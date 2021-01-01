@@ -1,0 +1,5 @@
+@file:Suppress("EXPERIMENTAL_UNSIGNED_LITERALS", "EXPERIMENTAL_API_USAGE")
+
+package com.ditchoom.buffermpp
+
+val VARIABLE_BYTE_INT_MAX = 268435455.toUInt()
