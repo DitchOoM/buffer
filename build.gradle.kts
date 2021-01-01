@@ -107,6 +107,18 @@ kotlin {
         val iosX64Test by getting {
             dependsOn(nativeTest)
         }
+        val tvosMain by getting {
+            dependsOn(nativeMain)
+        }
+        val tvosTest by getting {
+            dependsOn(nativeTest)
+        }
+        val watchosMain by getting {
+            dependsOn(nativeMain)
+        }
+        val watchosTest by getting {
+            dependsOn(nativeTest)
+        }
     }
 }
 
