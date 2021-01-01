@@ -1,4 +1,4 @@
-name: OSX Build
+name: OSX Assemble and Test
 
 on: [ push ]
 
@@ -17,6 +17,8 @@ jobs:
           path: ~/.gradle/caches
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle') }}
           restore-keys: ${{ runner.os }}-gradle
+      - name: PWD and inspect
+        run: pwd && ls -la
       - name: Assemble with Gradle
         run: ./gradlew assemble
       - name: Run tests with Gradle
