@@ -1,12 +1,14 @@
 @file:Suppress("UNUSED_VARIABLE")
+import org.gradle.internal.os.OperatingSystem.*
 
 plugins {
     kotlin("multiplatform") version "1.4.21"
     id("com.android.library")
+    id("maven-publish")
 }
 
 group = "com.ditchoom.buffermpp"
-version = "1.0-SNAPSHOT"
+version = "0.9-SNAPSHOT"
 
 repositories {
     google()
@@ -42,7 +44,68 @@ kotlin {
     }
     watchos()
     tvos()
-    android()
+    android {
+        publishLibraryVariants()
+    }
+
+    @Suppress("INACCESSIBLE_TYPE")
+    val publicationsFromMainHost = when (current()) {
+        WINDOWS -> {
+            listOf(mingwX64()).map { it.name } + "kotlinMultiplatform"
+        }
+        LINUX -> {
+            listOf(jvm(), js(), linuxX64(), android()).map { it.name } + "kotlinMultiplatform"
+        }
+        MAC_OS -> {
+            listOf(
+                macosX64(),
+                iosX64(),
+                iosArm64(),
+                watchosArm64(),
+                watchosX86(),
+                tvosArm64(),
+                tvosX64()
+            ).map { it.name } + "kotlinMultiplatform"
+        }
+        else -> throw IllegalStateException("Unsupported operating system ${current()}")
+    }
+    publishing {
+        publications {
+            matching { it.name in publicationsFromMainHost }.all {
+                val targetPublication = this@all
+                tasks.withType<AbstractPublishToMaven>()
+                    .matching { it.publication == targetPublication }
+                    .configureEach { onlyIf { findProperty("isMainHost") == "true" } }
+            }
+            publications.withType<MavenPublication>().all {
+                pom {
+                    name.set("Ditch OOM - Multiplatform Buffer")
+                    description.set("Multiplatform buffer that delegates to native byte[] or ByteBuffer")
+                    url.set("https://github.com/DitchOOM/buffer")
+                    scm {
+                        url.set("https://github.com/DitchOOM/buffer")
+                        connection.set("scm:git:git://github.com/DitchOOM/buffer.git")
+                        developerConnection.set("scm:git:git://github.com/DitchOOM/buffer.git")
+                    }
+                    licenses {
+                        license {
+                            name.set("The Apache Software License, Version 2.0")
+                            url.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
+                            distribution.set("repo")
+                        }
+                    }
+                    developers {
+                        developer {
+                            id.set("thebehera")
+                            name.set("Rahul Behera")
+                            url.set("https://github.com/thebehera")
+                        }
+                    }
+                }
+            }
+        }
+
+    }
     sourceSets {
         val commonMain by getting
         val commonTest by getting {
