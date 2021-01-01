@@ -33,20 +33,15 @@ kotlin {
     linuxX64()
     mingwX64()
     macosX64()
-    iosArm64 {
+    ios {
         binaries {
             framework {
                 baseName = "library"
             }
         }
     }
-    iosX64 {
-        binaries {
-            framework {
-                baseName = "library"
-            }
-        }
-    }
+    watchos()
+    tvos()
     android()
     sourceSets {
         val commonMain by getting
