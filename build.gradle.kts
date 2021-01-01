@@ -7,7 +7,7 @@ plugins {
     id("maven-publish")
 }
 
-group = "com.ditchoom.buffermpp"
+group = "com.ditchoom"
 version = "0.9-SNAPSHOT"
 
 repositories {
@@ -80,6 +80,7 @@ kotlin {
             publications.withType<MavenPublication>().all {
                 pom {
                     name.set("Ditch OOM - Multiplatform Buffer")
+                    artifactId = "buffer"
                     description.set("Multiplatform buffer that delegates to native byte[] or ByteBuffer")
                     url.set("https://github.com/DitchOOM/buffer")
                     scm {
