@@ -28,7 +28,7 @@ A kotlin multiplatform that allows you to allocate and modify byte[] natively us
 </p>
 
 
-<details>
+<details open="open">
   <summary>Table of Contents</summary>
   <ol>
     <li>
@@ -52,11 +52,10 @@ A kotlin multiplatform that allows you to allocate and modify byte[] natively us
     <li>
       <a href="#building-locally">Building Locally</a>
     </li>
+    <li><a href="#getting-started">Getting Started</a></li>
     <li><a href="#roadmap">Roadmap</a></li>
     <li><a href="#contributing">Contributing</a></li>
     <li><a href="#license">License</a></li>
-    <li><a href="#contact">Contact</a></li>
-    <li><a href="#acknowledgements">Acknowledgements</a></li>
   </ol>
 </details>
 
@@ -141,7 +140,7 @@ buffer.readLong()
 buffer.readUtf8(numOfBytesToRead)
 ```
 
-## Getting Started
+## Building Locally
 
 - `git clone git@github.com:DitchOoM/buffer.git`
 - Open cloned directory with [Intellij IDEA](https://www.jetbrains.com/idea/download).
