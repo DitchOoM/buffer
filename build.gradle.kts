@@ -1,5 +1,7 @@
 @file:Suppress("UNUSED_VARIABLE")
 import org.gradle.internal.os.OperatingSystem.*
+import org.jetbrains.kotlin.gradle.plugin.KotlinJsCompilerType
+import org.jetbrains.kotlin.gradle.plugin.KotlinJsCompilerType.*
 
 plugins {
     kotlin("multiplatform") version "1.4.21"
@@ -18,7 +20,7 @@ repositories {
 
 kotlin {
     jvm()
-    js {
+    js(KotlinJsCompilerType.BOTH) {
         browser {
             testTask {
                 useKarma {
