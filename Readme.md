@@ -69,7 +69,8 @@ side project for a kotlin multiplatform mqtt data sync solution.
 Implementation notes:
 
 * `JVM` + `Android` delegate to direct [ByteBuffers][byte-buffer-api] to avoid memory copies when possible.
-*
+* `Native` platforms use standard byte arrays to manage memory.
+* `JS` targets use Uint8Array.
 
 ### Runtime Dependencies
 
