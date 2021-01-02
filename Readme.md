@@ -183,7 +183,7 @@ Distributed under the Apache 2.0 License. See `LICENSE` for more information.
 
 [license-shield]: https://img.shields.io/github/license/DitchOoM/buffer.svg?style=for-the-badge
 
-[license-url]: https://github.com/DitchOoM/buffer/blob/master/LICENSE.txt
+[license-url]: https://github.com/DitchOoM/buffer/blob/master/LICENSE.md
 
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 
