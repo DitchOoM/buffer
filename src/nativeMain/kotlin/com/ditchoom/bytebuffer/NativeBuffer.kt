@@ -1,10 +1,9 @@
 @file:Suppress("EXPERIMENTAL_API_USAGE")
 
-package com.ditchoom.buffermpp
+package com.ditchoom.bytebuffer
 
 @ExperimentalUnsignedTypes
 class NativeBuffer(val data: ByteArray) : PlatformBuffer {
-    override val type = BufferType.InMemory
     override val capacity: UInt = data.size.toUInt()
     private var limit = data.size
     private var position = 0
@@ -132,11 +131,3 @@ class NativeBuffer(val data: ByteArray) : PlatformBuffer {
         position = newPosition
     }
 }
-
-actual fun allocateNewBuffer(
-    size: UInt,
-    limits: BufferMemoryLimit
-): PlatformBuffer = NativeBuffer(ByteArray(size.toInt()))
-
-actual fun String.toBuffer(): PlatformBuffer = NativeBuffer(this.encodeToByteArray())
-actual fun String.utf8Length(): UInt = encodeToByteArray().size.toUInt()

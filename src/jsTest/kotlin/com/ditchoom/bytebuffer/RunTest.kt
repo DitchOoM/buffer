@@ -1,4 +1,4 @@
-package com.ditchoom.buffermpp
+package com.ditchoom.bytebuffer
 
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.promise

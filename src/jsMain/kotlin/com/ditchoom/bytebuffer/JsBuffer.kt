@@ -1,12 +1,11 @@
 @file:Suppress("EXPERIMENTAL_API_USAGE")
 
-package com.ditchoom.buffermpp
+package com.ditchoom.bytebuffer
 
 import org.khronos.webgl.*
 import kotlin.experimental.and
 
 data class JsBuffer(val buffer: Uint8Array) : PlatformBuffer {
-    override val type = BufferType.InMemory
     private val littleEndian = false // network endian is big endian
     override val capacity: UInt = buffer.byteLength.toUInt()
     private var limit = 0
@@ -153,18 +152,3 @@ data class JsBuffer(val buffer: Uint8Array) : PlatformBuffer {
 
     override suspend fun close() {}
 }
-
-actual fun allocateNewBuffer(
-    size: UInt,
-    limits: BufferMemoryLimit
-): PlatformBuffer {
-    return JsBuffer(Uint8Array(size.toInt()))
-}
-
-actual fun String.toBuffer(): PlatformBuffer {
-    val int8Array = encodeToByteArray().unsafeCast<Int8Array>()
-    val uint8Array = Uint8Array(int8Array.buffer)
-    return JsBuffer(uint8Array)
-}
-
-actual fun String.utf8Length(): UInt = encodeToByteArray().unsafeCast<Int8Array>().length.toUInt()

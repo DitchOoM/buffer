@@ -79,14 +79,14 @@ kotlin {
             }
             publications.withType<MavenPublication>().all {
                 pom {
-                    name.set("Ditch OOM - Multiplatform Buffer")
-                    artifactId = "buffer"
-                    description.set("Multiplatform buffer that delegates to native byte[] or ByteBuffer")
-                    url.set("https://github.com/DitchOOM/buffer")
+                    name.set("Ditch OOM - Multiplatform ByteBuffer")
+                    artifactId = "bytebuffer"
+                    description.set("Multiplatform bytebuffer that delegates to native byte[] or ByteBuffer")
+                    url.set("https://github.com/DitchOOM/ByteBuffer")
                     scm {
-                        url.set("https://github.com/DitchOOM/buffer")
-                        connection.set("scm:git:git://github.com/DitchOOM/buffer.git")
-                        developerConnection.set("scm:git:git://github.com/DitchOOM/buffer.git")
+                        url.set("https://github.com/DitchOOM/ByteBuffer")
+                        connection.set("scm:git:git://github.com/DitchOOM/ByteBuffer.git")
+                        developerConnection.set("scm:git:git://github.com/DitchOOM/ByteBuffer.git")
                     }
                     licenses {
                         license {
@@ -139,7 +139,6 @@ kotlin {
         val nativeTest by creating {
             dependsOn(commonTest)
         }
-
         val linuxX64Main by getting {
             dependsOn(nativeMain)
         }
@@ -189,7 +188,7 @@ android {
     compileSdkVersion(30)
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
     defaultConfig {
-        minSdkVersion(14)
+        minSdkVersion(1)
         targetSdkVersion(30)
     }
 }

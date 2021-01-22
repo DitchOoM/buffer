@@ -1,22 +1,15 @@
 @file:Suppress("EXPERIMENTAL_API_USAGE")
 
-package com.ditchoom.buffermpp
+package com.ditchoom.bytebuffer
 
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
-import java.nio.MappedByteBuffer
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
 @ExperimentalUnsignedTypes
 data class JvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? = null) : PlatformBuffer {
-
-    override val type: BufferType = if (byteBuffer::class == MappedByteBuffer::class) {
-        BufferType.Disk
-    } else {
-        BufferType.InMemory
-    }
 
     override fun resetForRead() {
         byteBuffer.flip()

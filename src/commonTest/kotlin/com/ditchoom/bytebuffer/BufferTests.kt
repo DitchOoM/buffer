@@ -1,19 +1,16 @@
 @file:Suppress("EXPERIMENTAL_UNSIGNED_LITERALS")
 
-package com.ditchoom.buffermpp
+package com.ditchoom.bytebuffer
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
 @ExperimentalUnsignedTypes
 class BufferTests {
-    private val limit = object : BufferMemoryLimit {
-        override fun isTooLargeForMemory(size: UInt) = size > 1_000u
-    }
 
     @Test
     fun byte() {
-        val platformBuffer = allocateNewBuffer(1u, limit)
+        val platformBuffer = allocateNewBuffer(1u)
         val byte = (-1).toByte()
         platformBuffer.write(byte)
         platformBuffer.resetForRead()
@@ -23,7 +20,7 @@ class BufferTests {
     @Test
     fun byteArray() {
         val size = 200
-        val platformBuffer = allocateNewBuffer(size.toUInt(), limit)
+        val platformBuffer = allocateNewBuffer(size.toUInt())
         val bytes = ByteArray(200) { -1 }
         platformBuffer.write(bytes)
         platformBuffer.resetForRead()
@@ -37,7 +34,7 @@ class BufferTests {
 
     @Test
     fun unsignedByte() {
-        val platformBuffer = allocateNewBuffer(1u, limit)
+        val platformBuffer = allocateNewBuffer(1u)
         val byte = (-1).toUByte()
         platformBuffer.write(byte)
         platformBuffer.resetForRead()
@@ -46,7 +43,7 @@ class BufferTests {
 
     @Test
     fun unsignedShort() {
-        val platformBuffer = allocateNewBuffer(2u, limit)
+        val platformBuffer = allocateNewBuffer(2u)
         val uShort = UShort.MAX_VALUE.toInt() / 2
         platformBuffer.write(uShort.toUShort())
         platformBuffer.resetForRead()
@@ -73,7 +70,7 @@ class BufferTests {
 
     @Test
     fun unsignedShortHalf() {
-        val platformBuffer = allocateNewBuffer(2u, limit)
+        val platformBuffer = allocateNewBuffer(2u)
         val uShort = (UShort.MAX_VALUE / 2u).toUShort()
         platformBuffer.write(uShort)
         platformBuffer.resetForRead()
@@ -84,7 +81,7 @@ class BufferTests {
 
     @Test
     fun unsignedInt() {
-        val platformBuffer = allocateNewBuffer(4u, limit)
+        val platformBuffer = allocateNewBuffer(4u)
         val uInt = (-1).toUInt()
         platformBuffer.write(uInt)
         platformBuffer.resetForRead()
@@ -93,7 +90,7 @@ class BufferTests {
 
     @Test
     fun unsignedIntHalf() {
-        val platformBuffer = allocateNewBuffer(4u, limit)
+        val platformBuffer = allocateNewBuffer(4u)
         val uInt = Int.MAX_VALUE.toUInt() / 2u
         platformBuffer.write(uInt)
         platformBuffer.resetForRead()
@@ -102,7 +99,7 @@ class BufferTests {
 
     @Test
     fun long() {
-        val platformBuffer = allocateNewBuffer(Long.SIZE_BYTES.toUInt(), limit)
+        val platformBuffer = allocateNewBuffer(Long.SIZE_BYTES.toUInt())
         val long = (-1).toLong()
         platformBuffer.write(long)
         platformBuffer.resetForRead()
@@ -110,23 +107,10 @@ class BufferTests {
     }
 
     @Test
-    @ExperimentalStdlibApi
-    fun mqttUtf8String() {
-        val string = "yolo swag lyfestyle"
-        assertEquals(19, string.utf8Length().toInt())
-        val platformBuffer = allocateNewBuffer(21u, limit)
-        platformBuffer.writeMqttUtf8String(string)
-        platformBuffer.resetForRead()
-        val actual = platformBuffer.readMqttUtf8StringNotValidated().toString()
-        assertEquals(string.length, actual.length)
-        assertEquals(string, actual)
-    }
-
-    @Test
     fun utf8String() {
         val string = "yolo swag lyfestyle"
         assertEquals(19, string.utf8Length().toInt())
-        val platformBuffer = allocateNewBuffer(19u, limit)
+        val platformBuffer = allocateNewBuffer(19u)
         platformBuffer.writeUtf8(string)
         platformBuffer.resetForRead()
         val actual = platformBuffer.readUtf8(19u).toString()

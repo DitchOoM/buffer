@@ -1,4 +1,4 @@
-package com.ditchoom.buffermpp
+package com.ditchoom.bytebuffer
 
 interface SuspendCloseable {
     suspend fun close()

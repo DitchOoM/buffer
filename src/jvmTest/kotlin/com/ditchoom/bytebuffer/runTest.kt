@@ -1,4 +1,6 @@
-package com.ditchoom.buffermpp
+@file:JvmName("RunTest")
+
+package com.ditchoom.bytebuffer
 
 import kotlinx.coroutines.runBlocking
 

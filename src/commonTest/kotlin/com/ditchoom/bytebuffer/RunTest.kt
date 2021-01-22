@@ -1,4 +1,4 @@
-package com.ditchoom.buffermpp
+package com.ditchoom.bytebuffer
 
 expect fun <T> runTest(block: suspend () -> T)
 

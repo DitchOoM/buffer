@@ -12,10 +12,10 @@
 
 <br />
 <p align="center">
-<h3 align="center">Buffer</h3>
+<h3 align="center">ByteBuffer</h3>
 
 <p align="center">
-A kotlin multiplatform that allows you to allocate and modify byte[] natively using an API similar to <a href="https://docs.oracle.com/javase/8/docs/api/java/nio/ByteBuffer.html"><strong>Java's ByteBuffer API.</strong></a>
+A kotlin multiplatform library that allows you to allocate and modify byte[] natively using an API similar to <a href="https://docs.oracle.com/javase/8/docs/api/java/nio/ByteBuffer.html"><strong>Java's ByteBuffer API.</strong></a>
 <br />
 <!-- <a href="https://github.com/DitchOoM/buffer"><strong>Explore the docs »</strong></a> -->
 <br />
@@ -167,23 +167,23 @@ Distributed under the Apache 2.0 License. See `LICENSE` for more information.
 
 [contributors-shield]: https://img.shields.io/github/contributors/DitchOoM/buffer.svg?style=for-the-badge
 
-[contributors-url]: https://github.com/DitchOoM/buffer/graphs/contributors
+[contributors-url]: https://github.com/DitchOoM/ByteBuffer/graphs/contributors
 
-[forks-shield]: https://img.shields.io/github/forks/DitchOoM/buffer.svg?style=for-the-badge
+[forks-shield]: https://img.shields.io/github/forks/DitchOoM/ByteBuffer.svg?style=for-the-badge
 
-[forks-url]: https://github.com/DitchOoM/buffer/network/members
+[forks-url]: https://github.com/DitchOoM/ByteBuffer/network/members
 
-[stars-shield]: https://img.shields.io/github/stars/DitchOoM/buffer.svg?style=for-the-badge
+[stars-shield]: https://img.shields.io/github/stars/DitchOoM/ByteBuffer.svg?style=for-the-badge
 
-[stars-url]: https://github.com/DitchOoM/buffer/stargazers
+[stars-url]: https://github.com/DitchOoM/ByteBuffer/stargazers
 
-[issues-shield]: https://img.shields.io/github/issues/DitchOoM/buffer.svg?style=for-the-badge
+[issues-shield]: https://img.shields.io/github/issues/DitchOoM/ByteBuffer.svg?style=for-the-badge
 
-[issues-url]: https://github.com/DitchOoM/buffer/issues
+[issues-url]: https://github.com/DitchOoM/ByteBuffer/issues
 
-[license-shield]: https://img.shields.io/github/license/DitchOoM/buffer.svg?style=for-the-badge
+[license-shield]: https://img.shields.io/github/license/DitchOoM/ByteBuffer.svg?style=for-the-badge
 
-[license-url]: https://github.com/DitchOoM/buffer/blob/master/LICENSE.md
+[license-url]: https://github.com/DitchOoM/ByteBuffer/blob/master/LICENSE.md
 
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 
@@ -193,12 +193,12 @@ Distributed under the Apache 2.0 License. See `LICENSE` for more information.
 
 [maven-central]: https://search.maven.org/search?q=com.ditchoom
 
-[npm]: https://www.npmjs.com/search?q=ditchoom-buffer
+[npm]: https://www.npmjs.com/search?q=ditchoom-bytebuffer
 
-[cocoapods]: https://cocoapods.org/pods/DitchOoMBuffer
+[cocoapods]: https://cocoapods.org/pods/DitchOoM-ByteBuffer
 
 [apt]: https://packages.ubuntu.com/search?keywords=ditchoom&searchon=names&suite=groovy&section=all
 
-[yum]: https://pkgs.org/search/?q=DitchOoM-Buffer
+[yum]: https://pkgs.org/search/?q=DitchOoM-ByteBuffer
 
-[chocolately]: https://chocolatey.org/packages?q=DitchOoM-Buffer
+[chocolately]: https://chocolatey.org/packages?q=DitchOoM-ByteBuffer

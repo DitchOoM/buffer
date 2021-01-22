@@ -13,5 +13,5 @@ pluginManagement {
         }
     }
 }
-rootProject.name = "buffermpp"
+rootProject.name = "bytebuffer"
 
