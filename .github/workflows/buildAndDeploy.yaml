@@ -20,6 +20,8 @@ jobs:
           path: ~/.gradle/caches
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle') }}
           restore-keys: ${{ runner.os }}-gradle
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
       - name: Assemble and Run Tests with Gradle
         run: ./gradlew assemble check allTests
       - uses: actions/upload-artifact@v2
