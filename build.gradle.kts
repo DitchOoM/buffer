@@ -105,6 +105,15 @@ kotlin {
                 }
             }
         }
+        repositories {
+            maven {
+                setUrl("https://oss.sonatype.org/service/local/staging/deploy/maven2")
+                credentials {
+                    username = System.getenv("SONATYPE_NEXUS_USERNAME")
+                    password = System.getenv("SONATYPE_NEXUS_PASSWORD")
+                }
+            }
+        }
     }
     sourceSets {
         val commonMain by getting
