@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.ditchoom"
-version = "0.9-SNAPSHOT"
+version = "0.0-SNAPSHOT"
 
 repositories {
     google()
@@ -57,15 +57,7 @@ kotlin {
             listOf(jvm(), js(), linuxX64(), android()).map { it.name } + "kotlinMultiplatform"
         }
         MAC_OS -> {
-            listOf(
-                macosX64(),
-                iosX64(),
-                iosArm64(),
-                watchosArm64(),
-                watchosX86(),
-                tvosArm64(),
-                tvosX64()
-            ).map { it.name } + "kotlinMultiplatform"
+            listOf(jvm(), js(), android()).map { it.name } + "kotlinMultiplatform"
         }
         else -> throw IllegalStateException("Unsupported operating system ${current()}")
     }
@@ -105,15 +97,15 @@ kotlin {
                 }
             }
         }
-        repositories {
-            maven {
-                setUrl("https://oss.sonatype.org/service/local/staging/deploy/maven2")
-                credentials {
-                    username = System.getenv("SONATYPE_NEXUS_USERNAME")
-                    password = System.getenv("SONATYPE_NEXUS_PASSWORD")
-                }
-            }
-        }
+//        repositories {
+//            maven {
+//                setUrl("https://oss.sonatype.org/service/local/staging/deploy/maven2")
+//                credentials {
+//                    username = gradleLocalProperties(rootDir).getProperty("sonatypeUsername")
+//                    password = gradleLocalProperties(rootDir).getProperty("sonatypePassword")
+//                }
+//            }
+//        }
     }
     sourceSets {
         val commonMain by getting
