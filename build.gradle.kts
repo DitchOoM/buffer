@@ -38,9 +38,6 @@ kotlin {
                 cssSupport.enabled = true
             }
         }
-        nodejs {
-
-        }
     }
     macosX64()
     linuxX64()
