@@ -27,7 +27,7 @@ jobs:
           SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
           GPG_SECRET: ${{ secrets.GPG_SECRET }}
           GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
-        run: ./gradlew --no-daemon assemble build check allTests publishAllPublicationsToSonatypeRepository
+        run: ./gradlew --no-daemon assemble build check allTests publishAllPublicationsToSonatypeRepository closeAndReleaseRepository
       - uses: actions/upload-artifact@v2
         with:
           name: Package
