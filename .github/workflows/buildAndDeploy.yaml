@@ -21,6 +21,10 @@ jobs:
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_SECRET }}
           PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSWORD }}
+      - name: Print GPG data dir
+        run: ls -la /usr/share/gnupg
+      - name: Print GPG home dir
+        run: ls -la /home/runner/.gnupg
       - name: Test and deploy with Gradle
         env:
           SONATYPE_NEXUS_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
