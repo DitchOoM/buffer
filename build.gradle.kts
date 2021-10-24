@@ -32,12 +32,14 @@ kotlin {
         }
     }
     js {
+        moduleName = "bufferKt"
         binaries.executable()
         browser {
             commonWebpackConfig {
                 cssSupport.enabled = true
             }
         }
+        nodejs{ }
     }
     macosX64()
     linuxX64()
@@ -155,7 +157,7 @@ System.getenv("GITHUB_REPOSITORY")?.let {
     val libraryVersion = if (System.getenv("GITHUB_RUN_NUMBER") != null) {
         "$libraryVersionPrefix${System.getenv("GITHUB_RUN_NUMBER")}"
     } else {
-        "${libraryVersionPrefix}15-SNAPSHOT"
+        "${libraryVersionPrefix}0-SNAPSHOT"
     }
 
     project.group = publishedGroupId
