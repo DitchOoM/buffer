@@ -167,23 +167,23 @@ Distributed under the Apache 2.0 License. See `LICENSE` for more information.
 
 [contributors-shield]: https://img.shields.io/github/contributors/DitchOoM/buffer.svg?style=for-the-badge
 
-[contributors-url]: https://github.com/DitchOoM/ByteBuffer/graphs/contributors
+[contributors-url]: https://github.com/DitchOoM/buffer/graphs/contributors
 
-[forks-shield]: https://img.shields.io/github/forks/DitchOoM/ByteBuffer.svg?style=for-the-badge
+[forks-shield]: https://img.shields.io/github/forks/DitchOoM/buffer.svg?style=for-the-badge
 
-[forks-url]: https://github.com/DitchOoM/ByteBuffer/network/members
+[forks-url]: https://github.com/DitchOoM/buffer/network/members
 
-[stars-shield]: https://img.shields.io/github/stars/DitchOoM/ByteBuffer.svg?style=for-the-badge
+[stars-shield]: https://img.shields.io/github/stars/DitchOoM/buffer.svg?style=for-the-badge
 
-[stars-url]: https://github.com/DitchOoM/ByteBuffer/stargazers
+[stars-url]: https://github.com/DitchOoM/buffer/stargazers
 
-[issues-shield]: https://img.shields.io/github/issues/DitchOoM/ByteBuffer.svg?style=for-the-badge
+[issues-shield]: https://img.shields.io/github/issues/DitchOoM/buffer.svg?style=for-the-badge
 
-[issues-url]: https://github.com/DitchOoM/ByteBuffer/issues
+[issues-url]: https://github.com/DitchOoM/buffer/issues
 
-[license-shield]: https://img.shields.io/github/license/DitchOoM/ByteBuffer.svg?style=for-the-badge
+[license-shield]: https://img.shields.io/github/license/DitchOoM/buffer.svg?style=for-the-badge
 
-[license-url]: https://github.com/DitchOoM/ByteBuffer/blob/master/LICENSE.md
+[license-url]: https://github.com/DitchOoM/buffer/blob/master/LICENSE.md
 
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 
@@ -193,12 +193,12 @@ Distributed under the Apache 2.0 License. See `LICENSE` for more information.
 
 [maven-central]: https://search.maven.org/search?q=com.ditchoom
 
-[npm]: https://www.npmjs.com/search?q=ditchoom-bytebuffer
+[npm]: https://www.npmjs.com/search?q=ditchoom-buffer
 
-[cocoapods]: https://cocoapods.org/pods/DitchOoM-ByteBuffer
+[cocoapods]: https://cocoapods.org/pods/DitchOoM-buffer
 
 [apt]: https://packages.ubuntu.com/search?keywords=ditchoom&searchon=names&suite=groovy&section=all
 
-[yum]: https://pkgs.org/search/?q=DitchOoM-ByteBuffer
+[yum]: https://pkgs.org/search/?q=DitchOoM-buffer
 
-[chocolately]: https://chocolatey.org/packages?q=DitchOoM-ByteBuffer
+[chocolately]: https://chocolatey.org/packages?q=DitchOoM-buffer
