@@ -139,84 +139,84 @@ tasks {
         }
     }
 }
-
-
-val properties = Properties().apply {
-    load(FileInputStream(File(rootProject.rootDir, "local.properties")))
-}
-val ossUser = properties.getProperty("oss.user")
-val ossPassword = properties.getProperty("oss.password")
-extra["signing.keyId"] = properties.getProperty("signing.keyId")
-extra["signing.password"] = properties.getProperty("signing.password")
-extra["signing.secretKeyRingFile"] = properties.getProperty("signing.secretKeyRingFile")
-
-val libraryVersion: String by project
-val publishedGroupId: String by project
-val artifactName: String by project
-val libraryName: String by project
-val libraryDescription: String by project
-val siteUrl: String by project
-val gitUrl: String by project
-val licenseName: String by project
-val licenseUrl: String by project
-val developerOrg: String by project
-val developerName: String by project
-val developerEmail: String by project
-val developerId: String by project
-
-project.group = publishedGroupId
-project.version = libraryVersion
-
-publishing {
-    publications.withType(MavenPublication::class) {
-        groupId = publishedGroupId
-        artifactId = artifactName
-        version = libraryVersion
-
-        artifact(tasks["javadocJar"])
-
-        pom {
-            name.set(libraryName)
-            description.set(libraryDescription)
-            url.set(siteUrl)
-
-            licenses {
-                license {
-                    name.set(licenseName)
-                    url.set(licenseUrl)
-                }
-            }
-            developers {
-                developer {
-                    id.set(developerId)
-                    name.set(developerName)
-                    email.set(developerEmail)
-                }
-            }
-            organization {
-                name.set(developerOrg)
-            }
-            scm {
-                connection.set(gitUrl)
-                developerConnection.set(gitUrl)
-                url.set(siteUrl)
-            }
-        }
-    }
-
-    repositories {
-        maven("https://oss.sonatype.org/service/local/staging/deploy/maven2/") {
-            name = "sonatype"
-            credentials {
-                username = ossUser
-                password = ossPassword
-            }
-        }
-    }
-}
-
-nexusStaging {
-    username = ossUser
-    password = ossPassword
-    packageGroup = publishedGroupId
-}
+//
+//
+//val properties = Properties().apply {
+//    load(FileInputStream(File(rootProject.rootDir, "local.properties")))
+//}
+//val ossUser = properties.getProperty("oss.user")
+//val ossPassword = properties.getProperty("oss.password")
+//extra["signing.keyId"] = properties.getProperty("signing.keyId")
+//extra["signing.password"] = properties.getProperty("signing.password")
+//extra["signing.secretKeyRingFile"] = properties.getProperty("signing.secretKeyRingFile")
+//
+//val libraryVersion: String by project
+//val publishedGroupId: String by project
+//val artifactName: String by project
+//val libraryName: String by project
+//val libraryDescription: String by project
+//val siteUrl: String by project
+//val gitUrl: String by project
+//val licenseName: String by project
+//val licenseUrl: String by project
+//val developerOrg: String by project
+//val developerName: String by project
+//val developerEmail: String by project
+//val developerId: String by project
+//
+//project.group = publishedGroupId
+//project.version = libraryVersion
+//
+//publishing {
+//    publications.withType(MavenPublication::class) {
+//        groupId = publishedGroupId
+//        artifactId = artifactName
+//        version = libraryVersion
+//
+//        artifact(tasks["javadocJar"])
+//
+//        pom {
+//            name.set(libraryName)
+//            description.set(libraryDescription)
+//            url.set(siteUrl)
+//
+//            licenses {
+//                license {
+//                    name.set(licenseName)
+//                    url.set(licenseUrl)
+//                }
+//            }
+//            developers {
+//                developer {
+//                    id.set(developerId)
+//                    name.set(developerName)
+//                    email.set(developerEmail)
+//                }
+//            }
+//            organization {
+//                name.set(developerOrg)
+//            }
+//            scm {
+//                connection.set(gitUrl)
+//                developerConnection.set(gitUrl)
+//                url.set(siteUrl)
+//            }
+//        }
+//    }
+//
+//    repositories {
+//        maven("https://oss.sonatype.org/service/local/staging/deploy/maven2/") {
+//            name = "sonatype"
+//            credentials {
+//                username = ossUser
+//                password = ossPassword
+//            }
+//        }
+//    }
+//}
+//
+//nexusStaging {
+//    username = ossUser
+//    password = ossPassword
+//    packageGroup = publishedGroupId
+//}
