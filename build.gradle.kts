@@ -43,6 +43,8 @@ kotlin {
     linuxX64()
 //    mingwX64()
     ios()
+    iosSimulatorArm64()
+
     watchos()
     tvos()
     sourceSets {
@@ -69,6 +71,8 @@ kotlin {
 //        val mingwX64Test by getting
         val iosMain by getting
         val iosTest by getting
+        val iosSimulatorArm64Main by getting
+        val iosSimulatorArm64Test by getting
         val watchosMain by getting
         val watchosTest by getting
         val tvosMain by getting
@@ -80,6 +84,7 @@ kotlin {
             linuxX64Main.dependsOn(this)
 //            mingwX64Main.dependsOn(this)
             iosMain.dependsOn(this)
+            iosSimulatorArm64Main.dependsOn(this)
             watchosMain.dependsOn(this)
             tvosMain.dependsOn(this)
         }
@@ -89,6 +94,7 @@ kotlin {
             linuxX64Test.dependsOn(this)
 //            mingwX64Test.dependsOn(this)
             iosTest.dependsOn(this)
+            iosSimulatorArm64Test.dependsOn(this)
             watchosTest.dependsOn(this)
             tvosTest.dependsOn(this)
         }
