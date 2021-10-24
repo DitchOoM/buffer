@@ -136,8 +136,6 @@ tasks {
         }
     }
 }
-
-
 System.getenv("GITHUB_REPOSITORY")?.let {
     signing {
         useInMemoryPgpKeys("56F1A973", System.getenv("GPG_SECRET"), System.getenv("GPG_SIGNING_PASSWORD"))
@@ -146,7 +144,7 @@ System.getenv("GITHUB_REPOSITORY")?.let {
 
 
     val ossUser = System.getenv("SONATYPE_NEXUS_USERNAME")
-    val ossPassword = System.getenv("SONATYPE_NEXUS_USERNAME")
+    val ossPassword = System.getenv("SONATYPE_NEXUS_PASSWORD")
 
     val publishedGroupId: String by project
     val artifactName: String by project
@@ -161,7 +159,11 @@ System.getenv("GITHUB_REPOSITORY")?.let {
     val developerEmail: String by project
     val developerId: String by project
 
-    val libraryVersion = "$libraryVersionPrefix${System.getenv("GITHUB_RUN_NUMBER")}"
+    val libraryVersion = if (System.getenv("GITHUB_RUN_NUMBER") != null) {
+        "$libraryVersionPrefix${System.getenv("GITHUB_RUN_NUMBER")}"
+    } else {
+        "0.0.00"+System.currentTimeMillis()
+    }
 
     project.group = publishedGroupId
     project.version = libraryVersion
