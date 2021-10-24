@@ -160,7 +160,7 @@ System.getenv("GITHUB_REPOSITORY")?.let {
     val developerEmail: String by project
     val developerId: String by project
 
-    val libraryVersion = "$libraryVersionPrefix + ${Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER")) + 100}"
+    val libraryVersion = "$libraryVersionPrefix${Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER")) + 100}"
 
     project.group = publishedGroupId
     project.version = libraryVersion
