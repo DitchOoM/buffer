@@ -32,7 +32,6 @@ jobs:
           key: ${{ runner.os }}-konan-${{ hashFiles('**/Dependencies.kt') }}
           restore-keys: |
             ${{ runner.os }}-konan-
-
       - name: Import GPG Key
         uses: crazy-max/ghaction-import-gpg@v1
         env:
