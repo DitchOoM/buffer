@@ -1,195 +1,222 @@
-@file:Suppress("UNUSED_VARIABLE")
-import org.gradle.internal.os.OperatingSystem.*
+import java.io.File
+import java.io.FileInputStream
+import java.util.*
 
 plugins {
-    kotlin("multiplatform") version "1.4.21"
-    id("com.android.library")
-    id("maven-publish")
+    kotlin("multiplatform") version "1.5.31"
+//    id("com.android.library")
+    id("org.jetbrains.dokka") version "1.5.31"
+    id("io.codearte.nexus-staging") version "0.30.0"
+    `maven-publish`
+    signing
 }
 
 group = "com.ditchoom"
-version = "0.0-SNAPSHOT"
+version = "0.0.27-SNAPSHOT"
 
 repositories {
     google()
     mavenCentral()
-    jcenter()
 }
 
 kotlin {
-    jvm()
-    js {
+//    android()
+    jvm {
+        compilations.all {
+            kotlinOptions.jvmTarget = "1.8"
+        }
+        testRuns["test"].executionTask.configure {
+            useJUnit()
+        }
+    }
+    js(IR) {
+        binaries.executable()
         browser {
-            testTask {
-                useKarma {
-                    useChromeHeadless()
-                }
+            commonWebpackConfig {
+                cssSupport.enabled = true
             }
         }
         nodejs {
-            testTask {
 
-            }
         }
     }
-    linuxX64()
-    mingwX64()
-    macosX64()
-    ios {
-        binaries {
-            framework {
-                baseName = "library"
-            }
-        }
+    val hostOs = System.getProperty("os.name")
+    val isMingwX64 = hostOs.startsWith("Windows")
+    val nativeTarget = when {
+        hostOs == "Mac OS X" -> macosX64("hostOS")
+        hostOs == "Linux" -> linuxX64("hostOS")
+        isMingwX64 -> mingwX64("hostOS")
+        else -> throw GradleException("Host OS is not supported in Kotlin/Native.")
     }
-    watchos()
-    tvos()
-    android {
-        publishLibraryVariants()
-    }
-
-    @Suppress("INACCESSIBLE_TYPE")
-    val publicationsFromMainHost = when (current()) {
-        WINDOWS -> {
-            listOf(mingwX64()).map { it.name } + "kotlinMultiplatform"
-        }
-        LINUX -> {
-            listOf(jvm(), js(), linuxX64(), android()).map { it.name } + "kotlinMultiplatform"
-        }
-        MAC_OS -> {
-            listOf(jvm(), js(), android()).map { it.name } + "kotlinMultiplatform"
-        }
-        else -> throw IllegalStateException("Unsupported operating system ${current()}")
-    }
-    publishing {
-        publications {
-            matching { it.name in publicationsFromMainHost }.all {
-                val targetPublication = this@all
-                tasks.withType<AbstractPublishToMaven>()
-                    .matching { it.publication == targetPublication }
-                    .configureEach { onlyIf { findProperty("isMainHost") == "true" } }
-            }
-            publications.withType<MavenPublication>().all {
-                pom {
-                    name.set("Ditch OOM - Multiplatform ByteBuffer")
-                    artifactId = "bytebuffer"
-                    description.set("Multiplatform bytebuffer that delegates to native byte[] or ByteBuffer")
-                    url.set("https://github.com/DitchOOM/ByteBuffer")
-                    scm {
-                        url.set("https://github.com/DitchOOM/ByteBuffer")
-                        connection.set("scm:git:git://github.com/DitchOOM/ByteBuffer.git")
-                        developerConnection.set("scm:git:git://github.com/DitchOOM/ByteBuffer.git")
-                    }
-                    licenses {
-                        license {
-                            name.set("The Apache Software License, Version 2.0")
-                            url.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
-                            distribution.set("repo")
-                        }
-                    }
-                    developers {
-                        developer {
-                            id.set("thebehera")
-                            name.set("Rahul Behera")
-                            url.set("https://github.com/thebehera")
-                        }
-                    }
-                }
-            }
-        }
-//        repositories {
-//            maven {
-//                setUrl("https://oss.sonatype.org/service/local/staging/deploy/maven2")
-//                credentials {
-//                    username = gradleLocalProperties(rootDir).getProperty("sonatypeUsername")
-//                    password = gradleLocalProperties(rootDir).getProperty("sonatypePassword")
-//                }
-//            }
-//        }
-    }
+//    ios()
+//    watchos()
+//    tvos()
     sourceSets {
         val commonMain by getting
         val commonTest by getting {
             dependencies {
-                implementation(kotlin("test-common"))
-                implementation(kotlin("test-annotations-common"))
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.4.2")
+                implementation(kotlin("test"))
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.5.2")
             }
         }
-        val jvmMain by getting
+        val jvmMain by getting {
+            kotlin.srcDir("src/commonJvmMain/kotlin")
+        }
         val jvmTest by getting {
-            dependencies {
-                implementation(kotlin("test-junit"))
-            }
-        }
-        val androidMain by getting {
-            dependsOn(jvmMain)
-        }
-        val androidTest by getting {
-            dependsOn(jvmTest)
+            kotlin.srcDir("src/commonJvmTest/kotlin")
         }
         val jsMain by getting
-        val jsTest by getting {
-            dependencies {
-                implementation(kotlin("test-js"))
-            }
-        }
-        val nativeMain by creating {
+        val jsTest by getting
+        val hostOSMain by getting
+        val hostOSTest by getting
+//        val iosMain by getting
+//        val iosTest by getting
+//        val watchosMain by getting
+//        val watchosTest by getting
+//        val tvosMain by getting
+//        val tvosTest by getting
+
+        val nativeMain by sourceSets.creating {
             dependsOn(commonMain)
+            hostOSMain.dependsOn(this)
+//            iosMain.dependsOn(this)
+//            watchosMain.dependsOn(this)
+//            tvosMain.dependsOn(this)
         }
-        val nativeTest by creating {
+        val nativeTest by sourceSets.creating {
             dependsOn(commonTest)
+            hostOSTest.dependsOn(this)
+//            iosTest.dependsOn(this)
+//            watchosTest.dependsOn(this)
+//            tvosTest.dependsOn(this)
         }
-        val linuxX64Main by getting {
-            dependsOn(nativeMain)
-        }
-        val linuxX64Test by getting {
-            dependsOn(nativeTest)
-        }
-        val mingwX64Main by getting {
-            dependsOn(nativeMain)
-        }
-        val mingwX64Test by getting {
-            dependsOn(nativeTest)
-        }
-        val macosX64Main by getting {
-            dependsOn(nativeMain)
-        }
-        val macosX64Test by getting {
-            dependsOn(nativeTest)
-        }
-        val iosArm64Main by getting {
-            dependsOn(nativeMain)
-        }
-        val iosArm64Test by getting {
-            dependsOn(nativeTest)
-        }
-        val iosX64Main by getting {
-            dependsOn(nativeMain)
-        }
-        val iosX64Test by getting {
-            dependsOn(nativeTest)
-        }
-        val tvosMain by getting {
-            dependsOn(nativeMain)
-        }
-        val tvosTest by getting {
-            dependsOn(nativeTest)
-        }
-        val watchosMain by getting {
-            dependsOn(nativeMain)
-        }
-        val watchosTest by getting {
-            dependsOn(nativeTest)
+
+//        val androidMain by getting {
+//            kotlin.srcDir("src/commonJvmMain/kotlin")
+//        }
+//        val androidTest by getting {
+//            kotlin.srcDir("src/commonJvmTest/kotlin")
+//        }
+    }
+}
+
+//android {
+//    compileSdkVersion(31)
+//    sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
+//    defaultConfig {
+//        minSdkVersion(1)
+//        targetSdkVersion(31)
+//    }
+//    lintOptions {
+//        isQuiet = true
+//        isAbortOnError =  false
+//    }
+//    compileOptions {
+//        sourceCompatibility = JavaVersion.VERSION_1_8
+//        targetCompatibility = JavaVersion.VERSION_1_8
+//    }
+//}
+
+signing {
+    sign(publishing.publications)
+}
+
+val dokkaHtml by tasks.getting(org.jetbrains.dokka.gradle.DokkaTask::class)
+
+val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
+    dependsOn(dokkaHtml)
+    archiveClassifier.set("javadoc")
+    from(dokkaHtml.outputDirectory)
+}
+
+tasks {
+    dokkaJavadoc {
+        dokkaSourceSets {
+            named("commonMain") {
+                displayName.set("common")
+                platform.set(org.jetbrains.dokka.Platform.common)
+            }
         }
     }
 }
 
-android {
-    compileSdkVersion(30)
-    sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
-    defaultConfig {
-        minSdkVersion(1)
-        targetSdkVersion(30)
+
+val properties = Properties().apply {
+    load(FileInputStream(File(rootProject.rootDir, "local.properties")))
+}
+val ossUser = properties.getProperty("oss.user")
+val ossPassword = properties.getProperty("oss.password")
+extra["signing.keyId"] = properties.getProperty("signing.keyId")
+extra["signing.password"] = properties.getProperty("signing.password")
+extra["signing.secretKeyRingFile"] = properties.getProperty("signing.secretKeyRingFile")
+
+val libraryVersion: String by project
+val publishedGroupId: String by project
+val artifactName: String by project
+val libraryName: String by project
+val libraryDescription: String by project
+val siteUrl: String by project
+val gitUrl: String by project
+val licenseName: String by project
+val licenseUrl: String by project
+val developerOrg: String by project
+val developerName: String by project
+val developerEmail: String by project
+val developerId: String by project
+
+project.group = publishedGroupId
+project.version = libraryVersion
+
+publishing {
+    publications.withType(MavenPublication::class) {
+        groupId = publishedGroupId
+        artifactId = artifactName
+        version = libraryVersion
+
+        artifact(tasks["javadocJar"])
+
+        pom {
+            name.set(libraryName)
+            description.set(libraryDescription)
+            url.set(siteUrl)
+
+            licenses {
+                license {
+                    name.set(licenseName)
+                    url.set(licenseUrl)
+                }
+            }
+            developers {
+                developer {
+                    id.set(developerId)
+                    name.set(developerName)
+                    email.set(developerEmail)
+                }
+            }
+            organization {
+                name.set(developerOrg)
+            }
+            scm {
+                connection.set(gitUrl)
+                developerConnection.set(gitUrl)
+                url.set(siteUrl)
+            }
+        }
     }
+
+    repositories {
+        maven("https://oss.sonatype.org/service/local/staging/deploy/maven2/") {
+            name = "sonatype"
+            credentials {
+                username = ossUser
+                password = ossPassword
+            }
+        }
+    }
+}
+
+nexusStaging {
+    username = ossUser
+    password = ossPassword
+    packageGroup = publishedGroupId
 }
