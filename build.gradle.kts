@@ -41,7 +41,7 @@ kotlin {
     }
     macosX64()
     linuxX64()
-    mingwX64()
+//    mingwX64()
     ios()
     watchos()
     tvos()
@@ -65,8 +65,8 @@ kotlin {
         val macosX64Test by getting
         val linuxX64Main by getting
         val linuxX64Test by getting
-        val mingwX64Main by getting
-        val mingwX64Test by getting
+//        val mingwX64Main by getting
+//        val mingwX64Test by getting
         val iosMain by getting
         val iosTest by getting
         val watchosMain by getting
@@ -78,7 +78,7 @@ kotlin {
             dependsOn(commonMain)
             macosX64Main.dependsOn(this)
             linuxX64Main.dependsOn(this)
-            mingwX64Main.dependsOn(this)
+//            mingwX64Main.dependsOn(this)
             iosMain.dependsOn(this)
             watchosMain.dependsOn(this)
             tvosMain.dependsOn(this)
@@ -87,7 +87,7 @@ kotlin {
             dependsOn(commonTest)
             macosX64Test.dependsOn(this)
             linuxX64Test.dependsOn(this)
-            mingwX64Test.dependsOn(this)
+//            mingwX64Test.dependsOn(this)
             iosTest.dependsOn(this)
             watchosTest.dependsOn(this)
             tvosTest.dependsOn(this)
