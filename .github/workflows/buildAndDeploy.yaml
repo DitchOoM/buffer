@@ -40,10 +40,10 @@ jobs:
           name: Package
           path: build/libs
       - name: Import GPG Key
-        uses: crazy-max/ghaction-import-gpg@v4
+        uses: crazy-max/ghaction-import-gpg@v1
         env:
-          gpg_private_key: ${{ secrets.GPG_SECRET }}
-          passphrase: ${{ secrets.GPG_SIGNING_PASSWORD }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_SECRET }}
+          PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSWORD }}
       - name: Publish Snapshot
         env:
           SONATYPE_NEXUS_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
