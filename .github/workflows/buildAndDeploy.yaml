@@ -32,20 +32,18 @@ jobs:
             ${{ runner.os }}-konan-
 #      - name: Setup Android SDK
 #        uses: android-actions/setup-android@v2
-      - name: Test with Gradle
-        run: ./gradlew --no-daemon check allTests publish closeAndReleaseRepository
       - name: Import GPG Key
         uses: crazy-max/ghaction-import-gpg@v1
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_SECRET }}
           PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSWORD }}
-      - name: Deploy with Gradle
+      - name: Test and deploy with Gradle
         env:
           SONATYPE_NEXUS_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
           SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
           GPG_SECRET: ${{ secrets.GPG_SECRET }}
           GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
-        run: ./gradlew --no-daemon build publish closeAndReleaseRepository
+        run: ./gradlew --no-daemon check allTests publish closeAndReleaseRepository
       - uses: actions/upload-artifact@v2
         with:
           name: Package
