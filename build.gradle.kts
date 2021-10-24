@@ -5,8 +5,7 @@ import java.util.*
 plugins {
     kotlin("multiplatform") version "1.5.31"
 //    id("com.android.library")
-    id("org.jetbrains.dokka") version "1.5.31"
-    id("io.codearte.nexus-staging") version "0.30.0"
+//    id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
     signing
 }
@@ -30,15 +29,12 @@ kotlin {
             useJUnit()
         }
     }
-    js(IR) {
+    js {
         binaries.executable()
         browser {
             commonWebpackConfig {
                 cssSupport.enabled = true
             }
-        }
-        nodejs {
-
         }
     }
     val hostOs = System.getProperty("os.name")
@@ -52,6 +48,7 @@ kotlin {
 //    ios()
 //    watchos()
 //    tvos()
+
     sourceSets {
         val commonMain by getting
         val commonTest by getting {
@@ -118,27 +115,13 @@ kotlin {
 //    }
 //}
 
-val dokkaHtml by tasks.getting(org.jetbrains.dokka.gradle.DokkaTask::class)
-
 val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
-    dependsOn(dokkaHtml)
     archiveClassifier.set("javadoc")
-    from(dokkaHtml.outputDirectory)
 }
 
-tasks {
-    dokkaJavadoc {
-        dokkaSourceSets {
-            named("commonMain") {
-                displayName.set("common")
-                platform.set(org.jetbrains.dokka.Platform.common)
-            }
-        }
-    }
-}
 System.getenv("GITHUB_REPOSITORY")?.let {
     signing {
-        useInMemoryPgpKeys("56F1A973", System.getenv("GPG_SECRET"), System.getenv("GPG_SIGNING_PASSWORD"))
+        useInMemoryPgpKeys(System.getenv("GPG_SECRET"), System.getenv("GPG_SIGNING_PASSWORD"))
         sign(publishing.publications)
     }
 
@@ -147,7 +130,6 @@ System.getenv("GITHUB_REPOSITORY")?.let {
     val ossPassword = System.getenv("SONATYPE_NEXUS_PASSWORD")
 
     val publishedGroupId: String by project
-    val artifactName: String by project
     val libraryName: String by project
     val libraryDescription: String by project
     val siteUrl: String by project
@@ -171,7 +153,6 @@ System.getenv("GITHUB_REPOSITORY")?.let {
     publishing {
         publications.withType(MavenPublication::class) {
             groupId = publishedGroupId
-            artifactId = artifactName
             version = libraryVersion
 
             artifact(tasks["javadocJar"])
@@ -214,11 +195,5 @@ System.getenv("GITHUB_REPOSITORY")?.let {
                 }
             }
         }
-    }
-
-    nexusStaging {
-        username = ossUser
-        password = ossPassword
-        packageGroup = publishedGroupId
     }
 }
