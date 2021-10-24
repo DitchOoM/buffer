@@ -11,8 +11,9 @@ plugins {
     signing
 }
 
+val libraryVersionPrefix: String by project
 group = "com.ditchoom"
-version = "0.0.0-SNAPSHOT"
+version = "$libraryVersionPrefix.0-SNAPSHOT"
 
 repositories {
     google()
@@ -146,7 +147,6 @@ System.getenv("GITHUB_REPOSITORY")?.let {
     val ossUser = System.getenv("SONATYPE_NEXUS_USERNAME")
     val ossPassword = System.getenv("SONATYPE_NEXUS_USERNAME")
 
-    val libraryVersionPrefix: String by project
     val publishedGroupId: String by project
     val artifactName: String by project
     val libraryName: String by project
@@ -160,7 +160,7 @@ System.getenv("GITHUB_REPOSITORY")?.let {
     val developerEmail: String by project
     val developerId: String by project
 
-    val libraryVersion = "$libraryVersionPrefix${Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER")) + 100}"
+    val libraryVersion = "$libraryVersionPrefix${System.getenv("GITHUB_RUN_NUMBER")}"
 
     project.group = publishedGroupId
     project.version = libraryVersion
