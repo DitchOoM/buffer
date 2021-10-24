@@ -37,29 +37,12 @@ kotlin {
             }
         }
     }
-    val hostOs = System.getProperty("os.name")
-    val isMingwX64 = hostOs.startsWith("Windows")
-    val nativeTarget = when {
-        hostOs == "Mac OS X" -> macosX64("hostOS")
-        hostOs == "Linux" -> linuxX64("hostOS")
-        isMingwX64 -> mingwX64("hostOS")
-        else -> throw GradleException("Host OS is not supported in Kotlin/Native.")
-    }
-//    ios()
-//    watchos()
-//    tvos()
-    val publicationsFromMainHost =
-        listOf(jvm(), js(),nativeTarget).map { it.name } + "kotlinMultiplatform"
-    publishing {
-        publications {
-            matching { it.name in publicationsFromMainHost }.all {
-                val targetPublication = this@all
-                tasks.withType<AbstractPublishToMaven>()
-                    .matching { it.publication == targetPublication }
-                    .configureEach { onlyIf { findProperty("isMainHost") == "true" } }
-            }
-        }
-    }
+    macosX64()
+    linuxX64()
+    mingwX64()
+    ios()
+    watchos()
+    tvos()
     sourceSets {
         val commonMain by getting
         val commonTest by getting {
@@ -76,28 +59,36 @@ kotlin {
         }
         val jsMain by getting
         val jsTest by getting
-        val hostOSMain by getting
-        val hostOSTest by getting
-//        val iosMain by getting
-//        val iosTest by getting
-//        val watchosMain by getting
-//        val watchosTest by getting
-//        val tvosMain by getting
-//        val tvosTest by getting
+        val macosX64Main by getting
+        val macosX64Test by getting
+        val linuxX64Main by getting
+        val linuxX64Test by getting
+        val mingwX64Main by getting
+        val mingwX64Test by getting
+        val iosMain by getting
+        val iosTest by getting
+        val watchosMain by getting
+        val watchosTest by getting
+        val tvosMain by getting
+        val tvosTest by getting
 
         val nativeMain by sourceSets.creating {
             dependsOn(commonMain)
-            hostOSMain.dependsOn(this)
-//            iosMain.dependsOn(this)
-//            watchosMain.dependsOn(this)
-//            tvosMain.dependsOn(this)
+            macosX64Main.dependsOn(this)
+            linuxX64Main.dependsOn(this)
+            mingwX64Main.dependsOn(this)
+            iosMain.dependsOn(this)
+            watchosMain.dependsOn(this)
+            tvosMain.dependsOn(this)
         }
         val nativeTest by sourceSets.creating {
             dependsOn(commonTest)
-            hostOSTest.dependsOn(this)
-//            iosTest.dependsOn(this)
-//            watchosTest.dependsOn(this)
-//            tvosTest.dependsOn(this)
+            macosX64Test.dependsOn(this)
+            linuxX64Test.dependsOn(this)
+            mingwX64Test.dependsOn(this)
+            iosTest.dependsOn(this)
+            watchosTest.dependsOn(this)
+            tvosTest.dependsOn(this)
         }
 
 //        val androidMain by getting {
@@ -156,7 +147,7 @@ System.getenv("GITHUB_REPOSITORY")?.let {
     val libraryVersion = if (System.getenv("GITHUB_RUN_NUMBER") != null) {
         "$libraryVersionPrefix${System.getenv("GITHUB_RUN_NUMBER")}"
     } else {
-        "0.0.00"+System.currentTimeMillis()
+        "${libraryVersionPrefix}15-SNAPSHOT"
     }
 
     project.group = publishedGroupId
