@@ -5,7 +5,7 @@ import java.util.*
 plugins {
     kotlin("multiplatform") version "1.5.31"
 //    id("com.android.library")
-//    id("io.codearte.nexus-staging") version "0.30.0"
+    id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
     signing
 }
@@ -48,7 +48,18 @@ kotlin {
 //    ios()
 //    watchos()
 //    tvos()
-
+    val publicationsFromMainHost =
+        listOf(jvm(), js(),nativeTarget).map { it.name } + "kotlinMultiplatform"
+    publishing {
+        publications {
+            matching { it.name in publicationsFromMainHost }.all {
+                val targetPublication = this@all
+                tasks.withType<AbstractPublishToMaven>()
+                    .matching { it.publication == targetPublication }
+                    .configureEach { onlyIf { findProperty("isMainHost") == "true" } }
+            }
+        }
+    }
     sourceSets {
         val commonMain by getting
         val commonTest by getting {
@@ -121,6 +132,7 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
 
 System.getenv("GITHUB_REPOSITORY")?.let {
     signing {
+
         useInMemoryPgpKeys(System.getenv("GPG_SECRET"), System.getenv("GPG_SIGNING_PASSWORD"))
         sign(publishing.publications)
     }
@@ -195,5 +207,11 @@ System.getenv("GITHUB_REPOSITORY")?.let {
                 }
             }
         }
+    }
+
+    nexusStaging {
+        username = ossUser
+        password = ossPassword
+        packageGroup = publishedGroupId
     }
 }
