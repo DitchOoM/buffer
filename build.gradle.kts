@@ -4,7 +4,7 @@ import java.util.*
 
 plugins {
     kotlin("multiplatform") version "1.5.31"
-//    id("com.android.library")
+    id("com.android.library")
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
     signing
@@ -20,7 +20,9 @@ repositories {
 }
 
 kotlin {
-//    android()
+    android {
+        publishLibraryVariants("release")
+    }
     jvm {
         compilations.all {
             kotlinOptions.jvmTarget = "1.8"
@@ -91,31 +93,31 @@ kotlin {
             tvosTest.dependsOn(this)
         }
 
-//        val androidMain by getting {
-//            kotlin.srcDir("src/commonJvmMain/kotlin")
-//        }
-//        val androidTest by getting {
-//            kotlin.srcDir("src/commonJvmTest/kotlin")
-//        }
+        val androidMain by getting {
+            kotlin.srcDir("src/commonJvmMain/kotlin")
+        }
+        val androidTest by getting {
+            kotlin.srcDir("src/commonJvmTest/kotlin")
+        }
     }
 }
 
-//android {
-//    compileSdkVersion(31)
-//    sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
-//    defaultConfig {
-//        minSdkVersion(1)
-//        targetSdkVersion(31)
-//    }
-//    lintOptions {
-//        isQuiet = true
-//        isAbortOnError =  false
-//    }
-//    compileOptions {
-//        sourceCompatibility = JavaVersion.VERSION_1_8
-//        targetCompatibility = JavaVersion.VERSION_1_8
-//    }
-//}
+android {
+    compileSdkVersion(31)
+    sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
+    defaultConfig {
+        minSdkVersion(1)
+        targetSdkVersion(31)
+    }
+    lintOptions {
+        isQuiet = true
+        isAbortOnError =  false
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+}
 
 val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
     archiveClassifier.set("javadoc")

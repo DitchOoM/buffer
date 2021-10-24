@@ -14,8 +14,8 @@ jobs:
         uses: actions/setup-java@v1
         with:
           java-version: 1.8
-#      - name: Setup Android SDK
-#        uses: android-actions/setup-android@v2
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
       - name: Import GPG Key
         uses: crazy-max/ghaction-import-gpg@v1
         env:
@@ -31,7 +31,7 @@ jobs:
           SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
           GPG_SECRET: ${{ secrets.GPG_SECRET }}
           GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
-        run: ./gradlew --no-daemon assemble build check allTests publishAllPublicationsToSonatypeRepository closeAndReleaseRepository
+        run: ./gradlew --no-daemon assemble build check allTests publishAllPublicationsToSonatypeRepository
       - uses: actions/upload-artifact@v2
         with:
           name: Package
