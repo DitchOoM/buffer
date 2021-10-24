@@ -133,7 +133,7 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
 System.getenv("GITHUB_REPOSITORY")?.let {
     signing {
 
-        useInMemoryPgpKeys(System.getenv("GPG_SECRET"), System.getenv("GPG_SIGNING_PASSWORD"))
+        useInMemoryPgpKeys("56F1A973", System.getenv("GPG_SECRET"), System.getenv("GPG_SIGNING_PASSWORD"))
         sign(publishing.publications)
     }
 
