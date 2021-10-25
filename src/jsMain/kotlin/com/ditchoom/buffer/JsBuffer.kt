@@ -16,8 +16,6 @@ data class JsBuffer(val buffer: Uint8Array,
         limit = buffer.length
     }
 
-
-
     override fun resetForRead() {
         limit = position
         position = 0
