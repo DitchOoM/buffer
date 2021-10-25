@@ -5,15 +5,18 @@ package com.ditchoom.buffer
 import org.khronos.webgl.*
 import kotlin.experimental.and
 
-data class JsBuffer(val buffer: Uint8Array) : PlatformBuffer {
-    private val littleEndian = false // network endian is big endian
-    override val capacity: UInt = buffer.byteLength.toUInt()
-    private var limit = 0
-    private var position = 0
+data class JsBuffer(val buffer: Uint8Array,
+                    private val littleEndian:Boolean = false, // network endian is big endian
+                    private var position: Int = 0,
+                    private var limit: Int = 0,
+                    override val capacity: UInt = buffer.byteLength.toUInt(),
+) : PlatformBuffer {
 
     init {
         limit = buffer.length
     }
+
+
 
     override fun resetForRead() {
         limit = position
@@ -92,8 +95,7 @@ data class JsBuffer(val buffer: Uint8Array) : PlatformBuffer {
     }
 
     override fun write(bytes: ByteArray): WriteBuffer {
-        val int8Array = bytes.unsafeCast<Int8Array>()
-        val uint8Array = Uint8Array(int8Array.buffer)
+        val uint8Array = bytes.unsafeCast<Uint8Array>()
         this.buffer.set(uint8Array, position)
         position += uint8Array.length
         return this
@@ -148,7 +150,42 @@ data class JsBuffer(val buffer: Uint8Array) : PlatformBuffer {
         val otherRemaining = buffer.remaining()
         this.buffer.set((buffer as JsBuffer).buffer, position)
         position += otherRemaining.toInt()
+        buffer.position += otherRemaining.toInt()
     }
 
     override suspend fun close() {}
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other == null || this::class.js != other::class.js) return false
+
+        other as JsBuffer
+
+        if (littleEndian != other.littleEndian) return false
+        if (position != other.position) return false
+        if (limit != other.limit) return false
+        if (capacity != other.capacity) return false
+        val size = remaining()
+        try {
+            if (!readByteArray(size).contentEquals(other.readByteArray(size))) return false
+        } finally {
+            position -= size.toInt()
+            other.position -= size.toInt()
+        }
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = littleEndian.hashCode()
+        result = 31 * result + position
+        result = 31 * result + limit
+        result = 31 * result + capacity.hashCode()
+        val size = remaining()
+        try {
+            result = 31 * result + readByteArray(size).hashCode()
+        } finally {
+            position -= size.toInt()
+        }
+        return result
+    }
 }

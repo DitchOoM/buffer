@@ -3,10 +3,12 @@
 package com.ditchoom.buffer
 
 @ExperimentalUnsignedTypes
-class NativeBuffer(val data: ByteArray) : PlatformBuffer {
-    override val capacity: UInt = data.size.toUInt()
-    private var limit = data.size
-    private var position = 0
+data class NativeBuffer(
+    val data: ByteArray,
+    private var position: Int = 0,
+    private var limit: Int = data.size,
+    override val capacity: UInt = data.size.toUInt(),
+) : PlatformBuffer {
 
     override fun put(buffer: PlatformBuffer) {
         write(buffer)
@@ -115,7 +117,9 @@ class NativeBuffer(val data: ByteArray) : PlatformBuffer {
     }
 
     override fun write(buffer: PlatformBuffer) {
+        val start = position()
         write((buffer as NativeBuffer).data)
+        buffer.position((position() - start).toInt())
     }
 
     override fun writeUtf8(text: CharSequence): WriteBuffer {
@@ -129,5 +133,23 @@ class NativeBuffer(val data: ByteArray) : PlatformBuffer {
     override fun position() = position.toUInt()
     override fun position(newPosition: Int) {
         position = newPosition
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        other as NativeBuffer
+        if (position != other.position) return false
+        if (limit != other.limit) return false
+        if (capacity != other.capacity) return false
+        if (!data.contentEquals(other.data)) return false
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = position.hashCode()
+        result = 31 * result + limit.hashCode()
+        result = 31 * result + capacity.hashCode()
+        result = 31 * result + data.contentHashCode()
+        return result
     }
 }
