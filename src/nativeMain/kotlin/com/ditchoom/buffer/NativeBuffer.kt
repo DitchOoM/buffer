@@ -10,10 +10,6 @@ data class NativeBuffer(
     override val capacity: UInt = data.size.toUInt(),
 ) : PlatformBuffer {
 
-    override fun put(buffer: PlatformBuffer) {
-        write(buffer)
-    }
-
     override fun resetForRead() {
         limit = position
         position = 0
@@ -30,10 +26,13 @@ data class NativeBuffer(
 
     override fun readByte() = data[position++]
 
+    override fun slice(): ReadBuffer {
+        return NativeBuffer(data.sliceArray(position until limit))
+    }
+
     override fun readByteArray(size: UInt): ByteArray {
         val result = data.copyOfRange(position, position + size.toInt())
         position += size.toInt()
-
         return result
     }
 
@@ -116,9 +115,13 @@ data class NativeBuffer(
         return this
     }
 
-    override fun write(buffer: PlatformBuffer) {
+    override fun write(buffer: ReadBuffer) {
         val start = position()
-        write((buffer as NativeBuffer).data)
+        if (buffer is NativeBuffer) {
+            write(buffer.data)
+        } else {
+            write(buffer.readByteArray(remaining()))
+        }
         buffer.position((position() - start).toInt())
     }
 

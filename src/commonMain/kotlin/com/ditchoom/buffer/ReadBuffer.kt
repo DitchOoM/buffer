@@ -1,16 +1,10 @@
 package com.ditchoom.buffer
 
 @ExperimentalUnsignedTypes
-interface ReadBuffer {
-
-    fun limit(): UInt
-    fun position(): UInt
-    fun position(newPosition: Int)
-    fun remaining() = limit() - position()
-    fun hasRemaining() = position() < limit()
-
+interface ReadBuffer: PositionBuffer {
     fun resetForRead()
     fun readByte(): Byte
+    fun slice(): ReadBuffer
     fun readByteArray(size: UInt): ByteArray
     fun readUnsignedByte(): UByte
     fun readUnsignedShort(): UShort

@@ -39,6 +39,10 @@ data class JsBuffer(val buffer: Uint8Array,
         return dataView.getInt8(0)
     }
 
+    override fun slice(): ReadBuffer {
+        return JsBuffer(buffer.subarray(position, limit), littleEndian)
+    }
+
     override fun readByteArray(size: UInt): ByteArray {
         val byteArray = Int8Array(buffer.buffer, position, size.toInt()).unsafeCast<ByteArray>()
         position += size.toInt()
@@ -79,11 +83,14 @@ data class JsBuffer(val buffer: Uint8Array,
         return readByteArray(bytes).decodeToString()
     }
 
-    override fun put(buffer: PlatformBuffer) {
-        val otherBuffer = (buffer as JsBuffer)
-        val size = otherBuffer.limit - otherBuffer.position
-        this.buffer.set(otherBuffer.buffer, position)
-        position += size
+    override fun write(buffer: ReadBuffer) {
+        val size = buffer.limit() - buffer.position()
+        if (buffer is JsBuffer) {
+            this.buffer.set(buffer.buffer, position)
+        } else {
+            this.buffer.set(buffer.readByteArray(size).toTypedArray(), position)
+        }
+        position += size.toInt()
     }
 
     override fun write(byte: Byte): WriteBuffer {
@@ -142,13 +149,6 @@ data class JsBuffer(val buffer: Uint8Array,
     override fun position() = position.toUInt()
     override fun position(newPosition: Int) {
         position = newPosition
-    }
-
-    override fun write(buffer: PlatformBuffer) {
-        val otherRemaining = buffer.remaining()
-        this.buffer.set((buffer as JsBuffer).buffer, position)
-        position += otherRemaining.toInt()
-        buffer.position += otherRemaining.toInt()
     }
 
     override suspend fun close() {}

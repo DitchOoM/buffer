@@ -28,6 +28,8 @@ data class JvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? 
     override fun readByte() = byteBuffer.get()
     override fun readByteArray(size: UInt) = byteBuffer.toArray(size)
 
+    override fun slice() = JvmBuffer(byteBuffer.slice())
+
     override fun readUnsignedByte() = readByte().toUByte()
 
     override fun readUnsignedShort() = byteBuffer.short.toUShort()
@@ -42,10 +44,6 @@ data class JvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? 
         val decoded = Charsets.UTF_8.decode(readBuffer)
         byteBuffer.position(finalPosition)
         return decoded
-    }
-
-    override fun put(buffer: PlatformBuffer) {
-        byteBuffer.put((buffer as JvmBuffer).byteBuffer)
     }
 
     override fun write(byte: Byte): WriteBuffer {
@@ -83,8 +81,12 @@ data class JvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? 
         return this
     }
 
-    override fun write(buffer: PlatformBuffer) {
-        byteBuffer.put((buffer as JvmBuffer).byteBuffer)
+    override fun write(buffer: ReadBuffer) {
+        if (buffer is JvmBuffer) {
+            byteBuffer.put(buffer.byteBuffer)
+        } else {
+            byteBuffer.put(buffer.readByteArray(buffer.remaining()))
+        }
     }
 
     override fun position(newPosition: Int) {
