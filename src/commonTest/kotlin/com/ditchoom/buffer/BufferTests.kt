@@ -9,6 +9,34 @@ import kotlin.test.assertEquals
 class BufferTests {
 
     @Test
+    fun slice() {
+        val platformBuffer = allocateNewBuffer(3u)
+        platformBuffer.write((-1).toByte())
+        platformBuffer.resetForRead()
+        val slicedBuffer = platformBuffer.slice()
+        assertEquals(1u, slicedBuffer.limit())
+        assertEquals(-1, slicedBuffer.readByte())
+    }
+
+
+    @Test
+    fun sliceFragmented() {
+        val platformBuffer1 = allocateNewBuffer(3u)
+        platformBuffer1.write(1.toByte())
+        platformBuffer1.resetForRead()
+
+        val platformBuffer2 = allocateNewBuffer(3u)
+        platformBuffer2.write(2.toByte())
+        platformBuffer2.resetForRead()
+
+        val fragmentedBuffer = FragmentedReadBuffer(platformBuffer1, platformBuffer2)
+        val slicedBuffer = fragmentedBuffer.slice()
+        assertEquals(2u, slicedBuffer.limit())
+        assertEquals(1, slicedBuffer.readByte())
+        assertEquals(2, slicedBuffer.readByte())
+    }
+
+    @Test
     fun byte() {
         val platformBuffer = allocateNewBuffer(1u)
         val byte = (-1).toByte()
