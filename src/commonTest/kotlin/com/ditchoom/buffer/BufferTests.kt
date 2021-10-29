@@ -14,8 +14,11 @@ class BufferTests {
         platformBuffer.write((-1).toByte())
         platformBuffer.resetForRead()
         val slicedBuffer = platformBuffer.slice()
+        assertEquals(0u, slicedBuffer.position())
         assertEquals(1u, slicedBuffer.limit())
         assertEquals(-1, slicedBuffer.readByte())
+        assertEquals(1u, slicedBuffer.position())
+        assertEquals(1u, slicedBuffer.limit())
     }
 
 
@@ -31,9 +34,12 @@ class BufferTests {
 
         val fragmentedBuffer = FragmentedReadBuffer(platformBuffer1, platformBuffer2)
         val slicedBuffer = fragmentedBuffer.slice()
+        assertEquals(0u, slicedBuffer.position())
         assertEquals(2u, slicedBuffer.limit())
         assertEquals(1, slicedBuffer.readByte())
         assertEquals(2, slicedBuffer.readByte())
+        assertEquals(2u, slicedBuffer.position())
+        assertEquals(2u, slicedBuffer.limit())
     }
 
     @Test
