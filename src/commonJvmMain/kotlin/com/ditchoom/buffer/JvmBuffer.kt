@@ -43,7 +43,7 @@ data class JvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? 
     override fun readUtf8(bytes: UInt): CharSequence {
         val finalPosition = buffer.position() + bytes.toInt()
         val readBuffer = byteBuffer.asReadOnlyBuffer()
-        buffer.limit(finalPosition)
+        (readBuffer as Buffer).limit(finalPosition)
         val decoded = Charsets.UTF_8.decode(readBuffer)
         buffer.position(finalPosition)
         return decoded
