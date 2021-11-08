@@ -3,6 +3,7 @@
 package com.ditchoom.buffer
 
 import java.io.RandomAccessFile
+import java.nio.Buffer
 import java.nio.ByteBuffer
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -10,20 +11,22 @@ import kotlin.coroutines.suspendCoroutine
 
 @ExperimentalUnsignedTypes
 data class JvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? = null) : PlatformBuffer {
+    // Use Buffer reference to avoid NoSuchMethodException between JVM. see https://stackoverflow.com/q/61267495
+    private val buffer = byteBuffer as Buffer
 
     override fun resetForRead() {
-        byteBuffer.flip()
+        buffer.flip()
     }
 
     override fun resetForWrite() {
-        byteBuffer.clear()
+        buffer.clear()
     }
 
     override fun setLimit(limit: Int) {
-        byteBuffer.limit(limit)
+        buffer.limit(limit)
     }
 
-    override val capacity = byteBuffer.capacity().toUInt()
+    override val capacity = buffer.capacity().toUInt()
 
     override fun readByte() = byteBuffer.get()
     override fun readByteArray(size: UInt) = byteBuffer.toArray(size)
@@ -38,11 +41,11 @@ data class JvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? 
     override fun readLong() = byteBuffer.long
 
     override fun readUtf8(bytes: UInt): CharSequence {
-        val finalPosition = byteBuffer.position() + bytes.toInt()
+        val finalPosition = buffer.position() + bytes.toInt()
         val readBuffer = byteBuffer.asReadOnlyBuffer()
-        readBuffer.limit(finalPosition)
+        buffer.limit(finalPosition)
         val decoded = Charsets.UTF_8.decode(readBuffer)
-        byteBuffer.position(finalPosition)
+        buffer.position(finalPosition)
         return decoded
     }
 
@@ -90,17 +93,17 @@ data class JvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? 
     }
 
     override fun position(newPosition: Int) {
-        byteBuffer.position(newPosition)
+        buffer.position(newPosition)
     }
 
-    override fun toString() = byteBuffer.toString()
+    override fun toString() = buffer.toString()
 
     override suspend fun close() {
         fileRef?.aClose()
     }
 
-    override fun limit() = byteBuffer.limit().toUInt()
-    override fun position() = byteBuffer.position().toUInt()
+    override fun limit() = buffer.limit().toUInt()
+    override fun position() = buffer.position().toUInt()
 }
 
 
