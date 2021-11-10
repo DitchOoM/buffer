@@ -40,7 +40,7 @@ data class JsBuffer(val buffer: Uint8Array,
     }
 
     override fun slice(): ReadBuffer {
-        return JsBuffer(buffer.subarray(position, limit), littleEndian)
+        return JsBuffer(Uint8Array(buffer.buffer.slice(position, limit)), littleEndian)
     }
 
     override fun readByteArray(size: UInt): ByteArray {

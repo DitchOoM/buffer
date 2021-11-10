@@ -23,6 +23,21 @@ class BufferTests {
 
 
     @Test
+    fun sliceAndReadUtf8() {
+        val expected = "test"
+        // the first two bytes are not visible characters
+        val bytes = byteArrayOf(-126,4,
+            expected[0].code.toByte(),
+            expected[1].code.toByte(),
+            expected[2].code.toByte(),
+            expected[3].code.toByte())
+        val platformBuffer = allocateNewBuffer(bytes.size.toUInt())
+        platformBuffer.write(bytes)
+        platformBuffer.position(2)
+        assertEquals(expected, platformBuffer.readUtf8(4).toString())
+    }
+
+    @Test
     fun sliceFragmented() {
         val platformBuffer1 = allocateNewBuffer(3u)
         platformBuffer1.write(1.toByte())
