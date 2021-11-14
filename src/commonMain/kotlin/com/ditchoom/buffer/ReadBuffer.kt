@@ -7,9 +7,12 @@ interface ReadBuffer: PositionBuffer {
     fun slice(): ReadBuffer
     fun readByteArray(size: UInt): ByteArray
     fun readUnsignedByte(): UByte
+    fun readShort(): Short = readUnsignedShort().toShort()
     fun readUnsignedShort(): UShort
+    fun readInt(): Int = readUnsignedInt().toInt()
     fun readUnsignedInt(): UInt
     fun readLong(): Long
+    fun readUnsignedLong(): ULong = readLong().toULong()
     fun readUtf8(bytes: UInt): CharSequence
     fun readUtf8(bytes: Int): CharSequence = readUtf8(bytes.toUInt())
     fun readUtf8Line(): CharSequence {
