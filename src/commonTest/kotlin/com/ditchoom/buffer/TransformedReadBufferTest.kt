@@ -12,7 +12,7 @@ class TransformedReadBufferTest {
         val buffer = allocateNewBuffer(Byte.SIZE_BYTES.toUInt())
         buffer.write(10.toByte())
         buffer.resetForRead()
-        val add1TransformedReadBuffer = TransformedReadBuffer(buffer) { position, byte ->
+        val add1TransformedReadBuffer = TransformedReadBuffer(buffer) { _, byte ->
             (byte + 1).toByte()
         }
         assertEquals(11.toByte(), add1TransformedReadBuffer.readByte())
