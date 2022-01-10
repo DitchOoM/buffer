@@ -5,12 +5,13 @@ package com.ditchoom.buffer
 import org.khronos.webgl.*
 import kotlin.experimental.and
 
-data class JsBuffer(val buffer: Uint8Array,
-                    private val littleEndian:Boolean = false, // network endian is big endian
-                    private var position: Int = 0,
-                    private var limit: Int = 0,
-                    override val capacity: UInt = buffer.byteLength.toUInt(),
-) : PlatformBuffer {
+data class JsBuffer(
+    val buffer: Uint8Array,
+    private val littleEndian: Boolean = false, // network endian is big endian
+    private var position: Int = 0,
+    private var limit: Int = 0,
+    override val capacity: UInt = buffer.byteLength.toUInt(),
+) : ParcelablePlatformBuffer {
 
     init {
         limit = buffer.length

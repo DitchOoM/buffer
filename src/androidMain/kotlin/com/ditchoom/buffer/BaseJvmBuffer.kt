@@ -10,7 +10,7 @@ import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
 @ExperimentalUnsignedTypes
-data class JvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? = null) : PlatformBuffer {
+abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? = null) : ParcelablePlatformBuffer {
     // Use Buffer reference to avoid NoSuchMethodException between JVM. see https://stackoverflow.com/q/61267495
     private val buffer = byteBuffer as Buffer
 
@@ -96,7 +96,15 @@ data class JvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? 
         buffer.position(newPosition)
     }
 
-    override fun toString() = buffer.toString()
+    override fun equals(other: Any?): Boolean {
+        if (other !is PlatformBuffer) return false
+        if (position() != other.position()) return false
+        if (limit() != other.limit()) return false
+        if (capacity != other.capacity) return false
+        return true
+    }
+
+    override fun toString() = "Buffer[pos=${position()} lim=${limit()} cap=${capacity}]"
 
     override suspend fun close() {
         fileRef?.aClose()

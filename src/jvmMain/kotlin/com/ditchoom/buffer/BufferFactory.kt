@@ -6,9 +6,9 @@ import java.nio.ByteBuffer
 
 actual fun allocateNewBuffer(
     size: UInt
-): PlatformBuffer = JvmBuffer(ByteBuffer.allocateDirect(size.toInt()))
+): ParcelablePlatformBuffer = JvmBuffer(ByteBuffer.allocateDirect(size.toInt()))
 
 
-actual fun String.toBuffer(): PlatformBuffer = JvmBuffer(ByteBuffer.wrap(encodeToByteArray()))
+actual fun String.toBuffer(): ParcelablePlatformBuffer = JvmBuffer(ByteBuffer.wrap(encodeToByteArray()))
 
 actual fun String.utf8Length(): UInt = encodeToByteArray().size.toUInt()

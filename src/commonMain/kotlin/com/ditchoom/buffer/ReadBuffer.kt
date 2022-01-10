@@ -1,7 +1,7 @@
 package com.ditchoom.buffer
 
 @ExperimentalUnsignedTypes
-interface ReadBuffer: PositionBuffer {
+interface ReadBuffer : PositionBuffer {
     fun resetForRead()
     fun readByte(): Byte
     fun slice(): ReadBuffer

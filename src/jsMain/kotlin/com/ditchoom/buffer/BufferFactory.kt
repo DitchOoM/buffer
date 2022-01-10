@@ -7,11 +7,11 @@ import org.khronos.webgl.Uint8Array
 
 actual fun allocateNewBuffer(
     size: UInt
-): PlatformBuffer {
+): ParcelablePlatformBuffer {
     return JsBuffer(Uint8Array(size.toInt()))
 }
 
-actual fun String.toBuffer(): PlatformBuffer {
+actual fun String.toBuffer(): ParcelablePlatformBuffer {
     val int8Array = encodeToByteArray().unsafeCast<Int8Array>()
     val uint8Array = Uint8Array(int8Array.buffer)
     return JsBuffer(uint8Array)

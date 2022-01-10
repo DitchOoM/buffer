@@ -8,7 +8,7 @@ data class NativeBuffer(
     private var position: Int = 0,
     private var limit: Int = data.size,
     override val capacity: UInt = data.size.toUInt(),
-) : PlatformBuffer {
+) : ParcelablePlatformBuffer {
 
     override fun resetForRead() {
         limit = position
