@@ -9,7 +9,7 @@ import java.nio.ByteBuffer
 actual fun allocateNewBuffer(
     size: UInt
 ): ParcelablePlatformBuffer {
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && size > 0u) {
         val sharedMemory = SharedMemory.create(null, size.toInt())
         val buffer = sharedMemory.mapReadWrite()
         ParcelableSharedMemoryBuffer(buffer, sharedMemory)
