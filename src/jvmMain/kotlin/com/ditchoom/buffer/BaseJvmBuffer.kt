@@ -55,8 +55,8 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
         return this
     }
 
-    override fun write(bytes: ByteArray): WriteBuffer {
-        byteBuffer.put(bytes)
+    override fun write(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
+        byteBuffer.put(bytes, offset, length)
         return this
     }
 

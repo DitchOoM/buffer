@@ -100,8 +100,8 @@ data class JsBuffer(
         return this
     }
 
-    override fun write(bytes: ByteArray): WriteBuffer {
-        val uint8Array = bytes.unsafeCast<Uint8Array>()
+    override fun write(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
+        val uint8Array = bytes.unsafeCast<Uint8Array>().subarray(offset, offset + length)
         this.buffer.set(uint8Array, position)
         position += uint8Array.length
         return this
