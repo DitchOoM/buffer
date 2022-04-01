@@ -4,7 +4,8 @@ package com.ditchoom.buffer
 interface WriteBuffer : PositionBuffer {
     fun resetForWrite()
     fun write(byte: Byte): WriteBuffer
-    fun write(bytes: ByteArray): WriteBuffer
+    fun write(bytes: ByteArray): WriteBuffer = write(bytes, 0, bytes.size)
+    fun write(bytes: ByteArray, offset: Int, length: Int): WriteBuffer
     fun write(uByte: UByte): WriteBuffer
     fun write(short: Short): WriteBuffer = write(short.toUShort())
     fun write(uShort: UShort): WriteBuffer

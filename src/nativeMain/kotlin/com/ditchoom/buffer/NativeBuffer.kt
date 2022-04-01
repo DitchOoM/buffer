@@ -102,8 +102,8 @@ data class NativeBuffer(
         return this
     }
 
-    override fun write(bytes: ByteArray): WriteBuffer {
-        bytes.copyInto(data, position)
+    override fun write(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
+        bytes.copyInto(data, position, offset, offset + length)
         position += bytes.size
         return this
     }
