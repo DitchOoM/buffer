@@ -49,7 +49,7 @@ class FragmentedReadBuffer(
             val secondChunkSize = size - firstChunkSize
             val secondBufferLimit = second.limit().toInt()
             second.setLimit((second.position() + secondChunkSize).toInt())
-            val buffer = allocateNewBuffer(size)
+            val buffer = PlatformBuffer.allocate(size)
             buffer.write(first)
             buffer.write(second)
             second.setLimit(secondBufferLimit)
@@ -65,7 +65,7 @@ class FragmentedReadBuffer(
     override fun slice(): ReadBuffer {
         val first = first.slice()
         val second = second.slice()
-        val buffer = allocateNewBuffer(first.limit() + second.limit())
+        val buffer = PlatformBuffer.allocate(first.limit() + second.limit())
         buffer.write(first)
         buffer.write(second)
         buffer.resetForRead()

@@ -3,10 +3,13 @@
 package com.ditchoom.buffer
 
 
-actual fun allocateNewBuffer(
+actual fun PlatformBuffer.Companion.allocate(
     size: UInt,
     byteOrder: ByteOrder
-): ParcelablePlatformBuffer = NativeBuffer(ByteArray(size.toInt()), byteOrder = byteOrder)
+): PlatformBuffer = NativeBuffer(ByteArray(size.toInt()), byteOrder = byteOrder)
 
-actual fun String.toBuffer(): ParcelablePlatformBuffer = NativeBuffer(this.encodeToByteArray(), byteOrder = ByteOrder.BIG_ENDIAN)
+actual fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder): PlatformBuffer =
+    NativeBuffer(array, byteOrder = byteOrder)
+
+actual fun String.toBuffer(): PlatformBuffer = NativeBuffer(this.encodeToByteArray(), byteOrder = ByteOrder.BIG_ENDIAN)
 actual fun String.utf8Length(): UInt = encodeToByteArray().size.toUInt()
