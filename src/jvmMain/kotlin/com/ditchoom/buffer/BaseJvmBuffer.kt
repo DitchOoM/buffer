@@ -11,7 +11,7 @@ import kotlin.coroutines.suspendCoroutine
 
 @ExperimentalUnsignedTypes
 abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? = null) :
-    ParcelablePlatformBuffer {
+    PlatformBuffer {
     // Use Buffer reference to avoid NoSuchMethodException between JVM. see https://stackoverflow.com/q/61267495
     private val buffer = byteBuffer as Buffer
 

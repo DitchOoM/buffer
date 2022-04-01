@@ -11,7 +11,7 @@ data class JsBuffer(
     private var position: Int = 0,
     private var limit: Int = 0,
     override val capacity: UInt = buffer.byteLength.toUInt(),
-) : ParcelablePlatformBuffer {
+) : PlatformBuffer {
     override val byteOrder = if (littleEndian) ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN
 
     init {
