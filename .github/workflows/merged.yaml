@@ -1,0 +1,10 @@
+name: "Build and Test"
+on:
+  push:
+    branches: [ main ]
+jobs:
+  job:
+    runs-on: macos-latest
+    steps:
+      - uses: ./.github/workflows/build-and-test
+      - uses: ./.github/workflows/deploy

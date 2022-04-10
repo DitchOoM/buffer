@@ -1,0 +1,13 @@
+name: "Build and Test"
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - ready_for_review
+      - review_requested
+jobs:
+  job:
+    runs-on: macos-latest
+    steps:
+      - uses: ./.github/workflows/build-and-test

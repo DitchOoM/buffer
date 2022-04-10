@@ -1,0 +1,21 @@
+name: "Deploy"
+description: "Deploys the code to repositories"
+runs:
+  using: "composite"
+  steps:
+  - name: Import GPG Key
+    uses: crazy-max/ghaction-import-gpg@v1
+    env:
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_SECRET }}
+      PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSWORD }}
+  - name: Test and deploy with Gradle
+    env:
+      SONATYPE_NEXUS_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
+      SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
+      GPG_SECRET: ${{ secrets.GPG_SECRET }}
+      GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
+    run: ./gradlew --no-daemon publishAllPublicationsToSonatypeRepository closeAndReleaseRepository
+  - uses: actions/upload-artifact@v2
+    with:
+      name: Package
+      path: build/libs
