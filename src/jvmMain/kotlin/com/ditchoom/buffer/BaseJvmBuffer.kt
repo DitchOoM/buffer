@@ -15,6 +15,12 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
     // Use Buffer reference to avoid NoSuchMethodException between JVM. see https://stackoverflow.com/q/61267495
     private val buffer = byteBuffer as Buffer
 
+    override val byteOrder = when (byteBuffer.order()) {
+        java.nio.ByteOrder.LITTLE_ENDIAN -> ByteOrder.LITTLE_ENDIAN
+        java.nio.ByteOrder.BIG_ENDIAN -> ByteOrder.BIG_ENDIAN
+        else -> ByteOrder.BIG_ENDIAN
+    }
+
     override fun resetForRead() {
         buffer.flip()
     }
