@@ -124,11 +124,12 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
     archiveClassifier.set("javadoc")
 }
 
-(System.getenv("GITHUB_REPOSITORY") != null && System.getenv("GITHUB_REF") == "refs/heads/main")?.let {
-    signing {
-
-        useInMemoryPgpKeys("56F1A973", System.getenv("GPG_SECRET"), System.getenv("GPG_SIGNING_PASSWORD"))
-        sign(publishing.publications)
+(System.getenv("GITHUB_REPOSITORY") != null )?.let {
+    if (System.getenv("GITHUB_REF") == "refs/heads/main") {
+        signing {
+            useInMemoryPgpKeys("56F1A973", System.getenv("GPG_SECRET"), System.getenv("GPG_SIGNING_PASSWORD"))
+            sign(publishing.publications)
+        }
     }
 
 
