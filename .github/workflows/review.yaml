@@ -8,7 +8,7 @@ on:
       - reopened
       - opened
 jobs:
-  publish-snapshot:
+  review:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
