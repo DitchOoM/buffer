@@ -1,6 +1,5 @@
 plugins {
-    id("dev.petuska.npm.publish") version "2.1.2"
-    kotlin("multiplatform") version "1.6.20"
+    kotlin("multiplatform") version "1.6.10"
     id("com.android.library")
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
@@ -50,10 +49,11 @@ kotlin {
         val commonTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.1")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.0")
             }
         }
-        val jvmMain by getting
+        val jvmMain by getting {
+        }
         val jvmTest by getting {
             kotlin.srcDir("src/commonJvmTest/kotlin")
         }
@@ -92,9 +92,7 @@ kotlin {
         }
 
         val androidMain by getting
-        val androidAndroidTestRelease by getting
         val androidTest by getting {
-            dependsOn(androidAndroidTestRelease)
             kotlin.srcDir("src/commonJvmTest/kotlin")
         }
         val androidAndroidTest by getting {
