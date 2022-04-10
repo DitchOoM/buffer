@@ -11,8 +11,10 @@ interface ReadBuffer : PositionBuffer {
     fun readUnsignedShort(): UShort
     fun readInt(): Int = readUnsignedInt().toInt()
     fun readUnsignedInt(): UInt
+    fun readFloat(): Float = Float.fromBits(readInt())
     fun readLong(): Long
     fun readUnsignedLong(): ULong = readLong().toULong()
+    fun readDouble(): Double = Double.fromBits(readLong())
     fun readUtf8(bytes: UInt): CharSequence
     fun readUtf8(bytes: Int): CharSequence = readUtf8(bytes.toUInt())
     fun readUtf8Line(): CharSequence {
