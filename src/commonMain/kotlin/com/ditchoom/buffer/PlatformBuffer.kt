@@ -4,6 +4,7 @@ package com.ditchoom.buffer
 
 interface PlatformBuffer : ReadBuffer, WriteBuffer, SuspendCloseable {
     val capacity: UInt
+    val byteOrder: ByteOrder
 }
 
 
