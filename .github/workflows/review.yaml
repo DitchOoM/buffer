@@ -6,6 +6,8 @@ on:
     types:
       - ready_for_review
       - review_requested
+      - synchronize
+      - reopened
 jobs:
   publish-snapshot:
     runs-on: ${{ matrix.os }}
