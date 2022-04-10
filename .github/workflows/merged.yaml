@@ -3,7 +3,7 @@ on:
   push:
     branches: [ main ]
 jobs:
-  publish-snapshot:
+  deploy:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:

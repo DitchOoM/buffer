@@ -1,15 +1,14 @@
 name: "Build and Test"
 on:
   pull_request:
-    branches:
-      - main
     types:
       - ready_for_review
       - review_requested
       - synchronize
       - reopened
+      - opened
 jobs:
-  publish-snapshot:
+  review:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:

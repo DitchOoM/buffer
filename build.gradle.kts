@@ -1,5 +1,5 @@
 plugins {
-    kotlin("multiplatform") version "1.6.10"
+    kotlin("multiplatform") version "1.6.20"
     id("com.android.library")
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
@@ -49,7 +49,7 @@ kotlin {
         val commonTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.0")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.1")
             }
         }
         val jvmMain by getting {
@@ -124,11 +124,12 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
     archiveClassifier.set("javadoc")
 }
 
-System.getenv("GITHUB_REPOSITORY")?.let {
-    signing {
-
-        useInMemoryPgpKeys("56F1A973", System.getenv("GPG_SECRET"), System.getenv("GPG_SIGNING_PASSWORD"))
-        sign(publishing.publications)
+(System.getenv("GITHUB_REPOSITORY"))?.let {
+    if (System.getenv("GITHUB_REF") == "refs/heads/main") {
+        signing {
+            useInMemoryPgpKeys("56F1A973", System.getenv("GPG_SECRET"), System.getenv("GPG_SIGNING_PASSWORD"))
+            sign(publishing.publications)
+        }
     }
 
 
