@@ -3,6 +3,7 @@ description: "Deploys the code to repositories"
 runs:
   using: "composite"
   steps:
+  - uses: actions/checkout@v2
   - name: Import GPG Key
     uses: crazy-max/ghaction-import-gpg@v1
     env:
