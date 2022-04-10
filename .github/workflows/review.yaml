@@ -11,4 +11,4 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: ./.github/workflows/build-and-test
+      - uses: ./.github/actions/build-and-test

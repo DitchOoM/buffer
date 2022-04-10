@@ -148,7 +148,7 @@ System.getenv("GITHUB_REPOSITORY")?.let {
     val developerId: String by project
 
     val libraryVersion = if (System.getenv("GITHUB_RUN_NUMBER") != null) {
-        "$libraryVersionPrefix${System.getenv("GITHUB_RUN_NUMBER")}"
+        "$libraryVersionPrefix${(Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER")) + 60)}"
     } else {
         "${libraryVersionPrefix}0-SNAPSHOT"
     }
