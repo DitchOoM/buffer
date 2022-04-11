@@ -1,4 +1,5 @@
 plugins {
+    id("dev.petuska.npm.publish") version "2.1.2"
     kotlin("multiplatform") version "1.6.20"
     id("com.android.library")
     id("io.codearte.nexus-staging") version "0.30.0"
@@ -29,7 +30,6 @@ kotlin {
     }
     js {
         moduleName = "bufferKt"
-        binaries.executable()
         browser {
             commonWebpackConfig {
                 cssSupport.enabled = true
@@ -208,5 +208,21 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
         username = ossUser
         password = ossPassword
         packageGroup = publishedGroupId
+    }
+}
+
+if (System.getenv("NPM_ACCESS_TOKEN") != null) {
+    npmPublishing {
+        repositories {
+            repository("npmjs") {
+                registry = uri("https://registry.npmjs.org")
+                authToken = System.getenv("NPM_ACCESS_TOKEN")
+            }
+        }
+        readme = file("Readme.md") // (optional) Default readme file
+        organization = "ditchoom.com"
+        access = PUBLIC
+        bundleKotlinDependencies = true
+        dry = false
     }
 }
