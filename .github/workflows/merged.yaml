@@ -10,10 +10,10 @@ jobs:
         os: [ macos-latest ]
     steps:
       - uses: actions/checkout@v2
-      - name: Set up JDK 1.8
+      - name: Set up JDK 12
         uses: actions/setup-java@v1
         with:
-          java-version: 1.8
+          java-version: 12
       - name: Setup Android SDK
         uses: android-actions/setup-android@v2
       - name: Import GPG Key
@@ -27,7 +27,7 @@ jobs:
           SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
           GPG_SECRET: ${{ secrets.GPG_SECRET }}
           GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
-        run: ./gradlew --no-daemon assemble build check allTests connectedAndroidTest publishAllPublicationsToSonatypeRepository closeAndReleaseRepository
+        run: ./gradlew --no-daemon assemble build check allTests connectedAndroidTest publishAllPublicationsToSonatypeRepository publish closeAndReleaseRepository
       - uses: actions/upload-artifact@v2
         with:
           name: Package
