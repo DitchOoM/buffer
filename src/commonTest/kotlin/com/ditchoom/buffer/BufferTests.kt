@@ -152,7 +152,7 @@ class BufferTests {
     @Test
     fun long() {
         val platformBuffer = PlatformBuffer.allocate(Long.SIZE_BYTES.toUInt())
-        val long = (-1).toLong()
+        val long = (1234).toLong()
         platformBuffer.write(long)
         platformBuffer.resetForRead()
         assertEquals(long, platformBuffer.readLong())
