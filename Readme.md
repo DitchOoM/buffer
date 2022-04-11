@@ -115,6 +115,10 @@ buffer.write(5.toUShort())
 buffer.write(5.toUInt())
 // write long
 buffer.write(5L)
+// write float
+buffer.write(123.456f)
+// write double
+buffer.write(123.456)
 // write text
 buffer.write("5")
 // copy buffer into this one
@@ -139,6 +143,10 @@ buffer.readUnsignedShort()
 buffer.readUnsignedInt()
 // read long
 buffer.readLong()
+// read float
+buffer.readFloat()
+// read double
+buffer.readDouble()
 // read text
 buffer.readUtf8(numOfBytesToRead)
 // read byte array
