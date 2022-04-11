@@ -223,6 +223,6 @@ if (System.getenv("NPM_ACCESS_TOKEN") != null) {
         organization = "ditchoom.com"
         access = PUBLIC
         bundleKotlinDependencies = true
-        dry = false
+        dry = true
     }
 }
