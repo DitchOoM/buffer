@@ -119,6 +119,10 @@ buffer.write(5L)
 buffer.write("5")
 // copy buffer into this one
 buffer.write(otherBuffer)
+// write byte array
+buffer.write(byteArrayOf(1,2,3,4))
+// write partial byte array
+buffer.write(byteArrayOf(1,2,3,4,5), offset, length)
 ```
 
 ### Read big endian data into platform agnostic buffer
@@ -137,6 +141,8 @@ buffer.readUnsignedInt()
 buffer.readLong()
 // read text
 buffer.readUtf8(numOfBytesToRead)
+// read byte array
+buffer.readByteArray(numOfBytesToRead)
 ```
 
 ## Building Locally
