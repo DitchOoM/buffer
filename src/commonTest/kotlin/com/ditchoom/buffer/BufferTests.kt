@@ -156,6 +156,26 @@ class BufferTests {
     }
 
     @Test
+    fun float() {
+        val platformBuffer = allocateNewBuffer(Float.SIZE_BYTES.toUInt())
+        val float = 123.456f
+        platformBuffer.write(float)
+        platformBuffer.resetForRead()
+        // Note that in Kotlin/JS Float range is wider than "single format" bit layout can represent,
+        // so some Float values may overflow, underflow or lose their accuracy after conversion to bits and back.
+        assertTrue { (float - platformBuffer.readFloat()).absoluteValue < 0.00001f }
+    }
+
+    @Test
+    fun double() {
+        val platformBuffer = allocateNewBuffer(Double.SIZE_BYTES.toUInt())
+        val double = 123.456
+        platformBuffer.write(double)
+        platformBuffer.resetForRead()
+        assertEquals(double, platformBuffer.readDouble())
+    }
+
+    @Test
     fun utf8String() {
         val string = "yolo swag lyfestyle"
         assertEquals(19, string.utf8Length().toInt())
@@ -350,5 +370,17 @@ class BufferTests {
         bigEndian8.write(0x08.toByte())
         bigEndian8.resetForRead()
         assertEquals(0x0102030405060708, bigEndian8.readLong())
+    }
+
+    @Test
+    fun partialByteArray() {
+        val byteArray = byteArrayOf(0,1,2,3,4,5,6,7,8,9)
+        val partialArray = byteArray.sliceArray(2..6)
+        val buffer = allocateNewBuffer(partialArray.size.toUInt())
+        buffer.write(byteArray, 2, 5)
+        buffer.resetForRead()
+        val readValue = buffer.readByteArray(5u)
+        for (i in partialArray.indices)
+            assertEquals(partialArray[i], readValue[i])
     }
 }
