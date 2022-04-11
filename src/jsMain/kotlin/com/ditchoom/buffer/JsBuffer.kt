@@ -12,6 +12,7 @@ data class JsBuffer(
     private var limit: Int = 0,
     override val capacity: UInt = buffer.byteLength.toUInt(),
 ) : ParcelablePlatformBuffer {
+    override val byteOrder = if (littleEndian) ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN
 
     init {
         limit = buffer.length
@@ -65,7 +66,8 @@ data class JsBuffer(
     }
 
     override fun readLong(): Long {
-        val long = readByteArray(Long.SIZE_BYTES.toUInt()).toLong()
+        val bytes = readByteArray(Long.SIZE_BYTES.toUInt())
+        val long = if (littleEndian) bytes.reversedArray().toLong() else bytes.toLong()
         position += ULong.SIZE_BYTES
         return long
     }
@@ -127,7 +129,8 @@ data class JsBuffer(
     }
 
     override fun write(long: Long): WriteBuffer {
-        write(long.toByteArray())
+        val bytes = if (littleEndian) long.toByteArray().reversedArray() else long.toByteArray()
+        write(bytes)
         return this
     }
 

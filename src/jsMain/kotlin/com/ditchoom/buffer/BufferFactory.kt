@@ -6,9 +6,10 @@ import org.khronos.webgl.Int8Array
 import org.khronos.webgl.Uint8Array
 
 actual fun allocateNewBuffer(
-    size: UInt
+    size: UInt,
+    byteOrder: ByteOrder
 ): ParcelablePlatformBuffer {
-    return JsBuffer(Uint8Array(size.toInt()))
+    return JsBuffer(Uint8Array(size.toInt()), littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN)
 }
 
 actual fun String.toBuffer(): ParcelablePlatformBuffer {
