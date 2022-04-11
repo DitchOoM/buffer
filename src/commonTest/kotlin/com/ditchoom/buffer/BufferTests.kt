@@ -2,8 +2,10 @@
 
 package com.ditchoom.buffer
 
+import kotlin.math.absoluteValue
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 @ExperimentalUnsignedTypes
 class BufferTests {
@@ -149,10 +151,30 @@ class BufferTests {
     @Test
     fun long() {
         val platformBuffer = allocateNewBuffer(Long.SIZE_BYTES.toUInt())
-        val long = (-1).toLong()
+        val long = (123456).toLong()
         platformBuffer.write(long)
         platformBuffer.resetForRead()
         assertEquals(long, platformBuffer.readLong())
+    }
+
+    @Test
+    fun float() {
+        val platformBuffer = allocateNewBuffer(Float.SIZE_BYTES.toUInt())
+        val float = 123.456f
+        platformBuffer.write(float)
+        platformBuffer.resetForRead()
+        // Note that in Kotlin/JS Float range is wider than "single format" bit layout can represent,
+        // so some Float values may overflow, underflow or lose their accuracy after conversion to bits and back.
+        assertTrue { (float - platformBuffer.readFloat()).absoluteValue < 0.00001f }
+    }
+
+    @Test
+    fun double() {
+        val platformBuffer = allocateNewBuffer(Double.SIZE_BYTES.toUInt())
+        val double = 123.456
+        platformBuffer.write(double)
+        platformBuffer.resetForRead()
+        assertEquals(double, platformBuffer.readDouble())
     }
 
     @Test
