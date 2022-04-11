@@ -98,10 +98,21 @@ Implementation notes:
 ### Allocate a new platform agnostic buffer
 
 ```kotlin
-val buffer = allocateNewBuffer(byteSize)
+val buffer = PlatformBuffer.allocate(byteSize, byteOrder = ByteOrder.BIG_ENDIAN)
 ```
 
-### Write big endian data into platform agnostic buffer
+### Wrap an existing byte array into a platform agnostic buffer
+```kotlin
+val byteArray = byteArrayOf(1,2,3,4,5)
+val buffer = PlatformBuffer.wrap(byteArray, byteOrder = ByteOrder.BIG_ENDIAN)
+```
+
+### Byte order
+Byte order defaults to big endian but can be specified when creating the buffer with `ByteOrder.BIG_ENDIAN` or `ByteOrder.LITTLE_ENDIAN`
+
+The byte order of a buffer can be checked with `buffer.byteOrder`
+
+### Write data into platform agnostic buffer
 
 ```kotlin
 val buffer :WriteBuffer
@@ -129,7 +140,7 @@ buffer.write(byteArrayOf(1,2,3,4))
 buffer.write(byteArrayOf(1,2,3,4,5), offset, length)
 ```
 
-### Read big endian data into platform agnostic buffer
+### Read big data into platform agnostic buffer
 
 ```kotlin
 val buffer :ReadBuffer

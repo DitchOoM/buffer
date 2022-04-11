@@ -12,10 +12,10 @@ actual fun PlatformBuffer.Companion.allocate(
     return JsBuffer(Uint8Array(size.toInt()), littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN)
 }
 
-actual fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder): PlatformBuffer {
-    // TODO: Look into a direct cast to Uint8Array as wrap() shouldn't allocate a new array, maybe use NativeBuffer
-    return JsBuffer(Uint8Array(array.toTypedArray()), littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN)
-}
+// TODO: Wrap shouldn't duplicate data. Look into direct case to Uint8Array to wrap with the JsBuffer or use NativeBuffer
+actual fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder): PlatformBuffer =
+    //NativeBuffer(array, byteOrder = byteOrder)
+    JsBuffer(Uint8Array(array.toTypedArray()), littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN)
 
 actual fun String.toBuffer(): PlatformBuffer {
     val int8Array = encodeToByteArray().unsafeCast<Int8Array>()

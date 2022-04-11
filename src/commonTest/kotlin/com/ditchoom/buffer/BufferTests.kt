@@ -2,8 +2,11 @@
 
 package com.ditchoom.buffer
 
+import kotlin.math.absoluteValue
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 @ExperimentalUnsignedTypes
 class BufferTests {
@@ -157,7 +160,7 @@ class BufferTests {
 
     @Test
     fun float() {
-        val platformBuffer = allocateNewBuffer(Float.SIZE_BYTES.toUInt())
+        val platformBuffer = PlatformBuffer.allocate(Float.SIZE_BYTES.toUInt())
         val float = 123.456f
         platformBuffer.write(float)
         platformBuffer.resetForRead()
@@ -168,7 +171,7 @@ class BufferTests {
 
     @Test
     fun double() {
-        val platformBuffer = allocateNewBuffer(Double.SIZE_BYTES.toUInt())
+        val platformBuffer = PlatformBuffer.allocate(Double.SIZE_BYTES.toUInt())
         val double = 123.456
         platformBuffer.write(double)
         platformBuffer.resetForRead()
@@ -376,11 +379,17 @@ class BufferTests {
     fun partialByteArray() {
         val byteArray = byteArrayOf(0,1,2,3,4,5,6,7,8,9)
         val partialArray = byteArray.sliceArray(2..6)
-        val buffer = allocateNewBuffer(partialArray.size.toUInt())
+        val buffer = PlatformBuffer.allocate(partialArray.size.toUInt())
         buffer.write(byteArray, 2, 5)
         buffer.resetForRead()
-        val readValue = buffer.readByteArray(5u)
-        for (i in partialArray.indices)
-            assertEquals(partialArray[i], readValue[i])
+        assertContentEquals(partialArray, buffer.readByteArray(5u))
+    }
+
+    @Test
+    fun wrap() {
+        val byteArray = byteArrayOf(0,1,2,3,4,5,6,7,8,9)
+        val buffer = PlatformBuffer.wrap(byteArray)
+        assertEquals(byteArray.size.toUInt(), buffer.remaining())
+        assertContentEquals(byteArray, buffer.readByteArray(buffer.remaining()))
     }
 }

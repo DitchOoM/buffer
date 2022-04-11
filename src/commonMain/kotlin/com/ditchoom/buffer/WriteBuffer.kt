@@ -14,7 +14,7 @@ interface WriteBuffer : PositionBuffer {
     fun write(float: Float): WriteBuffer = write(float.toRawBits())
     fun write(uLong: ULong): WriteBuffer = write(uLong.toLong())
     fun write(long: Long): WriteBuffer
-    fun write(double: Double): WriteBuffer = write(double.toBits())
+    fun write(double: Double): WriteBuffer = write(double.toRawBits())
     fun writeUtf8(text: CharSequence): WriteBuffer
     fun write(buffer: ReadBuffer)
 }
