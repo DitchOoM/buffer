@@ -10,6 +10,11 @@ plugins {
 val libraryVersionPrefix: String by project
 group = "com.ditchoom"
 version = "$libraryVersionPrefix.0-SNAPSHOT"
+val libraryVersion = if (System.getenv("GITHUB_RUN_NUMBER") != null) {
+    "$libraryVersionPrefix${(Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER")) + 60)}"
+} else {
+    "${libraryVersionPrefix}0-SNAPSHOT"
+}
 
 repositories {
     google()
@@ -144,12 +149,6 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
     val developerEmail: String by project
     val developerId: String by project
 
-    val libraryVersion = if (System.getenv("GITHUB_RUN_NUMBER") != null) {
-        "$libraryVersionPrefix${(Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER")) + 60)}"
-    } else {
-        "${libraryVersionPrefix}0-SNAPSHOT"
-    }
-
     project.group = publishedGroupId
     project.version = libraryVersion
 
@@ -219,7 +218,7 @@ if (System.getenv("NPM_ACCESS_TOKEN") != null) {
         organization = "ditchoom"
         access = PUBLIC
         bundleKotlinDependencies = true
-        version = "0.0.5"
+        version = libraryVersion
         dry = !"refs/heads/main".equals(System.getenv("GITHUB_REF"), ignoreCase = true)
         publications {
             val js by getting {
