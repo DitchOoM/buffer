@@ -22,6 +22,4 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v2
       - name: Test with Gradle
-        env:
-          NPM_ACCESS_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
-        run: ./gradlew --no-daemon assemble build check allTests connectedAndroidTest publishJsNpmPublicationToNpmjs publishToMavenLocal
+        run: ./gradlew --no-daemon assemble pack build check allTests connectedAndroidTest publishToMavenLocal
