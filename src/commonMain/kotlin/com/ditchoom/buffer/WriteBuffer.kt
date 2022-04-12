@@ -11,7 +11,7 @@ interface WriteBuffer : PositionBuffer {
     fun write(uShort: UShort): WriteBuffer
     fun write(int: Int): WriteBuffer = write(int.toUInt())
     fun write(uInt: UInt): WriteBuffer
-    fun write(float: Float): WriteBuffer = write(float.toBits())
+    fun write(float: Float): WriteBuffer = write(float.toRawBits())
     fun write(uLong: ULong): WriteBuffer = write(uLong.toLong())
     fun write(long: Long): WriteBuffer
     fun write(double: Double): WriteBuffer = write(double.toBits())
