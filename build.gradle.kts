@@ -220,6 +220,7 @@ if (System.getenv("NPM_ACCESS_TOKEN") != null) {
         access = PUBLIC
         bundleKotlinDependencies = true
         version = "0.0.5"
+        dry = !"refs/heads/main".equals(System.getenv("GITHUB_REF"), ignoreCase = true)
         publications {
             val js by getting {
                 moduleName = "buffer-kt"
