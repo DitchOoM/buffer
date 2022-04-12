@@ -373,4 +373,16 @@ class BufferTests {
         bigEndian8.resetForRead()
         assertEquals(0x0102030405060708, bigEndian8.readLong())
     }
+
+    @Test
+    fun partialByteArray() {
+        val byteArray = byteArrayOf(0,1,2,3,4,5,6,7,8,9)
+        val partialArray = byteArray.sliceArray(2..6)
+        val buffer = allocateNewBuffer(partialArray.size.toUInt())
+        buffer.write(byteArray, 2, 5)
+        buffer.resetForRead()
+        val readValue = buffer.readByteArray(5u)
+        for (i in partialArray.indices)
+            assertEquals(partialArray[i], readValue[i])
+    }
 }
