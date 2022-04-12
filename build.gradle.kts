@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
+
 plugins {
     id("dev.petuska.npm.publish") version "2.1.2"
     kotlin("multiplatform") version "1.6.20"
@@ -5,6 +7,7 @@ plugins {
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
     signing
+    kotlin("native.cocoapods") version "1.6.20"
 }
 
 val libraryVersionPrefix: String by project
@@ -16,6 +19,10 @@ repositories {
     mavenCentral()
 }
 
+val libraryDescription: String by project
+val siteUrl: String by project
+val developerName: String by project
+val licenseName: String by project
 kotlin {
     android {
         publishLibraryVariants("release")
@@ -101,6 +108,21 @@ kotlin {
             kotlin.srcDir("src/commonTest/kotlin")
         }
     }
+
+
+    cocoapods {
+        // Required properties
+        summary = libraryDescription
+        homepage = siteUrl
+        authors = developerName
+        license = licenseName
+        specRepos {
+            source = siteUrl
+        }
+        // Maps custom Xcode configuration to NativeBuildType
+        xcodeConfigurationToNativeBuildType["CUSTOM_DEBUG"] = NativeBuildType.DEBUG
+        xcodeConfigurationToNativeBuildType["CUSTOM_RELEASE"] = NativeBuildType.RELEASE
+    }
 }
 
 android {
@@ -138,13 +160,9 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
 
     val publishedGroupId: String by project
     val libraryName: String by project
-    val libraryDescription: String by project
-    val siteUrl: String by project
     val gitUrl: String by project
-    val licenseName: String by project
     val licenseUrl: String by project
     val developerOrg: String by project
-    val developerName: String by project
     val developerEmail: String by project
     val developerId: String by project
 
