@@ -36,13 +36,9 @@ kotlin {
         }
     }
     js {
-        moduleName = "bufferKt"
-        browser {
-            commonWebpackConfig {
-                cssSupport.enabled = true
-            }
-        }
-        nodejs{ }
+        moduleName = "buffer-kt"
+        browser()
+        nodejs()
     }
     macosX64()
     linuxX64()
@@ -237,10 +233,15 @@ if (System.getenv("NPM_ACCESS_TOKEN") != null) {
                 authToken = System.getenv("NPM_ACCESS_TOKEN")
             }
         }
-        readme = file("Readme.md") // (optional) Default readme file
-        organization = "ditchoom.com"
+        readme = file("Readme.md")
+        organization = "ditchoom"
         access = PUBLIC
         bundleKotlinDependencies = true
-        dry = false
+        version = "0.0.5"
+        publications {
+            val js by getting {
+                moduleName = "buffer-kt"
+            }
+        }
     }
 }
