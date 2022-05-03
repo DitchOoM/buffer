@@ -10,6 +10,11 @@ plugins {
 val libraryVersionPrefix: String by project
 group = "com.ditchoom"
 version = "$libraryVersionPrefix.0-SNAPSHOT"
+val libraryVersion = if (System.getenv("GITHUB_RUN_NUMBER") != null) {
+    "$libraryVersionPrefix${(Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER")) + 60)}"
+} else {
+    "${libraryVersionPrefix}0-SNAPSHOT"
+}
 
 repositories {
     google()
@@ -29,13 +34,9 @@ kotlin {
         }
     }
     js {
-        moduleName = "bufferKt"
-        browser {
-            commonWebpackConfig {
-                cssSupport.enabled = true
-            }
-        }
-        nodejs{ }
+        moduleName = "buffer-kt"
+        browser()
+        nodejs()
     }
     macosX64()
     linuxX64()
@@ -148,12 +149,6 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
     val developerEmail: String by project
     val developerId: String by project
 
-    val libraryVersion = if (System.getenv("GITHUB_RUN_NUMBER") != null) {
-        "$libraryVersionPrefix${(Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER")) + 60)}"
-    } else {
-        "${libraryVersionPrefix}0-SNAPSHOT"
-    }
-
     project.group = publishedGroupId
     project.version = libraryVersion
 
@@ -219,10 +214,16 @@ if (System.getenv("NPM_ACCESS_TOKEN") != null) {
                 authToken = System.getenv("NPM_ACCESS_TOKEN")
             }
         }
-        readme = file("Readme.md") // (optional) Default readme file
-        organization = "ditchoom.com"
+        readme = file("Readme.md")
+        organization = "ditchoom"
         access = PUBLIC
         bundleKotlinDependencies = true
-        dry = false
+        version = libraryVersion
+        dry = !"refs/heads/main".equals(System.getenv("GITHUB_REF"), ignoreCase = true)
+        publications {
+            val js by getting {
+                moduleName = "buffer-kt"
+            }
+        }
     }
 }
