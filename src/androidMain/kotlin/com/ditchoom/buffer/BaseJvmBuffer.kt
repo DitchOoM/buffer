@@ -10,7 +10,7 @@ import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
 @ExperimentalUnsignedTypes
-abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? = null) : ParcelablePlatformBuffer {
+abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? = null) : PlatformBuffer {
     override val byteOrder = when (byteBuffer.order()) {
         java.nio.ByteOrder.BIG_ENDIAN -> ByteOrder.BIG_ENDIAN
         java.nio.ByteOrder.LITTLE_ENDIAN -> ByteOrder.LITTLE_ENDIAN

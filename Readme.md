@@ -44,8 +44,9 @@ A kotlin multiplatform library that allows you to allocate and modify byte[] nat
       <a href="#usage">Usage</a>
       <ul>
         <li><a href="#allocate-a-new-platform-agnostic-buffer">Allocate a new platform agnostic buffer</a></li>
-        <li><a href="#write-big-endian-data-into-platform-agnostic-buffer">Write big endian data into platform agnostic buffer</a></li>
-        <li><a href="#read-big-endian-data-into-platform-agnostic-buffer">Read big endian data into platform agnostic buffer</a></li>
+        <li><a href="#byte-order">Byte order</a></li>
+        <li><a href="#write-data-into-platform-agnostic-buffer">Write data into platform agnostic buffer</a></li>
+        <li><a href="#read-data-into-platform-agnostic-buffer">Read data into platform agnostic buffer</a></li>
       </ul>
     </li>
     <li>
@@ -98,10 +99,21 @@ Implementation notes:
 ### Allocate a new platform agnostic buffer
 
 ```kotlin
-val buffer = allocateNewBuffer(byteSize)
+val buffer = PlatformBuffer.allocate(byteSize, byteOrder = ByteOrder.BIG_ENDIAN)
 ```
 
-### Write big endian data into platform agnostic buffer
+### Wrap an existing byte array into a platform agnostic buffer
+```kotlin
+val byteArray = byteArrayOf(1,2,3,4,5)
+val buffer = PlatformBuffer.wrap(byteArray, byteOrder = ByteOrder.BIG_ENDIAN)
+```
+
+### Byte order
+Byte order defaults to big endian but can be specified when creating the buffer with `ByteOrder.BIG_ENDIAN` or `ByteOrder.LITTLE_ENDIAN`
+
+The byte order of a buffer can be checked with `buffer.byteOrder`
+
+### Write data into platform agnostic buffer
 
 ```kotlin
 val buffer :WriteBuffer
@@ -129,7 +141,7 @@ buffer.write(byteArrayOf(1,2,3,4))
 buffer.write(byteArrayOf(1,2,3,4,5), offset, length)
 ```
 
-### Read big endian data into platform agnostic buffer
+### Read data into platform agnostic buffer
 
 ```kotlin
 val buffer :ReadBuffer
