@@ -245,3 +245,4 @@ Distributed under the Apache 2.0 License. See `LICENSE` for more information.
 [yum]: https://pkgs.org/search/?q=DitchOoM-buffer
 
 [chocolately]: https://chocolatey.org/packages?q=DitchOoM-buffer
+
