@@ -1,4 +1,3 @@
-
 package com.ditchoom.buffer
 
 
@@ -12,6 +11,7 @@ actual fun PlatformBuffer.Companion.allocate(
     }
     return NativeBuffer(ByteArray(size), byteOrder = byteOrder)
 }
+
 actual fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder): PlatformBuffer =
     NativeBuffer(array, byteOrder = byteOrder)
 

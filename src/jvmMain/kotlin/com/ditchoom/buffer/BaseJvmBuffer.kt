@@ -1,4 +1,3 @@
-
 package com.ditchoom.buffer
 
 import java.io.RandomAccessFile

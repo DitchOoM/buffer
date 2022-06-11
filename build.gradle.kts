@@ -113,7 +113,7 @@ android {
     }
     lintOptions {
         isQuiet = true
-        isAbortOnError =  false
+        isAbortOnError = false
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
