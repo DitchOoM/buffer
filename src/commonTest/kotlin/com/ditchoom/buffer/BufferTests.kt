@@ -266,19 +266,19 @@ class BufferTests {
 
     @Test
     fun endianWrite() {
-        val littleEndian2 = PlatformBuffer.allocate(2, ByteOrder.LITTLE_ENDIAN)
+        val littleEndian2 = PlatformBuffer.allocate(2, byteOrder = ByteOrder.LITTLE_ENDIAN)
         littleEndian2.write(0x0102.toShort())
         littleEndian2.resetForRead()
         assertEquals(0x02u, littleEndian2.readUnsignedByte())
         assertEquals(0x01u, littleEndian2.readUnsignedByte())
 
-        val bigEndian2 = PlatformBuffer.allocate(2, ByteOrder.BIG_ENDIAN)
+        val bigEndian2 = PlatformBuffer.allocate(2, byteOrder = ByteOrder.BIG_ENDIAN)
         bigEndian2.write(0x0102.toShort())
         bigEndian2.resetForRead()
         assertEquals(0x01u, bigEndian2.readUnsignedByte())
         assertEquals(0x02u, bigEndian2.readUnsignedByte())
 
-        val littleEndian4 = PlatformBuffer.allocate(4, ByteOrder.LITTLE_ENDIAN)
+        val littleEndian4 = PlatformBuffer.allocate(4, byteOrder = ByteOrder.LITTLE_ENDIAN)
         littleEndian4.write(0x01020304)
         littleEndian4.resetForRead()
         assertEquals(0x04u, littleEndian4.readUnsignedByte())
@@ -286,7 +286,7 @@ class BufferTests {
         assertEquals(0x02u, littleEndian4.readUnsignedByte())
         assertEquals(0x01u, littleEndian4.readUnsignedByte())
 
-        val bigEndian4 = PlatformBuffer.allocate(4, ByteOrder.BIG_ENDIAN)
+        val bigEndian4 = PlatformBuffer.allocate(4, byteOrder = ByteOrder.BIG_ENDIAN)
         bigEndian4.write(0x01020304)
         bigEndian4.resetForRead()
         assertEquals(0x01u, bigEndian4.readUnsignedByte())
@@ -294,7 +294,7 @@ class BufferTests {
         assertEquals(0x03u, bigEndian4.readUnsignedByte())
         assertEquals(0x04u, bigEndian4.readUnsignedByte())
 
-        val littleEndian8 = PlatformBuffer.allocate(8, ByteOrder.LITTLE_ENDIAN)
+        val littleEndian8 = PlatformBuffer.allocate(8, byteOrder = ByteOrder.LITTLE_ENDIAN)
         littleEndian8.write(0x0102030405060708)
         littleEndian8.resetForRead()
         assertEquals(0x08u, littleEndian8.readUnsignedByte())
@@ -306,7 +306,7 @@ class BufferTests {
         assertEquals(0x02u, littleEndian8.readUnsignedByte())
         assertEquals(0x01u, littleEndian8.readUnsignedByte())
 
-        val bigEndian8 = PlatformBuffer.allocate(8, ByteOrder.BIG_ENDIAN)
+        val bigEndian8 = PlatformBuffer.allocate(8, byteOrder = ByteOrder.BIG_ENDIAN)
         bigEndian8.write(0x0102030405060708)
         bigEndian8.resetForRead()
         assertEquals(0x01u, bigEndian8.readUnsignedByte())
@@ -321,19 +321,19 @@ class BufferTests {
 
     @Test
     fun endianRead() {
-        val littleEndian2 = PlatformBuffer.allocate(2, ByteOrder.LITTLE_ENDIAN)
+        val littleEndian2 = PlatformBuffer.allocate(2, byteOrder = ByteOrder.LITTLE_ENDIAN)
         littleEndian2.write(0x01.toByte())
         littleEndian2.write(0x02.toByte())
         littleEndian2.resetForRead()
         assertEquals(0x0201.toShort(), littleEndian2.readShort())
 
-        val bigEndian2 = PlatformBuffer.allocate(2, ByteOrder.BIG_ENDIAN)
+        val bigEndian2 = PlatformBuffer.allocate(2, byteOrder = ByteOrder.BIG_ENDIAN)
         bigEndian2.write(0x01.toByte())
         bigEndian2.write(0x02.toByte())
         bigEndian2.resetForRead()
         assertEquals(0x0102.toShort(), bigEndian2.readShort())
 
-        val littleEndian4 = PlatformBuffer.allocate(4, ByteOrder.LITTLE_ENDIAN)
+        val littleEndian4 = PlatformBuffer.allocate(4, byteOrder = ByteOrder.LITTLE_ENDIAN)
         littleEndian4.write(0x01.toByte())
         littleEndian4.write(0x02.toByte())
         littleEndian4.write(0x03.toByte())
@@ -341,7 +341,7 @@ class BufferTests {
         littleEndian4.resetForRead()
         assertEquals(0x04030201, littleEndian4.readInt())
 
-        val bigEndian4 = PlatformBuffer.allocate(4, ByteOrder.BIG_ENDIAN)
+        val bigEndian4 = PlatformBuffer.allocate(4, byteOrder = ByteOrder.BIG_ENDIAN)
         bigEndian4.write(0x01.toByte())
         bigEndian4.write(0x02.toByte())
         bigEndian4.write(0x03.toByte())
@@ -349,7 +349,7 @@ class BufferTests {
         bigEndian4.resetForRead()
         assertEquals(0x01020304, bigEndian4.readInt())
 
-        val littleEndian8 = PlatformBuffer.allocate(8, ByteOrder.LITTLE_ENDIAN)
+        val littleEndian8 = PlatformBuffer.allocate(8, byteOrder = ByteOrder.LITTLE_ENDIAN)
         littleEndian8.write(0x01.toByte())
         littleEndian8.write(0x02.toByte())
         littleEndian8.write(0x03.toByte())
@@ -361,7 +361,7 @@ class BufferTests {
         littleEndian8.resetForRead()
         assertEquals(0x0807060504030201, littleEndian8.readLong())
 
-        val bigEndian8 = PlatformBuffer.allocate(8, ByteOrder.BIG_ENDIAN)
+        val bigEndian8 = PlatformBuffer.allocate(8, byteOrder = ByteOrder.BIG_ENDIAN)
         bigEndian8.write(0x01.toByte())
         bigEndian8.write(0x02.toByte())
         bigEndian8.write(0x03.toByte())
