@@ -44,7 +44,7 @@ A kotlin multiplatform library that allows you to allocate and modify byte[] nat
       <a href="#usage">Usage</a>
       <ul>
         <li><a href="#allocate-a-new-platform-agnostic-buffer">Allocate a new platform agnostic buffer</a></li>
-        <li><a href="#allocation-zone">Allocation Zones</a></li>
+        <li><a href="#allocation-zones">Allocation Zones</a></li>
         <li><a href="#byte-order">Byte order</a></li>
         <li><a href="#write-data-into-platform-agnostic-buffer">Write data into platform agnostic buffer</a></li>
         <li><a href="#read-data-into-platform-agnostic-buffer">Read data into platform agnostic buffer</a></li>
