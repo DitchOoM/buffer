@@ -5,10 +5,17 @@ package com.ditchoom.buffer
 import org.khronos.webgl.Int8Array
 import org.khronos.webgl.Uint8Array
 
+fun PlatformBuffer.Companion.allocate(
+    size: Int,
+    byteOrder: ByteOrder) = allocate(size, byteOrder, AllocationZone.Heap)
 actual fun PlatformBuffer.Companion.allocate(
     size: Int,
-    byteOrder: ByteOrder
+    byteOrder: ByteOrder,
+    zone: AllocationZone
 ): PlatformBuffer {
+    if (zone is AllocationZone.Custom) {
+        return zone.allocator(size)
+    }
     return JsBuffer(Uint8Array(size), littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN)
 }
 
@@ -17,10 +24,16 @@ actual fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder)
     //NativeBuffer(array, byteOrder = byteOrder)
     JsBuffer(Uint8Array(array.toTypedArray()), littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN)
 
-actual fun String.toBuffer(): PlatformBuffer {
-    val int8Array = encodeToByteArray().unsafeCast<Int8Array>()
-    val uint8Array = Uint8Array(int8Array.buffer)
-    return JsBuffer(uint8Array)
+fun String.toBuffer(): PlatformBuffer = toBuffer(AllocationZone.Heap)
+actual fun String.toBuffer(zone: AllocationZone): PlatformBuffer {
+    val bytes = encodeToByteArray()
+    return if (zone is AllocationZone.Custom) {
+        val buffer = zone.allocator(bytes.size)
+        buffer.write(bytes)
+        buffer
+    } else {
+        val int8Array = bytes.unsafeCast<Int8Array>()
+        val uint8Array = Uint8Array(int8Array.buffer)
+        JsBuffer(uint8Array)
+    }
 }
-
-actual fun String.utf8Length(): Int = encodeToByteArray().unsafeCast<Int8Array>().length

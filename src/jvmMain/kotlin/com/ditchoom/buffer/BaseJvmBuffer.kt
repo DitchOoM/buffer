@@ -47,7 +47,7 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
     override fun readLong() = byteBuffer.long
 
     override fun readUtf8(bytes: Int): CharSequence {
-        val finalPosition = buffer.position() + bytes.toInt()
+        val finalPosition = buffer.position() + bytes
         val readBuffer = byteBuffer.asReadOnlyBuffer()
         (readBuffer as Buffer).limit(finalPosition)
         val decoded = Charsets.UTF_8.decode(readBuffer)
