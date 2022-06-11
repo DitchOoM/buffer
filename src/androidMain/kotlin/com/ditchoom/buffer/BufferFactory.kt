@@ -1,4 +1,3 @@
-@file:Suppress("EXPERIMENTAL_API_USAGE")
 @file:JvmName("BufferFactoryAndroid")
 package com.ditchoom.buffer
 
@@ -7,7 +6,6 @@ import android.os.SharedMemory
 import java.nio.ByteBuffer
 import java.nio.CharBuffer
 import java.nio.charset.CharsetEncoder
-
 
 actual fun PlatformBuffer.Companion.allocate(
     size: Int,

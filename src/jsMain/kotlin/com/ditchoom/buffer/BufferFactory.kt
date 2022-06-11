@@ -1,5 +1,3 @@
-@file:Suppress("EXPERIMENTAL_API_USAGE")
-
 package com.ditchoom.buffer
 
 import org.khronos.webgl.Int8Array
@@ -23,6 +21,7 @@ actual fun PlatformBuffer.Companion.allocate(
 actual fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder): PlatformBuffer =
     //NativeBuffer(array, byteOrder = byteOrder)
     JsBuffer(Uint8Array(array.toTypedArray()), littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN)
+
 
 fun String.toBuffer(): PlatformBuffer = toBuffer(AllocationZone.Heap)
 actual fun String.toBuffer(zone: AllocationZone): PlatformBuffer {

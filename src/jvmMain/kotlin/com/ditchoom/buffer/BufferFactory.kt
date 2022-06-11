@@ -1,4 +1,3 @@
-@file:Suppress("EXPERIMENTAL_API_USAGE")
 @file:JvmName("BufferFactoryJvm")
 package com.ditchoom.buffer
 
@@ -41,7 +40,6 @@ actual fun String.toBuffer(zone: AllocationZone): PlatformBuffer {
     out.byteBuffer.flip()
     return out
 }
-
 
 private val utf8Encoder = object : ThreadLocal<CharsetEncoder>() {
     override fun initialValue(): CharsetEncoder? = Charsets.UTF_8.newEncoder()
