@@ -5,6 +5,7 @@ class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((Int, Byte
     override fun setLimit(limit: Int) {
         origin.setLimit(limit)
     }
+
     override fun position() = origin.position()
 
     override fun position(newPosition: Int) = origin.position(newPosition)

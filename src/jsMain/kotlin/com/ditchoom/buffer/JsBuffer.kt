@@ -3,7 +3,6 @@
 package com.ditchoom.buffer
 
 import org.khronos.webgl.*
-import kotlin.experimental.and
 
 data class JsBuffer(
     val buffer: Uint8Array,

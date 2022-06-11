@@ -28,11 +28,13 @@ class BufferTests {
     fun sliceAndReadUtf8() {
         val expected = "test"
         // the first two bytes are not visible characters
-        val bytes = byteArrayOf(-126,4,
+        val bytes = byteArrayOf(
+            -126, 4,
             expected[0].code.toByte(),
             expected[1].code.toByte(),
             expected[2].code.toByte(),
-            expected[3].code.toByte())
+            expected[3].code.toByte()
+        )
         val platformBuffer = PlatformBuffer.allocate(bytes.size)
         platformBuffer.write(bytes)
         platformBuffer.position(2)
@@ -376,7 +378,7 @@ class BufferTests {
 
     @Test
     fun partialByteArray() {
-        val byteArray = byteArrayOf(0,1,2,3,4,5,6,7,8,9)
+        val byteArray = byteArrayOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
         val partialArray = byteArray.sliceArray(2..6)
         val buffer = PlatformBuffer.allocate(partialArray.size)
         buffer.write(byteArray, 2, 5)
@@ -386,7 +388,7 @@ class BufferTests {
 
     @Test
     fun wrap() {
-        val byteArray = byteArrayOf(0,1,2,3,4,5,6,7,8,9)
+        val byteArray = byteArrayOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
         val buffer = PlatformBuffer.wrap(byteArray)
         assertEquals(byteArray.size, buffer.remaining())
         assertContentEquals(byteArray, buffer.readByteArray(buffer.remaining()))

@@ -5,7 +5,9 @@ import org.khronos.webgl.Uint8Array
 
 fun PlatformBuffer.Companion.allocate(
     size: Int,
-    byteOrder: ByteOrder) = allocate(size, AllocationZone.Heap, byteOrder)
+    byteOrder: ByteOrder
+) = allocate(size, AllocationZone.Heap, byteOrder)
+
 actual fun PlatformBuffer.Companion.allocate(
     size: Int,
     zone: AllocationZone,

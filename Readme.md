@@ -103,20 +103,23 @@ val buffer = PlatformBuffer.allocate(byteSize, byteOrder = ByteOrder.BIG_ENDIAN)
 ```
 
 ### Wrap an existing byte array into a platform agnostic buffer
+
 ```kotlin
-val byteArray = byteArrayOf(1,2,3,4,5)
+val byteArray = byteArrayOf(1, 2, 3, 4, 5)
 val buffer = PlatformBuffer.wrap(byteArray, byteOrder = ByteOrder.BIG_ENDIAN)
 ```
 
 ### Byte order
-Byte order defaults to big endian but can be specified when creating the buffer with `ByteOrder.BIG_ENDIAN` or `ByteOrder.LITTLE_ENDIAN`
+
+Byte order defaults to big endian but can be specified when creating the buffer with `ByteOrder.BIG_ENDIAN`
+or `ByteOrder.LITTLE_ENDIAN`
 
 The byte order of a buffer can be checked with `buffer.byteOrder`
 
 ### Write data into platform agnostic buffer
 
 ```kotlin
-val buffer :WriteBuffer
+val buffer: WriteBuffer
 // write signed byte
 buffer.write(5.toByte())
 // write unsigned byte
@@ -136,15 +139,15 @@ buffer.write("5")
 // copy buffer into this one
 buffer.write(otherBuffer)
 // write byte array
-buffer.write(byteArrayOf(1,2,3,4))
+buffer.write(byteArrayOf(1, 2, 3, 4))
 // write partial byte array
-buffer.write(byteArrayOf(1,2,3,4,5), offset, length)
+buffer.write(byteArrayOf(1, 2, 3, 4, 5), offset, length)
 ```
 
 ### Read data into platform agnostic buffer
 
 ```kotlin
-val buffer :ReadBuffer
+val buffer: ReadBuffer
 // read signed byte
 buffer.readByte()
 // read unsigned byte
