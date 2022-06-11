@@ -8,7 +8,7 @@ import android.os.SharedMemory
 import java.nio.ByteBuffer
 
 @TargetApi(Build.VERSION_CODES.O_MR1)
-class ParcelableSharedMemoryBuffer(buffer: ByteBuffer, private val sharedMemory: SharedMemory): JvmBuffer(buffer) {
+class ParcelableSharedMemoryBuffer(buffer: ByteBuffer, private val sharedMemory: SharedMemory) : JvmBuffer(buffer) {
     override fun describeContents(): Int = Parcelable.CONTENTS_FILE_DESCRIPTOR
 
     override fun writeToParcel(dest: Parcel, flags: Int) {
@@ -23,20 +23,20 @@ class ParcelableSharedMemoryBuffer(buffer: ByteBuffer, private val sharedMemory:
     }
 
     companion object {
-        val CREATOR: Parcelable.Creator<ParcelableSharedMemoryBuffer>
-                = object : Parcelable.Creator<ParcelableSharedMemoryBuffer> {
-            override fun createFromParcel(parcel: Parcel): ParcelableSharedMemoryBuffer {
-                val sharedMemory = parcel.readParcelable<SharedMemory>(javaClass.classLoader)!!
-                val buffer = ParcelableSharedMemoryBuffer(sharedMemory.mapReadWrite(), sharedMemory)
-                buffer.position(parcel.readInt())
-                buffer.setLimit(parcel.readInt())
-                return buffer
-            }
+        val CREATOR: Parcelable.Creator<ParcelableSharedMemoryBuffer> =
+            object : Parcelable.Creator<ParcelableSharedMemoryBuffer> {
+                override fun createFromParcel(parcel: Parcel): ParcelableSharedMemoryBuffer {
+                    val sharedMemory = parcel.readParcelable<SharedMemory>(javaClass.classLoader)!!
+                    val buffer = ParcelableSharedMemoryBuffer(sharedMemory.mapReadWrite(), sharedMemory)
+                    buffer.position(parcel.readInt())
+                    buffer.setLimit(parcel.readInt())
+                    return buffer
+                }
 
-            override fun newArray(size: Int): Array<ParcelableSharedMemoryBuffer?> {
-                return arrayOfNulls(size)
+                override fun newArray(size: Int): Array<ParcelableSharedMemoryBuffer?> {
+                    return arrayOfNulls(size)
+                }
             }
-        }
     }
 
 }

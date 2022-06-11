@@ -1,4 +1,3 @@
-
 package com.ditchoom.buffer
 
 import java.io.RandomAccessFile
@@ -14,6 +13,7 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
         java.nio.ByteOrder.LITTLE_ENDIAN -> ByteOrder.LITTLE_ENDIAN
         else -> ByteOrder.BIG_ENDIAN
     }
+
     // Use Buffer reference to avoid NoSuchMethodException between JVM. see https://stackoverflow.com/q/61267495
     private val buffer = byteBuffer as Buffer
 

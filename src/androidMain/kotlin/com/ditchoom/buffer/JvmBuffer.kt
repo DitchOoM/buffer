@@ -2,13 +2,12 @@ package com.ditchoom.buffer
 
 import android.os.Parcel
 import android.os.Parcelable
-import com.ditchoom.buffer.toArray
 import java.nio.ByteBuffer
 
 /**
  * Memory copy based parcelable conforming buffer.
  */
-open class JvmBuffer(val buffer: ByteBuffer): BaseJvmBuffer(buffer) {
+open class JvmBuffer(val buffer: ByteBuffer) : BaseJvmBuffer(buffer) {
     override fun describeContents(): Int = Parcelable.CONTENTS_FILE_DESCRIPTOR
 
     override fun writeToParcel(dest: Parcel, flags: Int) {
@@ -22,8 +21,7 @@ open class JvmBuffer(val buffer: ByteBuffer): BaseJvmBuffer(buffer) {
     }
 
     companion object {
-        val CREATOR: Parcelable.Creator<JvmBuffer>
-                = object : Parcelable.Creator<JvmBuffer> {
+        val CREATOR: Parcelable.Creator<JvmBuffer> = object : Parcelable.Creator<JvmBuffer> {
             override fun createFromParcel(parcel: Parcel): JvmBuffer {
                 val byteArray = ByteArray(parcel.readInt())
                 parcel.readByteArray(byteArray)

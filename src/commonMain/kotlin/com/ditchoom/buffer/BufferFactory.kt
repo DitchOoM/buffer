@@ -5,6 +5,7 @@ expect fun PlatformBuffer.Companion.allocate(
     zone: AllocationZone = AllocationZone.Heap,
     byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN
 ): PlatformBuffer
+
 expect fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN): PlatformBuffer
 expect fun String.toBuffer(zone: AllocationZone = AllocationZone.Heap): PlatformBuffer
 
