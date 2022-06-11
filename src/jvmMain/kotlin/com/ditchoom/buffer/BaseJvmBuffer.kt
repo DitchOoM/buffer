@@ -9,7 +9,6 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
-@ExperimentalUnsignedTypes
 abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? = null) :
     PlatformBuffer {
     // Use Buffer reference to avoid NoSuchMethodException between JVM. see https://stackoverflow.com/q/61267495

@@ -1,6 +1,5 @@
 package com.ditchoom.buffer
 
-@ExperimentalUnsignedTypes
 class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((UInt, Byte) -> Byte)) : ReadBuffer {
     override fun limit() = origin.limit()
     override fun setLimit(limit: Int) {
