@@ -111,11 +111,16 @@ val buffer = PlatformBuffer.wrap(byteArray, byteOrder = ByteOrder.BIG_ENDIAN)
 ```
 
 ### Allocation Zones
+
 Allocation zones allow you to change where the buffer is allocated.
-- `AllocationZone.Custom` -> Allows you to override the underlying buffer. This can be helpful for memory mapped structures.
+
+- `AllocationZone.Custom` -> Allows you to override the underlying buffer. This can be helpful for memory mapped
+  structures.
 - `AllocationZone.Heap` -> On JVM platforms, allocates a HeapByteBuffer, otherwise a native byte array
 - `AllocationZone.Direct` -> On JVM platforms, allocates a DirectByteBuffer, otherwise a native byte array
-- `AllocationZone.AndroidSharedMemory` -> On API 27+ it allocates a [Shared Memory](https://developer.android.com/reference/android/os/SharedMemory) instance, otherwise defaulting to `AllocationZone.Direct`.
+- `AllocationZone.AndroidSharedMemory` -> On API 27+ it allocates
+  a [Shared Memory](https://developer.android.com/reference/android/os/SharedMemory) instance, otherwise defaulting
+  to `AllocationZone.Direct`.
 
 > **Android**: All `JvmBuffer`s are `Parcelable`. To avoid extra memory copies, use `AllocationZone.AndroidSharedMemory`
 
