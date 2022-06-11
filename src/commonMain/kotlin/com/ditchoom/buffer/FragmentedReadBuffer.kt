@@ -5,7 +5,6 @@ package com.ditchoom.buffer
  * While reading from a buffer sometimes you might need more data to complete the decoding operation. This class will
  * handle reading from multiple fragmented buffers in memory and provide a simple read api.
  */
-@ExperimentalUnsignedTypes
 class FragmentedReadBuffer(
     private val first: ReadBuffer,
     private val second: ReadBuffer
@@ -129,7 +128,6 @@ class FragmentedReadBuffer(
     }
 }
 
-@ExperimentalUnsignedTypes
 fun List<ReadBuffer>.toComposableBuffer(): ReadBuffer {
     return when (size) {
         1 -> {

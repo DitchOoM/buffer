@@ -1,6 +1,5 @@
 package com.ditchoom.buffer
 
-@ExperimentalUnsignedTypes
 interface WriteBuffer : PositionBuffer {
     fun resetForWrite()
     fun write(byte: Byte): WriteBuffer

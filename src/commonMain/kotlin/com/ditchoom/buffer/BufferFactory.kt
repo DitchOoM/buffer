@@ -1,5 +1,3 @@
-@file:Suppress("EXPERIMENTAL_API_USAGE")
-
 package com.ditchoom.buffer
 
 expect fun PlatformBuffer.Companion.allocate(size: UInt, byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN): PlatformBuffer

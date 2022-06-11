@@ -2,7 +2,6 @@
 
 package com.ditchoom.buffer
 
-@ExperimentalUnsignedTypes
 data class NativeBuffer(
     val data: ByteArray,
     private var position: Int = 0,
