@@ -1,6 +1,6 @@
 package com.ditchoom.buffer
 
-class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((UInt, Byte) -> Byte)) : ReadBuffer {
+class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((Int, Byte) -> Byte)) : ReadBuffer {
     override fun limit() = origin.limit()
     override fun setLimit(limit: Int) {
         origin.setLimit(limit)
@@ -14,16 +14,16 @@ class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((UInt, Byt
     override fun readByte() = transformer(position(), origin.readByte())
     override fun slice(): ReadBuffer {
         val data = readByteArray(remaining())
-        val sliced = PlatformBuffer.allocate(data.size.toUInt())
+        val sliced = PlatformBuffer.allocate(data.size)
         sliced.write(data)
         sliced.resetForRead()
         return sliced
     }
 
-    override fun readByteArray(size: UInt): ByteArray {
+    override fun readByteArray(size: Int): ByteArray {
         val byteArray = origin.readByteArray(size)
         for (position in byteArray.indices) {
-            byteArray[position] = transformer(position.toUInt(), byteArray[position])
+            byteArray[position] = transformer(position, byteArray[position])
         }
         return byteArray
     }
@@ -31,7 +31,7 @@ class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((UInt, Byt
     override fun readUnsignedByte() = transformer(position(), origin.readByte()).toUByte()
 
     override fun readUnsignedShort(): UShort {
-        val buffer = PlatformBuffer.allocate(UShort.SIZE_BYTES.toUInt())
+        val buffer = PlatformBuffer.allocate(UShort.SIZE_BYTES)
         buffer.write(origin.readUnsignedShort())
         buffer.resetForRead()
         val byte1 = transformer(position(), buffer.readByte())
@@ -44,7 +44,7 @@ class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((UInt, Byt
     }
 
     override fun readUnsignedInt(): UInt {
-        val buffer = PlatformBuffer.allocate(UInt.SIZE_BYTES.toUInt())
+        val buffer = PlatformBuffer.allocate(UInt.SIZE_BYTES)
         buffer.write(origin.readUnsignedShort())
         buffer.resetForRead()
         val byte1 = transformer(position(), buffer.readByte())
@@ -61,7 +61,7 @@ class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((UInt, Byt
     }
 
     override fun readLong(): Long {
-        val buffer = PlatformBuffer.allocate(Long.SIZE_BYTES.toUInt())
+        val buffer = PlatformBuffer.allocate(Long.SIZE_BYTES)
         buffer.write(origin.readLong())
         buffer.resetForRead()
         val byte1 = transformer(position(), buffer.readByte())
@@ -85,6 +85,6 @@ class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((UInt, Byt
         return buffer.readLong()
     }
 
-    override fun readUtf8(bytes: UInt) = readByteArray(bytes).decodeToString()
+    override fun readUtf8(bytes: Int) = readByteArray(bytes).decodeToString()
 
 }

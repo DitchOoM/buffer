@@ -1,4 +1,4 @@
-@file:Suppress("EXPERIMENTAL_API_USAGE", "EXPERIMENTAL_OVERRIDE")
+@file:Suppress("EXPERIMENTAL_API_USAGE", "EXPERIMENTAL_OVERRIDE", "RemoveRedundantCallsOfConversionMethods")
 
 package com.ditchoom.buffer
 
@@ -10,7 +10,7 @@ data class JsBuffer(
     private val littleEndian: Boolean = false, // network endian is big endian
     private var position: Int = 0,
     private var limit: Int = 0,
-    override val capacity: UInt = buffer.byteLength.toUInt(),
+    override val capacity: Int = buffer.byteLength,
 ) : PlatformBuffer {
     override val byteOrder = if (littleEndian) ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN
 
@@ -45,7 +45,7 @@ data class JsBuffer(
         return JsBuffer(Uint8Array(buffer.buffer.slice(position, limit)), littleEndian)
     }
 
-    override fun readByteArray(size: UInt): ByteArray {
+    override fun readByteArray(size: Int): ByteArray {
         val byteArray = Int8Array(buffer.buffer, position, size.toInt()).unsafeCast<ByteArray>()
         position += size.toInt()
         return byteArray
@@ -66,7 +66,7 @@ data class JsBuffer(
     }
 
     override fun readLong(): Long {
-        val bytes = readByteArray(Long.SIZE_BYTES.toUInt())
+        val bytes = readByteArray(Long.SIZE_BYTES)
         val long = if (littleEndian) bytes.reversedArray().toLong() else bytes.toLong()
         position += ULong.SIZE_BYTES
         return long
@@ -82,7 +82,7 @@ data class JsBuffer(
         return result
     }
 
-    override fun readUtf8(bytes: UInt): CharSequence {
+    override fun readUtf8(bytes: Int): CharSequence {
         return readByteArray(bytes).decodeToString()
     }
 
@@ -93,7 +93,7 @@ data class JsBuffer(
         } else {
             this.buffer.set(buffer.readByteArray(size).toTypedArray(), position)
         }
-        position += size.toInt()
+        position += size
     }
 
     override fun write(byte: Byte): WriteBuffer {
@@ -149,8 +149,8 @@ data class JsBuffer(
         return this
     }
 
-    override fun limit() = limit.toUInt()
-    override fun position() = position.toUInt()
+    override fun limit() = limit
+    override fun position() = position
     override fun position(newPosition: Int) {
         position = newPosition
     }

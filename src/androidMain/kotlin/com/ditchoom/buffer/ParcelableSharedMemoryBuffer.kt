@@ -1,10 +1,13 @@
 package com.ditchoom.buffer
 
+import android.annotation.TargetApi
+import android.os.Build
 import android.os.Parcel
 import android.os.Parcelable
 import android.os.SharedMemory
 import java.nio.ByteBuffer
 
+@TargetApi(Build.VERSION_CODES.O_MR1)
 class ParcelableSharedMemoryBuffer(buffer: ByteBuffer, private val sharedMemory: SharedMemory): JvmBuffer(buffer) {
     override fun describeContents(): Int = Parcelable.CONTENTS_FILE_DESCRIPTOR
 
@@ -20,8 +23,8 @@ class ParcelableSharedMemoryBuffer(buffer: ByteBuffer, private val sharedMemory:
     }
 
     companion object {
-        val CREATOR: android.os.Parcelable.Creator<ParcelableSharedMemoryBuffer>
-                = object : android.os.Parcelable.Creator<ParcelableSharedMemoryBuffer> {
+        val CREATOR: Parcelable.Creator<ParcelableSharedMemoryBuffer>
+                = object : Parcelable.Creator<ParcelableSharedMemoryBuffer> {
             override fun createFromParcel(parcel: Parcel): ParcelableSharedMemoryBuffer {
                 val sharedMemory = parcel.readParcelable<SharedMemory>(javaClass.classLoader)!!
                 val buffer = ParcelableSharedMemoryBuffer(sharedMemory.mapReadWrite(), sharedMemory)

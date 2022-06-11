@@ -5,7 +5,7 @@ package com.ditchoom.buffer
 import java.nio.ByteBuffer
 
 actual fun PlatformBuffer.Companion.allocate(
-    size: UInt,
+    size: Int,
     byteOrder: ByteOrder
 ): PlatformBuffer {
     val nativeOrder = when (byteOrder) {
@@ -25,4 +25,4 @@ actual fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder)
 
 actual fun String.toBuffer(): PlatformBuffer = JvmBuffer(ByteBuffer.wrap(encodeToByteArray()))
 
-actual fun String.utf8Length(): UInt = encodeToByteArray().size.toUInt()
+actual fun String.utf8Length(): Int = encodeToByteArray().size

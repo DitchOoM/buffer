@@ -6,10 +6,10 @@ import org.khronos.webgl.Int8Array
 import org.khronos.webgl.Uint8Array
 
 actual fun PlatformBuffer.Companion.allocate(
-    size: UInt,
+    size: Int,
     byteOrder: ByteOrder
 ): PlatformBuffer {
-    return JsBuffer(Uint8Array(size.toInt()), littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN)
+    return JsBuffer(Uint8Array(size), littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN)
 }
 
 // TODO: Wrap shouldn't duplicate data. Look into direct case to Uint8Array to wrap with the JsBuffer or use NativeBuffer
@@ -23,4 +23,4 @@ actual fun String.toBuffer(): PlatformBuffer {
     return JsBuffer(uint8Array)
 }
 
-actual fun String.utf8Length(): UInt = encodeToByteArray().unsafeCast<Int8Array>().length.toUInt()
+actual fun String.utf8Length(): Int = encodeToByteArray().unsafeCast<Int8Array>().length

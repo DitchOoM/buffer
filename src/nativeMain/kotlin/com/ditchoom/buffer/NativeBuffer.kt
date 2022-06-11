@@ -6,7 +6,7 @@ data class NativeBuffer(
     val data: ByteArray,
     private var position: Int = 0,
     private var limit: Int = data.size,
-    override val capacity: UInt = data.size.toUInt(),
+    override val capacity: Int = data.size,
     override val byteOrder: ByteOrder
 ) : PlatformBuffer {
 
@@ -30,9 +30,9 @@ data class NativeBuffer(
         return NativeBuffer(data.sliceArray(position until limit), byteOrder = byteOrder)
     }
 
-    override fun readByteArray(size: UInt): ByteArray {
-        val result = data.copyOfRange(position, position + size.toInt())
-        position += size.toInt()
+    override fun readByteArray(size: Int): ByteArray {
+        val result = data.copyOfRange(position, position + size)
+        position += size
         return result
     }
 
@@ -90,9 +90,9 @@ data class NativeBuffer(
         return value
     }
 
-    override fun readUtf8(bytes: UInt): CharSequence {
-        val value = data.decodeToString(position, position + bytes.toInt())
-        position += bytes.toInt()
+    override fun readUtf8(bytes: Int): CharSequence {
+        val value = data.decodeToString(position, position + bytes)
+        position += bytes
         return value
     }
 
@@ -168,7 +168,7 @@ data class NativeBuffer(
         } else {
             write(buffer.readByteArray(remaining()))
         }
-        buffer.position((position() - start).toInt())
+        buffer.position((position() - start))
     }
 
     override fun writeUtf8(text: CharSequence): WriteBuffer {
@@ -178,8 +178,8 @@ data class NativeBuffer(
 
     override suspend fun close() = Unit
 
-    override fun limit() = limit.toUInt()
-    override fun position() = position.toUInt()
+    override fun limit() = limit
+    override fun position() = position
     override fun position(newPosition: Int) {
         position = newPosition
     }

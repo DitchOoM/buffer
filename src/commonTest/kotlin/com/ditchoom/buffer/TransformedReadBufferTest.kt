@@ -9,7 +9,7 @@ class TransformedReadBufferTest {
 
     @Test
     fun byte() {
-        val buffer = PlatformBuffer.allocate(Byte.SIZE_BYTES.toUInt())
+        val buffer = PlatformBuffer.allocate(Byte.SIZE_BYTES)
         buffer.write(10.toByte())
         buffer.resetForRead()
         val add1TransformedReadBuffer = TransformedReadBuffer(buffer) { _, byte ->

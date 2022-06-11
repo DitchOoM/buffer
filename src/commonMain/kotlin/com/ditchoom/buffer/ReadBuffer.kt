@@ -4,7 +4,7 @@ interface ReadBuffer : PositionBuffer {
     fun resetForRead()
     fun readByte(): Byte
     fun slice(): ReadBuffer
-    fun readByteArray(size: UInt): ByteArray
+    fun readByteArray(size: Int): ByteArray
     fun readUnsignedByte(): UByte
     fun readShort(): Short = readUnsignedShort().toShort()
     fun readUnsignedShort(): UShort
@@ -14,14 +14,14 @@ interface ReadBuffer : PositionBuffer {
     fun readLong(): Long
     fun readUnsignedLong(): ULong = readLong().toULong()
     fun readDouble(): Double = Double.fromBits(readLong())
-    fun readUtf8(bytes: UInt): CharSequence
-    fun readUtf8(bytes: Int): CharSequence = readUtf8(bytes.toUInt())
+    fun readUtf8(bytes: UInt): CharSequence = readUtf8(bytes.toInt())
+    fun readUtf8(bytes: Int): CharSequence
     fun readUtf8Line(): CharSequence {
         val initialPosition = position()
         var lastByte: Byte = 0
         var currentByte: Byte = 0
-        var bytesRead = 0u
-        while (remaining() > 0u) {
+        var bytesRead = 0
+        while (remaining() > 0) {
             lastByte = currentByte
             currentByte = readByte()
             bytesRead++
@@ -34,10 +34,10 @@ interface ReadBuffer : PositionBuffer {
             else if (currentByte == newLine[1]) 1
             else 0
 
-        val bytesToRead = bytesRead - carriageFeedPositionIncrement.toUInt()
-        position(initialPosition.toInt())
+        val bytesToRead = bytesRead - carriageFeedPositionIncrement
+        position(initialPosition)
         val result = readUtf8(bytesToRead)
-        position(position().toInt() + carriageFeedPositionIncrement)
+        position(position() + carriageFeedPositionIncrement)
         return result
     }
 
