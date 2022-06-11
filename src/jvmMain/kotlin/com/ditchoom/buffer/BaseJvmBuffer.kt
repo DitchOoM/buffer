@@ -32,10 +32,10 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
         buffer.limit(limit)
     }
 
-    override val capacity = buffer.capacity().toUInt()
+    override val capacity = buffer.capacity()
 
     override fun readByte() = byteBuffer.get()
-    override fun readByteArray(size: UInt) = byteBuffer.toArray(size)
+    override fun readByteArray(size: Int) = byteBuffer.toArray(size)
 
     override fun slice() = JvmBuffer(byteBuffer.slice())
 
@@ -46,7 +46,7 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
     override fun readUnsignedInt() = byteBuffer.int.toUInt()
     override fun readLong() = byteBuffer.long
 
-    override fun readUtf8(bytes: UInt): CharSequence {
+    override fun readUtf8(bytes: Int): CharSequence {
         val finalPosition = buffer.position() + bytes.toInt()
         val readBuffer = byteBuffer.asReadOnlyBuffer()
         (readBuffer as Buffer).limit(finalPosition)
@@ -116,8 +116,8 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
         fileRef?.aClose()
     }
 
-    override fun limit() = buffer.limit().toUInt()
-    override fun position() = buffer.position().toUInt()
+    override fun limit() = buffer.limit()
+    override fun position() = buffer.position()
 }
 
 
@@ -133,13 +133,13 @@ suspend fun RandomAccessFile.aClose() = suspendCoroutine<Unit> {
 }
 
 
-fun ByteBuffer.toArray(size: UInt = remaining().toUInt()): ByteArray {
+fun ByteBuffer.toArray(size: Int = remaining()): ByteArray {
     return if (hasArray()) {
-        val result = ByteArray(size.toInt())
-        System.arraycopy(this.array(), position(), result, 0, size.toInt())
+        val result = ByteArray(size)
+        System.arraycopy(this.array(), position(), result, 0, size)
         result
     } else {
-        val byteArray = ByteArray(size.toInt())
+        val byteArray = ByteArray(size)
         get(byteArray)
         byteArray
     }

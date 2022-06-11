@@ -11,12 +11,12 @@ class FragmentedReadBuffer(
 ) : ReadBuffer {
     private val firstInitialLimit = first.limit()
     private val secondInitialLimit = second.limit()
-    private var currentPosition = 0u
+    private var currentPosition = 0
     private var currentLimit = firstInitialLimit + secondInitialLimit
 
     override fun setLimit(limit: Int) {
-        if (limit.toUInt() <= firstInitialLimit + secondInitialLimit) {
-            currentLimit = limit.toUInt()
+        if (limit <= firstInitialLimit + secondInitialLimit) {
+            currentLimit = limit
         }
     }
 
@@ -25,11 +25,11 @@ class FragmentedReadBuffer(
     override fun position() = currentPosition
 
     override fun position(newPosition: Int) {
-        currentPosition = newPosition.toUInt()
+        currentPosition = newPosition
     }
 
     override fun resetForRead() {
-        currentPosition = 0u
+        currentPosition = 0
     }
 
     override fun readByte(): Byte {
@@ -40,7 +40,7 @@ class FragmentedReadBuffer(
         }
     }
 
-    private fun <T> readSizeIntoBuffer(size: UInt, block: (ReadBuffer) -> T): T {
+    private fun <T> readSizeIntoBuffer(size: Int, block: (ReadBuffer) -> T): T {
         val buffer = if (currentPosition < firstInitialLimit && currentPosition + size <= firstInitialLimit) {
             block(first)
         } else if (currentPosition < firstInitialLimit && currentPosition + size > firstInitialLimit) {
@@ -71,7 +71,7 @@ class FragmentedReadBuffer(
         return buffer
     }
 
-    override fun readByteArray(size: UInt): ByteArray {
+    override fun readByteArray(size: Int): ByteArray {
         return readSizeIntoBuffer(size) { it.readByteArray(size) }
     }
 
@@ -83,14 +83,14 @@ class FragmentedReadBuffer(
         }
     }
 
-    override fun readUnsignedShort() = readSizeIntoBuffer(UShort.SIZE_BYTES.toUInt()) { it.readUnsignedShort() }
+    override fun readUnsignedShort() = readSizeIntoBuffer(UShort.SIZE_BYTES) { it.readUnsignedShort() }
 
-    override fun readUnsignedInt() = readSizeIntoBuffer(UInt.SIZE_BYTES.toUInt()) { it.readUnsignedInt() }
+    override fun readUnsignedInt() = readSizeIntoBuffer(UInt.SIZE_BYTES) { it.readUnsignedInt() }
 
 
-    override fun readLong() = readSizeIntoBuffer(ULong.SIZE_BYTES.toUInt()) { it.readLong() }
+    override fun readLong() = readSizeIntoBuffer(ULong.SIZE_BYTES) { it.readLong() }
 
-    override fun readUtf8(bytes: UInt) = readSizeIntoBuffer(bytes) { it.readUtf8(bytes) }
+    override fun readUtf8(bytes: Int) = readSizeIntoBuffer(bytes) { it.readUtf8(bytes) }
     override fun readUtf8Line(): CharSequence {
         if (currentPosition < firstInitialLimit) {
             val initialFirstPosition = first.position()
