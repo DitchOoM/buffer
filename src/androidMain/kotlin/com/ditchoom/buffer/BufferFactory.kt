@@ -9,8 +9,8 @@ import java.nio.charset.CharsetEncoder
 
 actual fun PlatformBuffer.Companion.allocate(
     size: Int,
-    byteOrder: ByteOrder,
-    zone: AllocationZone
+    zone: AllocationZone,
+    byteOrder: ByteOrder
 ): PlatformBuffer {
     val byteOrderNative = when (byteOrder) {
         ByteOrder.BIG_ENDIAN -> java.nio.ByteOrder.BIG_ENDIAN

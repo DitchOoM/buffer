@@ -1,6 +1,10 @@
 package com.ditchoom.buffer
 
-expect fun PlatformBuffer.Companion.allocate(size: Int, byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN, zone: AllocationZone = AllocationZone.Heap): PlatformBuffer
+expect fun PlatformBuffer.Companion.allocate(
+    size: Int,
+    zone: AllocationZone = AllocationZone.Heap,
+    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN
+): PlatformBuffer
 expect fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN): PlatformBuffer
 expect fun String.toBuffer(zone: AllocationZone = AllocationZone.Heap): PlatformBuffer
 

@@ -4,8 +4,8 @@ package com.ditchoom.buffer
 
 actual fun PlatformBuffer.Companion.allocate(
     size: Int,
-    byteOrder: ByteOrder,
-    zone: AllocationZone
+    zone: AllocationZone,
+    byteOrder: ByteOrder
 ): PlatformBuffer {
     if (zone is AllocationZone.Custom) {
         return zone.allocator(size)
