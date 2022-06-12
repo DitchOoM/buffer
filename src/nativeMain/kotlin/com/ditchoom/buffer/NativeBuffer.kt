@@ -34,33 +34,31 @@ data class NativeBuffer(
         return result
     }
 
-    override fun readUnsignedByte() = data[position++].toUByte()
-
-    override fun readUnsignedShort(): UShort {
+    override fun readShort(): Short {
         val value =
             if (byteOrder == ByteOrder.BIG_ENDIAN)
                 ((0xff and data[position + 0].toInt() shl 8)
-                        or (0xff and data[position + 1].toInt() shl 0)).toUShort()
+                        or (0xff and data[position + 1].toInt() shl 0)).toShort()
             else
                 ((0xff and data[position + 1].toInt() shl 8)
-                        or (0xff and data[position + 0].toInt() shl 0)).toUShort()
-        position += UShort.SIZE_BYTES
+                        or (0xff and data[position + 0].toInt() shl 0)).toShort()
+        position += Short.SIZE_BYTES
         return value
     }
 
-    override fun readUnsignedInt(): UInt {
+    override fun readInt(): Int {
         val value =
             if (byteOrder == ByteOrder.BIG_ENDIAN)
                 (0xff and data[position + 0].toInt() shl 24
                         or (0xff and data[position + 1].toInt() shl 16)
                         or (0xff and data[position + 2].toInt() shl 8)
-                        or (0xff and data[position + 3].toInt() shl 0)).toUInt()
+                        or (0xff and data[position + 3].toInt() shl 0))
             else
                 (0xff and data[position + 3].toInt() shl 24
                         or (0xff and data[position + 2].toInt() shl 16)
                         or (0xff and data[position + 1].toInt() shl 8)
-                        or (0xff and data[position + 0].toInt() shl 0)).toUInt()
-        position += UInt.SIZE_BYTES
+                        or (0xff and data[position + 0].toInt() shl 0))
+        position += Int.SIZE_BYTES
         return value
     }
 

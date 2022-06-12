@@ -36,11 +36,8 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
 
     override fun slice() = JvmBuffer(byteBuffer.slice())
 
-    override fun readUnsignedByte() = readByte().toUByte()
-
-    override fun readUnsignedShort() = byteBuffer.short.toUShort()
-
-    override fun readUnsignedInt() = byteBuffer.int.toUInt()
+    override fun readShort(): Short = byteBuffer.short
+    override fun readInt() = byteBuffer.int
     override fun readLong() = byteBuffer.long
 
     override fun readUtf8(bytes: Int): CharSequence {

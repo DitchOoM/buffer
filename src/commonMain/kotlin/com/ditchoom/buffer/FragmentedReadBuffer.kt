@@ -75,17 +75,9 @@ class FragmentedReadBuffer(
         return readSizeIntoBuffer(size) { it.readByteArray(size) }
     }
 
-    override fun readUnsignedByte(): UByte {
-        return if (currentPosition++ < firstInitialLimit) {
-            first.readUnsignedByte()
-        } else {
-            second.readUnsignedByte()
-        }
-    }
+    override fun readShort() = readSizeIntoBuffer(Short.SIZE_BYTES) { it.readShort() }
 
-    override fun readUnsignedShort() = readSizeIntoBuffer(UShort.SIZE_BYTES) { it.readUnsignedShort() }
-
-    override fun readUnsignedInt() = readSizeIntoBuffer(UInt.SIZE_BYTES) { it.readUnsignedInt() }
+    override fun readInt() = readSizeIntoBuffer(Int.SIZE_BYTES) { it.readInt() }
 
 
     override fun readLong() = readSizeIntoBuffer(ULong.SIZE_BYTES) { it.readLong() }
