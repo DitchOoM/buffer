@@ -5,11 +5,11 @@ interface ReadBuffer : PositionBuffer {
     fun readByte(): Byte
     fun slice(): ReadBuffer
     fun readByteArray(size: Int): ByteArray
-    fun readUnsignedByte(): UByte
-    fun readShort(): Short = readUnsignedShort().toShort()
-    fun readUnsignedShort(): UShort
-    fun readInt(): Int = readUnsignedInt().toInt()
-    fun readUnsignedInt(): UInt
+    fun readUnsignedByte(): UByte = readByte().toUByte()
+    fun readShort(): Short
+    fun readUnsignedShort(): UShort = readShort().toUShort()
+    fun readInt(): Int
+    fun readUnsignedInt(): UInt = readInt().toUInt()
     fun readFloat(): Float = Float.fromBits(readInt())
     fun readLong(): Long
     fun readUnsignedLong(): ULong = readLong().toULong()

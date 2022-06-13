@@ -50,18 +50,16 @@ data class JsBuffer(
         return byteArray
     }
 
-    override fun readUnsignedByte() = readByte().toUByte()
-
-    override fun readUnsignedShort(): UShort {
-        val dataView = DataView(buffer.buffer, position, UShort.SIZE_BYTES)
-        position += UShort.SIZE_BYTES
-        return dataView.getUint16(0, littleEndian).toInt().toUShort()
+    override fun readShort(): Short {
+        val dataView = DataView(buffer.buffer, position, Short.SIZE_BYTES)
+        position += Short.SIZE_BYTES
+        return dataView.getInt16(0, littleEndian).toInt().toShort()
     }
 
-    override fun readUnsignedInt(): UInt {
-        val dataView = DataView(buffer.buffer, position, UInt.SIZE_BYTES)
-        position += UInt.SIZE_BYTES
-        return dataView.getUint32(0, littleEndian).toUInt()
+    override fun readInt(): Int {
+        val dataView = DataView(buffer.buffer, position, Int.SIZE_BYTES)
+        position += Int.SIZE_BYTES
+        return dataView.getInt32(0, littleEndian).toInt()
     }
 
     override fun readLong(): Long {

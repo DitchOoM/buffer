@@ -29,11 +29,9 @@ class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((Int, Byte
         return byteArray
     }
 
-    override fun readUnsignedByte() = transformer(position(), origin.readByte()).toUByte()
-
-    override fun readUnsignedShort(): UShort {
-        val buffer = PlatformBuffer.allocate(UShort.SIZE_BYTES)
-        buffer.write(origin.readUnsignedShort())
+    override fun readShort(): Short {
+        val buffer = PlatformBuffer.allocate(Short.SIZE_BYTES)
+        buffer.write(origin.readShort())
         buffer.resetForRead()
         val byte1 = transformer(position(), buffer.readByte())
         val byte2 = transformer(position(), buffer.readByte())
@@ -41,12 +39,12 @@ class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((Int, Byte
         buffer.write(byte1)
         buffer.write(byte2)
         buffer.resetForRead()
-        return buffer.readUnsignedShort()
+        return buffer.readShort()
     }
 
-    override fun readUnsignedInt(): UInt {
-        val buffer = PlatformBuffer.allocate(UInt.SIZE_BYTES)
-        buffer.write(origin.readUnsignedShort())
+    override fun readInt(): Int {
+        val buffer = PlatformBuffer.allocate(Int.SIZE_BYTES)
+        buffer.write(origin.readInt())
         buffer.resetForRead()
         val byte1 = transformer(position(), buffer.readByte())
         val byte2 = transformer(position(), buffer.readByte())
@@ -58,7 +56,7 @@ class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((Int, Byte
         buffer.write(byte3)
         buffer.write(byte4)
         buffer.resetForRead()
-        return buffer.readUnsignedInt()
+        return buffer.readInt()
     }
 
     override fun readLong(): Long {

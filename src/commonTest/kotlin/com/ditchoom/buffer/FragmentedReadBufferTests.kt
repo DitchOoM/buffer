@@ -40,6 +40,45 @@ class FragmentedReadBufferTests {
     }
 
     @Test
+    fun readShort() {
+        val first = PlatformBuffer.allocate(Short.SIZE_BYTES)
+        first.write(1.toShort())
+        first.resetForRead()
+        val second = PlatformBuffer.allocate(Short.SIZE_BYTES)
+        second.write(2.toShort())
+        second.resetForRead()
+        val composableBuffer = FragmentedReadBuffer(first, second)
+        assertEquals(1, composableBuffer.readShort())
+        assertEquals(2, composableBuffer.readShort())
+    }
+
+    @Test
+    fun readInt() {
+        val first = PlatformBuffer.allocate(Int.SIZE_BYTES)
+        first.write(1)
+        first.resetForRead()
+        val second = PlatformBuffer.allocate(Int.SIZE_BYTES)
+        second.write(2)
+        second.resetForRead()
+        val composableBuffer = FragmentedReadBuffer(first, second)
+        assertEquals(1, composableBuffer.readInt())
+        assertEquals(2, composableBuffer.readInt())
+    }
+
+    @Test
+    fun readLong() {
+        val first = PlatformBuffer.allocate(Long.SIZE_BYTES)
+        first.write(1L)
+        first.resetForRead()
+        val second = PlatformBuffer.allocate(Long.SIZE_BYTES)
+        second.write(2L)
+        second.resetForRead()
+        val composableBuffer = FragmentedReadBuffer(first, second)
+        assertEquals(1L, composableBuffer.readLong())
+        assertEquals(2L, composableBuffer.readLong())
+    }
+
+    @Test
     fun readBytesFromThreeBuffers() {
         val expectedFirstByte = Byte.MAX_VALUE
         val first = PlatformBuffer.allocate(1)
