@@ -38,7 +38,7 @@ actual fun String.toBuffer(zone: AllocationZone): PlatformBuffer {
     encoder.reset()
     val out = PlatformBuffer.allocate(utf8Length(), zone = zone) as JvmBuffer
     encoder.encode(CharBuffer.wrap(this), out.byteBuffer, true)
-    out.byteBuffer.flip()
+    out.resetForRead()
     return out
 }
 
