@@ -130,8 +130,9 @@ suspend fun RandomAccessFile.aClose() = suspendCoroutine<Unit> {
 fun ByteBuffer.toArray(size: Int = remaining()): ByteArray {
     return if (hasArray()) {
         val result = ByteArray(size)
-        System.arraycopy(this.array(), position(), result, 0, size)
-        position(position() + size)
+        val buffer = this as Buffer
+        System.arraycopy(this.array(), buffer.position(), result, 0, size)
+        position(buffer.position() + size)
         result
     } else {
         val byteArray = ByteArray(size)
