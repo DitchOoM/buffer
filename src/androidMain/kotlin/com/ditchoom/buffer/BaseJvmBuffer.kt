@@ -132,7 +132,7 @@ fun ByteBuffer.toArray(size: Int = remaining()): ByteArray {
         val result = ByteArray(size)
         val buffer = this as Buffer
         System.arraycopy(this.array(), buffer.position(), result, 0, size)
-        position(buffer.position() + size)
+        buffer.position(buffer.position() + size)
         result
     } else {
         val byteArray = ByteArray(size)
