@@ -78,22 +78,24 @@ Implementation notes:
 
 ### [Supported Platforms](https://kotlinlang.org/docs/reference/mpp-supported-platforms.html)
 
-| Platform | 🛠Builds🛠 + 🔬Tests🔬 | Deployed Artifact | Non Kotlin Sample |  
-| :---: | :---: | :---: | :---: |
-| `JVM` 1.8 |🚀| [maven central][maven-central] 🔮|🔮|
-| `Node.js` |🚀|[npm][npm] 🔮|🔮|
-| `Browser` (Chrome) |🚀|[npm][npm] 🔮|🔮|
-| `Android` |🚀|[maven central][maven-central]  🔮|🔮|
-| `iOS` |🚀|[cocoapods][cocoapods] 🔮|🔮|
-| `WatchOS` |🚀|[cocoapods][cocoapods] 🔮|🔮|
-| `TvOS` |🚀|[cocoapods][cocoapods] 🔮|🔮|
-| `MacOS` |🚀|[cocoapods][cocoapods] 🔮|🔮|
-| `Linux X64` |🚀|[apt][apt]/[yum][yum] 🔮|🔮|
-| `Windows X64` |🚀|[chocolatey][chocolately] 🔮|🔮|
+| Platform | 🛠Builds🛠 + 🔬Tests🔬 |         Deployed Artifact          | Non Kotlin Sample |  
+| :---: | :---: |:----------------------------------:|:-----------------:|
+| `JVM` 1.8 |🚀| [maven central][maven-central] 🔮  |        WIP        |
+| `Node.js` |🚀|           [npm][npm] 🔮            |        WIP         |
+| `Browser` (Chrome) |🚀|           [npm][npm] 🔮            |        WIP         |
+| `Android` |🚀| [maven central][maven-central]  🔮 |        WIP         |
+| `iOS` |🚀|    WIP [cocoapods][cocoapods] 🔮      |        WIP         |
+| `WatchOS` |🚀|    WIP [cocoapods][cocoapods] 🔮      |        WIP         |
+| `TvOS` |🚀|    WIP [cocoapods][cocoapods] 🔮      |        WIP         |
+| `MacOS` |🚀|    WIP [cocoapods][cocoapods] 🔮      |        WIP         |
+| `Linux X64` |🚀|    WIP [apt][apt]/[yum][yum] 🔮    |        WIP         |
+| `Windows X64` |🚀|  WIP [chocolatey][chocolately] 🔮  |        WIP         |
 
 ## Installation
-
-- **_TODO_**: Add explanation after artifacts are deployed
+### Gradle
+- [Add `implementation("com.ditchoom:buffer:$version")` to your `build.gradle` dependencies](https://search.maven.org/artifact/com.ditchoom/buffer)
+### NPM
+-  [execute `npm i @ditchoom/buffer-kt`](https://www.npmjs.com/package/@ditchoom/buffer-kt)
 
 ## Usage
 
@@ -139,12 +141,18 @@ val buffer: WriteBuffer
 buffer.write(5.toByte())
 // write unsigned byte
 buffer.write(5.toUByte())
+// write short
+buffer.write(5.toShort())
 // write unsigned short
 buffer.write(5.toUShort())
+// write int
+buffer.write(5)
 // write unsigned int
 buffer.write(5.toUInt())
 // write long
 buffer.write(5L)
+// write unsigned long
+buffer.write(5uL)
 // write float
 buffer.write(123.456f)
 // write double
@@ -164,23 +172,29 @@ buffer.write(byteArrayOf(1, 2, 3, 4, 5), offset, length)
 ```kotlin
 val buffer: ReadBuffer
 // read signed byte
-buffer.readByte()
+val b :Byte = buffer.readByte()
 // read unsigned byte
-buffer.readUnsignedByte()
+val uByte :UByte = buffer.readUnsignedByte()
+// read short
+val short :Short = buffer.readShort()
 // read unsigned short
-buffer.readUnsignedShort()
+val uShort :UShort = buffer.readUnsignedShort()
+// read int
+val intValue = buffer.readInt()
 // read unsigned int
-buffer.readUnsignedInt()
+val uIntValue :Int = buffer.readUnsignedInt()
 // read long
-buffer.readLong()
+val longValue :Long = buffer.readLong()
+// read unsigned long
+val uLongValue :ULong = buffer.readUnsignedLong()
 // read float
-buffer.readFloat()
+val float :Float = buffer.readFloat()
 // read double
-buffer.readDouble()
+val double: :Double = buffer.readDouble()
 // read text
-buffer.readUtf8(numOfBytesToRead)
+val string :String = buffer.readUtf8(numOfBytesToRead)
 // read byte array
-buffer.readByteArray(numOfBytesToRead)
+val byteArray :ByteArray = buffer.readByteArray(numOfBytesToRead)
 ```
 
 ## Building Locally

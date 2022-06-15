@@ -108,7 +108,7 @@ android {
     compileSdkVersion(31)
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
     defaultConfig {
-        minSdkVersion(1)
+        minSdkVersion(9)
         targetSdkVersion(31)
     }
     lintOptions {
