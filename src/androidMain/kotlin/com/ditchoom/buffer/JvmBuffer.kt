@@ -21,6 +21,7 @@ open class JvmBuffer(val buffer: ByteBuffer) : BaseJvmBuffer(buffer) {
     }
 
     companion object {
+        @JvmField
         val CREATOR: Parcelable.Creator<JvmBuffer> = object : Parcelable.Creator<JvmBuffer> {
             override fun createFromParcel(parcel: Parcel): JvmBuffer {
                 val byteArray = ByteArray(parcel.readInt())

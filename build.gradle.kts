@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
+
 plugins {
     id("dev.petuska.npm.publish") version "2.1.2"
     kotlin("multiplatform") version "1.7.21"
@@ -38,11 +40,14 @@ kotlin {
         browser()
         nodejs()
     }
+
     macosX64()
     linuxX64()
     ios()
     iosSimulatorArm64()
-
+    tasks.getByName<KotlinNativeSimulatorTest>("iosSimulatorArm64Test") {
+        deviceId = "iPhone 14"
+    }
     watchos()
     tvos()
     sourceSets {
@@ -105,20 +110,13 @@ kotlin {
 }
 
 android {
-    compileSdkVersion(33)
+    compileSdk = 33
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
     defaultConfig {
-        minSdkVersion(9)
-        targetSdkVersion(33)
+        minSdk =  9
+        targetSdk = 33
     }
-    lintOptions {
-        isQuiet = true
-        isAbortOnError = false
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
-    }
+    namespace = "$group.${rootProject.name}"
 }
 
 val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {

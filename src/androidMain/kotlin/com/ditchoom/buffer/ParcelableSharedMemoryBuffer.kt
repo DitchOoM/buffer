@@ -23,10 +23,16 @@ class ParcelableSharedMemoryBuffer(buffer: ByteBuffer, private val sharedMemory:
     }
 
     companion object {
+        @JvmField
         val CREATOR: Parcelable.Creator<ParcelableSharedMemoryBuffer> =
             object : Parcelable.Creator<ParcelableSharedMemoryBuffer> {
                 override fun createFromParcel(parcel: Parcel): ParcelableSharedMemoryBuffer {
-                    val sharedMemory = parcel.readParcelable<SharedMemory>(javaClass.classLoader)!!
+                    val sharedMemory = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        parcel.readParcelable(javaClass.classLoader, SharedMemory::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        parcel.readParcelable(javaClass.classLoader)
+                    }!!
                     val buffer = ParcelableSharedMemoryBuffer(sharedMemory.mapReadWrite(), sharedMemory)
                     buffer.position(parcel.readInt())
                     buffer.setLimit(parcel.readInt())
