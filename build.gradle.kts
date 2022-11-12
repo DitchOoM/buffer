@@ -1,6 +1,6 @@
 plugins {
     id("dev.petuska.npm.publish") version "2.1.2"
-    kotlin("multiplatform") version "1.6.20"
+    kotlin("multiplatform") version "1.7.21"
     id("com.android.library")
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
@@ -50,7 +50,7 @@ kotlin {
         val commonTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.1")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
             }
         }
         val jvmMain by getting {
@@ -105,11 +105,11 @@ kotlin {
 }
 
 android {
-    compileSdkVersion(31)
+    compileSdkVersion(33)
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
     defaultConfig {
         minSdkVersion(9)
-        targetSdkVersion(31)
+        targetSdkVersion(33)
     }
     lintOptions {
         isQuiet = true
