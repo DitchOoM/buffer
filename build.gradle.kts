@@ -7,6 +7,8 @@ plugins {
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
     signing
+    id("org.jlleitschuh.gradle.ktlint") version "11.0.0"
+    id("org.jlleitschuh.gradle.ktlint-idea") version "11.0.0"
 }
 
 val libraryVersionPrefix: String by project
@@ -224,4 +226,8 @@ if (System.getenv("NPM_ACCESS_TOKEN") != null) {
             }
         }
     }
+}
+ktlint {
+    verbose.set(true)
+    outputToConsole.set(true)
 }
