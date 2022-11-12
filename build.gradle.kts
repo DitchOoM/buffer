@@ -115,7 +115,7 @@ android {
     compileSdk = 33
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
     defaultConfig {
-        minSdk =  9
+        minSdk = 9
         targetSdk = 33
     }
     namespace = "$group.${rootProject.name}"
@@ -132,7 +132,6 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
             sign(publishing.publications)
         }
     }
-
 
     val ossUser = System.getenv("SONATYPE_NEXUS_USERNAME")
     val ossPassword = System.getenv("SONATYPE_NEXUS_PASSWORD")

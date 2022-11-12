@@ -21,9 +21,8 @@ actual fun PlatformBuffer.Companion.allocate(
 
 // TODO: Wrap shouldn't duplicate data. Look into direct case to Uint8Array to wrap with the JsBuffer or use NativeBuffer
 actual fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder): PlatformBuffer =
-    //NativeBuffer(array, byteOrder = byteOrder)
+    // NativeBuffer(array, byteOrder = byteOrder)
     JsBuffer(Uint8Array(array.toTypedArray()), littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN)
-
 
 fun String.toBuffer(): PlatformBuffer = toBuffer(AllocationZone.Heap)
 actual fun String.toBuffer(zone: AllocationZone): PlatformBuffer {

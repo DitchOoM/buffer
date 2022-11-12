@@ -1,6 +1,5 @@
 package com.ditchoom.buffer
 
-
 actual fun PlatformBuffer.Companion.allocate(
     size: Int,
     zone: AllocationZone,

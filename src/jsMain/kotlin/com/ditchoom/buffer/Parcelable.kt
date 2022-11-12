@@ -1,3 +1,3 @@
 package com.ditchoom.buffer
 
-expect interface Parcelable
+actual interface Parcelable

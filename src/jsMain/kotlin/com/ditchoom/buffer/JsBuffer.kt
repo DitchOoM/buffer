@@ -2,7 +2,9 @@
 
 package com.ditchoom.buffer
 
-import org.khronos.webgl.*
+import org.khronos.webgl.DataView
+import org.khronos.webgl.Int8Array
+import org.khronos.webgl.Uint8Array
 
 data class JsBuffer(
     val buffer: Uint8Array,
@@ -68,7 +70,6 @@ data class JsBuffer(
         position += ULong.SIZE_BYTES
         return long
     }
-
 
     private fun ByteArray.toLong(): Long {
         var result: Long = 0

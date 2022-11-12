@@ -79,7 +79,6 @@ class FragmentedReadBuffer(
 
     override fun readInt() = readSizeIntoBuffer(Int.SIZE_BYTES) { it.readInt() }
 
-
     override fun readLong() = readSizeIntoBuffer(ULong.SIZE_BYTES) { it.readLong() }
 
     override fun readUtf8(bytes: Int) = readSizeIntoBuffer(bytes) { it.readUtf8(bytes) }

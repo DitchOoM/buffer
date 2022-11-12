@@ -6,7 +6,6 @@ import java.nio.ByteBuffer
 import java.nio.CharBuffer
 import java.nio.charset.CharsetEncoder
 
-
 actual fun PlatformBuffer.Companion.allocate(
     size: Int,
     zone: AllocationZone,

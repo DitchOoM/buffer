@@ -104,7 +104,7 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
         return true
     }
 
-    override fun toString() = "Buffer[pos=${position()} lim=${limit()} cap=${capacity}]"
+    override fun toString() = "Buffer[pos=${position()} lim=${limit()} cap=$capacity]"
 
     override suspend fun close() {
         fileRef?.aClose()
@@ -113,7 +113,6 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
     override fun limit() = buffer.limit()
     override fun position() = buffer.position()
 }
-
 
 suspend fun RandomAccessFile.aClose() = suspendCoroutine<Unit> {
     try {
@@ -125,7 +124,6 @@ suspend fun RandomAccessFile.aClose() = suspendCoroutine<Unit> {
         it.resumeWithException(e)
     }
 }
-
 
 fun ByteBuffer.toArray(size: Int = remaining()): ByteArray {
     return if (hasArray()) {

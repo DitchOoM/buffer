@@ -44,5 +44,4 @@ class ParcelableSharedMemoryBuffer(buffer: ByteBuffer, private val sharedMemory:
                 }
             }
     }
-
 }
