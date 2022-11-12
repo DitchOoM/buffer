@@ -22,7 +22,7 @@ jobs:
 #      - name: Setup Android SDK
 #        uses: android-actions/setup-android@v2
       - name: run tests
-          uses: reactivecircus/android-emulator-runner@v2
-          with:
-            api-level: 33
-            script: ./gradlew --no-daemon assemble pack build check allTests connectedAndroidTest publishToMavenLocal
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          script: ./gradlew --no-daemon assemble pack build check allTests connectedAndroidTest publishToMavenLocal
