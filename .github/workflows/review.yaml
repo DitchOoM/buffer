@@ -21,18 +21,8 @@ jobs:
           distribution: 'zulu'
           java-version: '12'
           cache: gradle
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v2
-      - name: Update Android SDK Manager
-        run: yes | sdkmanager --update
-      - name: Accept Android Licenses
-        run: yes | sdkmanager --licenses
-      - name: Install Android emulator API V33 VM image
-        run: sdkmanager --install "system-images;android-33;google_apis;x86_64"
-      - name: Create AVD
-        run: echo "no" | avdmanager create avd --force --name testAVD --abi google_apis/x86_64 --package 'system-images;android-33;google_apis;x86_64'
-      - name: Install Android latest android emulator
-        run: sdkmanager --install emulator --channel=0
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v2
       - name: Import GPG Key
         id: import_gpg
         uses: crazy-max/ghaction-import-gpg@v5
@@ -40,4 +30,4 @@ jobs:
           gpg_private_key: ${{ secrets.GPG_SECRET }}
           passphrase: ${{ secrets.GPG_SIGNING_PASSWORD }}
       - name: Tests with Gradle
-        run: ./gradlew --no-daemon assemble pack build check allTests connectedAndroidTest publishToMavenLocal
+        run: gradle assemble pack build check allTests publishToMavenLocal
