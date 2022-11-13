@@ -36,4 +36,4 @@ jobs:
           gpg_private_key: ${{ secrets.GPG_SECRET }}
           passphrase: ${{ secrets.GPG_SIGNING_PASSWORD }}
       - name: Tests with Gradle
-        script: ./gradlew --no-daemon assemble pack build check allTests connectedAndroidTest publishToMavenLocal
+        run: ./gradlew --no-daemon assemble pack build check allTests connectedAndroidTest publishToMavenLocal
