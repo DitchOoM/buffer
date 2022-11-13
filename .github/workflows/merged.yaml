@@ -15,8 +15,16 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '12'
+          cache: gradle
       - name: Setup Android SDK
         uses: android-actions/setup-android@v2
+      - name: Create and Install Android emulator
+          run: |
+            yes | sdkmanager --update
+            yes | sdkmanager --licenses
+            sdkmanager --install "system-images;android-33;google_apis;x86_64"
+            echo "no" | avdmanager create avd --force --name testAVD --abi google_apis/x86_64 --package 'system-images;android-33;google_apis;x86_64'
+            sdkmanager --install emulator --channel=0
       - name: Import GPG Key
         id: import_gpg
         uses: crazy-max/ghaction-import-gpg@v5
@@ -24,16 +32,13 @@ jobs:
           gpg_private_key: ${{ secrets.GPG_SECRET }}
           passphrase: ${{ secrets.GPG_SIGNING_PASSWORD }}
       - name: Test and deploy with Gradle
-        uses: reactivecircus/android-emulator-runner@v2
         env:
           SONATYPE_NEXUS_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
           SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
           GPG_SECRET: ${{ secrets.GPG_SECRET }}
           GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
           NPM_ACCESS_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
-        with:
-          api-level: 29
-          script: ./gradlew --no-daemon assemble build check allTests connectedAndroidTest publishAllPublicationsToSonatypeRepository publishJsNpmPublicationToNpmjs publish closeAndReleaseRepository
+        script: gradle assemble build check allTests connectedAndroidTest publishAllPublicationsToSonatypeRepository publishJsNpmPublicationToNpmjs publish closeAndReleaseRepository
       - uses: actions/upload-artifact@v2
         with:
           name: Package
