@@ -2,11 +2,8 @@ name: "Build and Test"
 on:
   pull_request:
     types:
-      - ready_for_review
-      - review_requested
       - synchronize
       - reopened
-      - opened
 jobs:
   review:
     runs-on: ${{ matrix.os }}
