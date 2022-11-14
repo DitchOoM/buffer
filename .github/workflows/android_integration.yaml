@@ -19,25 +19,16 @@ jobs:
           distribution: 'zulu'
           java-version: '12'
           cache: gradle
-      - name: Setup Gradle
-        uses: gradle/gradle-build-action@v2
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v2
-      - name: Update Android SDK Manager
-        run: sdkmanager --update
-      - name: Install Android emulator API V33 VM image
-        run: echo y | sdkmanager --install "system-images;android-33;google_apis;x86_64"
-      - name: Create AVD
-        run: echo "no" | avdmanager create avd --force --name testAVD --abi google_apis/x86_64 --package 'system-images;android-33;google_apis;x86_64'
-      - name: Install Android latest android emulator
-        run: sdkmanager --install emulator --channel=0
-      - name: Launch emulator
-        run: $ANDROID_SDK_ROOT/emulator/emulator -avd testAVD
-      - name: Import GPG Key
-        id: import_gpg
-        uses: crazy-max/ghaction-import-gpg@v5
-        with:
-          gpg_private_key: ${{ secrets.GPG_SECRET }}
-          passphrase: ${{ secrets.GPG_SIGNING_PASSWORD }}
-      - name: Tests with Gradle
-        run: gradle connectedAndroidTest
+      - name: Run UI Tests
+          uses: reactivecircus/android-emulator-runner@v2
+          env:
+            ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL: 120
+          with:
+            api-level: 29
+            arch: x86
+            target: google_atd
+            profile: Nexus One
+            emulator-options: -no-snapshot -noaudio -no-boot-anim -camera-back none
+            disable-animations: true
+            disk-size: 2048M
+            script: gradle connectedAndroidTest
