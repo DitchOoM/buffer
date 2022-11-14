@@ -6,9 +6,11 @@ on:
     types:
       - synchronize
 jobs:
+  review:
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ ubuntu-latest ]
+        os: [ macos-latest ]
     steps:
       - uses: actions/checkout@v3
       - name: Set up JDK 12
