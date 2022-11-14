@@ -24,11 +24,9 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v2
       - name: Update Android SDK Manager
-        run: yes | sdkmanager --update
-      - name: Accept Android Licenses
-        run: yes | sdkmanager --licenses
+        run: sdkmanager --update
       - name: Install Android emulator API V33 VM image
-        run: sdkmanager --install "system-images;android-33;google_apis;x86_64"
+        run: echo y | sdkmanager --install "system-images;android-33;google_apis;x86_64"
       - name: Create AVD
         run: echo "no" | avdmanager create avd --force --name testAVD --abi google_apis/x86_64 --package 'system-images;android-33;google_apis;x86_64'
       - name: Install Android latest android emulator
