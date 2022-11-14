@@ -7,6 +7,8 @@ plugins {
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
     signing
+    id("org.jlleitschuh.gradle.ktlint") version "11.0.0"
+    id("org.jlleitschuh.gradle.ktlint-idea") version "11.0.0"
 }
 
 val libraryVersionPrefix: String by project
@@ -113,7 +115,7 @@ android {
     compileSdk = 33
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
     defaultConfig {
-        minSdk =  9
+        minSdk = 9
         targetSdk = 33
     }
     namespace = "$group.${rootProject.name}"
@@ -130,7 +132,6 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
             sign(publishing.publications)
         }
     }
-
 
     val ossUser = System.getenv("SONATYPE_NEXUS_USERNAME")
     val ossPassword = System.getenv("SONATYPE_NEXUS_PASSWORD")
@@ -224,4 +225,8 @@ if (System.getenv("NPM_ACCESS_TOKEN") != null) {
             }
         }
     }
+}
+ktlint {
+    verbose.set(true)
+    outputToConsole.set(true)
 }

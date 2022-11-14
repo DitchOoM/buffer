@@ -37,11 +37,15 @@ data class NativeBuffer(
     override fun readShort(): Short {
         val value =
             if (byteOrder == ByteOrder.BIG_ENDIAN)
-                ((0xff and data[position + 0].toInt() shl 8)
-                        or (0xff and data[position + 1].toInt() shl 0)).toShort()
+                (
+                    (0xff and data[position + 0].toInt() shl 8)
+                        or (0xff and data[position + 1].toInt() shl 0)
+                    ).toShort()
             else
-                ((0xff and data[position + 1].toInt() shl 8)
-                        or (0xff and data[position + 0].toInt() shl 0)).toShort()
+                (
+                    (0xff and data[position + 1].toInt() shl 8)
+                        or (0xff and data[position + 0].toInt() shl 0)
+                    ).toShort()
         position += Short.SIZE_BYTES
         return value
     }
@@ -49,15 +53,19 @@ data class NativeBuffer(
     override fun readInt(): Int {
         val value =
             if (byteOrder == ByteOrder.BIG_ENDIAN)
-                (0xff and data[position + 0].toInt() shl 24
+                (
+                    0xff and data[position + 0].toInt() shl 24
                         or (0xff and data[position + 1].toInt() shl 16)
                         or (0xff and data[position + 2].toInt() shl 8)
-                        or (0xff and data[position + 3].toInt() shl 0))
+                        or (0xff and data[position + 3].toInt() shl 0)
+                    )
             else
-                (0xff and data[position + 3].toInt() shl 24
+                (
+                    0xff and data[position + 3].toInt() shl 24
                         or (0xff and data[position + 2].toInt() shl 16)
                         or (0xff and data[position + 1].toInt() shl 8)
-                        or (0xff and data[position + 0].toInt() shl 0))
+                        or (0xff and data[position + 0].toInt() shl 0)
+                    )
         position += Int.SIZE_BYTES
         return value
     }
@@ -65,23 +73,27 @@ data class NativeBuffer(
     override fun readLong(): Long {
         val value =
             if (byteOrder == ByteOrder.BIG_ENDIAN)
-                (data[position + 0].toLong() shl 56
+                (
+                    data[position + 0].toLong() shl 56
                         or (data[position + 1].toLong() and 0xff shl 48)
                         or (data[position + 2].toLong() and 0xff shl 40)
                         or (data[position + 3].toLong() and 0xff shl 32)
                         or (data[position + 4].toLong() and 0xff shl 24)
                         or (data[position + 5].toLong() and 0xff shl 16)
                         or (data[position + 6].toLong() and 0xff shl 8)
-                        or (data[position + 7].toLong() and 0xff))
+                        or (data[position + 7].toLong() and 0xff)
+                    )
             else
-                (data[position + 7].toLong() shl 56
+                (
+                    data[position + 7].toLong() shl 56
                         or (data[position + 6].toLong() and 0xff shl 48)
                         or (data[position + 5].toLong() and 0xff shl 40)
                         or (data[position + 4].toLong() and 0xff shl 32)
                         or (data[position + 3].toLong() and 0xff shl 24)
                         or (data[position + 2].toLong() and 0xff shl 16)
                         or (data[position + 1].toLong() and 0xff shl 8)
-                        or (data[position + 0].toLong() and 0xff))
+                        or (data[position + 0].toLong() and 0xff)
+                    )
         position += Long.SIZE_BYTES
         return value
     }

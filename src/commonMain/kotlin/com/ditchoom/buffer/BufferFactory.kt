@@ -29,4 +29,3 @@ fun String.utf8Length(): Int {
     }
     return count
 }
-

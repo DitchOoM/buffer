@@ -41,7 +41,6 @@ interface ReadBuffer : PositionBuffer {
         return result
     }
 
-
     companion object {
         val newLine = "\r\n".encodeToByteArray()
     }

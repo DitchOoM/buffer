@@ -85,5 +85,4 @@ class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((Int, Byte
     }
 
     override fun readUtf8(bytes: Int) = readByteArray(bytes).decodeToString()
-
 }

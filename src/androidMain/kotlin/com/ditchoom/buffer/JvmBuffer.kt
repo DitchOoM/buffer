@@ -37,5 +37,4 @@ open class JvmBuffer(val buffer: ByteBuffer) : BaseJvmBuffer(buffer) {
             }
         }
     }
-
 }

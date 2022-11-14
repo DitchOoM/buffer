@@ -6,5 +6,3 @@ interface PlatformBuffer : ReadBuffer, WriteBuffer, SuspendCloseable, Parcelable
 
     companion object
 }
-
-
