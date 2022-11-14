@@ -5,6 +5,7 @@ package com.ditchoom.buffer
 import org.khronos.webgl.DataView
 import org.khronos.webgl.Int8Array
 import org.khronos.webgl.Uint8Array
+import org.khronos.webgl.set
 
 data class JsBuffer(
     val buffer: Uint8Array,
