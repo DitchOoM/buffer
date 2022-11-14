@@ -19,16 +19,8 @@ jobs:
           distribution: 'zulu'
           java-version: '12'
           cache: gradle
-      - name: Run UI Tests
+      - name: Run Android Device Tests
         uses: reactivecircus/android-emulator-runner@v2
-        env:
-          ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL: 120
-        with:
-          api-level: 29
-          arch: x86
-          target: google_atd
-          profile: Nexus One
-          emulator-options: -no-snapshot -noaudio -no-boot-anim -camera-back none
-          disable-animations: true
-          disk-size: 2048M
+          with:
+            api-level: 29
           script: gradle connectedAndroidTest
