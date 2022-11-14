@@ -1,9 +1,12 @@
-name: "Build Test and Deploy"
+name: "Android Emulator Integration Test"
 on:
   push:
     branches: [ main ]
+  pull_request:
+    types:
+      - synchronize
 jobs:
-  deploy:
+  review:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -20,21 +23,19 @@ jobs:
         uses: gradle/gradle-build-action@v2
       - name: Setup Android SDK
         uses: android-actions/setup-android@v2
+      - name: Update Android SDK Manager
+        run: sdkmanager --update
+      - name: Install Android emulator API V33 VM image
+        run: echo y | sdkmanager --install "system-images;android-33;google_apis;x86_64"
+      - name: Create AVD
+        run: echo "no" | avdmanager create avd --force --name testAVD --abi google_apis/x86_64 --package 'system-images;android-33;google_apis;x86_64'
+      - name: Install Android latest android emulator
+        run: sdkmanager --install emulator --channel=0
       - name: Import GPG Key
         id: import_gpg
         uses: crazy-max/ghaction-import-gpg@v5
         with:
           gpg_private_key: ${{ secrets.GPG_SECRET }}
           passphrase: ${{ secrets.GPG_SIGNING_PASSWORD }}
-      - name: Test and deploy with Gradle
-        env:
-          SONATYPE_NEXUS_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
-          SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
-          GPG_SECRET: ${{ secrets.GPG_SECRET }}
-          GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
-          NPM_ACCESS_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
-        run: gradle assemble build check ktlintCheck allTests publishAllPublicationsToSonatypeRepository publishJsNpmPublicationToNpmjs publish closeAndReleaseRepository
-      - uses: actions/upload-artifact@v3
-        with:
-          name: Package
-          path: build/libs
+      - name: Tests with Gradle
+        run: gradle connectedAndroidTest
