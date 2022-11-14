@@ -21,6 +21,4 @@ jobs:
           cache: gradle
       - name: Run Android Device Tests
         uses: reactivecircus/android-emulator-runner@v2
-          with:
-            api-level: 29
-          script: gradle connectedAndroidTest
+        script: gradle connectedAndroidTest
