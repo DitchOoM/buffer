@@ -5,6 +5,7 @@ on:
   pull_request:
     types:
       - synchronize
+      - opened
 jobs:
   review:
     runs-on: ${{ matrix.os }}
