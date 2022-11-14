@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
+
 plugins {
     id("dev.petuska.npm.publish") version "2.1.2"
     kotlin("multiplatform") version "1.7.21"
@@ -5,6 +7,8 @@ plugins {
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
     signing
+    id("org.jlleitschuh.gradle.ktlint") version "11.0.0"
+    id("org.jlleitschuh.gradle.ktlint-idea") version "11.0.0"
 }
 
 val libraryVersionPrefix: String by project
@@ -38,11 +42,14 @@ kotlin {
         browser()
         nodejs()
     }
+
     macosX64()
     linuxX64()
     ios()
     iosSimulatorArm64()
-
+    tasks.getByName<KotlinNativeSimulatorTest>("iosSimulatorArm64Test") {
+        deviceId = "iPhone 14"
+    }
     watchos()
     tvos()
     sourceSets {
@@ -105,20 +112,13 @@ kotlin {
 }
 
 android {
-    compileSdkVersion(33)
+    compileSdk = 33
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
     defaultConfig {
-        minSdkVersion(9)
-        targetSdkVersion(33)
+        minSdk = 9
+        targetSdk = 33
     }
-    lintOptions {
-        isQuiet = true
-        isAbortOnError = false
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
-    }
+    namespace = "$group.${rootProject.name}"
 }
 
 val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
@@ -132,7 +132,6 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
             sign(publishing.publications)
         }
     }
-
 
     val ossUser = System.getenv("SONATYPE_NEXUS_USERNAME")
     val ossPassword = System.getenv("SONATYPE_NEXUS_PASSWORD")
@@ -226,4 +225,8 @@ if (System.getenv("NPM_ACCESS_TOKEN") != null) {
             }
         }
     }
+}
+ktlint {
+    verbose.set(true)
+    outputToConsole.set(true)
 }

@@ -2,10 +2,7 @@ name: "Build and Test"
 on:
   pull_request:
     types:
-      - ready_for_review
-      - review_requested
       - synchronize
-      - reopened
       - opened
 jobs:
   review:
@@ -14,12 +11,14 @@ jobs:
       matrix:
         os: [ macos-latest ]
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Set up JDK 12
-        uses: actions/setup-java@v1
+        uses: actions/setup-java@v2
         with:
-          java-version: 12
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v2
-      - name: Test with Gradle
-        run: ./gradlew --no-daemon assemble pack build check allTests connectedAndroidTest publishToMavenLocal
+          distribution: 'zulu'
+          java-version: '12'
+          cache: gradle
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v2
+      - name: Tests with Gradle
+        run: gradle ktlintCheck assemble pack build check allTests publishToMavenLocal

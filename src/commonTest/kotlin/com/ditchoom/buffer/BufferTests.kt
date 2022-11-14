@@ -23,7 +23,6 @@ class BufferTests {
         assertEquals(1, slicedBuffer.limit())
     }
 
-
     @Test
     fun sliceAndReadUtf8() {
         val expected = "test"
@@ -104,8 +103,10 @@ class BufferTests {
         platformBuffer.resetForRead()
         val msb = platformBuffer.readByte()
         val lsb = platformBuffer.readByte()
-        val value = ((0xff and msb.toInt() shl 8)
-                or (0xff and lsb.toInt() shl 0)).toUShort()
+        val value = (
+            (0xff and msb.toInt() shl 8)
+                or (0xff and lsb.toInt() shl 0)
+            ).toUShort()
         assertEquals(value.toInt(), uShort)
     }
 
@@ -191,7 +192,6 @@ class BufferTests {
         assertEquals(string, actual)
     }
 
-
     @Test
     fun readUtf8LineSingle() {
         val text = "hello"
@@ -238,7 +238,6 @@ class BufferTests {
         assertEquals("", buffer.readUtf8Line().toString())
         assertEquals(buffer.remaining(), 0)
     }
-
 
     @Test
     fun readUtf8LineMixMulti() {
