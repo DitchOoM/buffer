@@ -1,8 +1,9 @@
+// import dev.petuska.npm.publish.extension.domain.NpmAccess
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 
 plugins {
-    id("dev.petuska.npm.publish") version "2.1.2"
-    kotlin("multiplatform") version "1.7.21"
+    id("dev.petuska.npm.publish") version "3.2.0"
+    kotlin("multiplatform") version "1.8.0"
     id("com.android.library")
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
@@ -37,8 +38,9 @@ kotlin {
             useJUnit()
         }
     }
-    js {
+    js(IR) {
         moduleName = "buffer-kt"
+        binaries.library()
         browser()
         nodejs()
     }
@@ -214,28 +216,24 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
         packageGroup = publishedGroupId
     }
 }
+// if ("refs/heads/main".equals(System.getenv("GITHUB_REF"), ignoreCase = true)) {
+// npmPublish {
+//    registries {
+//        register("npmjs") {
+//            uri.set("https://registry.npmjs.org")
+//            authToken.set(System.getenv("NPM_ACCESS_TOKEN"))
+//        }
+//    }
+//    readme.set(rootDir.resolve("Readme.md"))
+//    organization.set("ditchoom")
+//    access.set(NpmAccess.PUBLIC)
+//    version.set(libraryVersion)
+//    packages.named("js") {
+//        packageName.set("buffer-kt")
+//    }
+// }
+// }
 
-if (System.getenv("NPM_ACCESS_TOKEN") != null) {
-    npmPublishing {
-        repositories {
-            repository("npmjs") {
-                registry = uri("https://registry.npmjs.org")
-                authToken = System.getenv("NPM_ACCESS_TOKEN")
-            }
-        }
-        readme = file("Readme.md")
-        organization = "ditchoom"
-        access = PUBLIC
-        bundleKotlinDependencies = true
-        version = libraryVersion
-        dry = !"refs/heads/main".equals(System.getenv("GITHUB_REF"), ignoreCase = true)
-        publications {
-            val js by getting {
-                moduleName = "buffer-kt"
-            }
-        }
-    }
-}
 ktlint {
     verbose.set(true)
     outputToConsole.set(true)
