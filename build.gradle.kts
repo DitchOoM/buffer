@@ -216,23 +216,23 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
         packageGroup = publishedGroupId
     }
 }
-
-npmPublish {
-    registries {
-        register("npmjs") {
-            uri.set("https://registry.npmjs.org")
-            authToken.set(System.getenv("NPM_ACCESS_TOKEN"))
+//if ("refs/heads/main".equals(System.getenv("GITHUB_REF"), ignoreCase = true)) {
+    npmPublish {
+        registries {
+            register("npmjs") {
+                uri.set("https://registry.npmjs.org")
+                authToken.set(System.getenv("NPM_ACCESS_TOKEN"))
+            }
+        }
+        readme.set(rootDir.resolve("Readme.md"))
+        organization.set("ditchoom")
+        access.set(NpmAccess.PUBLIC)
+        version.set(libraryVersion)
+        packages.named("js") {
+            packageName.set("test-ignore-this")
         }
     }
-    readme.set(rootDir.resolve("Readme.md"))
-    organization.set("ditchoom")
-    access.set(NpmAccess.PUBLIC)
-    version.set(libraryVersion)
-    dry.set(!"refs/heads/main".equals(System.getenv("GITHUB_REF"), ignoreCase = true))
-    packages.named("js") {
-        packageName.set("buffer-kt")
-    }
-}
+//}
 
 ktlint {
     verbose.set(true)
