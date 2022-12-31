@@ -1,4 +1,4 @@
-import dev.petuska.npm.publish.extension.domain.NpmAccess
+// import dev.petuska.npm.publish.extension.domain.NpmAccess
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 
 plugins {
@@ -217,21 +217,21 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
     }
 }
 // if ("refs/heads/main".equals(System.getenv("GITHUB_REF"), ignoreCase = true)) {
-npmPublish {
-    registries {
-        register("npmjs") {
-            uri.set("https://registry.npmjs.org")
-            authToken.set(System.getenv("NPM_ACCESS_TOKEN"))
-        }
-    }
-    readme.set(rootDir.resolve("Readme.md"))
-    organization.set("ditchoom")
-    access.set(NpmAccess.PUBLIC)
-    version.set(libraryVersion)
-    packages.named("js") {
-        packageName.set("buffer-kt")
-    }
-}
+// npmPublish {
+//    registries {
+//        register("npmjs") {
+//            uri.set("https://registry.npmjs.org")
+//            authToken.set(System.getenv("NPM_ACCESS_TOKEN"))
+//        }
+//    }
+//    readme.set(rootDir.resolve("Readme.md"))
+//    organization.set("ditchoom")
+//    access.set(NpmAccess.PUBLIC)
+//    version.set(libraryVersion)
+//    packages.named("js") {
+//        packageName.set("buffer-kt")
+//    }
+// }
 // }
 
 ktlint {
