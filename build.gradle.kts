@@ -2,7 +2,7 @@ import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTes
 
 plugins {
     id("dev.petuska.npm.publish") version "2.1.2"
-    kotlin("multiplatform") version "1.8.0"
+    kotlin("multiplatform") version "1.7.21"
     id("com.android.library")
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
@@ -37,7 +37,7 @@ kotlin {
             useJUnit()
         }
     }
-    js(IR) {
+    js {
         moduleName = "buffer-kt"
         browser()
         nodejs()
