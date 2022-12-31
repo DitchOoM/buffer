@@ -140,7 +140,11 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
 (System.getenv("GITHUB_REPOSITORY"))?.let {
     if (System.getenv("GITHUB_REF") == "refs/heads/main") {
         signing {
-            useInMemoryPgpKeys("56F1A973", System.getenv("GPG_SECRET"), System.getenv("GPG_SIGNING_PASSWORD"))
+            useInMemoryPgpKeys(
+                "56F1A973",
+                System.getenv("GPG_SECRET"),
+                System.getenv("GPG_SIGNING_PASSWORD")
+            )
             sign(publishing.publications)
         }
     }
@@ -216,23 +220,23 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
         packageGroup = publishedGroupId
     }
 }
-//if ("refs/heads/main".equals(System.getenv("GITHUB_REF"), ignoreCase = true)) {
-    npmPublish {
-        registries {
-            register("npmjs") {
-                uri.set("https://registry.npmjs.org")
-                authToken.set(System.getenv("NPM_ACCESS_TOKEN"))
-            }
-        }
-        readme.set(rootDir.resolve("Readme.md"))
-        organization.set("ditchoom")
-        access.set(NpmAccess.PUBLIC)
-        version.set(libraryVersion)
-        packages.named("js") {
-            packageName.set("test-ignore-this")
+// if ("refs/heads/main".equals(System.getenv("GITHUB_REF"), ignoreCase = true)) {
+npmPublish {
+    registries {
+        register("npmjs") {
+            uri.set("https://registry.npmjs.org")
+            authToken.set(System.getenv("NPM_ACCESS_TOKEN"))
         }
     }
-//}
+    readme.set(rootDir.resolve("Readme.md"))
+    organization.set("ditchoom")
+    access.set(NpmAccess.PUBLIC)
+    version.set(libraryVersion)
+    packages.named("js") {
+        packageName.set("test-ignore-this")
+    }
+}
+// }
 
 ktlint {
     verbose.set(true)
