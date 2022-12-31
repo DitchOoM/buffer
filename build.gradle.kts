@@ -140,11 +140,7 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
 (System.getenv("GITHUB_REPOSITORY"))?.let {
     if (System.getenv("GITHUB_REF") == "refs/heads/main") {
         signing {
-            useInMemoryPgpKeys(
-                "56F1A973",
-                System.getenv("GPG_SECRET"),
-                System.getenv("GPG_SIGNING_PASSWORD")
-            )
+            useInMemoryPgpKeys("56F1A973", System.getenv("GPG_SECRET"), System.getenv("GPG_SIGNING_PASSWORD"))
             sign(publishing.publications)
         }
     }
@@ -233,7 +229,7 @@ npmPublish {
     access.set(NpmAccess.PUBLIC)
     version.set(libraryVersion)
     packages.named("js") {
-        packageName.set("test-ignore-this")
+        packageName.set("buffer-kt")
     }
 }
 // }
