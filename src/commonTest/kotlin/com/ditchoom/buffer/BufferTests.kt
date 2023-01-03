@@ -117,9 +117,9 @@ class BufferTests {
         val msb = platformBuffer.readByte()
         val lsb = platformBuffer.readByte()
         val value = (
-                (0xff and msb.toInt() shl 8)
-                        or (0xff and lsb.toInt() shl 0)
-                ).toUShort()
+            (0xff and msb.toInt() shl 8)
+                    or (0xff and lsb.toInt() shl 0)
+            ).toUShort()
         assertEquals(value.toInt(), uShort)
     }
 
