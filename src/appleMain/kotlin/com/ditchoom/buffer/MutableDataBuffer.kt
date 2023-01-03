@@ -30,7 +30,6 @@ data class MutableDataBuffer(
         limit = mutableData.length.toInt()
     }
 
-
     override fun write(byte: Byte): WriteBuffer {
         bytePointer[position++] = byte
         return this
@@ -112,7 +111,8 @@ data class MutableDataBuffer(
                 NSMakeRange(
                     position.convert(),
                     bytesToCopySize.convert()
-                ), otherSubdata.bytes
+                ),
+                otherSubdata.bytes
             )
             position += bytesToCopySize
         } else {
