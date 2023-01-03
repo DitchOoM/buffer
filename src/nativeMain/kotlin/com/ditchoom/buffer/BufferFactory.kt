@@ -14,7 +14,7 @@ actual fun PlatformBuffer.Companion.allocate(
 actual fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder): PlatformBuffer =
     NativeBuffer(array, byteOrder = byteOrder)
 
-actual fun String.toBuffer(zone: AllocationZone): PlatformBuffer {
+actual fun String.toBuffer(zone: AllocationZone): ReadBuffer {
     val bytes = this.encodeToByteArray()
     return if (zone is AllocationZone.Custom) {
         val buffer = zone.allocator(bytes.size)

@@ -41,7 +41,7 @@ actual fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder)
 }
 
 @Throws(CharacterCodingException::class)
-actual fun String.toBuffer(zone: AllocationZone): PlatformBuffer {
+actual fun String.toBuffer(zone: AllocationZone): ReadBuffer {
     val encoder = utf8Encoder.get()
     encoder.reset()
     val out = PlatformBuffer.allocate(utf8Length(), zone = zone) as JvmBuffer

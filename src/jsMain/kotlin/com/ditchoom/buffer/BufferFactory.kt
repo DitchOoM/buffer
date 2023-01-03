@@ -24,8 +24,7 @@ actual fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder)
     // NativeBuffer(array, byteOrder = byteOrder)
     JsBuffer(Uint8Array(array.toTypedArray()), littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN)
 
-fun String.toBuffer(): PlatformBuffer = toBuffer(AllocationZone.Heap)
-actual fun String.toBuffer(zone: AllocationZone): PlatformBuffer {
+actual fun String.toBuffer(zone: AllocationZone): ReadBuffer {
     val bytes = encodeToByteArray()
     return if (zone is AllocationZone.Custom) {
         val buffer = zone.allocator(bytes.size)

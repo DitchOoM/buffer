@@ -62,13 +62,15 @@ A kotlin multiplatform library that allows you to allocate and modify byte[] nat
 
 ## About The Project
 
-Allocating and managing a chunk of memory can be slightly different based on each platform. This project aims to make
-it **easier to manage buffers in a cross platform way using kotlin multiplatform**. This was originally created as a
-side project for a kotlin multiplatform mqtt data sync solution.
+Allocating and managing a chunk of memory can be slightly different based on each platform. This
+project aims to make it **easier to manage buffers in a cross platform way using kotlin
+multiplatform**. This was originally created as a side project for a kotlin multiplatform mqtt data
+sync solution.
 
 Implementation notes:
 
-* `JVM` + `Android` delegate to direct [ByteBuffers][byte-buffer-api] to avoid memory copies when possible.
+* `JVM` + `Android` delegate to direct [ByteBuffers][byte-buffer-api] to avoid memory copies when
+  possible.
 * `Native` platforms use standard byte arrays to manage memory.
 * `JS` targets use Uint8Array.
 
@@ -92,10 +94,14 @@ Implementation notes:
 | `Windows X64` |🚀|  WIP [chocolatey][chocolately] 🔮  |        WIP         |
 
 ## Installation
+
 ### Gradle
+
 - [Add `implementation("com.ditchoom:buffer:$version")` to your `build.gradle` dependencies](https://search.maven.org/artifact/com.ditchoom/buffer)
+
 ### NPM
--  [execute `npm i @ditchoom/buffer-kt`](https://www.npmjs.com/package/@ditchoom/buffer-kt)
+
+- [execute `npm i @ditchoom/buffer-kt`](https://www.npmjs.com/package/@ditchoom/buffer-kt)
 
 ## Usage
 
@@ -116,19 +122,22 @@ val buffer = PlatformBuffer.wrap(byteArray, byteOrder = ByteOrder.BIG_ENDIAN)
 
 Allocation zones allow you to change where the buffer is allocated.
 
-- `AllocationZone.Custom` -> Allows you to override the underlying buffer. This can be helpful for memory mapped
-  structures.
-- `AllocationZone.Heap` -> On JVM platforms, allocates a HeapByteBuffer, otherwise a native byte array
-- `AllocationZone.Direct` -> On JVM platforms, allocates a DirectByteBuffer, otherwise a native byte array
+- `AllocationZone.Custom` -> Allows you to override the underlying buffer. This can be helpful for
+  memory mapped structures.
+- `AllocationZone.Heap` -> On JVM platforms, allocates a HeapByteBuffer, otherwise a native byte
+  array
+- `AllocationZone.Direct` -> On JVM platforms, allocates a DirectByteBuffer, otherwise a native byte
+  array
 - `AllocationZone.AndroidSharedMemory` -> On API 27+ it allocates
-  a [Shared Memory](https://developer.android.com/reference/android/os/SharedMemory) instance, otherwise defaulting
-  to `AllocationZone.Direct`.
+  a [Shared Memory](https://developer.android.com/reference/android/os/SharedMemory) instance,
+  otherwise defaulting to `AllocationZone.Direct`.
 
 > **Android**: All `JvmBuffer`s are `Parcelable`. To avoid extra memory copies, use `AllocationZone.AndroidSharedMemory`
 
 ### Byte order
 
-Byte order defaults to big endian but can be specified when creating the buffer with `ByteOrder.BIG_ENDIAN`
+Byte order defaults to big endian but can be specified when creating the buffer
+with `ByteOrder.BIG_ENDIAN`
 or `ByteOrder.LITTLE_ENDIAN`
 
 The byte order of a buffer can be checked with `buffer.byteOrder`
@@ -201,16 +210,18 @@ val byteArray :ByteArray = buffer.readByteArray(numOfBytesToRead)
 
 - `git clone git@github.com:DitchOoM/buffer.git`
 - Open cloned directory with [Intellij IDEA](https://www.jetbrains.com/idea/download).
-    - Be sure to [open with gradle](https://www.jetbrains.com/help/idea/gradle.html#gradle_import_project_start)
+    - Be sure
+      to [open with gradle](https://www.jetbrains.com/help/idea/gradle.html#gradle_import_project_start)
 
 ## Roadmap
 
-See the [open issues](https://github.com/DitchOoM/buffer/issues) for a list of proposed features (and known issues).
+See the [open issues](https://github.com/DitchOoM/buffer/issues) for a list of proposed features (
+and known issues).
 
 ## Contributing
 
-Contributions are what make the open source community such an amazing place to be learn, inspire, and create. Any
-contributions you make are **greatly appreciated**.
+Contributions are what make the open source community such an amazing place to be learn, inspire,
+and create. Any contributions you make are **greatly appreciated**.
 
 1. Fork the Project
 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)

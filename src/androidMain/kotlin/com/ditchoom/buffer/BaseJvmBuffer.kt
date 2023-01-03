@@ -7,7 +7,8 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
-abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? = null) : PlatformBuffer {
+abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? = null) :
+    PlatformBuffer {
     override val byteOrder = when (byteBuffer.order()) {
         java.nio.ByteOrder.BIG_ENDIAN -> ByteOrder.BIG_ENDIAN
         java.nio.ByteOrder.LITTLE_ENDIAN -> ByteOrder.LITTLE_ENDIAN

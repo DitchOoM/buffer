@@ -90,20 +90,28 @@ kotlin {
 
         val nativeMain by sourceSets.creating {
             dependsOn(commonMain)
+            linuxX64Main.dependsOn(this)
+        }
+        val nativeTest by sourceSets.creating {
+            dependsOn(commonTest)
+            linuxX64Test.dependsOn(this)
+        }
+
+        val appleMain by sourceSets.creating {
+            dependsOn(commonMain)
             macosX64Main.dependsOn(this)
             macosArm64Main.dependsOn(this)
-            linuxX64Main.dependsOn(this)
             iosMain.dependsOn(this)
             iosX64Main.dependsOn(this)
             iosSimulatorArm64Main.dependsOn(this)
             watchosMain.dependsOn(this)
             tvosMain.dependsOn(this)
         }
-        val nativeTest by sourceSets.creating {
+
+        val appleTest by sourceSets.creating {
             dependsOn(commonTest)
             macosX64Test.dependsOn(this)
             macosArm64Test.dependsOn(this)
-            linuxX64Test.dependsOn(this)
             iosTest.dependsOn(this)
             iosX64Test.dependsOn(this)
             iosSimulatorArm64Test.dependsOn(this)
@@ -140,7 +148,11 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
 (System.getenv("GITHUB_REPOSITORY"))?.let {
     if (System.getenv("GITHUB_REF") == "refs/heads/main") {
         signing {
-            useInMemoryPgpKeys("56F1A973", System.getenv("GPG_SECRET"), System.getenv("GPG_SIGNING_PASSWORD"))
+            useInMemoryPgpKeys(
+                "56F1A973",
+                System.getenv("GPG_SECRET"),
+                System.getenv("GPG_SIGNING_PASSWORD")
+            )
             sign(publishing.publications)
         }
     }
