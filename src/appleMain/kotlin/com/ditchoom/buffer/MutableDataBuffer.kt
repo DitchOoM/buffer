@@ -4,7 +4,6 @@ import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
-import kotlinx.cinterop.pin
 import kotlinx.cinterop.set
 import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
@@ -158,29 +157,28 @@ class MutableDataBuffer(
     }
 
     companion object {
-        fun wrap(byteArray: ByteArray, byteOrder: ByteOrder) = byteArray.useDataRef {
+        fun wrap(byteArray: ByteArray, byteOrder: ByteOrder) = byteArray.useNSDataRef {
             MutableDataBuffer(it, byteOrder, byteArray)
         }
     }
 }
 
-private fun <T> ByteArray.useDataRef(block: (NSData) -> T): T {
-    val byteArray = this
-    val pin = byteArray.pin()
-    val bytesPointer = when {
-        byteArray.isNotEmpty() -> pin.addressOf(0)
-        else -> null
-    }
-    @Suppress("OPT_IN_USAGE") val nsData = NSData.dataWithBytesNoCopy(
-        bytes = bytesPointer,
-        length = byteArray.size.convert(),
-        freeWhenDone = false
-    )
-    @Suppress("UNCHECKED_CAST") val typeRef = CFBridgingRetain(nsData) as CFDataRef
-    try {
-        return block(nsData)
-    } finally {
-        CFBridgingRelease(typeRef)
-        pin.unpin()
+private fun <T> ByteArray.useNSDataRef(block: (NSData) -> T): T {
+    return usePinned { pin ->
+        val bytesPointer = when {
+            isNotEmpty() -> pin.addressOf(0)
+            else -> null
+        }
+        @Suppress("OPT_IN_USAGE") val nsData = NSData.dataWithBytesNoCopy(
+            bytes = bytesPointer,
+            length = size.convert(),
+            freeWhenDone = false
+        )
+        @Suppress("UNCHECKED_CAST") val typeRef = CFBridgingRetain(nsData) as CFDataRef
+        try {
+            block(nsData)
+        } finally {
+            CFBridgingRelease(typeRef)
+        }
     }
 }
