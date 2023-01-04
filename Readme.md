@@ -79,19 +79,20 @@ Implementation notes:
 * None
 
 ### [Supported Platforms](https://kotlinlang.org/docs/reference/mpp-supported-platforms.html)
+* All Kotlin Multiplatform supported OS's.
 
-| Platform | 🛠Builds🛠 + 🔬Tests🔬 |         Deployed Artifact          | Non Kotlin Sample |  
-| :---: | :---: |:----------------------------------:|:-----------------:|
-| `JVM` 1.8 |🚀| [maven central][maven-central] 🔮  |        WIP        |
-| `Node.js` |🚀|           [npm][npm] 🔮            |        WIP         |
-| `Browser` (Chrome) |🚀|           [npm][npm] 🔮            |        WIP         |
-| `Android` |🚀| [maven central][maven-central]  🔮 |        WIP         |
-| `iOS` |🚀|    WIP [cocoapods][cocoapods] 🔮      |        WIP         |
-| `WatchOS` |🚀|    WIP [cocoapods][cocoapods] 🔮      |        WIP         |
-| `TvOS` |🚀|    WIP [cocoapods][cocoapods] 🔮      |        WIP         |
-| `MacOS` |🚀|    WIP [cocoapods][cocoapods] 🔮      |        WIP         |
-| `Linux X64` |🚀|    WIP [apt][apt]/[yum][yum] 🔮    |        WIP         |
-| `Windows X64` |🚀|  WIP [chocolatey][chocolately] 🔮  |        WIP         |
+| Platform |                                                                            Wrapped Type                                                                             |  
+| :---: |:-------------------------------------------------------------------------------------------------------------------------------------------------------------------:|
+| `JVM` 1.8 |                                 [ByteBuffer](https://docs.oracle.com/en/java/javase/12/docs/api/java.base/java/nio/ByteBuffer.html)                                 |
+| `Node.js` |                              [Uint8Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array)                              |
+| `Browser` (Chrome) |                              [Uint8Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array)                              |
+| `Android` | [ByteBuffer](https://developer.android.com/reference/java/nio/ByteBuffer) including [SharedMemory](https://developer.android.com/reference/android/os/SharedMemory) |
+| `iOS` |                                  [NSMutableData](https://developer.apple.com/documentation/foundation/nsmutabledata?language=objc)                                  |
+| `WatchOS` |                                  [NSMutableData](https://developer.apple.com/documentation/foundation/nsmutabledata?language=objc)                                  |
+| `TvOS` |                                  [NSMutableData](https://developer.apple.com/documentation/foundation/nsmutabledata?language=objc)                                  |
+| `MacOS` |                                  [NSMutableData](https://developer.apple.com/documentation/foundation/nsmutabledata?language=objc)                                  |
+| `Linux X64` |                                                                          kotlin ByteArray                                                                           |
+| `Windows X64` |                                                                                TODO                                                                                 |
 
 ## Installation
 
@@ -99,9 +100,6 @@ Implementation notes:
 
 - [Add `implementation("com.ditchoom:buffer:$version")` to your `build.gradle` dependencies](https://search.maven.org/artifact/com.ditchoom/buffer)
 
-### NPM
-
-- [execute `npm i @ditchoom/buffer-kt`](https://www.npmjs.com/package/@ditchoom/buffer-kt)
 
 ## Usage
 
