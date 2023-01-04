@@ -19,10 +19,8 @@ actual fun PlatformBuffer.Companion.allocate(
     return JsBuffer(Uint8Array(size), littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN)
 }
 
-// TODO: Wrap shouldn't duplicate data. Look into direct case to Uint8Array to wrap with the JsBuffer or use NativeBuffer
 actual fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder): PlatformBuffer =
-    // NativeBuffer(array, byteOrder = byteOrder)
-    JsBuffer(Uint8Array(array.toTypedArray()), littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN)
+    JsBuffer(array.unsafeCast<Uint8Array>(), littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN)
 
 actual fun String.toBuffer(zone: AllocationZone): ReadBuffer {
     val bytes = encodeToByteArray()

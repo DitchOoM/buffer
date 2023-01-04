@@ -407,11 +407,10 @@ class BufferTests {
         val buffer = PlatformBuffer.wrap(byteArray)
         assertEquals(byteArray.size, buffer.remaining(), "remaining")
         assertContentEquals(byteArray, buffer.readByteArray(buffer.remaining()), "equals")
-        // TODO Ensure that wrap does a no copy wrap.
-//        buffer.resetForRead()
-//        assertEquals(byteArray.size, buffer.remaining(), "remaining")
-//        byteArray.fill(-1)
-//        val modified = byteArray.copyOf()
-//        assertContentEquals(buffer.readByteArray(buffer.remaining()), modified, "modify original")
+        buffer.resetForRead()
+        assertEquals(byteArray.size, buffer.remaining(), "remaining")
+        byteArray.fill(-1)
+        val modified = byteArray.copyOf()
+        assertContentEquals(buffer.readByteArray(buffer.remaining()), modified, "modify original")
     }
 }
