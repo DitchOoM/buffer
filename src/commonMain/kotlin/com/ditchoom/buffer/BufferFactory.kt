@@ -6,10 +6,6 @@ expect fun PlatformBuffer.Companion.allocate(
     byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN
 ): PlatformBuffer
 
-/**
- * Best attempt to wrap the array into a platform buffer. Changes to the underlying should array
- * reflect in the platform buffer, however that's not guaranteed on all platforms at the moment.
- */
 expect fun PlatformBuffer.Companion.wrap(
     array: ByteArray,
     byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN
