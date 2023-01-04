@@ -71,8 +71,9 @@ Implementation notes:
 
 * `JVM` + `Android` delegate to direct [ByteBuffers][byte-buffer-api] to avoid memory copies when
   possible.
-* `Native` platforms use standard byte arrays to manage memory.
+* Apple targets use NSData or NSMutableData
 * `JS` targets use Uint8Array.
+* `Native` platforms use standard byte arrays to manage memory.
 
 ### Runtime Dependencies
 
@@ -88,10 +89,10 @@ Implementation notes:
 | `Node.js` |                              [Uint8Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array)                              |
 | `Browser` (Chrome) |                              [Uint8Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array)                              |
 | `Android` | [ByteBuffer](https://developer.android.com/reference/java/nio/ByteBuffer) including [SharedMemory](https://developer.android.com/reference/android/os/SharedMemory) |
-| `iOS` |                                  [NSMutableData](https://developer.apple.com/documentation/foundation/nsmutabledata?language=objc)                                  |
-| `WatchOS` |                                  [NSMutableData](https://developer.apple.com/documentation/foundation/nsmutabledata?language=objc)                                  |
-| `TvOS` |                                  [NSMutableData](https://developer.apple.com/documentation/foundation/nsmutabledata?language=objc)                                  |
-| `MacOS` |                                  [NSMutableData](https://developer.apple.com/documentation/foundation/nsmutabledata?language=objc)                                  |
+| `iOS` |                                     [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                      |
+| `WatchOS` |                                     [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                      |
+| `TvOS` |                                     [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                      |
+| `MacOS` |                                     [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                      |
 | `Linux X64` |                                                                          kotlin ByteArray                                                                           |
 | `Windows X64` |                                                                                TODO                                                                                 |
 
