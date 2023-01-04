@@ -79,6 +79,7 @@ Implementation notes:
 * None
 
 ### [Supported Platforms](https://kotlinlang.org/docs/reference/mpp-supported-platforms.html)
+
 * All Kotlin Multiplatform supported OS's.
 
 | Platform |                                                                            Wrapped Type                                                                             |  
@@ -100,13 +101,16 @@ Implementation notes:
 
 - [Add `implementation("com.ditchoom:buffer:$version")` to your `build.gradle` dependencies](https://search.maven.org/artifact/com.ditchoom/buffer)
 
-
 ## Usage
 
 ### Allocate a new platform agnostic buffer
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(byteSize, zone = AllocationZone.Direct, byteOrder = ByteOrder.BIG_ENDIAN)
+val buffer = PlatformBuffer.allocate(
+    byteSize,
+    zone = AllocationZone.Direct,
+    byteOrder = ByteOrder.BIG_ENDIAN
+)
 ```
 
 ### Wrap an existing byte array into a platform agnostic buffer
@@ -179,29 +183,29 @@ buffer.write(byteArrayOf(1, 2, 3, 4, 5), offset, length)
 ```kotlin
 val buffer: ReadBuffer
 // read signed byte
-val b :Byte = buffer.readByte()
+val b: Byte = buffer.readByte()
 // read unsigned byte
-val uByte :UByte = buffer.readUnsignedByte()
+val uByte: UByte = buffer.readUnsignedByte()
 // read short
-val short :Short = buffer.readShort()
+val short: Short = buffer.readShort()
 // read unsigned short
-val uShort :UShort = buffer.readUnsignedShort()
+val uShort: UShort = buffer.readUnsignedShort()
 // read int
 val intValue = buffer.readInt()
 // read unsigned int
-val uIntValue :Int = buffer.readUnsignedInt()
+val uIntValue: Int = buffer.readUnsignedInt()
 // read long
-val longValue :Long = buffer.readLong()
+val longValue: Long = buffer.readLong()
 // read unsigned long
-val uLongValue :ULong = buffer.readUnsignedLong()
+val uLongValue: ULong = buffer.readUnsignedLong()
 // read float
-val float :Float = buffer.readFloat()
+val float: Float = buffer.readFloat()
 // read double
 val double: :Double = buffer.readDouble()
 // read text
-val string :String = buffer.readUtf8(numOfBytesToRead)
+val string: String = buffer.readUtf8(numOfBytesToRead)
 // read byte array
-val byteArray :ByteArray = buffer.readByteArray(numOfBytesToRead)
+val byteArray: ByteArray = buffer.readByteArray(numOfBytesToRead)
 ```
 
 ## Building Locally
