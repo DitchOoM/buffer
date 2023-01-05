@@ -171,6 +171,12 @@ class BufferTests {
         platformBuffer.writeLong(long)
         platformBuffer.resetForRead()
         assertEquals(long, platformBuffer.readLong())
+
+        val platformBufferLittleEndian =
+            PlatformBuffer.allocate(Long.SIZE_BYTES, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        platformBufferLittleEndian.writeLong(long)
+        platformBufferLittleEndian.resetForRead()
+        assertEquals(long, platformBufferLittleEndian.readLong())
     }
 
     @Test

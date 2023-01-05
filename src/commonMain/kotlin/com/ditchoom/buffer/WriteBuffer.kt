@@ -19,17 +19,7 @@ interface WriteBuffer : PositionBuffer {
     @Deprecated("Use writeUByte for explicitness. This will be removed in the next release", ReplaceWith("writeUByte(uByte)"))
     fun write(uByte: UByte): WriteBuffer = writeUByte(uByte)
 
-    fun writeShort(short: Short): WriteBuffer {
-        val value = short.toInt()
-        if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            writeByte((value shr 8 and 0xff).toByte())
-            writeByte((value shr 0 and 0xff).toByte())
-        } else {
-            writeByte((value shr 0 and 0xff).toByte())
-            writeByte((value shr 8 and 0xff).toByte())
-        }
-        return this
-    }
+    fun writeShort(short: Short): WriteBuffer = writeNumberOfByteSize(short.toLong(), Short.SIZE_BYTES)
     @Deprecated("Use writeShort for explicitness. This will be removed in the next release", ReplaceWith("writeShort(short)"))
     fun write(short: Short): WriteBuffer = writeUShort(short.toUShort())
 
@@ -37,20 +27,7 @@ interface WriteBuffer : PositionBuffer {
     @Deprecated("Use writeUShort for explicitness. This will be removed in the next release", ReplaceWith("writeUShort(uShort)"))
     fun write(uShort: UShort): WriteBuffer = writeUShort(uShort)
 
-    fun writeInt(int: Int): WriteBuffer {
-        if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            writeByte((int shr 24 and 0xff).toByte())
-            writeByte((int shr 16 and 0xff).toByte())
-            writeByte((int shr 8 and 0xff).toByte())
-            writeByte((int shr 0 and 0xff).toByte())
-        } else {
-            writeByte((int shr 0 and 0xff).toByte())
-            writeByte((int shr 8 and 0xff).toByte())
-            writeByte((int shr 16 and 0xff).toByte())
-            writeByte((int shr 24 and 0xff).toByte())
-        }
-        return this
-    }
+    fun writeInt(int: Int): WriteBuffer = writeNumberOfByteSize(int.toLong(), Int.SIZE_BYTES)
     @Deprecated("Use writeInt for explicitness. This will be removed in the next release", ReplaceWith("writeInt(int)"))
     fun write(int: Int): WriteBuffer = writeInt(int)
 
@@ -58,39 +35,19 @@ interface WriteBuffer : PositionBuffer {
     @Deprecated("Use writeUInt for explicitness. This will be removed in the next release", ReplaceWith("writeUInt(uInt)"))
     fun write(uInt: UInt): WriteBuffer = writeUInt(uInt)
 
-    fun writeLong(long: Long): WriteBuffer {
-        if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            writeByte((long shr 56 and 0xff).toByte())
-            writeByte((long shr 48 and 0xff).toByte())
-            writeByte((long shr 40 and 0xff).toByte())
-            writeByte((long shr 32 and 0xff).toByte())
-            writeByte((long shr 24 and 0xff).toByte())
-            writeByte((long shr 16 and 0xff).toByte())
-            writeByte((long shr 8 and 0xff).toByte())
-            writeByte((long shr 0 and 0xff).toByte())
-        } else {
-            writeByte((long shr 0 and 0xff).toByte())
-            writeByte((long shr 8 and 0xff).toByte())
-            writeByte((long shr 16 and 0xff).toByte())
-            writeByte((long shr 24 and 0xff).toByte())
-            writeByte((long shr 32 and 0xff).toByte())
-            writeByte((long shr 40 and 0xff).toByte())
-            writeByte((long shr 48 and 0xff).toByte())
-            writeByte((long shr 56 and 0xff).toByte())
-        }
-        return this
-    }
+    fun writeLong(long: Long): WriteBuffer = writeNumberOfByteSize(long, Long.SIZE_BYTES)
 
-    fun writeBits(bitSize: Byte, number: Long) {
-        check(bitSize >= 1) { "bit size out of range" }
+    fun writeNumberOfByteSize(number: Long, byteSize: Int): WriteBuffer {
+        check(byteSize in 1..8) { "byte size out of range" }
         val byteSizeRange = when (byteOrder) {
-            ByteOrder.BIG_ENDIAN -> bitSize - 1..0
-            ByteOrder.LITTLE_ENDIAN -> 0 until bitSize
+            ByteOrder.LITTLE_ENDIAN -> 0 until byteSize
+            ByteOrder.BIG_ENDIAN -> byteSize - 1 downTo 0
         }
-        for (byteIndex in byteSizeRange) {
-            val bitIndex = byteIndex * 8
+        for (i in byteSizeRange) {
+            val bitIndex = i * 8
             writeByte((number shr bitIndex and 0xff).toByte())
         }
+        return this
     }
 
     @Deprecated("Use writeLong for explicitness. This will be removed in the next release", ReplaceWith("writeLong(long)"))
