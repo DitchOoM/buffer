@@ -18,7 +18,7 @@ actual fun String.toBuffer(zone: AllocationZone): ReadBuffer {
     val bytes = this.encodeToByteArray()
     return if (zone is AllocationZone.Custom) {
         val buffer = zone.allocator(bytes.size)
-        buffer.write(bytes)
+        buffer.writeBytes(bytes)
         buffer
     } else {
         NativeBuffer(bytes, byteOrder = ByteOrder.BIG_ENDIAN)

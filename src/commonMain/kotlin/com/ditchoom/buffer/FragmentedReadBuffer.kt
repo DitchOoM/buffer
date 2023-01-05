@@ -14,6 +14,10 @@ class FragmentedReadBuffer(
     private var currentPosition = 0
     private var currentLimit = firstInitialLimit + secondInitialLimit
 
+    override val byteOrder: ByteOrder
+        get() {
+            throw IllegalStateException("Byte order is undefined for FragmentedReadBuffer")
+        }
     override fun setLimit(limit: Int) {
         if (limit <= firstInitialLimit + secondInitialLimit) {
             currentLimit = limit

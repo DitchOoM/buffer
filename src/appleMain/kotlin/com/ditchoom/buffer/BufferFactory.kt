@@ -27,7 +27,7 @@ actual fun String.toBuffer(zone: AllocationZone): ReadBuffer {
         @Suppress("OPT_IN_USAGE")
         val bytes = this.encodeToByteArray()
         val buffer = zone.allocator(bytes.size)
-        buffer.write(bytes)
+        buffer.writeBytes(bytes)
         buffer
     } else {
         @Suppress("OPT_IN_USAGE", "CAST_NEVER_SUCCEEDS")

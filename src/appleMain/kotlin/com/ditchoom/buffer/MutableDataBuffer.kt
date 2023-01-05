@@ -6,7 +6,6 @@ import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.set
 import kotlinx.cinterop.usePinned
-import kotlinx.cinterop.value
 import platform.CoreFoundation.CFDataRef
 import platform.Foundation.CFBridgingRelease
 import platform.Foundation.CFBridgingRetain
@@ -49,12 +48,12 @@ class MutableDataBuffer(
         limit = data.length.toInt()
     }
 
-    override fun write(byte: Byte): WriteBuffer {
+    override fun writeByte(byte: Byte): WriteBuffer {
         writeByteInternal(position++, byte)
         return this
     }
 
-    override fun write(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
+    override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
         if (mutableData != null) {
             val range = NSMakeRange(position.convert(), length.convert())
             bytes.usePinned { pin ->
@@ -64,60 +63,6 @@ class MutableDataBuffer(
         } else if (backingArray != null) {
             bytes.copyInto(backingArray, position, offset, offset + length)
             position += length
-        }
-        return this
-    }
-
-    override fun write(uByte: UByte) = write(uByte.toByte())
-
-    override fun write(uShort: UShort): WriteBuffer {
-        val value = uShort.toShort().toInt()
-        if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            writeByteInternal(position++, (value shr 8 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 0 and 0xff).toByte())
-        } else {
-            writeByteInternal(position++, (value shr 0 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 8 and 0xff).toByte())
-        }
-        return this
-    }
-
-    override fun write(uInt: UInt): WriteBuffer {
-        val value = uInt.toInt()
-        if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            writeByteInternal(position++, (value shr 24 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 16 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 8 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 0 and 0xff).toByte())
-        } else {
-            writeByteInternal(position++, (value shr 0 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 8 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 16 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 24 and 0xff).toByte())
-        }
-        return this
-    }
-
-    override fun write(long: Long): WriteBuffer {
-        val value = long
-        if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            writeByteInternal(position++, (value shr 56 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 48 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 40 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 32 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 24 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 16 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 8 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 0 and 0xff).toByte())
-        } else {
-            writeByteInternal(position++, (value shr 0 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 8 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 16 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 24 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 32 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 40 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 48 and 0xff).toByte())
-            writeByteInternal(position++, (value shr 56 and 0xff).toByte())
         }
         return this
     }
@@ -141,7 +86,7 @@ class MutableDataBuffer(
             position += bytesToCopySize
         } else {
             val remainingByteArray = buffer.readByteArray(buffer.remaining())
-            write(remainingByteArray)
+            writeBytes(remainingByteArray)
         }
     }
 

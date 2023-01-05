@@ -16,7 +16,7 @@ import platform.Foundation.subdataWithRange
 @Suppress("OPT_IN_USAGE")
 open class DataBuffer(
     val data: NSData,
-    open val byteOrder: ByteOrder
+    override val byteOrder: ByteOrder
 ) : ReadBuffer, SuspendCloseable, Parcelable {
 
     protected var position: Int = 0

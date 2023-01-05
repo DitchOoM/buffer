@@ -104,83 +104,29 @@ data class NativeBuffer(
         return value
     }
 
-    override fun write(byte: Byte): WriteBuffer {
+    override fun writeByte(byte: Byte): WriteBuffer {
         data[position++] = byte
         return this
     }
 
-    override fun write(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
+    override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
         bytes.copyInto(data, position, offset, offset + length)
         position += bytes.size
-        return this
-    }
-
-    override fun write(uByte: UByte) = write(uByte.toByte())
-
-    override fun write(uShort: UShort): WriteBuffer {
-        val value = uShort.toShort().toInt()
-        if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            data[position++] = (value shr 8 and 0xff).toByte()
-            data[position++] = (value shr 0 and 0xff).toByte()
-        } else {
-            data[position++] = (value shr 0 and 0xff).toByte()
-            data[position++] = (value shr 8 and 0xff).toByte()
-        }
-        return this
-    }
-
-    override fun write(uInt: UInt): WriteBuffer {
-        val value = uInt.toInt()
-        if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            data[position++] = (value shr 24 and 0xff).toByte()
-            data[position++] = (value shr 16 and 0xff).toByte()
-            data[position++] = (value shr 8 and 0xff).toByte()
-            data[position++] = (value shr 0 and 0xff).toByte()
-        } else {
-            data[position++] = (value shr 0 and 0xff).toByte()
-            data[position++] = (value shr 8 and 0xff).toByte()
-            data[position++] = (value shr 16 and 0xff).toByte()
-            data[position++] = (value shr 24 and 0xff).toByte()
-        }
-        return this
-    }
-
-    override fun write(long: Long): WriteBuffer {
-        val value = long
-        if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            data[position++] = (value shr 56 and 0xff).toByte()
-            data[position++] = (value shr 48 and 0xff).toByte()
-            data[position++] = (value shr 40 and 0xff).toByte()
-            data[position++] = (value shr 32 and 0xff).toByte()
-            data[position++] = (value shr 24 and 0xff).toByte()
-            data[position++] = (value shr 16 and 0xff).toByte()
-            data[position++] = (value shr 8 and 0xff).toByte()
-            data[position++] = (value shr 0 and 0xff).toByte()
-        } else {
-            data[position++] = (value shr 0 and 0xff).toByte()
-            data[position++] = (value shr 8 and 0xff).toByte()
-            data[position++] = (value shr 16 and 0xff).toByte()
-            data[position++] = (value shr 24 and 0xff).toByte()
-            data[position++] = (value shr 32 and 0xff).toByte()
-            data[position++] = (value shr 40 and 0xff).toByte()
-            data[position++] = (value shr 48 and 0xff).toByte()
-            data[position++] = (value shr 56 and 0xff).toByte()
-        }
         return this
     }
 
     override fun write(buffer: ReadBuffer) {
         val start = position()
         if (buffer is NativeBuffer) {
-            write(buffer.data)
+            writeBytes(buffer.data)
         } else {
-            write(buffer.readByteArray(remaining()))
+            writeBytes(buffer.readByteArray(remaining()))
         }
         buffer.position((position() - start))
     }
 
     override fun writeUtf8(text: CharSequence): WriteBuffer {
-        write(text.toString().encodeToByteArray())
+        writeBytes(text.toString().encodeToByteArray())
         return this
     }
 
