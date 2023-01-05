@@ -9,7 +9,9 @@ class FragmentedReadBuffer(
     private val first: ReadBuffer,
     private val second: ReadBuffer
 ) : ReadBuffer {
+    private val firstInitialPosition = first.position()
     private val firstInitialLimit = first.limit()
+    private val secondInitialPosition = second.position()
     private val secondInitialLimit = second.limit()
     private var currentPosition = 0
     private var currentLimit = firstInitialLimit + secondInitialLimit
@@ -24,7 +26,7 @@ class FragmentedReadBuffer(
         }
     }
 
-    override fun limit() = firstInitialLimit + secondInitialLimit
+    override fun limit() = currentLimit
 
     override fun position() = currentPosition
 
@@ -34,8 +36,8 @@ class FragmentedReadBuffer(
 
     override fun resetForRead() {
         currentPosition = 0
-        first.resetForRead()
-        second.resetForRead()
+        first.position(firstInitialPosition)
+        second.position(secondInitialPosition)
     }
 
     override fun readByte(): Byte {
