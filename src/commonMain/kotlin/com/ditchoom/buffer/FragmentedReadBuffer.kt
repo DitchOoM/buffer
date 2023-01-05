@@ -20,6 +20,7 @@ class FragmentedReadBuffer(
         get() {
             throw IllegalStateException("Byte order is undefined for FragmentedReadBuffer")
         }
+
     override fun setLimit(limit: Int) {
         if (limit <= firstInitialLimit + secondInitialLimit) {
             currentLimit = limit
