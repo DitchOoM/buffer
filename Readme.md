@@ -150,33 +150,33 @@ The byte order of a buffer can be checked with `buffer.byteOrder`
 ```kotlin
 val buffer: WriteBuffer
 // write signed byte
-buffer.write(5.toByte())
+buffer.writeByte(5.toByte())
 // write unsigned byte
-buffer.write(5.toUByte())
+buffer.writeUByte(5.toUByte())
 // write short
-buffer.write(5.toShort())
+buffer.writeShort(5.toShort())
 // write unsigned short
-buffer.write(5.toUShort())
+buffer.writeUShort(5.toUShort())
 // write int
-buffer.write(5)
+buffer.writeInt(5)
 // write unsigned int
-buffer.write(5.toUInt())
+buffer.writeUInt(5.toUInt())
 // write long
-buffer.write(5L)
+buffer.writeLong(5L)
 // write unsigned long
-buffer.write(5uL)
+buffer.writeULong(5uL)
 // write float
-buffer.write(123.456f)
+buffer.writeFloat(123.456f)
 // write double
-buffer.write(123.456)
+buffer.writeDouble(123.456)
 // write text
-buffer.write("5")
+buffer.writeUtf8("5")
 // copy buffer into this one
 buffer.write(otherBuffer)
 // write byte array
-buffer.write(byteArrayOf(1, 2, 3, 4))
+buffer.writeBytes(byteArrayOf(1, 2, 3, 4))
 // write partial byte array
-buffer.write(byteArrayOf(1, 2, 3, 4, 5), offset, length)
+buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5), offset, length)
 ```
 
 ### Read data into platform agnostic buffer
@@ -202,7 +202,7 @@ val uLongValue: ULong = buffer.readUnsignedLong()
 // read float
 val float: Float = buffer.readFloat()
 // read double
-val double: :Double = buffer.readDouble()
+val double: Double = buffer.readDouble()
 // read text
 val string: String = buffer.readUtf8(numOfBytesToRead)
 // read byte array

@@ -9,14 +9,14 @@ import kotlin.coroutines.suspendCoroutine
 
 abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? = null) :
     PlatformBuffer {
-    // Use Buffer reference to avoid NoSuchMethodException between JVM. see https://stackoverflow.com/q/61267495
-    private val buffer = byteBuffer as Buffer
-
     override val byteOrder = when (byteBuffer.order()) {
-        java.nio.ByteOrder.LITTLE_ENDIAN -> ByteOrder.LITTLE_ENDIAN
         java.nio.ByteOrder.BIG_ENDIAN -> ByteOrder.BIG_ENDIAN
+        java.nio.ByteOrder.LITTLE_ENDIAN -> ByteOrder.LITTLE_ENDIAN
         else -> ByteOrder.BIG_ENDIAN
     }
+
+    // Use Buffer reference to avoid NoSuchMethodException between JVM. see https://stackoverflow.com/q/61267495
+    private val buffer = byteBuffer as Buffer
 
     override fun resetForRead() {
         buffer.flip()
@@ -37,8 +37,7 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
 
     override fun slice() = JvmBuffer(byteBuffer.slice())
 
-    override fun readShort() = byteBuffer.short
-
+    override fun readShort(): Short = byteBuffer.short
     override fun readInt() = byteBuffer.int
     override fun readLong() = byteBuffer.long
 
@@ -51,38 +50,33 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
         return decoded
     }
 
-    override fun write(byte: Byte): WriteBuffer {
+    override fun writeByte(byte: Byte): WriteBuffer {
         byteBuffer.put(byte)
         return this
     }
 
-    override fun write(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
+    override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
         byteBuffer.put(bytes, offset, length)
         return this
     }
 
-    override fun write(uByte: UByte): WriteBuffer {
-        byteBuffer.put(uByte.toByte())
+    override fun writeShort(short: Short): WriteBuffer {
+        byteBuffer.putShort(short)
         return this
     }
 
-    override fun write(uShort: UShort): WriteBuffer {
-        byteBuffer.putShort(uShort.toShort())
+    override fun writeInt(int: Int): WriteBuffer {
+        byteBuffer.putInt(int)
         return this
     }
 
-    override fun write(uInt: UInt): WriteBuffer {
-        byteBuffer.putInt(uInt.toInt())
-        return this
-    }
-
-    override fun write(long: Long): WriteBuffer {
+    override fun writeLong(long: Long): WriteBuffer {
         byteBuffer.putLong(long)
         return this
     }
 
     override fun writeUtf8(text: CharSequence): WriteBuffer {
-        write(text.toString().encodeToByteArray())
+        writeBytes(text.toString().encodeToByteArray())
         return this
     }
 

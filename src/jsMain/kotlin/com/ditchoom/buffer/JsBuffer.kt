@@ -1,15 +1,8 @@
-@file:Suppress(
-    "EXPERIMENTAL_API_USAGE",
-    "EXPERIMENTAL_OVERRIDE",
-    "RemoveRedundantCallsOfConversionMethods"
-)
-
 package com.ditchoom.buffer
 
 import org.khronos.webgl.DataView
 import org.khronos.webgl.Int8Array
 import org.khronos.webgl.Uint8Array
-import org.khronos.webgl.set
 
 data class JsBuffer(
     val buffer: Uint8Array,
@@ -31,7 +24,7 @@ data class JsBuffer(
 
     override fun resetForWrite() {
         position = 0
-        limit = capacity.toInt()
+        limit = capacity
     }
 
     override fun setLimit(limit: Int) {
@@ -52,8 +45,8 @@ data class JsBuffer(
     }
 
     override fun readByteArray(size: Int): ByteArray {
-        val byteArray = Int8Array(buffer.buffer, position, size.toInt()).unsafeCast<ByteArray>()
-        position += size.toInt()
+        val byteArray = Int8Array(buffer.buffer, position, size).unsafeCast<ByteArray>()
+        position += size
         return byteArray
     }
 
@@ -66,7 +59,7 @@ data class JsBuffer(
     override fun readInt(): Int {
         val dataView = DataView(buffer.buffer, position, Int.SIZE_BYTES)
         position += Int.SIZE_BYTES
-        return dataView.getInt32(0, littleEndian).toInt()
+        return dataView.getInt32(0, littleEndian)
     }
 
     override fun readLong(): Long {
@@ -99,41 +92,36 @@ data class JsBuffer(
         position += size
     }
 
-    override fun write(byte: Byte): WriteBuffer {
-        val dataView = DataView(buffer.buffer, position++, 1)
+    override fun writeByte(byte: Byte): WriteBuffer {
+        val dataView = DataView(buffer.buffer, position++, Byte.SIZE_BYTES)
         dataView.setInt8(0, byte)
         return this
     }
 
-    override fun write(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
+    override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
         val uint8Array = bytes.unsafeCast<Uint8Array>().subarray(offset, offset + length)
         this.buffer.set(uint8Array, position)
         position += uint8Array.length
         return this
     }
 
-    override fun write(uByte: UByte): WriteBuffer {
-        buffer[position++] = uByte.toByte()
-        return this
-    }
-
-    override fun write(uShort: UShort): WriteBuffer {
-        val dataView = DataView(buffer.buffer, position, UShort.SIZE_BYTES)
+    override fun writeShort(short: Short): WriteBuffer {
+        val dataView = DataView(buffer.buffer, position, Short.SIZE_BYTES)
         position += UShort.SIZE_BYTES
-        dataView.setUint16(0, uShort.toShort(), littleEndian)
+        dataView.setUint16(0, short, littleEndian)
         return this
     }
 
-    override fun write(uInt: UInt): WriteBuffer {
+    override fun writeInt(int: Int): WriteBuffer {
         val dataView = DataView(buffer.buffer, position, UInt.SIZE_BYTES)
         position += UInt.SIZE_BYTES
-        dataView.setUint32(0, uInt.toInt(), littleEndian)
+        dataView.setUint32(0, int, littleEndian)
         return this
     }
 
-    override fun write(long: Long): WriteBuffer {
+    override fun writeLong(long: Long): WriteBuffer {
         val bytes = if (littleEndian) long.toByteArray().reversedArray() else long.toByteArray()
-        write(bytes)
+        writeBytes(bytes)
         return this
     }
 
@@ -148,7 +136,7 @@ data class JsBuffer(
     }
 
     override fun writeUtf8(text: CharSequence): WriteBuffer {
-        write(text.toString().encodeToByteArray())
+        writeBytes(text.toString().encodeToByteArray())
         return this
     }
 
@@ -174,8 +162,8 @@ data class JsBuffer(
         try {
             if (!readByteArray(size).contentEquals(other.readByteArray(size))) return false
         } finally {
-            position -= size.toInt()
-            other.position -= size.toInt()
+            position -= size
+            other.position -= size
         }
         return true
     }
@@ -189,7 +177,7 @@ data class JsBuffer(
         try {
             result = 31 * result + readByteArray(size).hashCode()
         } finally {
-            position -= size.toInt()
+            position -= size
         }
         return result
     }

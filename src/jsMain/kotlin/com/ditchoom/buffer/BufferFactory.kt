@@ -26,7 +26,7 @@ actual fun String.toBuffer(zone: AllocationZone): ReadBuffer {
     val bytes = encodeToByteArray()
     return if (zone is AllocationZone.Custom) {
         val buffer = zone.allocator(bytes.size)
-        buffer.write(bytes)
+        buffer.writeBytes(bytes)
         buffer
     } else {
         val int8Array = bytes.unsafeCast<Int8Array>()
