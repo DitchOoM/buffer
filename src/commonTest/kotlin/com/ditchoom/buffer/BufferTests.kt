@@ -47,15 +47,28 @@ class BufferTests {
         platformBuffer1.resetForRead()
 
         val platformBuffer2 = PlatformBuffer.allocate(3)
-        platformBuffer2.write(2.toByte())
+        platformBuffer2.write((-1).toByte())
         platformBuffer2.resetForRead()
 
         val fragmentedBuffer = FragmentedReadBuffer(platformBuffer1, platformBuffer2)
+        assertEquals(0, fragmentedBuffer.position())
+        assertEquals(2, fragmentedBuffer.limit())
+        assertEquals(1, fragmentedBuffer.readByte())
+        assertEquals(1, fragmentedBuffer.position())
+        assertEquals(2, fragmentedBuffer.limit())
+        assertEquals(-1, fragmentedBuffer.readByte())
+        assertEquals(2, fragmentedBuffer.position())
+        assertEquals(2, fragmentedBuffer.limit())
+        fragmentedBuffer.resetForRead()
+        assertEquals(0, fragmentedBuffer.position())
+        assertEquals(2, fragmentedBuffer.limit())
         val slicedBuffer = fragmentedBuffer.slice()
         assertEquals(0, slicedBuffer.position())
         assertEquals(2, slicedBuffer.limit())
         assertEquals(1, slicedBuffer.readByte())
-        assertEquals(2, slicedBuffer.readByte())
+        assertEquals(1, slicedBuffer.position())
+        assertEquals(2, slicedBuffer.limit())
+        assertEquals(-1, slicedBuffer.readByte())
         assertEquals(2, slicedBuffer.position())
         assertEquals(2, slicedBuffer.limit())
     }
@@ -379,8 +392,11 @@ class BufferTests {
     fun partialByteArray() {
         val byteArray = byteArrayOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
         val partialArray = byteArray.sliceArray(2..6)
-        val buffer = PlatformBuffer.allocate(partialArray.size)
+        val buffer = PlatformBuffer.allocate(byteArray.size)
+        val position = buffer.position()
         buffer.write(byteArray, 2, 5)
+        val deltaPosition = buffer.position() - position
+        assertEquals(5, deltaPosition)
         buffer.resetForRead()
         assertContentEquals(partialArray, buffer.readByteArray(5))
     }
@@ -389,7 +405,12 @@ class BufferTests {
     fun wrap() {
         val byteArray = byteArrayOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
         val buffer = PlatformBuffer.wrap(byteArray)
-        assertEquals(byteArray.size, buffer.remaining())
-        assertContentEquals(byteArray, buffer.readByteArray(buffer.remaining()))
+        assertEquals(byteArray.size, buffer.remaining(), "remaining")
+        assertContentEquals(byteArray, buffer.readByteArray(buffer.remaining()), "equals")
+        buffer.resetForRead()
+        assertEquals(byteArray.size, buffer.remaining(), "remaining")
+        byteArray.fill(-1)
+        val modified = byteArray.copyOf()
+        assertContentEquals(buffer.readByteArray(buffer.remaining()), modified, "modify original")
     }
 }

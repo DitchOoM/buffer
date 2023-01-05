@@ -62,15 +62,18 @@ A kotlin multiplatform library that allows you to allocate and modify byte[] nat
 
 ## About The Project
 
-Allocating and managing a chunk of memory can be slightly different based on each platform. This project aims to make
-it **easier to manage buffers in a cross platform way using kotlin multiplatform**. This was originally created as a
-side project for a kotlin multiplatform mqtt data sync solution.
+Allocating and managing a chunk of memory can be slightly different based on each platform. This
+project aims to make it **easier to manage buffers in a cross platform way using kotlin
+multiplatform**. This was originally created as a side project for a kotlin multiplatform mqtt data
+sync solution.
 
 Implementation notes:
 
-* `JVM` + `Android` delegate to direct [ByteBuffers][byte-buffer-api] to avoid memory copies when possible.
-* `Native` platforms use standard byte arrays to manage memory.
+* `JVM` + `Android` delegate to direct [ByteBuffers][byte-buffer-api] to avoid memory copies when
+  possible.
+* Apple targets use NSData or NSMutableData
 * `JS` targets use Uint8Array.
+* `Native` platforms use standard byte arrays to manage memory.
 
 ### Runtime Dependencies
 
@@ -78,31 +81,37 @@ Implementation notes:
 
 ### [Supported Platforms](https://kotlinlang.org/docs/reference/mpp-supported-platforms.html)
 
-| Platform | 🛠Builds🛠 + 🔬Tests🔬 |         Deployed Artifact          | Non Kotlin Sample |  
-| :---: | :---: |:----------------------------------:|:-----------------:|
-| `JVM` 1.8 |🚀| [maven central][maven-central] 🔮  |        WIP        |
-| `Node.js` |🚀|           [npm][npm] 🔮            |        WIP         |
-| `Browser` (Chrome) |🚀|           [npm][npm] 🔮            |        WIP         |
-| `Android` |🚀| [maven central][maven-central]  🔮 |        WIP         |
-| `iOS` |🚀|    WIP [cocoapods][cocoapods] 🔮      |        WIP         |
-| `WatchOS` |🚀|    WIP [cocoapods][cocoapods] 🔮      |        WIP         |
-| `TvOS` |🚀|    WIP [cocoapods][cocoapods] 🔮      |        WIP         |
-| `MacOS` |🚀|    WIP [cocoapods][cocoapods] 🔮      |        WIP         |
-| `Linux X64` |🚀|    WIP [apt][apt]/[yum][yum] 🔮    |        WIP         |
-| `Windows X64` |🚀|  WIP [chocolatey][chocolately] 🔮  |        WIP         |
+* All Kotlin Multiplatform supported OS's.
+
+| Platform |                                                                            Wrapped Type                                                                             |  
+| :---: |:-------------------------------------------------------------------------------------------------------------------------------------------------------------------:|
+| `JVM` 1.8 |                                 [ByteBuffer](https://docs.oracle.com/en/java/javase/12/docs/api/java.base/java/nio/ByteBuffer.html)                                 |
+| `Node.js` |                              [Uint8Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array)                              |
+| `Browser` (Chrome) |                              [Uint8Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array)                              |
+| `Android` | [ByteBuffer](https://developer.android.com/reference/java/nio/ByteBuffer) including [SharedMemory](https://developer.android.com/reference/android/os/SharedMemory) |
+| `iOS` |                                     [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                      |
+| `WatchOS` |                                     [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                      |
+| `TvOS` |                                     [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                      |
+| `MacOS` |                                     [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                      |
+| `Linux X64` |                                                                          kotlin ByteArray                                                                           |
+| `Windows X64` |                                                                                TODO                                                                                 |
 
 ## Installation
+
 ### Gradle
+
 - [Add `implementation("com.ditchoom:buffer:$version")` to your `build.gradle` dependencies](https://search.maven.org/artifact/com.ditchoom/buffer)
-### NPM
--  [execute `npm i @ditchoom/buffer-kt`](https://www.npmjs.com/package/@ditchoom/buffer-kt)
 
 ## Usage
 
 ### Allocate a new platform agnostic buffer
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(byteSize, zone = AllocationZone.Direct, byteOrder = ByteOrder.BIG_ENDIAN)
+val buffer = PlatformBuffer.allocate(
+    byteSize,
+    zone = AllocationZone.Direct,
+    byteOrder = ByteOrder.BIG_ENDIAN
+)
 ```
 
 ### Wrap an existing byte array into a platform agnostic buffer
@@ -116,19 +125,22 @@ val buffer = PlatformBuffer.wrap(byteArray, byteOrder = ByteOrder.BIG_ENDIAN)
 
 Allocation zones allow you to change where the buffer is allocated.
 
-- `AllocationZone.Custom` -> Allows you to override the underlying buffer. This can be helpful for memory mapped
-  structures.
-- `AllocationZone.Heap` -> On JVM platforms, allocates a HeapByteBuffer, otherwise a native byte array
-- `AllocationZone.Direct` -> On JVM platforms, allocates a DirectByteBuffer, otherwise a native byte array
+- `AllocationZone.Custom` -> Allows you to override the underlying buffer. This can be helpful for
+  memory mapped structures.
+- `AllocationZone.Heap` -> On JVM platforms, allocates a HeapByteBuffer, otherwise a native byte
+  array
+- `AllocationZone.Direct` -> On JVM platforms, allocates a DirectByteBuffer, otherwise a native byte
+  array
 - `AllocationZone.AndroidSharedMemory` -> On API 27+ it allocates
-  a [Shared Memory](https://developer.android.com/reference/android/os/SharedMemory) instance, otherwise defaulting
-  to `AllocationZone.Direct`.
+  a [Shared Memory](https://developer.android.com/reference/android/os/SharedMemory) instance,
+  otherwise defaulting to `AllocationZone.Direct`.
 
 > **Android**: All `JvmBuffer`s are `Parcelable`. To avoid extra memory copies, use `AllocationZone.AndroidSharedMemory`
 
 ### Byte order
 
-Byte order defaults to big endian but can be specified when creating the buffer with `ByteOrder.BIG_ENDIAN`
+Byte order defaults to big endian but can be specified when creating the buffer
+with `ByteOrder.BIG_ENDIAN`
 or `ByteOrder.LITTLE_ENDIAN`
 
 The byte order of a buffer can be checked with `buffer.byteOrder`
@@ -172,45 +184,47 @@ buffer.write(byteArrayOf(1, 2, 3, 4, 5), offset, length)
 ```kotlin
 val buffer: ReadBuffer
 // read signed byte
-val b :Byte = buffer.readByte()
+val b: Byte = buffer.readByte()
 // read unsigned byte
-val uByte :UByte = buffer.readUnsignedByte()
+val uByte: UByte = buffer.readUnsignedByte()
 // read short
-val short :Short = buffer.readShort()
+val short: Short = buffer.readShort()
 // read unsigned short
-val uShort :UShort = buffer.readUnsignedShort()
+val uShort: UShort = buffer.readUnsignedShort()
 // read int
 val intValue = buffer.readInt()
 // read unsigned int
-val uIntValue :Int = buffer.readUnsignedInt()
+val uIntValue: Int = buffer.readUnsignedInt()
 // read long
-val longValue :Long = buffer.readLong()
+val longValue: Long = buffer.readLong()
 // read unsigned long
-val uLongValue :ULong = buffer.readUnsignedLong()
+val uLongValue: ULong = buffer.readUnsignedLong()
 // read float
-val float :Float = buffer.readFloat()
+val float: Float = buffer.readFloat()
 // read double
 val double: :Double = buffer.readDouble()
 // read text
-val string :String = buffer.readUtf8(numOfBytesToRead)
+val string: String = buffer.readUtf8(numOfBytesToRead)
 // read byte array
-val byteArray :ByteArray = buffer.readByteArray(numOfBytesToRead)
+val byteArray: ByteArray = buffer.readByteArray(numOfBytesToRead)
 ```
 
 ## Building Locally
 
 - `git clone git@github.com:DitchOoM/buffer.git`
 - Open cloned directory with [Intellij IDEA](https://www.jetbrains.com/idea/download).
-    - Be sure to [open with gradle](https://www.jetbrains.com/help/idea/gradle.html#gradle_import_project_start)
+    - Be sure
+      to [open with gradle](https://www.jetbrains.com/help/idea/gradle.html#gradle_import_project_start)
 
 ## Roadmap
 
-See the [open issues](https://github.com/DitchOoM/buffer/issues) for a list of proposed features (and known issues).
+See the [open issues](https://github.com/DitchOoM/buffer/issues) for a list of proposed features (
+and known issues).
 
 ## Contributing
 
-Contributions are what make the open source community such an amazing place to be learn, inspire, and create. Any
-contributions you make are **greatly appreciated**.
+Contributions are what make the open source community such an amazing place to be learn, inspire,
+and create. Any contributions you make are **greatly appreciated**.
 
 1. Fork the Project
 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)

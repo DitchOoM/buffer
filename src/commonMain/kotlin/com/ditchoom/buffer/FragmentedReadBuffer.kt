@@ -30,6 +30,8 @@ class FragmentedReadBuffer(
 
     override fun resetForRead() {
         currentPosition = 0
+        first.resetForRead()
+        second.resetForRead()
     }
 
     override fun readByte(): Byte {
@@ -41,22 +43,23 @@ class FragmentedReadBuffer(
     }
 
     private fun <T> readSizeIntoBuffer(size: Int, block: (ReadBuffer) -> T): T {
-        val buffer = if (currentPosition < firstInitialLimit && currentPosition + size <= firstInitialLimit) {
-            block(first)
-        } else if (currentPosition < firstInitialLimit && currentPosition + size > firstInitialLimit) {
-            val firstChunkSize = firstInitialLimit - currentPosition
-            val secondChunkSize = size - firstChunkSize
-            val secondBufferLimit = second.limit().toInt()
-            second.setLimit((second.position() + secondChunkSize).toInt())
-            val buffer = PlatformBuffer.allocate(size)
-            buffer.write(first)
-            buffer.write(second)
-            second.setLimit(secondBufferLimit)
-            buffer.resetForRead()
-            block(buffer)
-        } else {
-            block(second)
-        }
+        val buffer =
+            if (currentPosition < firstInitialLimit && currentPosition + size <= firstInitialLimit) {
+                block(first)
+            } else if (currentPosition < firstInitialLimit && currentPosition + size > firstInitialLimit) {
+                val firstChunkSize = firstInitialLimit - currentPosition
+                val secondChunkSize = size - firstChunkSize
+                val secondBufferLimit = second.limit()
+                second.setLimit(second.position() + secondChunkSize)
+                val buffer = PlatformBuffer.allocate(size)
+                buffer.write(first)
+                buffer.write(second)
+                second.setLimit(secondBufferLimit)
+                buffer.resetForRead()
+                block(buffer)
+            } else {
+                block(second)
+            }
         currentPosition += size
         return buffer
     }

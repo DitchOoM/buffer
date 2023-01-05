@@ -1,4 +1,8 @@
-@file:Suppress("EXPERIMENTAL_API_USAGE", "EXPERIMENTAL_OVERRIDE", "RemoveRedundantCallsOfConversionMethods")
+@file:Suppress(
+    "EXPERIMENTAL_API_USAGE",
+    "EXPERIMENTAL_OVERRIDE",
+    "RemoveRedundantCallsOfConversionMethods"
+)
 
 package com.ditchoom.buffer
 
