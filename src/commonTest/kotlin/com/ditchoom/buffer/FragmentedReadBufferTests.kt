@@ -393,8 +393,8 @@ class FragmentedReadBufferTests {
             .split(Regex("(?=-)"))
             .map { it.toBuffer() }
             .toComposableBuffer()
-        val actual = composableBuffer.readUtf8(utf8length)
-        assertEquals(expectedString, actual.toString())
+        val actual = composableBuffer.readString(utf8length, Charset.UTF8)
+        assertEquals(expectedString, actual)
     }
 
     @Test

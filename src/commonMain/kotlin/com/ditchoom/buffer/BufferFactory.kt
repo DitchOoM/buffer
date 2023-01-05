@@ -13,7 +13,7 @@ expect fun PlatformBuffer.Companion.wrap(
 
 expect fun String.toBuffer(zone: AllocationZone = AllocationZone.Heap): ReadBuffer
 
-fun String.utf8Length(): Int {
+fun CharSequence.utf8Length(): Int {
     var count = 0
     var i = 0
     val len = length

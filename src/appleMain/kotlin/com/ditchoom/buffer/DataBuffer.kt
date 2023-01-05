@@ -48,13 +48,16 @@ open class DataBuffer(
         return result
     }
 
-    override fun readUtf8(bytes: Int): CharSequence {
-        if (bytes == 0) return ""
-        val subdata = data.subdataWithRange(NSMakeRange(position.convert(), bytes.convert()))
+    override fun readString(length: Int, charset: Charset): String {
+        if (length == 0) return ""
+        val subdata = data.subdataWithRange(NSMakeRange(position.convert(), length.convert()))
 
+        val stringEncoding = when (charset) {
+            Charset.UTF8 -> NSUTF8StringEncoding
+        }
         @Suppress("CAST_NEVER_SUCCEEDS")
-        val string = NSString.create(subdata, NSUTF8StringEncoding) as String
-        position += bytes
+        val string = NSString.create(subdata, stringEncoding) as String
+        position += length
         return string
     }
 

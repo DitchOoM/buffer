@@ -42,7 +42,7 @@ actual fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder)
 
 @Throws(CharacterCodingException::class)
 actual fun String.toBuffer(zone: AllocationZone): ReadBuffer {
-    val encoder = utf8Encoder.get()
+    val encoder = utf8Encoder.get()!!
     encoder.reset()
     val out = PlatformBuffer.allocate(utf8Length(), zone = zone) as JvmBuffer
     encoder.encode(CharBuffer.wrap(this), out.byteBuffer, true)
@@ -50,7 +50,7 @@ actual fun String.toBuffer(zone: AllocationZone): ReadBuffer {
     return out
 }
 
-private val utf8Encoder = object : ThreadLocal<CharsetEncoder>() {
+internal val utf8Encoder = object : ThreadLocal<CharsetEncoder>() {
     override fun initialValue(): CharsetEncoder? = Charsets.UTF_8.newEncoder()
     override fun get(): CharsetEncoder = super.get()!!
 }

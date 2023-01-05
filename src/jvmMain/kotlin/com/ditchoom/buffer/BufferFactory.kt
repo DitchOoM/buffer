@@ -41,7 +41,7 @@ actual fun String.toBuffer(zone: AllocationZone): ReadBuffer {
     return out
 }
 
-private val utf8Encoder = object : ThreadLocal<CharsetEncoder>() {
+internal val utf8Encoder = object : ThreadLocal<CharsetEncoder>() {
     override fun initialValue(): CharsetEncoder? = Charsets.UTF_8.newEncoder()
     override fun get(): CharsetEncoder = super.get()!!
 }

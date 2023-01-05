@@ -3,6 +3,7 @@ package com.ditchoom.buffer
 import java.io.RandomAccessFile
 import java.nio.Buffer
 import java.nio.ByteBuffer
+import java.nio.CharBuffer
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
@@ -41,13 +42,15 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
     override fun readInt() = byteBuffer.int
     override fun readLong() = byteBuffer.long
 
-    override fun readUtf8(bytes: Int): CharSequence {
-        val finalPosition = buffer.position() + bytes
+    override fun readString(length: Int, charset: Charset): String {
+        val finalPosition = buffer.position() + length
         val readBuffer = byteBuffer.asReadOnlyBuffer()
         (readBuffer as Buffer).limit(finalPosition)
-        val decoded = Charsets.UTF_8.decode(readBuffer)
+        val decoded = when (charset) {
+            Charset.UTF8 -> Charsets.UTF_8
+        }.decode(readBuffer)
         buffer.position(finalPosition)
-        return decoded
+        return decoded.toString()
     }
 
     override fun writeByte(byte: Byte): WriteBuffer {
@@ -76,7 +79,9 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
     }
 
     override fun writeUtf8(text: CharSequence): WriteBuffer {
-        writeBytes(text.toString().encodeToByteArray())
+        val encoder = utf8Encoder.get()!!
+        encoder.reset()
+        encoder.encode(CharBuffer.wrap(text), byteBuffer, true)
         return this
     }
 

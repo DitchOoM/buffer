@@ -78,8 +78,8 @@ data class JsBuffer(
         return result
     }
 
-    override fun readUtf8(bytes: Int): CharSequence {
-        return readByteArray(bytes).decodeToString()
+    override fun readString(length: Int, charset: Charset): String = when (charset) {
+        Charset.UTF8 -> readByteArray(length).decodeToString()
     }
 
     override fun write(buffer: ReadBuffer) {

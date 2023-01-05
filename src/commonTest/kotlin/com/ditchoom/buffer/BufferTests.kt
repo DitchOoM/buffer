@@ -37,7 +37,7 @@ class BufferTests {
         val platformBuffer = PlatformBuffer.allocate(bytes.size)
         platformBuffer.writeBytes(bytes)
         platformBuffer.position(2)
-        assertEquals(expected, platformBuffer.readUtf8(4).toString())
+        assertEquals(expected, platformBuffer.readString(4, Charset.UTF8))
     }
 
     @Test
@@ -229,7 +229,7 @@ class BufferTests {
         val platformBuffer = PlatformBuffer.allocate(19)
         platformBuffer.writeUtf8(string)
         platformBuffer.resetForRead()
-        val actual = platformBuffer.readUtf8(19u).toString()
+        val actual = platformBuffer.readString(19, Charset.UTF8)
         assertEquals(string.length, actual.length)
         assertEquals(string, actual)
     }

@@ -34,9 +34,11 @@ data class NativeBuffer(
         return result
     }
 
-    override fun readUtf8(bytes: Int): CharSequence {
-        val value = data.decodeToString(position, position + bytes)
-        position += bytes
+    override fun readString(length: Int, charset: Charset): String {
+        val value = when (charset) {
+            Charset.UTF8 -> data.decodeToString(position, position + length)
+        }
+        position += length
         return value
     }
 

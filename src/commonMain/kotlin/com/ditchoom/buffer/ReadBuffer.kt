@@ -14,8 +14,11 @@ interface ReadBuffer : PositionBuffer {
     fun readLong(): Long = readNumberWithByteSize(Long.SIZE_BYTES)
     fun readUnsignedLong(): ULong = readLong().toULong()
     fun readDouble(): Double = Double.fromBits(readLong())
-    fun readUtf8(bytes: UInt): CharSequence = readUtf8(bytes.toInt())
-    fun readUtf8(bytes: Int): CharSequence
+    fun readString(length: Int, charset: Charset = Charset.UTF8): String
+    @Deprecated("Use readString instead", ReplaceWith("readString(bytes, Charset.UTF8)", "com.ditchoom.buffer.Charset"))
+    fun readUtf8(bytes: UInt): CharSequence = readString(bytes.toInt(), Charset.UTF8)
+    @Deprecated("Use readString instead", ReplaceWith("readString(bytes, Charset.UTF8)", "com.ditchoom.buffer.Charset"))
+    fun readUtf8(bytes: Int): CharSequence = readString(bytes, Charset.UTF8)
     fun readUtf8Line(): CharSequence {
         val initialPosition = position()
         var lastByte: Byte = 0
@@ -36,7 +39,7 @@ interface ReadBuffer : PositionBuffer {
 
         val bytesToRead = bytesRead - carriageFeedPositionIncrement
         position(initialPosition)
-        val result = readUtf8(bytesToRead)
+        val result = readString(bytesToRead, Charset.UTF8)
         position(position() + carriageFeedPositionIncrement)
         return result
     }
