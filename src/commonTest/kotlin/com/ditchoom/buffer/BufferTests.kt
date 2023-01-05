@@ -171,12 +171,35 @@ class BufferTests {
         platformBuffer.writeLong(long)
         platformBuffer.resetForRead()
         assertEquals(long, platformBuffer.readLong())
+        platformBuffer.resetForRead()
+        assertEquals(long, platformBuffer.readNumberWithByteSize(Long.SIZE_BYTES))
 
         val platformBufferLittleEndian =
             PlatformBuffer.allocate(Long.SIZE_BYTES, byteOrder = ByteOrder.LITTLE_ENDIAN)
         platformBufferLittleEndian.writeLong(long)
         platformBufferLittleEndian.resetForRead()
         assertEquals(long, platformBufferLittleEndian.readLong())
+        platformBufferLittleEndian.resetForRead()
+        assertEquals(long, platformBufferLittleEndian.readNumberWithByteSize(Long.SIZE_BYTES))
+    }
+
+    @Test
+    fun longBits() {
+        val platformBuffer = PlatformBuffer.allocate(Long.SIZE_BYTES)
+        val long = (1234).toLong()
+        platformBuffer.writeNumberOfByteSize(long, Long.SIZE_BYTES)
+        platformBuffer.resetForRead()
+        assertEquals(long, platformBuffer.readLong())
+        platformBuffer.resetForRead()
+        assertEquals(long, platformBuffer.readNumberWithByteSize(Long.SIZE_BYTES))
+
+        val platformBufferLittleEndian =
+            PlatformBuffer.allocate(Long.SIZE_BYTES, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        platformBufferLittleEndian.writeNumberOfByteSize(long, Long.SIZE_BYTES)
+        platformBufferLittleEndian.resetForRead()
+        assertEquals(long, platformBufferLittleEndian.readLong())
+        platformBufferLittleEndian.resetForRead()
+        assertEquals(long, platformBufferLittleEndian.readNumberWithByteSize(Long.SIZE_BYTES))
     }
 
     @Test
