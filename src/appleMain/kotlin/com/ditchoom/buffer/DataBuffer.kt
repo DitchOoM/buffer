@@ -113,6 +113,7 @@ open class DataBuffer(
     }
 
     override fun readUtf8(bytes: Int): CharSequence {
+        if (bytes == 0) return ""
         val subdata = data.subdataWithRange(NSMakeRange(position.convert(), bytes.convert()))
 
         @Suppress("CAST_NEVER_SUCCEEDS")
