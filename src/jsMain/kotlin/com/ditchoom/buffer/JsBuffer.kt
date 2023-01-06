@@ -1,8 +1,10 @@
 package com.ditchoom.buffer
 
+import js.buffer.BufferSource
 import org.khronos.webgl.DataView
 import org.khronos.webgl.Int8Array
 import org.khronos.webgl.Uint8Array
+import web.encoding.TextDecoder
 
 data class JsBuffer(
     val buffer: Uint8Array,
@@ -78,8 +80,25 @@ data class JsBuffer(
         return result
     }
 
-    override fun readUtf8(bytes: Int): CharSequence {
-        return readByteArray(bytes).decodeToString()
+    override fun readString(length: Int, charset: Charset): String {
+        val encoding = when (charset) {
+            Charset.UTF8 -> "utf-8"
+            Charset.UTF16 -> throw UnsupportedOperationException("Not sure how to implement")
+            Charset.UTF16BigEndian -> "utf-16be"
+            Charset.UTF16LittleEndian -> "utf-16le"
+            Charset.ASCII -> "ascii"
+            Charset.ISOLatin1 -> "iso-8859-1"
+            Charset.UTF32 -> throw UnsupportedOperationException("Not sure how to implement")
+            Charset.UTF32LittleEndian -> throw UnsupportedOperationException("Not sure how to implement")
+            Charset.UTF32BigEndian -> throw UnsupportedOperationException("Not sure how to implement")
+        }
+
+        val textDecoder = TextDecoder(encoding)
+        val result = textDecoder.decode(
+            buffer.subarray(position, position + length).unsafeCast<BufferSource>()
+        )
+        position(position + length)
+        return result
     }
 
     override fun write(buffer: ReadBuffer) {
@@ -135,8 +154,11 @@ data class JsBuffer(
         return result
     }
 
-    override fun writeUtf8(text: CharSequence): WriteBuffer {
-        writeBytes(text.toString().encodeToByteArray())
+    override fun writeString(text: CharSequence, charset: Charset): WriteBuffer {
+        when (charset) {
+            Charset.UTF8 -> writeBytes(text.toString().encodeToByteArray())
+            else -> throw UnsupportedOperationException("Unable to encode in $charset. Must use Charset.UTF8")
+        }
         return this
     }
 

@@ -1,6 +1,10 @@
 // import dev.petuska.npm.publish.extension.domain.NpmAccess
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
-
+buildscript {
+    extra.apply {
+        set("kotlin_version", "1.8.0")
+    }
+}
 plugins {
     id("dev.petuska.npm.publish") version "3.2.0"
     kotlin("multiplatform") version "1.8.0"
@@ -24,6 +28,7 @@ val libraryVersion = if (System.getenv("GITHUB_RUN_NUMBER") != null) {
 repositories {
     google()
     mavenCentral()
+    maven { setUrl("https://maven.pkg.jetbrains.space/kotlin/p/kotlin/kotlin-js-wrappers/") }
 }
 
 kotlin {
@@ -69,7 +74,12 @@ kotlin {
         val jvmTest by getting {
             kotlin.srcDir("src/commonJvmTest/kotlin")
         }
-        val jsMain by getting
+
+        val jsMain by getting {
+            dependencies {
+                implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.467")
+            }
+        }
         val jsTest by getting
         val macosX64Main by getting
         val macosX64Test by getting

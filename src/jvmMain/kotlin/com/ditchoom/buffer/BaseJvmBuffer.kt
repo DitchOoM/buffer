@@ -3,6 +3,7 @@ package com.ditchoom.buffer
 import java.io.RandomAccessFile
 import java.nio.Buffer
 import java.nio.ByteBuffer
+import java.nio.CharBuffer
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
@@ -41,13 +42,23 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
     override fun readInt() = byteBuffer.int
     override fun readLong() = byteBuffer.long
 
-    override fun readUtf8(bytes: Int): CharSequence {
-        val finalPosition = buffer.position() + bytes
+    override fun readString(length: Int, charset: Charset): String {
+        val finalPosition = buffer.position() + length
         val readBuffer = byteBuffer.asReadOnlyBuffer()
         (readBuffer as Buffer).limit(finalPosition)
-        val decoded = Charsets.UTF_8.decode(readBuffer)
+        val decoded = when (charset) {
+            Charset.UTF8 -> Charsets.UTF_8
+            Charset.UTF16 -> Charsets.UTF_16
+            Charset.UTF16BigEndian -> Charsets.UTF_16BE
+            Charset.UTF16LittleEndian -> Charsets.UTF_16LE
+            Charset.ASCII -> Charsets.US_ASCII
+            Charset.ISOLatin1 -> Charsets.ISO_8859_1
+            Charset.UTF32 -> Charsets.UTF_32
+            Charset.UTF32LittleEndian -> Charsets.UTF_32LE
+            Charset.UTF32BigEndian -> Charsets.UTF_32BE
+        }.decode(readBuffer)
         buffer.position(finalPosition)
-        return decoded
+        return decoded.toString()
     }
 
     override fun writeByte(byte: Byte): WriteBuffer {
@@ -75,8 +86,10 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
         return this
     }
 
-    override fun writeUtf8(text: CharSequence): WriteBuffer {
-        writeBytes(text.toString().encodeToByteArray())
+    override fun writeString(text: CharSequence, charset: Charset): WriteBuffer {
+        val encoder = charset.toEncoder()
+        encoder.reset()
+        encoder.encode(CharBuffer.wrap(text), byteBuffer, true)
         return this
     }
 

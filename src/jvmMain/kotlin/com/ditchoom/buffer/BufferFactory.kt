@@ -4,7 +4,6 @@ package com.ditchoom.buffer
 
 import java.nio.ByteBuffer
 import java.nio.CharBuffer
-import java.nio.charset.CharsetEncoder
 
 actual fun PlatformBuffer.Companion.allocate(
     size: Int,
@@ -32,16 +31,11 @@ actual fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder)
 }
 
 @Throws(CharacterCodingException::class)
-actual fun String.toBuffer(zone: AllocationZone): ReadBuffer {
-    val encoder = utf8Encoder.get()
+actual fun String.toReadBuffer(charset: Charset, zone: AllocationZone): ReadBuffer {
+    val encoder = charset.toEncoder()
     encoder.reset()
     val out = PlatformBuffer.allocate(utf8Length(), zone = zone) as JvmBuffer
     encoder.encode(CharBuffer.wrap(this), out.byteBuffer, true)
     out.resetForRead()
     return out
-}
-
-private val utf8Encoder = object : ThreadLocal<CharsetEncoder>() {
-    override fun initialValue(): CharsetEncoder? = Charsets.UTF_8.newEncoder()
-    override fun get(): CharsetEncoder = super.get()!!
 }

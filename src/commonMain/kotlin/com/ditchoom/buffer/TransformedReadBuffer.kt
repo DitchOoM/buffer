@@ -86,5 +86,10 @@ class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((Int, Byte
         return buffer.readLong()
     }
 
-    override fun readUtf8(bytes: Int) = readByteArray(bytes).decodeToString()
+    override fun readString(length: Int, charset: Charset): String {
+        return when (charset) {
+            Charset.UTF8 -> readByteArray(length).decodeToString()
+            else -> throw UnsupportedOperationException("Unsupported charset $charset")
+        }
+    }
 }

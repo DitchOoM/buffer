@@ -34,73 +34,19 @@ data class NativeBuffer(
         return result
     }
 
-    override fun readShort(): Short {
-        val value =
-            if (byteOrder == ByteOrder.BIG_ENDIAN)
-                (
-                    (0xff and data[position + 0].toInt() shl 8)
-                        or (0xff and data[position + 1].toInt() shl 0)
-                    ).toShort()
-            else
-                (
-                    (0xff and data[position + 1].toInt() shl 8)
-                        or (0xff and data[position + 0].toInt() shl 0)
-                    ).toShort()
-        position += Short.SIZE_BYTES
-        return value
-    }
-
-    override fun readInt(): Int {
-        val value =
-            if (byteOrder == ByteOrder.BIG_ENDIAN)
-                (
-                    0xff and data[position + 0].toInt() shl 24
-                        or (0xff and data[position + 1].toInt() shl 16)
-                        or (0xff and data[position + 2].toInt() shl 8)
-                        or (0xff and data[position + 3].toInt() shl 0)
-                    )
-            else
-                (
-                    0xff and data[position + 3].toInt() shl 24
-                        or (0xff and data[position + 2].toInt() shl 16)
-                        or (0xff and data[position + 1].toInt() shl 8)
-                        or (0xff and data[position + 0].toInt() shl 0)
-                    )
-        position += Int.SIZE_BYTES
-        return value
-    }
-
-    override fun readLong(): Long {
-        val value =
-            if (byteOrder == ByteOrder.BIG_ENDIAN)
-                (
-                    data[position + 0].toLong() shl 56
-                        or (data[position + 1].toLong() and 0xff shl 48)
-                        or (data[position + 2].toLong() and 0xff shl 40)
-                        or (data[position + 3].toLong() and 0xff shl 32)
-                        or (data[position + 4].toLong() and 0xff shl 24)
-                        or (data[position + 5].toLong() and 0xff shl 16)
-                        or (data[position + 6].toLong() and 0xff shl 8)
-                        or (data[position + 7].toLong() and 0xff)
-                    )
-            else
-                (
-                    data[position + 7].toLong() shl 56
-                        or (data[position + 6].toLong() and 0xff shl 48)
-                        or (data[position + 5].toLong() and 0xff shl 40)
-                        or (data[position + 4].toLong() and 0xff shl 32)
-                        or (data[position + 3].toLong() and 0xff shl 24)
-                        or (data[position + 2].toLong() and 0xff shl 16)
-                        or (data[position + 1].toLong() and 0xff shl 8)
-                        or (data[position + 0].toLong() and 0xff)
-                    )
-        position += Long.SIZE_BYTES
-        return value
-    }
-
-    override fun readUtf8(bytes: Int): CharSequence {
-        val value = data.decodeToString(position, position + bytes)
-        position += bytes
+    override fun readString(length: Int, charset: Charset): String {
+        val value = when (charset) {
+            Charset.UTF8 -> data.decodeToString(position, position + length)
+            Charset.UTF16 -> throw UnsupportedOperationException("Not sure how to implement.")
+            Charset.UTF16BigEndian -> throw UnsupportedOperationException("Not sure how to implement.")
+            Charset.UTF16LittleEndian -> throw UnsupportedOperationException("Not sure how to implement.")
+            Charset.ASCII -> throw UnsupportedOperationException("Not sure how to implement.")
+            Charset.ISOLatin1 -> throw UnsupportedOperationException("Not sure how to implement.")
+            Charset.UTF32 -> throw UnsupportedOperationException("Not sure how to implement.")
+            Charset.UTF32LittleEndian -> throw UnsupportedOperationException("Not sure how to implement.")
+            Charset.UTF32BigEndian -> throw UnsupportedOperationException("Not sure how to implement.")
+        }
+        position += length
         return value
     }
 
@@ -125,8 +71,11 @@ data class NativeBuffer(
         buffer.position((position() - start))
     }
 
-    override fun writeUtf8(text: CharSequence): WriteBuffer {
-        writeBytes(text.toString().encodeToByteArray())
+    override fun writeString(text: CharSequence, charset: Charset): WriteBuffer {
+        when (charset) {
+            Charset.UTF8 -> writeBytes(text.toString().encodeToByteArray())
+            else -> throw UnsupportedOperationException("Unable to encode in $charset. Must use Charset.UTF8")
+        }
         return this
     }
 
