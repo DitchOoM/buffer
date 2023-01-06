@@ -24,6 +24,7 @@ val libraryVersion = if (System.getenv("GITHUB_RUN_NUMBER") != null) {
 repositories {
     google()
     mavenCentral()
+    maven { setUrl("https://maven.pkg.jetbrains.space/kotlin/p/kotlin/kotlin-js-wrappers/") }
 }
 
 kotlin {
@@ -69,7 +70,12 @@ kotlin {
         val jvmTest by getting {
             kotlin.srcDir("src/commonJvmTest/kotlin")
         }
-        val jsMain by getting
+
+        val jsMain by getting {
+            dependencies {
+                implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.467")
+            }
+        }
         val jsTest by getting
         val macosX64Main by getting
         val macosX64Test by getting

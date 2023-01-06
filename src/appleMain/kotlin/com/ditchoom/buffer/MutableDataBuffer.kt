@@ -13,7 +13,6 @@ import platform.Foundation.NSData
 import platform.Foundation.NSMakeRange
 import platform.Foundation.NSMutableData
 import platform.Foundation.NSString
-import platform.Foundation.NSUTF8StringEncoding
 import platform.Foundation.dataUsingEncoding
 import platform.Foundation.dataWithBytesNoCopy
 import platform.Foundation.replaceBytesInRange
@@ -90,14 +89,16 @@ class MutableDataBuffer(
         }
     }
 
-    override fun writeUtf8(text: CharSequence): WriteBuffer {
+    override fun writeString(text: CharSequence, charset: Charset): WriteBuffer {
         val string = if (text is String) {
             text as NSString
         } else {
             @Suppress("CAST_NEVER_SUCCEEDS")
             text.toString() as NSString
         }
-        write(DataBuffer(string.dataUsingEncoding(NSUTF8StringEncoding)!!, byteOrder))
+        val charsetEncoding = charset.toEncoding()
+        charset.toEncoding()
+        write(DataBuffer(string.dataUsingEncoding(charsetEncoding)!!, byteOrder))
         return this
     }
 

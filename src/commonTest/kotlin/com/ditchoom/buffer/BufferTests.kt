@@ -227,7 +227,7 @@ class BufferTests {
         val string = "yolo swag lyfestyle"
         assertEquals(19, string.utf8Length())
         val platformBuffer = PlatformBuffer.allocate(19)
-        platformBuffer.writeUtf8(string)
+        platformBuffer.writeString(string, Charset.UTF8)
         platformBuffer.resetForRead()
         val actual = platformBuffer.readString(19, Charset.UTF8)
         assertEquals(string.length, actual.length)
@@ -237,7 +237,7 @@ class BufferTests {
     @Test
     fun readUtf8LineSingle() {
         val text = "hello"
-        val buffer = text.toBuffer()
+        val buffer = text.toReadBuffer(Charset.UTF8)
         assertEquals("hello", buffer.readUtf8Line().toString())
         assertEquals(buffer.remaining(), 0)
     }
@@ -245,7 +245,7 @@ class BufferTests {
     @Test
     fun readUtf8LineDouble() {
         val text = "hello\r\n"
-        val buffer = text.toBuffer()
+        val buffer = text.toReadBuffer(Charset.UTF8)
         assertEquals("hello", buffer.readUtf8Line().toString())
         assertEquals("", buffer.readUtf8Line().toString())
         assertEquals(buffer.remaining(), 0)
@@ -254,7 +254,7 @@ class BufferTests {
     @Test
     fun readUtf8LineStart() {
         val text = "\r\nhello"
-        val buffer = text.toBuffer()
+        val buffer = text.toReadBuffer(Charset.UTF8)
         assertEquals("", buffer.readUtf8Line().toString())
         assertEquals("hello", buffer.readUtf8Line().toString())
         assertEquals(buffer.remaining(), 0)
@@ -263,7 +263,7 @@ class BufferTests {
     @Test
     fun readUtf8LineStartN() {
         val text = "\nhello"
-        val buffer = text.toBuffer()
+        val buffer = text.toReadBuffer(Charset.UTF8)
         assertEquals("", buffer.readUtf8Line().toString())
         assertEquals("hello", buffer.readUtf8Line().toString())
         assertEquals(buffer.remaining(), 0)
@@ -272,7 +272,7 @@ class BufferTests {
     @Test
     fun readUtf8LineMix() {
         val text = "\nhello\r\nhello\nhello\r\n"
-        val buffer = text.toBuffer()
+        val buffer = text.toReadBuffer(Charset.UTF8)
         assertEquals("", buffer.readUtf8Line().toString())
         assertEquals("hello", buffer.readUtf8Line().toString())
         assertEquals("hello", buffer.readUtf8Line().toString())
@@ -284,7 +284,7 @@ class BufferTests {
     @Test
     fun readUtf8LineMixMulti() {
         val text = "\nhello\r\n\nhello\n\nhello\r\n"
-        val buffer = text.toBuffer()
+        val buffer = text.toReadBuffer(Charset.UTF8)
         assertEquals("", buffer.readUtf8Line().toString())
         assertEquals("hello", buffer.readUtf8Line().toString())
         assertEquals("", buffer.readUtf8Line().toString())
@@ -300,7 +300,7 @@ class BufferTests {
         val stringArray = "yolo swag lyfestyle".split(' ')
         assertEquals(3, stringArray.size)
         val newLineString = stringArray.joinToString("\r\n")
-        val stringBuffer = newLineString.toBuffer()
+        val stringBuffer = newLineString.toReadBuffer(Charset.UTF8)
         stringArray.forEach {
             val line = stringBuffer.readUtf8Line()
             assertEquals(it, line.toString())
@@ -441,5 +441,27 @@ class BufferTests {
         byteArray.fill(-1)
         val modified = byteArray.copyOf()
         assertContentEquals(buffer.readByteArray(buffer.remaining()), modified, "modify original")
+    }
+
+    @Test
+    fun encoding() {
+        val string = "yolo swag lyfestyle"
+        var successfulCount = 0
+        Charset.values().forEach {
+            val stringBuffer = PlatformBuffer.allocate(80)
+            try {
+                stringBuffer.writeString(string, it)
+                stringBuffer.resetForRead()
+                assertEquals(
+                    string,
+                    stringBuffer.readString(stringBuffer.remaining(), it),
+                    it.toString()
+                )
+                successfulCount++
+            } catch (e: UnsupportedOperationException) {
+                // unallowed type.
+            }
+        }
+        assertTrue { successfulCount > 0 }
     }
 }

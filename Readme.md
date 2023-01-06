@@ -170,7 +170,7 @@ buffer.writeFloat(123.456f)
 // write double
 buffer.writeDouble(123.456)
 // write text
-buffer.writeUtf8("5")
+buffer.writeString("5", Charset.UTF8)
 // copy buffer into this one
 buffer.write(otherBuffer)
 // write byte array

@@ -94,6 +94,7 @@ class FragmentedReadBuffer(
     override fun readString(length: Int, charset: Charset): String {
         return readSizeIntoBuffer(length) { it.readString(length, charset) }
     }
+
     override fun readUtf8Line(): CharSequence {
         if (currentPosition < firstInitialLimit) {
             val initialFirstPosition = first.position()

@@ -114,6 +114,11 @@ interface WriteBuffer : PositionBuffer {
     )
     fun write(double: Double): WriteBuffer = writeDouble(double)
 
-    fun writeUtf8(text: CharSequence): WriteBuffer
+    @Deprecated(
+        "Use writeString(txt, Charset.UTF8) instead",
+        ReplaceWith("writeString(text, Charset.UTF8)", "com.ditchoom.buffer.Charset")
+    )
+    fun writeUtf8(text: CharSequence): WriteBuffer = writeString(text, Charset.UTF8)
+    fun writeString(text: CharSequence, charset: Charset): WriteBuffer
     fun write(buffer: ReadBuffer)
 }

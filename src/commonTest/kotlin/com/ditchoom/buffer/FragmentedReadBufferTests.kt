@@ -388,10 +388,10 @@ class FragmentedReadBufferTests {
     @Test
     fun readFragmentedStringFromThreeBuffers() {
         val expectedString = "yolo-swag-lyfestyle"
-        val utf8length = expectedString.toBuffer().limit()
+        val utf8length = expectedString.toReadBuffer(Charset.UTF8).limit()
         val composableBuffer = expectedString
             .split(Regex("(?=-)"))
-            .map { it.toBuffer() }
+            .map { it.toReadBuffer(Charset.UTF8) }
             .toComposableBuffer()
         val actual = composableBuffer.readString(utf8length, Charset.UTF8)
         assertEquals(expectedString, actual)
@@ -400,7 +400,7 @@ class FragmentedReadBufferTests {
     @Test
     fun utf8Line() {
         val buffers = arrayOf("yolo\r\n", "\nsw\n\r\nag", "\r\nli\n\r\nfe\r\nstyle\r\n")
-        val composableBuffer = buffers.map { it.toBuffer() }.toComposableBuffer()
+        val composableBuffer = buffers.map { it.toReadBuffer(Charset.UTF8) }.toComposableBuffer()
         assertEquals("yolo", composableBuffer.readUtf8Line().toString())
         assertEquals("", composableBuffer.readUtf8Line().toString())
         assertEquals("sw", composableBuffer.readUtf8Line().toString())

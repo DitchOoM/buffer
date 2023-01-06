@@ -37,6 +37,14 @@ data class NativeBuffer(
     override fun readString(length: Int, charset: Charset): String {
         val value = when (charset) {
             Charset.UTF8 -> data.decodeToString(position, position + length)
+            Charset.UTF16 -> throw UnsupportedOperationException("Not sure how to implement.")
+            Charset.UTF16BigEndian -> throw UnsupportedOperationException("Not sure how to implement.")
+            Charset.UTF16LittleEndian -> throw UnsupportedOperationException("Not sure how to implement.")
+            Charset.ASCII -> throw UnsupportedOperationException("Not sure how to implement.")
+            Charset.ISOLatin1 -> throw UnsupportedOperationException("Not sure how to implement.")
+            Charset.UTF32 -> throw UnsupportedOperationException("Not sure how to implement.")
+            Charset.UTF32LittleEndian -> throw UnsupportedOperationException("Not sure how to implement.")
+            Charset.UTF32BigEndian -> throw UnsupportedOperationException("Not sure how to implement.")
         }
         position += length
         return value
@@ -63,8 +71,11 @@ data class NativeBuffer(
         buffer.position((position() - start))
     }
 
-    override fun writeUtf8(text: CharSequence): WriteBuffer {
-        writeBytes(text.toString().encodeToByteArray())
+    override fun writeString(text: CharSequence, charset: Charset): WriteBuffer {
+        when (charset) {
+            Charset.UTF8 -> writeBytes(text.toString().encodeToByteArray())
+            else -> throw UnsupportedOperationException("Unable to encode in $charset. Must use Charset.UTF8")
+        }
         return this
     }
 

@@ -11,7 +11,17 @@ expect fun PlatformBuffer.Companion.wrap(
     byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN
 ): PlatformBuffer
 
-expect fun String.toBuffer(zone: AllocationZone = AllocationZone.Heap): ReadBuffer
+@Deprecated(
+    "Use toReadBuffer instead",
+    ReplaceWith("toReadBuffer(Charset.UTF8, zone)", "com.ditchoom.buffer.Charset")
+)
+fun String.toBuffer(zone: AllocationZone = AllocationZone.Heap): ReadBuffer =
+    toReadBuffer(Charset.UTF8, zone)
+
+expect fun String.toReadBuffer(
+    charset: Charset,
+    zone: AllocationZone = AllocationZone.Heap
+): ReadBuffer
 
 fun CharSequence.utf8Length(): Int {
     var count = 0

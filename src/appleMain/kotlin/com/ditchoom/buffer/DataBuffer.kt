@@ -8,7 +8,6 @@ import kotlinx.cinterop.readBytes
 import platform.Foundation.NSData
 import platform.Foundation.NSMakeRange
 import platform.Foundation.NSString
-import platform.Foundation.NSUTF8StringEncoding
 import platform.Foundation.create
 import platform.Foundation.isEqualToData
 import platform.Foundation.subdataWithRange
@@ -51,10 +50,8 @@ open class DataBuffer(
     override fun readString(length: Int, charset: Charset): String {
         if (length == 0) return ""
         val subdata = data.subdataWithRange(NSMakeRange(position.convert(), length.convert()))
+        val stringEncoding = charset.toEncoding()
 
-        val stringEncoding = when (charset) {
-            Charset.UTF8 -> NSUTF8StringEncoding
-        }
         @Suppress("CAST_NEVER_SUCCEEDS")
         val string = NSString.create(subdata, stringEncoding) as String
         position += length
