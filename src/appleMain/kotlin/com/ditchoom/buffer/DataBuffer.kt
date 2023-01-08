@@ -42,7 +42,11 @@ open class DataBuffer(
     }
 
     override fun readByteArray(size: Int): ByteArray {
-        val result = bytePointer.readBytes(size)
+        val subDataRange = NSMakeRange(position.convert(), size.convert())
+
+        @Suppress("UNCHECKED_CAST")
+        val subDataBytePointer = data.subdataWithRange(subDataRange).bytes as CPointer<ByteVar>
+        val result = subDataBytePointer.readBytes(size)
         position += size
         return result
     }

@@ -308,6 +308,15 @@ class BufferTests {
     }
 
     @Test
+    fun readByteArray() {
+        val string = "yolo swag lyfestyle"
+        val stringBuffer = string.toReadBuffer(Charset.UTF8)
+        assertEquals(string[0], Char(stringBuffer.readByte().toInt()))
+        val s = stringBuffer.readByteArray(stringBuffer.remaining())
+        assertEquals(string.substring(1), s.decodeToString())
+    }
+
+    @Test
     fun endianWrite() {
         val littleEndian2 = PlatformBuffer.allocate(2, byteOrder = ByteOrder.LITTLE_ENDIAN)
         littleEndian2.writeShort(0x0102.toShort())
