@@ -184,29 +184,29 @@ buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5), offset, length)
 ```kotlin
 val buffer: ReadBuffer
 // read signed byte
-val b: Byte = buffer.readByte()
+val b = buffer.readByte()
 // read unsigned byte
-val uByte: UByte = buffer.readUnsignedByte()
+val uByte = buffer.readUnsignedByte()
 // read short
-val short: Short = buffer.readShort()
+val short = buffer.readShort()
 // read unsigned short
-val uShort: UShort = buffer.readUnsignedShort()
+val uShort = buffer.readUnsignedShort()
 // read int
 val intValue = buffer.readInt()
 // read unsigned int
-val uIntValue: Int = buffer.readUnsignedInt()
+val uIntValue = buffer.readUnsignedInt()
 // read long
-val longValue: Long = buffer.readLong()
+val longValue = buffer.readLong()
 // read unsigned long
-val uLongValue: ULong = buffer.readUnsignedLong()
+val uLongValue = buffer.readUnsignedLong()
 // read float
-val float: Float = buffer.readFloat()
+val float = buffer.readFloat()
 // read double
-val double: Double = buffer.readDouble()
+val double = buffer.readDouble()
 // read text
-val string: String = buffer.readUtf8(numOfBytesToRead)
+val string = buffer.readUtf8(numOfBytesToRead)
 // read byte array
-val byteArray: ByteArray = buffer.readByteArray(numOfBytesToRead)
+val byteArray = buffer.readByteArray(numOfBytesToRead)
 ```
 
 ## Building Locally
