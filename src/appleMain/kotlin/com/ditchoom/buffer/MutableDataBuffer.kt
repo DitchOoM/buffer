@@ -53,6 +53,9 @@ class MutableDataBuffer(
     }
 
     override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
+        if (length < 1) {
+            return this
+        }
         if (mutableData != null) {
             val range = NSMakeRange(position.convert(), length.convert())
             bytes.usePinned { pin ->
