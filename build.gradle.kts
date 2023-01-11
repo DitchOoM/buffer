@@ -59,8 +59,12 @@ kotlin {
     tasks.getByName<KotlinNativeSimulatorTest>("iosSimulatorArm64Test") {
         deviceId = "iPhone 14"
     }
-    watchos()
+    watchosX64()
+    watchosArm64()
+    watchosSimulatorArm64()
     tvos()
+    tvosSimulatorArm64()
+
     sourceSets {
         val commonMain by getting
         val commonTest by getting {
@@ -93,10 +97,16 @@ kotlin {
         val iosX64Test by getting
         val iosSimulatorArm64Main by getting
         val iosSimulatorArm64Test by getting
-        val watchosMain by getting
-        val watchosTest by getting
+        val watchosArm64Main by getting
+        val watchosArm64Test by getting
+        val watchosX64Main by getting
+        val watchosX64Test by getting
+        val watchosSimulatorArm64Main by getting
+        val watchosSimulatorArm64Test by getting
         val tvosMain by getting
         val tvosTest by getting
+        val tvosSimulatorArm64Main by getting
+        val tvosSimulatorArm64Test by getting
 
         val nativeMain by sourceSets.creating {
             dependsOn(commonMain)
@@ -114,8 +124,11 @@ kotlin {
             iosMain.dependsOn(this)
             iosX64Main.dependsOn(this)
             iosSimulatorArm64Main.dependsOn(this)
-            watchosMain.dependsOn(this)
+            watchosArm64Main.dependsOn(this)
+            watchosX64Main.dependsOn(this)
+            watchosSimulatorArm64Main.dependsOn(this)
             tvosMain.dependsOn(this)
+            tvosSimulatorArm64Main.dependsOn(this)
         }
 
         val appleTest by sourceSets.creating {
@@ -125,8 +138,11 @@ kotlin {
             iosTest.dependsOn(this)
             iosX64Test.dependsOn(this)
             iosSimulatorArm64Test.dependsOn(this)
-            watchosTest.dependsOn(this)
+            watchosArm64Test.dependsOn(this)
+            watchosX64Test.dependsOn(this)
+            watchosSimulatorArm64Test.dependsOn(this)
             tvosTest.dependsOn(this)
+            tvosSimulatorArm64Test.dependsOn(this)
         }
 
         val androidMain by getting
