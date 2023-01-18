@@ -1,4 +1,3 @@
-// import dev.petuska.npm.publish.extension.domain.NpmAccess
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 
 plugins {
@@ -55,8 +54,7 @@ kotlin {
     tasks.getByName<KotlinNativeSimulatorTest>("iosSimulatorArm64Test") {
         deviceId = "iPhone 14"
     }
-    watchosX64()
-    watchosArm64()
+    watchos()
     watchosSimulatorArm64()
     tvos()
     tvosSimulatorArm64()
@@ -93,10 +91,8 @@ kotlin {
         val iosX64Test by getting
         val iosSimulatorArm64Main by getting
         val iosSimulatorArm64Test by getting
-        val watchosArm64Main by getting
-        val watchosArm64Test by getting
-        val watchosX64Main by getting
-        val watchosX64Test by getting
+        val watchosMain by getting
+        val watchosTest by getting
         val watchosSimulatorArm64Main by getting
         val watchosSimulatorArm64Test by getting
         val tvosMain by getting
@@ -120,8 +116,7 @@ kotlin {
             iosMain.dependsOn(this)
             iosX64Main.dependsOn(this)
             iosSimulatorArm64Main.dependsOn(this)
-            watchosArm64Main.dependsOn(this)
-            watchosX64Main.dependsOn(this)
+            watchosMain.dependsOn(this)
             watchosSimulatorArm64Main.dependsOn(this)
             tvosMain.dependsOn(this)
             tvosSimulatorArm64Main.dependsOn(this)
@@ -134,8 +129,7 @@ kotlin {
             iosTest.dependsOn(this)
             iosX64Test.dependsOn(this)
             iosSimulatorArm64Test.dependsOn(this)
-            watchosArm64Test.dependsOn(this)
-            watchosX64Test.dependsOn(this)
+            watchosTest.dependsOn(this)
             watchosSimulatorArm64Test.dependsOn(this)
             tvosTest.dependsOn(this)
             tvosSimulatorArm64Test.dependsOn(this)
@@ -250,23 +244,6 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
         packageGroup = publishedGroupId
     }
 }
-// if ("refs/heads/main".equals(System.getenv("GITHUB_REF"), ignoreCase = true)) {
-// npmPublish {
-//    registries {
-//        register("npmjs") {
-//            uri.set("https://registry.npmjs.org")
-//            authToken.set(System.getenv("NPM_ACCESS_TOKEN"))
-//        }
-//    }
-//    readme.set(rootDir.resolve("Readme.md"))
-//    organization.set("ditchoom")
-//    access.set(NpmAccess.PUBLIC)
-//    version.set(libraryVersion)
-//    packages.named("js") {
-//        packageName.set("buffer-kt")
-//    }
-// }
-// }
 
 ktlint {
     verbose.set(true)
