@@ -48,7 +48,6 @@ kotlin {
     macosArm64()
     linuxX64()
     ios()
-    iosX64()
     iosSimulatorArm64()
     tasks.getByName<KotlinNativeSimulatorTest>("iosSimulatorArm64Test") {
         deviceId = "iPhone 14"
@@ -86,8 +85,6 @@ kotlin {
         val linuxX64Test by getting
         val iosMain by getting
         val iosTest by getting
-        val iosX64Main by getting
-        val iosX64Test by getting
         val iosSimulatorArm64Main by getting
         val iosSimulatorArm64Test by getting
         val watchosMain by getting
@@ -113,7 +110,6 @@ kotlin {
             macosX64Main.dependsOn(this)
             macosArm64Main.dependsOn(this)
             iosMain.dependsOn(this)
-            iosX64Main.dependsOn(this)
             iosSimulatorArm64Main.dependsOn(this)
             watchosMain.dependsOn(this)
             watchosSimulatorArm64Main.dependsOn(this)
@@ -126,7 +122,6 @@ kotlin {
             macosX64Test.dependsOn(this)
             macosArm64Test.dependsOn(this)
             iosTest.dependsOn(this)
-            iosX64Test.dependsOn(this)
             iosSimulatorArm64Test.dependsOn(this)
             watchosTest.dependsOn(this)
             watchosSimulatorArm64Test.dependsOn(this)
