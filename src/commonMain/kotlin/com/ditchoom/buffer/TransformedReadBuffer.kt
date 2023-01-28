@@ -15,13 +15,7 @@ class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((Int, Byte
     override fun resetForRead() = origin.resetForRead()
 
     override fun readByte() = transformer(position(), origin.readByte())
-    override fun slice(): ReadBuffer {
-        val data = readByteArray(remaining())
-        val sliced = PlatformBuffer.allocate(data.size)
-        sliced.writeBytes(data)
-        sliced.resetForRead()
-        return sliced
-    }
+    override fun slice(): ReadBuffer = origin.slice()
 
     override fun readByteArray(size: Int): ByteArray {
         val byteArray = origin.readByteArray(size)
