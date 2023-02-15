@@ -207,6 +207,10 @@ val double = buffer.readDouble()
 val string = buffer.readUtf8(numOfBytesToRead)
 // read byte array
 val byteArray = buffer.readByteArray(numOfBytesToRead)
+// read a shared subsequence read buffer (changes to the original reflect here)
+val readBuffer = buffer.readBytes(numOfBytesForBuffer)
+// slice the buffer without adjusting the position or limit (changes to the original reflect here)
+val slicedBuffer = buffer.slice()
 ```
 
 ## Building Locally

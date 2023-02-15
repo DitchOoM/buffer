@@ -16,6 +16,23 @@ class BufferTests {
         platformBuffer.writeByte((-1).toByte())
         platformBuffer.resetForRead()
         val slicedBuffer = platformBuffer.slice()
+        assertEquals(0, platformBuffer.position())
+        assertEquals(1, platformBuffer.limit())
+        assertEquals(0, slicedBuffer.position())
+        assertEquals(1, slicedBuffer.limit())
+        assertEquals(-1, slicedBuffer.readByte())
+        assertEquals(1, slicedBuffer.position())
+        assertEquals(1, slicedBuffer.limit())
+    }
+
+    @Test
+    fun readBytes() {
+        val platformBuffer = PlatformBuffer.allocate(3)
+        platformBuffer.writeByte((-1).toByte())
+        platformBuffer.resetForRead()
+        val slicedBuffer = platformBuffer.readBytes(1)
+        assertEquals(1, platformBuffer.position())
+        assertEquals(1, platformBuffer.limit())
         assertEquals(0, slicedBuffer.position())
         assertEquals(1, slicedBuffer.limit())
         assertEquals(-1, slicedBuffer.readByte())
