@@ -3,7 +3,20 @@ package com.ditchoom.buffer
 interface ReadBuffer : PositionBuffer {
     fun resetForRead()
     fun readByte(): Byte
+
+    // slice does not change the position
     fun slice(): ReadBuffer
+
+    fun readBytes(size: Int): ReadBuffer {
+        val oldLimit = limit()
+        val oldPosition = position()
+        setLimit(position() + size)
+        val bytes = slice()
+        position(oldPosition + size)
+        setLimit(oldLimit)
+        return bytes
+    }
+
     fun readByteArray(size: Int): ByteArray
     fun readUnsignedByte(): UByte = readByte().toUByte()
     fun readShort(): Short = readNumberWithByteSize(Short.SIZE_BYTES).toShort()
