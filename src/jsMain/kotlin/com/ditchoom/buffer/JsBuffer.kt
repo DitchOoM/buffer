@@ -66,9 +66,7 @@ data class JsBuffer(
 
     override fun readLong(): Long {
         val bytes = readByteArray(Long.SIZE_BYTES)
-        val long = if (littleEndian) bytes.reversedArray().toLong() else bytes.toLong()
-        position += ULong.SIZE_BYTES
-        return long
+        return if (littleEndian) bytes.reversedArray().toLong() else bytes.toLong()
     }
 
     private fun ByteArray.toLong(): Long {
