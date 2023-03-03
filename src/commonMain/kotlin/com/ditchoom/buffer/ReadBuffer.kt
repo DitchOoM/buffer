@@ -8,6 +8,9 @@ interface ReadBuffer : PositionBuffer {
     fun slice(): ReadBuffer
 
     fun readBytes(size: Int): ReadBuffer {
+        if (size < 1) {
+            return EMPTY_BUFFER
+        }
         val oldLimit = limit()
         val oldPosition = position()
         setLimit(position() + size)
@@ -81,5 +84,6 @@ interface ReadBuffer : PositionBuffer {
 
     companion object {
         val newLine = "\r\n".encodeToByteArray()
+        val EMPTY_BUFFER = PlatformBuffer.allocate(0)
     }
 }
