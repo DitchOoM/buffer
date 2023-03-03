@@ -33,7 +33,7 @@ jobs:
           GPG_SECRET: ${{ secrets.GPG_SECRET }}
           GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
           NPM_ACCESS_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
-        run: gradle assemble build check ktlintCheck allTests publishAllPublicationsToSonatypeRepository publish closeAndReleaseRepository
+        run: ./gradlew assemble build check ktlintCheck allTests publishAllPublicationsToSonatypeRepository publish closeAndReleaseRepository
       - uses: actions/upload-artifact@v3
         with:
           name: Package
