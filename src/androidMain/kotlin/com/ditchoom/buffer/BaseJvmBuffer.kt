@@ -34,13 +34,17 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
     override val capacity = buffer.capacity()
 
     override fun readByte() = byteBuffer.get()
+    override fun get(index: Int): Byte = byteBuffer.get(index)
     override fun readByteArray(size: Int) = byteBuffer.toArray(size)
 
     override fun slice() = JvmBuffer(byteBuffer.slice())
 
     override fun readShort(): Short = byteBuffer.short
+    override fun getShort(index: Int): Short = byteBuffer.getShort(index)
     override fun readInt() = byteBuffer.int
+    override fun getInt(index: Int): Int = byteBuffer.getInt(index)
     override fun readLong() = byteBuffer.long
+    override fun getLong(index: Int): Long = byteBuffer.getLong(index)
 
     override fun readString(length: Int, charset: Charset): String {
         val finalPosition = buffer.position() + length
@@ -66,6 +70,11 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
         return this
     }
 
+    override fun set(index: Int, byte: Byte): WriteBuffer {
+        byteBuffer.put(index, byte)
+        return this
+    }
+
     override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
         byteBuffer.put(bytes, offset, length)
         return this
@@ -75,14 +84,28 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
         byteBuffer.putShort(short)
         return this
     }
+    override fun set(index: Int, short: Short): WriteBuffer {
+        byteBuffer.putShort(index, short)
+        return this
+    }
 
     override fun writeInt(int: Int): WriteBuffer {
         byteBuffer.putInt(int)
         return this
     }
 
+    override fun set(index: Int, int: Int): WriteBuffer {
+        byteBuffer.putInt(index, int)
+        return this
+    }
+
     override fun writeLong(long: Long): WriteBuffer {
         byteBuffer.putLong(long)
+        return this
+    }
+
+    override fun set(index: Int, long: Long): WriteBuffer {
+        byteBuffer.putLong(index, long)
         return this
     }
 

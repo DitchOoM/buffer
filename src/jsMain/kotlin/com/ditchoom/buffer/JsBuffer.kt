@@ -42,6 +42,11 @@ data class JsBuffer(
         return dataView.getInt8(0)
     }
 
+    override fun get(index: Int): Byte {
+        val dataView = DataView(buffer.buffer, index, 1)
+        return dataView.getInt8(0)
+    }
+
     override fun slice(): ReadBuffer {
         return JsBuffer(Uint8Array(buffer.buffer.slice(position, limit)), littleEndian)
     }
@@ -58,14 +63,29 @@ data class JsBuffer(
         return dataView.getInt16(0, littleEndian).toInt().toShort()
     }
 
+    override fun getShort(index: Int): Short {
+        val dataView = DataView(buffer.buffer, index, Short.SIZE_BYTES)
+        return dataView.getInt16(0, littleEndian).toInt().toShort()
+    }
+
     override fun readInt(): Int {
         val dataView = DataView(buffer.buffer, position, Int.SIZE_BYTES)
         position += Int.SIZE_BYTES
         return dataView.getInt32(0, littleEndian)
     }
 
+    override fun getInt(index: Int): Int {
+        val dataView = DataView(buffer.buffer, index, Int.SIZE_BYTES)
+        return dataView.getInt32(0, littleEndian)
+    }
+
     override fun readLong(): Long {
         val bytes = readByteArray(Long.SIZE_BYTES)
+        return if (littleEndian) bytes.reversedArray().toLong() else bytes.toLong()
+    }
+
+    override fun getLong(index: Int): Long {
+        val bytes = Int8Array(buffer.buffer, index, Long.SIZE_BYTES).unsafeCast<ByteArray>()
         return if (littleEndian) bytes.reversedArray().toLong() else bytes.toLong()
     }
 
@@ -115,6 +135,12 @@ data class JsBuffer(
         return this
     }
 
+    override fun set(index: Int, byte: Byte): WriteBuffer {
+        val dataView = DataView(buffer.buffer, index, Byte.SIZE_BYTES)
+        dataView.setInt8(0, byte)
+        return this
+    }
+
     override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
         val uint8Array = bytes.unsafeCast<Uint8Array>().subarray(offset, offset + length)
         this.buffer.set(uint8Array, position)
@@ -129,6 +155,12 @@ data class JsBuffer(
         return this
     }
 
+    override fun set(index: Int, short: Short): WriteBuffer {
+        val dataView = DataView(buffer.buffer, index, Short.SIZE_BYTES)
+        dataView.setUint16(0, short, littleEndian)
+        return this
+    }
+
     override fun writeInt(int: Int): WriteBuffer {
         val dataView = DataView(buffer.buffer, position, UInt.SIZE_BYTES)
         position += UInt.SIZE_BYTES
@@ -136,9 +168,22 @@ data class JsBuffer(
         return this
     }
 
+    override fun set(index: Int, int: Int): WriteBuffer {
+        val dataView = DataView(buffer.buffer, index, UInt.SIZE_BYTES)
+        dataView.setUint32(0, int, littleEndian)
+        return this
+    }
+
     override fun writeLong(long: Long): WriteBuffer {
         val bytes = if (littleEndian) long.toByteArray().reversedArray() else long.toByteArray()
         writeBytes(bytes)
+        return this
+    }
+
+    override fun set(index: Int, long: Long): WriteBuffer {
+        val bytes = if (littleEndian) long.toByteArray().reversedArray() else long.toByteArray()
+        val uint8Array = bytes.unsafeCast<Uint8Array>().subarray(0, Long.SIZE_BYTES)
+        this.buffer.set(uint8Array, index)
         return this
     }
 
