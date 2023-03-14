@@ -46,8 +46,10 @@ A kotlin multiplatform library that allows you to allocate and modify byte[] nat
         <li><a href="#allocate-a-new-platform-agnostic-buffer">Allocate a new platform agnostic buffer</a></li>
         <li><a href="#allocation-zones">Allocation Zones</a></li>
         <li><a href="#byte-order">Byte order</a></li>
-        <li><a href="#write-data-into-platform-agnostic-buffer">Write data into platform agnostic buffer</a></li>
-        <li><a href="#read-data-into-platform-agnostic-buffer">Read data into platform agnostic buffer</a></li>
+        <li><a href="#relative-write-data-into-platform-agnostic-buffer">Relative write data into platform agnostic buffer</a></li>
+        <li><a href="#absolute-write-data-into-platform-agnostic-buffer">Absolute write data into platform agnostic buffer</a></li>
+        <li><a href="#relative-read-data-into-platform-agnostic-buffer">Relative read data into platform agnostic buffer</a></li>
+        <li><a href="#absolute-read-data-into-platform-agnostic-buffer">Absolute read data into platform agnostic buffer</a></li>
       </ul>
     </li>
     <li>
@@ -145,7 +147,7 @@ or `ByteOrder.LITTLE_ENDIAN`
 
 The byte order of a buffer can be checked with `buffer.byteOrder`
 
-### Write data into platform agnostic buffer
+### Relative write data into platform agnostic buffer
 
 ```kotlin
 val buffer: WriteBuffer
@@ -179,7 +181,33 @@ buffer.writeBytes(byteArrayOf(1, 2, 3, 4))
 buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5), offset, length)
 ```
 
-### Read data into platform agnostic buffer
+### Absolute write data into platform agnostic buffer
+
+```kotlin
+val buffer: WriteBuffer
+// set signed byte
+buffer[index] = 5.toByte()
+// set unsigned byte
+buffer[index] = 5.toUByte()
+// set short
+buffer[index] = 5.toByte()
+// set unsigned short
+buffer[index] = 5.toUShort()
+// set int
+buffer[index] = 5
+// set unsigned int
+buffer[index] = 5.toUInt()
+// set long
+buffer[index] = 5L
+// set unsigned long
+buffer[index] = 5uL
+// set float
+buffer[index] = 123.456f
+// set double
+buffer[index] = 123.456
+```
+
+### Relative read data into platform agnostic buffer
 
 ```kotlin
 val buffer: ReadBuffer
@@ -209,6 +237,31 @@ val string = buffer.readUtf8(numOfBytesToRead)
 val byteArray = buffer.readByteArray(numOfBytesToRead)
 // read a shared subsequence read buffer (changes to the original reflect here)
 val readBuffer = buffer.readBytes(numOfBytesForBuffer)
+```
+
+### Absolute read data into platform agnostic buffer
+```kotlin
+val buffer: ReadBuffer
+// get signed byte
+val b = buffer.get(index) // or buffer[index]
+// get unsigned byte
+val uByte = buffer.getUnsignedByte(index)
+// get short
+val short = buffer.getShort(index)
+// get unsigned short
+val uShort = buffer.getUnsignedShort(index)
+// get int
+val intValue = buffer.getInt(index)
+// get unsigned int
+val uIntValue = buffer.getUnsignedInt(index)
+// get long
+val longValue = buffer.getLong(index)
+// get unsigned long
+val uLongValue = buffer.getUnsignedLong(index)
+// get float
+val float = buffer.getFloat(index)
+// get double
+val double = buffer.getDouble(index)
 // slice the buffer without adjusting the position or limit (changes to the original reflect here)
 val slicedBuffer = buffer.slice()
 ```

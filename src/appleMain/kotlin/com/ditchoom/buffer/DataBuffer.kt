@@ -35,6 +35,7 @@ open class DataBuffer(
     }
 
     override fun readByte() = bytePointer[position++]
+    override fun get(index: Int): Byte = bytePointer[index]
 
     override fun slice(): ReadBuffer {
         val range = NSMakeRange(position.convert(), (limit - position).convert())

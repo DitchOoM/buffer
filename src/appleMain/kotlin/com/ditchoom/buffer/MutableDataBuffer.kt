@@ -52,6 +52,11 @@ class MutableDataBuffer(
         return this
     }
 
+    override fun set(index: Int, byte: Byte): WriteBuffer {
+        writeByteInternal(position, byte)
+        return this
+    }
+
     override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
         if (length < 1) {
             return this

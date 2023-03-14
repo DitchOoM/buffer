@@ -24,6 +24,8 @@ data class NativeBuffer(
 
     override fun readByte() = data[position++]
 
+    override fun get(index: Int): Byte = data[position]
+
     override fun slice(): ReadBuffer {
         return NativeBuffer(data.sliceArray(position until limit), byteOrder = byteOrder)
     }
@@ -52,6 +54,11 @@ data class NativeBuffer(
 
     override fun writeByte(byte: Byte): WriteBuffer {
         data[position++] = byte
+        return this
+    }
+
+    override fun set(index: Int, byte: Byte): WriteBuffer {
+        data[position] = byte
         return this
     }
 

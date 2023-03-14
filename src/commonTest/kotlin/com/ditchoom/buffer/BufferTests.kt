@@ -1,11 +1,10 @@
-@file:Suppress("EXPERIMENTAL_UNSIGNED_LITERALS")
-
 package com.ditchoom.buffer
 
 import kotlin.math.absoluteValue
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BufferTests {
@@ -26,7 +25,7 @@ class BufferTests {
     }
 
     @Test
-    fun readBytes() {
+    fun readByte() {
         val platformBuffer = PlatformBuffer.allocate(3)
         platformBuffer.writeByte((-1).toByte())
         platformBuffer.resetForRead()
@@ -38,6 +37,17 @@ class BufferTests {
         assertEquals(-1, slicedBuffer.readByte())
         assertEquals(1, slicedBuffer.position())
         assertEquals(1, slicedBuffer.limit())
+    }
+
+    @Test
+    fun getByte() {
+        val platformBuffer = PlatformBuffer.allocate(3)
+        val expectedValue = (-1).toByte()
+        platformBuffer[0] = expectedValue
+        val valueRead = platformBuffer[0]
+        assertEquals(0, platformBuffer.position())
+        assertEquals(3, platformBuffer.limit())
+        assertEquals(-1, valueRead)
     }
 
     @Test
@@ -115,16 +125,26 @@ class BufferTests {
     }
 
     @Test
-    fun unsignedByte() {
+    fun relativeUnsignedByte() {
         val platformBuffer = PlatformBuffer.allocate(1)
         val byte = (-1).toUByte()
         platformBuffer.writeUByte(byte)
         platformBuffer.resetForRead()
         assertEquals(byte.toInt(), platformBuffer.readUnsignedByte().toInt())
+        assertFalse(platformBuffer.hasRemaining())
     }
 
     @Test
-    fun unsignedShort() {
+    fun absoluteUnsignedByte() {
+        val platformBuffer = PlatformBuffer.allocate(1)
+        val byte = (-1).toUByte()
+        platformBuffer[0] = byte
+        assertEquals(byte, platformBuffer[0].toUByte())
+        assertEquals(1, platformBuffer.remaining())
+    }
+
+    @Test
+    fun relativeUnsignedShort() {
         val platformBuffer = PlatformBuffer.allocate(2)
         val uShort = UShort.MAX_VALUE.toInt() / 2
         platformBuffer.writeUShort(uShort.toUShort())
@@ -138,6 +158,24 @@ class BufferTests {
                 or (0xff and lsb.toInt() shl 0)
             ).toUShort()
         assertEquals(value.toInt(), uShort)
+        assertEquals(0, platformBuffer.remaining())
+    }
+
+    @Test
+    fun absoluteUnsignedShort() {
+        val platformBuffer = PlatformBuffer.allocate(2)
+        val uShort = UShort.MAX_VALUE
+        platformBuffer[0] = uShort
+        println("msb lsb")
+        assertEquals(uShort, platformBuffer.getUnsignedShort(0))
+        val msb = platformBuffer[0]
+        val lsb = platformBuffer[1]
+        val value = (
+            (0xff and msb.toInt() shl 8)
+                or (0xff and lsb.toInt() shl 0)
+            ).toUShort()
+        assertEquals(value, uShort)
+        assertEquals(2, platformBuffer.remaining())
     }
 
     @Test
@@ -153,7 +191,7 @@ class BufferTests {
     }
 
     @Test
-    fun unsignedShortHalf() {
+    fun relativeUnsignedShortHalf() {
         val platformBuffer = PlatformBuffer.allocate(2)
         val uShort = (UShort.MAX_VALUE / 2u).toUShort()
         platformBuffer.writeUShort(uShort)
@@ -161,15 +199,36 @@ class BufferTests {
         val actual = platformBuffer.readUnsignedShort().toInt()
         assertEquals(uShort.toInt(), actual)
         assertEquals(uShort.toString(), actual.toString())
+        assertEquals(0, platformBuffer.remaining())
     }
 
     @Test
-    fun unsignedInt() {
+    fun absoluteUnsignedShortHalf() {
+        val platformBuffer = PlatformBuffer.allocate(2)
+        val uShort = (UShort.MAX_VALUE / 2u).toUShort()
+        platformBuffer[0] = uShort
+        val actual = platformBuffer.getUnsignedShort(0)
+        assertEquals(uShort, actual)
+        assertEquals(uShort.toString(), actual.toString())
+        assertEquals(0, platformBuffer.position())
+    }
+
+    @Test
+    fun relativeUnsignedInt() {
         val platformBuffer = PlatformBuffer.allocate(4)
         val uInt = (-1).toUInt()
         platformBuffer.writeUInt(uInt)
         platformBuffer.resetForRead()
         assertEquals(uInt.toLong(), platformBuffer.readUnsignedInt().toLong())
+        assertEquals(0, platformBuffer.remaining())
+    }
+    @Test
+    fun absoluteUnsignedInt() {
+        val platformBuffer = PlatformBuffer.allocate(4)
+        val uInt = (-1).toUInt()
+        platformBuffer[0] = uInt
+        assertEquals(uInt.toLong(), platformBuffer.getUnsignedInt(0).toLong())
+        assertEquals(4, platformBuffer.remaining())
     }
 
     @Test
@@ -179,10 +238,11 @@ class BufferTests {
         platformBuffer.writeUInt(uInt)
         platformBuffer.resetForRead()
         assertEquals(uInt.toLong(), platformBuffer.readUnsignedInt().toLong())
+        assertEquals(0, platformBuffer.remaining())
     }
 
     @Test
-    fun long() {
+    fun relativeLong() {
         val platformBuffer = PlatformBuffer.allocate(Long.SIZE_BYTES)
         val long = (1234).toLong()
         assertEquals(0, platformBuffer.position())
@@ -207,7 +267,33 @@ class BufferTests {
     }
 
     @Test
-    fun longBits() {
+    fun absoluteLong() {
+        val platformBuffer = PlatformBuffer.allocate(Long.SIZE_BYTES)
+        val long = (1234).toLong()
+        assertEquals(0, platformBuffer.position())
+        platformBuffer[0] = long
+        assertEquals(0, platformBuffer.position())
+        println("getLong")
+        assertEquals(long, platformBuffer.getLong(0), "getLong")
+        assertEquals(0, platformBuffer.position())
+        println("getNumberWithStartIndexAndByteSize")
+        assertEquals(long, platformBuffer.getNumberWithStartIndexAndByteSize(0, Long.SIZE_BYTES), "getNumberWithStartIndexAndByteSize")
+        assertEquals(0, platformBuffer.position())
+
+        val platformBufferLittleEndian =
+            PlatformBuffer.allocate(Long.SIZE_BYTES, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        platformBufferLittleEndian[0] = long
+        assertEquals(0, platformBufferLittleEndian.position())
+        println("getLong LE")
+        assertEquals(long, platformBufferLittleEndian.getLong(0), "getLongLittleEndian")
+        assertEquals(0, platformBufferLittleEndian.position())
+        println("getNumberWithStartIndexAndByteSize LE")
+        assertEquals(long, platformBufferLittleEndian.getNumberWithStartIndexAndByteSize(0, Long.SIZE_BYTES), "getNumberWithStartIndexAndByteSizeLittleEndian")
+        assertEquals(0, platformBufferLittleEndian.position())
+    }
+
+    @Test
+    fun relativeLongBits() {
         val platformBuffer = PlatformBuffer.allocate(Long.SIZE_BYTES)
         val long = (1234).toLong()
         platformBuffer.writeNumberOfByteSize(long, Long.SIZE_BYTES)
@@ -226,7 +312,28 @@ class BufferTests {
     }
 
     @Test
-    fun float() {
+    fun absoluteLongBits() {
+        val platformBuffer = PlatformBuffer.allocate(Long.SIZE_BYTES)
+        val long = (1234).toLong()
+        platformBuffer.setIndexNumberAndByteSize(0, long, Long.SIZE_BYTES)
+        assertEquals(0, platformBuffer.position())
+        assertEquals(long, platformBuffer.getLong(0))
+        assertEquals(0, platformBuffer.position())
+        assertEquals(long, platformBuffer.getNumberWithStartIndexAndByteSize(0, Long.SIZE_BYTES))
+        assertEquals(0, platformBuffer.position())
+
+        val platformBufferLittleEndian =
+            PlatformBuffer.allocate(Long.SIZE_BYTES, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        platformBufferLittleEndian.setIndexNumberAndByteSize(0, long, Long.SIZE_BYTES)
+        assertEquals(0, platformBufferLittleEndian.position())
+        assertEquals(long, platformBufferLittleEndian.getLong(0))
+        assertEquals(0, platformBufferLittleEndian.position())
+        assertEquals(long, platformBufferLittleEndian.getNumberWithStartIndexAndByteSize(0, Long.SIZE_BYTES))
+        assertEquals(0, platformBufferLittleEndian.position())
+    }
+
+    @Test
+    fun realtiveFloat() {
         val platformBuffer = PlatformBuffer.allocate(Float.SIZE_BYTES)
         val float = 123.456f
         platformBuffer.writeFloat(float)
@@ -237,12 +344,34 @@ class BufferTests {
     }
 
     @Test
-    fun double() {
+    fun absoluteFloat() {
+        val platformBuffer = PlatformBuffer.allocate(Float.SIZE_BYTES)
+        val float = 123.456f
+        platformBuffer[0] = float
+        assertEquals(0, platformBuffer.position())
+        // Note that in Kotlin/JS Float range is wider than "single format" bit layout can represent,
+        // so some Float values may overflow, underflow or lose their accuracy after conversion to bits and back.
+        assertTrue { (float - platformBuffer.getFloat(0)).absoluteValue < 0.00001f }
+        assertEquals(0, platformBuffer.position())
+    }
+
+    @Test
+    fun relativeDouble() {
         val platformBuffer = PlatformBuffer.allocate(Double.SIZE_BYTES)
         val double = 123.456
         platformBuffer.writeDouble(double)
         platformBuffer.resetForRead()
         assertEquals(double, platformBuffer.readDouble())
+    }
+
+    @Test
+    fun absoluteDouble() {
+        val platformBuffer = PlatformBuffer.allocate(Double.SIZE_BYTES)
+        val double = 123.456
+        platformBuffer[0] = double
+        assertEquals(0, platformBuffer.position())
+        assertEquals(double, platformBuffer.getDouble(0))
+        assertEquals(0, platformBuffer.position())
     }
 
     @Test

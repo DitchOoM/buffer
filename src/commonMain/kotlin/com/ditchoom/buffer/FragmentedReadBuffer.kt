@@ -49,6 +49,14 @@ class FragmentedReadBuffer(
         }
     }
 
+    override fun get(index: Int): Byte {
+        return if (currentPosition < firstInitialLimit) {
+            first.readByte()
+        } else {
+            second.readByte()
+        }
+    }
+
     private fun <T> readSizeIntoBuffer(size: Int, block: (ReadBuffer) -> T): T {
         val buffer =
             if (currentPosition < firstInitialLimit && currentPosition + size <= firstInitialLimit) {
