@@ -53,7 +53,7 @@ class MutableDataBuffer(
     }
 
     override fun set(index: Int, byte: Byte): WriteBuffer {
-        writeByteInternal(position, byte)
+        writeByteInternal(index, byte)
         return this
     }
 

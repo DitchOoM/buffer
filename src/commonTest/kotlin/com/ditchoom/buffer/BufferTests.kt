@@ -25,6 +25,77 @@ class BufferTests {
     }
 
     @Test
+    fun absolute() {
+        val platformBuffer = PlatformBuffer.allocate(
+            Byte.SIZE_BYTES + UByte.SIZE_BYTES +
+                Short.SIZE_BYTES + UShort.SIZE_BYTES +
+                Int.SIZE_BYTES + UInt.SIZE_BYTES +
+                Long.SIZE_BYTES + ULong.SIZE_BYTES
+        )
+        var index = 0
+        platformBuffer[index] = Byte.MIN_VALUE
+        index += Byte.SIZE_BYTES
+        platformBuffer[index] = UByte.MAX_VALUE
+        index += UByte.SIZE_BYTES
+
+        platformBuffer[index] = Short.MIN_VALUE
+        index += Short.SIZE_BYTES
+        platformBuffer[index] = UShort.MAX_VALUE
+        index += UShort.SIZE_BYTES
+
+        platformBuffer[index] = Int.MIN_VALUE
+        index += Int.SIZE_BYTES
+        platformBuffer[index] = UInt.MAX_VALUE
+        index += UInt.SIZE_BYTES
+
+        platformBuffer[index] = Long.MIN_VALUE
+        index += Long.SIZE_BYTES
+        platformBuffer[index] = ULong.MAX_VALUE
+
+        index = 0
+        assertEquals(platformBuffer[index], Byte.MIN_VALUE, "absolute byte read")
+        index += Byte.SIZE_BYTES
+        assertEquals(platformBuffer.getUnsignedByte(index), UByte.MAX_VALUE, "absolute ubyte read")
+        index += UByte.SIZE_BYTES
+
+        assertEquals(platformBuffer.getShort(index), Short.MIN_VALUE, "absolute short read")
+        index += Short.SIZE_BYTES
+        assertEquals(platformBuffer.getUnsignedShort(index), UShort.MAX_VALUE, "absolute ushort read")
+        index += UShort.SIZE_BYTES
+
+        assertEquals(platformBuffer.getInt(index), Int.MIN_VALUE, "absolute int read")
+        index += Int.SIZE_BYTES
+        assertEquals(platformBuffer.getUnsignedInt(index), UInt.MAX_VALUE, "absolute uint read")
+        index += UInt.SIZE_BYTES
+
+        assertEquals(platformBuffer.getLong(index), Long.MIN_VALUE, "absolute long read")
+        index += Long.SIZE_BYTES
+        assertEquals(platformBuffer.getUnsignedLong(index), ULong.MAX_VALUE, "absolute ulong read")
+
+        // double validate with relative reading
+        assertEquals(0, platformBuffer.position(), "relative initial position")
+        assertEquals(platformBuffer.readByte(), Byte.MIN_VALUE, "relative byte read")
+        assertEquals(1, platformBuffer.position(), "relative after byte read position")
+        assertEquals(platformBuffer.readUnsignedByte(), UByte.MAX_VALUE, "relative ubyte read")
+        assertEquals(2, platformBuffer.position(), "relative after ubyte read position")
+
+        assertEquals(platformBuffer.readShort(), Short.MIN_VALUE, "relative short read")
+        assertEquals(4, platformBuffer.position(), "relative after short read position")
+        assertEquals(platformBuffer.readUnsignedShort(), UShort.MAX_VALUE, "relative ushort read")
+        assertEquals(6, platformBuffer.position(), "relative after ushort read position")
+
+        assertEquals(platformBuffer.readInt(), Int.MIN_VALUE, "relative int read")
+        assertEquals(10, platformBuffer.position(), "relative after int read position")
+        assertEquals(platformBuffer.readUnsignedInt(), UInt.MAX_VALUE, "relative uint read")
+        assertEquals(14, platformBuffer.position(), "relative after uint read position")
+
+        assertEquals(platformBuffer.readLong(), Long.MIN_VALUE, "relative long read")
+        assertEquals(22, platformBuffer.position(), "relative after long read position")
+        assertEquals(platformBuffer.readUnsignedLong(), ULong.MAX_VALUE, "relative ulong read")
+        assertEquals(30, platformBuffer.position(), "relative after ulong read position")
+    }
+
+    @Test
     fun readByte() {
         val platformBuffer = PlatformBuffer.allocate(3)
         platformBuffer.writeByte((-1).toByte())
@@ -166,7 +237,6 @@ class BufferTests {
         val platformBuffer = PlatformBuffer.allocate(2)
         val uShort = UShort.MAX_VALUE
         platformBuffer[0] = uShort
-        println("msb lsb")
         assertEquals(uShort, platformBuffer.getUnsignedShort(0))
         val msb = platformBuffer[0]
         val lsb = platformBuffer[1]
@@ -273,10 +343,8 @@ class BufferTests {
         assertEquals(0, platformBuffer.position())
         platformBuffer[0] = long
         assertEquals(0, platformBuffer.position())
-        println("getLong")
         assertEquals(long, platformBuffer.getLong(0), "getLong")
         assertEquals(0, platformBuffer.position())
-        println("getNumberWithStartIndexAndByteSize")
         assertEquals(long, platformBuffer.getNumberWithStartIndexAndByteSize(0, Long.SIZE_BYTES), "getNumberWithStartIndexAndByteSize")
         assertEquals(0, platformBuffer.position())
 
@@ -284,10 +352,8 @@ class BufferTests {
             PlatformBuffer.allocate(Long.SIZE_BYTES, byteOrder = ByteOrder.LITTLE_ENDIAN)
         platformBufferLittleEndian[0] = long
         assertEquals(0, platformBufferLittleEndian.position())
-        println("getLong LE")
         assertEquals(long, platformBufferLittleEndian.getLong(0), "getLongLittleEndian")
         assertEquals(0, platformBufferLittleEndian.position())
-        println("getNumberWithStartIndexAndByteSize LE")
         assertEquals(long, platformBufferLittleEndian.getNumberWithStartIndexAndByteSize(0, Long.SIZE_BYTES), "getNumberWithStartIndexAndByteSizeLittleEndian")
         assertEquals(0, platformBufferLittleEndian.position())
     }
