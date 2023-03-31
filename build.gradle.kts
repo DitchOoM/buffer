@@ -38,7 +38,7 @@ kotlin {
             useJUnit()
         }
     }
-    js(IR) {
+    js(BOTH) {
         moduleName = "buffer-kt"
         browser()
         nodejs()
