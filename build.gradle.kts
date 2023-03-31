@@ -38,7 +38,7 @@ kotlin {
             useJUnit()
         }
     }
-    js(BOTH) {
+    js(IR) {
         moduleName = "buffer-kt"
         browser()
         nodejs()
@@ -73,7 +73,8 @@ kotlin {
 
         val jsMain by getting {
             dependencies {
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.467")
+                implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.521")
+                implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.521")
             }
         }
         val jsTest by getting
@@ -129,7 +130,11 @@ kotlin {
             tvosSimulatorArm64Test.dependsOn(this)
         }
 
-        val androidMain by getting
+        val androidMain by getting {
+            dependencies {
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
+            }
+        }
         val androidTest by getting {
             kotlin.srcDir("src/commonJvmTest/kotlin")
         }
@@ -137,6 +142,11 @@ kotlin {
             dependsOn(commonTest)
             kotlin.srcDir("src/commonJvmTest/kotlin")
             kotlin.srcDir("src/commonTest/kotlin")
+            dependencies {
+                implementation("androidx.test:runner:1.5.2")
+                implementation("androidx.test:rules:1.5.0")
+                implementation("androidx.test:core-ktx:1.5.0")
+            }
         }
     }
 }
@@ -144,9 +154,11 @@ kotlin {
 android {
     compileSdk = 33
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
+    sourceSets["androidTest"].manifest.srcFile("src/androidAndroidTest/AndroidManifest.xml")
     defaultConfig {
-        minSdk = 9
+        minSdk = 16
         targetSdk = 33
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     namespace = "$group.${rootProject.name}"
 }

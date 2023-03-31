@@ -1,40 +1,80 @@
 package com.ditchoom.buffer
 
+import android.os.Build
 import android.os.Parcel
-import android.os.Parcelable
+import android.os.ParcelFileDescriptor
+import android.os.Parcelable.Creator
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.nio.ByteBuffer
 
-/**
- * Memory copy based parcelable conforming buffer.
- */
 open class JvmBuffer(val buffer: ByteBuffer) : BaseJvmBuffer(buffer) {
-    override fun describeContents(): Int = Parcelable.CONTENTS_FILE_DESCRIPTOR
+    override fun describeContents(): Int = 0
 
     override fun writeToParcel(dest: Parcel, flags: Int) {
-        val position = buffer.position()
-        buffer.position(0)
-        val array = buffer.toArray()
-        dest.writeInt(array.size)
-        dest.writeByteArray(array)
-        dest.writeInt(position)
-        dest.writeInt(buffer.limit())
+        if (this is ParcelableSharedMemoryBuffer) {
+            dest.writeByte(1)
+            return
+        } else {
+            dest.writeByte(0)
+        }
+        dest.writeInt(byteBuffer.position())
+        dest.writeInt(byteBuffer.limit())
+        if (byteBuffer.isDirect) {
+            dest.writeByte(1)
+        } else {
+            dest.writeByte(0)
+        }
+        byteBuffer.position(0)
+        byteBuffer.limit(byteBuffer.capacity())
+
+        val (readFileDescriptor, writeFileDescriptor) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            ParcelFileDescriptor.createReliablePipe()
+        } else {
+            ParcelFileDescriptor.createPipe()
+        }
+        readFileDescriptor.writeToParcel(dest, 0)
+        val scope = CoroutineScope(Dispatchers.IO + CoroutineName("IPC Write Channel Jvm Buffer"))
+        scope.launch {
+            FileOutputStream(writeFileDescriptor.fileDescriptor).channel.use { writeChannel ->
+                writeChannel.write(buffer)
+            }
+            writeFileDescriptor.close()
+            readFileDescriptor.close()
+            scope.cancel()
+        }
     }
 
-    companion object {
-        @JvmField
-        val CREATOR: Parcelable.Creator<JvmBuffer> = object : Parcelable.Creator<JvmBuffer> {
-            override fun createFromParcel(parcel: Parcel): JvmBuffer {
-                val byteArray = ByteArray(parcel.readInt())
-                parcel.readByteArray(byteArray)
-                val buffer = JvmBuffer(ByteBuffer.wrap(byteArray))
-                buffer.position(parcel.readInt())
-                buffer.setLimit(parcel.readInt())
-                return buffer
+    companion object CREATOR : Creator<JvmBuffer> {
+        override fun createFromParcel(parcel: Parcel): JvmBuffer {
+            val p = parcel.dataPosition()
+            if (parcel.readByte().toInt() == 1) {
+                parcel.setDataPosition(p)
+                return ParcelableSharedMemoryBuffer.createFromParcel(parcel)
             }
+            val position = parcel.readInt()
+            val limit = parcel.readInt()
+            val isDirect = parcel.readByte() == 1.toByte()
+            val buffer = if (isDirect) {
+                ByteBuffer.allocateDirect(limit)
+            } else {
+                ByteBuffer.allocate(limit)
+            }
+            ParcelFileDescriptor.CREATOR.createFromParcel(parcel).use { pfd ->
+                FileInputStream(pfd.fileDescriptor).channel.use { readChannel -> readChannel.read(buffer) }
+            }
+            buffer.position(position)
+            buffer.limit(limit)
+            return JvmBuffer(buffer)
+        }
 
-            override fun newArray(size: Int): Array<JvmBuffer?> {
-                return arrayOfNulls(size)
-            }
+        override fun newArray(size: Int): Array<JvmBuffer?> {
+            return arrayOfNulls(size)
         }
     }
 }

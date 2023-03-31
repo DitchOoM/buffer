@@ -40,6 +40,7 @@ interface WriteBuffer : PositionBuffer {
 
     fun writeShort(short: Short): WriteBuffer =
         writeNumberOfByteSize(short.toLong(), Short.SIZE_BYTES)
+
     operator fun set(index: Int, short: Short) =
         setIndexNumberAndByteSize(index, short.toLong(), Short.SIZE_BYTES)
 

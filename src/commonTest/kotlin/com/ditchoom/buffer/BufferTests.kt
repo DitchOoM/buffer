@@ -25,6 +25,18 @@ class BufferTests {
     }
 
     @Test
+    fun sharedMemoryAllocates() {
+        val platformBuffer = PlatformBuffer.allocate(
+            Byte.SIZE_BYTES + UByte.SIZE_BYTES +
+                Short.SIZE_BYTES + UShort.SIZE_BYTES +
+                Int.SIZE_BYTES + UInt.SIZE_BYTES +
+                Long.SIZE_BYTES + ULong.SIZE_BYTES,
+            AllocationZone.SharedMemory
+        )
+        testAllPrimitives(platformBuffer)
+    }
+
+    @Test
     fun absolute() {
         val platformBuffer = PlatformBuffer.allocate(
             Byte.SIZE_BYTES + UByte.SIZE_BYTES +
@@ -32,6 +44,10 @@ class BufferTests {
                 Int.SIZE_BYTES + UInt.SIZE_BYTES +
                 Long.SIZE_BYTES + ULong.SIZE_BYTES
         )
+        testAllPrimitives(platformBuffer)
+    }
+
+    private fun testAllPrimitives(platformBuffer: PlatformBuffer) {
         var index = 0
         platformBuffer[index] = Byte.MIN_VALUE
         index += Byte.SIZE_BYTES
@@ -292,6 +308,7 @@ class BufferTests {
         assertEquals(uInt.toLong(), platformBuffer.readUnsignedInt().toLong())
         assertEquals(0, platformBuffer.remaining())
     }
+
     @Test
     fun absoluteUnsignedInt() {
         val platformBuffer = PlatformBuffer.allocate(4)
@@ -345,7 +362,11 @@ class BufferTests {
         assertEquals(0, platformBuffer.position())
         assertEquals(long, platformBuffer.getLong(0), "getLong")
         assertEquals(0, platformBuffer.position())
-        assertEquals(long, platformBuffer.getNumberWithStartIndexAndByteSize(0, Long.SIZE_BYTES), "getNumberWithStartIndexAndByteSize")
+        assertEquals(
+            long,
+            platformBuffer.getNumberWithStartIndexAndByteSize(0, Long.SIZE_BYTES),
+            "getNumberWithStartIndexAndByteSize"
+        )
         assertEquals(0, platformBuffer.position())
 
         val platformBufferLittleEndian =
@@ -354,7 +375,11 @@ class BufferTests {
         assertEquals(0, platformBufferLittleEndian.position())
         assertEquals(long, platformBufferLittleEndian.getLong(0), "getLongLittleEndian")
         assertEquals(0, platformBufferLittleEndian.position())
-        assertEquals(long, platformBufferLittleEndian.getNumberWithStartIndexAndByteSize(0, Long.SIZE_BYTES), "getNumberWithStartIndexAndByteSizeLittleEndian")
+        assertEquals(
+            long,
+            platformBufferLittleEndian.getNumberWithStartIndexAndByteSize(0, Long.SIZE_BYTES),
+            "getNumberWithStartIndexAndByteSizeLittleEndian"
+        )
         assertEquals(0, platformBufferLittleEndian.position())
     }
 

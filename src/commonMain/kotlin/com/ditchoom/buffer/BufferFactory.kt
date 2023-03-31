@@ -1,5 +1,7 @@
 package com.ditchoom.buffer
 
+import kotlin.math.roundToInt
+
 expect fun PlatformBuffer.Companion.allocate(
     size: Int,
     zone: AllocationZone = AllocationZone.Heap,
@@ -18,10 +20,17 @@ expect fun PlatformBuffer.Companion.wrap(
 fun String.toBuffer(zone: AllocationZone = AllocationZone.Heap): ReadBuffer =
     toReadBuffer(Charset.UTF8, zone)
 
-expect fun String.toReadBuffer(
-    charset: Charset,
-    zone: AllocationZone = AllocationZone.Heap
-): ReadBuffer
+fun CharSequence.maxBufferSize(charset: Charset): Int {
+    return (charset.maxBytesPerChar * this.length).roundToInt()
+}
+
+fun String.toReadBuffer(charset: Charset = Charset.UTF8, zone: AllocationZone = AllocationZone.Heap): ReadBuffer {
+    val maxBytes = maxBufferSize(charset)
+    val buffer = PlatformBuffer.allocate(maxBytes, zone)
+    buffer.writeString(this, charset)
+    buffer.resetForRead()
+    return buffer.slice()
+}
 
 fun CharSequence.utf8Length(): Int {
     var count = 0

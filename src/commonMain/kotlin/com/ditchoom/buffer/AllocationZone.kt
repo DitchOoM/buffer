@@ -8,8 +8,15 @@ sealed class AllocationZone {
     /** Allocates a direct buffer in native memory.*/
     object Direct : AllocationZone()
 
-    /** Allocates a direct buffer in native shared memory. Requires Android API 27, Oreo MR1. Otherwise defaults to [Direct].*/
-    object AndroidSharedMemory : AllocationZone()
+    /**
+     * Allocates a direct buffer in native shared memory.
+     * In Javascript it will allocate a SharedArrayBuffer
+     * Requires Android API 27, Oreo MR1. Otherwise defaults to [Direct].
+     ***/
+    object SharedMemory : AllocationZone()
 
     class Custom(val allocator: (Int) -> PlatformBuffer) : AllocationZone()
 }
+
+@Deprecated("Use SharedMemory")
+typealias AndroidSharedMemory = AllocationZone.SharedMemory

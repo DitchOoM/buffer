@@ -68,6 +68,7 @@ class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((Int, Byte
         buffer.resetForRead()
         return buffer.readInt()
     }
+
     override fun getInt(index: Int): Int {
         val buffer = PlatformBuffer.allocate(Int.SIZE_BYTES)
         buffer.writeInt(origin.getInt(index))

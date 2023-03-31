@@ -85,18 +85,18 @@ Implementation notes:
 
 * All Kotlin Multiplatform supported OS's.
 
-| Platform |                                                                            Wrapped Type                                                                             |  
-| :---: |:-------------------------------------------------------------------------------------------------------------------------------------------------------------------:|
-| `JVM` 1.8 |                                 [ByteBuffer](https://docs.oracle.com/en/java/javase/12/docs/api/java.base/java/nio/ByteBuffer.html)                                 |
-| `Node.js` |                              [Uint8Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array)                              |
-| `Browser` (Chrome) |                              [Uint8Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array)                              |
-| `Android` | [ByteBuffer](https://developer.android.com/reference/java/nio/ByteBuffer) including [SharedMemory](https://developer.android.com/reference/android/os/SharedMemory) |
-| `iOS` |                                     [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                      |
-| `WatchOS` |                                     [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                      |
-| `TvOS` |                                     [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                      |
-| `MacOS` |                                     [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                      |
-| `Linux X64` |                                                                          kotlin ByteArray                                                                           |
-| `Windows X64` |                                                                                TODO                                                                                 |
+|      Platform      |                                                                            Wrapped Type                                                                             |  
+|:------------------:|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------:|
+|     `JVM` 1.8      |                                 [ByteBuffer](https://docs.oracle.com/en/java/javase/12/docs/api/java.base/java/nio/ByteBuffer.html)                                 |
+|     `Node.js`      |               [Uint8Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array)  including SharedArrayBuffer                |
+| `Browser` (Chrome) |                [Uint8Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array) including SharedArrayBuffer                |
+|     `Android`      | [ByteBuffer](https://developer.android.com/reference/java/nio/ByteBuffer) including [SharedMemory](https://developer.android.com/reference/android/os/SharedMemory) |
+|       `iOS`        |                                         [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                         |
+|     `WatchOS`      |                                         [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                         |
+|       `TvOS`       |                                         [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                         |
+|      `MacOS`       |                                         [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                         |
+|    `Linux X64`     |                                                                          kotlin ByteArray                                                                           |
+|   `Windows X64`    |                                                                                TODO                                                                                 |
 
 ## Installation
 
@@ -133,11 +133,12 @@ Allocation zones allow you to change where the buffer is allocated.
   array
 - `AllocationZone.Direct` -> On JVM platforms, allocates a DirectByteBuffer, otherwise a native byte
   array
-- `AllocationZone.AndroidSharedMemory` -> On API 27+ it allocates
+- `AllocationZone.SharedMemory` -> On JS Platforms this will populate the `sharedArrayBuffer` parameter in `JsBuffer`.
+  On API 27+ it allocates
   a [Shared Memory](https://developer.android.com/reference/android/os/SharedMemory) instance,
-  otherwise defaulting to `AllocationZone.Direct`.
+  otherwise will pipe the data during parcel using ParcelFileDescriptor and java.nio.Channel api.
 
-> **Android**: All `JvmBuffer`s are `Parcelable`. To avoid extra memory copies, use `AllocationZone.AndroidSharedMemory`
+> **Android**: All `JvmBuffer`s are `Parcelable`. To avoid extra memory copies, use `AllocationZone.SharedMemory`
 
 ### Byte order
 
@@ -240,6 +241,7 @@ val readBuffer = buffer.readBytes(numOfBytesForBuffer)
 ```
 
 ### Absolute read data into platform agnostic buffer
+
 ```kotlin
 val buffer: ReadBuffer
 // get signed byte
