@@ -28,10 +28,10 @@ class ParcelableSharedMemoryBuffer(buffer: ByteBuffer, private val sharedMemory:
         override fun createFromParcel(parcel: Parcel): ParcelableSharedMemoryBuffer {
             parcel.readByte() // ignore this first byte
             val sharedMemory = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                parcel.readParcelable(javaClass.classLoader, SharedMemory::class.java)
+                parcel.readParcelable(this::class.java.classLoader, SharedMemory::class.java)
             } else {
                 @Suppress("DEPRECATION")
-                parcel.readParcelable(javaClass.classLoader)
+                parcel.readParcelable(this::class.java.classLoader)
             }!!
             val buffer =
                 ParcelableSharedMemoryBuffer(sharedMemory.mapReadWrite(), sharedMemory)
