@@ -136,7 +136,12 @@ Allocation zones allow you to change where the buffer is allocated.
 - `AllocationZone.SharedMemory` -> On JS Platforms this will populate the `sharedArrayBuffer` parameter in `JsBuffer`.
   On API 27+ it allocates
   a [Shared Memory](https://developer.android.com/reference/android/os/SharedMemory) instance,
-  otherwise will pipe the data during parcel using ParcelFileDescriptor and java.nio.Channel api.
+  otherwise will pipe the data during parcel using ParcelFileDescriptor and java.nio.Channel api. For `JS` platforms it
+  will allocate
+  a [`SharedArrayBuffer`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer).
+  If the
+  proper [security requirements](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer#security_requirements)
+  are not set, it will fallback to a standard `ArrayBuffer`.
 
 > **Android**: All `JvmBuffer`s are `Parcelable`. To avoid extra memory copies, use `AllocationZone.SharedMemory`
 
