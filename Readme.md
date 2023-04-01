@@ -141,9 +141,19 @@ Allocation zones allow you to change where the buffer is allocated.
   a [`SharedArrayBuffer`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer).
   If the
   proper [security requirements](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer#security_requirements)
-  are not set, it will fallback to a standard `ArrayBuffer`.
+  are not set, it will fallback to a standard `ArrayBuffer`. 
 
-> **Android**: All `JvmBuffer`s are `Parcelable`. To avoid extra memory copies, use `AllocationZone.SharedMemory`
+> **Android**: All `JvmBuffer`s are `Parcelable`. To avoid extra memory copies when using IPC, always choose `AllocationZone.SharedMemory`.
+
+> **Browser JS**: To enable SharedArrayBuffer, add the appropriate headers for the JS server in a gradle project by adding any file to a directory `webpack.config.d` next to the `src` directory containing:
+>```
+>if (config.devServer != null) {
+>    config.devServer.headers = {
+>        "Cross-Origin-Opener-Policy": "same-origin",
+>        "Cross-Origin-Embedder-Policy": "require-corp"
+>    }
+>}
+>```
 
 ### Byte order
 
