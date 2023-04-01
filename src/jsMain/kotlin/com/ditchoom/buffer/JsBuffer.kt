@@ -1,6 +1,7 @@
 package com.ditchoom.buffer
 
 import js.buffer.BufferSource
+import js.buffer.SharedArrayBuffer
 import org.khronos.webgl.DataView
 import org.khronos.webgl.Int8Array
 import org.khronos.webgl.Uint8Array
@@ -12,6 +13,7 @@ data class JsBuffer(
     private var position: Int = 0,
     private var limit: Int = 0,
     override val capacity: Int = buffer.byteLength,
+    val sharedArrayBuffer: SharedArrayBuffer? = null,
 ) : PlatformBuffer {
     override val byteOrder = if (littleEndian) ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN
 
@@ -48,7 +50,11 @@ data class JsBuffer(
     }
 
     override fun slice(): ReadBuffer {
-        return JsBuffer(Uint8Array(buffer.buffer.slice(position, limit)), littleEndian)
+        return JsBuffer(
+            Uint8Array(buffer.buffer.slice(position, limit)),
+            littleEndian,
+            sharedArrayBuffer = sharedArrayBuffer
+        )
     }
 
     override fun readByteArray(size: Int): ByteArray {
@@ -164,7 +170,7 @@ data class JsBuffer(
     override fun writeInt(int: Int): WriteBuffer {
         val dataView = DataView(buffer.buffer, position, UInt.SIZE_BYTES)
         position += UInt.SIZE_BYTES
-        dataView.setUint32(0, int, littleEndian)
+        dataView.setInt32(0, int, littleEndian)
         return this
     }
 

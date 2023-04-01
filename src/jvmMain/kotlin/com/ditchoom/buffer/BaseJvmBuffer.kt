@@ -84,6 +84,7 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
         byteBuffer.putShort(short)
         return this
     }
+
     override fun set(index: Int, short: Short): WriteBuffer {
         byteBuffer.putShort(index, short)
         return this
@@ -161,7 +162,7 @@ fun ByteBuffer.toArray(size: Int = remaining()): ByteArray {
     return if (hasArray()) {
         val result = ByteArray(size)
         val buffer = this as Buffer
-        System.arraycopy(this.array(), buffer.position(), result, 0, size)
+        System.arraycopy(this.array(), buffer.arrayOffset() + buffer.position(), result, 0, size)
         buffer.position(buffer.position() + size)
         result
     } else {

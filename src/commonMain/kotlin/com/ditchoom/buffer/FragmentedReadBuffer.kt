@@ -145,6 +145,7 @@ fun List<ReadBuffer>.toComposableBuffer(): ReadBuffer {
         1 -> {
             first()
         }
+
         else -> {
             FragmentedReadBuffer(
                 first(),
