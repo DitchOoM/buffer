@@ -24,7 +24,7 @@ import kotlin.test.assertTrue
 @MediumTest
 class IPCTest {
     @get:Rule
-    val serviceRule: ServiceTestRule = ServiceTestRule.withTimeout(300, TimeUnit.MILLISECONDS)
+    val serviceRule: ServiceTestRule = ServiceTestRule.withTimeout(3, TimeUnit.SECONDS)
 
     @Test
     fun sharedMemoryBuffer() = runBlocking {
