@@ -27,7 +27,9 @@ actual fun PlatformBuffer.Companion.allocate(
         null
     }
     if (sharedArrayBuffer == null && zone is AllocationZone.SharedMemory) {
-        console.warn("Failed to allocate shared buffer in BufferFactory.kt. Please check and validate the appropriate headers are set on the http request as defined in the SharedArrayBuffer MDN docs.")
+        console.warn("Failed to allocate shared buffer in BufferFactory.kt. Please check and validate the " +
+                "appropriate headers are set on the http request as defined in the SharedArrayBuffer MDN docs." +
+                "see: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer#security_requirements")
     }
     return if (sharedArrayBuffer != null) {
         val arrayBuffer = sharedArrayBuffer.unsafeCast<ArrayBuffer>().slice(0, size)
