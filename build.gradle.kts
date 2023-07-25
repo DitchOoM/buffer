@@ -2,7 +2,7 @@ import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTes
 
 plugins {
     id("dev.petuska.npm.publish") version "3.2.0"
-    kotlin("multiplatform") version "1.8.10"
+    kotlin("multiplatform") version "1.9.0"
     id("com.android.library")
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
@@ -27,7 +27,7 @@ repositories {
 }
 
 kotlin {
-    android {
+    androidTarget {
         publishLibraryVariants("release")
     }
     jvm {
@@ -50,7 +50,7 @@ kotlin {
     ios()
     iosSimulatorArm64()
     tasks.getByName<KotlinNativeSimulatorTest>("iosSimulatorArm64Test") {
-        deviceId = "iPhone 14"
+        device.set("iPhone 14")
     }
     watchos()
     watchosSimulatorArm64()
@@ -62,7 +62,7 @@ kotlin {
         val commonTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.2")
             }
         }
         val jvmMain by getting {
@@ -73,8 +73,8 @@ kotlin {
 
         val jsMain by getting {
             dependencies {
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.521")
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.521")
+                implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.599")
+                implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.599")
             }
         }
         val jsTest by getting
@@ -132,13 +132,13 @@ kotlin {
 
         val androidMain by getting {
             dependencies {
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.2")
             }
         }
-        val androidTest by getting {
+        val androidUnitTest by getting {
             kotlin.srcDir("src/commonJvmTest/kotlin")
         }
-        val androidAndroidTest by getting {
+        val androidInstrumentedTest by getting {
             dependsOn(commonTest)
             kotlin.srcDir("src/commonJvmTest/kotlin")
             kotlin.srcDir("src/commonTest/kotlin")
