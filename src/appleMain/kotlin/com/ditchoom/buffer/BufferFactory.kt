@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package com.ditchoom.buffer
 
 import kotlinx.cinterop.convert
@@ -12,7 +14,6 @@ actual fun PlatformBuffer.Companion.allocate(
     if (zone is AllocationZone.Custom) {
         return zone.allocator(size)
     }
-    @Suppress("OPT_IN_USAGE")
     return MutableDataBuffer(NSMutableData.create(length = size.convert())!!, byteOrder = byteOrder)
 }
 

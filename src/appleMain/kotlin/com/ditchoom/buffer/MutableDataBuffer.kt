@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package com.ditchoom.buffer
 
 import kotlinx.cinterop.ByteVar
@@ -18,7 +20,6 @@ import platform.Foundation.dataWithBytesNoCopy
 import platform.Foundation.replaceBytesInRange
 import platform.Foundation.subdataWithRange
 
-@Suppress("OPT_IN_USAGE")
 class MutableDataBuffer(
     dataRef: NSData,
     override val byteOrder: ByteOrder,
@@ -123,7 +124,7 @@ private fun <T> ByteArray.useNSDataRef(block: (NSData) -> T): T {
             isNotEmpty() -> pin.addressOf(0)
             else -> null
         }
-        @Suppress("OPT_IN_USAGE") val nsData = NSData.dataWithBytesNoCopy(
+        val nsData = NSData.dataWithBytesNoCopy(
             bytes = bytesPointer,
             length = size.convert(),
             freeWhenDone = false

@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package com.ditchoom.buffer
 
 import kotlinx.cinterop.ByteVar
@@ -12,7 +14,6 @@ import platform.Foundation.create
 import platform.Foundation.isEqualToData
 import platform.Foundation.subdataWithRange
 
-@Suppress("OPT_IN_USAGE")
 open class DataBuffer(
     val data: NSData,
     override val byteOrder: ByteOrder
