@@ -142,7 +142,8 @@ class BufferTests {
         val expected = "test"
         // the first two bytes are not visible characters
         val bytes = byteArrayOf(
-            -126, 4,
+            -126,
+            4,
             expected[0].code.toByte(),
             expected[1].code.toByte(),
             expected[2].code.toByte(),

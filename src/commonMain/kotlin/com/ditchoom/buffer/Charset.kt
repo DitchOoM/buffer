@@ -9,5 +9,5 @@ enum class Charset(val averageBytesPerChar: Float, val maxBytesPerChar: Float) {
     ISOLatin1(1f, 1f), // aka ISO/IEC 8859-1
     UTF32(4f, 4f),
     UTF32LittleEndian(4f, 4f),
-    UTF32BigEndian(4f, 4f),
+    UTF32BigEndian(4f, 4f)
 }

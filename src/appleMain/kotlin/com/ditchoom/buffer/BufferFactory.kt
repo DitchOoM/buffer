@@ -1,5 +1,3 @@
-@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
-
 package com.ditchoom.buffer
 
 import kotlinx.cinterop.convert

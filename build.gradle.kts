@@ -1,14 +1,14 @@
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 
 plugins {
-    id("dev.petuska.npm.publish") version "3.2.0"
+    id("dev.petuska.npm.publish") version "3.4.1"
     kotlin("multiplatform") version "1.9.0"
     id("com.android.library")
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
     signing
-    id("org.jlleitschuh.gradle.ktlint") version "11.0.0"
-    id("org.jlleitschuh.gradle.ktlint-idea") version "11.0.0"
+    id("org.jlleitschuh.gradle.ktlint") version "11.5.1"
+    id("org.jlleitschuh.gradle.ktlint-idea") version "11.5.1"
 }
 
 val libraryVersionPrefix: String by project
@@ -62,7 +62,7 @@ kotlin {
         val commonTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.2")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
             }
         }
         val jvmMain by getting {
@@ -147,6 +147,12 @@ kotlin {
                 implementation("androidx.test:rules:1.5.0")
                 implementation("androidx.test:core-ktx:1.5.0")
             }
+        }
+
+        all {
+            languageSettings.optIn("kotlinx.cinterop.ExperimentalForeignApi")
+            languageSettings.optIn("kotlinx.cinterop.BetaInteropApi")
+            languageSettings.optIn("kotlinx.cinterop.UnsafeNumber")
         }
     }
 }

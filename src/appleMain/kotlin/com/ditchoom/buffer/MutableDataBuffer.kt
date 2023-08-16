@@ -1,5 +1,3 @@
-@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
-
 package com.ditchoom.buffer
 
 import kotlinx.cinterop.ByteVar
@@ -129,7 +127,10 @@ private fun <T> ByteArray.useNSDataRef(block: (NSData) -> T): T {
             length = size.convert(),
             freeWhenDone = false
         )
-        @Suppress("UNCHECKED_CAST") val typeRef = CFBridgingRetain(nsData) as CFDataRef
+
+        @Suppress("UNCHECKED_CAST")
+        val typeRef = CFBridgingRetain(nsData) as CFDataRef
+
         try {
             block(nsData)
         } finally {
