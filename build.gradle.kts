@@ -40,8 +40,8 @@ kotlin {
     }
     js(IR) {
         moduleName = "buffer-kt"
-        browser()
-        nodejs()
+        browser { binaries.library() }
+        nodejs { binaries.library() }
     }
 
     macosX64()
