@@ -38,7 +38,7 @@ kotlin {
             useJUnit()
         }
     }
-    js(BOTH) {
+    js(IR) {
         moduleName = "buffer-kt"
         browser()
         nodejs()
@@ -73,8 +73,8 @@ kotlin {
 
         val jsMain by getting {
             dependencies {
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.599")
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.599")
+                implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.615")
+                implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.615")
             }
         }
         val jsTest by getting
@@ -132,7 +132,7 @@ kotlin {
 
         val androidMain by getting {
             dependencies {
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.2")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
             }
         }
         val androidUnitTest by getting {
