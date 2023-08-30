@@ -1,14 +1,14 @@
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 
 plugins {
-    id("dev.petuska.npm.publish") version "3.2.0"
-    kotlin("multiplatform") version "1.8.10"
+    id("dev.petuska.npm.publish") version "3.4.1"
+    kotlin("multiplatform") version "1.9.0"
     id("com.android.library")
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
     signing
-    id("org.jlleitschuh.gradle.ktlint") version "11.0.0"
-    id("org.jlleitschuh.gradle.ktlint-idea") version "11.0.0"
+    id("org.jlleitschuh.gradle.ktlint") version "11.5.1"
+    id("org.jlleitschuh.gradle.ktlint-idea") version "11.5.1"
 }
 
 val libraryVersionPrefix: String by project
@@ -27,7 +27,7 @@ repositories {
 }
 
 kotlin {
-    android {
+    androidTarget {
         publishLibraryVariants("release")
     }
     jvm {
@@ -38,10 +38,10 @@ kotlin {
             useJUnit()
         }
     }
-    js(BOTH) {
+    js(IR) {
         moduleName = "buffer-kt"
-        browser()
-        nodejs()
+        browser { binaries.library() }
+        nodejs { binaries.library() }
     }
 
     macosX64()
@@ -50,7 +50,7 @@ kotlin {
     ios()
     iosSimulatorArm64()
     tasks.getByName<KotlinNativeSimulatorTest>("iosSimulatorArm64Test") {
-        deviceId = "iPhone 14"
+        device.set("iPhone 14")
     }
     watchos()
     watchosSimulatorArm64()
@@ -62,7 +62,7 @@ kotlin {
         val commonTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
             }
         }
         val jvmMain by getting {
@@ -73,8 +73,8 @@ kotlin {
 
         val jsMain by getting {
             dependencies {
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.521")
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.521")
+                implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.615")
+                implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.615")
             }
         }
         val jsTest by getting
@@ -132,13 +132,13 @@ kotlin {
 
         val androidMain by getting {
             dependencies {
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
             }
         }
-        val androidTest by getting {
+        val androidUnitTest by getting {
             kotlin.srcDir("src/commonJvmTest/kotlin")
         }
-        val androidAndroidTest by getting {
+        val androidInstrumentedTest by getting {
             dependsOn(commonTest)
             kotlin.srcDir("src/commonJvmTest/kotlin")
             kotlin.srcDir("src/commonTest/kotlin")
@@ -147,6 +147,12 @@ kotlin {
                 implementation("androidx.test:rules:1.5.0")
                 implementation("androidx.test:core-ktx:1.5.0")
             }
+        }
+
+        all {
+            languageSettings.optIn("kotlinx.cinterop.ExperimentalForeignApi")
+            languageSettings.optIn("kotlinx.cinterop.BetaInteropApi")
+            languageSettings.optIn("kotlinx.cinterop.UnsafeNumber")
         }
     }
 }

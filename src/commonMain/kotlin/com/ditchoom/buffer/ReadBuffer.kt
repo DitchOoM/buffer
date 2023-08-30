@@ -69,9 +69,13 @@ interface ReadBuffer : PositionBuffer {
             }
         }
         val carriageFeedPositionIncrement =
-            if (lastByte == newLine[0] && currentByte == newLine[1]) 2
-            else if (currentByte == newLine[1]) 1
-            else 0
+            if (lastByte == newLine[0] && currentByte == newLine[1]) {
+                2
+            } else if (currentByte == newLine[1]) {
+                1
+            } else {
+                0
+            }
 
         val bytesToRead = bytesRead - carriageFeedPositionIncrement
         position(initialPosition)

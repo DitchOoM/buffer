@@ -18,7 +18,6 @@ import platform.Foundation.dataWithBytesNoCopy
 import platform.Foundation.replaceBytesInRange
 import platform.Foundation.subdataWithRange
 
-@Suppress("OPT_IN_USAGE")
 class MutableDataBuffer(
     dataRef: NSData,
     override val byteOrder: ByteOrder,
@@ -123,12 +122,15 @@ private fun <T> ByteArray.useNSDataRef(block: (NSData) -> T): T {
             isNotEmpty() -> pin.addressOf(0)
             else -> null
         }
-        @Suppress("OPT_IN_USAGE") val nsData = NSData.dataWithBytesNoCopy(
+        val nsData = NSData.dataWithBytesNoCopy(
             bytes = bytesPointer,
             length = size.convert(),
             freeWhenDone = false
         )
-        @Suppress("UNCHECKED_CAST") val typeRef = CFBridgingRetain(nsData) as CFDataRef
+
+        @Suppress("UNCHECKED_CAST")
+        val typeRef = CFBridgingRetain(nsData) as CFDataRef
+
         try {
             block(nsData)
         } finally {

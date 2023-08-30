@@ -48,5 +48,5 @@ actual fun PlatformBuffer.Companion.allocate(
 actual fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder): PlatformBuffer =
     JsBuffer(
         array.unsafeCast<Uint8Array>(),
-        littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN,
+        littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN
     )

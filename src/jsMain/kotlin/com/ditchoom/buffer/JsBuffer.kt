@@ -13,7 +13,7 @@ data class JsBuffer(
     private var position: Int = 0,
     private var limit: Int = 0,
     override val capacity: Int = buffer.byteLength,
-    val sharedArrayBuffer: SharedArrayBuffer? = null,
+    val sharedArrayBuffer: SharedArrayBuffer? = null
 ) : PlatformBuffer {
     override val byteOrder = if (littleEndian) ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN
 
