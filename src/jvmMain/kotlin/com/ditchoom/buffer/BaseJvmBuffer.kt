@@ -4,6 +4,7 @@ import java.io.RandomAccessFile
 import java.nio.Buffer
 import java.nio.ByteBuffer
 import java.nio.CharBuffer
+import java.nio.charset.CodingErrorAction
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
@@ -50,7 +51,7 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
         val finalPosition = buffer.position() + length
         val readBuffer = byteBuffer.asReadOnlyBuffer()
         (readBuffer as Buffer).limit(finalPosition)
-        val decoded = when (charset) {
+        val charsetConverted = when (charset) {
             Charset.UTF8 -> Charsets.UTF_8
             Charset.UTF16 -> Charsets.UTF_16
             Charset.UTF16BigEndian -> Charsets.UTF_16BE
@@ -60,7 +61,11 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
             Charset.UTF32 -> Charsets.UTF_32
             Charset.UTF32LittleEndian -> Charsets.UTF_32LE
             Charset.UTF32BigEndian -> Charsets.UTF_32BE
-        }.decode(readBuffer)
+        }
+        val decoded = charsetConverted.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(readBuffer)
         buffer.position(finalPosition)
         return decoded.toString()
     }
