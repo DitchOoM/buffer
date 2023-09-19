@@ -104,7 +104,6 @@ class MutableDataBuffer(
             text.toString() as NSString
         }
         val charsetEncoding = charset.toEncoding()
-        charset.toEncoding()
         write(DataBuffer(string.dataUsingEncoding(charsetEncoding)!!, byteOrder))
         return this
     }

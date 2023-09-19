@@ -6,6 +6,7 @@ import org.khronos.webgl.DataView
 import org.khronos.webgl.Int8Array
 import org.khronos.webgl.Uint8Array
 import web.encoding.TextDecoder
+import web.encoding.TextDecoderOptions
 
 data class JsBuffer(
     val buffer: Uint8Array,
@@ -116,8 +117,7 @@ data class JsBuffer(
             Charset.UTF32LittleEndian -> throw UnsupportedOperationException("Not sure how to implement")
             Charset.UTF32BigEndian -> throw UnsupportedOperationException("Not sure how to implement")
         }
-
-        val textDecoder = TextDecoder(encoding)
+        val textDecoder = TextDecoder(encoding, js("{fatal: true}") as TextDecoderOptions)
         val result = textDecoder.decode(
             buffer.subarray(position, position + length).unsafeCast<BufferSource>()
         )
