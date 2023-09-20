@@ -25,6 +25,9 @@ fun CharSequence.maxBufferSize(charset: Charset): Int {
 }
 
 fun String.toReadBuffer(charset: Charset = Charset.UTF8, zone: AllocationZone = AllocationZone.Heap): ReadBuffer {
+    if (this == "") {
+        return ReadBuffer.EMPTY_BUFFER
+    }
     val maxBytes = maxBufferSize(charset)
     val buffer = PlatformBuffer.allocate(maxBytes, zone)
     buffer.writeString(this, charset)
