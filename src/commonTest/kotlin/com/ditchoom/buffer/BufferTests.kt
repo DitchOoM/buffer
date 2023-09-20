@@ -735,4 +735,11 @@ class BufferTests {
             println("should have failed by now")
         }
     }
+
+    @Test
+    fun emptyString() {
+        val s = "".toReadBuffer()
+        assertEquals(0, s.position())
+        assertEquals(0, s.limit())
+    }
 }
