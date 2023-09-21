@@ -80,6 +80,11 @@ class FragmentedReadBuffer(
     }
 
     override fun slice(): ReadBuffer {
+        if (first.position() == 0 && first.limit() == 0) {
+            return second
+        } else if (second.position() == 0 && second.limit() == 0) {
+            return first
+        }
         val first = first.slice()
         val second = second.slice()
         val buffer = PlatformBuffer.allocate(first.limit() + second.limit())
