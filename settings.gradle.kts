@@ -7,14 +7,14 @@ pluginManagement {
     resolutionStrategy {
         eachPlugin {
             if (requested.id.namespace == "com.android" || requested.id.name == "kotlin-android-extensions") {
-                useModule("com.android.tools.build:gradle:7.3.1")
+                useModule("com.android.tools.build:gradle:8.1.0")
             }
         }
     }
 }
 rootProject.name = "buffer"
 plugins {
-    id("com.gradle.enterprise") version ("3.10.3")
+    id("com.gradle.enterprise") version ("3.15")
 }
 
 gradleEnterprise {
