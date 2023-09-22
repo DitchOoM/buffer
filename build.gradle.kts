@@ -27,13 +27,11 @@ repositories {
 }
 
 kotlin {
+    jvmToolchain(19)
     androidTarget {
         publishLibraryVariants("release")
     }
     jvm {
-        compilations.all {
-            kotlinOptions.jvmTarget = "1.8"
-        }
         testRuns["test"].executionTask.configure {
             useJUnit()
         }
@@ -167,10 +165,6 @@ android {
     defaultConfig {
         minSdk = 16
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_19
-        targetCompatibility = JavaVersion.VERSION_19
     }
     namespace = "$group.${rootProject.name}"
 }
