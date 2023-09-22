@@ -161,9 +161,11 @@ android {
     compileSdk = 34
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
     sourceSets["androidTest"].manifest.srcFile("src/androidAndroidTest/AndroidManifest.xml")
+    buildFeatures {
+        aidl = true
+    }
     defaultConfig {
         minSdk = 16
-        targetSdk = 34
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
