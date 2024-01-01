@@ -47,6 +47,7 @@ kotlin {
     macosX64()
     macosArm64()
     linuxX64()
+    linuxArm64()
     ios()
     iosSimulatorArm64()
     tasks.getByName<KotlinNativeSimulatorTest>("iosSimulatorArm64Test") {
@@ -84,6 +85,8 @@ kotlin {
         val macosArm64Test by getting
         val linuxX64Main by getting
         val linuxX64Test by getting
+        val linuxArm64Main by getting
+        val linuxArm64Test by getting
         val iosMain by getting
         val iosTest by getting
         val iosSimulatorArm64Main by getting
@@ -100,10 +103,12 @@ kotlin {
         val nativeMain by sourceSets.creating {
             dependsOn(commonMain)
             linuxX64Main.dependsOn(this)
+            linuxArm64Main.dependsOn(this)
         }
         val nativeTest by sourceSets.creating {
             dependsOn(commonTest)
             linuxX64Test.dependsOn(this)
+            linuxArm64Test.dependsOn(this)
         }
 
         val appleMain by sourceSets.creating {
