@@ -18,7 +18,7 @@ val loadAllPlatforms = !isRunningOnGithub || (isMacOS && isMainBranchGithub) || 
 
 println(
     "isRunningOnGithub: $isRunningOnGithub isMainBranchGithub: $isMainBranchGithub OS:$isMacOS " +
-        "Load All Platforms: $loadAllPlatforms, SONATYPE_REPOSITORY_ID=${System.getenv("repository_id")}" +
+        "Load All Platforms: $loadAllPlatforms, SONATYPE_REPOSITORY_ID=${System.getenv("SONATYPE_REPOSITORY_ID")}" +
             "\r\n${System.getenv().map { "${it.key}: ${it.value}" }.joinToString(", ")}"
 )
 
