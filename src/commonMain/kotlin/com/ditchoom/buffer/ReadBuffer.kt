@@ -108,8 +108,9 @@ interface ReadBuffer : PositionBuffer {
         var index = startIndex
         for (i in byteSizeRange) {
             val bitIndex = i * 8
-            number = get(index++).toLong() and 0xff shl bitIndex or number
-            println("reading index $bitIndex of ${toString()} -> $number")
+            val value = get(index++).toLong()
+            number = value and 0xff shl bitIndex or number
+            println("reading index $index => $value of ${toString()} -> $number")
         }
         return number
     }
