@@ -6,6 +6,10 @@ on:
     types:
       - synchronize
       - opened
+env:
+  username: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
+  password: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
+  profileId: ${{ secrets.SONATYPE_PROFILE_ID }}
 jobs:
   create-staging-repository:
     name: Create staging repository
@@ -14,10 +18,6 @@ jobs:
       repository_id: ${{ steps.create.outputs.repository_id }}
     steps:
       - id: create
-        with:
-          username: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
-          password: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
-          profileId: ${{ secrets.SONATYPE_PROFILE_ID }}
         run: |
           curl -s --request POST -u "$username:$password" \
               --url https://oss.sonatype.org/service/local/staging/profiles/"$profileId"/start \
