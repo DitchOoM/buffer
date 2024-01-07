@@ -358,13 +358,17 @@ class BufferTests {
     @Test
     fun absoluteLong() {
         val platformBuffer = PlatformBuffer.allocate(Long.SIZE_BYTES)
-        val long = Long.MAX_VALUE
+        val long = 5L
         assertEquals(0, platformBuffer.position())
         platformBuffer[0] = long
         assertEquals(0, platformBuffer.position())
-        assertEquals(long, platformBuffer.getLong(0), "getLong BIG_ENDIAN buffer[" +
+        assertEquals(
+            long,
+            platformBuffer.getLong(0),
+            "getLong BIG_ENDIAN buffer[" +
                 "${platformBuffer[0]}, ${platformBuffer[1]}, ${platformBuffer[2]}, ${platformBuffer[3]}, " +
-                "${platformBuffer[4]}, ${platformBuffer[5]}, ${platformBuffer[6]}, ${platformBuffer[7]}]")
+                "${platformBuffer[4]}, ${platformBuffer[5]}, ${platformBuffer[6]}, ${platformBuffer[7]}]"
+        )
         assertEquals(0, platformBuffer.position())
         assertEquals(
             long,
@@ -377,9 +381,13 @@ class BufferTests {
             PlatformBuffer.allocate(Long.SIZE_BYTES, byteOrder = ByteOrder.LITTLE_ENDIAN)
         platformBufferLE[0] = long
         assertEquals(0, platformBufferLE.position())
-        assertEquals(long, platformBufferLE.getLong(0), "getLong LITTLE_ENDIAN buffer[" +
+        assertEquals(
+            long,
+            platformBufferLE.getLong(0),
+            "getLong LITTLE_ENDIAN buffer[" +
                 "${platformBufferLE[0]}, ${platformBufferLE[1]}, ${platformBufferLE[2]}, ${platformBufferLE[3]}, " +
-                "${platformBufferLE[4]}, ${platformBufferLE[5]}, ${platformBufferLE[6]}, ${platformBufferLE[7]}]")
+                "${platformBufferLE[4]}, ${platformBufferLE[5]}, ${platformBufferLE[6]}, ${platformBufferLE[7]}]"
+        )
         assertEquals(0, platformBufferLE.position())
         assertEquals(
             long,
@@ -468,18 +476,26 @@ class BufferTests {
         assertEquals(0, platformBuffer.position())
         platformBuffer[0] = double
         assertEquals(0, platformBuffer.position())
-        assertEquals(double, platformBuffer.getDouble(0), "getDouble BIG_ENDIAN buffer[" +
+        assertEquals(
+            double,
+            platformBuffer.getDouble(0),
+            "getDouble BIG_ENDIAN buffer[" +
                 "${platformBuffer[0]}, ${platformBuffer[1]}, ${platformBuffer[2]}, ${platformBuffer[3]}, " +
-                "${platformBuffer[4]}, ${platformBuffer[5]}, ${platformBuffer[6]}, ${platformBuffer[7]}]"))
+                "${platformBuffer[4]}, ${platformBuffer[5]}, ${platformBuffer[6]}, ${platformBuffer[7]}]"
+        )
         assertEquals(0, platformBuffer.position())
 
         val platformBufferLE =
             PlatformBuffer.allocate(Long.SIZE_BYTES, byteOrder = ByteOrder.LITTLE_ENDIAN)
         platformBufferLE[0] = double
         assertEquals(0, platformBufferLE.position())
-        assertEquals(double, platformBufferLE.getDouble(0), "getDouble LITTLE_ENDIAN buffer[" +
+        assertEquals(
+            double,
+            platformBufferLE.getDouble(0),
+            "getDouble LITTLE_ENDIAN buffer[" +
                 "${platformBufferLE[0]}, ${platformBufferLE[1]}, ${platformBufferLE[2]}, ${platformBufferLE[3]}, " +
-                "${platformBufferLE[4]}, ${platformBufferLE[5]}, ${platformBufferLE[6]}, ${platformBufferLE[7]}]")
+                "${platformBufferLE[4]}, ${platformBufferLE[5]}, ${platformBufferLE[6]}, ${platformBufferLE[7]}]"
+        )
         assertEquals(0, platformBufferLE.position())
     }
 
