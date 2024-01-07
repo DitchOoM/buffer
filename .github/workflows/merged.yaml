@@ -1,15 +1,9 @@
 name: "Build Test and Deploy"
 on:
-#  push:
-#    paths-ignore:
-#      - '*.md'
-#    branches: [ main ]
-  pull_request:
+  push:
     paths-ignore:
       - '*.md'
-    types:
-      - synchronize
-      - opened
+    branches: [ main ]
 env:
   username: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
   password: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
@@ -94,4 +88,3 @@ jobs:
           username: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
           password: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
           staging_repository_id: ${{ needs.create-staging-repository.outputs.repository_id }}
-          close_only: true

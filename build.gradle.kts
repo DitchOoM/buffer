@@ -18,7 +18,7 @@ val loadAllPlatforms = !isRunningOnGithub || (isMacOS && isMainBranchGithub) || 
 
 println(
     "isRunningOnGithub: $isRunningOnGithub isMainBranchGithub: $isMainBranchGithub OS:$isMacOS " +
-        "Load All Platforms: $loadAllPlatforms, SONATYPE_REPOSITORY_ID=${System.getenv("SONATYPE_REPOSITORY_ID")}"
+        "Load All Platforms: $loadAllPlatforms"
 )
 
 val libraryVersionPrefix: String by project
