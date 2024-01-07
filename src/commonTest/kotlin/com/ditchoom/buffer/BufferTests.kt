@@ -292,7 +292,7 @@ class BufferTests {
 
     @Test
     fun absoluteUnsignedShortHalf() {
-        val platformBuffer = PlatformBuffer.allocate(2)
+        val platformBuffer = PlatformBuffer.allocate(UShort.SIZE_BYTES)
         val uShort = (UShort.MAX_VALUE / 2u).toUShort()
         platformBuffer[0] = uShort
         val actual = platformBuffer.getUnsignedShort(0)
@@ -362,7 +362,9 @@ class BufferTests {
         assertEquals(0, platformBuffer.position())
         platformBuffer[0] = long
         assertEquals(0, platformBuffer.position())
-        assertEquals(long, platformBuffer.getLong(0), "getLong")
+        assertEquals(long, platformBuffer.getLong(0), "getLong BIG_ENDIAN buffer[" +
+                "${platformBuffer[0]}, ${platformBuffer[1]}, ${platformBuffer[2]}, ${platformBuffer[3]}, " +
+                "${platformBuffer[4]}, ${platformBuffer[5]}, ${platformBuffer[6]}, ${platformBuffer[7]}]")
         assertEquals(0, platformBuffer.position())
         assertEquals(
             long,
@@ -371,18 +373,20 @@ class BufferTests {
         )
         assertEquals(0, platformBuffer.position())
 
-        val platformBufferLittleEndian =
+        val platformBufferLE =
             PlatformBuffer.allocate(Long.SIZE_BYTES, byteOrder = ByteOrder.LITTLE_ENDIAN)
-        platformBufferLittleEndian[0] = long
-        assertEquals(0, platformBufferLittleEndian.position())
-        assertEquals(long, platformBufferLittleEndian.getLong(0), "getLongLittleEndian")
-        assertEquals(0, platformBufferLittleEndian.position())
+        platformBufferLE[0] = long
+        assertEquals(0, platformBufferLE.position())
+        assertEquals(long, platformBufferLE.getLong(0), "getLong LITTLE_ENDIAN buffer[" +
+                "${platformBufferLE[0]}, ${platformBufferLE[1]}, ${platformBufferLE[2]}, ${platformBufferLE[3]}, " +
+                "${platformBufferLE[4]}, ${platformBufferLE[5]}, ${platformBufferLE[6]}, ${platformBufferLE[7]}]")
+        assertEquals(0, platformBufferLE.position())
         assertEquals(
             long,
-            platformBufferLittleEndian.getNumberWithStartIndexAndByteSize(0, Long.SIZE_BYTES),
+            platformBufferLE.getNumberWithStartIndexAndByteSize(0, Long.SIZE_BYTES),
             "getNumberWithStartIndexAndByteSizeLittleEndian"
         )
-        assertEquals(0, platformBufferLittleEndian.position())
+        assertEquals(0, platformBufferLE.position())
     }
 
     @Test
@@ -461,10 +465,22 @@ class BufferTests {
     fun absoluteDouble() {
         val platformBuffer = PlatformBuffer.allocate(Double.SIZE_BYTES)
         val double = 123.456
+        assertEquals(0, platformBuffer.position())
         platformBuffer[0] = double
         assertEquals(0, platformBuffer.position())
-        assertEquals(double, platformBuffer.getDouble(0))
+        assertEquals(double, platformBuffer.getDouble(0), "getDouble BIG_ENDIAN buffer[" +
+                "${platformBuffer[0]}, ${platformBuffer[1]}, ${platformBuffer[2]}, ${platformBuffer[3]}, " +
+                "${platformBuffer[4]}, ${platformBuffer[5]}, ${platformBuffer[6]}, ${platformBuffer[7]}]"))
         assertEquals(0, platformBuffer.position())
+
+        val platformBufferLE =
+            PlatformBuffer.allocate(Long.SIZE_BYTES, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        platformBufferLE[0] = double
+        assertEquals(0, platformBufferLE.position())
+        assertEquals(double, platformBufferLE.getDouble(0), "getDouble LITTLE_ENDIAN buffer[" +
+                "${platformBufferLE[0]}, ${platformBufferLE[1]}, ${platformBufferLE[2]}, ${platformBufferLE[3]}, " +
+                "${platformBufferLE[4]}, ${platformBufferLE[5]}, ${platformBufferLE[6]}, ${platformBufferLE[7]}]")
+        assertEquals(0, platformBufferLE.position())
     }
 
     @Test
