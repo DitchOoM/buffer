@@ -82,14 +82,14 @@ jobs:
     steps:
       - name: Discard
         if: ${{ needs.macos.result != 'success' }}
-        uses: nexus-actions/drop-nexus-staging-repo@1.1.0
+        uses: nexus-actions/drop-nexus-staging-repo@main
         with:
           username: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
           password: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
           staging_repository_id: ${{ needs.create-staging-repository.outputs.repository-id }}
       - name: Release
         if: ${{ needs.macos.result == 'success' }}
-        uses: nexus-actions/release-nexus-staging-repo@1.3.0
+        uses: nexus-actions/release-nexus-staging-repo@main
         with:
           username: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
           password: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
