@@ -89,7 +89,9 @@ interface WriteBuffer : PositionBuffer {
         }
         for (i in byteSizeRange) {
             val bitIndex = i * 8
-            writeByte((number shr bitIndex and 0xff).toByte())
+            val n = (number shr bitIndex and 0xff).toByte()
+            println("writing $n at index $i")
+            writeByte(n)
         }
         return this
     }
