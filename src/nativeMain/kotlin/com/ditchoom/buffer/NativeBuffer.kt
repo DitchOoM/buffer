@@ -58,7 +58,7 @@ data class NativeBuffer(
     }
 
     override fun set(index: Int, byte: Byte): WriteBuffer {
-        data[position] = byte
+        data[index] = byte
         return this
     }
 
