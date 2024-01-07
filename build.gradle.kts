@@ -14,8 +14,11 @@ plugins {
 val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
 val isMainBranchGithub = System.getenv("GITHUB_REF") == "refs/heads/main"
 val isMacOS = Os.isFamily(Os.FAMILY_MAC)
-println("isRunningOnGithub: $isRunningOnGithub isMainBranchGithub: $isMainBranchGithub OS:$isMacOS " +
-        "Load All Platforms: ${!isRunningOnGithub || (isMacOS && isMainBranchGithub) || !isMacOS}")
+val loadAllPlatforms = !isRunningOnGithub || (isMacOS && isMainBranchGithub) || !isMacOS
+println(
+    "isRunningOnGithub: $isRunningOnGithub isMainBranchGithub: $isMainBranchGithub OS:$isMacOS " +
+        "Load All Platforms: $loadAllPlatforms"
+)
 
 val libraryVersionPrefix: String by project
 group = "com.ditchoom"
@@ -33,7 +36,7 @@ repositories {
 }
 
 kotlin {
-    if (!isRunningOnGithub || (isMacOS && isMainBranchGithub) || !isMacOS) {
+    if (loadAllPlatforms) {
         androidTarget {
             publishLibraryVariants("release")
         }
@@ -74,7 +77,7 @@ kotlin {
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
             }
         }
-        if (!isRunningOnGithub || (isMacOS && isMainBranchGithub) || !isMacOS) {
+        if (loadAllPlatforms) {
             val androidMain by getting {
                 dependencies {
                     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
@@ -161,7 +164,6 @@ kotlin {
             tvosTest.dependsOn(this)
             tvosSimulatorArm64Test.dependsOn(this)
         }
-
 
         all {
             languageSettings.optIn("kotlinx.cinterop.ExperimentalForeignApi")
