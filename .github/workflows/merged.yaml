@@ -14,13 +14,16 @@ jobs:
       repository_id: ${{ steps.create.outputs.repository_id }}
     steps:
       - id: create
-        uses: nexus-actions/create-nexus-staging-repo@v1.3.0
         with:
           username: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
           password: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
-          staging_profile_id: ${{ secrets.SONATYPE_PROFILE_ID }}
-          base_url: 'https://oss.sonatype.org/service/local/staging/deploy/maven2/'
-          description: ${{ github.repository }}/${{ github.workflow }}#${{ github.run_number }}
+          profileId: ${{ secrets.SONATYPE_PROFILE_ID }}
+        run: |
+          curl -s --request POST -u "$username:$password" \
+              --url https://oss.sonatype.org/service/local/staging/profiles/"$profileId"/start \
+              --header 'Accept: application/json' \
+              --header 'Content-Type: application/json' \
+              --data '{ "data": {"description" : "Buffer"} }'
   macos:
     needs: create-staging-repository
     runs-on: macOS-latest
