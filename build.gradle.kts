@@ -257,7 +257,8 @@ if (isRunningOnGithub) {
         }
 
         repositories {
-            maven("https://oss.sonatype.org/service/local/staging/deploy/maven2/") {
+            val repositoryId = System.getenv("SONATYPE_REPOSITORY_ID")
+            maven("https://oss.sonatype.org/service/local/staging/deployByRepositoryId/$repositoryId/") {
                 name = "sonatype"
                 credentials {
                     username = ossUser

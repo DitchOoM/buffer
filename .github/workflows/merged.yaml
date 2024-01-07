@@ -1,13 +1,44 @@
 name: "Build Test and Deploy"
 on:
   push:
+    paths-ignore:
+      - '*.md'
     branches: [ main ]
+env:
+  username: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
+  password: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
 jobs:
-  deploy:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ macos-latest ]
+  create-staging-repository:
+    name: Create staging repository
+    runs-on: ubuntu-latest
+    outputs:
+      repository_id: ${{ steps.create.outputs.repository_id }}
+    steps:
+      - id: create
+        run: |
+          jsonOutput=$(curl -s --request POST -u "$username:$password" \
+              --url https://oss.sonatype.org/service/local/staging/profiles/3abaab4608e7e/start \
+              --header 'Accept: application/json' \
+              --header 'Content-Type: application/json' \
+              --data '{ "data": {"description" : "Buffer"} }')
+          stagingRepositoryId=$(echo "$jsonOutput" | jq -r '.data.stagedRepositoryId')
+          if [ -z "$stagingRepositoryId" ]; then
+            echo "Error while creating the staging repository."
+            exit 1
+          else
+          echo "repository_id=$stagingRepositoryId" >> $GITHUB_OUTPUT
+          fi
+  macos:
+    name: MacOS Build & Upload artifacts to sonatype
+    needs: create-staging-repository
+    runs-on: macOS-latest
+    env:
+      SONATYPE_REPOSITORY_ID: ${{ needs.create-staging-repository.outputs.repository_id }}
+      SONATYPE_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
+      SONATYPE_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
+      GPG_SECRET: ${{ secrets.GPG_SECRET }}
+      GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
+      NPM_ACCESS_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
     steps:
       - uses: actions/checkout@v3
       - name: Set up JDK 19
@@ -33,8 +64,27 @@ jobs:
           GPG_SECRET: ${{ secrets.GPG_SECRET }}
           GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
           NPM_ACCESS_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
-        run: ./gradlew publishAllPublicationsToSonatypeRepository publish closeAndReleaseRepository
+        run: ./gradlew publishAllPublicationsToSonatypeRepository
       - uses: actions/upload-artifact@v3
         with:
           name: Package
           path: build/libs
+  finalize:
+    runs-on: ubuntu-latest
+    needs: [create-staging-repository, macos]
+    if: ${{ always() && needs.create-staging-repository.result == 'success' }}
+    steps:
+      - name: Discard
+        if: ${{ needs.macos.result != 'success' }}
+        uses: nexus-actions/drop-nexus-staging-repo@main
+        with:
+          username: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
+          password: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
+          staging_repository_id: ${{ needs.create-staging-repository.outputs.repository-id }}
+      - name: Release
+        if: ${{ needs.macos.result == 'success' }}
+        uses: nexus-actions/release-nexus-staging-repo@main
+        with:
+          username: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
+          password: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
+          staging_repository_id: ${{ needs.create-staging-repository.outputs.repository_id }}
