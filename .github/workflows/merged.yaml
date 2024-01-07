@@ -45,7 +45,6 @@ jobs:
       GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
       NPM_ACCESS_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
     steps:
-      - run: printenv
       - uses: actions/checkout@v3
       - name: Set up JDK 19
         uses: actions/setup-java@v2
