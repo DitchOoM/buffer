@@ -28,7 +28,9 @@ jobs:
             echo "Error while creating the staging repository."
             exit 1
           else
+          echo jsonOutput
           echo "repository_id=$stagingRepositoryId" >> $GITHUB_OUTPUT
+          echo $GITHUB_OUTPUT
           fi
   macos:
     name: MacOS Build & Upload artifacts to sonatype
