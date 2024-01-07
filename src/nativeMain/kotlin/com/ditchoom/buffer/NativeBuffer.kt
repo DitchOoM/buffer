@@ -70,12 +70,15 @@ data class NativeBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val start = position()
-        if (buffer is NativeBuffer) {
+        val byteSize = if (buffer is NativeBuffer) {
             writeBytes(buffer.data)
+            buffer.data.size
         } else {
-            writeBytes(buffer.readByteArray(remaining()))
+            val numBytes = remaining()
+            writeBytes(buffer.readByteArray(numBytes))
+            numBytes
         }
-        buffer.position((position() - start))
+        buffer.position(start + byteSize)
     }
 
     override fun writeString(text: CharSequence, charset: Charset): WriteBuffer {

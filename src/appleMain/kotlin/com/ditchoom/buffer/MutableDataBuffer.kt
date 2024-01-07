@@ -90,6 +90,7 @@ class MutableDataBuffer(
                 otherSubdata.bytes
             )
             position += bytesToCopySize
+            buffer.position(buffer.position() + bytesToCopySize)
         } else {
             val remainingByteArray = buffer.readByteArray(buffer.remaining())
             writeBytes(remainingByteArray)

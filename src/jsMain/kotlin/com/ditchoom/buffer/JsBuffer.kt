@@ -133,6 +133,7 @@ data class JsBuffer(
             this.buffer.set(buffer.readByteArray(size).toTypedArray(), position)
         }
         position += size
+        buffer.position(buffer.position() + size)
     }
 
     override fun writeByte(byte: Byte): WriteBuffer {
