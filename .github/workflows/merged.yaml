@@ -9,7 +9,6 @@ on:
 env:
   username: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
   password: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
-  profileId: ${{ secrets.SONATYPE_PROFILE_ID }}
 jobs:
   create-staging-repository:
     name: Create staging repository
@@ -20,7 +19,7 @@ jobs:
       - id: create
         run: |
           curl -s --request POST -u "$username:$password" \
-              --url https://oss.sonatype.org/service/local/staging/profiles/"$profileId"/start \
+              --url https://oss.sonatype.org/service/local/staging/profiles/3abaab4608e7e/start \
               --header 'Accept: application/json' \
               --header 'Content-Type: application/json' \
               --data '{ "data": {"description" : "Buffer"} }'
