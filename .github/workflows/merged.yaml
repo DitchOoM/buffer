@@ -1,33 +1,13 @@
 name: "Build Test and Deploy"
 on:
   push:
-    paths-ignore:
-      - '*.md'
     branches: [ main ]
 jobs:
-  create-staging-repository:
-    name: Create staging repository
-    runs-on: ubuntu-latest
-    outputs:
-      repository_id: ${{ steps.create.outputs.repository_id }}
-    steps:
-      - id: create
-        uses: nexus-actions/create-nexus-staging-repo@v1.3.0
-        with:
-          username: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
-          password: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
-          staging_profile_id: ${{ secrets.SONATYPE_PROFILE_ID }}
-          description: Created by $GITHUB_WORKFLOW ($GITHUB_ACTION) for $GITHUB_REPOSITORY
-  macos:
-    needs: create-staging-repository
-    runs-on: macOS-latest
-    env:
-      SONATYPE_REPOSITORY_ID: ${{ needs.create_staging_repository.outputs.repository_id }}
-      SONATYPE_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
-      SONATYPE_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
-      GPG_SECRET: ${{ secrets.GPG_SECRET }}
-      GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
-      NPM_ACCESS_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
+  deploy:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ macos-latest ]
     steps:
       - uses: actions/checkout@v3
       - name: Set up JDK 19
@@ -53,27 +33,8 @@ jobs:
           GPG_SECRET: ${{ secrets.GPG_SECRET }}
           GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
           NPM_ACCESS_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
-        run: ./gradlew publishAllPublicationsToSonatypeRepository
+        run: ./gradlew publishAllPublicationsToSonatypeRepository publish closeAndReleaseRepository
       - uses: actions/upload-artifact@v3
         with:
           name: Package
           path: build/libs
-  finalize:
-    runs-on: ubuntu-latest
-    needs: [create-staging-repository, macos]
-    if: ${{ always() && needs.create_staging_repository.result == 'success' }}
-    steps:
-      - name: Discard
-        if: ${{ needs.macos.result != 'success' }}
-        uses: nexus-actions/drop-nexus-staging-repo@1.1.0
-        with:
-          username: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
-          password: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
-          staging_repository_id: ${{ needs.create_staging_repository.outputs.repository-id }}
-      - name: Release
-        if: ${{ needs.macos.result == 'success' }}
-        uses: nexus-actions/release-nexus-staging-repo@1.3.0
-        with:
-          username: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
-          password: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
-          staging_repository_id: ${{ needs.create_staging_repository.outputs.repository_id }}

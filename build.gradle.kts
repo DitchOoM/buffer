@@ -25,7 +25,7 @@ val libraryVersionPrefix: String by project
 group = "com.ditchoom"
 version = "$libraryVersionPrefix.0-SNAPSHOT"
 val libraryVersion = if (System.getenv("GITHUB_RUN_NUMBER") != null) {
-    "$libraryVersionPrefix${(Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER")) - 56)}"
+    "$libraryVersionPrefix${(Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER")) - 58)}"
 } else {
     "${libraryVersionPrefix}0-SNAPSHOT"
 }
