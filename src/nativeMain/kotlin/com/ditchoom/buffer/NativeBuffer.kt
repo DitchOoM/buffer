@@ -38,7 +38,7 @@ data class NativeBuffer(
 
     override fun readString(length: Int, charset: Charset): String {
         val value = when (charset) {
-            Charset.UTF8 -> data.decodeToString(position, position + length)
+            Charset.UTF8 -> data.decodeToString(position, position + length, throwOnInvalidSequence = true)
             Charset.UTF16 -> throw UnsupportedOperationException("Not sure how to implement.")
             Charset.UTF16BigEndian -> throw UnsupportedOperationException("Not sure how to implement.")
             Charset.UTF16LittleEndian -> throw UnsupportedOperationException("Not sure how to implement.")
