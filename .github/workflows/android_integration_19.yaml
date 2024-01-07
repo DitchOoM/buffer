@@ -1,8 +1,8 @@
 name: "Android Emulator Integration Test API Level 19"
 on:
-  push:
-    branches: [ main ]
   pull_request:
+    paths-ignore:
+      - '*.md'
     types:
       - synchronize
       - opened
