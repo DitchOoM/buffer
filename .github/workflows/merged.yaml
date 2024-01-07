@@ -19,7 +19,6 @@ jobs:
           username: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
           password: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
           staging_profile_id: ${{ secrets.SONATYPE_PROFILE_ID }}
-          staging-profile-id: ${{ secrets.SONATYPE_PROFILE_ID }}
           base_url: 'https://oss.sonatype.org/service/local/staging/deploy/maven2/'
   macos:
     needs: create-staging-repository
