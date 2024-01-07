@@ -24,7 +24,7 @@ data class NativeBuffer(
 
     override fun readByte() = data[position++]
 
-    override fun get(index: Int): Byte = data[position]
+    override fun get(index: Int): Byte = data[index]
 
     override fun slice(): ReadBuffer {
         return NativeBuffer(data.sliceArray(position until limit), byteOrder = byteOrder)
