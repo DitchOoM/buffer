@@ -114,16 +114,4 @@ data class NativeBuffer(
         result = 31 * result + data.contentHashCode()
         return result
     }
-
-    override fun toString(): String {
-        val p = "Buffer[pos=${position()} lim=${limit()} cap=$capacity]"
-        if (capacity < 25) {
-            val s = position()
-            position(0)
-            val returnValue = "$p ${readByteArray(remaining()).joinToString()}"
-            position(s)
-            return returnValue
-        }
-        return p
-    }
 }
