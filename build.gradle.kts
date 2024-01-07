@@ -15,6 +15,7 @@ val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
 val isMainBranchGithub = System.getenv("GITHUB_REF") == "refs/heads/main"
 val isMacOS = Os.isFamily(Os.FAMILY_MAC)
 val loadAllPlatforms = !isRunningOnGithub || (isMacOS && isMainBranchGithub) || !isMacOS
+
 println(
     "isRunningOnGithub: $isRunningOnGithub isMainBranchGithub: $isMainBranchGithub OS:$isMacOS " +
         "Load All Platforms: $loadAllPlatforms"
@@ -36,10 +37,10 @@ repositories {
 }
 
 kotlin {
+    androidTarget {
+        publishLibraryVariants("release")
+    }
     if (loadAllPlatforms) {
-        androidTarget {
-            publishLibraryVariants("release")
-        }
         jvm {
             compilations.all {
                 kotlinOptions.jvmTarget = "1.8"
@@ -77,25 +78,25 @@ kotlin {
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
             }
         }
+        val androidMain by getting {
+            dependencies {
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+            }
+        }
+        val androidUnitTest by getting {
+            kotlin.srcDir("src/commonJvmTest/kotlin")
+        }
+        val androidInstrumentedTest by getting {
+            dependsOn(commonTest)
+            kotlin.srcDir("src/commonJvmTest/kotlin")
+            kotlin.srcDir("src/commonTest/kotlin")
+            dependencies {
+                implementation("androidx.test:runner:1.5.2")
+                implementation("androidx.test:rules:1.5.0")
+                implementation("androidx.test:core-ktx:1.5.0")
+            }
+        }
         if (loadAllPlatforms) {
-            val androidMain by getting {
-                dependencies {
-                    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
-                }
-            }
-            val androidUnitTest by getting {
-                kotlin.srcDir("src/commonJvmTest/kotlin")
-            }
-            val androidInstrumentedTest by getting {
-                dependsOn(commonTest)
-                kotlin.srcDir("src/commonJvmTest/kotlin")
-                kotlin.srcDir("src/commonTest/kotlin")
-                dependencies {
-                    implementation("androidx.test:runner:1.5.2")
-                    implementation("androidx.test:rules:1.5.0")
-                    implementation("androidx.test:core-ktx:1.5.0")
-                }
-            }
             val jvmMain by getting
             val jvmTest by getting {
                 kotlin.srcDir("src/commonJvmTest/kotlin")
@@ -173,22 +174,20 @@ kotlin {
     }
 }
 
-if (loadAllPlatforms) {
-    android {
-        compileSdk = 34
-        sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
-        sourceSets["androidTest"].manifest.srcFile("src/androidAndroidTest/AndroidManifest.xml")
-        defaultConfig {
-            minSdk = 16
-            targetSdk = 34
-            testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        }
-        namespace = "$group.${rootProject.name}"
+android {
+    compileSdk = 34
+    sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
+    sourceSets["androidTest"].manifest.srcFile("src/androidAndroidTest/AndroidManifest.xml")
+    defaultConfig {
+        minSdk = 16
+        targetSdk = 34
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
+    namespace = "$group.${rootProject.name}"
+}
 
-    val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
-        archiveClassifier.set("javadoc")
-    }
+val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
+    archiveClassifier.set("javadoc")
 }
 
 if (isRunningOnGithub) {
