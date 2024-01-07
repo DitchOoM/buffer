@@ -64,7 +64,7 @@ data class NativeBuffer(
 
     override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
         bytes.copyInto(data, position, offset, offset + length)
-        position += bytes.size
+        position += length
         return this
     }
 
