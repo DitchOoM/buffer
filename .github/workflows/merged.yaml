@@ -60,7 +60,7 @@ jobs:
           path: build/libs
   finalize:
     runs-on: ubuntu-latest
-    needs: [create_staging_repository, macos]
+    needs: [create-staging-repository, macos]
     if: ${{ always() && needs.create_staging_repository.result == 'success' }}
     steps:
       - name: Discard
