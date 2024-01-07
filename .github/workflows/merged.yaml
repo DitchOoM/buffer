@@ -28,7 +28,7 @@ jobs:
             echo "Error while creating the staging repository."
             exit 1
           else
-          echo jsonOutput
+          echo $jsonOutput
           echo "repository_id=$stagingRepositoryId" >> $GITHUB_OUTPUT
           echo $GITHUB_OUTPUT
           fi
