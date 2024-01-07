@@ -115,7 +115,7 @@ data class NativeBuffer(
         return result
     }
 
-    override fun toString() :String {
+    override fun toString(): String {
         val p = "Buffer[pos=${position()} lim=${limit()} cap=$capacity]"
         if (capacity < 25) {
             val s = position()
@@ -126,5 +126,4 @@ data class NativeBuffer(
         }
         return p
     }
-
 }
