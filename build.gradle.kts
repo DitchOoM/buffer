@@ -1,3 +1,4 @@
+import org.apache.tools.ant.taskdefs.condition.Os
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 
 plugins {
@@ -10,6 +11,11 @@ plugins {
     id("org.jlleitschuh.gradle.ktlint") version "11.5.1"
     id("org.jlleitschuh.gradle.ktlint-idea") version "11.5.1"
 }
+val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
+val isMainBranchGithub = System.getenv("GITHUB_REF") == "refs/heads/main"
+val isMacOS = Os.isFamily(Os.FAMILY_MAC)
+println("isRunningOnGithub: $isRunningOnGithub isMainBranchGithub: $isMainBranchGithub OS:$isMacOS " +
+        "Load All Platforms: ${!isRunningOnGithub || (isMacOS && isMainBranchGithub) || !isMacOS}")
 
 val libraryVersionPrefix: String by project
 group = "com.ditchoom"
@@ -27,21 +33,23 @@ repositories {
 }
 
 kotlin {
-    androidTarget {
-        publishLibraryVariants("release")
-    }
-    jvm {
-        compilations.all {
-            kotlinOptions.jvmTarget = "1.8"
+    if (!isRunningOnGithub || (isMacOS && isMainBranchGithub) || !isMacOS) {
+        androidTarget {
+            publishLibraryVariants("release")
         }
-        testRuns["test"].executionTask.configure {
-            useJUnit()
+        jvm {
+            compilations.all {
+                kotlinOptions.jvmTarget = "1.8"
+            }
+            testRuns["test"].executionTask.configure {
+                useJUnit()
+            }
         }
-    }
-    js(IR) {
-        moduleName = "buffer-kt"
-        browser { binaries.library() }
-        nodejs { binaries.library() }
+        js(IR) {
+            moduleName = "buffer-kt"
+            browser { binaries.library() }
+            nodejs { binaries.library() }
+        }
     }
 
     macosX64()
@@ -66,19 +74,38 @@ kotlin {
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
             }
         }
-        val jvmMain by getting {
-        }
-        val jvmTest by getting {
-            kotlin.srcDir("src/commonJvmTest/kotlin")
-        }
-
-        val jsMain by getting {
-            dependencies {
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.615")
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.615")
+        if (!isRunningOnGithub || (isMacOS && isMainBranchGithub) || !isMacOS) {
+            val androidMain by getting {
+                dependencies {
+                    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+                }
             }
+            val androidUnitTest by getting {
+                kotlin.srcDir("src/commonJvmTest/kotlin")
+            }
+            val androidInstrumentedTest by getting {
+                dependsOn(commonTest)
+                kotlin.srcDir("src/commonJvmTest/kotlin")
+                kotlin.srcDir("src/commonTest/kotlin")
+                dependencies {
+                    implementation("androidx.test:runner:1.5.2")
+                    implementation("androidx.test:rules:1.5.0")
+                    implementation("androidx.test:core-ktx:1.5.0")
+                }
+            }
+            val jvmMain by getting
+            val jvmTest by getting {
+                kotlin.srcDir("src/commonJvmTest/kotlin")
+            }
+
+            val jsMain by getting {
+                dependencies {
+                    implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.615")
+                    implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.615")
+                }
+            }
+            val jsTest by getting
         }
-        val jsTest by getting
         val macosX64Main by getting
         val macosX64Test by getting
         val macosArm64Main by getting
@@ -135,24 +162,6 @@ kotlin {
             tvosSimulatorArm64Test.dependsOn(this)
         }
 
-        val androidMain by getting {
-            dependencies {
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
-            }
-        }
-        val androidUnitTest by getting {
-            kotlin.srcDir("src/commonJvmTest/kotlin")
-        }
-        val androidInstrumentedTest by getting {
-            dependsOn(commonTest)
-            kotlin.srcDir("src/commonJvmTest/kotlin")
-            kotlin.srcDir("src/commonTest/kotlin")
-            dependencies {
-                implementation("androidx.test:runner:1.5.2")
-                implementation("androidx.test:rules:1.5.0")
-                implementation("androidx.test:core-ktx:1.5.0")
-            }
-        }
 
         all {
             languageSettings.optIn("kotlinx.cinterop.ExperimentalForeignApi")
@@ -162,24 +171,26 @@ kotlin {
     }
 }
 
-android {
-    compileSdk = 34
-    sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
-    sourceSets["androidTest"].manifest.srcFile("src/androidAndroidTest/AndroidManifest.xml")
-    defaultConfig {
-        minSdk = 16
-        targetSdk = 34
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+if (!isRunningOnGithub || (isMacOS && isMainBranchGithub) || !isMacOS) {
+    android {
+        compileSdk = 34
+        sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
+        sourceSets["androidTest"].manifest.srcFile("src/androidAndroidTest/AndroidManifest.xml")
+        defaultConfig {
+            minSdk = 16
+            targetSdk = 34
+            testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        }
+        namespace = "$group.${rootProject.name}"
     }
-    namespace = "$group.${rootProject.name}"
+
+    val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
+        archiveClassifier.set("javadoc")
+    }
 }
 
-val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
-    archiveClassifier.set("javadoc")
-}
-
-(System.getenv("GITHUB_REPOSITORY"))?.let {
-    if (System.getenv("GITHUB_REF") == "refs/heads/main") {
+if (isRunningOnGithub) {
+    if (isMainBranchGithub) {
         signing {
             useInMemoryPgpKeys(
                 "56F1A973",
