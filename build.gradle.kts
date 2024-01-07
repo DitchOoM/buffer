@@ -191,13 +191,15 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
 }
 
 if (isRunningOnGithub) {
-    signing {
-        useInMemoryPgpKeys(
-            "56F1A973",
-            System.getenv("GPG_SECRET"),
-            System.getenv("GPG_SIGNING_PASSWORD")
-        )
-        sign(publishing.publications)
+    if (isMainBranchGithub) {
+        signing {
+            useInMemoryPgpKeys(
+                "56F1A973",
+                System.getenv("GPG_SECRET"),
+                System.getenv("GPG_SIGNING_PASSWORD")
+            )
+            sign(publishing.publications)
+        }
     }
 
     val ossUser = System.getenv("SONATYPE_NEXUS_USERNAME")
