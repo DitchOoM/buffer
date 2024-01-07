@@ -18,7 +18,7 @@ val loadAllPlatforms = !isRunningOnGithub || (isMacOS && isMainBranchGithub) || 
 
 println(
     "isRunningOnGithub: $isRunningOnGithub isMainBranchGithub: $isMainBranchGithub OS:$isMacOS " +
-        "Load All Platforms: $loadAllPlatforms"
+        "Load All Platforms: $loadAllPlatforms, SONATYPE_REPOSITORY_ID=${System.getenv("SONATYPE_REPOSITORY_ID")}"
 )
 
 val libraryVersionPrefix: String by project
@@ -191,15 +191,13 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
 }
 
 if (isRunningOnGithub) {
-    if (isMainBranchGithub) {
-        signing {
-            useInMemoryPgpKeys(
-                "56F1A973",
-                System.getenv("GPG_SECRET"),
-                System.getenv("GPG_SIGNING_PASSWORD")
-            )
-            sign(publishing.publications)
-        }
+    signing {
+        useInMemoryPgpKeys(
+            "56F1A973",
+            System.getenv("GPG_SECRET"),
+            System.getenv("GPG_SIGNING_PASSWORD")
+        )
+        sign(publishing.publications)
     }
 
     val ossUser = System.getenv("SONATYPE_NEXUS_USERNAME")
