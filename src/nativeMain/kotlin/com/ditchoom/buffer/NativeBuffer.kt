@@ -24,7 +24,7 @@ data class NativeBuffer(
 
     override fun readByte() = data[position++]
 
-    override fun get(index: Int): Byte = data[position]
+    override fun get(index: Int): Byte = data[index]
 
     override fun slice(): ReadBuffer {
         return NativeBuffer(data.sliceArray(position until limit), byteOrder = byteOrder)
@@ -38,7 +38,7 @@ data class NativeBuffer(
 
     override fun readString(length: Int, charset: Charset): String {
         val value = when (charset) {
-            Charset.UTF8 -> data.decodeToString(position, position + length)
+            Charset.UTF8 -> data.decodeToString(position, position + length, throwOnInvalidSequence = true)
             Charset.UTF16 -> throw UnsupportedOperationException("Not sure how to implement.")
             Charset.UTF16BigEndian -> throw UnsupportedOperationException("Not sure how to implement.")
             Charset.UTF16LittleEndian -> throw UnsupportedOperationException("Not sure how to implement.")
@@ -58,13 +58,13 @@ data class NativeBuffer(
     }
 
     override fun set(index: Int, byte: Byte): WriteBuffer {
-        data[position] = byte
+        data[index] = byte
         return this
     }
 
     override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
         bytes.copyInto(data, position, offset, offset + length)
-        position += bytes.size
+        position += length
         return this
     }
 
