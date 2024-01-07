@@ -255,8 +255,7 @@ if (isRunningOnGithub) {
         }
 
         repositories {
-            val repositoryId =
-                System.getenv("SONATYPE_REPOSITORY_ID") ?: error("Missing env variable: SONATYPE_REPOSITORY_ID")
+            val repositoryId = System.getenv("SONATYPE_REPOSITORY_ID")
             maven("https://oss.sonatype.org/service/local/staging/deployByRepositoryId/${repositoryId}/") {
                 name = "sonatype"
                 credentials {
