@@ -18,12 +18,20 @@ jobs:
     steps:
       - id: create
         run: |
-          curl -s --request POST -u "$username:$password" \
+          jsonOutput=$(curl -s --request POST -u "$username:$password" \
               --url https://oss.sonatype.org/service/local/staging/profiles/3abaab4608e7e/start \
               --header 'Accept: application/json' \
               --header 'Content-Type: application/json' \
-              --data '{ "data": {"description" : "Buffer"} }'
+              --data '{ "data": {"description" : "Buffer"} }')
+          stagingRepositoryId=$(echo "$jsonOutput" | jq -r '.data.stagedRepositoryId')
+          if [ -z "$stagingRepositoryId" ]; then
+            echo "Error while creating the staging repository."
+            exit 1
+          else
+          echo "repository_id=$stagingRepositoryId" >> $GITHUB_OUTPUT
+          fi
   macos:
+    name: MacOS Build & Upload artifacts to sonatype
     needs: create-staging-repository
     runs-on: macOS-latest
     env:
