@@ -358,7 +358,7 @@ class BufferTests {
     @Test
     fun absoluteLong() {
         val platformBuffer = PlatformBuffer.allocate(Long.SIZE_BYTES)
-        val long = 5L
+        val long = 12345L
         assertEquals(0, platformBuffer.position())
         platformBuffer[0] = long
         assertEquals(0, platformBuffer.position())
