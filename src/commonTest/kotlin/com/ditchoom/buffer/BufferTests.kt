@@ -468,6 +468,18 @@ class BufferTests {
     }
 
     @Test
+    fun positionWriteBytes() {
+        val text = "Hello world!"
+        val input = PlatformBuffer.wrap(text.encodeToByteArray())
+        val output = PlatformBuffer.allocate(text.length)
+        output.write(input)
+        assertEquals(input.position(), text.length)
+        assertEquals(output.position(), text.length)
+        output.position(0)
+        assertEquals(output.readString(text.length), text)
+    }
+
+    @Test
     fun utf8String() {
         val string = "yolo swag lyfestyle"
         assertEquals(19, string.utf8Length())
