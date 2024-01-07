@@ -112,6 +112,9 @@ interface ReadBuffer : PositionBuffer {
             number = value and 0xff shl bitIndex or number
             println("reading index $index => $value of ${toString()} -> $number")
         }
+        for (i in 0 until numberOfBytes) {
+            println("$i: ${get(i)}")
+        }
         return number
     }
 
