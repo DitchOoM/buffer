@@ -173,7 +173,7 @@ kotlin {
     }
 }
 
-if (!isRunningOnGithub || (isMacOS && isMainBranchGithub) || !isMacOS) {
+if (loadAllPlatforms) {
     android {
         compileSdk = 34
         sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
