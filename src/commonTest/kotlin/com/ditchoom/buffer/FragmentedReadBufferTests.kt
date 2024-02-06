@@ -413,4 +413,30 @@ class FragmentedReadBufferTests {
         assertEquals("", composableBuffer.readUtf8Line().toString())
         assertTrue { composableBuffer.remaining() == 0 }
     }
+
+    @Test
+    fun largeFragmentedBuffer() {
+        val buffers = mutableListOf<ReadBuffer>()
+        var indexCount = 0
+        do { // 64 byte chunks
+            val buffer = PlatformBuffer.allocate(64)
+            repeat(64 / 4) {
+                buffer.writeInt(indexCount++)
+            }
+            buffers += buffer
+        } while (indexCount < 1024 * 1024)
+        val fragmentedBuffer = buffers.toComposableBuffer() as FragmentedReadBuffer
+        fragmentedBuffer.resetForRead()
+        repeat(indexCount) {
+            assertEquals(it, fragmentedBuffer.readInt())
+        }
+        assertEquals(0, fragmentedBuffer.remaining())
+        fragmentedBuffer.resetForRead()
+        val combined = fragmentedBuffer.toSingleBuffer()
+        assertEquals(indexCount * 4, combined.remaining())
+        repeat(indexCount) {
+            assertEquals(it, combined.readInt())
+        }
+        assertEquals(0, combined.remaining())
+    }
 }

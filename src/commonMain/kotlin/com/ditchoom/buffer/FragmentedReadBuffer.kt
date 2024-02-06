@@ -9,9 +9,7 @@ class FragmentedReadBuffer(
     private val first: ReadBuffer,
     private val second: ReadBuffer
 ) : ReadBuffer {
-    private val firstInitialPosition = first.position()
     private val firstInitialLimit = first.limit()
-    private val secondInitialPosition = second.position()
     private val secondInitialLimit = second.limit()
     private var currentPosition = 0
     private var currentLimit = firstInitialLimit + secondInitialLimit
@@ -37,8 +35,8 @@ class FragmentedReadBuffer(
 
     override fun resetForRead() {
         currentPosition = 0
-        first.position(firstInitialPosition)
-        second.position(secondInitialPosition)
+        first.resetForRead()
+        second.resetForRead()
     }
 
     override fun readByte(): Byte {
@@ -143,19 +141,31 @@ class FragmentedReadBuffer(
             out += second
         }
     }
+    fun toSingleBuffer(zone: AllocationZone = AllocationZone.Heap): PlatformBuffer {
+        val firstLimit = firstInitialLimit
+        val secondLimit = secondInitialLimit
+        val initialPosition = position()
+        val buffer = PlatformBuffer.allocate(firstLimit + secondLimit - initialPosition, zone)
+        buffer.write(first)
+        buffer.write(second)
+        buffer.position(initialPosition)
+        return buffer
+    }
 }
 
 fun List<ReadBuffer>.toComposableBuffer(): ReadBuffer {
-    return when (size) {
-        1 -> {
-            first()
-        }
-
-        else -> {
-            FragmentedReadBuffer(
-                first(),
-                subList(1, size).toComposableBuffer()
-            )
-        }
+    if (isEmpty()) {
+        return ReadBuffer.EMPTY_BUFFER
     }
+    if (size == 1) {
+        return first()
+    }
+    if (size == 2) {
+        return FragmentedReadBuffer(first(), get(1))
+    }
+    val half = size / 2
+    return FragmentedReadBuffer(
+        subList(0, half).toComposableBuffer(),
+        subList(half, size).toComposableBuffer()
+    )
 }

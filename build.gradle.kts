@@ -52,7 +52,14 @@ kotlin {
         js(IR) {
             moduleName = "buffer-kt"
             browser { binaries.library() }
-            nodejs { binaries.library() }
+            nodejs {
+                binaries.library()
+                testTask {
+                    useMocha {
+                        timeout = "10s"
+                    }
+                }
+            }
         }
     }
 
