@@ -428,12 +428,12 @@ class FragmentedReadBufferTests {
         val fragmentedBuffer = buffers.toComposableBuffer() as FragmentedReadBuffer
         fragmentedBuffer.resetForRead()
         repeat(indexCount) {
-            assertEquals(it, fragmentedBuffer.readInt())
+            assertEquals(it, fragmentedBuffer.readInt(), "failed to read byte at $indexCount")
         }
         assertEquals(0, fragmentedBuffer.remaining())
         fragmentedBuffer.resetForRead()
         val combined = fragmentedBuffer.toSingleBuffer()
-        assertEquals(indexCount * 4, combined.remaining())
+        assertEquals(indexCount * 4, combined.remaining(), "failed to validate remaining")
         repeat(indexCount) {
             assertEquals(it, combined.readInt())
         }
