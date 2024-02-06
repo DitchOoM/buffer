@@ -437,6 +437,6 @@ class FragmentedReadBufferTests {
         repeat(indexCount) {
             assertEquals(it, combined.readInt(), "failed to read byte on combined at $indexCount")
         }
-        assertEquals(0, combined.remaining(),  "combined should have 0 remaining")
+        assertEquals(0, combined.remaining(), "combined should have 0 remaining")
     }
 }
