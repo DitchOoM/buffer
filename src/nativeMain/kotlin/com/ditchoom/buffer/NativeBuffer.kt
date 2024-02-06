@@ -74,7 +74,7 @@ data class NativeBuffer(
             writeBytes(buffer.data)
             buffer.data.size
         } else {
-            val numBytes = remaining()
+            val numBytes = buffer.remaining()
             writeBytes(buffer.readByteArray(numBytes))
             numBytes
         }
