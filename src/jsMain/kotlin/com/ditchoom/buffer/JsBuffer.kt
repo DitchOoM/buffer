@@ -4,12 +4,11 @@ import js.buffer.BufferSource
 import js.buffer.SharedArrayBuffer
 import org.khronos.webgl.DataView
 import org.khronos.webgl.Int8Array
-import org.khronos.webgl.Uint8Array
 import web.encoding.TextDecoder
 import web.encoding.TextDecoderOptions
 
 data class JsBuffer(
-    val buffer: Uint8Array,
+    val buffer: Int8Array,
     private val littleEndian: Boolean = false, // network endian is big endian
     private var position: Int = 0,
     private var limit: Int = 0,
@@ -52,16 +51,17 @@ data class JsBuffer(
 
     override fun slice(): ReadBuffer {
         return JsBuffer(
-            Uint8Array(buffer.buffer.slice(position, limit)),
+            Int8Array(buffer.buffer.slice(position, limit)),
             littleEndian,
             sharedArrayBuffer = sharedArrayBuffer
         )
     }
 
     override fun readByteArray(size: Int): ByteArray {
-        val byteArray = Int8Array(buffer.buffer, position, size).unsafeCast<ByteArray>()
+        val subArray = buffer.subarray(position, position + size)
+        val byteArray = Int8Array(subArray.buffer, subArray.byteOffset, size)
         position += size
-        return byteArray
+        return byteArray.unsafeCast<ByteArray>()
     }
 
     override fun readShort(): Short {
@@ -149,9 +149,9 @@ data class JsBuffer(
     }
 
     override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
-        val uint8Array = bytes.unsafeCast<Uint8Array>().subarray(offset, offset + length)
-        this.buffer.set(uint8Array, position)
-        position += uint8Array.length
+        val int8Array = bytes.unsafeCast<Int8Array>().subarray(offset, offset + length)
+        this.buffer.set(int8Array, position)
+        position += int8Array.length
         return this
     }
 
@@ -189,8 +189,8 @@ data class JsBuffer(
 
     override fun set(index: Int, long: Long): WriteBuffer {
         val bytes = if (littleEndian) long.toByteArray().reversedArray() else long.toByteArray()
-        val uint8Array = bytes.unsafeCast<Uint8Array>().subarray(0, Long.SIZE_BYTES)
-        this.buffer.set(uint8Array, index)
+        val int8Array = bytes.unsafeCast<Int8Array>().subarray(0, Long.SIZE_BYTES)
+        this.buffer.set(int8Array, index)
         return this
     }
 

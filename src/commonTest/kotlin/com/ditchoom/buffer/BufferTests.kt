@@ -202,14 +202,13 @@ class BufferTests {
     fun byteArray() {
         val size = 200
         val platformBuffer = PlatformBuffer.allocate(size)
-        val bytes = ByteArray(200) { -1 }
+        val bytes = ByteArray(size) { -1 }
         platformBuffer.writeBytes(bytes)
         platformBuffer.resetForRead()
         val byteArray = platformBuffer.readByteArray(size)
         assertEquals(bytes.count(), byteArray.count())
-        var count = 0
-        for (byte in bytes) {
-            assertEquals(byte, byteArray[count++])
+        bytes.forEachIndexed { index, byte ->
+            assertEquals(byte, byteArray[index], "Index $index")
         }
     }
 
