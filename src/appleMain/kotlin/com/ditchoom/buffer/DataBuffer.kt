@@ -2,6 +2,7 @@ package com.ditchoom.buffer
 
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
+import kotlinx.cinterop.UnsafeNumber
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.get
 import kotlinx.cinterop.readBytes
@@ -12,6 +13,7 @@ import platform.Foundation.create
 import platform.Foundation.isEqualToData
 import platform.Foundation.subdataWithRange
 
+@OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, UnsafeNumber::class)
 open class DataBuffer(
     val data: NSData,
     override val byteOrder: ByteOrder,
@@ -63,6 +65,7 @@ open class DataBuffer(
         val stringEncoding = charset.toEncoding()
 
         @Suppress("CAST_NEVER_SUCCEEDS")
+        @OptIn(kotlinx.cinterop.BetaInteropApi::class)
         val string = NSString.create(subdata, stringEncoding) as String
         position += length
         return string

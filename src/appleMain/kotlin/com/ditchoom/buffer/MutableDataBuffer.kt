@@ -2,6 +2,7 @@ package com.ditchoom.buffer
 
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
+import kotlinx.cinterop.UnsafeNumber
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.set
@@ -18,6 +19,7 @@ import platform.Foundation.dataWithBytesNoCopy
 import platform.Foundation.replaceBytesInRange
 import platform.Foundation.subdataWithRange
 
+@OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, UnsafeNumber::class)
 class MutableDataBuffer(
     dataRef: NSData,
     override val byteOrder: ByteOrder,
@@ -134,6 +136,7 @@ class MutableDataBuffer(
 }
 
 private fun <T> ByteArray.useNSDataRef(block: (NSData) -> T): T {
+    @OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, UnsafeNumber::class)
     return usePinned { pin ->
         val bytesPointer =
             when {

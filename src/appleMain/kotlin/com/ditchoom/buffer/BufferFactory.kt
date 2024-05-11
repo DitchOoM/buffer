@@ -1,5 +1,8 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, kotlinx.cinterop.BetaInteropApi::class)
+
 package com.ditchoom.buffer
 
+import kotlinx.cinterop.UnsafeNumber
 import kotlinx.cinterop.convert
 import platform.Foundation.NSMutableData
 import platform.Foundation.create
@@ -12,6 +15,8 @@ actual fun PlatformBuffer.Companion.allocate(
     if (zone is AllocationZone.Custom) {
         return zone.allocator(size)
     }
+
+    @OptIn(UnsafeNumber::class)
     return MutableDataBuffer(NSMutableData.create(length = size.convert())!!, byteOrder = byteOrder)
 }
 
