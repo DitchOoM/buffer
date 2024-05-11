@@ -1,6 +1,7 @@
 package com.ditchoom.buffer
 
 import kotlin.math.absoluteValue
+import kotlin.math.ceil
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -202,14 +203,13 @@ class BufferTests {
     fun byteArray() {
         val size = 200
         val platformBuffer = PlatformBuffer.allocate(size)
-        val bytes = ByteArray(200) { -1 }
+        val bytes = ByteArray(size) { -1 }
         platformBuffer.writeBytes(bytes)
         platformBuffer.resetForRead()
         val byteArray = platformBuffer.readByteArray(size)
         assertEquals(bytes.count(), byteArray.count())
-        var count = 0
-        for (byte in bytes) {
-            assertEquals(byte, byteArray[count++])
+        bytes.forEachIndexed { index, byte ->
+            assertEquals(byte, byteArray[index], "Index $index")
         }
     }
 
@@ -785,5 +785,76 @@ class BufferTests {
         val s = "".toReadBuffer()
         assertEquals(0, s.position())
         assertEquals(0, s.limit())
+    }
+
+    @OptIn(ExperimentalStdlibApi::class)
+    @Test
+    fun complexReadWrapReadAgain1() {
+        val str = "0001A960DBD8A500006500006400010A003132333435363738"
+
+        @OptIn(ExperimentalStdlibApi::class)
+        fun String.toByteArrayFromHex(): ByteArray {
+            var value = this
+            if (value.isEmpty()) return byteArrayOf()
+            val length = ceil(value.length / 2.0).toInt()
+            value = value.padStart(length * 2, '0')
+            return value.hexToByteArray()
+        }
+        val hex = str.toByteArrayFromHex()
+        assertContentEquals(hex, byteArrayOf(0, 1, -87, 96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56))
+        val buf = PlatformBuffer.wrap(hex)
+        assertBufferEquals(buf, byteArrayOf(0, 1, -87, 96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56))
+        assertEquals(0, buf.position())
+        assertEquals(25, buf.limit())
+        val messageId = buf.readUnsignedShort()
+        assertBufferEquals(buf, byteArrayOf(-87, 96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56))
+        assertEquals(messageId.toInt(), 1)
+        assertEquals(2, buf.position())
+        assertEquals(25, buf.limit())
+        val cmd = buf.readByte()
+        assertBufferEquals(buf, byteArrayOf(96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56))
+        assertEquals(-87, cmd)
+        assertEquals(3, buf.position())
+        assertEquals(25, buf.limit())
+        val rem = buf.remaining()
+        assertEquals(22, rem)
+        val data = buf.readByteArray(rem)
+        assertContentEquals(data, byteArrayOf(96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56))
+        val newBuffer = PlatformBuffer.wrap(data)
+        assertEquals(0, newBuffer.position())
+        assertEquals(22, newBuffer.limit())
+        assertBufferEquals(newBuffer, byteArrayOf(96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56))
+        val b = newBuffer.readByteArray(4)
+        assertEquals(b.toHexString().uppercase(), "60DBD8A5")
+    }
+
+    fun assertBufferEquals(b: ReadBuffer, byteArray: ByteArray) {
+        val p = b.position()
+        val l = b.limit()
+        assertContentEquals(b.readByteArray(b.remaining()), byteArray)
+        b.position(p)
+        b.setLimit(l)
+    }
+
+    @Test
+    fun wrapByteArraySharesBuffer() {
+        val array = byteArrayOf(0, 1, 2, 3, 4, 5)
+        val buf = PlatformBuffer.wrap(array)
+        assertEquals(1, buf[1])
+        array[1] = -1
+        assertEquals(-1, buf[1])
+    }
+
+    @Test
+    fun simpleReadWrapReadAgain() {
+        val array = byteArrayOf(0, 1, 2, 3, 4, 5)
+        val buf = PlatformBuffer.wrap(array)
+        buf.readBytes(3)
+        val bytesRead = buf.readByteArray(buf.remaining())
+        assertEquals(buf.position(), 6)
+        assertEquals(buf.limit(), 6)
+        assertEquals(bytesRead.size, 3)
+        val buffer2 = PlatformBuffer.wrap(bytesRead)
+        assertBufferEquals(buffer2, byteArrayOf(3, 4, 5))
     }
 }

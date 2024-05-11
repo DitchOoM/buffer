@@ -2,7 +2,7 @@ package com.ditchoom.buffer
 
 import js.buffer.SharedArrayBuffer
 import org.khronos.webgl.ArrayBuffer
-import org.khronos.webgl.Uint8Array
+import org.khronos.webgl.Int8Array
 
 fun PlatformBuffer.Companion.allocate(
     size: Int,
@@ -36,17 +36,17 @@ actual fun PlatformBuffer.Companion.allocate(
     return if (sharedArrayBuffer != null) {
         val arrayBuffer = sharedArrayBuffer.unsafeCast<ArrayBuffer>().slice(0, size)
         JsBuffer(
-            Uint8Array(arrayBuffer),
+            Int8Array(arrayBuffer),
             littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN,
             sharedArrayBuffer = sharedArrayBuffer
         )
     } else {
-        JsBuffer(Uint8Array(size), littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN)
+        JsBuffer(Int8Array(size), littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN)
     }
 }
 
 actual fun PlatformBuffer.Companion.wrap(array: ByteArray, byteOrder: ByteOrder): PlatformBuffer =
     JsBuffer(
-        array.unsafeCast<Uint8Array>(),
+        array.unsafeCast<Int8Array>(),
         littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN
     )
