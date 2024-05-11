@@ -7,7 +7,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class FragmentedReadBufferTests {
-
     @Test
     fun readByteFromFirstBuffer() {
         val expectedFirstByte = Byte.MAX_VALUE
@@ -389,10 +388,11 @@ class FragmentedReadBufferTests {
     fun readFragmentedStringFromThreeBuffers() {
         val expectedString = "yolo-swag-lyfestyle"
         val utf8length = expectedString.toReadBuffer(Charset.UTF8).limit()
-        val composableBuffer = expectedString
-            .split(Regex("(?=-)"))
-            .map { it.toReadBuffer(Charset.UTF8) }
-            .toComposableBuffer()
+        val composableBuffer =
+            expectedString
+                .split(Regex("(?=-)"))
+                .map { it.toReadBuffer(Charset.UTF8) }
+                .toComposableBuffer()
         val actual = composableBuffer.readString(utf8length, Charset.UTF8)
         assertEquals(expectedString, actual)
     }

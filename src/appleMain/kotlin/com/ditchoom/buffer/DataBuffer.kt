@@ -14,9 +14,8 @@ import platform.Foundation.subdataWithRange
 
 open class DataBuffer(
     val data: NSData,
-    override val byteOrder: ByteOrder
+    override val byteOrder: ByteOrder,
 ) : ReadBuffer, SuspendCloseable, Parcelable {
-
     protected var position: Int = 0
     protected var limit: Int = data.length.toInt()
     open val capacity: Int = data.length.toInt()
@@ -34,6 +33,7 @@ open class DataBuffer(
     }
 
     override fun readByte() = bytePointer[position++]
+
     override fun get(index: Int): Byte = bytePointer[index]
 
     override fun slice(): ReadBuffer {
@@ -54,7 +54,10 @@ open class DataBuffer(
         return result
     }
 
-    override fun readString(length: Int, charset: Charset): String {
+    override fun readString(
+        length: Int,
+        charset: Charset,
+    ): String {
         if (length == 0) return ""
         val subdata = data.subdataWithRange(NSMakeRange(position.convert(), length.convert()))
         val stringEncoding = charset.toEncoding()
@@ -66,7 +69,9 @@ open class DataBuffer(
     }
 
     override fun limit() = limit
+
     override fun position() = position
+
     override fun position(newPosition: Int) {
         position = newPosition
     }

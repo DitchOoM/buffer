@@ -5,9 +5,8 @@ data class NativeBuffer(
     private var position: Int = 0,
     private var limit: Int = data.size,
     override val capacity: Int = data.size,
-    override val byteOrder: ByteOrder
+    override val byteOrder: ByteOrder,
 ) : PlatformBuffer {
-
     override fun resetForRead() {
         limit = position
         position = 0
@@ -36,18 +35,22 @@ data class NativeBuffer(
         return result
     }
 
-    override fun readString(length: Int, charset: Charset): String {
-        val value = when (charset) {
-            Charset.UTF8 -> data.decodeToString(position, position + length, throwOnInvalidSequence = true)
-            Charset.UTF16 -> throw UnsupportedOperationException("Not sure how to implement.")
-            Charset.UTF16BigEndian -> throw UnsupportedOperationException("Not sure how to implement.")
-            Charset.UTF16LittleEndian -> throw UnsupportedOperationException("Not sure how to implement.")
-            Charset.ASCII -> throw UnsupportedOperationException("Not sure how to implement.")
-            Charset.ISOLatin1 -> throw UnsupportedOperationException("Not sure how to implement.")
-            Charset.UTF32 -> throw UnsupportedOperationException("Not sure how to implement.")
-            Charset.UTF32LittleEndian -> throw UnsupportedOperationException("Not sure how to implement.")
-            Charset.UTF32BigEndian -> throw UnsupportedOperationException("Not sure how to implement.")
-        }
+    override fun readString(
+        length: Int,
+        charset: Charset,
+    ): String {
+        val value =
+            when (charset) {
+                Charset.UTF8 -> data.decodeToString(position, position + length, throwOnInvalidSequence = true)
+                Charset.UTF16 -> throw UnsupportedOperationException("Not sure how to implement.")
+                Charset.UTF16BigEndian -> throw UnsupportedOperationException("Not sure how to implement.")
+                Charset.UTF16LittleEndian -> throw UnsupportedOperationException("Not sure how to implement.")
+                Charset.ASCII -> throw UnsupportedOperationException("Not sure how to implement.")
+                Charset.ISOLatin1 -> throw UnsupportedOperationException("Not sure how to implement.")
+                Charset.UTF32 -> throw UnsupportedOperationException("Not sure how to implement.")
+                Charset.UTF32LittleEndian -> throw UnsupportedOperationException("Not sure how to implement.")
+                Charset.UTF32BigEndian -> throw UnsupportedOperationException("Not sure how to implement.")
+            }
         position += length
         return value
     }
@@ -57,12 +60,19 @@ data class NativeBuffer(
         return this
     }
 
-    override fun set(index: Int, byte: Byte): WriteBuffer {
+    override fun set(
+        index: Int,
+        byte: Byte,
+    ): WriteBuffer {
         data[index] = byte
         return this
     }
 
-    override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
+    override fun writeBytes(
+        bytes: ByteArray,
+        offset: Int,
+        length: Int,
+    ): WriteBuffer {
         bytes.copyInto(data, position, offset, offset + length)
         position += length
         return this
@@ -70,18 +80,22 @@ data class NativeBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val start = position()
-        val byteSize = if (buffer is NativeBuffer) {
-            writeBytes(buffer.data)
-            buffer.data.size
-        } else {
-            val numBytes = buffer.remaining()
-            writeBytes(buffer.readByteArray(numBytes))
-            numBytes
-        }
+        val byteSize =
+            if (buffer is NativeBuffer) {
+                writeBytes(buffer.data)
+                buffer.data.size
+            } else {
+                val numBytes = buffer.remaining()
+                writeBytes(buffer.readByteArray(numBytes))
+                numBytes
+            }
         buffer.position(start + byteSize)
     }
 
-    override fun writeString(text: CharSequence, charset: Charset): WriteBuffer {
+    override fun writeString(
+        text: CharSequence,
+        charset: Charset,
+    ): WriteBuffer {
         when (charset) {
             Charset.UTF8 -> writeBytes(text.toString().encodeToByteArray())
             else -> throw UnsupportedOperationException("Unable to encode in $charset. Must use Charset.UTF8")
@@ -92,7 +106,9 @@ data class NativeBuffer(
     override suspend fun close() = Unit
 
     override fun limit() = limit
+
     override fun position() = position
+
     override fun position(newPosition: Int) {
         position = newPosition
     }

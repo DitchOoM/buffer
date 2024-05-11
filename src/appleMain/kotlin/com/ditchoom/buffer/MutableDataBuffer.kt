@@ -21,9 +21,8 @@ import platform.Foundation.subdataWithRange
 class MutableDataBuffer(
     dataRef: NSData,
     override val byteOrder: ByteOrder,
-    private val backingArray: ByteArray? = null
+    private val backingArray: ByteArray? = null,
 ) : DataBuffer(dataRef, byteOrder), PlatformBuffer {
-
     val mutableData = dataRef as? NSMutableData
 
     @Suppress("UNCHECKED_CAST")
@@ -32,11 +31,14 @@ class MutableDataBuffer(
     init {
         check(
             (bytePointer != null && backingArray == null) ||
-                (bytePointer == null && backingArray != null)
+                (bytePointer == null && backingArray != null),
         )
     }
 
-    private fun writeByteInternal(index: Int, byte: Byte) {
+    private fun writeByteInternal(
+        index: Int,
+        byte: Byte,
+    ) {
         backingArray?.set(index, byte)
         bytePointer?.set(index, byte)
     }
@@ -51,12 +53,19 @@ class MutableDataBuffer(
         return this
     }
 
-    override fun set(index: Int, byte: Byte): WriteBuffer {
+    override fun set(
+        index: Int,
+        byte: Byte,
+    ): WriteBuffer {
         writeByteInternal(index, byte)
         return this
     }
 
-    override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
+    override fun writeBytes(
+        bytes: ByteArray,
+        offset: Int,
+        length: Int,
+    ): WriteBuffer {
         if (length < 1) {
             return this
         }
@@ -76,18 +85,19 @@ class MutableDataBuffer(
     override fun write(buffer: ReadBuffer) {
         if (buffer is DataBuffer && mutableData != null) {
             val bytesToCopySize = buffer.remaining()
-            val otherSubdata = buffer.data.subdataWithRange(
-                NSMakeRange(
-                    buffer.position().convert(),
-                    bytesToCopySize.convert()
+            val otherSubdata =
+                buffer.data.subdataWithRange(
+                    NSMakeRange(
+                        buffer.position().convert(),
+                        bytesToCopySize.convert(),
+                    ),
                 )
-            )
             mutableData.replaceBytesInRange(
                 NSMakeRange(
                     position.convert(),
-                    bytesToCopySize.convert()
+                    bytesToCopySize.convert(),
                 ),
-                otherSubdata.bytes
+                otherSubdata.bytes,
             )
             position += bytesToCopySize
             buffer.position(buffer.position() + bytesToCopySize)
@@ -97,20 +107,27 @@ class MutableDataBuffer(
         }
     }
 
-    override fun writeString(text: CharSequence, charset: Charset): WriteBuffer {
-        val string = if (text is String) {
-            text as NSString
-        } else {
-            @Suppress("CAST_NEVER_SUCCEEDS")
-            text.toString() as NSString
-        }
+    override fun writeString(
+        text: CharSequence,
+        charset: Charset,
+    ): WriteBuffer {
+        val string =
+            if (text is String) {
+                text as NSString
+            } else {
+                @Suppress("CAST_NEVER_SUCCEEDS")
+                text.toString() as NSString
+            }
         val charsetEncoding = charset.toEncoding()
         write(DataBuffer(string.dataUsingEncoding(charsetEncoding)!!, byteOrder))
         return this
     }
 
     companion object {
-        fun wrap(byteArray: ByteArray, byteOrder: ByteOrder) = byteArray.useNSDataRef {
+        fun wrap(
+            byteArray: ByteArray,
+            byteOrder: ByteOrder,
+        ) = byteArray.useNSDataRef {
             MutableDataBuffer(it, byteOrder, byteArray)
         }
     }
@@ -118,15 +135,17 @@ class MutableDataBuffer(
 
 private fun <T> ByteArray.useNSDataRef(block: (NSData) -> T): T {
     return usePinned { pin ->
-        val bytesPointer = when {
-            isNotEmpty() -> pin.addressOf(0)
-            else -> null
-        }
-        val nsData = NSData.dataWithBytesNoCopy(
-            bytes = bytesPointer,
-            length = size.convert(),
-            freeWhenDone = false
-        )
+        val bytesPointer =
+            when {
+                isNotEmpty() -> pin.addressOf(0)
+                else -> null
+            }
+        val nsData =
+            NSData.dataWithBytesNoCopy(
+                bytes = bytesPointer,
+                length = size.convert(),
+                freeWhenDone = false,
+            )
 
         @Suppress("UNCHECKED_CAST")
         val typeRef = CFBridgingRetain(nsData) as CFDataRef

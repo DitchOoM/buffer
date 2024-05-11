@@ -1,5 +1,4 @@
 import org.apache.tools.ant.taskdefs.condition.Os
-import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 
 plugins {
     id("dev.petuska.npm.publish") version "3.4.1"
@@ -8,8 +7,7 @@ plugins {
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
     signing
-    id("org.jlleitschuh.gradle.ktlint") version "11.5.1"
-    id("org.jlleitschuh.gradle.ktlint-idea") version "11.5.1"
+    id("org.jlleitschuh.gradle.ktlint") version "12.1.1"
 }
 val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
 val isMainBranchGithub = System.getenv("GITHUB_REF") == "refs/heads/main"
@@ -18,17 +16,18 @@ val loadAllPlatforms = !isRunningOnGithub || (isMacOS && isMainBranchGithub) || 
 
 println(
     "isRunningOnGithub: $isRunningOnGithub isMainBranchGithub: $isMainBranchGithub OS:$isMacOS " +
-        "Load All Platforms: $loadAllPlatforms"
+        "Load All Platforms: $loadAllPlatforms",
 )
 
 val libraryVersionPrefix: String by project
 group = "com.ditchoom"
 version = "$libraryVersionPrefix.0-SNAPSHOT"
-val libraryVersion = if (System.getenv("GITHUB_RUN_NUMBER") != null) {
-    "$libraryVersionPrefix${(Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER")) - 58)}"
-} else {
-    "${libraryVersionPrefix}0-SNAPSHOT"
-}
+val libraryVersion =
+    if (System.getenv("GITHUB_RUN_NUMBER") != null) {
+        "$libraryVersionPrefix${(Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER")) - 58)}"
+    } else {
+        "${libraryVersionPrefix}0-SNAPSHOT"
+    }
 
 repositories {
     google()
@@ -200,7 +199,7 @@ if (isRunningOnGithub) {
             useInMemoryPgpKeys(
                 "56F1A973",
                 System.getenv("GPG_SECRET"),
-                System.getenv("GPG_SIGNING_PASSWORD")
+                System.getenv("GPG_SIGNING_PASSWORD"),
             )
             sign(publishing.publications)
         }

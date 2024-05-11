@@ -1,7 +1,6 @@
 package com.ditchoom.buffer
 
 sealed class AllocationZone {
-
     /** Allocates a buffer in the java heap.*/
     object Heap : AllocationZone()
 
