@@ -78,19 +78,13 @@ kotlin {
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
         }
 
-        val androidUnitTest by getting {
-            kotlin.srcDir("src/commonJvmTest/kotlin")
+        val androidInstrumentedTest by getting {
+            dependencies {
+                implementation("androidx.test:runner:1.5.2")
+                implementation("androidx.test:rules:1.5.0")
+                implementation("androidx.test:core-ktx:1.5.0")
+            }
         }
-//        val androidInstrumentedTest by getting {
-//            dependsOn(commonTest)
-//            kotlin.srcDir("src/commonJvmTest/kotlin")
-//            kotlin.srcDir("src/commonTest/kotlin")
-//            dependencies {
-//                implementation("androidx.test:runner:1.5.2")
-//                implementation("androidx.test:rules:1.5.0")
-//                implementation("androidx.test:core-ktx:1.5.0")
-//            }
-//        }
 
         jsMain.dependencies {
             implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.746")
@@ -109,6 +103,12 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     namespace = "$group.${rootProject.name}"
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+            withJavadocJar()
+        }
+    }
 }
 
 val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
