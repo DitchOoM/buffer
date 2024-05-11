@@ -69,9 +69,6 @@ kotlin {
     linuxArm64()
     ios()
     iosSimulatorArm64()
-    tasks.getByName<KotlinNativeSimulatorTest>("iosSimulatorArm64Test") {
-        device.set("iPhone 14")
-    }
     watchos()
     watchosSimulatorArm64()
     tvos()
