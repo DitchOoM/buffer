@@ -787,11 +787,11 @@ class BufferTests {
         assertEquals(0, s.limit())
     }
 
-
     @OptIn(ExperimentalStdlibApi::class)
     @Test
     fun complexReadWrapReadAgain1() {
         val str = "0001A960DBD8A500006500006400010A003132333435363738"
+
         @OptIn(ExperimentalStdlibApi::class)
         fun String.toByteArrayFromHex(): ByteArray {
             var value = this
@@ -857,5 +857,4 @@ class BufferTests {
         val buffer2 = PlatformBuffer.wrap(bytesRead)
         assertBufferEquals(buffer2, byteArrayOf(3, 4, 5))
     }
-
 }
