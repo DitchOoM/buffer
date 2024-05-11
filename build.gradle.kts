@@ -2,7 +2,7 @@ import org.apache.tools.ant.taskdefs.condition.Os
 
 plugins {
     kotlin("multiplatform") version "1.9.24"
-    id("com.android.library")
+    id("com.android.library") version "8.4.0"
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
     signing
@@ -35,6 +35,7 @@ repositories {
 }
 
 kotlin {
+    jvmToolchain(19)
     androidTarget {
         publishLibraryVariants("release")
     }
@@ -95,11 +96,8 @@ kotlin {
 
 android {
     compileSdk = 34
-    sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
-    sourceSets["androidTest"].manifest.srcFile("src/androidAndroidTest/AndroidManifest.xml")
     defaultConfig {
         minSdk = 16
-        targetSdk = 34
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     namespace = "$group.${rootProject.name}"

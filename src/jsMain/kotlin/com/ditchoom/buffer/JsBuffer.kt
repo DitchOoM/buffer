@@ -122,6 +122,8 @@ data class JsBuffer(
                 Charset.UTF32LittleEndian -> throw UnsupportedOperationException("Not sure how to implement")
                 Charset.UTF32BigEndian -> throw UnsupportedOperationException("Not sure how to implement")
             }
+
+        @Suppress("UNCHECKED_CAST_TO_EXTERNAL_INTERFACE")
         val textDecoder = TextDecoder(encoding, js("{fatal: true}") as TextDecoderOptions)
         val result =
             textDecoder.decode(
