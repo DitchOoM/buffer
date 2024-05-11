@@ -82,12 +82,12 @@ kotlin {
         val commonTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
             }
         }
         val androidMain by getting {
             dependencies {
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
             }
         }
         val androidUnitTest by getting {
@@ -111,8 +111,8 @@ kotlin {
 
             val jsMain by getting {
                 dependencies {
-                    implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.615")
-                    implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.615")
+                    implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.746")
+                    implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.746")
                 }
             }
             val jsTest by getting
