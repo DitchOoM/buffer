@@ -256,3 +256,8 @@ task<Exec>("publishTag") {
     commandLine("git", "tag", next)
     commandLine("git", "push", "origin", next)
 }
+
+val signingTasks = tasks.withType<Sign>()
+tasks.withType<AbstractPublishToMaven>().configureEach {
+    dependsOn(signingTasks)
+}
