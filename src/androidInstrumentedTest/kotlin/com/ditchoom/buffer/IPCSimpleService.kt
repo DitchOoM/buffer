@@ -7,7 +7,7 @@ import android.os.IBinder
 class IPCSimpleService : Service() {
     override fun onBind(intent: Intent?): IBinder =
         object : BufferIpcTestAidl.Stub() {
-            private val byteSize = 20 * 1024 * 1024
+            private val byteSize = 4 * 1024 * 1024
 
             override fun aidl(
                 num: Int,
