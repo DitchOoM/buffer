@@ -34,25 +34,11 @@ kotlin {
     androidTarget {
         publishLibraryVariants("release")
     }
-    jvm {
-        compilations.all {
-            kotlinOptions.jvmTarget = "1.8"
-        }
-        testRuns["test"].executionTask.configure {
-            useJUnit()
-        }
-    }
+    jvm()
     js {
         moduleName = "buffer-kt"
-        browser { binaries.library() }
-        nodejs {
-            binaries.library()
-            testTask {
-                useMocha {
-                    timeout = "10s"
-                }
-            }
-        }
+        browser()
+        nodejs()
     }
     macosX64()
     macosArm64()
