@@ -83,7 +83,7 @@ kotlin {
                 implementation("androidx.test.ext:junit:1.1.5")
             }
         }
-        
+
         jsMain.dependencies {
             implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.746")
             implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.746")
