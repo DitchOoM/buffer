@@ -20,6 +20,9 @@ jobs:
           distribution: 'zulu'
           java-version: '19'
           cache: gradle
+      - name: Setup Chrome
+        uses: browser-actions/setup-chrome@v1
+        run: chrome --version
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v2
       - name: Tests with Gradle Major
