@@ -251,12 +251,6 @@ tasks.create("nextVersion") {
     println(getNextVersion())
 }
 
-task<Exec>("publishTag") {
-    val next = "v" + getNextVersion().toString()
-    commandLine("git", "tag", next)
-    commandLine("git", "push", "origin", next)
-}
-
 val signingTasks = tasks.withType<Sign>()
 tasks.withType<AbstractPublishToMaven>().configureEach {
     dependsOn(signingTasks)
