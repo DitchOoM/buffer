@@ -80,6 +80,7 @@ kotlin {
                 implementation("androidx.test:runner:1.5.2")
                 implementation("androidx.test:rules:1.5.0")
                 implementation("androidx.test:core-ktx:1.5.0")
+                implementation("androidx.test.ext:junit:1.1.5")
             }
         }
 
@@ -91,6 +92,9 @@ kotlin {
 }
 
 android {
+    buildFeatures {
+        aidl = true
+    }
     compileSdk = 34
     defaultConfig {
         minSdk = 16
