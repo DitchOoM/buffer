@@ -76,6 +76,7 @@ kotlin {
 
         val androidInstrumentedTest by getting {
             dependencies {
+                implementation(kotlin("test"))
                 implementation("androidx.test:runner:1.5.2")
                 implementation("androidx.test:rules:1.5.0")
                 implementation("androidx.test:core-ktx:1.5.0")
@@ -244,4 +245,10 @@ fun getNextVersion(snapshot: Boolean = !isRunningOnGithub): Version {
 
 tasks.create("nextVersion") {
     println(getNextVersion())
+}
+
+task<Exec>("publishTag") {
+    val next = "v" + getNextVersion().toString()
+    commandLine("git", "tag", next)
+    commandLine("git", "push", "origin", next)
 }
