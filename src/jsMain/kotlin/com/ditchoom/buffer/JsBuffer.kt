@@ -9,11 +9,12 @@ import web.encoding.TextDecoderOptions
 
 data class JsBuffer(
     val buffer: Int8Array,
-    private val littleEndian: Boolean = false, // network endian is big endian
+    // network endian is big endian
+    private val littleEndian: Boolean = false,
     private var position: Int = 0,
     private var limit: Int = 0,
     override val capacity: Int = buffer.byteLength,
-    val sharedArrayBuffer: SharedArrayBuffer? = null
+    val sharedArrayBuffer: SharedArrayBuffer? = null,
 ) : PlatformBuffer {
     override val byteOrder = if (littleEndian) ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN
 
@@ -53,7 +54,7 @@ data class JsBuffer(
         return JsBuffer(
             Int8Array(buffer.buffer.slice(position, limit)),
             littleEndian,
-            sharedArrayBuffer = sharedArrayBuffer
+            sharedArrayBuffer = sharedArrayBuffer,
         )
     }
 
@@ -105,28 +106,35 @@ data class JsBuffer(
         return result
     }
 
-    override fun readString(length: Int, charset: Charset): String {
-        val encoding = when (charset) {
-            Charset.UTF8 -> "utf-8"
-            Charset.UTF16 -> throw UnsupportedOperationException("Not sure how to implement")
-            Charset.UTF16BigEndian -> "utf-16be"
-            Charset.UTF16LittleEndian -> "utf-16le"
-            Charset.ASCII -> "ascii"
-            Charset.ISOLatin1 -> "iso-8859-1"
-            Charset.UTF32 -> throw UnsupportedOperationException("Not sure how to implement")
-            Charset.UTF32LittleEndian -> throw UnsupportedOperationException("Not sure how to implement")
-            Charset.UTF32BigEndian -> throw UnsupportedOperationException("Not sure how to implement")
-        }
+    override fun readString(
+        length: Int,
+        charset: Charset,
+    ): String {
+        val encoding =
+            when (charset) {
+                Charset.UTF8 -> "utf-8"
+                Charset.UTF16 -> throw UnsupportedOperationException("Not sure how to implement")
+                Charset.UTF16BigEndian -> "utf-16be"
+                Charset.UTF16LittleEndian -> "utf-16le"
+                Charset.ASCII -> "ascii"
+                Charset.ISOLatin1 -> "iso-8859-1"
+                Charset.UTF32 -> throw UnsupportedOperationException("Not sure how to implement")
+                Charset.UTF32LittleEndian -> throw UnsupportedOperationException("Not sure how to implement")
+                Charset.UTF32BigEndian -> throw UnsupportedOperationException("Not sure how to implement")
+            }
+
+        @Suppress("UNCHECKED_CAST_TO_EXTERNAL_INTERFACE")
         val textDecoder = TextDecoder(encoding, js("{fatal: true}") as TextDecoderOptions)
-        val result = textDecoder.decode(
-            buffer.subarray(position, position + length).unsafeCast<BufferSource>()
-        )
+        val result =
+            textDecoder.decode(
+                buffer.subarray(position, position + length).unsafeCast<BufferSource>(),
+            )
         position(position + length)
         return result
     }
 
     override fun write(buffer: ReadBuffer) {
-        val size = buffer.limit() - buffer.position()
+        val size = buffer.remaining()
         if (buffer is JsBuffer) {
             this.buffer.set(buffer.buffer, position)
         } else {
@@ -142,13 +150,20 @@ data class JsBuffer(
         return this
     }
 
-    override fun set(index: Int, byte: Byte): WriteBuffer {
+    override fun set(
+        index: Int,
+        byte: Byte,
+    ): WriteBuffer {
         val dataView = DataView(buffer.buffer, index, Byte.SIZE_BYTES)
         dataView.setInt8(0, byte)
         return this
     }
 
-    override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
+    override fun writeBytes(
+        bytes: ByteArray,
+        offset: Int,
+        length: Int,
+    ): WriteBuffer {
         val int8Array = bytes.unsafeCast<Int8Array>().subarray(offset, offset + length)
         this.buffer.set(int8Array, position)
         position += int8Array.length
@@ -162,7 +177,10 @@ data class JsBuffer(
         return this
     }
 
-    override fun set(index: Int, short: Short): WriteBuffer {
+    override fun set(
+        index: Int,
+        short: Short,
+    ): WriteBuffer {
         val dataView = DataView(buffer.buffer, index, Short.SIZE_BYTES)
         dataView.setUint16(0, short, littleEndian)
         return this
@@ -175,7 +193,10 @@ data class JsBuffer(
         return this
     }
 
-    override fun set(index: Int, int: Int): WriteBuffer {
+    override fun set(
+        index: Int,
+        int: Int,
+    ): WriteBuffer {
         val dataView = DataView(buffer.buffer, index, UInt.SIZE_BYTES)
         dataView.setUint32(0, int, littleEndian)
         return this
@@ -187,7 +208,10 @@ data class JsBuffer(
         return this
     }
 
-    override fun set(index: Int, long: Long): WriteBuffer {
+    override fun set(
+        index: Int,
+        long: Long,
+    ): WriteBuffer {
         val bytes = if (littleEndian) long.toByteArray().reversedArray() else long.toByteArray()
         val int8Array = bytes.unsafeCast<Int8Array>().subarray(0, Long.SIZE_BYTES)
         this.buffer.set(int8Array, index)
@@ -204,7 +228,10 @@ data class JsBuffer(
         return result
     }
 
-    override fun writeString(text: CharSequence, charset: Charset): WriteBuffer {
+    override fun writeString(
+        text: CharSequence,
+        charset: Charset,
+    ): WriteBuffer {
         when (charset) {
             Charset.UTF8 -> writeBytes(text.toString().encodeToByteArray())
             else -> throw UnsupportedOperationException("Unable to encode in $charset. Must use Charset.UTF8")
@@ -213,7 +240,9 @@ data class JsBuffer(
     }
 
     override fun limit() = limit
+
     override fun position() = position
+
     override fun position(newPosition: Int) {
         position = newPosition
     }

@@ -2,6 +2,7 @@ package com.ditchoom.buffer
 
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
+import kotlinx.cinterop.UnsafeNumber
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.get
 import kotlinx.cinterop.readBytes
@@ -12,11 +13,11 @@ import platform.Foundation.create
 import platform.Foundation.isEqualToData
 import platform.Foundation.subdataWithRange
 
+@OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, UnsafeNumber::class)
 open class DataBuffer(
     val data: NSData,
-    override val byteOrder: ByteOrder
+    override val byteOrder: ByteOrder,
 ) : ReadBuffer, SuspendCloseable, Parcelable {
-
     protected var position: Int = 0
     protected var limit: Int = data.length.toInt()
     open val capacity: Int = data.length.toInt()
@@ -34,6 +35,7 @@ open class DataBuffer(
     }
 
     override fun readByte() = bytePointer[position++]
+
     override fun get(index: Int): Byte = bytePointer[index]
 
     override fun slice(): ReadBuffer {
@@ -54,19 +56,25 @@ open class DataBuffer(
         return result
     }
 
-    override fun readString(length: Int, charset: Charset): String {
+    override fun readString(
+        length: Int,
+        charset: Charset,
+    ): String {
         if (length == 0) return ""
         val subdata = data.subdataWithRange(NSMakeRange(position.convert(), length.convert()))
         val stringEncoding = charset.toEncoding()
 
         @Suppress("CAST_NEVER_SUCCEEDS")
+        @OptIn(kotlinx.cinterop.BetaInteropApi::class)
         val string = NSString.create(subdata, stringEncoding) as String
         position += length
         return string
     }
 
     override fun limit() = limit
+
     override fun position() = position
+
     override fun position(newPosition: Int) {
         position = newPosition
     }

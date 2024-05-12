@@ -13,14 +13,23 @@ jobs:
       matrix:
         os: [ macos-latest, ubuntu-latest ]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Set up JDK 19
-        uses: actions/setup-java@v2
+        uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '19'
           cache: gradle
-      - name: Setup Gradle
-        uses: gradle/gradle-build-action@v2
-      - name: Tests with Gradle
-        run: ./gradlew ktlintCheck assemble pack build check allTests publishToMavenLocal
+      - name: Setup Chrome
+        uses: browser-actions/setup-chrome@v1
+      - name: Gradle cache
+        uses: gradle/actions/setup-gradle@v3
+      - name: Tests with Gradle Major
+        if:  ${{ contains(github.event.pull_request.labels.*.name, 'major') }}
+        run: ./gradlew ktlintCheck assemble build check allTests publishToMavenLocal -PincrementMajor=true
+      - name: Tests with Gradle Minor
+        if:  ${{ contains(github.event.pull_request.labels.*.name, 'minor') }}
+        run: ./gradlew ktlintCheck assemble build check allTests publishToMavenLocal -PincrementMinor=true
+      - name: Tests with Gradle Patch
+        if:  ${{ !contains(github.event.pull_request.labels.*.name, 'major') && !contains(github.event.pull_request.labels.*.name, 'minor') }}
+        run: ./gradlew ktlintCheck assemble build check allTests publishToMavenLocal

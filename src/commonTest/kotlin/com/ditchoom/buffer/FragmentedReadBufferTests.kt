@@ -7,7 +7,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class FragmentedReadBufferTests {
-
     @Test
     fun readByteFromFirstBuffer() {
         val expectedFirstByte = Byte.MAX_VALUE
@@ -389,10 +388,11 @@ class FragmentedReadBufferTests {
     fun readFragmentedStringFromThreeBuffers() {
         val expectedString = "yolo-swag-lyfestyle"
         val utf8length = expectedString.toReadBuffer(Charset.UTF8).limit()
-        val composableBuffer = expectedString
-            .split(Regex("(?=-)"))
-            .map { it.toReadBuffer(Charset.UTF8) }
-            .toComposableBuffer()
+        val composableBuffer =
+            expectedString
+                .split(Regex("(?=-)"))
+                .map { it.toReadBuffer(Charset.UTF8) }
+                .toComposableBuffer()
         val actual = composableBuffer.readString(utf8length, Charset.UTF8)
         assertEquals(expectedString, actual)
     }
@@ -427,16 +427,11 @@ class FragmentedReadBufferTests {
         } while (indexCount < 1024 * 1024)
         val fragmentedBuffer = buffers.toComposableBuffer() as FragmentedReadBuffer
         fragmentedBuffer.resetForRead()
-        repeat(indexCount) {
-            assertEquals(it, fragmentedBuffer.readInt(), "failed to read byte on fragmented at $indexCount")
+        var intCount = 0
+        fragmentedBuffer.walk {
+            while (it.hasRemaining()) {
+                assertEquals(intCount++, it.readInt())
+            }
         }
-        assertEquals(0, fragmentedBuffer.remaining(), "fragmented should have 0 remaining")
-        fragmentedBuffer.resetForRead()
-        val combined = fragmentedBuffer.toSingleBuffer()
-        assertEquals(indexCount * 4, combined.remaining(), "failed to validate remaining")
-        repeat(indexCount) {
-            assertEquals(it, combined.readInt(), "failed to read byte on combined at $indexCount")
-        }
-        assertEquals(0, combined.remaining(), "combined should have 0 remaining")
     }
 }

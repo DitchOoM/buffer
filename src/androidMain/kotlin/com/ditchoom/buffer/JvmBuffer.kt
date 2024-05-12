@@ -16,7 +16,10 @@ import java.nio.ByteBuffer
 open class JvmBuffer(val buffer: ByteBuffer) : BaseJvmBuffer(buffer) {
     override fun describeContents(): Int = 0
 
-    override fun writeToParcel(dest: Parcel, flags: Int) {
+    override fun writeToParcel(
+        dest: Parcel,
+        flags: Int,
+    ) {
         if (this is ParcelableSharedMemoryBuffer) {
             dest.writeByte(1)
             return
@@ -33,11 +36,12 @@ open class JvmBuffer(val buffer: ByteBuffer) : BaseJvmBuffer(buffer) {
         byteBuffer.position(0)
         byteBuffer.limit(byteBuffer.capacity())
 
-        val (readFileDescriptor, writeFileDescriptor) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            ParcelFileDescriptor.createReliablePipe()
-        } else {
-            ParcelFileDescriptor.createPipe()
-        }
+        val (readFileDescriptor, writeFileDescriptor) =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                ParcelFileDescriptor.createReliablePipe()
+            } else {
+                ParcelFileDescriptor.createPipe()
+            }
         readFileDescriptor.writeToParcel(dest, 0)
         val scope = CoroutineScope(Dispatchers.IO + CoroutineName("IPC Write Channel Jvm Buffer"))
         scope.launch {
@@ -60,11 +64,12 @@ open class JvmBuffer(val buffer: ByteBuffer) : BaseJvmBuffer(buffer) {
             val position = parcel.readInt()
             val limit = parcel.readInt()
             val isDirect = parcel.readByte() == 1.toByte()
-            val buffer = if (isDirect) {
-                ByteBuffer.allocateDirect(limit)
-            } else {
-                ByteBuffer.allocate(limit)
-            }
+            val buffer =
+                if (isDirect) {
+                    ByteBuffer.allocateDirect(limit)
+                } else {
+                    ByteBuffer.allocate(limit)
+                }
             ParcelFileDescriptor.CREATOR.createFromParcel(parcel).use { pfd ->
                 FileInputStream(pfd.fileDescriptor).channel.use { readChannel -> readChannel.read(buffer) }
             }

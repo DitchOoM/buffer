@@ -1,34 +1,27 @@
+import groovy.util.Node
+import groovy.xml.XmlParser
 import org.apache.tools.ant.taskdefs.condition.Os
-import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
+import java.net.URL
 
 plugins {
-    id("dev.petuska.npm.publish") version "3.4.1"
-    kotlin("multiplatform") version "1.9.23"
-    id("com.android.library")
+    kotlin("multiplatform") version "1.9.24"
+    id("com.android.library") version "8.4.0"
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
     signing
-    id("org.jlleitschuh.gradle.ktlint") version "11.5.1"
-    id("org.jlleitschuh.gradle.ktlint-idea") version "11.5.1"
+    id("org.jlleitschuh.gradle.ktlint") version "12.1.1"
 }
 val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
 val isMainBranchGithub = System.getenv("GITHUB_REF") == "refs/heads/main"
 val isMacOS = Os.isFamily(Os.FAMILY_MAC)
 val loadAllPlatforms = !isRunningOnGithub || (isMacOS && isMainBranchGithub) || !isMacOS
-
-println(
-    "isRunningOnGithub: $isRunningOnGithub isMainBranchGithub: $isMainBranchGithub OS:$isMacOS " +
-        "Load All Platforms: $loadAllPlatforms"
-)
-
 val libraryVersionPrefix: String by project
 group = "com.ditchoom"
-version = "$libraryVersionPrefix.0-SNAPSHOT"
-val libraryVersion = if (System.getenv("GITHUB_RUN_NUMBER") != null) {
-    "$libraryVersionPrefix${(Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER")) - 58)}"
-} else {
-    "${libraryVersionPrefix}0-SNAPSHOT"
-}
+val libraryVersion = getNextVersion().toString()
+println(
+    "Version: ${libraryVersion}\nisRunningOnGithub: $isRunningOnGithub\nisMainBranchGithub: $isMainBranchGithub\n" +
+        "OS:$isMacOS\nLoad All Platforms: $loadAllPlatforms",
+)
 
 repositories {
     google()
@@ -37,160 +30,72 @@ repositories {
 }
 
 kotlin {
+    jvmToolchain(19)
     androidTarget {
         publishLibraryVariants("release")
     }
-    if (loadAllPlatforms) {
-        jvm {
-            compilations.all {
-                kotlinOptions.jvmTarget = "1.8"
-            }
-            testRuns["test"].executionTask.configure {
-                useJUnit()
-            }
-        }
-        js(IR) {
-            moduleName = "buffer-kt"
-            browser { binaries.library() }
-            nodejs {
-                binaries.library()
-                testTask {
-                    useMocha {
-                        timeout = "10s"
-                    }
-                }
-            }
-        }
+    jvm()
+    js {
+        moduleName = "buffer-kt"
+        browser()
+        nodejs()
     }
-
     macosX64()
     macosArm64()
     linuxX64()
     linuxArm64()
-    ios()
+    iosArm64()
     iosSimulatorArm64()
-    tasks.getByName<KotlinNativeSimulatorTest>("iosSimulatorArm64Test") {
-        device.set("iPhone 14")
-    }
-    watchos()
+    iosX64()
+    watchosArm64()
     watchosSimulatorArm64()
-    tvos()
+    watchosX64()
+    tvosArm64()
     tvosSimulatorArm64()
-
+    tvosX64()
+    applyDefaultHierarchyTemplate()
     sourceSets {
-        val commonMain by getting
-        val commonTest by getting {
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+        }
+        androidMain.dependencies {
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+        }
+
+        val androidInstrumentedTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
-            }
-        }
-        val androidMain by getting {
-            dependencies {
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
-            }
-        }
-        val androidUnitTest by getting {
-            kotlin.srcDir("src/commonJvmTest/kotlin")
-        }
-        val androidInstrumentedTest by getting {
-            dependsOn(commonTest)
-            kotlin.srcDir("src/commonJvmTest/kotlin")
-            kotlin.srcDir("src/commonTest/kotlin")
-            dependencies {
                 implementation("androidx.test:runner:1.5.2")
                 implementation("androidx.test:rules:1.5.0")
                 implementation("androidx.test:core-ktx:1.5.0")
+                implementation("androidx.test.ext:junit:1.1.5")
             }
         }
-        if (loadAllPlatforms) {
-            val jvmMain by getting
-            val jvmTest by getting {
-                kotlin.srcDir("src/commonJvmTest/kotlin")
-            }
 
-            val jsMain by getting {
-                dependencies {
-                    implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.615")
-                    implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.615")
-                }
-            }
-            val jsTest by getting
-        }
-        val macosX64Main by getting
-        val macosX64Test by getting
-        val macosArm64Main by getting
-        val macosArm64Test by getting
-        val linuxX64Main by getting
-        val linuxX64Test by getting
-        val linuxArm64Main by getting
-        val linuxArm64Test by getting
-        val iosMain by getting
-        val iosTest by getting
-        val iosSimulatorArm64Main by getting
-        val iosSimulatorArm64Test by getting
-        val watchosMain by getting
-        val watchosTest by getting
-        val watchosSimulatorArm64Main by getting
-        val watchosSimulatorArm64Test by getting
-        val tvosMain by getting
-        val tvosTest by getting
-        val tvosSimulatorArm64Main by getting
-        val tvosSimulatorArm64Test by getting
-
-        val nativeMain by sourceSets.creating {
-            dependsOn(commonMain)
-            linuxX64Main.dependsOn(this)
-            linuxArm64Main.dependsOn(this)
-        }
-        val nativeTest by sourceSets.creating {
-            dependsOn(commonTest)
-            linuxX64Test.dependsOn(this)
-            linuxArm64Test.dependsOn(this)
-        }
-
-        val appleMain by sourceSets.creating {
-            dependsOn(commonMain)
-            macosX64Main.dependsOn(this)
-            macosArm64Main.dependsOn(this)
-            iosMain.dependsOn(this)
-            iosSimulatorArm64Main.dependsOn(this)
-            watchosMain.dependsOn(this)
-            watchosSimulatorArm64Main.dependsOn(this)
-            tvosMain.dependsOn(this)
-            tvosSimulatorArm64Main.dependsOn(this)
-        }
-
-        val appleTest by sourceSets.creating {
-            dependsOn(commonTest)
-            macosX64Test.dependsOn(this)
-            macosArm64Test.dependsOn(this)
-            iosTest.dependsOn(this)
-            iosSimulatorArm64Test.dependsOn(this)
-            watchosTest.dependsOn(this)
-            watchosSimulatorArm64Test.dependsOn(this)
-            tvosTest.dependsOn(this)
-            tvosSimulatorArm64Test.dependsOn(this)
-        }
-
-        all {
-            languageSettings.optIn("kotlinx.cinterop.ExperimentalForeignApi")
-            languageSettings.optIn("kotlinx.cinterop.BetaInteropApi")
-            languageSettings.optIn("kotlinx.cinterop.UnsafeNumber")
+        jsMain.dependencies {
+            implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.746")
+            implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.746")
         }
     }
 }
 
 android {
+    buildFeatures {
+        aidl = true
+    }
     compileSdk = 34
-    sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
-    sourceSets["androidTest"].manifest.srcFile("src/androidAndroidTest/AndroidManifest.xml")
     defaultConfig {
         minSdk = 16
-        targetSdk = 34
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     namespace = "$group.${rootProject.name}"
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+            withJavadocJar()
+        }
+    }
 }
 
 val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
@@ -203,7 +108,7 @@ if (isRunningOnGithub) {
             useInMemoryPgpKeys(
                 "56F1A973",
                 System.getenv("GPG_SECRET"),
-                System.getenv("GPG_SIGNING_PASSWORD")
+                System.getenv("GPG_SIGNING_PASSWORD"),
             )
             sign(publishing.publications)
         }
@@ -285,4 +190,69 @@ if (isRunningOnGithub) {
 ktlint {
     verbose.set(true)
     outputToConsole.set(true)
+}
+
+class Version(val major: UInt, val minor: UInt, val patch: UInt, val snapshot: Boolean) {
+    constructor(string: String, snapshot: Boolean) :
+        this(
+            string.split('.')[0].toUInt(),
+            string.split('.')[1].toUInt(),
+            string.split('.')[2].toUInt(),
+            snapshot,
+        )
+
+    fun incrementMajor() = Version(major + 1u, 0u, 0u, snapshot)
+
+    fun incrementMinor() = Version(major, minor + 1u, 0u, snapshot)
+
+    fun incrementPatch() = Version(major, minor, patch + 1u, snapshot)
+
+    fun snapshot() = Version(major, minor, patch, true)
+
+    fun isVersionZero() = major == 0u && minor == 0u && patch == 0u
+
+    override fun toString(): String =
+        if (snapshot) {
+            "$major.$minor.$patch-SNAPSHOT"
+        } else {
+            "$major.$minor.$patch"
+        }
+}
+private var latestVersion: Version? = Version(0u, 0u, 0u, true)
+
+@Suppress("UNCHECKED_CAST")
+fun getLatestVersion(): Version {
+    val latestVersion = latestVersion
+    if (latestVersion != null && !latestVersion.isVersionZero()) {
+        return latestVersion
+    }
+    val xml = URL("https://repo1.maven.org/maven2/com/ditchoom/${rootProject.name}/maven-metadata.xml").readText()
+    val versioning = XmlParser().parseText(xml)["versioning"] as List<Node>
+    val latestStringList = versioning.first()["latest"] as List<Node>
+    val result = Version((latestStringList.first().value() as List<*>).first().toString(), false)
+    this.latestVersion = result
+    return result
+}
+
+fun getNextVersion(snapshot: Boolean = !isRunningOnGithub): Version {
+    var v = getLatestVersion()
+    if (snapshot) {
+        v = v.snapshot()
+    }
+    if (project.hasProperty("incrementMajor") && project.property("incrementMajor") == "true") {
+        return v.incrementMajor()
+    } else if (project.hasProperty("incrementMinor") && project.property("incrementMinor") == "true") {
+        return v.incrementMinor()
+    }
+    return v.incrementPatch()
+}
+
+tasks.create("nextVersion") {
+    println(getNextVersion())
+}
+
+task<Exec>("publishTag") {
+    val next = "v" + getNextVersion().toString()
+    commandLine("git", "tag", next)
+    commandLine("git", "push", "origin", next)
 }

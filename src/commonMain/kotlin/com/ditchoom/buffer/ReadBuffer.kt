@@ -2,7 +2,9 @@ package com.ditchoom.buffer
 
 interface ReadBuffer : PositionBuffer {
     fun resetForRead()
+
     fun readByte(): Byte
+
     operator fun get(index: Int): Byte
 
     // slice does not change the position
@@ -24,37 +26,58 @@ interface ReadBuffer : PositionBuffer {
     fun readByteArray(size: Int): ByteArray
 
     fun readUnsignedByte(): UByte = readByte().toUByte()
+
     fun getUnsignedByte(index: Int): UByte = get(index).toUByte()
 
     fun readShort(): Short = readNumberWithByteSize(Short.SIZE_BYTES).toShort()
+
     fun getShort(index: Int): Short = getNumberWithStartIndexAndByteSize(index, Short.SIZE_BYTES).toShort()
+
     fun readUnsignedShort(): UShort = readShort().toUShort()
+
     fun getUnsignedShort(index: Int): UShort = getShort(index).toUShort()
+
     fun readInt(): Int = readNumberWithByteSize(Int.SIZE_BYTES).toInt()
+
     fun getInt(index: Int): Int = getNumberWithStartIndexAndByteSize(index, Int.SIZE_BYTES).toInt()
+
     fun readUnsignedInt(): UInt = readInt().toUInt()
+
     fun getUnsignedInt(index: Int): UInt = getInt(index).toUInt()
+
     fun readFloat(): Float = Float.fromBits(readInt())
+
     fun getFloat(index: Int): Float = Float.fromBits(getInt(index))
+
     fun readLong(): Long = readNumberWithByteSize(Long.SIZE_BYTES)
+
     fun getLong(index: Int): Long = getNumberWithStartIndexAndByteSize(index, Long.SIZE_BYTES)
+
     fun readUnsignedLong(): ULong = readLong().toULong()
+
     fun getUnsignedLong(index: Int): ULong = getLong(index).toULong()
+
     fun readDouble(): Double = Double.fromBits(readLong())
+
     fun getDouble(index: Int): Double = Double.fromBits(getLong(index))
-    fun readString(length: Int, charset: Charset = Charset.UTF8): String
+
+    fun readString(
+        length: Int,
+        charset: Charset = Charset.UTF8,
+    ): String
 
     @Deprecated(
         "Use readString instead",
-        ReplaceWith("readString(bytes, Charset.UTF8)", "com.ditchoom.buffer.Charset")
+        ReplaceWith("readString(bytes, Charset.UTF8)", "com.ditchoom.buffer.Charset"),
     )
     fun readUtf8(bytes: UInt): CharSequence = readString(bytes.toInt(), Charset.UTF8)
 
     @Deprecated(
         "Use readString instead",
-        ReplaceWith("readString(bytes, Charset.UTF8)", "com.ditchoom.buffer.Charset")
+        ReplaceWith("readString(bytes, Charset.UTF8)", "com.ditchoom.buffer.Charset"),
     )
     fun readUtf8(bytes: Int): CharSequence = readString(bytes, Charset.UTF8)
+
     fun readUtf8Line(): CharSequence {
         val initialPosition = position()
         var lastByte: Byte = 0
@@ -86,10 +109,11 @@ interface ReadBuffer : PositionBuffer {
 
     fun readNumberWithByteSize(numberOfBytes: Int): Long {
         check(numberOfBytes in 1..8) { "byte size out of range" }
-        val byteSizeRange = when (byteOrder) {
-            ByteOrder.LITTLE_ENDIAN -> 0 until numberOfBytes
-            ByteOrder.BIG_ENDIAN -> numberOfBytes - 1 downTo 0
-        }
+        val byteSizeRange =
+            when (byteOrder) {
+                ByteOrder.LITTLE_ENDIAN -> 0 until numberOfBytes
+                ByteOrder.BIG_ENDIAN -> numberOfBytes - 1 downTo 0
+            }
         var number = 0L
         for (i in byteSizeRange) {
             val bitIndex = i * 8
@@ -98,12 +122,16 @@ interface ReadBuffer : PositionBuffer {
         return number
     }
 
-    fun getNumberWithStartIndexAndByteSize(startIndex: Int, numberOfBytes: Int): Long {
+    fun getNumberWithStartIndexAndByteSize(
+        startIndex: Int,
+        numberOfBytes: Int,
+    ): Long {
         check(numberOfBytes in 1..8) { "byte size out of range" }
-        val byteSizeRange = when (byteOrder) {
-            ByteOrder.LITTLE_ENDIAN -> 0 until numberOfBytes
-            ByteOrder.BIG_ENDIAN -> numberOfBytes - 1 downTo 0
-        }
+        val byteSizeRange =
+            when (byteOrder) {
+                ByteOrder.LITTLE_ENDIAN -> 0 until numberOfBytes
+                ByteOrder.BIG_ENDIAN -> numberOfBytes - 1 downTo 0
+            }
         var number = 0L
         var index = startIndex
         for (i in byteSizeRange) {

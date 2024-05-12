@@ -5,26 +5,28 @@ import kotlin.math.roundToInt
 expect fun PlatformBuffer.Companion.allocate(
     size: Int,
     zone: AllocationZone = AllocationZone.Heap,
-    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN
+    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
 ): PlatformBuffer
 
 expect fun PlatformBuffer.Companion.wrap(
     array: ByteArray,
-    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN
+    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
 ): PlatformBuffer
 
 @Deprecated(
     "Use toReadBuffer instead",
-    ReplaceWith("toReadBuffer(Charset.UTF8, zone)", "com.ditchoom.buffer.Charset")
+    ReplaceWith("toReadBuffer(Charset.UTF8, zone)", "com.ditchoom.buffer.Charset"),
 )
-fun String.toBuffer(zone: AllocationZone = AllocationZone.Heap): ReadBuffer =
-    toReadBuffer(Charset.UTF8, zone)
+fun String.toBuffer(zone: AllocationZone = AllocationZone.Heap): ReadBuffer = toReadBuffer(Charset.UTF8, zone)
 
 fun CharSequence.maxBufferSize(charset: Charset): Int {
     return (charset.maxBytesPerChar * this.length).roundToInt()
 }
 
-fun String.toReadBuffer(charset: Charset = Charset.UTF8, zone: AllocationZone = AllocationZone.Heap): ReadBuffer {
+fun String.toReadBuffer(
+    charset: Charset = Charset.UTF8,
+    zone: AllocationZone = AllocationZone.Heap,
+): ReadBuffer {
     if (this == "") {
         return ReadBuffer.EMPTY_BUFFER
     }

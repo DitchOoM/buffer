@@ -1,5 +1,3 @@
-@file:JvmName("RunTest")
-
 package com.ditchoom.buffer
 
 import kotlinx.coroutines.runBlocking

@@ -12,7 +12,10 @@ class ParcelableSharedMemoryBuffer(buffer: ByteBuffer, private val sharedMemory:
     JvmBuffer(buffer), Parcelable {
     override fun describeContents(): Int = Parcelable.CONTENTS_FILE_DESCRIPTOR
 
-    override fun writeToParcel(dest: Parcel, flags: Int) {
+    override fun writeToParcel(
+        dest: Parcel,
+        flags: Int,
+    ) {
         super.writeToParcel(dest, flags)
         dest.writeParcelable(sharedMemory, flags)
         dest.writeInt(buffer.position())
@@ -27,12 +30,13 @@ class ParcelableSharedMemoryBuffer(buffer: ByteBuffer, private val sharedMemory:
     companion object CREATOR : Parcelable.Creator<ParcelableSharedMemoryBuffer> {
         override fun createFromParcel(parcel: Parcel): ParcelableSharedMemoryBuffer {
             parcel.readByte() // ignore this first byte
-            val sharedMemory = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                parcel.readParcelable(this::class.java.classLoader, SharedMemory::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                parcel.readParcelable(this::class.java.classLoader)
-            }!!
+            val sharedMemory =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    parcel.readParcelable(this::class.java.classLoader, SharedMemory::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    parcel.readParcelable(this::class.java.classLoader)
+                }!!
             val buffer =
                 ParcelableSharedMemoryBuffer(sharedMemory.mapReadWrite(), sharedMemory)
             buffer.position(parcel.readInt())

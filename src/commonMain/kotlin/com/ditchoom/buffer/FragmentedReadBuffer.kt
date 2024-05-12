@@ -7,7 +7,7 @@ package com.ditchoom.buffer
  */
 class FragmentedReadBuffer(
     private val first: ReadBuffer,
-    private val second: ReadBuffer
+    private val second: ReadBuffer,
 ) : ReadBuffer {
     private val firstInitialLimit = first.limit()
     private val secondInitialLimit = second.limit()
@@ -55,7 +55,10 @@ class FragmentedReadBuffer(
         }
     }
 
-    private fun <T> readSizeIntoBuffer(size: Int, block: (ReadBuffer) -> T): T {
+    private fun <T> readSizeIntoBuffer(
+        size: Int,
+        block: (ReadBuffer) -> T,
+    ): T {
         val buffer =
             if (currentPosition < firstInitialLimit && currentPosition + size <= firstInitialLimit) {
                 block(first)
@@ -102,7 +105,10 @@ class FragmentedReadBuffer(
 
     override fun readLong() = readSizeIntoBuffer(ULong.SIZE_BYTES) { it.readLong() }
 
-    override fun readString(length: Int, charset: Charset): String {
+    override fun readString(
+        length: Int,
+        charset: Charset,
+    ): String {
         return readSizeIntoBuffer(length) { it.readString(length, charset) }
     }
 
@@ -141,15 +147,30 @@ class FragmentedReadBuffer(
             out += second
         }
     }
+
     fun toSingleBuffer(zone: AllocationZone = AllocationZone.Heap): PlatformBuffer {
         val firstLimit = firstInitialLimit
         val secondLimit = secondInitialLimit
         val initialPosition = position()
         val buffer = PlatformBuffer.allocate(firstLimit + secondLimit - initialPosition, zone)
-        buffer.write(first)
-        buffer.write(second)
+        walk {
+            buffer.write(it)
+        }
         buffer.position(initialPosition)
         return buffer
+    }
+
+    fun walk(visitor: (ReadBuffer) -> Unit) {
+        if (first is FragmentedReadBuffer) {
+            first.walk(visitor)
+        } else {
+            visitor(first)
+        }
+        if (second is FragmentedReadBuffer) {
+            second.walk(visitor)
+        } else {
+            visitor(second)
+        }
     }
 }
 
@@ -166,6 +187,6 @@ fun List<ReadBuffer>.toComposableBuffer(): ReadBuffer {
     val half = size / 2
     return FragmentedReadBuffer(
         subList(0, half).toComposableBuffer(),
-        subList(half, size).toComposableBuffer()
+        subList(half, size).toComposableBuffer(),
     )
 }

@@ -10,7 +10,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BufferTests {
-
     @Test
     fun slice() {
         val platformBuffer = PlatformBuffer.allocate(3)
@@ -28,24 +27,26 @@ class BufferTests {
 
     @Test
     fun sharedMemoryAllocates() {
-        val platformBuffer = PlatformBuffer.allocate(
-            Byte.SIZE_BYTES + UByte.SIZE_BYTES +
-                Short.SIZE_BYTES + UShort.SIZE_BYTES +
-                Int.SIZE_BYTES + UInt.SIZE_BYTES +
-                Long.SIZE_BYTES + ULong.SIZE_BYTES,
-            AllocationZone.SharedMemory
-        )
+        val platformBuffer =
+            PlatformBuffer.allocate(
+                Byte.SIZE_BYTES + UByte.SIZE_BYTES +
+                    Short.SIZE_BYTES + UShort.SIZE_BYTES +
+                    Int.SIZE_BYTES + UInt.SIZE_BYTES +
+                    Long.SIZE_BYTES + ULong.SIZE_BYTES,
+                AllocationZone.SharedMemory,
+            )
         testAllPrimitives(platformBuffer)
     }
 
     @Test
     fun absolute() {
-        val platformBuffer = PlatformBuffer.allocate(
-            Byte.SIZE_BYTES + UByte.SIZE_BYTES +
-                Short.SIZE_BYTES + UShort.SIZE_BYTES +
-                Int.SIZE_BYTES + UInt.SIZE_BYTES +
-                Long.SIZE_BYTES + ULong.SIZE_BYTES
-        )
+        val platformBuffer =
+            PlatformBuffer.allocate(
+                Byte.SIZE_BYTES + UByte.SIZE_BYTES +
+                    Short.SIZE_BYTES + UShort.SIZE_BYTES +
+                    Int.SIZE_BYTES + UInt.SIZE_BYTES +
+                    Long.SIZE_BYTES + ULong.SIZE_BYTES,
+            )
         testAllPrimitives(platformBuffer)
     }
 
@@ -143,14 +144,15 @@ class BufferTests {
     fun sliceAndReadUtf8() {
         val expected = "test"
         // the first two bytes are not visible characters
-        val bytes = byteArrayOf(
-            -126,
-            4,
-            expected[0].code.toByte(),
-            expected[1].code.toByte(),
-            expected[2].code.toByte(),
-            expected[3].code.toByte()
-        )
+        val bytes =
+            byteArrayOf(
+                -126,
+                4,
+                expected[0].code.toByte(),
+                expected[1].code.toByte(),
+                expected[2].code.toByte(),
+                expected[3].code.toByte(),
+            )
         val platformBuffer = PlatformBuffer.allocate(bytes.size)
         platformBuffer.writeBytes(bytes)
         platformBuffer.position(2)
@@ -242,9 +244,10 @@ class BufferTests {
         platformBuffer.resetForRead()
         val msb = platformBuffer.readByte()
         val lsb = platformBuffer.readByte()
-        val value = (
-            (0xff and msb.toInt() shl 8)
-                or (0xff and lsb.toInt() shl 0)
+        val value =
+            (
+                (0xff and msb.toInt() shl 8)
+                    or (0xff and lsb.toInt() shl 0)
             ).toUShort()
         assertEquals(value.toInt(), uShort)
         assertEquals(0, platformBuffer.remaining())
@@ -258,9 +261,10 @@ class BufferTests {
         assertEquals(uShort, platformBuffer.getUnsignedShort(0))
         val msb = platformBuffer[0]
         val lsb = platformBuffer[1]
-        val value = (
-            (0xff and msb.toInt() shl 8)
-                or (0xff and lsb.toInt() shl 0)
+        val value =
+            (
+                (0xff and msb.toInt() shl 8)
+                    or (0xff and lsb.toInt() shl 0)
             ).toUShort()
         assertEquals(value, uShort)
         assertEquals(2, platformBuffer.remaining())
@@ -367,13 +371,13 @@ class BufferTests {
             platformBuffer.getLong(0),
             "getLong BIG_ENDIAN buffer[" +
                 "${platformBuffer[0]}, ${platformBuffer[1]}, ${platformBuffer[2]}, ${platformBuffer[3]}, " +
-                "${platformBuffer[4]}, ${platformBuffer[5]}, ${platformBuffer[6]}, ${platformBuffer[7]}]"
+                "${platformBuffer[4]}, ${platformBuffer[5]}, ${platformBuffer[6]}, ${platformBuffer[7]}]",
         )
         assertEquals(0, platformBuffer.position())
         assertEquals(
             long,
             platformBuffer.getNumberWithStartIndexAndByteSize(0, Long.SIZE_BYTES),
-            "getNumberWithStartIndexAndByteSize"
+            "getNumberWithStartIndexAndByteSize",
         )
         assertEquals(0, platformBuffer.position())
 
@@ -386,13 +390,13 @@ class BufferTests {
             platformBufferLE.getLong(0),
             "getLong LITTLE_ENDIAN buffer[" +
                 "${platformBufferLE[0]}, ${platformBufferLE[1]}, ${platformBufferLE[2]}, ${platformBufferLE[3]}, " +
-                "${platformBufferLE[4]}, ${platformBufferLE[5]}, ${platformBufferLE[6]}, ${platformBufferLE[7]}]"
+                "${platformBufferLE[4]}, ${platformBufferLE[5]}, ${platformBufferLE[6]}, ${platformBufferLE[7]}]",
         )
         assertEquals(0, platformBufferLE.position())
         assertEquals(
             long,
             platformBufferLE.getNumberWithStartIndexAndByteSize(0, Long.SIZE_BYTES),
-            "getNumberWithStartIndexAndByteSizeLittleEndian"
+            "getNumberWithStartIndexAndByteSizeLittleEndian",
         )
         assertEquals(0, platformBufferLE.position())
     }
@@ -481,7 +485,7 @@ class BufferTests {
             platformBuffer.getDouble(0),
             "getDouble BIG_ENDIAN buffer[" +
                 "${platformBuffer[0]}, ${platformBuffer[1]}, ${platformBuffer[2]}, ${platformBuffer[3]}, " +
-                "${platformBuffer[4]}, ${platformBuffer[5]}, ${platformBuffer[6]}, ${platformBuffer[7]}]"
+                "${platformBuffer[4]}, ${platformBuffer[5]}, ${platformBuffer[6]}, ${platformBuffer[7]}]",
         )
         assertEquals(0, platformBuffer.position())
 
@@ -494,7 +498,7 @@ class BufferTests {
             platformBufferLE.getDouble(0),
             "getDouble LITTLE_ENDIAN buffer[" +
                 "${platformBufferLE[0]}, ${platformBufferLE[1]}, ${platformBufferLE[2]}, ${platformBufferLE[3]}, " +
-                "${platformBufferLE[4]}, ${platformBufferLE[5]}, ${platformBufferLE[6]}, ${platformBufferLE[7]}]"
+                "${platformBufferLE[4]}, ${platformBufferLE[5]}, ${platformBufferLE[6]}, ${platformBufferLE[7]}]",
         )
         assertEquals(0, platformBufferLE.position())
     }
@@ -761,7 +765,7 @@ class BufferTests {
                 assertEquals(
                     string,
                     stringBuffer.readString(stringBuffer.remaining(), it),
-                    it.toString()
+                    it.toString(),
                 )
                 successfulCount++
             } catch (e: UnsupportedOperationException) {
@@ -801,9 +805,15 @@ class BufferTests {
             return value.hexToByteArray()
         }
         val hex = str.toByteArrayFromHex()
-        assertContentEquals(hex, byteArrayOf(0, 1, -87, 96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56))
+        assertContentEquals(
+            hex,
+            byteArrayOf(0, 1, -87, 96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56),
+        )
         val buf = PlatformBuffer.wrap(hex)
-        assertBufferEquals(buf, byteArrayOf(0, 1, -87, 96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56))
+        assertBufferEquals(
+            buf,
+            byteArrayOf(0, 1, -87, 96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56),
+        )
         assertEquals(0, buf.position())
         assertEquals(25, buf.limit())
         val messageId = buf.readUnsignedShort()
@@ -828,7 +838,10 @@ class BufferTests {
         assertEquals(b.toHexString().uppercase(), "60DBD8A5")
     }
 
-    fun assertBufferEquals(b: ReadBuffer, byteArray: ByteArray) {
+    fun assertBufferEquals(
+        b: ReadBuffer,
+        byteArray: ByteArray,
+    ) {
         val p = b.position()
         val l = b.limit()
         assertContentEquals(b.readByteArray(b.remaining()), byteArray)
