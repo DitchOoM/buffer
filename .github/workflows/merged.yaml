@@ -67,7 +67,7 @@ jobs:
           GPG_SECRET: ${{ secrets.GPG_SECRET }}
           GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
           NPM_ACCESS_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
-        run: ./gradlew publishAllPublicationsToSonatypeRepository publishTag -PincrementMajor=true
+        run: ./gradlew publishAllPublicationsToSonatypeRepository -PincrementMajor=true
       - name: Test and deploy with Gradle Minor
         if:  ${{ contains(github.event.pull_request.labels.*.name, 'minor') }}
         env:
@@ -76,7 +76,7 @@ jobs:
           GPG_SECRET: ${{ secrets.GPG_SECRET }}
           GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
           NPM_ACCESS_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
-        run: ./gradlew publishAllPublicationsToSonatypeRepository publishTag -PincrementMinor=true
+        run: ./gradlew publishAllPublicationsToSonatypeRepository -PincrementMinor=true
       - name: Test and deploy with Gradle Patch
         if:  ${{ !contains(github.event.pull_request.labels.*.name, 'major') && !contains(github.event.pull_request.labels.*.name, 'minor') }}
         env:
@@ -85,7 +85,7 @@ jobs:
           GPG_SECRET: ${{ secrets.GPG_SECRET }}
           GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
           NPM_ACCESS_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
-        run: ./gradlew publishAllPublicationsToSonatypeRepository publishTag
+        run: ./gradlew publishAllPublicationsToSonatypeRepository
       - uses: actions/upload-artifact@v3
         with:
           name: Package
