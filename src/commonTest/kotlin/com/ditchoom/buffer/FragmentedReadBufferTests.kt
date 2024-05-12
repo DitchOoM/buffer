@@ -429,7 +429,7 @@ class FragmentedReadBufferTests {
         fragmentedBuffer.resetForRead()
         var intCount = 0
         fragmentedBuffer.walk {
-            while(it.hasRemaining()) {
+            while (it.hasRemaining()) {
                 assertEquals(intCount++, it.readInt())
             }
         }
