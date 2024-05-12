@@ -20,7 +20,7 @@ group = "com.ditchoom"
 val libraryVersion = getNextVersion().toString()
 println(
     "Version: ${libraryVersion}\nisRunningOnGithub: $isRunningOnGithub\nisMainBranchGithub: $isMainBranchGithub\n" +
-            "OS:$isMacOS\nLoad All Platforms: $loadAllPlatforms",
+        "OS:$isMacOS\nLoad All Platforms: $loadAllPlatforms",
 )
 
 repositories {
@@ -199,23 +199,34 @@ ktlint {
     outputToConsole.set(true)
 }
 
-
 class Version(val major: UInt, val minor: UInt, val patch: UInt, val snapshot: Boolean) {
     constructor(string: String, snapshot: Boolean) :
-            this(
-                string.split('.')[0].toUInt(),
-                string.split('.')[1].toUInt(),
-                string.split('.')[2].toUInt(),
-                snapshot
-            )
+        this(
+            string.split('.')[0].toUInt(),
+            string.split('.')[1].toUInt(),
+            string.split('.')[2].toUInt(),
+            snapshot,
+        )
+
     fun incrementMajor() = Version(major + 1u, 0u, 0u, snapshot)
+
     fun incrementMinor() = Version(major, minor + 1u, 0u, snapshot)
+
     fun incrementPatch() = Version(major, minor, patch + 1u, snapshot)
+
     fun snapshot() = Version(major, minor, patch, true)
+
     fun isVersionZero() = major == 0u && minor == 0u && patch == 0u
-    override fun toString(): String = if (snapshot) { "$major.$minor.$patch-SNAPSHOT" } else { "$major.$minor.$patch" }
+
+    override fun toString(): String =
+        if (snapshot) {
+            "$major.$minor.$patch-SNAPSHOT"
+        } else {
+            "$major.$minor.$patch"
+        }
 }
-private var latestVersion :Version? = Version(0u, 0u, 0u, true)
+private var latestVersion: Version? = Version(0u, 0u, 0u, true)
+
 @Suppress("UNCHECKED_CAST")
 fun getLatestVersion(): Version {
     val latestVersion = latestVersion
@@ -225,7 +236,7 @@ fun getLatestVersion(): Version {
     val xml = URL("https://repo1.maven.org/maven2/com/ditchoom/${rootProject.name}/maven-metadata.xml").readText()
     val versioning = XmlParser().parseText(xml)["versioning"] as List<Node>
     val latestStringList = versioning.first()["latest"] as List<Node>
-    val result =  Version((latestStringList.first().value() as List<*>).first().toString(), false)
+    val result = Version((latestStringList.first().value() as List<*>).first().toString(), false)
     this.latestVersion = result
     return result
 }
