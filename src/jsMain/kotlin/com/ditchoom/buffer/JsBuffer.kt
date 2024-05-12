@@ -134,7 +134,7 @@ data class JsBuffer(
     }
 
     override fun write(buffer: ReadBuffer) {
-        val size = buffer.limit() - buffer.position()
+        val size = buffer.remaining()
         if (buffer is JsBuffer) {
             this.buffer.set(buffer.buffer, position)
         } else {

@@ -153,10 +153,24 @@ class FragmentedReadBuffer(
         val secondLimit = secondInitialLimit
         val initialPosition = position()
         val buffer = PlatformBuffer.allocate(firstLimit + secondLimit - initialPosition, zone)
-        buffer.write(first)
-        buffer.write(second)
+        walk {
+            buffer.write(it)
+        }
         buffer.position(initialPosition)
         return buffer
+    }
+
+    fun walk(visitor: (ReadBuffer) -> Unit) {
+        if (first is FragmentedReadBuffer) {
+            first.walk(visitor)
+        } else {
+            visitor(first)
+        }
+        if (second is FragmentedReadBuffer) {
+            second.walk(visitor)
+        } else {
+            visitor(second)
+        }
     }
 }
 
