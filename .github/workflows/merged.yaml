@@ -51,7 +51,6 @@ jobs:
         uses: gradle/gradle-build-action@v2
       - name: Setup Chrome
         uses: browser-actions/setup-chrome@v1
-        run: chrome --version
       - name: Setup Android SDK
         uses: android-actions/setup-android@v2
       - name: Import GPG Key
