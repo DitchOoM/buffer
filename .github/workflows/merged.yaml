@@ -58,7 +58,7 @@ jobs:
           gpg_private_key: ${{ secrets.GPG_SECRET }}
           passphrase: ${{ secrets.GPG_SIGNING_PASSWORD }}
       - name: Test and deploy with Gradle Major
-        if: contains(github.event.pull_request.labels.*.name, 'major')
+        if:  ${{ contains(github.event.pull_request.labels.*.name, 'major') }}
         env:
           SONATYPE_NEXUS_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
           SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
@@ -67,7 +67,7 @@ jobs:
           NPM_ACCESS_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
         run: ./gradlew publishAllPublicationsToSonatypeRepository -PincrementMajor=true
       - name: Test and deploy with Gradle Minor
-        if: contains(github.event.pull_request.labels.*.name, 'minor')
+        if:  ${{ contains(github.event.pull_request.labels.*.name, 'minor') }}
         env:
           SONATYPE_NEXUS_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
           SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
@@ -76,7 +76,7 @@ jobs:
           NPM_ACCESS_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
         run: ./gradlew publishAllPublicationsToSonatypeRepository -PincrementMinor=true
       - name: Test and deploy with Gradle Patch
-        if: !contains(github.event.pull_request.labels.*.name, 'major') && !contains(github.event.pull_request.labels.*.name, 'minor')
+        if:  ${{ !contains(github.event.pull_request.labels.*.name, 'major') && !contains(github.event.pull_request.labels.*.name, 'minor') }}
         env:
           SONATYPE_NEXUS_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
           SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
