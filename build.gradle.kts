@@ -4,7 +4,7 @@ import org.apache.tools.ant.taskdefs.condition.Os
 import java.net.URL
 
 plugins {
-    kotlin("multiplatform") version "1.9.24"
+    kotlin("multiplatform") version "2.0.0"
     id("com.android.library") version "8.4.0"
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
