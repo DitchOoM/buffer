@@ -1,6 +1,7 @@
 import groovy.util.Node
 import groovy.xml.XmlParser
 import org.apache.tools.ant.taskdefs.condition.Os
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.net.URL
 
 plugins {
@@ -30,11 +31,13 @@ repositories {
 }
 
 kotlin {
-    jvmToolchain(19)
     androidTarget {
         publishLibraryVariants("release")
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
     }
-    jvm()
+    jvm {
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
+    }
     js {
         moduleName = "buffer-kt"
         browser()
