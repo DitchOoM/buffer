@@ -30,11 +30,16 @@ repositories {
 }
 
 kotlin {
-    jvmToolchain(8)
+    compilerOptions {
+        apiVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_0)
+    }
     androidTarget {
         publishLibraryVariants("release")
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
     }
-    jvm()
+    jvm {
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
+    }
     js {
         moduleName = "buffer-kt"
         browser()
