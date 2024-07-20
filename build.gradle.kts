@@ -31,9 +31,6 @@ repositories {
 }
 
 kotlin {
-    compilerOptions {
-        apiVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_0)
-    }
     androidTarget {
         publishLibraryVariants("release")
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
@@ -259,15 +256,4 @@ tasks.create("nextVersion") {
 val signingTasks = tasks.withType<Sign>()
 tasks.withType<AbstractPublishToMaven>().configureEach {
     dependsOn(signingTasks)
-}
-
-tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-    kotlinOptions {
-        jvmTarget = "1.8"
-    }
-}
-
-tasks.withType<JavaCompile> {
-    sourceCompatibility = "1.8"
-    targetCompatibility = "1.8"
 }
