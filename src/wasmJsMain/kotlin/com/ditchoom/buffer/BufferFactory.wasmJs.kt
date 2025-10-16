@@ -19,7 +19,6 @@ actual fun PlatformBuffer.Companion.wrap(
     byteOrder: ByteOrder,
 ): PlatformBuffer = KotlinJsBuffer(array, byteOrder = byteOrder)
 
-
 data class KotlinJsBuffer(
     val data: ByteArray,
     private var position: Int = 0,
@@ -27,7 +26,6 @@ data class KotlinJsBuffer(
     override val capacity: Int = data.size,
     override val byteOrder: ByteOrder,
 ) : PlatformBuffer {
-
     override fun resetForRead() {
         limit = position
         position = 0
