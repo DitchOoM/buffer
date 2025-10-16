@@ -1,7 +1,5 @@
 package com.ditchoom.buffer
 
-import org.khronos.webgl.Uint8Array
-
 actual fun PlatformBuffer.Companion.allocate(
     size: Int,
     zone: AllocationZone,
