@@ -1,6 +1,7 @@
 import groovy.util.Node
 import groovy.xml.XmlParser
 import org.apache.tools.ant.taskdefs.condition.Os
+import org.jetbrains.kotlin.gradle.targets.js.dsl.ExperimentalWasmDsl
 import java.net.URL
 
 plugins {
@@ -37,6 +38,11 @@ kotlin {
     jvm()
     js {
         moduleName = "buffer-kt"
+        browser()
+        nodejs()
+    }
+    @OptIn(ExperimentalWasmDsl::class)
+    wasmJs {
         browser()
         nodejs()
     }
