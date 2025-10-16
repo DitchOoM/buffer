@@ -7,7 +7,7 @@ import java.net.URL
 
 plugins {
     kotlin("multiplatform") version "2.0.0"
-    id("com.android.library") version "8.5.1"
+    id("com.android.library") version "8.4.0"
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
     signing
@@ -74,10 +74,10 @@ kotlin {
         val androidInstrumentedTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("androidx.test:runner:1.6.1")
-                implementation("androidx.test:rules:1.6.1")
-                implementation("androidx.test:core-ktx:1.6.1")
-                implementation("androidx.test.ext:junit:1.2.1")
+                implementation("androidx.test:runner:1.5.2")
+                implementation("androidx.test:rules:1.5.0")
+                implementation("androidx.test:core-ktx:1.5.0")
+                implementation("androidx.test.ext:junit:1.1.5")
             }
         }
 
@@ -92,7 +92,7 @@ android {
     buildFeatures {
         aidl = true
     }
-    compileSdk = 35
+    compileSdk = 34
     defaultConfig {
         minSdk = 16
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
