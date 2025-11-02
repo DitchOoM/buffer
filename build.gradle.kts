@@ -10,6 +10,7 @@ plugins {
     id("com.android.library") version "8.4.0"
     id("org.jlleitschuh.gradle.ktlint") version "12.1.1"
     id("com.vanniktech.maven.publish") version "0.34.0"
+    signing
 }
 
 val libraryVersionPrefix: String by project
@@ -118,6 +119,14 @@ val developerId: String by project
 project.group = publishedGroupId
 project.version = libraryVersion
 
+signing {
+    useInMemoryPgpKeys(
+        System.getenv("ORG_GRADLE_PROJECT_SIGNING_KEY_ID"),
+        System.getenv("ORG_GRADLE_PROJECT_signingInMemoryKey"),
+        System.getenv("ORG_GRADLE_PROJECT_signingInMemoryKeyPassword"),
+    )
+    sign(publishing.publications)
+}
 
 mavenPublishing {
     publishToMavenCentral()
