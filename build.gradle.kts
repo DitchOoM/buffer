@@ -1,6 +1,5 @@
 import groovy.util.Node
 import groovy.xml.XmlParser
-import org.apache.tools.ant.taskdefs.condition.Os
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.js.dsl.ExperimentalWasmDsl
 import java.net.URL
@@ -101,8 +100,6 @@ android {
 val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
     archiveClassifier.set("javadoc")
 }
-
-
 
 val publishedGroupId: String by project
 val libraryName: String by project
