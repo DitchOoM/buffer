@@ -8,22 +8,13 @@ import java.net.URL
 plugins {
     kotlin("multiplatform") version "2.0.0"
     id("com.android.library") version "8.4.0"
-    id("io.codearte.nexus-staging") version "0.30.0"
-    `maven-publish`
-    signing
     id("org.jlleitschuh.gradle.ktlint") version "12.1.1"
+    id("com.vanniktech.maven.publish") version "0.34.0"
 }
-val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
-val isMainBranchGithub = System.getenv("GITHUB_REF") == "refs/heads/main"
-val isMacOS = Os.isFamily(Os.FAMILY_MAC)
-val loadAllPlatforms = !isRunningOnGithub || (isMacOS && isMainBranchGithub) || !isMacOS
+
 val libraryVersionPrefix: String by project
 group = "com.ditchoom"
 val libraryVersion = getNextVersion().toString()
-println(
-    "Version: ${libraryVersion}\nisRunningOnGithub: $isRunningOnGithub\nisMainBranchGithub: $isMainBranchGithub\n" +
-        "OS:$isMacOS\nLoad All Platforms: $loadAllPlatforms",
-)
 
 repositories {
     google()
@@ -110,88 +101,57 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
     archiveClassifier.set("javadoc")
 }
 
-if (isRunningOnGithub) {
-    if (isMainBranchGithub) {
-        signing {
-            useInMemoryPgpKeys(
-                "56F1A973",
-                System.getenv("GPG_SECRET"),
-                System.getenv("GPG_SIGNING_PASSWORD"),
-            )
-            sign(publishing.publications)
-        }
-    }
 
-    val ossUser = System.getenv("SONATYPE_NEXUS_USERNAME")
-    val ossPassword = System.getenv("SONATYPE_NEXUS_PASSWORD")
 
-    val publishedGroupId: String by project
-    val libraryName: String by project
-    val libraryDescription: String by project
-    val siteUrl: String by project
-    val gitUrl: String by project
-    val licenseName: String by project
-    val licenseUrl: String by project
-    val developerOrg: String by project
-    val developerName: String by project
-    val developerEmail: String by project
-    val developerId: String by project
+val publishedGroupId: String by project
+val libraryName: String by project
+val libraryDescription: String by project
+val siteUrl: String by project
+val gitUrl: String by project
+val licenseName: String by project
+val licenseUrl: String by project
+val developerOrg: String by project
+val developerName: String by project
+val developerEmail: String by project
+val developerId: String by project
 
-    project.group = publishedGroupId
-    project.version = libraryVersion
+project.group = publishedGroupId
+project.version = libraryVersion
 
-    publishing {
-        publications.withType(MavenPublication::class) {
-            groupId = publishedGroupId
-            version = libraryVersion
 
-            artifact(tasks["javadocJar"])
+mavenPublishing {
+    publishToMavenCentral()
 
-            pom {
-                name.set(libraryName)
-                description.set(libraryDescription)
-                url.set(siteUrl)
+    signAllPublications()
 
-                licenses {
-                    license {
-                        name.set(licenseName)
-                        url.set(licenseUrl)
-                    }
-                }
-                developers {
-                    developer {
-                        id.set(developerId)
-                        name.set(developerName)
-                        email.set(developerEmail)
-                    }
-                }
-                organization {
-                    name.set(developerOrg)
-                }
-                scm {
-                    connection.set(gitUrl)
-                    developerConnection.set(gitUrl)
-                    url.set(siteUrl)
-                }
+    coordinates(publishedGroupId, libraryName, libraryVersion)
+
+    pom {
+        name.set(libraryName)
+        description.set(libraryDescription)
+        url.set(siteUrl)
+
+        licenses {
+            license {
+                name.set(licenseName)
+                url.set(licenseUrl)
             }
         }
-
-        repositories {
-            val repositoryId = System.getenv("SONATYPE_REPOSITORY_ID")
-            maven("https://oss.sonatype.org/service/local/staging/deployByRepositoryId/$repositoryId/") {
-                name = "sonatype"
-                credentials {
-                    username = ossUser
-                    password = ossPassword
-                }
+        developers {
+            developer {
+                id.set(developerId)
+                name.set(developerName)
+                email.set(developerEmail)
             }
         }
-    }
-
-    nexusStaging {
-        username = ossUser
-        password = ossPassword
-        packageGroup = publishedGroupId
+        organization {
+            name.set(developerOrg)
+        }
+        scm {
+            connection.set(gitUrl)
+            developerConnection.set(gitUrl)
+            url.set(siteUrl)
+        }
     }
 }
 
@@ -241,6 +201,7 @@ fun getLatestVersion(): Version {
     this.latestVersion = result
     return result
 }
+val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
 
 fun getNextVersion(snapshot: Boolean = !isRunningOnGithub): Version {
     var v = getLatestVersion()
