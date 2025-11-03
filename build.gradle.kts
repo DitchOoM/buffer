@@ -132,9 +132,11 @@ if (isMainBranchGithub && signingInMemoryKey is String && signingInMemoryKeyPass
 }
 
 mavenPublishing {
-    publishToMavenCentral()
+    if (isMainBranchGithub && signingInMemoryKey is String && signingInMemoryKeyPassword is String) {
+        publishToMavenCentral()
 
-    signAllPublications()
+        signAllPublications()
+    }
 
     coordinates(publishedGroupId, artifactName, libraryVersion)
 
