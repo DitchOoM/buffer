@@ -117,12 +117,16 @@ val developerId: String by project
 project.group = publishedGroupId
 project.version = libraryVersion
 
-signing {
-    useInMemoryPgpKeys(
-        project.property("signingInMemoryKey")?.toString().orEmpty(),
-        project.property("signingInMemoryKeyPassword")?.toString().orEmpty(),
-    )
-    sign(publishing.publications)
+val signingInMemoryKey = project.findProperty("signingInMemoryKey")
+val signingInMemoryKeyPassword = project.findProperty("signingInMemoryKeyPassword")
+if (signingInMemoryKey is String && signingInMemoryKeyPassword is String) {
+    signing {
+        useInMemoryPgpKeys(
+            signingInMemoryKey,
+            signingInMemoryKeyPassword,
+        )
+        sign(publishing.publications)
+    }
 }
 
 mavenPublishing {
