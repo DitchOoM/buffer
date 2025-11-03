@@ -119,7 +119,9 @@ project.version = libraryVersion
 
 val signingInMemoryKey = project.findProperty("signingInMemoryKey")
 val signingInMemoryKeyPassword = project.findProperty("signingInMemoryKeyPassword")
-if (signingInMemoryKey is String && signingInMemoryKeyPassword is String) {
+val isMainBranchGithub = System.getenv("GITHUB_REF") == "refs/heads/main"
+
+if (isMainBranchGithub && signingInMemoryKey is String && signingInMemoryKeyPassword is String) {
     signing {
         useInMemoryPgpKeys(
             signingInMemoryKey,
