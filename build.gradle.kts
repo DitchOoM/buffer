@@ -1,9 +1,9 @@
 import groovy.util.Node
 import groovy.xml.XmlParser
-import org.apache.tools.ant.taskdefs.condition.Os
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.js.dsl.ExperimentalWasmDsl
 import java.net.URL
+
 
 plugins {
     kotlin("multiplatform") version "2.0.0"
@@ -12,9 +12,8 @@ plugins {
     id("com.vanniktech.maven.publish") version "0.34.0"
     signing
 }
-
-val libraryVersionPrefix: String by project
 group = "com.ditchoom"
+val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
 val libraryVersion = getNextVersion().toString()
 
 repositories {
@@ -102,10 +101,9 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
     archiveClassifier.set("javadoc")
 }
 
-
-
 val publishedGroupId: String by project
 val libraryName: String by project
+val artifactName: String by project
 val libraryDescription: String by project
 val siteUrl: String by project
 val gitUrl: String by project
@@ -119,21 +117,28 @@ val developerId: String by project
 project.group = publishedGroupId
 project.version = libraryVersion
 
-signing {
-    useInMemoryPgpKeys(
-        System.getenv("ORG_GRADLE_PROJECT_SIGNING_KEY_ID"),
-        System.getenv("ORG_GRADLE_PROJECT_signingInMemoryKey"),
-        System.getenv("ORG_GRADLE_PROJECT_signingInMemoryKeyPassword"),
-    )
-    sign(publishing.publications)
+val signingInMemoryKey = project.findProperty("signingInMemoryKey")
+val signingInMemoryKeyPassword = project.findProperty("signingInMemoryKeyPassword")
+val isMainBranchGithub = System.getenv("GITHUB_REF") == "refs/heads/main"
+
+if (isMainBranchGithub && signingInMemoryKey is String && signingInMemoryKeyPassword is String) {
+    signing {
+        useInMemoryPgpKeys(
+            signingInMemoryKey,
+            signingInMemoryKeyPassword,
+        )
+        sign(publishing.publications)
+    }
 }
 
 mavenPublishing {
-    publishToMavenCentral()
+    if (isMainBranchGithub && signingInMemoryKey is String && signingInMemoryKeyPassword is String) {
+        publishToMavenCentral()
 
-    signAllPublications()
+        signAllPublications()
+    }
 
-    coordinates(publishedGroupId, libraryName, libraryVersion)
+    coordinates(publishedGroupId, artifactName, libraryVersion)
 
     pom {
         name.set(libraryName)
@@ -210,7 +215,6 @@ fun getLatestVersion(): Version {
     this.latestVersion = result
     return result
 }
-val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
 
 fun getNextVersion(snapshot: Boolean = !isRunningOnGithub): Version {
     var v = getLatestVersion()
