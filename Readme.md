@@ -69,6 +69,11 @@ project aims to make it **easier to manage buffers in a cross platform way using
 multiplatform**. This was originally created as a side project for a kotlin multiplatform mqtt data
 sync solution.
 
+
+This library allows Android/JVM users to access ByteBuffers without incurring extra memory copies 
+compared to okio which uses `byte[]` internally which forces Android/JVM users to copy data which 
+can cause significant performance issues in some cases.
+
 Implementation notes:
 
 * `JVM` + `Android` delegate to direct [ByteBuffers][byte-buffer-api] to avoid memory copies when
@@ -90,6 +95,8 @@ Implementation notes:
 |     `JVM` 1.8      |                                 [ByteBuffer](https://docs.oracle.com/en/java/javase/12/docs/api/java.base/java/nio/ByteBuffer.html)                                 |
 |     `Node.js`      |               [Uint8Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array)  including SharedArrayBuffer                |
 | `Browser` (Chrome) |                [Uint8Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array) including SharedArrayBuffer                |
+|  `WASM - Node.js`  |                                                   Kotlin ByteArray -- Looking for contributions to remove copies                                                    |
+| `WASM - Browser` (Chrome) |                Kotlin ByteArray -- Looking for contributions to remove copies                |
 |     `Android`      | [ByteBuffer](https://developer.android.com/reference/java/nio/ByteBuffer) including [SharedMemory](https://developer.android.com/reference/android/os/SharedMemory) |
 |       `iOS`        |                                         [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                         |
 |     `WatchOS`      |                                         [NSData](https://developer.apple.com/documentation/foundation/nsdata?language=objc)                                         |
