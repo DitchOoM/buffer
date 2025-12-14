@@ -9,7 +9,7 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.library)
     id("org.jlleitschuh.gradle.ktlint") version "12.1.1"
-    id("com.vanniktech.maven.publish") version "0.34.0"
+    alias(libs.plugins.maven.publish)
     signing
 }
 group = "com.ditchoom"
@@ -59,22 +59,22 @@ kotlin {
             implementation(kotlin("test"))
         }
         androidMain.dependencies {
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+            implementation(libs.kotlinx.coroutines.core)
         }
 
         val androidInstrumentedTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("androidx.test:runner:1.5.2")
-                implementation("androidx.test:rules:1.5.0")
-                implementation("androidx.test:core-ktx:1.5.0")
-                implementation("androidx.test.ext:junit:1.1.5")
+                implementation(libs.androidx.test.runner)
+                implementation(libs.androidx.test.rules)
+                implementation(libs.androidx.test.core.ktx)
+                implementation(libs.androidx.test.ext.junit)
             }
         }
 
         jsMain.dependencies {
-            implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.746")
-            implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.746")
+            implementation(libs.kotlin.web)
+            implementation(libs.kotlin.js)
         }
     }
 }
