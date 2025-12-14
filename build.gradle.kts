@@ -98,7 +98,7 @@ android {
     }
     compileSdk = 36
     defaultConfig {
-        minSdk = 16
+        minSdk = 21
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     namespace = "$group.${rootProject.name}"
