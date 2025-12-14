@@ -8,7 +8,7 @@ import java.net.URL
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.library)
-    id("org.jlleitschuh.gradle.ktlint") version "12.1.1"
+    alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
     signing
 }
@@ -172,9 +172,15 @@ mavenPublishing {
 ktlint {
     verbose.set(true)
     outputToConsole.set(true)
+    android.set(true)
 }
 
-class Version(val major: UInt, val minor: UInt, val patch: UInt, val snapshot: Boolean) {
+class Version(
+    val major: UInt,
+    val minor: UInt,
+    val patch: UInt,
+    val snapshot: Boolean,
+) {
     constructor(string: String, snapshot: Boolean) :
         this(
             string.split('.')[0].toUInt(),
