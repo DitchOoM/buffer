@@ -9,8 +9,10 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
-abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAccessFile? = null) :
-    PlatformBuffer {
+abstract class BaseJvmBuffer(
+    val byteBuffer: ByteBuffer,
+    val fileRef: RandomAccessFile? = null,
+) : PlatformBuffer {
     override val byteOrder =
         when (byteBuffer.order()) {
             java.nio.ByteOrder.BIG_ENDIAN -> ByteOrder.BIG_ENDIAN
@@ -75,7 +77,8 @@ abstract class BaseJvmBuffer(val byteBuffer: ByteBuffer, val fileRef: RandomAcce
                 Charset.UTF32BigEndian -> Charsets.UTF_32BE
             }
         val decoded =
-            charsetConverted.newDecoder()
+            charsetConverted
+                .newDecoder()
                 .onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT)
                 .decode(readBuffer)
@@ -197,8 +200,8 @@ suspend fun RandomAccessFile.aClose() =
         }
     }
 
-fun ByteBuffer.toArray(size: Int = remaining()): ByteArray {
-    return if (hasArray()) {
+fun ByteBuffer.toArray(size: Int = remaining()): ByteArray =
+    if (hasArray()) {
         val result = ByteArray(size)
         val buffer = this as Buffer
         System.arraycopy(this.array(), buffer.arrayOffset() + buffer.position(), result, 0, size)
@@ -209,4 +212,3 @@ fun ByteBuffer.toArray(size: Int = remaining()): ByteArray {
         get(byteArray)
         byteArray
     }
-}

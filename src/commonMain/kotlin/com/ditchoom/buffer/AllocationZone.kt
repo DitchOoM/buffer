@@ -14,7 +14,9 @@ sealed class AllocationZone {
      ***/
     object SharedMemory : AllocationZone()
 
-    class Custom(val allocator: (Int) -> PlatformBuffer) : AllocationZone()
+    class Custom(
+        val allocator: (Int) -> PlatformBuffer,
+    ) : AllocationZone()
 }
 
 @Deprecated("Use SharedMemory")

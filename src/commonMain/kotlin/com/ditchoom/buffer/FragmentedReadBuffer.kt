@@ -39,21 +39,19 @@ class FragmentedReadBuffer(
         second.resetForRead()
     }
 
-    override fun readByte(): Byte {
-        return if (currentPosition++ < firstInitialLimit) {
+    override fun readByte(): Byte =
+        if (currentPosition++ < firstInitialLimit) {
             first.readByte()
         } else {
             second.readByte()
         }
-    }
 
-    override fun get(index: Int): Byte {
-        return if (currentPosition < firstInitialLimit) {
+    override fun get(index: Int): Byte =
+        if (currentPosition < firstInitialLimit) {
             first.readByte()
         } else {
             second.readByte()
         }
-    }
 
     private fun <T> readSizeIntoBuffer(
         size: Int,
@@ -95,9 +93,7 @@ class FragmentedReadBuffer(
         return buffer
     }
 
-    override fun readByteArray(size: Int): ByteArray {
-        return readSizeIntoBuffer(size) { it.readByteArray(size) }
-    }
+    override fun readByteArray(size: Int): ByteArray = readSizeIntoBuffer(size) { it.readByteArray(size) }
 
     override fun readShort() = readSizeIntoBuffer(Short.SIZE_BYTES) { it.readShort() }
 
@@ -108,9 +104,7 @@ class FragmentedReadBuffer(
     override fun readString(
         length: Int,
         charset: Charset,
-    ): String {
-        return readSizeIntoBuffer(length) { it.readString(length, charset) }
-    }
+    ): String = readSizeIntoBuffer(length) { it.readString(length, charset) }
 
     override fun readUtf8Line(): CharSequence {
         if (currentPosition < firstInitialLimit) {

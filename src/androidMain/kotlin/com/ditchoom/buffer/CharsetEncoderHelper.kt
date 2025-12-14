@@ -15,8 +15,9 @@ fun Charset.toEncoder(): CharsetEncoder =
         Charset.UTF32BigEndian -> utf32BEEncoder
     }.get()
 
-internal class DefaultEncoder(private val charset: java.nio.charset.Charset) :
-    ThreadLocal<CharsetEncoder>() {
+internal class DefaultEncoder(
+    private val charset: java.nio.charset.Charset,
+) : ThreadLocal<CharsetEncoder>() {
     override fun initialValue(): CharsetEncoder? = charset.newEncoder()
 
     override fun get(): CharsetEncoder = super.get()!!

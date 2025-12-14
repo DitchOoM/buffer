@@ -19,9 +19,7 @@ expect fun PlatformBuffer.Companion.wrap(
 )
 fun String.toBuffer(zone: AllocationZone = AllocationZone.Heap): ReadBuffer = toReadBuffer(Charset.UTF8, zone)
 
-fun CharSequence.maxBufferSize(charset: Charset): Int {
-    return (charset.maxBytesPerChar * this.length).roundToInt()
-}
+fun CharSequence.maxBufferSize(charset: Charset): Int = (charset.maxBytesPerChar * this.length).roundToInt()
 
 fun String.toReadBuffer(
     charset: Charset = Charset.UTF8,

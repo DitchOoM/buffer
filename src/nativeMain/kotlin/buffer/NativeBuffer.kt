@@ -25,9 +25,7 @@ data class NativeBuffer(
 
     override fun get(index: Int): Byte = data[index]
 
-    override fun slice(): ReadBuffer {
-        return NativeBuffer(data.sliceArray(position until limit), byteOrder = byteOrder)
-    }
+    override fun slice(): ReadBuffer = NativeBuffer(data.sliceArray(position until limit), byteOrder = byteOrder)
 
     override fun readByteArray(size: Int): ByteArray {
         val result = data.copyOfRange(position, position + size)

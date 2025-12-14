@@ -13,7 +13,9 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 
-open class JvmBuffer(val buffer: ByteBuffer) : BaseJvmBuffer(buffer) {
+open class JvmBuffer(
+    val buffer: ByteBuffer,
+) : BaseJvmBuffer(buffer) {
     override fun describeContents(): Int = 0
 
     override fun writeToParcel(
@@ -78,8 +80,6 @@ open class JvmBuffer(val buffer: ByteBuffer) : BaseJvmBuffer(buffer) {
             return JvmBuffer(buffer)
         }
 
-        override fun newArray(size: Int): Array<JvmBuffer?> {
-            return arrayOfNulls(size)
-        }
+        override fun newArray(size: Int): Array<JvmBuffer?> = arrayOfNulls(size)
     }
 }

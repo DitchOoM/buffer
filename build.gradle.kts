@@ -1,20 +1,21 @@
-import groovy.util.Node
-import groovy.xml.XmlParser
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import org.jetbrains.kotlin.gradle.targets.js.dsl.ExperimentalWasmDsl
-import java.net.URL
+@file:OptIn(ExperimentalWasmDsl::class)
 
+import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    kotlin("multiplatform") version "2.0.0"
-    id("com.android.library") version "8.4.0"
-    id("org.jlleitschuh.gradle.ktlint") version "12.1.1"
-    id("com.vanniktech.maven.publish") version "0.34.0"
+    alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.android.library)
+    alias(libs.plugins.ktlint)
+    alias(libs.plugins.maven.publish)
     signing
 }
+
+apply(from = "gradle/setup.gradle.kts")
+
 group = "com.ditchoom"
 val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
-val libraryVersion = getNextVersion().toString()
+project.version = project.extra.get("getNextVersion").toString()
 
 repositories {
     google()
@@ -31,50 +32,62 @@ kotlin {
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
     }
     js {
-        moduleName = "buffer-kt"
+        outputModuleName.set("buffer-kt")
         browser()
         nodejs()
     }
-    @OptIn(ExperimentalWasmDsl::class)
+
     wasmJs {
         browser()
         nodejs()
     }
-    macosX64()
-    macosArm64()
-    linuxX64()
-    linuxArm64()
-    iosArm64()
-    iosSimulatorArm64()
-    iosX64()
-    watchosArm64()
-    watchosSimulatorArm64()
-    watchosX64()
-    tvosArm64()
-    tvosSimulatorArm64()
-    tvosX64()
+    if (isRunningOnGithub) {
+        macosX64()
+        macosArm64()
+        linuxX64()
+        linuxArm64()
+        iosArm64()
+        iosSimulatorArm64()
+        iosX64()
+        watchosArm64()
+        watchosSimulatorArm64()
+        watchosX64()
+        tvosArm64()
+        tvosSimulatorArm64()
+        tvosX64()
+    } else {
+        val osName = System.getProperty("os.name")
+        if (osName == "Mac OS X") {
+            val osArch = System.getProperty("os.arch")
+            if (osArch == "aarch64") {
+                macosArm64()
+            } else {
+                macosX64()
+            }
+        }
+    }
     applyDefaultHierarchyTemplate()
     sourceSets {
         commonTest.dependencies {
             implementation(kotlin("test"))
         }
         androidMain.dependencies {
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+            implementation(libs.kotlinx.coroutines.core)
         }
 
         val androidInstrumentedTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("androidx.test:runner:1.5.2")
-                implementation("androidx.test:rules:1.5.0")
-                implementation("androidx.test:core-ktx:1.5.0")
-                implementation("androidx.test.ext:junit:1.1.5")
+                implementation(libs.androidx.test.runner)
+                implementation(libs.androidx.test.rules)
+                implementation(libs.androidx.test.core.ktx)
+                implementation(libs.androidx.test.ext.junit)
             }
         }
 
         jsMain.dependencies {
-            implementation("org.jetbrains.kotlin-wrappers:kotlin-web:1.0.0-pre.746")
-            implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.746")
+            implementation(libs.kotlin.web)
+            implementation(libs.kotlin.js)
         }
     }
 }
@@ -83,9 +96,9 @@ android {
     buildFeatures {
         aidl = true
     }
-    compileSdk = 34
+    compileSdk = 36
     defaultConfig {
-        minSdk = 16
+        minSdk = 21
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     namespace = "$group.${rootProject.name}"
@@ -115,30 +128,29 @@ val developerEmail: String by project
 val developerId: String by project
 
 project.group = publishedGroupId
-project.version = libraryVersion
 
 val signingInMemoryKey = project.findProperty("signingInMemoryKey")
 val signingInMemoryKeyPassword = project.findProperty("signingInMemoryKeyPassword")
 val isMainBranchGithub = System.getenv("GITHUB_REF") == "refs/heads/main"
+val shouldSignAndPublish = isMainBranchGithub && signingInMemoryKey is String && signingInMemoryKeyPassword is String
 
-if (isMainBranchGithub && signingInMemoryKey is String && signingInMemoryKeyPassword is String) {
+if (shouldSignAndPublish) {
     signing {
         useInMemoryPgpKeys(
-            signingInMemoryKey,
-            signingInMemoryKeyPassword,
+            signingInMemoryKey as String,
+            signingInMemoryKeyPassword as String,
         )
         sign(publishing.publications)
     }
 }
 
 mavenPublishing {
-    if (isMainBranchGithub && signingInMemoryKey is String && signingInMemoryKeyPassword is String) {
+    if (shouldSignAndPublish) {
         publishToMavenCentral()
-
         signAllPublications()
     }
 
-    coordinates(publishedGroupId, artifactName, libraryVersion)
+    coordinates(publishedGroupId, artifactName, project.version.toString())
 
     pom {
         name.set(libraryName)
@@ -172,68 +184,9 @@ mavenPublishing {
 ktlint {
     verbose.set(true)
     outputToConsole.set(true)
-}
-
-class Version(val major: UInt, val minor: UInt, val patch: UInt, val snapshot: Boolean) {
-    constructor(string: String, snapshot: Boolean) :
-        this(
-            string.split('.')[0].toUInt(),
-            string.split('.')[1].toUInt(),
-            string.split('.')[2].toUInt(),
-            snapshot,
-        )
-
-    fun incrementMajor() = Version(major + 1u, 0u, 0u, snapshot)
-
-    fun incrementMinor() = Version(major, minor + 1u, 0u, snapshot)
-
-    fun incrementPatch() = Version(major, minor, patch + 1u, snapshot)
-
-    fun snapshot() = Version(major, minor, patch, true)
-
-    fun isVersionZero() = major == 0u && minor == 0u && patch == 0u
-
-    override fun toString(): String =
-        if (snapshot) {
-            "$major.$minor.$patch-SNAPSHOT"
-        } else {
-            "$major.$minor.$patch"
-        }
-}
-private var latestVersion: Version? = Version(0u, 0u, 0u, true)
-
-@Suppress("UNCHECKED_CAST")
-fun getLatestVersion(): Version {
-    val latestVersion = latestVersion
-    if (latestVersion != null && !latestVersion.isVersionZero()) {
-        return latestVersion
-    }
-    val xml = URL("https://repo1.maven.org/maven2/com/ditchoom/${rootProject.name}/maven-metadata.xml").readText()
-    val versioning = XmlParser().parseText(xml)["versioning"] as List<Node>
-    val latestStringList = versioning.first()["latest"] as List<Node>
-    val result = Version((latestStringList.first().value() as List<*>).first().toString(), false)
-    this.latestVersion = result
-    return result
-}
-
-fun getNextVersion(snapshot: Boolean = !isRunningOnGithub): Version {
-    var v = getLatestVersion()
-    if (snapshot) {
-        v = v.snapshot()
-    }
-    if (project.hasProperty("incrementMajor") && project.property("incrementMajor") == "true") {
-        return v.incrementMajor()
-    } else if (project.hasProperty("incrementMinor") && project.property("incrementMinor") == "true") {
-        return v.incrementMinor()
-    }
-    return v.incrementPatch()
+    android.set(true)
 }
 
 tasks.create("nextVersion") {
-    println(getNextVersion())
-}
-
-val signingTasks = tasks.withType<Sign>()
-tasks.withType<AbstractPublishToMaven>().configureEach {
-    dependsOn(signingTasks)
+    println(project.extra.get("getNextVersion"))
 }

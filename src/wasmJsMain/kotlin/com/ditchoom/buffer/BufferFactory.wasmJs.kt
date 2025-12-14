@@ -4,15 +4,14 @@ actual fun PlatformBuffer.Companion.allocate(
     size: Int,
     zone: AllocationZone,
     byteOrder: ByteOrder,
-): PlatformBuffer {
-    return when (zone) {
+): PlatformBuffer =
+    when (zone) {
         AllocationZone.Heap,
         AllocationZone.SharedMemory,
         AllocationZone.Direct,
         -> KotlinJsBuffer(ByteArray(size), byteOrder = byteOrder)
         is AllocationZone.Custom -> zone.allocator(size)
     }
-}
 
 actual fun PlatformBuffer.Companion.wrap(
     array: ByteArray,
@@ -44,9 +43,7 @@ data class KotlinJsBuffer(
 
     override fun get(index: Int): Byte = data[index]
 
-    override fun slice(): ReadBuffer {
-        return KotlinJsBuffer(data.sliceArray(position until limit), byteOrder = byteOrder)
-    }
+    override fun slice(): ReadBuffer = KotlinJsBuffer(data.sliceArray(position until limit), byteOrder = byteOrder)
 
     override fun readByteArray(size: Int): ByteArray {
         val result = data.copyOfRange(position, position + size)
