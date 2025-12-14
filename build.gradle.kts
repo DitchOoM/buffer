@@ -1,7 +1,6 @@
 import groovy.util.Node
 import groovy.xml.XmlParser
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import org.jetbrains.kotlin.gradle.targets.js.dsl.ExperimentalWasmDsl
 import java.net.URL
 
 
@@ -35,7 +34,7 @@ kotlin {
         browser()
         nodejs()
     }
-    @OptIn(ExperimentalWasmDsl::class)
+
     wasmJs {
         browser()
         nodejs()
