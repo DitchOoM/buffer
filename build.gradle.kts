@@ -138,7 +138,7 @@ if (shouldSignAndPublish) {
     signing {
         useInMemoryPgpKeys(
             signingInMemoryKey as String,
-            signingInMemoryKeyPassword as String
+            signingInMemoryKeyPassword as String,
         )
         sign(publishing.publications)
     }
