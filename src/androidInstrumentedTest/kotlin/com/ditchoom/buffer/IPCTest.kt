@@ -42,9 +42,7 @@ class IPCTest {
                         mutex.unlock()
                     }
 
-                    override fun onServiceDisconnected(name: ComponentName) {
-                        throw IllegalStateException("Service Disconnected")
-                    }
+                    override fun onServiceDisconnected(name: ComponentName): Unit = throw IllegalStateException("Service Disconnected")
                 },
                 Context.BIND_AUTO_CREATE,
             )
@@ -72,9 +70,7 @@ class IPCTest {
                         mutex.unlock()
                     }
 
-                    override fun onServiceDisconnected(name: ComponentName) {
-                        throw IllegalStateException("Service Disconnected")
-                    }
+                    override fun onServiceDisconnected(name: ComponentName): Unit = throw IllegalStateException("Service Disconnected")
                 },
                 Context.BIND_AUTO_CREATE,
             )
@@ -102,9 +98,7 @@ class IPCTest {
                         mutex.unlock()
                     }
 
-                    override fun onServiceDisconnected(name: ComponentName) {
-                        throw IllegalStateException("Service Disconnected")
-                    }
+                    override fun onServiceDisconnected(name: ComponentName): Unit = throw IllegalStateException("Service Disconnected")
                 },
                 Context.BIND_AUTO_CREATE,
             )

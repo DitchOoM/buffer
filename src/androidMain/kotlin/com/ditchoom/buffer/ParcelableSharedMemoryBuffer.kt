@@ -8,8 +8,11 @@ import android.os.SharedMemory
 import java.nio.ByteBuffer
 
 @TargetApi(Build.VERSION_CODES.O_MR1)
-class ParcelableSharedMemoryBuffer(buffer: ByteBuffer, private val sharedMemory: SharedMemory) :
-    JvmBuffer(buffer), Parcelable {
+class ParcelableSharedMemoryBuffer(
+    buffer: ByteBuffer,
+    private val sharedMemory: SharedMemory,
+) : JvmBuffer(buffer),
+    Parcelable {
     override fun describeContents(): Int = Parcelable.CONTENTS_FILE_DESCRIPTOR
 
     override fun writeToParcel(

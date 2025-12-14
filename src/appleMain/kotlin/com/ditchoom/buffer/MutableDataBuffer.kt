@@ -24,7 +24,8 @@ class MutableDataBuffer(
     dataRef: NSData,
     override val byteOrder: ByteOrder,
     private val backingArray: ByteArray? = null,
-) : DataBuffer(dataRef, byteOrder), PlatformBuffer {
+) : DataBuffer(dataRef, byteOrder),
+    PlatformBuffer {
     val mutableData = dataRef as? NSMutableData
 
     @Suppress("UNCHECKED_CAST")

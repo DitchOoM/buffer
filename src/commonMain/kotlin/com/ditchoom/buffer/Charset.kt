@@ -1,6 +1,9 @@
 package com.ditchoom.buffer
 
-enum class Charset(val averageBytesPerChar: Float, val maxBytesPerChar: Float) {
+enum class Charset(
+    val averageBytesPerChar: Float,
+    val maxBytesPerChar: Float,
+) {
     UTF8(1.1f, 4f),
     UTF16(2f, 4f),
     UTF16BigEndian(2f, 4f),

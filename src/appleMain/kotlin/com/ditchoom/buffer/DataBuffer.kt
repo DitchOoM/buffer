@@ -17,7 +17,9 @@ import platform.Foundation.subdataWithRange
 open class DataBuffer(
     val data: NSData,
     override val byteOrder: ByteOrder,
-) : ReadBuffer, SuspendCloseable, Parcelable {
+) : ReadBuffer,
+    SuspendCloseable,
+    Parcelable {
     protected var position: Int = 0
     protected var limit: Int = data.length.toInt()
     open val capacity: Int = data.length.toInt()

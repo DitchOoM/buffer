@@ -1,7 +1,9 @@
 package com.ditchoom.buffer
 
-class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((Int, Byte) -> Byte)) :
-    ReadBuffer {
+class TransformedReadBuffer(
+    val origin: ReadBuffer,
+    val transformer: ((Int, Byte) -> Byte),
+) : ReadBuffer {
     override val byteOrder: ByteOrder = origin.byteOrder
 
     override fun limit() = origin.limit()
@@ -143,10 +145,9 @@ class TransformedReadBuffer(val origin: ReadBuffer, val transformer: ((Int, Byte
     override fun readString(
         length: Int,
         charset: Charset,
-    ): String {
-        return when (charset) {
+    ): String =
+        when (charset) {
             Charset.UTF8 -> readByteArray(length).decodeToString()
             else -> throw UnsupportedOperationException("Unsupported charset $charset")
         }
-    }
 }

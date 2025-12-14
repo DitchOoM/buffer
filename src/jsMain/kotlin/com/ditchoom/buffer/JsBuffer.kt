@@ -50,13 +50,12 @@ data class JsBuffer(
         return dataView.getInt8(0)
     }
 
-    override fun slice(): ReadBuffer {
-        return JsBuffer(
+    override fun slice(): ReadBuffer =
+        JsBuffer(
             Int8Array(buffer.buffer.slice(position, limit)),
             littleEndian,
             sharedArrayBuffer = sharedArrayBuffer,
         )
-    }
 
     override fun readByteArray(size: Int): ByteArray {
         val subArray = buffer.subarray(position, position + size)
