@@ -1,11 +1,7 @@
 @file:OptIn(ExperimentalWasmDsl::class)
 
-import groovy.util.Node
-import groovy.xml.XmlParser
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import java.net.URL
-
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -14,9 +10,12 @@ plugins {
     alias(libs.plugins.maven.publish)
     signing
 }
+
+apply(from = "gradle/setup.gradle.kts")
+
 group = "com.ditchoom"
 val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
-val libraryVersion = getNextVersion().toString()
+project.version = project.extra.get("getNextVersion").toString()
 
 repositories {
     google()
@@ -57,13 +56,14 @@ kotlin {
         tvosSimulatorArm64()
         tvosX64()
     } else {
-        val os = org.gradle.internal.os.OperatingSystem.current()
-        if (os.isMacOsX) {
-            macosX64()
-            macosArm64()
-        } else if (os.isLinux) {
-            linuxX64()
-            linuxArm64()
+        val osName = System.getProperty("os.name")
+        if (osName == "Mac OS X") {
+            val osArch = System.getProperty("os.arch")
+            if (osArch == "aarch64") {
+                macosArm64()
+            } else {
+                macosX64()
+            }
         }
     }
     applyDefaultHierarchyTemplate()
@@ -96,7 +96,7 @@ android {
     buildFeatures {
         aidl = true
     }
-    compileSdk = 34
+    compileSdk = 36
     defaultConfig {
         minSdk = 16
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -128,7 +128,6 @@ val developerEmail: String by project
 val developerId: String by project
 
 project.group = publishedGroupId
-project.version = libraryVersion
 
 val signingInMemoryKey = project.findProperty("signingInMemoryKey")
 val signingInMemoryKeyPassword = project.findProperty("signingInMemoryKeyPassword")
@@ -147,11 +146,10 @@ if (isMainBranchGithub && signingInMemoryKey is String && signingInMemoryKeyPass
 mavenPublishing {
     if (isMainBranchGithub && signingInMemoryKey is String && signingInMemoryKeyPassword is String) {
         publishToMavenCentral()
-
         signAllPublications()
     }
 
-    coordinates(publishedGroupId, artifactName, libraryVersion)
+    coordinates(publishedGroupId, artifactName, project.version.toString())
 
     pom {
         name.set(libraryName)
@@ -188,71 +186,6 @@ ktlint {
     android.set(true)
 }
 
-class Version(
-    val major: UInt,
-    val minor: UInt,
-    val patch: UInt,
-    val snapshot: Boolean,
-) {
-    constructor(string: String, snapshot: Boolean) :
-        this(
-            string.split('.')[0].toUInt(),
-            string.split('.')[1].toUInt(),
-            string.split('.')[2].toUInt(),
-            snapshot,
-        )
-
-    fun incrementMajor() = Version(major + 1u, 0u, 0u, snapshot)
-
-    fun incrementMinor() = Version(major, minor + 1u, 0u, snapshot)
-
-    fun incrementPatch() = Version(major, minor, patch + 1u, snapshot)
-
-    fun snapshot() = Version(major, minor, patch, true)
-
-    fun isVersionZero() = major == 0u && minor == 0u && patch == 0u
-
-    override fun toString(): String =
-        if (snapshot) {
-            "$major.$minor.$patch-SNAPSHOT"
-        } else {
-            "$major.$minor.$patch"
-        }
-}
-private var latestVersion: Version? = Version(0u, 0u, 0u, true)
-
-@Suppress("UNCHECKED_CAST")
-fun getLatestVersion(): Version {
-    val latestVersion = latestVersion
-    if (latestVersion != null && !latestVersion.isVersionZero()) {
-        return latestVersion
-    }
-    val xml = URL("https://repo1.maven.org/maven2/com/ditchoom/${rootProject.name}/maven-metadata.xml").readText()
-    val versioning = XmlParser().parseText(xml)["versioning"] as List<Node>
-    val latestStringList = versioning.first()["latest"] as List<Node>
-    val result = Version((latestStringList.first().value() as List<*>).first().toString(), false)
-    this.latestVersion = result
-    return result
-}
-
-fun getNextVersion(snapshot: Boolean = !isRunningOnGithub): Version {
-    var v = getLatestVersion()
-    if (snapshot) {
-        v = v.snapshot()
-    }
-    if (project.hasProperty("incrementMajor") && project.property("incrementMajor") == "true") {
-        return v.incrementMajor()
-    } else if (project.hasProperty("incrementMinor") && project.property("incrementMinor") == "true") {
-        return v.incrementMinor()
-    }
-    return v.incrementPatch()
-}
-
 tasks.create("nextVersion") {
-    println(getNextVersion())
-}
-
-val signingTasks = tasks.withType<Sign>()
-tasks.withType<AbstractPublishToMaven>().configureEach {
-    dependsOn(signingTasks)
+    println(project.extra.get("getNextVersion"))
 }
