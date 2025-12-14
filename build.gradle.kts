@@ -1,5 +1,8 @@
+@file:OptIn(ExperimentalWasmDsl::class)
+
 import groovy.util.Node
 import groovy.xml.XmlParser
+import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.net.URL
 
@@ -39,19 +42,30 @@ kotlin {
         browser()
         nodejs()
     }
-    macosX64()
-    macosArm64()
-    linuxX64()
-    linuxArm64()
-    iosArm64()
-    iosSimulatorArm64()
-    iosX64()
-    watchosArm64()
-    watchosSimulatorArm64()
-    watchosX64()
-    tvosArm64()
-    tvosSimulatorArm64()
-    tvosX64()
+    if (isRunningOnGithub) {
+        macosX64()
+        macosArm64()
+        linuxX64()
+        linuxArm64()
+        iosArm64()
+        iosSimulatorArm64()
+        iosX64()
+        watchosArm64()
+        watchosSimulatorArm64()
+        watchosX64()
+        tvosArm64()
+        tvosSimulatorArm64()
+        tvosX64()
+    } else {
+        val os = org.gradle.internal.os.OperatingSystem.current()
+        if (os.isMacOsX) {
+            macosX64()
+            macosArm64()
+        } else if (os.isLinux) {
+            linuxX64()
+            linuxArm64()
+        }
+    }
     applyDefaultHierarchyTemplate()
     sourceSets {
         commonTest.dependencies {
