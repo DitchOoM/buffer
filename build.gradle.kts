@@ -132,19 +132,20 @@ project.group = publishedGroupId
 val signingInMemoryKey = project.findProperty("signingInMemoryKey")
 val signingInMemoryKeyPassword = project.findProperty("signingInMemoryKeyPassword")
 val isMainBranchGithub = System.getenv("GITHUB_REF") == "refs/heads/main"
+val shouldSignAndPublish = isMainBranchGithub && signingInMemoryKey is String && signingInMemoryKeyPassword is String
 
-if (isMainBranchGithub && signingInMemoryKey is String && signingInMemoryKeyPassword is String) {
+if (shouldSignAndPublish) {
     signing {
         useInMemoryPgpKeys(
-            signingInMemoryKey,
-            signingInMemoryKeyPassword,
+            signingInMemoryKey as String,
+            signingInMemoryKeyPassword as String
         )
         sign(publishing.publications)
     }
 }
 
 mavenPublishing {
-    if (isMainBranchGithub && signingInMemoryKey is String && signingInMemoryKeyPassword is String) {
+    if (shouldSignAndPublish) {
         publishToMavenCentral()
         signAllPublications()
     }
