@@ -6,8 +6,8 @@ import java.net.URL
 
 
 plugins {
-    kotlin("multiplatform") version "2.0.0"
-    id("com.android.library") version "8.4.0"
+    alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.android.library)
     id("org.jlleitschuh.gradle.ktlint") version "12.1.1"
     id("com.vanniktech.maven.publish") version "0.34.0"
     signing
@@ -31,7 +31,7 @@ kotlin {
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
     }
     js {
-        moduleName = "buffer-kt"
+        outputModuleName.set("buffer-kt")
         browser()
         nodejs()
     }
