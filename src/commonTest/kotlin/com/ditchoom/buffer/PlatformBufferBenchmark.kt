@@ -6,12 +6,13 @@ import kotlinx.benchmark.State
 
 @State(Scope.Benchmark)
 class PlatformBufferBenchmark {
-    private val platformBuffer = PlatformBuffer.allocate(
-        Byte.SIZE_BYTES + UByte.SIZE_BYTES +
-            Short.SIZE_BYTES + UShort.SIZE_BYTES +
-            Int.SIZE_BYTES + UInt.SIZE_BYTES +
-            Long.SIZE_BYTES + ULong.SIZE_BYTES
-    )
+    private val platformBuffer =
+        PlatformBuffer.allocate(
+            Byte.SIZE_BYTES + UByte.SIZE_BYTES +
+                Short.SIZE_BYTES + UShort.SIZE_BYTES +
+                Int.SIZE_BYTES + UInt.SIZE_BYTES +
+                Long.SIZE_BYTES + ULong.SIZE_BYTES,
+        )
     private val largeByteArray = ByteArray(1024 * 1024)
 
     @Benchmark
