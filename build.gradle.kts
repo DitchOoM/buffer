@@ -1,5 +1,6 @@
 @file:OptIn(ExperimentalWasmDsl::class)
 
+import org.gradle.kotlin.dsl.sourceSets
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -9,6 +10,12 @@ plugins {
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
     signing
+    alias(libs.plugins.kotlinx.benchmark)
+    kotlin("plugin.allopen") version "2.0.20"
+}
+
+allOpen {
+    annotation("org.openjdk.jmh.annotations.State")
 }
 
 apply(from = "gradle/setup.gradle.kts")
@@ -56,21 +63,18 @@ kotlin {
         tvosSimulatorArm64()
         tvosX64()
     } else {
-        val osName = System.getProperty("os.name")
-        if (osName == "Mac OS X") {
-            val osArch = System.getProperty("os.arch")
-            if (osArch == "aarch64") {
-                macosArm64()
-            } else {
-                macosX64()
-            }
-        }
+        macosArm64()
+        macosX64()
+        linuxX64()
+        linuxArm64()
     }
     applyDefaultHierarchyTemplate()
     sourceSets {
         commonTest.dependencies {
             implementation(kotlin("test"))
+            implementation(libs.kotlinx.benchmark.runtime)
         }
+
         androidMain.dependencies {
             implementation(libs.kotlinx.coroutines.core)
         }
@@ -187,6 +191,20 @@ ktlint {
     android.set(true)
 }
 
-tasks.create("nextVersion") {
-    println(project.extra.get("getNextVersion"))
+tasks.register("nextVersion") {
+    doLast {
+        println(project.extra.get("getNextVersion"))
+    }
+}
+
+
+benchmark {
+    // Define a target for the JVM platform
+    targets {
+        register("jvmTest")
+        register("jsTest")
+        register("macosArm64Test")
+        register("linuxArm64Test")
+        register("wasmJsTest")
+    }
 }
