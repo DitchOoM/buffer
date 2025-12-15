@@ -6,7 +6,6 @@ import kotlinx.benchmark.State
 
 @State(Scope.Benchmark)
 class BufferBenchmark {
-
     @Benchmark
     fun allocate() {
         PlatformBuffer.allocate(1024)

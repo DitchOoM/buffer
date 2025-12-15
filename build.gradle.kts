@@ -197,7 +197,6 @@ tasks.register("nextVersion") {
     }
 }
 
-
 benchmark {
     // Define a target for the JVM platform
     targets {

@@ -6,7 +6,6 @@ import kotlinx.benchmark.State
 
 @State(Scope.Benchmark)
 class FragmentedReadBufferBenchmark {
-
     @Benchmark
     fun fragmentedReadBuffer() {
         val buffer1 = PlatformBuffer.allocate(100)
