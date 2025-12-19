@@ -15,7 +15,10 @@ apply(from = "gradle/setup.gradle.kts")
 
 group = "com.ditchoom"
 val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
-project.version = project.extra.get("getNextVersion").toString()
+
+@Suppress("UNCHECKED_CAST")
+val getNextVersion = project.extra["getNextVersion"] as (Boolean) -> Any
+project.version = getNextVersion(!isRunningOnGithub).toString()
 
 repositories {
     google()
@@ -188,5 +191,5 @@ ktlint {
 }
 
 tasks.create("nextVersion") {
-    println(project.extra.get("getNextVersion"))
+    println(getNextVersion(false))
 }
