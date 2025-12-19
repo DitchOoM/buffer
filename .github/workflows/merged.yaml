@@ -39,13 +39,13 @@ jobs:
         uses: android-actions/setup-android@v2
       - name: Test and deploy with Gradle Major
         if:  ${{ contains(github.event.pull_request.labels.*.name, 'major') }}
-        run: ./gradlew check publishToMavenCentral --no-configuration-cache -PincrementMajor=true
+        run: ./gradlew check publishAndReleaseToMavenCentral --no-configuration-cache -PincrementMajor=true
       - name: Test and deploy with Gradle Minor
         if:  ${{ contains(github.event.pull_request.labels.*.name, 'minor') }}
-        run: ./gradlew check publishToMavenCentral --no-configuration-cache -PincrementMinor=true
+        run: ./gradlew check publishAndReleaseToMavenCentral --no-configuration-cache -PincrementMinor=true
       - name: Test and deploy with Gradle Patch
         if:  ${{ !contains(github.event.pull_request.labels.*.name, 'major') && !contains(github.event.pull_request.labels.*.name, 'minor') }}
-        run: ./gradlew check publishToMavenCentral --no-configuration-cache
+        run: ./gradlew check publishAndReleaseToMavenCentral --no-configuration-cache
       - name: Get version
         id: version
         run: echo "version=$(./gradlew -q nextVersion)" >> $GITHUB_OUTPUT
@@ -53,7 +53,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           version="${{ steps.version.outputs.version }}"
@@ -69,8 +68,9 @@ jobs:
           git tag "$tag"
           git push origin "$tag"
 
-          # Create release with PR info
+          # Create release with Maven Central link
+          maven_url="https://central.sonatype.com/artifact/com.ditchoom/buffer/${version}"
           gh release create "$tag" \
               --repo="$GITHUB_REPOSITORY" \
               --title="${tag}" \
-              --notes="## ${PR_TITLE}"$'\n\n'"See PR #${PR_NUMBER} for details: ${PR_URL}"
+              --notes="## [${PR_TITLE}](${PR_URL})"$'\n\n'"**Maven Central:** [com.ditchoom:buffer:${version}](${maven_url})"

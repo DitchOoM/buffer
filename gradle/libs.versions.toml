@@ -1,6 +1,6 @@
 
 [versions]
-kotlin = "2.2.21"
+kotlin = "2.3.0"
 androidGradlePlugin = "8.13.2"
 ktlint = "14.0.1"
 mavenPublish = "0.35.0"
