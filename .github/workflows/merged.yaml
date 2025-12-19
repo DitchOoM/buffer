@@ -33,10 +33,10 @@ jobs:
         uses: android-actions/setup-android@v2
       - name: Test and deploy with Gradle Major
         if:  ${{ contains(github.event.pull_request.labels.*.name, 'major') }}
-        run: ./gradlew publishToMavenCentral --no-configuration-cache -PincrementMajor=true
+        run: ./gradlew check publishToMavenCentral --no-configuration-cache -PincrementMajor=true
       - name: Test and deploy with Gradle Minor
         if:  ${{ contains(github.event.pull_request.labels.*.name, 'minor') }}
-        run: ./gradlew publishToMavenCentral --no-configuration-cache -PincrementMinor=true
+        run: ./gradlew check publishToMavenCentral --no-configuration-cache -PincrementMinor=true
       - name: Test and deploy with Gradle Patch
         if:  ${{ !contains(github.event.pull_request.labels.*.name, 'major') && !contains(github.event.pull_request.labels.*.name, 'minor') }}
-        run: ./gradlew publishToMavenCentral --no-configuration-cache
+        run: ./gradlew check publishToMavenCentral --no-configuration-cache

@@ -26,10 +26,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
       - name: Tests with Gradle Major
         if:  ${{ contains(github.event.pull_request.labels.*.name, 'major') }}
-        run: ./gradlew ktlintCheck assemble build check allTests publishToMavenLocal -PincrementMajor=true
+        run: ./gradlew ktlintCheck build allTests publishToMavenLocal -PincrementMajor=true
       - name: Tests with Gradle Minor
         if:  ${{ contains(github.event.pull_request.labels.*.name, 'minor') }}
-        run: ./gradlew ktlintCheck assemble build check allTests publishToMavenLocal -PincrementMinor=true
+        run: ./gradlew ktlintCheck build allTests publishToMavenLocal -PincrementMinor=true
       - name: Tests with Gradle Patch
         if:  ${{ !contains(github.event.pull_request.labels.*.name, 'major') && !contains(github.event.pull_request.labels.*.name, 'minor') }}
-        run: ./gradlew ktlintCheck assemble build check allTests publishToMavenLocal
+        run: ./gradlew ktlintCheck build allTests publishToMavenLocal
