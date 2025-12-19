@@ -10,6 +10,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Force-kill emulator after 1 second instead of waiting 20 seconds for graceful shutdown
+      ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL: 1
     strategy:
       matrix:
         api-level: [19, 29]
