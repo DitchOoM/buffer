@@ -6,6 +6,10 @@ on:
     branches: [ main ]
     types:
       - closed
+
+permissions:
+  contents: write
+
 jobs:
   macos:
     name: MacOS Build & Upload artifacts to sonatype
@@ -42,3 +46,32 @@ jobs:
       - name: Test and deploy with Gradle Patch
         if:  ${{ !contains(github.event.pull_request.labels.*.name, 'major') && !contains(github.event.pull_request.labels.*.name, 'minor') }}
         run: ./gradlew check publishToMavenCentral --no-configuration-cache
+      - name: Get version
+        id: version
+        run: echo "version=$(./gradlew -q nextVersion)" >> $GITHUB_OUTPUT
+      - name: Create tag and release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          tag="v${version}"
+
+          # Check if tag already exists
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists, skipping"
+            exit 0
+          fi
+
+          # Create and push tag
+          git tag "$tag"
+          git push origin "$tag"
+
+          # Create release with PR info
+          gh release create "$tag" \
+              --repo="$GITHUB_REPOSITORY" \
+              --title="${tag}" \
+              --notes="${PR_TITLE}
+
+${PR_BODY}"
