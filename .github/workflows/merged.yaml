@@ -10,7 +10,7 @@ jobs:
   macos:
     name: MacOS Build & Upload artifacts to sonatype
     if: github.event.pull_request.merged == true
-    runs-on: macos-14
+    runs-on: macos-latest
     env:
       ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
       ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
