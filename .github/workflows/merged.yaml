@@ -53,7 +53,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           version="${{ steps.version.outputs.version }}"
           tag="v${version}"
@@ -72,6 +73,6 @@ jobs:
           gh release create "$tag" \
               --repo="$GITHUB_REPOSITORY" \
               --title="${tag}" \
-              --notes="${PR_TITLE}
+              --notes="## ${PR_TITLE}
 
-${PR_BODY}"
+See PR #${PR_NUMBER} for details: ${PR_URL}"
