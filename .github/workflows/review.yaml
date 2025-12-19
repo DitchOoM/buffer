@@ -8,7 +8,6 @@ on:
       - opened
 
 jobs:
-  # Fast job: JVM, JS, WASM, Android unit tests (runs on Ubuntu)
   review:
     name: "JVM/JS/WASM Tests"
     runs-on: ubuntu-latest
@@ -22,12 +21,9 @@ jobs:
           cache: gradle
       - name: Setup Chrome
         uses: browser-actions/setup-chrome@v1
-      - name: Gradle cache
-        uses: gradle/actions/setup-gradle@v3
-      - name: Run JVM, JS, WASM tests
-        run: ./gradlew ktlintCheck jvmTest jsNodeTest jsBrowserTest wasmJsNodeTest wasmJsBrowserTest publishToMavenLocal
+      - name: Run tests
+        run: ./gradlew ktlintCheck jvmTest jsNodeTest jsBrowserTest wasmJsNodeTest wasmJsBrowserTest --no-build-cache
 
-  # Apple targets (requires macOS)
   apple:
     name: "Apple Target Tests"
     runs-on: macos-14
@@ -45,7 +41,5 @@ jobs:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: konan-${{ runner.os }}-
-      - name: Gradle cache
-        uses: gradle/actions/setup-gradle@v3
-      - name: Run Apple target tests
-        run: ./gradlew macosArm64Test iosSimulatorArm64Test publishToMavenLocal
+      - name: Run tests
+        run: ./gradlew macosArm64Test iosSimulatorArm64Test --no-build-cache

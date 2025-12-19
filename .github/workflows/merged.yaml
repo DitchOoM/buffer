@@ -31,10 +31,6 @@ jobs:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: konan-${{ runner.os }}-
-      - name: Gradle cache
-        uses: gradle/actions/setup-gradle@v3
-      - name: Setup Chrome
-        uses: browser-actions/setup-chrome@v1
       - name: Setup Android SDK
         uses: android-actions/setup-android@v2
       - name: Test and deploy with Gradle Major
