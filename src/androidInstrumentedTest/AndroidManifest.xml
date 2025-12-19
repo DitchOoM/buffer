@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-sdk tools:overrideLibrary="androidx.test.rules,androidx.test.runner,androidx.test.core,androidx.test.core.ktx,androidx.test.ext.junit,androidx.test.services.storage,androidx.test.monitor,androidx.test.ext.junit.ktx"/>
     <application>
         <service
             android:name="com.ditchoom.buffer.IPCSimpleService"

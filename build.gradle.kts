@@ -15,7 +15,10 @@ apply(from = "gradle/setup.gradle.kts")
 
 group = "com.ditchoom"
 val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
-project.version = project.extra.get("getNextVersion").toString()
+
+@Suppress("UNCHECKED_CAST")
+val getNextVersion = project.extra["getNextVersion"] as (Boolean) -> Any
+project.version = getNextVersion(!isRunningOnGithub).toString()
 
 repositories {
     google()
@@ -98,7 +101,7 @@ android {
     }
     compileSdk = 36
     defaultConfig {
-        minSdk = 21
+        minSdk = 19
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     namespace = "$group.${rootProject.name}"
@@ -188,5 +191,5 @@ ktlint {
 }
 
 tasks.create("nextVersion") {
-    println(project.extra.get("getNextVersion"))
+    println(getNextVersion(false))
 }
