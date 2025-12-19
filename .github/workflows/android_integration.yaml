@@ -54,3 +54,11 @@ jobs:
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: ./gradlew connectedCheck
+
+      - name: Kill emulator processes
+        if: always()
+        run: |
+          pkill -SIGTERM crashpad_handler || true
+          sleep 2
+          pkill -SIGKILL crashpad_handler || true
+          adb emu kill || true
