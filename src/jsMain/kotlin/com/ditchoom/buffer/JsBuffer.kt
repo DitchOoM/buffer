@@ -17,6 +17,7 @@ data class JsBuffer(
     val sharedArrayBuffer: SharedArrayBuffer? = null,
 ) : PlatformBuffer {
     override val byteOrder = if (littleEndian) ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN
+    private val dataView = DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength)
 
     init {
         limit = buffer.length

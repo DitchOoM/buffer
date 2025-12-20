@@ -10,6 +10,10 @@ actual fun PlatformBuffer.Companion.allocate(
         AllocationZone.SharedMemory,
         AllocationZone.Direct,
         -> KotlinJsBuffer(ByteArray(size), byteOrder = byteOrder)
+        AllocationZone.Unsafe -> throw UnsupportedOperationException(
+            "UnsafeBuffer cannot be returned as PlatformBuffer. " +
+                "Use UnsafeBuffer.allocate() or UnsafeBuffer.withBuffer() directly.",
+        )
         is AllocationZone.Custom -> zone.allocator(size)
     }
 

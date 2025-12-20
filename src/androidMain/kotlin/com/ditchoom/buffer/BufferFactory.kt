@@ -28,7 +28,10 @@ actual fun PlatformBuffer.Companion.allocate(
                 JvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
             }
 
-        AllocationZone.Unsafe -> UnsafeBuffer.allocate(size, byteOrder)
+        AllocationZone.Unsafe -> throw UnsupportedOperationException(
+            "UnsafeBuffer cannot be returned as PlatformBuffer because it doesn't support Parcelable. " +
+                "Use UnsafeBuffer.allocate() or UnsafeBuffer.withBuffer() directly.",
+        )
         is AllocationZone.Custom -> zone.allocator(size)
     }
 }
