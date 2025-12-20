@@ -1,8 +1,6 @@
 name: "Build Test and Deploy"
 on:
   pull_request_target:
-    paths-ignore:
-      - '*.md'
     branches: [ main ]
     types:
       - closed
@@ -11,9 +9,55 @@ permissions:
   contents: write
 
 jobs:
+  check-release:
+    name: Check if release is needed
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for skip-release label or non-code changes only
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Check for skip-release label
+          if ${{ contains(github.event.pull_request.labels.*.name, 'skip-release') }}; then
+            echo "skip-release label found, skipping release"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Get list of changed files
+          changed_files=$(gh pr diff ${{ github.event.pull_request.number }} --name-only)
+
+          # Check if all changed files are non-code (CI, docs, config)
+          should_release=true
+          for file in $changed_files; do
+            case "$file" in
+              .github/*|*.md|.gitignore|.editorconfig|CLAUDE.md|LICENSE|*.txt)
+                # Non-code file, continue checking
+                ;;
+              *)
+                # Code file found, should release
+                echo "Code file changed: $file"
+                echo "should_release=true" >> $GITHUB_OUTPUT
+                exit 0
+                ;;
+            esac
+          done
+
+          # Only non-code files changed
+          echo "Only non-code files changed, skipping release"
+          echo "should_release=false" >> $GITHUB_OUTPUT
+
   macos:
     name: MacOS Build & Upload artifacts to sonatype
-    if: github.event.pull_request.merged == true
+    needs: check-release
+    if: needs.check-release.outputs.should_release == 'true'
     runs-on: macos-latest
     env:
       ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
@@ -37,6 +81,21 @@ jobs:
           restore-keys: konan-${{ runner.os }}-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v2
+      - name: Get version (Major)
+        if:  ${{ contains(github.event.pull_request.labels.*.name, 'major') }}
+        id: version_major
+        run: echo "version=$(./gradlew -q nextVersion -PincrementMajor=true)" >> $GITHUB_OUTPUT
+      - name: Get version (Minor)
+        if:  ${{ contains(github.event.pull_request.labels.*.name, 'minor') }}
+        id: version_minor
+        run: echo "version=$(./gradlew -q nextVersion -PincrementMinor=true)" >> $GITHUB_OUTPUT
+      - name: Get version (Patch)
+        if:  ${{ !contains(github.event.pull_request.labels.*.name, 'major') && !contains(github.event.pull_request.labels.*.name, 'minor') }}
+        id: version_patch
+        run: echo "version=$(./gradlew -q nextVersion)" >> $GITHUB_OUTPUT
+      - name: Set version output
+        id: version
+        run: echo "version=${{ steps.version_major.outputs.version }}${{ steps.version_minor.outputs.version }}${{ steps.version_patch.outputs.version }}" >> $GITHUB_OUTPUT
       - name: Test and deploy with Gradle Major
         if:  ${{ contains(github.event.pull_request.labels.*.name, 'major') }}
         run: ./gradlew check publishAndReleaseToMavenCentral --no-configuration-cache -PincrementMajor=true
@@ -46,9 +105,6 @@ jobs:
       - name: Test and deploy with Gradle Patch
         if:  ${{ !contains(github.event.pull_request.labels.*.name, 'major') && !contains(github.event.pull_request.labels.*.name, 'minor') }}
         run: ./gradlew check publishAndReleaseToMavenCentral --no-configuration-cache
-      - name: Get version
-        id: version
-        run: echo "version=$(./gradlew -q nextVersion)" >> $GITHUB_OUTPUT
       - name: Create tag and release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
