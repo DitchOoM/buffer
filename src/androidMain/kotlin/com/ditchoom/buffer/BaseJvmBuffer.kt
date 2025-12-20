@@ -57,6 +57,40 @@ abstract class BaseJvmBuffer(
 
     override fun getLong(index: Int): Long = byteBuffer.getLong(index)
 
+    override fun readFloat(): Float = byteBuffer.float
+
+    override fun getFloat(index: Int): Float = byteBuffer.getFloat(index)
+
+    override fun readDouble(): Double = byteBuffer.double
+
+    override fun getDouble(index: Int): Double = byteBuffer.getDouble(index)
+
+    override fun writeFloat(float: Float): WriteBuffer {
+        byteBuffer.putFloat(float)
+        return this
+    }
+
+    override fun set(
+        index: Int,
+        float: Float,
+    ): WriteBuffer {
+        byteBuffer.putFloat(index, float)
+        return this
+    }
+
+    override fun writeDouble(double: Double): WriteBuffer {
+        byteBuffer.putDouble(double)
+        return this
+    }
+
+    override fun set(
+        index: Int,
+        double: Double,
+    ): WriteBuffer {
+        byteBuffer.putDouble(index, double)
+        return this
+    }
+
     override fun readString(
         length: Int,
         charset: Charset,
