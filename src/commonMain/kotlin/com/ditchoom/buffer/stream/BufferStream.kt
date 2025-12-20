@@ -59,21 +59,22 @@ private class ByteArrayBufferStream(
 ) : BufferStream {
     override val contentLength: Long = data.size.toLong()
 
-    override val chunks: Flow<BufferChunk> = flow {
-        var offset = 0L
-        while (offset < data.size) {
-            val remaining = data.size - offset.toInt()
-            val size = minOf(chunkSize, remaining)
-            val isLast = offset + size >= data.size
+    override val chunks: Flow<BufferChunk> =
+        flow {
+            var offset = 0L
+            while (offset < data.size) {
+                val remaining = data.size - offset.toInt()
+                val size = minOf(chunkSize, remaining)
+                val isLast = offset + size >= data.size
 
-            val buffer = pool.acquire(size)
-            buffer.writeBytes(data, offset.toInt(), size)
-            buffer.resetForRead()
+                val buffer = pool.acquire(size)
+                buffer.writeBytes(data, offset.toInt(), size)
+                buffer.resetForRead()
 
-            emit(BufferChunk(buffer, isLast, offset))
-            offset += size
+                emit(BufferChunk(buffer, isLast, offset))
+                offset += size
+            }
         }
-    }
 }
 
 private class FlowBufferStream(
@@ -82,27 +83,28 @@ private class FlowBufferStream(
 ) : BufferStream {
     override val contentLength: Long = -1L // Unknown for streaming
 
-    override val chunks: Flow<BufferChunk> = flow {
-        var offset = 0L
-        var lastEmittedBuffer: PooledBuffer? = null
+    override val chunks: Flow<BufferChunk> =
+        flow {
+            var offset = 0L
+            var lastEmittedBuffer: PooledBuffer? = null
 
-        source.collect { bytes ->
-            // Release previous buffer
+            source.collect { bytes ->
+                // Release previous buffer
+                lastEmittedBuffer?.release()
+
+                val buffer = pool.acquire(bytes.size)
+                buffer.writeBytes(bytes)
+                buffer.resetForRead()
+
+                // We don't know if this is the last chunk in a Flow
+                emit(BufferChunk(buffer, isLast = false, offset))
+                lastEmittedBuffer = buffer
+                offset += bytes.size
+            }
+
+            // Mark the last one properly
             lastEmittedBuffer?.release()
-
-            val buffer = pool.acquire(bytes.size)
-            buffer.writeBytes(bytes)
-            buffer.resetForRead()
-
-            // We don't know if this is the last chunk in a Flow
-            emit(BufferChunk(buffer, isLast = false, offset))
-            lastEmittedBuffer = buffer
-            offset += bytes.size
         }
-
-        // Mark the last one properly
-        lastEmittedBuffer?.release()
-    }
 }
 
 /**

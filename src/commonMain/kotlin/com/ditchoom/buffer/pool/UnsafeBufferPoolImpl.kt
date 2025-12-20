@@ -4,7 +4,6 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.DefaultUnsafeBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.UnsafeBuffer
 import com.ditchoom.buffer.UnsafeMemory
 import com.ditchoom.buffer.WriteBuffer
 import kotlin.concurrent.Volatile
@@ -40,9 +39,10 @@ internal class UnsafeBufferPoolImpl(
         val size = maxOf(minSize, defaultBufferSize)
 
         // Try to get from pool
-        val buffer = synchronized(pool) {
-            pool.removeLastOrNull()
-        }
+        val buffer =
+            synchronized(pool) {
+                pool.removeLastOrNull()
+            }
 
         return if (buffer != null && buffer.capacity >= size) {
             poolHits++
@@ -77,13 +77,14 @@ internal class UnsafeBufferPoolImpl(
         }
     }
 
-    override fun stats(): PoolStats = PoolStats(
-        totalAllocations = totalAllocations,
-        poolHits = poolHits,
-        poolMisses = poolMisses,
-        currentPoolSize = pool.size,
-        peakPoolSize = peakPoolSize,
-    )
+    override fun stats(): PoolStats =
+        PoolStats(
+            totalAllocations = totalAllocations,
+            poolHits = poolHits,
+            poolMisses = poolMisses,
+            currentPoolSize = pool.size,
+            peakPoolSize = peakPoolSize,
+        )
 
     override fun clear() {
         synchronized(pool) {
@@ -133,7 +134,9 @@ private class UnsafePooledBufferImpl(
     }
 
     override fun limit(): Int = lim
+
     override fun position(): Int = pos
+
     override fun position(newPosition: Int) {
         pos = newPosition
     }
@@ -218,7 +221,10 @@ private class UnsafePooledBufferImpl(
         return Double.fromBits(if (needsSwap) bits.reverseBytes() else bits)
     }
 
-    override fun readString(length: Int, charset: Charset): String {
+    override fun readString(
+        length: Int,
+        charset: Charset,
+    ): String {
         val bytes = readByteArray(length)
         return bytes.decodeToString()
     }
@@ -240,12 +246,19 @@ private class UnsafePooledBufferImpl(
         return this
     }
 
-    override fun set(index: Int, byte: Byte): WriteBuffer {
+    override fun set(
+        index: Int,
+        byte: Byte,
+    ): WriteBuffer {
         UnsafeMemory.putByte(address, index, byte)
         return this
     }
 
-    override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
+    override fun writeBytes(
+        bytes: ByteArray,
+        offset: Int,
+        length: Int,
+    ): WriteBuffer {
         checkWriteBounds(length)
         UnsafeMemory.copyFromArray(bytes, offset, address, pos, length)
         pos += length
@@ -260,7 +273,10 @@ private class UnsafePooledBufferImpl(
         return this
     }
 
-    override fun set(index: Int, short: Short): WriteBuffer {
+    override fun set(
+        index: Int,
+        short: Short,
+    ): WriteBuffer {
         val value = if (needsSwap) short.reverseBytes() else short
         UnsafeMemory.putShort(address, index, value)
         return this
@@ -274,7 +290,10 @@ private class UnsafePooledBufferImpl(
         return this
     }
 
-    override fun set(index: Int, int: Int): WriteBuffer {
+    override fun set(
+        index: Int,
+        int: Int,
+    ): WriteBuffer {
         val value = if (needsSwap) int.reverseBytes() else int
         UnsafeMemory.putInt(address, index, value)
         return this
@@ -288,7 +307,10 @@ private class UnsafePooledBufferImpl(
         return this
     }
 
-    override fun set(index: Int, long: Long): WriteBuffer {
+    override fun set(
+        index: Int,
+        long: Long,
+    ): WriteBuffer {
         val value = if (needsSwap) long.reverseBytes() else long
         UnsafeMemory.putLong(address, index, value)
         return this
@@ -303,7 +325,10 @@ private class UnsafePooledBufferImpl(
         return this
     }
 
-    override fun set(index: Int, float: Float): WriteBuffer {
+    override fun set(
+        index: Int,
+        float: Float,
+    ): WriteBuffer {
         val bits = float.toRawBits()
         val value = if (needsSwap) bits.reverseBytes() else bits
         UnsafeMemory.putInt(address, index, value)
@@ -319,14 +344,20 @@ private class UnsafePooledBufferImpl(
         return this
     }
 
-    override fun set(index: Int, double: Double): WriteBuffer {
+    override fun set(
+        index: Int,
+        double: Double,
+    ): WriteBuffer {
         val bits = double.toRawBits()
         val value = if (needsSwap) bits.reverseBytes() else bits
         UnsafeMemory.putLong(address, index, value)
         return this
     }
 
-    override fun writeString(text: CharSequence, charset: Charset): WriteBuffer {
+    override fun writeString(
+        text: CharSequence,
+        charset: Charset,
+    ): WriteBuffer {
         val bytes = text.toString().encodeToByteArray()
         return writeBytes(bytes)
     }
@@ -348,8 +379,7 @@ private class UnsafePooledBufferImpl(
         }
     }
 
-    private fun Short.reverseBytes(): Short =
-        (((this.toInt() and 0xFF) shl 8) or ((this.toInt() shr 8) and 0xFF)).toShort()
+    private fun Short.reverseBytes(): Short = (((this.toInt() and 0xFF) shl 8) or ((this.toInt() shr 8) and 0xFF)).toShort()
 
     private fun Int.reverseBytes(): Int =
         ((this and 0xFF) shl 24) or

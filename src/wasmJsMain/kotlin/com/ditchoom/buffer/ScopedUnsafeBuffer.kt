@@ -14,15 +14,16 @@ actual inline fun <R> withUnsafeBuffer(
     size: Int,
     byteOrder: ByteOrder,
     block: (UnsafeBuffer) -> R,
-): R = withScopedMemoryAllocator { allocator ->
-    val pointer = allocator.allocate(size)
-    // Zero the memory
-    for (i in 0 until size) {
-        (pointer + i).storeByte(0)
+): R =
+    withScopedMemoryAllocator { allocator ->
+        val pointer = allocator.allocate(size)
+        // Zero the memory
+        for (i in 0 until size) {
+            (pointer + i).storeByte(0)
+        }
+        val buffer = WasmNativeUnsafeBuffer(size, byteOrder, pointer)
+        block(buffer)
     }
-    val buffer = WasmNativeUnsafeBuffer(size, byteOrder, pointer)
-    block(buffer)
-}
 
 /**
  * WASM-native buffer implementation using Pointer operations.
@@ -151,7 +152,10 @@ internal class WasmNativeUnsafeBuffer(
         return Double.fromBits(if (needsSwap) bits.reverseBytes() else bits)
     }
 
-    override fun readString(length: Int, charset: Charset): String {
+    override fun readString(
+        length: Int,
+        charset: Charset,
+    ): String {
         val bytes = readByteArray(length)
         return bytes.decodeToString()
     }
@@ -162,13 +166,20 @@ internal class WasmNativeUnsafeBuffer(
         return this
     }
 
-    override fun set(index: Int, byte: Byte): WriteBuffer {
+    override fun set(
+        index: Int,
+        byte: Byte,
+    ): WriteBuffer {
         checkAbsoluteBounds(index, 1)
         (basePointer + index).storeByte(byte)
         return this
     }
 
-    override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
+    override fun writeBytes(
+        bytes: ByteArray,
+        offset: Int,
+        length: Int,
+    ): WriteBuffer {
         checkWriteBounds(length)
         for (i in 0 until length) {
             (basePointer + pos + i).storeByte(bytes[offset + i])
@@ -185,7 +196,10 @@ internal class WasmNativeUnsafeBuffer(
         return this
     }
 
-    override fun set(index: Int, short: Short): WriteBuffer {
+    override fun set(
+        index: Int,
+        short: Short,
+    ): WriteBuffer {
         checkAbsoluteBounds(index, 2)
         val value = if (needsSwap) short.reverseBytes() else short
         (basePointer + index).storeShort(value)
@@ -200,7 +214,10 @@ internal class WasmNativeUnsafeBuffer(
         return this
     }
 
-    override fun set(index: Int, int: Int): WriteBuffer {
+    override fun set(
+        index: Int,
+        int: Int,
+    ): WriteBuffer {
         checkAbsoluteBounds(index, 4)
         val value = if (needsSwap) int.reverseBytes() else int
         (basePointer + index).storeInt(value)
@@ -215,7 +232,10 @@ internal class WasmNativeUnsafeBuffer(
         return this
     }
 
-    override fun set(index: Int, long: Long): WriteBuffer {
+    override fun set(
+        index: Int,
+        long: Long,
+    ): WriteBuffer {
         checkAbsoluteBounds(index, 8)
         val value = if (needsSwap) long.reverseBytes() else long
         (basePointer + index).storeLong(value)
@@ -231,7 +251,10 @@ internal class WasmNativeUnsafeBuffer(
         return this
     }
 
-    override fun set(index: Int, float: Float): WriteBuffer {
+    override fun set(
+        index: Int,
+        float: Float,
+    ): WriteBuffer {
         checkAbsoluteBounds(index, 4)
         val bits = float.toRawBits()
         val value = if (needsSwap) bits.reverseBytes() else bits
@@ -248,7 +271,10 @@ internal class WasmNativeUnsafeBuffer(
         return this
     }
 
-    override fun set(index: Int, double: Double): WriteBuffer {
+    override fun set(
+        index: Int,
+        double: Double,
+    ): WriteBuffer {
         checkAbsoluteBounds(index, 8)
         val bits = double.toRawBits()
         val value = if (needsSwap) bits.reverseBytes() else bits
@@ -256,7 +282,10 @@ internal class WasmNativeUnsafeBuffer(
         return this
     }
 
-    override fun writeString(text: CharSequence, charset: Charset): WriteBuffer {
+    override fun writeString(
+        text: CharSequence,
+        charset: Charset,
+    ): WriteBuffer {
         val bytes = text.toString().encodeToByteArray()
         return writeBytes(bytes)
     }
@@ -282,7 +311,10 @@ internal class WasmNativeUnsafeBuffer(
         }
     }
 
-    private fun checkAbsoluteBounds(index: Int, size: Int) {
+    private fun checkAbsoluteBounds(
+        index: Int,
+        size: Int,
+    ) {
         if (index < 0 || index + size > capacity) {
             throw IndexOutOfBoundsException("Access of $size bytes at index $index exceeds capacity $capacity")
         }

@@ -22,27 +22,28 @@ class WebSocketParser(
     /**
      * Parses WebSocket frames from a buffer stream.
      */
-    fun parseFrames(stream: BufferStream): Flow<WebSocketFrame> = flow {
-        val reader = AccumulatingBufferReader(pool)
+    fun parseFrames(stream: BufferStream): Flow<WebSocketFrame> =
+        flow {
+            val reader = AccumulatingBufferReader(pool)
 
-        try {
-            stream.chunks.collect { chunk ->
-                reader.append(chunk)
+            try {
+                stream.chunks.collect { chunk ->
+                    reader.append(chunk)
 
-                while (reader.available() >= 2) {
-                    val frame = tryParseFrame(reader)
-                    if (frame != null) {
-                        emit(frame)
-                        reader.compact()
-                    } else {
-                        break // Need more data
+                    while (reader.available() >= 2) {
+                        val frame = tryParseFrame(reader)
+                        if (frame != null) {
+                            emit(frame)
+                            reader.compact()
+                        } else {
+                            break // Need more data
+                        }
                     }
                 }
+            } finally {
+                reader.release()
             }
-        } finally {
-            reader.release()
         }
-    }
 
     /**
      * Parses a single frame from a byte array.
@@ -53,7 +54,10 @@ class WebSocketParser(
             val buffer = pool.acquire(data.size)
             buffer.writeBytes(data)
             buffer.resetForRead()
-            reader.append(com.ditchoom.buffer.stream.BufferChunk(buffer, true, 0))
+            reader.append(
+                com.ditchoom.buffer.stream
+                    .BufferChunk(buffer, true, 0),
+            )
             return tryParseFrame(reader)
                 ?: throw WebSocketParseException("Incomplete WebSocket frame")
         } finally {
@@ -102,29 +106,31 @@ class WebSocketParser(
         reader.readByte() // byte2
 
         // Read extended payload length
-        payloadLen = when (payloadLen.toInt()) {
-            126 -> {
-                ((reader.readByte().toInt() and 0xFF) shl 8) or
-                    (reader.readByte().toInt() and 0xFF).toLong()
-            }
-
-            127 -> {
-                var len = 0L
-                repeat(8) {
-                    len = (len shl 8) or (reader.readByte().toLong() and 0xFF)
+        payloadLen =
+            when (payloadLen.toInt()) {
+                126 -> {
+                    ((reader.readByte().toInt() and 0xFF) shl 8) or
+                        (reader.readByte().toInt() and 0xFF).toLong()
                 }
-                len
-            }
 
-            else -> payloadLen
-        }
+                127 -> {
+                    var len = 0L
+                    repeat(8) {
+                        len = (len shl 8) or (reader.readByte().toLong() and 0xFF)
+                    }
+                    len
+                }
+
+                else -> payloadLen
+            }
 
         // Read masking key
-        val maskingKey = if (masked) {
-            reader.readBytes(4)
-        } else {
-            null
-        }
+        val maskingKey =
+            if (masked) {
+                reader.readBytes(4)
+            } else {
+                null
+            }
 
         // Check if we have full payload
         if (reader.available() < payloadLen.toInt()) {
@@ -137,55 +143,109 @@ class WebSocketParser(
         val rawPayload = reader.readBytes(payloadLen.toInt())
 
         // Unmask if needed
-        val unmaskedPayload = if (masked && maskingKey != null) {
-            unmask(rawPayload, maskingKey)
-        } else {
-            rawPayload
-        }
+        val unmaskedPayload =
+            if (masked && maskingKey != null) {
+                unmask(rawPayload, maskingKey)
+            } else {
+                rawPayload
+            }
 
         // Handle compression (rsv1 indicates per-message deflate)
-        val payload = if (rsv1 && decompressor != null && unmaskedPayload.isNotEmpty()) {
-            WebSocketPayload.Compressed(unmaskedPayload, decompressor)
-        } else {
-            WebSocketPayload.Raw(unmaskedPayload)
-        }
+        val payload =
+            if (rsv1 && decompressor != null && unmaskedPayload.isNotEmpty()) {
+                WebSocketPayload.Compressed(unmaskedPayload, decompressor)
+            } else {
+                WebSocketPayload.Raw(unmaskedPayload)
+            }
 
         // Create frame based on opcode
         return when (opcode) {
-            WebSocketOpcode.Continuation -> WebSocketFrame.Continuation(
-                fin, rsv1, rsv2, rsv3, masked, maskingKey, payloadLen, payload
-            )
+            WebSocketOpcode.Continuation ->
+                WebSocketFrame.Continuation(
+                    fin,
+                    rsv1,
+                    rsv2,
+                    rsv3,
+                    masked,
+                    maskingKey,
+                    payloadLen,
+                    payload,
+                )
 
-            WebSocketOpcode.Text -> WebSocketFrame.Text(
-                fin, rsv1, rsv2, rsv3, masked, maskingKey, payloadLen, payload
-            )
+            WebSocketOpcode.Text ->
+                WebSocketFrame.Text(
+                    fin,
+                    rsv1,
+                    rsv2,
+                    rsv3,
+                    masked,
+                    maskingKey,
+                    payloadLen,
+                    payload,
+                )
 
-            WebSocketOpcode.Binary -> WebSocketFrame.Binary(
-                fin, rsv1, rsv2, rsv3, masked, maskingKey, payloadLen, payload
-            )
+            WebSocketOpcode.Binary ->
+                WebSocketFrame.Binary(
+                    fin,
+                    rsv1,
+                    rsv2,
+                    rsv3,
+                    masked,
+                    maskingKey,
+                    payloadLen,
+                    payload,
+                )
 
             WebSocketOpcode.Close -> {
                 val (closeCode, reason) = parseClosePayload(unmaskedPayload)
                 WebSocketFrame.Close(
-                    fin, rsv1, rsv2, rsv3, masked, maskingKey, payloadLen, payload, closeCode, reason
+                    fin,
+                    rsv1,
+                    rsv2,
+                    rsv3,
+                    masked,
+                    maskingKey,
+                    payloadLen,
+                    payload,
+                    closeCode,
+                    reason,
                 )
             }
 
-            WebSocketOpcode.Ping -> WebSocketFrame.Ping(
-                fin, rsv1, rsv2, rsv3, masked, maskingKey, payloadLen, payload
-            )
+            WebSocketOpcode.Ping ->
+                WebSocketFrame.Ping(
+                    fin,
+                    rsv1,
+                    rsv2,
+                    rsv3,
+                    masked,
+                    maskingKey,
+                    payloadLen,
+                    payload,
+                )
 
-            WebSocketOpcode.Pong -> WebSocketFrame.Pong(
-                fin, rsv1, rsv2, rsv3, masked, maskingKey, payloadLen, payload
-            )
+            WebSocketOpcode.Pong ->
+                WebSocketFrame.Pong(
+                    fin,
+                    rsv1,
+                    rsv2,
+                    rsv3,
+                    masked,
+                    maskingKey,
+                    payloadLen,
+                    payload,
+                )
 
             is WebSocketOpcode.Reserved -> throw WebSocketParseException(
-                "Reserved opcode: ${opcode.value}"
+                "Reserved opcode: ${opcode.value}",
             )
         }
     }
 
-    private fun unmask(data: ByteArray, maskingKey: ByteArray): ByteArray {
+    private fun unmask(
+        data: ByteArray,
+        maskingKey: ByteArray,
+    ): ByteArray {
         val result = ByteArray(data.size)
         for (i in data.indices) {
             result[i] = (data[i].toInt() xor maskingKey[i % 4].toInt()).toByte()
@@ -199,11 +259,12 @@ class WebSocketParser(
         }
 
         val code = ((payload[0].toInt() and 0xFF) shl 8) or (payload[1].toInt() and 0xFF)
-        val reason = if (payload.size > 2) {
-            payload.copyOfRange(2, payload.size).decodeToString()
-        } else {
-            ""
-        }
+        val reason =
+            if (payload.size > 2) {
+                payload.copyOfRange(2, payload.size).decodeToString()
+            } else {
+                ""
+            }
 
         return WebSocketCloseCode.fromInt(code) to reason
     }
@@ -235,9 +296,7 @@ class WebSocketSerializer(
         data: ByteArray,
         masked: Boolean = false,
         compress: Boolean = false,
-    ): ByteArray {
-        return createFrame(WebSocketOpcode.Binary, data, masked, compress)
-    }
+    ): ByteArray = createFrame(WebSocketOpcode.Binary, data, masked, compress)
 
     /**
      * Serializes a close frame.
@@ -257,16 +316,18 @@ class WebSocketSerializer(
     /**
      * Serializes a ping frame.
      */
-    fun createPingFrame(data: ByteArray = ByteArray(0), masked: Boolean = false): ByteArray {
-        return createFrame(WebSocketOpcode.Ping, data, masked, compress = false)
-    }
+    fun createPingFrame(
+        data: ByteArray = ByteArray(0),
+        masked: Boolean = false,
+    ): ByteArray = createFrame(WebSocketOpcode.Ping, data, masked, compress = false)
 
     /**
      * Serializes a pong frame.
      */
-    fun createPongFrame(data: ByteArray = ByteArray(0), masked: Boolean = false): ByteArray {
-        return createFrame(WebSocketOpcode.Pong, data, masked, compress = false)
-    }
+    fun createPongFrame(
+        data: ByteArray = ByteArray(0),
+        masked: Boolean = false,
+    ): ByteArray = createFrame(WebSocketOpcode.Pong, data, masked, compress = false)
 
     private fun createFrame(
         opcode: WebSocketOpcode,
@@ -274,30 +335,33 @@ class WebSocketSerializer(
         masked: Boolean,
         compress: Boolean,
     ): ByteArray {
-        val finalPayload = if (compress && compressor != null) {
-            compressor.invoke(payload)
-        } else {
-            payload
-        }
+        val finalPayload =
+            if (compress && compressor != null) {
+                compressor.invoke(payload)
+            } else {
+                payload
+            }
 
         val payloadLen = finalPayload.size
         val rsv1 = compress && compressor != null
 
         // Calculate frame size
-        val headerSize = when {
-            payloadLen <= 125 -> 2
-            payloadLen <= 65535 -> 4
-            else -> 10
-        } + if (masked) 4 else 0
+        val headerSize =
+            when {
+                payloadLen <= 125 -> 2
+                payloadLen <= 65535 -> 4
+                else -> 10
+            } + if (masked) 4 else 0
 
         val frameSize = headerSize + payloadLen
         val buffer = pool.acquire(frameSize)
 
         try {
             // Byte 1: FIN, RSV1-3, opcode
-            val byte1 = 0x80 or // FIN
-                (if (rsv1) 0x40 else 0) or
-                (opcode.value and 0x0F)
+            val byte1 =
+                0x80 or // FIN
+                    (if (rsv1) 0x40 else 0) or
+                    (opcode.value and 0x0F)
             buffer.writeByte(byte1.toByte())
 
             // Byte 2: MASK, payload length
@@ -342,12 +406,18 @@ class WebSocketSerializer(
         }
     }
 
-    private fun generateMaskingKey(): ByteArray {
-        return ByteArray(4) { kotlin.random.Random.nextInt().toByte() }
-    }
+    private fun generateMaskingKey(): ByteArray =
+        ByteArray(4) {
+            kotlin.random.Random
+                .nextInt()
+                .toByte()
+        }
 }
 
 /**
  * Exception thrown when WebSocket parsing fails.
  */
-class WebSocketParseException(message: String, cause: Throwable? = null) : Exception(message, cause)
+class WebSocketParseException(
+    message: String,
+    cause: Throwable? = null,
+) : Exception(message, cause)

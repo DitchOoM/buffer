@@ -182,18 +182,21 @@ sealed interface WebSocketOpcode {
         override val value = 0xA
     }
 
-    data class Reserved(override val value: Int) : WebSocketOpcode
+    data class Reserved(
+        override val value: Int,
+    ) : WebSocketOpcode
 
     companion object {
-        fun fromInt(value: Int): WebSocketOpcode = when (value) {
-            0x0 -> Continuation
-            0x1 -> Text
-            0x2 -> Binary
-            0x8 -> Close
-            0x9 -> Ping
-            0xA -> Pong
-            else -> Reserved(value)
-        }
+        fun fromInt(value: Int): WebSocketOpcode =
+            when (value) {
+                0x0 -> Continuation
+                0x1 -> Text
+                0x2 -> Binary
+                0x8 -> Close
+                0x9 -> Ping
+                0xA -> Pong
+                else -> Reserved(value)
+            }
     }
 }
 
@@ -274,28 +277,31 @@ sealed interface WebSocketCloseCode {
         override val description = "TLS Handshake Failure"
     }
 
-    data class Custom(override val code: Int) : WebSocketCloseCode {
+    data class Custom(
+        override val code: Int,
+    ) : WebSocketCloseCode {
         override val description = "Custom ($code)"
     }
 
     companion object {
-        fun fromInt(code: Int): WebSocketCloseCode = when (code) {
-            1000 -> NormalClosure
-            1001 -> GoingAway
-            1002 -> ProtocolError
-            1003 -> UnsupportedData
-            1005 -> NoStatusReceived
-            1006 -> AbnormalClosure
-            1007 -> InvalidPayload
-            1008 -> PolicyViolation
-            1009 -> MessageTooBig
-            1010 -> MandatoryExtension
-            1011 -> InternalError
-            1012 -> ServiceRestart
-            1013 -> TryAgainLater
-            1015 -> TLSHandshake
-            else -> Custom(code)
-        }
+        fun fromInt(code: Int): WebSocketCloseCode =
+            when (code) {
+                1000 -> NormalClosure
+                1001 -> GoingAway
+                1002 -> ProtocolError
+                1003 -> UnsupportedData
+                1005 -> NoStatusReceived
+                1006 -> AbnormalClosure
+                1007 -> InvalidPayload
+                1008 -> PolicyViolation
+                1009 -> MessageTooBig
+                1010 -> MandatoryExtension
+                1011 -> InternalError
+                1012 -> ServiceRestart
+                1013 -> TryAgainLater
+                1015 -> TLSHandshake
+                else -> Custom(code)
+            }
     }
 }
 
@@ -304,11 +310,13 @@ sealed interface WebSocketCloseCode {
  */
 sealed interface WebSocketPayload {
     fun bytes(): ByteArray
+
     val length: Long
     val isCompressed: Boolean
 
     data object Empty : WebSocketPayload {
         override fun bytes() = ByteArray(0)
+
         override val length = 0L
         override val isCompressed = false
     }
@@ -318,6 +326,7 @@ sealed interface WebSocketPayload {
         override val isCompressed: Boolean = false,
     ) : WebSocketPayload {
         override fun bytes() = data
+
         override val length = data.size.toLong()
 
         override fun equals(other: Any?): Boolean {
@@ -341,11 +350,10 @@ sealed interface WebSocketPayload {
 
         private var decompressedCache: ByteArray? = null
 
-        override fun bytes(): ByteArray {
-            return decompressedCache ?: decompressor(compressedData).also {
+        override fun bytes(): ByteArray =
+            decompressedCache ?: decompressor(compressedData).also {
                 decompressedCache = it
             }
-        }
 
         override fun equals(other: Any?): Boolean {
             if (this === other) return true

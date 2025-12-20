@@ -20,52 +20,54 @@ class HttpParser(
     /**
      * Parses HTTP requests from a buffer stream.
      */
-    fun parseRequests(stream: BufferStream): Flow<HttpRequest> = flow {
-        val reader = AccumulatingBufferReader(pool)
+    fun parseRequests(stream: BufferStream): Flow<HttpRequest> =
+        flow {
+            val reader = AccumulatingBufferReader(pool)
 
-        try {
-            stream.chunks.collect { chunk ->
-                reader.append(chunk)
+            try {
+                stream.chunks.collect { chunk ->
+                    reader.append(chunk)
 
-                while (reader.available() > 0) {
-                    val request = tryParseRequest(reader)
-                    if (request != null) {
-                        emit(request)
-                        reader.compact()
-                    } else {
-                        break // Need more data
+                    while (reader.available() > 0) {
+                        val request = tryParseRequest(reader)
+                        if (request != null) {
+                            emit(request)
+                            reader.compact()
+                        } else {
+                            break // Need more data
+                        }
                     }
                 }
+            } finally {
+                reader.release()
             }
-        } finally {
-            reader.release()
         }
-    }
 
     /**
      * Parses HTTP responses from a buffer stream.
      */
-    fun parseResponses(stream: BufferStream): Flow<HttpResponse> = flow {
-        val reader = AccumulatingBufferReader(pool)
+    fun parseResponses(stream: BufferStream): Flow<HttpResponse> =
+        flow {
+            val reader = AccumulatingBufferReader(pool)
 
-        try {
-            stream.chunks.collect { chunk ->
-                reader.append(chunk)
+            try {
+                stream.chunks.collect { chunk ->
+                    reader.append(chunk)
 
-                while (reader.available() > 0) {
-                    val response = tryParseResponse(reader)
-                    if (response != null) {
-                        emit(response)
-                        reader.compact()
-                    } else {
-                        break // Need more data
+                    while (reader.available() > 0) {
+                        val response = tryParseResponse(reader)
+                        if (response != null) {
+                            emit(response)
+                            reader.compact()
+                        } else {
+                            break // Need more data
+                        }
                     }
                 }
+            } finally {
+                reader.release()
             }
-        } finally {
-            reader.release()
         }
-    }
 
     /**
      * Parses a single request from a byte array (convenience method).
@@ -133,8 +135,9 @@ class HttpParser(
         if (parts.size < 2) throw HttpParseException("Invalid status line: $statusLine")
 
         val version = HttpVersion.parse(parts[0])
-        val statusCode = parts[1].toIntOrNull()
-            ?: throw HttpParseException("Invalid status code: ${parts[1]}")
+        val statusCode =
+            parts[1].toIntOrNull()
+                ?: throw HttpParseException("Invalid status code: ${parts[1]}")
         val statusText = if (parts.size > 2) parts[2] else ""
 
         // Parse headers
@@ -152,8 +155,10 @@ class HttpParser(
 
         val data = reader.peek(available)
         for (i in 0 until data.size - 3) {
-            if (data[i] == CR && data[i + 1] == LF &&
-                data[i + 2] == CR && data[i + 3] == LF
+            if (data[i] == CR &&
+                data[i + 1] == LF &&
+                data[i + 2] == CR &&
+                data[i + 3] == LF
             ) {
                 return i + 4
             }
@@ -205,22 +210,23 @@ class HttpParser(
         val contentLength = headers.contentLength
         val contentEncoding = headers.contentEncoding
 
-        val rawBody = when {
-            transferEncoding?.contains("chunked", ignoreCase = true) == true -> {
-                parseChunkedBody(reader)
-            }
-
-            contentLength != null && contentLength > 0 -> {
-                if (reader.available() < contentLength.toInt()) {
-                    // Not enough data yet
-                    HttpBody.Empty
-                } else {
-                    HttpBody.Bytes(reader.readBytes(contentLength.toInt()))
+        val rawBody =
+            when {
+                transferEncoding?.contains("chunked", ignoreCase = true) == true -> {
+                    parseChunkedBody(reader)
                 }
-            }
 
-            else -> HttpBody.Empty
-        }
+                contentLength != null && contentLength > 0 -> {
+                    if (reader.available() < contentLength.toInt()) {
+                        // Not enough data yet
+                        HttpBody.Empty
+                    } else {
+                        HttpBody.Bytes(reader.readBytes(contentLength.toInt()))
+                    }
+                }
+
+                else -> HttpBody.Empty
+            }
 
         // Handle compression
         return if (contentEncoding != null && rawBody != HttpBody.Empty && decompressor != null) {
@@ -265,7 +271,10 @@ class HttpParser(
 /**
  * Exception thrown when HTTP parsing fails.
  */
-class HttpParseException(message: String, cause: Throwable? = null) : Exception(message, cause)
+class HttpParseException(
+    message: String,
+    cause: Throwable? = null,
+) : Exception(message, cause)
 
 /**
  * Serializes HTTP messages back to bytes.

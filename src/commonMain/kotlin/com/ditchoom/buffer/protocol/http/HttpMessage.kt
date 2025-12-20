@@ -77,21 +77,24 @@ sealed interface HttpMethod {
         override val name = "TRACE"
     }
 
-    data class Custom(override val name: String) : HttpMethod
+    data class Custom(
+        override val name: String,
+    ) : HttpMethod
 
     companion object {
-        fun parse(method: String): HttpMethod = when (method.uppercase()) {
-            "GET" -> GET
-            "POST" -> POST
-            "PUT" -> PUT
-            "DELETE" -> DELETE
-            "HEAD" -> HEAD
-            "OPTIONS" -> OPTIONS
-            "PATCH" -> PATCH
-            "CONNECT" -> CONNECT
-            "TRACE" -> TRACE
-            else -> Custom(method)
-        }
+        fun parse(method: String): HttpMethod =
+            when (method.uppercase()) {
+                "GET" -> GET
+                "POST" -> POST
+                "PUT" -> PUT
+                "DELETE" -> DELETE
+                "HEAD" -> HEAD
+                "OPTIONS" -> OPTIONS
+                "PATCH" -> PATCH
+                "CONNECT" -> CONNECT
+                "TRACE" -> TRACE
+                else -> Custom(method)
+            }
     }
 }
 
@@ -102,25 +105,31 @@ sealed interface HttpVersion {
     val major: Int
     val minor: Int
 
-    data object HTTP_1_0 : HttpVersion {
+    data object Http10 : HttpVersion {
         override val major = 1
         override val minor = 0
+
         override fun toString() = "HTTP/1.0"
     }
 
-    data object HTTP_1_1 : HttpVersion {
+    data object Http11 : HttpVersion {
         override val major = 1
         override val minor = 1
+
         override fun toString() = "HTTP/1.1"
     }
 
-    data object HTTP_2_0 : HttpVersion {
+    data object Http20 : HttpVersion {
         override val major = 2
         override val minor = 0
+
         override fun toString() = "HTTP/2.0"
     }
 
-    data class Custom(override val major: Int, override val minor: Int) : HttpVersion {
+    data class Custom(
+        override val major: Int,
+        override val minor: Int,
+    ) : HttpVersion {
         override fun toString() = "HTTP/$major.$minor"
     }
 
@@ -128,15 +137,15 @@ sealed interface HttpVersion {
         fun parse(version: String): HttpVersion {
             val trimmed = version.trim()
             return when {
-                trimmed.equals("HTTP/1.0", ignoreCase = true) -> HTTP_1_0
-                trimmed.equals("HTTP/1.1", ignoreCase = true) -> HTTP_1_1
+                trimmed.equals("HTTP/1.0", ignoreCase = true) -> Http10
+                trimmed.equals("HTTP/1.1", ignoreCase = true) -> Http11
                 trimmed.equals("HTTP/2.0", ignoreCase = true) ||
-                    trimmed.equals("HTTP/2", ignoreCase = true) -> HTTP_2_0
+                    trimmed.equals("HTTP/2", ignoreCase = true) -> Http20
                 trimmed.startsWith("HTTP/", ignoreCase = true) -> {
                     val parts = trimmed.substring(5).split(".")
                     Custom(parts[0].toInt(), parts.getOrElse(1) { "0" }.toInt())
                 }
-                else -> HTTP_1_1 // Default
+                else -> Http11 // Default
             }
         }
     }
@@ -151,20 +160,17 @@ class HttpHeaders private constructor(
     /**
      * Gets the first value for a header (case-insensitive).
      */
-    operator fun get(name: String): String? =
-        headers.firstOrNull { it.first.equals(name, ignoreCase = true) }?.second
+    operator fun get(name: String): String? = headers.firstOrNull { it.first.equals(name, ignoreCase = true) }?.second
 
     /**
      * Gets all values for a header (case-insensitive).
      */
-    fun getAll(name: String): List<String> =
-        headers.filter { it.first.equals(name, ignoreCase = true) }.map { it.second }
+    fun getAll(name: String): List<String> = headers.filter { it.first.equals(name, ignoreCase = true) }.map { it.second }
 
     /**
      * Checks if header exists.
      */
-    fun contains(name: String): Boolean =
-        headers.any { it.first.equals(name, ignoreCase = true) }
+    fun contains(name: String): Boolean = headers.any { it.first.equals(name, ignoreCase = true) }
 
     /**
      * Content-Length header value, or null if not present.
@@ -205,12 +211,18 @@ class HttpHeaders private constructor(
     class Builder {
         private val headers = mutableListOf<Pair<String, String>>()
 
-        fun add(name: String, value: String): Builder {
+        fun add(
+            name: String,
+            value: String,
+        ): Builder {
             headers.add(name to value)
             return this
         }
 
-        fun set(name: String, value: String): Builder {
+        fun set(
+            name: String,
+            value: String,
+        ): Builder {
             headers.removeAll { it.first.equals(name, ignoreCase = true) }
             headers.add(name to value)
             return this
@@ -255,6 +267,7 @@ sealed interface HttpBody {
      */
     data object Empty : HttpBody {
         override suspend fun bytes() = ByteArray(0)
+
         override val length = 0L
         override val isCompressed = false
     }
@@ -267,6 +280,7 @@ sealed interface HttpBody {
         override val isCompressed: Boolean = false,
     ) : HttpBody {
         override suspend fun bytes() = data
+
         override val length = data.size.toLong()
 
         override fun equals(other: Any?): Boolean {
@@ -326,11 +340,10 @@ sealed interface HttpBody {
 
         private var decompressedCache: ByteArray? = null
 
-        override suspend fun bytes(): ByteArray {
-            return decompressedCache ?: decompressor(compressedData, encoding).also {
+        override suspend fun bytes(): ByteArray =
+            decompressedCache ?: decompressor(compressedData, encoding).also {
                 decompressedCache = it
             }
-        }
 
         override fun equals(other: Any?): Boolean {
             if (this === other) return true

@@ -1,7 +1,6 @@
 package com.ditchoom.buffer.pool
 
 import com.ditchoom.buffer.ByteOrder
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 
@@ -39,7 +38,9 @@ interface BufferPool {
  * A buffer that has been acquired from a pool.
  * Must be released back to the pool when done.
  */
-interface PooledBuffer : ReadBuffer, WriteBuffer {
+interface PooledBuffer :
+    ReadBuffer,
+    WriteBuffer {
     val capacity: Int
     val byteOrder: ByteOrder
 
@@ -64,7 +65,7 @@ data class PoolStats(
 /**
  * Creates a safe buffer pool using PlatformBuffer.
  */
-fun SafeBufferPool(
+fun createSafeBufferPool(
     initialPoolSize: Int = 16,
     maxPoolSize: Int = 64,
     defaultBufferSize: Int = 8192,
@@ -75,7 +76,7 @@ fun SafeBufferPool(
  * Creates an unsafe buffer pool using UnsafeBuffer for maximum performance.
  * Buffers MUST be released back to the pool to avoid memory leaks.
  */
-fun UnsafeBufferPool(
+fun createUnsafeBufferPool(
     initialPoolSize: Int = 16,
     maxPoolSize: Int = 64,
     defaultBufferSize: Int = 8192,

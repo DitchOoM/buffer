@@ -4,7 +4,6 @@ package com.ditchoom.buffer
 
 import kotlin.test.Test
 import kotlin.time.measureTime
-import kotlin.wasm.unsafe.withScopedMemoryAllocator
 
 /**
  * Compares WasmNativeUnsafeBuffer (Pointer-based) vs DefaultUnsafeBuffer (ByteArray-based)
@@ -25,22 +24,24 @@ class WasmBufferComparisonTest {
         }
 
         // WasmNativeUnsafeBuffer (Pointer-based with Long chunking)
-        val pointerTime = measureTime {
-            repeat(iterations) {
-                withUnsafeBuffer(bufferSize) { buf ->
-                    buf.writeBytes(testData)
+        val pointerTime =
+            measureTime {
+                repeat(iterations) {
+                    withUnsafeBuffer(bufferSize) { buf ->
+                        buf.writeBytes(testData)
+                    }
                 }
             }
-        }
 
         // DefaultUnsafeBuffer (ByteArray-based with copyInto)
-        val byteArrayTime = measureTime {
-            repeat(iterations) {
-                DefaultUnsafeBuffer.withBuffer(bufferSize) { buf ->
-                    buf.writeBytes(testData)
+        val byteArrayTime =
+            measureTime {
+                repeat(iterations) {
+                    DefaultUnsafeBuffer.withBuffer(bufferSize) { buf ->
+                        buf.writeBytes(testData)
+                    }
                 }
             }
-        }
 
         val speedup = pointerTime.inWholeNanoseconds.toDouble() / byteArrayTime.inWholeNanoseconds
         println("=== WASM ByteArray Write Comparison ($iterations iters, $bufferSize bytes) ===")
@@ -68,26 +69,28 @@ class WasmBufferComparisonTest {
         }
 
         // WasmNativeUnsafeBuffer
-        val pointerTime = measureTime {
-            repeat(iterations) {
-                withUnsafeBuffer(bufferSize) { buf ->
-                    buf.writeBytes(testData)
-                    buf.resetForRead()
-                    buf.readByteArray(bufferSize)
+        val pointerTime =
+            measureTime {
+                repeat(iterations) {
+                    withUnsafeBuffer(bufferSize) { buf ->
+                        buf.writeBytes(testData)
+                        buf.resetForRead()
+                        buf.readByteArray(bufferSize)
+                    }
                 }
             }
-        }
 
         // DefaultUnsafeBuffer
-        val byteArrayTime = measureTime {
-            repeat(iterations) {
-                DefaultUnsafeBuffer.withBuffer(bufferSize) { buf ->
-                    buf.writeBytes(testData)
-                    buf.resetForRead()
-                    buf.readByteArray(bufferSize)
+        val byteArrayTime =
+            measureTime {
+                repeat(iterations) {
+                    DefaultUnsafeBuffer.withBuffer(bufferSize) { buf ->
+                        buf.writeBytes(testData)
+                        buf.resetForRead()
+                        buf.readByteArray(bufferSize)
+                    }
                 }
             }
-        }
 
         val speedup = pointerTime.inWholeNanoseconds.toDouble() / byteArrayTime.inWholeNanoseconds
         println("=== WASM ByteArray Read Comparison ($iterations iters, $bufferSize bytes) ===")
@@ -111,22 +114,24 @@ class WasmBufferComparisonTest {
         }
 
         // WasmNativeUnsafeBuffer
-        val pointerTime = measureTime {
-            repeat(iterations) {
-                withUnsafeBuffer(bufferSize) { buf ->
-                    repeat(intCount) { i -> buf.writeInt(i) }
+        val pointerTime =
+            measureTime {
+                repeat(iterations) {
+                    withUnsafeBuffer(bufferSize) { buf ->
+                        repeat(intCount) { i -> buf.writeInt(i) }
+                    }
                 }
             }
-        }
 
         // DefaultUnsafeBuffer
-        val byteArrayTime = measureTime {
-            repeat(iterations) {
-                DefaultUnsafeBuffer.withBuffer(bufferSize) { buf ->
-                    repeat(intCount) { i -> buf.writeInt(i) }
+        val byteArrayTime =
+            measureTime {
+                repeat(iterations) {
+                    DefaultUnsafeBuffer.withBuffer(bufferSize) { buf ->
+                        repeat(intCount) { i -> buf.writeInt(i) }
+                    }
                 }
             }
-        }
 
         val speedup = pointerTime.inWholeNanoseconds.toDouble() / byteArrayTime.inWholeNanoseconds
         println("=== WASM Int Write Comparison ($iterations iters, $intCount ints) ===")
@@ -148,46 +153,48 @@ class WasmBufferComparisonTest {
         }
 
         // WasmNativeUnsafeBuffer
-        val pointerTime = measureTime {
-            repeat(iterations) {
-                withUnsafeBuffer(bufferSize) { buf ->
-                    repeat(10) {
-                        buf.writeInt(1)
-                        buf.writeLong(2L)
-                        buf.writeShort(3)
-                        buf.writeByte(4)
-                    }
-                    buf.resetForRead()
-                    repeat(10) {
-                        buf.readInt()
-                        buf.readLong()
-                        buf.readShort()
-                        buf.readByte()
+        val pointerTime =
+            measureTime {
+                repeat(iterations) {
+                    withUnsafeBuffer(bufferSize) { buf ->
+                        repeat(10) {
+                            buf.writeInt(1)
+                            buf.writeLong(2L)
+                            buf.writeShort(3)
+                            buf.writeByte(4)
+                        }
+                        buf.resetForRead()
+                        repeat(10) {
+                            buf.readInt()
+                            buf.readLong()
+                            buf.readShort()
+                            buf.readByte()
+                        }
                     }
                 }
             }
-        }
 
         // DefaultUnsafeBuffer
-        val byteArrayTime = measureTime {
-            repeat(iterations) {
-                DefaultUnsafeBuffer.withBuffer(bufferSize) { buf ->
-                    repeat(10) {
-                        buf.writeInt(1)
-                        buf.writeLong(2L)
-                        buf.writeShort(3)
-                        buf.writeByte(4)
-                    }
-                    buf.resetForRead()
-                    repeat(10) {
-                        buf.readInt()
-                        buf.readLong()
-                        buf.readShort()
-                        buf.readByte()
+        val byteArrayTime =
+            measureTime {
+                repeat(iterations) {
+                    DefaultUnsafeBuffer.withBuffer(bufferSize) { buf ->
+                        repeat(10) {
+                            buf.writeInt(1)
+                            buf.writeLong(2L)
+                            buf.writeShort(3)
+                            buf.writeByte(4)
+                        }
+                        buf.resetForRead()
+                        repeat(10) {
+                            buf.readInt()
+                            buf.readLong()
+                            buf.readShort()
+                            buf.readByte()
+                        }
                     }
                 }
             }
-        }
 
         val speedup = pointerTime.inWholeNanoseconds.toDouble() / byteArrayTime.inWholeNanoseconds
         println("=== WASM Mixed Ops Comparison ($iterations iters) ===")
