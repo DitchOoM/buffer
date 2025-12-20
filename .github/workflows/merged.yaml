@@ -37,6 +37,21 @@ jobs:
           restore-keys: konan-${{ runner.os }}-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v2
+      - name: Get version (Major)
+        if:  ${{ contains(github.event.pull_request.labels.*.name, 'major') }}
+        id: version_major
+        run: echo "version=$(./gradlew -q nextVersion -PincrementMajor=true)" >> $GITHUB_OUTPUT
+      - name: Get version (Minor)
+        if:  ${{ contains(github.event.pull_request.labels.*.name, 'minor') }}
+        id: version_minor
+        run: echo "version=$(./gradlew -q nextVersion -PincrementMinor=true)" >> $GITHUB_OUTPUT
+      - name: Get version (Patch)
+        if:  ${{ !contains(github.event.pull_request.labels.*.name, 'major') && !contains(github.event.pull_request.labels.*.name, 'minor') }}
+        id: version_patch
+        run: echo "version=$(./gradlew -q nextVersion)" >> $GITHUB_OUTPUT
+      - name: Set version output
+        id: version
+        run: echo "version=${{ steps.version_major.outputs.version }}${{ steps.version_minor.outputs.version }}${{ steps.version_patch.outputs.version }}" >> $GITHUB_OUTPUT
       - name: Test and deploy with Gradle Major
         if:  ${{ contains(github.event.pull_request.labels.*.name, 'major') }}
         run: ./gradlew check publishAndReleaseToMavenCentral --no-configuration-cache -PincrementMajor=true
@@ -46,9 +61,6 @@ jobs:
       - name: Test and deploy with Gradle Patch
         if:  ${{ !contains(github.event.pull_request.labels.*.name, 'major') && !contains(github.event.pull_request.labels.*.name, 'minor') }}
         run: ./gradlew check publishAndReleaseToMavenCentral --no-configuration-cache
-      - name: Get version
-        id: version
-        run: echo "version=$(./gradlew -q nextVersion)" >> $GITHUB_OUTPUT
       - name: Create tag and release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
