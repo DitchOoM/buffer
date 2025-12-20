@@ -20,6 +20,7 @@ actual fun PlatformBuffer.Companion.allocate(
         AllocationZone.Direct,
         -> JvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
 
+        AllocationZone.Unsafe -> UnsafeBuffer.allocate(size, byteOrder)
         is AllocationZone.Custom -> zone.allocator(size)
     }
 }

@@ -5,6 +5,7 @@ bin
 .gradle
 *.swp
 .project
+.claude/
 
 kotlinx-io-native/repo/
 .kotlin/

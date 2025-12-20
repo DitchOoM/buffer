@@ -8,6 +8,7 @@ actual fun PlatformBuffer.Companion.allocate(
     if (zone is AllocationZone.Custom) {
         return zone.allocator(size)
     }
+    // Unsafe not supported on Linux native, fall through to default allocation
     return NativeBuffer(ByteArray(size), byteOrder = byteOrder)
 }
 

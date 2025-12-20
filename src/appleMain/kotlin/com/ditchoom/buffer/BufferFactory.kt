@@ -15,6 +15,7 @@ actual fun PlatformBuffer.Companion.allocate(
     if (zone is AllocationZone.Custom) {
         return zone.allocator(size)
     }
+    // Unsafe not supported on Apple platforms, fall through to default allocation
 
     @OptIn(UnsafeNumber::class)
     return MutableDataBuffer(NSMutableData.create(length = size.convert())!!, byteOrder = byteOrder)

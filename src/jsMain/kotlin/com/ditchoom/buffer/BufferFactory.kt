@@ -17,6 +17,7 @@ actual fun PlatformBuffer.Companion.allocate(
     if (zone is AllocationZone.Custom) {
         return zone.allocator(size)
     }
+    // Unsafe not supported on JS, fall through to default allocation
     val sharedArrayBuffer =
         try {
             if (zone is AllocationZone.SharedMemory) {
