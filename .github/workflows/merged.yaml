@@ -1,8 +1,6 @@
 name: "Build Test and Deploy"
 on:
   pull_request_target:
-    paths-ignore:
-      - '*.md'
     branches: [ main ]
     types:
       - closed
@@ -11,9 +9,55 @@ permissions:
   contents: write
 
 jobs:
+  check-release:
+    name: Check if release is needed
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for skip-release label or non-code changes only
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Check for skip-release label
+          if ${{ contains(github.event.pull_request.labels.*.name, 'skip-release') }}; then
+            echo "skip-release label found, skipping release"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Get list of changed files
+          changed_files=$(gh pr diff ${{ github.event.pull_request.number }} --name-only)
+
+          # Check if all changed files are non-code (CI, docs, config)
+          should_release=true
+          for file in $changed_files; do
+            case "$file" in
+              .github/*|*.md|.gitignore|.editorconfig|CLAUDE.md|LICENSE|*.txt)
+                # Non-code file, continue checking
+                ;;
+              *)
+                # Code file found, should release
+                echo "Code file changed: $file"
+                echo "should_release=true" >> $GITHUB_OUTPUT
+                exit 0
+                ;;
+            esac
+          done
+
+          # Only non-code files changed
+          echo "Only non-code files changed, skipping release"
+          echo "should_release=false" >> $GITHUB_OUTPUT
+
   macos:
     name: MacOS Build & Upload artifacts to sonatype
-    if: github.event.pull_request.merged == true
+    needs: check-release
+    if: needs.check-release.outputs.should_release == 'true'
     runs-on: macos-latest
     env:
       ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
