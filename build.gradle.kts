@@ -13,6 +13,10 @@ plugins {
     signing
 }
 
+allOpen {
+    annotation("org.openjdk.jmh.annotations.State")
+}
+
 apply(from = "gradle/setup.gradle.kts")
 
 group = "com.ditchoom"
@@ -61,21 +65,18 @@ kotlin {
         tvosSimulatorArm64()
         tvosX64()
     } else {
-        val osName = System.getProperty("os.name")
-        if (osName == "Mac OS X") {
-            val osArch = System.getProperty("os.arch")
-            if (osArch == "aarch64") {
-                macosArm64()
-            } else {
-                macosX64()
-            }
-        }
+        macosArm64()
+        macosX64()
+        linuxX64()
+        linuxArm64()
     }
     applyDefaultHierarchyTemplate()
     sourceSets {
         commonTest.dependencies {
             implementation(kotlin("test"))
+            implementation(libs.kotlinx.benchmark.runtime)
         }
+
         androidMain.dependencies {
             implementation(libs.kotlinx.coroutines.core)
         }
@@ -87,6 +88,7 @@ kotlin {
                 implementation(libs.androidx.test.rules)
                 implementation(libs.androidx.test.core.ktx)
                 implementation(libs.androidx.test.ext.junit)
+                implementation(libs.androidx.benchmark.junit4)
             }
         }
 
@@ -195,6 +197,23 @@ ktlint {
     android.set(true)
 }
 
-tasks.create("nextVersion") {
-    println(getNextVersion(false))
+tasks.register("nextVersion") {
+    doLast {
+        println(getNextVersion(false))
+    }
+}
+
+benchmark {
+    // Define targets for all platforms
+    targets {
+        register("jvmTest")
+        register("jsTest")
+        register("wasmJsTest")
+        // macOS targets (ARM and Intel)
+        register("macosArm64Test")
+        register("macosX64Test")
+        // Linux targets (ARM and Intel)
+        register("linuxArm64Test")
+        register("linuxX64Test")
+    }
 }
