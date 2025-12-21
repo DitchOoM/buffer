@@ -1,3 +1,5 @@
+@file:JvmName("CompressionJvm")
+
 package com.ditchoom.buffer.compression
 
 import java.io.ByteArrayInputStream

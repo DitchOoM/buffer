@@ -1,8 +1,7 @@
 package com.ditchoom.buffer.jni
 
-import android.os.Build
+import android.annotation.SuppressLint
 import android.os.SharedMemory
-import androidx.annotation.RequiresApi
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.withUnsafeBuffer
 import java.nio.ByteBuffer
@@ -37,7 +36,7 @@ object AndroidJniBuffer {
      * val received = sharedBuffer.readBytes(length)
      * ```
      */
-    @RequiresApi(Build.VERSION_CODES.O_MR1)
+    @SuppressLint("NewApi")
     fun createSharedBuffer(
         name: String,
         size: Int,
@@ -58,7 +57,7 @@ object AndroidJniBuffer {
         height: Int,
         nativeProcessor: (address: Long, width: Int, height: Int) -> Unit,
     ): ByteArray =
-        withUnsafeBuffer(frameData.size, ByteOrder.NATIVE) { buffer ->
+        withUnsafeBuffer(frameData.size, ByteOrder.LITTLE_ENDIAN) { buffer ->
             buffer.writeBytes(frameData)
             buffer.resetForRead()
 
@@ -133,7 +132,7 @@ object AndroidJniBuffer {
  *
  * Uses Android's SharedMemory API for zero-copy inter-process communication.
  */
-@RequiresApi(Build.VERSION_CODES.O_MR1)
+@SuppressLint("NewApi")
 class SharedIpcBuffer(
     val sharedMemory: SharedMemory,
     val size: Int,

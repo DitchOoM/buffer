@@ -1,11 +1,11 @@
 package com.ditchoom.buffer.protocol.http
 
+import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.AccumulatingBufferReader
 import com.ditchoom.buffer.stream.BufferChunk
 import com.ditchoom.buffer.stream.BufferStream
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
 
 /**
  * High-performance HTTP parser using zero-copy buffer operations.
@@ -15,69 +15,70 @@ import kotlinx.coroutines.flow.flow
  */
 class HttpParser(
     private val pool: BufferPool,
-    private val decompressor: (suspend (ByteArray, String) -> ByteArray)? = null,
+    private val decompressor: ((ReadBuffer, String) -> ReadBuffer)? = null,
 ) {
     /**
      * Parses HTTP requests from a buffer stream.
      */
-    fun parseRequests(stream: BufferStream): Flow<HttpRequest> =
-        flow {
-            val reader = AccumulatingBufferReader(pool)
+    fun parseRequests(
+        stream: BufferStream,
+        handler: (HttpRequest) -> Unit,
+    ) {
+        val reader = AccumulatingBufferReader(pool)
 
-            try {
-                stream.chunks.collect { chunk ->
-                    reader.append(chunk)
+        try {
+            stream.forEachChunk { chunk ->
+                reader.append(chunk)
 
-                    while (reader.available() > 0) {
-                        val request = tryParseRequest(reader)
-                        if (request != null) {
-                            emit(request)
-                            reader.compact()
-                        } else {
-                            break // Need more data
-                        }
+                while (reader.available() > 0) {
+                    val request = tryParseRequest(reader)
+                    if (request != null) {
+                        handler(request)
+                        reader.compact()
+                    } else {
+                        break // Need more data
                     }
                 }
-            } finally {
-                reader.release()
             }
+        } finally {
+            reader.release()
         }
+    }
 
     /**
      * Parses HTTP responses from a buffer stream.
      */
-    fun parseResponses(stream: BufferStream): Flow<HttpResponse> =
-        flow {
-            val reader = AccumulatingBufferReader(pool)
+    fun parseResponses(
+        stream: BufferStream,
+        handler: (HttpResponse) -> Unit,
+    ) {
+        val reader = AccumulatingBufferReader(pool)
 
-            try {
-                stream.chunks.collect { chunk ->
-                    reader.append(chunk)
+        try {
+            stream.forEachChunk { chunk ->
+                reader.append(chunk)
 
-                    while (reader.available() > 0) {
-                        val response = tryParseResponse(reader)
-                        if (response != null) {
-                            emit(response)
-                            reader.compact()
-                        } else {
-                            break // Need more data
-                        }
+                while (reader.available() > 0) {
+                    val response = tryParseResponse(reader)
+                    if (response != null) {
+                        handler(response)
+                        reader.compact()
+                    } else {
+                        break // Need more data
                     }
                 }
-            } finally {
-                reader.release()
             }
+        } finally {
+            reader.release()
         }
+    }
 
     /**
-     * Parses a single request from a byte array (convenience method).
+     * Parses a single request from a ReadBuffer.
      */
-    suspend fun parseRequest(data: ByteArray): HttpRequest {
+    fun parseRequest(buffer: ReadBuffer): HttpRequest {
         val reader = AccumulatingBufferReader(pool)
         try {
-            val buffer = pool.acquire(data.size)
-            buffer.writeBytes(data)
-            buffer.resetForRead()
             reader.append(BufferChunk(buffer, true, 0))
             return tryParseRequest(reader)
                 ?: throw HttpParseException("Incomplete HTTP request")
@@ -87,14 +88,11 @@ class HttpParser(
     }
 
     /**
-     * Parses a single response from a byte array (convenience method).
+     * Parses a single response from a ReadBuffer.
      */
-    suspend fun parseResponse(data: ByteArray): HttpResponse {
+    fun parseResponse(buffer: ReadBuffer): HttpResponse {
         val reader = AccumulatingBufferReader(pool)
         try {
-            val buffer = pool.acquire(data.size)
-            buffer.writeBytes(data)
-            buffer.resetForRead()
             reader.append(BufferChunk(buffer, true, 0))
             return tryParseResponse(reader)
                 ?: throw HttpParseException("Incomplete HTTP response")
@@ -103,7 +101,7 @@ class HttpParser(
         }
     }
 
-    private suspend fun tryParseRequest(reader: AccumulatingBufferReader): HttpRequest? {
+    private fun tryParseRequest(reader: AccumulatingBufferReader): HttpRequest? {
         // Find end of headers (double CRLF)
         val headerEnd = findHeaderEnd(reader) ?: return null
 
@@ -125,7 +123,7 @@ class HttpParser(
         return HttpRequest(method, path, version, headers, body)
     }
 
-    private suspend fun tryParseResponse(reader: AccumulatingBufferReader): HttpResponse? {
+    private fun tryParseResponse(reader: AccumulatingBufferReader): HttpResponse? {
         // Find end of headers
         val headerEnd = findHeaderEnd(reader) ?: return null
 
@@ -153,12 +151,12 @@ class HttpParser(
         val available = reader.available()
         if (available < 4) return null
 
-        val data = reader.peek(available)
-        for (i in 0 until data.size - 3) {
-            if (data[i] == CR &&
-                data[i + 1] == LF &&
-                data[i + 2] == CR &&
-                data[i + 3] == LF
+        // Scan for double CRLF pattern without creating ByteArray
+        for (i in 0 until available - 3) {
+            if (reader.peekByte(i) == CR &&
+                reader.peekByte(i + 1) == LF &&
+                reader.peekByte(i + 2) == CR &&
+                reader.peekByte(i + 3) == LF
             ) {
                 return i + 4
             }
@@ -171,7 +169,7 @@ class HttpParser(
         while (reader.available() > 0) {
             val b = reader.readByte()
             if (b == CR) {
-                if (reader.available() > 0 && reader.peek(1)[0] == LF) {
+                if (reader.available() > 0 && reader.peekByte() == LF) {
                     reader.readByte() // consume LF
                 }
                 return builder.toString()
@@ -202,7 +200,7 @@ class HttpParser(
         return builder.build()
     }
 
-    private suspend fun parseBody(
+    private fun parseBody(
         reader: AccumulatingBufferReader,
         headers: HttpHeaders,
     ): HttpBody {
@@ -221,7 +219,8 @@ class HttpParser(
                         // Not enough data yet
                         HttpBody.Empty
                     } else {
-                        HttpBody.Bytes(reader.readBytes(contentLength.toInt()))
+                        // Use zero-copy slice for the body
+                        HttpBody.Buffered(reader.readBuffer(contentLength.toInt()), contentLength)
                     }
                 }
 
@@ -230,15 +229,14 @@ class HttpParser(
 
         // Handle compression
         return if (contentEncoding != null && rawBody != HttpBody.Empty && decompressor != null) {
-            val data = rawBody.bytes()
-            HttpBody.Compressed(data, contentEncoding, decompressor)
+            HttpBody.Compressed(rawBody.asBuffer(), contentEncoding, decompressor)
         } else {
             rawBody
         }
     }
 
     private fun parseChunkedBody(reader: AccumulatingBufferReader): HttpBody {
-        val chunks = mutableListOf<ByteArray>()
+        val chunks = mutableListOf<ReadBuffer>()
 
         while (reader.available() > 0) {
             val sizeLine = readLine(reader) ?: break
@@ -255,7 +253,8 @@ class HttpParser(
                 break
             }
 
-            chunks.add(reader.readBytes(chunkSize))
+            // Use zero-copy slice for each chunk
+            chunks.add(reader.readBuffer(chunkSize))
             readLine(reader) // Skip trailing CRLF after chunk
         }
 
@@ -277,72 +276,123 @@ class HttpParseException(
 ) : Exception(message, cause)
 
 /**
- * Serializes HTTP messages back to bytes.
+ * Serializes HTTP messages to buffers.
  */
 object HttpSerializer {
-    fun serialize(request: HttpRequest): ByteArray {
-        val builder = StringBuilder()
+    private val CRLF = "\r\n"
+    private val HEADER_SEP = ": "
+
+    /**
+     * Serializes an HTTP request to a WriteBuffer.
+     * Returns the number of bytes written.
+     */
+    fun serializeTo(
+        request: HttpRequest,
+        buffer: WriteBuffer,
+    ): Int {
+        val startPos = buffer.position()
 
         // Request line
-        builder.append(request.method.name)
-        builder.append(' ')
-        builder.append(request.path)
-        builder.append(' ')
-        builder.append(request.version)
-        builder.append("\r\n")
+        buffer.writeString(request.method.name)
+        buffer.writeString(" ")
+        buffer.writeString(request.path)
+        buffer.writeString(" ")
+        buffer.writeString(request.version.toString())
+        buffer.writeString(CRLF)
 
         // Headers
         for ((name, value) in request.headers) {
-            builder.append(name)
-            builder.append(": ")
-            builder.append(value)
-            builder.append("\r\n")
+            buffer.writeString(name)
+            buffer.writeString(HEADER_SEP)
+            buffer.writeString(value)
+            buffer.writeString(CRLF)
         }
-        builder.append("\r\n")
+        buffer.writeString(CRLF)
 
-        val headerBytes = builder.toString().encodeToByteArray()
-
-        // Body (blocking call - use for small bodies only)
-        return if (request.body == HttpBody.Empty) {
-            headerBytes
-        } else {
-            // For proper async, use serializeAsync
-            headerBytes
+        // Body
+        if (request.body != HttpBody.Empty) {
+            val bodyBuffer = request.body.asBuffer()
+            buffer.write(bodyBuffer)
         }
+
+        return buffer.position() - startPos
     }
 
-    fun serialize(response: HttpResponse): ByteArray {
-        val builder = StringBuilder()
+    /**
+     * Serializes an HTTP response to a WriteBuffer.
+     * Returns the number of bytes written.
+     */
+    fun serializeTo(
+        response: HttpResponse,
+        buffer: WriteBuffer,
+    ): Int {
+        val startPos = buffer.position()
 
         // Status line
-        builder.append(response.version)
-        builder.append(' ')
-        builder.append(response.statusCode)
-        builder.append(' ')
-        builder.append(response.statusText)
-        builder.append("\r\n")
+        buffer.writeString(response.version.toString())
+        buffer.writeString(" ")
+        buffer.writeString(response.statusCode.toString())
+        buffer.writeString(" ")
+        buffer.writeString(response.statusText)
+        buffer.writeString(CRLF)
 
         // Headers
         for ((name, value) in response.headers) {
-            builder.append(name)
-            builder.append(": ")
-            builder.append(value)
-            builder.append("\r\n")
+            buffer.writeString(name)
+            buffer.writeString(HEADER_SEP)
+            buffer.writeString(value)
+            buffer.writeString(CRLF)
         }
-        builder.append("\r\n")
+        buffer.writeString(CRLF)
 
-        return builder.toString().encodeToByteArray()
+        // Body
+        if (response.body != HttpBody.Empty) {
+            val bodyBuffer = response.body.asBuffer()
+            buffer.write(bodyBuffer)
+        }
+
+        return buffer.position() - startPos
     }
 
-    suspend fun serializeWithBody(request: HttpRequest): ByteArray {
-        val headers = serialize(request)
-        val body = request.body.bytes()
-        return headers + body
+    /**
+     * Calculates the size needed to serialize an HTTP request.
+     */
+    fun calculateSize(request: HttpRequest): Int {
+        var size = 0
+        size += request.method.name.length + 1 // method + space
+        size += request.path.length + 1 // path + space
+        size += request.version.toString().length + 2 // version + CRLF
+
+        for ((name, value) in request.headers) {
+            size += name.length + 2 + value.length + 2 // name: value\r\n
+        }
+        size += 2 // Final CRLF
+
+        if (request.body != HttpBody.Empty) {
+            size += request.body.length.toInt()
+        }
+
+        return size
     }
 
-    suspend fun serializeWithBody(response: HttpResponse): ByteArray {
-        val headers = serialize(response)
-        val body = response.body.bytes()
-        return headers + body
+    /**
+     * Calculates the size needed to serialize an HTTP response.
+     */
+    fun calculateSize(response: HttpResponse): Int {
+        var size = 0
+        size += response.version.toString().length + 1 // version + space
+        size += response.statusCode.toString().length + 1 // code + space
+        size += response.statusText.length + 2 // text + CRLF
+
+        for ((name, value) in response.headers) {
+            size += name.length + 2 + value.length + 2 // name: value\r\n
+        }
+        size += 2 // Final CRLF
+
+        if (response.body != HttpBody.Empty) {
+            size += response.body.length.toInt()
+        }
+
+        return size
     }
 }

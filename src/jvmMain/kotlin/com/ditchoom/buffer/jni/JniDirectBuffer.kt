@@ -1,7 +1,7 @@
 package com.ditchoom.buffer.jni
 
-import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.UnsafeBuffer
+import com.ditchoom.buffer.UnsafeMemory
 import com.ditchoom.buffer.withUnsafeBuffer
 import java.nio.ByteBuffer
 
@@ -40,7 +40,7 @@ object JniDirectBuffer {
         data: ByteArray,
         processor: (address: Long, size: Int) -> Unit,
     ): ByteArray =
-        withUnsafeBuffer(data.size, ByteOrder.NATIVE) { buffer ->
+        withUnsafeBuffer(data.size, UnsafeMemory.nativeByteOrder) { buffer ->
             // Write data to unsafe buffer
             buffer.writeBytes(data)
             buffer.resetForRead()
@@ -67,7 +67,7 @@ object JniDirectBuffer {
         size: Int,
         block: (buffer: UnsafeBuffer, address: Long) -> R,
     ): R =
-        withUnsafeBuffer(size, ByteOrder.NATIVE) { buffer ->
+        withUnsafeBuffer(size, UnsafeMemory.nativeByteOrder) { buffer ->
             val address = getBufferAddress(buffer)
             block(buffer, address)
         }

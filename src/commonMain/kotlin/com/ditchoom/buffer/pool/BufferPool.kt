@@ -42,7 +42,7 @@ interface PooledBuffer :
     ReadBuffer,
     WriteBuffer {
     val capacity: Int
-    val byteOrder: ByteOrder
+    override val byteOrder: ByteOrder
 
     /**
      * Returns this buffer to its pool.

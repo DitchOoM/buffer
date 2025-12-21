@@ -14,10 +14,17 @@ actual fun PlatformBuffer.Companion.allocate(
                 "Use UnsafeBuffer.allocate() or UnsafeBuffer.withBuffer() directly.",
         )
     }
-    return NativeBuffer(ByteArray(size), byteOrder = byteOrder)
+    // Use native memory allocation
+    return NativeBuffer.allocate(size, byteOrder)
 }
 
 actual fun PlatformBuffer.Companion.wrap(
     array: ByteArray,
     byteOrder: ByteOrder,
-): PlatformBuffer = NativeBuffer(array, byteOrder = byteOrder)
+): PlatformBuffer {
+    // Create a native buffer and copy the data
+    val buffer = NativeBuffer.allocate(array.size, byteOrder)
+    buffer.writeBytes(array)
+    buffer.resetForRead()
+    return buffer
+}

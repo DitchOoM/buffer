@@ -1,14 +1,16 @@
 package com.ditchoom.buffer.protocol.websocket
 
+import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.WriteBuffer
+import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.pool.BufferPool
-import com.ditchoom.buffer.pool.PooledBuffer
 import com.ditchoom.buffer.stream.AccumulatingBufferReader
+import com.ditchoom.buffer.stream.BufferChunk
 import com.ditchoom.buffer.stream.BufferStream
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
 
 /**
- * High-performance WebSocket frame parser.
+ * High-performance WebSocket frame parser using zero-copy buffer operations.
  *
  * Implements RFC 6455 frame parsing with support for:
  * - Fragmented messages
@@ -17,47 +19,43 @@ import kotlinx.coroutines.flow.flow
  */
 class WebSocketParser(
     private val pool: BufferPool,
-    private val decompressor: ((ByteArray) -> ByteArray)? = null,
+    private val decompressor: ((ReadBuffer) -> ReadBuffer)? = null,
 ) {
     /**
      * Parses WebSocket frames from a buffer stream.
      */
-    fun parseFrames(stream: BufferStream): Flow<WebSocketFrame> =
-        flow {
-            val reader = AccumulatingBufferReader(pool)
+    fun parseFrames(
+        stream: BufferStream,
+        handler: (WebSocketFrame) -> Unit,
+    ) {
+        val reader = AccumulatingBufferReader(pool)
 
-            try {
-                stream.chunks.collect { chunk ->
-                    reader.append(chunk)
+        try {
+            stream.forEachChunk { chunk ->
+                reader.append(chunk)
 
-                    while (reader.available() >= 2) {
-                        val frame = tryParseFrame(reader)
-                        if (frame != null) {
-                            emit(frame)
-                            reader.compact()
-                        } else {
-                            break // Need more data
-                        }
+                while (reader.available() >= 2) {
+                    val frame = tryParseFrame(reader)
+                    if (frame != null) {
+                        handler(frame)
+                        reader.compact()
+                    } else {
+                        break // Need more data
                     }
                 }
-            } finally {
-                reader.release()
             }
+        } finally {
+            reader.release()
         }
+    }
 
     /**
-     * Parses a single frame from a byte array.
+     * Parses a single frame from a ReadBuffer.
      */
-    fun parseFrame(data: ByteArray): WebSocketFrame {
+    fun parseFrame(buffer: ReadBuffer): WebSocketFrame {
         val reader = AccumulatingBufferReader(pool)
         try {
-            val buffer = pool.acquire(data.size)
-            buffer.writeBytes(data)
-            buffer.resetForRead()
-            reader.append(
-                com.ditchoom.buffer.stream
-                    .BufferChunk(buffer, true, 0),
-            )
+            reader.append(BufferChunk(buffer, true, 0))
             return tryParseFrame(reader)
                 ?: throw WebSocketParseException("Incomplete WebSocket frame")
         } finally {
@@ -68,9 +66,9 @@ class WebSocketParser(
     private fun tryParseFrame(reader: AccumulatingBufferReader): WebSocketFrame? {
         if (reader.available() < 2) return null
 
-        // Read first two bytes
-        val byte1 = reader.peek(1)[0].toInt() and 0xFF
-        val byte2 = reader.peek(2)[1].toInt() and 0xFF
+        // Peek at first two bytes without consuming
+        val byte1 = reader.peekByte(0).toInt() and 0xFF
+        val byte2 = reader.peekByte(1).toInt() and 0xFF
 
         val fin = (byte1 and 0x80) != 0
         val rsv1 = (byte1 and 0x40) != 0
@@ -109,8 +107,10 @@ class WebSocketParser(
         payloadLen =
             when (payloadLen.toInt()) {
                 126 -> {
-                    ((reader.readByte().toInt() and 0xFF) shl 8) or
-                        (reader.readByte().toInt() and 0xFF).toLong()
+                    (
+                        ((reader.readByte().toInt() and 0xFF) shl 8) or
+                            (reader.readByte().toInt() and 0xFF)
+                    ).toLong()
                 }
 
                 127 -> {
@@ -124,38 +124,42 @@ class WebSocketParser(
                 else -> payloadLen
             }
 
-        // Read masking key
+        // Read masking key as buffer
         val maskingKey =
             if (masked) {
-                reader.readBytes(4)
+                val keyBuffer = reader.readBuffer(4)
+                byteArrayOf(
+                    keyBuffer.readByte(),
+                    keyBuffer.readByte(),
+                    keyBuffer.readByte(),
+                    keyBuffer.readByte(),
+                )
             } else {
                 null
             }
 
         // Check if we have full payload
         if (reader.available() < payloadLen.toInt()) {
-            // Can't rewind, so this is a problem - for now, return null
-            // In a real implementation, we'd need to track partial read state
             return null
         }
 
-        // Read payload
-        val rawPayload = reader.readBytes(payloadLen.toInt())
+        // Read payload as buffer
+        val rawPayloadBuffer = reader.readBuffer(payloadLen.toInt())
 
-        // Unmask if needed
+        // Unmask if needed - this requires creating a new buffer
         val unmaskedPayload =
             if (masked && maskingKey != null) {
-                unmask(rawPayload, maskingKey)
+                unmaskToBuffer(rawPayloadBuffer, maskingKey)
             } else {
-                rawPayload
+                rawPayloadBuffer
             }
 
         // Handle compression (rsv1 indicates per-message deflate)
         val payload =
-            if (rsv1 && decompressor != null && unmaskedPayload.isNotEmpty()) {
+            if (rsv1 && decompressor != null && unmaskedPayload.remaining() > 0) {
                 WebSocketPayload.Compressed(unmaskedPayload, decompressor)
             } else {
-                WebSocketPayload.Raw(unmaskedPayload)
+                WebSocketPayload.Buffered(unmaskedPayload, payloadLen)
             }
 
         // Create frame based on opcode
@@ -242,26 +246,31 @@ class WebSocketParser(
         }
     }
 
-    private fun unmask(
-        data: ByteArray,
+    private fun unmaskToBuffer(
+        data: ReadBuffer,
         maskingKey: ByteArray,
-    ): ByteArray {
-        val result = ByteArray(data.size)
-        for (i in data.indices) {
-            result[i] = (data[i].toInt() xor maskingKey[i % 4].toInt()).toByte()
+    ): ReadBuffer {
+        val size = data.remaining()
+        val result = PlatformBuffer.allocate(size)
+        for (i in 0 until size) {
+            val maskedByte = (data.readByte().toInt() xor maskingKey[i % 4].toInt()).toByte()
+            result.writeByte(maskedByte)
         }
+        result.resetForRead()
         return result
     }
 
-    private fun parseClosePayload(payload: ByteArray): Pair<WebSocketCloseCode, String> {
-        if (payload.size < 2) {
+    private fun parseClosePayload(payload: ReadBuffer): Pair<WebSocketCloseCode, String> {
+        if (payload.remaining() < 2) {
             return WebSocketCloseCode.NoStatusReceived to ""
         }
 
-        val code = ((payload[0].toInt() and 0xFF) shl 8) or (payload[1].toInt() and 0xFF)
+        val code =
+            ((payload.readByte().toInt() and 0xFF) shl 8) or
+                (payload.readByte().toInt() and 0xFF)
         val reason =
-            if (payload.size > 2) {
-                payload.copyOfRange(2, payload.size).decodeToString()
+            if (payload.remaining() > 0) {
+                payload.readString(payload.remaining())
             } else {
                 ""
             }
@@ -271,70 +280,86 @@ class WebSocketParser(
 }
 
 /**
- * Serializes WebSocket frames.
+ * Serializes WebSocket frames to buffers.
  */
 class WebSocketSerializer(
     private val pool: BufferPool,
-    private val compressor: ((ByteArray) -> ByteArray)? = null,
+    private val compressor: ((ReadBuffer) -> ReadBuffer)? = null,
 ) {
     /**
-     * Serializes a text frame.
+     * Serializes a text frame to a WriteBuffer.
+     * Returns the number of bytes written.
      */
-    fun createTextFrame(
+    fun serializeTextFrame(
         text: String,
+        buffer: WriteBuffer,
         masked: Boolean = false,
         compress: Boolean = false,
-    ): ByteArray {
-        val payload = text.encodeToByteArray()
-        return createFrame(WebSocketOpcode.Text, payload, masked, compress)
+    ): Int {
+        val textBuffer = PlatformBuffer.allocate(text.length * 4)
+        textBuffer.writeString(text)
+        textBuffer.resetForRead()
+        return serializeFrame(WebSocketOpcode.Text, textBuffer, buffer, masked, compress)
     }
 
     /**
-     * Serializes a binary frame.
+     * Serializes a binary frame to a WriteBuffer.
+     * Returns the number of bytes written.
      */
-    fun createBinaryFrame(
-        data: ByteArray,
+    fun serializeBinaryFrame(
+        data: ReadBuffer,
+        buffer: WriteBuffer,
         masked: Boolean = false,
         compress: Boolean = false,
-    ): ByteArray = createFrame(WebSocketOpcode.Binary, data, masked, compress)
+    ): Int = serializeFrame(WebSocketOpcode.Binary, data, buffer, masked, compress)
 
     /**
-     * Serializes a close frame.
+     * Serializes a close frame to a WriteBuffer.
+     * Returns the number of bytes written.
      */
-    fun createCloseFrame(
+    fun serializeCloseFrame(
         code: WebSocketCloseCode,
         reason: String = "",
+        buffer: WriteBuffer,
         masked: Boolean = false,
-    ): ByteArray {
-        val payload = ByteArray(2 + reason.length)
-        payload[0] = ((code.code shr 8) and 0xFF).toByte()
-        payload[1] = (code.code and 0xFF).toByte()
-        reason.encodeToByteArray().copyInto(payload, 2)
-        return createFrame(WebSocketOpcode.Close, payload, masked, compress = false)
+    ): Int {
+        val payloadBuffer = PlatformBuffer.allocate(2 + reason.length * 4)
+        payloadBuffer.writeByte(((code.code shr 8) and 0xFF).toByte())
+        payloadBuffer.writeByte((code.code and 0xFF).toByte())
+        payloadBuffer.writeString(reason)
+        payloadBuffer.resetForRead()
+        return serializeFrame(WebSocketOpcode.Close, payloadBuffer, buffer, masked, compress = false)
     }
 
     /**
-     * Serializes a ping frame.
+     * Serializes a ping frame to a WriteBuffer.
+     * Returns the number of bytes written.
      */
-    fun createPingFrame(
-        data: ByteArray = ByteArray(0),
+    fun serializePingFrame(
+        data: ReadBuffer = ReadBuffer.EMPTY_BUFFER,
+        buffer: WriteBuffer,
         masked: Boolean = false,
-    ): ByteArray = createFrame(WebSocketOpcode.Ping, data, masked, compress = false)
+    ): Int = serializeFrame(WebSocketOpcode.Ping, data, buffer, masked, compress = false)
 
     /**
-     * Serializes a pong frame.
+     * Serializes a pong frame to a WriteBuffer.
+     * Returns the number of bytes written.
      */
-    fun createPongFrame(
-        data: ByteArray = ByteArray(0),
+    fun serializePongFrame(
+        data: ReadBuffer = ReadBuffer.EMPTY_BUFFER,
+        buffer: WriteBuffer,
         masked: Boolean = false,
-    ): ByteArray = createFrame(WebSocketOpcode.Pong, data, masked, compress = false)
+    ): Int = serializeFrame(WebSocketOpcode.Pong, data, buffer, masked, compress = false)
 
-    private fun createFrame(
+    private fun serializeFrame(
         opcode: WebSocketOpcode,
-        payload: ByteArray,
+        payload: ReadBuffer,
+        buffer: WriteBuffer,
         masked: Boolean,
         compress: Boolean,
-    ): ByteArray {
+    ): Int {
+        val startPos = buffer.position()
+
         val finalPayload =
             if (compress && compressor != null) {
                 compressor.invoke(payload)
@@ -342,68 +367,53 @@ class WebSocketSerializer(
                 payload
             }
 
-        val payloadLen = finalPayload.size
+        val payloadLen = finalPayload.remaining()
         val rsv1 = compress && compressor != null
 
-        // Calculate frame size
-        val headerSize =
-            when {
-                payloadLen <= 125 -> 2
-                payloadLen <= 65535 -> 4
-                else -> 10
-            } + if (masked) 4 else 0
+        // Byte 1: FIN, RSV1-3, opcode
+        val byte1 =
+            0x80 or // FIN
+                (if (rsv1) 0x40 else 0) or
+                (opcode.value and 0x0F)
+        buffer.writeByte(byte1.toByte())
 
-        val frameSize = headerSize + payloadLen
-        val buffer = pool.acquire(frameSize)
-
-        try {
-            // Byte 1: FIN, RSV1-3, opcode
-            val byte1 =
-                0x80 or // FIN
-                    (if (rsv1) 0x40 else 0) or
-                    (opcode.value and 0x0F)
-            buffer.writeByte(byte1.toByte())
-
-            // Byte 2: MASK, payload length
-            val maskBit = if (masked) 0x80 else 0
-            when {
-                payloadLen <= 125 -> {
-                    buffer.writeByte((maskBit or payloadLen).toByte())
-                }
-
-                payloadLen <= 65535 -> {
-                    buffer.writeByte((maskBit or 126).toByte())
-                    buffer.writeByte(((payloadLen shr 8) and 0xFF).toByte())
-                    buffer.writeByte((payloadLen and 0xFF).toByte())
-                }
-
-                else -> {
-                    buffer.writeByte((maskBit or 127).toByte())
-                    for (i in 7 downTo 0) {
-                        buffer.writeByte(((payloadLen shr (i * 8)) and 0xFF).toByte())
-                    }
-                }
+        // Byte 2: MASK, payload length
+        val maskBit = if (masked) 0x80 else 0
+        when {
+            payloadLen <= 125 -> {
+                buffer.writeByte((maskBit or payloadLen).toByte())
             }
 
-            // Masking key and payload
-            if (masked) {
-                val maskingKey = generateMaskingKey()
-                buffer.writeBytes(maskingKey)
-
-                // Mask and write payload
-                for (i in finalPayload.indices) {
-                    val maskedByte = (finalPayload[i].toInt() xor maskingKey[i % 4].toInt()).toByte()
-                    buffer.writeByte(maskedByte)
-                }
-            } else {
-                buffer.writeBytes(finalPayload)
+            payloadLen <= 65535 -> {
+                buffer.writeByte((maskBit or 126).toByte())
+                buffer.writeByte(((payloadLen shr 8) and 0xFF).toByte())
+                buffer.writeByte((payloadLen and 0xFF).toByte())
             }
 
-            buffer.resetForRead()
-            return buffer.readByteArray(buffer.remaining())
-        } finally {
-            (buffer as PooledBuffer).release()
+            else -> {
+                buffer.writeByte((maskBit or 127).toByte())
+                for (i in 7 downTo 0) {
+                    buffer.writeByte(((payloadLen shr (i * 8)) and 0xFF).toByte())
+                }
+            }
         }
+
+        // Masking key and payload
+        if (masked) {
+            val maskingKey = generateMaskingKey()
+            buffer.writeBytes(maskingKey)
+
+            // Mask and write payload
+            for (i in 0 until payloadLen) {
+                val byte = finalPayload.readByte()
+                val maskedByte = (byte.toInt() xor maskingKey[i % 4].toInt()).toByte()
+                buffer.writeByte(maskedByte)
+            }
+        } else {
+            buffer.write(finalPayload)
+        }
+
+        return buffer.position() - startPos
     }
 
     private fun generateMaskingKey(): ByteArray =

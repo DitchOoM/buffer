@@ -6,7 +6,8 @@ import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
-import kotlin.concurrent.Volatile
+import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.withLock
 
 /**
  * Thread-safe buffer pool implementation using PlatformBuffer.
@@ -19,16 +20,9 @@ internal class SafeBufferPoolImpl(
 ) : BufferPool {
     private val pool = ArrayDeque<PlatformBuffer>(initialPoolSize)
 
-    @Volatile
     private var totalAllocations = 0L
-
-    @Volatile
     private var poolHits = 0L
-
-    @Volatile
     private var poolMisses = 0L
-
-    @Volatile
     private var peakPoolSize = 0
 
     override fun acquire(minSize: Int): PooledBuffer {
@@ -37,7 +31,7 @@ internal class SafeBufferPoolImpl(
 
         // Try to get from pool
         val buffer =
-            synchronized(pool) {
+            withLock(pool) {
                 pool.removeLastOrNull()
             }
 
@@ -56,7 +50,7 @@ internal class SafeBufferPoolImpl(
     override fun release(buffer: PooledBuffer) {
         if (buffer !is SafePooledBuffer) return
 
-        synchronized(pool) {
+        withLock(pool) {
             if (pool.size < maxPoolSize) {
                 buffer.inner.resetForWrite()
                 pool.addLast(buffer.inner)
@@ -78,7 +72,7 @@ internal class SafeBufferPoolImpl(
         )
 
     override fun clear() {
-        synchronized(pool) {
+        withLock(pool) {
             pool.clear()
         }
     }

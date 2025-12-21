@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.protocol.mqtt
 
+import com.ditchoom.buffer.ReadBuffer
+
 /**
  * MQTT packet model using sealed interfaces for exhaustive matching.
  *
@@ -121,7 +123,7 @@ data class MqttConnect(
     val willTopic: String?,
     val willPayload: MqttPayload?,
     val username: String?,
-    val password: ByteArray?,
+    val password: ReadBuffer?,
 ) : MqttPacket {
     override val packetType = MqttPacketType.Connect
 
@@ -551,61 +553,58 @@ data class MqttSubscription(
 )
 
 /**
- * MQTT payload with lazy evaluation and compression support.
+ * MQTT payload using zero-copy buffer operations.
  */
 sealed interface MqttPayload {
-    fun bytes(): ByteArray
+    /**
+     * Returns the payload as a ReadBuffer for zero-copy access.
+     */
+    fun asBuffer(): ReadBuffer
+
+    /**
+     * Returns the payload as a string (UTF-8).
+     */
+    fun text(): String {
+        val buffer = asBuffer()
+        return buffer.readString(buffer.remaining())
+    }
 
     val length: Int
     val isCompressed: Boolean
 
     data object Empty : MqttPayload {
-        override fun bytes() = ByteArray(0)
+        override fun asBuffer(): ReadBuffer = ReadBuffer.EMPTY_BUFFER
 
         override val length = 0
         override val isCompressed = false
     }
 
-    data class Raw(
-        private val data: ByteArray,
+    /**
+     * Payload backed by a buffer (zero-copy).
+     */
+    data class Buffered(
+        private val buffer: ReadBuffer,
+        override val length: Int,
         override val isCompressed: Boolean = false,
     ) : MqttPayload {
-        override fun bytes() = data
-
-        override val length = data.size
-
-        override fun equals(other: Any?): Boolean {
-            if (this === other) return true
-            if (other !is Raw) return false
-            return data.contentEquals(other.data)
-        }
-
-        override fun hashCode() = data.contentHashCode()
+        override fun asBuffer(): ReadBuffer = buffer
     }
 
     /**
      * Compressed payload that decompresses on access.
      */
     data class Compressed(
-        private val compressedData: ByteArray,
-        private val decompressor: (ByteArray) -> ByteArray,
+        private val compressedBuffer: ReadBuffer,
+        private val decompressor: (ReadBuffer) -> ReadBuffer,
     ) : MqttPayload {
         override val isCompressed = true
-        override val length = compressedData.size
+        override val length = compressedBuffer.remaining()
 
-        private var decompressedCache: ByteArray? = null
+        private var decompressedCache: ReadBuffer? = null
 
-        override fun bytes(): ByteArray =
-            decompressedCache ?: decompressor(compressedData).also {
+        override fun asBuffer(): ReadBuffer =
+            decompressedCache ?: decompressor(compressedBuffer).also {
                 decompressedCache = it
             }
-
-        override fun equals(other: Any?): Boolean {
-            if (this === other) return true
-            if (other !is Compressed) return false
-            return compressedData.contentEquals(other.compressedData)
-        }
-
-        override fun hashCode() = compressedData.contentHashCode()
     }
 }

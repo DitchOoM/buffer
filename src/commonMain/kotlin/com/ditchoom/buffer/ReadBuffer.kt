@@ -66,18 +66,6 @@ interface ReadBuffer : PositionBuffer {
         charset: Charset = Charset.UTF8,
     ): String
 
-    @Deprecated(
-        "Use readString instead",
-        ReplaceWith("readString(bytes, Charset.UTF8)", "com.ditchoom.buffer.Charset"),
-    )
-    fun readUtf8(bytes: UInt): CharSequence = readString(bytes.toInt(), Charset.UTF8)
-
-    @Deprecated(
-        "Use readString instead",
-        ReplaceWith("readString(bytes, Charset.UTF8)", "com.ditchoom.buffer.Charset"),
-    )
-    fun readUtf8(bytes: Int): CharSequence = readString(bytes, Charset.UTF8)
-
     fun readUtf8Line(): CharSequence {
         val initialPosition = position()
         var lastByte: Byte = 0

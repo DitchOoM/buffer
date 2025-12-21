@@ -1,6 +1,8 @@
 package com.ditchoom.buffer.protocol.http
 
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.allocate
 
 /**
  * High-performance HTTP message model using sealed interfaces.
@@ -239,18 +241,22 @@ class HttpHeaders private constructor(
 }
 
 /**
- * HTTP body with lazy evaluation to avoid memory copies.
+ * HTTP body using zero-copy buffer operations.
+ * All body types expose data via ReadBuffer to avoid ByteArray allocations.
  */
 sealed interface HttpBody {
     /**
-     * Returns the body as bytes. May trigger decompression.
+     * Returns the body as a ReadBuffer for zero-copy access.
      */
-    suspend fun bytes(): ByteArray
+    fun asBuffer(): ReadBuffer
 
     /**
      * Returns the body as a string (UTF-8).
      */
-    suspend fun text(): String = bytes().decodeToString()
+    fun text(): String {
+        val buffer = asBuffer()
+        return buffer.readString(buffer.remaining())
+    }
 
     /**
      * Body length if known, -1 otherwise.
@@ -266,95 +272,62 @@ sealed interface HttpBody {
      * Empty body.
      */
     data object Empty : HttpBody {
-        override suspend fun bytes() = ByteArray(0)
+        override fun asBuffer(): ReadBuffer = ReadBuffer.EMPTY_BUFFER
 
         override val length = 0L
         override val isCompressed = false
     }
 
     /**
-     * Body backed by a byte array.
-     */
-    data class Bytes(
-        private val data: ByteArray,
-        override val isCompressed: Boolean = false,
-    ) : HttpBody {
-        override suspend fun bytes() = data
-
-        override val length = data.size.toLong()
-
-        override fun equals(other: Any?): Boolean {
-            if (this === other) return true
-            if (other !is Bytes) return false
-            return data.contentEquals(other.data)
-        }
-
-        override fun hashCode() = data.contentHashCode()
-    }
-
-    /**
-     * Body backed by a buffer (zero-copy when possible).
+     * Body backed by a buffer (zero-copy).
      */
     data class Buffered(
         private val buffer: ReadBuffer,
         override val length: Long,
         override val isCompressed: Boolean = false,
     ) : HttpBody {
-        override suspend fun bytes(): ByteArray {
-            val size = if (length > 0) length.toInt() else buffer.remaining()
-            return buffer.readByteArray(size)
-        }
+        override fun asBuffer(): ReadBuffer = buffer
     }
 
     /**
-     * Chunked transfer encoding body.
+     * Chunked transfer encoding body backed by buffers.
      */
     data class Chunked(
-        private val chunks: List<ByteArray>,
+        private val chunks: List<ReadBuffer>,
         override val isCompressed: Boolean = false,
     ) : HttpBody {
-        override suspend fun bytes(): ByteArray {
-            val total = chunks.sumOf { it.size }
-            val result = ByteArray(total)
-            var offset = 0
-            for (chunk in chunks) {
-                chunk.copyInto(result, offset)
-                offset += chunk.size
-            }
-            return result
-        }
+        override val length = chunks.sumOf { it.remaining().toLong() }
 
-        override val length = chunks.sumOf { it.size }.toLong()
+        override fun asBuffer(): ReadBuffer {
+            // If single chunk, return it directly
+            if (chunks.size == 1) return chunks[0]
+            // Combine multiple chunks into a single buffer
+            val total = length.toInt()
+            val combined = PlatformBuffer.allocate(total)
+            for (chunk in chunks) {
+                combined.write(chunk)
+            }
+            combined.resetForRead()
+            return combined
+        }
     }
 
     /**
      * Compressed body that decompresses on access.
      */
     data class Compressed(
-        private val compressedData: ByteArray,
+        private val compressedBuffer: ReadBuffer,
         val encoding: String, // "gzip", "deflate", etc.
-        private val decompressor: suspend (ByteArray, String) -> ByteArray,
+        private val decompressor: (ReadBuffer, String) -> ReadBuffer,
     ) : HttpBody {
         override val isCompressed = true
-        override val length = compressedData.size.toLong()
+        override val length = compressedBuffer.remaining().toLong()
 
-        private var decompressedCache: ByteArray? = null
+        private var decompressedCache: ReadBuffer? = null
 
-        override suspend fun bytes(): ByteArray =
-            decompressedCache ?: decompressor(compressedData, encoding).also {
+        override fun asBuffer(): ReadBuffer =
+            decompressedCache ?: decompressor(compressedBuffer, encoding).also {
                 decompressedCache = it
             }
-
-        override fun equals(other: Any?): Boolean {
-            if (this === other) return true
-            if (other !is Compressed) return false
-            return compressedData.contentEquals(other.compressedData) && encoding == other.encoding
-        }
-
-        override fun hashCode(): Int {
-            var result = compressedData.contentHashCode()
-            result = 31 * result + encoding.hashCode()
-            return result
-        }
     }
 }

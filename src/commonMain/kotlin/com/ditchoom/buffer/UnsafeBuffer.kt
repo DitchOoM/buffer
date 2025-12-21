@@ -30,6 +30,7 @@ class DefaultUnsafeBuffer private constructor(
     val capacity: Int,
     override val byteOrder: ByteOrder,
     @PublishedApi internal val address: Long,
+    private val baseOffset: Int = 0,
     private val isSlice: Boolean = false,
 ) : UnsafeBuffer {
     private var pos: Int = 0
@@ -61,89 +62,89 @@ class DefaultUnsafeBuffer private constructor(
 
     override fun readByte(): Byte {
         checkReadBounds(1)
-        return UnsafeMemory.getByte(address, pos++)
+        return UnsafeMemory.getByte(address, baseOffset + pos++)
     }
 
     override fun get(index: Int): Byte {
         checkAbsoluteBounds(index, 1)
-        return UnsafeMemory.getByte(address, index)
+        return UnsafeMemory.getByte(address, baseOffset + index)
     }
 
     override fun readByteArray(size: Int): ByteArray {
         checkReadBounds(size)
         val array = ByteArray(size)
-        UnsafeMemory.copyToArray(address, pos, array, 0, size)
+        UnsafeMemory.copyToArray(address, baseOffset + pos, array, 0, size)
         pos += size
         return array
     }
 
     override fun slice(): ReadBuffer {
         val sliceSize = lim - pos
-        return DefaultUnsafeBuffer(sliceSize, byteOrder, address + pos, isSlice = true)
+        return DefaultUnsafeBuffer(sliceSize, byteOrder, address, baseOffset + pos, isSlice = true)
     }
 
     override fun readShort(): Short {
         checkReadBounds(2)
-        val value = UnsafeMemory.getShort(address, pos)
+        val value = UnsafeMemory.getShort(address, baseOffset + pos)
         pos += 2
         return if (needsSwap) value.reverseBytes() else value
     }
 
     override fun getShort(index: Int): Short {
         checkAbsoluteBounds(index, 2)
-        val value = UnsafeMemory.getShort(address, index)
+        val value = UnsafeMemory.getShort(address, baseOffset + index)
         return if (needsSwap) value.reverseBytes() else value
     }
 
     override fun readInt(): Int {
         checkReadBounds(4)
-        val value = UnsafeMemory.getInt(address, pos)
+        val value = UnsafeMemory.getInt(address, baseOffset + pos)
         pos += 4
         return if (needsSwap) value.reverseBytes() else value
     }
 
     override fun getInt(index: Int): Int {
         checkAbsoluteBounds(index, 4)
-        val value = UnsafeMemory.getInt(address, index)
+        val value = UnsafeMemory.getInt(address, baseOffset + index)
         return if (needsSwap) value.reverseBytes() else value
     }
 
     override fun readLong(): Long {
         checkReadBounds(8)
-        val value = UnsafeMemory.getLong(address, pos)
+        val value = UnsafeMemory.getLong(address, baseOffset + pos)
         pos += 8
         return if (needsSwap) value.reverseBytes() else value
     }
 
     override fun getLong(index: Int): Long {
         checkAbsoluteBounds(index, 8)
-        val value = UnsafeMemory.getLong(address, index)
+        val value = UnsafeMemory.getLong(address, baseOffset + index)
         return if (needsSwap) value.reverseBytes() else value
     }
 
     override fun readFloat(): Float {
         checkReadBounds(4)
-        val bits = UnsafeMemory.getInt(address, pos)
+        val bits = UnsafeMemory.getInt(address, baseOffset + pos)
         pos += 4
         return Float.fromBits(if (needsSwap) bits.reverseBytes() else bits)
     }
 
     override fun getFloat(index: Int): Float {
         checkAbsoluteBounds(index, 4)
-        val bits = UnsafeMemory.getInt(address, index)
+        val bits = UnsafeMemory.getInt(address, baseOffset + index)
         return Float.fromBits(if (needsSwap) bits.reverseBytes() else bits)
     }
 
     override fun readDouble(): Double {
         checkReadBounds(8)
-        val bits = UnsafeMemory.getLong(address, pos)
+        val bits = UnsafeMemory.getLong(address, baseOffset + pos)
         pos += 8
         return Double.fromBits(if (needsSwap) bits.reverseBytes() else bits)
     }
 
     override fun getDouble(index: Int): Double {
         checkAbsoluteBounds(index, 8)
-        val bits = UnsafeMemory.getLong(address, index)
+        val bits = UnsafeMemory.getLong(address, baseOffset + index)
         return Double.fromBits(if (needsSwap) bits.reverseBytes() else bits)
     }
 
@@ -157,7 +158,7 @@ class DefaultUnsafeBuffer private constructor(
 
     override fun writeByte(byte: Byte): WriteBuffer {
         checkWriteBounds(1)
-        UnsafeMemory.putByte(address, pos++, byte)
+        UnsafeMemory.putByte(address, baseOffset + pos++, byte)
         return this
     }
 
@@ -166,7 +167,7 @@ class DefaultUnsafeBuffer private constructor(
         byte: Byte,
     ): WriteBuffer {
         checkAbsoluteBounds(index, 1)
-        UnsafeMemory.putByte(address, index, byte)
+        UnsafeMemory.putByte(address, baseOffset + index, byte)
         return this
     }
 
@@ -176,7 +177,7 @@ class DefaultUnsafeBuffer private constructor(
         length: Int,
     ): WriteBuffer {
         checkWriteBounds(length)
-        UnsafeMemory.copyFromArray(bytes, offset, address, pos, length)
+        UnsafeMemory.copyFromArray(bytes, offset, address, baseOffset + pos, length)
         pos += length
         return this
     }
@@ -184,7 +185,7 @@ class DefaultUnsafeBuffer private constructor(
     override fun writeShort(short: Short): WriteBuffer {
         checkWriteBounds(2)
         val value = if (needsSwap) short.reverseBytes() else short
-        UnsafeMemory.putShort(address, pos, value)
+        UnsafeMemory.putShort(address, baseOffset + pos, value)
         pos += 2
         return this
     }
@@ -195,14 +196,14 @@ class DefaultUnsafeBuffer private constructor(
     ): WriteBuffer {
         checkAbsoluteBounds(index, 2)
         val value = if (needsSwap) short.reverseBytes() else short
-        UnsafeMemory.putShort(address, index, value)
+        UnsafeMemory.putShort(address, baseOffset + index, value)
         return this
     }
 
     override fun writeInt(int: Int): WriteBuffer {
         checkWriteBounds(4)
         val value = if (needsSwap) int.reverseBytes() else int
-        UnsafeMemory.putInt(address, pos, value)
+        UnsafeMemory.putInt(address, baseOffset + pos, value)
         pos += 4
         return this
     }
@@ -213,14 +214,14 @@ class DefaultUnsafeBuffer private constructor(
     ): WriteBuffer {
         checkAbsoluteBounds(index, 4)
         val value = if (needsSwap) int.reverseBytes() else int
-        UnsafeMemory.putInt(address, index, value)
+        UnsafeMemory.putInt(address, baseOffset + index, value)
         return this
     }
 
     override fun writeLong(long: Long): WriteBuffer {
         checkWriteBounds(8)
         val value = if (needsSwap) long.reverseBytes() else long
-        UnsafeMemory.putLong(address, pos, value)
+        UnsafeMemory.putLong(address, baseOffset + pos, value)
         pos += 8
         return this
     }
@@ -231,7 +232,7 @@ class DefaultUnsafeBuffer private constructor(
     ): WriteBuffer {
         checkAbsoluteBounds(index, 8)
         val value = if (needsSwap) long.reverseBytes() else long
-        UnsafeMemory.putLong(address, index, value)
+        UnsafeMemory.putLong(address, baseOffset + index, value)
         return this
     }
 
@@ -239,7 +240,7 @@ class DefaultUnsafeBuffer private constructor(
         checkWriteBounds(4)
         val bits = float.toRawBits()
         val value = if (needsSwap) bits.reverseBytes() else bits
-        UnsafeMemory.putInt(address, pos, value)
+        UnsafeMemory.putInt(address, baseOffset + pos, value)
         pos += 4
         return this
     }
@@ -251,7 +252,7 @@ class DefaultUnsafeBuffer private constructor(
         checkAbsoluteBounds(index, 4)
         val bits = float.toRawBits()
         val value = if (needsSwap) bits.reverseBytes() else bits
-        UnsafeMemory.putInt(address, index, value)
+        UnsafeMemory.putInt(address, baseOffset + index, value)
         return this
     }
 
@@ -259,7 +260,7 @@ class DefaultUnsafeBuffer private constructor(
         checkWriteBounds(8)
         val bits = double.toRawBits()
         val value = if (needsSwap) bits.reverseBytes() else bits
-        UnsafeMemory.putLong(address, pos, value)
+        UnsafeMemory.putLong(address, baseOffset + pos, value)
         pos += 8
         return this
     }
@@ -271,7 +272,7 @@ class DefaultUnsafeBuffer private constructor(
         checkAbsoluteBounds(index, 8)
         val bits = double.toRawBits()
         val value = if (needsSwap) bits.reverseBytes() else bits
-        UnsafeMemory.putLong(address, index, value)
+        UnsafeMemory.putLong(address, baseOffset + index, value)
         return this
     }
 

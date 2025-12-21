@@ -1,95 +1,85 @@
 package com.ditchoom.buffer
 
+import org.khronos.webgl.ArrayBuffer
+import org.khronos.webgl.DataView
+import org.khronos.webgl.Int8Array
+
+/**
+ * WASM-JS UnsafeMemory implementation using JavaScript typed arrays.
+ *
+ * Uses DataView operations for multi-byte access which provides
+ * efficient native-like memory access.
+ */
 actual object UnsafeMemory {
     private var nextId = 1L
-    private val buffers = mutableMapOf<Long, ByteArray>()
+    private val buffers = mutableMapOf<Long, Int8Array>()
+    private val dataViews = mutableMapOf<Long, DataView>()
 
     actual val nativeByteOrder: ByteOrder = ByteOrder.LITTLE_ENDIAN
 
     actual fun allocate(size: Int): Long {
         val id = nextId++
-        buffers[id] = ByteArray(size)
+        val arrayBuffer = ArrayBuffer(size)
+        val int8Array = Int8Array(arrayBuffer)
+        buffers[id] = int8Array
+        dataViews[id] = DataView(arrayBuffer)
         return id
     }
 
     actual fun free(address: Long) {
         buffers.remove(address)
+        dataViews.remove(address)
     }
 
-    private fun getBuffer(address: Long): ByteArray = buffers[address] ?: error("Invalid address: $address")
+    private fun getDataView(address: Long): DataView = dataViews[address] ?: error("Invalid address: $address")
 
     actual fun getByte(
         address: Long,
         offset: Int,
-    ): Byte = getBuffer(address)[offset]
+    ): Byte = getDataView(address).getInt8(offset)
 
     actual fun putByte(
         address: Long,
         offset: Int,
         value: Byte,
     ) {
-        getBuffer(address)[offset] = value
+        getDataView(address).setInt8(offset, value)
     }
 
     actual fun getShort(
         address: Long,
         offset: Int,
-    ): Short {
-        val buffer = getBuffer(address)
-        val b0 = buffer[offset].toInt() and 0xFF
-        val b1 = buffer[offset + 1].toInt() and 0xFF
-        return (b0 or (b1 shl 8)).toShort()
-    }
+    ): Short = getDataView(address).getInt16(offset, true).toInt().toShort() // native endian (little)
 
     actual fun putShort(
         address: Long,
         offset: Int,
         value: Short,
     ) {
-        val buffer = getBuffer(address)
-        buffer[offset] = value.toByte()
-        buffer[offset + 1] = (value.toInt() shr 8).toByte()
+        getDataView(address).setInt16(offset, value, true)
     }
 
     actual fun getInt(
         address: Long,
         offset: Int,
-    ): Int {
-        val buffer = getBuffer(address)
-        val b0 = buffer[offset].toInt() and 0xFF
-        val b1 = buffer[offset + 1].toInt() and 0xFF
-        val b2 = buffer[offset + 2].toInt() and 0xFF
-        val b3 = buffer[offset + 3].toInt() and 0xFF
-        return b0 or (b1 shl 8) or (b2 shl 16) or (b3 shl 24)
-    }
+    ): Int = getDataView(address).getInt32(offset, true)
 
     actual fun putInt(
         address: Long,
         offset: Int,
         value: Int,
     ) {
-        val buffer = getBuffer(address)
-        buffer[offset] = value.toByte()
-        buffer[offset + 1] = (value shr 8).toByte()
-        buffer[offset + 2] = (value shr 16).toByte()
-        buffer[offset + 3] = (value shr 24).toByte()
+        getDataView(address).setInt32(offset, value, true)
     }
 
     actual fun getLong(
         address: Long,
         offset: Int,
     ): Long {
-        val buffer = getBuffer(address)
-        val b0 = buffer[offset].toLong() and 0xFF
-        val b1 = buffer[offset + 1].toLong() and 0xFF
-        val b2 = buffer[offset + 2].toLong() and 0xFF
-        val b3 = buffer[offset + 3].toLong() and 0xFF
-        val b4 = buffer[offset + 4].toLong() and 0xFF
-        val b5 = buffer[offset + 5].toLong() and 0xFF
-        val b6 = buffer[offset + 6].toLong() and 0xFF
-        val b7 = buffer[offset + 7].toLong() and 0xFF
-        return b0 or (b1 shl 8) or (b2 shl 16) or (b3 shl 24) or
-            (b4 shl 32) or (b5 shl 40) or (b6 shl 48) or (b7 shl 56)
+        val dv = getDataView(address)
+        val low = dv.getInt32(offset, true).toLong() and 0xFFFFFFFFL
+        val high = dv.getInt32(offset + 4, true).toLong() and 0xFFFFFFFFL
+        return (high shl 32) or low
     }
 
     actual fun putLong(
@@ -97,15 +87,9 @@ actual object UnsafeMemory {
         offset: Int,
         value: Long,
     ) {
-        val buffer = getBuffer(address)
-        buffer[offset] = value.toByte()
-        buffer[offset + 1] = (value shr 8).toByte()
-        buffer[offset + 2] = (value shr 16).toByte()
-        buffer[offset + 3] = (value shr 24).toByte()
-        buffer[offset + 4] = (value shr 32).toByte()
-        buffer[offset + 5] = (value shr 40).toByte()
-        buffer[offset + 6] = (value shr 48).toByte()
-        buffer[offset + 7] = (value shr 56).toByte()
+        val dv = getDataView(address)
+        dv.setInt32(offset, value.toInt(), true)
+        dv.setInt32(offset + 4, (value shr 32).toInt(), true)
     }
 
     actual fun getFloat(
@@ -141,8 +125,10 @@ actual object UnsafeMemory {
         destOffset: Int,
         length: Int,
     ) {
-        val buffer = getBuffer(address)
-        buffer.copyInto(dest, destOffset, offset, offset + length)
+        val dv = getDataView(address)
+        for (i in 0 until length) {
+            dest[destOffset + i] = dv.getInt8(offset + i)
+        }
     }
 
     actual fun copyFromArray(
@@ -152,8 +138,10 @@ actual object UnsafeMemory {
         offset: Int,
         length: Int,
     ) {
-        val buffer = getBuffer(address)
-        src.copyInto(buffer, offset, srcOffset, srcOffset + length)
+        val dv = getDataView(address)
+        for (i in 0 until length) {
+            dv.setInt8(offset + i, src[srcOffset + i])
+        }
     }
 
     actual fun zeroMemory(
@@ -161,7 +149,9 @@ actual object UnsafeMemory {
         offset: Int,
         length: Int,
     ) {
-        val buffer = getBuffer(address)
-        buffer.fill(0, offset, offset + length)
+        val dv = getDataView(address)
+        for (i in 0 until length) {
+            dv.setInt8(offset + i, 0)
+        }
     }
 }

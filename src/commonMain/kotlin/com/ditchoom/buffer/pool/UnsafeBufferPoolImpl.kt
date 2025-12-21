@@ -6,7 +6,7 @@ import com.ditchoom.buffer.DefaultUnsafeBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.UnsafeMemory
 import com.ditchoom.buffer.WriteBuffer
-import kotlin.concurrent.Volatile
+import com.ditchoom.buffer.withLock
 
 /**
  * High-performance buffer pool using UnsafeBuffer for direct memory access.
@@ -22,16 +22,9 @@ internal class UnsafeBufferPoolImpl(
 ) : BufferPool {
     private val pool = ArrayDeque<UnsafePooledBufferImpl>(initialPoolSize)
 
-    @Volatile
     private var totalAllocations = 0L
-
-    @Volatile
     private var poolHits = 0L
-
-    @Volatile
     private var poolMisses = 0L
-
-    @Volatile
     private var peakPoolSize = 0
 
     override fun acquire(minSize: Int): PooledBuffer {
@@ -40,7 +33,7 @@ internal class UnsafeBufferPoolImpl(
 
         // Try to get from pool
         val buffer =
-            synchronized(pool) {
+            withLock(pool) {
                 pool.removeLastOrNull()
             }
 
@@ -62,7 +55,7 @@ internal class UnsafeBufferPoolImpl(
         if (buffer !is UnsafePooledBufferImpl) return
         if (!buffer.isAcquired) return
 
-        synchronized(pool) {
+        withLock(pool) {
             if (pool.size < maxPoolSize) {
                 buffer.resetForWrite()
                 buffer.markReleased()
@@ -87,7 +80,7 @@ internal class UnsafeBufferPoolImpl(
         )
 
     override fun clear() {
-        synchronized(pool) {
+        withLock(pool) {
             pool.forEach { it.freeMemory() }
             pool.clear()
         }
@@ -104,7 +97,6 @@ private class UnsafePooledBufferImpl(
     private var lim: Int = capacity
     private val needsSwap: Boolean = byteOrder != UnsafeMemory.nativeByteOrder
 
-    @Volatile
     var isAcquired: Boolean = true
         private set
 

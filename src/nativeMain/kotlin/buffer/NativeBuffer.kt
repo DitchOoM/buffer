@@ -1,60 +1,145 @@
 package com.ditchoom.buffer
 
-data class NativeBuffer(
-    val data: ByteArray,
-    private var position: Int = 0,
-    private var limit: Int = data.size,
-    override val capacity: Int = data.size,
+/**
+ * High-performance native buffer using malloc/free via UnsafeMemory.
+ *
+ * Key optimizations:
+ * - Uses native memory (malloc) instead of ByteArray
+ * - Zero-copy slice() by tracking baseOffset
+ * - Direct memory access for multi-byte operations
+ * - Byte swapping handled via reverseBytes when needed
+ */
+class NativeBuffer private constructor(
+    private val address: Long,
+    private val baseOffset: Int,
+    override val capacity: Int,
     override val byteOrder: ByteOrder,
+    private val ownsMemory: Boolean, // true if this buffer should free memory on close
 ) : PlatformBuffer {
+    private var pos: Int = 0
+    private var lim: Int = capacity
+    private val needsSwap: Boolean = byteOrder != UnsafeMemory.nativeByteOrder
+
+    companion object {
+        fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): NativeBuffer {
+            val address = UnsafeMemory.allocate(size)
+            return NativeBuffer(address, 0, size, byteOrder, ownsMemory = true)
+        }
+    }
+
     override fun resetForRead() {
-        limit = position
-        position = 0
+        lim = pos
+        pos = 0
     }
 
     override fun resetForWrite() {
-        position = 0
-        limit = data.size
+        pos = 0
+        lim = capacity
     }
 
     override fun setLimit(limit: Int) {
-        this.limit = limit
+        lim = limit
     }
 
-    override fun readByte() = data[position++]
+    override fun limit(): Int = lim
 
-    override fun get(index: Int): Byte = data[index]
+    override fun position(): Int = pos
 
-    override fun slice(): ReadBuffer = NativeBuffer(data.sliceArray(position until limit), byteOrder = byteOrder)
+    override fun position(newPosition: Int) {
+        pos = newPosition
+    }
+
+    override fun readByte(): Byte = UnsafeMemory.getByte(address, baseOffset + pos++)
+
+    override fun get(index: Int): Byte = UnsafeMemory.getByte(address, baseOffset + index)
+
+    // Zero-copy slice: creates a view with adjusted offset, shares same native memory
+    override fun slice(): ReadBuffer =
+        NativeBuffer(
+            address,
+            baseOffset + pos,
+            lim - pos,
+            byteOrder,
+            ownsMemory = false, // slice doesn't own memory
+        )
 
     override fun readByteArray(size: Int): ByteArray {
-        val result = data.copyOfRange(position, position + size)
-        position += size
+        val result = ByteArray(size)
+        UnsafeMemory.copyToArray(address, baseOffset + pos, result, 0, size)
+        pos += size
         return result
+    }
+
+    override fun readShort(): Short {
+        val value = UnsafeMemory.getShort(address, baseOffset + pos)
+        pos += 2
+        return if (needsSwap) value.reverseBytes() else value
+    }
+
+    override fun getShort(index: Int): Short {
+        val value = UnsafeMemory.getShort(address, baseOffset + index)
+        return if (needsSwap) value.reverseBytes() else value
+    }
+
+    override fun readInt(): Int {
+        val value = UnsafeMemory.getInt(address, baseOffset + pos)
+        pos += 4
+        return if (needsSwap) value.reverseBytes() else value
+    }
+
+    override fun getInt(index: Int): Int {
+        val value = UnsafeMemory.getInt(address, baseOffset + index)
+        return if (needsSwap) value.reverseBytes() else value
+    }
+
+    override fun readLong(): Long {
+        val value = UnsafeMemory.getLong(address, baseOffset + pos)
+        pos += 8
+        return if (needsSwap) value.reverseBytes() else value
+    }
+
+    override fun getLong(index: Int): Long {
+        val value = UnsafeMemory.getLong(address, baseOffset + index)
+        return if (needsSwap) value.reverseBytes() else value
+    }
+
+    override fun readFloat(): Float {
+        val bits = readInt()
+        return Float.fromBits(bits)
+    }
+
+    override fun getFloat(index: Int): Float {
+        val bits = getInt(index)
+        return Float.fromBits(bits)
+    }
+
+    override fun readDouble(): Double {
+        val bits = readLong()
+        return Double.fromBits(bits)
+    }
+
+    override fun getDouble(index: Int): Double {
+        val bits = getLong(index)
+        return Double.fromBits(bits)
     }
 
     override fun readString(
         length: Int,
         charset: Charset,
     ): String {
-        val value =
-            when (charset) {
-                Charset.UTF8 -> data.decodeToString(position, position + length, throwOnInvalidSequence = true)
-                Charset.UTF16 -> throw UnsupportedOperationException("Not sure how to implement.")
-                Charset.UTF16BigEndian -> throw UnsupportedOperationException("Not sure how to implement.")
-                Charset.UTF16LittleEndian -> throw UnsupportedOperationException("Not sure how to implement.")
-                Charset.ASCII -> throw UnsupportedOperationException("Not sure how to implement.")
-                Charset.ISOLatin1 -> throw UnsupportedOperationException("Not sure how to implement.")
-                Charset.UTF32 -> throw UnsupportedOperationException("Not sure how to implement.")
-                Charset.UTF32LittleEndian -> throw UnsupportedOperationException("Not sure how to implement.")
-                Charset.UTF32BigEndian -> throw UnsupportedOperationException("Not sure how to implement.")
-            }
-        position += length
-        return value
+        // For string reading, we need to get the bytes first (unavoidable for charset conversion)
+        val bytes = readByteArray(length)
+        return when (charset) {
+            Charset.UTF8 -> bytes.decodeToString()
+            else -> throw UnsupportedOperationException("Only UTF8 charset is supported on native")
+        }
     }
 
     override fun writeByte(byte: Byte): WriteBuffer {
-        data[position++] = byte
+        UnsafeMemory.putByte(address, baseOffset + pos++, byte)
         return this
     }
 
@@ -62,7 +147,7 @@ data class NativeBuffer(
         index: Int,
         byte: Byte,
     ): WriteBuffer {
-        data[index] = byte
+        UnsafeMemory.putByte(address, baseOffset + index, byte)
         return this
     }
 
@@ -71,24 +156,72 @@ data class NativeBuffer(
         offset: Int,
         length: Int,
     ): WriteBuffer {
-        bytes.copyInto(data, position, offset, offset + length)
-        position += length
+        UnsafeMemory.copyFromArray(bytes, offset, address, baseOffset + pos, length)
+        pos += length
         return this
     }
 
-    override fun write(buffer: ReadBuffer) {
-        val start = position()
-        val byteSize =
-            if (buffer is NativeBuffer) {
-                writeBytes(buffer.data)
-                buffer.data.size
-            } else {
-                val numBytes = buffer.remaining()
-                writeBytes(buffer.readByteArray(numBytes))
-                numBytes
-            }
-        buffer.position(start + byteSize)
+    override fun writeShort(short: Short): WriteBuffer {
+        val value = if (needsSwap) short.reverseBytes() else short
+        UnsafeMemory.putShort(address, baseOffset + pos, value)
+        pos += 2
+        return this
     }
+
+    override fun set(
+        index: Int,
+        short: Short,
+    ): WriteBuffer {
+        val value = if (needsSwap) short.reverseBytes() else short
+        UnsafeMemory.putShort(address, baseOffset + index, value)
+        return this
+    }
+
+    override fun writeInt(int: Int): WriteBuffer {
+        val value = if (needsSwap) int.reverseBytes() else int
+        UnsafeMemory.putInt(address, baseOffset + pos, value)
+        pos += 4
+        return this
+    }
+
+    override fun set(
+        index: Int,
+        int: Int,
+    ): WriteBuffer {
+        val value = if (needsSwap) int.reverseBytes() else int
+        UnsafeMemory.putInt(address, baseOffset + index, value)
+        return this
+    }
+
+    override fun writeLong(long: Long): WriteBuffer {
+        val value = if (needsSwap) long.reverseBytes() else long
+        UnsafeMemory.putLong(address, baseOffset + pos, value)
+        pos += 8
+        return this
+    }
+
+    override fun set(
+        index: Int,
+        long: Long,
+    ): WriteBuffer {
+        val value = if (needsSwap) long.reverseBytes() else long
+        UnsafeMemory.putLong(address, baseOffset + index, value)
+        return this
+    }
+
+    override fun writeFloat(float: Float): WriteBuffer = writeInt(float.toRawBits())
+
+    override fun set(
+        index: Int,
+        float: Float,
+    ): WriteBuffer = set(index, float.toRawBits())
+
+    override fun writeDouble(double: Double): WriteBuffer = writeLong(double.toRawBits())
+
+    override fun set(
+        index: Int,
+        double: Double,
+    ): WriteBuffer = set(index, double.toRawBits())
 
     override fun writeString(
         text: CharSequence,
@@ -96,36 +229,66 @@ data class NativeBuffer(
     ): WriteBuffer {
         when (charset) {
             Charset.UTF8 -> writeBytes(text.toString().encodeToByteArray())
-            else -> throw UnsupportedOperationException("Unable to encode in $charset. Must use Charset.UTF8")
+            else -> throw UnsupportedOperationException("Only UTF8 charset is supported on native")
         }
         return this
     }
 
-    override suspend fun close() = Unit
+    override fun write(buffer: ReadBuffer) {
+        val size = buffer.remaining()
+        if (buffer is NativeBuffer) {
+            // Direct memory copy for NativeBuffer to NativeBuffer
+            // Use memcpy via the platform
+            for (i in 0 until size) {
+                UnsafeMemory.putByte(address, baseOffset + pos + i, buffer.readByte())
+            }
+            pos += size
+        } else {
+            // Fallback: read bytes (creates allocation)
+            val bytes = buffer.readByteArray(size)
+            writeBytes(bytes)
+        }
+        buffer.position(buffer.position())
+    }
 
-    override fun limit() = limit
-
-    override fun position() = position
-
-    override fun position(newPosition: Int) {
-        position = newPosition
+    override suspend fun close() {
+        if (ownsMemory && address != 0L) {
+            UnsafeMemory.free(address)
+        }
     }
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
-        other as NativeBuffer
-        if (position != other.position) return false
-        if (limit != other.limit) return false
+        if (other !is NativeBuffer) return false
+        if (pos != other.pos) return false
+        if (lim != other.lim) return false
         if (capacity != other.capacity) return false
-        if (!data.contentEquals(other.data)) return false
         return true
     }
 
     override fun hashCode(): Int {
-        var result = position.hashCode()
-        result = 31 * result + limit.hashCode()
+        var result = pos.hashCode()
+        result = 31 * result + lim.hashCode()
         result = 31 * result + capacity.hashCode()
-        result = 31 * result + data.contentHashCode()
         return result
     }
+
+    // Byte swapping utilities
+    private fun Short.reverseBytes(): Short = (((this.toInt() and 0xFF) shl 8) or ((this.toInt() shr 8) and 0xFF)).toShort()
+
+    private fun Int.reverseBytes(): Int =
+        ((this and 0xFF) shl 24) or
+            ((this and 0xFF00) shl 8) or
+            ((this shr 8) and 0xFF00) or
+            ((this shr 24) and 0xFF)
+
+    private fun Long.reverseBytes(): Long =
+        ((this and 0xFFL) shl 56) or
+            ((this and 0xFF00L) shl 40) or
+            ((this and 0xFF0000L) shl 24) or
+            ((this and 0xFF000000L) shl 8) or
+            ((this shr 8) and 0xFF000000L) or
+            ((this shr 24) and 0xFF0000L) or
+            ((this shr 40) and 0xFF00L) or
+            ((this shr 56) and 0xFFL)
 }
