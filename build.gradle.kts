@@ -86,6 +86,7 @@ kotlin {
                 implementation(libs.androidx.test.rules)
                 implementation(libs.androidx.test.core.ktx)
                 implementation(libs.androidx.test.ext.junit)
+                implementation(libs.androidx.benchmark.junit4)
             }
         }
 
@@ -198,12 +199,16 @@ tasks.register("nextVersion") {
 }
 
 benchmark {
-    // Define a target for the JVM platform
+    // Define targets for all platforms
     targets {
         register("jvmTest")
         register("jsTest")
-        register("macosArm64Test")
-        register("linuxArm64Test")
         register("wasmJsTest")
+        // macOS targets (ARM and Intel)
+        register("macosArm64Test")
+        register("macosX64Test")
+        // Linux targets (ARM and Intel)
+        register("linuxArm64Test")
+        register("linuxX64Test")
     }
 }
