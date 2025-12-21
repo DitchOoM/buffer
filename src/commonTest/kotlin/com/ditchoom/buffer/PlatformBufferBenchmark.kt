@@ -63,6 +63,10 @@ class PlatformBufferBenchmark {
         index += Long.SIZE_BYTES
         platformBuffer.getUnsignedLong(index)
 
+        // Reset for relative reads
+        platformBuffer.position(0)
+        platformBuffer.setLimit(platformBuffer.capacity)
+
         platformBuffer.readByte()
         platformBuffer.readUnsignedByte()
         platformBuffer.readShort()
