@@ -8,6 +8,7 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
+    alias(libs.plugins.atomicfu)
     signing
 }
 

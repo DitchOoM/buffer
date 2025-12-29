@@ -54,6 +54,39 @@ src/
 - `WriteBuffer` - Write operations (relative and absolute)
 - `AllocationZone` - Memory allocation strategy: `Heap`, `Direct`, `SharedMemory`, `Custom`
 
+### Buffer Pool (`com.ditchoom.buffer.pool`)
+
+High-performance buffer pooling for minimizing allocations:
+
+- `BufferPool` - Main pool interface with `SingleThreaded` and `MultiThreaded` modes
+- `PooledBuffer` - Buffer acquired from pool, must call `release()` when done
+- `withBuffer { }` - Recommended: auto-acquires and releases buffer
+- `withPool { }` - Creates pool, runs block, clears pool on exit
+
+```kotlin
+// Preferred usage pattern
+withPool(defaultBufferSize = 8192) { pool ->
+    pool.withBuffer(1024) { buffer ->
+        buffer.writeInt(42)
+    }
+}
+```
+
+### Buffer Stream (`com.ditchoom.buffer.stream`)
+
+Chunked processing for large buffers and streaming data:
+
+- `BufferStream` - Iterates over a buffer in fixed-size chunks
+- `StreamProcessor` - Handles fragmented data (e.g., network packets) with peek/read operations
+
+```kotlin
+val processor = StreamProcessor.create(pool)
+processor.append(networkData)
+val length = processor.peekInt()  // peek without consuming
+processor.skip(4)
+val payload = processor.readBuffer(length)
+```
+
 ### Factory Pattern
 
 Buffers are created via companion object methods:
