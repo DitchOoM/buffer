@@ -18,6 +18,7 @@ internal class SingleThreadedBufferPool(
     private val maxPoolSize: Int,
     private val defaultBufferSize: Int,
     private val byteOrder: ByteOrder,
+    private val allocationZone: AllocationZone,
 ) : BufferPool {
     private val pool = ArrayDeque<PlatformBuffer>(maxPoolSize)
 
@@ -38,7 +39,7 @@ internal class SingleThreadedBufferPool(
             SimplePooledBuffer(buffer, this)
         } else {
             poolMisses++
-            val newBuffer = PlatformBuffer.allocate(size, AllocationZone.Direct, byteOrder)
+            val newBuffer = PlatformBuffer.allocate(size, allocationZone, byteOrder)
             SimplePooledBuffer(newBuffer, this)
         }
     }

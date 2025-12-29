@@ -21,6 +21,7 @@ internal class LockFreeBufferPool(
     private val maxPoolSize: Int,
     private val defaultBufferSize: Int,
     private val byteOrder: ByteOrder,
+    private val allocationZone: AllocationZone,
 ) : BufferPool {
     // Treiber stack node
     private class Node(
@@ -53,7 +54,7 @@ internal class LockFreeBufferPool(
             LockFreePooledBuffer(buffer, this)
         } else {
             poolMisses.incrementAndGet()
-            val newBuffer = PlatformBuffer.allocate(size, AllocationZone.Direct, byteOrder)
+            val newBuffer = PlatformBuffer.allocate(size, allocationZone, byteOrder)
             LockFreePooledBuffer(newBuffer, this)
         }
     }

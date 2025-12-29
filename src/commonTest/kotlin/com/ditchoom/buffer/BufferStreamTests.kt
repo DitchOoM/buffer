@@ -478,61 +478,54 @@ class BufferStreamTests {
     }
 
     // ============================================================================
-    // StreamProcessor Buffer Read Tests (Zero-Copy)
+    // StreamProcessor Buffer Read Tests
     // ============================================================================
 
     @Test
-    fun streamProcessorReadBufferZeroCopy() {
-        val pool = BufferPool(defaultBufferSize = 1024)
-        val processor = StreamProcessor.create(pool)
+    fun streamProcessorReadBufferContiguous() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(20)
-        repeat(20) { buffer.writeByte(it.toByte()) }
-        buffer.resetForRead()
+            val buffer = PlatformBuffer.allocate(20)
+            repeat(20) { buffer.writeByte(it.toByte()) }
+            buffer.resetForRead()
 
-        processor.append(buffer)
+            processor.append(buffer)
 
-        // Read contiguous data (zero-copy slice)
-        val result = processor.readBuffer(10)
-        assertEquals(10, result.remaining())
-        for (i in 0 until 10) {
-            assertEquals(i.toByte(), result.readByte())
+            val result = processor.readBuffer(10)
+            assertEquals(10, result.remaining())
+            for (i in 0 until 10) {
+                assertEquals(i.toByte(), result.readByte())
+            }
+
+            assertEquals(10, processor.available())
+            processor.release()
         }
-
-        assertEquals(10, processor.available())
-
-        processor.release()
-        pool.clear()
-    }
 
     @Test
-    fun streamProcessorReadBufferAcrossChunks() {
-        val pool = BufferPool(defaultBufferSize = 1024)
-        val processor = StreamProcessor.create(pool)
+    fun streamProcessorReadBufferAcrossChunks() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            val processor = StreamProcessor.create(pool)
 
-        // Append two chunks
-        val buffer1 = PlatformBuffer.allocate(5)
-        repeat(5) { buffer1.writeByte(it.toByte()) }
-        buffer1.resetForRead()
-        processor.append(buffer1)
+            val buffer1 = PlatformBuffer.allocate(5)
+            repeat(5) { buffer1.writeByte(it.toByte()) }
+            buffer1.resetForRead()
+            processor.append(buffer1)
 
-        val buffer2 = PlatformBuffer.allocate(5)
-        repeat(5) { buffer2.writeByte((it + 5).toByte()) }
-        buffer2.resetForRead()
-        processor.append(buffer2)
+            val buffer2 = PlatformBuffer.allocate(5)
+            repeat(5) { buffer2.writeByte((it + 5).toByte()) }
+            buffer2.resetForRead()
+            processor.append(buffer2)
 
-        // Read across chunks
-        val result = processor.readBuffer(8)
-        assertEquals(8, result.remaining())
-        for (i in 0 until 8) {
-            assertEquals(i.toByte(), result.readByte())
+            val result = processor.readBuffer(8)
+            assertEquals(8, result.remaining())
+            for (i in 0 until 8) {
+                assertEquals(i.toByte(), result.readByte())
+            }
+
+            assertEquals(2, processor.available())
+            processor.release()
         }
-
-        assertEquals(2, processor.available())
-
-        processor.release()
-        pool.clear()
-    }
 
     // ============================================================================
     // StreamProcessor Skip Tests
