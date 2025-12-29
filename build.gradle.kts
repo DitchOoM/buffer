@@ -9,6 +9,7 @@ plugins {
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.atomicfu)
+    alias(libs.plugins.dokka)
     signing
 }
 
@@ -193,4 +194,29 @@ ktlint {
 
 tasks.create("nextVersion") {
     println(getNextVersion(false))
+}
+
+// Dokka V2 configuration
+dokka {
+    dokkaSourceSets.configureEach {
+        // Link to Kotlin stdlib documentation (includes unsigned types)
+        externalDocumentationLinks.register("kotlin-stdlib") {
+            url("https://kotlinlang.org/api/latest/jvm/stdlib/")
+            packageListUrl("https://kotlinlang.org/api/latest/jvm/stdlib/package-list")
+        }
+        // Link to kotlinx.coroutines documentation
+        externalDocumentationLinks.register("kotlinx-coroutines") {
+            url("https://kotlinlang.org/api/kotlinx.coroutines/")
+            packageListUrl("https://kotlinlang.org/api/kotlinx.coroutines/package-list")
+        }
+        // Don't report undocumented members
+        reportUndocumented.set(false)
+    }
+}
+
+// Task to copy Dokka output to docs/static for Docusaurus
+tasks.register<Copy>("copyDokkaToDocusaurus") {
+    dependsOn("dokkaGeneratePublicationHtml")
+    from(layout.buildDirectory.dir("dokka/html"))
+    into(projectDir.resolve("docs/static/api"))
 }

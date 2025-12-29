@@ -148,35 +148,64 @@ class StreamProcessor private constructor(
     }
 
     /**
-     * Peeks at an Int without consuming it.
+     * Peeks at a Short without consuming it.
+     * @param offset byte offset from current position (default 0)
      */
-    fun peekInt(): Int {
-        require(totalAvailable >= Int.SIZE_BYTES) { "Not enough data for Int" }
+    fun peekShort(offset: Int = 0): Short {
+        require(totalAvailable >= offset + Short.SIZE_BYTES) { "Not enough data for Short at offset $offset" }
+
         val chunk = chunks.first()
-        if (chunk.remaining() >= Int.SIZE_BYTES) {
-            // Fast path: all in one chunk
-            return chunk.getInt(chunk.position())
+        if (chunk.remaining() >= offset + Short.SIZE_BYTES) {
+            return chunk.getShort(chunk.position() + offset)
         }
+
         // Slow path: spans chunks
-        return (peekByte(0).toInt() and 0xFF shl 24) or
-            (peekByte(1).toInt() and 0xFF shl 16) or
-            (peekByte(2).toInt() and 0xFF shl 8) or
-            (peekByte(3).toInt() and 0xFF)
+        return (
+            (peekByte(offset).toInt() and 0xFF shl 8) or
+                (peekByte(offset + 1).toInt() and 0xFF)
+        ).toShort()
     }
 
     /**
-     * Peeks at a Short without consuming it.
+     * Peeks at an Int without consuming it.
+     * @param offset byte offset from current position (default 0)
      */
-    fun peekShort(): Short {
-        require(totalAvailable >= Short.SIZE_BYTES) { "Not enough data for Short" }
+    fun peekInt(offset: Int = 0): Int {
+        require(totalAvailable >= offset + Int.SIZE_BYTES) { "Not enough data for Int at offset $offset" }
+
         val chunk = chunks.first()
-        if (chunk.remaining() >= Short.SIZE_BYTES) {
-            return chunk.getShort(chunk.position())
+        if (chunk.remaining() >= offset + Int.SIZE_BYTES) {
+            return chunk.getInt(chunk.position() + offset)
         }
-        return (
-            (peekByte(0).toInt() and 0xFF shl 8) or
-                (peekByte(1).toInt() and 0xFF)
-        ).toShort()
+
+        // Slow path: spans chunks
+        return (peekByte(offset).toInt() and 0xFF shl 24) or
+            (peekByte(offset + 1).toInt() and 0xFF shl 16) or
+            (peekByte(offset + 2).toInt() and 0xFF shl 8) or
+            (peekByte(offset + 3).toInt() and 0xFF)
+    }
+
+    /**
+     * Peeks at a Long without consuming it.
+     * @param offset byte offset from current position (default 0)
+     */
+    fun peekLong(offset: Int = 0): Long {
+        require(totalAvailable >= offset + Long.SIZE_BYTES) { "Not enough data for Long at offset $offset" }
+
+        val chunk = chunks.first()
+        if (chunk.remaining() >= offset + Long.SIZE_BYTES) {
+            return chunk.getLong(chunk.position() + offset)
+        }
+
+        // Slow path: spans chunks
+        return (peekByte(offset).toLong() and 0xFF shl 56) or
+            (peekByte(offset + 1).toLong() and 0xFF shl 48) or
+            (peekByte(offset + 2).toLong() and 0xFF shl 40) or
+            (peekByte(offset + 3).toLong() and 0xFF shl 32) or
+            (peekByte(offset + 4).toLong() and 0xFF shl 24) or
+            (peekByte(offset + 5).toLong() and 0xFF shl 16) or
+            (peekByte(offset + 6).toLong() and 0xFF shl 8) or
+            (peekByte(offset + 7).toLong() and 0xFF)
     }
 
     /**

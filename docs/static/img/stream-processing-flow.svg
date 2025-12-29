@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 180">
+  <style>
+    .packet { fill: #fff3cd; stroke: #ffc107; stroke-width: 2; }
+    .processor { fill: #e7f3ff; stroke: #4a90d9; stroke-width: 2; }
+    .message { fill: #d4edda; stroke: #28a745; stroke-width: 2; }
+    .title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 11px; fill: #6c757d; font-weight: 600; }
+    .label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 11px; fill: #495057; }
+    .code { font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 9px; fill: #6c757d; }
+  </style>
+
+  <!-- Column headers -->
+  <text x="70" y="20" text-anchor="middle" class="title">Network Packets</text>
+  <text x="280" y="20" text-anchor="middle" class="title">StreamProcessor</text>
+  <text x="490" y="20" text-anchor="middle" class="title">Parsed Messages</text>
+
+  <!-- Packet 1 -->
+  <rect x="20" y="40" width="100" height="35" class="packet" rx="6"/>
+  <text x="70" y="62" text-anchor="middle" class="label">Packet 1</text>
+
+  <!-- Arrow to processor - right pointing -->
+  <line x1="120" y1="57" x2="163" y2="57" stroke="#495057" stroke-width="2"/>
+  <polygon points="173,57 163,51 163,63" fill="#495057"/>
+
+  <!-- StreamProcessor box -->
+  <rect x="178" y="35" width="204" height="120" class="processor" rx="6"/>
+  <text x="280" y="55" text-anchor="middle" class="label">[1][2][partial]</text>
+  <text x="280" y="75" text-anchor="middle" class="code">peek(4) → length</text>
+
+  <!-- Packet 2 -->
+  <rect x="20" y="100" width="100" height="35" class="packet" rx="6"/>
+  <text x="70" y="122" text-anchor="middle" class="label">Packet 2</text>
+
+  <!-- Arrow to processor - right pointing -->
+  <line x1="120" y1="117" x2="163" y2="117" stroke="#495057" stroke-width="2"/>
+  <polygon points="173,117 163,111 163,123" fill="#495057"/>
+
+  <!-- Updated state -->
+  <text x="280" y="105" text-anchor="middle" class="label">[1][2][3][4]</text>
+  <text x="280" y="125" text-anchor="middle" class="code">skip(4)</text>
+  <text x="280" y="140" text-anchor="middle" class="code">readBuffer(n)</text>
+
+  <!-- Arrow to message - right pointing -->
+  <line x1="387" y1="95" x2="425" y2="95" stroke="#495057" stroke-width="2"/>
+  <polygon points="435,95 425,89 425,101" fill="#495057"/>
+
+  <!-- Message box -->
+  <rect x="440" y="60" width="100" height="70" class="message" rx="6"/>
+  <text x="490" y="100" text-anchor="middle" class="label">Message</text>
+</svg>

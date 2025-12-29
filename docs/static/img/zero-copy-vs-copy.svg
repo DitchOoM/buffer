@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 180">
+  <style>
+    .container { fill: #f8f9fa; stroke: #dee2e6; stroke-width: 2; }
+    .chunk { fill: #e7f3ff; stroke: #4a90d9; stroke-width: 2; }
+    .payload { fill: #d4edda; stroke: #28a745; stroke-width: 1.5; }
+    .payload-split { fill: #fff3cd; stroke: #ffc107; stroke-width: 1.5; }
+    .title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; fill: #2c3e50; font-weight: 600; }
+    .label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 11px; fill: #495057; }
+    .result { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 10px; fill: #6c757d; }
+    .good { fill: #28a745; }
+    .warn { fill: #856404; }
+  </style>
+
+  <!-- Zero-Copy Section -->
+  <rect x="10" y="10" width="240" height="160" class="container" rx="8"/>
+  <text x="130" y="30" text-anchor="middle" class="title good">ZERO-COPY</text>
+  <text x="130" y="44" text-anchor="middle" class="result">(data in single chunk)</text>
+
+  <!-- Single chunk with payload -->
+  <rect x="30" y="55" width="200" height="50" class="chunk" rx="4"/>
+  <text x="130" y="72" text-anchor="middle" class="label">Chunk 1</text>
+  <rect x="50" y="80" width="160" height="18" class="payload" rx="3"/>
+  <text x="130" y="93" text-anchor="middle" class="label">payload</text>
+
+  <!-- Arrow down -->
+  <line x1="130" y1="110" x2="130" y2="128" stroke="#495057" stroke-width="2"/>
+  <polygon points="130,138 122,128 138,128" fill="#495057"/>
+
+  <!-- Result -->
+  <text x="130" y="154" text-anchor="middle" class="label good">slice() → O(1)</text>
+  <text x="130" y="166" text-anchor="middle" class="result">same memory</text>
+
+  <!-- Copy Section -->
+  <rect x="270" y="10" width="240" height="160" class="container" rx="8"/>
+  <text x="390" y="30" text-anchor="middle" class="title warn">COPY</text>
+  <text x="390" y="44" text-anchor="middle" class="result">(data spans chunks)</text>
+
+  <!-- Two chunks with split payload -->
+  <rect x="290" y="55" width="95" height="50" class="chunk" rx="4"/>
+  <text x="337" y="72" text-anchor="middle" class="label">Chunk 1</text>
+  <rect x="310" y="80" width="55" height="18" class="payload-split" rx="3"/>
+  <text x="337" y="93" text-anchor="middle" class="label">A</text>
+
+  <rect x="395" y="55" width="95" height="50" class="chunk" rx="4"/>
+  <text x="442" y="72" text-anchor="middle" class="label">Chunk 2</text>
+  <rect x="415" y="80" width="55" height="18" class="payload-split" rx="3"/>
+  <text x="442" y="93" text-anchor="middle" class="label">B</text>
+
+  <!-- Arrow down -->
+  <line x1="390" y1="110" x2="390" y2="128" stroke="#495057" stroke-width="2"/>
+  <polygon points="390,138 382,128 398,128" fill="#495057"/>
+
+  <!-- Result -->
+  <text x="390" y="154" text-anchor="middle" class="label warn">copy → O(n)</text>
+  <text x="390" y="166" text-anchor="middle" class="result">new buffer</text>
+</svg>

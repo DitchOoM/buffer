@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 220">
+  <style>
+    .container { fill: #f8f9fa; stroke: #dee2e6; stroke-width: 2; }
+    .process-box { fill: #e7f3ff; stroke: #4a90d9; stroke-width: 2; }
+    .app-box { fill: #ffffff; stroke: #6c757d; stroke-width: 1.5; }
+    .shared-mem { fill: #d4edda; stroke: #28a745; stroke-width: 2; }
+    .title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; fill: #2c3e50; font-weight: 600; }
+    .label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; fill: #495057; }
+    .label-bold { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 11px; fill: #495057; font-weight: 600; }
+    .shared-label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; fill: #155724; font-weight: 500; }
+  </style>
+
+  <!-- Main container -->
+  <rect x="10" y="10" width="460" height="200" class="container" rx="8"/>
+  <text x="240" y="32" text-anchor="middle" class="title">SharedMemory for IPC</text>
+
+  <!-- Process A -->
+  <rect x="30" y="48" width="140" height="85" class="process-box" rx="6"/>
+  <text x="100" y="68" text-anchor="middle" class="label-bold">Process A</text>
+  <rect x="50" y="80" width="100" height="35" class="app-box" rx="4"/>
+  <text x="100" y="103" text-anchor="middle" class="label">App Code</text>
+
+  <!-- Process B -->
+  <rect x="310" y="48" width="140" height="85" class="process-box" rx="6"/>
+  <text x="380" y="68" text-anchor="middle" class="label-bold">Process B</text>
+  <rect x="330" y="80" width="100" height="35" class="app-box" rx="4"/>
+  <text x="380" y="103" text-anchor="middle" class="label">App Code</text>
+
+  <!-- Arrows from processes to shared memory - downward pointing -->
+  <line x1="100" y1="133" x2="100" y2="153" stroke="#28a745" stroke-width="2"/>
+  <polygon points="100,163 92,153 108,153" fill="#28a745"/>
+
+  <line x1="380" y1="133" x2="380" y2="153" stroke="#28a745" stroke-width="2"/>
+  <polygon points="380,163 372,153 388,153" fill="#28a745"/>
+
+  <!-- Shared Memory Region -->
+  <rect x="30" y="168" width="420" height="32" class="shared-mem" rx="6"/>
+  <text x="240" y="182" text-anchor="middle" class="shared-label">Shared Memory Region</text>
+  <text x="240" y="194" text-anchor="middle" class="label">(zero-copy between processes)</text>
+</svg>

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 70">
+  <style>
+    .frame { fill: #e7f3ff; stroke: #4a90d9; stroke-width: 2; }
+    .type { fill: #d4edda; stroke: #28a745; stroke-width: 2; }
+    .len { fill: #fff3cd; stroke: #ffc107; stroke-width: 2; }
+    .payload { fill: #f8d7da; stroke: #dc3545; stroke-width: 2; }
+    .label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 11px; fill: #495057; font-weight: 500; }
+    .size { font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 9px; fill: #6c757d; }
+  </style>
+
+  <!-- Type field -->
+  <rect x="10" y="15" width="60" height="40" class="type" rx="4"/>
+  <text x="40" y="40" text-anchor="middle" class="label">Type (1)</text>
+
+  <!-- Length field -->
+  <rect x="75" y="15" width="80" height="40" class="len" rx="4"/>
+  <text x="115" y="40" text-anchor="middle" class="label">Len (4)</text>
+
+  <!-- Payload field -->
+  <rect x="160" y="15" width="230" height="40" class="payload" rx="4"/>
+  <text x="275" y="40" text-anchor="middle" class="label">Payload (N bytes)</text>
+</svg>

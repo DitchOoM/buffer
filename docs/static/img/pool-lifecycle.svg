@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 200">
+  <style>
+    .pool-box { fill: #e7f3ff; stroke: #4a90d9; stroke-width: 2; }
+    .idle-box { fill: #ffffff; stroke: #6c757d; stroke-width: 1.5; }
+    .buffer-idle { fill: #d4edda; stroke: #28a745; stroke-width: 1.5; }
+    .buffer-active { fill: #fff3cd; stroke: #ffc107; stroke-width: 2; }
+    .title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; fill: #2c3e50; font-weight: 600; }
+    .label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 11px; fill: #495057; }
+    .code { font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 10px; fill: #6c757d; }
+  </style>
+
+  <!-- BufferPool -->
+  <rect x="10" y="10" width="460" height="70" class="pool-box" rx="8"/>
+  <text x="240" y="30" text-anchor="middle" class="title">BufferPool</text>
+
+  <!-- Idle buffers container -->
+  <rect x="30" y="40" width="420" height="30" class="idle-box" rx="4"/>
+  <text x="60" y="60" class="label">Idle:</text>
+  <rect x="95" y="45" width="40" height="20" class="buffer-idle" rx="3"/>
+  <text x="115" y="59" text-anchor="middle" class="code">B1</text>
+  <rect x="145" y="45" width="40" height="20" class="buffer-idle" rx="3"/>
+  <text x="165" y="59" text-anchor="middle" class="code">B2</text>
+  <rect x="195" y="45" width="40" height="20" class="buffer-idle" rx="3"/>
+  <text x="215" y="59" text-anchor="middle" class="code">B3</text>
+
+  <!-- Arrows -->
+  <line x1="115" y1="80" x2="115" y2="110" stroke="#495057" stroke-width="2"/>
+  <polygon points="115,120 107,110 123,110" fill="#495057"/>
+  <text x="145" y="100" class="code">acquire()</text>
+
+  <line x1="365" y1="120" x2="365" y2="90" stroke="#495057" stroke-width="2"/>
+  <polygon points="365,80 357,90 373,90" fill="#495057"/>
+  <text x="395" y="110" class="code">release()</text>
+
+  <!-- Active PooledBuffer -->
+  <rect x="10" y="130" width="460" height="60" class="buffer-active" rx="8"/>
+  <text x="240" y="152" text-anchor="middle" class="title">PooledBuffer (B1)</text>
+  <text x="240" y="175" text-anchor="middle" class="code">capacity=1024, position=0, inUse=true</text>
+</svg>
