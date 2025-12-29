@@ -255,7 +255,6 @@ class StreamProcessor private constructor(
     // - JVM (JDK 11+): ByteBuffer.mismatch() or Arrays.mismatch()
     // - Native: memcmp via cinterop
     // - JS: Buffer.compare() in Node.js
-    // Current implementation uses 8-byte Long comparisons which is reasonably efficient.
 
     // Find first mismatched byte index within a Long (big-endian)
     private fun findMismatchInLong(

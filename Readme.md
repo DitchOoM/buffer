@@ -391,7 +391,7 @@ pool.clear()
 - Handles data spanning multiple chunks transparently
 - `peekByte/peekShort/peekInt/peekLong` - read without consuming
 - `peekMatches(pattern)` - check for magic bytes/headers (returns Boolean)
-- `peekMismatch(pattern)` - find first mismatch index, or -1 if match (optimized with 8-byte comparisons)
+- `peekMismatch(pattern)` - find first mismatch index, or -1 if match
 - `readBuffer(size)` - read into a new buffer
 - `skip(count)` - skip bytes efficiently
 - Automatic chunk cleanup after consumption
