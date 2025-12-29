@@ -14,3 +14,4 @@ kotlinx-io-native/repo/
 !.idea/codeStyles
 
 local.properties
+.claude/settings.local.json

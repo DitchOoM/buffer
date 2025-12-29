@@ -50,6 +50,8 @@ A kotlin multiplatform library that allows you to allocate and modify byte[] nat
         <li><a href="#absolute-write-data-into-platform-agnostic-buffer">Absolute write data into platform agnostic buffer</a></li>
         <li><a href="#relative-read-data-into-platform-agnostic-buffer">Relative read data into platform agnostic buffer</a></li>
         <li><a href="#absolute-read-data-into-platform-agnostic-buffer">Absolute read data into platform agnostic buffer</a></li>
+        <li><a href="#buffer-pool">Buffer Pool</a></li>
+        <li><a href="#buffer-stream">Buffer Stream</a></li>
       </ul>
     </li>
     <li>
@@ -289,6 +291,110 @@ val double = buffer.getDouble(index)
 // slice the buffer without adjusting the position or limit (changes to the original reflect here)
 val slicedBuffer = buffer.slice()
 ```
+
+### Buffer Pool
+
+High-performance buffer pooling to minimize allocations in hot paths like network I/O:
+
+```kotlin
+import com.ditchoom.buffer.pool.*
+
+// Create a pool (single-threaded for best performance)
+val pool = BufferPool(
+    threadingMode = ThreadingMode.SingleThreaded,  // or MultiThreaded for concurrent access
+    maxPoolSize = 64,
+    defaultBufferSize = 8 * 1024,  // 8KB default
+    byteOrder = ByteOrder.BIG_ENDIAN
+)
+
+// Recommended: use withBuffer for automatic acquire/release
+pool.withBuffer(1024) { buffer ->
+    buffer.writeInt(42)
+    buffer.resetForRead()
+    println(buffer.readInt())
+} // buffer automatically released
+
+// Or use withPool for scoped pool lifetime
+withPool(defaultBufferSize = 8192) { pool ->
+    pool.withBuffer { buffer ->
+        // use buffer
+    }
+} // pool automatically cleared
+
+// Manual acquire/release (use when buffer lifetime spans multiple scopes)
+val buffer = pool.acquire(1024)
+try {
+    buffer.writeInt(123)
+} finally {
+    buffer.release()  // returns buffer to pool
+}
+
+// Check pool statistics
+val stats = pool.stats()
+println("Hits: ${stats.poolHits}, Misses: ${stats.poolMisses}")
+
+// Clean up
+pool.clear()
+```
+
+**Threading modes:**
+- `SingleThreaded` - Fastest, use when pool is confined to a single thread/coroutine
+- `MultiThreaded` - Thread-safe lock-free implementation for concurrent access (e.g., acquire on IO thread, release from processing thread)
+
+### Buffer Stream
+
+Process large buffers or streaming data in chunks without loading everything into memory:
+
+```kotlin
+import com.ditchoom.buffer.stream.*
+import com.ditchoom.buffer.pool.*
+
+// Create a stream from an existing buffer
+val sourceBuffer = PlatformBuffer.allocate(1024 * 1024)  // 1MB
+// ... populate buffer ...
+sourceBuffer.resetForRead()
+
+val stream = BufferStream(sourceBuffer, chunkSize = 8192)
+
+// Process chunks
+stream.forEachChunk { chunk ->
+    // Process each 8KB chunk
+    processChunk(chunk)
+}
+
+// Or use StreamProcessor for protocol parsing with fragmented data
+val pool = BufferPool(defaultBufferSize = 8192)
+val processor = StreamProcessor.create(pool)
+
+// Append incoming data (e.g., from network)
+processor.append(incomingBuffer1)
+processor.append(incomingBuffer2)
+
+// Parse protocol messages
+while (processor.available() >= 4) {
+    val messageLength = processor.peekInt()  // peek without consuming
+    if (processor.available() >= 4 + messageLength) {
+        processor.skip(4)  // skip length header
+        val payload = processor.readBuffer(messageLength)
+        handleMessage(payload)
+    } else {
+        break  // wait for more data
+    }
+}
+
+// Clean up
+processor.release()
+pool.clear()
+```
+
+**StreamProcessor features:**
+- Handles data spanning multiple chunks transparently
+- `peekByte/peekShort/peekInt/peekLong` - read without consuming
+- `peekMatches(pattern)` - check for magic bytes/headers (returns Boolean)
+- `peekMismatch(pattern)` - find first mismatch index, or -1 if match (optimized with 8-byte comparisons)
+- `readBuffer(size)` - read into a new buffer
+- `skip(count)` - skip bytes efficiently
+- Automatic chunk cleanup after consumption
 
 ## Building Locally
 
