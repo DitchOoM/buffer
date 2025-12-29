@@ -95,17 +95,15 @@ data class KotlinJsBuffer(
     }
 
     override fun write(buffer: ReadBuffer) {
-        val start = position()
-        val byteSize =
-            if (buffer is KotlinJsBuffer) {
-                writeBytes(buffer.data)
-                buffer.data.size
-            } else {
-                val numBytes = buffer.remaining()
-                writeBytes(buffer.readByteArray(numBytes))
-                numBytes
-            }
-        buffer.position(start + byteSize)
+        val numBytes = buffer.remaining()
+        if (buffer is KotlinJsBuffer) {
+            // Copy only the remaining portion (from position to limit)
+            buffer.data.copyInto(data, position, buffer.position(), buffer.position() + numBytes)
+            position += numBytes
+        } else {
+            writeBytes(buffer.readByteArray(numBytes))
+        }
+        buffer.position(buffer.position() + numBytes)
     }
 
     override fun writeString(

@@ -135,7 +135,9 @@ data class JsBuffer(
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
         if (buffer is JsBuffer) {
-            this.buffer.set(buffer.buffer, position)
+            // Copy only the remaining portion (from position to limit)
+            val sourceSubarray = buffer.buffer.subarray(buffer.position(), buffer.position() + size)
+            this.buffer.set(sourceSubarray, position)
         } else {
             this.buffer.set(buffer.readByteArray(size).toTypedArray(), position)
         }
