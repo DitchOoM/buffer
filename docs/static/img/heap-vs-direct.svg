@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 200">
+  <style>
+    .container { fill: #f8f9fa; stroke: #dee2e6; stroke-width: 2; }
+    .heap-box { fill: #fff3cd; stroke: #ffc107; stroke-width: 2; }
+    .direct-box { fill: #d1ecf1; stroke: #17a2b8; stroke-width: 2; }
+    .buffer-heap { fill: #ffeeba; stroke: #856404; stroke-width: 1.5; }
+    .buffer-direct { fill: #bee5eb; stroke: #0c5460; stroke-width: 1.5; }
+    .title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; fill: #2c3e50; font-weight: 600; }
+    .label { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; fill: #495057; }
+    .label-bold { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 11px; fill: #495057; font-weight: 600; }
+    .bullet { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 10px; fill: #6c757d; }
+  </style>
+
+  <!-- Main container -->
+  <rect x="10" y="10" width="500" height="180" class="container" rx="8"/>
+  <text x="260" y="32" text-anchor="middle" class="title">JVM Process Memory</text>
+
+  <!-- JVM Heap section -->
+  <rect x="25" y="48" width="220" height="130" class="heap-box" rx="6"/>
+  <text x="135" y="68" text-anchor="middle" class="label-bold">JVM Heap</text>
+
+  <!-- HeapByteBuffer -->
+  <rect x="45" y="80" width="180" height="45" class="buffer-heap" rx="4"/>
+  <text x="135" y="100" text-anchor="middle" class="label">HeapByteBuffer</text>
+  <text x="135" y="115" text-anchor="middle" class="bullet">(GC managed)</text>
+
+  <!-- Heap bullets -->
+  <text x="45" y="145" class="bullet">- GC pressure</text>
+  <text x="45" y="160" class="bullet">- Copy on JNI calls</text>
+
+  <!-- Off-Heap section -->
+  <rect x="270" y="48" width="225" height="130" class="direct-box" rx="6"/>
+  <text x="382" y="68" text-anchor="middle" class="label-bold">Off-Heap Memory</text>
+
+  <!-- DirectByteBuffer -->
+  <rect x="290" y="80" width="185" height="45" class="buffer-direct" rx="4"/>
+  <text x="382" y="100" text-anchor="middle" class="label">DirectByteBuffer</text>
+  <text x="382" y="115" text-anchor="middle" class="bullet">(OS managed)</text>
+
+  <!-- Direct bullets -->
+  <text x="290" y="145" class="bullet">- Zero-copy I/O</text>
+  <text x="290" y="160" class="bullet">- No GC overhead</text>
+</svg>
