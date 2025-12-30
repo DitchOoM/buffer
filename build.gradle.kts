@@ -154,6 +154,8 @@ android {
     }
     compileSdk = 36
     defaultConfig {
+        // Library supports API 19+, but test APK requires API 23+ for Android 14 devices.
+        // To run benchmarks on Android 14+: temporarily change this to 23, run tests, revert.
         minSdk = 19
         testInstrumentationRunner = "androidx.benchmark.junit4.AndroidBenchmarkRunner"
         testInstrumentationRunnerArguments["androidx.benchmark.output.enable"] = "true"
@@ -161,7 +163,7 @@ android {
     namespace = "$group.${rootProject.name}"
 
     // Benchmark build type for running benchmarks with R8 optimization
-    // Note: Use connectedDebugAndroidTest for debugging, tests run against debug build
+    // Run with: ./gradlew connectedBenchmarkAndroidTest
     buildTypes {
         create("benchmark") {
             initWith(getByName("release"))
@@ -172,6 +174,17 @@ android {
                 "proguard-benchmark.pro",
             )
             matchingFallbacks += listOf("release")
+        }
+    }
+    // Run instrumented tests against benchmark build type for accurate performance measurements
+    testBuildType = "benchmark"
+
+    // Android 14+ requires apps to target at least SDK 23 for installation
+    @Suppress("UnstableApiUsage")
+    testOptions {
+        targetSdk = 36
+        managedDevices {
+            // Could add managed device config here for CI
         }
     }
 
