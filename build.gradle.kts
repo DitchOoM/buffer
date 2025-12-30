@@ -156,6 +156,7 @@ android {
     defaultConfig {
         minSdk = 19
         testInstrumentationRunner = "androidx.benchmark.junit4.AndroidBenchmarkRunner"
+        testInstrumentationRunnerArguments["androidx.benchmark.output.enable"] = "true"
     }
     namespace = "$group.${rootProject.name}"
     publishing {

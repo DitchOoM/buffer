@@ -3,14 +3,18 @@ package com.ditchoom.buffer
 import androidx.benchmark.junit4.BenchmarkRule
 import androidx.benchmark.junit4.measureRepeated
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.ditchoom.buffer.allocate
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
  * Android-specific benchmarks using AndroidX Benchmark library.
- * Run with: ./gradlew connectedCheck -Pandroid.testInstrumentationRunnerArguments.class=com.ditchoom.buffer.AndroidBufferBenchmark
+ *
+ * Run benchmarks only:
+ * ./gradlew connectedCheck -Pandroid.testInstrumentationRunnerArguments.class=com.ditchoom.buffer.AndroidBufferBenchmark
+ *
+ * Run all instrumented tests (includes benchmarks):
+ * ./gradlew connectedCheck
  */
 @RunWith(AndroidJUnit4::class)
 class AndroidBufferBenchmark {
@@ -23,302 +27,86 @@ class AndroidBufferBenchmark {
     // --- Allocation Benchmarks ---
 
     @Test
-    fun allocateHeapSmall() {
+    fun allocateHeap() {
         benchmarkRule.measureRepeated {
             PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
         }
     }
 
     @Test
-    fun allocateDirectSmall() {
+    fun allocateDirect() {
         benchmarkRule.measureRepeated {
             PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
         }
     }
 
-    @Test
-    fun allocateHeapLarge() {
-        benchmarkRule.measureRepeated {
-            PlatformBuffer.allocate(largeBufferSize, AllocationZone.Heap)
-        }
-    }
+    // --- Read/Write Int (representative of primitive operations) ---
 
     @Test
-    fun allocateDirectLarge() {
-        benchmarkRule.measureRepeated {
-            PlatformBuffer.allocate(largeBufferSize, AllocationZone.Direct)
-        }
-    }
-
-    // --- Read Benchmarks ---
-
-    @Test
-    fun readByteHeap() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
-        buffer.writeBytes(ByteArray(smallBufferSize))
-        buffer.resetForRead()
-        benchmarkRule.measureRepeated {
-            buffer.position(0)
-            repeat(smallBufferSize) {
-                buffer.readByte()
-            }
-        }
-    }
-
-    @Test
-    fun readByteDirect() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
-        buffer.writeBytes(ByteArray(smallBufferSize))
-        buffer.resetForRead()
-        benchmarkRule.measureRepeated {
-            buffer.position(0)
-            repeat(smallBufferSize) {
-                buffer.readByte()
-            }
-        }
-    }
-
-    @Test
-    fun readIntHeap() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
-        repeat(smallBufferSize / 4) { buffer.writeInt(it) }
-        buffer.resetForRead()
-        benchmarkRule.measureRepeated {
-            buffer.position(0)
-            repeat(smallBufferSize / 4) {
-                buffer.readInt()
-            }
-        }
-    }
-
-    @Test
-    fun readIntDirect() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
-        repeat(smallBufferSize / 4) { buffer.writeInt(it) }
-        buffer.resetForRead()
-        benchmarkRule.measureRepeated {
-            buffer.position(0)
-            repeat(smallBufferSize / 4) {
-                buffer.readInt()
-            }
-        }
-    }
-
-    @Test
-    fun readLongHeap() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
-        repeat(smallBufferSize / 8) { buffer.writeLong(it.toLong()) }
-        buffer.resetForRead()
-        benchmarkRule.measureRepeated {
-            buffer.position(0)
-            repeat(smallBufferSize / 8) {
-                buffer.readLong()
-            }
-        }
-    }
-
-    @Test
-    fun readLongDirect() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
-        repeat(smallBufferSize / 8) { buffer.writeLong(it.toLong()) }
-        buffer.resetForRead()
-        benchmarkRule.measureRepeated {
-            buffer.position(0)
-            repeat(smallBufferSize / 8) {
-                buffer.readLong()
-            }
-        }
-    }
-
-    // --- Write Benchmarks ---
-
-    @Test
-    fun writeByteHeap() {
+    fun readWriteIntHeap() {
         val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
         benchmarkRule.measureRepeated {
             buffer.resetForWrite()
-            repeat(smallBufferSize) {
-                buffer.writeByte(it.toByte())
-            }
+            repeat(smallBufferSize / 4) { buffer.writeInt(it) }
+            buffer.resetForRead()
+            repeat(smallBufferSize / 4) { buffer.readInt() }
         }
     }
 
     @Test
-    fun writeByteDirect() {
+    fun readWriteIntDirect() {
         val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
         benchmarkRule.measureRepeated {
             buffer.resetForWrite()
-            repeat(smallBufferSize) {
-                buffer.writeByte(it.toByte())
-            }
-        }
-    }
-
-    @Test
-    fun writeIntHeap() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
-        benchmarkRule.measureRepeated {
-            buffer.resetForWrite()
-            repeat(smallBufferSize / 4) {
-                buffer.writeInt(it)
-            }
-        }
-    }
-
-    @Test
-    fun writeIntDirect() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
-        benchmarkRule.measureRepeated {
-            buffer.resetForWrite()
-            repeat(smallBufferSize / 4) {
-                buffer.writeInt(it)
-            }
-        }
-    }
-
-    @Test
-    fun writeLongHeap() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
-        benchmarkRule.measureRepeated {
-            buffer.resetForWrite()
-            repeat(smallBufferSize / 8) {
-                buffer.writeLong(it.toLong())
-            }
-        }
-    }
-
-    @Test
-    fun writeLongDirect() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
-        benchmarkRule.measureRepeated {
-            buffer.resetForWrite()
-            repeat(smallBufferSize / 8) {
-                buffer.writeLong(it.toLong())
-            }
+            repeat(smallBufferSize / 4) { buffer.writeInt(it) }
+            buffer.resetForRead()
+            repeat(smallBufferSize / 4) { buffer.readInt() }
         }
     }
 
     // --- Bulk Operations ---
 
     @Test
-    fun writeBytesHeap() {
+    fun bulkOperationsHeap() {
         val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
         val data = ByteArray(smallBufferSize) { it.toByte() }
         benchmarkRule.measureRepeated {
             buffer.resetForWrite()
             buffer.writeBytes(data)
+            buffer.resetForRead()
+            buffer.readByteArray(smallBufferSize)
         }
     }
 
     @Test
-    fun writeBytesDirect() {
+    fun bulkOperationsDirect() {
         val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
         val data = ByteArray(smallBufferSize) { it.toByte() }
         benchmarkRule.measureRepeated {
             buffer.resetForWrite()
             buffer.writeBytes(data)
-        }
-    }
-
-    @Test
-    fun readByteArrayHeap() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
-        buffer.writeBytes(ByteArray(smallBufferSize))
-        buffer.resetForRead()
-        benchmarkRule.measureRepeated {
-            buffer.position(0)
+            buffer.resetForRead()
             buffer.readByteArray(smallBufferSize)
         }
     }
 
-    @Test
-    fun readByteArrayDirect() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
-        buffer.writeBytes(ByteArray(smallBufferSize))
-        buffer.resetForRead()
-        benchmarkRule.measureRepeated {
-            buffer.position(0)
-            buffer.readByteArray(smallBufferSize)
-        }
-    }
-
-    // --- Slice Benchmarks ---
+    // --- Large Buffer (64KB) ---
 
     @Test
-    fun sliceHeap() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
-        buffer.writeBytes(ByteArray(smallBufferSize))
-        buffer.resetForRead()
-        benchmarkRule.measureRepeated {
-            buffer.position(0)
-            buffer.slice()
-        }
-    }
-
-    @Test
-    fun sliceDirect() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
-        buffer.writeBytes(ByteArray(smallBufferSize))
-        buffer.resetForRead()
-        benchmarkRule.measureRepeated {
-            buffer.position(0)
-            buffer.slice()
-        }
-    }
-
-    // --- Large Buffer Operations (64KB) ---
-
-    @Test
-    fun readLongLargeHeap() {
-        val buffer = PlatformBuffer.allocate(largeBufferSize, AllocationZone.Heap)
-        repeat(largeBufferSize / 8) { buffer.writeLong(it.toLong()) }
-        buffer.resetForRead()
-        benchmarkRule.measureRepeated {
-            buffer.position(0)
-            repeat(largeBufferSize / 8) {
-                buffer.readLong()
-            }
-        }
-    }
-
-    @Test
-    fun readLongLargeDirect() {
+    fun largeBufferOperations() {
         val buffer = PlatformBuffer.allocate(largeBufferSize, AllocationZone.Direct)
-        repeat(largeBufferSize / 8) { buffer.writeLong(it.toLong()) }
-        buffer.resetForRead()
-        benchmarkRule.measureRepeated {
-            buffer.position(0)
-            repeat(largeBufferSize / 8) {
-                buffer.readLong()
-            }
-        }
-    }
-
-    // --- Mixed Operations ---
-
-    @Test
-    fun mixedOperationsHeap() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
         benchmarkRule.measureRepeated {
             buffer.resetForWrite()
-            repeat(64) {
-                buffer.writeByte(1)
-                buffer.writeShort(2)
-                buffer.writeInt(3)
-                buffer.writeLong(4)
-            }
+            repeat(largeBufferSize / 8) { buffer.writeLong(it.toLong()) }
             buffer.resetForRead()
-            repeat(64) {
-                buffer.readByte()
-                buffer.readShort()
-                buffer.readInt()
-                buffer.readLong()
-            }
+            repeat(largeBufferSize / 8) { buffer.readLong() }
         }
     }
 
+    // --- Mixed Operations (realistic usage pattern) ---
+
     @Test
-    fun mixedOperationsDirect() {
+    fun mixedOperations() {
         val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
         benchmarkRule.measureRepeated {
             buffer.resetForWrite()
@@ -335,6 +123,19 @@ class AndroidBufferBenchmark {
                 buffer.readInt()
                 buffer.readLong()
             }
+        }
+    }
+
+    // --- Slice ---
+
+    @Test
+    fun sliceBuffer() {
+        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        buffer.writeBytes(ByteArray(smallBufferSize))
+        buffer.resetForRead()
+        benchmarkRule.measureRepeated {
+            buffer.position(0)
+            buffer.slice()
         }
     }
 }
