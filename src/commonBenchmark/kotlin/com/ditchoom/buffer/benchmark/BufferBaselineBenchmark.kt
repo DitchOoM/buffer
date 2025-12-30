@@ -2,7 +2,6 @@ package com.ditchoom.buffer.benchmark
 
 import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.allocate
 import kotlinx.benchmark.Benchmark
 import kotlinx.benchmark.BenchmarkMode
@@ -83,21 +82,23 @@ open class BufferBaselineBenchmark {
     // --- Bulk Operations (buffer-to-buffer, no ByteArray allocation in read path) ---
 
     @Benchmark
-    fun bulkOperationsHeap(): ReadBuffer {
+    fun bulkOperationsHeap(): Int {
         sourceBuffer.position(0)
         heapBuffer.resetForWrite()
         heapBuffer.write(sourceBuffer)
         heapBuffer.resetForRead()
-        return heapBuffer.slice()
+        // Return first int to prevent DCE without allocating new objects
+        return heapBuffer.readInt()
     }
 
     @Benchmark
-    fun bulkOperationsDirect(): ReadBuffer {
+    fun bulkOperationsDirect(): Int {
         sourceBuffer.position(0)
         directBuffer.resetForWrite()
         directBuffer.write(sourceBuffer)
         directBuffer.resetForRead()
-        return directBuffer.slice()
+        // Return first int to prevent DCE without allocating new objects
+        return directBuffer.readInt()
     }
 
     // --- Large Buffer (64KB) ---
@@ -135,12 +136,16 @@ open class BufferBaselineBenchmark {
     }
 
     // --- Slice ---
+    // Note: This benchmark creates new buffer objects each iteration.
+    // On native platforms, this may cause memory pressure at high iteration counts.
 
     @Benchmark
-    fun sliceBuffer(): ReadBuffer {
+    fun sliceBuffer(): Int {
         directBuffer.resetForWrite()
         directBuffer.write(sourceBuffer.also { it.position(0) })
         directBuffer.resetForRead()
-        return directBuffer.slice()
+        val slice = directBuffer.slice()
+        // Read first byte to prevent DCE and ensure slice was created
+        return slice.readByte().toInt()
     }
 }
