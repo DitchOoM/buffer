@@ -24,6 +24,7 @@ apply(from = "gradle/setup.gradle.kts")
 
 group = "com.ditchoom"
 val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
+val isArm64 = System.getProperty("os.arch") == "aarch64"
 
 @Suppress("UNCHECKED_CAST")
 val getNextVersion = project.extra["getNextVersion"] as (Boolean) -> Any
@@ -139,10 +140,12 @@ kotlin {
                 implementation(libs.kotlinx.benchmark.runtime)
             }
         }
-        val macosArm64Benchmark by getting {
-            kotlin.srcDir("src/commonBenchmark/kotlin")
-            dependencies {
-                implementation(libs.kotlinx.benchmark.runtime)
+        if (isArm64) {
+            val macosArm64Benchmark by getting {
+                kotlin.srcDir("src/commonBenchmark/kotlin")
+                dependencies {
+                    implementation(libs.kotlinx.benchmark.runtime)
+                }
             }
         }
     }
@@ -273,7 +276,9 @@ benchmark {
         register("jvmBenchmark")
         register("jsBenchmark")
         register("wasmJsBenchmark")
-        register("macosArm64Benchmark")
+        if (isArm64) {
+            register("macosArm64Benchmark")
+        }
     }
     // Quick configuration for validation (use with -Pbenchmark.configuration=quick)
     configurations {
