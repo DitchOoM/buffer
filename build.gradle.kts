@@ -159,15 +159,27 @@ android {
         testInstrumentationRunnerArguments["androidx.benchmark.output.enable"] = "true"
     }
     namespace = "$group.${rootProject.name}"
+
+    // Benchmark build type for running benchmarks with R8 optimization
+    // Run with: ./gradlew connectedBenchmarkAndroidTest
+    buildTypes {
+        create("benchmark") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-benchmark.pro",
+            )
+            matchingFallbacks += listOf("release")
+        }
+    }
+
     publishing {
         singleVariant("release") {
             withSourcesJar()
             withJavadocJar()
         }
-    }
-    lint {
-        // APIs are guarded with @RequiresApi annotations
-        disable += "NewApi"
     }
 }
 
@@ -257,7 +269,7 @@ benchmark {
             iterations = 1
             iterationTime = 100
             iterationTimeUnit = "ms"
-            include("allocateHeapSmall") // Just one benchmark for quick validation
+            include("allocateDirect") // Just one benchmark for quick validation
         }
         register("subset") {
             warmups = 2
@@ -278,8 +290,13 @@ ktlint {
     }
 }
 
-tasks.create("nextVersion") {
+tasks.register("nextVersion") {
     println(getNextVersion(false))
+}
+
+// Disable unit tests for benchmark build type (only instrumented tests should run)
+tasks.matching { it.name == "testBenchmarkUnitTest" }.configureEach {
+    enabled = false
 }
 
 // Dokka V2 configuration

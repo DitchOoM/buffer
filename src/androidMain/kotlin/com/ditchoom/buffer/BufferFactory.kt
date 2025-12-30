@@ -1,11 +1,14 @@
 @file:JvmName("BufferFactoryAndroid")
+@file:Suppress("DEPRECATION")
 
 package com.ditchoom.buffer
 
+import android.annotation.SuppressLint
 import android.os.Build
 import android.os.SharedMemory
 import java.nio.ByteBuffer
 
+@SuppressLint("NewApi") // SharedMemory API (API 27+) is guarded with Build.VERSION.SDK_INT check
 actual fun PlatformBuffer.Companion.allocate(
     size: Int,
     zone: AllocationZone,
