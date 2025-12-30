@@ -20,6 +20,7 @@ import kotlinx.benchmark.Warmup
  * These establish performance baselines before optimizations.
  *
  * Benchmarks are consistent with AndroidBufferBenchmark for cross-platform comparison.
+ * All benchmarks return values to prevent dead code elimination.
  */
 @State(Scope.Benchmark)
 @Warmup(iterations = 3)
@@ -33,6 +34,7 @@ open class BufferBaselineBenchmark {
     private lateinit var heapBuffer: PlatformBuffer
     private lateinit var directBuffer: PlatformBuffer
     private lateinit var largeDirectBuffer: PlatformBuffer
+    private lateinit var sourceBuffer: PlatformBuffer
     private lateinit var testData: ByteArray
 
     @Setup
@@ -40,11 +42,12 @@ open class BufferBaselineBenchmark {
         heapBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
         directBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
         largeDirectBuffer = PlatformBuffer.allocate(largeBufferSize, AllocationZone.Direct)
+        sourceBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
         testData = ByteArray(smallBufferSize) { it.toByte() }
 
-        // Pre-fill buffers for slice benchmark
-        directBuffer.writeBytes(testData)
-        directBuffer.resetForRead()
+        // Pre-fill source buffer for bulk write operations
+        sourceBuffer.writeBytes(testData)
+        sourceBuffer.resetForRead()
     }
 
     // --- Allocation Benchmarks ---
@@ -77,22 +80,24 @@ open class BufferBaselineBenchmark {
         return sum
     }
 
-    // --- Bulk Operations ---
+    // --- Bulk Operations (buffer-to-buffer, no ByteArray allocation in read path) ---
 
     @Benchmark
-    fun bulkOperationsHeap(): ByteArray {
+    fun bulkOperationsHeap(): ReadBuffer {
+        sourceBuffer.position(0)
         heapBuffer.resetForWrite()
-        heapBuffer.writeBytes(testData)
+        heapBuffer.write(sourceBuffer)
         heapBuffer.resetForRead()
-        return heapBuffer.readByteArray(smallBufferSize)
+        return heapBuffer.slice()
     }
 
     @Benchmark
-    fun bulkOperationsDirect(): ByteArray {
+    fun bulkOperationsDirect(): ReadBuffer {
+        sourceBuffer.position(0)
         directBuffer.resetForWrite()
-        directBuffer.writeBytes(testData)
+        directBuffer.write(sourceBuffer)
         directBuffer.resetForRead()
-        return directBuffer.readByteArray(smallBufferSize)
+        return directBuffer.slice()
     }
 
     // --- Large Buffer (64KB) ---
@@ -133,7 +138,9 @@ open class BufferBaselineBenchmark {
 
     @Benchmark
     fun sliceBuffer(): ReadBuffer {
-        directBuffer.position(0)
+        directBuffer.resetForWrite()
+        directBuffer.write(sourceBuffer.also { it.position(0) })
+        directBuffer.resetForRead()
         return directBuffer.slice()
     }
 }

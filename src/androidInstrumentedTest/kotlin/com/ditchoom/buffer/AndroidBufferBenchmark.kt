@@ -1,5 +1,7 @@
 package com.ditchoom.buffer
 
+import androidx.benchmark.BlackHole
+import androidx.benchmark.ExperimentalBlackHoleApi
 import androidx.benchmark.junit4.BenchmarkRule
 import androidx.benchmark.junit4.measureRepeated
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -15,7 +17,11 @@ import org.junit.runner.RunWith
  *
  * Run all instrumented tests (includes benchmarks):
  * ./gradlew connectedCheck
+ *
+ * All benchmarks use BlackHole.consume() to prevent dead code elimination.
+ * Benchmarks are consistent with BufferBaselineBenchmark for cross-platform comparison.
  */
+@OptIn(ExperimentalBlackHoleApi::class)
 @RunWith(AndroidJUnit4::class)
 class AndroidBufferBenchmark {
     @get:Rule
@@ -29,14 +35,14 @@ class AndroidBufferBenchmark {
     @Test
     fun allocateHeap() {
         benchmarkRule.measureRepeated {
-            PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
+            BlackHole.consume(PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap))
         }
     }
 
     @Test
     fun allocateDirect() {
         benchmarkRule.measureRepeated {
-            PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+            BlackHole.consume(PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct))
         }
     }
 
@@ -49,7 +55,9 @@ class AndroidBufferBenchmark {
             buffer.resetForWrite()
             repeat(smallBufferSize / 4) { buffer.writeInt(it) }
             buffer.resetForRead()
-            repeat(smallBufferSize / 4) { buffer.readInt() }
+            var sum = 0L
+            repeat(smallBufferSize / 4) { sum += buffer.readInt() }
+            BlackHole.consume(sum)
         }
     }
 
@@ -60,33 +68,41 @@ class AndroidBufferBenchmark {
             buffer.resetForWrite()
             repeat(smallBufferSize / 4) { buffer.writeInt(it) }
             buffer.resetForRead()
-            repeat(smallBufferSize / 4) { buffer.readInt() }
+            var sum = 0L
+            repeat(smallBufferSize / 4) { sum += buffer.readInt() }
+            BlackHole.consume(sum)
         }
     }
 
-    // --- Bulk Operations ---
+    // --- Bulk Operations (buffer-to-buffer, no ByteArray allocation in read path) ---
 
     @Test
     fun bulkOperationsHeap() {
+        val sourceBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        sourceBuffer.writeBytes(ByteArray(smallBufferSize) { it.toByte() })
+        sourceBuffer.resetForRead()
         val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
-        val data = ByteArray(smallBufferSize) { it.toByte() }
         benchmarkRule.measureRepeated {
+            sourceBuffer.position(0)
             buffer.resetForWrite()
-            buffer.writeBytes(data)
+            buffer.write(sourceBuffer)
             buffer.resetForRead()
-            buffer.readByteArray(smallBufferSize)
+            BlackHole.consume(buffer.slice())
         }
     }
 
     @Test
     fun bulkOperationsDirect() {
+        val sourceBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        sourceBuffer.writeBytes(ByteArray(smallBufferSize) { it.toByte() })
+        sourceBuffer.resetForRead()
         val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
-        val data = ByteArray(smallBufferSize) { it.toByte() }
         benchmarkRule.measureRepeated {
+            sourceBuffer.position(0)
             buffer.resetForWrite()
-            buffer.writeBytes(data)
+            buffer.write(sourceBuffer)
             buffer.resetForRead()
-            buffer.readByteArray(smallBufferSize)
+            BlackHole.consume(buffer.slice())
         }
     }
 
@@ -99,7 +115,9 @@ class AndroidBufferBenchmark {
             buffer.resetForWrite()
             repeat(largeBufferSize / 8) { buffer.writeLong(it.toLong()) }
             buffer.resetForRead()
-            repeat(largeBufferSize / 8) { buffer.readLong() }
+            var sum = 0L
+            repeat(largeBufferSize / 8) { sum += buffer.readLong() }
+            BlackHole.consume(sum)
         }
     }
 
@@ -117,12 +135,14 @@ class AndroidBufferBenchmark {
                 buffer.writeLong(4)
             }
             buffer.resetForRead()
+            var sum = 0L
             repeat(64) {
-                buffer.readByte()
-                buffer.readShort()
-                buffer.readInt()
-                buffer.readLong()
+                sum += buffer.readByte()
+                sum += buffer.readShort()
+                sum += buffer.readInt()
+                sum += buffer.readLong()
             }
+            BlackHole.consume(sum)
         }
     }
 
@@ -130,12 +150,16 @@ class AndroidBufferBenchmark {
 
     @Test
     fun sliceBuffer() {
+        val sourceBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        sourceBuffer.writeBytes(ByteArray(smallBufferSize) { it.toByte() })
+        sourceBuffer.resetForRead()
         val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
-        buffer.writeBytes(ByteArray(smallBufferSize))
-        buffer.resetForRead()
         benchmarkRule.measureRepeated {
-            buffer.position(0)
-            buffer.slice()
+            sourceBuffer.position(0)
+            buffer.resetForWrite()
+            buffer.write(sourceBuffer)
+            buffer.resetForRead()
+            BlackHole.consume(buffer.slice())
         }
     }
 }
