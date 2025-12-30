@@ -102,6 +102,60 @@ PlatformBuffer.wrap(byteArray)
 - **JS SharedArrayBuffer:** Requires CORS headers (`Cross-Origin-Opener-Policy`, `Cross-Origin-Embedder-Policy`)
 - **WASM:** Currently uses ByteArray copies - optimization contributions welcome
 
+## Benchmarking
+
+### Running Benchmarks
+
+```bash
+# All platforms (kotlinx-benchmark)
+./gradlew benchmark
+
+# Platform-specific
+./gradlew jvmBenchmarkBenchmark
+./gradlew jsBenchmarkBenchmark
+./gradlew wasmJsBenchmarkBenchmark
+./gradlew macosArm64BenchmarkBenchmark
+
+# Quick validation (single iteration)
+./gradlew quickBenchmark
+
+# Android (requires device/emulator)
+./gradlew connectedBenchmarkAndroidTest
+```
+
+### Benchmark Source Locations
+
+- `src/commonBenchmark/kotlin/` - Shared benchmarks for JVM, JS, WasmJS, Native
+- `src/androidInstrumentedTest/kotlin/` - AndroidX Benchmark tests
+
+## Performance Optimization Guidelines
+
+When optimizing buffer operations, follow these principles:
+
+### Apple/Native Platform
+1. **Avoid object allocation in hot paths** - Kotlin/Native GC can't keep up with millions of allocations/sec
+2. **Use pointer arithmetic** - `CPointer + offset` compiles to single CPU instruction, zero allocation
+3. **Use `reinterpret<>()` for multi-byte reads** - Avoids byte-by-byte assembly
+4. **Prefer `memcpy` over intermediate arrays** - Direct memory-to-memory copy
+5. **Avoid `subdataWithRange()`** - Creates new NSData objects, causes GC pressure
+
+### JVM/Android
+1. **Direct ByteBuffers** are best for I/O (avoid extra copy)
+2. **Heap allocation is faster** (7.6M vs 1.3M ops/s) but Direct is better for I/O
+3. **Bulk operations are extremely fast** (46-56M ops/s)
+
+### JavaScript
+1. **Batch operations** - Primitive read/write is slow (36K ops/s)
+2. **Use bulk operations** when possible (10M ops/s)
+3. Heap and Direct are equivalent (both use Uint8Array)
+
+### WasmJS
+1. **Fastest allocation** of any platform (21M+ ops/s)
+2. Primitive operations are ~3x faster than JS
+3. Good choice for compute-heavy workloads
+
+See `PERFORMANCE.md` for detailed benchmark results.
+
 ## CI/CD
 
 - Builds run on macOS with JDK 19
