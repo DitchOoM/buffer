@@ -272,6 +272,9 @@ ktlint {
     verbose.set(true)
     outputToConsole.set(true)
     android.set(true)
+    filter {
+        exclude("**/generated/**")
+    }
 }
 
 tasks.create("nextVersion") {
