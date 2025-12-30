@@ -2,10 +2,11 @@ package com.ditchoom.buffer.benchmark
 
 import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.allocate
 import kotlinx.benchmark.Benchmark
 import kotlinx.benchmark.BenchmarkMode
-import kotlinx.benchmark.Blackhole
+import kotlinx.benchmark.BenchmarkTimeUnit
 import kotlinx.benchmark.Measurement
 import kotlinx.benchmark.Mode
 import kotlinx.benchmark.OutputTimeUnit
@@ -13,17 +14,16 @@ import kotlinx.benchmark.Scope
 import kotlinx.benchmark.Setup
 import kotlinx.benchmark.State
 import kotlinx.benchmark.Warmup
-import java.util.concurrent.TimeUnit
 
 /**
  * Baseline benchmarks for buffer operations.
  * These establish performance baselines before optimizations.
  */
 @State(Scope.Benchmark)
-@Warmup(iterations = 3, time = 1, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
+@Warmup(iterations = 3)
+@Measurement(iterations = 5)
 @BenchmarkMode(Mode.Throughput)
-@OutputTimeUnit(TimeUnit.SECONDS)
+@OutputTimeUnit(BenchmarkTimeUnit.SECONDS)
 open class BufferBaselineBenchmark {
     private val smallBufferSize = 1024
     private val largeBufferSize = 64 * 1024
@@ -58,251 +58,263 @@ open class BufferBaselineBenchmark {
     // --- Allocation Benchmarks ---
 
     @Benchmark
-    fun allocateHeapSmall(bh: Blackhole) {
-        bh.consume(PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap))
-    }
+    fun allocateHeapSmall(): PlatformBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
 
     @Benchmark
-    fun allocateDirectSmall(bh: Blackhole) {
-        bh.consume(PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct))
-    }
+    fun allocateDirectSmall(): PlatformBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
 
     @Benchmark
-    fun allocateHeapLarge(bh: Blackhole) {
-        bh.consume(PlatformBuffer.allocate(largeBufferSize, AllocationZone.Heap))
-    }
+    fun allocateHeapLarge(): PlatformBuffer = PlatformBuffer.allocate(largeBufferSize, AllocationZone.Heap)
 
     @Benchmark
-    fun allocateDirectLarge(bh: Blackhole) {
-        bh.consume(PlatformBuffer.allocate(largeBufferSize, AllocationZone.Direct))
-    }
+    fun allocateDirectLarge(): PlatformBuffer = PlatformBuffer.allocate(largeBufferSize, AllocationZone.Direct)
 
     // --- Read Benchmarks (Heap) ---
 
     @Benchmark
-    fun readByteHeap(bh: Blackhole) {
+    fun readByteHeap(): Long {
         heapBuffer.position(0)
+        var sum = 0L
         repeat(smallBufferSize) {
-            bh.consume(heapBuffer.readByte())
+            sum += heapBuffer.readByte()
         }
+        return sum
     }
 
     @Benchmark
-    fun readShortHeap(bh: Blackhole) {
+    fun readShortHeap(): Long {
         heapBuffer.position(0)
+        var sum = 0L
         repeat(smallBufferSize / 2) {
-            bh.consume(heapBuffer.readShort())
+            sum += heapBuffer.readShort()
         }
+        return sum
     }
 
     @Benchmark
-    fun readIntHeap(bh: Blackhole) {
+    fun readIntHeap(): Long {
         heapBuffer.position(0)
+        var sum = 0L
         repeat(smallBufferSize / 4) {
-            bh.consume(heapBuffer.readInt())
+            sum += heapBuffer.readInt()
         }
+        return sum
     }
 
     @Benchmark
-    fun readLongHeap(bh: Blackhole) {
+    fun readLongHeap(): Long {
         heapBuffer.position(0)
+        var sum = 0L
         repeat(smallBufferSize / 8) {
-            bh.consume(heapBuffer.readLong())
+            sum += heapBuffer.readLong()
         }
+        return sum
     }
 
     // --- Read Benchmarks (Direct) ---
 
     @Benchmark
-    fun readByteDirect(bh: Blackhole) {
+    fun readByteDirect(): Long {
         directBuffer.position(0)
+        var sum = 0L
         repeat(smallBufferSize) {
-            bh.consume(directBuffer.readByte())
+            sum += directBuffer.readByte()
         }
+        return sum
     }
 
     @Benchmark
-    fun readShortDirect(bh: Blackhole) {
+    fun readShortDirect(): Long {
         directBuffer.position(0)
+        var sum = 0L
         repeat(smallBufferSize / 2) {
-            bh.consume(directBuffer.readShort())
+            sum += directBuffer.readShort()
         }
+        return sum
     }
 
     @Benchmark
-    fun readIntDirect(bh: Blackhole) {
+    fun readIntDirect(): Long {
         directBuffer.position(0)
+        var sum = 0L
         repeat(smallBufferSize / 4) {
-            bh.consume(directBuffer.readInt())
+            sum += directBuffer.readInt()
         }
+        return sum
     }
 
     @Benchmark
-    fun readLongDirect(bh: Blackhole) {
+    fun readLongDirect(): Long {
         directBuffer.position(0)
+        var sum = 0L
         repeat(smallBufferSize / 8) {
-            bh.consume(directBuffer.readLong())
+            sum += directBuffer.readLong()
         }
+        return sum
     }
 
     // --- Write Benchmarks (Heap) ---
 
     @Benchmark
-    fun writeByteHeap(bh: Blackhole) {
+    fun writeByteHeap(): PlatformBuffer {
         heapBuffer.resetForWrite()
         repeat(smallBufferSize) {
             heapBuffer.writeByte(it.toByte())
         }
-        bh.consume(heapBuffer)
+        return heapBuffer
     }
 
     @Benchmark
-    fun writeShortHeap(bh: Blackhole) {
+    fun writeShortHeap(): PlatformBuffer {
         heapBuffer.resetForWrite()
         repeat(smallBufferSize / 2) {
             heapBuffer.writeShort(it.toShort())
         }
-        bh.consume(heapBuffer)
+        return heapBuffer
     }
 
     @Benchmark
-    fun writeIntHeap(bh: Blackhole) {
+    fun writeIntHeap(): PlatformBuffer {
         heapBuffer.resetForWrite()
         repeat(smallBufferSize / 4) {
             heapBuffer.writeInt(it)
         }
-        bh.consume(heapBuffer)
+        return heapBuffer
     }
 
     @Benchmark
-    fun writeLongHeap(bh: Blackhole) {
+    fun writeLongHeap(): PlatformBuffer {
         heapBuffer.resetForWrite()
         repeat(smallBufferSize / 8) {
             heapBuffer.writeLong(it.toLong())
         }
-        bh.consume(heapBuffer)
+        return heapBuffer
     }
 
     // --- Write Benchmarks (Direct) ---
 
     @Benchmark
-    fun writeByteDirect(bh: Blackhole) {
+    fun writeByteDirect(): PlatformBuffer {
         directBuffer.resetForWrite()
         repeat(smallBufferSize) {
             directBuffer.writeByte(it.toByte())
         }
-        bh.consume(directBuffer)
+        return directBuffer
     }
 
     @Benchmark
-    fun writeShortDirect(bh: Blackhole) {
+    fun writeShortDirect(): PlatformBuffer {
         directBuffer.resetForWrite()
         repeat(smallBufferSize / 2) {
             directBuffer.writeShort(it.toShort())
         }
-        bh.consume(directBuffer)
+        return directBuffer
     }
 
     @Benchmark
-    fun writeIntDirect(bh: Blackhole) {
+    fun writeIntDirect(): PlatformBuffer {
         directBuffer.resetForWrite()
         repeat(smallBufferSize / 4) {
             directBuffer.writeInt(it)
         }
-        bh.consume(directBuffer)
+        return directBuffer
     }
 
     @Benchmark
-    fun writeLongDirect(bh: Blackhole) {
+    fun writeLongDirect(): PlatformBuffer {
         directBuffer.resetForWrite()
         repeat(smallBufferSize / 8) {
             directBuffer.writeLong(it.toLong())
         }
-        bh.consume(directBuffer)
+        return directBuffer
     }
 
     // --- Bulk Operations ---
 
     @Benchmark
-    fun writeBytesHeap(bh: Blackhole) {
+    fun writeBytesHeap(): PlatformBuffer {
         heapBuffer.resetForWrite()
         heapBuffer.writeBytes(testData)
-        bh.consume(heapBuffer)
+        return heapBuffer
     }
 
     @Benchmark
-    fun writeBytesDirect(bh: Blackhole) {
+    fun writeBytesDirect(): PlatformBuffer {
         directBuffer.resetForWrite()
         directBuffer.writeBytes(testData)
-        bh.consume(directBuffer)
+        return directBuffer
     }
 
     @Benchmark
-    fun readByteArrayHeap(bh: Blackhole) {
+    fun readByteArrayHeap(): ByteArray {
         heapBuffer.position(0)
-        bh.consume(heapBuffer.readByteArray(smallBufferSize))
+        return heapBuffer.readByteArray(smallBufferSize)
     }
 
     @Benchmark
-    fun readByteArrayDirect(bh: Blackhole) {
+    fun readByteArrayDirect(): ByteArray {
         directBuffer.position(0)
-        bh.consume(directBuffer.readByteArray(smallBufferSize))
+        return directBuffer.readByteArray(smallBufferSize)
     }
 
     // --- Slice Benchmarks ---
 
     @Benchmark
-    fun sliceHeap(bh: Blackhole) {
+    fun sliceHeap(): ReadBuffer {
         heapBuffer.position(0)
-        bh.consume(heapBuffer.slice())
+        return heapBuffer.slice()
     }
 
     @Benchmark
-    fun sliceDirect(bh: Blackhole) {
+    fun sliceDirect(): ReadBuffer {
         directBuffer.position(0)
-        bh.consume(directBuffer.slice())
+        return directBuffer.slice()
     }
 
     // --- Large Buffer Operations (64KB) ---
 
     @Benchmark
-    fun readLongLargeHeap(bh: Blackhole) {
+    fun readLongLargeHeap(): Long {
         largeHeapBuffer.position(0)
+        var sum = 0L
         repeat(largeBufferSize / 8) {
-            bh.consume(largeHeapBuffer.readLong())
+            sum += largeHeapBuffer.readLong()
         }
+        return sum
     }
 
     @Benchmark
-    fun readLongLargeDirect(bh: Blackhole) {
+    fun readLongLargeDirect(): Long {
         largeDirectBuffer.position(0)
+        var sum = 0L
         repeat(largeBufferSize / 8) {
-            bh.consume(largeDirectBuffer.readLong())
+            sum += largeDirectBuffer.readLong()
         }
+        return sum
     }
 
     @Benchmark
-    fun writeLongLargeHeap(bh: Blackhole) {
+    fun writeLongLargeHeap(): PlatformBuffer {
         largeHeapBuffer.resetForWrite()
         repeat(largeBufferSize / 8) {
             largeHeapBuffer.writeLong(it.toLong())
         }
-        bh.consume(largeHeapBuffer)
+        return largeHeapBuffer
     }
 
     @Benchmark
-    fun writeLongLargeDirect(bh: Blackhole) {
+    fun writeLongLargeDirect(): PlatformBuffer {
         largeDirectBuffer.resetForWrite()
         repeat(largeBufferSize / 8) {
             largeDirectBuffer.writeLong(it.toLong())
         }
-        bh.consume(largeDirectBuffer)
+        return largeDirectBuffer
     }
 
     // --- Mixed Operations ---
 
     @Benchmark
-    fun mixedOperationsHeap(bh: Blackhole) {
+    fun mixedOperationsHeap(): PlatformBuffer {
         heapBuffer.resetForWrite()
         repeat(64) {
             heapBuffer.writeByte(1)
@@ -311,16 +323,18 @@ open class BufferBaselineBenchmark {
             heapBuffer.writeLong(4)
         }
         heapBuffer.resetForRead()
+        var sum = 0L
         repeat(64) {
-            bh.consume(heapBuffer.readByte())
-            bh.consume(heapBuffer.readShort())
-            bh.consume(heapBuffer.readInt())
-            bh.consume(heapBuffer.readLong())
+            sum += heapBuffer.readByte()
+            sum += heapBuffer.readShort()
+            sum += heapBuffer.readInt()
+            sum += heapBuffer.readLong()
         }
+        return heapBuffer
     }
 
     @Benchmark
-    fun mixedOperationsDirect(bh: Blackhole) {
+    fun mixedOperationsDirect(): PlatformBuffer {
         directBuffer.resetForWrite()
         repeat(64) {
             directBuffer.writeByte(1)
@@ -329,11 +343,13 @@ open class BufferBaselineBenchmark {
             directBuffer.writeLong(4)
         }
         directBuffer.resetForRead()
+        var sum = 0L
         repeat(64) {
-            bh.consume(directBuffer.readByte())
-            bh.consume(directBuffer.readShort())
-            bh.consume(directBuffer.readInt())
-            bh.consume(directBuffer.readLong())
+            sum += directBuffer.readByte()
+            sum += directBuffer.readShort()
+            sum += directBuffer.readInt()
+            sum += directBuffer.readLong()
         }
+        return directBuffer
     }
 }

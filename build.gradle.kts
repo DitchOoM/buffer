@@ -120,23 +120,27 @@ kotlin {
             implementation(libs.kotlin.js)
         }
 
-        // Benchmark dependencies
+        // Benchmark source sets - all share the same source directory
         val jvmBenchmark by getting {
+            kotlin.srcDir("src/commonBenchmark/kotlin")
             dependencies {
                 implementation(libs.kotlinx.benchmark.runtime)
             }
         }
         val jsBenchmark by getting {
+            kotlin.srcDir("src/commonBenchmark/kotlin")
             dependencies {
                 implementation(libs.kotlinx.benchmark.runtime)
             }
         }
         val wasmJsBenchmark by getting {
+            kotlin.srcDir("src/commonBenchmark/kotlin")
             dependencies {
                 implementation(libs.kotlinx.benchmark.runtime)
             }
         }
         val macosArm64Benchmark by getting {
+            kotlin.srcDir("src/commonBenchmark/kotlin")
             dependencies {
                 implementation(libs.kotlinx.benchmark.runtime)
             }
