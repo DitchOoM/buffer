@@ -65,7 +65,13 @@ kotlin {
     }
     if (isRunningOnGithub) {
         macosX64()
-        macosArm64()
+        macosArm64 {
+            if (isArm64) {
+                compilations.create("benchmark") {
+                    associateWith(this@macosArm64.compilations.getByName("main"))
+                }
+            }
+        }
         linuxX64()
         linuxArm64()
         iosArm64()
