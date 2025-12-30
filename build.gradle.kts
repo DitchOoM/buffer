@@ -291,15 +291,12 @@ benchmark {
             iterationTimeUnit = "ms"
             include("allocate.*") // All allocation benchmarks
         }
-        // Native-safe configuration: only include benchmarks that don't allocate per-iteration
+        // Native-safe configuration: excludes slice benchmark which allocates per-iteration
         register("nativeSafe") {
             warmups = 3
             iterations = 5
-            // Only include benchmarks that don't allocate NSData copies
-            include("allocate.*")
-            include("readWrite.*")
-            include("largeBuffer.*")
-            include("mixed.*")
+            // Exclude slice (allocates NSData copies at high frequency)
+            exclude(".*sliceBuffer.*")
         }
     }
 }
