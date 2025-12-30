@@ -161,7 +161,7 @@ android {
     namespace = "$group.${rootProject.name}"
 
     // Benchmark build type for running benchmarks with R8 optimization
-    // Run with: ./gradlew connectedBenchmarkAndroidTest
+    // Note: Use connectedDebugAndroidTest for debugging, tests run against debug build
     buildTypes {
         create("benchmark") {
             initWith(getByName("release"))
