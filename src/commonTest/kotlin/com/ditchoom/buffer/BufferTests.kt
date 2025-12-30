@@ -442,6 +442,54 @@ class BufferTests {
     }
 
     @Test
+    fun longEdgeCases() {
+        // Test edge cases that could break two-int implementations
+        val testValues =
+            listOf(
+                Long.MIN_VALUE, // 0x8000000000000000 - sign bit set, all others 0
+                Long.MAX_VALUE, // 0x7FFFFFFFFFFFFFFF - all bits except sign
+                -1L, // 0xFFFFFFFFFFFFFFFF - all bits set
+                0L, // all bits clear
+                0x00000000FFFFFFFFL, // low 32 bits all set
+                -0x100000000L, // high 32 bits all set (0xFFFFFFFF00000000)
+                0x0000000100000000L, // bit 32 set (boundary between low and high int)
+                0x1122334455667788L, // distinct bytes for endianness verification
+                -0x1122334455667788L, // negative version
+                0x7FFFFFFF00000000L, // max positive high int, zero low
+                0x0000000080000000L, // zero high, min negative as low int pattern
+            )
+
+        for (value in testValues) {
+            // Test big endian
+            val bufferBE = PlatformBuffer.allocate(Long.SIZE_BYTES, byteOrder = ByteOrder.BIG_ENDIAN)
+            bufferBE.writeLong(value)
+            bufferBE.resetForRead()
+            assertEquals(value, bufferBE.readLong(), "Big endian relative read/write failed for $value")
+
+            bufferBE.position(0)
+            assertEquals(value, bufferBE.getLong(0), "Big endian absolute read failed for $value")
+
+            // Test little endian
+            val bufferLE = PlatformBuffer.allocate(Long.SIZE_BYTES, byteOrder = ByteOrder.LITTLE_ENDIAN)
+            bufferLE.writeLong(value)
+            bufferLE.resetForRead()
+            assertEquals(value, bufferLE.readLong(), "Little endian relative read/write failed for $value")
+
+            bufferLE.position(0)
+            assertEquals(value, bufferLE.getLong(0), "Little endian absolute read failed for $value")
+
+            // Test indexed set/get
+            val bufferIndexedBE = PlatformBuffer.allocate(Long.SIZE_BYTES, byteOrder = ByteOrder.BIG_ENDIAN)
+            bufferIndexedBE[0] = value
+            assertEquals(value, bufferIndexedBE.getLong(0), "Big endian indexed set/get failed for $value")
+
+            val bufferIndexedLE = PlatformBuffer.allocate(Long.SIZE_BYTES, byteOrder = ByteOrder.LITTLE_ENDIAN)
+            bufferIndexedLE[0] = value
+            assertEquals(value, bufferIndexedLE.getLong(0), "Little endian indexed set/get failed for $value")
+        }
+    }
+
+    @Test
     fun realtiveFloat() {
         val platformBuffer = PlatformBuffer.allocate(Float.SIZE_BYTES)
         val float = 123.456f
