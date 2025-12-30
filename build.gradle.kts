@@ -5,12 +5,19 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.kotlin.allopen)
     alias(libs.plugins.android.library)
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.atomicfu)
     alias(libs.plugins.dokka)
+    alias(libs.plugins.kotlinx.benchmark)
     signing
+}
+
+// Required for JMH @State classes
+allOpen {
+    annotation("org.openjdk.jmh.annotations.State")
 }
 
 apply(from = "gradle/setup.gradle.kts")
@@ -35,16 +42,25 @@ kotlin {
     }
     jvm {
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
+        compilations.create("benchmark") {
+            associateWith(this@jvm.compilations.getByName("main"))
+        }
     }
     js {
         outputModuleName.set("buffer-kt")
         browser()
         nodejs()
+        compilations.create("benchmark") {
+            associateWith(this@js.compilations.getByName("main"))
+        }
     }
 
     wasmJs {
         browser()
         nodejs()
+        compilations.create("benchmark") {
+            associateWith(this@wasmJs.compilations.getByName("main"))
+        }
     }
     if (isRunningOnGithub) {
         macosX64()
@@ -65,9 +81,17 @@ kotlin {
         if (osName == "Mac OS X") {
             val osArch = System.getProperty("os.arch")
             if (osArch == "aarch64") {
-                macosArm64()
+                macosArm64 {
+                    compilations.create("benchmark") {
+                        associateWith(this@macosArm64.compilations.getByName("main"))
+                    }
+                }
             } else {
-                macosX64()
+                macosX64 {
+                    compilations.create("benchmark") {
+                        associateWith(this@macosX64.compilations.getByName("main"))
+                    }
+                }
             }
         }
     }
@@ -87,12 +111,35 @@ kotlin {
                 implementation(libs.androidx.test.rules)
                 implementation(libs.androidx.test.core.ktx)
                 implementation(libs.androidx.test.ext.junit)
+                implementation(libs.androidx.benchmark.junit4)
             }
         }
 
         jsMain.dependencies {
             implementation(libs.kotlin.web)
             implementation(libs.kotlin.js)
+        }
+
+        // Benchmark dependencies
+        val jvmBenchmark by getting {
+            dependencies {
+                implementation(libs.kotlinx.benchmark.runtime)
+            }
+        }
+        val jsBenchmark by getting {
+            dependencies {
+                implementation(libs.kotlinx.benchmark.runtime)
+            }
+        }
+        val wasmJsBenchmark by getting {
+            dependencies {
+                implementation(libs.kotlinx.benchmark.runtime)
+            }
+        }
+        val macosArm64Benchmark by getting {
+            dependencies {
+                implementation(libs.kotlinx.benchmark.runtime)
+            }
         }
     }
 }
@@ -104,7 +151,7 @@ android {
     compileSdk = 36
     defaultConfig {
         minSdk = 19
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "androidx.benchmark.junit4.AndroidBenchmarkRunner"
     }
     namespace = "$group.${rootProject.name}"
     publishing {
@@ -112,6 +159,10 @@ android {
             withSourcesJar()
             withJavadocJar()
         }
+    }
+    lint {
+        // APIs are guarded with @RequiresApi annotations
+        disable += "NewApi"
     }
 }
 
@@ -182,6 +233,33 @@ mavenPublishing {
             connection.set(gitUrl)
             developerConnection.set(gitUrl)
             url.set(siteUrl)
+        }
+    }
+}
+
+// kotlinx-benchmark configuration
+benchmark {
+    targets {
+        register("jvmBenchmark")
+        register("jsBenchmark")
+        register("wasmJsBenchmark")
+        register("macosArm64Benchmark")
+    }
+    // Quick configuration for validation (use with -Pbenchmark.configuration=quick)
+    configurations {
+        register("quick") {
+            warmups = 1
+            iterations = 1
+            iterationTime = 100
+            iterationTimeUnit = "ms"
+            include("allocateHeapSmall") // Just one benchmark for quick validation
+        }
+        register("subset") {
+            warmups = 2
+            iterations = 3
+            iterationTime = 500
+            iterationTimeUnit = "ms"
+            include("allocate.*") // All allocation benchmarks
         }
     }
 }
