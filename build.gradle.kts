@@ -5,18 +5,26 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.kotlin.allopen)
     alias(libs.plugins.android.library)
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.atomicfu)
     alias(libs.plugins.dokka)
+    alias(libs.plugins.kotlinx.benchmark)
     signing
+}
+
+// Required for JMH @State classes
+allOpen {
+    annotation("org.openjdk.jmh.annotations.State")
 }
 
 apply(from = "gradle/setup.gradle.kts")
 
 group = "com.ditchoom"
 val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
+val isArm64 = System.getProperty("os.arch") == "aarch64"
 
 @Suppress("UNCHECKED_CAST")
 val getNextVersion = project.extra["getNextVersion"] as (Boolean) -> Any
@@ -35,20 +43,35 @@ kotlin {
     }
     jvm {
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
+        compilations.create("benchmark") {
+            associateWith(this@jvm.compilations.getByName("main"))
+        }
     }
     js {
         outputModuleName.set("buffer-kt")
         browser()
         nodejs()
+        compilations.create("benchmark") {
+            associateWith(this@js.compilations.getByName("main"))
+        }
     }
 
     wasmJs {
         browser()
         nodejs()
+        compilations.create("benchmark") {
+            associateWith(this@wasmJs.compilations.getByName("main"))
+        }
     }
     if (isRunningOnGithub) {
         macosX64()
-        macosArm64()
+        macosArm64 {
+            if (isArm64) {
+                compilations.create("benchmark") {
+                    associateWith(this@macosArm64.compilations.getByName("main"))
+                }
+            }
+        }
         linuxX64()
         linuxArm64()
         iosArm64()
@@ -65,9 +88,17 @@ kotlin {
         if (osName == "Mac OS X") {
             val osArch = System.getProperty("os.arch")
             if (osArch == "aarch64") {
-                macosArm64()
+                macosArm64 {
+                    compilations.create("benchmark") {
+                        associateWith(this@macosArm64.compilations.getByName("main"))
+                    }
+                }
             } else {
-                macosX64()
+                macosX64 {
+                    compilations.create("benchmark") {
+                        associateWith(this@macosX64.compilations.getByName("main"))
+                    }
+                }
             }
         }
     }
@@ -87,12 +118,41 @@ kotlin {
                 implementation(libs.androidx.test.rules)
                 implementation(libs.androidx.test.core.ktx)
                 implementation(libs.androidx.test.ext.junit)
+                implementation(libs.androidx.benchmark.junit4)
             }
         }
 
         jsMain.dependencies {
             implementation(libs.kotlin.web)
             implementation(libs.kotlin.js)
+        }
+
+        // Benchmark source sets - all share the same source directory
+        val jvmBenchmark by getting {
+            kotlin.srcDir("src/commonBenchmark/kotlin")
+            dependencies {
+                implementation(libs.kotlinx.benchmark.runtime)
+            }
+        }
+        val jsBenchmark by getting {
+            kotlin.srcDir("src/commonBenchmark/kotlin")
+            dependencies {
+                implementation(libs.kotlinx.benchmark.runtime)
+            }
+        }
+        val wasmJsBenchmark by getting {
+            kotlin.srcDir("src/commonBenchmark/kotlin")
+            dependencies {
+                implementation(libs.kotlinx.benchmark.runtime)
+            }
+        }
+        if (isArm64) {
+            val macosArm64Benchmark by getting {
+                kotlin.srcDir("src/commonBenchmark/kotlin")
+                dependencies {
+                    implementation(libs.kotlinx.benchmark.runtime)
+                }
+            }
         }
     }
 }
@@ -103,10 +163,40 @@ android {
     }
     compileSdk = 36
     defaultConfig {
+        // Library supports API 19+, but test APK requires API 23+ for Android 14 devices.
+        // To run benchmarks on Android 14+: temporarily change this to 23, run tests, revert.
         minSdk = 19
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "androidx.benchmark.junit4.AndroidBenchmarkRunner"
+        testInstrumentationRunnerArguments["androidx.benchmark.output.enable"] = "true"
     }
     namespace = "$group.${rootProject.name}"
+
+    // Benchmark build type for running benchmarks with R8 optimization
+    // Run with: ./gradlew connectedBenchmarkAndroidTest
+    buildTypes {
+        create("benchmark") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-benchmark.pro",
+            )
+            matchingFallbacks += listOf("release")
+        }
+    }
+    // Run instrumented tests against benchmark build type for accurate performance measurements
+    testBuildType = "benchmark"
+
+    // Android 14+ requires apps to target at least SDK 23 for installation
+    @Suppress("UnstableApiUsage")
+    testOptions {
+        targetSdk = 36
+        managedDevices {
+            // Could add managed device config here for CI
+        }
+    }
+
     publishing {
         singleVariant("release") {
             withSourcesJar()
@@ -186,14 +276,58 @@ mavenPublishing {
     }
 }
 
+// kotlinx-benchmark configuration
+benchmark {
+    targets {
+        register("jvmBenchmark")
+        register("jsBenchmark")
+        register("wasmJsBenchmark")
+        if (isArm64) {
+            register("macosArm64Benchmark")
+        }
+    }
+    // Quick configuration for validation (use with -Pbenchmark.configuration=quick)
+    configurations {
+        register("quick") {
+            warmups = 1
+            iterations = 1
+            iterationTime = 100
+            iterationTimeUnit = "ms"
+            include("largeBufferOperations") // Write/read longs on 64KB buffer
+        }
+        register("subset") {
+            warmups = 2
+            iterations = 3
+            iterationTime = 500
+            iterationTimeUnit = "ms"
+            include("allocate.*") // All allocation benchmarks
+        }
+        // Native-safe configuration: excludes slice benchmark which allocates per-iteration
+        register("nativeSafe") {
+            warmups = 3
+            iterations = 5
+            // Exclude slice (allocates NSData copies at high frequency)
+            exclude(".*sliceBuffer.*")
+        }
+    }
+}
+
 ktlint {
     verbose.set(true)
     outputToConsole.set(true)
     android.set(true)
+    filter {
+        exclude("**/generated/**")
+    }
 }
 
-tasks.create("nextVersion") {
+tasks.register("nextVersion") {
     println(getNextVersion(false))
+}
+
+// Disable unit tests for benchmark build type (only instrumented tests should run)
+tasks.matching { it.name == "testBenchmarkUnitTest" }.configureEach {
+    enabled = false
 }
 
 // Dokka V2 configuration

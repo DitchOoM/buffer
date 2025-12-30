@@ -5,6 +5,7 @@ import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.UnsafeNumber
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
+import kotlinx.cinterop.plus
 import kotlinx.cinterop.set
 import kotlinx.cinterop.usePinned
 import platform.CoreFoundation.CFDataRef
@@ -17,7 +18,7 @@ import platform.Foundation.NSString
 import platform.Foundation.dataUsingEncoding
 import platform.Foundation.dataWithBytesNoCopy
 import platform.Foundation.replaceBytesInRange
-import platform.Foundation.subdataWithRange
+import platform.posix.memcpy
 
 @OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, UnsafeNumber::class)
 class MutableDataBuffer(
@@ -29,12 +30,12 @@ class MutableDataBuffer(
     val mutableData = dataRef as? NSMutableData
 
     @Suppress("UNCHECKED_CAST")
-    private val bytePointer = mutableData?.mutableBytes as? CPointer<ByteVar>
+    private val mutableBytePointer = mutableData?.mutableBytes as? CPointer<ByteVar>
 
     init {
         check(
-            (bytePointer != null && backingArray == null) ||
-                (bytePointer == null && backingArray != null),
+            (mutableBytePointer != null && backingArray == null) ||
+                (mutableBytePointer == null && backingArray != null),
         )
     }
 
@@ -43,7 +44,7 @@ class MutableDataBuffer(
         byte: Byte,
     ) {
         backingArray?.set(index, byte)
-        bytePointer?.set(index, byte)
+        mutableBytePointer?.set(index, byte)
     }
 
     override fun resetForWrite() {
@@ -86,22 +87,12 @@ class MutableDataBuffer(
     }
 
     override fun write(buffer: ReadBuffer) {
-        if (buffer is DataBuffer && mutableData != null) {
+        if (buffer is DataBuffer && mutableBytePointer != null) {
             val bytesToCopySize = buffer.remaining()
-            val otherSubdata =
-                buffer.data.subdataWithRange(
-                    NSMakeRange(
-                        buffer.position().convert(),
-                        bytesToCopySize.convert(),
-                    ),
-                )
-            mutableData.replaceBytesInRange(
-                NSMakeRange(
-                    position.convert(),
-                    bytesToCopySize.convert(),
-                ),
-                otherSubdata.bytes,
-            )
+            // Direct memory copy - no intermediate allocation
+            val srcPtr = buffer.bytePointer + buffer.position()
+            val dstPtr = mutableBytePointer + position
+            memcpy(dstPtr, srcPtr, bytesToCopySize.convert())
             position += bytesToCopySize
             buffer.position(buffer.position() + bytesToCopySize)
         } else {

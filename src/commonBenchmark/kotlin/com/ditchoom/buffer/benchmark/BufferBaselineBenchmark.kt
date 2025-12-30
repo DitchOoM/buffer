@@ -1,0 +1,151 @@
+package com.ditchoom.buffer.benchmark
+
+import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.allocate
+import kotlinx.benchmark.Benchmark
+import kotlinx.benchmark.BenchmarkMode
+import kotlinx.benchmark.BenchmarkTimeUnit
+import kotlinx.benchmark.Measurement
+import kotlinx.benchmark.Mode
+import kotlinx.benchmark.OutputTimeUnit
+import kotlinx.benchmark.Scope
+import kotlinx.benchmark.Setup
+import kotlinx.benchmark.State
+import kotlinx.benchmark.Warmup
+
+/**
+ * Baseline benchmarks for buffer operations.
+ * These establish performance baselines before optimizations.
+ *
+ * Benchmarks are consistent with AndroidBufferBenchmark for cross-platform comparison.
+ * All benchmarks return values to prevent dead code elimination.
+ */
+@State(Scope.Benchmark)
+@Warmup(iterations = 3)
+@Measurement(iterations = 5)
+@BenchmarkMode(Mode.Throughput)
+@OutputTimeUnit(BenchmarkTimeUnit.SECONDS)
+open class BufferBaselineBenchmark {
+    private val smallBufferSize = 1024
+    private val largeBufferSize = 64 * 1024
+
+    private lateinit var heapBuffer: PlatformBuffer
+    private lateinit var directBuffer: PlatformBuffer
+    private lateinit var largeDirectBuffer: PlatformBuffer
+    private lateinit var sourceBuffer: PlatformBuffer
+    private lateinit var testData: ByteArray
+
+    @Setup
+    fun setup() {
+        heapBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
+        directBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        largeDirectBuffer = PlatformBuffer.allocate(largeBufferSize, AllocationZone.Direct)
+        sourceBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        testData = ByteArray(smallBufferSize) { it.toByte() }
+
+        // Pre-fill source buffer for bulk write operations
+        sourceBuffer.writeBytes(testData)
+        sourceBuffer.resetForRead()
+    }
+
+    // --- Allocation Benchmarks ---
+
+    @Benchmark
+    fun allocateHeap(): PlatformBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
+
+    @Benchmark
+    fun allocateDirect(): PlatformBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+
+    // --- Read/Write Int (representative of primitive operations) ---
+
+    @Benchmark
+    fun readWriteIntHeap(): Long {
+        heapBuffer.resetForWrite()
+        repeat(smallBufferSize / 4) { heapBuffer.writeInt(it) }
+        heapBuffer.resetForRead()
+        var sum = 0L
+        repeat(smallBufferSize / 4) { sum += heapBuffer.readInt() }
+        return sum
+    }
+
+    @Benchmark
+    fun readWriteIntDirect(): Long {
+        directBuffer.resetForWrite()
+        repeat(smallBufferSize / 4) { directBuffer.writeInt(it) }
+        directBuffer.resetForRead()
+        var sum = 0L
+        repeat(smallBufferSize / 4) { sum += directBuffer.readInt() }
+        return sum
+    }
+
+    // --- Bulk Operations (buffer-to-buffer, no ByteArray allocation in read path) ---
+
+    @Benchmark
+    fun bulkOperationsHeap(): Int {
+        sourceBuffer.position(0)
+        heapBuffer.resetForWrite()
+        heapBuffer.write(sourceBuffer)
+        heapBuffer.resetForRead()
+        // Return first int to prevent DCE without allocating new objects
+        return heapBuffer.readInt()
+    }
+
+    @Benchmark
+    fun bulkOperationsDirect(): Int {
+        sourceBuffer.position(0)
+        directBuffer.resetForWrite()
+        directBuffer.write(sourceBuffer)
+        directBuffer.resetForRead()
+        // Return first int to prevent DCE without allocating new objects
+        return directBuffer.readInt()
+    }
+
+    // --- Large Buffer (64KB) ---
+
+    @Benchmark
+    fun largeBufferOperations(): Long {
+        largeDirectBuffer.resetForWrite()
+        repeat(largeBufferSize / 8) { largeDirectBuffer.writeLong(it.toLong()) }
+        largeDirectBuffer.resetForRead()
+        var sum = 0L
+        repeat(largeBufferSize / 8) { sum += largeDirectBuffer.readLong() }
+        return sum
+    }
+
+    // --- Mixed Operations (realistic usage pattern) ---
+
+    @Benchmark
+    fun mixedOperations(): Long {
+        directBuffer.resetForWrite()
+        repeat(64) {
+            directBuffer.writeByte(1)
+            directBuffer.writeShort(2)
+            directBuffer.writeInt(3)
+            directBuffer.writeLong(4)
+        }
+        directBuffer.resetForRead()
+        var sum = 0L
+        repeat(64) {
+            sum += directBuffer.readByte()
+            sum += directBuffer.readShort()
+            sum += directBuffer.readInt()
+            sum += directBuffer.readLong()
+        }
+        return sum
+    }
+
+    // --- Slice ---
+    // Note: This benchmark creates new buffer objects each iteration.
+    // On native platforms, this may cause memory pressure at high iteration counts.
+
+    @Benchmark
+    fun sliceBuffer(): Int {
+        directBuffer.resetForWrite()
+        directBuffer.write(sourceBuffer.also { it.position(0) })
+        directBuffer.resetForRead()
+        val slice = directBuffer.slice()
+        // Read first byte to prevent DCE and ensure slice was created
+        return slice.readByte().toInt()
+    }
+}
