@@ -1,11 +1,17 @@
-# ProGuard rules for AndroidX Benchmark
-# Keep benchmark classes and methods identifiable in reports
+# ProGuard/R8 rules for AndroidX Benchmark
+# Allow R8 to optimize library code while keeping benchmark infrastructure readable
 
-# Keep benchmark class names
--keep class com.ditchoom.buffer.AndroidBufferBenchmark { *; }
+# Keep benchmark class and test methods
+-keep class com.ditchoom.buffer.AndroidBufferBenchmark {
+    @org.junit.Test <methods>;
+}
 
-# Keep all buffer classes for accurate benchmarking
--keep class com.ditchoom.buffer.** { *; }
+# Keep public API entry points (factory methods)
+-keep class com.ditchoom.buffer.PlatformBuffer {
+    public static ** allocate(...);
+}
+-keep class com.ditchoom.buffer.AllocationZone { *; }
+-keep class com.ditchoom.buffer.AllocationZone$* { *; }
 
-# Don't obfuscate (required for benchmark reports to be readable)
+# Don't obfuscate - keeps class/method names readable in benchmark reports and stack traces
 -dontobfuscate

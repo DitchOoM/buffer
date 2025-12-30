@@ -269,7 +269,7 @@ benchmark {
             iterations = 1
             iterationTime = 100
             iterationTimeUnit = "ms"
-            include("allocateDirect") // Just one benchmark for quick validation
+            include("largeBufferOperations") // Write/read longs on 64KB buffer
         }
         register("subset") {
             warmups = 2
