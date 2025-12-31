@@ -49,21 +49,21 @@ open class DataBuffer(
         val ptr = (bytePointer + position)!!.reinterpret<ShortVar>()
         val value = ptr[0]
         position += 2
-        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.toBigEndian() else value
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun readInt(): Int {
         val ptr = (bytePointer + position)!!.reinterpret<IntVar>()
         val value = ptr[0]
         position += 4
-        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.toBigEndian() else value
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun readLong(): Long {
         val ptr = (bytePointer + position)!!.reinterpret<LongVar>()
         val value = ptr[0]
         position += 8
-        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.toBigEndian() else value
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun slice(): ReadBuffer {
@@ -163,21 +163,21 @@ internal class DataBufferSlice(
         val ptr = (slicePointer + position)!!.reinterpret<ShortVar>()
         val value = ptr[0]
         position += 2
-        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.toBigEndian() else value
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun readInt(): Int {
         val ptr = (slicePointer + position)!!.reinterpret<IntVar>()
         val value = ptr[0]
         position += 4
-        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.toBigEndian() else value
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun readLong(): Long {
         val ptr = (slicePointer + position)!!.reinterpret<LongVar>()
         val value = ptr[0]
         position += 8
-        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.toBigEndian() else value
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun slice(): ReadBuffer = DataBufferSlice(parent, sliceOffset + position, limit - position)
@@ -218,22 +218,3 @@ internal class DataBufferSlice(
         position = newPosition
     }
 }
-
-// Byte swap utilities for endianness conversion (ARM64 is little endian)
-private fun Short.toBigEndian(): Short = (((this.toInt() and 0xFF) shl 8) or ((this.toInt() shr 8) and 0xFF)).toShort()
-
-private fun Int.toBigEndian(): Int =
-    ((this and 0xFF) shl 24) or
-        ((this and 0xFF00) shl 8) or
-        ((this shr 8) and 0xFF00) or
-        ((this shr 24) and 0xFF)
-
-private fun Long.toBigEndian(): Long =
-    ((this and 0xFFL) shl 56) or
-        ((this and 0xFF00L) shl 40) or
-        ((this and 0xFF0000L) shl 24) or
-        ((this and 0xFF000000L) shl 8) or
-        ((this shr 8) and 0xFF000000L) or
-        ((this shr 24) and 0xFF0000L) or
-        ((this shr 40) and 0xFF00L) or
-        ((this shr 56) and 0xFFL)
