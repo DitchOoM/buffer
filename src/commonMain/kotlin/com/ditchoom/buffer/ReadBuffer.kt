@@ -29,17 +29,55 @@ interface ReadBuffer : PositionBuffer {
 
     fun getUnsignedByte(index: Int): UByte = get(index).toUByte()
 
-    fun readShort(): Short = readNumberWithByteSize(Short.SIZE_BYTES).toShort()
+    // Optimized Short read - direct byte access instead of loop
+    fun readShort(): Short {
+        val b0 = readByte().toInt() and 0xFF
+        val b1 = readByte().toInt() and 0xFF
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) {
+            ((b0 shl 8) or b1).toShort()
+        } else {
+            (b0 or (b1 shl 8)).toShort()
+        }
+    }
 
-    fun getShort(index: Int): Short = getNumberWithStartIndexAndByteSize(index, Short.SIZE_BYTES).toShort()
+    fun getShort(index: Int): Short {
+        val b0 = get(index).toInt() and 0xFF
+        val b1 = get(index + 1).toInt() and 0xFF
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) {
+            ((b0 shl 8) or b1).toShort()
+        } else {
+            (b0 or (b1 shl 8)).toShort()
+        }
+    }
 
     fun readUnsignedShort(): UShort = readShort().toUShort()
 
     fun getUnsignedShort(index: Int): UShort = getShort(index).toUShort()
 
-    fun readInt(): Int = readNumberWithByteSize(Int.SIZE_BYTES).toInt()
+    // Optimized Int read - direct byte access instead of loop
+    fun readInt(): Int {
+        val b0 = readByte().toInt() and 0xFF
+        val b1 = readByte().toInt() and 0xFF
+        val b2 = readByte().toInt() and 0xFF
+        val b3 = readByte().toInt() and 0xFF
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) {
+            (b0 shl 24) or (b1 shl 16) or (b2 shl 8) or b3
+        } else {
+            b0 or (b1 shl 8) or (b2 shl 16) or (b3 shl 24)
+        }
+    }
 
-    fun getInt(index: Int): Int = getNumberWithStartIndexAndByteSize(index, Int.SIZE_BYTES).toInt()
+    fun getInt(index: Int): Int {
+        val b0 = get(index).toInt() and 0xFF
+        val b1 = get(index + 1).toInt() and 0xFF
+        val b2 = get(index + 2).toInt() and 0xFF
+        val b3 = get(index + 3).toInt() and 0xFF
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) {
+            (b0 shl 24) or (b1 shl 16) or (b2 shl 8) or b3
+        } else {
+            b0 or (b1 shl 8) or (b2 shl 16) or (b3 shl 24)
+        }
+    }
 
     fun readUnsignedInt(): UInt = readInt().toUInt()
 
@@ -49,9 +87,26 @@ interface ReadBuffer : PositionBuffer {
 
     fun getFloat(index: Int): Float = Float.fromBits(getInt(index))
 
-    fun readLong(): Long = readNumberWithByteSize(Long.SIZE_BYTES)
+    // Optimized Long read - uses two Int reads for efficiency
+    fun readLong(): Long {
+        val first = readInt().toLong() and 0xFFFFFFFFL
+        val second = readInt().toLong() and 0xFFFFFFFFL
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) {
+            (first shl 32) or second
+        } else {
+            (second shl 32) or first
+        }
+    }
 
-    fun getLong(index: Int): Long = getNumberWithStartIndexAndByteSize(index, Long.SIZE_BYTES)
+    fun getLong(index: Int): Long {
+        val first = getInt(index).toLong() and 0xFFFFFFFFL
+        val second = getInt(index + 4).toLong() and 0xFFFFFFFFL
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) {
+            (first shl 32) or second
+        } else {
+            (second shl 32) or first
+        }
+    }
 
     fun readUnsignedLong(): ULong = readLong().toULong()
 

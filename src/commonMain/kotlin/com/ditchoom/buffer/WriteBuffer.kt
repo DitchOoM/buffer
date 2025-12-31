@@ -53,12 +53,33 @@ interface WriteBuffer : PositionBuffer {
     )
     fun write(uByte: UByte): WriteBuffer = writeUByte(uByte)
 
-    fun writeShort(short: Short): WriteBuffer = writeNumberOfByteSize(short.toLong(), Short.SIZE_BYTES)
+    // Optimized Short write - direct byte access instead of loop
+    fun writeShort(short: Short): WriteBuffer {
+        val value = short.toInt()
+        if (byteOrder == ByteOrder.BIG_ENDIAN) {
+            writeByte((value shr 8).toByte())
+            writeByte(value.toByte())
+        } else {
+            writeByte(value.toByte())
+            writeByte((value shr 8).toByte())
+        }
+        return this
+    }
 
     operator fun set(
         index: Int,
         short: Short,
-    ) = setIndexNumberAndByteSize(index, short.toLong(), Short.SIZE_BYTES)
+    ): WriteBuffer {
+        val value = short.toInt()
+        if (byteOrder == ByteOrder.BIG_ENDIAN) {
+            set(index, (value shr 8).toByte())
+            set(index + 1, value.toByte())
+        } else {
+            set(index, value.toByte())
+            set(index + 1, (value shr 8).toByte())
+        }
+        return this
+    }
 
     @Deprecated(
         "Use writeShort for explicitness. This will be removed in the next release",
@@ -79,12 +100,39 @@ interface WriteBuffer : PositionBuffer {
     )
     fun write(uShort: UShort): WriteBuffer = writeUShort(uShort)
 
-    fun writeInt(int: Int): WriteBuffer = writeNumberOfByteSize(int.toLong(), Int.SIZE_BYTES)
+    // Optimized Int write - direct byte access instead of loop
+    fun writeInt(int: Int): WriteBuffer {
+        if (byteOrder == ByteOrder.BIG_ENDIAN) {
+            writeByte((int shr 24).toByte())
+            writeByte((int shr 16).toByte())
+            writeByte((int shr 8).toByte())
+            writeByte(int.toByte())
+        } else {
+            writeByte(int.toByte())
+            writeByte((int shr 8).toByte())
+            writeByte((int shr 16).toByte())
+            writeByte((int shr 24).toByte())
+        }
+        return this
+    }
 
     operator fun set(
         index: Int,
         int: Int,
-    ) = setIndexNumberAndByteSize(index, int.toLong(), Int.SIZE_BYTES)
+    ): WriteBuffer {
+        if (byteOrder == ByteOrder.BIG_ENDIAN) {
+            set(index, (int shr 24).toByte())
+            set(index + 1, (int shr 16).toByte())
+            set(index + 2, (int shr 8).toByte())
+            set(index + 3, int.toByte())
+        } else {
+            set(index, int.toByte())
+            set(index + 1, (int shr 8).toByte())
+            set(index + 2, (int shr 16).toByte())
+            set(index + 3, (int shr 24).toByte())
+        }
+        return this
+    }
 
     @Deprecated(
         "Use writeInt for explicitness. This will be removed in the next release",
@@ -105,12 +153,31 @@ interface WriteBuffer : PositionBuffer {
     )
     fun write(uInt: UInt): WriteBuffer = writeUInt(uInt)
 
-    fun writeLong(long: Long): WriteBuffer = writeNumberOfByteSize(long, Long.SIZE_BYTES)
+    // Optimized Long write - uses two Int writes for efficiency
+    fun writeLong(long: Long): WriteBuffer {
+        if (byteOrder == ByteOrder.BIG_ENDIAN) {
+            writeInt((long shr 32).toInt())
+            writeInt(long.toInt())
+        } else {
+            writeInt(long.toInt())
+            writeInt((long shr 32).toInt())
+        }
+        return this
+    }
 
     operator fun set(
         index: Int,
         long: Long,
-    ) = setIndexNumberAndByteSize(index, long, Long.SIZE_BYTES)
+    ): WriteBuffer {
+        if (byteOrder == ByteOrder.BIG_ENDIAN) {
+            set(index, (long shr 32).toInt())
+            set(index + 4, long.toInt())
+        } else {
+            set(index, long.toInt())
+            set(index + 4, (long shr 32).toInt())
+        }
+        return this
+    }
 
     fun writeNumberOfByteSize(
         number: Long,
