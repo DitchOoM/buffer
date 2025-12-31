@@ -81,7 +81,10 @@ class MutableDataBuffer(
         return this
     }
 
-    override fun set(index: Int, short: Short): WriteBuffer {
+    override fun set(
+        index: Int,
+        short: Short,
+    ): WriteBuffer {
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) short.reverseBytes() else short
         mutableBytePointer?.let { ptr ->
             (ptr + index)!!.reinterpret<ShortVar>()[0] = value
@@ -106,7 +109,10 @@ class MutableDataBuffer(
         return this
     }
 
-    override fun set(index: Int, int: Int): WriteBuffer {
+    override fun set(
+        index: Int,
+        int: Int,
+    ): WriteBuffer {
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) int.reverseBytes() else int
         mutableBytePointer?.let { ptr ->
             (ptr + index)!!.reinterpret<IntVar>()[0] = value
@@ -137,7 +143,10 @@ class MutableDataBuffer(
         return this
     }
 
-    override fun set(index: Int, long: Long): WriteBuffer {
+    override fun set(
+        index: Int,
+        long: Long,
+    ): WriteBuffer {
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) long.reverseBytes() else long
         mutableBytePointer?.let { ptr ->
             (ptr + index)!!.reinterpret<LongVar>()[0] = value
