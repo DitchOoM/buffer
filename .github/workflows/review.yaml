@@ -43,3 +43,35 @@ jobs:
           restore-keys: konan-${{ runner.os }}-
       - name: Run tests
         run: ./gradlew macosArm64Test iosSimulatorArm64Test --no-build-cache
+
+  docs:
+    name: "Validate Docs Generation"
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 19
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '19'
+          cache: gradle
+      - name: Cache Konan
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-${{ runner.os }}-
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: docs/package-lock.json
+      - name: Generate API Documentation with Dokka
+        run: ./gradlew copyDokkaToDocusaurus
+      - name: Install docs dependencies
+        working-directory: docs
+        run: npm ci
+      - name: Build docs site
+        working-directory: docs
+        run: npm run build

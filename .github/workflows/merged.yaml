@@ -16,6 +16,7 @@ jobs:
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
       skip_release: ${{ steps.check.outputs.skip_release }}
+      draft_release: ${{ steps.check.outputs.draft_release }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,10 +31,21 @@ jobs:
             echo "skip-release label found, will run dry-run build only"
             echo "should_release=false" >> $GITHUB_OUTPUT
             echo "skip_release=true" >> $GITHUB_OUTPUT
+            echo "draft_release=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           echo "skip_release=false" >> $GITHUB_OUTPUT
+
+          # Check for draft-release label
+          if ${{ contains(github.event.pull_request.labels.*.name, 'draft-release') }}; then
+            echo "draft-release label found, will publish to staging only"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "draft_release=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "draft_release=false" >> $GITHUB_OUTPUT
 
           # Get list of changed files
           changed_files=$(gh pr diff ${{ github.event.pull_request.number }} --name-only)
@@ -92,6 +104,76 @@ jobs:
             **/build/libs/*.jar
             **/build/outputs/aar/*.aar
           retention-days: 7
+
+  # Draft release - publishes to staging but doesn't release
+  # Creates a draft GitHub release (no tag) for manual validation
+  draft-release:
+    name: Draft Release (staging only)
+    needs: check-release
+    if: needs.check-release.outputs.draft_release == 'true'
+    runs-on: macos-latest
+    env:
+      ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+      ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+      ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_KEY_ID }}
+      ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_PASSWORD }}
+      ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_KEY_CONTENTS }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 19
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '19'
+          cache: gradle
+      - name: Cache Konan
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-${{ runner.os }}-
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
+      - name: Get version (Major)
+        if:  ${{ contains(github.event.pull_request.labels.*.name, 'major') }}
+        id: version_major
+        run: echo "version=$(./gradlew -q nextVersion -PincrementMajor=true)" >> $GITHUB_OUTPUT
+      - name: Get version (Minor)
+        if:  ${{ contains(github.event.pull_request.labels.*.name, 'minor') }}
+        id: version_minor
+        run: echo "version=$(./gradlew -q nextVersion -PincrementMinor=true)" >> $GITHUB_OUTPUT
+      - name: Get version (Patch)
+        if:  ${{ !contains(github.event.pull_request.labels.*.name, 'major') && !contains(github.event.pull_request.labels.*.name, 'minor') }}
+        id: version_patch
+        run: echo "version=$(./gradlew -q nextVersion)" >> $GITHUB_OUTPUT
+      - name: Set version output
+        id: version
+        run: echo "version=${{ steps.version_major.outputs.version }}${{ steps.version_minor.outputs.version }}${{ steps.version_patch.outputs.version }}" >> $GITHUB_OUTPUT
+      - name: Test and publish to staging (Major)
+        if:  ${{ contains(github.event.pull_request.labels.*.name, 'major') }}
+        run: ./gradlew check publishToMavenCentral --no-configuration-cache -PincrementMajor=true
+      - name: Test and publish to staging (Minor)
+        if:  ${{ contains(github.event.pull_request.labels.*.name, 'minor') }}
+        run: ./gradlew check publishToMavenCentral --no-configuration-cache -PincrementMinor=true
+      - name: Test and publish to staging (Patch)
+        if:  ${{ !contains(github.event.pull_request.labels.*.name, 'major') && !contains(github.event.pull_request.labels.*.name, 'minor') }}
+        run: ./gradlew check publishToMavenCentral --no-configuration-cache
+      - name: Create draft release (no tag)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          staging_url="https://central.sonatype.com/publishing/deployments"
+
+          # Create draft release without tag
+          # NOTE: No git tag is created - that happens when you publish the release
+          gh release create "v${version}" \
+              --draft \
+              --repo="$GITHUB_REPOSITORY" \
+              --title="v${version}" \
+              --notes="## [${PR_TITLE}](${PR_URL})"$'\n\n'"**Status:** Awaiting validation in [Maven Central Staging](${staging_url})"$'\n\n'"### To complete release:"$'\n'"1. Validate artifacts in Maven Central staging area"$'\n'"2. Run the 'Complete Release' workflow, or"$'\n'"3. Publish this draft release (will create tag and release to Maven Central)"$'\n\n'"### To cancel:"$'\n'"1. Drop the staging repository in Maven Central"$'\n'"2. Delete this draft release"$'\n'"   No tag or Maven Central artifacts will remain."
 
   macos:
     name: MacOS Build & Upload artifacts to sonatype
