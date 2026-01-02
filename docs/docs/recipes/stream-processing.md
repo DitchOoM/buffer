@@ -44,10 +44,16 @@ Parse protocols that span chunk boundaries:
 
 ```kotlin
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.stream.builder
 import com.ditchoom.buffer.pool.BufferPool
 
 val pool = BufferPool(defaultBufferSize = 8192)
-val processor = StreamProcessor.create(pool)
+
+// Using the builder pattern
+val processor = StreamProcessor.builder(pool).build()
+
+// Or directly
+val processor2 = StreamProcessor.create(pool)
 
 // Simulate network data arriving
 processor.append(networkPacket1)
@@ -185,6 +191,27 @@ class HttpChunkedParser(private val pool: BufferPool) {
 }
 ```
 
+## Builder Pattern with Transforms
+
+The `StreamProcessor.builder()` API allows composing transforms like decompression:
+
+```kotlin
+// With compression module
+val processor = StreamProcessor.builder(pool)
+    .decompress(CompressionAlgorithm.Gzip)  // From buffer-compression
+    .build()
+
+// Append compressed data
+processor.append(compressedChunk)
+processor.finish()  // Signal no more input
+
+// Read decompressed data
+val data = processor.readBuffer(processor.available())
+processor.release()
+```
+
+See [Compression](/recipes/compression#streamprocessor-integration) for full details.
+
 ## Best Practices
 
 1. **Use peek before read** - check data availability first
@@ -192,3 +219,4 @@ class HttpChunkedParser(private val pool: BufferPool) {
 3. **Call release()** - clean up when done
 4. **Handle fragmentation** - always check `available()` before reading
 5. **Prefer peekMatches** - for magic byte detection
+6. **Call finish() for transforms** - signals end of input for decompression etc.

@@ -13,7 +13,11 @@ See [Maven Central](https://central.sonatype.com/artifact/com.ditchoom/buffer) f
 
 ```kotlin
 dependencies {
+    // Core buffer library
     implementation("com.ditchoom:buffer:<latest-version>")
+
+    // Optional: Compression support (gzip, deflate)
+    implementation("com.ditchoom:buffer-compression:<latest-version>")
 }
 ```
 

@@ -19,3 +19,4 @@ develocity {
 
 // Monorepo modules
 include(":buffer")
+include(":buffer-compression")

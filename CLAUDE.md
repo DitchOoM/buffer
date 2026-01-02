@@ -82,8 +82,7 @@ Chunked processing for large buffers and streaming data:
 ```kotlin
 val processor = StreamProcessor.create(pool)
 processor.append(networkData)
-val length = processor.peekInt()  // peek without consuming
-processor.skip(4)
+val length = processor.readInt()
 val payload = processor.readBuffer(length)
 ```
 

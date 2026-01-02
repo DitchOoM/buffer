@@ -1,0 +1,403 @@
+package com.ditchoom.buffer.compression
+
+import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.allocate
+import kotlinx.coroutines.await
+import org.khronos.webgl.Int8Array
+import org.khronos.webgl.Uint8Array
+import kotlin.js.Promise
+
+/**
+ * JS streaming compressor factory.
+ * Node.js: uses native zlib sync APIs.
+ * Browser: throws UnsupportedOperationException (use SuspendingStreamingCompressor instead).
+ */
+actual fun StreamingCompressor.Companion.create(
+    algorithm: CompressionAlgorithm,
+    level: CompressionLevel,
+    allocator: BufferAllocator,
+    outputBufferSize: Int,
+): StreamingCompressor =
+    if (isNodeJs) {
+        JsNodeStreamingCompressor(algorithm, level, allocator)
+    } else {
+        throw UnsupportedOperationException(
+            "Synchronous streaming compression not supported in browser. " +
+                "Use SuspendingStreamingCompressor.create() instead.",
+        )
+    }
+
+/**
+ * JS streaming decompressor factory.
+ * Node.js: uses native zlib sync APIs.
+ * Browser: throws UnsupportedOperationException (use SuspendingStreamingDecompressor instead).
+ */
+actual fun StreamingDecompressor.Companion.create(
+    algorithm: CompressionAlgorithm,
+    allocator: BufferAllocator,
+    outputBufferSize: Int,
+    expectedSize: Int,
+): StreamingDecompressor =
+    if (isNodeJs) {
+        JsNodeStreamingDecompressor(algorithm, allocator)
+    } else {
+        throw UnsupportedOperationException(
+            "Synchronous streaming decompression not supported in browser. " +
+                "Use SuspendingStreamingDecompressor.create() instead.",
+        )
+    }
+
+/**
+ * JS suspending streaming compressor factory.
+ * Node.js: wraps sync zlib.
+ * Browser: uses native CompressionStream API.
+ */
+actual fun SuspendingStreamingCompressor.Companion.create(
+    algorithm: CompressionAlgorithm,
+    level: CompressionLevel,
+    allocator: BufferAllocator,
+): SuspendingStreamingCompressor =
+    if (isNodeJs) {
+        // Node.js: wrap sync implementation
+        SyncWrappingSuspendingCompressor(
+            JsNodeStreamingCompressor(algorithm, level, allocator),
+        )
+    } else {
+        // Browser: use native CompressionStream
+        BrowserStreamingCompressor(algorithm, allocator)
+    }
+
+/**
+ * JS suspending streaming decompressor factory.
+ * Node.js: wraps sync zlib.
+ * Browser: uses native DecompressionStream API.
+ */
+actual fun SuspendingStreamingDecompressor.Companion.create(
+    algorithm: CompressionAlgorithm,
+    allocator: BufferAllocator,
+): SuspendingStreamingDecompressor =
+    if (isNodeJs) {
+        // Node.js: wrap sync implementation
+        SyncWrappingSuspendingDecompressor(
+            JsNodeStreamingDecompressor(algorithm, allocator),
+        )
+    } else {
+        // Browser: use native DecompressionStream
+        BrowserStreamingDecompressor(algorithm, allocator)
+    }
+
+// ============================================================================
+// Node.js sync streaming implementation
+// ============================================================================
+
+/**
+ * Node.js streaming compressor using native zlib sync APIs.
+ */
+private class JsNodeStreamingCompressor(
+    private val algorithm: CompressionAlgorithm,
+    private val level: CompressionLevel,
+    override val allocator: BufferAllocator,
+) : StreamingCompressor {
+    private val accumulatedChunks = mutableListOf<Int8Array>()
+    private var totalBytes = 0
+    private var closed = false
+
+    override fun compress(
+        input: ReadBuffer,
+        onOutput: (ReadBuffer) -> Unit,
+    ) {
+        check(!closed) { "Compressor is closed" }
+
+        val remaining = input.remaining()
+        if (remaining > 0) {
+            val chunk = input.toInt8Array()
+            accumulatedChunks.add(chunk)
+            totalBytes += remaining
+        }
+    }
+
+    override fun finish(onOutput: (ReadBuffer) -> Unit) {
+        check(!closed) { "Compressor is closed" }
+
+        if (totalBytes == 0) {
+            when (val result = compress(PlatformBuffer.allocate(0), algorithm, level)) {
+                is CompressionResult.Success -> onOutput(result.buffer)
+                is CompressionResult.Failure -> throw CompressionException(result.message, result.cause)
+            }
+            return
+        }
+
+        val combined = Int8Array(totalBytes)
+        var offset = 0
+        for (chunk in accumulatedChunks) {
+            combined.set(chunk, offset)
+            offset += chunk.length
+        }
+
+        val buffer = combined.toJsBuffer()
+        when (val result = compress(buffer, algorithm, level)) {
+            is CompressionResult.Success -> onOutput(result.buffer)
+            is CompressionResult.Failure -> throw CompressionException(result.message, result.cause)
+        }
+    }
+
+    override fun reset() {
+        accumulatedChunks.clear()
+        totalBytes = 0
+    }
+
+    override fun close() {
+        if (!closed) {
+            accumulatedChunks.clear()
+            closed = true
+        }
+    }
+}
+
+/**
+ * Node.js streaming decompressor using native zlib sync APIs.
+ */
+private class JsNodeStreamingDecompressor(
+    private val algorithm: CompressionAlgorithm,
+    override val allocator: BufferAllocator,
+) : StreamingDecompressor {
+    private val accumulatedChunks = mutableListOf<Int8Array>()
+    private var totalBytes = 0
+    private var closed = false
+
+    override fun decompress(
+        input: ReadBuffer,
+        onOutput: (ReadBuffer) -> Unit,
+    ) {
+        check(!closed) { "Decompressor is closed" }
+
+        val remaining = input.remaining()
+        if (remaining > 0) {
+            val chunk = input.toInt8Array()
+            accumulatedChunks.add(chunk)
+            totalBytes += remaining
+        }
+    }
+
+    override fun finish(onOutput: (ReadBuffer) -> Unit) {
+        check(!closed) { "Decompressor is closed" }
+
+        if (totalBytes == 0) return
+
+        val combined = Int8Array(totalBytes)
+        var offset = 0
+        for (chunk in accumulatedChunks) {
+            combined.set(chunk, offset)
+            offset += chunk.length
+        }
+
+        val buffer = combined.toJsBuffer()
+        when (val result = decompress(buffer, algorithm)) {
+            is CompressionResult.Success -> onOutput(result.buffer)
+            is CompressionResult.Failure -> throw CompressionException(result.message, result.cause)
+        }
+    }
+
+    override fun reset() {
+        accumulatedChunks.clear()
+        totalBytes = 0
+    }
+
+    override fun close() {
+        if (!closed) {
+            accumulatedChunks.clear()
+            closed = true
+        }
+    }
+}
+
+// ============================================================================
+// Browser CompressionStream/DecompressionStream implementation
+// ============================================================================
+
+/**
+ * Get the compression format string for browser APIs.
+ * Note: Browser only supports "gzip" and "deflate" (zlib format).
+ * Raw deflate is not supported.
+ */
+private fun CompressionAlgorithm.toBrowserFormat(): String =
+    when (this) {
+        CompressionAlgorithm.Gzip -> "gzip"
+        CompressionAlgorithm.Deflate -> "deflate"
+        CompressionAlgorithm.Raw -> throw UnsupportedOperationException(
+            "Raw deflate not supported in browser. Use Gzip or Deflate.",
+        )
+    }
+
+/**
+ * Browser streaming compressor using native CompressionStream API.
+ * Accumulates input and compresses asynchronously on finish.
+ */
+private class BrowserStreamingCompressor(
+    private val algorithm: CompressionAlgorithm,
+    override val allocator: BufferAllocator,
+) : SuspendingStreamingCompressor {
+    private val accumulatedChunks = mutableListOf<Uint8Array>()
+    private var totalBytes = 0
+    private var closed = false
+
+    override suspend fun compress(input: ReadBuffer): List<ReadBuffer> {
+        check(!closed) { "Compressor is closed" }
+
+        val remaining = input.remaining()
+        if (remaining > 0) {
+            val chunk = input.toUint8Array()
+            accumulatedChunks.add(chunk)
+            totalBytes += remaining
+        }
+        // CompressionStream buffers internally, no output until finish
+        return emptyList()
+    }
+
+    override suspend fun finish(): List<ReadBuffer> {
+        check(!closed) { "Compressor is closed" }
+
+        if (totalBytes == 0) {
+            // Compress empty data
+            val compressed = compressWithBrowserStream(Uint8Array(0), algorithm)
+            return listOf(compressed.toJsBuffer())
+        }
+
+        // Combine all chunks
+        val combined = Uint8Array(totalBytes)
+        var offset = 0
+        for (chunk in accumulatedChunks) {
+            combined.set(chunk, offset)
+            offset += chunk.length
+        }
+
+        val compressed = compressWithBrowserStream(combined, algorithm)
+        return listOf(compressed.toJsBuffer())
+    }
+
+    override fun reset() {
+        accumulatedChunks.clear()
+        totalBytes = 0
+    }
+
+    override fun close() {
+        if (!closed) {
+            accumulatedChunks.clear()
+            closed = true
+        }
+    }
+}
+
+/**
+ * Browser streaming decompressor using native DecompressionStream API.
+ */
+private class BrowserStreamingDecompressor(
+    private val algorithm: CompressionAlgorithm,
+    override val allocator: BufferAllocator,
+) : SuspendingStreamingDecompressor {
+    private val accumulatedChunks = mutableListOf<Uint8Array>()
+    private var totalBytes = 0
+    private var closed = false
+
+    override suspend fun decompress(input: ReadBuffer): List<ReadBuffer> {
+        check(!closed) { "Decompressor is closed" }
+
+        val remaining = input.remaining()
+        if (remaining > 0) {
+            val chunk = input.toUint8Array()
+            accumulatedChunks.add(chunk)
+            totalBytes += remaining
+        }
+        return emptyList()
+    }
+
+    override suspend fun finish(): List<ReadBuffer> {
+        check(!closed) { "Decompressor is closed" }
+
+        if (totalBytes == 0) return emptyList()
+
+        // Combine all chunks
+        val combined = Uint8Array(totalBytes)
+        var offset = 0
+        for (chunk in accumulatedChunks) {
+            combined.set(chunk, offset)
+            offset += chunk.length
+        }
+
+        val decompressed = decompressWithBrowserStream(combined, algorithm)
+        return listOf(decompressed.toJsBuffer())
+    }
+
+    override fun reset() {
+        accumulatedChunks.clear()
+        totalBytes = 0
+    }
+
+    override fun close() {
+        if (!closed) {
+            accumulatedChunks.clear()
+            closed = true
+        }
+    }
+}
+
+/**
+ * Compress data using browser's CompressionStream API.
+ */
+private suspend fun compressWithBrowserStream(
+    data: Uint8Array,
+    algorithm: CompressionAlgorithm,
+): Uint8Array {
+    val format = algorithm.toBrowserFormat()
+
+    // Create CompressionStream and pipe data through it
+    val cs = createCompressionStream(format)
+    val blob = createBlob(data)
+    val inputStream = getStream(blob)
+    val compressedStream = pipeThrough(inputStream, cs)
+    val response = createResponse(compressedStream)
+    val arrayBuffer = getArrayBuffer(response).await()
+
+    return createUint8ArrayFromBuffer(arrayBuffer)
+}
+
+/**
+ * Decompress data using browser's DecompressionStream API.
+ */
+private suspend fun decompressWithBrowserStream(
+    data: Uint8Array,
+    algorithm: CompressionAlgorithm,
+): Uint8Array {
+    val format = algorithm.toBrowserFormat()
+
+    // Create DecompressionStream and pipe data through it
+    val ds = createDecompressionStream(format)
+    val blob = createBlob(data)
+    val inputStream = getStream(blob)
+    val decompressedStream = pipeThrough(inputStream, ds)
+    val response = createResponse(decompressedStream)
+    val arrayBuffer = getArrayBuffer(response).await()
+
+    return createUint8ArrayFromBuffer(arrayBuffer)
+}
+
+// Browser API wrappers
+private fun createCompressionStream(format: String): dynamic = js("new CompressionStream(format)")
+
+private fun createDecompressionStream(format: String): dynamic = js("new DecompressionStream(format)")
+
+private fun createBlob(data: Uint8Array): dynamic = js("new Blob([data])")
+
+private fun getStream(blob: dynamic): dynamic = blob.stream()
+
+private fun pipeThrough(
+    stream: dynamic,
+    transform: dynamic,
+): dynamic = stream.pipeThrough(transform)
+
+private fun createResponse(stream: dynamic): dynamic = js("new Response(stream)")
+
+private fun getArrayBuffer(response: dynamic): Promise<dynamic> = response.arrayBuffer().unsafeCast<Promise<dynamic>>()
+
+private fun createUint8ArrayFromBuffer(buffer: dynamic): Uint8Array = js("new Uint8Array(buffer)").unsafeCast<Uint8Array>()

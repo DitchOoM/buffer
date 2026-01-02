@@ -554,7 +554,7 @@ class BufferTests {
     @Test
     fun positionWriteBytes() {
         val text = "Hello world!"
-        val input = PlatformBuffer.wrap(text.encodeToByteArray())
+        val input = text.toReadBuffer()
         val output = PlatformBuffer.allocate(text.length)
         output.write(input)
         assertEquals(input.position(), text.length)

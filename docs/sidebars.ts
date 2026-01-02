@@ -20,6 +20,7 @@ const sidebars: SidebarsConfig = {
         'recipes/basic-operations',
         'recipes/buffer-pooling',
         'recipes/stream-processing',
+        'recipes/compression',
         'recipes/protocol-parsing',
       ],
     },

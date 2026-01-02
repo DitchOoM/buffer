@@ -25,11 +25,22 @@ memory copies:
 
 ```kotlin
 dependencies {
+    // Core buffer library
     implementation("com.ditchoom:buffer:<latest-version>")
+
+    // Optional: Compression support (gzip, deflate)
+    implementation("com.ditchoom:buffer-compression:<latest-version>")
 }
 ```
 
 Find the latest version on [Maven Central](https://central.sonatype.com/artifact/com.ditchoom/buffer).
+
+## Modules
+
+| Module | Description |
+|--------|-------------|
+| `buffer` | Core buffer interfaces and implementations |
+| `buffer-compression` | Compression/decompression (gzip, deflate) |
 
 ## Quick Example
 
@@ -41,6 +52,35 @@ buffer.resetForRead()
 
 val number = buffer.readInt()
 val text = buffer.readString(6)
+```
+
+## Compression Example
+
+```kotlin
+import com.ditchoom.buffer.compression.*
+
+val data = "Hello, World!".toReadBuffer()
+val compressed = compress(data, CompressionAlgorithm.Gzip).getOrThrow()
+val decompressed = decompress(compressed, CompressionAlgorithm.Gzip).getOrThrow()
+```
+
+## Stream Processing
+
+Handle fragmented data with `StreamProcessor`:
+
+```kotlin
+val processor = StreamProcessor.builder(pool).build()
+
+// Append chunks as they arrive
+processor.append(chunk1)
+processor.append(chunk2)
+
+// Parse protocol headers
+val messageLength = processor.peekInt()
+if (processor.available() >= 4 + messageLength) {
+    processor.skip(4)
+    val payload = processor.readBuffer(messageLength)
+}
 ```
 
 ## License
