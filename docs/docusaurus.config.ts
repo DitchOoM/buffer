@@ -95,11 +95,11 @@ const config: Config = {
           position: 'left',
           items: [
             {
-              href: 'pathname:///api/buffer/index.html',
+              href: 'pathname:///buffer/api/buffer/index.html',
               label: 'Buffer (Core)',
             },
             {
-              href: 'pathname:///api/buffer-compression/index.html',
+              href: 'pathname:///buffer/api/buffer-compression/index.html',
               label: 'Buffer Compression',
             },
           ],
