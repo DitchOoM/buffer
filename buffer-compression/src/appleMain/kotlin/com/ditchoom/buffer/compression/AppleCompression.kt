@@ -11,6 +11,7 @@ import com.ditchoom.buffer.allocate
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.UnsafeNumber
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.nativeHeap
@@ -39,11 +40,11 @@ actual val supportsSyncCompression: Boolean = true
 
 /**
  * Helper to copy memory with platform-appropriate size_t conversion.
- * Inline function avoids metadata compilation issues with different bit widths
- * across Apple platforms (arm64 vs arm64_32).
+ * Uses UnsafeNumber to handle different bit widths across Apple platforms
+ * (arm64 uses 64-bit size_t, arm64_32 like watchOS uses 32-bit size_t).
  */
 @Suppress("NOTHING_TO_INLINE")
-@OptIn(ExperimentalForeignApi::class)
+@OptIn(ExperimentalForeignApi::class, UnsafeNumber::class)
 private inline fun copyMemory(
     dst: CPointer<ByteVar>?,
     src: CPointer<ByteVar>?,
@@ -54,10 +55,10 @@ private inline fun copyMemory(
 
 /**
  * Helper to get compress bound with platform-appropriate size_t conversion.
- * Inline function avoids metadata compilation issues with different bit widths.
+ * Uses UnsafeNumber to handle different bit widths across Apple platforms.
  */
 @Suppress("NOTHING_TO_INLINE")
-@OptIn(ExperimentalForeignApi::class)
+@OptIn(ExperimentalForeignApi::class, UnsafeNumber::class)
 private inline fun getCompressBound(size: Int): Int = compressBound(size.convert()).convert()
 
 /**
