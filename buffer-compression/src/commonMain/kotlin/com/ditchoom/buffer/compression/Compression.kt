@@ -126,11 +126,11 @@ expect val supportsSyncCompression: Boolean
  * For large data or when you need to process chunks incrementally, use
  * [SuspendingStreamingCompressor] directly.
  *
- * @param buffer The data to compress (reads from position to limit)
+ * @param buffer The data to compress (reads from position to limit). **Fully consumed after call.**
  * @param algorithm The compression algorithm to use
  * @param level The compression level
  * @param zone The allocation zone for the output buffer
- * @return The compressed data as a single buffer
+ * @return The compressed data as a single buffer (position=0, limit=compressed size)
  */
 suspend fun compressAsync(
     buffer: ReadBuffer,
@@ -156,24 +156,110 @@ suspend fun compressAsync(
  * For large data or when you need to process chunks incrementally, use
  * [SuspendingStreamingDecompressor] directly.
  *
- * @param buffer The compressed data (reads from position to limit)
+ * @param buffer The compressed data (reads from position to limit). Position is advanced.
  * @param algorithm The compression algorithm to use
  * @param zone The allocation zone for the output buffer
- * @return The decompressed data as a single buffer
+ * @param expectedOutputSize Hint for pre-allocating the output buffer. If the actual
+ *   decompressed size exceeds this, the buffer grows automatically. Use 0 (default)
+ *   if unknown. Providing a good estimate reduces memory allocations.
+ * @return The decompressed data as a single buffer (position=0, limit=decompressed size)
  */
 suspend fun decompressAsync(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Gzip,
     zone: AllocationZone = AllocationZone.Direct,
+    expectedOutputSize: Int = 0,
 ): PlatformBuffer {
     val decompressor = SuspendingStreamingDecompressor.create(algorithm)
     return try {
-        val output = mutableListOf<ReadBuffer>()
-        output += decompressor.decompress(buffer)
-        output += decompressor.finish()
-        combineBuffers(output, zone)
+        if (expectedOutputSize > 0) {
+            // Optimized path: write directly to pre-allocated buffer
+            decompressToBuffer(decompressor, buffer, zone, expectedOutputSize)
+        } else {
+            // Default path: collect chunks then combine
+            val output = mutableListOf<ReadBuffer>()
+            output += decompressor.decompress(buffer)
+            output += decompressor.finish()
+            combineBuffers(output, zone)
+        }
     } finally {
         decompressor.close()
+    }
+}
+
+/**
+ * Decompresses directly to a pre-allocated buffer, growing if needed.
+ * Returns a buffer sliced to exact size (no wasted capacity).
+ */
+private suspend fun decompressToBuffer(
+    decompressor: SuspendingStreamingDecompressor,
+    input: ReadBuffer,
+    zone: AllocationZone,
+    expectedSize: Int,
+): PlatformBuffer {
+    var output = PlatformBuffer.allocate(expectedSize, zone)
+    var capacity = expectedSize // Track capacity since it's not exposed in API
+
+    // Process decompression chunks
+    for (chunk in decompressor.decompress(input)) {
+        val result = ensureCapacityAndWrite(output, capacity, chunk, zone)
+        output = result.first
+        capacity = result.second
+    }
+
+    // Process finish chunks
+    for (chunk in decompressor.finish()) {
+        val result = ensureCapacityAndWrite(output, capacity, chunk, zone)
+        output = result.first
+        capacity = result.second
+    }
+
+    // Slice to exact size if we have excess capacity
+    val actualSize = output.position()
+    return if (actualSize == capacity) {
+        output.resetForRead()
+        output
+    } else {
+        // Return a right-sized buffer to avoid memory waste
+        output.position(0)
+        output.setLimit(actualSize)
+        val result = PlatformBuffer.allocate(actualSize, zone)
+        result.write(output)
+        result.resetForRead()
+        result
+    }
+}
+
+/**
+ * Ensures the output buffer has capacity for the chunk, growing if needed.
+ * Returns the (possibly new) output buffer and its capacity.
+ */
+private fun ensureCapacityAndWrite(
+    output: PlatformBuffer,
+    capacity: Int,
+    chunk: ReadBuffer,
+    zone: AllocationZone,
+): Pair<PlatformBuffer, Int> {
+    val needed = chunk.remaining()
+    val available = capacity - output.position()
+
+    return if (needed <= available) {
+        output.write(chunk)
+        Pair(output, capacity)
+    } else {
+        // Grow buffer: double size or add needed space, whichever is larger
+        val newCapacity = maxOf(capacity * 2, capacity + needed)
+        val newOutput = PlatformBuffer.allocate(newCapacity, zone)
+
+        // Copy existing data
+        val written = output.position()
+        output.position(0)
+        output.setLimit(written)
+        newOutput.write(output)
+
+        // Write new chunk
+        newOutput.write(chunk)
+        Pair(newOutput, newCapacity)
     }
 }
 

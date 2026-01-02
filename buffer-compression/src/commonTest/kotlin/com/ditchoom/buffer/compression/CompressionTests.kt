@@ -568,4 +568,122 @@ class CompressionTests {
             val decompressed = decompressAsync(compressed)
             assertEquals(text, decompressed.readString(decompressed.remaining()))
         }
+
+    // =========================================================================
+    // expectedOutputSize tests
+    // =========================================================================
+
+    @Test
+    fun decompressAsyncWithExactExpectedSize() =
+        runTest {
+            val text = "Hello, expected size!"
+            val compressed = compressAsync(text.toReadBuffer())
+
+            // Decompress with exact expected size
+            val decompressed = decompressAsync(
+                compressed,
+                expectedOutputSize = text.length,
+            )
+            assertEquals(text, decompressed.readString(decompressed.remaining()))
+        }
+
+    @Test
+    fun decompressAsyncWithUnderestimatedSize() =
+        runTest {
+            val text = "This is a longer string that will exceed our small estimate. ".repeat(100)
+            val compressed = compressAsync(text.toReadBuffer())
+
+            // Decompress with way too small expected size - should grow automatically
+            val decompressed = decompressAsync(
+                compressed,
+                expectedOutputSize = 10, // Way too small!
+            )
+            assertEquals(text, decompressed.readString(decompressed.remaining()))
+        }
+
+    @Test
+    fun decompressAsyncWithOverestimatedSize() =
+        runTest {
+            val text = "Short"
+            val compressed = compressAsync(text.toReadBuffer())
+
+            // Decompress with larger than needed expected size
+            val decompressed = decompressAsync(
+                compressed,
+                expectedOutputSize = 1000, // Larger than needed
+            )
+            assertEquals(text, decompressed.readString(decompressed.remaining()))
+        }
+
+    @Test
+    fun inputBufferFullyConsumedAfterCompress() =
+        runTest {
+            val text = "Test input consumption"
+            val input = text.toReadBuffer()
+            assertEquals(text.length, input.remaining())
+
+            compressAsync(input)
+
+            // Input buffer should be fully consumed
+            assertEquals(0, input.remaining())
+        }
+
+    @Test
+    fun inputBufferConsumedAfterDecompress() =
+        runTest {
+            val text = "Test input consumption"
+            val compressed = compressAsync(text.toReadBuffer())
+            val initialRemaining = compressed.remaining()
+            assertTrue(initialRemaining > 0, "Should have compressed data")
+
+            val decompressed = decompressAsync(compressed)
+
+            // Verify decompression worked
+            assertEquals(text, decompressed.readString(decompressed.remaining()))
+
+            // Input buffer should be mostly consumed (position advanced)
+            // Note: may not be exactly 0 due to platform-specific trailer handling
+            assertTrue(
+                compressed.remaining() < initialRemaining,
+                "Input buffer position should advance during decompression",
+            )
+        }
+
+    @Test
+    fun outputBufferStateAfterCompress() =
+        runTest {
+            // Use longer text to ensure compression actually reduces size
+            val text = "Test output buffer state ".repeat(100)
+            val compressed = compressAsync(text.toReadBuffer())
+
+            // Output buffer should be ready for reading: position=0, limit=size
+            assertEquals(0, compressed.position())
+            assertTrue(compressed.remaining() > 0, "Should have compressed data")
+            assertTrue(compressed.remaining() < text.length, "Should be smaller than input for repetitive data")
+        }
+
+    @Test
+    fun outputBufferStateAfterDecompress() =
+        runTest {
+            val text = "Test output buffer state"
+            val compressed = compressAsync(text.toReadBuffer())
+            val decompressed = decompressAsync(compressed)
+
+            // Output buffer should be ready for reading: position=0, limit=size
+            assertEquals(0, decompressed.position())
+            assertEquals(text.length, decompressed.remaining())
+        }
+
+    @Test
+    fun outputBufferStateWithExpectedSize() =
+        runTest {
+            val text = "Test output buffer state with expected size hint"
+            val compressed = compressAsync(text.toReadBuffer())
+            val decompressed = decompressAsync(compressed, expectedOutputSize = text.length)
+
+            // Output buffer should be ready for reading: position=0, limit=size
+            assertEquals(0, decompressed.position())
+            assertEquals(text.length, decompressed.remaining())
+            assertEquals(text, decompressed.readString(decompressed.remaining()))
+        }
 }
