@@ -1,7 +1,9 @@
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.allocate
 
 /**
  * Compression algorithm types.
@@ -112,3 +114,81 @@ class CompressionException(
  * - JS (Browser): `false` - only async CompressionStream API, use [SuspendingStreamingCompressor]
  */
 expect val supportsSyncCompression: Boolean
+
+// =============================================================================
+// Suspending One-Shot API (works on all platforms including browser JS)
+// =============================================================================
+
+/**
+ * Compresses data using the specified algorithm. Works on all platforms.
+ *
+ * This is a convenience function that handles the streaming API internally.
+ * For large data or when you need to process chunks incrementally, use
+ * [SuspendingStreamingCompressor] directly.
+ *
+ * @param buffer The data to compress (reads from position to limit)
+ * @param algorithm The compression algorithm to use
+ * @param level The compression level
+ * @param zone The allocation zone for the output buffer
+ * @return The compressed data as a single buffer
+ */
+suspend fun compressAsync(
+    buffer: ReadBuffer,
+    algorithm: CompressionAlgorithm = CompressionAlgorithm.Gzip,
+    level: CompressionLevel = CompressionLevel.Default,
+    zone: AllocationZone = AllocationZone.Direct,
+): PlatformBuffer {
+    val compressor = SuspendingStreamingCompressor.create(algorithm, level)
+    return try {
+        val output = mutableListOf<ReadBuffer>()
+        output += compressor.compress(buffer)
+        output += compressor.finish()
+        combineBuffers(output, zone)
+    } finally {
+        compressor.close()
+    }
+}
+
+/**
+ * Decompresses data using the specified algorithm. Works on all platforms.
+ *
+ * This is a convenience function that handles the streaming API internally.
+ * For large data or when you need to process chunks incrementally, use
+ * [SuspendingStreamingDecompressor] directly.
+ *
+ * @param buffer The compressed data (reads from position to limit)
+ * @param algorithm The compression algorithm to use
+ * @param zone The allocation zone for the output buffer
+ * @return The decompressed data as a single buffer
+ */
+suspend fun decompressAsync(
+    buffer: ReadBuffer,
+    algorithm: CompressionAlgorithm = CompressionAlgorithm.Gzip,
+    zone: AllocationZone = AllocationZone.Direct,
+): PlatformBuffer {
+    val decompressor = SuspendingStreamingDecompressor.create(algorithm)
+    return try {
+        val output = mutableListOf<ReadBuffer>()
+        output += decompressor.decompress(buffer)
+        output += decompressor.finish()
+        combineBuffers(output, zone)
+    } finally {
+        decompressor.close()
+    }
+}
+
+/**
+ * Combines multiple buffers into a single buffer.
+ */
+private fun combineBuffers(
+    buffers: List<ReadBuffer>,
+    zone: AllocationZone,
+): PlatformBuffer {
+    val totalSize = buffers.sumOf { it.remaining() }
+    val result = PlatformBuffer.allocate(totalSize, zone)
+    for (buf in buffers) {
+        result.write(buf)
+    }
+    result.resetForRead()
+    return result
+}

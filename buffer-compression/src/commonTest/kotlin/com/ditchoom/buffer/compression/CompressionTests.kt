@@ -4,6 +4,7 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.toReadBuffer
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -504,4 +505,67 @@ class CompressionTests {
                 "Original: $originalSize, Compressed: $compressedSize",
         )
     }
+
+    // =========================================================================
+    // Async one-shot API tests
+    // =========================================================================
+
+    @Test
+    fun compressAsyncRoundTrip() =
+        runTest {
+            val text = "Hello, async compression!"
+            val compressed = compressAsync(text.toReadBuffer(), CompressionAlgorithm.Gzip)
+            val decompressed = decompressAsync(compressed, CompressionAlgorithm.Gzip)
+            assertEquals(text, decompressed.readString(decompressed.remaining()))
+        }
+
+    @Test
+    fun compressAsyncWithDifferentAlgorithms() =
+        runTest {
+            val text = "Testing different algorithms"
+
+            // Browser JS only supports Gzip via CompressionStream API
+            val algorithms =
+                if (supportsSyncCompression) {
+                    listOf(CompressionAlgorithm.Gzip, CompressionAlgorithm.Deflate, CompressionAlgorithm.Raw)
+                } else {
+                    listOf(CompressionAlgorithm.Gzip)
+                }
+
+            for (algorithm in algorithms) {
+                val compressed = compressAsync(text.toReadBuffer(), algorithm)
+                val decompressed = decompressAsync(compressed, algorithm)
+                assertEquals(text, decompressed.readString(decompressed.remaining()), "Failed for $algorithm")
+            }
+        }
+
+    @Test
+    fun compressAsyncWithDifferentLevels() =
+        runTest {
+            val text = "Testing compression levels " + "x".repeat(1000)
+
+            val fast = compressAsync(text.toReadBuffer(), level = CompressionLevel.BestSpeed)
+            val best = compressAsync(text.toReadBuffer(), level = CompressionLevel.BestCompression)
+
+            // Best compression should produce smaller or equal output
+            assertTrue(
+                best.remaining() <= fast.remaining(),
+                "BestCompression (${best.remaining()}) should be <= BestSpeed (${fast.remaining()})",
+            )
+
+            // Both should decompress correctly
+            assertEquals(text, decompressAsync(fast).readString(text.length))
+            assertEquals(text, decompressAsync(best).readString(text.length))
+        }
+
+    @Test
+    fun compressAsyncLargeData() =
+        runTest {
+            val text = "Large data test. ".repeat(10000)
+            val compressed = compressAsync(text.toReadBuffer())
+            assertTrue(compressed.remaining() < text.length, "Compression should reduce size")
+
+            val decompressed = decompressAsync(compressed)
+            assertEquals(text, decompressed.readString(decompressed.remaining()))
+        }
 }

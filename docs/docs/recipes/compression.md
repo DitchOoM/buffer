@@ -20,58 +20,41 @@ dependencies {
 
 These examples work on **every supported platform**, including browser JavaScript.
 
-### Compress Data
+### Compress and Decompress
 
 ```kotlin
 import com.ditchoom.buffer.compression.*
 
-suspend fun compressData(data: String): List<ReadBuffer> {
-    val output = mutableListOf<ReadBuffer>()
+// Compress
+val data = "Hello, World!".toReadBuffer()
+val compressed = compressAsync(data, CompressionAlgorithm.Gzip)
 
-    SuspendingStreamingCompressor.create(CompressionAlgorithm.Gzip).use { compressor ->
-        output += compressor.compress(data.toReadBuffer())
-        output += compressor.finish()
-    }
-
-    return output
-}
+// Decompress
+val decompressed = decompressAsync(compressed, CompressionAlgorithm.Gzip)
+val text = decompressed.readString(decompressed.remaining())
 ```
 
-### Decompress Data
+### Round-Trip Example
 
 ```kotlin
-suspend fun decompressData(compressed: List<ReadBuffer>): String {
-    val output = mutableListOf<ReadBuffer>()
-
-    SuspendingStreamingDecompressor.create(CompressionAlgorithm.Gzip).use { decompressor ->
-        for (chunk in compressed) {
-            output += decompressor.decompress(chunk)
-        }
-        output += decompressor.finish()
-    }
-
-    // Combine chunks and read as string
-    val totalSize = output.sumOf { it.remaining() }
-    val result = PlatformBuffer.allocate(totalSize)
-    output.forEach { result.write(it) }
-    result.resetForRead()
-    return result.readString(totalSize)
+suspend fun roundTrip(input: String): String {
+    val compressed = compressAsync(input.toReadBuffer())
+    val decompressed = decompressAsync(compressed)
+    return decompressed.readString(decompressed.remaining())
 }
 ```
+
+## Streaming API
+
+For large data or network scenarios where data arrives in chunks:
 
 ### Compress and Send Over Network
 
 ```kotlin
 suspend fun sendCompressed(socket: Socket, data: String) {
     SuspendingStreamingCompressor.create(CompressionAlgorithm.Gzip).use { compressor ->
-        // Compress and send chunks as they're produced
-        compressor.compress(data.toReadBuffer()).forEach { chunk ->
-            socket.write(chunk)
-        }
-        // Flush remaining data
-        compressor.finish().forEach { chunk ->
-            socket.write(chunk)
-        }
+        compressor.compress(data.toReadBuffer()).forEach { socket.write(it) }
+        compressor.finish().forEach { socket.write(it) }
     }
 }
 ```
@@ -79,18 +62,15 @@ suspend fun sendCompressed(socket: Socket, data: String) {
 ### Receive and Decompress from Network
 
 ```kotlin
-suspend fun receiveDecompressed(socket: Socket): ReadBuffer {
+suspend fun receiveDecompressed(socket: Socket): PlatformBuffer {
     val output = mutableListOf<ReadBuffer>()
-
     SuspendingStreamingDecompressor.create(CompressionAlgorithm.Gzip).use { decompressor ->
         while (socket.hasData()) {
-            val chunk = socket.read()
-            output += decompressor.decompress(chunk)
+            output += decompressor.decompress(socket.read())
         }
         output += decompressor.finish()
     }
-
-    // Combine into single buffer
+    // Combine chunks
     val totalSize = output.sumOf { it.remaining() }
     val result = PlatformBuffer.allocate(totalSize)
     output.forEach { result.write(it) }
@@ -117,25 +97,17 @@ CompressionAlgorithm.Raw
 Control the speed/size tradeoff:
 
 ```kotlin
-SuspendingStreamingCompressor.create(
-    algorithm = CompressionAlgorithm.Gzip,
-    level = CompressionLevel.BestSpeed       // Fastest compression
-)
+// Fastest compression
+compressAsync(data, level = CompressionLevel.BestSpeed)
 
-SuspendingStreamingCompressor.create(
-    algorithm = CompressionAlgorithm.Gzip,
-    level = CompressionLevel.BestCompression // Smallest output
-)
+// Smallest output
+compressAsync(data, level = CompressionLevel.BestCompression)
 
-SuspendingStreamingCompressor.create(
-    algorithm = CompressionAlgorithm.Gzip,
-    level = CompressionLevel.Default         // Balanced (default)
-)
+// Balanced (default)
+compressAsync(data, level = CompressionLevel.Default)
 
-SuspendingStreamingCompressor.create(
-    algorithm = CompressionAlgorithm.Gzip,
-    level = CompressionLevel.Custom(4)       // Custom 0-9
-)
+// Custom level 0-9
+compressAsync(data, level = CompressionLevel.Custom(4))
 ```
 
 ## Handling Large Files
@@ -178,14 +150,10 @@ suspend fun fetchAndDecompress(url: String): String {
     val body = response.body
 
     return if (contentEncoding == "gzip") {
-        val output = mutableListOf<ReadBuffer>()
-        SuspendingStreamingDecompressor.create(CompressionAlgorithm.Gzip).use { decompressor ->
-            output += decompressor.decompress(body)
-            output += decompressor.finish()
-        }
-        combineBuffers(output).readString()
+        val decompressed = decompressAsync(body, CompressionAlgorithm.Gzip)
+        decompressed.readString(decompressed.remaining())
     } else {
-        body.readString()
+        body.readString(body.remaining())
     }
 }
 ```
