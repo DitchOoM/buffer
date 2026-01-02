@@ -90,9 +90,19 @@ const config: Config = {
           position: 'left',
         },
         {
-          href: 'pathname:///api/index.html',
+          type: 'dropdown',
           label: 'API Reference',
           position: 'left',
+          items: [
+            {
+              href: 'pathname:///api/buffer/index.html',
+              label: 'Buffer (Core)',
+            },
+            {
+              href: 'pathname:///api/buffer-compression/index.html',
+              label: 'Buffer Compression',
+            },
+          ],
         },
         {
           href: 'https://github.com/DitchOoM/buffer',
