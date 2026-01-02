@@ -16,3 +16,6 @@ develocity {
         termsOfUseAgree.set("yes")
     }
 }
+
+// Monorepo modules
+include(":buffer")

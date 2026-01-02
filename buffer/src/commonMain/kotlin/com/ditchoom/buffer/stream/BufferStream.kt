@@ -106,36 +106,132 @@ fun BufferStream.collectToBuffer(pool: BufferPool): ReadBuffer {
  * processor.release()
  * ```
  */
-class StreamProcessor private constructor(
-    private val pool: BufferPool,
-) {
-    private val chunks = ArrayDeque<ReadBuffer>()
-    private var totalAvailable = 0
-
-    companion object {
-        fun create(pool: BufferPool) = StreamProcessor(pool)
-    }
-
+interface StreamProcessor {
     /**
      * Appends a chunk to the processor.
      * The processor takes ownership and will release PooledBuffers when consumed.
      */
-    fun append(chunk: ReadBuffer) {
+    fun append(chunk: ReadBuffer)
+
+    /**
+     * Returns total bytes available for reading across all chunks.
+     */
+    fun available(): Int
+
+    /**
+     * Peeks at a byte without consuming it.
+     * @param offset byte offset from current position (default 0)
+     */
+    fun peekByte(offset: Int = 0): Byte
+
+    /**
+     * Peeks at a Short without consuming it.
+     * @param offset byte offset from current position (default 0)
+     */
+    fun peekShort(offset: Int = 0): Short
+
+    /**
+     * Peeks at an Int without consuming it.
+     * @param offset byte offset from current position (default 0)
+     */
+    fun peekInt(offset: Int = 0): Int
+
+    /**
+     * Peeks at a Long without consuming it.
+     * @param offset byte offset from current position (default 0)
+     */
+    fun peekLong(offset: Int = 0): Long
+
+    /**
+     * Finds the first mismatch between stream data and the given pattern.
+     * Optimized to compare using Long/Int primitives when possible.
+     *
+     * @return -1 if the patterns match completely, or the index of first mismatch
+     */
+    fun peekMismatch(pattern: ReadBuffer): Int
+
+    /**
+     * Checks if the next bytes match the given pattern.
+     */
+    fun peekMatches(pattern: ReadBuffer): Boolean
+
+    /**
+     * Reads a byte, consuming it.
+     */
+    fun readByte(): Byte
+
+    /**
+     * Reads an unsigned byte (0-255), consuming it.
+     */
+    fun readUnsignedByte(): Int
+
+    /**
+     * Reads a Short, consuming it.
+     */
+    fun readShort(): Short
+
+    /**
+     * Reads an Int, consuming it.
+     */
+    fun readInt(): Int
+
+    /**
+     * Reads a Long, consuming it.
+     */
+    fun readLong(): Long
+
+    /**
+     * Reads a buffer of exactly [size] bytes.
+     *
+     * Returns a slice when data is contiguous in one chunk.
+     * Copies when data spans multiple chunks.
+     */
+    fun readBuffer(size: Int): ReadBuffer
+
+    /**
+     * Skips [count] bytes.
+     */
+    fun skip(count: Int)
+
+    /**
+     * Signals that all data has been appended and flushes any buffered data.
+     * Call this after appending all chunks but before reading final data.
+     *
+     * This is important for transforms that buffer data (e.g., decompression).
+     * The default implementation does nothing.
+     */
+    fun finish() {}
+
+    /**
+     * Releases all resources. Call when done processing.
+     * Implicitly calls [finish] if not already called.
+     */
+    fun release()
+
+    companion object {
+        fun create(pool: BufferPool): StreamProcessor = DefaultStreamProcessor(pool)
+    }
+}
+
+/**
+ * Default implementation of StreamProcessor.
+ */
+internal class DefaultStreamProcessor(
+    private val pool: BufferPool,
+) : StreamProcessor {
+    private val chunks = ArrayDeque<ReadBuffer>()
+    private var totalAvailable = 0
+
+    override fun append(chunk: ReadBuffer) {
         if (chunk.remaining() > 0) {
             chunks.addLast(chunk)
             totalAvailable += chunk.remaining()
         }
     }
 
-    /**
-     * Returns total bytes available for reading across all chunks.
-     */
-    fun available(): Int = totalAvailable
+    override fun available(): Int = totalAvailable
 
-    /**
-     * Peeks at a byte without consuming it.
-     */
-    fun peekByte(offset: Int = 0): Byte {
+    override fun peekByte(offset: Int): Byte {
         require(totalAvailable > offset) { "Not enough data: need ${offset + 1}, have $totalAvailable" }
         var remaining = offset
         for (chunk in chunks) {
@@ -147,11 +243,7 @@ class StreamProcessor private constructor(
         throw IllegalStateException("Unexpected end of data")
     }
 
-    /**
-     * Peeks at a Short without consuming it.
-     * @param offset byte offset from current position (default 0)
-     */
-    fun peekShort(offset: Int = 0): Short {
+    override fun peekShort(offset: Int): Short {
         require(totalAvailable >= offset + Short.SIZE_BYTES) { "Not enough data for Short at offset $offset" }
 
         val chunk = chunks.first()
@@ -166,11 +258,7 @@ class StreamProcessor private constructor(
         ).toShort()
     }
 
-    /**
-     * Peeks at an Int without consuming it.
-     * @param offset byte offset from current position (default 0)
-     */
-    fun peekInt(offset: Int = 0): Int {
+    override fun peekInt(offset: Int): Int {
         require(totalAvailable >= offset + Int.SIZE_BYTES) { "Not enough data for Int at offset $offset" }
 
         val chunk = chunks.first()
@@ -185,11 +273,7 @@ class StreamProcessor private constructor(
             (peekByte(offset + 3).toInt() and 0xFF)
     }
 
-    /**
-     * Peeks at a Long without consuming it.
-     * @param offset byte offset from current position (default 0)
-     */
-    fun peekLong(offset: Int = 0): Long {
+    override fun peekLong(offset: Int): Long {
         require(totalAvailable >= offset + Long.SIZE_BYTES) { "Not enough data for Long at offset $offset" }
 
         val chunk = chunks.first()
@@ -208,13 +292,7 @@ class StreamProcessor private constructor(
             (peekByte(offset + 7).toLong() and 0xFF)
     }
 
-    /**
-     * Finds the first mismatch between stream data and the given pattern.
-     * Optimized to compare using Long/Int primitives when possible.
-     *
-     * @return -1 if the patterns match completely, or the index of first mismatch
-     */
-    fun peekMismatch(pattern: ReadBuffer): Int {
+    override fun peekMismatch(pattern: ReadBuffer): Int {
         val patternSize = pattern.remaining()
         if (totalAvailable < patternSize) return minOf(totalAvailable, patternSize)
         if (patternSize == 0) return -1
@@ -275,15 +353,7 @@ class StreamProcessor private constructor(
         return -1
     }
 
-    /**
-     * Checks if the next bytes match the given pattern.
-     */
-    fun peekMatches(pattern: ReadBuffer): Boolean = peekMismatch(pattern) < 0
-
-    // TODO: Platform-specific optimization opportunity:
-    // - JVM (JDK 11+): ByteBuffer.mismatch() or Arrays.mismatch()
-    // - Native: memcmp via cinterop
-    // - JS: Buffer.compare() in Node.js
+    override fun peekMatches(pattern: ReadBuffer): Boolean = peekMismatch(pattern) < 0
 
     // Find first mismatched byte index within a Long (big-endian)
     private fun findMismatchInLong(
@@ -313,10 +383,7 @@ class StreamProcessor private constructor(
         return (xor.countLeadingZeroBits() - 16) / 8
     }
 
-    /**
-     * Reads a byte, consuming it.
-     */
-    fun readByte(): Byte {
+    override fun readByte(): Byte {
         require(totalAvailable >= 1) { "No data available" }
         val chunk = chunks.first()
         val byte = chunk.readByte()
@@ -325,15 +392,9 @@ class StreamProcessor private constructor(
         return byte
     }
 
-    /**
-     * Reads an unsigned byte (0-255), consuming it.
-     */
-    fun readUnsignedByte(): Int = readByte().toInt() and 0xFF
+    override fun readUnsignedByte(): Int = readByte().toInt() and 0xFF
 
-    /**
-     * Reads a Short, consuming it.
-     */
-    fun readShort(): Short {
+    override fun readShort(): Short {
         require(totalAvailable >= Short.SIZE_BYTES) { "Not enough data for Short" }
         val chunk = chunks.first()
         if (chunk.remaining() >= Short.SIZE_BYTES) {
@@ -349,10 +410,7 @@ class StreamProcessor private constructor(
         ).toShort()
     }
 
-    /**
-     * Reads an Int, consuming it.
-     */
-    fun readInt(): Int {
+    override fun readInt(): Int {
         require(totalAvailable >= Int.SIZE_BYTES) { "Not enough data for Int" }
         val chunk = chunks.first()
         if (chunk.remaining() >= Int.SIZE_BYTES) {
@@ -368,10 +426,7 @@ class StreamProcessor private constructor(
             (readByte().toInt() and 0xFF)
     }
 
-    /**
-     * Reads a Long, consuming it.
-     */
-    fun readLong(): Long {
+    override fun readLong(): Long {
         require(totalAvailable >= Long.SIZE_BYTES) { "Not enough data for Long" }
         val chunk = chunks.first()
         if (chunk.remaining() >= Long.SIZE_BYTES) {
@@ -391,13 +446,7 @@ class StreamProcessor private constructor(
             (readByte().toLong() and 0xFF)
     }
 
-    /**
-     * Reads a buffer of exactly [size] bytes.
-     *
-     * Returns a slice when data is contiguous in one chunk.
-     * Copies when data spans multiple chunks.
-     */
-    fun readBuffer(size: Int): ReadBuffer {
+    override fun readBuffer(size: Int): ReadBuffer {
         require(totalAvailable >= size) { "Not enough data: need $size, have $totalAvailable" }
         require(chunks.isNotEmpty() || size == 0) { "No chunks available" }
 
@@ -441,10 +490,7 @@ class StreamProcessor private constructor(
         return merged
     }
 
-    /**
-     * Skips [count] bytes.
-     */
-    fun skip(count: Int) {
+    override fun skip(count: Int) {
         require(totalAvailable >= count) { "Not enough data to skip: need $count, have $totalAvailable" }
         var remaining = count
         while (remaining > 0 && chunks.isNotEmpty()) {
@@ -457,10 +503,7 @@ class StreamProcessor private constructor(
         }
     }
 
-    /**
-     * Releases all resources. Call when done processing.
-     */
-    fun release() {
+    override fun release() {
         for (chunk in chunks) {
             releaseIfPooled(chunk)
         }
