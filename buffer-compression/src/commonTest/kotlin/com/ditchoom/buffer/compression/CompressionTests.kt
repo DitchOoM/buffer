@@ -580,10 +580,11 @@ class CompressionTests {
             val compressed = compressAsync(text.toReadBuffer())
 
             // Decompress with exact expected size
-            val decompressed = decompressAsync(
-                compressed,
-                expectedOutputSize = text.length,
-            )
+            val decompressed =
+                decompressAsync(
+                    compressed,
+                    expectedOutputSize = text.length,
+                )
             assertEquals(text, decompressed.readString(decompressed.remaining()))
         }
 
@@ -594,10 +595,11 @@ class CompressionTests {
             val compressed = compressAsync(text.toReadBuffer())
 
             // Decompress with way too small expected size - should grow automatically
-            val decompressed = decompressAsync(
-                compressed,
-                expectedOutputSize = 10, // Way too small!
-            )
+            val decompressed =
+                decompressAsync(
+                    compressed,
+                    expectedOutputSize = 10, // Way too small!
+                )
             assertEquals(text, decompressed.readString(decompressed.remaining()))
         }
 
@@ -608,10 +610,11 @@ class CompressionTests {
             val compressed = compressAsync(text.toReadBuffer())
 
             // Decompress with larger than needed expected size
-            val decompressed = decompressAsync(
-                compressed,
-                expectedOutputSize = 1000, // Larger than needed
-            )
+            val decompressed =
+                decompressAsync(
+                    compressed,
+                    expectedOutputSize = 1000, // Larger than needed
+                )
             assertEquals(text, decompressed.readString(decompressed.remaining()))
         }
 
