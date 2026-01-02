@@ -59,7 +59,7 @@ val text = buffer.readString(6)
 ```kotlin
 import com.ditchoom.buffer.compression.*
 
-val data = PlatformBuffer.wrap("Hello, World!".encodeToByteArray())
+val data = "Hello, World!".toReadBuffer()
 val compressed = compress(data, CompressionAlgorithm.Gzip).getOrThrow()
 val decompressed = decompress(compressed, CompressionAlgorithm.Gzip).getOrThrow()
 ```
