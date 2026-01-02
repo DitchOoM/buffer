@@ -1,0 +1,107 @@
+name: "Complete or Cancel Release"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.2.3 - without v prefix)'
+        required: true
+        type: string
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - complete
+          - cancel
+
+permissions:
+  contents: write
+
+jobs:
+  complete-release:
+    name: Complete Release
+    if: github.event.inputs.action == 'complete'
+    runs-on: macos-latest
+    env:
+      ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+      ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+      ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_KEY_ID }}
+      ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_PASSWORD }}
+      ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_KEY_CONTENTS }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 19
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '19'
+          cache: gradle
+
+      - name: Release from Maven Central staging
+        run: |
+          # The vanniktech plugin's releaseToMavenCentral task releases the staging repo
+          # This only works if there's a staging repo from a previous publishToMavenCentral
+          echo "Releasing version ${{ github.event.inputs.version }} from Maven Central staging..."
+          ./gradlew releaseToMavenCentral --no-configuration-cache
+
+      - name: Publish draft release (creates tag)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${{ github.event.inputs.version }}"
+          tag="v${version}"
+          maven_url="https://central.sonatype.com/artifact/com.ditchoom/buffer/${version}"
+
+          # Get the draft release and update its notes
+          echo "Publishing draft release ${tag}..."
+
+          # Update the release notes and publish (removes draft status, creates tag)
+          gh release edit "$tag" \
+              --repo="$GITHUB_REPOSITORY" \
+              --draft=false \
+              --notes="$(gh release view "$tag" --repo="$GITHUB_REPOSITORY" --json body -q .body | sed "s|Awaiting validation.*|Released to Maven Central|" | sed "s|### To complete release:.*||" | sed "s|### To cancel:.*||")"$'\n\n'"**Maven Central:** [com.ditchoom:buffer:${version}](${maven_url})"
+
+          echo "✅ Release ${tag} published!"
+          echo "   Tag created: ${tag}"
+          echo "   Maven Central: ${maven_url}"
+
+  cancel-release:
+    name: Cancel Release
+    if: github.event.inputs.action == 'cancel'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete draft release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${{ github.event.inputs.version }}"
+          tag="v${version}"
+
+          echo "Cancelling release ${tag}..."
+
+          # Check if the release exists and is a draft
+          release_info=$(gh release view "$tag" --repo="$GITHUB_REPOSITORY" --json isDraft,tagName 2>/dev/null || echo "not_found")
+
+          if [ "$release_info" = "not_found" ]; then
+            echo "⚠️  Release ${tag} not found. Nothing to delete."
+            exit 0
+          fi
+
+          is_draft=$(echo "$release_info" | jq -r .isDraft)
+
+          if [ "$is_draft" != "true" ]; then
+            echo "❌ Release ${tag} is not a draft. Cannot cancel a published release."
+            echo "   If you need to remove this release, do so manually."
+            exit 1
+          fi
+
+          # Delete the draft release (no tag exists for drafts)
+          gh release delete "$tag" --repo="$GITHUB_REPOSITORY" --yes
+
+          echo "✅ Draft release ${tag} deleted!"
+          echo ""
+          echo "⚠️  IMPORTANT: You must also drop the staging repository in Maven Central:"
+          echo "   https://central.sonatype.com/publishing/deployments"
+          echo ""
+          echo "   No git tag was created. No artifacts were published to Maven Central."

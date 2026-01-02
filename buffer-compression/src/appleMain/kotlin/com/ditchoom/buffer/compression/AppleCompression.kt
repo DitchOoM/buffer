@@ -18,6 +18,7 @@ import kotlinx.cinterop.plus
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.rawPtr
 import kotlinx.cinterop.reinterpret
+import platform.posix.memcpy
 import platform.zlib.Z_DEFLATED
 import platform.zlib.Z_FINISH
 import platform.zlib.Z_OK
@@ -35,6 +36,26 @@ import platform.zlib.z_stream
  * Apple supports synchronous compression via system zlib.
  */
 actual val supportsSyncCompression: Boolean = true
+
+/**
+ * Helper to copy memory with platform-appropriate size_t conversion.
+ * Encapsulates the .convert() call to avoid metadata compilation issues
+ * with different bit widths across Apple platforms (arm64 vs arm64_32).
+ */
+@OptIn(ExperimentalForeignApi::class)
+private fun copyMemory(
+    dst: CPointer<ByteVar>?,
+    src: CPointer<ByteVar>?,
+    size: Int,
+) {
+    memcpy(dst, src, size.convert())
+}
+
+/**
+ * Helper to get compress bound with platform-appropriate size_t conversion.
+ */
+@OptIn(ExperimentalForeignApi::class)
+private fun getCompressBound(size: Int): Int = compressBound(size.convert()).convert()
 
 /**
  * Window bits for different compression formats.
@@ -96,8 +117,7 @@ private fun compressWithZStream(
     val inputPosition = input.position()
 
     // Allocate output buffer sized for worst case
-    // Use explicit ULong to avoid platform-specific type width issues
-    val maxOutputSize = compressBound(inputSize.toULong()).toLong().toInt() + 32
+    val maxOutputSize = getCompressBound(inputSize) + 32
     val output = PlatformBuffer.allocate(maxOutputSize, AllocationZone.Direct) as MutableDataBuffer
     val outputPtr =
         output.mutableData?.mutableBytes as? CPointer<ByteVar>
@@ -218,8 +238,7 @@ private fun decompressWithZStream(
                             newOutput.mutableData?.mutableBytes as? CPointer<ByteVar>
                                 ?: throw CompressionException("Failed to get new output pointer")
                         // Copy existing decompressed data to new buffer
-                        // Use explicit ULong to avoid platform-specific type width issues
-                        platform.posix.memcpy(newPtr, outputPtr, totalDecompressed.toULong())
+                        copyMemory(newPtr, outputPtr, totalDecompressed)
                         output = newOutput
                         outputPtr = newPtr
                         outputSize = newSize
