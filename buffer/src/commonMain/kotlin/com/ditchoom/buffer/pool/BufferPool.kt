@@ -92,10 +92,7 @@ enum class ThreadingMode {
  * A buffer that has been acquired from a pool.
  * Must be released back to the pool when done.
  */
-interface PooledBuffer :
-    com.ditchoom.buffer.ReadBuffer,
-    com.ditchoom.buffer.WriteBuffer {
-    val capacity: Int
+interface PooledBuffer : com.ditchoom.buffer.ReadWriteBuffer {
     override val byteOrder: ByteOrder
 
     /**

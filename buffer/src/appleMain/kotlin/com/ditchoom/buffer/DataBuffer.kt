@@ -30,7 +30,7 @@ open class DataBuffer(
     open val capacity: Int = data.length.toInt()
 
     @Suppress("UNCHECKED_CAST")
-    internal val bytePointer = this.data.bytes as CPointer<ByteVar>
+    val bytePointer = this.data.bytes as CPointer<ByteVar>
 
     override fun resetForRead() {
         limit = position
@@ -133,7 +133,7 @@ open class DataBuffer(
  * Uses pointer arithmetic instead of subdataWithRange to avoid NSData allocation.
  */
 @OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, UnsafeNumber::class)
-internal class DataBufferSlice(
+class DataBufferSlice(
     private val parent: DataBuffer,
     private val sliceOffset: Int,
     private val sliceLength: Int,
@@ -142,7 +142,7 @@ internal class DataBufferSlice(
     private var limit: Int = sliceLength
 
     // Pointer to the start of this slice's data (non-null since parent.bytePointer is valid)
-    private val slicePointer: CPointer<ByteVar> = (parent.bytePointer + sliceOffset)!!
+    val bytePointer: CPointer<ByteVar> = (parent.bytePointer + sliceOffset)!!
 
     override val byteOrder: ByteOrder get() = parent.byteOrder
 
@@ -155,26 +155,26 @@ internal class DataBufferSlice(
         this.limit = limit
     }
 
-    override fun readByte(): Byte = slicePointer[position++]
+    override fun readByte(): Byte = bytePointer[position++]
 
-    override fun get(index: Int): Byte = slicePointer[index]
+    override fun get(index: Int): Byte = bytePointer[index]
 
     override fun readShort(): Short {
-        val ptr = (slicePointer + position)!!.reinterpret<ShortVar>()
+        val ptr = (bytePointer + position)!!.reinterpret<ShortVar>()
         val value = ptr[0]
         position += 2
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun readInt(): Int {
-        val ptr = (slicePointer + position)!!.reinterpret<IntVar>()
+        val ptr = (bytePointer + position)!!.reinterpret<IntVar>()
         val value = ptr[0]
         position += 4
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun readLong(): Long {
-        val ptr = (slicePointer + position)!!.reinterpret<LongVar>()
+        val ptr = (bytePointer + position)!!.reinterpret<LongVar>()
         val value = ptr[0]
         position += 8
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
@@ -186,7 +186,7 @@ internal class DataBufferSlice(
         if (size < 1) {
             return ByteArray(0)
         }
-        val result = (slicePointer + position)!!.readBytes(size)
+        val result = (bytePointer + position)!!.readBytes(size)
         position += size
         return result
     }

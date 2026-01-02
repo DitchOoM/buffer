@@ -1,11 +1,8 @@
 package com.ditchoom.buffer
 
 interface PlatformBuffer :
-    ReadBuffer,
-    WriteBuffer,
+    ReadWriteBuffer,
     SuspendCloseable,
     Parcelable {
-    val capacity: Int
-
     companion object
 }

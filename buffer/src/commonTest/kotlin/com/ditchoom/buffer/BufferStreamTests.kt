@@ -6,6 +6,7 @@ import com.ditchoom.buffer.pool.withPool
 import com.ditchoom.buffer.stream.BufferChunk
 import com.ditchoom.buffer.stream.BufferStream
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.stream.builder
 import com.ditchoom.buffer.stream.collectToBuffer
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -1206,6 +1207,39 @@ class BufferStreamTests {
 
         assertEquals(6, processor.available())
 
+        processor.release()
+        pool.clear()
+    }
+
+    // ============================================================================
+    // StreamProcessorBuilder Tests
+    // ============================================================================
+
+    @Test
+    fun streamProcessorBuilderCreatesProcessor() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.builder(pool).build()
+
+        assertEquals(0, processor.available())
+
+        val buffer = PlatformBuffer.allocate(10)
+        repeat(10) { buffer.writeByte(it.toByte()) }
+        buffer.resetForRead()
+
+        processor.append(buffer)
+        assertEquals(10, processor.available())
+        assertEquals(0.toByte(), processor.readByte())
+
+        processor.release()
+        pool.clear()
+    }
+
+    @Test
+    fun streamProcessorBuilderCreatesSuspendingProcessor() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.builder(pool).buildSuspending()
+
+        assertEquals(0, processor.available())
         processor.release()
         pool.clear()
     }
