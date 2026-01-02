@@ -6,7 +6,8 @@ on:
       - main
     paths:
       - 'docs/**'
-      - 'src/**'
+      - 'buffer/src/**'
+      - 'buffer-compression/src/**'
       - 'MODULE.md'
       - '.github/workflows/docs.yaml'
   workflow_dispatch:

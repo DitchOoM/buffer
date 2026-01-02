@@ -16,26 +16,23 @@ plugins {
 tasks.register("allTests") {
     description = "Run tests for all modules and platforms"
     group = "verification"
-    dependsOn(":buffer:allTests", ":buffer-compression:jvmTest")
+    dependsOn(":buffer:allTests")
 }
 
 tasks.register("buildAll") {
     description = "Build all modules"
     group = "build"
-    dependsOn(":buffer:build", ":buffer-compression:build")
+    dependsOn(":buffer:build")
 }
 
 // Copy Dokka output to Docusaurus static directory
 tasks.register<Copy>("copyDokkaToDocusaurus") {
     description = "Generate and copy API documentation to Docusaurus"
     group = "documentation"
-    dependsOn(":buffer:dokkaGenerateHtml", ":buffer-compression:dokkaGenerateHtml")
+    dependsOn(":buffer:dokkaGenerateHtml")
 
     from(layout.projectDirectory.dir("buffer/build/dokka/html")) {
         into("buffer")
-    }
-    from(layout.projectDirectory.dir("buffer-compression/build/dokka/html")) {
-        into("buffer-compression")
     }
     into(layout.projectDirectory.dir("docs/static/api"))
 }
