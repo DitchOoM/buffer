@@ -5,11 +5,9 @@ title: Compression
 
 # Compression
 
-The `buffer-compression` module provides cross-platform compression and decompression.
+The `buffer-compression` module provides cross-platform compression and decompression using Gzip, Deflate, and Raw formats.
 
 ## Installation
-
-Add the compression module to your dependencies:
 
 ```kotlin
 dependencies {
@@ -18,46 +16,220 @@ dependencies {
 }
 ```
 
-## One-Shot Compression
+## Quick Start (All Platforms)
 
-:::caution Browser JavaScript Not Supported
-The one-shot `compress()` and `decompress()` functions are synchronous and **not available in browser JavaScript**. Use `SuspendingStreamingCompressor` for browser support.
-:::
+These examples work on **every supported platform**, including browser JavaScript.
 
-Compress and decompress entire buffers:
+### Compress Data
 
 ```kotlin
-val original = "Hello, World!".toReadBuffer()
-val compressed = compress(original, CompressionAlgorithm.Gzip).getOrThrow()
+import com.ditchoom.buffer.compression.*
 
-val decompressed = decompress(compressed, CompressionAlgorithm.Gzip).getOrThrow()
-val text = decompressed.readString(decompressed.remaining())
+suspend fun compressData(data: String): List<ReadBuffer> {
+    val output = mutableListOf<ReadBuffer>()
+
+    SuspendingStreamingCompressor.create(CompressionAlgorithm.Gzip).use { compressor ->
+        output += compressor.compress(data.toReadBuffer())
+        output += compressor.finish()
+    }
+
+    return output
+}
+```
+
+### Decompress Data
+
+```kotlin
+suspend fun decompressData(compressed: List<ReadBuffer>): String {
+    val output = mutableListOf<ReadBuffer>()
+
+    SuspendingStreamingDecompressor.create(CompressionAlgorithm.Gzip).use { decompressor ->
+        for (chunk in compressed) {
+            output += decompressor.decompress(chunk)
+        }
+        output += decompressor.finish()
+    }
+
+    // Combine chunks and read as string
+    val totalSize = output.sumOf { it.remaining() }
+    val result = PlatformBuffer.allocate(totalSize)
+    output.forEach { result.write(it) }
+    result.resetForRead()
+    return result.readString(totalSize)
+}
+```
+
+### Compress and Send Over Network
+
+```kotlin
+suspend fun sendCompressed(socket: Socket, data: String) {
+    SuspendingStreamingCompressor.create(CompressionAlgorithm.Gzip).use { compressor ->
+        // Compress and send chunks as they're produced
+        compressor.compress(data.toReadBuffer()).forEach { chunk ->
+            socket.write(chunk)
+        }
+        // Flush remaining data
+        compressor.finish().forEach { chunk ->
+            socket.write(chunk)
+        }
+    }
+}
+```
+
+### Receive and Decompress from Network
+
+```kotlin
+suspend fun receiveDecompressed(socket: Socket): ReadBuffer {
+    val output = mutableListOf<ReadBuffer>()
+
+    SuspendingStreamingDecompressor.create(CompressionAlgorithm.Gzip).use { decompressor ->
+        while (socket.hasData()) {
+            val chunk = socket.read()
+            output += decompressor.decompress(chunk)
+        }
+        output += decompressor.finish()
+    }
+
+    // Combine into single buffer
+    val totalSize = output.sumOf { it.remaining() }
+    val result = PlatformBuffer.allocate(totalSize)
+    output.forEach { result.write(it) }
+    result.resetForRead()
+    return result
+}
 ```
 
 ## Compression Algorithms
 
 ```kotlin
-// Gzip - most common for HTTP
-compress(buffer, CompressionAlgorithm.Gzip)
+// Gzip - most common for HTTP, includes headers and CRC
+CompressionAlgorithm.Gzip
 
 // Deflate - zlib format with header/trailer
-compress(buffer, CompressionAlgorithm.Deflate)
+CompressionAlgorithm.Deflate
 
-// Raw - no headers, for custom protocols
-compress(buffer, CompressionAlgorithm.Raw)
+// Raw - no headers, for custom protocols or when you manage framing yourself
+CompressionAlgorithm.Raw
 ```
 
 ## Compression Levels
 
+Control the speed/size tradeoff:
+
 ```kotlin
-compress(buffer, algorithm, CompressionLevel.BestSpeed)       // Fastest
-compress(buffer, algorithm, CompressionLevel.BestCompression) // Smallest
-compress(buffer, algorithm, CompressionLevel.Default)         // Balanced
-compress(buffer, algorithm, CompressionLevel.NoCompression)   // Store only
-compress(buffer, algorithm, CompressionLevel.Custom(4))       // Custom 0-9
+SuspendingStreamingCompressor.create(
+    algorithm = CompressionAlgorithm.Gzip,
+    level = CompressionLevel.BestSpeed       // Fastest compression
+)
+
+SuspendingStreamingCompressor.create(
+    algorithm = CompressionAlgorithm.Gzip,
+    level = CompressionLevel.BestCompression // Smallest output
+)
+
+SuspendingStreamingCompressor.create(
+    algorithm = CompressionAlgorithm.Gzip,
+    level = CompressionLevel.Default         // Balanced (default)
+)
+
+SuspendingStreamingCompressor.create(
+    algorithm = CompressionAlgorithm.Gzip,
+    level = CompressionLevel.Custom(4)       // Custom 0-9
+)
 ```
 
-## Error Handling
+## Handling Large Files
+
+For large files, process in chunks to avoid loading everything into memory:
+
+```kotlin
+suspend fun compressFile(input: FileChannel, output: FileChannel) {
+    val chunkSize = 64 * 1024  // 64KB chunks
+
+    SuspendingStreamingCompressor.create(CompressionAlgorithm.Gzip).use { compressor ->
+        val buffer = PlatformBuffer.allocate(chunkSize)
+
+        while (input.read(buffer) > 0) {
+            buffer.resetForRead()
+            compressor.compress(buffer).forEach { chunk ->
+                output.write(chunk)
+            }
+            buffer.clear()
+        }
+
+        compressor.finish().forEach { chunk ->
+            output.write(chunk)
+        }
+    }
+}
+```
+
+## HTTP Response Decompression
+
+Common pattern for handling gzipped HTTP responses:
+
+```kotlin
+suspend fun fetchAndDecompress(url: String): String {
+    val response = httpClient.get(url) {
+        header("Accept-Encoding", "gzip")
+    }
+
+    val contentEncoding = response.headers["Content-Encoding"]
+    val body = response.body
+
+    return if (contentEncoding == "gzip") {
+        val output = mutableListOf<ReadBuffer>()
+        SuspendingStreamingDecompressor.create(CompressionAlgorithm.Gzip).use { decompressor ->
+            output += decompressor.decompress(body)
+            output += decompressor.finish()
+        }
+        combineBuffers(output).readString()
+    } else {
+        body.readString()
+    }
+}
+```
+
+---
+
+## Platform Optimizations
+
+The examples above use the async API which works everywhere. On platforms with synchronous compression support, you can use more efficient APIs.
+
+### Platform Support Matrix
+
+| Platform | Sync API | Async API | Engine |
+|----------|----------|-----------|--------|
+| JVM | ✅ | ✅ | java.util.zip |
+| Android | ✅ | ✅ | java.util.zip |
+| iOS/macOS | ✅ | ✅ | zlib |
+| JS (Node.js) | ✅ | ✅ | zlib module |
+| JS (Browser) | ❌ | ✅ | CompressionStream |
+| WasmJS | ❌ | ❌ | — |
+| Linux Native | ❌ | ❌ | — |
+
+### Check Platform Support at Runtime
+
+```kotlin
+if (supportsSyncCompression) {
+    // Use faster sync API
+} else {
+    // Fall back to async API (browser JS)
+}
+```
+
+### One-Shot API (Non-Browser Only)
+
+For simple cases where you have all data upfront:
+
+```kotlin
+// Only available when supportsSyncCompression == true
+val original = "Hello, World!".toReadBuffer()
+val compressed = compress(original, CompressionAlgorithm.Gzip).getOrThrow()
+val decompressed = decompress(compressed, CompressionAlgorithm.Gzip).getOrThrow()
+```
+
+Handle errors explicitly:
 
 ```kotlin
 when (val result = compress(buffer, CompressionAlgorithm.Gzip)) {
@@ -70,54 +242,13 @@ val buffer = compress(data, algorithm).getOrThrow()  // throws on failure
 val buffer = compress(data, algorithm).getOrNull()   // null on failure
 ```
 
-## Streaming Compression
+### Synchronous Streaming API (Non-Browser Only)
 
-For large data or network streams, use the suspending API which works on **all platforms** including browser JavaScript:
-
-```kotlin
-SuspendingStreamingCompressor.create(algorithm = CompressionAlgorithm.Gzip).use { compress ->
-    compress("First chunk".toReadBuffer())
-    compress("Second chunk".toReadBuffer())
-    compress("Third chunk".toReadBuffer())
-    // finish() and close() called automatically
-}
-```
-
-### Streaming Decompression
+The sync API avoids coroutine overhead and is slightly faster:
 
 ```kotlin
-SuspendingStreamingDecompressor.create(algorithm = CompressionAlgorithm.Gzip).use { decompress ->
-    decompress(compressedChunk1)
-    decompress(compressedChunk2)
-    // finish() and close() called automatically
-}
-```
-
-### Collecting Output
-
-The suspending API returns output chunks from each call:
-
-```kotlin
-SuspendingStreamingCompressor.create(algorithm = CompressionAlgorithm.Gzip).use { compress ->
-    val chunks1 = compress(data1)  // returns List<ReadBuffer>
-    val chunks2 = compress(data2)
-
-    // Send chunks as they're produced
-    chunks1.forEach { sendToNetwork(it) }
-    chunks2.forEach { sendToNetwork(it) }
-}
-```
-
-## Synchronous API
-
-:::caution Browser JavaScript Not Supported
-The synchronous API is **not available in browser JavaScript**. Browser JS only supports the async `CompressionStream` API. Use `SuspendingStreamingCompressor` instead, or check `supportsSyncCompression` at runtime.
-:::
-
-For platforms with synchronous compression support (JVM, Android, iOS/macOS, Node.js), use the callback-based API:
-
-```kotlin
-StreamingCompressor.create(algorithm = CompressionAlgorithm.Gzip).use(
+// Compression with callback
+StreamingCompressor.create(CompressionAlgorithm.Gzip).use(
     onOutput = { compressedChunk ->
         socket.write(compressedChunk)
     }
@@ -126,12 +257,9 @@ StreamingCompressor.create(algorithm = CompressionAlgorithm.Gzip).use(
     compress("Second chunk".toReadBuffer())
     compress("Third chunk".toReadBuffer())
 }
-```
 
-### Synchronous Decompression
-
-```kotlin
-StreamingDecompressor.create(algorithm = CompressionAlgorithm.Gzip).use(
+// Decompression with callback
+StreamingDecompressor.create(CompressionAlgorithm.Gzip).use(
     onOutput = { decompressedChunk ->
         processData(decompressedChunk)
     }
@@ -141,55 +269,45 @@ StreamingDecompressor.create(algorithm = CompressionAlgorithm.Gzip).use(
 }
 ```
 
-### With Suspending I/O
+### Sync Compression with Suspending I/O
 
-When using synchronous compression with suspending I/O (e.g., network sockets), use `useSuspending`:
+When reading from a network socket (suspending) but using sync compression:
 
 ```kotlin
-StreamingCompressor.create(algorithm = CompressionAlgorithm.Gzip).useSuspending(
+StreamingCompressor.create(CompressionAlgorithm.Gzip).useSuspending(
     onOutput = { chunk -> channel.send(chunk) }
 ) { compress ->
     while (socket.hasData()) {
-        val chunk = socket.read()  // suspend OK
-        compress(chunk)
+        val data = socket.read()  // suspend call is OK here
+        compress(data)            // sync compression
     }
 }
 ```
 
-## Platform Support
-
-| Platform | Engine | Sync API | Async API |
-|----------|--------|----------|-----------|
-| JVM | java.util.zip | ✅ | ✅ |
-| Android | java.util.zip | ✅ | ✅ |
-| iOS/macOS | zlib | ✅ | ✅ |
-| JS (Node.js) | zlib module | ✅ | ✅ |
-| JS (Browser) | CompressionStream | ❌ | ✅ |
-| WasmJS | — | ❌ | ❌ |
-| Linux Native | — | ❌ | ❌ |
-
-### Unsupported Platforms
-
-**WasmJS** and **Linux Native** are not currently supported because:
-- These platforms don't include zlib by default
-- WasmJS would require bundling a WASM-compiled zlib or using browser APIs (which aren't available in non-browser WASM environments)
-- Linux Native would require linking against the system's zlib library
-
-Contributions to add support for these platforms are welcome!
-
-Check platform support at runtime:
+### Choosing the Right API
 
 ```kotlin
-if (supportsSyncCompression) {
-    compress(buffer, CompressionAlgorithm.Gzip)
-} else {
-    // Browser - use SuspendingStreamingCompressor
+suspend fun compressEfficiently(data: ReadBuffer): List<ReadBuffer> {
+    return if (supportsSyncCompression) {
+        // Platform supports sync - use one-shot for simplicity
+        listOf(compress(data, CompressionAlgorithm.Gzip).getOrThrow())
+    } else {
+        // Browser - must use async
+        val output = mutableListOf<ReadBuffer>()
+        SuspendingStreamingCompressor.create(CompressionAlgorithm.Gzip).use { compressor ->
+            output += compressor.compress(data)
+            output += compressor.finish()
+        }
+        output
+    }
 }
 ```
 
+---
+
 ## StreamProcessor Integration
 
-For protocol parsing scenarios where you receive compressed data and need to parse structured content, use the `StreamProcessor` builder API:
+For protocol parsing scenarios where you receive compressed data and need to parse structured content:
 
 ```kotlin
 withPool { pool ->
@@ -201,20 +319,20 @@ withPool { pool ->
         // Append compressed chunks as they arrive
         processor.append(compressedChunk1)
         processor.append(compressedChunk2)
-        processor.finish()  // Signal no more data
+        processor.finish()  // Signal no more input
 
-        // Now parse the decompressed data
-        val header = processor.peekInt()
-        val payload = processor.readBuffer(processor.available())
+        // Parse the decompressed data
+        val messageType = processor.peekByte()
+        val length = processor.peekInt(offset = 1)
+        processor.skip(5)  // Skip header
+        val payload = processor.readBuffer(length)
     } finally {
         processor.release()
     }
 }
 ```
 
-### With Suspending I/O
-
-The sync `StreamProcessor` works in coroutine contexts - the suspend happens before `append()`:
+### With Network I/O
 
 ```kotlin
 withPool { pool ->
@@ -223,20 +341,30 @@ withPool { pool ->
         .build()
 
     try {
-        // Suspend on socket.read(), then append synchronously
+        // Read from socket and decompress on the fly
         while (socket.hasData()) {
-            processor.append(socket.read())  // socket.read() is suspend
+            processor.append(socket.read())  // socket.read() suspends
         }
         processor.finish()
 
-        val payload = processor.readBuffer(processor.available())
+        // Parse multiple messages from the stream
+        while (processor.available() >= 4) {
+            val length = processor.peekInt()
+            if (processor.available() < 4 + length) break
+
+            processor.skip(4)
+            val message = processor.readBuffer(length)
+            handleMessage(message)
+        }
     } finally {
         processor.release()
     }
 }
 ```
 
-For browser JavaScript (async-only decompression), use `buildSuspending()`:
+### Browser JavaScript (Async-Only)
+
+For browser JS, use `buildSuspending()`:
 
 ```kotlin
 val processor = StreamProcessor.builder(pool)
@@ -249,15 +377,70 @@ val data = processor.readBuffer(processor.available())
 processor.release()
 ```
 
-This approach:
-- Automatically decompresses data as chunks are appended
-- Provides efficient peek/read operations on decompressed data
-- Works with the buffer pool for zero-copy slicing where possible
+---
+
+## Memory Management
+
+### Using BufferAllocator
+
+Control how output buffers are allocated:
+
+```kotlin
+// Use direct memory (default) - best for I/O
+SuspendingStreamingCompressor.create(
+    algorithm = CompressionAlgorithm.Gzip,
+    allocator = BufferAllocator.Direct
+)
+
+// Use heap memory - faster allocation
+SuspendingStreamingCompressor.create(
+    algorithm = CompressionAlgorithm.Gzip,
+    allocator = BufferAllocator.Heap
+)
+
+// Use a specific zone
+SuspendingStreamingCompressor.create(
+    algorithm = CompressionAlgorithm.Gzip,
+    allocator = BufferAllocator.FromZone(AllocationZone.SharedMemory)
+)
+```
+
+### Output Buffer Size
+
+Tune the output chunk size for your use case:
+
+```kotlin
+// Smaller chunks - lower latency, more overhead
+SuspendingStreamingCompressor.create(
+    algorithm = CompressionAlgorithm.Gzip,
+    outputBufferSize = 4096
+)
+
+// Larger chunks - higher throughput, more memory
+SuspendingStreamingCompressor.create(
+    algorithm = CompressionAlgorithm.Gzip,
+    outputBufferSize = 65536
+)
+```
+
+---
 
 ## Best Practices
 
-1. **Use `use` extensions** - Auto-calls `finish()` and `close()`
-2. **Use Gzip for HTTP** - Standard for web compression
-3. **Use `useSuspending` for network I/O** - Efficient sync compression with suspend I/O
-4. **Check `supportsSyncCompression`** - Browser JS requires async API
-5. **Use StreamProcessor for protocol parsing** - Combines decompression with structured data parsing
+1. **Start with the async API** - Works everywhere, including browser JS
+2. **Use `use` extensions** - Automatically calls `finish()` and `close()`
+3. **Use Gzip for HTTP** - Standard compression for web
+4. **Check `supportsSyncCompression`** - Before using sync APIs
+5. **Process in chunks** - For large files, stream data through
+6. **Use StreamProcessor for protocols** - Combines decompression with parsing
+
+---
+
+## Unsupported Platforms
+
+**WasmJS** and **Linux Native** don't currently support compression because:
+- These platforms don't include zlib by default
+- WasmJS would require bundling a WASM-compiled zlib
+- Linux Native would require linking against the system's zlib library
+
+Contributions to add support are welcome!
