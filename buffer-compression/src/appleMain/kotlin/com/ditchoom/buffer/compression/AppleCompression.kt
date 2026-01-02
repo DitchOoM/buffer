@@ -96,7 +96,8 @@ private fun compressWithZStream(
     val inputPosition = input.position()
 
     // Allocate output buffer sized for worst case
-    val maxOutputSize = compressBound(inputSize.convert()).toInt() + 32
+    // Use explicit ULong to avoid platform-specific type width issues
+    val maxOutputSize = compressBound(inputSize.toULong()).toLong().toInt() + 32
     val output = PlatformBuffer.allocate(maxOutputSize, AllocationZone.Direct) as MutableDataBuffer
     val outputPtr =
         output.mutableData?.mutableBytes as? CPointer<ByteVar>
@@ -217,7 +218,8 @@ private fun decompressWithZStream(
                             newOutput.mutableData?.mutableBytes as? CPointer<ByteVar>
                                 ?: throw CompressionException("Failed to get new output pointer")
                         // Copy existing decompressed data to new buffer
-                        platform.posix.memcpy(newPtr, outputPtr, totalDecompressed.convert())
+                        // Use explicit ULong to avoid platform-specific type width issues
+                        platform.posix.memcpy(newPtr, outputPtr, totalDecompressed.toULong())
                         output = newOutput
                         outputPtr = newPtr
                         outputSize = newSize
