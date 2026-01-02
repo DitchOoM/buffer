@@ -455,6 +455,93 @@ class StreamProcessorIntegrationTests {
             }
         }
 
+    /**
+     * Tests interleaved reading and appending with SuspendingStreamProcessor.
+     * This pattern reads messages as they become available while still receiving data,
+     * which is common in real-time streaming scenarios.
+     */
+    @Test
+    fun interleavedReadAndAppendWithSuspendingProcessor() =
+        runTest {
+            if (!supportsSyncCompression) return@runTest
+
+            // Create multiple length-prefixed messages
+            val messages =
+                listOf(
+                    "Message one",
+                    "Message two is a bit longer",
+                    "Three",
+                    "Fourth message here",
+                    "Fifth and final message",
+                )
+            val uncompressedBuffer = PlatformBuffer.allocate(2048)
+            for (msg in messages) {
+                val msgBytes = msg.encodeToByteArray()
+                uncompressedBuffer.writeInt(msgBytes.size)
+                uncompressedBuffer.writeBytes(msgBytes)
+            }
+            uncompressedBuffer.resetForRead()
+
+            // Compress the entire buffer
+            val compressedResult = compress(uncompressedBuffer, CompressionAlgorithm.Gzip)
+            assertTrue(compressedResult is CompressionResult.Success)
+            val compressed = compressedResult.buffer
+            compressed.position(0)
+
+            // Use small chunks to simulate slow network - messages span multiple chunks
+            val socket = MockSuspendingSocket(splitIntoChunks(compressed, chunkSize = 8))
+
+            withPool { pool ->
+                val processor =
+                    StreamProcessor
+                        .builder(pool)
+                        .decompress(CompressionAlgorithm.Gzip)
+                        .buildSuspending()
+
+                try {
+                    val parsed = mutableListOf<String>()
+
+                    // Interleaved pattern: read messages as they become available
+                    // while still receiving data from the socket
+                    while (socket.hasData() || processor.available() >= 4) {
+                        // Try to read complete messages from what we have
+                        while (processor.available() >= 4) {
+                            val length = processor.peekInt()
+                            if (processor.available() >= 4 + length) {
+                                processor.skip(4)
+                                val payload = processor.readBuffer(length) // suspend
+                                parsed.add(payload.readString(payload.remaining()))
+                            } else {
+                                break // Need more data for this message
+                            }
+                        }
+
+                        // Get more data if available
+                        if (socket.hasData()) {
+                            processor.append(socket.read()) // suspend
+                        }
+                    }
+                    processor.finish()
+
+                    // Read any remaining messages after finish
+                    while (processor.available() >= 4) {
+                        val length = processor.peekInt()
+                        if (processor.available() >= 4 + length) {
+                            processor.skip(4)
+                            val payload = processor.readBuffer(length)
+                            parsed.add(payload.readString(payload.remaining()))
+                        } else {
+                            break
+                        }
+                    }
+
+                    assertEquals(messages, parsed)
+                } finally {
+                    processor.release()
+                }
+            }
+        }
+
     // =========================================================================
     // Helper functions
     // =========================================================================
