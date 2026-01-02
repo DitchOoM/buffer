@@ -39,11 +39,12 @@ actual val supportsSyncCompression: Boolean = true
 
 /**
  * Helper to copy memory with platform-appropriate size_t conversion.
- * Encapsulates the .convert() call to avoid metadata compilation issues
- * with different bit widths across Apple platforms (arm64 vs arm64_32).
+ * Inline function avoids metadata compilation issues with different bit widths
+ * across Apple platforms (arm64 vs arm64_32).
  */
+@Suppress("NOTHING_TO_INLINE")
 @OptIn(ExperimentalForeignApi::class)
-private fun copyMemory(
+private inline fun copyMemory(
     dst: CPointer<ByteVar>?,
     src: CPointer<ByteVar>?,
     size: Int,
@@ -53,9 +54,11 @@ private fun copyMemory(
 
 /**
  * Helper to get compress bound with platform-appropriate size_t conversion.
+ * Inline function avoids metadata compilation issues with different bit widths.
  */
+@Suppress("NOTHING_TO_INLINE")
 @OptIn(ExperimentalForeignApi::class)
-private fun getCompressBound(size: Int): Int = compressBound(size.convert()).convert()
+private inline fun getCompressBound(size: Int): Int = compressBound(size.convert()).convert()
 
 /**
  * Window bits for different compression formats.
