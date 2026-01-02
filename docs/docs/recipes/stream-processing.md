@@ -210,7 +210,7 @@ val data = processor.readBuffer(processor.available())
 processor.release()
 ```
 
-See [Compression](/docs/recipes/compression#streamprocessor-integration) for full details.
+See [Compression](/recipes/compression#streamprocessor-integration) for full details.
 
 ## Best Practices
 
