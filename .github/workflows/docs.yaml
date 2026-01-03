@@ -10,6 +10,8 @@ on:
       - 'buffer-compression/src/**'
       - 'MODULE.md'
       - '.github/workflows/docs.yaml'
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
