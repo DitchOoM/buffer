@@ -79,6 +79,48 @@ class LinearBuffer(
     capacity: Int,
     byteOrder: ByteOrder,
 ) : BaseWebBuffer(capacity, byteOrder) {
+
+    /**
+     * Get the linear memory offset for the current position.
+     * This can be passed to JavaScript for zero-copy access via DataView.
+     */
+    val linearMemoryOffset: Int get() = baseOffset + positionValue
+
+    /**
+     * Write from a JS Int8Array into this buffer.
+     * Uses native Uint8Array.set() for efficient copying.
+     *
+     * @param jsArray The JS Int8Array to copy from
+     * @param srcOffset Offset within the JS array to start copying from
+     * @param length Number of bytes to copy
+     */
+    fun writeFromJsArray(
+        jsArray: JsAny,
+        srcOffset: Int = 0,
+        length: Int,
+    ): LinearBuffer {
+        copyFromJsArray(jsArray, baseOffset + positionValue, srcOffset, length)
+        positionValue += length
+        return this
+    }
+
+    /**
+     * Read from this buffer into a JS Int8Array.
+     * Uses native Uint8Array.set() for efficient copying.
+     *
+     * @param jsArray The JS Int8Array to copy to
+     * @param dstOffset Offset within the JS array to start copying to
+     * @param length Number of bytes to copy
+     */
+    fun readToJsArray(
+        jsArray: JsAny,
+        dstOffset: Int = 0,
+        length: Int,
+    ) {
+        copyToJsArray(jsArray, baseOffset + positionValue, dstOffset, length)
+        positionValue += length
+    }
+
     /**
      * Get the linear memory offset for the current position.
      * This can be passed to JavaScript for zero-copy access via DataView.
