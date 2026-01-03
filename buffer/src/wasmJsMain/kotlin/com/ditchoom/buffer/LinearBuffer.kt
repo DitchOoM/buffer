@@ -1,9 +1,70 @@
-@file:OptIn(UnsafeWasmMemoryApi::class)
+@file:OptIn(UnsafeWasmMemoryApi::class, ExperimentalWasmJsInterop::class)
 
 package com.ditchoom.buffer
 
+import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.wasm.unsafe.Pointer
 import kotlin.wasm.unsafe.UnsafeWasmMemoryApi
+
+/**
+ * Efficient memory copy within WASM linear memory using Uint8Array.set().
+ * This is much faster than byte-by-byte or even Long-by-Long copying.
+ */
+@JsFun(
+    """
+(srcOffset, dstOffset, length) => {
+    const memory = wasmExports.memory.buffer;
+    const src = new Uint8Array(memory, srcOffset, length);
+    const dst = new Uint8Array(memory, dstOffset, length);
+    dst.set(src);
+}
+""",
+)
+private external fun memcpy(
+    srcOffset: Int,
+    dstOffset: Int,
+    length: Int,
+)
+
+/**
+ * Copy from JS Int8Array to linear memory. Zero-copy if arrays overlap in same memory.
+ */
+@JsFun(
+    """
+(jsArray, dstOffset, srcOffset, length) => {
+    const memory = wasmExports.memory.buffer;
+    const dst = new Uint8Array(memory, dstOffset, length);
+    const src = new Uint8Array(jsArray.buffer, jsArray.byteOffset + srcOffset, length);
+    dst.set(src);
+}
+""",
+)
+private external fun copyFromJsArray(
+    jsArray: JsAny,
+    dstOffset: Int,
+    srcOffset: Int,
+    length: Int,
+)
+
+/**
+ * Copy from linear memory to JS Int8Array.
+ */
+@JsFun(
+    """
+(jsArray, srcOffset, dstOffset, length) => {
+    const memory = wasmExports.memory.buffer;
+    const src = new Uint8Array(memory, srcOffset, length);
+    const dst = new Uint8Array(jsArray.buffer, jsArray.byteOffset + dstOffset, length);
+    dst.set(src);
+}
+""",
+)
+private external fun copyToJsArray(
+    jsArray: JsAny,
+    srcOffset: Int,
+    dstOffset: Int,
+    length: Int,
+)
 
 /**
  * Buffer implementation using WASM linear memory with native Pointer operations.
@@ -14,10 +75,52 @@ import kotlin.wasm.unsafe.UnsafeWasmMemoryApi
  * All read/write operations compile to native WASM i32.load/i32.store instructions.
  */
 class LinearBuffer(
-    private val baseOffset: Int,
+    internal val baseOffset: Int,
     capacity: Int,
     byteOrder: ByteOrder,
 ) : BaseWebBuffer(capacity, byteOrder) {
+
+    /**
+     * Get the linear memory offset for the current position.
+     * This can be passed to JavaScript for zero-copy access via DataView.
+     */
+    val linearMemoryOffset: Int get() = baseOffset + positionValue
+
+    /**
+     * Write from a JS Int8Array into this buffer.
+     * Uses native Uint8Array.set() for efficient copying.
+     *
+     * @param jsArray The JS Int8Array to copy from
+     * @param srcOffset Offset within the JS array to start copying from
+     * @param length Number of bytes to copy
+     */
+    fun writeFromJsArray(
+        jsArray: JsAny,
+        srcOffset: Int = 0,
+        length: Int,
+    ): LinearBuffer {
+        copyFromJsArray(jsArray, baseOffset + positionValue, srcOffset, length)
+        positionValue += length
+        return this
+    }
+
+    /**
+     * Read from this buffer into a JS Int8Array.
+     * Uses native Uint8Array.set() for efficient copying.
+     *
+     * @param jsArray The JS Int8Array to copy to
+     * @param dstOffset Offset within the JS array to start copying to
+     * @param length Number of bytes to copy
+     */
+    fun readToJsArray(
+        jsArray: JsAny,
+        dstOffset: Int = 0,
+        length: Int,
+    ) {
+        copyToJsArray(jsArray, baseOffset + positionValue, dstOffset, length)
+        positionValue += length
+    }
+
     /**
      * Get a Pointer to the specified offset within this buffer.
      * Pointer is a value class - no allocation, compiles to raw address arithmetic.
@@ -133,9 +236,32 @@ class LinearBuffer(
         // Copy from linear memory to Kotlin ByteArray (Wasm GC heap)
         // This requires a copy - unavoidable due to separate memory spaces
         val result = ByteArray(size)
-        for (i in 0 until size) {
-            result[i] = loadByte(positionValue + i)
+        var srcOffset = positionValue
+        var dstOffset = 0
+
+        // Copy 8 bytes at a time using Long operations
+        while (dstOffset + 8 <= size) {
+            val value = ptr(srcOffset).loadLong()
+            // Manually unpack Long to bytes (faster than 8 separate loadByte calls)
+            result[dstOffset] = value.toByte()
+            result[dstOffset + 1] = (value shr 8).toByte()
+            result[dstOffset + 2] = (value shr 16).toByte()
+            result[dstOffset + 3] = (value shr 24).toByte()
+            result[dstOffset + 4] = (value shr 32).toByte()
+            result[dstOffset + 5] = (value shr 40).toByte()
+            result[dstOffset + 6] = (value shr 48).toByte()
+            result[dstOffset + 7] = (value shr 56).toByte()
+            srcOffset += 8
+            dstOffset += 8
         }
+
+        // Copy remaining bytes
+        while (dstOffset < size) {
+            result[dstOffset] = loadByte(srcOffset)
+            srcOffset++
+            dstOffset++
+        }
+
         positionValue += size
         return result
     }
@@ -146,9 +272,33 @@ class LinearBuffer(
         length: Int,
     ): WriteBuffer {
         // Copy from Kotlin ByteArray (Wasm GC heap) to linear memory
-        for (i in 0 until length) {
-            storeByte(positionValue + i, bytes[offset + i])
+        var srcOffset = offset
+        var dstOffset = positionValue
+
+        // Copy 8 bytes at a time using Long operations
+        while (srcOffset + 8 <= offset + length) {
+            // Pack 8 bytes into a Long
+            val value =
+                (bytes[srcOffset].toLong() and 0xFFL) or
+                    ((bytes[srcOffset + 1].toLong() and 0xFFL) shl 8) or
+                    ((bytes[srcOffset + 2].toLong() and 0xFFL) shl 16) or
+                    ((bytes[srcOffset + 3].toLong() and 0xFFL) shl 24) or
+                    ((bytes[srcOffset + 4].toLong() and 0xFFL) shl 32) or
+                    ((bytes[srcOffset + 5].toLong() and 0xFFL) shl 40) or
+                    ((bytes[srcOffset + 6].toLong() and 0xFFL) shl 48) or
+                    ((bytes[srcOffset + 7].toLong() and 0xFFL) shl 56)
+            ptr(dstOffset).storeLong(value)
+            srcOffset += 8
+            dstOffset += 8
         }
+
+        // Copy remaining bytes
+        while (srcOffset < offset + length) {
+            storeByte(dstOffset, bytes[srcOffset])
+            srcOffset++
+            dstOffset++
+        }
+
         positionValue += length
         return this
     }
@@ -157,10 +307,12 @@ class LinearBuffer(
         val size = buffer.remaining()
         when (buffer) {
             is LinearBuffer -> {
-                // Both are in linear memory - can use memory copy
-                for (i in 0 until size) {
-                    storeByte(positionValue + i, buffer.loadByte(buffer.positionValue + i))
-                }
+                // Both are in linear memory - use native memcpy via Uint8Array.set()
+                memcpy(
+                    srcOffset = buffer.baseOffset + buffer.positionValue,
+                    dstOffset = baseOffset + positionValue,
+                    length = size,
+                )
             }
             else -> {
                 // Fallback for other buffer types
