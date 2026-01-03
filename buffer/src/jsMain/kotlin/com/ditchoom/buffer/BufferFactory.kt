@@ -39,11 +39,11 @@ actual fun PlatformBuffer.Companion.allocate(
         val arrayBuffer = sharedArrayBuffer.unsafeCast<ArrayBuffer>().slice(0, size)
         JsBuffer(
             Int8Array(arrayBuffer),
-            littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN,
+            byteOrder,
             sharedArrayBuffer = sharedArrayBuffer,
         )
     } else {
-        JsBuffer(Int8Array(size), littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN)
+        JsBuffer(Int8Array(size), byteOrder)
     }
 }
 
@@ -53,5 +53,5 @@ actual fun PlatformBuffer.Companion.wrap(
 ): PlatformBuffer =
     JsBuffer(
         array.unsafeCast<Int8Array>(),
-        littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN,
+        byteOrder,
     )

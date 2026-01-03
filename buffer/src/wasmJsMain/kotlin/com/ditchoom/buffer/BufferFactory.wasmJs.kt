@@ -1,147 +1,38 @@
 package com.ditchoom.buffer
 
+/**
+ * WASM buffer allocation using native linear memory.
+ *
+ * This implementation uses LinearBuffer which provides:
+ * - Native WASM i32.load/i32.store instructions for read/write
+ * - Zero-copy slicing via pointer arithmetic
+ * - Same memory accessible from JavaScript via DataView
+ */
 actual fun PlatformBuffer.Companion.allocate(
     size: Int,
     zone: AllocationZone,
     byteOrder: ByteOrder,
-): PlatformBuffer =
-    when (zone) {
-        AllocationZone.Heap,
-        AllocationZone.SharedMemory,
-        AllocationZone.Direct,
-        -> KotlinJsBuffer(ByteArray(size), byteOrder = byteOrder)
-        is AllocationZone.Custom -> zone.allocator(size)
+): PlatformBuffer {
+    if (zone is AllocationZone.Custom) {
+        return zone.allocator(size)
     }
 
+    // Allocate in linear memory (allocator returns aligned capacity, but we use requested size)
+    val (offset, _) = LinearMemoryAllocator.allocate(size)
+    return LinearBuffer(offset, size, byteOrder)
+}
+
+/**
+ * Wrap a ByteArray in a buffer.
+ *
+ * This uses ByteArrayBuffer (not LinearBuffer) because ByteArray lives in the
+ * WasmGC heap, which is separate from WASM linear memory. There's no way to
+ * get a Pointer to a ByteArray's data.
+ *
+ * ByteArrayBuffer shares memory with the original array, so modifications
+ * to the original ByteArray are visible in the buffer (and vice versa).
+ */
 actual fun PlatformBuffer.Companion.wrap(
     array: ByteArray,
     byteOrder: ByteOrder,
-): PlatformBuffer = KotlinJsBuffer(array, byteOrder = byteOrder)
-
-data class KotlinJsBuffer(
-    val data: ByteArray,
-    private var position: Int = 0,
-    private var limit: Int = data.size,
-    override val capacity: Int = data.size,
-    override val byteOrder: ByteOrder,
-) : PlatformBuffer {
-    override fun resetForRead() {
-        limit = position
-        position = 0
-    }
-
-    override fun resetForWrite() {
-        position = 0
-        limit = data.size
-    }
-
-    override fun setLimit(limit: Int) {
-        this.limit = limit
-    }
-
-    override fun readByte() = data[position++]
-
-    override fun get(index: Int): Byte = data[index]
-
-    override fun slice(): ReadBuffer = KotlinJsBuffer(data.sliceArray(position until limit), byteOrder = byteOrder)
-
-    override fun readByteArray(size: Int): ByteArray {
-        val result = data.copyOfRange(position, position + size)
-        position += size
-        return result
-    }
-
-    override fun readString(
-        length: Int,
-        charset: Charset,
-    ): String {
-        val value =
-            when (charset) {
-                Charset.UTF8 -> data.decodeToString(position, position + length, throwOnInvalidSequence = true)
-                Charset.UTF16 -> throw UnsupportedOperationException("Not sure how to implement.")
-                Charset.UTF16BigEndian -> throw UnsupportedOperationException("Not sure how to implement.")
-                Charset.UTF16LittleEndian -> throw UnsupportedOperationException("Not sure how to implement.")
-                Charset.ASCII -> throw UnsupportedOperationException("Not sure how to implement.")
-                Charset.ISOLatin1 -> throw UnsupportedOperationException("Not sure how to implement.")
-                Charset.UTF32 -> throw UnsupportedOperationException("Not sure how to implement.")
-                Charset.UTF32LittleEndian -> throw UnsupportedOperationException("Not sure how to implement.")
-                Charset.UTF32BigEndian -> throw UnsupportedOperationException("Not sure how to implement.")
-            }
-        position += length
-        return value
-    }
-
-    override fun writeByte(byte: Byte): WriteBuffer {
-        data[position++] = byte
-        return this
-    }
-
-    override fun set(
-        index: Int,
-        byte: Byte,
-    ): WriteBuffer {
-        data[index] = byte
-        return this
-    }
-
-    override fun writeBytes(
-        bytes: ByteArray,
-        offset: Int,
-        length: Int,
-    ): WriteBuffer {
-        bytes.copyInto(data, position, offset, offset + length)
-        position += length
-        return this
-    }
-
-    override fun write(buffer: ReadBuffer) {
-        val numBytes = buffer.remaining()
-        if (buffer is KotlinJsBuffer) {
-            // Copy only the remaining portion (from position to limit)
-            buffer.data.copyInto(data, position, buffer.position(), buffer.position() + numBytes)
-            position += numBytes
-        } else {
-            writeBytes(buffer.readByteArray(numBytes))
-        }
-        buffer.position(buffer.position() + numBytes)
-    }
-
-    override fun writeString(
-        text: CharSequence,
-        charset: Charset,
-    ): WriteBuffer {
-        when (charset) {
-            Charset.UTF8 -> writeBytes(text.toString().encodeToByteArray())
-            else -> throw UnsupportedOperationException("Unable to encode in $charset. Must use Charset.UTF8")
-        }
-        return this
-    }
-
-    override suspend fun close() = Unit
-
-    override fun limit() = limit
-
-    override fun position() = position
-
-    override fun position(newPosition: Int) {
-        position = newPosition
-    }
-
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        other as KotlinJsBuffer
-        if (position != other.position) return false
-        if (limit != other.limit) return false
-        if (capacity != other.capacity) return false
-        if (!data.contentEquals(other.data)) return false
-        return true
-    }
-
-    override fun hashCode(): Int {
-        var result = position.hashCode()
-        result = 31 * result + limit.hashCode()
-        result = 31 * result + capacity.hashCode()
-        result = 31 * result + data.contentHashCode()
-        return result
-    }
-}
+): PlatformBuffer = ByteArrayBuffer(array, byteOrder)
