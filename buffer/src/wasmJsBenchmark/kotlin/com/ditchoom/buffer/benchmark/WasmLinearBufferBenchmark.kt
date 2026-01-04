@@ -1,11 +1,9 @@
 package com.ditchoom.buffer.benchmark
 
-import com.ditchoom.buffer.AllocationZone
-import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.ByteArrayBuffer
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.LinearBuffer
 import com.ditchoom.buffer.LinearMemoryAllocator
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.allocate
 import kotlinx.benchmark.Benchmark
 import kotlinx.benchmark.BenchmarkMode
@@ -43,9 +41,7 @@ open class WasmLinearBufferBenchmark {
 
     // Test 1: ByteArrayBuffer allocation (should work)
     @Benchmark
-    fun byteArrayBufferAlloc(): ByteArrayBuffer {
-        return ByteArrayBuffer(ByteArray(bufferSize), ByteOrder.BIG_ENDIAN)
-    }
+    fun byteArrayBufferAlloc(): ByteArrayBuffer = ByteArrayBuffer(ByteArray(bufferSize), ByteOrder.BIG_ENDIAN)
 
     // Test 2: ByteArrayBuffer operations (should work)
     @Benchmark

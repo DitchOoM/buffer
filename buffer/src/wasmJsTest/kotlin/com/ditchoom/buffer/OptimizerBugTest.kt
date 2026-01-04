@@ -9,7 +9,6 @@ import kotlin.test.assertTrue
  * in production builds with LinearBuffer allocation.
  */
 class OptimizerBugTest {
-
     // Test 1: Is it the allocator or LinearBuffer?
     @Test
     fun testAllocatorOnly() {

@@ -79,7 +79,6 @@ class LinearBuffer(
     capacity: Int,
     byteOrder: ByteOrder,
 ) : BaseWebBuffer(capacity, byteOrder) {
-
     /**
      * Get the linear memory offset for the current position.
      * This can be passed to JavaScript for zero-copy access via DataView.

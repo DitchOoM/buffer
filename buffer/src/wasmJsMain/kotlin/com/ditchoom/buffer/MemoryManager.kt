@@ -115,7 +115,7 @@ object LinearMemoryAllocator {
         if (nextOffset + aligned > heapEnd) {
             throw OutOfMemoryError(
                 "LinearBuffer allocation exceeded pre-allocated memory. " +
-                    "Increase INITIAL_PAGES or use AllocationZone.Heap for high-frequency allocation."
+                    "Increase INITIAL_PAGES or use AllocationZone.Heap for high-frequency allocation.",
             )
         }
 
@@ -181,9 +181,7 @@ object LinearMemoryAllocator {
     /**
      * Test: Just the alignment math, nothing else
      */
-    fun testAlignmentOnly(size: Int): Int {
-        return (size + 7) and 7.inv()
-    }
+    fun testAlignmentOnly(size: Int): Int = (size + 7) and 7.inv()
 
     /**
      * Test: Alignment + assignment to lastAlignedSize

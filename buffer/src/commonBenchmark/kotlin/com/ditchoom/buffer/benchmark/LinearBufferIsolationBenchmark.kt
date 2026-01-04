@@ -1,7 +1,6 @@
 package com.ditchoom.buffer.benchmark
 
 import com.ditchoom.buffer.AllocationZone
-import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.allocate
 import kotlinx.benchmark.Benchmark
@@ -25,7 +24,6 @@ import kotlinx.benchmark.Warmup
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(BenchmarkTimeUnit.SECONDS)
 open class LinearBufferIsolationBenchmark {
-
     private lateinit var heapBuffer: PlatformBuffer
 
     @Setup
@@ -36,9 +34,7 @@ open class LinearBufferIsolationBenchmark {
 
     // Benchmark 1: Just heap allocation - should work
     @Benchmark
-    fun heapAllocationOnly(): PlatformBuffer {
-        return PlatformBuffer.allocate(1024, AllocationZone.Heap)
-    }
+    fun heapAllocationOnly(): PlatformBuffer = PlatformBuffer.allocate(1024, AllocationZone.Heap)
 
     // Benchmark 2: Heap buffer operations - should work
     @Benchmark
