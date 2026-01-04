@@ -24,3 +24,13 @@ actual fun PlatformBuffer.Companion.wrap(
     array: ByteArray,
     byteOrder: ByteOrder,
 ): PlatformBuffer = MutableDataBuffer.wrap(array, byteOrder)
+
+/**
+ * Allocates a buffer with guaranteed native memory access (MutableDataBuffer).
+ * All Apple buffers use NSMutableData which provides native pointer access.
+ */
+@OptIn(UnsafeNumber::class)
+actual fun PlatformBuffer.Companion.allocateNative(
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer = MutableDataBuffer(NSMutableData.create(length = size.convert())!!, byteOrder = byteOrder)

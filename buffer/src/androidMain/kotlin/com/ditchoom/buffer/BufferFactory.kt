@@ -46,3 +46,19 @@ actual fun PlatformBuffer.Companion.wrap(
         }
     return JvmBuffer(ByteBuffer.wrap(array).order(byteOrderNative))
 }
+
+/**
+ * Allocates a buffer with guaranteed native memory access (DirectJvmBuffer).
+ * Uses a direct ByteBuffer with accessible native memory address.
+ */
+actual fun PlatformBuffer.Companion.allocateNative(
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer {
+    val byteOrderNative =
+        when (byteOrder) {
+            ByteOrder.BIG_ENDIAN -> java.nio.ByteOrder.BIG_ENDIAN
+            ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
+        }
+    return DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
+}

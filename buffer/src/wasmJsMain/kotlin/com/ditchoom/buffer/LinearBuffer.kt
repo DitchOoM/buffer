@@ -78,7 +78,19 @@ class LinearBuffer(
     internal val baseOffset: Int,
     capacity: Int,
     byteOrder: ByteOrder,
-) : BaseWebBuffer(capacity, byteOrder) {
+) : BaseWebBuffer(capacity, byteOrder),
+    NativeMemoryAccess {
+    /**
+     * The offset in WASM linear memory for zero-copy JS interop.
+     * Use with `new DataView(wasmExports.memory.buffer, nativeAddress, nativeSize)`.
+     */
+    override val nativeAddress: Long get() = baseOffset.toLong()
+
+    /**
+     * The size of the native memory region in bytes.
+     */
+    override val nativeSize: Int get() = capacity
+
     /**
      * Get the linear memory offset for the current position.
      * This can be passed to JavaScript for zero-copy access via DataView.

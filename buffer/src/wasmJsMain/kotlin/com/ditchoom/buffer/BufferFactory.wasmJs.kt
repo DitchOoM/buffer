@@ -48,3 +48,15 @@ actual fun PlatformBuffer.Companion.wrap(
     array: ByteArray,
     byteOrder: ByteOrder,
 ): PlatformBuffer = ByteArrayBuffer(array, byteOrder)
+
+/**
+ * Allocates a buffer with guaranteed native memory access (LinearBuffer).
+ * This is equivalent to allocate with Direct zone but makes the intent explicit.
+ */
+actual fun PlatformBuffer.Companion.allocateNative(
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer {
+    val (offset, _) = LinearMemoryAllocator.allocate(size)
+    return LinearBuffer(offset, size, byteOrder)
+}

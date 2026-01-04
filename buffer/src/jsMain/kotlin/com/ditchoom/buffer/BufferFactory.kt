@@ -55,3 +55,12 @@ actual fun PlatformBuffer.Companion.wrap(
         array.unsafeCast<Int8Array>(),
         byteOrder,
     )
+
+/**
+ * Allocates a buffer with guaranteed native memory access (JsBuffer).
+ * In JavaScript, all buffers have native access via ArrayBuffer.
+ */
+actual fun PlatformBuffer.Companion.allocateNative(
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer = JsBuffer(Int8Array(size), byteOrder)
