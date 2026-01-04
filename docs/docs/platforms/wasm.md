@@ -68,17 +68,30 @@ pool.withBuffer(1024, AllocationZone.Heap) { buffer ->
 LinearBuffer enables zero-copy data sharing between Kotlin/WASM and JavaScript:
 
 ```kotlin
-// Kotlin side: allocate in linear memory
-val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+// Kotlin side: allocate in linear memory and get offset for JS
+val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct) as LinearBuffer
 buffer.writeInt(42)
 buffer.writeString("Hello from WASM")
+
+// Pass this offset to JavaScript
+val jsOffset = buffer.linearMemoryOffset  // or buffer.baseOffset for start of buffer
 ```
 
 ```javascript
-// JavaScript side: access same memory
+// JavaScript side: access same memory using the offset from Kotlin
 const wasmMemory = wasmExports.memory;
-const view = new DataView(wasmMemory.buffer, bufferOffset, 1024);
-const value = view.getInt32(0, false); // 42
+const view = new DataView(wasmMemory.buffer, jsOffset, 1024);
+const value = view.getInt32(0, false); // 42 - same bytes, zero copy!
+```
+
+LinearBuffer also provides helper methods for JS array interop:
+
+```kotlin
+// Write from JS Int8Array to buffer
+linearBuffer.writeFromJsArray(jsInt8Array, srcOffset = 0, length = 100)
+
+// Read from buffer to JS Int8Array
+linearBuffer.readToJsArray(jsInt8Array, dstOffset = 0, length = 100)
 ```
 
 ## Known Limitations
@@ -101,6 +114,20 @@ Increase INITIAL_PAGES or use AllocationZone.Heap for high-frequency allocation.
 ### ByteArray Conversion
 
 Converting between `LinearBuffer` and Kotlin `ByteArray` requires a copy (they live in different memory spaces - linear memory vs WasmGC heap).
+
+### Cross-Module Memory
+
+Each WASM module has its own isolated linear memory. Passing buffers between different WASM modules (e.g., Kotlin buffer to a compression WASM module) requires copying:
+
+```
+Kotlin/WASM Module    SSL WASM Module     Compression Module
+   [Memory A]    ──COPY──>  [Memory B]   ──COPY──>  [Memory C]
+```
+
+**Workarounds:**
+- Use JS as intermediary (create `Uint8Array` view, pass to other module)
+- Some libraries accept `Uint8Array` input, allowing a view over LinearBuffer's memory
+- Future: WASM Component Model may enable shared memory regions
 
 ## Usage
 
