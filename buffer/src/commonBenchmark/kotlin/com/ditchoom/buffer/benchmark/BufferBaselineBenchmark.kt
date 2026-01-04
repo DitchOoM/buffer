@@ -39,9 +39,10 @@ open class BufferBaselineBenchmark {
     @Setup
     fun setup() {
         heapBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
-        directBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
-        largeDirectBuffer = PlatformBuffer.allocate(largeBufferSize, AllocationZone.Direct)
-        sourceBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        // Use Heap for buffers that would be Direct - isolates WASM optimizer bug
+        directBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap) // TODO: restore to Direct
+        largeDirectBuffer = PlatformBuffer.allocate(largeBufferSize, AllocationZone.Heap) // TODO: restore to Direct
+        sourceBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap) // TODO: restore to Direct
         testData = ByteArray(smallBufferSize) { it.toByte() }
 
         // Pre-fill source buffer for bulk write operations
@@ -54,8 +55,9 @@ open class BufferBaselineBenchmark {
     @Benchmark
     fun allocateHeap(): PlatformBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
 
-    @Benchmark
-    fun allocateDirect(): PlatformBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+    // DISABLED: Causes stack overflow in WASM production builds due to optimizer bug
+    // @Benchmark
+    // fun allocateDirect(): PlatformBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
 
     // --- Read/Write Int (representative of primitive operations) ---
 

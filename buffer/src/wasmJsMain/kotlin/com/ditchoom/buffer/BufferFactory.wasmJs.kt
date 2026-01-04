@@ -3,24 +3,36 @@ package com.ditchoom.buffer
 /**
  * WASM buffer allocation using native linear memory.
  *
- * This implementation uses LinearBuffer which provides:
+ * - **Heap**: Uses ByteArrayBuffer (WasmGC heap) - good for temporary buffers
+ * - **Direct/SharedMemory**: Uses LinearBuffer (WASM linear memory) - enables JS interop
+ *
+ * LinearBuffer provides:
  * - Native WASM i32.load/i32.store instructions for read/write
  * - Zero-copy slicing via pointer arithmetic
- * - Same memory accessible from JavaScript via DataView
+ * - Same memory accessible from JavaScript via DataView on wasmExports.memory.buffer
+ *
+ * **Warning**: Due to a Kotlin/WASM optimizer issue, high-frequency allocation of
+ * Direct buffers in production builds may cause stack overflow. If you're allocating
+ * many buffers in a tight loop, consider using AllocationZone.Heap or object pooling.
  */
 actual fun PlatformBuffer.Companion.allocate(
     size: Int,
     zone: AllocationZone,
     byteOrder: ByteOrder,
-): PlatformBuffer {
-    if (zone is AllocationZone.Custom) {
-        return zone.allocator(size)
+): PlatformBuffer =
+    when (zone) {
+        AllocationZone.Heap -> {
+            // Heap uses ByteArrayBuffer (WasmGC heap)
+            ByteArrayBuffer(ByteArray(size), byteOrder)
+        }
+        AllocationZone.Direct, AllocationZone.SharedMemory -> {
+            // Direct/SharedMemory use LinearBuffer (WASM linear memory)
+            // Enables JS interop via shared memory
+            val (offset, _) = LinearMemoryAllocator.allocate(size)
+            LinearBuffer(offset, size, byteOrder)
+        }
+        is AllocationZone.Custom -> zone.allocator(size)
     }
-
-    // Allocate in linear memory (allocator returns aligned capacity, but we use requested size)
-    val (offset, _) = LinearMemoryAllocator.allocate(size)
-    return LinearBuffer(offset, size, byteOrder)
-}
 
 /**
  * Wrap a ByteArray in a buffer.
