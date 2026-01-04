@@ -43,7 +43,7 @@ src/
 ├── androidMain/         # Android: extends JVM + SharedMemory/Parcelable IPC
 ├── appleMain/           # iOS/macOS/watchOS/tvOS: wraps NSData/NSMutableData
 ├── jsMain/              # Browser/Node.js: wraps Uint8Array (SharedArrayBuffer support)
-├── wasmJsMain/          # WASM: uses Kotlin ByteArray (optimization contributions welcome)
+├── wasmJsMain/          # WASM: LinearBuffer (native memory) + ByteArrayBuffer (heap)
 └── nativeMain/          # Linux: uses Kotlin ByteArray
 ```
 
@@ -99,7 +99,7 @@ PlatformBuffer.wrap(byteArray)
 - **JVM/Android:** Direct ByteBuffers used by default to avoid copies
 - **Android SharedMemory:** Use `AllocationZone.SharedMemory` for zero-copy IPC via Parcelable
 - **JS SharedArrayBuffer:** Requires CORS headers (`Cross-Origin-Opener-Policy`, `Cross-Origin-Embedder-Policy`)
-- **WASM:** Currently uses ByteArray copies - optimization contributions welcome
+- **WASM:** LinearBuffer (Direct) uses native WASM memory for JS interop; ByteArrayBuffer (Heap) for compute workloads
 
 ## Benchmarking
 
@@ -149,9 +149,11 @@ When optimizing buffer operations, follow these principles:
 3. Heap and Direct are equivalent (both use Uint8Array)
 
 ### WasmJS
-1. **Fastest allocation** of any platform (21M+ ops/s)
-2. Primitive operations are ~3x faster than JS
-3. Good choice for compute-heavy workloads
+1. **LinearBuffer (Direct)** - Uses native WASM Pointer ops, 25% faster than ByteArrayBuffer
+2. **ByteArrayBuffer (Heap)** - Use for high-frequency allocations (no memory limit)
+3. **Bulk operations are 2x faster** than single operations on LinearBuffer
+4. **256MB pre-allocated** - LinearBuffer uses bump allocator due to optimizer bug workaround
+5. **Use Direct for JS interop** - Zero-copy sharing with JavaScript via `wasmMemory.buffer`
 
 See `PERFORMANCE.md` for detailed benchmark results.
 

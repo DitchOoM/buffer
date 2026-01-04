@@ -187,6 +187,28 @@ destBuffer.write(sourceBuffer)
 - Buffer pooling is critical
 - Direct memory access is fast once allocated
 
+### WASM
+
+- **Use `Direct` for JS interop** - LinearBuffer shares memory with JavaScript
+- **Use `Heap` for compute workloads** - ByteArrayBuffer has no memory limits
+- **LinearBuffer is faster** - 25% faster single ops, 2x faster bulk ops
+- **Pre-allocated memory** - 256MB limit due to optimizer bug workaround
+
+```kotlin
+// JS interop: use Direct (LinearBuffer)
+val interopBuffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+
+// Compute workloads: use Heap (ByteArrayBuffer)
+val computeBuffer = PlatformBuffer.allocate(1024, AllocationZone.Heap)
+```
+
+WASM benchmark results:
+
+| Operation | LinearBuffer | ByteArrayBuffer | Speedup |
+|-----------|-------------|-----------------|---------|
+| Single int ops | 91.1M ops/s | 73.2M ops/s | 1.24x |
+| Bulk ops (256 ints) | 2.0M ops/s | 967K ops/s | 2.04x |
+
 ## Profiling Tips
 
 ### Measure Allocation Rate
