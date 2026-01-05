@@ -2239,4 +2239,438 @@ class BufferTests {
     }
 
     // endregion
+
+    // region ReadBuffer additional coverage
+
+    @Test
+    fun readBytesSlice() {
+        val buffer = PlatformBuffer.allocate(10)
+        for (i in 0 until 10) {
+            buffer.writeByte(i.toByte())
+        }
+        buffer.resetForRead()
+
+        buffer.readByte() // Skip first byte
+        val slice = buffer.readBytes(4)
+        assertEquals(4, slice.remaining())
+        assertEquals(1.toByte(), slice.readByte())
+        assertEquals(2.toByte(), slice.readByte())
+        assertEquals(3.toByte(), slice.readByte())
+        assertEquals(4.toByte(), slice.readByte())
+        assertEquals(5, buffer.position()) // Original buffer position advanced
+    }
+
+    @Test
+    fun readBytesZeroSize() {
+        val buffer = PlatformBuffer.allocate(10)
+        buffer.writeByte(1)
+        buffer.resetForRead()
+
+        val slice = buffer.readBytes(0)
+        assertEquals(0, slice.remaining())
+        assertEquals(0, buffer.position()) // Position unchanged
+    }
+
+    @Test
+    fun readBytesNegativeSize() {
+        val buffer = PlatformBuffer.allocate(10)
+        buffer.writeByte(1)
+        buffer.resetForRead()
+
+        val slice = buffer.readBytes(-5)
+        assertEquals(0, slice.remaining())
+    }
+
+    @Test
+    fun getUnsignedByteAtIndex() {
+        val buffer = PlatformBuffer.allocate(4)
+        buffer.writeByte(0x00.toByte())
+        buffer.writeByte(0x7F.toByte())
+        buffer.writeByte(0x80.toByte())
+        buffer.writeByte(0xFF.toByte())
+        buffer.resetForRead()
+
+        assertEquals(0x00u.toUByte(), buffer.getUnsignedByte(0))
+        assertEquals(0x7Fu.toUByte(), buffer.getUnsignedByte(1))
+        assertEquals(0x80u.toUByte(), buffer.getUnsignedByte(2))
+        assertEquals(0xFFu.toUByte(), buffer.getUnsignedByte(3))
+    }
+
+    @Test
+    fun getUnsignedShortAtIndex() {
+        val buffer = PlatformBuffer.allocate(8)
+        buffer.writeShort(0x0000.toShort())
+        buffer.writeShort(0x7FFF.toShort())
+        buffer.writeShort(0x8000.toShort())
+        buffer.writeShort(0xFFFF.toShort())
+        buffer.resetForRead()
+
+        assertEquals(0x0000u.toUShort(), buffer.getUnsignedShort(0))
+        assertEquals(0x7FFFu.toUShort(), buffer.getUnsignedShort(2))
+        assertEquals(0x8000u.toUShort(), buffer.getUnsignedShort(4))
+        assertEquals(0xFFFFu.toUShort(), buffer.getUnsignedShort(6))
+    }
+
+    @Test
+    fun getUnsignedIntAtIndex() {
+        val buffer = PlatformBuffer.allocate(16)
+        buffer.writeInt(0x00000000)
+        buffer.writeInt(0x7FFFFFFF)
+        buffer.writeInt(0x80000000.toInt())
+        buffer.writeInt(0xFFFFFFFF.toInt())
+        buffer.resetForRead()
+
+        assertEquals(0x00000000u, buffer.getUnsignedInt(0))
+        assertEquals(0x7FFFFFFFu, buffer.getUnsignedInt(4))
+        assertEquals(0x80000000u, buffer.getUnsignedInt(8))
+        assertEquals(0xFFFFFFFFu, buffer.getUnsignedInt(12))
+    }
+
+    @Test
+    fun getUnsignedLongAtIndex() {
+        val buffer = PlatformBuffer.allocate(16)
+        buffer.writeLong(0x0000000000000000L)
+        buffer.writeLong(0x7FFFFFFFFFFFFFFFL)
+        buffer.resetForRead()
+
+        assertEquals(0x0000000000000000uL, buffer.getUnsignedLong(0))
+        assertEquals(0x7FFFFFFFFFFFFFFFuL, buffer.getUnsignedLong(8))
+    }
+
+    @Test
+    fun getDoubleAtIndex() {
+        val buffer = PlatformBuffer.allocate(16)
+        buffer.writeDouble(3.14159265358979)
+        buffer.writeDouble(-2.71828182845904)
+        buffer.resetForRead()
+
+        assertEquals(3.14159265358979, buffer.getDouble(0))
+        assertEquals(-2.71828182845904, buffer.getDouble(8))
+    }
+
+    // endregion
+
+    // region WriteBuffer additional coverage
+
+    @Test
+    fun setUByteAtIndexOperator() {
+        val buffer = PlatformBuffer.allocate(4)
+        buffer.fill(0)
+        buffer[0] = 0xFFu.toUByte()
+        buffer[1] = 0x80u.toUByte()
+        buffer[2] = 0x00u.toUByte()
+        buffer[3] = 0x7Fu.toUByte()
+        buffer.resetForRead()
+
+        assertEquals(0xFF.toByte(), buffer.readByte())
+        assertEquals(0x80.toByte(), buffer.readByte())
+        assertEquals(0x00.toByte(), buffer.readByte())
+        assertEquals(0x7F.toByte(), buffer.readByte())
+    }
+
+    @Test
+    fun setUShortAtIndexOperator() {
+        val buffer = PlatformBuffer.allocate(4)
+        buffer.fill(0)
+        buffer[0] = 0xFFFFu.toUShort()
+        buffer[2] = 0x1234u.toUShort()
+        buffer.resetForRead()
+
+        assertEquals(0xFFFFu.toUShort(), buffer.readUnsignedShort())
+        assertEquals(0x1234u.toUShort(), buffer.readUnsignedShort())
+    }
+
+    @Test
+    fun setUIntAtIndexOperator() {
+        val buffer = PlatformBuffer.allocate(8)
+        buffer.fill(0)
+        buffer[0] = 0xFFFFFFFFu
+        buffer[4] = 0x12345678u
+        buffer.resetForRead()
+
+        assertEquals(0xFFFFFFFFu, buffer.readUnsignedInt())
+        assertEquals(0x12345678u, buffer.readUnsignedInt())
+    }
+
+    @Test
+    fun setULongAtIndexOperator() {
+        val buffer = PlatformBuffer.allocate(16)
+        buffer.fill(0)
+        buffer[0] = 0xFFFFFFFFFFFFFFFFuL
+        buffer[8] = 0x123456789ABCDEF0uL
+        buffer.resetForRead()
+
+        assertEquals(0xFFFFFFFFFFFFFFFFuL, buffer.readUnsignedLong())
+        assertEquals(0x123456789ABCDEF0uL, buffer.readUnsignedLong())
+    }
+
+    @Test
+    fun setFloatAtIndexOperator() {
+        val buffer = PlatformBuffer.allocate(8)
+        buffer.fill(0)
+        buffer[0] = 3.14f
+        buffer[4] = -2.71f
+        buffer.resetForRead()
+
+        assertTrue { (3.14f - buffer.readFloat()).absoluteValue < 0.001f }
+        assertTrue { (-2.71f - buffer.readFloat()).absoluteValue < 0.001f }
+    }
+
+    @Test
+    fun setDoubleAtIndexOperator() {
+        val buffer = PlatformBuffer.allocate(16)
+        buffer.fill(0)
+        buffer[0] = 3.14159265358979
+        buffer[8] = -2.71828182845904
+        buffer.resetForRead()
+
+        assertEquals(3.14159265358979, buffer.readDouble())
+        assertEquals(-2.71828182845904, buffer.readDouble())
+    }
+
+    @Test
+    fun writeNumberOfByteSizeBigEndian() {
+        val buffer = PlatformBuffer.allocate(8, byteOrder = ByteOrder.BIG_ENDIAN)
+        buffer.writeNumberOfByteSize(0x123456L, 3)
+        buffer.resetForRead()
+
+        assertEquals(0x12.toByte(), buffer.readByte())
+        assertEquals(0x34.toByte(), buffer.readByte())
+        assertEquals(0x56.toByte(), buffer.readByte())
+    }
+
+    @Test
+    fun writeNumberOfByteSizeLittleEndian() {
+        val buffer = PlatformBuffer.allocate(8, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        buffer.writeNumberOfByteSize(0x123456L, 3)
+        buffer.resetForRead()
+
+        assertEquals(0x56.toByte(), buffer.readByte())
+        assertEquals(0x34.toByte(), buffer.readByte())
+        assertEquals(0x12.toByte(), buffer.readByte())
+    }
+
+    @Test
+    fun setIndexNumberAndByteSizeMiddle() {
+        val buffer = PlatformBuffer.allocate(10, byteOrder = ByteOrder.BIG_ENDIAN)
+        buffer.fill(0.toByte())
+        buffer.setIndexNumberAndByteSize(2, 0xABCDEFL, 3)
+        buffer.resetForRead()
+
+        assertEquals(0.toByte(), buffer.readByte()) // Index 0
+        assertEquals(0.toByte(), buffer.readByte()) // Index 1
+        assertEquals(0xAB.toByte(), buffer.readByte()) // Index 2
+        assertEquals(0xCD.toByte(), buffer.readByte()) // Index 3
+        assertEquals(0xEF.toByte(), buffer.readByte()) // Index 4
+        assertEquals(0.toByte(), buffer.readByte()) // Index 5
+    }
+
+    @Test
+    fun fillShortWithRemainder() {
+        val buffer = PlatformBuffer.allocate(10) // 10 bytes = 5 shorts, tests remainder path
+        buffer.fill(0x1234.toShort())
+        buffer.resetForRead()
+
+        repeat(5) {
+            assertEquals(0x1234.toShort(), buffer.readShort())
+        }
+    }
+
+    @Test
+    fun fillShortEmpty() {
+        val buffer = PlatformBuffer.allocate(8)
+        repeat(8) { buffer.writeByte(0) }
+        // Position is now at limit, remaining is 0
+        buffer.fill(0x1234.toShort()) // Should do nothing
+        buffer.resetForRead()
+        // All bytes should still be 0
+        repeat(8) {
+            assertEquals(0.toByte(), buffer.readByte())
+        }
+    }
+
+    @Test
+    fun fillIntWithRemainder() {
+        val buffer = PlatformBuffer.allocate(12) // 12 bytes = 3 ints, but 8+4 for bulk+remainder
+        buffer.fill(0x12345678)
+        buffer.resetForRead()
+
+        repeat(3) {
+            assertEquals(0x12345678, buffer.readInt())
+        }
+    }
+
+    @Test
+    fun fillIntEmpty() {
+        val buffer = PlatformBuffer.allocate(8)
+        repeat(8) { buffer.writeByte(0) }
+        buffer.fill(0x12345678) // Should do nothing
+        buffer.resetForRead()
+        repeat(8) {
+            assertEquals(0.toByte(), buffer.readByte())
+        }
+    }
+
+    @Test
+    fun fillLongMultiple() {
+        val buffer = PlatformBuffer.allocate(24)
+        buffer.fill(0x123456789ABCDEF0L)
+        buffer.resetForRead()
+
+        repeat(3) {
+            assertEquals(0x123456789ABCDEF0L, buffer.readLong())
+        }
+    }
+
+    @Test
+    fun fillLongEmpty() {
+        val buffer = PlatformBuffer.allocate(8)
+        repeat(8) { buffer.writeByte(0) }
+        buffer.fill(0x123456789ABCDEF0L) // Should do nothing
+        buffer.resetForRead()
+        repeat(8) {
+            assertEquals(0.toByte(), buffer.readByte())
+        }
+    }
+
+    @Test
+    fun writeBytesWithOffsetAndLength() {
+        val bytes = byteArrayOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+        val buffer = PlatformBuffer.allocate(5)
+        buffer.writeBytes(bytes, 3, 5) // Write bytes[3..7]
+        buffer.resetForRead()
+
+        assertEquals(3.toByte(), buffer.readByte())
+        assertEquals(4.toByte(), buffer.readByte())
+        assertEquals(5.toByte(), buffer.readByte())
+        assertEquals(6.toByte(), buffer.readByte())
+        assertEquals(7.toByte(), buffer.readByte())
+    }
+
+    // endregion
+
+    // region ReadBuffer little endian coverage
+
+    @Test
+    fun readShortLittleEndian() {
+        val buffer = PlatformBuffer.allocate(2, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        buffer.writeByte(0x34.toByte())
+        buffer.writeByte(0x12.toByte())
+        buffer.resetForRead()
+
+        assertEquals(0x1234.toShort(), buffer.readShort())
+    }
+
+    @Test
+    fun getShortLittleEndian() {
+        val buffer = PlatformBuffer.allocate(2, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        buffer.writeByte(0x34.toByte())
+        buffer.writeByte(0x12.toByte())
+        buffer.resetForRead()
+
+        assertEquals(0x1234.toShort(), buffer.getShort(0))
+    }
+
+    @Test
+    fun readIntLittleEndian() {
+        val buffer = PlatformBuffer.allocate(4, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        buffer.writeByte(0x78.toByte())
+        buffer.writeByte(0x56.toByte())
+        buffer.writeByte(0x34.toByte())
+        buffer.writeByte(0x12.toByte())
+        buffer.resetForRead()
+
+        assertEquals(0x12345678, buffer.readInt())
+    }
+
+    @Test
+    fun getIntLittleEndian() {
+        val buffer = PlatformBuffer.allocate(4, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        buffer.writeByte(0x78.toByte())
+        buffer.writeByte(0x56.toByte())
+        buffer.writeByte(0x34.toByte())
+        buffer.writeByte(0x12.toByte())
+        buffer.resetForRead()
+
+        assertEquals(0x12345678, buffer.getInt(0))
+    }
+
+    @Test
+    fun readLongLittleEndian() {
+        val buffer = PlatformBuffer.allocate(8, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        buffer.writeByte(0xF0.toByte())
+        buffer.writeByte(0xDE.toByte())
+        buffer.writeByte(0xBC.toByte())
+        buffer.writeByte(0x9A.toByte())
+        buffer.writeByte(0x78.toByte())
+        buffer.writeByte(0x56.toByte())
+        buffer.writeByte(0x34.toByte())
+        buffer.writeByte(0x12.toByte())
+        buffer.resetForRead()
+
+        assertEquals(0x123456789ABCDEF0L, buffer.readLong())
+    }
+
+    @Test
+    fun getLongLittleEndian() {
+        val buffer = PlatformBuffer.allocate(8, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        buffer.writeByte(0xF0.toByte())
+        buffer.writeByte(0xDE.toByte())
+        buffer.writeByte(0xBC.toByte())
+        buffer.writeByte(0x9A.toByte())
+        buffer.writeByte(0x78.toByte())
+        buffer.writeByte(0x56.toByte())
+        buffer.writeByte(0x34.toByte())
+        buffer.writeByte(0x12.toByte())
+        buffer.resetForRead()
+
+        assertEquals(0x123456789ABCDEF0L, buffer.getLong(0))
+    }
+
+    // endregion
+
+    // region WriteBuffer little endian set at index
+
+    @Test
+    fun setShortAtIndexLittleEndian() {
+        val buffer = PlatformBuffer.allocate(4, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        buffer.fill(0)
+        buffer[0] = 0x1234.toShort()
+        buffer.resetForRead()
+
+        assertEquals(0x34.toByte(), buffer.readByte())
+        assertEquals(0x12.toByte(), buffer.readByte())
+    }
+
+    @Test
+    fun setIntAtIndexLittleEndian() {
+        val buffer = PlatformBuffer.allocate(4, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        buffer.fill(0)
+        buffer[0] = 0x12345678
+        buffer.resetForRead()
+
+        assertEquals(0x78.toByte(), buffer.readByte())
+        assertEquals(0x56.toByte(), buffer.readByte())
+        assertEquals(0x34.toByte(), buffer.readByte())
+        assertEquals(0x12.toByte(), buffer.readByte())
+    }
+
+    @Test
+    fun setLongAtIndexLittleEndian() {
+        val buffer = PlatformBuffer.allocate(8, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        buffer.fill(0)
+        buffer[0] = 0x123456789ABCDEF0L
+        buffer.resetForRead()
+
+        assertEquals(0xF0.toByte(), buffer.readByte())
+        assertEquals(0xDE.toByte(), buffer.readByte())
+        assertEquals(0xBC.toByte(), buffer.readByte())
+        assertEquals(0x9A.toByte(), buffer.readByte())
+        assertEquals(0x78.toByte(), buffer.readByte())
+        assertEquals(0x56.toByte(), buffer.readByte())
+        assertEquals(0x34.toByte(), buffer.readByte())
+        assertEquals(0x12.toByte(), buffer.readByte())
+    }
+
+    // endregion
 }
