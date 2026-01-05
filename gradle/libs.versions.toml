@@ -6,6 +6,7 @@ ktlint = "14.0.1"
 mavenPublish = "0.35.0"
 atomicfu = "0.29.0"
 dokka = "2.1.0"
+kover = "0.9.1"
 kotlinxCoroutines = "1.10.2"
 kotlinxBenchmark = "0.4.15"
 androidxBenchmark = "1.4.1"
@@ -35,4 +36,5 @@ ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
 maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublish" }
 atomicfu = { id = "org.jetbrains.kotlinx.atomicfu", version.ref = "atomicfu" }
 dokka = { id = "org.jetbrains.dokka", version.ref = "dokka" }
+kover = { id = "org.jetbrains.kotlinx.kover", version.ref = "kover" }
 kotlinx-benchmark = { id = "org.jetbrains.kotlinx.benchmark", version.ref = "kotlinxBenchmark" }

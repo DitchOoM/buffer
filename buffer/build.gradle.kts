@@ -11,6 +11,7 @@ plugins {
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.atomicfu)
     alias(libs.plugins.dokka)
+    alias(libs.plugins.kover)
     alias(libs.plugins.kotlinx.benchmark)
     signing
 }

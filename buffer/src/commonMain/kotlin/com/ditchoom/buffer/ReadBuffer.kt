@@ -129,33 +129,65 @@ interface ReadBuffer : PositionBuffer {
     )
     fun readUtf8(bytes: Int): CharSequence = readString(bytes, Charset.UTF8)
 
+    /**
+     * Reads a line of text from the buffer, handling all common line endings:
+     * - `\n` (Unix/Linux/macOS)
+     * - `\r\n` (Windows)
+     * - `\r` (Classic Mac)
+     *
+     * The line ending characters are consumed but not included in the result.
+     */
     fun readUtf8Line(): CharSequence {
         val initialPosition = position()
-        var lastByte: Byte = 0
         var currentByte: Byte = 0
         var bytesRead = 0
+        var foundCR = false
+
         while (remaining() > 0) {
-            lastByte = currentByte
             currentByte = readByte()
             bytesRead++
-            if (currentByte == newLine[1]) {
+
+            if (currentByte == CR) {
+                foundCR = true
+                // Check if next byte is LF (for \r\n)
+                if (remaining() > 0) {
+                    val nextByte = readByte()
+                    if (nextByte == LF) {
+                        bytesRead++ // Include the LF in bytes read
+                        break
+                    } else {
+                        // Not \r\n, just \r - put the byte back by adjusting position
+                        position(position() - 1)
+                        break
+                    }
+                }
+                break
+            } else if (currentByte == LF) {
                 break
             }
         }
-        val carriageFeedPositionIncrement =
-            if (lastByte == newLine[0] && currentByte == newLine[1]) {
-                2
-            } else if (currentByte == newLine[1]) {
-                1
-            } else {
-                0
+
+        // Calculate how many bytes are the actual content (excluding line ending)
+        val lineEndingSize =
+            when {
+                foundCR && bytesRead > 1 && get(initialPosition + bytesRead - 1) == LF -> 2 // \r\n
+                foundCR -> 1 // \r
+                currentByte == LF -> 1 // \n
+                else -> 0 // No line ending found (end of buffer)
             }
 
-        val bytesToRead = bytesRead - carriageFeedPositionIncrement
+        val contentLength = bytesRead - lineEndingSize
         position(initialPosition)
-        val result = readString(bytesToRead, Charset.UTF8)
-        position(position() + carriageFeedPositionIncrement)
+        val result = readString(contentLength, Charset.UTF8)
+        position(initialPosition + bytesRead)
         return result
+    }
+
+    companion object {
+        private const val CR: Byte = '\r'.code.toByte()
+        private const val LF: Byte = '\n'.code.toByte()
+        val newLine = "\r\n".encodeToByteArray()
+        val EMPTY_BUFFER = PlatformBuffer.allocate(0)
     }
 
     fun readNumberWithByteSize(numberOfBytes: Int): Long {
@@ -411,10 +443,5 @@ interface ReadBuffer : PositionBuffer {
         needle.resetForRead()
 
         return indexOf(needle)
-    }
-
-    companion object {
-        val newLine = "\r\n".encodeToByteArray()
-        val EMPTY_BUFFER = PlatformBuffer.allocate(0)
     }
 }
