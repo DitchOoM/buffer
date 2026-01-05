@@ -156,7 +156,7 @@ Benchmarks run on:
 ## Optimizations Applied
 
 ### Apple/Native Platform
-1. **Zero-copy slice**: `DataBufferSlice` uses pointer arithmetic instead of `subdataWithRange()`
+1. **Zero-copy slice**: `MutableDataBufferSlice` uses pointer arithmetic instead of `subdataWithRange()`
 2. **memcpy bulk writes**: Direct memory copy instead of intermediate ByteArray
 3. **Pointer reinterpretation**: `readShort/Int/Long()` use `CPointer.reinterpret<>()`
 4. **Direct pointer reads**: `readByteArray()` avoids NSData allocation

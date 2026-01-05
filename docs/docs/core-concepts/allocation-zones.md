@@ -38,7 +38,8 @@ val buffer = PlatformBuffer.allocate(1024, AllocationZone.Heap)
 |----------|---------------|
 | JVM | [`HeapByteBuffer`](https://docs.oracle.com/javase/8/docs/api/java/nio/ByteBuffer.html) |
 | Android | [`HeapByteBuffer`](https://developer.android.com/reference/java/nio/ByteBuffer) |
-| Others | [`ByteArray`](https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-byte-array/) |
+| WASM | `ByteArrayBuffer` |
+| Others | `ByteArrayBuffer` |
 
 ### AllocationZone.Direct
 
@@ -61,7 +62,8 @@ val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
 | Android | [`DirectByteBuffer`](https://developer.android.com/reference/java/nio/ByteBuffer#allocateDirect(int)) |
 | iOS/macOS | [`NSMutableData`](https://developer.apple.com/documentation/foundation/nsmutabledata) |
 | JavaScript | [`Uint8Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array) |
-| Others | [`ByteArray`](https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-byte-array/) |
+| WASM | `LinearBuffer` (native WASM memory) |
+| Linux | `ByteArrayBuffer` |
 
 ![Heap vs Direct Memory](/img/heap-vs-direct.svg)
 
@@ -84,6 +86,7 @@ val buffer = PlatformBuffer.allocate(1024, AllocationZone.SharedMemory)
 | Android (API 27+) | [`SharedMemory`](https://developer.android.com/reference/android/os/SharedMemory) |
 | Android (< API 27) | [`ParcelFileDescriptor`](https://developer.android.com/reference/android/os/ParcelFileDescriptor) pipes |
 | JavaScript | [`SharedArrayBuffer`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer) (requires CORS headers) |
+| WASM | `LinearBuffer` (falls back to Direct) |
 | Others | Falls back to Direct |
 
 ![SharedMemory IPC](/img/shared-memory-ipc.svg)

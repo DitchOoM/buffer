@@ -1,6 +1,6 @@
 package com.ditchoom.buffer.compression
 
-import com.ditchoom.buffer.JvmBuffer
+import com.ditchoom.buffer.BaseJvmBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
 import java.util.zip.CRC32
@@ -43,7 +43,7 @@ actual fun StreamingDecompressor.Companion.create(
  * Sets deflater input from a ReadBuffer.
  */
 private fun Deflater.setInputFrom(buffer: ReadBuffer) {
-    val byteBuffer = (buffer as? JvmBuffer)?.byteBuffer
+    val byteBuffer = (buffer as? BaseJvmBuffer)?.byteBuffer
     if (byteBuffer != null) {
         setInput(byteBuffer)
     } else {
@@ -56,7 +56,7 @@ private fun Deflater.setInputFrom(buffer: ReadBuffer) {
  */
 private fun Inflater.setInputFrom(buffer: ReadBuffer) {
     if (buffer.remaining() == 0) return
-    val byteBuffer = (buffer as? JvmBuffer)?.byteBuffer
+    val byteBuffer = (buffer as? BaseJvmBuffer)?.byteBuffer
     if (byteBuffer != null) {
         setInput(byteBuffer)
     } else {
@@ -70,7 +70,7 @@ private fun Inflater.setInputFrom(buffer: ReadBuffer) {
  */
 private fun CRC32.updateFrom(buffer: ReadBuffer): Int {
     val remaining = buffer.remaining()
-    val byteBuffer = (buffer as? JvmBuffer)?.byteBuffer
+    val byteBuffer = (buffer as? BaseJvmBuffer)?.byteBuffer
     val savedPosition = buffer.position()
 
     if (byteBuffer != null) {
@@ -92,7 +92,7 @@ private inline fun emitPartialBuffer(
     onOutput: (ReadBuffer) -> Unit,
 ): Boolean {
     if (output == null) return false
-    val buffer = (output as JvmBuffer).byteBuffer
+    val buffer = (output as BaseJvmBuffer).byteBuffer
     if (buffer.position() > 0) {
         output.resetForRead()
         onOutput(output)
@@ -162,7 +162,7 @@ private class JvmDeflateStreamingCompressor(
             }
 
             val output = currentOutput!!
-            val buffer = (output as JvmBuffer).byteBuffer
+            val buffer = (output as BaseJvmBuffer).byteBuffer
             val count = deflater.deflate(buffer)
 
             when {
@@ -259,7 +259,7 @@ private class JvmGzipStreamingCompressor(
             }
 
             val output = currentOutput!!
-            val buffer = (output as JvmBuffer).byteBuffer
+            val buffer = (output as BaseJvmBuffer).byteBuffer
             val count = deflater.deflate(buffer)
 
             when {
@@ -331,7 +331,7 @@ private class JvmInflateStreamingDecompressor(
             }
 
             val output = currentOutput!!
-            val buffer = (output as JvmBuffer).byteBuffer
+            val buffer = (output as BaseJvmBuffer).byteBuffer
             val count = inflater.inflate(buffer)
 
             when {
@@ -431,7 +431,7 @@ private class JvmGzipStreamingDecompressor(
             }
 
             val output = currentOutput!!
-            val buffer = (output as JvmBuffer).byteBuffer
+            val buffer = (output as BaseJvmBuffer).byteBuffer
             val count = inflater.inflate(buffer)
 
             when {

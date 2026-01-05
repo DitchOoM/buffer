@@ -4,10 +4,14 @@ package com.ditchoom.buffer
  * Buffer implementation backed by a Kotlin ByteArray.
  *
  * Used for wrap() operations where the buffer must share memory
- * with the original ByteArray. This lives in WasmGC heap, not linear memory.
+ * with the original ByteArray. This lives in managed heap memory (WasmGC heap
+ * for WASM, Kotlin/Native GC heap for native platforms).
+ *
+ * For native memory access on Apple platforms, use [MutableDataBuffer] instead.
+ * For WASM linear memory, use [LinearBuffer] instead.
  */
 class ByteArrayBuffer(
-    private val data: ByteArray,
+    internal val data: ByteArray,
     override val byteOrder: ByteOrder,
 ) : PlatformBuffer,
     ManagedMemoryAccess {
@@ -110,16 +114,7 @@ class ByteArrayBuffer(
         length: Int,
         charset: Charset,
     ): String {
-        val result =
-            when (charset) {
-                Charset.UTF8 ->
-                    data.decodeToString(
-                        positionValue,
-                        positionValue + length,
-                        throwOnInvalidSequence = true,
-                    )
-                else -> throw UnsupportedOperationException("ByteArrayBuffer only supports UTF8 charset")
-            }
+        val result = decodeByteArrayToString(data, positionValue, positionValue + length, charset)
         positionValue += length
         return result
     }

@@ -104,8 +104,26 @@ kotlin {
     }
     applyDefaultHierarchyTemplate()
     sourceSets {
-        // Use the existing webMain source set from the default hierarchy
-        // It's automatically shared between JS and WASM targets
+        // Create nonJvmMain source set shared by nativeMain and wasmJsMain
+        // This contains ByteArrayBuffer which is used for managed memory on these platforms
+        val nonJvmMain by creating {
+            dependsOn(commonMain.get())
+        }
+        val nonJvmTest by creating {
+            dependsOn(commonTest.get())
+        }
+        nativeMain {
+            dependsOn(nonJvmMain)
+        }
+        nativeTest {
+            dependsOn(nonJvmTest)
+        }
+        wasmJsMain {
+            dependsOn(nonJvmMain)
+        }
+        wasmJsTest {
+            dependsOn(nonJvmTest)
+        }
 
         commonTest.dependencies {
             implementation(kotlin("test"))

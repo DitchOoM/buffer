@@ -20,8 +20,8 @@ actual fun PlatformBuffer.Companion.allocate(
     size: Int,
     zone: AllocationZone,
     byteOrder: ByteOrder,
-): PlatformBuffer {
-    return when (zone) {
+): PlatformBuffer =
+    when (zone) {
         AllocationZone.Heap -> ByteArrayBuffer(ByteArray(size), byteOrder = byteOrder)
         AllocationZone.Direct, AllocationZone.SharedMemory -> {
             @OptIn(UnsafeNumber::class)
@@ -29,7 +29,6 @@ actual fun PlatformBuffer.Companion.allocate(
         }
         is AllocationZone.Custom -> zone.allocator(size)
     }
-}
 
 /**
  * Wraps an existing ByteArray in a buffer.

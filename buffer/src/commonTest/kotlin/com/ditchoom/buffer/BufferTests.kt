@@ -918,4 +918,307 @@ class BufferTests {
         val buffer2 = PlatformBuffer.wrap(bytesRead)
         assertBufferEquals(buffer2, byteArrayOf(3, 4, 5))
     }
+
+    // region contentEquals tests
+
+    @Test
+    fun contentEqualsIdenticalBuffers() {
+        val bytes = byteArrayOf(1, 2, 3, 4, 5)
+        val buf1 = PlatformBuffer.wrap(bytes.copyOf())
+        val buf2 = PlatformBuffer.wrap(bytes.copyOf())
+        assertTrue(buf1.contentEquals(buf2))
+    }
+
+    @Test
+    fun contentEqualsDifferentBuffers() {
+        val buf1 = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        val buf2 = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 6))
+        assertFalse(buf1.contentEquals(buf2))
+    }
+
+    @Test
+    fun contentEqualsDifferentSizes() {
+        val buf1 = PlatformBuffer.wrap(byteArrayOf(1, 2, 3))
+        val buf2 = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4))
+        assertFalse(buf1.contentEquals(buf2))
+    }
+
+    @Test
+    fun contentEqualsEmptyBuffers() {
+        val buf1 = PlatformBuffer.allocate(0)
+        val buf2 = PlatformBuffer.allocate(0)
+        assertTrue(buf1.contentEquals(buf2))
+    }
+
+    @Test
+    fun contentEqualsWithPosition() {
+        val buf1 = PlatformBuffer.wrap(byteArrayOf(0, 1, 2, 3, 4))
+        val buf2 = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4))
+        buf1.position(1)
+        assertTrue(buf1.contentEquals(buf2))
+    }
+
+    @Test
+    fun contentEqualsLargeBuffer() {
+        // Test buffer larger than 8 bytes to exercise bulk comparison
+        val size = 100
+        val bytes = ByteArray(size) { it.toByte() }
+        val buf1 = PlatformBuffer.wrap(bytes.copyOf())
+        val buf2 = PlatformBuffer.wrap(bytes.copyOf())
+        assertTrue(buf1.contentEquals(buf2))
+    }
+
+    @Test
+    fun contentEqualsLargeBufferDifferAtEnd() {
+        val size = 100
+        val bytes1 = ByteArray(size) { it.toByte() }
+        val bytes2 = bytes1.copyOf()
+        bytes2[size - 1] = -1 // Differ at end
+        val buf1 = PlatformBuffer.wrap(bytes1)
+        val buf2 = PlatformBuffer.wrap(bytes2)
+        assertFalse(buf1.contentEquals(buf2))
+    }
+
+    // endregion
+
+    // region mismatch tests
+
+    @Test
+    fun mismatchIdenticalBuffers() {
+        val bytes = byteArrayOf(1, 2, 3, 4, 5)
+        val buf1 = PlatformBuffer.wrap(bytes.copyOf())
+        val buf2 = PlatformBuffer.wrap(bytes.copyOf())
+        assertEquals(-1, buf1.mismatch(buf2))
+    }
+
+    @Test
+    fun mismatchAtStart() {
+        val buf1 = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        val buf2 = PlatformBuffer.wrap(byteArrayOf(0, 2, 3, 4, 5))
+        assertEquals(0, buf1.mismatch(buf2))
+    }
+
+    @Test
+    fun mismatchAtMiddle() {
+        val buf1 = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        val buf2 = PlatformBuffer.wrap(byteArrayOf(1, 2, 9, 4, 5))
+        assertEquals(2, buf1.mismatch(buf2))
+    }
+
+    @Test
+    fun mismatchAtEnd() {
+        val buf1 = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        val buf2 = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 6))
+        assertEquals(4, buf1.mismatch(buf2))
+    }
+
+    @Test
+    fun mismatchDifferentSizesMatchPrefix() {
+        val buf1 = PlatformBuffer.wrap(byteArrayOf(1, 2, 3))
+        val buf2 = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        assertEquals(3, buf1.mismatch(buf2)) // Returns minLength when prefix matches but sizes differ
+    }
+
+    @Test
+    fun mismatchDifferentSizesMismatchPrefix() {
+        val buf1 = PlatformBuffer.wrap(byteArrayOf(1, 2, 9))
+        val buf2 = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        assertEquals(2, buf1.mismatch(buf2))
+    }
+
+    @Test
+    fun mismatchEmptyBuffers() {
+        val buf1 = PlatformBuffer.allocate(0)
+        val buf2 = PlatformBuffer.allocate(0)
+        assertEquals(-1, buf1.mismatch(buf2))
+    }
+
+    @Test
+    fun mismatchEmptyVsNonEmpty() {
+        val buf1 = PlatformBuffer.allocate(0)
+        val buf2 = PlatformBuffer.wrap(byteArrayOf(1, 2, 3))
+        assertEquals(0, buf1.mismatch(buf2))
+    }
+
+    @Test
+    fun mismatchLargeBuffer() {
+        // Test buffer larger than 8 bytes to exercise bulk comparison
+        val size = 100
+        val bytes1 = ByteArray(size) { it.toByte() }
+        val bytes2 = bytes1.copyOf()
+        bytes2[50] = -1 // Differ at index 50
+        val buf1 = PlatformBuffer.wrap(bytes1)
+        val buf2 = PlatformBuffer.wrap(bytes2)
+        assertEquals(50, buf1.mismatch(buf2))
+    }
+
+    @Test
+    fun mismatchWithPosition() {
+        val buf1 = PlatformBuffer.wrap(byteArrayOf(0, 1, 2, 3, 4))
+        val buf2 = PlatformBuffer.wrap(byteArrayOf(1, 2, 9, 4))
+        buf1.position(1)
+        assertEquals(2, buf1.mismatch(buf2)) // Differ at relative index 2
+    }
+
+    // endregion
+
+    // region indexOf(byte) tests
+
+    @Test
+    fun indexOfByteFound() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        assertEquals(2, buf.indexOf(3.toByte()))
+    }
+
+    @Test
+    fun indexOfByteNotFound() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        assertEquals(-1, buf.indexOf(9.toByte()))
+    }
+
+    @Test
+    fun indexOfByteAtStart() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        assertEquals(0, buf.indexOf(1.toByte()))
+    }
+
+    @Test
+    fun indexOfByteAtEnd() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        assertEquals(4, buf.indexOf(5.toByte()))
+    }
+
+    @Test
+    fun indexOfByteEmptyBuffer() {
+        val buf = PlatformBuffer.allocate(0)
+        assertEquals(-1, buf.indexOf(1.toByte()))
+    }
+
+    @Test
+    fun indexOfByteWithPosition() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 1, 5))
+        buf.position(2)
+        assertEquals(1, buf.indexOf(1.toByte())) // Returns index relative to position
+    }
+
+    @Test
+    fun indexOfByteDuplicates() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(1, 2, 1, 2, 1))
+        assertEquals(0, buf.indexOf(1.toByte())) // Returns first occurrence
+    }
+
+    @Test
+    fun indexOfByteNegative() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(-1, -2, -3, -4, -5))
+        assertEquals(2, buf.indexOf((-3).toByte()))
+    }
+
+    @Test
+    fun indexOfByteLargeBuffer() {
+        // Test buffer larger than 8 bytes to exercise bulk search
+        val size = 100
+        val bytes = ByteArray(size) { 0 }
+        bytes[75] = 42
+        val buf = PlatformBuffer.wrap(bytes)
+        assertEquals(75, buf.indexOf(42.toByte()))
+    }
+
+    @Test
+    fun indexOfByteLargeBufferNotFound() {
+        val size = 100
+        val bytes = ByteArray(size) { 0 }
+        val buf = PlatformBuffer.wrap(bytes)
+        assertEquals(-1, buf.indexOf(42.toByte()))
+    }
+
+    // endregion
+
+    // region indexOf(ReadBuffer) tests
+
+    @Test
+    fun indexOfBufferFound() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        val needle = PlatformBuffer.wrap(byteArrayOf(3, 4))
+        assertEquals(2, buf.indexOf(needle))
+    }
+
+    @Test
+    fun indexOfBufferNotFound() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        val needle = PlatformBuffer.wrap(byteArrayOf(3, 5))
+        assertEquals(-1, buf.indexOf(needle))
+    }
+
+    @Test
+    fun indexOfBufferAtStart() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        val needle = PlatformBuffer.wrap(byteArrayOf(1, 2))
+        assertEquals(0, buf.indexOf(needle))
+    }
+
+    @Test
+    fun indexOfBufferAtEnd() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        val needle = PlatformBuffer.wrap(byteArrayOf(4, 5))
+        assertEquals(3, buf.indexOf(needle))
+    }
+
+    @Test
+    fun indexOfBufferEmptyNeedle() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        val needle = PlatformBuffer.allocate(0)
+        assertEquals(0, buf.indexOf(needle)) // Empty needle matches at start
+    }
+
+    @Test
+    fun indexOfBufferEmptyHaystack() {
+        val buf = PlatformBuffer.allocate(0)
+        val needle = PlatformBuffer.wrap(byteArrayOf(1, 2))
+        assertEquals(-1, buf.indexOf(needle))
+    }
+
+    @Test
+    fun indexOfBufferNeedleLargerThanHaystack() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(1, 2))
+        val needle = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        assertEquals(-1, buf.indexOf(needle))
+    }
+
+    @Test
+    fun indexOfBufferSameSize() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(1, 2, 3))
+        val needle = PlatformBuffer.wrap(byteArrayOf(1, 2, 3))
+        assertEquals(0, buf.indexOf(needle))
+    }
+
+    @Test
+    fun indexOfBufferSameSizeNoMatch() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(1, 2, 3))
+        val needle = PlatformBuffer.wrap(byteArrayOf(1, 2, 4))
+        assertEquals(-1, buf.indexOf(needle))
+    }
+
+    @Test
+    fun indexOfBufferMultipleMatches() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(1, 2, 1, 2, 1, 2))
+        val needle = PlatformBuffer.wrap(byteArrayOf(1, 2))
+        assertEquals(0, buf.indexOf(needle)) // Returns first match
+    }
+
+    @Test
+    fun indexOfBufferSingleByte() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5))
+        val needle = PlatformBuffer.wrap(byteArrayOf(3))
+        assertEquals(2, buf.indexOf(needle))
+    }
+
+    @Test
+    fun indexOfBufferWithPosition() {
+        val buf = PlatformBuffer.wrap(byteArrayOf(0, 1, 2, 3, 4, 5))
+        val needle = PlatformBuffer.wrap(byteArrayOf(2, 3))
+        buf.position(1)
+        assertEquals(1, buf.indexOf(needle)) // Index 2 in haystack, but 1 relative to position 1
+    }
+
+    // endregion
 }

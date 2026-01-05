@@ -8,9 +8,10 @@ management. It delegates to native implementations on each platform to avoid
 memory copies:
 
 - **JVM/Android**: `java.nio.ByteBuffer` (Direct buffers for zero-copy I/O)
-- **iOS/macOS**: `NSData` / `NSMutableData`
+- **iOS/macOS**: `NSMutableData` (native) or `ByteArray` (managed)
 - **JavaScript**: `Uint8Array` with `SharedArrayBuffer` support
-- **WASM/Native**: `ByteArray`
+- **WASM**: Native linear memory (Direct) or `ByteArray` (Heap)
+- **Linux/Native**: `ByteArray`
 
 ## Features
 

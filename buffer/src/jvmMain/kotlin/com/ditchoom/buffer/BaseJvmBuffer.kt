@@ -220,6 +220,114 @@ abstract class BaseJvmBuffer(
     override fun limit() = buffer.limit()
 
     override fun position() = buffer.position()
+
+    /**
+     * Optimized content comparison using ByteBuffer.mismatch (Java 11+) when available,
+     * falling back to array comparison for heap buffers.
+     */
+    override fun contentEquals(other: ReadBuffer): Boolean {
+        if (remaining() != other.remaining()) return false
+        if (other is BaseJvmBuffer) {
+            return mismatchInternal(other) == -1
+        }
+        return super.contentEquals(other)
+    }
+
+    /**
+     * Optimized mismatch using ByteBuffer.mismatch (Java 11+) when available.
+     */
+    override fun mismatch(other: ReadBuffer): Int {
+        if (other is BaseJvmBuffer) {
+            return mismatchInternal(other)
+        }
+        return super.mismatch(other)
+    }
+
+    private fun mismatchInternal(other: BaseJvmBuffer): Int {
+        val thisRemaining = remaining()
+        val otherRemaining = other.remaining()
+        val minLength = minOf(thisRemaining, otherRemaining)
+
+        // Use ByteBuffer.mismatch if available (Java 11+)
+        // This uses SIMD optimizations on supported hardware
+        return try {
+            val thisSlice = byteBuffer.slice()
+            (thisSlice as Buffer).limit(minLength)
+            val otherSlice = other.byteBuffer.slice()
+            (otherSlice as Buffer).limit(minLength)
+            val result = thisSlice.mismatch(otherSlice)
+            if (result == -1 && thisRemaining != otherRemaining) {
+                minLength
+            } else {
+                result
+            }
+        } catch (_: NoSuchMethodError) {
+            // Fallback for Java 8
+            fallbackMismatch(other, minLength, thisRemaining, otherRemaining)
+        }
+    }
+
+    private fun fallbackMismatch(
+        other: BaseJvmBuffer,
+        minLength: Int,
+        thisRemaining: Int,
+        otherRemaining: Int,
+    ): Int {
+        // Optimize with Long comparisons (8 bytes at a time)
+        val thisPos = position()
+        val otherPos = other.position()
+        var i = 0
+
+        // Compare 8 bytes at a time using Long reads
+        while (i + 8 <= minLength) {
+            if (byteBuffer.getLong(thisPos + i) != other.byteBuffer.getLong(otherPos + i)) {
+                // Found mismatch in this Long, find exact position
+                for (j in 0 until 8) {
+                    if (byteBuffer.get(thisPos + i + j) != other.byteBuffer.get(otherPos + i + j)) {
+                        return i + j
+                    }
+                }
+            }
+            i += 8
+        }
+
+        // Compare remaining bytes
+        while (i < minLength) {
+            if (byteBuffer.get(thisPos + i) != other.byteBuffer.get(otherPos + i)) {
+                return i
+            }
+            i++
+        }
+
+        return if (thisRemaining != otherRemaining) minLength else -1
+    }
+
+    /**
+     * Optimized single byte indexOf using native array operations.
+     */
+    override fun indexOf(byte: Byte): Int {
+        val pos = position()
+        val remaining = remaining()
+
+        if (byteBuffer.hasArray()) {
+            val array = byteBuffer.array()
+            val offset = byteBuffer.arrayOffset() + pos
+            for (i in 0 until remaining) {
+                if (array[offset + i] == byte) {
+                    return i
+                }
+            }
+            return -1
+        }
+
+        // Direct buffer - use get()
+        for (i in 0 until remaining) {
+            if (byteBuffer.get(pos + i) == byte) {
+                return i
+            }
+        }
+        return -1
+    }
 }
 
 suspend fun RandomAccessFile.aClose() =

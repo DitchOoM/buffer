@@ -163,6 +163,63 @@ class JsBuffer(
         return this
     }
 
+    /**
+     * Optimized single byte indexOf using DataView.
+     */
+    override fun indexOf(byte: Byte): Int = bulkIndexOfInt(
+        startPos = positionValue,
+        length = remaining(),
+        byte = byte,
+        getInt = { dataView.getInt32(it, true) },
+        getByte = { dataView.getInt8(it) },
+    )
+
+    /**
+     * Optimized contentEquals using Int8Array comparison.
+     */
+    override fun contentEquals(other: ReadBuffer): Boolean {
+        if (remaining() != other.remaining()) return false
+        val size = remaining()
+        if (size == 0) return true
+
+        if (other is JsBuffer) {
+            return bulkCompareEqualsInt(
+                thisPos = positionValue,
+                otherPos = other.positionValue,
+                length = size,
+                getInt = { dataView.getInt32(it, true) },
+                otherGetInt = { other.dataView.getInt32(it, true) },
+                getByte = { dataView.getInt8(it) },
+                otherGetByte = { other.dataView.getInt8(it) },
+            )
+        }
+        return super.contentEquals(other)
+    }
+
+    /**
+     * Optimized mismatch using DataView comparisons.
+     */
+    override fun mismatch(other: ReadBuffer): Int {
+        val thisRemaining = remaining()
+        val otherRemaining = other.remaining()
+        val minLength = minOf(thisRemaining, otherRemaining)
+
+        if (other is JsBuffer) {
+            return bulkMismatchInt(
+                thisPos = positionValue,
+                otherPos = other.positionValue,
+                minLength = minLength,
+                thisRemaining = thisRemaining,
+                otherRemaining = otherRemaining,
+                getInt = { dataView.getInt32(it, true) },
+                otherGetInt = { other.dataView.getInt32(it, true) },
+                getByte = { dataView.getInt8(it) },
+                otherGetByte = { other.dataView.getInt8(it) },
+            )
+        }
+        return super.mismatch(other)
+    }
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other == null || this::class.js != other::class.js) return false

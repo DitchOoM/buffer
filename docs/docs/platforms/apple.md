@@ -44,7 +44,7 @@ let value = buffer.readInt()
 
 Memory is managed automatically through Kotlin/Native GC and Objective-C ARC cooperation:
 
-- **Kotlin wrapper** (`DataBuffer`/`MutableDataBuffer`) - managed by Kotlin/Native GC
+- **Kotlin wrapper** (`MutableDataBuffer`/`ByteArrayBuffer`) - managed by Kotlin/Native GC
 - **Underlying `NSData`/`NSMutableData`** - managed by Objective-C ARC
 
 When the Kotlin buffer object is garbage collected, the reference to the underlying NSData is released, allowing ARC to deallocate it.

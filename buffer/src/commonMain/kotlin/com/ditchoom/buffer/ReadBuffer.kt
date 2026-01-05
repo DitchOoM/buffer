@@ -196,6 +196,98 @@ interface ReadBuffer : PositionBuffer {
         return number
     }
 
+    /**
+     * Compares the remaining content of this buffer with another buffer.
+     *
+     * @param other The buffer to compare with
+     * @return true if the remaining bytes in both buffers are identical
+     */
+    fun contentEquals(other: ReadBuffer): Boolean {
+        if (remaining() != other.remaining()) return false
+        val size = remaining()
+        for (i in 0 until size) {
+            if (get(position() + i) != other.get(other.position() + i)) {
+                return false
+            }
+        }
+        return true
+    }
+
+    /**
+     * Finds the first position where this buffer differs from another buffer.
+     *
+     * Compares bytes starting from each buffer's current position up to the
+     * smaller of the two remaining sizes.
+     *
+     * @param other The buffer to compare with
+     * @return The relative index of the first mismatch, or -1 if no mismatch is found
+     *         within the common length. If buffers have different remaining sizes but
+     *         match up to the shorter length, returns the length of the shorter buffer.
+     */
+    fun mismatch(other: ReadBuffer): Int {
+        val thisRemaining = remaining()
+        val otherRemaining = other.remaining()
+        val minLength = minOf(thisRemaining, otherRemaining)
+
+        for (i in 0 until minLength) {
+            if (get(position() + i) != other.get(other.position() + i)) {
+                return i
+            }
+        }
+
+        // If lengths differ but all compared bytes matched, mismatch is at the end of shorter
+        return if (thisRemaining != otherRemaining) minLength else -1
+    }
+
+    /**
+     * Finds the first occurrence of a byte sequence within this buffer.
+     *
+     * Searches for [needle] starting from this buffer's current position.
+     *
+     * @param needle The byte sequence to search for
+     * @return The relative index where needle starts (relative to current position),
+     *         or -1 if not found
+     */
+    fun indexOf(needle: ReadBuffer): Int {
+        val needleSize = needle.remaining()
+        if (needleSize == 0) return 0
+        if (needleSize > remaining()) return -1
+
+        val firstByte = needle.get(needle.position())
+        val searchLimit = remaining() - needleSize
+
+        outer@ for (i in 0..searchLimit) {
+            // Quick check on first byte
+            if (get(position() + i) != firstByte) continue
+
+            // Check remaining bytes
+            for (j in 1 until needleSize) {
+                if (get(position() + i + j) != needle.get(needle.position() + j)) {
+                    continue@outer
+                }
+            }
+            return i
+        }
+        return -1
+    }
+
+    /**
+     * Finds the first occurrence of a single byte within this buffer.
+     *
+     * @param byte The byte to search for
+     * @return The relative index where the byte is found (relative to current position),
+     *         or -1 if not found
+     */
+    fun indexOf(byte: Byte): Int {
+        val size = remaining()
+        for (i in 0 until size) {
+            if (get(position() + i) == byte) {
+                return i
+            }
+        }
+        return -1
+    }
+
     companion object {
         val newLine = "\r\n".encodeToByteArray()
         val EMPTY_BUFFER = PlatformBuffer.allocate(0)

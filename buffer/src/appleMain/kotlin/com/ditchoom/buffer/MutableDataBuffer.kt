@@ -6,6 +6,7 @@ import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.LongVar
 import kotlinx.cinterop.ShortVar
 import kotlinx.cinterop.UnsafeNumber
+import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.get
 import kotlinx.cinterop.plus
@@ -13,6 +14,7 @@ import kotlinx.cinterop.readBytes
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.set
 import kotlinx.cinterop.toLong
+import kotlinx.cinterop.usePinned
 import platform.Foundation.NSMakeRange
 import platform.Foundation.NSMutableData
 import platform.Foundation.NSString
@@ -21,8 +23,8 @@ import platform.Foundation.dataUsingEncoding
 import platform.Foundation.isEqualToData
 import platform.Foundation.replaceBytesInRange
 import platform.Foundation.subdataWithRange
-import kotlinx.cinterop.addressOf
-import kotlinx.cinterop.usePinned
+import platform.posix.memchr
+import platform.posix.memcmp
 import platform.posix.memcpy
 
 /**
@@ -112,7 +114,10 @@ class MutableDataBuffer(
         return result
     }
 
-    override fun readString(length: Int, charset: Charset): String {
+    override fun readString(
+        length: Int,
+        charset: Charset,
+    ): String {
         if (length == 0) return ""
         val subdata = data.subdataWithRange(NSMakeRange(position.convert(), length.convert()))
         val stringEncoding = charset.toEncoding()
@@ -138,7 +143,10 @@ class MutableDataBuffer(
         return this
     }
 
-    override fun set(index: Int, byte: Byte): WriteBuffer {
+    override fun set(
+        index: Int,
+        byte: Byte,
+    ): WriteBuffer {
         bytePointer[index] = byte
         return this
     }
@@ -150,7 +158,10 @@ class MutableDataBuffer(
         return this
     }
 
-    override fun set(index: Int, short: Short): WriteBuffer {
+    override fun set(
+        index: Int,
+        short: Short,
+    ): WriteBuffer {
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) short.reverseBytes() else short
         (bytePointer + index)!!.reinterpret<ShortVar>()[0] = value
         return this
@@ -163,7 +174,10 @@ class MutableDataBuffer(
         return this
     }
 
-    override fun set(index: Int, int: Int): WriteBuffer {
+    override fun set(
+        index: Int,
+        int: Int,
+    ): WriteBuffer {
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) int.reverseBytes() else int
         (bytePointer + index)!!.reinterpret<IntVar>()[0] = value
         return this
@@ -176,13 +190,20 @@ class MutableDataBuffer(
         return this
     }
 
-    override fun set(index: Int, long: Long): WriteBuffer {
+    override fun set(
+        index: Int,
+        long: Long,
+    ): WriteBuffer {
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) long.reverseBytes() else long
         (bytePointer + index)!!.reinterpret<LongVar>()[0] = value
         return this
     }
 
-    override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
+    override fun writeBytes(
+        bytes: ByteArray,
+        offset: Int,
+        length: Int,
+    ): WriteBuffer {
         if (length < 1) {
             return this
         }
@@ -218,14 +239,18 @@ class MutableDataBuffer(
         buffer.position(buffer.position() + bytesToCopy)
     }
 
-    override fun writeString(text: CharSequence, charset: Charset): WriteBuffer {
-        val string = if (text is String) {
-            @Suppress("CAST_NEVER_SUCCEEDS")
-            text as NSString
-        } else {
-            @Suppress("CAST_NEVER_SUCCEEDS")
-            text.toString() as NSString
-        }
+    override fun writeString(
+        text: CharSequence,
+        charset: Charset,
+    ): WriteBuffer {
+        val string =
+            if (text is String) {
+                @Suppress("CAST_NEVER_SUCCEEDS")
+                text as NSString
+            } else {
+                @Suppress("CAST_NEVER_SUCCEEDS")
+                text.toString() as NSString
+            }
         val charsetEncoding = charset.toEncoding()
         val stringData = string.dataUsingEncoding(charsetEncoding)!!
 
@@ -251,6 +276,128 @@ class MutableDataBuffer(
     }
 
     override suspend fun close() = Unit
+
+    // endregion
+
+    // region Optimized comparison operations
+
+    /**
+     * Optimized content comparison using memcmp.
+     */
+    override fun contentEquals(other: ReadBuffer): Boolean {
+        if (remaining() != other.remaining()) return false
+        val size = remaining()
+        if (size == 0) return true
+
+        return when (other) {
+            is MutableDataBuffer -> {
+                memcmp(bytePointer + position, other.bytePointer + other.position(), size.convert()) == 0
+            }
+            is MutableDataBufferSlice -> {
+                memcmp(bytePointer + position, other.bytePointer + other.position(), size.convert()) == 0
+            }
+            is ByteArrayBuffer -> {
+                other.backingArray.usePinned { pinned ->
+                    memcmp(bytePointer + position, pinned.addressOf(other.position()), size.convert()) == 0
+                }
+            }
+            else -> {
+                // Fallback for other buffer types
+                for (i in 0 until size) {
+                    if (get(position + i) != other.get(other.position() + i)) {
+                        return false
+                    }
+                }
+                true
+            }
+        }
+    }
+
+    /**
+     * Optimized mismatch using memcmp for native buffers.
+     */
+    override fun mismatch(other: ReadBuffer): Int {
+        val thisRemaining = remaining()
+        val otherRemaining = other.remaining()
+        val minLength = minOf(thisRemaining, otherRemaining)
+
+        if (minLength == 0) {
+            return if (thisRemaining != otherRemaining) 0 else -1
+        }
+
+        when (other) {
+            is MutableDataBuffer -> {
+                // Use Long comparisons for speed (8 bytes at a time)
+                var i = 0
+                while (i + 8 <= minLength) {
+                    val thisPtr = (bytePointer + position + i)!!.reinterpret<LongVar>()
+                    val otherPtr = (other.bytePointer + other.position() + i)!!.reinterpret<LongVar>()
+                    if (thisPtr[0] != otherPtr[0]) {
+                        // Found mismatch, find exact byte
+                        for (j in 0 until 8) {
+                            if (bytePointer[position + i + j] != other.bytePointer[other.position() + i + j]) {
+                                return i + j
+                            }
+                        }
+                    }
+                    i += 8
+                }
+                // Check remaining bytes
+                while (i < minLength) {
+                    if (bytePointer[position + i] != other.bytePointer[other.position() + i]) {
+                        return i
+                    }
+                    i++
+                }
+            }
+            is MutableDataBufferSlice -> {
+                var i = 0
+                while (i + 8 <= minLength) {
+                    val thisPtr = (bytePointer + position + i)!!.reinterpret<LongVar>()
+                    val otherPtr = (other.bytePointer + other.position() + i)!!.reinterpret<LongVar>()
+                    if (thisPtr[0] != otherPtr[0]) {
+                        for (j in 0 until 8) {
+                            if (bytePointer[position + i + j] != other.bytePointer[other.position() + i + j]) {
+                                return i + j
+                            }
+                        }
+                    }
+                    i += 8
+                }
+                while (i < minLength) {
+                    if (bytePointer[position + i] != other.bytePointer[other.position() + i]) {
+                        return i
+                    }
+                    i++
+                }
+            }
+            else -> {
+                // Fallback for other buffer types
+                for (i in 0 until minLength) {
+                    if (get(position + i) != other.get(other.position() + i)) {
+                        return i
+                    }
+                }
+            }
+        }
+        return if (thisRemaining != otherRemaining) minLength else -1
+    }
+
+    /**
+     * Optimized single byte indexOf using memchr.
+     */
+    override fun indexOf(byte: Byte): Int {
+        val size = remaining()
+        if (size == 0) return -1
+
+        val result = memchr(bytePointer + position, byte.toInt(), size.convert())
+        return if (result == null) {
+            -1
+        } else {
+            @Suppress("UNCHECKED_CAST")
+            ((result as CPointer<ByteVar>).toLong() - (bytePointer + position).toLong()).toInt()
+        }
+    }
 
     // endregion
 
@@ -337,11 +484,15 @@ class MutableDataBufferSlice(
         return result
     }
 
-    override fun readString(length: Int, charset: Charset): String {
+    override fun readString(
+        length: Int,
+        charset: Charset,
+    ): String {
         if (length == 0) return ""
-        val subdata = parent.data.subdataWithRange(
-            NSMakeRange((sliceOffset + position).convert(), length.convert()),
-        )
+        val subdata =
+            parent.data.subdataWithRange(
+                NSMakeRange((sliceOffset + position).convert(), length.convert()),
+            )
         val stringEncoding = charset.toEncoding()
 
         @Suppress("CAST_NEVER_SUCCEEDS")
@@ -358,5 +509,20 @@ class MutableDataBufferSlice(
     override fun position(newPosition: Int) {
         position = newPosition
     }
-}
 
+    /**
+     * Optimized single byte indexOf using memchr.
+     */
+    override fun indexOf(byte: Byte): Int {
+        val size = remaining()
+        if (size == 0) return -1
+
+        val result = memchr(bytePointer + position, byte.toInt(), size.convert())
+        return if (result == null) {
+            -1
+        } else {
+            @Suppress("UNCHECKED_CAST")
+            ((result as CPointer<ByteVar>).toLong() - (bytePointer + position).toLong()).toInt()
+        }
+    }
+}
