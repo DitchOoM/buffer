@@ -6,7 +6,48 @@ import com.ditchoom.buffer.ByteOrder
 /**
  * High-performance buffer pool that minimizes allocations by reusing buffers.
  *
- * Use [BufferPool.Companion.invoke] to create an instance with the desired threading model.
+ * Buffer pools significantly reduce garbage collection overhead in high-throughput
+ * scenarios like network I/O, file processing, and protocol parsing.
+ *
+ * ## Usage Patterns
+ *
+ * ### Recommended: withBuffer (auto-release)
+ * ```kotlin
+ * val pool = BufferPool()
+ * pool.withBuffer(1024) { buffer ->
+ *     buffer.writeInt(42)
+ *     buffer.writeString("Hello")
+ *     buffer.resetForRead()
+ *     // Use buffer...
+ * } // Buffer automatically released
+ * ```
+ *
+ * ### Scoped pool with withPool
+ * ```kotlin
+ * withPool(defaultBufferSize = 8192) { pool ->
+ *     pool.withBuffer { buffer ->
+ *         // Process data
+ *     }
+ * } // Pool automatically cleared
+ * ```
+ *
+ * ### Manual acquire/release
+ * ```kotlin
+ * val buffer = pool.acquire(1024)
+ * try {
+ *     buffer.writeInt(42)
+ * } finally {
+ *     buffer.release()  // MUST release when done
+ * }
+ * ```
+ *
+ * ## Threading Models
+ *
+ * - [ThreadingMode.SingleThreaded]: Fastest, but NOT thread-safe
+ * - [ThreadingMode.MultiThreaded]: Lock-free, safe for concurrent access
+ *
+ * @see withBuffer for auto-releasing buffer usage
+ * @see withPool for scoped pool creation
  */
 sealed interface BufferPool {
     /**
@@ -89,21 +130,33 @@ enum class ThreadingMode {
 }
 
 /**
- * A buffer that has been acquired from a pool.
- * Must be released back to the pool when done.
+ * A buffer that has been acquired from a [BufferPool].
+ *
+ * Pooled buffers MUST be released when no longer needed to enable reuse.
+ * Use [BufferPool.withBuffer] for automatic release, or call [release] manually.
+ *
+ * **Warning**: Do not use a buffer after releasing it.
  */
 interface PooledBuffer : com.ditchoom.buffer.ReadWriteBuffer {
     override val byteOrder: ByteOrder
 
     /**
-     * Returns this buffer to its pool.
-     * After calling this, the buffer should not be used.
+     * Returns this buffer to its pool for reuse.
+     *
+     * After calling this method, the buffer should not be used.
+     * Any further access to the buffer results in undefined behavior.
      */
     fun release()
 }
 
 /**
- * Statistics about buffer pool usage.
+ * Statistics about buffer pool usage for monitoring and tuning.
+ *
+ * @property totalAllocations Total number of acquire() calls
+ * @property poolHits Number of times a pooled buffer was reused
+ * @property poolMisses Number of times a new buffer had to be allocated
+ * @property currentPoolSize Number of buffers currently in the pool
+ * @property peakPoolSize Maximum number of buffers ever held in the pool
  */
 data class PoolStats(
     val totalAllocations: Long,
@@ -111,7 +164,11 @@ data class PoolStats(
     val poolMisses: Long,
     val currentPoolSize: Int,
     val peakPoolSize: Int,
-)
+) {
+    /** Percentage of acquire() calls satisfied from the pool (0.0 to 1.0). */
+    val hitRate: Double
+        get() = if (totalAllocations > 0) poolHits.toDouble() / totalAllocations else 0.0
+}
 
 /**
  * Default buffer size for file I/O operations (64 KB).

@@ -1,15 +1,111 @@
 package com.ditchoom.buffer
 
+/**
+ * Interface for reading primitive values and byte sequences from a buffer.
+ *
+ * ReadBuffer provides two types of read operations:
+ * - **Relative reads** (`readByte()`, `readInt()`, etc.) - Read at the current [position] and advance it
+ * - **Absolute reads** (`get(index)`, `getInt(index)`, etc.) - Read at a specific index without changing position
+ *
+ * ## Position and Limit
+ *
+ * The buffer maintains a [position] cursor and a [limit] boundary:
+ * - [position]: Current read location (0 to limit-1)
+ * - [limit]: End of readable data (0 to capacity)
+ * - [remaining]: Bytes available to read (limit - position)
+ *
+ * ```
+ * [0]...[position]...[limit]...[capacity]
+ *       ^cursor      ^end of data
+ * ```
+ *
+ * ## Byte Order
+ *
+ * Multi-byte reads respect the buffer's [byteOrder]:
+ * - [ByteOrder.BIG_ENDIAN]: Most significant byte first (network byte order)
+ * - [ByteOrder.LITTLE_ENDIAN]: Least significant byte first (x86/ARM native)
+ *
+ * ```kotlin
+ * // Buffer containing bytes: [0x12, 0x34]
+ * buffer.readShort() // BIG_ENDIAN: 0x1234, LITTLE_ENDIAN: 0x3412
+ * ```
+ *
+ * ## Thread Safety
+ *
+ * ReadBuffer is NOT thread-safe. External synchronization is required for concurrent access.
+ *
+ * ## Example Usage
+ *
+ * ```kotlin
+ * val buffer = PlatformBuffer.allocate(100)
+ * buffer.writeInt(42)
+ * buffer.writeString("Hello")
+ * buffer.resetForRead()
+ *
+ * val number = buffer.readInt()     // 42
+ * val text = buffer.readString(5)   // "Hello"
+ * ```
+ *
+ * @see WriteBuffer for write operations
+ * @see PlatformBuffer for creating buffers
+ */
 interface ReadBuffer : PositionBuffer {
+    /**
+     * Prepares the buffer for reading by setting limit to current position and position to 0.
+     *
+     * Call this after writing to switch to read mode:
+     * ```kotlin
+     * buffer.writeInt(42)
+     * buffer.resetForRead()  // position=0, limit=4
+     * val value = buffer.readInt()
+     * ```
+     */
     fun resetForRead()
 
+    /**
+     * Reads a single byte at the current position and advances position by 1.
+     *
+     * @return The byte value at the current position
+     * @throws IndexOutOfBoundsException if position >= limit (platform-dependent behavior)
+     */
     fun readByte(): Byte
 
+    /**
+     * Gets a byte at the specified absolute index without changing position.
+     *
+     * @param index The absolute index to read from (0 to capacity-1)
+     * @return The byte value at the specified index
+     * @throws IndexOutOfBoundsException if index is out of bounds (platform-dependent)
+     */
     operator fun get(index: Int): Byte
 
-    // slice does not change the position
+    /**
+     * Creates a new read-only view of this buffer's remaining content.
+     *
+     * The slice shares the underlying memory but has independent position/limit:
+     * - Slice position: 0
+     * - Slice limit: this.remaining()
+     * - Changes to data are visible in both buffers
+     *
+     * **Does not change this buffer's position.**
+     *
+     * ```kotlin
+     * buffer.position(10)
+     * buffer.setLimit(20)
+     * val slice = buffer.slice()  // slice has position=0, limit=10
+     * // buffer position is still 10
+     * ```
+     *
+     * @return A new ReadBuffer viewing the remaining bytes
+     */
     fun slice(): ReadBuffer
 
+    /**
+     * Reads [size] bytes as a new buffer and advances position.
+     *
+     * @param size Number of bytes to read
+     * @return A new ReadBuffer containing the bytes, or [EMPTY_BUFFER] if size < 1
+     */
     fun readBytes(size: Int): ReadBuffer {
         if (size < 1) {
             return EMPTY_BUFFER
@@ -23,13 +119,31 @@ interface ReadBuffer : PositionBuffer {
         return bytes
     }
 
+    /**
+     * Reads [size] bytes into a new ByteArray and advances position.
+     *
+     * @param size Number of bytes to read
+     * @return A new ByteArray containing the bytes
+     */
     fun readByteArray(size: Int): ByteArray
 
+    /**
+     * Reads a single byte as unsigned (0-255) and advances position by 1.
+     */
     fun readUnsignedByte(): UByte = readByte().toUByte()
 
+    /**
+     * Gets a byte as unsigned at the specified index without changing position.
+     */
     fun getUnsignedByte(index: Int): UByte = get(index).toUByte()
 
-    // Optimized Short read - direct byte access instead of loop
+    /**
+     * Reads a 16-bit signed integer at the current position and advances position by 2.
+     *
+     * Byte order is determined by [byteOrder]:
+     * - BIG_ENDIAN: bytes `[0x12, 0x34]` → `0x1234`
+     * - LITTLE_ENDIAN: bytes `[0x12, 0x34]` → `0x3412`
+     */
     fun readShort(): Short {
         val b0 = readByte().toInt() and 0xFF
         val b1 = readByte().toInt() and 0xFF
@@ -40,6 +154,11 @@ interface ReadBuffer : PositionBuffer {
         }
     }
 
+    /**
+     * Gets a 16-bit signed integer at the specified index without changing position.
+     *
+     * @param index The absolute byte index to read from
+     */
     fun getShort(index: Int): Short {
         val b0 = get(index).toInt() and 0xFF
         val b1 = get(index + 1).toInt() and 0xFF
@@ -50,11 +169,17 @@ interface ReadBuffer : PositionBuffer {
         }
     }
 
+    /** Reads a 16-bit unsigned integer and advances position by 2. */
     fun readUnsignedShort(): UShort = readShort().toUShort()
 
+    /** Gets a 16-bit unsigned integer at the specified index without changing position. */
     fun getUnsignedShort(index: Int): UShort = getShort(index).toUShort()
 
-    // Int read using Short reads - enables optimized ShortArrayBuffer implementations
+    /**
+     * Reads a 32-bit signed integer at the current position and advances position by 4.
+     *
+     * Byte order is determined by [byteOrder].
+     */
     fun readInt(): Int {
         val s0 = readShort().toInt() and 0xFFFF
         val s1 = readShort().toInt() and 0xFFFF
@@ -65,6 +190,7 @@ interface ReadBuffer : PositionBuffer {
         }
     }
 
+    /** Gets a 32-bit signed integer at the specified index without changing position. */
     fun getInt(index: Int): Int {
         val s0 = getShort(index).toInt() and 0xFFFF
         val s1 = getShort(index + 2).toInt() and 0xFFFF
@@ -75,15 +201,23 @@ interface ReadBuffer : PositionBuffer {
         }
     }
 
+    /** Reads a 32-bit unsigned integer and advances position by 4. */
     fun readUnsignedInt(): UInt = readInt().toUInt()
 
+    /** Gets a 32-bit unsigned integer at the specified index without changing position. */
     fun getUnsignedInt(index: Int): UInt = getInt(index).toUInt()
 
+    /** Reads a 32-bit IEEE 754 floating point and advances position by 4. */
     fun readFloat(): Float = Float.fromBits(readInt())
 
+    /** Gets a 32-bit IEEE 754 floating point at the specified index. */
     fun getFloat(index: Int): Float = Float.fromBits(getInt(index))
 
-    // Optimized Long read - uses two Int reads for efficiency
+    /**
+     * Reads a 64-bit signed integer at the current position and advances position by 8.
+     *
+     * Byte order is determined by [byteOrder].
+     */
     fun readLong(): Long {
         val first = readInt().toLong() and 0xFFFFFFFFL
         val second = readInt().toLong() and 0xFFFFFFFFL
@@ -94,6 +228,7 @@ interface ReadBuffer : PositionBuffer {
         }
     }
 
+    /** Gets a 64-bit signed integer at the specified index without changing position. */
     fun getLong(index: Int): Long {
         val first = getInt(index).toLong() and 0xFFFFFFFFL
         val second = getInt(index + 4).toLong() and 0xFFFFFFFFL
@@ -104,14 +239,43 @@ interface ReadBuffer : PositionBuffer {
         }
     }
 
+    /** Reads a 64-bit unsigned integer and advances position by 8. */
     fun readUnsignedLong(): ULong = readLong().toULong()
 
+    /** Gets a 64-bit unsigned integer at the specified index without changing position. */
     fun getUnsignedLong(index: Int): ULong = getLong(index).toULong()
 
+    /** Reads a 64-bit IEEE 754 double precision floating point and advances position by 8. */
     fun readDouble(): Double = Double.fromBits(readLong())
 
+    /** Gets a 64-bit IEEE 754 double precision floating point at the specified index. */
     fun getDouble(index: Int): Double = Double.fromBits(getLong(index))
 
+    /**
+     * Reads a string of the specified byte length and advances position.
+     *
+     * The [length] parameter specifies the number of **bytes** to read, not characters.
+     * For variable-width encodings like UTF-8, the number of characters may differ.
+     *
+     * ## Charset Support by Platform
+     *
+     * | Charset | JVM | Android | Apple | JS | WASM |
+     * |---------|-----|---------|-------|----|----|
+     * | UTF8 | ✓ | ✓ | ✓ | ✓ | ✓ |
+     * | UTF16 | ✓ | ✓ | ✓ | ✗ | ✓ |
+     * | UTF16BigEndian | ✓ | ✓ | ✓ | ✓ | ✓ |
+     * | UTF16LittleEndian | ✓ | ✓ | ✓ | ✓ | ✓ |
+     * | ASCII | ✓ | ✓ | ✓ | ✓ | ✓ |
+     * | ISOLatin1 | ✓ | ✓ | ✓ | ✓ | ✓ |
+     * | UTF32 | ✓ | ✓ | ✗ | ✗ | ✗ |
+     * | UTF32BigEndian | ✓ | ✓ | ✗ | ✗ | ✗ |
+     * | UTF32LittleEndian | ✓ | ✓ | ✗ | ✗ | ✗ |
+     *
+     * @param length Number of bytes to read
+     * @param charset Character encoding to use (default: UTF-8)
+     * @return The decoded string
+     * @throws UnsupportedOperationException if the charset is not supported on this platform
+     */
     fun readString(
         length: Int,
         charset: Charset = Charset.UTF8,
@@ -190,6 +354,16 @@ interface ReadBuffer : PositionBuffer {
         val EMPTY_BUFFER = PlatformBuffer.allocate(0)
     }
 
+    /**
+     * Reads a number of variable byte size (1-8 bytes) and advances position.
+     *
+     * Useful for protocols with variable-width integers or reading
+     * partial values (e.g., 3-byte or 5-byte integers).
+     *
+     * @param numberOfBytes Number of bytes to read (1-8)
+     * @return The value as a Long, with bytes interpreted according to [byteOrder]
+     * @throws IllegalStateException if numberOfBytes is not in 1..8
+     */
     fun readNumberWithByteSize(numberOfBytes: Int): Long {
         check(numberOfBytes in 1..8) { "byte size out of range" }
         val byteSizeRange =
@@ -205,6 +379,14 @@ interface ReadBuffer : PositionBuffer {
         return number
     }
 
+    /**
+     * Gets a number of variable byte size at the specified index without changing position.
+     *
+     * @param startIndex The absolute byte index to start reading from
+     * @param numberOfBytes Number of bytes to read (1-8)
+     * @return The value as a Long, with bytes interpreted according to [byteOrder]
+     * @throws IllegalStateException if numberOfBytes is not in 1..8
+     */
     fun getNumberWithStartIndexAndByteSize(
         startIndex: Int,
         numberOfBytes: Int,
