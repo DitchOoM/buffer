@@ -5,12 +5,12 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.allocate
 
 /**
- * Android supports synchronous compression via java.util.zip.
+ * JVM/Android supports synchronous compression via java.util.zip.
  */
 actual val supportsSyncCompression: Boolean = true
 
 /**
- * Android implementation delegating to streaming compression.
+ * JVM/Android implementation delegating to streaming compression.
  */
 actual fun compress(
     buffer: ReadBuffer,

@@ -125,6 +125,17 @@ kotlin {
             dependsOn(nonJvmTest)
         }
 
+        // Shared source set for JVM and Android (java.nio.ByteBuffer)
+        val jvmCommonMain by creating {
+            dependsOn(commonMain.get())
+        }
+        jvmMain {
+            dependsOn(jvmCommonMain)
+        }
+        androidMain {
+            dependsOn(jvmCommonMain)
+        }
+
         commonTest.dependencies {
             implementation(kotlin("test"))
         }

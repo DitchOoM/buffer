@@ -10,7 +10,7 @@ import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
 abstract class BaseJvmBuffer(
-    val byteBuffer: ByteBuffer,
+    open val byteBuffer: ByteBuffer,
     val fileRef: RandomAccessFile? = null,
 ) : PlatformBuffer {
     override val byteOrder =
@@ -43,7 +43,7 @@ abstract class BaseJvmBuffer(
 
     override fun readByteArray(size: Int) = byteBuffer.toArray(size)
 
-    override fun slice() = JvmBuffer(byteBuffer.slice())
+    abstract override fun slice(): PlatformBuffer
 
     override fun readShort(): Short = byteBuffer.short
 
@@ -192,7 +192,7 @@ abstract class BaseJvmBuffer(
     }
 
     override fun write(buffer: ReadBuffer) {
-        if (buffer is JvmBuffer) {
+        if (buffer is BaseJvmBuffer) {
             byteBuffer.put(buffer.byteBuffer)
         } else {
             byteBuffer.put(buffer.readByteArray(buffer.remaining()))
@@ -222,8 +222,8 @@ abstract class BaseJvmBuffer(
     override fun position() = buffer.position()
 
     /**
-     * Optimized content comparison using ByteBuffer.mismatch (Java 11+) when available,
-     * falling back to array comparison for heap buffers.
+     * Optimized content comparison using ByteBuffer.mismatch (Java 11+ / Android API 34+) when available,
+     * falling back to Long comparisons for older versions.
      */
     override fun contentEquals(other: ReadBuffer): Boolean {
         if (remaining() != other.remaining()) return false
@@ -234,7 +234,7 @@ abstract class BaseJvmBuffer(
     }
 
     /**
-     * Optimized mismatch using ByteBuffer.mismatch (Java 11+) when available.
+     * Optimized mismatch using ByteBuffer.mismatch (Java 11+ / Android API 34+) when available.
      */
     override fun mismatch(other: ReadBuffer): Int {
         if (other is BaseJvmBuffer) {
@@ -248,7 +248,7 @@ abstract class BaseJvmBuffer(
         val otherRemaining = other.remaining()
         val minLength = minOf(thisRemaining, otherRemaining)
 
-        // Use ByteBuffer.mismatch if available (Java 11+)
+        // Use ByteBuffer.mismatch if available (Java 11+ / Android API 34+)
         // This uses SIMD optimizations on supported hardware
         return try {
             val thisSlice = byteBuffer.slice()
@@ -262,7 +262,7 @@ abstract class BaseJvmBuffer(
                 result
             }
         } catch (_: NoSuchMethodError) {
-            // Fallback for Java 8
+            // Fallback for Java 8 / older Android
             fallbackMismatch(other, minLength, thisRemaining, otherRemaining)
         }
     }
@@ -327,6 +327,78 @@ abstract class BaseJvmBuffer(
             }
         }
         return -1
+    }
+
+    /**
+     * Optimized Short indexOf using ByteBuffer operations.
+     */
+    override fun indexOf(value: Short): Int {
+        val pos = position()
+        val remaining = remaining()
+        if (remaining < 2) return -1
+
+        val searchLimit = remaining - 1
+        for (i in 0 until searchLimit) {
+            if (byteBuffer.getShort(pos + i) == value) {
+                return i
+            }
+        }
+        return -1
+    }
+
+    /**
+     * Optimized Int indexOf using ByteBuffer operations.
+     */
+    override fun indexOf(value: Int): Int {
+        val pos = position()
+        val remaining = remaining()
+        if (remaining < 4) return -1
+
+        val searchLimit = remaining - 3
+        for (i in 0 until searchLimit) {
+            if (byteBuffer.getInt(pos + i) == value) {
+                return i
+            }
+        }
+        return -1
+    }
+
+    /**
+     * Optimized Long indexOf using ByteBuffer operations.
+     */
+    override fun indexOf(value: Long): Int {
+        val pos = position()
+        val remaining = remaining()
+        if (remaining < 8) return -1
+
+        val searchLimit = remaining - 7
+        for (i in 0 until searchLimit) {
+            if (byteBuffer.getLong(pos + i) == value) {
+                return i
+            }
+        }
+        return -1
+    }
+
+    /**
+     * Optimized fill using Arrays.fill for heap buffers.
+     */
+    override fun fill(value: Byte): WriteBuffer {
+        val count = remaining()
+        if (count == 0) return this
+
+        if (byteBuffer.hasArray()) {
+            val array = byteBuffer.array()
+            val offset = byteBuffer.arrayOffset() + position()
+            java.util.Arrays.fill(array, offset, offset + count, value)
+            buffer.position(buffer.position() + count)
+        } else {
+            // Direct buffer - write byte by byte
+            for (i in 0 until count) {
+                byteBuffer.put(value)
+            }
+        }
+        return this
     }
 }
 

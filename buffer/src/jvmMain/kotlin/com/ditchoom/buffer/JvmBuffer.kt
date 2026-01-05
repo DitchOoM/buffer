@@ -6,4 +6,6 @@ import java.nio.ByteBuffer
 class JvmBuffer(
     byteBuffer: ByteBuffer,
     fileRef: RandomAccessFile? = null,
-) : BaseJvmBuffer(byteBuffer, fileRef)
+) : BaseJvmBuffer(byteBuffer, fileRef) {
+    override fun slice() = JvmBuffer(byteBuffer.slice())
+}

@@ -54,28 +54,24 @@ interface ReadBuffer : PositionBuffer {
 
     fun getUnsignedShort(index: Int): UShort = getShort(index).toUShort()
 
-    // Optimized Int read - direct byte access instead of loop
+    // Int read using Short reads - enables optimized ShortArrayBuffer implementations
     fun readInt(): Int {
-        val b0 = readByte().toInt() and 0xFF
-        val b1 = readByte().toInt() and 0xFF
-        val b2 = readByte().toInt() and 0xFF
-        val b3 = readByte().toInt() and 0xFF
+        val s0 = readShort().toInt() and 0xFFFF
+        val s1 = readShort().toInt() and 0xFFFF
         return if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            (b0 shl 24) or (b1 shl 16) or (b2 shl 8) or b3
+            (s0 shl 16) or s1
         } else {
-            b0 or (b1 shl 8) or (b2 shl 16) or (b3 shl 24)
+            s0 or (s1 shl 16)
         }
     }
 
     fun getInt(index: Int): Int {
-        val b0 = get(index).toInt() and 0xFF
-        val b1 = get(index + 1).toInt() and 0xFF
-        val b2 = get(index + 2).toInt() and 0xFF
-        val b3 = get(index + 3).toInt() and 0xFF
+        val s0 = getShort(index).toInt() and 0xFFFF
+        val s1 = getShort(index + 2).toInt() and 0xFFFF
         return if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            (b0 shl 24) or (b1 shl 16) or (b2 shl 8) or b3
+            (s0 shl 16) or s1
         } else {
-            b0 or (b1 shl 8) or (b2 shl 16) or (b3 shl 24)
+            s0 or (s1 shl 16)
         }
     }
 
@@ -242,7 +238,8 @@ interface ReadBuffer : PositionBuffer {
     /**
      * Finds the first occurrence of a byte sequence within this buffer.
      *
-     * Searches for [needle] starting from this buffer's current position.
+     * Uses optimized bulk search (8 bytes at a time) for the first byte,
+     * then bulk Long comparisons for verifying matches.
      *
      * @param needle The byte sequence to search for
      * @return The relative index where needle starts (relative to current position),
@@ -253,20 +250,51 @@ interface ReadBuffer : PositionBuffer {
         if (needleSize == 0) return 0
         if (needleSize > remaining()) return -1
 
+        // For single byte, delegate to optimized indexOf(Byte)
+        if (needleSize == 1) {
+            return indexOf(needle.get(needle.position()))
+        }
+
         val firstByte = needle.get(needle.position())
-        val searchLimit = remaining() - needleSize
+        val thisPos = position()
+        val needlePos = needle.position()
+        var searchOffset = 0
+        val maxSearchOffset = remaining() - needleSize
 
-        outer@ for (i in 0..searchLimit) {
-            // Quick check on first byte
-            if (get(position() + i) != firstByte) continue
+        while (searchOffset <= maxSearchOffset) {
+            // Use optimized bulk search for first byte
+            val sliceRemaining = remaining() - searchOffset
+            val firstByteIndex =
+                bulkIndexOf(
+                    startPos = thisPos + searchOffset,
+                    length = sliceRemaining - needleSize + 1,
+                    byte = firstByte,
+                    getLong = { getLong(it) },
+                    getByte = { get(it) },
+                )
 
-            // Check remaining bytes
-            for (j in 1 until needleSize) {
-                if (get(position() + i + j) != needle.get(needle.position() + j)) {
-                    continue@outer
-                }
+            if (firstByteIndex == -1) return -1
+
+            val candidatePos = searchOffset + firstByteIndex
+
+            // Verify match using bulk Long comparisons
+            val matches =
+                bulkCompareEquals(
+                    thisPos = thisPos + candidatePos,
+                    otherPos = needlePos,
+                    length = needleSize,
+                    getLong = { getLong(it) },
+                    otherGetLong = { needle.getLong(it) },
+                    getByte = { get(it) },
+                    otherGetByte = { needle.get(it) },
+                )
+
+            if (matches) {
+                return candidatePos
             }
-            return i
+
+            // Move past this candidate
+            searchOffset = candidatePos + 1
         }
         return -1
     }
@@ -274,18 +302,115 @@ interface ReadBuffer : PositionBuffer {
     /**
      * Finds the first occurrence of a single byte within this buffer.
      *
+     * Uses optimized bulk search (8 bytes at a time with SIMD-like tricks) when possible.
+     *
      * @param byte The byte to search for
      * @return The relative index where the byte is found (relative to current position),
      *         or -1 if not found
      */
-    fun indexOf(byte: Byte): Int {
+    fun indexOf(byte: Byte): Int =
+        bulkIndexOf(
+            startPos = position(),
+            length = remaining(),
+            byte = byte,
+            getLong = { getLong(it) },
+            getByte = { get(it) },
+        )
+
+    /**
+     * Finds the first occurrence of a Short value within this buffer.
+     *
+     * Searches for the 2-byte representation of [value] using the buffer's byte order.
+     *
+     * @param value The Short value to search for
+     * @return The relative index where the value starts (relative to current position),
+     *         or -1 if not found
+     */
+    fun indexOf(value: Short): Int {
         val size = remaining()
-        for (i in 0 until size) {
-            if (get(position() + i) == byte) {
+        if (size < 2) return -1
+
+        val pos = position()
+        val searchLimit = size - 1
+
+        for (i in 0 until searchLimit) {
+            if (getShort(pos + i) == value) {
                 return i
             }
         }
         return -1
+    }
+
+    /**
+     * Finds the first occurrence of an Int value within this buffer.
+     *
+     * Searches for the 4-byte representation of [value] using the buffer's byte order.
+     *
+     * @param value The Int value to search for
+     * @return The relative index where the value starts (relative to current position),
+     *         or -1 if not found
+     */
+    fun indexOf(value: Int): Int {
+        val size = remaining()
+        if (size < 4) return -1
+
+        val pos = position()
+        val searchLimit = size - 3
+
+        for (i in 0 until searchLimit) {
+            if (getInt(pos + i) == value) {
+                return i
+            }
+        }
+        return -1
+    }
+
+    /**
+     * Finds the first occurrence of a Long value within this buffer.
+     *
+     * Searches for the 8-byte representation of [value] using the buffer's byte order.
+     *
+     * @param value The Long value to search for
+     * @return The relative index where the value starts (relative to current position),
+     *         or -1 if not found
+     */
+    fun indexOf(value: Long): Int {
+        val size = remaining()
+        if (size < 8) return -1
+
+        val pos = position()
+        val searchLimit = size - 7
+
+        for (i in 0 until searchLimit) {
+            if (getLong(pos + i) == value) {
+                return i
+            }
+        }
+        return -1
+    }
+
+    /**
+     * Finds the first occurrence of a string within this buffer.
+     *
+     * Encodes the string using the specified charset and searches for the resulting bytes.
+     *
+     * @param text The string to search for
+     * @param charset The charset to use for encoding (default: UTF-8)
+     * @return The relative index where the string starts (relative to current position),
+     *         or -1 if not found
+     */
+    fun indexOf(
+        text: CharSequence,
+        charset: Charset = Charset.UTF8,
+    ): Int {
+        if (text.isEmpty()) return 0
+
+        // Encode the string to bytes
+        val needle = PlatformBuffer.allocate(text.length * 4) // Max 4 bytes per char in UTF-8
+        needle.writeString(text, charset)
+        needle.resetForRead()
+
+        return indexOf(needle)
     }
 
     companion object {

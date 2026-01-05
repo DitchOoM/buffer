@@ -1,9 +1,9 @@
 package com.ditchoom.buffer.compression
 
-import android.os.Build
-import com.ditchoom.buffer.JvmBuffer
+import com.ditchoom.buffer.BaseJvmBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
+import java.nio.Buffer
 import java.nio.ByteBuffer
 import java.util.zip.CRC32
 import java.util.zip.Deflater
@@ -20,9 +20,9 @@ actual fun StreamingCompressor.Companion.create(
     outputBufferSize: Int,
 ): StreamingCompressor =
     when (algorithm) {
-        CompressionAlgorithm.Gzip -> AndroidGzipStreamingCompressor(level, allocator, outputBufferSize)
-        CompressionAlgorithm.Deflate -> AndroidDeflateStreamingCompressor(level, nowrap = false, allocator, outputBufferSize)
-        CompressionAlgorithm.Raw -> AndroidDeflateStreamingCompressor(level, nowrap = true, allocator, outputBufferSize)
+        CompressionAlgorithm.Gzip -> JvmGzipStreamingCompressor(level, allocator, outputBufferSize)
+        CompressionAlgorithm.Deflate -> JvmDeflateStreamingCompressor(level, nowrap = false, allocator, outputBufferSize)
+        CompressionAlgorithm.Raw -> JvmDeflateStreamingCompressor(level, nowrap = true, allocator, outputBufferSize)
     }
 
 actual fun StreamingDecompressor.Companion.create(
@@ -32,110 +32,126 @@ actual fun StreamingDecompressor.Companion.create(
     expectedSize: Int,
 ): StreamingDecompressor =
     when (algorithm) {
-        CompressionAlgorithm.Gzip -> AndroidGzipStreamingDecompressor(allocator, outputBufferSize, expectedSize)
-        CompressionAlgorithm.Deflate -> AndroidInflateStreamingDecompressor(nowrap = false, allocator, outputBufferSize, expectedSize)
-        CompressionAlgorithm.Raw -> AndroidInflateStreamingDecompressor(nowrap = true, allocator, outputBufferSize, expectedSize)
+        CompressionAlgorithm.Gzip -> JvmGzipStreamingDecompressor(allocator, outputBufferSize, expectedSize)
+        CompressionAlgorithm.Deflate -> JvmInflateStreamingDecompressor(nowrap = false, allocator, outputBufferSize, expectedSize)
+        CompressionAlgorithm.Raw -> JvmInflateStreamingDecompressor(nowrap = true, allocator, outputBufferSize, expectedSize)
     }
 
 // =============================================================================
-// Shared Helpers
+// Shared Helpers - Use try-catch for ByteBuffer methods (Java 11+ / Android API 35+)
 // =============================================================================
 
 /**
- * Sets deflater input from a ReadBuffer, using the most efficient method available.
+ * Sets deflater input from a ReadBuffer, using ByteBuffer when available.
  */
 private fun Deflater.setInputFrom(buffer: ReadBuffer) {
     val remaining = buffer.remaining()
-    val byteBuffer = (buffer as? JvmBuffer)?.buffer
+    val byteBuffer = (buffer as? BaseJvmBuffer)?.byteBuffer
 
-    when {
-        byteBuffer != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM -> {
+    if (byteBuffer != null) {
+        try {
             setInput(byteBuffer)
+            return
+        } catch (_: NoSuchMethodError) {
+            // ByteBuffer overload not available, use fallback
         }
-        byteBuffer != null && byteBuffer.hasArray() -> {
+
+        // Fallback: use array if available
+        if (byteBuffer.hasArray()) {
             setInput(byteBuffer.array(), byteBuffer.arrayOffset() + byteBuffer.position(), remaining)
-            byteBuffer.position(byteBuffer.position() + remaining)
+            (byteBuffer as Buffer).position(byteBuffer.position() + remaining)
+            return
         }
-        byteBuffer != null -> {
-            val data = ByteArray(remaining)
-            byteBuffer.get(data)
-            setInput(data)
-        }
-        else -> {
-            setInput(buffer.readByteArray(remaining))
-        }
+
+        // Fallback: copy to byte array
+        val data = ByteArray(remaining)
+        byteBuffer.get(data)
+        setInput(data)
+    } else {
+        setInput(buffer.readByteArray(remaining))
     }
 }
 
 /**
  * Deflates into a ByteBuffer, using the most efficient method available.
  */
-private fun Deflater.deflateInto(buffer: ByteBuffer): Int =
-    when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM -> {
-            deflate(buffer)
-        }
-        buffer.hasArray() -> {
-            val count = deflate(buffer.array(), buffer.arrayOffset() + buffer.position(), buffer.remaining())
-            buffer.position(buffer.position() + count)
-            count
-        }
-        else -> {
-            val temp = ByteArray(buffer.remaining())
-            val count = deflate(temp)
-            buffer.put(temp, 0, count)
-            count
-        }
+private fun Deflater.deflateInto(buffer: ByteBuffer): Int {
+    try {
+        return deflate(buffer)
+    } catch (_: NoSuchMethodError) {
+        // ByteBuffer overload not available, use fallback
     }
 
+    // Fallback: use array if available
+    if (buffer.hasArray()) {
+        val count = deflate(buffer.array(), buffer.arrayOffset() + buffer.position(), buffer.remaining())
+        (buffer as Buffer).position(buffer.position() + count)
+        return count
+    }
+
+    // Fallback: use temp array
+    val temp = ByteArray(buffer.remaining())
+    val count = deflate(temp)
+    buffer.put(temp, 0, count)
+    return count
+}
+
 /**
- * Sets inflater input from a ReadBuffer, using the most efficient method available.
+ * Sets inflater input from a ReadBuffer, using ByteBuffer when available.
  */
 private fun Inflater.setInputFrom(buffer: ReadBuffer) {
     val remaining = buffer.remaining()
     if (remaining == 0) return
 
-    val byteBuffer = (buffer as? JvmBuffer)?.buffer
+    val byteBuffer = (buffer as? BaseJvmBuffer)?.byteBuffer
 
-    when {
-        byteBuffer != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM -> {
+    if (byteBuffer != null) {
+        try {
             setInput(byteBuffer)
+            return
+        } catch (_: NoSuchMethodError) {
+            // ByteBuffer overload not available, use fallback
         }
-        byteBuffer != null && byteBuffer.hasArray() -> {
+
+        // Fallback: use array if available
+        if (byteBuffer.hasArray()) {
             setInput(byteBuffer.array(), byteBuffer.arrayOffset() + byteBuffer.position(), remaining)
-            byteBuffer.position(byteBuffer.position() + remaining)
+            (byteBuffer as Buffer).position(byteBuffer.position() + remaining)
+            return
         }
-        byteBuffer != null -> {
-            val data = ByteArray(remaining)
-            byteBuffer.get(data)
-            setInput(data)
-        }
-        else -> {
-            setInput(buffer.readByteArray(remaining))
-        }
+
+        // Fallback: copy to byte array
+        val data = ByteArray(remaining)
+        byteBuffer.get(data)
+        setInput(data)
+    } else {
+        setInput(buffer.readByteArray(remaining))
     }
 }
 
 /**
  * Inflates into a ByteBuffer, using the most efficient method available.
  */
-private fun Inflater.inflateInto(buffer: ByteBuffer): Int =
-    when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM -> {
-            inflate(buffer)
-        }
-        buffer.hasArray() -> {
-            val count = inflate(buffer.array(), buffer.arrayOffset() + buffer.position(), buffer.remaining())
-            buffer.position(buffer.position() + count)
-            count
-        }
-        else -> {
-            val temp = ByteArray(buffer.remaining())
-            val count = inflate(temp)
-            buffer.put(temp, 0, count)
-            count
-        }
+private fun Inflater.inflateInto(buffer: ByteBuffer): Int {
+    try {
+        return inflate(buffer)
+    } catch (_: NoSuchMethodError) {
+        // ByteBuffer overload not available, use fallback
     }
+
+    // Fallback: use array if available
+    if (buffer.hasArray()) {
+        val count = inflate(buffer.array(), buffer.arrayOffset() + buffer.position(), buffer.remaining())
+        (buffer as Buffer).position(buffer.position() + count)
+        return count
+    }
+
+    // Fallback: use temp array
+    val temp = ByteArray(buffer.remaining())
+    val count = inflate(temp)
+    buffer.put(temp, 0, count)
+    return count
+}
 
 /**
  * Updates CRC from a ReadBuffer without consuming the buffer.
@@ -143,21 +159,29 @@ private fun Inflater.inflateInto(buffer: ByteBuffer): Int =
  */
 private fun CRC32.updateFrom(buffer: ReadBuffer): Int {
     val remaining = buffer.remaining()
-    val byteBuffer = (buffer as? JvmBuffer)?.buffer
+    val byteBuffer = (buffer as? BaseJvmBuffer)?.byteBuffer
     val savedPosition = buffer.position()
 
-    when {
-        byteBuffer != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O -> {
+    if (byteBuffer != null) {
+        try {
+            @Suppress("Since15")
             update(byteBuffer)
+            buffer.position(savedPosition)
+            return remaining
+        } catch (_: NoSuchMethodError) {
+            // ByteBuffer overload not available (Java 8 / Android < API 26)
         }
-        byteBuffer != null && byteBuffer.hasArray() -> {
+
+        // Fallback: use array if available
+        if (byteBuffer.hasArray()) {
             update(byteBuffer.array(), byteBuffer.arrayOffset() + byteBuffer.position(), remaining)
-        }
-        else -> {
-            update(buffer.readByteArray(remaining))
+            buffer.position(savedPosition)
+            return remaining
         }
     }
 
+    // Fallback: read to byte array
+    update(buffer.readByteArray(remaining))
     buffer.position(savedPosition)
     return remaining
 }
@@ -170,7 +194,7 @@ private inline fun emitPartialBuffer(
     onOutput: (ReadBuffer) -> Unit,
 ): Boolean {
     if (output == null) return false
-    val buffer = (output as JvmBuffer).buffer
+    val buffer = (output as BaseJvmBuffer).byteBuffer
     if (buffer.position() > 0) {
         output.resetForRead()
         onOutput(output)
@@ -183,7 +207,7 @@ private inline fun emitPartialBuffer(
 // Compressors
 // =============================================================================
 
-private class AndroidDeflateStreamingCompressor(
+private class JvmDeflateStreamingCompressor(
     level: CompressionLevel,
     nowrap: Boolean,
     override val allocator: BufferAllocator,
@@ -240,7 +264,7 @@ private class AndroidDeflateStreamingCompressor(
             }
 
             val output = currentOutput!!
-            val buffer = (output as JvmBuffer).buffer
+            val buffer = (output as BaseJvmBuffer).byteBuffer
             val count = deflater.deflateInto(buffer)
 
             when {
@@ -257,7 +281,7 @@ private class AndroidDeflateStreamingCompressor(
     }
 }
 
-private class AndroidGzipStreamingCompressor(
+private class JvmGzipStreamingCompressor(
     level: CompressionLevel,
     override val allocator: BufferAllocator,
     private val outputBufferSize: Int,
@@ -337,7 +361,7 @@ private class AndroidGzipStreamingCompressor(
             }
 
             val output = currentOutput!!
-            val buffer = (output as JvmBuffer).buffer
+            val buffer = (output as BaseJvmBuffer).byteBuffer
             val count = deflater.deflateInto(buffer)
 
             when {
@@ -358,7 +382,7 @@ private class AndroidGzipStreamingCompressor(
 // Decompressors
 // =============================================================================
 
-private class AndroidInflateStreamingDecompressor(
+private class JvmInflateStreamingDecompressor(
     nowrap: Boolean,
     override val allocator: BufferAllocator,
     outputBufferSize: Int,
@@ -383,6 +407,10 @@ private class AndroidInflateStreamingDecompressor(
         drainInflater(onOutput)
         emitPartialBuffer(currentOutput, onOutput)
         currentOutput = null
+
+        if (!inflater.finished() && !inflater.needsInput()) {
+            throw CompressionException("Incomplete compressed data stream")
+        }
     }
 
     override fun reset() {
@@ -405,7 +433,7 @@ private class AndroidInflateStreamingDecompressor(
             }
 
             val output = currentOutput!!
-            val buffer = (output as JvmBuffer).buffer
+            val buffer = (output as BaseJvmBuffer).byteBuffer
             val count = inflater.inflateInto(buffer)
 
             when {
@@ -446,7 +474,7 @@ actual fun SuspendingStreamingDecompressor.Companion.create(
         StreamingDecompressor.create(algorithm, allocator),
     )
 
-private class AndroidGzipStreamingDecompressor(
+private class JvmGzipStreamingDecompressor(
     override val allocator: BufferAllocator,
     outputBufferSize: Int,
     expectedSize: Int,
@@ -505,7 +533,7 @@ private class AndroidGzipStreamingDecompressor(
             }
 
             val output = currentOutput!!
-            val buffer = (output as JvmBuffer).buffer
+            val buffer = (output as BaseJvmBuffer).byteBuffer
             val count = inflater.inflateInto(buffer)
 
             when {

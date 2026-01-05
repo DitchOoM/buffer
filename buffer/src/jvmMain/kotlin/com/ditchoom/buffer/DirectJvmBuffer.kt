@@ -31,6 +31,8 @@ class DirectJvmBuffer(
      */
     override val nativeSize: Int get() = capacity
 
+    override fun slice() = DirectJvmBuffer(byteBuffer.slice())
+
     companion object {
         private val addressField: Field? by lazy {
             try {

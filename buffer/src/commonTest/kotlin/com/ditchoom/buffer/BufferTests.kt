@@ -1221,4 +1221,234 @@ class BufferTests {
     }
 
     // endregion
+
+    // region indexOf Short/Int/Long/String tests
+
+    @Test
+    fun indexOfShortFound() {
+        val buf = PlatformBuffer.allocate(10, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.writeShort(0x0102)
+        buf.writeShort(0x0304)
+        buf.writeShort(0x0506)
+        buf.resetForRead()
+        assertEquals(2, buf.indexOf(0x0304.toShort()))
+    }
+
+    @Test
+    fun indexOfShortNotFound() {
+        val buf = PlatformBuffer.allocate(6, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.writeShort(0x0102)
+        buf.writeShort(0x0304)
+        buf.writeShort(0x0506)
+        buf.resetForRead()
+        assertEquals(-1, buf.indexOf(0x0708.toShort()))
+    }
+
+    @Test
+    fun indexOfShortAtStart() {
+        val buf = PlatformBuffer.allocate(6, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.writeShort(0x0102)
+        buf.writeShort(0x0304)
+        buf.writeShort(0x0506)
+        buf.resetForRead()
+        assertEquals(0, buf.indexOf(0x0102.toShort()))
+    }
+
+    @Test
+    fun indexOfShortUnaligned() {
+        // Test finding short value at odd offset
+        val buf = PlatformBuffer.allocate(7, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.writeByte(0x00)
+        buf.writeShort(0x0102)
+        buf.writeShort(0x0304)
+        buf.writeShort(0x0506)
+        buf.resetForRead()
+        assertEquals(1, buf.indexOf(0x0102.toShort()))
+    }
+
+    @Test
+    fun indexOfIntFound() {
+        val buf = PlatformBuffer.allocate(12, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.writeInt(0x01020304)
+        buf.writeInt(0x05060708)
+        buf.writeInt(0x090A0B0C)
+        buf.resetForRead()
+        assertEquals(4, buf.indexOf(0x05060708))
+    }
+
+    @Test
+    fun indexOfIntNotFound() {
+        val buf = PlatformBuffer.allocate(12, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.writeInt(0x01020304)
+        buf.writeInt(0x05060708)
+        buf.writeInt(0x090A0B0C)
+        buf.resetForRead()
+        assertEquals(-1, buf.indexOf(0x11223344))
+    }
+
+    @Test
+    fun indexOfIntAtStart() {
+        val buf = PlatformBuffer.allocate(12, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.writeInt(0x01020304)
+        buf.writeInt(0x05060708)
+        buf.writeInt(0x090A0B0C)
+        buf.resetForRead()
+        assertEquals(0, buf.indexOf(0x01020304))
+    }
+
+    @Test
+    fun indexOfLongFound() {
+        val buf = PlatformBuffer.allocate(24, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.writeLong(0x0102030405060708L)
+        buf.writeLong(0x090A0B0C0D0E0F10L)
+        buf.writeLong(0x1112131415161718L)
+        buf.resetForRead()
+        assertEquals(8, buf.indexOf(0x090A0B0C0D0E0F10L))
+    }
+
+    @Test
+    fun indexOfLongNotFound() {
+        val buf = PlatformBuffer.allocate(24, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.writeLong(0x0102030405060708L)
+        buf.writeLong(0x090A0B0C0D0E0F10L)
+        buf.writeLong(0x1112131415161718L)
+        buf.resetForRead()
+        assertEquals(-1, buf.indexOf(0x2122232425262728L))
+    }
+
+    @Test
+    fun indexOfLongAtStart() {
+        val buf = PlatformBuffer.allocate(24, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.writeLong(0x0102030405060708L)
+        buf.writeLong(0x090A0B0C0D0E0F10L)
+        buf.writeLong(0x1112131415161718L)
+        buf.resetForRead()
+        assertEquals(0, buf.indexOf(0x0102030405060708L))
+    }
+
+    @Test
+    fun indexOfStringFound() {
+        val buf = PlatformBuffer.allocate(100)
+        buf.writeString("Hello, World!")
+        buf.resetForRead()
+        assertEquals(7, buf.indexOf("World"))
+    }
+
+    @Test
+    fun indexOfStringNotFound() {
+        val buf = PlatformBuffer.allocate(100)
+        buf.writeString("Hello, World!")
+        buf.resetForRead()
+        assertEquals(-1, buf.indexOf("Goodbye"))
+    }
+
+    @Test
+    fun indexOfStringAtStart() {
+        val buf = PlatformBuffer.allocate(100)
+        buf.writeString("Hello, World!")
+        buf.resetForRead()
+        assertEquals(0, buf.indexOf("Hello"))
+    }
+
+    @Test
+    fun indexOfStringEmpty() {
+        val buf = PlatformBuffer.allocate(100)
+        buf.writeString("Hello, World!")
+        buf.resetForRead()
+        assertEquals(0, buf.indexOf(""))
+    }
+
+    @Test
+    fun indexOfStringUnicode() {
+        val buf = PlatformBuffer.allocate(100)
+        buf.writeString("Hello, 世界!")
+        buf.resetForRead()
+        assertEquals(7, buf.indexOf("世界"))
+    }
+
+    // endregion
+
+    // region fill tests
+
+    @Test
+    fun fillByte() {
+        val buf = PlatformBuffer.allocate(10)
+        buf.fill(0x42.toByte())
+        buf.resetForRead()
+        assertEquals(10, buf.remaining())
+        for (i in 0 until 10) {
+            assertEquals(0x42.toByte(), buf.readByte())
+        }
+    }
+
+    @Test
+    fun fillBytePartial() {
+        val buf = PlatformBuffer.allocate(10)
+        buf.writeByte(0x01)
+        buf.writeByte(0x02)
+        buf.fill(0x42.toByte())
+        buf.resetForRead()
+        assertEquals(0x01.toByte(), buf.readByte())
+        assertEquals(0x02.toByte(), buf.readByte())
+        for (i in 0 until 8) {
+            assertEquals(0x42.toByte(), buf.readByte())
+        }
+    }
+
+    @Test
+    fun fillByteZero() {
+        val buf = PlatformBuffer.allocate(10)
+        buf.fill(0x00.toByte())
+        buf.resetForRead()
+        for (i in 0 until 10) {
+            assertEquals(0x00.toByte(), buf.readByte())
+        }
+    }
+
+    @Test
+    fun fillShort() {
+        val buf = PlatformBuffer.allocate(10, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.fill(0x1234.toShort())
+        buf.resetForRead()
+        assertEquals(5, buf.remaining() / 2)
+        for (i in 0 until 5) {
+            assertEquals(0x1234.toShort(), buf.readShort())
+        }
+    }
+
+    @Test
+    fun fillInt() {
+        val buf = PlatformBuffer.allocate(12, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.fill(0x12345678)
+        buf.resetForRead()
+        assertEquals(3, buf.remaining() / 4)
+        for (i in 0 until 3) {
+            assertEquals(0x12345678, buf.readInt())
+        }
+    }
+
+    @Test
+    fun fillLong() {
+        val buf = PlatformBuffer.allocate(24, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.fill(0x123456789ABCDEF0L)
+        buf.resetForRead()
+        assertEquals(3, buf.remaining() / 8)
+        for (i in 0 until 3) {
+            assertEquals(0x123456789ABCDEF0L, buf.readLong())
+        }
+    }
+
+    @Test
+    fun fillLittleEndian() {
+        val buf = PlatformBuffer.allocate(8, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        buf.fill(0x12345678)
+        buf.resetForRead()
+        // In little endian, 0x12345678 is stored as 78 56 34 12
+        assertEquals(0x78.toByte(), buf.readByte())
+        assertEquals(0x56.toByte(), buf.readByte())
+        assertEquals(0x34.toByte(), buf.readByte())
+        assertEquals(0x12.toByte(), buf.readByte())
+    }
+
+    // endregion
 }

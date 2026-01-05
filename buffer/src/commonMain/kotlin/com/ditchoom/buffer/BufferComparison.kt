@@ -1,9 +1,7 @@
 package com.ditchoom.buffer
 
-/**
- * Utility functions for optimized buffer comparison operations.
- * Provides bulk comparison using Long (8-byte) and Int (4-byte) chunks.
- */
+// Utility functions for optimized buffer comparison operations.
+// Provides bulk comparison using Long (8-byte) and Int (4-byte) chunks.
 
 /**
  * Compare two buffers for equality starting at specified positions.

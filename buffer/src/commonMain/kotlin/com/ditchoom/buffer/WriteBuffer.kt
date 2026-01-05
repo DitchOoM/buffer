@@ -100,18 +100,14 @@ interface WriteBuffer : PositionBuffer {
     )
     fun write(uShort: UShort): WriteBuffer = writeUShort(uShort)
 
-    // Optimized Int write - direct byte access instead of loop
+    // Int write using Short writes - enables optimized ShortArrayBuffer implementations
     fun writeInt(int: Int): WriteBuffer {
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            writeByte((int shr 24).toByte())
-            writeByte((int shr 16).toByte())
-            writeByte((int shr 8).toByte())
-            writeByte(int.toByte())
+            writeShort((int shr 16).toShort())
+            writeShort(int.toShort())
         } else {
-            writeByte(int.toByte())
-            writeByte((int shr 8).toByte())
-            writeByte((int shr 16).toByte())
-            writeByte((int shr 24).toByte())
+            writeShort(int.toShort())
+            writeShort((int shr 16).toShort())
         }
         return this
     }
@@ -121,15 +117,11 @@ interface WriteBuffer : PositionBuffer {
         int: Int,
     ): WriteBuffer {
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            set(index, (int shr 24).toByte())
-            set(index + 1, (int shr 16).toByte())
-            set(index + 2, (int shr 8).toByte())
-            set(index + 3, int.toByte())
+            set(index, (int shr 16).toShort())
+            set(index + 2, int.toShort())
         } else {
-            set(index, int.toByte())
-            set(index + 1, (int shr 8).toByte())
-            set(index + 2, (int shr 16).toByte())
-            set(index + 3, (int shr 24).toByte())
+            set(index, int.toShort())
+            set(index + 2, (int shr 16).toShort())
         }
         return this
     }
@@ -266,4 +258,125 @@ interface WriteBuffer : PositionBuffer {
     ): WriteBuffer
 
     fun write(buffer: ReadBuffer)
+
+    /**
+     * Fills the remaining space in this buffer with the specified byte value.
+     *
+     * Uses optimized bulk writes (8 bytes at a time) when possible.
+     * After this operation, position will equal limit.
+     *
+     * @param value The byte value to fill with
+     * @return This buffer for chaining
+     */
+    fun fill(value: Byte): WriteBuffer {
+        val count = remaining()
+        if (count == 0) return this
+
+        // Create a Long with the byte repeated 8 times for bulk writing
+        val b = value.toLong() and 0xFFL
+        val longValue =
+            b or (b shl 8) or (b shl 16) or (b shl 24) or
+                (b shl 32) or (b shl 40) or (b shl 48) or (b shl 56)
+
+        // Write 8 bytes at a time
+        var remaining = count
+        while (remaining >= 8) {
+            writeLong(longValue)
+            remaining -= 8
+        }
+
+        // Write remaining bytes
+        while (remaining > 0) {
+            writeByte(value)
+            remaining--
+        }
+        return this
+    }
+
+    /**
+     * Fills the remaining space in this buffer with the specified Short value.
+     *
+     * Uses optimized bulk writes (8 bytes at a time) when possible.
+     * The remaining space must be a multiple of 2 bytes, otherwise an exception is thrown.
+     *
+     * @param value The Short value to fill with
+     * @return This buffer for chaining
+     * @throws IllegalArgumentException if remaining space is not a multiple of 2
+     */
+    fun fill(value: Short): WriteBuffer {
+        val count = remaining()
+        require(count % 2 == 0) { "Remaining space ($count) must be a multiple of 2 for Short fill" }
+        if (count == 0) return this
+
+        // Create a Long with the Short repeated 4 times for bulk writing
+        val s = value.toLong() and 0xFFFFL
+        val longValue = s or (s shl 16) or (s shl 32) or (s shl 48)
+
+        // Write 8 bytes (4 shorts) at a time
+        var remaining = count
+        while (remaining >= 8) {
+            writeLong(longValue)
+            remaining -= 8
+        }
+
+        // Write remaining shorts
+        while (remaining >= 2) {
+            writeShort(value)
+            remaining -= 2
+        }
+        return this
+    }
+
+    /**
+     * Fills the remaining space in this buffer with the specified Int value.
+     *
+     * Uses optimized bulk writes (8 bytes at a time) when possible.
+     * The remaining space must be a multiple of 4 bytes, otherwise an exception is thrown.
+     *
+     * @param value The Int value to fill with
+     * @return This buffer for chaining
+     * @throws IllegalArgumentException if remaining space is not a multiple of 4
+     */
+    fun fill(value: Int): WriteBuffer {
+        val count = remaining()
+        require(count % 4 == 0) { "Remaining space ($count) must be a multiple of 4 for Int fill" }
+        if (count == 0) return this
+
+        // Create a Long with the Int repeated twice for bulk writing
+        val i = value.toLong() and 0xFFFFFFFFL
+        val longValue = i or (i shl 32)
+
+        // Write 8 bytes (2 ints) at a time
+        var remaining = count
+        while (remaining >= 8) {
+            writeLong(longValue)
+            remaining -= 8
+        }
+
+        // Write remaining int if any
+        if (remaining >= 4) {
+            writeInt(value)
+        }
+        return this
+    }
+
+    /**
+     * Fills the remaining space in this buffer with the specified Long value.
+     *
+     * Writes [value] repeatedly using the buffer's byte order. The remaining space
+     * must be a multiple of 8 bytes, otherwise an exception is thrown.
+     *
+     * @param value The Long value to fill with
+     * @return This buffer for chaining
+     * @throws IllegalArgumentException if remaining space is not a multiple of 8
+     */
+    fun fill(value: Long): WriteBuffer {
+        val count = remaining()
+        require(count % 8 == 0) { "Remaining space ($count) must be a multiple of 8 for Long fill" }
+        val iterations = count / 8
+        for (i in 0 until iterations) {
+            writeLong(value)
+        }
+        return this
+    }
 }

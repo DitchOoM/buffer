@@ -73,6 +73,18 @@ kotlin {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
         }
+
+        // Shared source set for JVM and Android (java.util.zip APIs)
+        val jvmCommonMain by creating {
+            dependsOn(commonMain.get())
+        }
+        jvmMain {
+            dependsOn(jvmCommonMain)
+        }
+        androidMain {
+            dependsOn(jvmCommonMain)
+        }
+
         jsMain.dependencies {
             implementation(libs.kotlin.web)
             implementation(libs.kotlin.js)

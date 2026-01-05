@@ -137,6 +137,56 @@ val bigEndian = PlatformBuffer.allocate(1024, byteOrder = ByteOrder.BIG_ENDIAN)
 val littleEndian = PlatformBuffer.allocate(1024, byteOrder = ByteOrder.LITTLE_ENDIAN)
 ```
 
+## Searching Buffers
+
+Find values within a buffer:
+
+```kotlin
+val buffer = PlatformBuffer.allocate(100)
+buffer.writeString("Hello, World!")
+buffer.resetForRead()
+
+// Find a byte
+val index = buffer.indexOf(','.code.toByte())  // 5
+
+// Find a string
+val worldIndex = buffer.indexOf("World")  // 7
+
+// Find primitive values (respects byte order)
+buffer.indexOf(0x1234.toShort())
+buffer.indexOf(0x12345678)
+buffer.indexOf(0x123456789ABCDEF0L)
+```
+
+## Comparing Buffers
+
+Compare buffer contents:
+
+```kotlin
+val buf1 = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4))
+val buf2 = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4))
+val buf3 = PlatformBuffer.wrap(byteArrayOf(1, 2, 5, 4))
+
+buf1.contentEquals(buf2)  // true
+buf1.contentEquals(buf3)  // false
+buf1.mismatch(buf3)       // 2 (index where they differ)
+```
+
+## Filling Buffers
+
+Fill a buffer with a repeated value:
+
+```kotlin
+val buffer = PlatformBuffer.allocate(1024)
+
+// Zero-fill (optimized: writes 8 bytes at a time)
+buffer.fill(0x00.toByte())
+
+// Fill with a pattern
+buffer.resetForWrite()
+buffer.fill(0xDEADBEEF.toInt())  // Requires size divisible by 4
+```
+
 ## Buffer Pooling
 
 For high-performance scenarios, use buffer pools to avoid allocation overhead:

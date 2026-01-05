@@ -39,12 +39,14 @@ The project uses the expect/actual pattern with platform-specific implementation
 src/
 ├── commonMain/          # Shared interfaces (PlatformBuffer, ReadBuffer, WriteBuffer)
 ├── commonTest/          # Shared tests run on all platforms
-├── jvmMain/             # JVM: HeapJvmBuffer (ByteArray) + DirectJvmBuffer (native)
+├── jvmCommonMain/       # Shared JVM/Android: BaseJvmBuffer, CharsetEncoderHelper
+├── jvmMain/             # JVM: HeapJvmBuffer, DirectJvmBuffer, JvmBuffer
 ├── androidMain/         # Android: extends JVM + SharedMemory/Parcelable IPC
 ├── appleMain/           # iOS/macOS/watchOS/tvOS: MutableDataBuffer (NSMutableData)
 ├── jsMain/              # Browser/Node.js: JsBuffer (Int8Array, SharedArrayBuffer support)
 ├── wasmJsMain/          # WASM: LinearBuffer (native memory) + ByteArrayBuffer (heap)
-└── nativeMain/          # Linux/Apple shared: ByteArrayBuffer (Kotlin ByteArray)
+├── nonJvmMain/          # Shared native/WASM: ByteArrayBuffer
+└── nativeMain/          # Linux/Apple native: uses nonJvmMain
 ```
 
 ### Buffer Types by Platform
@@ -70,6 +72,36 @@ src/
 - `ReadBuffer` - Read operations (relative and absolute)
 - `WriteBuffer` - Write operations (relative and absolute)
 - `AllocationZone` - Memory allocation strategy: `Heap`, `Direct`, `SharedMemory`, `Custom`
+
+### Buffer Comparison & Search Methods
+
+ReadBuffer provides optimized search and comparison operations:
+
+```kotlin
+// Content comparison (optimized with SIMD on JVM 11+)
+buffer1.contentEquals(buffer2)  // true if remaining bytes are identical
+buffer1.mismatch(buffer2)       // index of first difference, or -1
+
+// Search for values (uses bulk Long comparisons, XOR zero-detection)
+buffer.indexOf(0x42.toByte())           // find byte
+buffer.indexOf(0x1234.toShort())        // find Short (respects byte order)
+buffer.indexOf(0x12345678)              // find Int
+buffer.indexOf(0x123456789ABCDEF0L)     // find Long
+buffer.indexOf("Hello")                 // find string (UTF-8 default)
+buffer.indexOf(otherBuffer)             // find byte sequence
+```
+
+### Buffer Fill Methods
+
+WriteBuffer provides optimized fill operations (writes 8 bytes at a time internally):
+
+```kotlin
+// Fill remaining space with value
+buffer.fill(0x00.toByte())      // zero-fill (uses Long writes internally)
+buffer.fill(0x1234.toShort())   // fill with Short pattern
+buffer.fill(0x12345678)         // fill with Int pattern
+buffer.fill(0x123456789ABCDEF0L) // fill with Long pattern
+```
 
 ### Buffer Pool (`com.ditchoom.buffer.pool`)
 

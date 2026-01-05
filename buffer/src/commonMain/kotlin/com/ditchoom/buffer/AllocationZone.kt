@@ -1,7 +1,7 @@
 package com.ditchoom.buffer
 
 sealed class AllocationZone {
-    /** Allocates a buffer in the java heap.*/
+    /** Allocates a buffer in the kotlin managed heap.*/
     object Heap : AllocationZone()
 
     /** Allocates a direct buffer in native memory.*/

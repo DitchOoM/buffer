@@ -16,6 +16,7 @@ Buffer provides a unified API for managing byte buffers across all Kotlin platfo
 - **Kotlin Multiplatform**: Single API works across JVM, Android, iOS, JS, WASM, and Native
 - **Buffer Pooling**: High-performance buffer reuse for network I/O and protocol parsing
 - **Stream Processing**: Handle fragmented data across chunk boundaries
+- **Optimized Operations**: Bulk comparison, search (indexOf), and fill operations using SIMD-like techniques
 
 ## Platform Implementations
 
