@@ -25,12 +25,11 @@ actual fun PlatformBuffer.Companion.wrap(
 actual fun PlatformBuffer.Companion.allocateNative(
     size: Int,
     byteOrder: ByteOrder,
-): PlatformBuffer {
+): PlatformBuffer =
     throw UnsupportedOperationException(
         "Native memory access is not supported on Linux. " +
             "ByteArrayBuffer uses Kotlin ByteArray which lives in managed memory.",
     )
-}
 
 /**
  * Allocates a buffer with shared memory support.
