@@ -61,7 +61,7 @@ val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
 | JVM | [`DirectByteBuffer`](https://docs.oracle.com/javase/8/docs/api/java/nio/ByteBuffer.html#allocateDirect-int-) |
 | Android | [`DirectByteBuffer`](https://developer.android.com/reference/java/nio/ByteBuffer#allocateDirect(int)) |
 | iOS/macOS | [`NSMutableData`](https://developer.apple.com/documentation/foundation/nsmutabledata) |
-| JavaScript | [`Uint8Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array) |
+| JavaScript | [`Int8Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int8Array) |
 | WASM | `LinearBuffer` (native WASM memory) |
 | Linux | `ByteArrayBuffer` |
 
@@ -84,7 +84,7 @@ val buffer = PlatformBuffer.allocate(1024, AllocationZone.SharedMemory)
 | Platform | Implementation |
 |----------|---------------|
 | Android (API 27+) | [`SharedMemory`](https://developer.android.com/reference/android/os/SharedMemory) |
-| Android (< API 27) | [`ParcelFileDescriptor`](https://developer.android.com/reference/android/os/ParcelFileDescriptor) pipes |
+| Android (< API 27) | Falls back to `DirectByteBuffer` |
 | JavaScript | [`SharedArrayBuffer`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer) (requires CORS headers) |
 | WASM | `LinearBuffer` (falls back to Direct) |
 | Others | Falls back to Direct |
