@@ -39,13 +39,30 @@ The project uses the expect/actual pattern with platform-specific implementation
 src/
 ├── commonMain/          # Shared interfaces (PlatformBuffer, ReadBuffer, WriteBuffer)
 ├── commonTest/          # Shared tests run on all platforms
-├── jvmMain/             # JVM: wraps java.nio.ByteBuffer
+├── jvmMain/             # JVM: HeapJvmBuffer (ByteArray) + DirectJvmBuffer (native)
 ├── androidMain/         # Android: extends JVM + SharedMemory/Parcelable IPC
-├── appleMain/           # iOS/macOS/watchOS/tvOS: wraps NSData/NSMutableData
-├── jsMain/              # Browser/Node.js: wraps Uint8Array (SharedArrayBuffer support)
+├── appleMain/           # iOS/macOS/watchOS/tvOS: MutableDataBuffer (NSMutableData)
+├── jsMain/              # Browser/Node.js: JsBuffer (Int8Array, SharedArrayBuffer support)
 ├── wasmJsMain/          # WASM: LinearBuffer (native memory) + ByteArrayBuffer (heap)
-└── nativeMain/          # Linux: uses Kotlin ByteArray
+└── nativeMain/          # Linux/Apple shared: ByteArrayBuffer (Kotlin ByteArray)
 ```
+
+### Buffer Types by Platform
+
+| Platform | Heap (wrap/Heap zone) | Direct (allocate) | Shared Memory |
+|----------|----------------------|-------------------|---------------|
+| JVM | `HeapJvmBuffer` | `DirectJvmBuffer` | Falls back to Direct |
+| Android | `HeapJvmBuffer` | `DirectJvmBuffer` | `ParcelableSharedMemoryBuffer` |
+| Apple | `ByteArrayBuffer` | `MutableDataBuffer` | Falls back to Direct |
+| JS | `JsBuffer` | `JsBuffer` | `JsBuffer` (SharedArrayBuffer) |
+| WASM | `ByteArrayBuffer` | `LinearBuffer` | Falls back to Direct |
+| Linux | `ByteArrayBuffer` | `ByteArrayBuffer` | Falls back to Direct |
+
+### Memory Access Interfaces
+
+- `NativeMemoryAccess` - Direct native memory pointer (DirectJvmBuffer, MutableDataBuffer, LinearBuffer, JsBuffer)
+- `ManagedMemoryAccess` - Kotlin ByteArray backing (HeapJvmBuffer, ByteArrayBuffer)
+- `SharedMemoryAccess` - Cross-process shared memory (ParcelableSharedMemoryBuffer, JsBuffer with SharedArrayBuffer)
 
 ### Key Interfaces
 
@@ -96,10 +113,13 @@ PlatformBuffer.wrap(byteArray)
 
 ## Platform Notes
 
-- **JVM/Android:** Direct ByteBuffers used by default to avoid copies
-- **Android SharedMemory:** Use `AllocationZone.SharedMemory` for zero-copy IPC via Parcelable
+- **JVM/Android:** Direct ByteBuffers (`DirectJvmBuffer`) used by default; `HeapJvmBuffer` for `wrap()` and `Heap` zone
+- **Android SharedMemory:** Use `AllocationZone.SharedMemory` for zero-copy IPC via Parcelable (API 27+)
+- **Apple:** `MutableDataBuffer` wraps NSMutableData (native memory); `wrap(ByteArray)` returns `ByteArrayBuffer`
+- **Apple NSData interop:** Use `PlatformBuffer.wrap(nsData)` or `PlatformBuffer.wrap(nsMutableData)` for zero-copy Apple API interop
 - **JS SharedArrayBuffer:** Requires CORS headers (`Cross-Origin-Opener-Policy`, `Cross-Origin-Embedder-Policy`)
-- **WASM:** LinearBuffer (Direct) uses native WASM memory for JS interop; ByteArrayBuffer (Heap) for compute workloads
+- **WASM:** `LinearBuffer` (Direct) uses native WASM memory for JS interop; `ByteArrayBuffer` (Heap) for compute workloads
+- **Linux:** Only `ByteArrayBuffer` available (no native memory access)
 
 ## Benchmarking
 

@@ -18,6 +18,7 @@ class ParcelableSharedMemoryBuffer(
      * Always returns true since this buffer is backed by SharedMemory.
      */
     override val isShared: Boolean get() = true
+
     override fun describeContents(): Int = Parcelable.CONTENTS_FILE_DESCRIPTOR
 
     override fun writeToParcel(

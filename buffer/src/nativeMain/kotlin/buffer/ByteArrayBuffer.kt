@@ -1,6 +1,14 @@
 package com.ditchoom.buffer
 
-data class NativeBuffer(
+/**
+ * Buffer implementation backed by a Kotlin ByteArray (managed memory).
+ *
+ * This buffer lives in Kotlin's managed heap and is subject to garbage collection.
+ * Use this for temporary buffers or when wrapping existing ByteArrays.
+ *
+ * For native memory access on Apple platforms, use [MutableDataBuffer] instead.
+ */
+data class ByteArrayBuffer(
     val data: ByteArray,
     private var position: Int = 0,
     private var limit: Int = data.size,
@@ -10,6 +18,7 @@ data class NativeBuffer(
     ManagedMemoryAccess {
     override val backingArray: ByteArray get() = data
     override val arrayOffset: Int get() = 0
+
     override fun resetForRead() {
         limit = position
         position = 0
@@ -28,7 +37,7 @@ data class NativeBuffer(
 
     override fun get(index: Int): Byte = data[index]
 
-    override fun slice(): ReadBuffer = NativeBuffer(data.sliceArray(position until limit), byteOrder = byteOrder)
+    override fun slice(): ReadBuffer = ByteArrayBuffer(data.sliceArray(position until limit), byteOrder = byteOrder)
 
     override fun readByteArray(size: Int): ByteArray {
         val result = data.copyOfRange(position, position + size)
@@ -82,7 +91,7 @@ data class NativeBuffer(
     override fun write(buffer: ReadBuffer) {
         val start = position()
         val byteSize =
-            if (buffer is NativeBuffer) {
+            if (buffer is ByteArrayBuffer) {
                 writeBytes(buffer.data)
                 buffer.data.size
             } else {
@@ -116,7 +125,7 @@ data class NativeBuffer(
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
-        other as NativeBuffer
+        if (other !is ByteArrayBuffer) return false
         if (position != other.position) return false
         if (limit != other.limit) return false
         if (capacity != other.capacity) return false

@@ -8,13 +8,13 @@ actual fun PlatformBuffer.Companion.allocate(
     if (zone is AllocationZone.Custom) {
         return zone.allocator(size)
     }
-    return NativeBuffer(ByteArray(size), byteOrder = byteOrder)
+    return ByteArrayBuffer(ByteArray(size), byteOrder = byteOrder)
 }
 
 actual fun PlatformBuffer.Companion.wrap(
     array: ByteArray,
     byteOrder: ByteOrder,
-): PlatformBuffer = NativeBuffer(array, byteOrder = byteOrder)
+): PlatformBuffer = ByteArrayBuffer(array, byteOrder = byteOrder)
 
 /**
  * Allocates a buffer with guaranteed native memory access.
@@ -28,7 +28,7 @@ actual fun PlatformBuffer.Companion.allocateNative(
 ): PlatformBuffer {
     throw UnsupportedOperationException(
         "Native memory access is not supported on Linux. " +
-            "NativeBuffer uses Kotlin ByteArray which lives in managed memory.",
+            "ByteArrayBuffer uses Kotlin ByteArray which lives in managed memory.",
     )
 }
 
