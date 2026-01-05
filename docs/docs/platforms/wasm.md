@@ -48,10 +48,23 @@ Benchmark results (WASM production builds):
 
 LinearBuffer uses a bump allocator with pre-allocated memory:
 
-- **256MB** allocated at initialization
+- **16MB** allocated by default at first allocation
+- Configurable via `LinearMemoryAllocator.configure()`
 - Memory is not freed (bump allocator)
 - Best for buffers with longer lifetimes (interop scenarios)
 - Use `AllocationZone.Heap` for high-frequency short-lived allocations
+
+### Configuring Memory Size
+
+```kotlin
+// At app startup, BEFORE any LinearBuffer allocation:
+LinearMemoryAllocator.configure(initialSizeMB = 32)  // Set to 32MB
+
+// Or use a smaller size for lightweight apps:
+LinearMemoryAllocator.configure(initialSizeMB = 4)   // Set to 4MB
+```
+
+### Usage Patterns
 
 ```kotlin
 // Good: Long-lived buffer for JS interop
@@ -100,15 +113,16 @@ linearBuffer.readToJsArray(jsInt8Array, dstOffset = 0, length = 100)
 
 Due to a Kotlin/WASM production optimizer bug, LinearBuffer pre-allocates memory at initialization rather than growing dynamically. This means:
 
-1. **256MB limit** - Sufficient for typical interop use cases
+1. **Configurable limit** - Default 16MB, adjustable via `configureWasmMemory()`
 2. **No memory reclamation** - Bump allocator doesn't free memory
 3. **Use Heap for benchmarks** - High-frequency allocation benchmarks should use `AllocationZone.Heap`
 
-If you exceed the 256MB limit, you'll get an `OutOfMemoryError` with guidance:
+If you exceed the configured limit, you'll get an `OutOfMemoryError` with guidance:
 
 ```
-LinearBuffer allocation exceeded pre-allocated memory.
-Increase INITIAL_PAGES or use AllocationZone.Heap for high-frequency allocation.
+LinearBuffer allocation exceeded 16MB pre-allocated memory.
+Call LinearMemoryAllocator.configure(initialSizeMB = N) at startup with a larger value,
+or use AllocationZone.Heap for high-frequency allocation.
 ```
 
 ### ByteArray Conversion
