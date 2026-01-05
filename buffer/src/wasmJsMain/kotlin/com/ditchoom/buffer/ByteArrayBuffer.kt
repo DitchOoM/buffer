@@ -9,7 +9,10 @@ package com.ditchoom.buffer
 class ByteArrayBuffer(
     private val data: ByteArray,
     override val byteOrder: ByteOrder,
-) : PlatformBuffer {
+) : PlatformBuffer,
+    ManagedMemoryAccess {
+    override val backingArray: ByteArray get() = data
+    override val arrayOffset: Int get() = 0
     private var positionValue: Int = 0
     private var limitValue: Int = data.size
     override val capacity: Int = data.size

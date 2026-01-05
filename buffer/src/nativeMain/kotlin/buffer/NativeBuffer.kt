@@ -6,7 +6,10 @@ data class NativeBuffer(
     private var limit: Int = data.size,
     override val capacity: Int = data.size,
     override val byteOrder: ByteOrder,
-) : PlatformBuffer {
+) : PlatformBuffer,
+    ManagedMemoryAccess {
+    override val backingArray: ByteArray get() = data
+    override val arrayOffset: Int get() = 0
     override fun resetForRead() {
         limit = position
         position = 0

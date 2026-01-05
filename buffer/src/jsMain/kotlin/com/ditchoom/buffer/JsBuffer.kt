@@ -12,7 +12,8 @@ class JsBuffer(
     byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
     val sharedArrayBuffer: SharedArrayBuffer? = null,
 ) : BaseWebBuffer(buffer.byteLength, byteOrder),
-    NativeMemoryAccess {
+    NativeMemoryAccess,
+    SharedMemoryAccess {
     /**
      * The byte offset within the underlying ArrayBuffer.
      * Use with `new DataView(buffer.buffer, nativeAddress, nativeSize)`.
@@ -23,6 +24,11 @@ class JsBuffer(
      * The size of the native memory region in bytes.
      */
     override val nativeSize: Int get() = buffer.byteLength
+
+    /**
+     * Whether this buffer is backed by a SharedArrayBuffer.
+     */
+    override val isShared: Boolean get() = sharedArrayBuffer != null
 
     // Cached DataView for the entire buffer - avoids creating new DataView on each operation
     private val dataView = DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength)

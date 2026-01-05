@@ -31,3 +31,12 @@ actual fun PlatformBuffer.Companion.allocateNative(
             "NativeBuffer uses Kotlin ByteArray which lives in managed memory.",
     )
 }
+
+/**
+ * Allocates a buffer with shared memory support.
+ * On Linux/Native, falls back to regular allocation (no cross-process shared memory).
+ */
+actual fun PlatformBuffer.Companion.allocateShared(
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer = allocate(size, AllocationZone.Direct, byteOrder)

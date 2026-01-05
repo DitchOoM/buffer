@@ -64,3 +64,16 @@ actual fun PlatformBuffer.Companion.allocateNative(
     size: Int,
     byteOrder: ByteOrder,
 ): PlatformBuffer = JsBuffer(Int8Array(size), byteOrder)
+
+/**
+ * Allocates a buffer with shared memory (SharedArrayBuffer) if available.
+ * Falls back to regular ArrayBuffer if SharedArrayBuffer is not supported.
+ *
+ * Note: SharedArrayBuffer requires CORS headers:
+ * - Cross-Origin-Opener-Policy: same-origin
+ * - Cross-Origin-Embedder-Policy: require-corp
+ */
+actual fun PlatformBuffer.Companion.allocateShared(
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer = allocate(size, AllocationZone.SharedMemory, byteOrder)

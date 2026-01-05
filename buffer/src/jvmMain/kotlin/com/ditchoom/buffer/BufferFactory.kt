@@ -15,7 +15,7 @@ actual fun PlatformBuffer.Companion.allocate(
             ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
         }
     return when (zone) {
-        AllocationZone.Heap -> JvmBuffer(ByteBuffer.allocate(size).order(byteOrderNative))
+        AllocationZone.Heap -> HeapJvmBuffer(ByteBuffer.allocate(size).order(byteOrderNative))
         AllocationZone.SharedMemory,
         AllocationZone.Direct,
         -> DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
@@ -33,7 +33,7 @@ actual fun PlatformBuffer.Companion.wrap(
             ByteOrder.BIG_ENDIAN -> java.nio.ByteOrder.BIG_ENDIAN
             ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
         }
-    return JvmBuffer(ByteBuffer.wrap(array).order(byteOrderNative))
+    return HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrderNative))
 }
 
 /**
@@ -51,3 +51,12 @@ actual fun PlatformBuffer.Companion.allocateNative(
         }
     return DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
 }
+
+/**
+ * Allocates a buffer with shared memory support.
+ * On JVM, falls back to direct allocation (no cross-process shared memory).
+ */
+actual fun PlatformBuffer.Companion.allocateShared(
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer = allocate(size, AllocationZone.Direct, byteOrder)

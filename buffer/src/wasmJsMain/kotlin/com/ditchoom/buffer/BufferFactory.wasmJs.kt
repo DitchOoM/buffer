@@ -60,3 +60,12 @@ actual fun PlatformBuffer.Companion.allocateNative(
     val (offset, _) = LinearMemoryAllocator.allocate(size)
     return LinearBuffer(offset, size, byteOrder)
 }
+
+/**
+ * Allocates a buffer with shared memory support.
+ * On WASM, falls back to LinearBuffer (no cross-process shared memory).
+ */
+actual fun PlatformBuffer.Companion.allocateShared(
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer = allocate(size, AllocationZone.Direct, byteOrder)

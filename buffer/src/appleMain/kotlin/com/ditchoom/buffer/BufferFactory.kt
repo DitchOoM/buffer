@@ -34,3 +34,12 @@ actual fun PlatformBuffer.Companion.allocateNative(
     size: Int,
     byteOrder: ByteOrder,
 ): PlatformBuffer = MutableDataBuffer(NSMutableData.create(length = size.convert())!!, byteOrder = byteOrder)
+
+/**
+ * Allocates a buffer with shared memory support.
+ * On Apple, falls back to direct allocation (no cross-process shared memory API exposed).
+ */
+actual fun PlatformBuffer.Companion.allocateShared(
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer = allocate(size, AllocationZone.Direct, byteOrder)

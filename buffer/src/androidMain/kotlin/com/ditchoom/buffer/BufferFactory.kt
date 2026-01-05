@@ -20,15 +20,15 @@ actual fun PlatformBuffer.Companion.allocate(
             ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
         }
     return when (zone) {
-        AllocationZone.Heap -> JvmBuffer(ByteBuffer.allocate(size).order(byteOrderNative))
-        AllocationZone.Direct -> JvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
+        AllocationZone.Heap -> HeapJvmBuffer(ByteBuffer.allocate(size).order(byteOrderNative))
+        AllocationZone.Direct -> DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
         AllocationZone.SharedMemory ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && size > 0) {
                 val sharedMemory = SharedMemory.create(null, size)
                 val buffer = sharedMemory.mapReadWrite().order(byteOrderNative)
                 ParcelableSharedMemoryBuffer(buffer, sharedMemory)
             } else {
-                JvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
+                DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
             }
 
         is AllocationZone.Custom -> zone.allocator(size)
@@ -44,7 +44,7 @@ actual fun PlatformBuffer.Companion.wrap(
             ByteOrder.BIG_ENDIAN -> java.nio.ByteOrder.BIG_ENDIAN
             ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
         }
-    return JvmBuffer(ByteBuffer.wrap(array).order(byteOrderNative))
+    return HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrderNative))
 }
 
 /**
@@ -62,3 +62,15 @@ actual fun PlatformBuffer.Companion.allocateNative(
         }
     return DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
 }
+
+/**
+ * Allocates a buffer with shared memory (SharedMemory) if available.
+ * Falls back to DirectJvmBuffer if SharedMemory is not supported (API < 27) or size is 0.
+ *
+ * SharedMemory enables zero-copy IPC via Parcelable on Android.
+ */
+@SuppressLint("NewApi")
+actual fun PlatformBuffer.Companion.allocateShared(
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer = allocate(size, AllocationZone.SharedMemory, byteOrder)

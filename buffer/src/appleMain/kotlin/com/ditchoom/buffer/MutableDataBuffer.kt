@@ -11,6 +11,7 @@ import kotlinx.cinterop.convert
 import kotlinx.cinterop.plus
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.set
+import kotlinx.cinterop.toLong
 import kotlinx.cinterop.usePinned
 import platform.CoreFoundation.CFDataRef
 import platform.Foundation.CFBridgingRelease
@@ -28,9 +29,11 @@ import platform.posix.memcpy
 class MutableDataBuffer(
     dataRef: NSData,
     override val byteOrder: ByteOrder,
-    private val backingArray: ByteArray? = null,
+    private val internalBackingArray: ByteArray? = null,
 ) : DataBuffer(dataRef, byteOrder),
-    PlatformBuffer {
+    PlatformBuffer,
+    NativeMemoryAccess,
+    ManagedMemoryAccess {
     val mutableData = dataRef as? NSMutableData
 
     @Suppress("UNCHECKED_CAST")
@@ -38,16 +41,52 @@ class MutableDataBuffer(
 
     init {
         check(
-            (mutableBytePointer != null && backingArray == null) ||
-                (mutableBytePointer == null && backingArray != null),
+            (mutableBytePointer != null && internalBackingArray == null) ||
+                (mutableBytePointer == null && internalBackingArray != null),
         )
     }
+
+    /**
+     * The native memory address for C interop.
+     * Only available for buffers backed by NSMutableData (not wrapped ByteArrays).
+     *
+     * @throws UnsupportedOperationException if this buffer wraps a ByteArray
+     */
+    override val nativeAddress: Long
+        get() = mutableBytePointer?.toLong()
+            ?: throw UnsupportedOperationException(
+                "Native memory access not available for wrapped ByteArray buffers. " +
+                    "Use PlatformBuffer.allocate() instead of wrap() for native access.",
+            )
+
+    /**
+     * The size of the native memory region in bytes.
+     */
+    override val nativeSize: Int get() = capacity
+
+    /**
+     * The underlying ByteArray backing this buffer.
+     * Only available for buffers created via wrap() (not allocate()).
+     *
+     * @throws UnsupportedOperationException if this buffer is backed by NSMutableData
+     */
+    override val backingArray: ByteArray
+        get() = internalBackingArray
+            ?: throw UnsupportedOperationException(
+                "Managed memory access not available for NSMutableData-backed buffers. " +
+                    "Use PlatformBuffer.wrap() instead of allocate() for ByteArray access.",
+            )
+
+    /**
+     * The offset within [backingArray] where this buffer's data begins.
+     */
+    override val arrayOffset: Int get() = 0
 
     private fun writeByteInternal(
         index: Int,
         byte: Byte,
     ) {
-        backingArray?.set(index, byte)
+        internalBackingArray?.set(index, byte)
         mutableBytePointer?.set(index, byte)
     }
 
@@ -73,7 +112,7 @@ class MutableDataBuffer(
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) short.reverseBytes() else short
         mutableBytePointer?.let { ptr ->
             (ptr + position)!!.reinterpret<ShortVar>()[0] = value
-        } ?: backingArray?.let { arr ->
+        } ?: internalBackingArray?.let { arr ->
             arr[position] = value.toByte()
             arr[position + 1] = (value.toInt() shr 8).toByte()
         }
@@ -88,7 +127,7 @@ class MutableDataBuffer(
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) short.reverseBytes() else short
         mutableBytePointer?.let { ptr ->
             (ptr + index)!!.reinterpret<ShortVar>()[0] = value
-        } ?: backingArray?.let { arr ->
+        } ?: internalBackingArray?.let { arr ->
             arr[index] = value.toByte()
             arr[index + 1] = (value.toInt() shr 8).toByte()
         }
@@ -99,7 +138,7 @@ class MutableDataBuffer(
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) int.reverseBytes() else int
         mutableBytePointer?.let { ptr ->
             (ptr + position)!!.reinterpret<IntVar>()[0] = value
-        } ?: backingArray?.let { arr ->
+        } ?: internalBackingArray?.let { arr ->
             arr[position] = value.toByte()
             arr[position + 1] = (value shr 8).toByte()
             arr[position + 2] = (value shr 16).toByte()
@@ -116,7 +155,7 @@ class MutableDataBuffer(
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) int.reverseBytes() else int
         mutableBytePointer?.let { ptr ->
             (ptr + index)!!.reinterpret<IntVar>()[0] = value
-        } ?: backingArray?.let { arr ->
+        } ?: internalBackingArray?.let { arr ->
             arr[index] = value.toByte()
             arr[index + 1] = (value shr 8).toByte()
             arr[index + 2] = (value shr 16).toByte()
@@ -129,7 +168,7 @@ class MutableDataBuffer(
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) long.reverseBytes() else long
         mutableBytePointer?.let { ptr ->
             (ptr + position)!!.reinterpret<LongVar>()[0] = value
-        } ?: backingArray?.let { arr ->
+        } ?: internalBackingArray?.let { arr ->
             arr[position] = value.toByte()
             arr[position + 1] = (value shr 8).toByte()
             arr[position + 2] = (value shr 16).toByte()
@@ -150,7 +189,7 @@ class MutableDataBuffer(
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) long.reverseBytes() else long
         mutableBytePointer?.let { ptr ->
             (ptr + index)!!.reinterpret<LongVar>()[0] = value
-        } ?: backingArray?.let { arr ->
+        } ?: internalBackingArray?.let { arr ->
             arr[index] = value.toByte()
             arr[index + 1] = (value shr 8).toByte()
             arr[index + 2] = (value shr 16).toByte()
@@ -177,8 +216,8 @@ class MutableDataBuffer(
                 mutableData.replaceBytesInRange(range, pin.addressOf(offset))
             }
             position += length
-        } else if (backingArray != null) {
-            bytes.copyInto(backingArray, position, offset, offset + length)
+        } else if (internalBackingArray != null) {
+            bytes.copyInto(internalBackingArray, position, offset, offset + length)
             position += length
         }
         return this

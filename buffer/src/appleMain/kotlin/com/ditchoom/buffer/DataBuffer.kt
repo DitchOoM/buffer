@@ -11,7 +11,6 @@ import kotlinx.cinterop.get
 import kotlinx.cinterop.plus
 import kotlinx.cinterop.readBytes
 import kotlinx.cinterop.reinterpret
-import kotlinx.cinterop.toLong
 import platform.Foundation.NSData
 import platform.Foundation.NSMakeRange
 import platform.Foundation.NSString
@@ -25,25 +24,13 @@ open class DataBuffer(
     override val byteOrder: ByteOrder,
 ) : ReadBuffer,
     SuspendCloseable,
-    Parcelable,
-    NativeMemoryAccess {
+    Parcelable {
     protected var position: Int = 0
     protected var limit: Int = data.length.toInt()
     open val capacity: Int = data.length.toInt()
 
     @Suppress("UNCHECKED_CAST")
     val bytePointer = this.data.bytes as CPointer<ByteVar>
-
-    /**
-     * The native memory address for C interop.
-     * Use with `CPointer` or pass to native functions.
-     */
-    override val nativeAddress: Long get() = bytePointer.toLong()
-
-    /**
-     * The size of the native memory region in bytes.
-     */
-    override val nativeSize: Int get() = data.length.toInt()
 
     override fun resetForRead() {
         limit = position
