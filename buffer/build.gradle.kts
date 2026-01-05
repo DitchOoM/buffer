@@ -104,6 +104,9 @@ kotlin {
     }
     applyDefaultHierarchyTemplate()
     sourceSets {
+        // Use the existing webMain source set from the default hierarchy
+        // It's automatically shared between JS and WASM targets
+
         commonTest.dependencies {
             implementation(kotlin("test"))
         }
@@ -123,6 +126,11 @@ kotlin {
         }
 
         jsMain.dependencies {
+            implementation(libs.kotlin.web)
+            implementation(libs.kotlin.js)
+        }
+
+        wasmJsMain.dependencies {
             implementation(libs.kotlin.web)
             implementation(libs.kotlin.js)
         }
