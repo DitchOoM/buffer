@@ -2041,4 +2041,202 @@ class BufferTests {
     }
 
     // endregion
+
+    // region WriteBuffer unsigned write tests
+
+    @Test
+    fun writeUByte() {
+        val buffer = PlatformBuffer.allocate(4)
+        buffer.writeUByte(0xFFu)
+        buffer.writeUByte(0x80u)
+        buffer.writeUByte(0x00u)
+        buffer.writeUByte(0x7Fu)
+        buffer.resetForRead()
+
+        assertEquals(0xFFu.toUByte(), buffer.readUnsignedByte())
+        assertEquals(0x80u.toUByte(), buffer.readUnsignedByte())
+        assertEquals(0x00u.toUByte(), buffer.readUnsignedByte())
+        assertEquals(0x7Fu.toUByte(), buffer.readUnsignedByte())
+    }
+
+    @Test
+    fun writeUShort() {
+        val buffer = PlatformBuffer.allocate(8)
+        buffer.writeUShort(0xFFFFu)
+        buffer.writeUShort(0x8000u)
+        buffer.writeUShort(0x0000u)
+        buffer.writeUShort(0x7FFFu)
+        buffer.resetForRead()
+
+        assertEquals(0xFFFFu.toUShort(), buffer.readUnsignedShort())
+        assertEquals(0x8000u.toUShort(), buffer.readUnsignedShort())
+        assertEquals(0x0000u.toUShort(), buffer.readUnsignedShort())
+        assertEquals(0x7FFFu.toUShort(), buffer.readUnsignedShort())
+    }
+
+    @Test
+    fun writeUInt() {
+        val buffer = PlatformBuffer.allocate(16)
+        buffer.writeUInt(0xFFFFFFFFu)
+        buffer.writeUInt(0x80000000u)
+        buffer.writeUInt(0x00000000u)
+        buffer.writeUInt(0x7FFFFFFFu)
+        buffer.resetForRead()
+
+        assertEquals(0xFFFFFFFFu, buffer.readUnsignedInt())
+        assertEquals(0x80000000u, buffer.readUnsignedInt())
+        assertEquals(0x00000000u, buffer.readUnsignedInt())
+        assertEquals(0x7FFFFFFFu, buffer.readUnsignedInt())
+    }
+
+    @Test
+    fun writeULong() {
+        val buffer = PlatformBuffer.allocate(32)
+        buffer.writeULong(0xFFFFFFFFFFFFFFFFuL)
+        buffer.writeULong(0x8000000000000000uL)
+        buffer.writeULong(0x0000000000000000uL)
+        buffer.writeULong(0x7FFFFFFFFFFFFFFFuL)
+        buffer.resetForRead()
+
+        assertEquals(0xFFFFFFFFFFFFFFFFuL, buffer.readUnsignedLong())
+        assertEquals(0x8000000000000000uL, buffer.readUnsignedLong())
+        assertEquals(0x0000000000000000uL, buffer.readUnsignedLong())
+        assertEquals(0x7FFFFFFFFFFFFFFFuL, buffer.readUnsignedLong())
+    }
+
+    @Test
+    fun writeFloatAndDouble() {
+        val buffer = PlatformBuffer.allocate(24)
+        val floatVal1 = 3.14159f
+        val floatVal2 = -2.71828f
+        val doubleVal1 = 3.141592653589793
+        val doubleVal2 = -2.718281828459045
+
+        buffer.writeFloat(floatVal1)
+        buffer.writeFloat(floatVal2)
+        buffer.writeDouble(doubleVal1)
+        buffer.writeDouble(doubleVal2)
+        buffer.resetForRead()
+
+        // Note that in Kotlin/JS Float range is wider than "single format" bit layout can represent,
+        // so some Float values may lose their accuracy after conversion to bits and back.
+        assertTrue { (floatVal1 - buffer.readFloat()).absoluteValue < 0.00001f }
+        assertTrue { (floatVal2 - buffer.readFloat()).absoluteValue < 0.00001f }
+        assertEquals(doubleVal1, buffer.readDouble())
+        assertEquals(doubleVal2, buffer.readDouble())
+    }
+
+    // endregion
+
+    // region Fill additional edge cases
+
+    @Test
+    fun fillByteNonEightMultiple() {
+        val buffer = PlatformBuffer.allocate(13) // Not divisible by 8
+        buffer.fill(0x42.toByte())
+        buffer.resetForRead()
+
+        repeat(13) {
+            assertEquals(0x42.toByte(), buffer.readByte())
+        }
+    }
+
+    @Test
+    fun fillByteZeroRemaining() {
+        val buffer = PlatformBuffer.allocate(10)
+        repeat(10) { buffer.writeByte(0) }
+        // Position is now at limit, remaining is 0
+        buffer.fill(0xFF.toByte()) // Should do nothing
+        buffer.resetForRead()
+        // All bytes should still be 0
+        repeat(10) {
+            assertEquals(0.toByte(), buffer.readByte())
+        }
+    }
+
+    // endregion
+
+    // region Little endian tests
+
+    @Test
+    fun littleEndianShort() {
+        val buffer = PlatformBuffer.allocate(4, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        buffer.writeShort(0x1234)
+        buffer.resetForRead()
+
+        assertEquals(0x34.toByte(), buffer.readByte())
+        assertEquals(0x12.toByte(), buffer.readByte())
+    }
+
+    @Test
+    fun littleEndianInt() {
+        val buffer = PlatformBuffer.allocate(8, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        buffer.writeInt(0x12345678)
+        buffer.resetForRead()
+
+        assertEquals(0x78.toByte(), buffer.readByte())
+        assertEquals(0x56.toByte(), buffer.readByte())
+        assertEquals(0x34.toByte(), buffer.readByte())
+        assertEquals(0x12.toByte(), buffer.readByte())
+    }
+
+    @Test
+    fun littleEndianLong() {
+        val buffer = PlatformBuffer.allocate(16, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        buffer.writeLong(0x123456789ABCDEF0L)
+        buffer.resetForRead()
+
+        assertEquals(0xF0.toByte(), buffer.readByte())
+        assertEquals(0xDE.toByte(), buffer.readByte())
+        assertEquals(0xBC.toByte(), buffer.readByte())
+        assertEquals(0x9A.toByte(), buffer.readByte())
+        assertEquals(0x78.toByte(), buffer.readByte())
+        assertEquals(0x56.toByte(), buffer.readByte())
+        assertEquals(0x34.toByte(), buffer.readByte())
+        assertEquals(0x12.toByte(), buffer.readByte())
+    }
+
+    @Test
+    fun littleEndianSetAtIndex() {
+        val buffer = PlatformBuffer.allocate(8, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        buffer.fill(0.toByte())
+        buffer[2] = 0x1234.toShort()
+        buffer.resetForRead()
+
+        buffer.readShort() // skip first short
+        assertEquals(0x34.toByte(), buffer.readByte())
+        assertEquals(0x12.toByte(), buffer.readByte())
+    }
+
+    // endregion
+
+    // region Buffer write (copy) tests
+
+    @Test
+    fun writeBufferFromReadBuffer() {
+        val source = PlatformBuffer.allocate(12) // 4 bytes Int + 8 bytes Long = 12
+        source.writeInt(0x12345678)
+        source.writeLong(0xDEADBEEFCAFEBABEUL.toLong())
+        source.resetForRead()
+        source.readShort() // Advance position by 2 bytes
+
+        val dest = PlatformBuffer.allocate(20)
+        dest.write(source) // Write remaining 10 bytes
+        dest.resetForRead()
+
+        // Should have written remaining bytes from source (after skipping 2 bytes)
+        assertEquals(0x5678.toShort(), dest.readShort())
+        assertEquals(0xDEADBEEFCAFEBABEUL.toLong(), dest.readLong())
+    }
+
+    @Test
+    fun writeStringWithCharset() {
+        val buffer = PlatformBuffer.allocate(50)
+        buffer.writeString("Hello, World!", Charset.UTF8)
+        buffer.resetForRead()
+
+        assertEquals("Hello, World!", buffer.readString(13, Charset.UTF8))
+    }
+
+    // endregion
 }
