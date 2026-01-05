@@ -144,6 +144,8 @@ kotlin {
         }
 
         val androidInstrumentedTest by getting {
+            // Include commonTest so tests can run on device/emulator
+            dependsOn(commonTest.get())
             dependencies {
                 implementation(kotlin("test"))
                 implementation(libs.androidx.test.runner)

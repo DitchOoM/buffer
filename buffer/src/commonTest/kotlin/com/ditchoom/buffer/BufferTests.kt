@@ -1451,4 +1451,315 @@ class BufferTests {
     }
 
     // endregion
+
+    // region Buffer-to-buffer copy tests (Heap/Direct interactions)
+
+    @Test
+    fun copyHeapToHeap() {
+        val source = PlatformBuffer.allocate(100, AllocationZone.Heap)
+        source.writeInt(0x12345678)
+        source.writeString("Hello")
+        source.resetForRead()
+
+        val dest = PlatformBuffer.allocate(100, AllocationZone.Heap)
+        dest.write(source)
+        dest.resetForRead()
+
+        assertEquals(0x12345678, dest.readInt())
+        assertEquals("Hello", dest.readString(5))
+    }
+
+    @Test
+    fun copyDirectToDirect() {
+        val source = PlatformBuffer.allocate(100, AllocationZone.Direct)
+        source.writeInt(0x12345678)
+        source.writeString("Hello")
+        source.resetForRead()
+
+        val dest = PlatformBuffer.allocate(100, AllocationZone.Direct)
+        dest.write(source)
+        dest.resetForRead()
+
+        assertEquals(0x12345678, dest.readInt())
+        assertEquals("Hello", dest.readString(5))
+    }
+
+    @Test
+    fun copyHeapToDirect() {
+        val source = PlatformBuffer.allocate(100, AllocationZone.Heap)
+        source.writeInt(0xDEADBEEF.toInt())
+        source.writeLong(0x123456789ABCDEF0L)
+        source.writeString("Test")
+        source.resetForRead()
+
+        val dest = PlatformBuffer.allocate(100, AllocationZone.Direct)
+        dest.write(source)
+        dest.resetForRead()
+
+        assertEquals(0xDEADBEEF.toInt(), dest.readInt())
+        assertEquals(0x123456789ABCDEF0L, dest.readLong())
+        assertEquals("Test", dest.readString(4))
+    }
+
+    @Test
+    fun copyDirectToHeap() {
+        val source = PlatformBuffer.allocate(100, AllocationZone.Direct)
+        source.writeInt(0xCAFEBABE.toInt())
+        source.writeLong(0xFEDCBA9876543210UL.toLong())
+        source.writeString("Copy")
+        source.resetForRead()
+
+        val dest = PlatformBuffer.allocate(100, AllocationZone.Heap)
+        dest.write(source)
+        dest.resetForRead()
+
+        assertEquals(0xCAFEBABE.toInt(), dest.readInt())
+        assertEquals(0xFEDCBA9876543210UL.toLong(), dest.readLong())
+        assertEquals("Copy", dest.readString(4))
+    }
+
+    @Test
+    fun copyPartialBuffer() {
+        val source = PlatformBuffer.allocate(100, AllocationZone.Direct)
+        source.writeInt(1)
+        source.writeInt(2)
+        source.writeInt(3)
+        source.writeInt(4)
+        source.resetForRead()
+        source.readInt() // Skip first int
+        // Now position=4, remaining=12 (3 ints)
+
+        val dest = PlatformBuffer.allocate(100, AllocationZone.Heap)
+        dest.write(source)
+        dest.resetForRead()
+
+        assertEquals(2, dest.readInt())
+        assertEquals(3, dest.readInt())
+        assertEquals(4, dest.readInt())
+    }
+
+    @Test
+    fun copyLargeBuffer() {
+        val size = 64 * 1024 // 64KB
+        val source = PlatformBuffer.allocate(size, AllocationZone.Direct)
+        // Fill with pattern
+        for (i in 0 until size / 4) {
+            source.writeInt(i)
+        }
+        source.resetForRead()
+
+        val dest = PlatformBuffer.allocate(size, AllocationZone.Heap)
+        dest.write(source)
+        dest.resetForRead()
+
+        // Verify pattern
+        for (i in 0 until size / 4) {
+            assertEquals(i, dest.readInt(), "Mismatch at index $i")
+        }
+    }
+
+    // endregion
+
+    // region Cross-zone contentEquals/mismatch tests
+
+    @Test
+    fun contentEqualsHeapVsDirect() {
+        val heap = PlatformBuffer.allocate(100, AllocationZone.Heap)
+        val direct = PlatformBuffer.allocate(100, AllocationZone.Direct)
+
+        heap.writeInt(0x12345678)
+        heap.writeString("Hello")
+        heap.resetForRead()
+
+        direct.writeInt(0x12345678)
+        direct.writeString("Hello")
+        direct.resetForRead()
+
+        assertTrue(heap.contentEquals(direct))
+        assertTrue(direct.contentEquals(heap))
+    }
+
+    @Test
+    fun contentEqualsHeapVsDirectDifferent() {
+        val heap = PlatformBuffer.allocate(100, AllocationZone.Heap)
+        val direct = PlatformBuffer.allocate(100, AllocationZone.Direct)
+
+        heap.writeInt(0x12345678)
+        heap.resetForRead()
+
+        direct.writeInt(0x12345679) // Different value
+        direct.resetForRead()
+
+        assertFalse(heap.contentEquals(direct))
+        assertFalse(direct.contentEquals(heap))
+    }
+
+    @Test
+    fun mismatchHeapVsDirect() {
+        val heap = PlatformBuffer.allocate(100, AllocationZone.Heap)
+        val direct = PlatformBuffer.allocate(100, AllocationZone.Direct)
+
+        heap.writeInt(0x12345678)
+        heap.writeInt(0xDEADBEEF.toInt())
+        heap.writeInt(0x11111111)
+        heap.resetForRead()
+
+        direct.writeInt(0x12345678)
+        direct.writeInt(0xDEADBEEF.toInt())
+        direct.writeInt(0x22222222) // Different at byte 8
+        direct.resetForRead()
+
+        assertEquals(8, heap.mismatch(direct))
+        assertEquals(8, direct.mismatch(heap))
+    }
+
+    @Test
+    fun mismatchHeapVsDirectIdentical() {
+        val heap = PlatformBuffer.allocate(100, AllocationZone.Heap)
+        val direct = PlatformBuffer.allocate(100, AllocationZone.Direct)
+
+        heap.writeLong(0x123456789ABCDEF0L)
+        heap.resetForRead()
+
+        direct.writeLong(0x123456789ABCDEF0L)
+        direct.resetForRead()
+
+        assertEquals(-1, heap.mismatch(direct))
+    }
+
+    // endregion
+
+    // region Cross-zone indexOf tests
+
+    @Test
+    fun indexOfBufferHeapInDirect() {
+        val haystack = PlatformBuffer.allocate(100, AllocationZone.Direct)
+        haystack.writeString("Hello, World!")
+        haystack.resetForRead()
+
+        val needle = PlatformBuffer.allocate(10, AllocationZone.Heap)
+        needle.writeString("World")
+        needle.resetForRead()
+
+        assertEquals(7, haystack.indexOf(needle))
+    }
+
+    @Test
+    fun indexOfBufferDirectInHeap() {
+        val haystack = PlatformBuffer.allocate(100, AllocationZone.Heap)
+        haystack.writeString("Hello, World!")
+        haystack.resetForRead()
+
+        val needle = PlatformBuffer.allocate(10, AllocationZone.Direct)
+        needle.writeString("World")
+        needle.resetForRead()
+
+        assertEquals(7, haystack.indexOf(needle))
+    }
+
+    @Test
+    fun indexOfBufferLargePattern() {
+        val haystack = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+        // Write some data, then a pattern, then more data
+        for (i in 0 until 100) {
+            haystack.writeByte(0x00)
+        }
+        haystack.writeString("PATTERN_TO_FIND")
+        for (i in 0 until 100) {
+            haystack.writeByte(0xFF.toByte())
+        }
+        haystack.resetForRead()
+
+        val needle = PlatformBuffer.allocate(20, AllocationZone.Heap)
+        needle.writeString("PATTERN_TO_FIND")
+        needle.resetForRead()
+
+        assertEquals(100, haystack.indexOf(needle))
+    }
+
+    // endregion
+
+    // region Different byte order interactions
+
+    @Test
+    fun copyDifferentByteOrders() {
+        val sourceBE = PlatformBuffer.allocate(100, byteOrder = ByteOrder.BIG_ENDIAN)
+        sourceBE.writeInt(0x12345678)
+        sourceBE.resetForRead()
+
+        val destLE = PlatformBuffer.allocate(100, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        destLE.write(sourceBE)
+        destLE.resetForRead()
+
+        // The bytes are copied as-is, so reading with LE order gives different value
+        val bytes = destLE.readByteArray(4)
+        assertContentEquals(byteArrayOf(0x12, 0x34, 0x56, 0x78), bytes)
+    }
+
+    @Test
+    fun contentEqualsDifferentByteOrders() {
+        // Buffers with different byte orders but same raw bytes should be equal
+        val be = PlatformBuffer.allocate(4, byteOrder = ByteOrder.BIG_ENDIAN)
+        be.writeByte(0x12)
+        be.writeByte(0x34)
+        be.writeByte(0x56)
+        be.writeByte(0x78)
+        be.resetForRead()
+
+        val le = PlatformBuffer.allocate(4, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        le.writeByte(0x12)
+        le.writeByte(0x34)
+        le.writeByte(0x56)
+        le.writeByte(0x78)
+        le.resetForRead()
+
+        assertTrue(be.contentEquals(le))
+    }
+
+    // endregion
+
+    // region Wrap vs allocate interactions
+
+    @Test
+    fun copyWrappedToAllocated() {
+        val data = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
+        val wrapped = PlatformBuffer.wrap(data)
+
+        val allocated = PlatformBuffer.allocate(8, AllocationZone.Direct)
+        allocated.write(wrapped)
+        allocated.resetForRead()
+
+        assertContentEquals(data, allocated.readByteArray(8))
+    }
+
+    @Test
+    fun copyAllocatedToWrapped() {
+        val allocated = PlatformBuffer.allocate(8, AllocationZone.Direct)
+        allocated.writeInt(0x12345678)
+        allocated.writeInt(0xDEADBEEF.toInt())
+        allocated.resetForRead()
+
+        val data = ByteArray(8)
+        val wrapped = PlatformBuffer.wrap(data)
+        wrapped.write(allocated)
+
+        assertEquals(0x12.toByte(), data[0])
+        assertEquals(0x34.toByte(), data[1])
+        assertEquals(0x56.toByte(), data[2])
+        assertEquals(0x78.toByte(), data[3])
+    }
+
+    @Test
+    fun contentEqualsWrappedVsAllocated() {
+        val data = byteArrayOf(1, 2, 3, 4, 5)
+        val wrapped = PlatformBuffer.wrap(data.copyOf())
+
+        val allocated = PlatformBuffer.allocate(5, AllocationZone.Direct)
+        allocated.writeBytes(data)
+        allocated.resetForRead()
+
+        assertTrue(wrapped.contentEquals(allocated))
+    }
+
+    // endregion
 }
