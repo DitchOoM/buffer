@@ -166,13 +166,14 @@ class JsBuffer(
     /**
      * Optimized single byte indexOf using DataView.
      */
-    override fun indexOf(byte: Byte): Int = bulkIndexOfInt(
-        startPos = positionValue,
-        length = remaining(),
-        byte = byte,
-        getInt = { dataView.getInt32(it, true) },
-        getByte = { dataView.getInt8(it) },
-    )
+    override fun indexOf(byte: Byte): Int =
+        bulkIndexOfInt(
+            startPos = positionValue,
+            length = remaining(),
+            byte = byte,
+            getInt = { dataView.getInt32(it, true) },
+            getByte = { dataView.getInt8(it) },
+        )
 
     /**
      * Optimized contentEquals using Int8Array comparison.

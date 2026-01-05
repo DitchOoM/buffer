@@ -159,9 +159,10 @@ internal inline fun bulkIndexOfInt(
 ): Int {
     if (length == 0) return -1
 
-    val targetInt = (byte.toInt() and 0xFF).let { b ->
-        b or (b shl 8) or (b shl 16) or (b shl 24)
-    }
+    val targetInt =
+        (byte.toInt() and 0xFF).let { b ->
+            b or (b shl 8) or (b shl 16) or (b shl 24)
+        }
     var i = 0
 
     while (i + 4 <= length) {

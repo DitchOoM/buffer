@@ -416,13 +416,14 @@ class LinearBuffer(
     /**
      * Optimized single byte indexOf using Long comparisons (8 bytes at a time).
      */
-    override fun indexOf(byte: Byte): Int = bulkIndexOf(
-        startPos = positionValue,
-        length = remaining(),
-        byte = byte,
-        getLong = { ptr(it).loadLong() },
-        getByte = { loadByte(it) },
-    )
+    override fun indexOf(byte: Byte): Int =
+        bulkIndexOf(
+            startPos = positionValue,
+            length = remaining(),
+            byte = byte,
+            getLong = { ptr(it).loadLong() },
+            getByte = { loadByte(it) },
+        )
 
     /**
      * Optimized contentEquals using Long comparisons.
