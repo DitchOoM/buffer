@@ -180,3 +180,53 @@ expect fun PlatformBuffer.Companion.allocateShared(
     size: Int,
     byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
 ): PlatformBuffer
+
+// =============================================================================
+// Accessing Platform-Specific Native Buffer Objects
+// =============================================================================
+//
+// When you need the actual platform-native buffer object (not just the address),
+// cast to the platform-specific implementation class:
+//
+// **JVM/Android** - Get `java.nio.ByteBuffer`:
+// ```kotlin
+// val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+// val byteBuffer: ByteBuffer = (buffer as BaseJvmBuffer).byteBuffer
+// // Use with NIO channels, memory-mapped files, etc.
+// ```
+//
+// **Apple (iOS/macOS)** - Get `NSMutableData`:
+// ```kotlin
+// val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+// val nsData: NSMutableData = (buffer as MutableDataBuffer).data
+// // Use with Foundation APIs, file I/O, etc.
+// ```
+//
+// **JavaScript** - Get `Int8Array`:
+// ```kotlin
+// val buffer = PlatformBuffer.allocate(1024)
+// val int8Array: Int8Array = (buffer as JsBuffer).buffer
+// // Use with WebGL, fetch, WebSockets, etc.
+// ```
+//
+// **WASM** - Get linear memory offset for JS interop:
+// ```kotlin
+// val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+// val linearBuffer = buffer as LinearBuffer
+// val offset = linearBuffer.baseOffset + linearBuffer.position()
+// // Create JS DataView: new DataView(wasmExports.memory.buffer, offset, size)
+// ```
+//
+// **Linux** - No native buffer (only ByteArrayBuffer with managed memory):
+// ```kotlin
+// val buffer = PlatformBuffer.allocate(1024)
+// val byteArray: ByteArray = (buffer as ByteArrayBuffer).backingArray
+// ```
+//
+// For pointer-based interop (FFI, JNI, C interop), use [NativeMemoryAccess]:
+// ```kotlin
+// buffer.nativeMemoryAccess?.let { native ->
+//     val address: Long = native.nativeAddress
+//     val size: Int = native.nativeSize
+// }
+// ```
