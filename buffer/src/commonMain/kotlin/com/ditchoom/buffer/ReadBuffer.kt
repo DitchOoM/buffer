@@ -301,50 +301,50 @@ interface ReadBuffer : PositionBuffer {
      *
      * The line ending characters are consumed but not included in the result.
      * The line is decoded as UTF-8.
+     *
+     * This implementation uses bulk search operations (indexOf) for better performance
+     * on long lines compared to byte-by-byte scanning.
      */
     fun readLine(): CharSequence {
-        val initialPosition = position()
-        var currentByte: Byte = 0
-        var bytesRead = 0
-        var foundCR = false
+        if (remaining() == 0) return ""
 
-        while (remaining() > 0) {
-            currentByte = readByte()
-            bytesRead++
+        val startPos = position()
 
-            if (currentByte == CR) {
-                foundCR = true
-                // Check if next byte is LF (for \r\n)
-                if (remaining() > 0) {
-                    val nextByte = readByte()
-                    if (nextByte == LF) {
-                        bytesRead++ // Include the LF in bytes read
-                        break
-                    } else {
-                        // Not \r\n, just \r - put the byte back by adjusting position
-                        position(position() - 1)
-                        break
-                    }
+        // Use bulk search to find line endings (much faster than byte-by-byte)
+        val crIndex = indexOf(CR) // Relative to current position
+        val lfIndex = indexOf(LF) // Relative to current position
+
+        // Determine content length and line ending size
+        val (contentLength, lineEndingSize) = when {
+            crIndex == -1 && lfIndex == -1 -> {
+                // No line ending - read to end of buffer
+                remaining() to 0
+            }
+            crIndex == -1 -> {
+                // Only \n found
+                lfIndex to 1
+            }
+            lfIndex == -1 -> {
+                // Only \r found
+                crIndex to 1
+            }
+            lfIndex < crIndex -> {
+                // \n comes first
+                lfIndex to 1
+            }
+            else -> {
+                // \r comes first (crIndex <= lfIndex)
+                // Check if followed immediately by \n (CRLF)
+                if (lfIndex == crIndex + 1) {
+                    crIndex to 2 // \r\n
+                } else {
+                    crIndex to 1 // Just \r
                 }
-                break
-            } else if (currentByte == LF) {
-                break
             }
         }
 
-        // Calculate how many bytes are the actual content (excluding line ending)
-        val lineEndingSize =
-            when {
-                foundCR && bytesRead > 1 && get(initialPosition + bytesRead - 1) == LF -> 2 // \r\n
-                foundCR -> 1 // \r
-                currentByte == LF -> 1 // \n
-                else -> 0 // No line ending found (end of buffer)
-            }
-
-        val contentLength = bytesRead - lineEndingSize
-        position(initialPosition)
         val result = readString(contentLength, Charset.UTF8)
-        position(initialPosition + bytesRead)
+        position(startPos + contentLength + lineEndingSize)
         return result
     }
 
