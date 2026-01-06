@@ -1,6 +1,5 @@
 package com.ditchoom.buffer
 
-import java.io.RandomAccessFile
 import java.nio.Buffer
 import java.nio.ByteBuffer
 
@@ -13,7 +12,6 @@ import java.nio.ByteBuffer
  */
 class HeapJvmBuffer(
     byteBuffer: ByteBuffer,
-    fileRef: RandomAccessFile? = null,
 ) : JvmBuffer(byteBuffer),
     ManagedMemoryAccess {
     init {
