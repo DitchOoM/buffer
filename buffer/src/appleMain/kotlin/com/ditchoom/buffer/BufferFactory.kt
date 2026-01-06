@@ -42,10 +42,25 @@ actual fun PlatformBuffer.Companion.wrap(
 ): PlatformBuffer = ByteArrayBuffer(array, byteOrder = byteOrder)
 
 /**
- * Wraps an existing NSData in a buffer by creating a mutable copy.
+ * Wraps an existing NSData in a read-only buffer (zero-copy).
  *
- * This creates a new NSMutableData with a copy of the data to provide buffer operations.
- * For zero-copy wrapping, use [wrap] with NSMutableData directly.
+ * The buffer shares memory with the original NSData. This is efficient for
+ * reading data from Apple APIs without copying.
+ *
+ * @param data The NSData to wrap
+ * @param byteOrder The byte order for multi-byte operations
+ * @return An [NSDataBuffer] providing read-only access to the data
+ */
+fun PlatformBuffer.Companion.wrapReadOnly(
+    data: NSData,
+    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
+): ReadBuffer = NSDataBuffer(data, byteOrder)
+
+/**
+ * Wraps an existing NSData in a mutable buffer by creating a copy.
+ *
+ * This creates a new NSMutableData with a copy of the data to provide write operations.
+ * For zero-copy read-only access, use [wrapReadOnly] instead.
  *
  * @param data The NSData to wrap
  * @param byteOrder The byte order for multi-byte operations
