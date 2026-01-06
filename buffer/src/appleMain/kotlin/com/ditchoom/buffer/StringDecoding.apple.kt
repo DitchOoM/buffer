@@ -1,23 +1,28 @@
-@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, kotlinx.cinterop.BetaInteropApi::class)
+@file:OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
 
 package com.ditchoom.buffer
 
 import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.convert
 import kotlinx.cinterop.usePinned
-import platform.Foundation.NSASCIIStringEncoding
 import platform.Foundation.NSData
-import platform.Foundation.NSISOLatin1StringEncoding
 import platform.Foundation.NSString
-import platform.Foundation.NSUTF16BigEndianStringEncoding
-import platform.Foundation.NSUTF16LittleEndianStringEncoding
-import platform.Foundation.NSUTF16StringEncoding
-import platform.Foundation.NSUTF32BigEndianStringEncoding
-import platform.Foundation.NSUTF32LittleEndianStringEncoding
-import platform.Foundation.NSUTF32StringEncoding
-import platform.Foundation.NSUTF8StringEncoding
 import platform.Foundation.create
+import platform.darwin.NSUInteger
+
+// Raw NSStringEncoding values (platform-agnostic, same numeric value everywhere)
+// Using Long to avoid platform-specific type inference issues in metadata compilation
+private const val ENCODING_ASCII: Long = 1
+private const val ENCODING_ISO_LATIN1: Long = 2
+private const val ENCODING_UTF8: Long = 4
+private const val ENCODING_UTF16: Long = 10
+private const val ENCODING_UTF16_BE: Long = 0x90000100
+private const val ENCODING_UTF16_LE: Long = 0x94000100
+private const val ENCODING_UTF32: Long = 0x8c000100
+private const val ENCODING_UTF32_BE: Long = 0x98000100
+private const val ENCODING_UTF32_LE: Long = 0x9c000100
 
 /**
  * Apple implementation of string decoding using NSString.
@@ -34,20 +39,18 @@ internal actual fun decodeByteArrayToString(
         return data.decodeToString(startIndex, endIndex, throwOnInvalidSequence = true)
     }
 
-    // Note: NSStringEncoding has different bit widths across Apple platforms (UInt vs ULong).
-    // We use ULong for compatibility and let the platform handle the conversion.
-    @Suppress("USELESS_CAST")
-    val encoding: ULong =
+    // Get the encoding value (platform-agnostic Long)
+    val encodingValue: Long =
         when (charset) {
-            Charset.UTF8 -> NSUTF8StringEncoding as ULong
-            Charset.UTF16 -> NSUTF16StringEncoding as ULong
-            Charset.UTF16BigEndian -> NSUTF16BigEndianStringEncoding as ULong
-            Charset.UTF16LittleEndian -> NSUTF16LittleEndianStringEncoding as ULong
-            Charset.ASCII -> NSASCIIStringEncoding as ULong
-            Charset.ISOLatin1 -> NSISOLatin1StringEncoding as ULong
-            Charset.UTF32 -> NSUTF32StringEncoding as ULong
-            Charset.UTF32LittleEndian -> NSUTF32LittleEndianStringEncoding as ULong
-            Charset.UTF32BigEndian -> NSUTF32BigEndianStringEncoding as ULong
+            Charset.UTF8 -> ENCODING_UTF8
+            Charset.UTF16 -> ENCODING_UTF16
+            Charset.UTF16BigEndian -> ENCODING_UTF16_BE
+            Charset.UTF16LittleEndian -> ENCODING_UTF16_LE
+            Charset.ASCII -> ENCODING_ASCII
+            Charset.ISOLatin1 -> ENCODING_ISO_LATIN1
+            Charset.UTF32 -> ENCODING_UTF32
+            Charset.UTF32LittleEndian -> ENCODING_UTF32_LE
+            Charset.UTF32BigEndian -> ENCODING_UTF32_BE
         }
 
     val length = endIndex - startIndex
@@ -55,12 +58,12 @@ internal actual fun decodeByteArrayToString(
     // Create NSData from the byte range
     val nsData =
         data.usePinned { pinned ->
-            NSData.create(bytes = pinned.addressOf(startIndex), length = length.toULong())
+            NSData.create(bytes = pinned.addressOf(startIndex), length = length.convert<NSUInteger>())
         }
 
-    // Decode using NSString
+    // Decode using NSString - convert encoding to platform-specific NSUInteger
     val nsString =
-        NSString.create(nsData, encoding)
+        NSString.create(nsData, encodingValue.convert<NSUInteger>())
             ?: throw IllegalArgumentException("Failed to decode bytes using charset: $charset")
 
     return nsString.toString()
