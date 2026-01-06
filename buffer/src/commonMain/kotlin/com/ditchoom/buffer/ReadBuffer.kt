@@ -315,33 +315,34 @@ interface ReadBuffer : PositionBuffer {
         val lfIndex = indexOf(LF) // Relative to current position
 
         // Determine content length and line ending size
-        val (contentLength, lineEndingSize) = when {
-            crIndex == -1 && lfIndex == -1 -> {
-                // No line ending - read to end of buffer
-                remaining() to 0
-            }
-            crIndex == -1 -> {
-                // Only \n found
-                lfIndex to 1
-            }
-            lfIndex == -1 -> {
-                // Only \r found
-                crIndex to 1
-            }
-            lfIndex < crIndex -> {
-                // \n comes first
-                lfIndex to 1
-            }
-            else -> {
-                // \r comes first (crIndex <= lfIndex)
-                // Check if followed immediately by \n (CRLF)
-                if (lfIndex == crIndex + 1) {
-                    crIndex to 2 // \r\n
-                } else {
-                    crIndex to 1 // Just \r
+        val (contentLength, lineEndingSize) =
+            when {
+                crIndex == -1 && lfIndex == -1 -> {
+                    // No line ending - read to end of buffer
+                    remaining() to 0
+                }
+                crIndex == -1 -> {
+                    // Only \n found
+                    lfIndex to 1
+                }
+                lfIndex == -1 -> {
+                    // Only \r found
+                    crIndex to 1
+                }
+                lfIndex < crIndex -> {
+                    // \n comes first
+                    lfIndex to 1
+                }
+                else -> {
+                    // \r comes first (crIndex <= lfIndex)
+                    // Check if followed immediately by \n (CRLF)
+                    if (lfIndex == crIndex + 1) {
+                        crIndex to 2 // \r\n
+                    } else {
+                        crIndex to 1 // Just \r
+                    }
                 }
             }
-        }
 
         val result = readString(contentLength, Charset.UTF8)
         position(startPos + contentLength + lineEndingSize)

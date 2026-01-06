@@ -40,13 +40,14 @@ open class BufferBaselineBenchmark {
     private lateinit var shortLinesBuffer: PlatformBuffer
     private lateinit var longLinesBuffer: PlatformBuffer
     private val shortLineText = "Hello\nWorld\nTest\n" // 3 short lines
-    private val longLineText = buildString {
-        // 5 lines of 200 chars each (1000+ bytes total)
-        repeat(5) {
-            append("A".repeat(200))
-            append("\r\n")
+    private val longLineText =
+        buildString {
+            // 5 lines of 200 chars each (1000+ bytes total)
+            repeat(5) {
+                append("A".repeat(200))
+                append("\r\n")
+            }
         }
-    }
 
     @Setup
     fun setup() {
