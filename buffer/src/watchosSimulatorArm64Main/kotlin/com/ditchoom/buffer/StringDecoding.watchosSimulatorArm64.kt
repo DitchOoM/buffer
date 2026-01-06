@@ -3,17 +3,14 @@
 package com.ditchoom.buffer
 
 import kotlinx.cinterop.addressOf
-import kotlinx.cinterop.convert
 import kotlinx.cinterop.usePinned
 import platform.Foundation.NSData
 import platform.Foundation.NSString
-import platform.Foundation.NSStringEncoding
 import platform.Foundation.create
-import platform.darwin.NSUInteger
 
 /**
- * watchOS implementation using Foundation's NSString.
- * Uses convert() to handle the type differences between watchOS device (32-bit) and simulator (64-bit).
+ * watchOS simulator (arm64) implementation using Foundation's NSString.
+ * On 64-bit simulators, NSData and NSString.create expect ULong parameters.
  */
 internal actual fun decodeWithFoundation(
     data: ByteArray,
@@ -23,9 +20,9 @@ internal actual fun decodeWithFoundation(
 ): String {
     val nsData =
         data.usePinned { pinned ->
-            NSData.create(bytes = pinned.addressOf(offset), length = length.convert<NSUInteger>())
+            NSData.create(bytes = pinned.addressOf(offset), length = length.toULong())
         }
 
-    return NSString.create(nsData, encoding.convert<NSStringEncoding>())?.toString()
+    return NSString.create(nsData, encoding.toULong())?.toString()
         ?: throw IllegalArgumentException("Failed to decode bytes with encoding: $encoding")
 }
