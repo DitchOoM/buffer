@@ -54,7 +54,7 @@ class NSDataBuffer(
     /**
      * The size of the native memory region in bytes.
      */
-    override val nativeSize: Int get() = capacity
+    override val nativeSize: Long get() = capacity.toLong()
 
     // region Read operations
 
@@ -134,8 +134,9 @@ class NSDataBuffer(
                 NSMakeRange(position.convert(), length.convert()),
             )
         val stringEncoding = charset.toEncoding()
-        val string = NSString.create(subdata, stringEncoding)?.toString()
-            ?: throw IllegalArgumentException("Failed to decode bytes with charset: $charset")
+        val string =
+            NSString.create(subdata, stringEncoding)?.toString()
+                ?: throw IllegalArgumentException("Failed to decode bytes with charset: $charset")
         position += length
         return string
     }
@@ -242,7 +243,7 @@ internal class NSDataBufferSlice(
 
     override val nativeAddress: Long get() = bytePointer.toLong()
 
-    override val nativeSize: Int get() = capacity
+    override val nativeSize: Long get() = capacity.toLong()
 
     override fun resetForRead() {
         limit = position
@@ -317,8 +318,9 @@ internal class NSDataBufferSlice(
                 NSMakeRange((sliceOffset + position).convert(), length.convert()),
             )
         val stringEncoding = charset.toEncoding()
-        val string = NSString.create(subdata, stringEncoding)?.toString()
-            ?: throw IllegalArgumentException("Failed to decode bytes with charset: $charset")
+        val string =
+            NSString.create(subdata, stringEncoding)?.toString()
+                ?: throw IllegalArgumentException("Failed to decode bytes with charset: $charset")
         position += length
         return string
     }

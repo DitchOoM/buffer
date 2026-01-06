@@ -33,8 +33,11 @@ interface NativeMemoryAccess {
 
     /**
      * The size of the native memory region in bytes.
+     *
+     * Uses Long for compatibility with Java FFM (Foreign Function & Memory API)
+     * which uses long for memory segment sizes.
      */
-    val nativeSize: Int
+    val nativeSize: Long
 }
 
 /**
@@ -227,6 +230,6 @@ expect fun PlatformBuffer.Companion.allocateShared(
 // ```kotlin
 // buffer.nativeMemoryAccess?.let { native ->
 //     val address: Long = native.nativeAddress
-//     val size: Int = native.nativeSize
+//     val size: Long = native.nativeSize
 // }
 // ```

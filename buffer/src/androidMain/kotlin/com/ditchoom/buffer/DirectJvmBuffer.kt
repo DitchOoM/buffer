@@ -28,7 +28,7 @@ class DirectJvmBuffer(
     /**
      * The size of the native memory region in bytes.
      */
-    override val nativeSize: Int get() = capacity
+    override val nativeSize: Long get() = capacity.toLong()
 
     companion object {
         private val addressField: Field? by lazy {

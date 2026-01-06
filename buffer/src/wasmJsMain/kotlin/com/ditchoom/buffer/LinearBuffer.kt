@@ -109,7 +109,7 @@ class LinearBuffer(
     /**
      * The size of the native memory region in bytes.
      */
-    override val nativeSize: Int get() = capacity
+    override val nativeSize: Long get() = capacity.toLong()
 
     /**
      * Get the linear memory offset for the current position.

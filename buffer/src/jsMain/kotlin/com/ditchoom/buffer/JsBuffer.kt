@@ -23,7 +23,7 @@ class JsBuffer(
     /**
      * The size of the native memory region in bytes.
      */
-    override val nativeSize: Int get() = buffer.byteLength
+    override val nativeSize: Long get() = buffer.byteLength.toLong()
 
     /**
      * Whether this buffer is backed by a SharedArrayBuffer.

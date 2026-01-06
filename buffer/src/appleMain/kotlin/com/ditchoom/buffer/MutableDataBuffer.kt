@@ -61,7 +61,7 @@ class MutableDataBuffer(
     /**
      * The size of the native memory region in bytes.
      */
-    override val nativeSize: Int get() = capacity
+    override val nativeSize: Long get() = capacity.toLong()
 
     // region Read operations
 
