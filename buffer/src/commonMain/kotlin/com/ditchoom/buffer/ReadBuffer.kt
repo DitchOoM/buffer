@@ -409,25 +409,33 @@ interface ReadBuffer : PositionBuffer {
     /**
      * Compares the remaining content of this buffer with another buffer.
      *
+     * Uses optimized bulk comparison (8 bytes at a time) when possible.
+     *
      * @param other The buffer to compare with
      * @return true if the remaining bytes in both buffers are identical
      */
     fun contentEquals(other: ReadBuffer): Boolean {
         if (remaining() != other.remaining()) return false
         val size = remaining()
-        for (i in 0 until size) {
-            if (get(position() + i) != other.get(other.position() + i)) {
-                return false
-            }
-        }
-        return true
+        if (size == 0) return true
+
+        return bulkCompareEquals(
+            thisPos = position(),
+            otherPos = other.position(),
+            length = size,
+            getLong = { getLong(it) },
+            otherGetLong = { other.getLong(it) },
+            getByte = { get(it) },
+            otherGetByte = { other.get(it) },
+        )
     }
 
     /**
      * Finds the first position where this buffer differs from another buffer.
      *
      * Compares bytes starting from each buffer's current position up to the
-     * smaller of the two remaining sizes.
+     * smaller of the two remaining sizes. Uses bulk Long comparisons (8 bytes
+     * at a time) for improved performance.
      *
      * @param other The buffer to compare with
      * @return The relative index of the first mismatch, or -1 if no mismatch is found
@@ -439,14 +447,21 @@ interface ReadBuffer : PositionBuffer {
         val otherRemaining = other.remaining()
         val minLength = minOf(thisRemaining, otherRemaining)
 
-        for (i in 0 until minLength) {
-            if (get(position() + i) != other.get(other.position() + i)) {
-                return i
-            }
+        if (minLength == 0) {
+            return if (thisRemaining != otherRemaining) 0 else -1
         }
 
-        // If lengths differ but all compared bytes matched, mismatch is at the end of shorter
-        return if (thisRemaining != otherRemaining) minLength else -1
+        return bulkMismatch(
+            thisPos = position(),
+            otherPos = other.position(),
+            minLength = minLength,
+            thisRemaining = thisRemaining,
+            otherRemaining = otherRemaining,
+            getLong = { getLong(it) },
+            otherGetLong = { other.getLong(it) },
+            getByte = { get(it) },
+            otherGetByte = { other.get(it) },
+        )
     }
 
     /**
