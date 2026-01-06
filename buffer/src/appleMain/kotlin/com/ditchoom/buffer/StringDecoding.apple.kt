@@ -1,28 +1,16 @@
-@file:OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
-
 package com.ditchoom.buffer
-
-import kotlinx.cinterop.BetaInteropApi
-import kotlinx.cinterop.ExperimentalForeignApi
-import kotlinx.cinterop.addressOf
-import kotlinx.cinterop.convert
-import kotlinx.cinterop.usePinned
-import platform.Foundation.NSData
-import platform.Foundation.NSString
-import platform.Foundation.create
-import platform.darwin.NSUInteger
 
 // Raw NSStringEncoding values (platform-agnostic, same numeric value everywhere)
 // Using Long to avoid platform-specific type inference issues in metadata compilation
-private const val ENCODING_ASCII: Long = 1
-private const val ENCODING_ISO_LATIN1: Long = 2
-private const val ENCODING_UTF8: Long = 4
-private const val ENCODING_UTF16: Long = 10
-private const val ENCODING_UTF16_BE: Long = 0x90000100
-private const val ENCODING_UTF16_LE: Long = 0x94000100
-private const val ENCODING_UTF32: Long = 0x8c000100
-private const val ENCODING_UTF32_BE: Long = 0x98000100
-private const val ENCODING_UTF32_LE: Long = 0x9c000100
+internal const val ENCODING_ASCII: Long = 1
+internal const val ENCODING_ISO_LATIN1: Long = 2
+internal const val ENCODING_UTF8: Long = 4
+internal const val ENCODING_UTF16: Long = 10
+internal const val ENCODING_UTF16_BE: Long = 0x90000100
+internal const val ENCODING_UTF16_LE: Long = 0x94000100
+internal const val ENCODING_UTF32: Long = 0x8c000100
+internal const val ENCODING_UTF32_BE: Long = 0x98000100
+internal const val ENCODING_UTF32_LE: Long = 0x9c000100
 
 /**
  * Apple implementation of string decoding using NSString.
@@ -53,18 +41,17 @@ internal actual fun decodeByteArrayToString(
             Charset.UTF32BigEndian -> ENCODING_UTF32_BE
         }
 
-    val length = endIndex - startIndex
-
-    // Create NSData from the byte range
-    val nsData =
-        data.usePinned { pinned ->
-            NSData.create(bytes = pinned.addressOf(startIndex), length = length.convert<NSUInteger>())
-        }
-
-    // Decode using NSString - convert encoding to platform-specific NSUInteger
-    val nsString =
-        NSString.create(nsData, encodingValue.convert<NSUInteger>())
-            ?: throw IllegalArgumentException("Failed to decode bytes using charset: $charset")
-
-    return nsString.toString()
+    // Delegate to platform-specific implementation for Foundation API calls
+    return decodeWithFoundation(data, startIndex, endIndex - startIndex, encodingValue)
 }
+
+/**
+ * Platform-specific NSString decoding using Foundation APIs.
+ * Implemented in macosMain, iosMain, etc. to handle platform-varying types.
+ */
+internal expect fun decodeWithFoundation(
+    data: ByteArray,
+    offset: Int,
+    length: Int,
+    encoding: Long,
+): String
