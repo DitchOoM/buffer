@@ -10,7 +10,7 @@ import platform.Foundation.create
 
 /**
  * watchOS implementation using Foundation's NSString.
- * On watchOS, NSString.create expects UInt for encoding.
+ * On 64-bit watchOS, NSString.create expects ULong for encoding.
  */
 internal actual fun decodeWithFoundation(
     data: ByteArray,
@@ -23,6 +23,6 @@ internal actual fun decodeWithFoundation(
             NSData.create(bytes = pinned.addressOf(offset), length = length.toULong())
         }
 
-    return NSString.create(nsData, encoding.toUInt())?.toString()
+    return NSString.create(nsData, encoding.toULong())?.toString()
         ?: throw IllegalArgumentException("Failed to decode bytes with encoding: $encoding")
 }
