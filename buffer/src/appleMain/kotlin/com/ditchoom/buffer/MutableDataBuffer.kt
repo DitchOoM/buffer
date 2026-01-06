@@ -78,6 +78,24 @@ class MutableDataBuffer(
 
     override fun get(index: Int): Byte = bytePointer[index]
 
+    override fun getShort(index: Int): Short {
+        val ptr = (bytePointer + index)!!.reinterpret<ShortVar>()
+        val value = ptr[0]
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
+    }
+
+    override fun getInt(index: Int): Int {
+        val ptr = (bytePointer + index)!!.reinterpret<IntVar>()
+        val value = ptr[0]
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
+    }
+
+    override fun getLong(index: Int): Long {
+        val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
+        val value = ptr[0]
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
+    }
+
     override fun readShort(): Short {
         val ptr = (bytePointer + position)!!.reinterpret<ShortVar>()
         val value = ptr[0]
@@ -451,6 +469,24 @@ class MutableDataBufferSlice(
     override fun readByte(): Byte = bytePointer[position++]
 
     override fun get(index: Int): Byte = bytePointer[index]
+
+    override fun getShort(index: Int): Short {
+        val ptr = (bytePointer + index)!!.reinterpret<ShortVar>()
+        val value = ptr[0]
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
+    }
+
+    override fun getInt(index: Int): Int {
+        val ptr = (bytePointer + index)!!.reinterpret<IntVar>()
+        val value = ptr[0]
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
+    }
+
+    override fun getLong(index: Int): Long {
+        val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
+        val value = ptr[0]
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
+    }
 
     override fun readShort(): Short {
         val ptr = (bytePointer + position)!!.reinterpret<ShortVar>()
