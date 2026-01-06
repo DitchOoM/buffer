@@ -4,12 +4,7 @@ actual fun PlatformBuffer.Companion.allocate(
     size: Int,
     zone: AllocationZone,
     byteOrder: ByteOrder,
-): PlatformBuffer {
-    if (zone is AllocationZone.Custom) {
-        return zone.allocator(size)
-    }
-    return ByteArrayBuffer(ByteArray(size), byteOrder = byteOrder)
-}
+): PlatformBuffer = ByteArrayBuffer(ByteArray(size), byteOrder = byteOrder)
 
 actual fun PlatformBuffer.Companion.wrap(
     array: ByteArray,

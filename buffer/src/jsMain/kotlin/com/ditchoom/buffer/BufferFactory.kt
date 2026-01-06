@@ -14,9 +14,6 @@ actual fun PlatformBuffer.Companion.allocate(
     zone: AllocationZone,
     byteOrder: ByteOrder,
 ): PlatformBuffer {
-    if (zone is AllocationZone.Custom) {
-        return zone.allocator(size)
-    }
     val sharedArrayBuffer =
         try {
             if (zone is AllocationZone.SharedMemory) {

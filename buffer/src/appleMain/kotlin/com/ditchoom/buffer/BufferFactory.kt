@@ -14,7 +14,6 @@ import platform.Foundation.create
  * - [AllocationZone.Heap]: Returns [ByteArrayBuffer] (Kotlin managed memory)
  * - [AllocationZone.Direct]: Returns [MutableDataBuffer] (Apple native memory)
  * - [AllocationZone.SharedMemory]: Falls back to Direct (no shared memory on Apple)
- * - [AllocationZone.Custom]: Uses the provided allocator
  */
 actual fun PlatformBuffer.Companion.allocate(
     size: Int,
@@ -27,7 +26,6 @@ actual fun PlatformBuffer.Companion.allocate(
             @OptIn(UnsafeNumber::class)
             MutableDataBuffer(NSMutableData.create(length = size.convert())!!, byteOrder = byteOrder)
         }
-        is AllocationZone.Custom -> zone.allocator(size)
     }
 
 /**

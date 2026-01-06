@@ -19,8 +19,6 @@ actual fun PlatformBuffer.Companion.allocate(
         AllocationZone.SharedMemory,
         AllocationZone.Direct,
         -> DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
-
-        is AllocationZone.Custom -> zone.allocator(size)
     }
 }
 

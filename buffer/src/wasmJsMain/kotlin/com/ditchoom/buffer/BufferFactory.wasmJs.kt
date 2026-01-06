@@ -31,7 +31,6 @@ actual fun PlatformBuffer.Companion.allocate(
             val (offset, _) = LinearMemoryAllocator.allocate(size)
             LinearBuffer(offset, size, byteOrder)
         }
-        is AllocationZone.Custom -> zone.allocator(size)
     }
 
 /**

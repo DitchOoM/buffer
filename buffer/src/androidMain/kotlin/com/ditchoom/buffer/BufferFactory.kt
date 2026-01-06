@@ -30,8 +30,6 @@ actual fun PlatformBuffer.Companion.allocate(
             } else {
                 DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
             }
-
-        is AllocationZone.Custom -> zone.allocator(size)
     }
 }
 
