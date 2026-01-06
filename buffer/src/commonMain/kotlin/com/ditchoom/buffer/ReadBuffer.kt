@@ -300,8 +300,9 @@ interface ReadBuffer : PositionBuffer {
      * - `\r` (Classic Mac)
      *
      * The line ending characters are consumed but not included in the result.
+     * The line is decoded as UTF-8.
      */
-    fun readUtf8Line(): CharSequence {
+    fun readLine(): CharSequence {
         val initialPosition = position()
         var currentByte: Byte = 0
         var bytesRead = 0
@@ -346,6 +347,12 @@ interface ReadBuffer : PositionBuffer {
         position(initialPosition + bytesRead)
         return result
     }
+
+    @Deprecated(
+        "Use readLine instead",
+        ReplaceWith("readLine()"),
+    )
+    fun readUtf8Line(): CharSequence = readLine()
 
     companion object {
         private const val CR: Byte = '\r'.code.toByte()
