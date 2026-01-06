@@ -11,7 +11,25 @@ class JsBuffer(
     val buffer: Int8Array,
     byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
     val sharedArrayBuffer: SharedArrayBuffer? = null,
-) : BaseWebBuffer(buffer.byteLength, byteOrder) {
+) : BaseWebBuffer(buffer.byteLength, byteOrder),
+    NativeMemoryAccess,
+    SharedMemoryAccess {
+    /**
+     * The byte offset within the underlying ArrayBuffer.
+     * Use with `new DataView(buffer.buffer, nativeAddress, nativeSize)`.
+     */
+    override val nativeAddress: Long get() = buffer.byteOffset.toLong()
+
+    /**
+     * The size of the native memory region in bytes.
+     */
+    override val nativeSize: Long get() = buffer.byteLength.toLong()
+
+    /**
+     * Whether this buffer is backed by a SharedArrayBuffer.
+     */
+    override val isShared: Boolean get() = sharedArrayBuffer != null
+
     // Cached DataView for the entire buffer - avoids creating new DataView on each operation
     private val dataView = DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength)
 
@@ -143,6 +161,64 @@ class JsBuffer(
             else -> throw UnsupportedOperationException("Unable to encode in $charset. Must use Charset.UTF8")
         }
         return this
+    }
+
+    /**
+     * Optimized single byte indexOf using DataView.
+     */
+    override fun indexOf(byte: Byte): Int =
+        bulkIndexOfInt(
+            startPos = positionValue,
+            length = remaining(),
+            byte = byte,
+            getInt = { dataView.getInt32(it, true) },
+            getByte = { dataView.getInt8(it) },
+        )
+
+    /**
+     * Optimized contentEquals using Int8Array comparison.
+     */
+    override fun contentEquals(other: ReadBuffer): Boolean {
+        if (remaining() != other.remaining()) return false
+        val size = remaining()
+        if (size == 0) return true
+
+        if (other is JsBuffer) {
+            return bulkCompareEqualsInt(
+                thisPos = positionValue,
+                otherPos = other.positionValue,
+                length = size,
+                getInt = { dataView.getInt32(it, true) },
+                otherGetInt = { other.dataView.getInt32(it, true) },
+                getByte = { dataView.getInt8(it) },
+                otherGetByte = { other.dataView.getInt8(it) },
+            )
+        }
+        return super.contentEquals(other)
+    }
+
+    /**
+     * Optimized mismatch using DataView comparisons.
+     */
+    override fun mismatch(other: ReadBuffer): Int {
+        val thisRemaining = remaining()
+        val otherRemaining = other.remaining()
+        val minLength = minOf(thisRemaining, otherRemaining)
+
+        if (other is JsBuffer) {
+            return bulkMismatchInt(
+                thisPos = positionValue,
+                otherPos = other.positionValue,
+                minLength = minLength,
+                thisRemaining = thisRemaining,
+                otherRemaining = otherRemaining,
+                getInt = { dataView.getInt32(it, true) },
+                otherGetInt = { other.dataView.getInt32(it, true) },
+                getByte = { dataView.getInt8(it) },
+                otherGetByte = { other.dataView.getInt8(it) },
+            )
+        }
+        return super.mismatch(other)
     }
 
     override fun equals(other: Any?): Boolean {

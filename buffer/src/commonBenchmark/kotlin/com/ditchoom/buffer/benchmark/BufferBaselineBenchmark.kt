@@ -36,6 +36,19 @@ open class BufferBaselineBenchmark {
     private lateinit var sourceBuffer: PlatformBuffer
     private lateinit var testData: ByteArray
 
+    // For readLine benchmarks
+    private lateinit var shortLinesBuffer: PlatformBuffer
+    private lateinit var longLinesBuffer: PlatformBuffer
+    private val shortLineText = "Hello\nWorld\nTest\n" // 3 short lines
+    private val longLineText =
+        buildString {
+            // 5 lines of 200 chars each (1000+ bytes total)
+            repeat(5) {
+                append("A".repeat(200))
+                append("\r\n")
+            }
+        }
+
     @Setup
     fun setup() {
         heapBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
@@ -48,6 +61,13 @@ open class BufferBaselineBenchmark {
         // Pre-fill source buffer for bulk write operations
         sourceBuffer.writeBytes(testData)
         sourceBuffer.resetForRead()
+
+        // Setup readLine buffers
+        shortLinesBuffer = PlatformBuffer.allocate(shortLineText.length * 2, AllocationZone.Heap)
+        shortLinesBuffer.writeString(shortLineText)
+
+        longLinesBuffer = PlatformBuffer.allocate(longLineText.length * 2, AllocationZone.Heap)
+        longLinesBuffer.writeString(longLineText)
     }
 
     // --- Allocation Benchmarks ---
@@ -149,5 +169,28 @@ open class BufferBaselineBenchmark {
         val slice = directBuffer.slice()
         // Read first byte to prevent DCE and ensure slice was created
         return slice.readByte().toInt()
+    }
+
+    // --- readLine Benchmarks ---
+    // These measure the performance of line parsing with bulk indexOf optimization
+
+    @Benchmark
+    fun readLineShort(): Int {
+        shortLinesBuffer.resetForRead()
+        var totalLength = 0
+        while (shortLinesBuffer.hasRemaining()) {
+            totalLength += shortLinesBuffer.readLine().length
+        }
+        return totalLength
+    }
+
+    @Benchmark
+    fun readLineLong(): Int {
+        longLinesBuffer.resetForRead()
+        var totalLength = 0
+        while (longLinesBuffer.hasRemaining()) {
+            totalLength += longLinesBuffer.readLine().length
+        }
+        return totalLength
     }
 }

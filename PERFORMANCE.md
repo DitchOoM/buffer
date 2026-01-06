@@ -156,9 +156,28 @@ Benchmarks run on:
 ## Optimizations Applied
 
 ### Apple/Native Platform
-1. **Zero-copy slice**: `DataBufferSlice` uses pointer arithmetic instead of `subdataWithRange()`
+1. **Zero-copy slice**: `MutableDataBufferSlice` uses pointer arithmetic instead of `subdataWithRange()`
 2. **memcpy bulk writes**: Direct memory copy instead of intermediate ByteArray
 3. **Pointer reinterpretation**: `readShort/Int/Long()` use `CPointer.reinterpret<>()`
 4. **Direct pointer reads**: `readByteArray()` avoids NSData allocation
 
 These optimizations improved Native performance by 1.3-1.7x and fixed OOM crashes during high-frequency slice operations.
+
+### String Decoding (Apple Platforms)
+
+The string decoding implementation uses platform-specific source sets to handle NSStringEncoding type differences across Apple platforms:
+
+- **macOS, iOS, tvOS**: 64-bit platforms using `ULong` for NSStringEncoding
+- **watchOS**: Mixed types (device uses `UInt`, simulators use `ULong`)
+
+**Performance Impact**: Benchmark comparison shows **no regression** from string decoding changes:
+
+| Platform | Benchmark | Before | After | Change |
+|----------|-----------|--------|-------|--------|
+| JVM | heapOperations | 149M ops/s | 162M ops/s | +9% |
+| JS | heapOperations | 67M ops/s | 80M ops/s | +19% |
+| WASM | linearBufferOps | 90M ops/s | 90M ops/s | ~0% |
+| macOS | readWriteIntDirect | 99K ops/s | 238K ops/s | +140% |
+| macOS | heapOperations | 14M ops/s | 31M ops/s | +117% |
+
+The macOS improvements are from pointer-based optimizations in native code paths, not from string decoding changes (which are a separate code path used only for charset conversions).

@@ -28,6 +28,26 @@ private external fun jsMemoryGrow(pages: Int): Int
 private external fun jsMemorySize(): Int
 
 /**
+ * Configuration for LinearBuffer memory allocation.
+ *
+ * Call [LinearMemoryAllocator.configure] before any LinearBuffer allocation
+ * to customize the initial memory size.
+ *
+ * ```kotlin
+ * // At app startup, before any buffer allocation:
+ * LinearMemoryAllocator.configure(initialSizeMB = 8)
+ * ```
+ */
+object LinearMemoryConfig {
+    /**
+     * Initial memory allocation in megabytes. Default is 16MB.
+     * Must be set before the first LinearBuffer allocation.
+     */
+    var initialSizeMB: Int = 16
+        internal set
+}
+
+/**
  * Linear memory allocator for buffer storage.
  *
  * This allocator grows WASM linear memory via JavaScript interop and uses
@@ -49,11 +69,26 @@ object LinearMemoryAllocator {
     private var nextOffset: Int = 0
     private var heapEnd: Int = 0
 
-    // Allocate 256MB initially (4096 pages * 64KB)
-    // This large allocation works around the optimizer bug that prevents
-    // calling jsMemoryGrow during allocation
-    private const val INITIAL_PAGES = 4096
-    private const val GROWTH_PAGES = 4096
+    // Computed from config - 1MB = 16 pages (16 * 64KB)
+    private val initialPages: Int get() = LinearMemoryConfig.initialSizeMB * 16
+
+    /**
+     * Configure the initial memory allocation size.
+     * Must be called before any LinearBuffer allocation.
+     *
+     * @param initialSizeMB Initial memory size in megabytes (default: 16MB)
+     * @throws IllegalStateException if called after memory has been initialized
+     */
+    fun configure(initialSizeMB: Int = 16) {
+        if (initialized) {
+            throw IllegalStateException(
+                "LinearMemoryAllocator already initialized. " +
+                    "Call configure() before any LinearBuffer allocation.",
+            )
+        }
+        require(initialSizeMB > 0) { "initialSizeMB must be positive" }
+        LinearMemoryConfig.initialSizeMB = initialSizeMB
+    }
 
     /**
      * Initialize the allocator by growing memory.
@@ -63,7 +98,7 @@ object LinearMemoryAllocator {
         if (initialized) return
 
         // Grow memory to get pages exclusively for our use
-        val previousSizePages = jsMemoryGrow(INITIAL_PAGES)
+        val previousSizePages = jsMemoryGrow(initialPages)
         if (previousSizePages == -1) {
             throw OutOfMemoryError("Failed to grow WASM memory for buffer allocation")
         }
@@ -71,7 +106,7 @@ object LinearMemoryAllocator {
         // Our heap starts at the old memory boundary
         heapBase = previousSizePages * PAGE_SIZE
         nextOffset = heapBase
-        heapEnd = heapBase + (INITIAL_PAGES * PAGE_SIZE)
+        heapEnd = heapBase + (initialPages * PAGE_SIZE)
         initialized = true
     }
 
@@ -114,8 +149,9 @@ object LinearMemoryAllocator {
         // Check bounds but don't try to grow (would require @JsFun call)
         if (nextOffset + aligned > heapEnd) {
             throw OutOfMemoryError(
-                "LinearBuffer allocation exceeded pre-allocated memory. " +
-                    "Increase INITIAL_PAGES or use AllocationZone.Heap for high-frequency allocation.",
+                "LinearBuffer allocation exceeded ${LinearMemoryConfig.initialSizeMB}MB pre-allocated memory. " +
+                    "Call LinearMemoryAllocator.configure(initialSizeMB = N) at startup with a larger value, " +
+                    "or use AllocationZone.Heap for high-frequency allocation.",
             )
         }
 
@@ -126,13 +162,13 @@ object LinearMemoryAllocator {
 
     // Helper for test functions that need initialization
     private fun initializeMemory() {
-        val previousSizePages = jsMemoryGrow(INITIAL_PAGES)
+        val previousSizePages = jsMemoryGrow(initialPages)
         if (previousSizePages == -1) {
             throw OutOfMemoryError("Failed to grow WASM memory for buffer allocation")
         }
         heapBase = previousSizePages * PAGE_SIZE
         nextOffset = heapBase
-        heapEnd = heapBase + (INITIAL_PAGES * PAGE_SIZE)
+        heapEnd = heapBase + (initialPages * PAGE_SIZE)
         initialized = true
     }
 

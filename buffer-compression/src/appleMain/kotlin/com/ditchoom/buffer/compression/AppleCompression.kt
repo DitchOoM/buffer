@@ -1,10 +1,10 @@
 package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.ByteArrayBuffer
 import com.ditchoom.buffer.ByteOrder
-import com.ditchoom.buffer.DataBuffer
-import com.ditchoom.buffer.DataBufferSlice
 import com.ditchoom.buffer.MutableDataBuffer
+import com.ditchoom.buffer.MutableDataBufferSlice
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.allocate
@@ -12,6 +12,7 @@ import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.UnsafeNumber
+import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.nativeHeap
@@ -19,6 +20,7 @@ import kotlinx.cinterop.plus
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.rawPtr
 import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.usePinned
 import platform.posix.memcpy
 import platform.zlib.Z_DEFLATED
 import platform.zlib.Z_FINISH
@@ -117,15 +119,14 @@ private fun compressWithZStream(
     level: CompressionLevel,
 ): PlatformBuffer {
     val inputSize = input.remaining()
-    val inputPtr = getBufferPointer(input)
     val inputPosition = input.position()
 
     // Allocate output buffer sized for worst case
     val maxOutputSize = getCompressBound(inputSize) + 32
     val output = PlatformBuffer.allocate(maxOutputSize, AllocationZone.Direct) as MutableDataBuffer
-    val outputPtr =
-        output.mutableData?.mutableBytes as? CPointer<ByteVar>
-            ?: throw CompressionException("Failed to get output buffer pointer")
+
+    @Suppress("UNCHECKED_CAST")
+    val outputPtr = output.data.mutableBytes as CPointer<ByteVar>
 
     val s = nativeHeap.alloc<z_stream>()
     try {
@@ -154,12 +155,14 @@ private fun compressWithZStream(
             throw CompressionException("deflateInit2 failed with code: $result")
         }
 
-        s.next_in = (inputPtr + inputPosition)?.reinterpret()
-        s.avail_in = inputSize.convert()
-        s.next_out = outputPtr.reinterpret()
-        s.avail_out = maxOutputSize.convert()
+        withBufferPointer(input) { inputPtr ->
+            s.next_in = (inputPtr + inputPosition)?.reinterpret()
+            s.avail_in = inputSize.convert()
+            s.next_out = outputPtr.reinterpret()
+            s.avail_out = maxOutputSize.convert()
 
-        result = deflate(s.ptr, Z_FINISH)
+            result = deflate(s.ptr, Z_FINISH)
+        }
         deflateEnd(s.ptr)
 
         if (result != Z_STREAM_END) {
@@ -189,7 +192,6 @@ private fun decompressWithZStream(
     algorithm: CompressionAlgorithm,
 ): PlatformBuffer {
     val inputSize = input.remaining()
-    val inputPtr = getBufferPointer(input)
     val inputPosition = input.position()
 
     val s = nativeHeap.alloc<z_stream>()
@@ -211,46 +213,48 @@ private fun decompressWithZStream(
             throw CompressionException("inflateInit2 failed with code: $result")
         }
 
-        s.next_in = (inputPtr + inputPosition)?.reinterpret()
-        s.avail_in = inputSize.convert()
-
         // Start with estimate, grow if needed
         var outputSize = maxOf(inputSize * 4, 1024)
         var output = PlatformBuffer.allocate(outputSize, AllocationZone.Direct) as MutableDataBuffer
-        var outputPtr =
-            output.mutableData?.mutableBytes as? CPointer<ByteVar>
-                ?: throw CompressionException("Failed to get output buffer pointer")
+
+        @Suppress("UNCHECKED_CAST")
+        var outputPtr = output.data.mutableBytes as CPointer<ByteVar>
 
         var totalDecompressed = 0
 
-        while (true) {
-            s.next_out = (outputPtr + totalDecompressed)?.reinterpret()
-            s.avail_out = (outputSize - totalDecompressed).convert()
+        withBufferPointer(input) { inputPtr ->
+            s.next_in = (inputPtr + inputPosition)?.reinterpret()
+            s.avail_in = inputSize.convert()
 
-            result = inflate(s.ptr, Z_FINISH)
+            while (true) {
+                s.next_out = (outputPtr + totalDecompressed)?.reinterpret()
+                s.avail_out = (outputSize - totalDecompressed).convert()
 
-            totalDecompressed = outputSize - s.avail_out.toInt()
+                result = inflate(s.ptr, Z_FINISH)
 
-            when (result) {
-                Z_STREAM_END -> break
-                Z_OK, -5 -> {
-                    // Z_OK or Z_BUF_ERROR - need more output space
-                    if (s.avail_out == 0u) {
-                        val newSize = outputSize * 2
-                        val newOutput = PlatformBuffer.allocate(newSize, AllocationZone.Direct) as MutableDataBuffer
-                        val newPtr =
-                            newOutput.mutableData?.mutableBytes as? CPointer<ByteVar>
-                                ?: throw CompressionException("Failed to get new output pointer")
-                        // Copy existing decompressed data to new buffer
-                        copyMemory(newPtr, outputPtr, totalDecompressed)
-                        output = newOutput
-                        outputPtr = newPtr
-                        outputSize = newSize
+                totalDecompressed = outputSize - s.avail_out.toInt()
+
+                when (result) {
+                    Z_STREAM_END -> break
+                    Z_OK, -5 -> {
+                        // Z_OK or Z_BUF_ERROR - need more output space
+                        if (s.avail_out == 0u) {
+                            val newSize = outputSize * 2
+                            val newOutput = PlatformBuffer.allocate(newSize, AllocationZone.Direct) as MutableDataBuffer
+
+                            @Suppress("UNCHECKED_CAST")
+                            val newPtr = newOutput.data.mutableBytes as CPointer<ByteVar>
+                            // Copy existing decompressed data to new buffer
+                            copyMemory(newPtr, outputPtr, totalDecompressed)
+                            output = newOutput
+                            outputPtr = newPtr
+                            outputSize = newSize
+                        }
                     }
-                }
-                else -> {
-                    inflateEnd(s.ptr)
-                    throw CompressionException("inflate failed with code: $result")
+                    else -> {
+                        inflateEnd(s.ptr)
+                        throw CompressionException("inflate failed with code: $result")
+                    }
                 }
             }
         }
@@ -270,13 +274,25 @@ private fun decompressWithZStream(
 }
 
 /**
- * Get pointer to buffer data.
+ * Execute a block with a pointer to the buffer's data.
+ * Handles pinning for ByteArrayBuffer to ensure the pointer remains valid.
  */
 @OptIn(ExperimentalForeignApi::class)
-private fun getBufferPointer(buffer: ReadBuffer): CPointer<ByteVar> =
+private inline fun <R> withBufferPointer(
+    buffer: ReadBuffer,
+    block: (CPointer<ByteVar>) -> R,
+): R =
     when (buffer) {
-        is DataBufferSlice -> buffer.bytePointer
-        is DataBuffer -> buffer.bytePointer
+        is MutableDataBufferSlice -> block(buffer.bytePointer)
+        is MutableDataBuffer -> {
+            @Suppress("UNCHECKED_CAST")
+            block(buffer.data.mutableBytes as CPointer<ByteVar>)
+        }
+        is ByteArrayBuffer -> {
+            buffer.backingArray.usePinned { pinned ->
+                block(pinned.addressOf(0))
+            }
+        }
         else -> throw CompressionException("Unsupported buffer type for compression: ${buffer::class}")
     }
 

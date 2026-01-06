@@ -401,16 +401,16 @@ class FragmentedReadBufferTests {
     fun utf8Line() {
         val buffers = arrayOf("yolo\r\n", "\nsw\n\r\nag", "\r\nli\n\r\nfe\r\nstyle\r\n")
         val composableBuffer = buffers.map { it.toReadBuffer(Charset.UTF8) }.toComposableBuffer()
-        assertEquals("yolo", composableBuffer.readUtf8Line().toString())
-        assertEquals("", composableBuffer.readUtf8Line().toString())
-        assertEquals("sw", composableBuffer.readUtf8Line().toString())
-        assertEquals("", composableBuffer.readUtf8Line().toString())
-        assertEquals("ag", composableBuffer.readUtf8Line().toString())
-        assertEquals("li", composableBuffer.readUtf8Line().toString())
-        assertEquals("", composableBuffer.readUtf8Line().toString())
-        assertEquals("fe", composableBuffer.readUtf8Line().toString())
-        assertEquals("style", composableBuffer.readUtf8Line().toString())
-        assertEquals("", composableBuffer.readUtf8Line().toString())
+        assertEquals("yolo", composableBuffer.readLine().toString())
+        assertEquals("", composableBuffer.readLine().toString())
+        assertEquals("sw", composableBuffer.readLine().toString())
+        assertEquals("", composableBuffer.readLine().toString())
+        assertEquals("ag", composableBuffer.readLine().toString())
+        assertEquals("li", composableBuffer.readLine().toString())
+        assertEquals("", composableBuffer.readLine().toString())
+        assertEquals("fe", composableBuffer.readLine().toString())
+        assertEquals("style", composableBuffer.readLine().toString())
+        assertEquals("", composableBuffer.readLine().toString())
         assertTrue { composableBuffer.remaining() == 0 }
     }
 

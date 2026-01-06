@@ -14,9 +14,6 @@ actual fun PlatformBuffer.Companion.allocate(
     zone: AllocationZone,
     byteOrder: ByteOrder,
 ): PlatformBuffer {
-    if (zone is AllocationZone.Custom) {
-        return zone.allocator(size)
-    }
     val sharedArrayBuffer =
         try {
             if (zone is AllocationZone.SharedMemory) {
@@ -55,3 +52,25 @@ actual fun PlatformBuffer.Companion.wrap(
         array.unsafeCast<Int8Array>(),
         byteOrder,
     )
+
+/**
+ * Allocates a buffer with guaranteed native memory access (JsBuffer).
+ * In JavaScript, all buffers have native access via ArrayBuffer.
+ */
+actual fun PlatformBuffer.Companion.allocateNative(
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer = JsBuffer(Int8Array(size), byteOrder)
+
+/**
+ * Allocates a buffer with shared memory (SharedArrayBuffer) if available.
+ * Falls back to regular ArrayBuffer if SharedArrayBuffer is not supported.
+ *
+ * Note: SharedArrayBuffer requires CORS headers:
+ * - Cross-Origin-Opener-Policy: same-origin
+ * - Cross-Origin-Embedder-Policy: require-corp
+ */
+actual fun PlatformBuffer.Companion.allocateShared(
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer = allocate(size, AllocationZone.SharedMemory, byteOrder)

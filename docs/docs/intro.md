@@ -16,6 +16,7 @@ Buffer provides a unified API for managing byte buffers across all Kotlin platfo
 - **Kotlin Multiplatform**: Single API works across JVM, Android, iOS, JS, WASM, and Native
 - **Buffer Pooling**: High-performance buffer reuse for network I/O and protocol parsing
 - **Stream Processing**: Handle fragmented data across chunk boundaries
+- **Optimized Operations**: Bulk comparison, search (indexOf), and fill operations using SIMD-like techniques
 
 ## Platform Implementations
 
@@ -25,7 +26,7 @@ Buffer provides a unified API for managing byte buffers across all Kotlin platfo
 | Android | [`ByteBuffer`](https://developer.android.com/reference/java/nio/ByteBuffer) + [`SharedMemory`](https://developer.android.com/reference/android/os/SharedMemory) | IPC via Parcelable |
 | iOS/macOS | [`NSData`](https://developer.apple.com/documentation/foundation/nsdata) / [`NSMutableData`](https://developer.apple.com/documentation/foundation/nsmutabledata) | Foundation integration |
 | JavaScript | [`Uint8Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array) | SharedArrayBuffer support |
-| WASM | [`ByteArray`](https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-byte-array/) | Contributions welcome |
+| WASM | `LinearBuffer` (native memory) / `ByteArrayBuffer` | Zero-copy JS interop |
 | Linux | [`ByteArray`](https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-byte-array/) | Native target |
 
 ## Quick Example

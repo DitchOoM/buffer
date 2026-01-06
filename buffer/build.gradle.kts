@@ -11,6 +11,7 @@ plugins {
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.atomicfu)
     alias(libs.plugins.dokka)
+    alias(libs.plugins.kover)
     alias(libs.plugins.kotlinx.benchmark)
     signing
 }
@@ -104,8 +105,37 @@ kotlin {
     }
     applyDefaultHierarchyTemplate()
     sourceSets {
-        // Use the existing webMain source set from the default hierarchy
-        // It's automatically shared between JS and WASM targets
+        // Create nonJvmMain source set shared by nativeMain and wasmJsMain
+        // This contains ByteArrayBuffer which is used for managed memory on these platforms
+        val nonJvmMain by creating {
+            dependsOn(commonMain.get())
+        }
+        val nonJvmTest by creating {
+            dependsOn(commonTest.get())
+        }
+        nativeMain {
+            dependsOn(nonJvmMain)
+        }
+        nativeTest {
+            dependsOn(nonJvmTest)
+        }
+        wasmJsMain {
+            dependsOn(nonJvmMain)
+        }
+        wasmJsTest {
+            dependsOn(nonJvmTest)
+        }
+
+        // Shared source set for JVM and Android (java.nio.ByteBuffer)
+        val jvmCommonMain by creating {
+            dependsOn(commonMain.get())
+        }
+        jvmMain {
+            dependsOn(jvmCommonMain)
+        }
+        androidMain {
+            dependsOn(jvmCommonMain)
+        }
 
         commonTest.dependencies {
             implementation(kotlin("test"))
@@ -115,6 +145,8 @@ kotlin {
         }
 
         val androidInstrumentedTest by getting {
+            // Include commonTest so tests can run on device/emulator
+            dependsOn(commonTest.get())
             dependencies {
                 implementation(kotlin("test"))
                 implementation(libs.androidx.test.runner)

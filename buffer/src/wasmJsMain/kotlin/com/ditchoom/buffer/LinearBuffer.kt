@@ -7,6 +7,26 @@ import kotlin.wasm.unsafe.Pointer
 import kotlin.wasm.unsafe.UnsafeWasmMemoryApi
 
 /**
+ * Decode bytes from WASM linear memory to a string using the specified encoding.
+ * Uses the browser's TextDecoder API for charset support.
+ */
+@JsFun(
+    """
+(offset, length, encoding) => {
+    const memory = wasmExports.memory.buffer;
+    const bytes = new Uint8Array(memory, offset, length);
+    const decoder = new TextDecoder(encoding, { fatal: true });
+    return decoder.decode(bytes);
+}
+""",
+)
+private external fun decodeString(
+    offset: Int,
+    length: Int,
+    encoding: JsString,
+): JsString
+
+/**
  * Efficient memory copy within WASM linear memory using Uint8Array.set().
  * This is much faster than byte-by-byte or even Long-by-Long copying.
  */
@@ -78,7 +98,19 @@ class LinearBuffer(
     internal val baseOffset: Int,
     capacity: Int,
     byteOrder: ByteOrder,
-) : BaseWebBuffer(capacity, byteOrder) {
+) : BaseWebBuffer(capacity, byteOrder),
+    NativeMemoryAccess {
+    /**
+     * The offset in WASM linear memory for zero-copy JS interop.
+     * Use with `new DataView(wasmExports.memory.buffer, nativeAddress, nativeSize)`.
+     */
+    override val nativeAddress: Long get() = baseOffset.toLong()
+
+    /**
+     * The size of the native memory region in bytes.
+     */
+    override val nativeSize: Long get() = capacity.toLong()
+
     /**
      * Get the linear memory offset for the current position.
      * This can be passed to JavaScript for zero-copy access via DataView.
@@ -166,7 +198,7 @@ class LinearBuffer(
             raw
         } else {
             // Swap bytes for big endian
-            reverseInt(raw)
+            raw.reverseBytes()
         }
     }
 
@@ -178,7 +210,7 @@ class LinearBuffer(
             if (littleEndian) {
                 value
             } else {
-                reverseInt(value)
+                value.reverseBytes()
             }
         ptr(index).storeInt(toStore)
     }
@@ -188,7 +220,7 @@ class LinearBuffer(
         return if (littleEndian) {
             raw
         } else {
-            reverseLong(raw)
+            raw.reverseBytes()
         }
     }
 
@@ -200,26 +232,10 @@ class LinearBuffer(
             if (littleEndian) {
                 value
             } else {
-                reverseLong(value)
+                value.reverseBytes()
             }
         ptr(index).storeLong(toStore)
     }
-
-    private fun reverseInt(value: Int): Int =
-        ((value and 0xFF) shl 24) or
-            ((value and 0xFF00) shl 8) or
-            ((value shr 8) and 0xFF00) or
-            ((value shr 24) and 0xFF)
-
-    private fun reverseLong(value: Long): Long =
-        ((value and 0xFFL) shl 56) or
-            ((value and 0xFF00L) shl 40) or
-            ((value and 0xFF0000L) shl 24) or
-            ((value and 0xFF000000L) shl 8) or
-            ((value shr 8) and 0xFF000000L) or
-            ((value shr 24) and 0xFF0000L) or
-            ((value shr 40) and 0xFF00L) or
-            ((value shr 56) and 0xFFL)
 
     override fun slice(): ReadBuffer {
         // Create a new LinearBuffer view of the remaining portion
@@ -326,14 +342,24 @@ class LinearBuffer(
     override fun readString(
         length: Int,
         charset: Charset,
-    ): String =
-        when (charset) {
-            Charset.UTF8 -> {
-                val bytes = readByteArray(length)
-                bytes.decodeToString()
+    ): String {
+        val encoding =
+            when (charset) {
+                Charset.UTF8 -> "utf-8"
+                Charset.UTF16 -> "utf-16"
+                Charset.UTF16BigEndian -> "utf-16be"
+                Charset.UTF16LittleEndian -> "utf-16le"
+                Charset.ASCII -> "ascii"
+                Charset.ISOLatin1 -> "iso-8859-1"
+                Charset.UTF32,
+                Charset.UTF32LittleEndian,
+                Charset.UTF32BigEndian,
+                -> throw UnsupportedOperationException("UTF-32 charsets are not supported by TextDecoder")
             }
-            else -> throw UnsupportedOperationException("LinearBuffer only supports UTF8 charset. Got: $charset")
-        }
+        val result = decodeString(baseOffset + positionValue, length, encoding.toJsString()).toString()
+        positionValue += length
+        return result
+    }
 
     override fun writeString(
         text: CharSequence,
@@ -344,6 +370,64 @@ class LinearBuffer(
             else -> throw UnsupportedOperationException("LinearBuffer only supports UTF8 charset. Got: $charset")
         }
         return this
+    }
+
+    /**
+     * Optimized single byte indexOf using Long comparisons (8 bytes at a time).
+     */
+    override fun indexOf(byte: Byte): Int =
+        bulkIndexOf(
+            startPos = positionValue,
+            length = remaining(),
+            byte = byte,
+            getLong = { ptr(it).loadLong() },
+            getByte = { loadByte(it) },
+        )
+
+    /**
+     * Optimized contentEquals using Long comparisons.
+     */
+    override fun contentEquals(other: ReadBuffer): Boolean {
+        if (remaining() != other.remaining()) return false
+        val size = remaining()
+        if (size == 0) return true
+
+        if (other is LinearBuffer) {
+            return bulkCompareEquals(
+                thisPos = positionValue,
+                otherPos = other.positionValue,
+                length = size,
+                getLong = { ptr(it).loadLong() },
+                otherGetLong = { other.ptr(it).loadLong() },
+                getByte = { loadByte(it) },
+                otherGetByte = { other.loadByte(it) },
+            )
+        }
+        return super.contentEquals(other)
+    }
+
+    /**
+     * Optimized mismatch using Long comparisons.
+     */
+    override fun mismatch(other: ReadBuffer): Int {
+        val thisRemaining = remaining()
+        val otherRemaining = other.remaining()
+        val minLength = minOf(thisRemaining, otherRemaining)
+
+        if (other is LinearBuffer) {
+            return bulkMismatch(
+                thisPos = positionValue,
+                otherPos = other.positionValue,
+                minLength = minLength,
+                thisRemaining = thisRemaining,
+                otherRemaining = otherRemaining,
+                getLong = { ptr(it).loadLong() },
+                otherGetLong = { other.ptr(it).loadLong() },
+                getByte = { loadByte(it) },
+                otherGetByte = { other.loadByte(it) },
+            )
+        }
+        return super.mismatch(other)
     }
 
     override fun equals(other: Any?): Boolean {

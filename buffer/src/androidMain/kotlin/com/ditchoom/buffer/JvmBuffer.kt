@@ -16,6 +16,8 @@ import java.nio.ByteBuffer
 open class JvmBuffer(
     val buffer: ByteBuffer,
 ) : BaseJvmBuffer(buffer) {
+    override fun slice() = JvmBuffer(byteBuffer.slice())
+
     override fun describeContents(): Int = 0
 
     override fun writeToParcel(
@@ -56,30 +58,34 @@ open class JvmBuffer(
         }
     }
 
-    companion object CREATOR : Creator<JvmBuffer> {
-        override fun createFromParcel(parcel: Parcel): JvmBuffer {
-            val p = parcel.dataPosition()
-            if (parcel.readByte().toInt() == 1) {
-                parcel.setDataPosition(p)
-                return ParcelableSharedMemoryBuffer.createFromParcel(parcel)
-            }
-            val position = parcel.readInt()
-            val limit = parcel.readInt()
-            val isDirect = parcel.readByte() == 1.toByte()
-            val buffer =
-                if (isDirect) {
-                    ByteBuffer.allocateDirect(limit)
-                } else {
-                    ByteBuffer.allocate(limit)
+    companion object {
+        @JvmField
+        val CREATOR: Creator<JvmBuffer> =
+            object : Creator<JvmBuffer> {
+                override fun createFromParcel(parcel: Parcel): JvmBuffer {
+                    val p = parcel.dataPosition()
+                    if (parcel.readByte().toInt() == 1) {
+                        parcel.setDataPosition(p)
+                        return ParcelableSharedMemoryBuffer.createFromParcel(parcel)
+                    }
+                    val position = parcel.readInt()
+                    val limit = parcel.readInt()
+                    val isDirect = parcel.readByte() == 1.toByte()
+                    val buffer =
+                        if (isDirect) {
+                            ByteBuffer.allocateDirect(limit)
+                        } else {
+                            ByteBuffer.allocate(limit)
+                        }
+                    ParcelFileDescriptor.CREATOR.createFromParcel(parcel).use { pfd ->
+                        FileInputStream(pfd.fileDescriptor).channel.use { readChannel -> readChannel.read(buffer) }
+                    }
+                    buffer.position(position)
+                    buffer.limit(limit)
+                    return JvmBuffer(buffer)
                 }
-            ParcelFileDescriptor.CREATOR.createFromParcel(parcel).use { pfd ->
-                FileInputStream(pfd.fileDescriptor).channel.use { readChannel -> readChannel.read(buffer) }
-            }
-            buffer.position(position)
-            buffer.limit(limit)
-            return JvmBuffer(buffer)
-        }
 
-        override fun newArray(size: Int): Array<JvmBuffer?> = arrayOfNulls(size)
+                override fun newArray(size: Int): Array<JvmBuffer?> = arrayOfNulls(size)
+            }
     }
 }

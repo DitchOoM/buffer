@@ -106,24 +106,24 @@ class FragmentedReadBuffer(
         charset: Charset,
     ): String = readSizeIntoBuffer(length) { it.readString(length, charset) }
 
-    override fun readUtf8Line(): CharSequence {
+    override fun readLine(): CharSequence {
         if (currentPosition < firstInitialLimit) {
             val initialFirstPosition = first.position()
-            val firstUtf8 = first.readUtf8Line()
+            val firstLine = first.readLine()
             val bytesRead = first.position() - initialFirstPosition
-            return if (firstUtf8.toString().utf8Length().toLong() == bytesRead.toLong()) {
+            return if (firstLine.toString().utf8Length().toLong() == bytesRead.toLong()) {
                 // read the entire string, check the second one
                 currentPosition = firstInitialLimit
                 val secondInitialPosition = second.position()
-                val secondLine = second.readUtf8Line()
+                val secondLine = second.readLine()
                 currentPosition += second.position() - secondInitialPosition
-                StringBuilder(firstUtf8).append(secondLine)
+                StringBuilder(firstLine).append(secondLine)
             } else {
-                firstUtf8
+                firstLine
             }
         } else {
             val secondInitialPosition = second.position()
-            val line = second.readUtf8Line()
+            val line = second.readLine()
             currentPosition += second.position() - secondInitialPosition
             return line
         }
