@@ -82,7 +82,8 @@ jobs:
         with:
           api-level: 34
           arch: x86_64
-          script: ./gradlew :buffer:connectedBenchmarkAndroidTest --no-build-cache
+          # Run only functional tests, exclude benchmark tests (they require real hardware)
+          script: ./gradlew :buffer:connectedBenchmarkAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=com.ditchoom.buffer.AndroidBufferBenchmark --no-build-cache
 
   apple:
     name: "Apple Target Tests"
