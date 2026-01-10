@@ -15,6 +15,9 @@ internal object BufferMismatchImpl {
      *
      * Called by Android after verifying Build.VERSION.SDK_INT >= 34.
      * Uses SIMD-optimized vectorized comparison on supported hardware.
+     *
+     * Note: Only use when both buffers are the same type (both heap or both direct).
+     * Mixing buffer types can cause issues on some Android versions.
      */
     @Suppress("NewApi") // Android caller verifies API level
     fun mismatchOptimized(
@@ -24,6 +27,12 @@ internal object BufferMismatchImpl {
         buffer1Remaining: Int,
         buffer2Remaining: Int,
     ): Int {
+        // Only use native mismatch when both buffers are the same type
+        // Mixing heap and direct buffers can cause issues on some Android versions
+        if (buffer1.isDirect != buffer2.isDirect) {
+            return mismatchFallback(buffer1, buffer2, minLength, buffer1Remaining, buffer2Remaining)
+        }
+
         val slice1 = buffer1.slice()
         (slice1 as Buffer).limit(minLength)
         val slice2 = buffer2.slice()
