@@ -47,6 +47,15 @@ kotlin {
         compilations.create("benchmark") {
             associateWith(this@jvm.compilations.getByName("main"))
         }
+        // Java 11 compilation for ByteBuffer.mismatch() optimization
+        compilations.create("java11") {
+            compilerOptions.configure {
+                jvmTarget.set(JvmTarget.JVM_11)
+            }
+            defaultSourceSet {
+                kotlin.srcDir("src/jvm11Main/kotlin")
+            }
+        }
     }
     js {
         outputModuleName.set("buffer-kt")
@@ -142,6 +151,7 @@ kotlin {
         }
         androidMain.dependencies {
             implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.androidx.annotation)
         }
 
         val androidInstrumentedTest by getting {
@@ -337,6 +347,23 @@ benchmark {
             iterations = 5
             exclude(".*sliceBuffer.*")
         }
+    }
+}
+
+// Configure multi-release JAR for Java 11+ optimizations
+tasks.named<Jar>("jvmJar") {
+    manifest {
+        attributes("Multi-Release" to "true")
+    }
+    // Include Java 11 classes in META-INF/versions/11/
+    into("META-INF/versions/11") {
+        from(
+            kotlin
+                .jvm()
+                .compilations["java11"]
+                .output
+                .allOutputs,
+        )
     }
 }
 
