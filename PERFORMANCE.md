@@ -199,4 +199,4 @@ The macOS improvements are from pointer-based optimizations in native code paths
 2. Polymorphic signature overhead causes boxing/unboxing
 3. Standard `ByteBuffer.getInt()/putInt()` methods are already intrinsified
 
-**Recommendation**: Use standard ByteBuffer methods for get/put operations on Android. Only use MethodHandle for private field access (like `nativeAddress`) where it provides ~10x improvement over reflection.
+**Recommendation**: Use standard ByteBuffer methods for get/put operations on Android. MethodHandle for private field access (like `nativeAddress`) provides ~10x improvement over reflection, but requires minSdk 26+. This library currently uses cached reflection for `nativeAddress` to maintain minSdk 19 compatibility. MethodHandle optimization may be added in a future release with multi-version library support.
