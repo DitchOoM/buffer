@@ -1,4 +1,4 @@
-@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, kotlinx.cinterop.UnsafeNumber::class)
 
 package com.ditchoom.buffer
 
@@ -73,9 +73,7 @@ actual object UnsafeMemory {
         dstAddress: Long,
         size: Long,
     ) {
-        val src = srcAddress.toCPointer<ByteVar>()
-        val dst = dstAddress.toCPointer<ByteVar>()
-        memcpy(dst, src, size.convert())
+        memcpy(dstAddress.toCPointer<ByteVar>(), srcAddress.toCPointer<ByteVar>(), size.convert())
     }
 
     actual fun setMemory(
@@ -83,7 +81,6 @@ actual object UnsafeMemory {
         size: Long,
         value: Byte,
     ) {
-        val ptr = address.toCPointer<ByteVar>()
-        memset(ptr, value.toInt(), size.convert())
+        memset(address.toCPointer<ByteVar>(), value.toInt(), size.convert())
     }
 }
