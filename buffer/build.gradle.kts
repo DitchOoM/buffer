@@ -77,6 +77,15 @@ kotlin {
                 kotlin.srcDir("src/jvm11Main/kotlin")
             }
         }
+        // Java 21 compilation for FFM (Foreign Function & Memory) API
+        compilations.create("java21") {
+            compilerOptions.configure {
+                jvmTarget.set(JvmTarget.JVM_21)
+            }
+            defaultSourceSet {
+                kotlin.srcDir("src/jvm21Main/kotlin")
+            }
+        }
     }
     js {
         outputModuleName.set("buffer-kt")
@@ -374,7 +383,7 @@ benchmark {
     }
 }
 
-// Configure multi-release JAR for Java 11+ optimizations
+// Configure multi-release JAR for Java 11+ and Java 21+ optimizations
 tasks.named<Jar>("jvmJar") {
     manifest {
         attributes("Multi-Release" to "true")
@@ -385,6 +394,16 @@ tasks.named<Jar>("jvmJar") {
             kotlin
                 .jvm()
                 .compilations["java11"]
+                .output
+                .allOutputs,
+        )
+    }
+    // Include Java 21 classes in META-INF/versions/21/
+    into("META-INF/versions/21") {
+        from(
+            kotlin
+                .jvm()
+                .compilations["java21"]
                 .output
                 .allOutputs,
         )

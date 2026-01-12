@@ -47,7 +47,7 @@ jobs:
           unzip -p "$JAR_FILE" META-INF/MANIFEST.MF
 
           echo "--- Structure ---"
-          jar tf "$JAR_FILE" | grep -E "BufferMismatch|META-INF/versions"
+          jar tf "$JAR_FILE" | grep -E "BufferMismatch|DirectBufferAddress|META-INF/versions"
 
           echo "--- Validation ---"
           unzip -p "$JAR_FILE" META-INF/MANIFEST.MF | grep -q "Multi-Release: true" || (echo "FAIL: Multi-Release attribute missing" && exit 1)
@@ -58,6 +58,9 @@ jobs:
 
           jar tf "$JAR_FILE" | grep -q "META-INF/versions/11/com/ditchoom/buffer/BufferMismatchHelper.class" || (echo "FAIL: Java 11 class missing" && exit 1)
           echo "✓ Java 11 BufferMismatchHelper.class present"
+
+          jar tf "$JAR_FILE" | grep -q "META-INF/versions/21/com/ditchoom/buffer/DirectBufferAddressHelperKt.class" || (echo "FAIL: Java 21 class missing" && exit 1)
+          echo "✓ Java 21 DirectBufferAddressHelperKt.class present"
 
           echo "=== JAR structure verified ==="
 
