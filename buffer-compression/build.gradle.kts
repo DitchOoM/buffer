@@ -37,8 +37,8 @@ kotlin {
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
     }
     jvm {
-        // JVM target can use Java 17 since we're not constrained by Android minSdk
-        compilerOptions.jvmTarget.set(JvmTarget.JVM_17)
+        // Keep Java 8 bytecode for maximum compatibility
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
     }
     js {
         outputModuleName.set("buffer-compression-kt")

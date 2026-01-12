@@ -63,8 +63,8 @@ kotlin {
         }
     }
     jvm {
-        // JVM target can use Java 17 since we're not constrained by Android minSdk
-        compilerOptions.jvmTarget.set(JvmTarget.JVM_17)
+        // Keep Java 8 bytecode for maximum compatibility; Java 11+ optimizations in META-INF/versions/11/
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
         compilations.create("benchmark") {
             associateWith(this@jvm.compilations.getByName("main"))
         }
