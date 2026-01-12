@@ -408,6 +408,15 @@ tasks.matching { it.name == "testBenchmarkUnitTest" }.configureEach {
     enabled = false
 }
 
+// Allow reflective access to internal JDK fields:
+// - java.nio: DirectBufferAddressHelper accesses Buffer.address field
+// - jdk.internal.misc: UnsafeMemory accesses sun.misc.Unsafe
+tasks.withType<Test>().configureEach {
+    jvmArgs(
+        "--add-opens=java.base/java.nio=ALL-UNNAMED",
+    )
+}
+
 dokka {
     dokkaSourceSets.configureEach {
         externalDocumentationLinks.register("kotlin-stdlib") {
