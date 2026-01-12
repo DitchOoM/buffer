@@ -38,6 +38,17 @@ repositories {
 }
 
 kotlin {
+    // Suppress Beta warning for expect/actual classes (BufferMismatchHelper)
+    targets.all {
+        compilations.all {
+            compileTaskProvider.configure {
+                compilerOptions {
+                    freeCompilerArgs.add("-Xexpect-actual-classes")
+                }
+            }
+        }
+    }
+
     androidTarget {
         publishLibraryVariants("release")
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
@@ -46,6 +57,15 @@ kotlin {
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
         compilations.create("benchmark") {
             associateWith(this@jvm.compilations.getByName("main"))
+        }
+        // Java 11 compilation for ByteBuffer.mismatch() optimization
+        compilations.create("java11") {
+            compilerOptions.configure {
+                jvmTarget.set(JvmTarget.JVM_11)
+            }
+            defaultSourceSet {
+                kotlin.srcDir("src/jvm11Main/kotlin")
+            }
         }
     }
     js {
@@ -337,6 +357,23 @@ benchmark {
             iterations = 5
             exclude(".*sliceBuffer.*")
         }
+    }
+}
+
+// Configure multi-release JAR for Java 11+ optimizations
+tasks.named<Jar>("jvmJar") {
+    manifest {
+        attributes("Multi-Release" to "true")
+    }
+    // Include Java 11 classes in META-INF/versions/11/
+    into("META-INF/versions/11") {
+        from(
+            kotlin
+                .jvm()
+                .compilations["java11"]
+                .output
+                .allOutputs,
+        )
     }
 }
 

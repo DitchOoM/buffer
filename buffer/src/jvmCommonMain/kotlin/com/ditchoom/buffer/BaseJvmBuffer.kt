@@ -222,84 +222,26 @@ abstract class BaseJvmBuffer(
     override fun position() = buffer.position()
 
     /**
-     * Optimized content comparison using ByteBuffer.mismatch (Java 11+ / Android API 34+) when available,
-     * falling back to Long comparisons for older versions.
+     * Optimized content comparison using ByteBuffer.mismatch() on Java 11+ via multi-release JAR.
+     * Falls back to default ReadBuffer.contentEquals() on Java 8 and Android.
      */
     override fun contentEquals(other: ReadBuffer): Boolean {
         if (remaining() != other.remaining()) return false
-        if (other is BaseJvmBuffer) {
-            return mismatchInternal(other) == -1
-        }
-        return super.contentEquals(other)
+        return mismatch(other) == -1
     }
 
     /**
-     * Optimized mismatch using ByteBuffer.mismatch (Java 11+ / Android API 34+) when available.
+     * Optimized mismatch using ByteBuffer.mismatch() on Java 11+ via multi-release JAR.
+     * Falls back to default ReadBuffer.mismatch() on Java 8 and Android.
      */
     override fun mismatch(other: ReadBuffer): Int {
         if (other is BaseJvmBuffer) {
-            return mismatchInternal(other)
+            val result = BufferMismatchHelper.mismatch(byteBuffer, other.byteBuffer)
+            if (result != USE_DEFAULT_MISMATCH) {
+                return result
+            }
         }
         return super.mismatch(other)
-    }
-
-    private fun mismatchInternal(other: BaseJvmBuffer): Int {
-        val thisRemaining = remaining()
-        val otherRemaining = other.remaining()
-        val minLength = minOf(thisRemaining, otherRemaining)
-
-        // Use ByteBuffer.mismatch if available (Java 11+ / Android API 34+)
-        // This uses SIMD optimizations on supported hardware
-        return try {
-            val thisSlice = byteBuffer.slice()
-            (thisSlice as Buffer).limit(minLength)
-            val otherSlice = other.byteBuffer.slice()
-            (otherSlice as Buffer).limit(minLength)
-            val result = thisSlice.mismatch(otherSlice)
-            if (result == -1 && thisRemaining != otherRemaining) {
-                minLength
-            } else {
-                result
-            }
-        } catch (_: NoSuchMethodError) {
-            // Fallback for Java 8 / older Android
-            fallbackMismatch(other, minLength, thisRemaining, otherRemaining)
-        }
-    }
-
-    private fun fallbackMismatch(
-        other: BaseJvmBuffer,
-        minLength: Int,
-        thisRemaining: Int,
-        otherRemaining: Int,
-    ): Int {
-        // Optimize with Long comparisons (8 bytes at a time)
-        val thisPos = position()
-        val otherPos = other.position()
-        var i = 0
-
-        // Compare 8 bytes at a time using Long reads
-        while (i + 8 <= minLength) {
-            if (byteBuffer.getLong(thisPos + i) != other.byteBuffer.getLong(otherPos + i)) {
-                // Found mismatch in this Long, find exact position
-                for (j in 0 until 8) {
-                    if (byteBuffer.get(thisPos + i + j) != other.byteBuffer.get(otherPos + i + j)) {
-                        return i + j
-                    }
-                }
-            }
-            i += 8
-        }
-
-        // Compare remaining bytes
-        while (i < minLength) {
-            if (byteBuffer.get(thisPos + i) != other.byteBuffer.get(otherPos + i)) {
-                return i
-            }
-            i++
-        }
-
-        return if (thisRemaining != otherRemaining) minLength else -1
     }
 
     /**

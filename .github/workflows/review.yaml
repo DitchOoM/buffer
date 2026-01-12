@@ -24,6 +24,43 @@ jobs:
       - name: Run tests
         run: ./gradlew ktlintCheck jvmTest jsNodeTest jsBrowserTest wasmJsNodeTest wasmJsBrowserTest --no-build-cache
 
+  multi-release-jar:
+    name: "Validate Multi-Release JAR"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 19
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '19'
+          cache: gradle
+      - name: Build JAR
+        run: ./gradlew :buffer:jvmJar --no-build-cache
+      - name: Verify JAR structure
+        run: |
+          JAR_FILE=$(ls buffer/build/libs/buffer-jvm-*.jar | head -1)
+          echo "=== Multi-Release JAR Validation ==="
+          echo "JAR: $JAR_FILE"
+
+          echo "--- Manifest ---"
+          unzip -p "$JAR_FILE" META-INF/MANIFEST.MF
+
+          echo "--- Structure ---"
+          jar tf "$JAR_FILE" | grep -E "BufferMismatch|META-INF/versions"
+
+          echo "--- Validation ---"
+          unzip -p "$JAR_FILE" META-INF/MANIFEST.MF | grep -q "Multi-Release: true" || (echo "FAIL: Multi-Release attribute missing" && exit 1)
+          echo "✓ Multi-Release: true"
+
+          jar tf "$JAR_FILE" | grep -q "^com/ditchoom/buffer/BufferMismatchHelper.class" || (echo "FAIL: Base class missing" && exit 1)
+          echo "✓ Base BufferMismatchHelper.class present"
+
+          jar tf "$JAR_FILE" | grep -q "META-INF/versions/11/com/ditchoom/buffer/BufferMismatchHelper.class" || (echo "FAIL: Java 11 class missing" && exit 1)
+          echo "✓ Java 11 BufferMismatchHelper.class present"
+
+          echo "=== JAR structure verified ==="
+
   apple:
     name: "Apple Target Tests"
     runs-on: macos-latest
