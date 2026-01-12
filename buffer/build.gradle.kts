@@ -55,13 +55,15 @@ kotlin {
 
     androidTarget {
         publishLibraryVariants("release")
-        compilerOptions.jvmTarget.set(JvmTarget.JVM_17)
+        // Use JVM 1.8 for Android to maintain minSdk 19 compatibility
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
         // Include commonTest in Android instrumented tests
         instrumentedTestVariant {
             sourceSetTree.set(KotlinSourceSetTree.test)
         }
     }
     jvm {
+        // JVM target can use Java 17 since we're not constrained by Android minSdk
         compilerOptions.jvmTarget.set(JvmTarget.JVM_17)
         compilations.create("benchmark") {
             associateWith(this@jvm.compilations.getByName("main"))
@@ -235,10 +237,10 @@ android {
     }
     namespace = "com.ditchoom.buffer"
 
-    // Match Kotlin JVM target for Android - use Java 17 for JDK 21 compatibility
+    // Use Java 1.8 for Android to maintain minSdk 19 compatibility
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
     }
 
     buildTypes {
