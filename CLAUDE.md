@@ -211,6 +211,6 @@ See `PERFORMANCE.md` for detailed benchmark results.
 
 ## CI/CD
 
-- Builds run on macOS with JDK 19
+- Builds run on macOS with JDK 21
 - PR labels control version bumping: `major`, `minor`, or patch (default)
 - Publishing to Maven Central happens automatically on PR merge to main

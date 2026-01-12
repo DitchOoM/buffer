@@ -39,6 +39,9 @@ repositories {
 }
 
 kotlin {
+    // Ensure consistent JDK version across all developer machines and CI
+    jvmToolchain(21)
+
     // Suppress Beta warning for expect/actual classes (BufferMismatchHelper)
     targets.all {
         compilations.all {

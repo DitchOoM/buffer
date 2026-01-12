@@ -148,6 +148,34 @@ class AndroidBufferBenchmark {
         }
     }
 
+    // --- Native Address Lookup ---
+    // Measures performance of getting native memory address from DirectByteBuffer
+    // On Android 33+, uses MethodHandle optimization; older versions use reflection
+
+    @Test
+    fun nativeAddressLookup() {
+        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        val directBuffer =
+            buffer as? NativeMemoryAccess
+                ?: throw IllegalStateException("Direct buffer should implement NativeMemoryAccess")
+        benchmarkRule.measureRepeated {
+            // Access nativeAddress repeatedly to measure lookup performance
+            // Note: nativeAddress is lazy, so first access caches the value
+            // This benchmark measures the cached access performance
+            BlackHole.consume(directBuffer.nativeAddress)
+        }
+    }
+
+    @Test
+    fun nativeAddressLookupFresh() {
+        // Measures fresh address lookup (not cached) by creating new buffers
+        benchmarkRule.measureRepeated {
+            val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+            val directBuffer = buffer as NativeMemoryAccess
+            BlackHole.consume(directBuffer.nativeAddress)
+        }
+    }
+
     // --- Slice ---
 
     @Test

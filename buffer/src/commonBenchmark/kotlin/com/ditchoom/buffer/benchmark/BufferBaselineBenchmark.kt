@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.benchmark
 
 import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.NativeMemoryAccess
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.allocate
 import kotlinx.benchmark.Benchmark
@@ -192,5 +193,26 @@ open class BufferBaselineBenchmark {
             totalLength += longLinesBuffer.readLine().length
         }
         return totalLength
+    }
+
+    // --- Native Address Lookup (JVM/Android only) ---
+    // Measures performance of getting native memory address from DirectByteBuffer
+    // JVM: Uses cached reflection Field lookup
+    // Android 33+: Uses MethodHandle optimization
+    // Note: Only works on JVM/Android where NativeMemoryAccess is implemented
+
+    @Benchmark
+    fun nativeAddressLookupCached(): Long {
+        // Access cached nativeAddress (lazy property already initialized)
+        val access = directBuffer as? NativeMemoryAccess ?: return 0L
+        return access.nativeAddress
+    }
+
+    @Benchmark
+    fun nativeAddressLookupFresh(): Long {
+        // Create new buffer and access nativeAddress (not cached)
+        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        val access = buffer as? NativeMemoryAccess ?: return 0L
+        return access.nativeAddress
     }
 }

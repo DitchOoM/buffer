@@ -5,7 +5,7 @@ This document provides benchmark results and optimization guidelines for the buf
 ## Benchmark Results
 
 Benchmarks run on:
-- **JVM/JS/WasmJS/Native**: MacBook Air M2, 16GB RAM, JDK 19
+- **JVM/JS/WasmJS/Native**: MacBook Air M2, 16GB RAM, JDK 21
 - **JavaScript**: Node.js v22
 - **WasmJS**: Node.js v22 with WASM runtime
 - **Native**: macOS ARM64 (Apple Silicon)
