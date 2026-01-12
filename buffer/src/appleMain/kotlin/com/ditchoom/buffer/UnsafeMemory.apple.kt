@@ -12,7 +12,6 @@ import kotlinx.cinterop.set
 import kotlinx.cinterop.toCPointer
 import platform.posix.memcpy
 import platform.posix.memset
-import platform.posix.size_t
 
 actual object UnsafeMemory {
     actual val isSupported: Boolean = true
@@ -76,7 +75,7 @@ actual object UnsafeMemory {
     ) {
         val src = srcAddress.toCPointer<ByteVar>()
         val dst = dstAddress.toCPointer<ByteVar>()
-        memcpy(dst, src, size.convert<size_t>())
+        memcpy(dst, src, size.convert())
     }
 
     actual fun setMemory(
@@ -85,6 +84,6 @@ actual object UnsafeMemory {
         value: Byte,
     ) {
         val ptr = address.toCPointer<ByteVar>()
-        memset(ptr, value.toInt(), size.convert<size_t>())
+        memset(ptr, value.toInt(), size.convert())
     }
 }
