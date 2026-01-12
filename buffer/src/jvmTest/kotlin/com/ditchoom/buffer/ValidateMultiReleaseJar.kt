@@ -17,6 +17,10 @@ package com.ditchoom.buffer
  *   # Run with Java 11+ (should use ByteBuffer.mismatch)
  *   /path/to/java11/bin/java -cp buffer/build/libs/buffer-jvm-*.jar \
  *       com.ditchoom.buffer.ValidateMultiReleaseJar
+ *
+ *   # Run with Java 21+ (should use FFM MemorySegment.ofBuffer)
+ *   /path/to/java21/bin/java -cp buffer/build/libs/buffer-jvm-*.jar \
+ *       com.ditchoom.buffer.ValidateMultiReleaseJar
  */
 fun main() {
     val javaVersion = System.getProperty("java.specification.version")
@@ -59,8 +63,39 @@ fun main() {
     println("Actual implementation: $actualImpl")
     println()
 
-    // Quick functional test
-    println("=== Functional Test ===")
+    // Check DirectBufferAddressHelper (Java 21 optimization)
+    println("=== DirectBufferAddressHelper ===")
+    val addressHelperClass =
+        Class.forName("com.ditchoom.buffer.DirectBufferAddressHelperKt")
+    val addressResourceName = addressHelperClass.name.replace('.', '/') + ".class"
+    val addressClassUrl = addressHelperClass.classLoader?.getResource(addressResourceName)
+
+    println("DirectBufferAddressHelperKt loaded from:")
+    println("  $addressClassUrl")
+    println()
+
+    val expectedAddressImpl =
+        if (majorVersion >= 21) {
+            "META-INF/versions/21 (FFM MemorySegment.ofBuffer)"
+        } else {
+            "root (reflection-based)"
+        }
+
+    println("Expected implementation: $expectedAddressImpl")
+
+    val addressUrlStr = addressClassUrl?.toString() ?: ""
+    val actualAddressImpl =
+        when {
+            addressUrlStr.contains("META-INF/versions/21") -> "META-INF/versions/21 (FFM MemorySegment.ofBuffer)"
+            addressUrlStr.contains(".jar!") -> "root (reflection-based)"
+            else -> "build directory (not from JAR)"
+        }
+
+    println("Actual implementation: $actualAddressImpl")
+    println()
+
+    // Quick functional test for BufferMismatchHelper
+    println("=== Functional Test: BufferMismatchHelper ===")
     val buffer1 = java.nio.ByteBuffer.allocate(1000)
     val buffer2 = java.nio.ByteBuffer.allocate(1000)
     repeat(1000) {
@@ -81,5 +116,17 @@ fun main() {
     } else {
         println("Mismatch at position: $result (expected: 500)")
         println("Test ${if (result == 500) "PASSED" else "FAILED"}")
+    }
+
+    // Functional test for DirectBufferAddressHelper
+    println()
+    println("=== Functional Test: DirectBufferAddressHelper ===")
+    val directBuffer = java.nio.ByteBuffer.allocateDirect(64)
+    try {
+        val address = getDirectBufferAddress(directBuffer)
+        println("Direct buffer address: 0x${address.toString(16)}")
+        println("Test PASSED (address obtained successfully)")
+    } catch (e: Exception) {
+        println("Test FAILED: ${e.message}")
     }
 }
