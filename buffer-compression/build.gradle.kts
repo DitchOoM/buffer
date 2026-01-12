@@ -28,12 +28,15 @@ repositories {
 }
 
 kotlin {
+    // Ensure consistent JDK version across all developer machines and CI
+    jvmToolchain(21)
+
     androidTarget {
         publishLibraryVariants("release")
-        compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_17)
     }
     jvm {
-        compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_17)
     }
     js {
         outputModuleName.set("buffer-compression-kt")
@@ -98,6 +101,12 @@ android {
         minSdk = 19
     }
     namespace = "$group.buffer.compression"
+
+    // Match Kotlin JVM target for Android - use Java 17 for JDK 21 compatibility
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
 
     publishing {
         singleVariant("release") {
