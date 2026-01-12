@@ -2,6 +2,7 @@
 
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSetTree
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -52,6 +53,10 @@ kotlin {
     androidTarget {
         publishLibraryVariants("release")
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
+        // Include commonTest in Android instrumented tests
+        instrumentedTestVariant {
+            sourceSetTree.set(KotlinSourceSetTree.test)
+        }
     }
     jvm {
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
@@ -165,8 +170,6 @@ kotlin {
         }
 
         val androidInstrumentedTest by getting {
-            // Include commonTest so tests can run on device/emulator
-            dependsOn(commonTest.get())
             dependencies {
                 implementation(kotlin("test"))
                 implementation(libs.androidx.test.runner)

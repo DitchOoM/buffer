@@ -26,7 +26,7 @@ class TransformedReadBufferTest {
         buffer.resetForRead()
 
         val transformed = TransformedReadBuffer(buffer, xorTransformer)
-        assertEquals((3.toInt() xor 0xFF).toByte(), transformed[2])
+        assertEquals((3 xor 0xFF).toByte(), transformed[2])
         assertEquals(0, transformed.position()) // Position unchanged
     }
 
