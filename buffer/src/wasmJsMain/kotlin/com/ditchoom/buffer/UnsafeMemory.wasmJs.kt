@@ -15,7 +15,11 @@ import kotlin.wasm.unsafe.UnsafeWasmMemoryApi
 }
 """,
 )
-private external fun memset(offset: Int, length: Int, value: Int)
+private external fun memset(
+    offset: Int,
+    length: Int,
+    value: Int,
+)
 
 @JsFun(
     """
@@ -27,7 +31,11 @@ private external fun memset(offset: Int, length: Int, value: Int)
 }
 """,
 )
-private external fun memcpyJs(srcOffset: Int, dstOffset: Int, length: Int)
+private external fun memcpyJs(
+    srcOffset: Int,
+    dstOffset: Int,
+    length: Int,
+)
 
 actual object UnsafeMemory {
     actual val isSupported: Boolean = true
@@ -36,33 +44,53 @@ actual object UnsafeMemory {
 
     actual fun getByte(address: Long): Byte = ptr(address).loadByte()
 
-    actual fun putByte(address: Long, value: Byte) {
+    actual fun putByte(
+        address: Long,
+        value: Byte,
+    ) {
         ptr(address).storeByte(value)
     }
 
     actual fun getShort(address: Long): Short = ptr(address).loadShort()
 
-    actual fun putShort(address: Long, value: Short) {
+    actual fun putShort(
+        address: Long,
+        value: Short,
+    ) {
         ptr(address).storeShort(value)
     }
 
     actual fun getInt(address: Long): Int = ptr(address).loadInt()
 
-    actual fun putInt(address: Long, value: Int) {
+    actual fun putInt(
+        address: Long,
+        value: Int,
+    ) {
         ptr(address).storeInt(value)
     }
 
     actual fun getLong(address: Long): Long = ptr(address).loadLong()
 
-    actual fun putLong(address: Long, value: Long) {
+    actual fun putLong(
+        address: Long,
+        value: Long,
+    ) {
         ptr(address).storeLong(value)
     }
 
-    actual fun copyMemory(srcAddress: Long, dstAddress: Long, size: Long) {
+    actual fun copyMemory(
+        srcAddress: Long,
+        dstAddress: Long,
+        size: Long,
+    ) {
         memcpyJs(srcAddress.toInt(), dstAddress.toInt(), size.toInt())
     }
 
-    actual fun setMemory(address: Long, size: Long, value: Byte) {
+    actual fun setMemory(
+        address: Long,
+        size: Long,
+        value: Byte,
+    ) {
         memset(address.toInt(), size.toInt(), value.toInt())
     }
 }

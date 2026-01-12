@@ -3,12 +3,10 @@
 package com.ditchoom.buffer
 
 import kotlinx.cinterop.ByteVar
-import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.LongVar
 import kotlinx.cinterop.ShortVar
 import kotlinx.cinterop.get
-import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.set
 import kotlinx.cinterop.toCPointer
 import platform.posix.memcpy
@@ -22,7 +20,10 @@ actual object UnsafeMemory {
         return ptr[0]
     }
 
-    actual fun putByte(address: Long, value: Byte) {
+    actual fun putByte(
+        address: Long,
+        value: Byte,
+    ) {
         val ptr = address.toCPointer<ByteVar>()!!
         ptr[0] = value
     }
@@ -32,7 +33,10 @@ actual object UnsafeMemory {
         return ptr[0]
     }
 
-    actual fun putShort(address: Long, value: Short) {
+    actual fun putShort(
+        address: Long,
+        value: Short,
+    ) {
         val ptr = address.toCPointer<ShortVar>()!!
         ptr[0] = value
     }
@@ -42,7 +46,10 @@ actual object UnsafeMemory {
         return ptr[0]
     }
 
-    actual fun putInt(address: Long, value: Int) {
+    actual fun putInt(
+        address: Long,
+        value: Int,
+    ) {
         val ptr = address.toCPointer<IntVar>()!!
         ptr[0] = value
     }
@@ -52,18 +59,29 @@ actual object UnsafeMemory {
         return ptr[0]
     }
 
-    actual fun putLong(address: Long, value: Long) {
+    actual fun putLong(
+        address: Long,
+        value: Long,
+    ) {
         val ptr = address.toCPointer<LongVar>()!!
         ptr[0] = value
     }
 
-    actual fun copyMemory(srcAddress: Long, dstAddress: Long, size: Long) {
+    actual fun copyMemory(
+        srcAddress: Long,
+        dstAddress: Long,
+        size: Long,
+    ) {
         val src = srcAddress.toCPointer<ByteVar>()
         val dst = dstAddress.toCPointer<ByteVar>()
         memcpy(dst, src, size.toULong())
     }
 
-    actual fun setMemory(address: Long, size: Long, value: Byte) {
+    actual fun setMemory(
+        address: Long,
+        size: Long,
+        value: Byte,
+    ) {
         val ptr = address.toCPointer<ByteVar>()
         memset(ptr, value.toInt(), size.toULong())
     }

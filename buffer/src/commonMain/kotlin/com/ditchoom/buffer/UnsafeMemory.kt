@@ -52,7 +52,10 @@ expect object UnsafeMemory {
      * @param value The byte value to write
      * @throws UnsupportedOperationException if not supported on this platform
      */
-    fun putByte(address: Long, value: Byte)
+    fun putByte(
+        address: Long,
+        value: Byte,
+    )
 
     /**
      * Reads a short (2 bytes) from the given memory address.
@@ -72,7 +75,10 @@ expect object UnsafeMemory {
      * @param value The short value to write
      * @throws UnsupportedOperationException if not supported on this platform
      */
-    fun putShort(address: Long, value: Short)
+    fun putShort(
+        address: Long,
+        value: Short,
+    )
 
     /**
      * Reads an int (4 bytes) from the given memory address.
@@ -92,7 +98,10 @@ expect object UnsafeMemory {
      * @param value The int value to write
      * @throws UnsupportedOperationException if not supported on this platform
      */
-    fun putInt(address: Long, value: Int)
+    fun putInt(
+        address: Long,
+        value: Int,
+    )
 
     /**
      * Reads a long (8 bytes) from the given memory address.
@@ -112,7 +121,10 @@ expect object UnsafeMemory {
      * @param value The long value to write
      * @throws UnsupportedOperationException if not supported on this platform
      */
-    fun putLong(address: Long, value: Long)
+    fun putLong(
+        address: Long,
+        value: Long,
+    )
 
     /**
      * Copies memory from source address to destination address.
@@ -122,7 +134,11 @@ expect object UnsafeMemory {
      * @param size The number of bytes to copy
      * @throws UnsupportedOperationException if not supported on this platform
      */
-    fun copyMemory(srcAddress: Long, dstAddress: Long, size: Long)
+    fun copyMemory(
+        srcAddress: Long,
+        dstAddress: Long,
+        size: Long,
+    )
 
     /**
      * Sets all bytes in a memory region to a specific value.
@@ -132,5 +148,9 @@ expect object UnsafeMemory {
      * @param value The byte value to fill with
      * @throws UnsupportedOperationException if not supported on this platform
      */
-    fun setMemory(address: Long, size: Long, value: Byte)
+    fun setMemory(
+        address: Long,
+        size: Long,
+        value: Byte,
+    )
 }
