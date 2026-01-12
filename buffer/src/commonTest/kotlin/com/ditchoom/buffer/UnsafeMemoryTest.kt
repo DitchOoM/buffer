@@ -66,4 +66,33 @@ class UnsafeMemoryTest {
             assertEquals(i.toByte(), UnsafeMemory.getByte(dstAddr + i), "Byte at offset $i should be $i")
         }
     }
+
+    @Test
+    fun testLargeBufferOperations() {
+        if (!UnsafeMemory.isSupported) return
+
+        // Test with 1MB buffer to verify Long size handling
+        val size = 1024 * 1024 // 1MB
+        val buffer = PlatformBuffer.allocate(size, AllocationZone.Direct)
+        val address = (buffer as? NativeMemoryAccess)?.nativeAddress ?: return
+
+        // Fill with 0x55 pattern
+        UnsafeMemory.setMemory(address, size.toLong(), 0x55)
+
+        // Verify first, middle, and last bytes
+        assertEquals(0x55.toByte(), UnsafeMemory.getByte(address), "First byte should be 0x55")
+        assertEquals(0x55.toByte(), UnsafeMemory.getByte(address + size / 2), "Middle byte should be 0x55")
+        assertEquals(0x55.toByte(), UnsafeMemory.getByte(address + size - 1), "Last byte should be 0x55")
+
+        // Test copyMemory with large buffer
+        val dst = PlatformBuffer.allocate(size, AllocationZone.Direct)
+        val dstAddr = (dst as? NativeMemoryAccess)?.nativeAddress ?: return
+
+        UnsafeMemory.copyMemory(address, dstAddr, size.toLong())
+
+        // Verify copy
+        assertEquals(0x55.toByte(), UnsafeMemory.getByte(dstAddr), "First copied byte should be 0x55")
+        assertEquals(0x55.toByte(), UnsafeMemory.getByte(dstAddr + size / 2), "Middle copied byte should be 0x55")
+        assertEquals(0x55.toByte(), UnsafeMemory.getByte(dstAddr + size - 1), "Last copied byte should be 0x55")
+    }
 }
