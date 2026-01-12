@@ -181,3 +181,22 @@ The string decoding implementation uses platform-specific source sets to handle 
 | macOS | heapOperations | 14M ops/s | 31M ops/s | +117% |
 
 The macOS improvements are from pointer-based optimizations in native code paths, not from string decoding changes (which are a separate code path used only for charset conversions).
+
+### VarHandle vs Standard ByteBuffer (Android)
+
+**Important Finding**: VarHandle is significantly SLOWER than standard ByteBuffer operations on Android's ART runtime.
+
+| Operation | Standard ByteBuffer | VarHandle | Slowdown |
+|-----------|---------------------|-----------|----------|
+| Int R/W (Direct) | **6,658 ns** | 560,833 ns | **84x slower** |
+| Long R/W (Direct) | **3,407 ns** | 279,619 ns | **82x slower** |
+| Int R/W (Heap) | **8,086 ns** | 563,305 ns | **70x slower** |
+
+*Tested on Realme RMX3933, Android 14 (API 34)*
+
+**Why VarHandle is slower on Android:**
+1. ART runtime hasn't optimized VarHandle operations like HotSpot JVM has
+2. Polymorphic signature overhead causes boxing/unboxing
+3. Standard `ByteBuffer.getInt()/putInt()` methods are already intrinsified
+
+**Recommendation**: Use standard ByteBuffer methods for get/put operations on Android. Only use MethodHandle for private field access (like `nativeAddress`) where it provides ~10x improvement over reflection.
