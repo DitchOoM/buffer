@@ -71,7 +71,7 @@ fun PlatformBuffer.Companion.wrap(
     data: NSData,
     byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
 ): MutableDataBuffer {
-    val mutableData = NSMutableData.create(data)!!
+    val mutableData = NSMutableData.create(data)
     return MutableDataBuffer(mutableData, byteOrder)
 }
 

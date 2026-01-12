@@ -1,3 +1,5 @@
+@file:Suppress("UNCHECKED_CAST")
+
 package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.ByteArrayBuffer

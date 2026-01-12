@@ -453,6 +453,7 @@ class MutableDataBufferSlice(
     private var limit: Int = sliceLength
 
     // Pointer to the start of this slice's data
+    @Suppress("UNCHECKED_CAST")
     val bytePointer: CPointer<ByteVar> = (parent.data.mutableBytes as CPointer<ByteVar> + sliceOffset)!!
 
     override val byteOrder: ByteOrder get() = parent.byteOrder
