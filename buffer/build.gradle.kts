@@ -235,6 +235,12 @@ android {
     }
     namespace = "com.ditchoom.buffer"
 
+    // Match Kotlin JVM target for Android
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
     buildTypes {
         create("benchmark") {
             initWith(getByName("release"))
