@@ -93,4 +93,32 @@ actual object UnsafeMemory {
     ) {
         memset(address.toInt(), size.toInt(), value.toInt())
     }
+
+    actual fun copyMemoryToArray(
+        srcAddress: Long,
+        dest: ByteArray,
+        destOffset: Int,
+        length: Int,
+    ) {
+        // Copy byte by byte from WASM memory to Kotlin array
+        var addr = srcAddress
+        for (i in destOffset until destOffset + length) {
+            dest[i] = ptr(addr).loadByte()
+            addr++
+        }
+    }
+
+    actual fun copyMemoryFromArray(
+        src: ByteArray,
+        srcOffset: Int,
+        dstAddress: Long,
+        length: Int,
+    ) {
+        // Copy byte by byte from Kotlin array to WASM memory
+        var addr = dstAddress
+        for (i in srcOffset until srcOffset + length) {
+            ptr(addr).storeByte(src[i])
+            addr++
+        }
+    }
 }

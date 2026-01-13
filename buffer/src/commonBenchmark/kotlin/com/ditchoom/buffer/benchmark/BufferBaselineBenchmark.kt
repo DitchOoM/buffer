@@ -211,7 +211,8 @@ open class BufferBaselineBenchmark {
     @Benchmark
     fun nativeAddressLookupFresh(): Long {
         // Create new buffer and access nativeAddress (not cached)
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        // Use Heap to avoid exhausting WASM LinearMemoryAllocator
+        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
         val access = buffer as? NativeMemoryAccess ?: return 0L
         return access.nativeAddress
     }

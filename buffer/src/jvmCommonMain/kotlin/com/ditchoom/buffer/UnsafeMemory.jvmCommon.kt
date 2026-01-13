@@ -93,4 +93,41 @@ actual object UnsafeMemory {
         checkSupported()
         unsafe!!.setMemory(address, size, value)
     }
+
+    // Array offset for byte arrays - required for Unsafe.copyMemory with arrays
+    private val BYTE_ARRAY_BASE_OFFSET: Long by lazy {
+        unsafe!!.arrayBaseOffset(ByteArray::class.java).toLong()
+    }
+
+    actual fun copyMemoryToArray(
+        srcAddress: Long,
+        dest: ByteArray,
+        destOffset: Int,
+        length: Int,
+    ) {
+        checkSupported()
+        unsafe!!.copyMemory(
+            null,
+            srcAddress,
+            dest,
+            BYTE_ARRAY_BASE_OFFSET + destOffset,
+            length.toLong(),
+        )
+    }
+
+    actual fun copyMemoryFromArray(
+        src: ByteArray,
+        srcOffset: Int,
+        dstAddress: Long,
+        length: Int,
+    ) {
+        checkSupported()
+        unsafe!!.copyMemory(
+            src,
+            BYTE_ARRAY_BASE_OFFSET + srcOffset,
+            null,
+            dstAddress,
+            length.toLong(),
+        )
+    }
 }

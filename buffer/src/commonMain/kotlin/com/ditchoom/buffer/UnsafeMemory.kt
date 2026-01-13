@@ -153,4 +153,36 @@ expect object UnsafeMemory {
         size: Long,
         value: Byte,
     )
+
+    /**
+     * Copies memory from native address to a byte array.
+     *
+     * @param srcAddress The source native memory address
+     * @param dest The destination byte array
+     * @param destOffset The offset in the destination array
+     * @param length The number of bytes to copy
+     * @throws UnsupportedOperationException if not supported on this platform
+     */
+    fun copyMemoryToArray(
+        srcAddress: Long,
+        dest: ByteArray,
+        destOffset: Int,
+        length: Int,
+    )
+
+    /**
+     * Copies memory from a byte array to native address.
+     *
+     * @param src The source byte array
+     * @param srcOffset The offset in the source array
+     * @param dstAddress The destination native memory address
+     * @param length The number of bytes to copy
+     * @throws UnsupportedOperationException if not supported on this platform
+     */
+    fun copyMemoryFromArray(
+        src: ByteArray,
+        srcOffset: Int,
+        dstAddress: Long,
+        length: Int,
+    )
 }

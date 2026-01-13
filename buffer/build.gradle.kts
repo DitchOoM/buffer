@@ -84,6 +84,16 @@ kotlin {
             }
             defaultSourceSet {
                 kotlin.srcDir("src/jvm21Main/kotlin")
+                dependencies {
+                    // Access main compilation output for common types (Charset, ReadBuffer, etc.)
+                    implementation(
+                        this@jvm
+                            .compilations
+                            .getByName("main")
+                            .output
+                            .classesDirs,
+                    )
+                }
             }
         }
     }
@@ -379,6 +389,13 @@ benchmark {
             warmups = 3
             iterations = 5
             exclude(".*sliceBuffer.*")
+        }
+        register("scoped") {
+            warmups = 2
+            iterations = 3
+            iterationTime = 500
+            iterationTimeUnit = "ms"
+            include(".*ScopedBuffer.*")
         }
     }
 }

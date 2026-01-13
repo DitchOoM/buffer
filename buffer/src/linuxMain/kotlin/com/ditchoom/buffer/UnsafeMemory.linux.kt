@@ -6,10 +6,12 @@ import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.LongVar
 import kotlinx.cinterop.ShortVar
+import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.get
 import kotlinx.cinterop.set
 import kotlinx.cinterop.toCPointer
+import kotlinx.cinterop.usePinned
 import platform.posix.memcpy
 import platform.posix.memset
 
@@ -82,5 +84,27 @@ actual object UnsafeMemory {
         value: Byte,
     ) {
         memset(address.toCPointer<ByteVar>(), value.toInt(), size.convert())
+    }
+
+    actual fun copyMemoryToArray(
+        srcAddress: Long,
+        dest: ByteArray,
+        destOffset: Int,
+        length: Int,
+    ) {
+        dest.usePinned { pinned ->
+            memcpy(pinned.addressOf(destOffset), srcAddress.toCPointer<ByteVar>(), length.convert())
+        }
+    }
+
+    actual fun copyMemoryFromArray(
+        src: ByteArray,
+        srcOffset: Int,
+        dstAddress: Long,
+        length: Int,
+    ) {
+        src.usePinned { pinned ->
+            memcpy(dstAddress.toCPointer<ByteVar>(), pinned.addressOf(srcOffset), length.convert())
+        }
     }
 }

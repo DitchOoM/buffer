@@ -48,4 +48,18 @@ actual object UnsafeMemory {
         size: Long,
         value: Byte,
     ): Unit = unsupported()
+
+    actual fun copyMemoryToArray(
+        srcAddress: Long,
+        dest: ByteArray,
+        destOffset: Int,
+        length: Int,
+    ): Unit = unsupported()
+
+    actual fun copyMemoryFromArray(
+        src: ByteArray,
+        srcOffset: Int,
+        dstAddress: Long,
+        length: Int,
+    ): Unit = unsupported()
 }

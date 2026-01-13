@@ -13,7 +13,8 @@ import kotlin.test.assertTrue
  */
 class MultiReleaseJarTest {
     private val javaVersion: Int by lazy {
-        System.getProperty("java.specification.version")
+        System
+            .getProperty("java.specification.version")
             ?.substringBefore('.')
             ?.toIntOrNull() ?: 8
     }
@@ -109,16 +110,18 @@ class MultiReleaseJarTest {
 
         // Report BufferMismatchHelper
         val mismatchClass = BufferMismatchHelper::class.java
-        val mismatchUrl = mismatchClass.classLoader?.getResource(
-            mismatchClass.name.replace('.', '/') + ".class",
-        )
+        val mismatchUrl =
+            mismatchClass.classLoader?.getResource(
+                mismatchClass.name.replace('.', '/') + ".class",
+            )
         println("BufferMismatchHelper: $mismatchUrl")
 
         // Report DirectBufferAddressHelperKt
         val addressClass = Class.forName("com.ditchoom.buffer.DirectBufferAddressHelperKt")
-        val addressUrl = addressClass.classLoader?.getResource(
-            addressClass.name.replace('.', '/') + ".class",
-        )
+        val addressUrl =
+            addressClass.classLoader?.getResource(
+                addressClass.name.replace('.', '/') + ".class",
+            )
         println("DirectBufferAddressHelperKt: $addressUrl")
 
         // Expected implementations based on Java version
