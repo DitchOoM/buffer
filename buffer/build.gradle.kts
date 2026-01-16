@@ -55,8 +55,8 @@ kotlin {
 
     androidTarget {
         publishLibraryVariants("release")
-        // Match JVM target for consistency; D8/R8 desugars bytecode for minSdk 19
-        compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
+        // D8/R8 desugars bytecode for minSdk 19
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_11)
         // Include commonTest in Android instrumented tests
         instrumentedTestVariant {
             sourceSetTree.set(KotlinSourceSetTree.test)
@@ -256,10 +256,10 @@ android {
     }
     namespace = "com.ditchoom.buffer"
 
-    // Match JVM target for consistency; D8/R8 desugars bytecode for minSdk 19
+    // D8/R8 desugars bytecode for minSdk 19
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
     }
 
     buildTypes {
