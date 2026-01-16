@@ -56,7 +56,7 @@ kotlin {
     androidTarget {
         publishLibraryVariants("release")
         // D8/R8 desugars bytecode for minSdk 19
-        compilerOptions.jvmTarget.set(JvmTarget.JVM_11)
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_17)
         // Include commonTest in Android instrumented tests
         instrumentedTestVariant {
             sourceSetTree.set(KotlinSourceSetTree.test)
@@ -258,8 +258,8 @@ android {
 
     // D8/R8 desugars bytecode for minSdk 19
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     buildTypes {
