@@ -8,7 +8,7 @@ import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.get
-import kotlinx.cinterop.nativeHeap
+import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.set
@@ -64,14 +64,15 @@ class NativeBufferScope : BufferScope {
             "Alignment must be a positive power of 2, got: $alignment"
         }
 
-        val ptrHolder = nativeHeap.alloc<COpaquePointerVar>()
-        val result = posix_memalign(ptrHolder.ptr, alignment.convert(), size.convert())
-        if (result != 0) {
-            throw OutOfMemoryError("Failed to allocate $size bytes with alignment $alignment")
-        }
-        val ptr =
+        val ptr = memScoped {
+            val ptrHolder = alloc<COpaquePointerVar>()
+            val result = posix_memalign(ptrHolder.ptr, alignment.convert(), size.convert())
+            if (result != 0) {
+                throw OutOfMemoryError("Failed to allocate $size bytes with alignment $alignment")
+            }
             ptrHolder.value?.reinterpret<ByteVar>()
                 ?: throw OutOfMemoryError("posix_memalign returned null")
+        }
         allocations.add(ptr)
         return NativeScopedBuffer(this, ptr, size, byteOrder)
     }
