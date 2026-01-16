@@ -5,6 +5,8 @@ package com.ditchoom.buffer
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
+import java.nio.CharBuffer
+import java.nio.charset.CodingErrorAction
 
 /**
  * FFM-based BufferScope implementation for Java 21+.
@@ -242,69 +244,58 @@ class FfmScopedBuffer(
         return FfmScopedBuffer(scope, slicedSegment, remaining(), byteOrder)
     }
 
-    // String operations
+    // String operations - use CharsetEncoder/Decoder for zero-copy I/O
+
     override fun readString(
         length: Int,
         charset: Charset,
     ): String {
-        val bytes = readByteArray(length)
-        return when (charset) {
-            Charset.UTF8 -> bytes.decodeToString()
-            Charset.UTF16 -> String(bytes, Charsets.UTF_16)
-            Charset.UTF16BigEndian -> String(bytes, Charsets.UTF_16BE)
-            Charset.UTF16LittleEndian -> String(bytes, Charsets.UTF_16LE)
-            Charset.ASCII -> String(bytes, Charsets.US_ASCII)
-            Charset.ISOLatin1 -> String(bytes, Charsets.ISO_8859_1)
-            Charset.UTF32 ->
-                String(
-                    bytes,
-                    java.nio.charset.Charset
-                        .forName("UTF-32"),
-                )
-            Charset.UTF32BigEndian ->
-                String(
-                    bytes,
-                    java.nio.charset.Charset
-                        .forName("UTF-32BE"),
-                )
-            Charset.UTF32LittleEndian ->
-                String(
-                    bytes,
-                    java.nio.charset.Charset
-                        .forName("UTF-32LE"),
-                )
-        }
+        val finalPosition = positionValue + length
+        // Create a ByteBuffer view over the MemorySegment slice
+        val slice = segment.asSlice(positionValue.toLong(), length.toLong())
+        val readBuffer = slice.asByteBuffer()
+        val javaCharset = charset.toJavaCharset()
+        val decoded =
+            javaCharset
+                .newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(readBuffer)
+        positionValue = finalPosition
+        return decoded.toString()
     }
 
     override fun writeString(
         text: CharSequence,
         charset: Charset,
     ): WriteBuffer {
-        val bytes =
-            when (charset) {
-                Charset.UTF8 -> text.toString().encodeToByteArray()
-                Charset.UTF16 -> text.toString().toByteArray(Charsets.UTF_16)
-                Charset.UTF16BigEndian -> text.toString().toByteArray(Charsets.UTF_16BE)
-                Charset.UTF16LittleEndian -> text.toString().toByteArray(Charsets.UTF_16LE)
-                Charset.ASCII -> text.toString().toByteArray(Charsets.US_ASCII)
-                Charset.ISOLatin1 -> text.toString().toByteArray(Charsets.ISO_8859_1)
-                Charset.UTF32 ->
-                    text.toString().toByteArray(
-                        java.nio.charset.Charset
-                            .forName("UTF-32"),
-                    )
-                Charset.UTF32BigEndian ->
-                    text.toString().toByteArray(
-                        java.nio.charset.Charset
-                            .forName("UTF-32BE"),
-                    )
-                Charset.UTF32LittleEndian ->
-                    text.toString().toByteArray(
-                        java.nio.charset.Charset
-                            .forName("UTF-32LE"),
-                    )
-            }
-        writeBytes(bytes)
+        // Use CharsetEncoder to encode directly to ByteBuffer (no intermediate array)
+        val encoder = charset.toEncoder()
+        encoder.reset()
+        // Create a ByteBuffer view over the remaining MemorySegment
+        val slice = segment.asSlice(positionValue.toLong(), (capacity - positionValue).toLong())
+        val byteBuffer = slice.asByteBuffer()
+        encoder.encode(CharBuffer.wrap(text), byteBuffer, true)
+        positionValue += byteBuffer.position()
         return this
     }
+
+    private fun Charset.toJavaCharset(): java.nio.charset.Charset =
+        when (this) {
+            Charset.UTF8 -> Charsets.UTF_8
+            Charset.UTF16 -> Charsets.UTF_16
+            Charset.UTF16BigEndian -> Charsets.UTF_16BE
+            Charset.UTF16LittleEndian -> Charsets.UTF_16LE
+            Charset.ASCII -> Charsets.US_ASCII
+            Charset.ISOLatin1 -> Charsets.ISO_8859_1
+            Charset.UTF32 ->
+                java.nio.charset.Charset
+                    .forName("UTF-32")
+            Charset.UTF32BigEndian ->
+                java.nio.charset.Charset
+                    .forName("UTF-32BE")
+            Charset.UTF32LittleEndian ->
+                java.nio.charset.Charset
+                    .forName("UTF-32LE")
+        }
 }

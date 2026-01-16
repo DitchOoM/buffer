@@ -130,4 +130,37 @@ actual object UnsafeMemory {
             length.toLong(),
         )
     }
+
+    // DirectByteBuffer wrapper - tested once per process, falls back gracefully
+    // Uses default SYNCHRONIZED mode since this singleton could be accessed from multiple threads
+    private val directByteBufferConstructor: java.lang.reflect.Constructor<*>? by lazy {
+        try {
+            val clazz = Class.forName("java.nio.DirectByteBuffer")
+            val constructor =
+                clazz.getDeclaredConstructor(
+                    Long::class.javaPrimitiveType,
+                    Int::class.javaPrimitiveType,
+                )
+            constructor.isAccessible = true
+            constructor
+        } catch (e: Exception) {
+            null // Reflection not available on this platform
+        }
+    }
+
+    /**
+     * Attempts to create a DirectByteBuffer wrapping the given native memory.
+     * Uses reflection (tested once per process). Returns null if not supported.
+     */
+    fun tryWrapAsDirectByteBuffer(
+        address: Long,
+        capacity: Int,
+    ): java.nio.ByteBuffer? {
+        val constructor = directByteBufferConstructor ?: return null
+        return try {
+            constructor.newInstance(address, capacity) as java.nio.ByteBuffer
+        } catch (e: Exception) {
+            null
+        }
+    }
 }

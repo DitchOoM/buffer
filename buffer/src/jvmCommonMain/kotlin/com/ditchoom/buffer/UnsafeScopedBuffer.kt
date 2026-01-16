@@ -1,5 +1,8 @@
 package com.ditchoom.buffer
 
+import java.nio.CharBuffer
+import java.nio.charset.CodingErrorAction
+
 /**
  * Unsafe-based ScopedBuffer implementation for JVM < 21 and Android.
  *
@@ -476,69 +479,82 @@ class UnsafeScopedBuffer(
 
     override fun slice(): ReadBuffer = UnsafeScopedBuffer(scope, nativeAddress + positionValue, remaining(), byteOrder)
 
-    // String operations
+    // String operations - tries zero-copy via DirectByteBuffer reflection, falls back to byte array
+
+    /** Lazily initialized ByteBuffer view - null if reflection not supported */
+    private var byteBufferView: java.nio.ByteBuffer? = null
+    private var byteBufferViewChecked = false
+
+    private fun getByteBufferView(): java.nio.ByteBuffer? {
+        if (!byteBufferViewChecked) {
+            byteBufferViewChecked = true
+            byteBufferView = UnsafeMemory.tryWrapAsDirectByteBuffer(nativeAddress, capacity)
+        }
+        return byteBufferView
+    }
+
     override fun readString(
         length: Int,
         charset: Charset,
     ): String {
-        val bytes = readByteArray(length)
-        return when (charset) {
-            Charset.UTF8 -> bytes.decodeToString()
-            Charset.UTF16 -> String(bytes, Charsets.UTF_16)
-            Charset.UTF16BigEndian -> String(bytes, Charsets.UTF_16BE)
-            Charset.UTF16LittleEndian -> String(bytes, Charsets.UTF_16LE)
-            Charset.ASCII -> String(bytes, Charsets.US_ASCII)
-            Charset.ISOLatin1 -> String(bytes, Charsets.ISO_8859_1)
-            Charset.UTF32 ->
-                String(
-                    bytes,
-                    java.nio.charset.Charset
-                        .forName("UTF-32"),
-                )
-            Charset.UTF32BigEndian ->
-                String(
-                    bytes,
-                    java.nio.charset.Charset
-                        .forName("UTF-32BE"),
-                )
-            Charset.UTF32LittleEndian ->
-                String(
-                    bytes,
-                    java.nio.charset.Charset
-                        .forName("UTF-32LE"),
-                )
+        val view = getByteBufferView()
+        if (view != null) {
+            // Zero-copy path via DirectByteBuffer
+            val finalPosition = positionValue + length
+            (view as java.nio.Buffer).position(positionValue)
+            (view as java.nio.Buffer).limit(finalPosition)
+            val decoded =
+                charset
+                    .toJavaCharset()
+                    .newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(view.slice())
+            positionValue = finalPosition
+            return decoded.toString()
         }
+        // Fallback: intermediate byte array
+        val bytes = readByteArray(length)
+        return String(bytes, charset.toJavaCharset())
     }
 
     override fun writeString(
         text: CharSequence,
         charset: Charset,
     ): WriteBuffer {
-        val bytes =
-            when (charset) {
-                Charset.UTF8 -> text.toString().encodeToByteArray()
-                Charset.UTF16 -> text.toString().toByteArray(Charsets.UTF_16)
-                Charset.UTF16BigEndian -> text.toString().toByteArray(Charsets.UTF_16BE)
-                Charset.UTF16LittleEndian -> text.toString().toByteArray(Charsets.UTF_16LE)
-                Charset.ASCII -> text.toString().toByteArray(Charsets.US_ASCII)
-                Charset.ISOLatin1 -> text.toString().toByteArray(Charsets.ISO_8859_1)
-                Charset.UTF32 ->
-                    text.toString().toByteArray(
-                        java.nio.charset.Charset
-                            .forName("UTF-32"),
-                    )
-                Charset.UTF32BigEndian ->
-                    text.toString().toByteArray(
-                        java.nio.charset.Charset
-                            .forName("UTF-32BE"),
-                    )
-                Charset.UTF32LittleEndian ->
-                    text.toString().toByteArray(
-                        java.nio.charset.Charset
-                            .forName("UTF-32LE"),
-                    )
-            }
+        val view = getByteBufferView()
+        if (view != null) {
+            // Zero-copy path via DirectByteBuffer
+            val encoder = charset.toEncoder()
+            encoder.reset()
+            (view as java.nio.Buffer).position(positionValue)
+            (view as java.nio.Buffer).limit(capacity)
+            encoder.encode(CharBuffer.wrap(text), view, true)
+            positionValue = view.position()
+            return this
+        }
+        // Fallback: intermediate byte array
+        val bytes = text.toString().toByteArray(charset.toJavaCharset())
         writeBytes(bytes)
         return this
     }
+
+    private fun Charset.toJavaCharset(): java.nio.charset.Charset =
+        when (this) {
+            Charset.UTF8 -> Charsets.UTF_8
+            Charset.UTF16 -> Charsets.UTF_16
+            Charset.UTF16BigEndian -> Charsets.UTF_16BE
+            Charset.UTF16LittleEndian -> Charsets.UTF_16LE
+            Charset.ASCII -> Charsets.US_ASCII
+            Charset.ISOLatin1 -> Charsets.ISO_8859_1
+            Charset.UTF32 ->
+                java.nio.charset.Charset
+                    .forName("UTF-32")
+            Charset.UTF32BigEndian ->
+                java.nio.charset.Charset
+                    .forName("UTF-32BE")
+            Charset.UTF32LittleEndian ->
+                java.nio.charset.Charset
+                    .forName("UTF-32LE")
+        }
 }

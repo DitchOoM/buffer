@@ -397,6 +397,14 @@ benchmark {
             iterationTimeUnit = "ms"
             include(".*ScopedBuffer.*")
         }
+        // Fast configuration for WASM - runs only key benchmarks to avoid long run times
+        register("wasmFast") {
+            warmups = 2
+            iterations = 2
+            include("allocateScopedBuffer")
+            include("bulkWriteIntsScoped")
+            include("readWriteIntScoped")
+        }
     }
 }
 

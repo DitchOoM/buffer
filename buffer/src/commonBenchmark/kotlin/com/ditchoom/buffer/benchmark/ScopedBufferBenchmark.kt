@@ -60,14 +60,13 @@ open class ScopedBufferBenchmark {
             buffer.capacity
         }
 
-    // Commented out for faster WASM benchmark runs - uncomment for full benchmark suite
-    // @Benchmark
+    @Benchmark
     fun allocatePlatformBufferDirect(): Int {
         val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
         return buffer.capacity
     }
 
-    // @Benchmark
+    @Benchmark
     fun allocatePlatformBufferHeap(): Int {
         val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
         return buffer.capacity
@@ -87,7 +86,7 @@ open class ScopedBufferBenchmark {
             sum
         }
 
-    // @Benchmark
+    @Benchmark
     fun readWriteIntPlatformDirect(): Long {
         platformBufferDirect.resetForWrite()
         repeat(smallBufferSize / 4) { platformBufferDirect.writeInt(it) }
@@ -97,7 +96,7 @@ open class ScopedBufferBenchmark {
         return sum
     }
 
-    // @Benchmark
+    @Benchmark
     fun readWriteIntPlatformHeap(): Long {
         platformBufferHeap.resetForWrite()
         repeat(smallBufferSize / 4) { platformBufferHeap.writeInt(it) }
@@ -110,7 +109,7 @@ open class ScopedBufferBenchmark {
     // ===== Read/Write Long Benchmarks =====
     // Measures 8-byte primitive performance
 
-    // @Benchmark
+    @Benchmark
     fun readWriteLongScoped(): Long =
         withScope { scope ->
             val buffer = scope.allocate(smallBufferSize)
@@ -121,7 +120,7 @@ open class ScopedBufferBenchmark {
             sum
         }
 
-    // @Benchmark
+    @Benchmark
     fun readWriteLongPlatformDirect(): Long {
         platformBufferDirect.resetForWrite()
         repeat(smallBufferSize / 8) { platformBufferDirect.writeLong(it.toLong()) }
@@ -134,7 +133,7 @@ open class ScopedBufferBenchmark {
     // ===== Large Buffer Benchmarks =====
     // Measures performance with 64KB buffers
 
-    // @Benchmark
+    @Benchmark
     fun largeBufferScoped(): Long =
         withScope { scope ->
             val buffer = scope.allocate(largeBufferSize)
@@ -145,7 +144,7 @@ open class ScopedBufferBenchmark {
             sum
         }
 
-    // @Benchmark
+    @Benchmark
     fun largeBufferPlatformDirect(): Long {
         largePlatformBuffer.resetForWrite()
         repeat(largeBufferSize / 8) { largePlatformBuffer.writeLong(it.toLong()) }
@@ -158,7 +157,7 @@ open class ScopedBufferBenchmark {
     // ===== Mixed Operations Benchmarks =====
     // Measures realistic usage with various primitive types
 
-    // @Benchmark
+    @Benchmark
     fun mixedOperationsScoped(): Long =
         withScope { scope ->
             val buffer = scope.allocate(smallBufferSize)
@@ -179,7 +178,7 @@ open class ScopedBufferBenchmark {
             sum
         }
 
-    // @Benchmark
+    @Benchmark
     fun mixedOperationsPlatformDirect(): Long {
         platformBufferDirect.resetForWrite()
         repeat(64) {
@@ -202,7 +201,7 @@ open class ScopedBufferBenchmark {
     // ===== Multiple Buffers in Single Scope =====
     // Measures overhead of allocating multiple buffers in one scope
 
-    // @Benchmark
+    @Benchmark
     fun multipleBuffersScoped(): Long =
         withScope { scope ->
             val buffer1 = scope.allocate(256)
@@ -223,7 +222,7 @@ open class ScopedBufferBenchmark {
             buffer1.readLong() + buffer2.readLong() + buffer3.readLong() + buffer4.readLong()
         }
 
-    // @Benchmark
+    @Benchmark
     fun multipleBuffersPlatform(): Long {
         val buffer1 = PlatformBuffer.allocate(256, AllocationZone.Heap)
         val buffer2 = PlatformBuffer.allocate(256, AllocationZone.Heap)
@@ -246,7 +245,7 @@ open class ScopedBufferBenchmark {
     // ===== Byte Order Benchmarks =====
     // Measures any overhead from byte order handling
 
-    // @Benchmark
+    @Benchmark
     fun bigEndianScoped(): Long =
         withScope { scope ->
             val buffer = scope.allocate(smallBufferSize, ByteOrder.BIG_ENDIAN)
@@ -257,7 +256,7 @@ open class ScopedBufferBenchmark {
             sum
         }
 
-    // @Benchmark
+    @Benchmark
     fun littleEndianScoped(): Long =
         withScope { scope ->
             val buffer = scope.allocate(smallBufferSize, ByteOrder.LITTLE_ENDIAN)
@@ -271,7 +270,7 @@ open class ScopedBufferBenchmark {
     // ===== Native Address Access =====
     // Measures the cost of accessing native address (useful for FFI/JNI)
 
-    // @Benchmark
+    @Benchmark
     fun nativeAddressAccessScoped(): Long =
         withScope { scope ->
             val buffer = scope.allocate(smallBufferSize)
@@ -281,7 +280,7 @@ open class ScopedBufferBenchmark {
     // ===== Aligned Allocation =====
     // Measures aligned allocation overhead (useful for SIMD operations)
 
-    // @Benchmark
+    @Benchmark
     fun allocateAligned64Scoped(): Int =
         withScope { scope ->
             val buffer = scope.allocateAligned(smallBufferSize, alignment = 64)
@@ -291,7 +290,7 @@ open class ScopedBufferBenchmark {
     // ===== Buffer Copy Operations =====
     // Measures buffer-to-buffer copy performance
 
-    // @Benchmark
+    @Benchmark
     fun bufferCopyScoped(): Long =
         withScope { scope ->
             val source = scope.allocate(smallBufferSize)
@@ -309,7 +308,7 @@ open class ScopedBufferBenchmark {
             dest.readLong()
         }
 
-    // @Benchmark
+    @Benchmark
     fun bufferCopyPlatformDirect(): Long {
         val source = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
         val dest = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
@@ -341,7 +340,7 @@ open class ScopedBufferBenchmark {
             buffer.position()
         }
 
-    // @Benchmark
+    @Benchmark
     fun bulkReadIntsScoped(): Long =
         withScope { scope ->
             val buffer = scope.allocate(smallBufferSize, ByteOrder.BIG_ENDIAN)
@@ -351,14 +350,14 @@ open class ScopedBufferBenchmark {
             result.sum().toLong()
         }
 
-    // @Benchmark
+    @Benchmark
     fun bulkWriteIntsPlatformDirect(): Int {
         val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
         buffer.writeInts(bulkIntData)
         return buffer.position()
     }
 
-    // @Benchmark
+    @Benchmark
     fun bulkReadIntsPlatformDirect(): Long {
         val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
         buffer.writeInts(bulkIntData)
@@ -367,7 +366,7 @@ open class ScopedBufferBenchmark {
         return result.sum().toLong()
     }
 
-    // @Benchmark
+    @Benchmark
     fun bulkWriteShortsScoped(): Int =
         withScope { scope ->
             val buffer = scope.allocate(smallBufferSize, ByteOrder.BIG_ENDIAN)
@@ -375,14 +374,14 @@ open class ScopedBufferBenchmark {
             buffer.position()
         }
 
-    // @Benchmark
+    @Benchmark
     fun bulkWriteShortsPlatformDirect(): Int {
         val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
         buffer.writeShorts(bulkShortData)
         return buffer.position()
     }
 
-    // @Benchmark
+    @Benchmark
     fun bulkWriteLongsScoped(): Int =
         withScope { scope ->
             val buffer = scope.allocate(smallBufferSize, ByteOrder.BIG_ENDIAN)
@@ -390,7 +389,7 @@ open class ScopedBufferBenchmark {
             buffer.position()
         }
 
-    // @Benchmark
+    @Benchmark
     fun bulkWriteLongsPlatformDirect(): Int {
         val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
         buffer.writeLongs(bulkLongData)
@@ -401,7 +400,7 @@ open class ScopedBufferBenchmark {
     // Measures read/write performance with pre-allocated buffers (no allocation overhead)
     // This isolates the pure read/write performance
 
-    // @Benchmark
+    @Benchmark
     fun preallocatedPlatformDirectBigEndian(): Long {
         platformBufferDirect.resetForWrite()
         repeat(smallBufferSize / 4) { platformBufferDirect.writeInt(it) }
@@ -411,7 +410,7 @@ open class ScopedBufferBenchmark {
         return sum
     }
 
-    // @Benchmark
+    @Benchmark
     fun preallocatedPlatformHeap(): Long {
         platformBufferHeap.resetForWrite()
         repeat(smallBufferSize / 4) { platformBufferHeap.writeInt(it) }
