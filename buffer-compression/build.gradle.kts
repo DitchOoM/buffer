@@ -28,11 +28,16 @@ repositories {
 }
 
 kotlin {
+    // Ensure consistent JDK version across all developer machines and CI
+    jvmToolchain(21)
+
     androidTarget {
         publishLibraryVariants("release")
+        // Use JVM 1.8 for Android to maintain minSdk 19 compatibility
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
     }
     jvm {
+        // Keep Java 8 bytecode for maximum compatibility
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
     }
     js {
@@ -98,6 +103,12 @@ android {
         minSdk = 19
     }
     namespace = "$group.buffer.compression"
+
+    // Use Java 1.8 for Android to maintain minSdk 19 compatibility
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
 
     publishing {
         singleVariant("release") {

@@ -1,6 +1,5 @@
 package com.ditchoom.buffer
 
-import java.lang.reflect.Field
 import java.nio.ByteBuffer
 
 /**
@@ -32,27 +31,4 @@ class DirectJvmBuffer(
     override val nativeSize: Long get() = capacity.toLong()
 
     override fun slice() = DirectJvmBuffer(byteBuffer.slice())
-
-    companion object {
-        private val addressField: Field? by lazy {
-            try {
-                val field = java.nio.Buffer::class.java.getDeclaredField("address")
-                field.isAccessible = true
-                field
-            } catch (e: Exception) {
-                null
-            }
-        }
-
-        /**
-         * Gets the native memory address of a direct ByteBuffer using reflection.
-         * Direct ByteBuffers store their native address in a protected field.
-         */
-        private fun getDirectBufferAddress(buffer: ByteBuffer): Long =
-            addressField?.getLong(buffer)
-                ?: throw UnsupportedOperationException(
-                    "Cannot access native address. " +
-                        "This may require --add-opens java.base/java.nio=ALL-UNNAMED",
-                )
-    }
 }

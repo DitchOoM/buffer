@@ -73,6 +73,41 @@ src/
 - `WriteBuffer` - Write operations (relative and absolute)
 - `AllocationZone` - Memory allocation strategy: `Heap`, `Direct`, `SharedMemory`, `Custom`
 
+### Scoped Buffers (`com.ditchoom.buffer`)
+
+High-performance buffers with deterministic memory management for performance-critical code:
+
+- `BufferScope` - Manages lifetime of scoped buffers; all buffers freed when scope closes
+- `ScopedBuffer` - Buffer with guaranteed native memory access and explicit cleanup
+- `withScope { }` - Recommended entry point; creates scope and ensures cleanup
+
+```kotlin
+withScope { scope ->
+    val buffer = scope.allocate(8192)
+    buffer.writeInt(42)
+    buffer.resetForRead()
+    val value = buffer.readInt()
+
+    // Native address for FFI/JNI
+    val address = buffer.nativeAddress
+} // All buffers freed here
+```
+
+**Platform Implementations:**
+
+| Platform | Implementation | Allocation |
+|----------|---------------|------------|
+| JVM 21+  | `FfmBufferScope` | FFM Arena + MemorySegment |
+| JVM < 21 | `UnsafeBufferScope` | Unsafe.allocateMemory |
+| Android  | `UnsafeBufferScope` | Unsafe.allocateMemory |
+| Native   | `NativeBufferScope` | malloc/free |
+| WASM     | `WasmBufferScope` | LinearMemory |
+| JS       | `JsBufferScope` | GC-managed ArrayBuffer |
+
+**When to use ScopedBuffer vs PlatformBuffer:**
+- Use `ScopedBuffer` for: FFI/JNI interop, zero-copy I/O, avoiding GC pressure
+- Use `PlatformBuffer` for: General-purpose buffering, long-lived buffers
+
 ### Buffer Comparison & Search Methods
 
 ReadBuffer provides optimized search and comparison operations:
@@ -211,6 +246,6 @@ See `PERFORMANCE.md` for detailed benchmark results.
 
 ## CI/CD
 
-- Builds run on macOS with JDK 19
+- Builds run on macOS with JDK 21
 - PR labels control version bumping: `major`, `minor`, or patch (default)
 - Publishing to Maven Central happens automatically on PR merge to main

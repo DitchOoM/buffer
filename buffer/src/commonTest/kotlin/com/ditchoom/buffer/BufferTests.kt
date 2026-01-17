@@ -828,7 +828,6 @@ class BufferTests {
         assertFails {
             val buffer = PlatformBuffer.wrap(byteArrayOf(2, 126, 33, -66, -100, 4, -39, 108))
             buffer.readString(buffer.remaining())
-            println("should have failed by now")
         }
     }
 

@@ -529,4 +529,153 @@ interface WriteBuffer : PositionBuffer {
         }
         return this
     }
+
+    // ===== Bulk Primitive Operations =====
+    // These methods write arrays of primitives efficiently.
+    // Optimized implementations may use SIMD-like patterns (long-pairs)
+    // for ~3x performance improvement on byte-swapping operations.
+
+    /**
+     * Writes all shorts from the array and advances position by `shorts.size * 2`.
+     *
+     * Uses the buffer's byte order for each short value.
+     * Optimized implementations may process pairs of shorts as ints for better performance.
+     *
+     * @param shorts The short array to write
+     * @return This buffer for chaining
+     */
+    fun writeShorts(shorts: ShortArray): WriteBuffer = writeShorts(shorts, 0, shorts.size)
+
+    /**
+     * Writes shorts from the array starting at [offset] for [length] elements.
+     *
+     * @param shorts The source short array
+     * @param offset Starting index in the source array
+     * @param length Number of shorts to write
+     * @return This buffer for chaining
+     */
+    fun writeShorts(
+        shorts: ShortArray,
+        offset: Int,
+        length: Int,
+    ): WriteBuffer {
+        for (i in offset until offset + length) {
+            writeShort(shorts[i])
+        }
+        return this
+    }
+
+    /**
+     * Writes all ints from the array and advances position by `ints.size * 4`.
+     *
+     * Uses the buffer's byte order for each int value.
+     * Optimized implementations may process pairs of ints as longs for ~3x better performance
+     * when byte swapping is required.
+     *
+     * @param ints The int array to write
+     * @return This buffer for chaining
+     */
+    fun writeInts(ints: IntArray): WriteBuffer = writeInts(ints, 0, ints.size)
+
+    /**
+     * Writes ints from the array starting at [offset] for [length] elements.
+     *
+     * @param ints The source int array
+     * @param offset Starting index in the source array
+     * @param length Number of ints to write
+     * @return This buffer for chaining
+     */
+    fun writeInts(
+        ints: IntArray,
+        offset: Int,
+        length: Int,
+    ): WriteBuffer {
+        for (i in offset until offset + length) {
+            writeInt(ints[i])
+        }
+        return this
+    }
+
+    /**
+     * Writes all longs from the array and advances position by `longs.size * 8`.
+     *
+     * Uses the buffer's byte order for each long value.
+     *
+     * @param longs The long array to write
+     * @return This buffer for chaining
+     */
+    fun writeLongs(longs: LongArray): WriteBuffer = writeLongs(longs, 0, longs.size)
+
+    /**
+     * Writes longs from the array starting at [offset] for [length] elements.
+     *
+     * @param longs The source long array
+     * @param offset Starting index in the source array
+     * @param length Number of longs to write
+     * @return This buffer for chaining
+     */
+    fun writeLongs(
+        longs: LongArray,
+        offset: Int,
+        length: Int,
+    ): WriteBuffer {
+        for (i in offset until offset + length) {
+            writeLong(longs[i])
+        }
+        return this
+    }
+
+    /**
+     * Writes all floats from the array and advances position by `floats.size * 4`.
+     *
+     * @param floats The float array to write
+     * @return This buffer for chaining
+     */
+    fun writeFloats(floats: FloatArray): WriteBuffer = writeFloats(floats, 0, floats.size)
+
+    /**
+     * Writes floats from the array starting at [offset] for [length] elements.
+     *
+     * @param floats The source float array
+     * @param offset Starting index in the source array
+     * @param length Number of floats to write
+     * @return This buffer for chaining
+     */
+    fun writeFloats(
+        floats: FloatArray,
+        offset: Int,
+        length: Int,
+    ): WriteBuffer {
+        for (i in offset until offset + length) {
+            writeFloat(floats[i])
+        }
+        return this
+    }
+
+    /**
+     * Writes all doubles from the array and advances position by `doubles.size * 8`.
+     *
+     * @param doubles The double array to write
+     * @return This buffer for chaining
+     */
+    fun writeDoubles(doubles: DoubleArray): WriteBuffer = writeDoubles(doubles, 0, doubles.size)
+
+    /**
+     * Writes doubles from the array starting at [offset] for [length] elements.
+     *
+     * @param doubles The source double array
+     * @param offset Starting index in the source array
+     * @param length Number of doubles to write
+     * @return This buffer for chaining
+     */
+    fun writeDoubles(
+        doubles: DoubleArray,
+        offset: Int,
+        length: Int,
+    ): WriteBuffer {
+        for (i in offset until offset + length) {
+            writeDouble(doubles[i])
+        }
+        return this
+    }
 }
