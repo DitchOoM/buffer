@@ -55,6 +55,30 @@ val number = buffer.readInt()
 val text = buffer.readString(6)
 ```
 
+## Scoped Buffers (High Performance)
+
+For performance-critical code paths, use `ScopedBuffer` with deterministic memory management:
+
+```kotlin
+withScope { scope ->
+    val buffer = scope.allocate(8192)
+    buffer.writeInt(42)
+    buffer.writeString("Hello")
+    buffer.resetForRead()
+
+    val value = buffer.readInt()
+    val text = buffer.readString(5)
+
+    // Native address available for FFI/JNI
+    val address = buffer.nativeAddress
+} // Memory freed immediately when scope closes
+```
+
+**Benefits over `PlatformBuffer`:**
+- **Deterministic cleanup**: Memory freed immediately, no GC pressure
+- **Direct native access**: `nativeAddress` for FFI/JNI interop
+- **Platform-optimized**: FFM on JVM 21+, Unsafe on older JVMs, malloc on native
+
 ## Compression Example
 
 ```kotlin

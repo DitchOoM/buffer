@@ -97,6 +97,35 @@ Benchmarks run on:
 | mixedOperations | 64,152 | 119 |
 | sliceBuffer | 5,746 | 1,329 |
 
+## ScopedBuffer Performance
+
+ScopedBuffer provides deterministic memory management with platform-optimized allocation. Key characteristics:
+
+| Platform | Allocation | Cleanup | Native Address |
+|----------|-----------|---------|----------------|
+| JVM 21+  | FFM Arena.allocate() | Arena.close() | MemorySegment.address() |
+| JVM < 21 | Unsafe.allocateMemory() | Unsafe.freeMemory() | Direct pointer |
+| Android  | Unsafe.allocateMemory() | Unsafe.freeMemory() | Direct pointer |
+| Native   | malloc() | free() | CPointer address |
+| WASM     | LinearMemory | Bump allocator | Pointer offset |
+| JS       | ArrayBuffer (GC) | Reference release | byteOffset |
+
+**Performance characteristics:**
+- **Allocation**: Comparable to `PlatformBuffer.allocate(zone=Direct)`
+- **Operations**: Identical performance to direct buffers (same underlying memory)
+- **Cleanup**: Deterministic and immediate (no GC pause)
+
+**Bulk operations** use optimized Long-pairs (8 bytes at a time) for:
+- `writeBytes()` / `readBytes()`
+- `fill()` operations
+- Buffer-to-buffer copies
+
+Run ScopedBuffer benchmarks:
+```bash
+./gradlew jvmBenchmarkBenchmark --args='ScopedBuffer'
+./gradlew macosArm64BenchmarkBenchmark --args='ScopedBuffer'
+```
+
 ## Running Benchmarks
 
 ### kotlinx-benchmark (JVM, JS, WasmJS, Native)
