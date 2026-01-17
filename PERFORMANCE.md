@@ -97,9 +97,9 @@ Benchmarks run on:
 | mixedOperations | 64,152 | 119 |
 | sliceBuffer | 5,746 | 1,329 |
 
-## ScopedBuffer Performance
+## ScopedBuffer
 
-ScopedBuffer provides deterministic memory management with platform-optimized allocation. Key characteristics:
+ScopedBuffer provides deterministic memory management for FFI/JNI interop and latency-sensitive code.
 
 | Platform | Allocation | Cleanup | Native Address |
 |----------|-----------|---------|----------------|
@@ -108,22 +108,19 @@ ScopedBuffer provides deterministic memory management with platform-optimized al
 | Android  | Unsafe.allocateMemory() | Unsafe.freeMemory() | Direct pointer |
 | Native   | malloc() | free() | CPointer address |
 | WASM     | LinearMemory | Bump allocator | Pointer offset |
-| JS       | ArrayBuffer (GC) | Reference release | byteOffset |
+| JS       | ArrayBuffer (GC) | Reference release | N/A (GC managed) |
 
-**Performance characteristics:**
-- **Allocation**: Comparable to `PlatformBuffer.allocate(zone=Direct)`
-- **Operations**: Identical performance to direct buffers (same underlying memory)
-- **Cleanup**: Deterministic and immediate (no GC pause)
+**Use cases:**
+- **FFI/JNI interop**: Pass `nativeAddress` directly to native code
+- **Deterministic cleanup**: Memory freed immediately when scope closes
+- **Latency-sensitive code**: Avoid GC pauses by managing memory explicitly
 
-**Bulk operations** use optimized Long-pairs (8 bytes at a time) for:
-- `writeBytes()` / `readBytes()`
-- `fill()` operations
-- Buffer-to-buffer copies
+**Note:** Raw read/write performance is similar to `PlatformBuffer` with `AllocationZone.Direct` since they use the same underlying memory mechanisms.
 
 Run ScopedBuffer benchmarks:
 ```bash
-./gradlew jvmBenchmarkBenchmark --args='ScopedBuffer'
-./gradlew macosArm64BenchmarkBenchmark --args='ScopedBuffer'
+./gradlew jvmBenchmarkBenchmark -Pbenchmark.include=Scoped
+./gradlew macosArm64BenchmarkBenchmark -Pbenchmark.include=Scoped
 ```
 
 ## Running Benchmarks
