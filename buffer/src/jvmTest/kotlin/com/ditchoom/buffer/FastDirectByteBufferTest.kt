@@ -45,10 +45,7 @@ class FastDirectByteBufferTest {
                     constructor.isAccessible = true
                     intCap = false
                 } catch (e2: NoSuchMethodException) {
-                    println("Available DirectByteBuffer constructors:")
-                    clazz.declaredConstructors.forEach { c ->
-                        println("  ${c.parameterTypes.map { it.name }.joinToString(", ")}")
-                    }
+                    // Constructor not available on this JVM
                 }
             }
 
@@ -81,11 +78,7 @@ class FastDirectByteBufferTest {
 
     @Test
     fun `fast DirectByteBuffer creation works`() {
-        val result = createFastDirectByteBuffer(1024)
-        if (result == null) {
-            println("Fast DirectByteBuffer creation not supported on this JVM")
-            return
-        }
+        val result = createFastDirectByteBuffer(1024) ?: return // Skip if not supported
 
         val (buffer, address) = result
         try {
@@ -105,7 +98,7 @@ class FastDirectByteBufferTest {
     }
 
     @Test
-    fun `benchmark allocation comparison`() {
+    fun `allocation performance comparison`() {
         val iterations = 100_000
         val size = 1024
 
@@ -115,7 +108,6 @@ class FastDirectByteBufferTest {
                 freeDirectByteBuffer(addr)
                 true
             } ?: false
-        println("Fast DirectByteBuffer supported: $fastSupported")
 
         // Warm up
         repeat(1000) {
@@ -154,30 +146,24 @@ class FastDirectByteBufferTest {
         }
         val unsafeTime = System.nanoTime() - unsafeStart
 
-        println("=== Allocation Benchmark ($iterations iterations, $size bytes) ===")
-        println("Standard DirectByteBuffer: ${standardTime / 1_000_000}ms (${iterations * 1_000_000_000L / standardTime} ops/s)")
+        // Verify benchmarks completed (no assertions on timing, just completion)
+        assertTrue(standardTime > 0)
+        assertTrue(unsafeTime > 0)
         if (fastSupported) {
-            println("Fast DirectByteBuffer:     ${fastTime / 1_000_000}ms (${iterations * 1_000_000_000L / fastTime} ops/s)")
-            println("Fast vs Standard speedup: ${standardTime.toDouble() / fastTime}x")
-        } else {
-            println("Fast DirectByteBuffer:     NOT SUPPORTED on this JVM")
+            assertTrue(fastTime > 0)
         }
-        println("Raw Unsafe allocation:     ${unsafeTime / 1_000_000}ms (${iterations * 1_000_000_000L / unsafeTime} ops/s)")
-        println("Unsafe vs Standard speedup: ${standardTime.toDouble() / unsafeTime}x")
     }
 
     @Test
-    fun `benchmark read write comparison`() {
+    fun `read write performance comparison`() {
         val iterations = 1_000_000
         val size = 1024
 
         // Setup buffers
         val standardBuffer = ByteBuffer.allocateDirect(size)
-        val (fastBuffer, fastAddress) =
-            createFastDirectByteBuffer(size) ?: run {
-                println("Fast DirectByteBuffer not supported")
-                return
-            }
+        val fastResult = createFastDirectByteBuffer(size) ?: return // Skip if not supported
+
+        val (fastBuffer, fastAddress) = fastResult
         val unsafeAddress = unsafe.allocateMemory(size.toLong())
 
         try {
@@ -228,10 +214,10 @@ class FastDirectByteBufferTest {
             }
             val unsafeTime = System.nanoTime() - unsafeStart
 
-            println("=== Read/Write Benchmark ($iterations iterations, $size bytes) ===")
-            println("Standard DirectByteBuffer: ${standardTime / 1_000_000}ms (${iterations * 1_000_000_000L / standardTime} ops/s)")
-            println("Fast DirectByteBuffer:     ${fastTime / 1_000_000}ms (${iterations * 1_000_000_000L / fastTime} ops/s)")
-            println("Raw Unsafe:                ${unsafeTime / 1_000_000}ms (${iterations * 1_000_000_000L / unsafeTime} ops/s)")
+            // Verify benchmarks completed
+            assertTrue(standardTime > 0)
+            assertTrue(fastTime > 0)
+            assertTrue(unsafeTime > 0)
         } finally {
             freeDirectByteBuffer(fastAddress)
             unsafe.freeMemory(unsafeAddress)
@@ -239,7 +225,7 @@ class FastDirectByteBufferTest {
     }
 
     @Test
-    fun `benchmark with byte order conversion`() {
+    fun `byte order conversion performance`() {
         val iterations = 1_000_000
         val size = 1024
         val nativeIsLittleEndian = java.nio.ByteOrder.nativeOrder() == java.nio.ByteOrder.LITTLE_ENDIAN
@@ -315,17 +301,11 @@ class FastDirectByteBufferTest {
             }
             val unsafeLETime = System.nanoTime() - unsafeLEStart
 
-            println("=== Byte Order Benchmark ($iterations iterations, $size bytes) ===")
-            println("Native byte order: ${if (nativeIsLittleEndian) "LITTLE_ENDIAN" else "BIG_ENDIAN"}")
-            println()
-            println("ByteBuffer BIG_ENDIAN:    ${beBBTime / 1_000_000}ms (${iterations * 1_000_000_000L / beBBTime} ops/s)")
-            println("ByteBuffer LITTLE_ENDIAN: ${leBBTime / 1_000_000}ms (${iterations * 1_000_000_000L / leBBTime} ops/s)")
-            println("Unsafe + byte swap (BE):  ${unsafeBETime / 1_000_000}ms (${iterations * 1_000_000_000L / unsafeBETime} ops/s)")
-            println("Unsafe native (LE):       ${unsafeLETime / 1_000_000}ms (${iterations * 1_000_000_000L / unsafeLETime} ops/s)")
-            println()
-            println("ByteBuffer BE vs LE: ${leBBTime.toDouble() / beBBTime}x")
-            println("Unsafe BE vs LE: ${unsafeLETime.toDouble() / unsafeBETime}x")
-            println("Unsafe BE vs ByteBuffer BE: ${beBBTime.toDouble() / unsafeBETime}x")
+            // Verify benchmarks completed
+            assertTrue(beBBTime > 0)
+            assertTrue(leBBTime > 0)
+            assertTrue(unsafeBETime > 0)
+            assertTrue(unsafeLETime > 0)
         } finally {
             unsafe.freeMemory(unsafeAddress)
         }

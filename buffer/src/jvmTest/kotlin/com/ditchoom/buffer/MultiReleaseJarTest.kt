@@ -103,31 +103,21 @@ class MultiReleaseJarTest {
     }
 
     @Test
-    fun `report loaded multi-release classes`() {
-        println("=== Multi-Release JAR Class Loading Report ===")
-        println("Java version: $javaVersion")
-        println()
-
-        // Report BufferMismatchHelper
+    fun `multi-release classes load successfully`() {
+        // Verify BufferMismatchHelper loads
         val mismatchClass = BufferMismatchHelper::class.java
         val mismatchUrl =
             mismatchClass.classLoader?.getResource(
                 mismatchClass.name.replace('.', '/') + ".class",
             )
-        println("BufferMismatchHelper: $mismatchUrl")
+        assertTrue(mismatchUrl != null, "BufferMismatchHelper should be loadable")
 
-        // Report DirectBufferAddressHelperKt
+        // Verify DirectBufferAddressHelperKt loads
         val addressClass = Class.forName("com.ditchoom.buffer.DirectBufferAddressHelperKt")
         val addressUrl =
             addressClass.classLoader?.getResource(
                 addressClass.name.replace('.', '/') + ".class",
             )
-        println("DirectBufferAddressHelperKt: $addressUrl")
-
-        // Expected implementations based on Java version
-        println()
-        println("Expected implementations on Java $javaVersion:")
-        println("  BufferMismatchHelper: ${if (javaVersion >= 11) "ByteBuffer.mismatch()" else "fallback"}")
-        println("  DirectBufferAddressHelper: ${if (javaVersion >= 21) "FFM MemorySegment" else "reflection"}")
+        assertTrue(addressUrl != null, "DirectBufferAddressHelperKt should be loadable")
     }
 }

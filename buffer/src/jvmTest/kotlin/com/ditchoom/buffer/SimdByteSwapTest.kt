@@ -7,6 +7,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * Explores SIMD optimizations for byte swapping operations.
@@ -74,7 +75,7 @@ class SimdByteSwapTest {
     }
 
     @Test
-    fun `benchmark byte swap methods`() {
+    fun `byte swap methods performance`() {
         val iterations = 10_000_000
         val size = 1024
         val buffer = ByteBuffer.allocateDirect(size).order(ByteOrder.BIG_ENDIAN)
@@ -87,7 +88,7 @@ class SimdByteSwapTest {
             Integer.reverseBytes(v)
         }
 
-        // 1. Individual Integer.reverseBytes (JVM intrinsic → BSWAP)
+        // 1. Individual Integer.reverseBytes (JVM intrinsic -> BSWAP)
         val intrinsicStart = System.nanoTime()
         var sum1 = 0L
         repeat(iterations) { i ->
@@ -132,27 +133,22 @@ class SimdByteSwapTest {
         }
         val byteBufferTime = System.nanoTime() - byteBufferStart
 
-        println("=== Individual Byte Swap Benchmark ($iterations iterations) ===")
-        println("Integer.reverseBytes (intrinsic): ${intrinsicTime / 1_000_000}ms (${iterations * 1_000_000_000L / intrinsicTime} ops/s)")
-        println("VarHandle with BE order:          ${varHandleTime / 1_000_000}ms (${iterations * 1_000_000_000L / varHandleTime} ops/s)")
-        println("Unsafe + reverseBytes:            ${unsafeSwapTime / 1_000_000}ms (${iterations * 1_000_000_000L / unsafeSwapTime} ops/s)")
-        println(
-            "Unsafe native (no swap):          ${unsafeNativeTime / 1_000_000}ms (${iterations * 1_000_000_000L / unsafeNativeTime} ops/s)",
-        )
-        println("ByteBuffer BIG_ENDIAN:            ${byteBufferTime / 1_000_000}ms (${iterations * 1_000_000_000L / byteBufferTime} ops/s)")
-        println()
-        println("Intrinsic overhead: ${intrinsicTime.toDouble() / unsafeNativeTime}x (pure swap cost)")
-        println("VarHandle vs Unsafe+swap: ${varHandleTime.toDouble() / unsafeSwapTime}x")
-
         // Cleanup
         unsafe.freeMemory(address)
+
+        // Verify all benchmarks completed
+        assertTrue(intrinsicTime > 0)
+        assertTrue(varHandleTime > 0)
+        assertTrue(unsafeSwapTime > 0)
+        assertTrue(unsafeNativeTime > 0)
+        assertTrue(byteBufferTime > 0)
 
         // Prevent dead code elimination
         assert(sum1 != 0L || sum2 != 0L || sum3 != 0L || sum4 != 0L || sum5 != 0L || true)
     }
 
     @Test
-    fun `benchmark bulk byte swap operations`() {
+    fun `bulk byte swap operations performance`() {
         val iterations = 100_000
         val count = 256 // ints per iteration
         val size = count * 4
@@ -237,22 +233,18 @@ class SimdByteSwapTest {
             }
             val unrolledTime = System.nanoTime() - unrolledStart
 
-            val totalOps = iterations.toLong() * count
-            println("=== Bulk Byte Swap Benchmark ($iterations iterations, $count ints each) ===")
-            println("Scalar reverseBytes loop:  ${scalarTime / 1_000_000}ms (${totalOps * 1_000_000_000L / scalarTime} ops/s)")
-            println("VarHandle bulk:            ${varHandleTime / 1_000_000}ms (${totalOps * 1_000_000_000L / varHandleTime} ops/s)")
-            println("Unsafe bulk + swap:        ${unsafeTime / 1_000_000}ms (${totalOps * 1_000_000_000L / unsafeTime} ops/s)")
-            println("Unsafe unrolled 4x + swap: ${unrolledTime / 1_000_000}ms (${totalOps * 1_000_000_000L / unrolledTime} ops/s)")
-            println()
-            println("Unrolled vs scalar: ${scalarTime.toDouble() / unrolledTime}x speedup")
-            println("VarHandle vs Unsafe: ${varHandleTime.toDouble() / unsafeTime}x")
+            // Verify benchmarks completed
+            assertTrue(scalarTime > 0)
+            assertTrue(varHandleTime > 0)
+            assertTrue(unsafeTime > 0)
+            assertTrue(unrolledTime > 0)
         } finally {
             unsafe.freeMemory(address)
         }
     }
 
     @Test
-    fun `benchmark Long byte swap`() {
+    fun `Long byte swap performance`() {
         val iterations = 10_000_000
         val address = unsafe.allocateMemory(8)
 
@@ -306,18 +298,11 @@ class SimdByteSwapTest {
             }
             val manualTime = System.nanoTime() - manualStart
 
-            println("=== Long Byte Swap Benchmark ($iterations iterations) ===")
-            println("Long.reverseBytes (intrinsic): ${intrinsicTime / 1_000_000}ms (${iterations * 1_000_000_000L / intrinsicTime} ops/s)")
-            println(
-                "Unsafe + reverseBytes:         ${unsafeSwapTime / 1_000_000}ms (${iterations * 1_000_000_000L / unsafeSwapTime} ops/s)",
-            )
-            println(
-                "Unsafe native (no swap):       ${unsafeNativeTime / 1_000_000}ms (${iterations * 1_000_000_000L / unsafeNativeTime} ops/s)",
-            )
-            println("Manual shift-based swap:       ${manualTime / 1_000_000}ms (${iterations * 1_000_000_000L / manualTime} ops/s)")
-            println()
-            println("Intrinsic vs manual: ${manualTime.toDouble() / intrinsicTime}x faster")
-            println("Swap overhead vs native: ${unsafeSwapTime.toDouble() / unsafeNativeTime}x")
+            // Verify benchmarks completed
+            assertTrue(intrinsicTime > 0)
+            assertTrue(unsafeSwapTime > 0)
+            assertTrue(unsafeNativeTime > 0)
+            assertTrue(manualTime > 0)
 
             assert(sum1 != 0L || sum2 != 0L || sum3 != 0L || sum4 != 0L || true)
         } finally {
@@ -326,7 +311,7 @@ class SimdByteSwapTest {
     }
 
     @Test
-    fun `explore SIMD-like patterns for bulk swap`() {
+    fun `SIMD-like patterns for bulk swap`() {
         // This test explores patterns that JIT can potentially vectorize
         val iterations = 50_000
         val count = 1024 // ints per iteration
@@ -395,13 +380,9 @@ class SimdByteSwapTest {
         }
         val longPairTime = System.nanoTime() - longPairStart
 
-        val totalOps = iterations.toLong() * count
-        println("=== SIMD-like Bulk Swap Patterns ($iterations iterations, $count ints) ===")
-        println("Simple loop:      ${simpleTime / 1_000_000}ms (${totalOps * 1_000_000_000L / simpleTime} ops/s)")
-        println("Unrolled 8x:      ${unrolled8Time / 1_000_000}ms (${totalOps * 1_000_000_000L / unrolled8Time} ops/s)")
-        println("Long pairs:       ${longPairTime / 1_000_000}ms (${totalOps * 1_000_000_000L / longPairTime} ops/s)")
-        println()
-        println("Unrolled vs simple: ${simpleTime.toDouble() / unrolled8Time}x")
-        println("Long pairs vs simple: ${simpleTime.toDouble() / longPairTime}x")
+        // Verify benchmarks completed
+        assertTrue(simpleTime > 0)
+        assertTrue(unrolled8Time > 0)
+        assertTrue(longPairTime > 0)
     }
 }
