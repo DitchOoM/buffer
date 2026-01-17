@@ -1,6 +1,5 @@
 package com.ditchoom.buffer
 
-import java.lang.reflect.Field
 import java.nio.ByteBuffer
 
 /**
@@ -10,6 +9,8 @@ import java.nio.ByteBuffer
  * - Java NIO channels
  * - JNI/FFI native code
  * - Memory-mapped files
+ *
+ * On Android 33+, uses MethodHandle for faster address lookup.
  */
 class DirectJvmBuffer(
     byteBuffer: ByteBuffer,
@@ -29,26 +30,4 @@ class DirectJvmBuffer(
      * The size of the native memory region in bytes.
      */
     override val nativeSize: Long get() = capacity.toLong()
-
-    companion object {
-        private val addressField: Field? by lazy {
-            try {
-                val field = java.nio.Buffer::class.java.getDeclaredField("address")
-                field.isAccessible = true
-                field
-            } catch (e: Exception) {
-                null
-            }
-        }
-
-        /**
-         * Gets the native memory address of a direct ByteBuffer using reflection.
-         * Direct ByteBuffers store their native address in a protected field.
-         */
-        private fun getDirectBufferAddress(buffer: ByteBuffer): Long =
-            addressField?.getLong(buffer)
-                ?: throw UnsupportedOperationException(
-                    "Cannot access native address on this Android version.",
-                )
-    }
 }

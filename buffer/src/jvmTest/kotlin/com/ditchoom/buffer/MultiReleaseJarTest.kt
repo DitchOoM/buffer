@@ -5,9 +5,20 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Tests to verify multi-release JAR structure and mismatch correctness.
+ * Tests to verify multi-release JAR structure and correctness.
+ *
+ * Note: When running from IDE/Gradle (not from JAR), classes are loaded from
+ * build directories. For full multi-release JAR verification from the actual
+ * JAR file, use ValidateMultiReleaseJar.main() with different JVM versions.
  */
 class MultiReleaseJarTest {
+    private val javaVersion: Int by lazy {
+        System
+            .getProperty("java.specification.version")
+            ?.substringBefore('.')
+            ?.toIntOrNull() ?: 8
+    }
+
     @Test
     fun `mismatch produces correct results`() {
         val buffer1 = PlatformBuffer.allocate(100)
@@ -66,5 +77,47 @@ class MultiReleaseJarTest {
         a.resetForRead()
         b.resetForRead()
         assertEquals(0, a.mismatch(b), "Should find mismatch at first byte")
+    }
+
+    @Test
+    fun `DirectBufferAddressHelper returns valid address`() {
+        val directBuffer = java.nio.ByteBuffer.allocateDirect(64)
+        val address = getDirectBufferAddress(directBuffer)
+
+        // Address should be non-zero for a direct buffer
+        assertTrue(address != 0L, "Direct buffer address should be non-zero")
+
+        // Verify it's actually the buffer's address by writing bytes and reading them back
+        // Using individual bytes avoids byte order complications
+        directBuffer.put(0, 0x42.toByte())
+        directBuffer.put(1, 0x43.toByte())
+        directBuffer.put(2, 0x44.toByte())
+        directBuffer.put(3, 0x45.toByte())
+
+        if (UnsafeMemory.isSupported) {
+            assertEquals(0x42.toByte(), UnsafeMemory.getByte(address), "Byte 0 should match")
+            assertEquals(0x43.toByte(), UnsafeMemory.getByte(address + 1), "Byte 1 should match")
+            assertEquals(0x44.toByte(), UnsafeMemory.getByte(address + 2), "Byte 2 should match")
+            assertEquals(0x45.toByte(), UnsafeMemory.getByte(address + 3), "Byte 3 should match")
+        }
+    }
+
+    @Test
+    fun `multi-release classes load successfully`() {
+        // Verify BufferMismatchHelper loads
+        val mismatchClass = BufferMismatchHelper::class.java
+        val mismatchUrl =
+            mismatchClass.classLoader?.getResource(
+                mismatchClass.name.replace('.', '/') + ".class",
+            )
+        assertTrue(mismatchUrl != null, "BufferMismatchHelper should be loadable")
+
+        // Verify DirectBufferAddressHelperKt loads
+        val addressClass = Class.forName("com.ditchoom.buffer.DirectBufferAddressHelperKt")
+        val addressUrl =
+            addressClass.classLoader?.getResource(
+                addressClass.name.replace('.', '/') + ".class",
+            )
+        assertTrue(addressUrl != null, "DirectBufferAddressHelperKt should be loadable")
     }
 }

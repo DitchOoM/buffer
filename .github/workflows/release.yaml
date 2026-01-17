@@ -31,11 +31,11 @@ jobs:
       ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_KEY_CONTENTS }}
     steps:
       - uses: actions/checkout@v4
-      - name: Set up JDK 19
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '19'
+          java-version: '21'
           cache: gradle
 
       - name: Release from Maven Central staging

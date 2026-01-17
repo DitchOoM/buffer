@@ -40,10 +40,15 @@ private external fun jsMemorySize(): Int
  */
 object LinearMemoryConfig {
     /**
-     * Initial memory allocation in megabytes. Default is 16MB.
+     * Initial memory allocation in megabytes. Default is 256MB.
      * Must be set before the first LinearBuffer allocation.
+     *
+     * The larger default ensures sufficient headroom for:
+     * - Multiple buffer allocations within scoped regions
+     * - Benchmark workloads with many iterations
+     * - Applications using Direct allocation zone
      */
-    var initialSizeMB: Int = 16
+    var initialSizeMB: Int = 256
         internal set
 }
 
@@ -150,8 +155,8 @@ object LinearMemoryAllocator {
         if (nextOffset + aligned > heapEnd) {
             throw OutOfMemoryError(
                 "LinearBuffer allocation exceeded ${LinearMemoryConfig.initialSizeMB}MB pre-allocated memory. " +
-                    "Call LinearMemoryAllocator.configure(initialSizeMB = N) at startup with a larger value, " +
-                    "or use AllocationZone.Heap for high-frequency allocation.",
+                    "Use AllocationZone.Heap for high-frequency allocations, " +
+                    "or call LinearMemoryAllocator.configure(initialSizeMB = N) at startup with a larger value.",
             )
         }
 

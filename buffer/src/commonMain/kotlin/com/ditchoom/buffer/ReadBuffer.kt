@@ -649,4 +649,164 @@ interface ReadBuffer : PositionBuffer {
 
         return indexOf(needle)
     }
+
+    // ===== Bulk Primitive Read Operations =====
+    // These methods read arrays of primitives efficiently.
+    // Optimized implementations may use SIMD-like patterns (long-pairs)
+    // for ~3x performance improvement on byte-swapping operations.
+
+    /**
+     * Reads [count] shorts from the buffer and advances position by `count * 2`.
+     *
+     * Uses the buffer's byte order for each short value.
+     * Optimized implementations may process pairs of shorts as ints for better performance.
+     *
+     * @param count The number of shorts to read
+     * @return A ShortArray containing the read values
+     */
+    fun readShorts(count: Int): ShortArray {
+        val result = ShortArray(count)
+        readShorts(result, 0, count)
+        return result
+    }
+
+    /**
+     * Reads shorts into the destination array.
+     *
+     * @param dest The destination short array
+     * @param offset Starting index in the destination array
+     * @param length Number of shorts to read
+     * @return This buffer for chaining
+     */
+    fun readShorts(
+        dest: ShortArray,
+        offset: Int = 0,
+        length: Int = dest.size - offset,
+    ) {
+        for (i in offset until offset + length) {
+            dest[i] = readShort()
+        }
+    }
+
+    /**
+     * Reads [count] ints from the buffer and advances position by `count * 4`.
+     *
+     * Uses the buffer's byte order for each int value.
+     * Optimized implementations may process pairs of ints as longs for ~3x better performance
+     * when byte swapping is required.
+     *
+     * @param count The number of ints to read
+     * @return An IntArray containing the read values
+     */
+    fun readInts(count: Int): IntArray {
+        val result = IntArray(count)
+        readInts(result, 0, count)
+        return result
+    }
+
+    /**
+     * Reads ints into the destination array.
+     *
+     * @param dest The destination int array
+     * @param offset Starting index in the destination array
+     * @param length Number of ints to read
+     */
+    fun readInts(
+        dest: IntArray,
+        offset: Int = 0,
+        length: Int = dest.size - offset,
+    ) {
+        for (i in offset until offset + length) {
+            dest[i] = readInt()
+        }
+    }
+
+    /**
+     * Reads [count] longs from the buffer and advances position by `count * 8`.
+     *
+     * Uses the buffer's byte order for each long value.
+     *
+     * @param count The number of longs to read
+     * @return A LongArray containing the read values
+     */
+    fun readLongs(count: Int): LongArray {
+        val result = LongArray(count)
+        readLongs(result, 0, count)
+        return result
+    }
+
+    /**
+     * Reads longs into the destination array.
+     *
+     * @param dest The destination long array
+     * @param offset Starting index in the destination array
+     * @param length Number of longs to read
+     */
+    fun readLongs(
+        dest: LongArray,
+        offset: Int = 0,
+        length: Int = dest.size - offset,
+    ) {
+        for (i in offset until offset + length) {
+            dest[i] = readLong()
+        }
+    }
+
+    /**
+     * Reads [count] floats from the buffer and advances position by `count * 4`.
+     *
+     * @param count The number of floats to read
+     * @return A FloatArray containing the read values
+     */
+    fun readFloats(count: Int): FloatArray {
+        val result = FloatArray(count)
+        readFloats(result, 0, count)
+        return result
+    }
+
+    /**
+     * Reads floats into the destination array.
+     *
+     * @param dest The destination float array
+     * @param offset Starting index in the destination array
+     * @param length Number of floats to read
+     */
+    fun readFloats(
+        dest: FloatArray,
+        offset: Int = 0,
+        length: Int = dest.size - offset,
+    ) {
+        for (i in offset until offset + length) {
+            dest[i] = readFloat()
+        }
+    }
+
+    /**
+     * Reads [count] doubles from the buffer and advances position by `count * 8`.
+     *
+     * @param count The number of doubles to read
+     * @return A DoubleArray containing the read values
+     */
+    fun readDoubles(count: Int): DoubleArray {
+        val result = DoubleArray(count)
+        readDoubles(result, 0, count)
+        return result
+    }
+
+    /**
+     * Reads doubles into the destination array.
+     *
+     * @param dest The destination double array
+     * @param offset Starting index in the destination array
+     * @param length Number of doubles to read
+     */
+    fun readDoubles(
+        dest: DoubleArray,
+        offset: Int = 0,
+        length: Int = dest.size - offset,
+    ) {
+        for (i in offset until offset + length) {
+            dest[i] = readDouble()
+        }
+    }
 }

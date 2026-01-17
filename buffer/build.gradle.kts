@@ -39,6 +39,9 @@ repositories {
 }
 
 kotlin {
+    // Ensure consistent JDK version across all developer machines and CI
+    jvmToolchain(21)
+
     // Suppress Beta warning for expect/actual classes (BufferMismatchHelper)
     targets.all {
         compilations.all {
@@ -52,13 +55,15 @@ kotlin {
 
     androidTarget {
         publishLibraryVariants("release")
-        compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
+        // D8/R8 desugars bytecode for minSdk 19
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_17)
         // Include commonTest in Android instrumented tests
         instrumentedTestVariant {
             sourceSetTree.set(KotlinSourceSetTree.test)
         }
     }
     jvm {
+        // Keep Java 8 bytecode for maximum compatibility; Java 11+ optimizations in META-INF/versions/11/
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
         compilations.create("benchmark") {
             associateWith(this@jvm.compilations.getByName("main"))
@@ -70,6 +75,25 @@ kotlin {
             }
             defaultSourceSet {
                 kotlin.srcDir("src/jvm11Main/kotlin")
+            }
+        }
+        // Java 21 compilation for FFM (Foreign Function & Memory) API
+        compilations.create("java21") {
+            compilerOptions.configure {
+                jvmTarget.set(JvmTarget.JVM_21)
+            }
+            defaultSourceSet {
+                kotlin.srcDir("src/jvm21Main/kotlin")
+                dependencies {
+                    // Access main compilation output for common types (Charset, ReadBuffer, etc.)
+                    implementation(
+                        this@jvm
+                            .compilations
+                            .getByName("main")
+                            .output
+                            .classesDirs,
+                    )
+                }
             }
         }
     }
@@ -232,6 +256,12 @@ android {
     }
     namespace = "com.ditchoom.buffer"
 
+    // D8/R8 desugars bytecode for minSdk 19
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
     buildTypes {
         create("benchmark") {
             initWith(getByName("release"))
@@ -360,10 +390,25 @@ benchmark {
             iterations = 5
             exclude(".*sliceBuffer.*")
         }
+        register("scoped") {
+            warmups = 2
+            iterations = 3
+            iterationTime = 500
+            iterationTimeUnit = "ms"
+            include(".*ScopedBuffer.*")
+        }
+        // Fast configuration for WASM - runs only key benchmarks to avoid long run times
+        register("wasmFast") {
+            warmups = 2
+            iterations = 2
+            include("allocateScopedBuffer")
+            include("bulkWriteIntsScoped")
+            include("readWriteIntScoped")
+        }
     }
 }
 
-// Configure multi-release JAR for Java 11+ optimizations
+// Configure multi-release JAR for Java 11+ and Java 21+ optimizations
 tasks.named<Jar>("jvmJar") {
     manifest {
         attributes("Multi-Release" to "true")
@@ -374,6 +419,16 @@ tasks.named<Jar>("jvmJar") {
             kotlin
                 .jvm()
                 .compilations["java11"]
+                .output
+                .allOutputs,
+        )
+    }
+    // Include Java 21 classes in META-INF/versions/21/
+    into("META-INF/versions/21") {
+        from(
+            kotlin
+                .jvm()
+                .compilations["java21"]
                 .output
                 .allOutputs,
         )
@@ -395,6 +450,15 @@ tasks.register("nextVersion") {
 
 tasks.matching { it.name == "testBenchmarkUnitTest" }.configureEach {
     enabled = false
+}
+
+// Allow reflective access to internal JDK fields:
+// - java.nio: DirectBufferAddressHelper accesses Buffer.address field
+// - jdk.internal.misc: UnsafeMemory accesses sun.misc.Unsafe
+tasks.withType<Test>().configureEach {
+    jvmArgs(
+        "--add-opens=java.base/java.nio=ALL-UNNAMED",
+    )
 }
 
 dokka {

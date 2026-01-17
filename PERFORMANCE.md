@@ -5,7 +5,7 @@ This document provides benchmark results and optimization guidelines for the buf
 ## Benchmark Results
 
 Benchmarks run on:
-- **JVM/JS/WasmJS/Native**: MacBook Air M2, 16GB RAM, JDK 19
+- **JVM/JS/WasmJS/Native**: MacBook Air M2, 16GB RAM, JDK 21
 - **JavaScript**: Node.js v22
 - **WasmJS**: Node.js v22 with WASM runtime
 - **Native**: macOS ARM64 (Apple Silicon)
@@ -97,6 +97,32 @@ Benchmarks run on:
 | mixedOperations | 64,152 | 119 |
 | sliceBuffer | 5,746 | 1,329 |
 
+## ScopedBuffer
+
+ScopedBuffer provides deterministic memory management for FFI/JNI interop and latency-sensitive code.
+
+| Platform | Allocation | Cleanup | Native Address |
+|----------|-----------|---------|----------------|
+| JVM 21+  | FFM Arena.allocate() | Arena.close() | MemorySegment.address() |
+| JVM < 21 | Unsafe.allocateMemory() | Unsafe.freeMemory() | Direct pointer |
+| Android  | Unsafe.allocateMemory() | Unsafe.freeMemory() | Direct pointer |
+| Native   | malloc() | free() | CPointer address |
+| WASM     | LinearMemory | Bump allocator | Pointer offset |
+| JS       | ArrayBuffer (GC) | Reference release | N/A (GC managed) |
+
+**Use cases:**
+- **FFI/JNI interop**: Pass `nativeAddress` directly to native code
+- **Deterministic cleanup**: Memory freed immediately when scope closes
+- **Latency-sensitive code**: Avoid GC pauses by managing memory explicitly
+
+**Note:** Raw read/write performance is similar to `PlatformBuffer` with `AllocationZone.Direct` since they use the same underlying memory mechanisms.
+
+Run ScopedBuffer benchmarks:
+```bash
+./gradlew jvmBenchmarkBenchmark -Pbenchmark.include=Scoped
+./gradlew macosArm64BenchmarkBenchmark -Pbenchmark.include=Scoped
+```
+
 ## Running Benchmarks
 
 ### kotlinx-benchmark (JVM, JS, WasmJS, Native)
@@ -181,3 +207,22 @@ The string decoding implementation uses platform-specific source sets to handle 
 | macOS | heapOperations | 14M ops/s | 31M ops/s | +117% |
 
 The macOS improvements are from pointer-based optimizations in native code paths, not from string decoding changes (which are a separate code path used only for charset conversions).
+
+### VarHandle vs Standard ByteBuffer (Android)
+
+**Important Finding**: VarHandle is significantly SLOWER than standard ByteBuffer operations on Android's ART runtime.
+
+| Operation | Standard ByteBuffer | VarHandle | Slowdown |
+|-----------|---------------------|-----------|----------|
+| Int R/W (Direct) | **6,658 ns** | 560,833 ns | **84x slower** |
+| Long R/W (Direct) | **3,407 ns** | 279,619 ns | **82x slower** |
+| Int R/W (Heap) | **8,086 ns** | 563,305 ns | **70x slower** |
+
+*Tested on Realme RMX3933, Android 14 (API 34)*
+
+**Why VarHandle is slower on Android:**
+1. ART runtime hasn't optimized VarHandle operations like HotSpot JVM has
+2. Polymorphic signature overhead causes boxing/unboxing
+3. Standard `ByteBuffer.getInt()/putInt()` methods are already intrinsified
+
+**Recommendation**: Use standard ByteBuffer methods for get/put operations on Android. MethodHandle for private field access (like `nativeAddress`) provides ~10x improvement over reflection, but requires minSdk 26+. This library currently uses cached reflection for `nativeAddress` to maintain minSdk 19 compatibility. MethodHandle optimization may be added in a future release with multi-version library support.
