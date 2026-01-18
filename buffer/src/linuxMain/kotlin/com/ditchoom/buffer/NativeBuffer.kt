@@ -265,7 +265,7 @@ class NativeBuffer private constructor(
  */
 private class NativeBufferSlice(
     private val baseAddress: Long,
-    override val capacity: Int,
+    val capacity: Int,
     override val byteOrder: ByteOrder,
     private val parent: NativeBuffer,
 ) : ReadBuffer,

@@ -61,6 +61,12 @@ val PlatformBuffer.nativeMemoryAccess: NativeMemoryAccess?
     get() = this as? NativeMemoryAccess
 
 /**
+ * Extension for ReadBuffer to access native memory if available.
+ */
+val ReadBuffer.nativeMemoryAccess: NativeMemoryAccess?
+    get() = this as? NativeMemoryAccess
+
+/**
  * Allocates a buffer with guaranteed native memory access.
  *
  * This is equivalent to `PlatformBuffer.allocate(size, AllocationZone.Direct)` but
@@ -122,6 +128,12 @@ interface ManagedMemoryAccess {
  * ```
  */
 val PlatformBuffer.managedMemoryAccess: ManagedMemoryAccess?
+    get() = this as? ManagedMemoryAccess
+
+/**
+ * Extension for ReadBuffer to access managed memory if available.
+ */
+val ReadBuffer.managedMemoryAccess: ManagedMemoryAccess?
     get() = this as? ManagedMemoryAccess
 
 /**
