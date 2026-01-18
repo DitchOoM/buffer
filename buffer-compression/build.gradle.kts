@@ -33,7 +33,7 @@ kotlin {
 
     androidTarget {
         publishLibraryVariants("release")
-        // Use JVM 1.8 for Android to maintain minSdk 19 compatibility
+        // Use JVM 1.8 for Android to maintain maximum compatibility
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
     }
     jvm {
@@ -104,7 +104,7 @@ android {
     }
     namespace = "$group.buffer.compression"
 
-    // Use Java 1.8 for Android to maintain minSdk 19 compatibility
+    // Use Java 1.8 for Android to maintain maximum compatibility
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
