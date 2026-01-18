@@ -8,7 +8,6 @@ import kotlinx.cinterop.convert
 import kotlinx.cinterop.get
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.set
-import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.toLong
 import platform.posix.free
 import platform.posix.malloc
@@ -53,8 +52,9 @@ class NativeBuffer private constructor(
             size: Int,
             byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
         ): NativeBuffer {
-            val ptr = malloc(size.convert())?.reinterpret<ByteVar>()
-                ?: throw OutOfMemoryError("Failed to allocate $size bytes")
+            val ptr =
+                malloc(size.convert())?.reinterpret<ByteVar>()
+                    ?: throw OutOfMemoryError("Failed to allocate $size bytes")
             return NativeBuffer(ptr, size, byteOrder)
         }
     }
@@ -62,9 +62,16 @@ class NativeBuffer private constructor(
     private fun checkOpen() = check(!closed) { "Buffer closed" }
 
     override fun position(): Int = positionValue
-    override fun position(newPosition: Int) { positionValue = newPosition }
+
+    override fun position(newPosition: Int) {
+        positionValue = newPosition
+    }
+
     override fun limit(): Int = limitValue
-    override fun setLimit(limit: Int) { limitValue = limit }
+
+    override fun setLimit(limit: Int) {
+        limitValue = limit
+    }
 
     override fun resetForRead() {
         limitValue = positionValue
@@ -135,7 +142,10 @@ class NativeBuffer private constructor(
         return array
     }
 
-    override fun readString(length: Int, charset: Charset): String {
+    override fun readString(
+        length: Int,
+        charset: Charset,
+    ): String {
         checkOpen()
         return readByteArray(length).decodeToString()
     }
@@ -154,7 +164,10 @@ class NativeBuffer private constructor(
         return this
     }
 
-    override fun set(index: Int, byte: Byte): WriteBuffer {
+    override fun set(
+        index: Int,
+        byte: Byte,
+    ): WriteBuffer {
         checkOpen()
         ptr[index] = byte
         return this
@@ -167,7 +180,10 @@ class NativeBuffer private constructor(
         return this
     }
 
-    override fun set(index: Int, short: Short): WriteBuffer {
+    override fun set(
+        index: Int,
+        short: Short,
+    ): WriteBuffer {
         checkOpen()
         val value = if (littleEndian == nativeIsLittleEndian) short else short.reverseBytes()
         UnsafeMemory.putShort(nativeAddress + index, value)
@@ -181,7 +197,10 @@ class NativeBuffer private constructor(
         return this
     }
 
-    override fun set(index: Int, int: Int): WriteBuffer {
+    override fun set(
+        index: Int,
+        int: Int,
+    ): WriteBuffer {
         checkOpen()
         val value = if (littleEndian == nativeIsLittleEndian) int else int.reverseBytes()
         UnsafeMemory.putInt(nativeAddress + index, value)
@@ -195,14 +214,21 @@ class NativeBuffer private constructor(
         return this
     }
 
-    override fun set(index: Int, long: Long): WriteBuffer {
+    override fun set(
+        index: Int,
+        long: Long,
+    ): WriteBuffer {
         checkOpen()
         val value = if (littleEndian == nativeIsLittleEndian) long else long.reverseBytes()
         UnsafeMemory.putLong(nativeAddress + index, value)
         return this
     }
 
-    override fun writeBytes(bytes: ByteArray, offset: Int, length: Int): WriteBuffer {
+    override fun writeBytes(
+        bytes: ByteArray,
+        offset: Int,
+        length: Int,
+    ): WriteBuffer {
         checkOpen()
         UnsafeMemory.copyMemoryFromArray(bytes, offset, nativeAddress + positionValue, length)
         positionValue += length
@@ -244,7 +270,10 @@ class NativeBuffer private constructor(
         writeBytes(buffer.readByteArray(size))
     }
 
-    override fun writeString(text: CharSequence, charset: Charset): WriteBuffer {
+    override fun writeString(
+        text: CharSequence,
+        charset: Charset,
+    ): WriteBuffer {
         checkOpen()
         writeBytes(text.toString().encodeToByteArray())
         return this
@@ -282,9 +311,17 @@ private class NativeBufferSlice(
     private fun checkOpen() = check(!parent.isClosed()) { "Parent buffer closed" }
 
     override fun position(): Int = positionValue
-    override fun position(newPosition: Int) { positionValue = newPosition }
+
+    override fun position(newPosition: Int) {
+        positionValue = newPosition
+    }
+
     override fun limit(): Int = limitValue
-    override fun setLimit(limit: Int) { limitValue = limit }
+
+    override fun setLimit(limit: Int) {
+        limitValue = limit
+    }
+
     override fun resetForRead() {
         limitValue = positionValue
         positionValue = 0
@@ -347,7 +384,10 @@ private class NativeBufferSlice(
         return array
     }
 
-    override fun readString(length: Int, charset: Charset): String {
+    override fun readString(
+        length: Int,
+        charset: Charset,
+    ): String {
         checkOpen()
         return readByteArray(length).decodeToString()
     }

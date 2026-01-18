@@ -11,10 +11,11 @@ actual fun PlatformBuffer.Companion.allocate(
     size: Int,
     zone: AllocationZone,
     byteOrder: ByteOrder,
-): PlatformBuffer = when (zone) {
-    AllocationZone.Heap -> ByteArrayBuffer(ByteArray(size), byteOrder = byteOrder)
-    AllocationZone.Direct, AllocationZone.SharedMemory -> NativeBuffer.allocate(size, byteOrder)
-}
+): PlatformBuffer =
+    when (zone) {
+        AllocationZone.Heap -> ByteArrayBuffer(ByteArray(size), byteOrder = byteOrder)
+        AllocationZone.Direct, AllocationZone.SharedMemory -> NativeBuffer.allocate(size, byteOrder)
+    }
 
 actual fun PlatformBuffer.Companion.wrap(
     array: ByteArray,
