@@ -58,11 +58,11 @@ src/
 | Apple | `ByteArrayBuffer` | `MutableDataBuffer` | Falls back to Direct |
 | JS | `JsBuffer` | `JsBuffer` | `JsBuffer` (SharedArrayBuffer) |
 | WASM | `ByteArrayBuffer` | `LinearBuffer` | Falls back to Direct |
-| Linux | `ByteArrayBuffer` | `ByteArrayBuffer` | Falls back to Direct |
+| Linux | `ByteArrayBuffer` | `NativeBuffer` | Falls back to Direct |
 
 ### Memory Access Interfaces
 
-- `NativeMemoryAccess` - Direct native memory pointer (DirectJvmBuffer, MutableDataBuffer, LinearBuffer, JsBuffer)
+- `NativeMemoryAccess` - Direct native memory pointer (DirectJvmBuffer, MutableDataBuffer, LinearBuffer, JsBuffer, NativeBuffer)
 - `ManagedMemoryAccess` - Kotlin ByteArray backing (HeapJvmBuffer, ByteArrayBuffer)
 - `SharedMemoryAccess` - Cross-process shared memory (ParcelableSharedMemoryBuffer, JsBuffer with SharedArrayBuffer)
 
@@ -186,7 +186,7 @@ PlatformBuffer.wrap(byteArray)
 - **Apple NSData interop:** Use `PlatformBuffer.wrap(nsData)` or `PlatformBuffer.wrap(nsMutableData)` for zero-copy Apple API interop
 - **JS SharedArrayBuffer:** Requires CORS headers (`Cross-Origin-Opener-Policy`, `Cross-Origin-Embedder-Policy`)
 - **WASM:** `LinearBuffer` (Direct) uses native WASM memory for JS interop; `ByteArrayBuffer` (Heap) for compute workloads
-- **Linux:** Only `ByteArrayBuffer` available (no native memory access)
+- **Linux:** `NativeBuffer` (Direct) uses malloc/free for zero-copy io_uring I/O; `ByteArrayBuffer` (Heap) for managed memory
 
 ## Benchmarking
 

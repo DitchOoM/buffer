@@ -27,7 +27,7 @@ Buffer provides a unified API for managing byte buffers across all Kotlin platfo
 | iOS/macOS | [`NSData`](https://developer.apple.com/documentation/foundation/nsdata) / [`NSMutableData`](https://developer.apple.com/documentation/foundation/nsmutabledata) | Foundation integration |
 | JavaScript | [`Uint8Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array) | SharedArrayBuffer support |
 | WASM | `LinearBuffer` (native memory) / `ByteArrayBuffer` | Zero-copy JS interop |
-| Linux | [`ByteArray`](https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-byte-array/) | Native target |
+| Linux | `NativeBuffer` (malloc) / `ByteArrayBuffer` | Zero-copy io_uring I/O |
 
 ## Quick Example
 

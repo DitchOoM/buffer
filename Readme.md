@@ -11,7 +11,7 @@ memory copies:
 - **iOS/macOS**: `NSMutableData` (native) or `ByteArray` (managed)
 - **JavaScript**: `Uint8Array` with `SharedArrayBuffer` support
 - **WASM**: Native linear memory (Direct) or `ByteArray` (Heap)
-- **Linux/Native**: `ByteArray`
+- **Linux**: `NativeBuffer` (malloc/free) for zero-copy I/O, or `ByteArray` (managed)
 
 ## Features
 
