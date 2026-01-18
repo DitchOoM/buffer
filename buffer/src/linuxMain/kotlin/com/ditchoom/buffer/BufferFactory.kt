@@ -1,10 +1,20 @@
 package com.ditchoom.buffer
 
+/**
+ * Allocates a buffer with the specified allocation zone.
+ *
+ * - [AllocationZone.Heap]: Uses [ByteArrayBuffer] backed by Kotlin ByteArray (GC managed)
+ * - [AllocationZone.Direct]: Uses [NativeBuffer] backed by malloc (zero-copy for io_uring)
+ * - [AllocationZone.SharedMemory]: Falls back to Direct on Linux
+ */
 actual fun PlatformBuffer.Companion.allocate(
     size: Int,
     zone: AllocationZone,
     byteOrder: ByteOrder,
-): PlatformBuffer = ByteArrayBuffer(ByteArray(size), byteOrder = byteOrder)
+): PlatformBuffer = when (zone) {
+    AllocationZone.Heap -> ByteArrayBuffer(ByteArray(size), byteOrder = byteOrder)
+    AllocationZone.Direct, AllocationZone.SharedMemory -> NativeBuffer.allocate(size, byteOrder)
+}
 
 actual fun PlatformBuffer.Companion.wrap(
     array: ByteArray,
@@ -12,25 +22,23 @@ actual fun PlatformBuffer.Companion.wrap(
 ): PlatformBuffer = ByteArrayBuffer(array, byteOrder = byteOrder)
 
 /**
- * Allocates a buffer with guaranteed native memory access.
+ * Allocates a buffer with guaranteed native memory access using malloc.
  *
- * @throws UnsupportedOperationException Linux/Native uses ByteArray which doesn't provide
- *         direct native memory access. Use JVM or Apple platforms for native memory support.
+ * Returns a [NativeBuffer] that provides [NativeMemoryAccess.nativeAddress] for
+ * zero-copy I/O with io_uring and other native APIs.
+ *
+ * IMPORTANT: The returned buffer must be explicitly closed to free native memory.
  */
 actual fun PlatformBuffer.Companion.allocateNative(
     size: Int,
     byteOrder: ByteOrder,
-): PlatformBuffer =
-    throw UnsupportedOperationException(
-        "Native memory access is not supported on Linux. " +
-            "ByteArrayBuffer uses Kotlin ByteArray which lives in managed memory.",
-    )
+): PlatformBuffer = NativeBuffer.allocate(size, byteOrder)
 
 /**
  * Allocates a buffer with shared memory support.
- * On Linux/Native, falls back to regular allocation (no cross-process shared memory).
+ * On Linux, falls back to native allocation (no cross-process shared memory).
  */
 actual fun PlatformBuffer.Companion.allocateShared(
     size: Int,
     byteOrder: ByteOrder,
-): PlatformBuffer = allocate(size, AllocationZone.Direct, byteOrder)
+): PlatformBuffer = NativeBuffer.allocate(size, byteOrder)
