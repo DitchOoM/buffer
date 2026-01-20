@@ -10,32 +10,59 @@ import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.usePinned
 import platform.Foundation.NSData
+import platform.Foundation.NSMakeRange
 import platform.Foundation.NSMutableData
 import platform.Foundation.create
+import platform.Foundation.subdataWithRange
 
 /**
- * Converts this buffer to NSData.
+ * Converts the remaining bytes of this buffer to NSData.
  *
- * - If the buffer is an [NSDataBuffer], returns the underlying NSData (zero-copy)
- * - If the buffer is a [MutableDataBuffer], returns the underlying NSMutableData as NSData (zero-copy)
- * - Otherwise, copies the remaining bytes to a new NSData
+ * - If the buffer is an [NSDataBuffer] or [MutableDataBuffer] at position 0 with full remaining,
+ *   returns the underlying NSData (zero-copy)
+ * - Otherwise, copies the remaining bytes (from position to limit) to a new NSData
  */
 fun ReadBuffer.toNativeData(): NSData =
     when (this) {
-        is NSDataBuffer -> data
-        is MutableDataBuffer -> data
+        is NSDataBuffer -> {
+            val pos = position()
+            val rem = remaining()
+            if (pos == 0 && rem == data.length.toInt()) {
+                data
+            } else {
+                data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert()))
+            }
+        }
+        is MutableDataBuffer -> {
+            val pos = position()
+            val rem = remaining()
+            if (pos == 0 && rem == data.length.toInt()) {
+                data
+            } else {
+                data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert()))
+            }
+        }
         else -> toByteArray().toNSData()
     }
 
 /**
- * Converts this buffer to NSMutableData.
+ * Converts the remaining bytes of this buffer to NSMutableData.
  *
- * - If the buffer is a [MutableDataBuffer], returns the underlying NSMutableData (zero-copy)
- * - Otherwise, copies the remaining bytes to a new NSMutableData
+ * - If the buffer is a [MutableDataBuffer] at position 0 with full remaining,
+ *   returns the underlying NSMutableData (zero-copy)
+ * - Otherwise, copies the remaining bytes (from position to limit) to a new NSMutableData
  */
 fun PlatformBuffer.toMutableNativeData(): NSMutableData =
     when (this) {
-        is MutableDataBuffer -> data
+        is MutableDataBuffer -> {
+            val pos = position()
+            val rem = remaining()
+            if (pos == 0 && rem == data.length.toInt()) {
+                data
+            } else {
+                NSMutableData.create(data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert())))!!
+            }
+        }
         else -> toByteArray().toNSMutableData()
     }
 
