@@ -66,6 +66,40 @@ src/
 - `ManagedMemoryAccess` - Kotlin ByteArray backing (HeapJvmBuffer, ByteArrayBuffer)
 - `SharedMemoryAccess` - Cross-process shared memory (ParcelableSharedMemoryBuffer, JsBuffer with SharedArrayBuffer)
 
+### Native Data Conversions
+
+Convert buffers to platform-native types for interop with platform APIs:
+
+```kotlin
+// Get platform-native read handle (zero-copy when possible)
+val nativeData = buffer.toNativeData()
+
+// Get platform-native mutable handle (zero-copy when possible)
+val mutableData = buffer.toMutableNativeData()
+
+// Get ByteArray (zero-copy when backed by managed memory)
+val bytes = buffer.toByteArray()
+```
+
+**Platform return types:**
+
+| Platform | `toNativeData()` | `toMutableNativeData()` | `toByteArray()` |
+|----------|------------------|-------------------------|-----------------|
+| JVM | `ByteBuffer` (read-only) | `ByteBuffer` | `ByteArray` |
+| Android | `ByteBuffer` (read-only) | `ByteBuffer` | `ByteArray` |
+| Apple | `NSData` | `NSMutableData` | `ByteArray` |
+| JS | `ArrayBuffer` | `Int8Array` | `ByteArray` |
+| WASM | `Int` (linear memory offset) | `Int` (linear memory offset) | `ByteArray` |
+| Linux | `Long` (native address) | `Long` (native address) | `ByteArray` |
+
+**Apple-specific helpers:**
+
+```kotlin
+// Convert ByteArray to NSData/NSMutableData
+val nsData = byteArray.toNSData()
+val nsMutableData = byteArray.toNSMutableData()
+```
+
 ### Key Interfaces
 
 - `PlatformBuffer` - Main buffer interface combining read/write operations
