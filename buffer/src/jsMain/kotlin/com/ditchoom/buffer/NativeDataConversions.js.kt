@@ -29,10 +29,9 @@ fun ReadBuffer.toNativeData(): ArrayBuffer =
     }
 
 /**
- * Converts this buffer to a ByteArray.
+ * Converts the remaining bytes of this buffer to a ByteArray.
  *
- * In JavaScript, ByteArray and Int8Array share the same underlying representation,
- * so this operation leverages that for efficiency.
+ * This always creates a copy of the data.
  */
 actual fun ReadBuffer.toByteArray(): ByteArray =
     when (this) {
