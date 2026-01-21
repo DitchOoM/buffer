@@ -71,22 +71,30 @@ src/
 Convert buffers to platform-native types for interop with platform APIs:
 
 ```kotlin
-// Get platform-native read handle (zero-copy when possible)
+// Get native memory handle (guarantees NativeMemoryAccess)
 val nativeData = buffer.toNativeData()
 
-// Get platform-native mutable handle (zero-copy when possible)
+// Get mutable native memory handle (guarantees NativeMemoryAccess)
 val mutableData = buffer.toMutableNativeData()
 
-// Get ByteArray (zero-copy when backed by managed memory)
+// Get managed memory (guarantees ManagedMemoryAccess)
 val bytes = buffer.toByteArray()
 ```
+
+**Mental model:**
+- `toNativeData()` / `toMutableNativeData()` → guarantees native memory (direct ByteBuffer, NSData, native pointer)
+- `toByteArray()` → guarantees managed memory (Kotlin ByteArray)
+
+**Zero-copy vs Copy:**
+- Zero-copy when source already matches target type (e.g., direct buffer → direct ByteBuffer)
+- Copies when conversion is needed (e.g., heap buffer → direct ByteBuffer)
 
 **Platform return types:**
 
 | Platform | `toNativeData()` | `toMutableNativeData()` | `toByteArray()` |
 |----------|------------------|-------------------------|-----------------|
-| JVM | `ByteBuffer` (read-only) | `ByteBuffer` | `ByteArray` |
-| Android | `ByteBuffer` (read-only) | `ByteBuffer` | `ByteArray` |
+| JVM | `ByteBuffer` (direct, read-only) | `ByteBuffer` (direct) | `ByteArray` |
+| Android | `ByteBuffer` (direct, read-only) | `ByteBuffer` (direct) | `ByteArray` |
 | Apple | `NSData` | `NSMutableData` | `ByteArray` |
 | JS | `ArrayBuffer` | `Int8Array` | `ByteArray` |
 | WASM | `Int` (linear memory offset) | `Int` (linear memory offset) | `ByteArray` |

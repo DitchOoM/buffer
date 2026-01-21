@@ -3,26 +3,32 @@ package com.ditchoom.buffer
 import java.nio.ByteBuffer
 
 /**
- * Converts the remaining bytes of this buffer to a read-only ByteBuffer.
+ * Converts the remaining bytes of this buffer to a direct read-only ByteBuffer.
+ *
+ * This guarantees the returned ByteBuffer has native memory access (isDirect = true),
+ * suitable for efficient I/O operations.
  *
  * **Zero-copy path:**
- * - If the buffer is a [BaseJvmBuffer], returns a read-only duplicate that shares
- *   the underlying memory. The returned buffer preserves the direct/heap nature
- *   of the original (isDirect matches the source buffer).
+ * - If the buffer is already backed by a direct ByteBuffer, returns a read-only
+ *   duplicate that shares the underlying native memory.
  *
  * **Copy path:**
- * - Otherwise, copies remaining bytes to a new heap-backed ByteBuffer.
+ * - If the buffer is heap-backed, copies remaining bytes to a new direct ByteBuffer.
  */
-fun ReadBuffer.toNativeData(): ByteBuffer =
-    when (this) {
-        is BaseJvmBuffer -> {
-            val duplicate = byteBuffer.duplicate()
-            duplicate.position(position())
-            duplicate.limit(limit())
-            duplicate.asReadOnlyBuffer()
-        }
-        else -> ByteBuffer.wrap(toByteArray()).asReadOnlyBuffer()
+fun ReadBuffer.toNativeData(): ByteBuffer {
+    if (this is BaseJvmBuffer && byteBuffer.isDirect) {
+        val duplicate = byteBuffer.duplicate()
+        duplicate.position(position())
+        duplicate.limit(limit())
+        return duplicate.asReadOnlyBuffer()
     }
+    // Copy to direct buffer
+    val bytes = toByteArray()
+    val direct = ByteBuffer.allocateDirect(bytes.size)
+    direct.put(bytes)
+    direct.flip()
+    return direct.asReadOnlyBuffer()
+}
 
 /**
  * Converts the remaining bytes of this buffer to a ByteArray.
@@ -58,22 +64,29 @@ actual fun ReadBuffer.toByteArray(): ByteArray =
     }
 
 /**
- * Converts the remaining bytes of this buffer to a mutable ByteBuffer.
+ * Converts the remaining bytes of this buffer to a mutable direct ByteBuffer.
+ *
+ * This guarantees the returned ByteBuffer has native memory access (isDirect = true),
+ * suitable for efficient I/O operations.
  *
  * **Zero-copy path:**
- * - If the buffer is a [BaseJvmBuffer], returns a duplicate that shares the underlying
- *   memory. The returned buffer preserves the direct/heap nature of the original.
+ * - If the buffer is already backed by a direct ByteBuffer, returns a duplicate
+ *   that shares the underlying native memory.
  *
  * **Copy path:**
- * - Otherwise, copies remaining bytes to a new heap-backed ByteBuffer.
+ * - If the buffer is heap-backed, copies remaining bytes to a new direct ByteBuffer.
  */
-fun PlatformBuffer.toMutableNativeData(): ByteBuffer =
-    when (this) {
-        is BaseJvmBuffer -> {
-            val duplicate = byteBuffer.duplicate()
-            duplicate.position(position())
-            duplicate.limit(limit())
-            duplicate
-        }
-        else -> ByteBuffer.wrap(toByteArray())
+fun PlatformBuffer.toMutableNativeData(): ByteBuffer {
+    if (this is BaseJvmBuffer && byteBuffer.isDirect) {
+        val duplicate = byteBuffer.duplicate()
+        duplicate.position(position())
+        duplicate.limit(limit())
+        return duplicate
     }
+    // Copy to direct buffer
+    val bytes = toByteArray()
+    val direct = ByteBuffer.allocateDirect(bytes.size)
+    direct.put(bytes)
+    direct.flip()
+    return direct
+}

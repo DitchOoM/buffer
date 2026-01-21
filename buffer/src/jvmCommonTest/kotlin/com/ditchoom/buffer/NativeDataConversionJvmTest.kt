@@ -30,7 +30,8 @@ class NativeDataConversionJvmTest {
         buffer.readByte() // position = 2
 
         val result = buffer.toNativeData()
-        assertEquals(2, result.position())
+        // Result is a new direct buffer starting at position 0
+        assertEquals(0, result.position())
         assertEquals(6, result.remaining())
 
         val bytes = ByteArray(6)
@@ -77,44 +78,53 @@ class NativeDataConversionJvmTest {
         buffer.setLimit(6)
 
         val result = buffer.toMutableNativeData()
-        assertEquals(1, result.position())
+        // Result is a new direct buffer starting at position 0
+        assertEquals(0, result.position())
         assertEquals(5, result.remaining())
+
+        val bytes = ByteArray(5)
+        result.get(bytes)
+        assertContentEquals(byteArrayOf(2, 3, 4, 5, 6), bytes)
     }
 
-    // region toNativeData preserves direct/heap nature
+    // region toNativeData always returns direct ByteBuffer
 
     @Test
-    fun toNativeDataPreservesDirectNature() {
+    fun toNativeDataFromDirectBufferReturnsDirect() {
         val buffer = PlatformBuffer.allocate(8, AllocationZone.Direct)
         buffer.writeBytes(byteArrayOf(10, 20, 30, 40, 50, 60, 70, 80))
         buffer.resetForRead()
         buffer.readByte() // position = 1
 
         val result = buffer.toNativeData()
-        assertTrue(result.isDirect, "Direct buffer should produce direct ByteBuffer")
+        assertTrue(result.isDirect, "toNativeData should always return direct ByteBuffer")
         assertEquals(7, result.remaining())
     }
 
     @Test
-    fun toNativeDataPreservesHeapNature() {
+    fun toNativeDataFromHeapBufferReturnsDirect() {
         val buffer = PlatformBuffer.allocate(8, AllocationZone.Heap)
         buffer.writeBytes(byteArrayOf(10, 20, 30, 40, 50, 60, 70, 80))
         buffer.resetForRead()
         buffer.readByte() // position = 1
 
         val result = buffer.toNativeData()
-        assertFalse(result.isDirect, "Heap buffer should produce heap ByteBuffer")
+        assertTrue(result.isDirect, "toNativeData should always return direct ByteBuffer")
         assertEquals(7, result.remaining())
+
+        val bytes = ByteArray(7)
+        result.get(bytes)
+        assertContentEquals(byteArrayOf(20, 30, 40, 50, 60, 70, 80), bytes)
     }
 
     @Test
-    fun toNativeDataWrappedByteArrayProducesHeapBuffer() {
+    fun toNativeDataFromWrappedByteArrayReturnsDirect() {
         val original = byteArrayOf(1, 2, 3, 4, 5)
         val buffer = PlatformBuffer.wrap(original)
         buffer.readByte() // position = 1
 
         val result = buffer.toNativeData()
-        assertFalse(result.isDirect, "Wrapped byte array should produce heap ByteBuffer")
+        assertTrue(result.isDirect, "toNativeData should always return direct ByteBuffer")
         assertEquals(4, result.remaining())
 
         val bytes = ByteArray(4)
@@ -123,23 +133,23 @@ class NativeDataConversionJvmTest {
     }
 
     @Test
-    fun toMutableNativeDataPreservesDirectNature() {
+    fun toMutableNativeDataFromDirectBufferReturnsDirect() {
         val buffer = PlatformBuffer.allocate(8, AllocationZone.Direct)
         buffer.writeBytes(byteArrayOf(10, 20, 30, 40, 50, 60, 70, 80))
         buffer.resetForRead()
 
         val result = buffer.toMutableNativeData()
-        assertTrue(result.isDirect, "Direct buffer should produce direct ByteBuffer")
+        assertTrue(result.isDirect, "toMutableNativeData should always return direct ByteBuffer")
     }
 
     @Test
-    fun toMutableNativeDataPreservesHeapNature() {
+    fun toMutableNativeDataFromHeapBufferReturnsDirect() {
         val buffer = PlatformBuffer.allocate(8, AllocationZone.Heap)
         buffer.writeBytes(byteArrayOf(10, 20, 30, 40, 50, 60, 70, 80))
         buffer.resetForRead()
 
         val result = buffer.toMutableNativeData()
-        assertFalse(result.isDirect, "Heap buffer should produce heap ByteBuffer")
+        assertTrue(result.isDirect, "toMutableNativeData should always return direct ByteBuffer")
     }
 
     // endregion
@@ -196,7 +206,7 @@ class NativeDataConversionJvmTest {
     // region Zero-copy verification via mutation
 
     @Test
-    fun toNativeDataSharesMemoryWithDirectBuffer() {
+    fun toMutableNativeDataSharesMemoryWithDirectBuffer() {
         val buffer = PlatformBuffer.allocate(8, AllocationZone.Direct)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
@@ -204,12 +214,12 @@ class NativeDataConversionJvmTest {
         val nativeData = buffer.toMutableNativeData()
         nativeData.put(0, 99.toByte())
 
-        // Original buffer should see the change
+        // Original buffer should see the change (zero-copy for direct)
         assertEquals(99.toByte(), buffer.get(0), "Direct buffer toMutableNativeData should share memory")
     }
 
     @Test
-    fun toNativeDataSharesMemoryWithHeapBuffer() {
+    fun toMutableNativeDataCopiesFromHeapBuffer() {
         val buffer = PlatformBuffer.allocate(8, AllocationZone.Heap)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
@@ -217,8 +227,8 @@ class NativeDataConversionJvmTest {
         val nativeData = buffer.toMutableNativeData()
         nativeData.put(0, 99.toByte())
 
-        // Original buffer should see the change
-        assertEquals(99.toByte(), buffer.get(0), "Heap buffer toMutableNativeData should share memory")
+        // Original buffer should NOT see the change (copy for heap -> direct)
+        assertEquals(1.toByte(), buffer.get(0), "Heap buffer toMutableNativeData should copy to direct")
     }
 
     // endregion
