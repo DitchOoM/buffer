@@ -6,7 +6,9 @@ package com.ditchoom.buffer
  * Access the underlying NativeBuffer via [nativeBuffer] property.
  * For raw address access, use `nativeBuffer.nativeAddress`.
  */
-actual class NativeData(val nativeBuffer: NativeBuffer)
+actual class NativeData(
+    val nativeBuffer: NativeBuffer,
+)
 
 /**
  * Linux mutable native data wrapper containing a NativeBuffer.
@@ -14,7 +16,9 @@ actual class NativeData(val nativeBuffer: NativeBuffer)
  * Access the underlying NativeBuffer via [nativeBuffer] property.
  * For raw address access, use `nativeBuffer.nativeAddress`.
  */
-actual class MutableNativeData(val nativeBuffer: NativeBuffer)
+actual class MutableNativeData(
+    val nativeBuffer: NativeBuffer,
+)
 
 /**
  * Converts the remaining bytes of this buffer to a NativeBuffer.
