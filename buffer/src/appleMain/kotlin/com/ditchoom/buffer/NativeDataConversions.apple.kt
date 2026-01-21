@@ -18,9 +18,9 @@ import platform.Foundation.subdataWithRange
 /**
  * Converts the remaining bytes of this buffer to NSData.
  *
- * - If the buffer is an [NSDataBuffer] or [MutableDataBuffer] at position 0 with full remaining,
- *   returns the underlying NSData (zero-copy)
- * - Otherwise, copies the remaining bytes (from position to limit) to a new NSData
+ * - If the buffer is an [NSDataBuffer] or [MutableDataBuffer], returns an NSData view
+ *   of the remaining bytes using subdataWithRange (zero-copy, shares underlying memory)
+ * - Otherwise, copies the remaining bytes to a new NSData
  */
 fun ReadBuffer.toNativeData(): NSData =
     when (this) {
@@ -50,7 +50,7 @@ fun ReadBuffer.toNativeData(): NSData =
  *
  * - If the buffer is a [MutableDataBuffer] at position 0 with full remaining,
  *   returns the underlying NSMutableData (zero-copy)
- * - Otherwise, copies the remaining bytes (from position to limit) to a new NSMutableData
+ * - Otherwise, copies the remaining bytes to a new NSMutableData
  */
 fun PlatformBuffer.toMutableNativeData(): NSMutableData =
     when (this) {
@@ -60,7 +60,7 @@ fun PlatformBuffer.toMutableNativeData(): NSMutableData =
             if (pos == 0 && rem == data.length.toInt()) {
                 data
             } else {
-                NSMutableData.create(data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert())))!!
+                NSMutableData.create(data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert())))
             }
         }
         else -> toByteArray().toNSMutableData()
@@ -92,6 +92,6 @@ fun ByteArray.toNSMutableData(): NSMutableData =
         NSMutableData()
     } else {
         usePinned { pinned ->
-            NSMutableData.create(bytes = pinned.addressOf(0), length = size.convert())!!
+            NSMutableData.create(bytes = pinned.addressOf(0), length = size.convert())
         }
     }

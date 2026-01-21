@@ -179,11 +179,20 @@ kotlin {
         val jvmCommonMain by creating {
             dependsOn(commonMain.get())
         }
+        val jvmCommonTest by creating {
+            dependsOn(commonTest.get())
+        }
         jvmMain {
             dependsOn(jvmCommonMain)
         }
+        jvmTest {
+            dependsOn(jvmCommonTest)
+        }
         androidMain {
             dependsOn(jvmCommonMain)
+        }
+        androidUnitTest {
+            dependsOn(jvmCommonTest)
         }
 
         commonTest.dependencies {
