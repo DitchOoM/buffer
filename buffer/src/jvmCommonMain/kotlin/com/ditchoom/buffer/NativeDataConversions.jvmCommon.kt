@@ -3,10 +3,15 @@ package com.ditchoom.buffer
 import java.nio.ByteBuffer
 
 /**
- * Converts this buffer to a read-only ByteBuffer.
+ * Converts the remaining bytes of this buffer to a read-only ByteBuffer.
  *
- * - If the buffer is a [BaseJvmBuffer], returns a read-only duplicate (zero-copy)
- * - Otherwise, wraps the byte array content in a read-only ByteBuffer
+ * **Zero-copy path:**
+ * - If the buffer is a [BaseJvmBuffer], returns a read-only duplicate that shares
+ *   the underlying memory. The returned buffer preserves the direct/heap nature
+ *   of the original (isDirect matches the source buffer).
+ *
+ * **Copy path:**
+ * - Otherwise, copies remaining bytes to a new heap-backed ByteBuffer.
  */
 fun ReadBuffer.toNativeData(): ByteBuffer =
     when (this) {
@@ -20,11 +25,17 @@ fun ReadBuffer.toNativeData(): ByteBuffer =
     }
 
 /**
- * Converts this buffer to a ByteArray.
+ * Converts the remaining bytes of this buffer to a ByteArray.
  *
- * - If the buffer is a heap-backed [BaseJvmBuffer] with hasArray() and the full remaining
- *   content matches the array bounds, returns the backing array (zero-copy)
- * - Otherwise, copies the remaining bytes to a new ByteArray
+ * **Zero-copy path:**
+ * - If the buffer is a heap-backed [BaseJvmBuffer] where hasArray() is true,
+ *   position is 0, arrayOffset is 0, and remaining equals the full array size,
+ *   returns the backing array directly.
+ *
+ * **Copy path:**
+ * - Direct ByteBuffers (hasArray() returns false): copies to new array
+ * - Heap buffers with non-zero position/offset or partial remaining: copies to new array
+ * - Non-JVM buffer types: copies via readByteArray()
  */
 actual fun ReadBuffer.toByteArray(): ByteArray =
     when (this) {
@@ -47,10 +58,14 @@ actual fun ReadBuffer.toByteArray(): ByteArray =
     }
 
 /**
- * Converts this buffer to a mutable ByteBuffer.
+ * Converts the remaining bytes of this buffer to a mutable ByteBuffer.
  *
- * - If the buffer is a [BaseJvmBuffer], returns a duplicate that shares the underlying memory
- * - Otherwise, wraps the byte array content in a new ByteBuffer
+ * **Zero-copy path:**
+ * - If the buffer is a [BaseJvmBuffer], returns a duplicate that shares the underlying
+ *   memory. The returned buffer preserves the direct/heap nature of the original.
+ *
+ * **Copy path:**
+ * - Otherwise, copies remaining bytes to a new heap-backed ByteBuffer.
  */
 fun PlatformBuffer.toMutableNativeData(): ByteBuffer =
     when (this) {
