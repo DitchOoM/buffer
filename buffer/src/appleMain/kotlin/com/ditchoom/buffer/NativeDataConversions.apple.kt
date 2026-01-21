@@ -85,6 +85,7 @@ actual fun ReadBuffer.toNativeData(): NativeData =
  *
  * **Copy path:**
  * - Otherwise, copies the remaining bytes to a new NSMutableData.
+ *   Note: NSMutableData requires its own mutable memory, so partial views must copy.
  */
 actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData =
     MutableNativeData(
@@ -95,6 +96,9 @@ actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData =
                 if (pos == 0 && rem == data.length.toInt()) {
                     data
                 } else {
+                    // Note: NSMutableData may internally copy even with dataWithBytesNoCopy
+                    // due to implementation details in NSConcreteMutableData.
+                    // Using subdataWithRange + create for consistent behavior.
                     NSMutableData.create(data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert())))
                 }
             }
