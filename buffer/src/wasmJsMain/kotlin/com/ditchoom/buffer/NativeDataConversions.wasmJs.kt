@@ -1,46 +1,83 @@
 package com.ditchoom.buffer
 
 /**
- * Returns the linear memory offset for this buffer's current position.
+ * WASM native data wrapper containing a LinearBuffer.
  *
- * - If the buffer is a [LinearBuffer], returns its offset in linear memory (zero-copy access)
- * - Otherwise, copies the remaining bytes to a new LinearBuffer and returns its offset
- *
- * The returned offset can be used with JavaScript's DataView or Uint8Array:
- * ```javascript
- * const view = new DataView(wasmExports.memory.buffer, offset, size);
- * ```
- *
- * **Note**: If a copy is made, the allocated memory is managed by LinearMemoryAllocator.
+ * Access the underlying LinearBuffer via [linearBuffer] property.
+ * For raw offset access, use `linearBuffer.baseOffset`.
  */
-fun ReadBuffer.toNativeData(): Int =
-    when (this) {
-        is LinearBuffer -> baseOffset + position()
-        else -> {
-            val bytes = toByteArray()
-            val (offset, _) = LinearMemoryAllocator.allocate(bytes.size)
-            val linearBuffer = LinearBuffer(offset, bytes.size, byteOrder)
-            linearBuffer.writeBytes(bytes)
-            offset
-        }
-    }
+actual class NativeData(
+    val linearBuffer: LinearBuffer,
+)
 
 /**
- * Returns the linear memory offset for this buffer's current position.
+ * WASM mutable native data wrapper containing a LinearBuffer.
  *
- * - If the buffer is a [LinearBuffer], returns its offset in linear memory (zero-copy access)
- * - Otherwise, copies the remaining bytes to a new LinearBuffer and returns its offset
- *
- * **Note**: If a copy is made, the allocated memory is managed by LinearMemoryAllocator.
+ * Access the underlying LinearBuffer via [linearBuffer] property.
+ * For raw offset access, use `linearBuffer.baseOffset`.
  */
-fun PlatformBuffer.toMutableNativeData(): Int =
-    when (this) {
-        is LinearBuffer -> baseOffset + position()
-        else -> {
-            val bytes = toByteArray()
-            val (offset, _) = LinearMemoryAllocator.allocate(bytes.size)
-            val linearBuffer = LinearBuffer(offset, bytes.size, byteOrder)
-            linearBuffer.writeBytes(bytes)
-            offset
-        }
-    }
+actual class MutableNativeData(
+    val linearBuffer: LinearBuffer,
+)
+
+/**
+ * Converts the remaining bytes of this buffer to a LinearBuffer.
+ *
+ * **Zero-copy path:**
+ * - If the buffer is already a [LinearBuffer], returns a slice sharing the same memory.
+ *
+ * **Copy path:**
+ * - Otherwise, copies the remaining bytes to a new LinearBuffer.
+ *
+ * For raw offset access, use `.linearBuffer.baseOffset`.
+ *
+ * **Memory management**: If a copy is made, the allocated memory is managed
+ * by LinearMemoryAllocator.
+ */
+actual fun ReadBuffer.toNativeData(): NativeData =
+    NativeData(
+        when (this) {
+            is LinearBuffer -> this.slice() as LinearBuffer
+            else -> {
+                val bytes = toByteArray()
+                val (offset, _) = LinearMemoryAllocator.allocate(bytes.size)
+                val linearBuffer = LinearBuffer(offset, bytes.size, byteOrder)
+                linearBuffer.writeBytes(bytes)
+                linearBuffer.resetForRead()
+                linearBuffer
+            }
+        },
+    )
+
+/**
+ * Converts the remaining bytes of this buffer to a mutable LinearBuffer.
+ *
+ * **Zero-copy path:**
+ * - If the buffer is already a [LinearBuffer], returns a duplicate sharing the same memory.
+ *
+ * **Copy path:**
+ * - Otherwise, copies the remaining bytes to a new LinearBuffer.
+ *
+ * For raw offset access, use `.linearBuffer.baseOffset`.
+ *
+ * **Memory management**: If a copy is made, the allocated memory is managed
+ * by LinearMemoryAllocator.
+ */
+actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData =
+    MutableNativeData(
+        when (this) {
+            is LinearBuffer -> {
+                // Create a new LinearBuffer view sharing the same memory
+                val newBuffer = LinearBuffer(baseOffset + position(), remaining(), byteOrder)
+                newBuffer
+            }
+            else -> {
+                val bytes = toByteArray()
+                val (offset, _) = LinearMemoryAllocator.allocate(bytes.size)
+                val linearBuffer = LinearBuffer(offset, bytes.size, byteOrder)
+                linearBuffer.writeBytes(bytes)
+                linearBuffer.resetForRead()
+                linearBuffer
+            }
+        },
+    )

@@ -16,34 +16,54 @@ import platform.Foundation.create
 import platform.Foundation.subdataWithRange
 
 /**
+ * Apple native data wrapper containing NSData.
+ *
+ * Access the underlying NSData via [nsData] property.
+ */
+actual class NativeData(
+    val nsData: NSData,
+)
+
+/**
+ * Apple mutable native data wrapper containing NSMutableData.
+ *
+ * Access the underlying NSMutableData via [nsMutableData] property.
+ */
+actual class MutableNativeData(
+    val nsMutableData: NSMutableData,
+)
+
+/**
  * Converts the remaining bytes of this buffer to NSData.
  *
  * - If the buffer is an [NSDataBuffer] or [MutableDataBuffer], returns an NSData view
  *   of the remaining bytes using subdataWithRange (zero-copy, shares underlying memory)
  * - Otherwise, copies the remaining bytes to a new NSData
  */
-fun ReadBuffer.toNativeData(): NSData =
-    when (this) {
-        is NSDataBuffer -> {
-            val pos = position()
-            val rem = remaining()
-            if (pos == 0 && rem == data.length.toInt()) {
-                data
-            } else {
-                data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert()))
+actual fun ReadBuffer.toNativeData(): NativeData =
+    NativeData(
+        when (this) {
+            is NSDataBuffer -> {
+                val pos = position()
+                val rem = remaining()
+                if (pos == 0 && rem == data.length.toInt()) {
+                    data
+                } else {
+                    data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert()))
+                }
             }
-        }
-        is MutableDataBuffer -> {
-            val pos = position()
-            val rem = remaining()
-            if (pos == 0 && rem == data.length.toInt()) {
-                data
-            } else {
-                data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert()))
+            is MutableDataBuffer -> {
+                val pos = position()
+                val rem = remaining()
+                if (pos == 0 && rem == data.length.toInt()) {
+                    data
+                } else {
+                    data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert()))
+                }
             }
-        }
-        else -> toByteArray().toNSData()
-    }
+            else -> toByteArray().toNSData()
+        },
+    )
 
 /**
  * Converts the remaining bytes of this buffer to NSMutableData.
@@ -52,19 +72,21 @@ fun ReadBuffer.toNativeData(): NSData =
  *   returns the underlying NSMutableData (zero-copy)
  * - Otherwise, copies the remaining bytes to a new NSMutableData
  */
-fun PlatformBuffer.toMutableNativeData(): NSMutableData =
-    when (this) {
-        is MutableDataBuffer -> {
-            val pos = position()
-            val rem = remaining()
-            if (pos == 0 && rem == data.length.toInt()) {
-                data
-            } else {
-                NSMutableData.create(data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert())))
+actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData =
+    MutableNativeData(
+        when (this) {
+            is MutableDataBuffer -> {
+                val pos = position()
+                val rem = remaining()
+                if (pos == 0 && rem == data.length.toInt()) {
+                    data
+                } else {
+                    NSMutableData.create(data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert())))
+                }
             }
-        }
-        else -> toByteArray().toNSMutableData()
-    }
+            else -> toByteArray().toNSMutableData()
+        },
+    )
 
 /**
  * Converts a ByteArray to NSData.

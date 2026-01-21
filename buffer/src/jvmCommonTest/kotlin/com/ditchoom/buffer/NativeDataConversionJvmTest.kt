@@ -14,7 +14,7 @@ class NativeDataConversionJvmTest {
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
 
-        val result = buffer.toNativeData()
+        val result = buffer.toNativeData().byteBuffer
         assertTrue(result.isReadOnly)
         assertEquals(0, result.position())
         assertEquals(8, result.remaining())
@@ -28,7 +28,7 @@ class NativeDataConversionJvmTest {
         buffer.readByte() // position = 1
         buffer.readByte() // position = 2
 
-        val result = buffer.toNativeData()
+        val result = buffer.toNativeData().byteBuffer
         // Result is a new direct buffer starting at position 0
         assertEquals(0, result.position())
         assertEquals(6, result.remaining())
@@ -45,7 +45,7 @@ class NativeDataConversionJvmTest {
         buffer.resetForRead()
         buffer.setLimit(5)
 
-        val result = buffer.toNativeData()
+        val result = buffer.toNativeData().byteBuffer
         assertEquals(5, result.remaining())
 
         val bytes = ByteArray(5)
@@ -59,7 +59,7 @@ class NativeDataConversionJvmTest {
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
 
-        val result = buffer.toMutableNativeData()
+        val result = buffer.toMutableNativeData().byteBuffer
         assertEquals(0, result.position())
         assertEquals(8, result.remaining())
 
@@ -76,7 +76,7 @@ class NativeDataConversionJvmTest {
         buffer.readByte() // position = 1
         buffer.setLimit(6)
 
-        val result = buffer.toMutableNativeData()
+        val result = buffer.toMutableNativeData().byteBuffer
         // Result is a new direct buffer starting at position 0
         assertEquals(0, result.position())
         assertEquals(5, result.remaining())
@@ -95,7 +95,7 @@ class NativeDataConversionJvmTest {
         buffer.resetForRead()
         buffer.readByte() // position = 1
 
-        val result = buffer.toNativeData()
+        val result = buffer.toNativeData().byteBuffer
         assertTrue(result.isDirect, "toNativeData should always return direct ByteBuffer")
         assertEquals(7, result.remaining())
     }
@@ -107,7 +107,7 @@ class NativeDataConversionJvmTest {
         buffer.resetForRead()
         buffer.readByte() // position = 1
 
-        val result = buffer.toNativeData()
+        val result = buffer.toNativeData().byteBuffer
         assertTrue(result.isDirect, "toNativeData should always return direct ByteBuffer")
         assertEquals(7, result.remaining())
 
@@ -122,7 +122,7 @@ class NativeDataConversionJvmTest {
         val buffer = PlatformBuffer.wrap(original)
         buffer.readByte() // position = 1
 
-        val result = buffer.toNativeData()
+        val result = buffer.toNativeData().byteBuffer
         assertTrue(result.isDirect, "toNativeData should always return direct ByteBuffer")
         assertEquals(4, result.remaining())
 
@@ -137,7 +137,7 @@ class NativeDataConversionJvmTest {
         buffer.writeBytes(byteArrayOf(10, 20, 30, 40, 50, 60, 70, 80))
         buffer.resetForRead()
 
-        val result = buffer.toMutableNativeData()
+        val result = buffer.toMutableNativeData().byteBuffer
         assertTrue(result.isDirect, "toMutableNativeData should always return direct ByteBuffer")
     }
 
@@ -147,7 +147,7 @@ class NativeDataConversionJvmTest {
         buffer.writeBytes(byteArrayOf(10, 20, 30, 40, 50, 60, 70, 80))
         buffer.resetForRead()
 
-        val result = buffer.toMutableNativeData()
+        val result = buffer.toMutableNativeData().byteBuffer
         assertTrue(result.isDirect, "toMutableNativeData should always return direct ByteBuffer")
     }
 
@@ -210,7 +210,7 @@ class NativeDataConversionJvmTest {
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
 
-        val nativeData = buffer.toMutableNativeData()
+        val nativeData = buffer.toMutableNativeData().byteBuffer
         nativeData.put(0, 99.toByte())
 
         // Original buffer should see the change (zero-copy for direct)
@@ -223,7 +223,7 @@ class NativeDataConversionJvmTest {
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
 
-        val nativeData = buffer.toMutableNativeData()
+        val nativeData = buffer.toMutableNativeData().byteBuffer
         nativeData.put(0, 99.toByte())
 
         // Original buffer should NOT see the change (copy for heap -> direct)

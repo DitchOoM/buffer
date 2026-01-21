@@ -3,6 +3,24 @@ package com.ditchoom.buffer
 import java.nio.ByteBuffer
 
 /**
+ * JVM/Android native data wrapper containing a direct ByteBuffer.
+ *
+ * Access the underlying ByteBuffer via [byteBuffer] property.
+ */
+actual class NativeData(
+    val byteBuffer: ByteBuffer,
+)
+
+/**
+ * JVM/Android mutable native data wrapper containing a direct ByteBuffer.
+ *
+ * Access the underlying ByteBuffer via [byteBuffer] property.
+ */
+actual class MutableNativeData(
+    val byteBuffer: ByteBuffer,
+)
+
+/**
  * Converts the remaining bytes of this buffer to a direct read-only ByteBuffer.
  *
  * This guarantees the returned ByteBuffer has native memory access (isDirect = true),
@@ -15,19 +33,19 @@ import java.nio.ByteBuffer
  * **Copy path:**
  * - If the buffer is heap-backed, copies remaining bytes to a new direct ByteBuffer.
  */
-fun ReadBuffer.toNativeData(): ByteBuffer {
+actual fun ReadBuffer.toNativeData(): NativeData {
     if (this is BaseJvmBuffer && byteBuffer.isDirect) {
         val duplicate = byteBuffer.duplicate()
         duplicate.position(position())
         duplicate.limit(limit())
-        return duplicate.asReadOnlyBuffer()
+        return NativeData(duplicate.asReadOnlyBuffer())
     }
     // Copy to direct buffer
     val bytes = toByteArray()
     val direct = ByteBuffer.allocateDirect(bytes.size)
     direct.put(bytes)
     direct.flip()
-    return direct.asReadOnlyBuffer()
+    return NativeData(direct.asReadOnlyBuffer())
 }
 
 /**
@@ -76,17 +94,17 @@ actual fun ReadBuffer.toByteArray(): ByteArray =
  * **Copy path:**
  * - If the buffer is heap-backed, copies remaining bytes to a new direct ByteBuffer.
  */
-fun PlatformBuffer.toMutableNativeData(): ByteBuffer {
+actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData {
     if (this is BaseJvmBuffer && byteBuffer.isDirect) {
         val duplicate = byteBuffer.duplicate()
         duplicate.position(position())
         duplicate.limit(limit())
-        return duplicate
+        return MutableNativeData(duplicate)
     }
     // Copy to direct buffer
     val bytes = toByteArray()
     val direct = ByteBuffer.allocateDirect(bytes.size)
     direct.put(bytes)
     direct.flip()
-    return direct
+    return MutableNativeData(direct)
 }

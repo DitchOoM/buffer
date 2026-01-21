@@ -176,7 +176,7 @@ class NSDataBufferTest {
         writeBuffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         writeBuffer.resetForRead()
 
-        val result = writeBuffer.toNativeData()
+        val result = writeBuffer.toNativeData().nsData
         assertSame(mutableData, result)
     }
 
@@ -189,7 +189,7 @@ class NSDataBufferTest {
         writeBuffer.readByte() // position = 1
         writeBuffer.readByte() // position = 2
 
-        val result = writeBuffer.toNativeData()
+        val result = writeBuffer.toNativeData().nsData
         assertEquals(6.convert(), result.length)
 
         val resultBuffer = PlatformBuffer.wrapReadOnly(result)
@@ -204,7 +204,7 @@ class NSDataBufferTest {
         writeBuffer.resetForRead()
         writeBuffer.setLimit(5)
 
-        val result = writeBuffer.toNativeData()
+        val result = writeBuffer.toNativeData().nsData
         assertEquals(5.convert(), result.length)
 
         val resultBuffer = PlatformBuffer.wrapReadOnly(result)
@@ -220,7 +220,7 @@ class NSDataBufferTest {
         writeBuffer.readByte() // position = 1
         writeBuffer.setLimit(6)
 
-        val result = writeBuffer.toNativeData()
+        val result = writeBuffer.toNativeData().nsData
         assertEquals(5.convert(), result.length)
 
         val resultBuffer = PlatformBuffer.wrapReadOnly(result)
@@ -234,7 +234,7 @@ class NSDataBufferTest {
         writeBuffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         writeBuffer.resetForRead()
 
-        val result = writeBuffer.toMutableNativeData()
+        val result = writeBuffer.toMutableNativeData().nsMutableData
         assertSame(mutableData, result)
     }
 
@@ -247,7 +247,7 @@ class NSDataBufferTest {
         writeBuffer.readByte() // position = 1
         writeBuffer.readByte() // position = 2
 
-        val result = writeBuffer.toMutableNativeData()
+        val result = writeBuffer.toMutableNativeData().nsMutableData
         assertEquals(6.convert(), result.length)
 
         val resultBuffer = PlatformBuffer.wrap(result)
@@ -264,7 +264,7 @@ class NSDataBufferTest {
         nsDataBuffer.readByte() // position = 1
         nsDataBuffer.readByte() // position = 2
 
-        val result = nsDataBuffer.toNativeData()
+        val result = nsDataBuffer.toNativeData().nsData
         assertEquals(6.convert(), result.length)
     }
 
@@ -275,7 +275,7 @@ class NSDataBufferTest {
         buffer.resetForRead()
         buffer.readByte() // position = 1
 
-        val result = buffer.toNativeData()
+        val result = buffer.toNativeData().nsData
         assertEquals(7.convert(), result.length)
 
         val resultBuffer = PlatformBuffer.wrapReadOnly(result)
