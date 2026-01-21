@@ -158,6 +158,56 @@ val l = buffer.readLong()
 val s = buffer.readString(10)
 ```
 
+## Native Data Conversion
+
+Convert buffers to WASM-native `LinearBuffer` for JavaScript interop:
+
+```kotlin
+val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+buffer.writeBytes(data)
+buffer.resetForRead()
+
+// Get LinearBuffer (zero-copy slice)
+val nativeData = buffer.toNativeData()
+val linearBuffer: LinearBuffer = nativeData.linearBuffer
+
+// Access memory offset for JS interop
+val offset = linearBuffer.baseOffset
+```
+
+### Zero-Copy Behavior
+
+| Conversion | ByteArrayBuffer (Heap) | LinearBuffer (Direct) |
+|------------|------------------------|----------------------|
+| `toNativeData()` | Copy (different memory) | Zero-copy (slice) |
+| `toMutableNativeData()` | Copy (different memory) | Zero-copy (view) |
+| `toByteArray()` | Zero-copy (backing array) | Copy (different memory) |
+
+:::note Memory Spaces
+WASM has two memory spaces: WasmGC heap (where `ByteArray` lives) and linear memory (where `LinearBuffer` lives). Conversions between these always require a copy.
+:::
+
+### JavaScript Interop with Native Data
+
+```kotlin
+// Kotlin side
+val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct) as LinearBuffer
+buffer.writeInt(42)
+buffer.writeString("Hello from WASM")
+buffer.resetForRead()
+
+val nativeData = buffer.toNativeData()
+val offset = nativeData.linearBuffer.baseOffset
+```
+
+```javascript
+// JavaScript side - access same memory
+const view = new DataView(wasmExports.memory.buffer, offset, 1024);
+const value = view.getInt32(0, false); // 42 - zero copy!
+```
+
+See [Platform Interop](/docs/recipes/platform-interop) for more details.
+
 ## Best Practices
 
 1. **Use Heap for compute-heavy workloads** - ByteArrayBuffer has no memory limit concerns

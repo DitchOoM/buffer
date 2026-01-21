@@ -86,6 +86,62 @@ val buffer = PlatformBuffer.wrap(receivedArrayBuffer)
 val value = buffer.readInt()  // 42
 ```
 
+## Native Data Conversion
+
+Convert buffers to JavaScript-native types for Web API interop:
+
+```kotlin
+val buffer = PlatformBuffer.allocate(1024)
+buffer.writeBytes(data)
+buffer.resetForRead()
+
+// Get ArrayBuffer (for Fetch, WebSocket, etc.)
+val nativeData = buffer.toNativeData()
+val arrayBuffer: ArrayBuffer = nativeData.arrayBuffer
+fetch(url, RequestInit(body = arrayBuffer))
+
+// Get Int8Array (mutable view)
+val mutableData = buffer.toMutableNativeData()
+val int8Array: Int8Array = mutableData.int8Array
+```
+
+### Zero-Copy Behavior
+
+| Conversion | JsBuffer |
+|------------|----------|
+| `toNativeData()` | Zero-copy for mutable buffers, copy for read-only |
+| `toMutableNativeData()` | Zero-copy (subarray view) |
+| `toByteArray()` | Zero-copy (subarray) |
+
+:::note ArrayBuffer Limitation
+`ArrayBuffer` itself is immutable (you can't create a view of a portion). When converting to `ArrayBuffer`, a copy may be needed for partial views. `Int8Array` supports zero-copy subarray views.
+:::
+
+### Web API Examples
+
+```kotlin
+// Fetch API
+val response = fetch(url).await()
+val arrayBuffer = response.arrayBuffer().await()
+val buffer = PlatformBuffer.wrap(arrayBuffer)
+
+// WebSocket
+webSocket.onmessage = { event ->
+    val data = event.data as ArrayBuffer
+    val buffer = PlatformBuffer.wrap(data)
+    processMessage(buffer)
+}
+
+// Send via WebSocket
+val buffer = PlatformBuffer.allocate(1024)
+buffer.writeInt(messageId)
+buffer.writeString(payload)
+buffer.resetForRead()
+webSocket.send(buffer.toNativeData().arrayBuffer)
+```
+
+See [Platform Interop](/docs/recipes/platform-interop) for more details.
+
 ## Best Practices
 
 1. **Configure CORS headers** for SharedArrayBuffer

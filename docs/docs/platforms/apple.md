@@ -64,6 +64,55 @@ fun processData(): PlatformBuffer {
 The `close()` method on Apple buffers is a no-op since ARC handles cleanup automatically. The `SuspendCloseable` interface is implemented for API consistency across platforms.
 :::
 
+## Native Data Conversion
+
+Convert buffers to Apple-native `NSData`/`NSMutableData` for Foundation API interop:
+
+```kotlin
+val buffer = PlatformBuffer.allocate(1024)
+buffer.writeBytes(data)
+buffer.resetForRead()
+
+// Get read-only NSData (zero-copy for MutableDataBuffer)
+val nativeData = buffer.toNativeData()
+val nsData: NSData = nativeData.nsData
+NSFileManager.defaultManager.createFileAtPath(path, nsData, null)
+
+// Get mutable NSMutableData
+val mutableData = buffer.toMutableNativeData()
+val nsMutableData: NSMutableData = mutableData.nsMutableData
+```
+
+### Zero-Copy Behavior
+
+| Conversion | ByteArrayBuffer | MutableDataBuffer |
+|------------|-----------------|-------------------|
+| `toNativeData()` | Copy | Zero-copy (subdataWithRange) |
+| `toMutableNativeData()` | Copy | Zero-copy (full buffer only) |
+| `toByteArray()` | Zero-copy (backing array) | Copy |
+
+:::note Partial Views
+For `toNativeData()`, `subdataWithRange` creates a zero-copy view of the remaining bytes.
+
+For `toMutableNativeData()`, zero-copy is only possible when position is 0 and the entire buffer is used. Partial views require a copy because `NSMutableData` needs mutable ownership of its memory.
+:::
+
+### Wrapping NSData
+
+You can also create buffers from existing NSData:
+
+```kotlin
+// Wrap NSData (read-only, zero-copy)
+val nsData: NSData = // ... from API ...
+val buffer = PlatformBuffer.wrap(nsData)
+
+// Wrap NSMutableData (mutable, zero-copy)
+val nsMutableData: NSMutableData = // ... from API ...
+val buffer = PlatformBuffer.wrap(nsMutableData)
+```
+
+See [Platform Interop](/docs/recipes/platform-interop) for more details.
+
 ## Best Practices
 
 1. **Use Direct (default)** - NSMutableData is efficient
