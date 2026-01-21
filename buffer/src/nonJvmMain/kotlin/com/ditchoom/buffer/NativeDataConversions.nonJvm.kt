@@ -3,6 +3,8 @@ package com.ditchoom.buffer
 /**
  * Converts this buffer to a ByteArray.
  *
+ * **Important:** This method does NOT modify the buffer's position.
+ *
  * - If the buffer has [ManagedMemoryAccess] and the full remaining content matches the array,
  *   returns the backing array (zero-copy)
  * - Otherwise, copies the remaining bytes to a new ByteArray
@@ -17,6 +19,12 @@ actual fun ReadBuffer.toByteArray(): ByteArray {
         if (offset == 0 && pos == 0 && rem == array.size) {
             return array
         }
+        // Copy without modifying position
+        return array.copyOfRange(offset + pos, offset + pos + rem)
     }
-    return readByteArray(remaining())
+    // Fallback: read and restore position
+    val pos = position()
+    val result = readByteArray(remaining())
+    position(pos)
+    return result
 }

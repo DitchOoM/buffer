@@ -51,6 +51,8 @@ actual fun ReadBuffer.toNativeData(): NativeData {
 /**
  * Converts the remaining bytes of this buffer to a ByteArray.
  *
+ * **Important:** This method does NOT modify the buffer's position.
+ *
  * **Zero-copy path:**
  * - If the buffer is a heap-backed [BaseJvmBuffer] where hasArray() is true,
  *   position is 0, arrayOffset is 0, and remaining equals the full array size,
@@ -72,13 +74,25 @@ actual fun ReadBuffer.toByteArray(): ByteArray =
                 if (offset == 0 && pos == 0 && rem == array.size) {
                     array
                 } else {
-                    byteBuffer.toArray(rem)
+                    // Copy without modifying position
+                    val result = ByteArray(rem)
+                    System.arraycopy(array, offset + pos, result, 0, rem)
+                    result
                 }
             } else {
-                byteBuffer.toArray(remaining())
+                // Direct buffer - copy without modifying position
+                val pos = position()
+                val result = byteBuffer.toArray(remaining())
+                (byteBuffer as java.nio.Buffer).position(pos)
+                result
             }
         }
-        else -> readByteArray(remaining())
+        else -> {
+            val pos = position()
+            val result = readByteArray(remaining())
+            position(pos)
+            result
+        }
     }
 
 /**

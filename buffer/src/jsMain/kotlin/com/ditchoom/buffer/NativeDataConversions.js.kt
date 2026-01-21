@@ -62,6 +62,8 @@ actual fun ReadBuffer.toNativeData(): NativeData =
 /**
  * Converts the remaining bytes of this buffer to a ByteArray.
  *
+ * **Important:** This method does NOT modify the buffer's position.
+ *
  * - If the buffer is a [JsBuffer], returns a view of the underlying memory (zero-copy).
  *   Note: The returned ByteArray shares memory with the original buffer.
  * - Otherwise, copies via readByteArray().
@@ -72,7 +74,12 @@ actual fun ReadBuffer.toByteArray(): ByteArray =
             // ByteArray IS Int8Array in Kotlin/JS, and subarray() creates a zero-copy view
             buffer.subarray(position(), position() + remaining()).unsafeCast<ByteArray>()
         }
-        else -> readByteArray(remaining())
+        else -> {
+            val pos = position()
+            val result = readByteArray(remaining())
+            position(pos)
+            result
+        }
     }
 
 /**
