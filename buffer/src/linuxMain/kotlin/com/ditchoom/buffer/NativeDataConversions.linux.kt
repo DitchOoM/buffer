@@ -23,6 +23,10 @@ actual class MutableNativeData(
 /**
  * Converts the remaining bytes of this buffer to a NativeBuffer.
  *
+ * **Scope**: Operates on remaining bytes (position to limit).
+ *
+ * **Position invariant**: Does NOT modify position or limit.
+ *
  * Always copies the remaining bytes to a new NativeBuffer to ensure
  * the returned buffer has full NativeBuffer capabilities.
  *
@@ -41,6 +45,10 @@ actual fun ReadBuffer.toNativeData(): NativeData {
 
 /**
  * Converts the remaining bytes of this buffer to a mutable NativeBuffer.
+ *
+ * **Scope**: Operates on remaining bytes (position to limit).
+ *
+ * **Position invariant**: Does NOT modify position or limit.
  *
  * Always copies the remaining bytes to a new NativeBuffer to ensure
  * the returned buffer has full NativeBuffer capabilities.

@@ -1,13 +1,18 @@
 package com.ditchoom.buffer
 
 /**
- * Converts this buffer to a ByteArray.
+ * Converts the remaining bytes of this buffer to a ByteArray.
  *
- * **Important:** This method does NOT modify the buffer's position.
+ * **Scope**: Operates on remaining bytes (position to limit).
  *
+ * **Position invariant**: Does NOT modify position or limit.
+ *
+ * **Zero-copy path:**
  * - If the buffer has [ManagedMemoryAccess] and the full remaining content matches the array,
- *   returns the backing array (zero-copy)
- * - Otherwise, copies the remaining bytes to a new ByteArray
+ *   returns the backing array.
+ *
+ * **Copy path:**
+ * - Otherwise, copies the remaining bytes to a new ByteArray.
  */
 actual fun ReadBuffer.toByteArray(): ByteArray {
     val managed = this.managedMemoryAccess

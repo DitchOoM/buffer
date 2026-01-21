@@ -33,12 +33,16 @@ expect class MutableNativeData
 /**
  * Converts the remaining bytes of this buffer to native platform data.
  *
+ * **Scope**: Operates on remaining bytes (position to limit).
+ *
+ * **Position invariant**: Does NOT modify position or limit.
+ *
  * Returns the platform-specific native memory representation wrapped in [NativeData]:
  * - **JVM/Android**: Direct read-only `ByteBuffer`
  * - **Apple**: `NSData` (zero-copy view via subdataWithRange when possible)
  * - **JS**: `ArrayBuffer` (zero-copy if full buffer, copies for partial views)
- * - **Linux**: Native memory address as `Long`
- * - **WASM**: Linear memory offset as `Int`
+ * - **Linux**: `NativeBuffer` with native memory
+ * - **WASM**: `LinearBuffer` with linear memory
  *
  * **Zero-copy behavior**: Each platform optimizes for zero-copy when the buffer
  * is already in native format. Copies only when conversion is necessary.
@@ -50,12 +54,16 @@ expect fun ReadBuffer.toNativeData(): NativeData
 /**
  * Converts the remaining bytes of this buffer to mutable native platform data.
  *
+ * **Scope**: Operates on remaining bytes (position to limit).
+ *
+ * **Position invariant**: Does NOT modify position or limit.
+ *
  * Returns the platform-specific mutable native memory representation wrapped in [MutableNativeData]:
  * - **JVM/Android**: Direct mutable `ByteBuffer`
  * - **Apple**: `NSMutableData`
  * - **JS**: `Int8Array` (always zero-copy via subarray)
- * - **Linux**: Native memory address as `Long`
- * - **WASM**: Linear memory offset as `Int`
+ * - **Linux**: `NativeBuffer` with native memory
+ * - **WASM**: `LinearBuffer` with linear memory
  *
  * **Zero-copy behavior**: Each platform optimizes for zero-copy when the buffer
  * is already in native format. Copies only when conversion is necessary.
@@ -65,10 +73,15 @@ expect fun ReadBuffer.toNativeData(): NativeData
 expect fun PlatformBuffer.toMutableNativeData(): MutableNativeData
 
 /**
- * Converts this buffer to a ByteArray.
+ * Converts the remaining bytes of this buffer to a ByteArray.
  *
+ * **Scope**: Operates on remaining bytes (position to limit).
+ *
+ * **Position invariant**: Does NOT modify position or limit.
+ *
+ * **Zero-copy behavior**:
  * - If the buffer is backed by a ByteArray (ManagedMemoryAccess) and the full array matches
- *   the remaining content, returns the backing array (zero-copy)
+ *   the remaining content, returns the backing array directly (zero-copy)
  * - Otherwise, copies the remaining bytes to a new ByteArray
  *
  * @return ByteArray containing the buffer's remaining content

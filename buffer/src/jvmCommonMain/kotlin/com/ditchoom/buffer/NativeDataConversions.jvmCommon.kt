@@ -23,6 +23,10 @@ actual class MutableNativeData(
 /**
  * Converts the remaining bytes of this buffer to a direct read-only ByteBuffer.
  *
+ * **Scope**: Operates on remaining bytes (position to limit).
+ *
+ * **Position invariant**: Does NOT modify position or limit.
+ *
  * This guarantees the returned ByteBuffer has native memory access (isDirect = true),
  * suitable for efficient I/O operations.
  *
@@ -51,7 +55,9 @@ actual fun ReadBuffer.toNativeData(): NativeData {
 /**
  * Converts the remaining bytes of this buffer to a ByteArray.
  *
- * **Important:** This method does NOT modify the buffer's position.
+ * **Scope**: Operates on remaining bytes (position to limit).
+ *
+ * **Position invariant**: Does NOT modify position or limit.
  *
  * **Zero-copy path:**
  * - If the buffer is a heap-backed [BaseJvmBuffer] where hasArray() is true,
@@ -97,6 +103,10 @@ actual fun ReadBuffer.toByteArray(): ByteArray =
 
 /**
  * Converts the remaining bytes of this buffer to a mutable direct ByteBuffer.
+ *
+ * **Scope**: Operates on remaining bytes (position to limit).
+ *
+ * **Position invariant**: Does NOT modify position or limit.
  *
  * This guarantees the returned ByteBuffer has native memory access (isDirect = true),
  * suitable for efficient I/O operations.

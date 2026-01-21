@@ -27,6 +27,10 @@ actual class MutableNativeData(
 /**
  * Converts the remaining bytes of this buffer to an ArrayBuffer.
  *
+ * **Scope**: Operates on remaining bytes (position to limit).
+ *
+ * **Position invariant**: Does NOT modify position or limit.
+ *
  * **Zero-copy path:**
  * - If the buffer is a [JsBuffer] at position 0 with no byte offset and remaining
  *   equals the full ArrayBuffer size, returns the underlying ArrayBuffer directly.
@@ -62,10 +66,15 @@ actual fun ReadBuffer.toNativeData(): NativeData =
 /**
  * Converts the remaining bytes of this buffer to a ByteArray.
  *
- * **Important:** This method does NOT modify the buffer's position.
+ * **Scope**: Operates on remaining bytes (position to limit).
  *
- * - If the buffer is a [JsBuffer], returns a view of the underlying memory (zero-copy).
+ * **Position invariant**: Does NOT modify position or limit.
+ *
+ * **Zero-copy path:**
+ * - If the buffer is a [JsBuffer], returns a view of the underlying memory.
  *   Note: The returned ByteArray shares memory with the original buffer.
+ *
+ * **Copy path:**
  * - Otherwise, copies via readByteArray().
  */
 actual fun ReadBuffer.toByteArray(): ByteArray =
@@ -83,10 +92,17 @@ actual fun ReadBuffer.toByteArray(): ByteArray =
     }
 
 /**
- * Converts this buffer to an Int8Array.
+ * Converts the remaining bytes of this buffer to an Int8Array.
  *
- * - If the buffer is a [JsBuffer], returns a view of the underlying buffer (zero-copy)
- * - Otherwise, copies the remaining bytes to a new Int8Array
+ * **Scope**: Operates on remaining bytes (position to limit).
+ *
+ * **Position invariant**: Does NOT modify position or limit.
+ *
+ * **Zero-copy path:**
+ * - If the buffer is a [JsBuffer], returns a view of the underlying buffer.
+ *
+ * **Copy path:**
+ * - Otherwise, copies the remaining bytes to a new Int8Array.
  */
 actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData =
     MutableNativeData(

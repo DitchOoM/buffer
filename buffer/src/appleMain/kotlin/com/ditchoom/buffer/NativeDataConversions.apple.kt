@@ -36,9 +36,16 @@ actual class MutableNativeData(
 /**
  * Converts the remaining bytes of this buffer to NSData.
  *
+ * **Scope**: Operates on remaining bytes (position to limit).
+ *
+ * **Position invariant**: Does NOT modify position or limit.
+ *
+ * **Zero-copy path:**
  * - If the buffer is an [NSDataBuffer] or [MutableDataBuffer], returns an NSData view
- *   of the remaining bytes using subdataWithRange (zero-copy, shares underlying memory)
- * - Otherwise, copies the remaining bytes to a new NSData
+ *   of the remaining bytes using subdataWithRange (shares underlying memory).
+ *
+ * **Copy path:**
+ * - Otherwise, copies the remaining bytes to a new NSData.
  */
 actual fun ReadBuffer.toNativeData(): NativeData =
     NativeData(
@@ -68,9 +75,16 @@ actual fun ReadBuffer.toNativeData(): NativeData =
 /**
  * Converts the remaining bytes of this buffer to NSMutableData.
  *
+ * **Scope**: Operates on remaining bytes (position to limit).
+ *
+ * **Position invariant**: Does NOT modify position or limit.
+ *
+ * **Zero-copy path:**
  * - If the buffer is a [MutableDataBuffer] at position 0 with full remaining,
- *   returns the underlying NSMutableData (zero-copy)
- * - Otherwise, copies the remaining bytes to a new NSMutableData
+ *   returns the underlying NSMutableData.
+ *
+ * **Copy path:**
+ * - Otherwise, copies the remaining bytes to a new NSMutableData.
  */
 actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData =
     MutableNativeData(

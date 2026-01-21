@@ -23,6 +23,10 @@ actual class MutableNativeData(
 /**
  * Converts the remaining bytes of this buffer to a LinearBuffer.
  *
+ * **Scope**: Operates on remaining bytes (position to limit).
+ *
+ * **Position invariant**: Does NOT modify position or limit.
+ *
  * **Zero-copy path:**
  * - If the buffer is already a [LinearBuffer], returns a slice sharing the same memory.
  *
@@ -51,6 +55,10 @@ actual fun ReadBuffer.toNativeData(): NativeData =
 
 /**
  * Converts the remaining bytes of this buffer to a mutable LinearBuffer.
+ *
+ * **Scope**: Operates on remaining bytes (position to limit).
+ *
+ * **Position invariant**: Does NOT modify position or limit.
  *
  * **Zero-copy path:**
  * - If the buffer is already a [LinearBuffer], returns a duplicate sharing the same memory.
