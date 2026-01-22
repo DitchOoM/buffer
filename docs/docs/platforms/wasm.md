@@ -19,10 +19,13 @@ Buffer on Kotlin/WASM uses native WASM linear memory for optimal performance wit
 
 `LinearBuffer` uses Kotlin/WASM's `Pointer` API to read/write directly to WASM linear memory. This provides:
 
-- **Native speed**: `Pointer.loadInt()`/`storeInt()` compile to single WASM instructions (`i32.load`/`i32.store`)
+- **Native instructions**: `Pointer.loadInt()`/`storeInt()` compile to single WASM instructions (`i32.load`/`i32.store`)
 - **Zero-copy JS interop**: JavaScript can access the same memory via `DataView` on `wasmMemory.buffer`
-- **~25% faster** single operations vs ByteArrayBuffer
-- **~2x faster** bulk operations vs ByteArrayBuffer
+- **~10-20% faster** primitive operations vs ByteArrayBuffer
+
+:::note Performance Trade-offs
+LinearBuffer's main advantage is **JavaScript interoperability**, not raw speed. For pure Kotlin operations without JS interop, ByteArrayBuffer can be faster for bulk operations since it stays in the WasmGC heap.
+:::
 
 ### When to Use Each Zone
 
@@ -36,13 +39,17 @@ val interopBuffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
 
 ## Performance
 
-Benchmark results (WASM production builds):
+Benchmark results (WASM Node.js):
 
-| Operation | LinearBuffer (Direct) | ByteArrayBuffer (Heap) | Speedup |
-|-----------|----------------------|------------------------|---------|
-| Single int write/read | 91.1M ops/sec | 73.2M ops/sec | 1.24x |
-| Bulk ops (256 ints) | 2.0M ops/sec | 967K ops/sec | 2.04x |
-| Allocation | 95.3M ops/sec | 22.8M ops/sec | 4.2x |
+| Operation | LinearBuffer (Direct) | ByteArrayBuffer (Heap) | Winner |
+|-----------|----------------------|------------------------|--------|
+| Primitive read/write | ~68M ops/sec | ~57M ops/sec | LinearBuffer (~1.2x) |
+| Buffer-to-buffer copy | ~2.6M ops/sec | ~5.5M ops/sec | ByteArrayBuffer (~2x) |
+| Allocation | Bump allocator (fast) | GC-managed | LinearBuffer |
+
+**Key insight**: LinearBuffer is faster for primitive operations, but ByteArrayBuffer is faster for bulk operations that stay within the WasmGC heap. Choose based on your use case:
+- **JS interop needed?** → Use LinearBuffer (Direct)
+- **Pure Kotlin computation?** → Use ByteArrayBuffer (Heap)
 
 ## Memory Management
 
@@ -210,8 +217,8 @@ See [Platform Interop](../recipes/platform-interop) for more details.
 
 ## Best Practices
 
-1. **Use Heap for compute-heavy workloads** - ByteArrayBuffer has no memory limit concerns
-2. **Use Direct for JS interop** - Zero-copy sharing with JavaScript
-3. **Pool buffers** - Reduces allocation overhead
-4. **Batch operations** - Bulk reads/writes are 2x faster than single operations
-5. **Reuse buffers** - Call `resetForWrite()` instead of allocating new buffers
+1. **Use Direct for JS interop** - Zero-copy sharing with JavaScript via `wasmMemory.buffer`
+2. **Use Heap for pure Kotlin workloads** - ByteArrayBuffer is faster for bulk operations and has no memory limit concerns
+3. **Pool buffers** - Reduces allocation overhead for both types
+4. **Reuse buffers** - Call `resetForWrite()` instead of allocating new buffers
+5. **Consider memory boundaries** - Crossing between WasmGC heap and linear memory has overhead
