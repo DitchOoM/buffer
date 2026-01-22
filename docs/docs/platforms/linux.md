@@ -154,7 +154,7 @@ buffer.resetForRead()
 val data = buffer.readByteArray(bytesRead)
 ```
 
-See [Platform Interop](/docs/recipes/platform-interop) for more details.
+See [Platform Interop](../recipes/platform-interop) for more details.
 
 ## Best Practices
 

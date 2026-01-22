@@ -111,7 +111,7 @@ val nsMutableData: NSMutableData = // ... from API ...
 val buffer = PlatformBuffer.wrap(nsMutableData)
 ```
 
-See [Platform Interop](/docs/recipes/platform-interop) for more details.
+See [Platform Interop](../recipes/platform-interop) for more details.
 
 ## Best Practices
 

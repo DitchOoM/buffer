@@ -113,7 +113,7 @@ For true zero-copy conversion, allocate with `AllocationZone.Direct`. Changes to
 All conversion functions operate on remaining bytes (position to limit) and do **not** modify the buffer's position or limit.
 :::
 
-See [Platform Interop](/docs/recipes/platform-interop) for more details.
+See [Platform Interop](../recipes/platform-interop) for more details.
 
 ## Best Practices
 

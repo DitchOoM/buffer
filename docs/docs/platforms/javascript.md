@@ -140,7 +140,7 @@ buffer.resetForRead()
 webSocket.send(buffer.toNativeData().arrayBuffer)
 ```
 
-See [Platform Interop](/docs/recipes/platform-interop) for more details.
+See [Platform Interop](../recipes/platform-interop) for more details.
 
 ## Best Practices
 

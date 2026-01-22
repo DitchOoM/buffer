@@ -206,7 +206,7 @@ const view = new DataView(wasmExports.memory.buffer, offset, 1024);
 const value = view.getInt32(0, false); // 42 - zero copy!
 ```
 
-See [Platform Interop](/docs/recipes/platform-interop) for more details.
+See [Platform Interop](../recipes/platform-interop) for more details.
 
 ## Best Practices
 
