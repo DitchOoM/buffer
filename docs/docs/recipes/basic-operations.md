@@ -87,7 +87,7 @@ buffer.writeString("Hello", Charset.UTF8)
 val text = buffer.readString(13)  // "Hello, World!"
 
 // Read with explicit charset
-val text = buffer.readUtf8(byteCount = 5)
+val text = buffer.readUtf8(bytes = 5)
 ```
 
 ## Byte Array Operations

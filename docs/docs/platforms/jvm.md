@@ -75,6 +75,46 @@ val nioBuffer: ByteBuffer = buffer.byteBuffer
 channel.write(nioBuffer)
 ```
 
+## Native Data Conversion
+
+Convert buffers to JVM-native `ByteBuffer` for NIO and JNI interop:
+
+```kotlin
+val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+buffer.writeBytes(data)
+buffer.resetForRead()
+
+// Get read-only direct ByteBuffer (zero-copy for direct buffers)
+val nativeData = buffer.toNativeData()
+val readOnlyBuffer: ByteBuffer = nativeData.byteBuffer
+channel.write(readOnlyBuffer)
+
+// Get mutable direct ByteBuffer (zero-copy for direct buffers)
+val mutableData = buffer.toMutableNativeData()
+val mutableBuffer: ByteBuffer = mutableData.byteBuffer
+channel.read(mutableBuffer)
+```
+
+### Zero-Copy Behavior
+
+`toNativeData()` and `toMutableNativeData()` always return direct ByteBuffers for native memory access:
+
+| Conversion | Heap Buffer | Direct Buffer |
+|------------|-------------|---------------|
+| `toNativeData()` | Copy to direct | Zero-copy (duplicate) |
+| `toMutableNativeData()` | Copy to direct | Zero-copy (duplicate) |
+| `toByteArray()` | Zero-copy (backing array) | Copy required |
+
+:::tip Use Direct for Zero-Copy
+For true zero-copy conversion, allocate with `AllocationZone.Direct`. Changes to the returned ByteBuffer will reflect in the original buffer and vice versa.
+:::
+
+:::note Position Invariance
+All conversion functions operate on remaining bytes (position to limit) and do **not** modify the buffer's position or limit.
+:::
+
+See [Platform Interop](../recipes/platform-interop) for more details.
+
 ## Best Practices
 
 1. **Use Direct for I/O** - network sockets, file channels

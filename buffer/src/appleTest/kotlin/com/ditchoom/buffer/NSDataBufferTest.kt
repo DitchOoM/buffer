@@ -6,8 +6,10 @@ import platform.Foundation.NSData
 import platform.Foundation.NSMutableData
 import platform.Foundation.create
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalForeignApi::class, kotlinx.cinterop.BetaInteropApi::class, kotlinx.cinterop.UnsafeNumber::class)
@@ -164,4 +166,121 @@ class NSDataBufferTest {
         assertEquals(0, readBuffer.remaining())
         assertFalse(readBuffer.hasRemaining())
     }
+
+    // region toNativeData tests
+
+    @Test
+    fun toNativeDataReturnsFullNSDataAtPositionZero() {
+        val mutableData = NSMutableData.create(length = 8.convert())!!
+        val writeBuffer = PlatformBuffer.wrap(mutableData)
+        writeBuffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
+        writeBuffer.resetForRead()
+
+        val result = writeBuffer.toNativeData().nsData
+        assertSame(mutableData, result)
+    }
+
+    @Test
+    fun toNativeDataReturnsRemainingBytesFromPosition() {
+        val mutableData = NSMutableData.create(length = 8.convert())!!
+        val writeBuffer = PlatformBuffer.wrap(mutableData)
+        writeBuffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
+        writeBuffer.resetForRead()
+        writeBuffer.readByte() // position = 1
+        writeBuffer.readByte() // position = 2
+
+        val result = writeBuffer.toNativeData().nsData
+        assertEquals(6.convert(), result.length)
+
+        val resultBuffer = PlatformBuffer.wrapReadOnly(result)
+        assertContentEquals(byteArrayOf(3, 4, 5, 6, 7, 8), resultBuffer.toByteArray())
+    }
+
+    @Test
+    fun toNativeDataRespectsLimit() {
+        val mutableData = NSMutableData.create(length = 8.convert())!!
+        val writeBuffer = PlatformBuffer.wrap(mutableData)
+        writeBuffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
+        writeBuffer.resetForRead()
+        writeBuffer.setLimit(5)
+
+        val result = writeBuffer.toNativeData().nsData
+        assertEquals(5.convert(), result.length)
+
+        val resultBuffer = PlatformBuffer.wrapReadOnly(result)
+        assertContentEquals(byteArrayOf(1, 2, 3, 4, 5), resultBuffer.toByteArray())
+    }
+
+    @Test
+    fun toNativeDataRespectsPositionAndLimit() {
+        val mutableData = NSMutableData.create(length = 8.convert())!!
+        val writeBuffer = PlatformBuffer.wrap(mutableData)
+        writeBuffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
+        writeBuffer.resetForRead()
+        writeBuffer.readByte() // position = 1
+        writeBuffer.setLimit(6)
+
+        val result = writeBuffer.toNativeData().nsData
+        assertEquals(5.convert(), result.length)
+
+        val resultBuffer = PlatformBuffer.wrapReadOnly(result)
+        assertContentEquals(byteArrayOf(2, 3, 4, 5, 6), resultBuffer.toByteArray())
+    }
+
+    @Test
+    fun toMutableNativeDataReturnsFullNSMutableDataAtPositionZero() {
+        val mutableData = NSMutableData.create(length = 8.convert())!!
+        val writeBuffer = PlatformBuffer.wrap(mutableData)
+        writeBuffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
+        writeBuffer.resetForRead()
+
+        val result = writeBuffer.toMutableNativeData().nsMutableData
+        assertSame(mutableData, result)
+    }
+
+    @Test
+    fun toMutableNativeDataReturnsRemainingBytesFromPosition() {
+        val mutableData = NSMutableData.create(length = 8.convert())!!
+        val writeBuffer = PlatformBuffer.wrap(mutableData)
+        writeBuffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
+        writeBuffer.resetForRead()
+        writeBuffer.readByte() // position = 1
+        writeBuffer.readByte() // position = 2
+
+        val result = writeBuffer.toMutableNativeData().nsMutableData
+        assertEquals(6.convert(), result.length)
+
+        val resultBuffer = PlatformBuffer.wrap(result)
+        assertContentEquals(byteArrayOf(3, 4, 5, 6, 7, 8), resultBuffer.toByteArray())
+    }
+
+    @Test
+    fun toNativeDataWorksWithNSDataBuffer() {
+        val mutableData = NSMutableData.create(length = 8.convert())!!
+        val writeBuffer = PlatformBuffer.wrap(mutableData)
+        writeBuffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
+
+        val nsDataBuffer = PlatformBuffer.wrapReadOnly(mutableData as NSData)
+        nsDataBuffer.readByte() // position = 1
+        nsDataBuffer.readByte() // position = 2
+
+        val result = nsDataBuffer.toNativeData().nsData
+        assertEquals(6.convert(), result.length)
+    }
+
+    @Test
+    fun toNativeDataFromByteArrayBuffer() {
+        val buffer = PlatformBuffer.allocate(8, AllocationZone.Heap)
+        buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
+        buffer.resetForRead()
+        buffer.readByte() // position = 1
+
+        val result = buffer.toNativeData().nsData
+        assertEquals(7.convert(), result.length)
+
+        val resultBuffer = PlatformBuffer.wrapReadOnly(result)
+        assertContentEquals(byteArrayOf(2, 3, 4, 5, 6, 7, 8), resultBuffer.toByteArray())
+    }
+
+    // endregion
 }

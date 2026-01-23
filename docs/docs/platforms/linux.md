@@ -99,6 +99,63 @@ val wrapped = PlatformBuffer.wrap(existingByteArray)
 | General compute | `ByteArrayBuffer` (Heap) |
 | Wrapping existing data | `ByteArrayBuffer` (wrap) |
 
+## Native Data Conversion
+
+Convert buffers to Linux-native `NativeBuffer` wrapper for FFI:
+
+```kotlin
+val buffer = NativeBuffer.allocate(1024)
+buffer.writeBytes(data)
+buffer.resetForRead()
+
+// Get NativeBuffer wrapper (copies for safety)
+val nativeData = buffer.toNativeData()
+val nativeBuffer: NativeBuffer = nativeData.nativeBuffer
+
+// Access native pointer
+val ptr = nativeBuffer.nativeAddress.toCPointer<ByteVar>()
+val size = nativeBuffer.nativeSize
+```
+
+### Zero-Copy Behavior
+
+| Conversion | ByteArrayBuffer (Heap) | NativeBuffer (Direct) |
+|------------|------------------------|----------------------|
+| `toNativeData()` | Copy | Copy (new allocation) |
+| `toMutableNativeData()` | Copy | Copy (new allocation) |
+| `toByteArray()` | Zero-copy (backing array) | Copy |
+
+:::note Why Copy?
+`NativeBuffer` uses `malloc`-allocated memory that must be explicitly freed. Returning a view would create ownership ambiguity. For zero-copy access, use the `NativeBuffer` directly:
+
+```kotlin
+val buffer = NativeBuffer.allocate(1024)
+val ptr = buffer.nativeAddress.toCPointer<ByteVar>()
+// Use ptr directly with io_uring or other system calls
+```
+:::
+
+### Direct Native Access
+
+For zero-copy I/O, access the native pointer directly instead of using conversion:
+
+```kotlin
+val buffer = NativeBuffer.allocate(65536)
+
+// Direct pointer access - zero copy
+val ptr = buffer.nativeAddress.toCPointer<ByteVar>()!!
+
+// Use with io_uring
+io_uring_prep_recv(sqe, sockfd, ptr, buffer.capacity.toULong(), 0)
+
+// After completion
+buffer.position(bytesRead)
+buffer.resetForRead()
+val data = buffer.readByteArray(bytesRead)
+```
+
+See [Platform Interop](../recipes/platform-interop) for more details.
+
 ## Best Practices
 
 1. **Use Direct for I/O** - `NativeBuffer` avoids copies to/from kernel space

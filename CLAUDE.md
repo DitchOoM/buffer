@@ -66,6 +66,68 @@ src/
 - `ManagedMemoryAccess` - Kotlin ByteArray backing (HeapJvmBuffer, ByteArrayBuffer)
 - `SharedMemoryAccess` - Cross-process shared memory (ParcelableSharedMemoryBuffer, JsBuffer with SharedArrayBuffer)
 
+### Native Data Conversions
+
+Convert buffers to platform-native types for interop with platform APIs:
+
+```kotlin
+// Get native memory handle (returns NativeData wrapper)
+val nativeData: NativeData = buffer.toNativeData()
+
+// Get mutable native memory handle (returns MutableNativeData wrapper)
+val mutableData: MutableNativeData = buffer.toMutableNativeData()
+
+// Get managed memory (guarantees ManagedMemoryAccess)
+val bytes = buffer.toByteArray()
+```
+
+**Accessing platform-specific types:**
+
+```kotlin
+// JVM/Android
+val byteBuffer: ByteBuffer = buffer.toNativeData().byteBuffer
+
+// Apple
+val nsData: NSData = buffer.toNativeData().nsData
+
+// JS
+val arrayBuffer: ArrayBuffer = buffer.toNativeData().arrayBuffer
+val int8Array: Int8Array = buffer.toMutableNativeData().int8Array
+
+// WASM
+val linearBuffer: LinearBuffer = buffer.toNativeData().linearBuffer
+
+// Linux
+val nativeBuffer: NativeBuffer = buffer.toNativeData().nativeBuffer
+```
+
+**Mental model:**
+- `toNativeData()` / `toMutableNativeData()` → guarantees native memory (direct ByteBuffer, NSData, NativeBuffer, etc.)
+- `toByteArray()` → guarantees managed memory (Kotlin ByteArray)
+
+**Zero-copy vs Copy:**
+- Zero-copy when source already matches target type (e.g., direct buffer → direct ByteBuffer)
+- Copies when conversion is needed (e.g., heap buffer → direct ByteBuffer)
+
+**Platform wrapper contents:**
+
+| Platform | `NativeData` contains | `MutableNativeData` contains | `toByteArray()` |
+|----------|----------------------|------------------------------|-----------------|
+| JVM | `ByteBuffer` (direct, read-only) | `ByteBuffer` (direct) | `ByteArray` |
+| Android | `ByteBuffer` (direct, read-only) | `ByteBuffer` (direct) | `ByteArray` |
+| Apple | `NSData` | `NSMutableData` | `ByteArray` |
+| JS | `ArrayBuffer` | `Int8Array` | `ByteArray` |
+| WASM | `LinearBuffer` | `LinearBuffer` | `ByteArray` |
+| Linux | `NativeBuffer` | `NativeBuffer` | `ByteArray` |
+
+**Apple-specific helpers:**
+
+```kotlin
+// Convert ByteArray to NSData/NSMutableData
+val nsData = byteArray.toNSData()
+val nsMutableData = byteArray.toNSMutableData()
+```
+
 ### Key Interfaces
 
 - `PlatformBuffer` - Main buffer interface combining read/write operations

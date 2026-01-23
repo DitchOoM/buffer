@@ -22,6 +22,7 @@ const sidebars: SidebarsConfig = {
         'recipes/stream-processing',
         'recipes/compression',
         'recipes/protocol-parsing',
+        'recipes/platform-interop',
       ],
     },
     {
@@ -33,6 +34,7 @@ const sidebars: SidebarsConfig = {
         'platforms/apple',
         'platforms/javascript',
         'platforms/wasm',
+        'platforms/linux',
       ],
     },
     'performance',
