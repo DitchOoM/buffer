@@ -4,13 +4,24 @@ package com.ditchoom.buffer
 
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
+import kotlinx.cinterop.UByteVar
+import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.get
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.set
 import kotlinx.cinterop.toLong
+import kotlinx.cinterop.usePinned
 import platform.posix.free
 import platform.posix.malloc
+import platform.posix.memchr
+import platform.posix.memcmp
+import platform.posix.memset
+import com.ditchoom.buffer.cinterop.buf_xor_mask
+import com.ditchoom.buffer.cinterop.buf_mismatch
+import com.ditchoom.buffer.cinterop.buf_indexof_short
+import com.ditchoom.buffer.cinterop.buf_indexof_int
+import com.ditchoom.buffer.cinterop.buf_indexof_long
 
 /**
  * Buffer implementation using native memory (malloc/free) on Linux.
@@ -32,7 +43,7 @@ import platform.posix.malloc
  * ```
  */
 class NativeBuffer private constructor(
-    private val ptr: CPointer<ByteVar>,
+    internal val ptr: CPointer<ByteVar>,
     override val capacity: Int,
     override val byteOrder: ByteOrder,
 ) : PlatformBuffer,
@@ -277,6 +288,161 @@ class NativeBuffer private constructor(
         checkOpen()
         writeBytes(text.toString().encodeToByteArray())
         return this
+    }
+
+    // === Optimized bulk operations ===
+
+    /**
+     * SIMD-optimized XOR mask using buf_xor_mask.
+     */
+    override fun xorMask(mask: Int) {
+        checkOpen()
+        if (mask == 0) return
+        val size = remaining()
+        if (size == 0) return
+        // Byte-swap mask for little-endian native memory
+        val nativeMask = mask.reverseBytes().toUInt()
+        buf_xor_mask((ptr + positionValue)!!.reinterpret<UByteVar>(), size.convert(), nativeMask)
+    }
+
+    /**
+     * Optimized fill using memset.
+     */
+    override fun fill(value: Byte): WriteBuffer {
+        checkOpen()
+        val count = remaining()
+        if (count == 0) return this
+        memset(ptr + positionValue, value.toInt(), count.convert())
+        positionValue += count
+        return this
+    }
+
+    /**
+     * Optimized contentEquals using memcmp.
+     */
+    override fun contentEquals(other: ReadBuffer): Boolean {
+        checkOpen()
+        if (remaining() != other.remaining()) return false
+        val size = remaining()
+        if (size == 0) return true
+
+        when (other) {
+            is NativeBuffer -> {
+                return memcmp(ptr + positionValue, other.ptr + other.position(), size.convert()) == 0
+            }
+            is ByteArrayBuffer -> {
+                return other.backingArray.usePinned { pinned ->
+                    memcmp(ptr + positionValue, pinned.addressOf(other.position()), size.convert()) == 0
+                }
+            }
+            else -> return super.contentEquals(other)
+        }
+    }
+
+    /**
+     * SIMD-optimized mismatch using buf_mismatch.
+     */
+    override fun mismatch(other: ReadBuffer): Int {
+        checkOpen()
+        val thisRemaining = remaining()
+        val otherRemaining = other.remaining()
+        val minLength = minOf(thisRemaining, otherRemaining)
+
+        if (minLength == 0) {
+            return if (thisRemaining != otherRemaining) 0 else -1
+        }
+
+        val result = when (other) {
+            is NativeBuffer -> {
+                buf_mismatch(
+                    (ptr + positionValue)!!.reinterpret(),
+                    (other.ptr + other.position())!!.reinterpret(),
+                    minLength.convert(),
+                ).toInt()
+            }
+            is ByteArrayBuffer -> {
+                other.backingArray.usePinned { pinned ->
+                    buf_mismatch(
+                        (ptr + positionValue)!!.reinterpret(),
+                        pinned.addressOf(other.position())!!.reinterpret(),
+                        minLength.convert(),
+                    ).toInt()
+                }
+            }
+            else -> {
+                for (i in 0 until minLength) {
+                    if (get(positionValue + i) != other.get(other.position() + i)) {
+                        return i
+                    }
+                }
+                -1
+            }
+        }
+
+        if (result != -1) return result
+        return if (thisRemaining != otherRemaining) minLength else -1
+    }
+
+    /**
+     * Optimized indexOf(Byte) using memchr.
+     */
+    override fun indexOf(byte: Byte): Int {
+        checkOpen()
+        val size = remaining()
+        if (size == 0) return -1
+
+        val result = memchr(ptr + positionValue, byte.toInt(), size.convert())
+        return if (result == null) {
+            -1
+        } else {
+            @Suppress("UNCHECKED_CAST")
+            ((result as CPointer<ByteVar>).toLong() - (ptr + positionValue).toLong()).toInt()
+        }
+    }
+
+    /**
+     * SIMD-optimized indexOf(Short) using buf_indexof_short.
+     */
+    override fun indexOf(value: Short): Int {
+        checkOpen()
+        val size = remaining()
+        if (size < 2) return -1
+        val nativeValue = if (littleEndian == nativeIsLittleEndian) value else value.reverseBytes()
+        return buf_indexof_short(
+            (ptr + positionValue)!!.reinterpret(),
+            size.convert(),
+            nativeValue.toUShort(),
+        ).toInt()
+    }
+
+    /**
+     * SIMD-optimized indexOf(Int) using buf_indexof_int.
+     */
+    override fun indexOf(value: Int): Int {
+        checkOpen()
+        val size = remaining()
+        if (size < 4) return -1
+        val nativeValue = if (littleEndian == nativeIsLittleEndian) value else value.reverseBytes()
+        return buf_indexof_int(
+            (ptr + positionValue)!!.reinterpret(),
+            size.convert(),
+            nativeValue.toUInt(),
+        ).toInt()
+    }
+
+    /**
+     * SIMD-optimized indexOf(Long) using buf_indexof_long.
+     */
+    override fun indexOf(value: Long): Int {
+        checkOpen()
+        val size = remaining()
+        if (size < 8) return -1
+        val nativeValue = if (littleEndian == nativeIsLittleEndian) value else value.reverseBytes()
+        return buf_indexof_long(
+            (ptr + positionValue)!!.reinterpret(),
+            size.convert(),
+            nativeValue.toULong(),
+        ).toInt()
     }
 
     override suspend fun close() {

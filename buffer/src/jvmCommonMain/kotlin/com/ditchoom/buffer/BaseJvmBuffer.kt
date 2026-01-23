@@ -199,6 +199,53 @@ abstract class BaseJvmBuffer(
         }
     }
 
+    /**
+     * Optimized XOR mask using ByteBuffer getLong/putLong with forced BIG_ENDIAN.
+     */
+    override fun xorMask(mask: Int) {
+        if (mask == 0) return
+        val pos = position()
+        val lim = limit()
+        val size = lim - pos
+        if (size == 0) return
+
+        // Create 8-byte mask (big-endian: mask repeated twice)
+        val maskLong = (mask.toLong() shl 32) or (mask.toLong() and 0xFFFFFFFFL)
+
+        // Use a duplicate with BIG_ENDIAN to avoid byte-order interference
+        val dup = byteBuffer.duplicate()
+        (dup as java.nio.Buffer).position(pos)
+        (dup as java.nio.Buffer).limit(lim)
+        dup.order(java.nio.ByteOrder.BIG_ENDIAN)
+
+        var offset = pos
+        // Process 8 bytes at a time
+        while (offset + 8 <= lim) {
+            val value = dup.getLong(offset)
+            dup.putLong(offset, value xor maskLong)
+            offset += 8
+        }
+
+        // Handle remaining bytes
+        val maskByte0 = (mask ushr 24).toByte()
+        val maskByte1 = (mask ushr 16).toByte()
+        val maskByte2 = (mask ushr 8).toByte()
+        val maskByte3 = mask.toByte()
+        var i = offset - pos
+        while (offset < lim) {
+            val maskByte =
+                when (i and 3) {
+                    0 -> maskByte0
+                    1 -> maskByte1
+                    2 -> maskByte2
+                    else -> maskByte3
+                }
+            byteBuffer.put(offset, (byteBuffer.get(offset).toInt() xor maskByte.toInt()).toByte())
+            offset++
+            i++
+        }
+    }
+
     override fun position(newPosition: Int) {
         buffer.position(newPosition)
     }

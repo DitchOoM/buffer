@@ -231,6 +231,90 @@ class ByteArrayBuffer(
         return this
     }
 
+    // === Optimized bulk operations ===
+
+    /**
+     * Optimized XOR mask operating directly on the backing byte array.
+     */
+    override fun xorMask(mask: Int) {
+        if (mask == 0) return
+        val pos = positionValue
+        val lim = limitValue
+        val size = lim - pos
+        if (size == 0) return
+
+        val maskByte0 = (mask ushr 24).toByte()
+        val maskByte1 = (mask ushr 16).toByte()
+        val maskByte2 = (mask ushr 8).toByte()
+        val maskByte3 = mask.toByte()
+
+        var i = 0
+        // Process 4 bytes at a time
+        while (i + 4 <= size) {
+            data[pos + i] = (data[pos + i].toInt() xor maskByte0.toInt()).toByte()
+            data[pos + i + 1] = (data[pos + i + 1].toInt() xor maskByte1.toInt()).toByte()
+            data[pos + i + 2] = (data[pos + i + 2].toInt() xor maskByte2.toInt()).toByte()
+            data[pos + i + 3] = (data[pos + i + 3].toInt() xor maskByte3.toInt()).toByte()
+            i += 4
+        }
+        // Handle remaining bytes
+        while (i < size) {
+            val maskByte =
+                when (i and 3) {
+                    0 -> maskByte0
+                    1 -> maskByte1
+                    2 -> maskByte2
+                    else -> maskByte3
+                }
+            data[pos + i] = (data[pos + i].toInt() xor maskByte.toInt()).toByte()
+            i++
+        }
+    }
+
+    /**
+     * Optimized fill using ByteArray.fill().
+     */
+    override fun fill(value: Byte): WriteBuffer {
+        val count = remaining()
+        if (count == 0) return this
+        data.fill(value, positionValue, positionValue + count)
+        positionValue += count
+        return this
+    }
+
+    /**
+     * Optimized contentEquals for ByteArrayBuffer-to-ByteArrayBuffer comparison.
+     */
+    override fun contentEquals(other: ReadBuffer): Boolean {
+        if (remaining() != other.remaining()) return false
+        val size = remaining()
+        if (size == 0) return true
+
+        if (other is ByteArrayBuffer) {
+            for (i in 0 until size) {
+                if (data[positionValue + i] != other.data[other.positionValue + i]) {
+                    return false
+                }
+            }
+            return true
+        }
+        return super.contentEquals(other)
+    }
+
+    /**
+     * Optimized indexOf(Byte) using direct array scan.
+     */
+    override fun indexOf(byte: Byte): Int {
+        val pos = positionValue
+        val size = remaining()
+        for (i in 0 until size) {
+            if (data[pos + i] == byte) {
+                return i
+            }
+        }
+        return -1
+    }
+
     override suspend fun close() = Unit
 
     override fun equals(other: Any?): Boolean {

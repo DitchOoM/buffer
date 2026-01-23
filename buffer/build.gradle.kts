@@ -152,6 +152,16 @@ kotlin {
             }
         }
     }
+    targets.withType<org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget>().configureEach {
+        compilations.getByName("main") {
+            cinterops {
+                create("simd") {
+                    defFile(project.file("src/nativeInterop/cinterop/simd.def"))
+                }
+            }
+        }
+    }
+
     applyDefaultHierarchyTemplate()
     sourceSets {
         // Create nonJvmMain source set shared by nativeMain and wasmJsMain
@@ -405,6 +415,13 @@ benchmark {
             iterationTime = 500
             iterationTimeUnit = "ms"
             include(".*ScopedBuffer.*")
+        }
+        register("bulk") {
+            warmups = 3
+            iterations = 5
+            iterationTime = 1000
+            iterationTimeUnit = "ms"
+            include("BulkOperations")
         }
         // Fast configuration for WASM - runs only key benchmarks to avoid long run times
         register("wasmFast") {

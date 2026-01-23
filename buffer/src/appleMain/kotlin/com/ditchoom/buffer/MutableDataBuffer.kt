@@ -1,5 +1,10 @@
 package com.ditchoom.buffer
 
+import com.ditchoom.buffer.cinterop.buf_indexof_int
+import com.ditchoom.buffer.cinterop.buf_indexof_long
+import com.ditchoom.buffer.cinterop.buf_indexof_short
+import com.ditchoom.buffer.cinterop.buf_mismatch
+import com.ditchoom.buffer.cinterop.buf_xor_mask
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.IntVar
@@ -26,6 +31,7 @@ import platform.Foundation.subdataWithRange
 import platform.posix.memchr
 import platform.posix.memcmp
 import platform.posix.memcpy
+import platform.posix.memset
 
 /**
  * Buffer implementation backed by NSMutableData (Apple native memory).
@@ -297,6 +303,33 @@ class MutableDataBuffer(
 
     // endregion
 
+    // region Optimized bulk operations
+
+    /**
+     * SIMD-optimized XOR mask using buf_xor_mask (auto-vectorized by clang at -O2).
+     */
+    override fun xorMask(mask: Int) {
+        if (mask == 0) return
+        val size = limit - position
+        if (size == 0) return
+        // Byte-swap mask for little-endian: mask is big-endian but native memory is LE
+        val nativeMask = mask.reverseBytes().toUInt()
+        buf_xor_mask((bytePointer + position)!!.reinterpret(), size.convert(), nativeMask)
+    }
+
+    /**
+     * Optimized fill using memset (OS-provided SIMD implementation).
+     */
+    override fun fill(value: Byte): WriteBuffer {
+        val count = remaining()
+        if (count == 0) return this
+        memset(bytePointer + position, value.toInt(), count.convert())
+        position += count
+        return this
+    }
+
+    // endregion
+
     // region Optimized comparison operations
 
     /**
@@ -332,7 +365,7 @@ class MutableDataBuffer(
     }
 
     /**
-     * Optimized mismatch using memcmp for native buffers.
+     * SIMD-optimized mismatch using buf_mismatch (auto-vectorized by clang at -O2).
      */
     override fun mismatch(other: ReadBuffer): Int {
         val thisRemaining = remaining()
@@ -343,61 +376,43 @@ class MutableDataBuffer(
             return if (thisRemaining != otherRemaining) 0 else -1
         }
 
-        when (other) {
-            is MutableDataBuffer -> {
-                // Use Long comparisons for speed (8 bytes at a time)
-                var i = 0
-                while (i + 8 <= minLength) {
-                    val thisPtr = (bytePointer + position + i)!!.reinterpret<LongVar>()
-                    val otherPtr = (other.bytePointer + other.position() + i)!!.reinterpret<LongVar>()
-                    if (thisPtr[0] != otherPtr[0]) {
-                        // Found mismatch, find exact byte
-                        for (j in 0 until 8) {
-                            if (bytePointer[position + i + j] != other.bytePointer[other.position() + i + j]) {
-                                return i + j
-                            }
+        val result =
+            when (other) {
+                is MutableDataBuffer -> {
+                    buf_mismatch(
+                        (bytePointer + position)!!.reinterpret(),
+                        (other.bytePointer + other.position())!!.reinterpret(),
+                        minLength.convert(),
+                    ).toInt()
+                }
+                is MutableDataBufferSlice -> {
+                    buf_mismatch(
+                        (bytePointer + position)!!.reinterpret(),
+                        (other.bytePointer + other.position())!!.reinterpret(),
+                        minLength.convert(),
+                    ).toInt()
+                }
+                is ByteArrayBuffer -> {
+                    other.backingArray.usePinned { pinned ->
+                        buf_mismatch(
+                            (bytePointer + position)!!.reinterpret(),
+                            pinned.addressOf(other.position()).reinterpret(),
+                            minLength.convert(),
+                        ).toInt()
+                    }
+                }
+                else -> {
+                    // Fallback for other buffer types
+                    for (i in 0 until minLength) {
+                        if (get(position + i) != other.get(other.position() + i)) {
+                            return i
                         }
                     }
-                    i += 8
-                }
-                // Check remaining bytes
-                while (i < minLength) {
-                    if (bytePointer[position + i] != other.bytePointer[other.position() + i]) {
-                        return i
-                    }
-                    i++
+                    -1
                 }
             }
-            is MutableDataBufferSlice -> {
-                var i = 0
-                while (i + 8 <= minLength) {
-                    val thisPtr = (bytePointer + position + i)!!.reinterpret<LongVar>()
-                    val otherPtr = (other.bytePointer + other.position() + i)!!.reinterpret<LongVar>()
-                    if (thisPtr[0] != otherPtr[0]) {
-                        for (j in 0 until 8) {
-                            if (bytePointer[position + i + j] != other.bytePointer[other.position() + i + j]) {
-                                return i + j
-                            }
-                        }
-                    }
-                    i += 8
-                }
-                while (i < minLength) {
-                    if (bytePointer[position + i] != other.bytePointer[other.position() + i]) {
-                        return i
-                    }
-                    i++
-                }
-            }
-            else -> {
-                // Fallback for other buffer types
-                for (i in 0 until minLength) {
-                    if (get(position + i) != other.get(other.position() + i)) {
-                        return i
-                    }
-                }
-            }
-        }
+
+        if (result != -1) return result
         return if (thisRemaining != otherRemaining) minLength else -1
     }
 
@@ -415,6 +430,49 @@ class MutableDataBuffer(
             @Suppress("UNCHECKED_CAST")
             ((result as CPointer<ByteVar>).toLong() - (bytePointer + position).toLong()).toInt()
         }
+    }
+
+    /**
+     * SIMD-optimized indexOf(Short) using buf_indexof_short.
+     */
+    override fun indexOf(value: Short): Int {
+        val size = remaining()
+        if (size < 2) return -1
+        // Convert to native memory representation
+        val nativeValue = if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
+        return buf_indexof_short(
+            (bytePointer + position)!!.reinterpret(),
+            size.convert(),
+            nativeValue.toUShort(),
+        ).toInt()
+    }
+
+    /**
+     * SIMD-optimized indexOf(Int) using buf_indexof_int.
+     */
+    override fun indexOf(value: Int): Int {
+        val size = remaining()
+        if (size < 4) return -1
+        val nativeValue = if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
+        return buf_indexof_int(
+            (bytePointer + position)!!.reinterpret(),
+            size.convert(),
+            nativeValue.toUInt(),
+        ).toInt()
+    }
+
+    /**
+     * SIMD-optimized indexOf(Long) using buf_indexof_long.
+     */
+    override fun indexOf(value: Long): Int {
+        val size = remaining()
+        if (size < 8) return -1
+        val nativeValue = if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
+        return buf_indexof_long(
+            (bytePointer + position)!!.reinterpret(),
+            size.convert(),
+            nativeValue.toULong(),
+        ).toInt()
     }
 
     // endregion
