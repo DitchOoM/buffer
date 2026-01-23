@@ -135,8 +135,13 @@ open class BulkOperationsBenchmark {
     @Benchmark
     fun indexOfInt64k(): Int {
         directBuffer1.position(0)
-        // Search for an int value
         return directBuffer1.indexOf(0x7C7D7E7F)
+    }
+
+    @Benchmark
+    fun indexOfInt64kAligned(): Int {
+        directBuffer1.position(0)
+        return directBuffer1.indexOf(0x7C7D7E7F, aligned = true)
     }
 
     // --- indexOf(Long) ---
@@ -144,8 +149,13 @@ open class BulkOperationsBenchmark {
     @Benchmark
     fun indexOfLong64k(): Int {
         directBuffer1.position(0)
-        // Search for a long value
         return directBuffer1.indexOf(0x78797A7B7C7D7E7FL)
+    }
+
+    @Benchmark
+    fun indexOfLong64kAligned(): Int {
+        directBuffer1.position(0)
+        return directBuffer1.indexOf(0x78797A7B7C7D7E7FL, aligned = true)
     }
 
     // --- Write/Read Ints ---

@@ -20,8 +20,11 @@ import platform.posix.memset
 import com.ditchoom.buffer.cinterop.buf_xor_mask
 import com.ditchoom.buffer.cinterop.buf_mismatch
 import com.ditchoom.buffer.cinterop.buf_indexof_short
+import com.ditchoom.buffer.cinterop.buf_indexof_short_aligned
 import com.ditchoom.buffer.cinterop.buf_indexof_int
+import com.ditchoom.buffer.cinterop.buf_indexof_int_aligned
 import com.ditchoom.buffer.cinterop.buf_indexof_long
+import com.ditchoom.buffer.cinterop.buf_indexof_long_aligned
 
 /**
  * Buffer implementation using native memory (malloc/free) on Linux.
@@ -401,14 +404,16 @@ class NativeBuffer private constructor(
     }
 
     /**
-     * SIMD-optimized indexOf(Short) using buf_indexof_short.
+     * Optimized indexOf(Short) using native C implementation.
+     * When [aligned] is true, uses SIMD auto-vectorized aligned scanning.
      */
-    override fun indexOf(value: Short): Int {
+    override fun indexOf(value: Short, aligned: Boolean): Int {
         checkOpen()
         val size = remaining()
         if (size < 2) return -1
         val nativeValue = if (littleEndian == nativeIsLittleEndian) value else value.reverseBytes()
-        return buf_indexof_short(
+        val fn = if (aligned) ::buf_indexof_short_aligned else ::buf_indexof_short
+        return fn(
             (ptr + positionValue)!!.reinterpret(),
             size.convert(),
             nativeValue.toUShort(),
@@ -416,14 +421,16 @@ class NativeBuffer private constructor(
     }
 
     /**
-     * SIMD-optimized indexOf(Int) using buf_indexof_int.
+     * Optimized indexOf(Int) using native C implementation.
+     * When [aligned] is true, uses SIMD auto-vectorized aligned scanning.
      */
-    override fun indexOf(value: Int): Int {
+    override fun indexOf(value: Int, aligned: Boolean): Int {
         checkOpen()
         val size = remaining()
         if (size < 4) return -1
         val nativeValue = if (littleEndian == nativeIsLittleEndian) value else value.reverseBytes()
-        return buf_indexof_int(
+        val fn = if (aligned) ::buf_indexof_int_aligned else ::buf_indexof_int
+        return fn(
             (ptr + positionValue)!!.reinterpret(),
             size.convert(),
             nativeValue.toUInt(),
@@ -431,14 +438,16 @@ class NativeBuffer private constructor(
     }
 
     /**
-     * SIMD-optimized indexOf(Long) using buf_indexof_long.
+     * Optimized indexOf(Long) using native C implementation.
+     * When [aligned] is true, uses SIMD auto-vectorized aligned scanning.
      */
-    override fun indexOf(value: Long): Int {
+    override fun indexOf(value: Long, aligned: Boolean): Int {
         checkOpen()
         val size = remaining()
         if (size < 8) return -1
         val nativeValue = if (littleEndian == nativeIsLittleEndian) value else value.reverseBytes()
-        return buf_indexof_long(
+        val fn = if (aligned) ::buf_indexof_long_aligned else ::buf_indexof_long
+        return fn(
             (ptr + positionValue)!!.reinterpret(),
             size.convert(),
             nativeValue.toULong(),

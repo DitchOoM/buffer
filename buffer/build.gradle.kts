@@ -470,6 +470,35 @@ ktlint {
     }
 }
 
+// Fix: kotlinx-benchmark's NativeSourceGeneratorWorker doesn't include cinterop klibs
+// in its inputDependencies, causing KLIB resolution to fail. Add them explicitly.
+// Also fix: the benchmark executable link task doesn't include cinterop klibs,
+// causing IrLinkageError at runtime for cinterop functions.
+afterEvaluate {
+    tasks.withType(kotlinx.benchmark.gradle.NativeSourceGeneratorTask::class.java).configureEach {
+        val gradleTarget = name.substringBefore("Benchmark")
+        val cinteropKlib = project.file(
+            "${project.layout.buildDirectory.get()}/classes/kotlin/$gradleTarget/main/cinterop/buffer-cinterop-simd"
+        )
+        inputDependencies = inputDependencies + project.files(cinteropKlib)
+    }
+    tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinNativeLink::class.java).configureEach {
+        if (name.contains("BenchmarkBenchmark")) {
+            val targetName = when {
+                name.contains("MacosArm64", ignoreCase = true) -> "macosArm64"
+                name.contains("MacosX64", ignoreCase = true) -> "macosX64"
+                name.contains("LinuxX64", ignoreCase = true) -> "linuxX64"
+                name.contains("LinuxArm64", ignoreCase = true) -> "linuxArm64"
+                else -> return@configureEach
+            }
+            val cinteropKlib = project.file(
+                "${project.layout.buildDirectory.get()}/classes/kotlin/$targetName/main/cinterop/buffer-cinterop-simd"
+            )
+            libraries.from(cinteropKlib)
+        }
+    }
+}
+
 tasks.register("nextVersion") {
     println(getNextVersion(false))
 }

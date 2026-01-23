@@ -560,17 +560,21 @@ interface ReadBuffer : PositionBuffer {
      * Searches for the 2-byte representation of [value] using the buffer's byte order.
      *
      * @param value The Short value to search for
+     * @param aligned If true, only searches at 2-byte aligned positions from current position.
+     *        This enables SIMD auto-vectorization on native platforms. Use when values were
+     *        written with writeShort() or when data is known to be 2-byte aligned.
      * @return The relative index where the value starts (relative to current position),
      *         or -1 if not found
      */
-    fun indexOf(value: Short): Int {
+    fun indexOf(value: Short, aligned: Boolean = false): Int {
         val size = remaining()
         if (size < 2) return -1
 
         val pos = position()
+        val step = if (aligned) 2 else 1
         val searchLimit = size - 1
 
-        for (i in 0 until searchLimit) {
+        for (i in 0 until searchLimit step step) {
             if (getShort(pos + i) == value) {
                 return i
             }
@@ -584,17 +588,21 @@ interface ReadBuffer : PositionBuffer {
      * Searches for the 4-byte representation of [value] using the buffer's byte order.
      *
      * @param value The Int value to search for
+     * @param aligned If true, only searches at 4-byte aligned positions from current position.
+     *        This enables SIMD auto-vectorization on native platforms. Use when values were
+     *        written with writeInt() or when data is known to be 4-byte aligned.
      * @return The relative index where the value starts (relative to current position),
      *         or -1 if not found
      */
-    fun indexOf(value: Int): Int {
+    fun indexOf(value: Int, aligned: Boolean = false): Int {
         val size = remaining()
         if (size < 4) return -1
 
         val pos = position()
+        val step = if (aligned) 4 else 1
         val searchLimit = size - 3
 
-        for (i in 0 until searchLimit) {
+        for (i in 0 until searchLimit step step) {
             if (getInt(pos + i) == value) {
                 return i
             }
@@ -608,17 +616,21 @@ interface ReadBuffer : PositionBuffer {
      * Searches for the 8-byte representation of [value] using the buffer's byte order.
      *
      * @param value The Long value to search for
+     * @param aligned If true, only searches at 8-byte aligned positions from current position.
+     *        This enables SIMD auto-vectorization on native platforms. Use when values were
+     *        written with writeLong() or when data is known to be 8-byte aligned.
      * @return The relative index where the value starts (relative to current position),
      *         or -1 if not found
      */
-    fun indexOf(value: Long): Int {
+    fun indexOf(value: Long, aligned: Boolean = false): Int {
         val size = remaining()
         if (size < 8) return -1
 
         val pos = position()
+        val step = if (aligned) 8 else 1
         val searchLimit = size - 7
 
-        for (i in 0 until searchLimit) {
+        for (i in 0 until searchLimit step step) {
             if (getLong(pos + i) == value) {
                 return i
             }

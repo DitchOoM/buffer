@@ -1,8 +1,11 @@
 package com.ditchoom.buffer
 
 import com.ditchoom.buffer.cinterop.buf_indexof_int
+import com.ditchoom.buffer.cinterop.buf_indexof_int_aligned
 import com.ditchoom.buffer.cinterop.buf_indexof_long
+import com.ditchoom.buffer.cinterop.buf_indexof_long_aligned
 import com.ditchoom.buffer.cinterop.buf_indexof_short
+import com.ditchoom.buffer.cinterop.buf_indexof_short_aligned
 import com.ditchoom.buffer.cinterop.buf_mismatch
 import com.ditchoom.buffer.cinterop.buf_xor_mask
 import kotlinx.cinterop.ByteVar
@@ -433,14 +436,15 @@ class MutableDataBuffer(
     }
 
     /**
-     * SIMD-optimized indexOf(Short) using buf_indexof_short.
+     * Optimized indexOf(Short) using native C implementation.
+     * When [aligned] is true, uses SIMD auto-vectorized aligned scanning.
      */
-    override fun indexOf(value: Short): Int {
+    override fun indexOf(value: Short, aligned: Boolean): Int {
         val size = remaining()
         if (size < 2) return -1
-        // Convert to native memory representation
         val nativeValue = if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
-        return buf_indexof_short(
+        val fn = if (aligned) ::buf_indexof_short_aligned else ::buf_indexof_short
+        return fn(
             (bytePointer + position)!!.reinterpret(),
             size.convert(),
             nativeValue.toUShort(),
@@ -448,13 +452,15 @@ class MutableDataBuffer(
     }
 
     /**
-     * SIMD-optimized indexOf(Int) using buf_indexof_int.
+     * Optimized indexOf(Int) using native C implementation.
+     * When [aligned] is true, uses SIMD auto-vectorized aligned scanning.
      */
-    override fun indexOf(value: Int): Int {
+    override fun indexOf(value: Int, aligned: Boolean): Int {
         val size = remaining()
         if (size < 4) return -1
         val nativeValue = if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
-        return buf_indexof_int(
+        val fn = if (aligned) ::buf_indexof_int_aligned else ::buf_indexof_int
+        return fn(
             (bytePointer + position)!!.reinterpret(),
             size.convert(),
             nativeValue.toUInt(),
@@ -462,13 +468,15 @@ class MutableDataBuffer(
     }
 
     /**
-     * SIMD-optimized indexOf(Long) using buf_indexof_long.
+     * Optimized indexOf(Long) using native C implementation.
+     * When [aligned] is true, uses SIMD auto-vectorized aligned scanning.
      */
-    override fun indexOf(value: Long): Int {
+    override fun indexOf(value: Long, aligned: Boolean): Int {
         val size = remaining()
         if (size < 8) return -1
         val nativeValue = if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
-        return buf_indexof_long(
+        val fn = if (aligned) ::buf_indexof_long_aligned else ::buf_indexof_long
+        return fn(
             (bytePointer + position)!!.reinterpret(),
             size.convert(),
             nativeValue.toULong(),
