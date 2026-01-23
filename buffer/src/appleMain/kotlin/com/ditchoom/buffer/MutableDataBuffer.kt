@@ -439,7 +439,10 @@ class MutableDataBuffer(
      * Optimized indexOf(Short) using native C implementation.
      * When [aligned] is true, uses SIMD auto-vectorized aligned scanning.
      */
-    override fun indexOf(value: Short, aligned: Boolean): Int {
+    override fun indexOf(
+        value: Short,
+        aligned: Boolean,
+    ): Int {
         val size = remaining()
         if (size < 2) return -1
         val nativeValue = if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
@@ -455,7 +458,10 @@ class MutableDataBuffer(
      * Optimized indexOf(Int) using native C implementation.
      * When [aligned] is true, uses SIMD auto-vectorized aligned scanning.
      */
-    override fun indexOf(value: Int, aligned: Boolean): Int {
+    override fun indexOf(
+        value: Int,
+        aligned: Boolean,
+    ): Int {
         val size = remaining()
         if (size < 4) return -1
         val nativeValue = if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
@@ -471,7 +477,10 @@ class MutableDataBuffer(
      * Optimized indexOf(Long) using native C implementation.
      * When [aligned] is true, uses SIMD auto-vectorized aligned scanning.
      */
-    override fun indexOf(value: Long, aligned: Boolean): Int {
+    override fun indexOf(
+        value: Long,
+        aligned: Boolean,
+    ): Int {
         val size = remaining()
         if (size < 8) return -1
         val nativeValue = if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value

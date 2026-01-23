@@ -566,7 +566,10 @@ interface ReadBuffer : PositionBuffer {
      * @return The relative index where the value starts (relative to current position),
      *         or -1 if not found
      */
-    fun indexOf(value: Short, aligned: Boolean = false): Int {
+    fun indexOf(
+        value: Short,
+        aligned: Boolean = false,
+    ): Int {
         val size = remaining()
         if (size < 2) return -1
 
@@ -594,7 +597,10 @@ interface ReadBuffer : PositionBuffer {
      * @return The relative index where the value starts (relative to current position),
      *         or -1 if not found
      */
-    fun indexOf(value: Int, aligned: Boolean = false): Int {
+    fun indexOf(
+        value: Int,
+        aligned: Boolean = false,
+    ): Int {
         val size = remaining()
         if (size < 4) return -1
 
@@ -622,7 +628,10 @@ interface ReadBuffer : PositionBuffer {
      * @return The relative index where the value starts (relative to current position),
      *         or -1 if not found
      */
-    fun indexOf(value: Long, aligned: Boolean = false): Int {
+    fun indexOf(
+        value: Long,
+        aligned: Boolean = false,
+    ): Int {
         val size = remaining()
         if (size < 8) return -1
 

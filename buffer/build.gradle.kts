@@ -477,23 +477,26 @@ ktlint {
 afterEvaluate {
     tasks.withType(kotlinx.benchmark.gradle.NativeSourceGeneratorTask::class.java).configureEach {
         val gradleTarget = name.substringBefore("Benchmark")
-        val cinteropKlib = project.file(
-            "${project.layout.buildDirectory.get()}/classes/kotlin/$gradleTarget/main/cinterop/buffer-cinterop-simd"
-        )
+        val cinteropKlib =
+            project.file(
+                "${project.layout.buildDirectory.get()}/classes/kotlin/$gradleTarget/main/cinterop/buffer-cinterop-simd",
+            )
         inputDependencies = inputDependencies + project.files(cinteropKlib)
     }
     tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinNativeLink::class.java).configureEach {
         if (name.contains("BenchmarkBenchmark")) {
-            val targetName = when {
-                name.contains("MacosArm64", ignoreCase = true) -> "macosArm64"
-                name.contains("MacosX64", ignoreCase = true) -> "macosX64"
-                name.contains("LinuxX64", ignoreCase = true) -> "linuxX64"
-                name.contains("LinuxArm64", ignoreCase = true) -> "linuxArm64"
-                else -> return@configureEach
-            }
-            val cinteropKlib = project.file(
-                "${project.layout.buildDirectory.get()}/classes/kotlin/$targetName/main/cinterop/buffer-cinterop-simd"
-            )
+            val targetName =
+                when {
+                    name.contains("MacosArm64", ignoreCase = true) -> "macosArm64"
+                    name.contains("MacosX64", ignoreCase = true) -> "macosX64"
+                    name.contains("LinuxX64", ignoreCase = true) -> "linuxX64"
+                    name.contains("LinuxArm64", ignoreCase = true) -> "linuxArm64"
+                    else -> return@configureEach
+                }
+            val cinteropKlib =
+                project.file(
+                    "${project.layout.buildDirectory.get()}/classes/kotlin/$targetName/main/cinterop/buffer-cinterop-simd",
+                )
             libraries.from(cinteropKlib)
         }
     }
