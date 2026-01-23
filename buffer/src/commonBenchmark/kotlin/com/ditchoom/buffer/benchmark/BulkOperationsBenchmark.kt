@@ -105,57 +105,87 @@ open class BulkOperationsBenchmark {
     // --- Content Equals ---
 
     @Benchmark
-    fun contentEquals64k(): Boolean {
+    fun contentEquals64kDirect(): Boolean {
         directBuffer1.position(0)
         directBuffer2.position(0)
         return directBuffer1.contentEquals(directBuffer2)
     }
 
+    @Benchmark
+    fun contentEquals64kHeap(): Boolean {
+        heapBuffer1.position(0)
+        heapBuffer2.position(0)
+        return heapBuffer1.contentEquals(heapBuffer2)
+    }
+
     // --- Mismatch ---
 
     @Benchmark
-    fun mismatch64k(): Int {
+    fun mismatch64kDirect(): Int {
         directBuffer1.position(0)
         directBuffer2.position(0)
-        // Both buffers have same content, so mismatch returns -1
         return directBuffer1.mismatch(directBuffer2)
+    }
+
+    @Benchmark
+    fun mismatch64kHeap(): Int {
+        heapBuffer1.position(0)
+        heapBuffer2.position(0)
+        return heapBuffer1.mismatch(heapBuffer2)
     }
 
     // --- indexOf(Byte) ---
 
     @Benchmark
-    fun indexOfByte64k(): Int {
+    fun indexOfByte64kDirect(): Int {
         directBuffer1.position(0)
-        // Search for a byte that's near the end
         return directBuffer1.indexOf(0xFF.toByte())
+    }
+
+    @Benchmark
+    fun indexOfByte64kHeap(): Int {
+        heapBuffer1.position(0)
+        return heapBuffer1.indexOf(0xFF.toByte())
     }
 
     // --- indexOf(Int) ---
 
     @Benchmark
-    fun indexOfInt64k(): Int {
+    fun indexOfInt64kDirect(): Int {
         directBuffer1.position(0)
         return directBuffer1.indexOf(0x7C7D7E7F)
     }
 
     @Benchmark
-    fun indexOfInt64kAligned(): Int {
+    fun indexOfInt64kDirectAligned(): Int {
         directBuffer1.position(0)
         return directBuffer1.indexOf(0x7C7D7E7F, aligned = true)
+    }
+
+    @Benchmark
+    fun indexOfInt64kHeap(): Int {
+        heapBuffer1.position(0)
+        return heapBuffer1.indexOf(0x7C7D7E7F)
     }
 
     // --- indexOf(Long) ---
 
     @Benchmark
-    fun indexOfLong64k(): Int {
+    fun indexOfLong64kDirect(): Int {
         directBuffer1.position(0)
         return directBuffer1.indexOf(0x78797A7B7C7D7E7FL)
     }
 
     @Benchmark
-    fun indexOfLong64kAligned(): Int {
+    fun indexOfLong64kDirectAligned(): Int {
         directBuffer1.position(0)
         return directBuffer1.indexOf(0x78797A7B7C7D7E7FL, aligned = true)
+    }
+
+    @Benchmark
+    fun indexOfLong64kHeap(): Int {
+        heapBuffer1.position(0)
+        return heapBuffer1.indexOf(0x78797A7B7C7D7E7FL)
     }
 
     // --- Write/Read Ints ---

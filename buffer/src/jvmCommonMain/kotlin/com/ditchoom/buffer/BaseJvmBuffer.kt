@@ -321,13 +321,17 @@ abstract class BaseJvmBuffer(
     /**
      * Optimized Short indexOf using ByteBuffer operations.
      */
-    override fun indexOf(value: Short): Int {
+    override fun indexOf(
+        value: Short,
+        aligned: Boolean,
+    ): Int {
         val pos = position()
         val remaining = remaining()
         if (remaining < 2) return -1
 
+        val step = if (aligned) 2 else 1
         val searchLimit = remaining - 1
-        for (i in 0 until searchLimit) {
+        for (i in 0 until searchLimit step step) {
             if (byteBuffer.getShort(pos + i) == value) {
                 return i
             }
@@ -338,13 +342,17 @@ abstract class BaseJvmBuffer(
     /**
      * Optimized Int indexOf using ByteBuffer operations.
      */
-    override fun indexOf(value: Int): Int {
+    override fun indexOf(
+        value: Int,
+        aligned: Boolean,
+    ): Int {
         val pos = position()
         val remaining = remaining()
         if (remaining < 4) return -1
 
+        val step = if (aligned) 4 else 1
         val searchLimit = remaining - 3
-        for (i in 0 until searchLimit) {
+        for (i in 0 until searchLimit step step) {
             if (byteBuffer.getInt(pos + i) == value) {
                 return i
             }
@@ -355,13 +363,17 @@ abstract class BaseJvmBuffer(
     /**
      * Optimized Long indexOf using ByteBuffer operations.
      */
-    override fun indexOf(value: Long): Int {
+    override fun indexOf(
+        value: Long,
+        aligned: Boolean,
+    ): Int {
         val pos = position()
         val remaining = remaining()
         if (remaining < 8) return -1
 
+        val step = if (aligned) 8 else 1
         val searchLimit = remaining - 7
-        for (i in 0 until searchLimit) {
+        for (i in 0 until searchLimit step step) {
             if (byteBuffer.getLong(pos + i) == value) {
                 return i
             }
