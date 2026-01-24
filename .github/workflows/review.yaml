@@ -99,6 +99,8 @@ jobs:
           restore-keys: konan-${{ runner.os }}-
       - name: Run tests
         run: ./gradlew macosArm64Test iosSimulatorArm64Test --no-build-cache
+      - name: Verify Linux cross-compilation
+        run: ./gradlew compileKotlinLinuxX64 compileKotlinLinuxArm64 --no-build-cache
 
   docs:
     name: "Validate Docs Generation"
