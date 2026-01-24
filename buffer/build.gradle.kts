@@ -470,11 +470,37 @@ ktlint {
     }
 }
 
-// Fix: kotlinx-benchmark's NativeSourceGeneratorWorker doesn't include cinterop klibs
+// Fix: Kotlin metadata compilation for intermediate source sets (appleMain, nativeMain, etc.)
+// doesn't include per-target cinterop klibs, causing "Unresolved reference 'cinterop'" errors.
+// Add a representative cinterop klib to the metadata compilation classpath. All targets produce
+// the same API from the same .def file, so any target's klib works for type resolution.
+// Also fix: kotlinx-benchmark's NativeSourceGeneratorWorker doesn't include cinterop klibs
 // in its inputDependencies, causing KLIB resolution to fail. Add them explicitly.
 // Also fix: the benchmark executable link task doesn't include cinterop klibs,
 // causing IrLinkageError at runtime for cinterop functions.
 afterEvaluate {
+    // Determine which target's cinterop klib to use for metadata compilation
+    val metadataCinteropTarget =
+        when {
+            isArm64 -> "macosArm64"
+            System.getProperty("os.name") == "Mac OS X" -> "macosX64"
+            else -> "linuxX64"
+        }
+    val metadataCinteropKlib =
+        project.file(
+            "${project.layout.buildDirectory.get()}/classes/kotlin/$metadataCinteropTarget/main/cinterop/buffer-cinterop-simd",
+        )
+    val metadataCinteropTaskName = "cinteropSimd${metadataCinteropTarget.replaceFirstChar { it.uppercase() }}"
+
+    // Add cinterop klib to intermediate source set metadata compilation tasks
+    tasks.matching {
+        it.name.startsWith("compile") && it.name.endsWith("KotlinMetadata")
+    }.configureEach {
+        dependsOn(metadataCinteropTaskName)
+        if (this is org.jetbrains.kotlin.gradle.tasks.AbstractKotlinCompileTool<*>) {
+            libraries.from(metadataCinteropKlib)
+        }
+    }
     tasks.withType(kotlinx.benchmark.gradle.NativeSourceGeneratorTask::class.java).configureEach {
         val gradleTarget = name.substringBefore("Benchmark")
         val cinteropKlib =
@@ -530,34 +556,5 @@ dokka {
             packageListUrl("https://kotlinlang.org/api/kotlinx.coroutines/package-list")
         }
         reportUndocumented.set(false)
-    }
-    // Suppress native source sets that use cinterop - metadata compilation can't
-    // resolve cinterop bindings. Public API is fully documented via commonMain.
-    dokkaSourceSets
-        .matching {
-            it.name in setOf("appleMain", "nativeMain", "linuxMain", "macosMain")
-        }.configureEach {
-            suppress.set(true)
-        }
-}
-
-// Dokka suppress.set(true) prevents documentation output but still triggers metadata
-// compilation as a task dependency. Disable native metadata compilation tasks when Dokka
-// is in the task graph, since those tasks fail (cinterop klibs are per-target, not
-// available for intermediate source set metadata compilation).
-gradle.taskGraph.whenReady {
-    if (allTasks.any { it.name.contains("dokka", ignoreCase = true) }) {
-        allTasks
-            .filter {
-                it.name.endsWith("KotlinMetadata") &&
-                    (
-                        it.name.contains("Apple", ignoreCase = true) ||
-                            it.name.contains("Native", ignoreCase = true) ||
-                            it.name.contains("Linux", ignoreCase = true) ||
-                            it.name.contains("Macos", ignoreCase = true)
-                    )
-            }.forEach {
-                it.enabled = false
-            }
     }
 }
