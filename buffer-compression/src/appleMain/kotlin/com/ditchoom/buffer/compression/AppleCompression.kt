@@ -39,6 +39,7 @@ import platform.zlib.z_stream
  * Apple supports synchronous compression via system zlib.
  */
 actual val supportsSyncCompression: Boolean = true
+actual val supportsRawDeflate: Boolean = true
 
 /**
  * Helper to copy memory with platform-appropriate size_t conversion.
@@ -237,8 +238,14 @@ private fun decompressWithZStream(
                 when (result) {
                     Z_STREAM_END -> break
                     Z_OK, -5 -> {
-                        // Z_OK or Z_BUF_ERROR - need more output space
+                        if (s.avail_out > 0u && s.avail_in == 0u) {
+                            // No more input and output space available means inflate
+                            // can't make progress. Stream is complete even without
+                            // BFINAL=1 (e.g., WebSocket per-message-deflate RFC 7692).
+                            break
+                        }
                         if (s.avail_out == 0u) {
+                            // Need more output space - grow buffer
                             val newSize = outputSize * 2
                             val newOutput = PlatformBuffer.allocate(newSize, AllocationZone.Direct) as MutableDataBuffer
 

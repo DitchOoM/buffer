@@ -1367,6 +1367,164 @@ class BufferTests {
 
     // endregion
 
+    // region indexOf aligned tests
+
+    @Test
+    fun indexOfShortAlignedFindsAtAlignedPosition() {
+        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+            for (order in listOf(ByteOrder.BIG_ENDIAN, ByteOrder.LITTLE_ENDIAN)) {
+                val buf = PlatformBuffer.allocate(12, zone, order)
+                buf.writeShort(0x1111)
+                buf.writeShort(0x2222)
+                buf.writeShort(0x3333)
+                buf.writeShort(0x4444)
+                buf.writeShort(0x5555)
+                buf.writeShort(0x6666)
+                buf.resetForRead()
+                assertEquals(4, buf.indexOf(0x3333.toShort(), aligned = true), "zone=$zone order=$order")
+            }
+        }
+    }
+
+    @Test
+    fun indexOfShortAlignedMissesUnalignedValue() {
+        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+            val buf = PlatformBuffer.allocate(7, zone, ByteOrder.BIG_ENDIAN)
+            // Write a padding byte then the value at offset 1 (unaligned for 2-byte step)
+            buf.writeByte(0x00)
+            buf.writeShort(0x1234)
+            buf.writeShort(0x5678)
+            buf.writeShort(0x9ABC.toShort())
+            buf.resetForRead()
+            // Unaligned search finds it at offset 1
+            assertEquals(1, buf.indexOf(0x1234.toShort(), aligned = false), "zone=$zone unaligned")
+            // Aligned search skips it (only checks offsets 0, 2, 4, 6)
+            assertEquals(-1, buf.indexOf(0x1234.toShort(), aligned = true), "zone=$zone aligned")
+        }
+    }
+
+    @Test
+    fun indexOfShortAlignedAtPositionZero() {
+        val buf = PlatformBuffer.allocate(6, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.writeShort(0x1234)
+        buf.writeShort(0x5678)
+        buf.writeShort(0x9ABC.toShort())
+        buf.resetForRead()
+        assertEquals(0, buf.indexOf(0x1234.toShort(), aligned = true))
+    }
+
+    @Test
+    fun indexOfShortAlignedAtLastPosition() {
+        val buf = PlatformBuffer.allocate(6, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.writeShort(0x1111)
+        buf.writeShort(0x2222)
+        buf.writeShort(0x3333)
+        buf.resetForRead()
+        assertEquals(4, buf.indexOf(0x3333.toShort(), aligned = true))
+    }
+
+    @Test
+    fun indexOfIntAlignedFindsAtAlignedPosition() {
+        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+            for (order in listOf(ByteOrder.BIG_ENDIAN, ByteOrder.LITTLE_ENDIAN)) {
+                val buf = PlatformBuffer.allocate(12, zone, order)
+                buf.writeInt(0x11111111)
+                buf.writeInt(0x22222222)
+                buf.writeInt(0x33333333)
+                buf.resetForRead()
+                assertEquals(4, buf.indexOf(0x22222222, aligned = true), "zone=$zone order=$order")
+            }
+        }
+    }
+
+    @Test
+    fun indexOfIntAlignedMissesUnalignedValue() {
+        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+            val buf = PlatformBuffer.allocate(9, zone, ByteOrder.BIG_ENDIAN)
+            // Write a padding byte then the value at offset 1 (unaligned for 4-byte step)
+            buf.writeByte(0x00)
+            buf.writeInt(0x12345678)
+            buf.writeInt(0x11111111)
+            buf.resetForRead()
+            // Unaligned search finds it
+            assertEquals(1, buf.indexOf(0x12345678, aligned = false), "zone=$zone unaligned")
+            // Aligned search misses it (only checks offsets 0, 4, 8)
+            assertEquals(-1, buf.indexOf(0x12345678, aligned = true), "zone=$zone aligned")
+        }
+    }
+
+    @Test
+    fun indexOfIntAlignedAtPositionZero() {
+        val buf = PlatformBuffer.allocate(12, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.writeInt(0x12345678)
+        buf.writeInt(0x11111111)
+        buf.writeInt(0x22222222)
+        buf.resetForRead()
+        assertEquals(0, buf.indexOf(0x12345678, aligned = true))
+    }
+
+    @Test
+    fun indexOfIntAlignedAtLastPosition() {
+        val buf = PlatformBuffer.allocate(12, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.writeInt(0x11111111)
+        buf.writeInt(0x22222222)
+        buf.writeInt(0x33333333)
+        buf.resetForRead()
+        assertEquals(8, buf.indexOf(0x33333333, aligned = true))
+    }
+
+    @Test
+    fun indexOfLongAlignedFindsAtAlignedPosition() {
+        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+            for (order in listOf(ByteOrder.BIG_ENDIAN, ByteOrder.LITTLE_ENDIAN)) {
+                val buf = PlatformBuffer.allocate(24, zone, order)
+                buf.writeLong(0x1111111111111111L)
+                buf.writeLong(0x2222222222222222L)
+                buf.writeLong(0x3333333333333333L)
+                buf.resetForRead()
+                assertEquals(8, buf.indexOf(0x2222222222222222L, aligned = true), "zone=$zone order=$order")
+            }
+        }
+    }
+
+    @Test
+    fun indexOfLongAlignedMissesUnalignedValue() {
+        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+            val buf = PlatformBuffer.allocate(17, zone, ByteOrder.BIG_ENDIAN)
+            // Write a padding byte then the value at offset 1 (unaligned for 8-byte step)
+            buf.writeByte(0x00)
+            buf.writeLong(0x123456789ABCDEF0L)
+            buf.writeLong(0x1111111111111111L)
+            buf.resetForRead()
+            // Unaligned search finds it
+            assertEquals(1, buf.indexOf(0x123456789ABCDEF0L, aligned = false), "zone=$zone unaligned")
+            // Aligned search misses it (only checks offsets 0, 8, 16)
+            assertEquals(-1, buf.indexOf(0x123456789ABCDEF0L, aligned = true), "zone=$zone aligned")
+        }
+    }
+
+    @Test
+    fun indexOfLongAlignedAtPositionZero() {
+        val buf = PlatformBuffer.allocate(24, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.writeLong(0x123456789ABCDEF0L)
+        buf.writeLong(0x1111111111111111L)
+        buf.writeLong(0x2222222222222222L)
+        buf.resetForRead()
+        assertEquals(0, buf.indexOf(0x123456789ABCDEF0L, aligned = true))
+    }
+
+    @Test
+    fun indexOfLongAlignedAtLastPosition() {
+        val buf = PlatformBuffer.allocate(24, byteOrder = ByteOrder.BIG_ENDIAN)
+        buf.writeLong(0x1111111111111111L)
+        buf.writeLong(0x2222222222222222L)
+        buf.writeLong(0x3333333333333333L)
+        buf.resetForRead()
+        assertEquals(16, buf.indexOf(0x3333333333333333L, aligned = true))
+    }
+
+    // endregion
+
     // region fill tests
 
     @Test

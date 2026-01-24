@@ -1,0 +1,224 @@
+package = com.ditchoom.buffer.cinterop
+compilerOpts = -O2
+---
+#include <stdint.h>
+#include <stddef.h>
+#include <string.h>
+
+/**
+ * XOR mask buffer in-place with a repeating 4-byte mask.
+ * Clang at -O2 auto-vectorizes this to NEON (ARM64) or SSE2/AVX2 (x86_64).
+ * Uses memcpy for type-safe unaligned access (compiles to same instructions).
+ *
+ * The `mask` parameter must be in native byte order such that after
+ * `memcpy(mask_bytes, &mask, 4)`, mask_bytes[0] corresponds to the first
+ * byte to XOR, mask_bytes[1] to the second, and so on.
+ */
+void buf_xor_mask(uint8_t* buffer, size_t length, uint32_t mask) {
+    uint64_t mask64 = ((uint64_t)mask << 32) | (uint64_t)mask;
+    size_t i = 0;
+
+    // Process 8 bytes at a time using memcpy for safe unaligned access
+    for (; i + 8 <= length; i += 8) {
+        uint64_t val;
+        memcpy(&val, buffer + i, 8);
+        val ^= mask64;
+        memcpy(buffer + i, &val, 8);
+    }
+
+    // Handle remaining bytes
+    uint8_t mask_bytes[4];
+    memcpy(mask_bytes, &mask, 4);
+    for (; i < length; i++) {
+        buffer[i] ^= mask_bytes[i & 3];
+    }
+}
+
+/**
+ * Bulk byte-swap for 16-bit elements.
+ * Clang auto-vectorizes to REV16 (NEON) or PSHUFB (SSE/AVX).
+ */
+void buf_bswap16(uint8_t* buffer, size_t length) {
+    size_t count = length / 2;
+    for (size_t i = 0; i < count; i++) {
+        uint16_t v;
+        memcpy(&v, buffer + i * 2, 2);
+        v = (uint16_t)((v >> 8) | (v << 8));
+        memcpy(buffer + i * 2, &v, 2);
+    }
+}
+
+/**
+ * Bulk byte-swap for 32-bit elements.
+ * Clang auto-vectorizes to REV32 (NEON) or PSHUFB (SSE/AVX).
+ */
+void buf_bswap32(uint8_t* buffer, size_t length) {
+    size_t count = length / 4;
+    for (size_t i = 0; i < count; i++) {
+        uint32_t v;
+        memcpy(&v, buffer + i * 4, 4);
+        v = ((v >> 24) & 0xFF) |
+            ((v >> 8) & 0xFF00) |
+            ((v << 8) & 0xFF0000) |
+            ((v << 24) & 0xFF000000u);
+        memcpy(buffer + i * 4, &v, 4);
+    }
+}
+
+/**
+ * Bulk byte-swap for 64-bit elements.
+ * Clang auto-vectorizes with REV (NEON) or multiple shuffles (SSE/AVX).
+ */
+void buf_bswap64(uint8_t* buffer, size_t length) {
+    size_t count = length / 8;
+    for (size_t i = 0; i < count; i++) {
+        uint64_t v;
+        memcpy(&v, buffer + i * 8, 8);
+        v = ((v >> 56) & 0xFFULL) |
+            ((v >> 40) & 0xFF00ULL) |
+            ((v >> 24) & 0xFF0000ULL) |
+            ((v >> 8)  & 0xFF000000ULL) |
+            ((v << 8)  & 0xFF00000000ULL) |
+            ((v << 24) & 0xFF0000000000ULL) |
+            ((v << 40) & 0xFF000000000000ULL) |
+            ((v << 56) & 0xFF00000000000000ULL);
+        memcpy(buffer + i * 8, &v, 8);
+    }
+}
+
+/**
+ * Find first mismatch between two buffers.
+ * Returns index of first differing byte, or -1 if buffers are equal.
+ * Clang auto-vectorizes the comparison loop.
+ */
+long buf_mismatch(const uint8_t* a, const uint8_t* b, size_t length) {
+    size_t i = 0;
+
+    // Compare 8 bytes at a time using memcpy for safe unaligned access
+    for (; i + 8 <= length; i += 8) {
+        uint64_t va, vb;
+        memcpy(&va, a + i, 8);
+        memcpy(&vb, b + i, 8);
+        if (va != vb) {
+            // Find exact mismatch position
+            for (size_t j = 0; j < 8; j++) {
+                if (a[i + j] != b[i + j]) {
+                    return (long)(i + j);
+                }
+            }
+        }
+    }
+
+    // Compare remaining bytes
+    for (; i < length; i++) {
+        if (a[i] != b[i]) {
+            return (long)i;
+        }
+    }
+    return -1L;
+}
+
+/**
+ * Find index of 16-bit value in buffer, scanning every byte position.
+ * Uses memcpy for safe unaligned access (compiles to single LDR at -O2).
+ * Faster than Kotlin default: no virtual dispatch, no safepoints, no byte-order swap per read.
+ */
+long buf_indexof_short(const uint8_t* buffer, size_t length, uint16_t value) {
+    if (length < 2) return -1L;
+    size_t search_limit = length - 1;
+    for (size_t i = 0; i < search_limit; i++) {
+        uint16_t v;
+        memcpy(&v, buffer + i, 2);
+        if (v == value) {
+            return (long)i;
+        }
+    }
+    return -1L;
+}
+
+/**
+ * Find index of 32-bit value in buffer, scanning every byte position.
+ * Uses memcpy for safe unaligned access (compiles to single LDR at -O2).
+ * Faster than Kotlin default: no virtual dispatch, no safepoints, no byte-order swap per read.
+ */
+long buf_indexof_int(const uint8_t* buffer, size_t length, uint32_t value) {
+    if (length < 4) return -1L;
+    size_t search_limit = length - 3;
+    for (size_t i = 0; i < search_limit; i++) {
+        uint32_t v;
+        memcpy(&v, buffer + i, 4);
+        if (v == value) {
+            return (long)i;
+        }
+    }
+    return -1L;
+}
+
+/**
+ * Find index of 64-bit value in buffer, scanning every byte position.
+ * Uses memcpy for safe unaligned access (compiles to single LDR at -O2).
+ * Faster than Kotlin default: no virtual dispatch, no safepoints, no byte-order swap per read.
+ */
+long buf_indexof_long(const uint8_t* buffer, size_t length, uint64_t value) {
+    if (length < 8) return -1L;
+    size_t search_limit = length - 7;
+    for (size_t i = 0; i < search_limit; i++) {
+        uint64_t v;
+        memcpy(&v, buffer + i, 8);
+        if (v == value) {
+            return (long)i;
+        }
+    }
+    return -1L;
+}
+
+/**
+ * Find index of 16-bit value at 2-byte aligned positions.
+ * Clang auto-vectorizes to NEON/SSE2 broadcast + compare.
+ */
+long buf_indexof_short_aligned(const uint8_t* buffer, size_t length, uint16_t value) {
+    if (length < 2) return -1L;
+    size_t count = length / 2;
+    for (size_t i = 0; i < count; i++) {
+        uint16_t v;
+        memcpy(&v, buffer + i * 2, 2);
+        if (v == value) {
+            return (long)(i * 2);
+        }
+    }
+    return -1L;
+}
+
+/**
+ * Find index of 32-bit value at 4-byte aligned positions.
+ * Clang auto-vectorizes to NEON/SSE2 broadcast + compare.
+ */
+long buf_indexof_int_aligned(const uint8_t* buffer, size_t length, uint32_t value) {
+    if (length < 4) return -1L;
+    size_t count = length / 4;
+    for (size_t i = 0; i < count; i++) {
+        uint32_t v;
+        memcpy(&v, buffer + i * 4, 4);
+        if (v == value) {
+            return (long)(i * 4);
+        }
+    }
+    return -1L;
+}
+
+/**
+ * Find index of 64-bit value at 8-byte aligned positions.
+ * Clang auto-vectorizes to NEON/SSE2 broadcast + compare.
+ */
+long buf_indexof_long_aligned(const uint8_t* buffer, size_t length, uint64_t value) {
+    if (length < 8) return -1L;
+    size_t count = length / 8;
+    for (size_t i = 0; i < count; i++) {
+        uint64_t v;
+        memcpy(&v, buffer + i * 8, 8);
+        if (v == value) {
+            return (long)(i * 8);
+        }
+    }
+    return -1L;
+}

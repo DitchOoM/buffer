@@ -152,6 +152,16 @@ kotlin {
             }
         }
     }
+    targets.withType<org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget>().configureEach {
+        compilations.getByName("main") {
+            cinterops {
+                create("simd") {
+                    defFile(project.file("src/nativeInterop/cinterop/simd.def"))
+                }
+            }
+        }
+    }
+
     applyDefaultHierarchyTemplate()
     sourceSets {
         // Create nonJvmMain source set shared by nativeMain and wasmJsMain
@@ -406,6 +416,13 @@ benchmark {
             iterationTimeUnit = "ms"
             include(".*ScopedBuffer.*")
         }
+        register("bulk") {
+            warmups = 3
+            iterations = 5
+            iterationTime = 1000
+            iterationTimeUnit = "ms"
+            include("BulkOperations")
+        }
         // Fast configuration for WASM - runs only key benchmarks to avoid long run times
         register("wasmFast") {
             warmups = 2
@@ -450,6 +467,88 @@ ktlint {
     android.set(true)
     filter {
         exclude("**/generated/**")
+    }
+}
+
+// Fix: Kotlin metadata compilation for intermediate source sets (appleMain, nativeMain, etc.)
+// doesn't include per-target cinterop klibs, causing "Unresolved reference 'cinterop'" errors.
+// Add a representative cinterop klib to the metadata compilation classpath. All targets produce
+// the same API from the same .def file, so any target's klib works for type resolution.
+// Also fix: kotlinx-benchmark's NativeSourceGeneratorWorker doesn't include cinterop klibs
+// in its inputDependencies, causing KLIB resolution to fail. Add them explicitly.
+// Also fix: the benchmark executable link task doesn't include cinterop klibs,
+// causing IrLinkageError at runtime for cinterop functions.
+afterEvaluate {
+    // Determine which target's cinterop klib to use for metadata compilation
+    val metadataCinteropTarget =
+        when {
+            isArm64 -> "macosArm64"
+            System.getProperty("os.name") == "Mac OS X" -> "macosX64"
+            else -> "linuxX64"
+        }
+    val metadataCinteropKlib =
+        project.file(
+            "${project.layout.buildDirectory.get()}/classes/kotlin/$metadataCinteropTarget/main/cinterop/buffer-cinterop-simd",
+        )
+    val metadataCinteropTaskName = "cinteropSimd${metadataCinteropTarget.replaceFirstChar { it.uppercase() }}"
+
+    // Add cinterop klib to intermediate source set metadata compilation tasks
+    tasks
+        .matching {
+            it.name.startsWith("compile") && it.name.endsWith("KotlinMetadata")
+        }.configureEach {
+            dependsOn(metadataCinteropTaskName)
+            if (this is org.jetbrains.kotlin.gradle.tasks.AbstractKotlinCompileTool<*>) {
+                libraries.from(metadataCinteropKlib)
+            }
+        }
+    // Disable cross-platform metadata compilation tasks that can't resolve on the current host.
+    // CPointer arithmetic in linuxMain can't compile to metadata on macOS and vice versa.
+    val isLinux = System.getProperty("os.name") == "Linux"
+    val isMacOs = System.getProperty("os.name") == "Mac OS X"
+    tasks
+        .matching {
+            it.name.endsWith("KotlinMetadata") &&
+                (
+                    (!isLinux && it.name.contains("Linux", ignoreCase = true)) ||
+                        (
+                            !isMacOs &&
+                                (
+                                    it.name.contains("Apple", ignoreCase = true) ||
+                                        it.name.contains("Ios", ignoreCase = true) ||
+                                        it.name.contains("Macos", ignoreCase = true) ||
+                                        it.name.contains("Tvos", ignoreCase = true) ||
+                                        it.name.contains("Watchos", ignoreCase = true)
+                                )
+                        )
+                )
+        }.configureEach {
+            enabled = false
+        }
+    tasks.withType(kotlinx.benchmark.gradle.NativeSourceGeneratorTask::class.java).configureEach {
+        val gradleTarget = name.substringBefore("Benchmark")
+        val cinteropKlib =
+            project.file(
+                "${project.layout.buildDirectory.get()}/classes/kotlin/$gradleTarget/main/cinterop/buffer-cinterop-simd",
+            )
+        inputDependencies = inputDependencies + project.files(cinteropKlib)
+    }
+    tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinNativeLink::class.java).configureEach {
+        if (name.contains("BenchmarkBenchmark")) {
+            val targetName =
+                when {
+                    name.contains("MacosArm64", ignoreCase = true) -> "macosArm64"
+                    name.contains("MacosX64", ignoreCase = true) -> "macosX64"
+                    name.contains("LinuxX64", ignoreCase = true) -> "linuxX64"
+                    name.contains("LinuxArm64", ignoreCase = true) -> "linuxArm64"
+                    else -> return@configureEach
+                }
+            val cinteropKlib =
+                project.file(
+                    "${project.layout.buildDirectory.get()}/classes/kotlin/$targetName/main/cinterop/buffer-cinterop-simd",
+                )
+            libraries.from(cinteropKlib)
+        }
     }
 }
 

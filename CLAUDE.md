@@ -175,7 +175,7 @@ withScope { scope ->
 ReadBuffer provides optimized search and comparison operations:
 
 ```kotlin
-// Content comparison (optimized with SIMD on JVM 11+)
+// Content comparison (SIMD-accelerated on native, optimized on JVM 11+)
 buffer1.contentEquals(buffer2)  // true if remaining bytes are identical
 buffer1.mismatch(buffer2)       // index of first difference, or -1
 
@@ -186,18 +186,27 @@ buffer.indexOf(0x12345678)              // find Int
 buffer.indexOf(0x123456789ABCDEF0L)     // find Long
 buffer.indexOf("Hello")                 // find string (UTF-8 default)
 buffer.indexOf(otherBuffer)             // find byte sequence
+
+// Aligned search (SIMD auto-vectorized on native platforms)
+// Only checks naturally-aligned positions - use when data was written with writeShort/Int/Long
+buffer.indexOf(0x1234.toShort(), aligned = true)  // 2-byte aligned positions only
+buffer.indexOf(0x12345678, aligned = true)        // 4-byte aligned positions only
+buffer.indexOf(0x123456789ABCDEF0L, aligned = true) // 8-byte aligned positions only
 ```
 
-### Buffer Fill Methods
+### Buffer Fill & Masking Methods
 
-WriteBuffer provides optimized fill operations (writes 8 bytes at a time internally):
+WriteBuffer provides optimized fill and masking operations:
 
 ```kotlin
-// Fill remaining space with value
-buffer.fill(0x00.toByte())      // zero-fill (uses Long writes internally)
+// Fill remaining space with value (writes 8 bytes at a time internally)
+buffer.fill(0x00.toByte())      // zero-fill
 buffer.fill(0x1234.toShort())   // fill with Short pattern
 buffer.fill(0x12345678)         // fill with Int pattern
 buffer.fill(0x123456789ABCDEF0L) // fill with Long pattern
+
+// XOR mask (SIMD-accelerated on native, used for WebSocket frame masking)
+buffer.xorMask(0x12345678)      // XOR remaining bytes with repeating 4-byte mask
 ```
 
 ### Buffer Pool (`com.ditchoom.buffer.pool`)

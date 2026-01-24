@@ -237,6 +237,49 @@ class LinearBuffer(
         ptr(index).storeLong(toStore)
     }
 
+    /**
+     * Optimized XOR mask using Pointer Long operations (8 bytes at a time).
+     */
+    override fun xorMask(mask: Int) {
+        if (mask == 0) return
+        val pos = positionValue
+        val lim = limitValue
+        val size = lim - pos
+        if (size == 0) return
+
+        // WASM is little-endian, so reverse the big-endian mask for memory layout
+        val leMask = mask.reverseBytes()
+        val maskLong = (leMask.toLong() and 0xFFFFFFFFL) or (leMask.toLong() shl 32)
+
+        var offset = pos
+        // Process 8 bytes at a time
+        while (offset + 8 <= lim) {
+            val value = ptr(offset).loadLong()
+            ptr(offset).storeLong(value xor maskLong)
+            offset += 8
+        }
+
+        // Handle remaining bytes
+        val maskByte0 = (mask ushr 24).toByte()
+        val maskByte1 = (mask ushr 16).toByte()
+        val maskByte2 = (mask ushr 8).toByte()
+        val maskByte3 = mask.toByte()
+        var i = offset - pos
+        while (offset < lim) {
+            val maskByte =
+                when (i and 3) {
+                    0 -> maskByte0
+                    1 -> maskByte1
+                    2 -> maskByte2
+                    else -> maskByte3
+                }
+            val b = ptr(offset).loadByte()
+            ptr(offset).storeByte((b.toInt() xor maskByte.toInt()).toByte())
+            offset++
+            i++
+        }
+    }
+
     override fun slice(): ReadBuffer {
         // Create a new LinearBuffer view of the remaining portion
         // This is zero-copy - just creates a new view with different base offset

@@ -143,7 +143,61 @@ fun processBuffer(buffer: ReadBuffer) {
 }
 ```
 
-> **Note:** Future releases will add SIMD optimizations for even faster bulk operations on supported platforms.
+### Built-in `xorMask()` (Fastest)
+
+The buffer library provides a SIMD-optimized `xorMask()` method that eliminates all the overhead above:
+
+```kotlin
+// Best: built-in SIMD-optimized XOR mask (36x faster on Native)
+fun maskPayload(payload: PlatformBuffer, maskKey: Int) {
+    payload.xorMask(maskKey)  // SIMD-accelerated on Native, uses Long ops on JVM
+}
+```
+
+This uses platform-specific optimizations:
+- **Native (Apple/Linux):** C cinterop functions auto-vectorized to NEON/SSE2 by Clang
+- **JVM:** Long-based XOR with hardware byte swapping
+- **JS:** Int32 DataView operations (native to V8)
+
+## SIMD-Accelerated Bulk Operations
+
+On native platforms (Apple ARM64, Linux x86_64), Direct buffers use SIMD-optimized C functions
+that Clang auto-vectorizes to NEON or SSE2/AVX2 instructions.
+
+### macOS ARM64 Benchmark Results (64KB buffers)
+
+Comparison uses the same Direct buffer type — "Baseline" is the old Kotlin-only implementation
+(Long-based reads/writes via `getLong`/`set`) that was used before the SIMD overrides:
+
+| Operation | SIMD | Baseline (Kotlin-only) | Speedup |
+|-----------|------|------------------------|---------|
+| xorMask | 635K ops/s | 4.3K ops/s | **146x** |
+| contentEquals | 626K ops/s | 8.9K ops/s | **70x** |
+| fill | 944K ops/s | 17.2K ops/s | **55x** |
+| mismatch | 351K ops/s | 9.0K ops/s | **39x** |
+| indexOf(Int) | 16.1M ops/s | 1.1M ops/s | **14x** |
+| indexOf(Long) | 16.2M ops/s | 1.2M ops/s | **14x** |
+| indexOf(Byte) | 42.4M ops/s | 3.9M ops/s | **11x** |
+| indexOf(Int, aligned) | 36.9M ops/s | — | — |
+| indexOf(Long, aligned) | 43.8M ops/s | — | — |
+| bufferCopy | 939K ops/s | — | — |
+
+**Key takeaways:**
+- Use `AllocationZone.Direct` on native platforms for bulk operations (11-146x faster)
+- `xorMask()` gains the most because SIMD avoids byte-order swapping overhead
+- The `aligned` flag enables even faster SIMD scanning when data alignment is known
+
+### Running Benchmarks
+
+```bash
+# All platforms
+./gradlew bulkBenchmark
+
+# Platform-specific
+./gradlew macosArm64BenchmarkBulkBenchmark
+./gradlew jvmBenchmarkBulkBenchmark
+./gradlew jsBenchmarkBulkBenchmark
+```
 
 ## Bulk Operations
 
@@ -184,8 +238,10 @@ destBuffer.write(sourceBuffer)
 
 ### Native (Linux/Apple)
 
-- Buffer pooling is critical
-- Direct memory access is fast once allocated
+- **Use Direct buffers** for SIMD-accelerated bulk operations (up to 40x faster)
+- Buffer pooling is critical (avoid GC pressure from Kotlin/Native)
+- `xorMask()`, `contentEquals()`, `mismatch()`, `indexOf()` all use C SIMD functions
+- Use `aligned=true` on `indexOf()` when data alignment is known (up to 24x faster)
 
 ### WASM
 
@@ -304,7 +360,10 @@ while (buffer.remaining() > 0) {
 | Optimization | Impact | Effort |
 |--------------|--------|--------|
 | Buffer pooling | High | Low |
+| SIMD bulk ops (Native Direct) | High | Low |
 | Use largest primitives | High | Low |
 | Zero-copy slicing | High | Low |
+| `xorMask()` for WebSocket | High | Low |
 | Bulk operations | Medium | Low |
 | Direct allocation | Medium | Low |
+| `indexOf(aligned=true)` | Medium | Low |

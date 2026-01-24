@@ -16,6 +16,10 @@ actual val supportsSyncCompression: Boolean by lazy {
     isNodeJs
 }
 
+actual val supportsRawDeflate: Boolean by lazy {
+    isNodeJs
+}
+
 /**
  * Check if running in Node.js environment.
  */
@@ -112,7 +116,14 @@ private fun decompressWithNodeZlib(
         when (algorithm) {
             CompressionAlgorithm.Gzip -> zlib.gunzipSync(inputArray).unsafeCast<Uint8Array>()
             CompressionAlgorithm.Deflate -> zlib.inflateSync(inputArray).unsafeCast<Uint8Array>()
-            CompressionAlgorithm.Raw -> zlib.inflateRawSync(inputArray).unsafeCast<Uint8Array>()
+            CompressionAlgorithm.Raw -> {
+                // Use Z_SYNC_FLUSH as finishFlush so inflateRawSync doesn't require
+                // BFINAL=1. This is needed for WebSocket per-message-deflate (RFC 7692)
+                // where the sync marker 00 00 ff ff has BFINAL=0.
+                val options = js("{}")
+                options["finishFlush"] = zlib.constants.Z_SYNC_FLUSH
+                zlib.inflateRawSync(inputArray, options).unsafeCast<Uint8Array>()
+            }
         }
 
     return decompressed.toJsBuffer()

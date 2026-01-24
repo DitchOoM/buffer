@@ -329,6 +329,12 @@ private class AppleZlibStreamingDecompressor(
             when (result) {
                 Z_OK -> {}
                 Z_STREAM_END -> streamEnded = true
+                -5 -> {
+                    // Z_BUF_ERROR (-5) with no input means the stream produced all
+                    // available output. This is expected for raw deflate streams
+                    // without BFINAL=1 (e.g., WebSocket per-message-deflate RFC 7692).
+                    streamEnded = true
+                }
                 else -> throw CompressionException("inflate finish failed with code: $result")
             }
 

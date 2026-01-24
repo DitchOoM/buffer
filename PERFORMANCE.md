@@ -189,6 +189,41 @@ Run ScopedBuffer benchmarks:
 
 These optimizations improved Native performance by 1.3-1.7x and fixed OOM crashes during high-frequency slice operations.
 
+### SIMD-Accelerated Bulk Operations (Native)
+
+On native platforms (Apple ARM64, Linux x86_64), Direct buffers (`AllocationZone.Direct`) use C cinterop functions that Clang auto-vectorizes to NEON or SSE2/AVX2 instructions.
+
+**macOS ARM64 Benchmark Results (64KB buffers):**
+
+Comparison uses the same Direct buffer type — "Baseline" is the old Kotlin-only implementation
+(Long-based reads/writes via `getLong`/`set`) that was used before the SIMD overrides:
+
+| Operation | SIMD | Baseline (Kotlin-only) | Speedup |
+|-----------|------|------------------------|---------|
+| xorMask | 635K ops/s | 4.3K ops/s | **146x** |
+| contentEquals | 626K ops/s | 8.9K ops/s | **70x** |
+| fill | 944K ops/s | 17.2K ops/s | **55x** |
+| mismatch | 351K ops/s | 9.0K ops/s | **39x** |
+| indexOf(Int) | 16.1M ops/s | 1.1M ops/s | **14x** |
+| indexOf(Long) | 16.2M ops/s | 1.2M ops/s | **14x** |
+| indexOf(Byte) | 42.4M ops/s | 3.9M ops/s | **11x** |
+| indexOf(Int, aligned) | 36.9M ops/s | — | — |
+| indexOf(Long, aligned) | 43.8M ops/s | — | — |
+| bufferCopy | 939K ops/s | — | — |
+
+**Key takeaways:**
+- Use `AllocationZone.Direct` on native platforms for bulk operations (11-146x faster)
+- `xorMask()` gains the most because SIMD avoids byte-order swapping overhead
+- The `aligned` flag enables even faster SIMD scanning when data alignment is known
+- `xorMask()` is critical for WebSocket per-message-deflate masking performance
+
+**Running bulk benchmarks:**
+```bash
+./gradlew macosArm64BenchmarkBulkBenchmark
+./gradlew jvmBenchmarkBulkBenchmark
+./gradlew jsBenchmarkBulkBenchmark
+```
+
 ### String Decoding (Apple Platforms)
 
 The string decoding implementation uses platform-specific source sets to handle NSStringEncoding type differences across Apple platforms:

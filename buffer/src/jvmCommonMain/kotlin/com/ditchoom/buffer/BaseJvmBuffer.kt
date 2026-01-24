@@ -199,6 +199,53 @@ abstract class BaseJvmBuffer(
         }
     }
 
+    /**
+     * Optimized XOR mask using ByteBuffer getLong/putLong with forced BIG_ENDIAN.
+     */
+    override fun xorMask(mask: Int) {
+        if (mask == 0) return
+        val pos = position()
+        val lim = limit()
+        val size = lim - pos
+        if (size == 0) return
+
+        // Create 8-byte mask (big-endian: mask repeated twice)
+        val maskLong = (mask.toLong() shl 32) or (mask.toLong() and 0xFFFFFFFFL)
+
+        // Use a duplicate with BIG_ENDIAN to avoid byte-order interference
+        val dup = byteBuffer.duplicate()
+        (dup as java.nio.Buffer).position(pos)
+        (dup as java.nio.Buffer).limit(lim)
+        dup.order(java.nio.ByteOrder.BIG_ENDIAN)
+
+        var offset = pos
+        // Process 8 bytes at a time
+        while (offset + 8 <= lim) {
+            val value = dup.getLong(offset)
+            dup.putLong(offset, value xor maskLong)
+            offset += 8
+        }
+
+        // Handle remaining bytes
+        val maskByte0 = (mask ushr 24).toByte()
+        val maskByte1 = (mask ushr 16).toByte()
+        val maskByte2 = (mask ushr 8).toByte()
+        val maskByte3 = mask.toByte()
+        var i = offset - pos
+        while (offset < lim) {
+            val maskByte =
+                when (i and 3) {
+                    0 -> maskByte0
+                    1 -> maskByte1
+                    2 -> maskByte2
+                    else -> maskByte3
+                }
+            byteBuffer.put(offset, (byteBuffer.get(offset).toInt() xor maskByte.toInt()).toByte())
+            offset++
+            i++
+        }
+    }
+
     override fun position(newPosition: Int) {
         buffer.position(newPosition)
     }
@@ -274,13 +321,17 @@ abstract class BaseJvmBuffer(
     /**
      * Optimized Short indexOf using ByteBuffer operations.
      */
-    override fun indexOf(value: Short): Int {
+    override fun indexOf(
+        value: Short,
+        aligned: Boolean,
+    ): Int {
         val pos = position()
         val remaining = remaining()
         if (remaining < 2) return -1
 
+        val step = if (aligned) 2 else 1
         val searchLimit = remaining - 1
-        for (i in 0 until searchLimit) {
+        for (i in 0 until searchLimit step step) {
             if (byteBuffer.getShort(pos + i) == value) {
                 return i
             }
@@ -291,13 +342,17 @@ abstract class BaseJvmBuffer(
     /**
      * Optimized Int indexOf using ByteBuffer operations.
      */
-    override fun indexOf(value: Int): Int {
+    override fun indexOf(
+        value: Int,
+        aligned: Boolean,
+    ): Int {
         val pos = position()
         val remaining = remaining()
         if (remaining < 4) return -1
 
+        val step = if (aligned) 4 else 1
         val searchLimit = remaining - 3
-        for (i in 0 until searchLimit) {
+        for (i in 0 until searchLimit step step) {
             if (byteBuffer.getInt(pos + i) == value) {
                 return i
             }
@@ -308,13 +363,17 @@ abstract class BaseJvmBuffer(
     /**
      * Optimized Long indexOf using ByteBuffer operations.
      */
-    override fun indexOf(value: Long): Int {
+    override fun indexOf(
+        value: Long,
+        aligned: Boolean,
+    ): Int {
         val pos = position()
         val remaining = remaining()
         if (remaining < 8) return -1
 
+        val step = if (aligned) 8 else 1
         val searchLimit = remaining - 7
-        for (i in 0 until searchLimit) {
+        for (i in 0 until searchLimit step step) {
             if (byteBuffer.getLong(pos + i) == value) {
                 return i
             }
