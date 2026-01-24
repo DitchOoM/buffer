@@ -493,14 +493,38 @@ afterEvaluate {
     val metadataCinteropTaskName = "cinteropSimd${metadataCinteropTarget.replaceFirstChar { it.uppercase() }}"
 
     // Add cinterop klib to intermediate source set metadata compilation tasks
-    tasks.matching {
-        it.name.startsWith("compile") && it.name.endsWith("KotlinMetadata")
-    }.configureEach {
-        dependsOn(metadataCinteropTaskName)
-        if (this is org.jetbrains.kotlin.gradle.tasks.AbstractKotlinCompileTool<*>) {
-            libraries.from(metadataCinteropKlib)
+    tasks
+        .matching {
+            it.name.startsWith("compile") && it.name.endsWith("KotlinMetadata")
+        }.configureEach {
+            dependsOn(metadataCinteropTaskName)
+            if (this is org.jetbrains.kotlin.gradle.tasks.AbstractKotlinCompileTool<*>) {
+                libraries.from(metadataCinteropKlib)
+            }
         }
-    }
+    // Disable cross-platform metadata compilation tasks that can't resolve on the current host.
+    // CPointer arithmetic in linuxMain can't compile to metadata on macOS and vice versa.
+    val isLinux = System.getProperty("os.name") == "Linux"
+    val isMacOs = System.getProperty("os.name") == "Mac OS X"
+    tasks
+        .matching {
+            it.name.endsWith("KotlinMetadata") &&
+                (
+                    (!isLinux && it.name.contains("Linux", ignoreCase = true)) ||
+                        (
+                            !isMacOs &&
+                                (
+                                    it.name.contains("Apple", ignoreCase = true) ||
+                                        it.name.contains("Ios", ignoreCase = true) ||
+                                        it.name.contains("Macos", ignoreCase = true) ||
+                                        it.name.contains("Tvos", ignoreCase = true) ||
+                                        it.name.contains("Watchos", ignoreCase = true)
+                                )
+                        )
+                )
+        }.configureEach {
+            enabled = false
+        }
     tasks.withType(kotlinx.benchmark.gradle.NativeSourceGeneratorTask::class.java).configureEach {
         val gradleTarget = name.substringBefore("Benchmark")
         val cinteropKlib =
