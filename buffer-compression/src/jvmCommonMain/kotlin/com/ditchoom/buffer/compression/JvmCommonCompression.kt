@@ -8,6 +8,7 @@ import com.ditchoom.buffer.allocate
  * JVM/Android supports synchronous compression via java.util.zip.
  */
 actual val supportsSyncCompression: Boolean = true
+actual val supportsRawDeflate: Boolean = true
 
 /**
  * JVM/Android implementation delegating to streaming compression.

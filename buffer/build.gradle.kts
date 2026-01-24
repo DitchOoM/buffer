@@ -540,3 +540,24 @@ dokka {
             suppress.set(true)
         }
 }
+
+// Dokka suppress.set(true) prevents documentation output but still triggers metadata
+// compilation as a task dependency. Disable native metadata compilation tasks when Dokka
+// is in the task graph, since those tasks fail (cinterop klibs are per-target, not
+// available for intermediate source set metadata compilation).
+gradle.taskGraph.whenReady {
+    if (allTasks.any { it.name.contains("dokka", ignoreCase = true) }) {
+        allTasks
+            .filter {
+                it.name.endsWith("KotlinMetadata") &&
+                    (
+                        it.name.contains("Apple", ignoreCase = true) ||
+                            it.name.contains("Native", ignoreCase = true) ||
+                            it.name.contains("Linux", ignoreCase = true) ||
+                            it.name.contains("Macos", ignoreCase = true)
+                    )
+            }.forEach {
+                it.enabled = false
+            }
+    }
+}

@@ -39,6 +39,7 @@ import platform.zlib.z_stream
  * Apple supports synchronous compression via system zlib.
  */
 actual val supportsSyncCompression: Boolean = true
+actual val supportsRawDeflate: Boolean = true
 
 /**
  * Helper to copy memory with platform-appropriate size_t conversion.

@@ -115,6 +115,15 @@ class CompressionException(
  */
 expect val supportsSyncCompression: Boolean
 
+/**
+ * Whether the current platform supports raw deflate (no zlib/gzip headers).
+ *
+ * - JVM, Android, Apple: `true`
+ * - JS (Node.js): `true` - uses native zlib inflateRaw
+ * - JS (Browser): `false` - CompressionStream API only supports "gzip" and "deflate"
+ */
+expect val supportsRawDeflate: Boolean
+
 // =============================================================================
 // Suspending One-Shot API (works on all platforms including browser JS)
 // =============================================================================

@@ -50,6 +50,7 @@ class RawDeflateTests {
     @Test
     fun rfc7692_unfragmented_hello_async() =
         runTest {
+            if (!supportsRawDeflate) return@runTest
             val compressed =
                 byteArrayOf(
                     0xf2.toByte(),
@@ -87,6 +88,7 @@ class RawDeflateTests {
     @Test
     fun rfc7692_unfragmented_hello_streaming() =
         runTest {
+            if (!supportsRawDeflate) return@runTest
             val compressed =
                 byteArrayOf(
                     0xf2.toByte(),
@@ -128,6 +130,7 @@ class RawDeflateTests {
     @Test
     fun rfc7692_fragmented_hello_async() =
         runTest {
+            if (!supportsRawDeflate) return@runTest
             // After reassembly, the combined compressed payload is the same
             val combined =
                 byteArrayOf(
@@ -151,6 +154,7 @@ class RawDeflateTests {
     @Test
     fun rfc7692_fragmented_hello_streaming_incremental() =
         runTest {
+            if (!supportsRawDeflate) return@runTest
             val fragment1 = byteArrayOf(0xf2.toByte(), 0x48, 0xcd.toByte())
             val fragment2 = byteArrayOf(0xc9.toByte(), 0xc9.toByte(), 0x07, 0x00) + syncTerminator
 
@@ -198,6 +202,7 @@ class RawDeflateTests {
     @Test
     fun rfc7692_stored_block_hello_async() =
         runTest {
+            if (!supportsRawDeflate) return@runTest
             val compressed =
                 byteArrayOf(
                     0x00,
@@ -251,6 +256,7 @@ class RawDeflateTests {
     @Test
     fun rawDeflate_roundTrip_async() =
         runTest {
+            if (!supportsRawDeflate) return@runTest
             val text = "Round trip raw deflate test data!"
             val compressed = compressAsync(text.toReadBuffer(), CompressionAlgorithm.Raw)
             val decompressed = decompressAsync(compressed, CompressionAlgorithm.Raw)
@@ -276,6 +282,7 @@ class RawDeflateTests {
     @Test
     fun rawDeflate_largePayload_withSyncTerminator() =
         runTest {
+            if (!supportsRawDeflate) return@runTest
             val text = "WebSocket payload data. ".repeat(500) // ~12KB
             val compressed = compressAsync(text.toReadBuffer(), CompressionAlgorithm.Raw)
 
@@ -299,6 +306,7 @@ class RawDeflateTests {
     @Test
     fun rawDeflate_onlySyncTerminator_async() =
         runTest {
+            if (!supportsRawDeflate) return@runTest
             // Just the sync terminator: an empty stored block
             val buffer = PlatformBuffer.allocate(syncTerminator.size)
             buffer.writeBytes(syncTerminator)
@@ -332,6 +340,7 @@ class RawDeflateTests {
     @Test
     fun rawDeflate_multipleMessages_sharedContext_streaming() =
         runTest {
+            if (!supportsRawDeflate) return@runTest
             val messages = listOf("Hello", "World", "WebSocket", "Compression")
 
             // Compress each message with shared compressor context
@@ -377,6 +386,7 @@ class RawDeflateTests {
     @Test
     fun rawDeflate_singleByte_async() =
         runTest {
+            if (!supportsRawDeflate) return@runTest
             val text = "X"
             val compressed = compressAsync(text.toReadBuffer(), CompressionAlgorithm.Raw)
             val decompressed = decompressAsync(compressed, CompressionAlgorithm.Raw)
@@ -389,6 +399,7 @@ class RawDeflateTests {
     @Test
     fun rawDeflate_binaryData_async() =
         runTest {
+            if (!supportsRawDeflate) return@runTest
             val data = ByteArray(256) { it.toByte() }
             val input = PlatformBuffer.allocate(data.size)
             input.writeBytes(data)
@@ -407,6 +418,7 @@ class RawDeflateTests {
     @Test
     fun rawDeflate_withExpectedOutputSize_async() =
         runTest {
+            if (!supportsRawDeflate) return@runTest
             val compressed =
                 byteArrayOf(
                     0xf2.toByte(),
@@ -425,6 +437,7 @@ class RawDeflateTests {
     @Test
     fun rawDeflate_withUnderestimatedExpectedSize_async() =
         runTest {
+            if (!supportsRawDeflate) return@runTest
             val compressed =
                 byteArrayOf(
                     0xf2.toByte(),
@@ -451,6 +464,7 @@ class RawDeflateTests {
     @Test
     fun rawDeflate_repeatedCycles_async() =
         runTest {
+            if (!supportsRawDeflate) return@runTest
             val texts = listOf("Hello", "World", "Test123", "A".repeat(1000), "B")
             for (text in texts) {
                 val compressed = compressAsync(text.toReadBuffer(), CompressionAlgorithm.Raw)

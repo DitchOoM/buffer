@@ -16,6 +16,10 @@ actual val supportsSyncCompression: Boolean by lazy {
     isNodeJs
 }
 
+actual val supportsRawDeflate: Boolean by lazy {
+    isNodeJs
+}
+
 /**
  * Check if running in Node.js environment.
  */
