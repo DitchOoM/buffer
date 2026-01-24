@@ -531,4 +531,12 @@ dokka {
         }
         reportUndocumented.set(false)
     }
+    // Suppress native source sets that use cinterop - metadata compilation can't
+    // resolve cinterop bindings. Public API is fully documented via commonMain.
+    dokkaSourceSets
+        .matching {
+            it.name in setOf("appleMain", "nativeMain", "linuxMain", "macosMain")
+        }.configureEach {
+            suppress.set(true)
+        }
 }

@@ -191,27 +191,30 @@ These optimizations improved Native performance by 1.3-1.7x and fixed OOM crashe
 
 ### SIMD-Accelerated Bulk Operations (Native)
 
-On native platforms (Apple ARM64, Linux x86_64), Direct buffers (`AllocationZone.Direct`) use C cinterop functions that Clang auto-vectorizes to NEON or SSE2/AVX2 instructions. Heap buffers use Kotlin-only implementations as a baseline.
+On native platforms (Apple ARM64, Linux x86_64), Direct buffers (`AllocationZone.Direct`) use C cinterop functions that Clang auto-vectorizes to NEON or SSE2/AVX2 instructions.
 
 **macOS ARM64 Benchmark Results (64KB buffers):**
 
-| Operation | Direct (SIMD) | Heap (Baseline) | Speedup |
-|-----------|---------------|-----------------|---------|
-| xorMask | 625K ops/s | 17.5K ops/s | **36x** |
-| contentEquals | 629K ops/s | 15.9K ops/s | **40x** |
-| mismatch | 355K ops/s | 14.9K ops/s | **24x** |
-| indexOf(Byte) | 43.2M ops/s | 5.8M ops/s | **7.4x** |
-| indexOf(Int) | 16.2M ops/s | 3.3M ops/s | **4.9x** |
-| indexOf(Int, aligned) | 37.0M ops/s | — | **11x** |
-| indexOf(Long) | 16.4M ops/s | 1.9M ops/s | **8.7x** |
-| indexOf(Long, aligned) | 44.8M ops/s | — | **24x** |
-| fill | 940K ops/s | 1.0M ops/s | ~1x |
-| bufferCopy | 943K ops/s | — | — |
+Comparison uses the same Direct buffer type — "Baseline" is the old Kotlin-only implementation
+(Long-based reads/writes via `getLong`/`set`) that was used before the SIMD overrides:
+
+| Operation | SIMD | Baseline (Kotlin-only) | Speedup |
+|-----------|------|------------------------|---------|
+| xorMask | 635K ops/s | 4.3K ops/s | **146x** |
+| contentEquals | 626K ops/s | 8.9K ops/s | **70x** |
+| fill | 944K ops/s | 17.2K ops/s | **55x** |
+| mismatch | 351K ops/s | 9.0K ops/s | **39x** |
+| indexOf(Int) | 16.1M ops/s | 1.1M ops/s | **14x** |
+| indexOf(Long) | 16.2M ops/s | 1.2M ops/s | **14x** |
+| indexOf(Byte) | 42.4M ops/s | 3.9M ops/s | **11x** |
+| indexOf(Int, aligned) | 36.9M ops/s | — | — |
+| indexOf(Long, aligned) | 43.8M ops/s | — | — |
+| bufferCopy | 939K ops/s | — | — |
 
 **Key takeaways:**
-- Use `AllocationZone.Direct` on native platforms for bulk operations (7-40x faster)
-- The `aligned` flag enables faster SIMD scanning when data alignment is known (up to 24x)
-- `fill` is already fast on both paths (uses `memset` internally)
+- Use `AllocationZone.Direct` on native platforms for bulk operations (11-146x faster)
+- `xorMask()` gains the most because SIMD avoids byte-order swapping overhead
+- The `aligned` flag enables even faster SIMD scanning when data alignment is known
 - `xorMask()` is critical for WebSocket per-message-deflate masking performance
 
 **Running bulk benchmarks:**

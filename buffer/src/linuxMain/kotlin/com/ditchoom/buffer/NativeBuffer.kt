@@ -2,6 +2,14 @@
 
 package com.ditchoom.buffer
 
+import com.ditchoom.buffer.cinterop.buf_indexof_int
+import com.ditchoom.buffer.cinterop.buf_indexof_int_aligned
+import com.ditchoom.buffer.cinterop.buf_indexof_long
+import com.ditchoom.buffer.cinterop.buf_indexof_long_aligned
+import com.ditchoom.buffer.cinterop.buf_indexof_short
+import com.ditchoom.buffer.cinterop.buf_indexof_short_aligned
+import com.ditchoom.buffer.cinterop.buf_mismatch
+import com.ditchoom.buffer.cinterop.buf_xor_mask
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.UByteVar
@@ -17,14 +25,6 @@ import platform.posix.malloc
 import platform.posix.memchr
 import platform.posix.memcmp
 import platform.posix.memset
-import com.ditchoom.buffer.cinterop.buf_xor_mask
-import com.ditchoom.buffer.cinterop.buf_mismatch
-import com.ditchoom.buffer.cinterop.buf_indexof_short
-import com.ditchoom.buffer.cinterop.buf_indexof_short_aligned
-import com.ditchoom.buffer.cinterop.buf_indexof_int
-import com.ditchoom.buffer.cinterop.buf_indexof_int_aligned
-import com.ditchoom.buffer.cinterop.buf_indexof_long
-import com.ditchoom.buffer.cinterop.buf_indexof_long_aligned
 
 /**
  * Buffer implementation using native memory (malloc/free) on Linux.
@@ -355,32 +355,33 @@ class NativeBuffer private constructor(
             return if (thisRemaining != otherRemaining) 0 else -1
         }
 
-        val result = when (other) {
-            is NativeBuffer -> {
-                buf_mismatch(
-                    (ptr + positionValue)!!.reinterpret(),
-                    (other.ptr + other.position())!!.reinterpret(),
-                    minLength.convert(),
-                ).toInt()
-            }
-            is ByteArrayBuffer -> {
-                other.backingArray.usePinned { pinned ->
+        val result =
+            when (other) {
+                is NativeBuffer -> {
                     buf_mismatch(
                         (ptr + positionValue)!!.reinterpret(),
-                        pinned.addressOf(other.position())!!.reinterpret(),
+                        (other.ptr + other.position())!!.reinterpret(),
                         minLength.convert(),
                     ).toInt()
                 }
-            }
-            else -> {
-                for (i in 0 until minLength) {
-                    if (get(positionValue + i) != other.get(other.position() + i)) {
-                        return i
+                is ByteArrayBuffer -> {
+                    other.backingArray.usePinned { pinned ->
+                        buf_mismatch(
+                            (ptr + positionValue)!!.reinterpret(),
+                            pinned.addressOf(other.position())!!.reinterpret(),
+                            minLength.convert(),
+                        ).toInt()
                     }
                 }
-                -1
+                else -> {
+                    for (i in 0 until minLength) {
+                        if (get(positionValue + i) != other.get(other.position() + i)) {
+                            return i
+                        }
+                    }
+                    -1
+                }
             }
-        }
 
         if (result != -1) return result
         return if (thisRemaining != otherRemaining) minLength else -1
@@ -407,7 +408,10 @@ class NativeBuffer private constructor(
      * Optimized indexOf(Short) using native C implementation.
      * When [aligned] is true, uses SIMD auto-vectorized aligned scanning.
      */
-    override fun indexOf(value: Short, aligned: Boolean): Int {
+    override fun indexOf(
+        value: Short,
+        aligned: Boolean,
+    ): Int {
         checkOpen()
         val size = remaining()
         if (size < 2) return -1
@@ -424,7 +428,10 @@ class NativeBuffer private constructor(
      * Optimized indexOf(Int) using native C implementation.
      * When [aligned] is true, uses SIMD auto-vectorized aligned scanning.
      */
-    override fun indexOf(value: Int, aligned: Boolean): Int {
+    override fun indexOf(
+        value: Int,
+        aligned: Boolean,
+    ): Int {
         checkOpen()
         val size = remaining()
         if (size < 4) return -1
@@ -441,7 +448,10 @@ class NativeBuffer private constructor(
      * Optimized indexOf(Long) using native C implementation.
      * When [aligned] is true, uses SIMD auto-vectorized aligned scanning.
      */
-    override fun indexOf(value: Long, aligned: Boolean): Int {
+    override fun indexOf(
+        value: Long,
+        aligned: Boolean,
+    ): Int {
         checkOpen()
         val size = remaining()
         if (size < 8) return -1
