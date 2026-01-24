@@ -156,6 +156,11 @@ val worldIndex = buffer.indexOf("World")  // 7
 buffer.indexOf(0x1234.toShort())
 buffer.indexOf(0x12345678)
 buffer.indexOf(0x123456789ABCDEF0L)
+
+// Aligned search (faster, SIMD-accelerated on native)
+// Use when values were written with writeShort/writeInt/writeLong
+buffer.indexOf(0x1234.toShort(), aligned = true)
+buffer.indexOf(0x12345678, aligned = true)
 ```
 
 ## Comparing Buffers
@@ -185,6 +190,12 @@ buffer.fill(0x00.toByte())
 // Fill with a pattern
 buffer.resetForWrite()
 buffer.fill(0xDEADBEEF.toInt())  // Requires size divisible by 4
+
+// XOR mask (SIMD-accelerated on native, used for WebSocket frame masking)
+buffer.resetForWrite()
+buffer.fill(0x01.toByte())
+buffer.resetForRead()
+buffer.xorMask(0x12345678)  // XOR remaining bytes with repeating 4-byte mask
 ```
 
 ## Buffer Pooling
