@@ -46,7 +46,7 @@ import platform.posix.memset
  * ```
  */
 class NativeBuffer private constructor(
-    internal val ptr: CPointer<ByteVar>,
+    private val ptr: CPointer<ByteVar>,
     override val capacity: Int,
     override val byteOrder: ByteOrder,
 ) : PlatformBuffer,
@@ -59,6 +59,9 @@ class NativeBuffer private constructor(
     override val nativeSize: Long get() = capacity.toLong()
 
     private val littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN
+
+    // All current Kotlin/Native targets (ARM64, x86_64) are little-endian.
+    // This would need updating if a big-endian target (e.g. s390x) is ever added.
     private val nativeIsLittleEndian = true
 
     companion object {
@@ -303,7 +306,8 @@ class NativeBuffer private constructor(
         if (mask == 0) return
         val size = remaining()
         if (size == 0) return
-        // Byte-swap mask for little-endian native memory
+        // The mask Int is big-endian (byte 0 = MSB). Native memory is little-endian,
+        // so reverseBytes() ensures mask_bytes[0] from memcpy matches the first byte to XOR.
         val nativeMask = mask.reverseBytes().toUInt()
         buf_xor_mask((ptr + positionValue)!!.reinterpret<UByteVar>(), size.convert(), nativeMask)
     }
@@ -491,6 +495,9 @@ private class NativeBufferSlice(
     override val nativeSize: Long get() = capacity.toLong()
 
     private val littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN
+
+    // All current Kotlin/Native targets (ARM64, x86_64) are little-endian.
+    // This would need updating if a big-endian target (e.g. s390x) is ever added.
     private val nativeIsLittleEndian = true
 
     private fun checkOpen() = check(!parent.isClosed()) { "Parent buffer closed" }

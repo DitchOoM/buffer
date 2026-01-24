@@ -9,6 +9,10 @@ compilerOpts = -O2
  * XOR mask buffer in-place with a repeating 4-byte mask.
  * Clang at -O2 auto-vectorizes this to NEON (ARM64) or SSE2/AVX2 (x86_64).
  * Uses memcpy for type-safe unaligned access (compiles to same instructions).
+ *
+ * The `mask` parameter must be in native byte order such that after
+ * `memcpy(mask_bytes, &mask, 4)`, mask_bytes[0] corresponds to the first
+ * byte to XOR, mask_bytes[1] to the second, and so on.
  */
 void buf_xor_mask(uint8_t* buffer, size_t length, uint32_t mask) {
     uint64_t mask64 = ((uint64_t)mask << 32) | (uint64_t)mask;

@@ -284,6 +284,8 @@ class ByteArrayBuffer(
 
     /**
      * Optimized contentEquals for ByteArrayBuffer-to-ByteArrayBuffer comparison.
+     * Uses a direct element-by-element loop to avoid allocating temporary arrays
+     * (copyOfRange would allocate two ByteArrays for the slicing).
      */
     override fun contentEquals(other: ReadBuffer): Boolean {
         if (remaining() != other.remaining()) return false
@@ -291,6 +293,8 @@ class ByteArrayBuffer(
         if (size == 0) return true
 
         if (other is ByteArrayBuffer) {
+            // Intentionally allocation-free: compare elements directly rather than
+            // using copyOfRange().contentEquals() which would allocate two temp arrays.
             for (i in 0 until size) {
                 if (data[positionValue + i] != other.data[other.positionValue + i]) {
                     return false

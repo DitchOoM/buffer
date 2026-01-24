@@ -106,7 +106,8 @@ class NativeScopedBuffer(
 
     private val littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN
 
-    // Native byte order is little-endian on all modern platforms (x86, ARM, etc.)
+    // All current Kotlin/Native targets (ARM64, x86_64) are little-endian.
+    // This would need updating if a big-endian target (e.g. s390x) is ever added.
     private val nativeIsLittleEndian = true
 
     // Position and limit management

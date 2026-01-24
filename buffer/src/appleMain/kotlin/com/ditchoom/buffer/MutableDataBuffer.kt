@@ -315,7 +315,8 @@ class MutableDataBuffer(
         if (mask == 0) return
         val size = limit - position
         if (size == 0) return
-        // Byte-swap mask for little-endian: mask is big-endian but native memory is LE
+        // The mask Int is big-endian (byte 0 = MSB). Native memory is little-endian,
+        // so reverseBytes() ensures mask_bytes[0] from memcpy matches the first byte to XOR.
         val nativeMask = mask.reverseBytes().toUInt()
         buf_xor_mask((bytePointer + position)!!.reinterpret(), size.convert(), nativeMask)
     }
