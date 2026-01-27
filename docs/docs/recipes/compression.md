@@ -123,6 +123,46 @@ CompressionAlgorithm.Deflate
 CompressionAlgorithm.Raw
 ```
 
+## Sync Flush Marker Handling
+
+Some protocols (like WebSocket permessage-deflate) require stripping or appending the deflate sync marker (`00 00 FF FF`). The buffer module provides utilities for this:
+
+### Convenience Functions
+
+For most use cases, use the high-level functions:
+
+```kotlin
+// Compress with sync flush and strip the marker
+val compressed = compressWithSyncFlush(data.toReadBuffer())
+
+// Decompress data that had the marker stripped
+val decompressed = decompressWithSyncFlush(compressed)
+```
+
+### Low-Level Utilities
+
+For more control, use the extension functions directly:
+
+```kotlin
+// Strip the sync marker from the end of compressed data
+val stripped = compressedBuffer.stripSyncFlushMarker()
+
+// Append the sync marker before decompression
+val withMarker = compressedBuffer.appendSyncFlushMarker()
+```
+
+### The Sync Marker Constant
+
+The marker value is available as a constant:
+
+```kotlin
+DeflateFormat.SYNC_FLUSH_MARKER  // 0x0000FFFF (00 00 FF FF)
+```
+
+:::note
+These utilities work with raw deflate (`CompressionAlgorithm.Raw`). The sync marker is a deflate format concept, not specific to any protocol.
+:::
+
 ## Compression Levels
 
 Control the speed/size tradeoff:
