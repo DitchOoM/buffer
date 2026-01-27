@@ -281,11 +281,10 @@ private class BrowserStreamingCompressor(
         return emptyList()
     }
 
-    override suspend fun flush(): List<ReadBuffer> {
+    override suspend fun flush(): List<ReadBuffer> =
         throw UnsupportedOperationException(
             "flush() not supported in browser. Browser CompressionStream does not support flush modes.",
         )
-    }
 
     override suspend fun finish(): List<ReadBuffer> {
         check(!closed) { "Compressor is closed" }
