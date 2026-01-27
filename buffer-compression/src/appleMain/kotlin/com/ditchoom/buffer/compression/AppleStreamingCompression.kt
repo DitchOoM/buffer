@@ -158,6 +158,40 @@ private class AppleZlibStreamingCompressor(
         input.position(inputPosition + remaining)
     }
 
+    override fun flush(onOutput: (ReadBuffer) -> Unit) {
+        check(!closed) { "Compressor is closed" }
+        val s = streamPtr ?: throw CompressionException("Stream not initialized")
+
+        s.pointed.next_in = null
+        s.pointed.avail_in = 0u
+
+        // Drain with Z_SYNC_FLUSH until no more output
+        while (true) {
+            val chunk = allocator.allocate(outputBufferSize) as MutableDataBuffer
+            val chunkPtr =
+                chunk.data.mutableBytes as? CPointer<ByteVar>
+                    ?: throw CompressionException("Failed to get output buffer pointer")
+
+            s.pointed.next_out = chunkPtr.reinterpret()
+            s.pointed.avail_out = outputBufferSize.convert()
+
+            val result = deflate(s, Z_SYNC_FLUSH)
+            if (result != Z_OK && result != Z_STREAM_END) {
+                throw CompressionException("deflate flush failed with code: $result")
+            }
+
+            val produced = outputBufferSize - s.pointed.avail_out.toInt()
+            if (produced > 0) {
+                chunk.position(produced)
+                chunk.resetForRead()
+                onOutput(chunk)
+            }
+
+            // If output buffer wasn't filled, flush is complete
+            if (s.pointed.avail_out > 0u) break
+        }
+    }
+
     override fun finish(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         val s = streamPtr ?: throw CompressionException("Stream not initialized")

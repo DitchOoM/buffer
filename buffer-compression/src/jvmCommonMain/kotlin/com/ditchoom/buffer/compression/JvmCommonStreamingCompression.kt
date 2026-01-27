@@ -75,23 +75,26 @@ private fun Deflater.setInputFrom(buffer: ReadBuffer) {
 /**
  * Deflates into a ByteBuffer, using the most efficient method available.
  */
-private fun Deflater.deflateInto(buffer: ByteBuffer): Int {
+private fun Deflater.deflateInto(
+    buffer: ByteBuffer,
+    flushMode: Int = Deflater.NO_FLUSH,
+): Int {
     try {
-        return deflate(buffer)
+        return deflate(buffer, flushMode)
     } catch (_: NoSuchMethodError) {
         // ByteBuffer overload not available, use fallback
     }
 
     // Fallback: use array if available
     if (buffer.hasArray()) {
-        val count = deflate(buffer.array(), buffer.arrayOffset() + buffer.position(), buffer.remaining())
+        val count = deflate(buffer.array(), buffer.arrayOffset() + buffer.position(), buffer.remaining(), flushMode)
         (buffer as Buffer).position(buffer.position() + count)
         return count
     }
 
     // Fallback: use temp array
     val temp = ByteArray(buffer.remaining())
-    val count = deflate(temp)
+    val count = deflate(temp, 0, temp.size, flushMode)
     buffer.put(temp, 0, count)
     return count
 }
@@ -223,13 +226,39 @@ private class JvmDeflateStreamingCompressor(
     ) {
         check(!closed) { "Compressor is closed" }
         deflater.setInputFrom(input)
-        drainDeflater(onOutput, finishing = false)
+        drainDeflater(onOutput)
+    }
+
+    override fun flush(onOutput: (ReadBuffer) -> Unit) {
+        check(!closed) { "Compressor is closed" }
+        // For SYNC_FLUSH, keep calling deflate until output buffer is not filled
+        // This forces the sync marker to be written even if there's no pending input
+        while (true) {
+            if (currentOutput == null) {
+                currentOutput = allocator.allocate(outputBufferSize)
+            }
+
+            val output = currentOutput!!
+            val buffer = (output as BaseJvmBuffer).byteBuffer
+            val count = deflater.deflateInto(buffer, Deflater.SYNC_FLUSH)
+
+            if (count > 0 && buffer.remaining() == 0) {
+                output.resetForRead()
+                onOutput(output)
+                currentOutput = null
+            } else {
+                // Output buffer not filled, flush is complete
+                break
+            }
+        }
+        emitPartialBuffer(currentOutput, onOutput)
+        currentOutput = null
     }
 
     override fun finish(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         deflater.finish()
-        drainDeflater(onOutput, finishing = true)
+        drainDeflaterFinishing(onOutput)
         emitPartialBuffer(currentOutput, onOutput)
         currentOutput = null
     }
@@ -247,18 +276,29 @@ private class JvmDeflateStreamingCompressor(
         }
     }
 
-    private fun drainDeflater(
-        onOutput: (ReadBuffer) -> Unit,
-        finishing: Boolean,
-    ) {
-        val condition =
-            if (finishing) {
-                { !deflater.finished() }
-            } else {
-                { !deflater.needsInput() }
+    private fun drainDeflater(onOutput: (ReadBuffer) -> Unit) {
+        while (!deflater.needsInput()) {
+            if (currentOutput == null) {
+                currentOutput = allocator.allocate(outputBufferSize)
             }
 
-        while (condition()) {
+            val output = currentOutput!!
+            val buffer = (output as BaseJvmBuffer).byteBuffer
+            val count = deflater.deflateInto(buffer)
+
+            when {
+                count > 0 && buffer.remaining() == 0 -> {
+                    output.resetForRead()
+                    onOutput(output)
+                    currentOutput = null
+                }
+                count == 0 -> break
+            }
+        }
+    }
+
+    private fun drainDeflaterFinishing(onOutput: (ReadBuffer) -> Unit) {
+        while (!deflater.finished()) {
             if (currentOutput == null) {
                 currentOutput = allocator.allocate(outputBufferSize)
             }
@@ -274,7 +314,7 @@ private class JvmDeflateStreamingCompressor(
                     currentOutput = null
                 }
                 count == 0 -> {
-                    if (!finishing || deflater.needsInput()) break
+                    if (deflater.needsInput()) break
                 }
             }
         }
@@ -306,7 +346,31 @@ private class JvmGzipStreamingCompressor(
 
         totalInputBytes += crc.updateFrom(input)
         deflater.setInputFrom(input)
-        drainDeflater(onOutput, finishing = false)
+        drainDeflater(onOutput)
+    }
+
+    override fun flush(onOutput: (ReadBuffer) -> Unit) {
+        check(!closed) { "Compressor is closed" }
+        // For SYNC_FLUSH, keep calling deflate until output buffer is not filled
+        while (true) {
+            if (currentOutput == null) {
+                currentOutput = allocator.allocate(outputBufferSize)
+            }
+
+            val output = currentOutput!!
+            val buffer = (output as BaseJvmBuffer).byteBuffer
+            val count = deflater.deflateInto(buffer, Deflater.SYNC_FLUSH)
+
+            if (count > 0 && buffer.remaining() == 0) {
+                output.resetForRead()
+                onOutput(output)
+                currentOutput = null
+            } else {
+                break
+            }
+        }
+        emitPartialBuffer(currentOutput, onOutput)
+        currentOutput = null
     }
 
     override fun finish(onOutput: (ReadBuffer) -> Unit) {
@@ -317,7 +381,7 @@ private class JvmGzipStreamingCompressor(
         }
 
         deflater.finish()
-        drainDeflater(onOutput, finishing = true)
+        drainDeflaterFinishing(onOutput)
         emitPartialBuffer(currentOutput, onOutput)
 
         // Write trailer (8 bytes)
@@ -344,18 +408,29 @@ private class JvmGzipStreamingCompressor(
         }
     }
 
-    private fun drainDeflater(
-        onOutput: (ReadBuffer) -> Unit,
-        finishing: Boolean,
-    ) {
-        val condition =
-            if (finishing) {
-                { !deflater.finished() }
-            } else {
-                { !deflater.needsInput() }
+    private fun drainDeflater(onOutput: (ReadBuffer) -> Unit) {
+        while (!deflater.needsInput()) {
+            if (currentOutput == null) {
+                currentOutput = allocator.allocate(outputBufferSize)
             }
 
-        while (condition()) {
+            val output = currentOutput!!
+            val buffer = (output as BaseJvmBuffer).byteBuffer
+            val count = deflater.deflateInto(buffer)
+
+            when {
+                count > 0 && buffer.remaining() == 0 -> {
+                    output.resetForRead()
+                    onOutput(output)
+                    currentOutput = null
+                }
+                count == 0 -> break
+            }
+        }
+    }
+
+    private fun drainDeflaterFinishing(onOutput: (ReadBuffer) -> Unit) {
+        while (!deflater.finished()) {
             if (currentOutput == null) {
                 currentOutput = allocator.allocate(outputBufferSize)
             }
@@ -371,7 +446,7 @@ private class JvmGzipStreamingCompressor(
                     currentOutput = null
                 }
                 count == 0 -> {
-                    if (!finishing || deflater.needsInput()) break
+                    if (deflater.needsInput()) break
                 }
             }
         }

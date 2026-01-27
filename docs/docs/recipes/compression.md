@@ -59,6 +59,37 @@ suspend fun sendCompressed(socket: Socket, data: String) {
 }
 ```
 
+### Flush vs Finish
+
+The streaming compressor provides two ways to emit output:
+
+- **`flush()`** - Produces output that can be immediately decompressed, but keeps the stream open for more data. The output ends with a sync marker (`00 00 FF FF`).
+- **`finish()`** - Finalizes the stream and produces the final output. The stream cannot accept more data after this.
+
+Use `flush()` when you need independently decompressible messages within a single compression context:
+
+```kotlin
+val compressor = StreamingCompressor.create(algorithm = CompressionAlgorithm.Raw)
+try {
+    // First message - can be decompressed immediately
+    compressor.compress("message1".toReadBuffer()) {}
+    compressor.flush { socket.write(it) }
+
+    // Second message - still using same compression context
+    compressor.compress("message2".toReadBuffer()) {}
+    compressor.flush { socket.write(it) }
+
+    // When done, call finish
+    compressor.finish { socket.write(it) }
+} finally {
+    compressor.close()
+}
+```
+
+:::note
+`flush()` is not supported in browser JavaScript. Use `finish()` instead, or check `supportsSyncCompression` before using `flush()`.
+:::
+
 ### Receive and Decompress from Network
 
 ```kotlin

@@ -117,6 +117,32 @@ private class JsNodeStreamingCompressor(
         }
     }
 
+    override fun flush(onOutput: (ReadBuffer) -> Unit) {
+        check(!closed) { "Compressor is closed" }
+
+        if (totalBytes == 0) {
+            // Compress empty data with SYNC_FLUSH
+            val result = compressWithSyncFlush(PlatformBuffer.allocate(0), algorithm, level)
+            onOutput(result)
+            return
+        }
+
+        val combined = Int8Array(totalBytes)
+        var offset = 0
+        for (chunk in accumulatedChunks) {
+            combined.set(chunk, offset)
+            offset += chunk.length
+        }
+
+        val buffer = combined.toJsBuffer()
+        val result = compressWithSyncFlush(buffer, algorithm, level)
+        onOutput(result)
+
+        // Clear accumulated data - stream remains open
+        accumulatedChunks.clear()
+        totalBytes = 0
+    }
+
     override fun finish(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
 
@@ -253,6 +279,12 @@ private class BrowserStreamingCompressor(
         }
         // CompressionStream buffers internally, no output until finish
         return emptyList()
+    }
+
+    override suspend fun flush(): List<ReadBuffer> {
+        throw UnsupportedOperationException(
+            "flush() not supported in browser. Browser CompressionStream does not support flush modes.",
+        )
     }
 
     override suspend fun finish(): List<ReadBuffer> {
