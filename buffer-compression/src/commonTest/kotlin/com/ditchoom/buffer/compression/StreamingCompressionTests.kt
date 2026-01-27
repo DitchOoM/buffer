@@ -656,6 +656,142 @@ class StreamingCompressionTests {
                 compressor.close()
             }
         }
+
+    // =========================================================================
+    // DeflateFormat utility tests
+    // =========================================================================
+
+    @Test
+    fun stripSyncFlushMarkerRemovesTrailingMarker() {
+        // Create buffer ending with sync marker: 00 00 FF FF
+        val data = PlatformBuffer.allocate(10)
+        data.writeByte(0x01) // some data
+        data.writeByte(0x02)
+        data.writeByte(0x03)
+        data.writeByte(0x04)
+        data.writeByte(0x05)
+        data.writeByte(0x06)
+        // Sync marker
+        data.writeByte(0x00)
+        data.writeByte(0x00)
+        data.writeByte(0xFF.toByte())
+        data.writeByte(0xFF.toByte())
+        data.resetForRead()
+
+        assertEquals(10, data.remaining(), "Original size should be 10")
+
+        val stripped = data.stripSyncFlushMarker()
+        assertEquals(6, stripped.remaining(), "Stripped size should be 6")
+
+        // Verify the data bytes are still there
+        assertEquals(0x01.toByte(), stripped.readByte())
+        assertEquals(0x02.toByte(), stripped.readByte())
+        assertEquals(0x03.toByte(), stripped.readByte())
+        assertEquals(0x04.toByte(), stripped.readByte())
+        assertEquals(0x05.toByte(), stripped.readByte())
+        assertEquals(0x06.toByte(), stripped.readByte())
+    }
+
+    @Test
+    fun stripSyncFlushMarkerLeavesDataWithoutMarker() {
+        // Create buffer NOT ending with sync marker
+        val data = PlatformBuffer.allocate(6)
+        data.writeByte(0x01)
+        data.writeByte(0x02)
+        data.writeByte(0x03)
+        data.writeByte(0x04)
+        data.writeByte(0x05)
+        data.writeByte(0x06)
+        data.resetForRead()
+
+        val result = data.stripSyncFlushMarker()
+        assertEquals(6, result.remaining(), "Size should remain unchanged")
+    }
+
+    @Test
+    fun stripSyncFlushMarkerHandlesSmallBuffers() {
+        // Buffer too small to contain marker
+        val data = PlatformBuffer.allocate(2)
+        data.writeByte(0x01)
+        data.writeByte(0x02)
+        data.resetForRead()
+
+        val result = data.stripSyncFlushMarker()
+        assertEquals(2, result.remaining(), "Small buffer should remain unchanged")
+    }
+
+    @Test
+    fun appendSyncFlushMarkerAddsTrailingMarker() {
+        val data = PlatformBuffer.allocate(3)
+        data.writeByte(0x01)
+        data.writeByte(0x02)
+        data.writeByte(0x03)
+        data.resetForRead()
+
+        val withMarker = data.appendSyncFlushMarker()
+        assertEquals(7, withMarker.remaining(), "Size should be original + 4")
+
+        // Read original data
+        assertEquals(0x01.toByte(), withMarker.readByte())
+        assertEquals(0x02.toByte(), withMarker.readByte())
+        assertEquals(0x03.toByte(), withMarker.readByte())
+
+        // Read sync marker
+        assertEquals(0x00.toByte(), withMarker.readByte())
+        assertEquals(0x00.toByte(), withMarker.readByte())
+        assertEquals(0xFF.toByte(), withMarker.readByte())
+        assertEquals(0xFF.toByte(), withMarker.readByte())
+    }
+
+    @Test
+    fun compressWithSyncFlushProducesStrippedOutput() =
+        runTest {
+            val text = "Hello, compressed world!"
+            val compressed = compressWithSyncFlush(text.toReadBuffer())
+
+            // Verify marker is NOT present at the end
+            val size = compressed.remaining()
+            assertTrue(size >= 4, "Compressed data should be at least 4 bytes")
+
+            compressed.position(size - 4)
+            val lastFourBytes = compressed.getInt(size - 4)
+            assertTrue(
+                lastFourBytes != DeflateFormat.SYNC_FLUSH_MARKER,
+                "Sync marker should be stripped",
+            )
+
+            // Verify it can be decompressed
+            compressed.position(0)
+            val decompressed = decompressWithSyncFlush(compressed)
+            assertEquals(text, decompressed.readString(decompressed.remaining()))
+        }
+
+    @Test
+    fun compressAndDecompressWithSyncFlushRoundTrip() =
+        runTest {
+            val texts =
+                listOf(
+                    "Short",
+                    "A medium length string for testing compression.",
+                    "A longer string with repetition. ".repeat(50),
+                )
+
+            for (text in texts) {
+                val compressed = compressWithSyncFlush(text.toReadBuffer())
+                val decompressed = decompressWithSyncFlush(compressed)
+                assertEquals(
+                    text,
+                    decompressed.readString(decompressed.remaining()),
+                    "Round-trip should preserve data",
+                )
+            }
+        }
+
+    @Test
+    fun deflateFormatSyncMarkerConstantIsCorrect() {
+        // Verify the constant value matches the expected bytes: 00 00 FF FF
+        assertEquals(0x0000FFFF, DeflateFormat.SYNC_FLUSH_MARKER)
+    }
 }
 
 // Note: StreamProcessorIntegrationTests are in a separate file to avoid

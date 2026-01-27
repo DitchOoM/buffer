@@ -275,7 +275,7 @@ private fun ensureCapacityAndWrite(
 /**
  * Combines multiple buffers into a single buffer.
  */
-private fun combineBuffers(
+internal fun combineBuffers(
     buffers: List<ReadBuffer>,
     zone: AllocationZone,
 ): PlatformBuffer {
@@ -286,4 +286,113 @@ private fun combineBuffers(
     }
     result.resetForRead()
     return result
+}
+
+// ============================================================================
+// Deflate Format Utilities
+// ============================================================================
+
+/**
+ * Deflate format constants.
+ */
+object DeflateFormat {
+    /**
+     * Z_SYNC_FLUSH marker: `00 00 FF FF`
+     *
+     * This 4-byte sequence is produced by deflate's Z_SYNC_FLUSH operation and marks
+     * the end of a complete deflate block. Data up to this marker can be decompressed
+     * independently without waiting for more input.
+     *
+     * The sequence represents an empty non-final stored block in the deflate format.
+     */
+    const val SYNC_FLUSH_MARKER: Int = 0x0000FFFF
+}
+
+/**
+ * Strips the Z_SYNC_FLUSH marker (`00 00 FF FF`) from the end of compressed data.
+ *
+ * When using [SuspendingStreamingCompressor.flush] or [StreamingCompressor.flush],
+ * the output ends with this 4-byte sync marker. Some protocols (like WebSocket
+ * permessage-deflate) require stripping this marker before transmission.
+ *
+ * @return The buffer with the marker removed by adjusting the limit. If the marker
+ *   is not present, returns the buffer unchanged.
+ */
+fun ReadBuffer.stripSyncFlushMarker(): ReadBuffer {
+    if (remaining() < 4) return this
+
+    val positionOfLastFourBytes = limit() - 4
+    val lastFourBytes = getInt(positionOfLastFourBytes)
+
+    if (lastFourBytes == DeflateFormat.SYNC_FLUSH_MARKER) {
+        setLimit(positionOfLastFourBytes)
+    }
+    return this
+}
+
+/**
+ * Appends the Z_SYNC_FLUSH marker (`00 00 FF FF`) to compressed data.
+ *
+ * When decompressing data that had the sync marker stripped (e.g., WebSocket
+ * permessage-deflate), the marker must be appended before decompression.
+ *
+ * @param zone The allocation zone for the new buffer.
+ * @return A new buffer containing the original data plus the sync marker,
+ *   positioned at 0 and ready for reading.
+ */
+fun ReadBuffer.appendSyncFlushMarker(zone: AllocationZone = AllocationZone.Direct): ReadBuffer {
+    val newBuffer = PlatformBuffer.allocate(remaining() + 4, zone)
+    newBuffer.write(this)
+    newBuffer.writeInt(DeflateFormat.SYNC_FLUSH_MARKER)
+    newBuffer.resetForRead()
+    return newBuffer
+}
+
+/**
+ * Compresses data using Z_SYNC_FLUSH and strips the sync marker.
+ *
+ * This is a convenience function for protocols that need independently decompressible
+ * messages without the trailing sync marker (e.g., WebSocket permessage-deflate).
+ *
+ * The compressed output can be decompressed by first calling [appendSyncFlushMarker]
+ * and then using [decompressAsync] with [CompressionAlgorithm.Raw].
+ *
+ * @param buffer The data to compress.
+ * @param level The compression level.
+ * @param zone The allocation zone for the output buffer.
+ * @return Compressed data with the sync marker stripped.
+ */
+suspend fun compressWithSyncFlush(
+    buffer: ReadBuffer,
+    level: CompressionLevel = CompressionLevel.Default,
+    zone: AllocationZone = AllocationZone.Heap,
+): ReadBuffer {
+    val compressor = SuspendingStreamingCompressor.create(CompressionAlgorithm.Raw, level)
+    val chunks = mutableListOf<ReadBuffer>()
+    try {
+        chunks.addAll(compressor.compress(buffer))
+        chunks.addAll(compressor.flush())
+    } finally {
+        compressor.close()
+    }
+
+    val compressed = combineBuffers(chunks, zone)
+    return compressed.stripSyncFlushMarker()
+}
+
+/**
+ * Decompresses data that was compressed with [compressWithSyncFlush].
+ *
+ * Automatically appends the sync marker before decompression.
+ *
+ * @param buffer The compressed data (without sync marker).
+ * @param zone The allocation zone for the output buffer.
+ * @return The decompressed data.
+ */
+suspend fun decompressWithSyncFlush(
+    buffer: ReadBuffer,
+    zone: AllocationZone = AllocationZone.Direct,
+): ReadBuffer {
+    val withMarker = buffer.appendSyncFlushMarker(zone)
+    return decompressAsync(withMarker, CompressionAlgorithm.Raw, zone)
 }
