@@ -3,6 +3,7 @@
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSetTree
+import org.jetbrains.kotlin.konan.target.HostManager
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -134,10 +135,8 @@ kotlin {
         tvosSimulatorArm64()
         tvosX64()
     } else {
-        val osName = System.getProperty("os.name")
-        if (osName == "Mac OS X") {
-            val osArch = System.getProperty("os.arch")
-            if (osArch == "aarch64") {
+        if (HostManager.hostIsMac) {
+            if (isArm64) {
                 macosArm64 {
                     compilations.create("benchmark") {
                         associateWith(this@macosArm64.compilations.getByName("main"))
@@ -150,6 +149,8 @@ kotlin {
                     }
                 }
             }
+        } else if (HostManager.hostIsLinux) {
+            linuxX64()
         }
     }
     targets.withType<org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget>().configureEach {
@@ -483,7 +484,7 @@ afterEvaluate {
     val metadataCinteropTarget =
         when {
             isArm64 -> "macosArm64"
-            System.getProperty("os.name") == "Mac OS X" -> "macosX64"
+            HostManager.hostIsMac -> "macosX64"
             else -> "linuxX64"
         }
     val metadataCinteropKlib =
@@ -504,8 +505,8 @@ afterEvaluate {
         }
     // Disable cross-platform metadata compilation tasks that can't resolve on the current host.
     // CPointer arithmetic in linuxMain can't compile to metadata on macOS and vice versa.
-    val isLinux = System.getProperty("os.name") == "Linux"
-    val isMacOs = System.getProperty("os.name") == "Mac OS X"
+    val isLinux = HostManager.hostIsLinux
+    val isMacOs = HostManager.hostIsMac
     tasks
         .matching {
             it.name.endsWith("KotlinMetadata") &&
