@@ -746,6 +746,8 @@ class StreamingCompressionTests {
     @Test
     fun compressWithSyncFlushProducesStrippedOutput() =
         runTest {
+            if (!supportsSyncCompression) return@runTest
+
             val text = "Hello, compressed world!"
             val compressed = compressWithSyncFlush(text.toReadBuffer())
 
@@ -769,6 +771,8 @@ class StreamingCompressionTests {
     @Test
     fun compressAndDecompressWithSyncFlushRoundTrip() =
         runTest {
+            if (!supportsSyncCompression) return@runTest
+
             val texts =
                 listOf(
                     "Short",
