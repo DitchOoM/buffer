@@ -126,19 +126,20 @@ expect val supportsSyncCompression: Boolean
 expect val supportsRawDeflate: Boolean
 
 /**
- * Whether the platform maintains compression state across flush() calls.
+ * Whether the sync [StreamingCompressor] maintains compression state across flush() calls.
  *
  * When true, calling [StreamingCompressor.flush] produces output that can be
  * immediately decompressed, and the compressor can continue accepting more data
  * for the same compression context.
  *
- * When false (JS Node.js), flush() produces independent compressed blocks and
- * clears internal state. This works for Raw deflate but produces invalid output
- * for Gzip/Deflate formats if you call finish() after flush().
+ * When false, flush() produces independent compressed blocks and clears internal state.
  *
  * - JVM, Android, Apple: `true` - true zlib z_stream maintains state
- * - JS (Node.js): `false` - batch-based, state cleared after flush
+ * - JS (Node.js): `false` - sync API uses batch compression, state cleared after flush
  * - JS (Browser): `false` - CompressionStream doesn't support flush
+ *
+ * Note: On JS Node.js, the async [SuspendingStreamingCompressor] DOES support stateful
+ * flush using the Transform stream API, even though this flag is `false`.
  */
 expect val supportsStatefulFlush: Boolean
 
