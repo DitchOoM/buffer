@@ -412,7 +412,7 @@ suspend fun compressWithSyncFlush(
 /**
  * Decompresses data that was compressed with [compressWithSyncFlush].
  *
- * Automatically appends the sync marker before decompression.
+ * Automatically appends the sync marker before decompression without copying the input buffer.
  *
  * @param buffer The compressed data (without sync marker).
  * @param zone The allocation zone for the output buffer.
@@ -422,6 +422,18 @@ suspend fun decompressWithSyncFlush(
     buffer: ReadBuffer,
     zone: AllocationZone = AllocationZone.Direct,
 ): ReadBuffer {
-    val withMarker = buffer.appendSyncFlushMarker(zone)
-    return decompressAsync(withMarker, CompressionAlgorithm.Raw, zone)
+    val decompressor = SuspendingStreamingDecompressor.create(CompressionAlgorithm.Raw)
+    return try {
+        val output = mutableListOf<ReadBuffer>()
+        output += decompressor.decompress(buffer)
+        // Write just the 4-byte marker without copying the input buffer
+        val marker = PlatformBuffer.allocate(4, zone)
+        marker.writeInt(DeflateFormat.SYNC_FLUSH_MARKER)
+        marker.resetForRead()
+        output += decompressor.decompress(marker)
+        output += decompressor.finish()
+        combineBuffers(output, zone)
+    } finally {
+        decompressor.close()
+    }
 }
