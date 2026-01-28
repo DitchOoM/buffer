@@ -848,29 +848,6 @@ class StreamingCompressionTests {
     }
 
     @Test
-    fun appendSyncFlushMarkerAddsTrailingMarker() {
-        val data = PlatformBuffer.allocate(3)
-        data.writeByte(0x01)
-        data.writeByte(0x02)
-        data.writeByte(0x03)
-        data.resetForRead()
-
-        val withMarker = data.appendSyncFlushMarker()
-        assertEquals(7, withMarker.remaining(), "Size should be original + 4")
-
-        // Read original data
-        assertEquals(0x01.toByte(), withMarker.readByte())
-        assertEquals(0x02.toByte(), withMarker.readByte())
-        assertEquals(0x03.toByte(), withMarker.readByte())
-
-        // Read sync marker
-        assertEquals(0x00.toByte(), withMarker.readByte())
-        assertEquals(0x00.toByte(), withMarker.readByte())
-        assertEquals(0xFF.toByte(), withMarker.readByte())
-        assertEquals(0xFF.toByte(), withMarker.readByte())
-    }
-
-    @Test
     fun compressWithSyncFlushProducesStrippedOutput() =
         runTest {
             if (!supportsSyncCompression) return@runTest

@@ -146,9 +146,6 @@ For more control, use the extension functions directly:
 ```kotlin
 // Strip the sync marker from the end of compressed data
 val stripped = compressedBuffer.stripSyncFlushMarker()
-
-// Append the sync marker before decompression
-val withMarker = compressedBuffer.appendSyncFlushMarker()
 ```
 
 ### The Sync Marker Constant

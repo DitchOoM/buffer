@@ -360,31 +360,12 @@ fun ReadBuffer.stripSyncFlushMarker(): ReadBuffer {
 }
 
 /**
- * Appends the Z_SYNC_FLUSH marker (`00 00 FF FF`) to compressed data.
- *
- * When decompressing data that had the sync marker stripped (e.g., WebSocket
- * permessage-deflate), the marker must be appended before decompression.
- *
- * @param zone The allocation zone for the new buffer.
- * @return A new buffer containing the original data plus the sync marker,
- *   positioned at 0 and ready for reading.
- */
-fun ReadBuffer.appendSyncFlushMarker(zone: AllocationZone = AllocationZone.Direct): ReadBuffer {
-    val newBuffer = PlatformBuffer.allocate(remaining() + 4, zone)
-    newBuffer.write(this)
-    newBuffer.writeInt(DeflateFormat.SYNC_FLUSH_MARKER)
-    newBuffer.resetForRead()
-    return newBuffer
-}
-
-/**
  * Compresses data using Z_SYNC_FLUSH and strips the sync marker.
  *
  * This is a convenience function for protocols that need independently decompressible
  * messages without the trailing sync marker (e.g., WebSocket permessage-deflate).
  *
- * The compressed output can be decompressed by first calling [appendSyncFlushMarker]
- * and then using [decompressAsync] with [CompressionAlgorithm.Raw].
+ * The compressed output can be decompressed using [decompressWithSyncFlush].
  *
  * @param buffer The data to compress.
  * @param level The compression level.
