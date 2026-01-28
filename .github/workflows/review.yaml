@@ -102,6 +102,28 @@ jobs:
       - name: Verify Linux cross-compilation
         run: ./gradlew compileKotlinLinuxX64 compileKotlinLinuxArm64 --no-build-cache
 
+  linux:
+    name: "Linux Target Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: gradle
+      - name: Cache Konan
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-${{ runner.os }}-
+      - name: Run buffer Linux tests
+        run: ./gradlew :buffer:linuxX64Test --no-build-cache
+      - name: Run compression Linux tests
+        run: ./gradlew :buffer-compression:linuxX64Test --no-build-cache
+
   docs:
     name: "Validate Docs Generation"
     runs-on: macos-latest
