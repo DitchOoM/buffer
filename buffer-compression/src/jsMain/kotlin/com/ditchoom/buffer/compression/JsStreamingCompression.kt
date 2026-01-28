@@ -50,11 +50,8 @@ actual fun StreamingDecompressor.Companion.create(
 
 /**
  * JS suspending streaming compressor factory.
- * Node.js: wraps sync zlib (no context takeover support).
- * Browser: uses native CompressionStream API.
- *
- * Note: The sync wrapper doesn't maintain dictionary across flush() calls.
- * A Transform stream-based implementation could be added for stateful flush.
+ * Node.js: uses Transform stream API for stateful compression with flush support.
+ * Browser: uses native CompressionStream API (no flush support).
  */
 actual fun SuspendingStreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
@@ -62,10 +59,8 @@ actual fun SuspendingStreamingCompressor.Companion.create(
     allocator: BufferAllocator,
 ): SuspendingStreamingCompressor =
     if (isNodeJs) {
-        // Node.js: wrap sync implementation (no context takeover)
-        SyncWrappingSuspendingCompressor(
-            JsNodeStreamingCompressor(algorithm, level, allocator),
-        )
+        // Node.js: use Transform stream for stateful compression
+        NodeTransformStreamingCompressor(algorithm, level, allocator)
     } else {
         // Browser: use native CompressionStream
         BrowserStreamingCompressor(algorithm, allocator)
@@ -73,7 +68,7 @@ actual fun SuspendingStreamingCompressor.Companion.create(
 
 /**
  * JS suspending streaming decompressor factory.
- * Node.js: wraps sync zlib.
+ * Node.js: uses Transform stream API for stateful decompression.
  * Browser: uses native DecompressionStream API.
  */
 actual fun SuspendingStreamingDecompressor.Companion.create(
@@ -81,10 +76,8 @@ actual fun SuspendingStreamingDecompressor.Companion.create(
     allocator: BufferAllocator,
 ): SuspendingStreamingDecompressor =
     if (isNodeJs) {
-        // Node.js: wrap sync implementation
-        SyncWrappingSuspendingDecompressor(
-            JsNodeStreamingDecompressor(algorithm, allocator),
-        )
+        // Node.js: use Transform stream for stateful decompression
+        NodeTransformStreamingDecompressor(algorithm, allocator)
     } else {
         // Browser: use native DecompressionStream
         BrowserStreamingDecompressor(algorithm, allocator)
@@ -440,3 +433,319 @@ private fun createResponse(stream: dynamic): dynamic = js("new Response(stream)"
 private fun getArrayBuffer(response: dynamic): Promise<dynamic> = response.arrayBuffer().unsafeCast<Promise<dynamic>>()
 
 private fun createUint8ArrayFromBuffer(buffer: dynamic): Uint8Array = js("new Uint8Array(buffer)").unsafeCast<Uint8Array>()
+
+// ============================================================================
+// Node.js Transform stream implementation (stateful flush)
+// Uses pure JS helpers to encapsulate async operations in single Promises
+// ============================================================================
+
+/**
+ * Pure JS helper that compresses data through a Transform stream and returns a Promise.
+ * All stream operations are encapsulated in JS, avoiding runTest virtual time issues.
+ */
+private fun nodeCompressAsync(
+    input: Uint8Array,
+    algorithm: String,
+    level: Int,
+): Promise<Uint8Array> {
+    val zlib = getNodeZlib()
+    val options = js("{}")
+    options["level"] = level
+
+    val stream: dynamic =
+        when (algorithm) {
+            "gzip" -> zlib.createGzip(options)
+            "deflate" -> zlib.createDeflate(options)
+            else -> zlib.createDeflateRaw(options)
+        }
+
+    return Promise { resolve, reject ->
+        val chunks = js("[]")
+
+        stream.on("data") { chunk: dynamic ->
+            chunks.push(chunk)
+        }
+        stream.on("error") { err: dynamic ->
+            reject(Error(err.toString()))
+        }
+        stream.on("end") {
+            val result: dynamic = js("Buffer").concat(chunks)
+            val uint8 = Uint8Array(result.buffer, result.byteOffset, result.length)
+            resolve(uint8)
+        }
+        stream.end(input)
+    }
+}
+
+/**
+ * Pure JS helper that decompresses data through a Transform stream and returns a Promise.
+ */
+private fun nodeDecompressAsync(
+    input: Uint8Array,
+    algorithm: String,
+): Promise<Uint8Array> {
+    val zlib = getNodeZlib()
+    val options: dynamic = js("{}")
+    if (algorithm == "raw") {
+        options["finishFlush"] = zlib.constants.Z_SYNC_FLUSH
+    }
+
+    val stream: dynamic =
+        when (algorithm) {
+            "gzip" -> zlib.createGunzip(options)
+            "deflate" -> zlib.createInflate(options)
+            else -> zlib.createInflateRaw(options)
+        }
+
+    return Promise { resolve, reject ->
+        val chunks = js("[]")
+
+        stream.on("data") { chunk: dynamic ->
+            chunks.push(chunk)
+        }
+        stream.on("error") { err: dynamic ->
+            reject(Error(err.toString()))
+        }
+        stream.on("end") {
+            val result: dynamic = js("Buffer").concat(chunks)
+            val uint8 = Uint8Array(result.buffer, result.byteOffset, result.length)
+            resolve(uint8)
+        }
+        stream.end(input)
+    }
+}
+
+/**
+ * Node.js streaming compressor using Transform stream API (zlib.createDeflate, etc).
+ * Maintains compression dictionary across flush() calls for optimal compression.
+ *
+ * Uses pure JS async helpers for finish() to work correctly with runTest virtual time.
+ */
+private class NodeTransformStreamingCompressor(
+    private val algorithm: CompressionAlgorithm,
+    private val level: CompressionLevel,
+    override val allocator: BufferAllocator,
+) : SuspendingStreamingCompressor {
+    private var stream: dynamic = null
+    private var closed = false
+    private val pendingChunks = mutableListOf<Uint8Array>()
+    private var pendingBytes = 0
+
+    init {
+        initStream()
+    }
+
+    private fun initStream() {
+        val zlib = getNodeZlib()
+        val options = js("{}")
+        options["level"] = level.value
+
+        stream =
+            when (algorithm) {
+                CompressionAlgorithm.Gzip -> zlib.createGzip(options)
+                CompressionAlgorithm.Deflate -> zlib.createDeflate(options)
+                CompressionAlgorithm.Raw -> zlib.createDeflateRaw(options)
+            }
+
+        // Keep stream in paused mode (no 'data' listener = paused mode)
+    }
+
+    override suspend fun compress(input: ReadBuffer): List<ReadBuffer> {
+        check(!closed) { "Compressor is closed" }
+
+        val remaining = input.remaining()
+        if (remaining == 0) return emptyList()
+
+        // Accumulate chunks for later processing
+        val chunk = input.toUint8Array()
+        pendingChunks.add(chunk)
+        pendingBytes += remaining
+
+        return emptyList()
+    }
+
+    override suspend fun flush(): List<ReadBuffer> {
+        check(!closed) { "Compressor is closed" }
+
+        val zlib = getNodeZlib()
+        val chunks = mutableListOf<ReadBuffer>()
+
+        // Flush with Z_SYNC_FLUSH and collect output via 'readable' events
+        Promise<Unit> { resolve, reject ->
+            stream.once("error") { err: dynamic -> reject(Error(err.toString())) }
+            stream.on("readable") {
+                while (true) {
+                    val chunk = stream.read()
+                    if (chunk == null) break
+                    chunks.add(chunk.unsafeCast<Uint8Array>().toJsBuffer())
+                }
+            }
+            // Write pending chunks first
+            for (chunk in pendingChunks) {
+                stream.write(chunk)
+            }
+            pendingChunks.clear()
+            pendingBytes = 0
+
+            stream.flush(zlib.constants.Z_SYNC_FLUSH) {
+                // Flush callback - all data should be available now
+                resolve(Unit)
+            }
+        }.await()
+
+        // Read any remaining data
+        while (true) {
+            val chunk = stream.read()
+            if (chunk == null) break
+            chunks.add(chunk.unsafeCast<Uint8Array>().toJsBuffer())
+        }
+
+        // Remove readable listener to avoid memory leak
+        stream.removeAllListeners("readable")
+
+        return chunks
+    }
+
+    override suspend fun finish(): List<ReadBuffer> {
+        check(!closed) { "Compressor is closed" }
+
+        // Combine all pending chunks
+        val combined = Uint8Array(pendingBytes)
+        var offset = 0
+        for (chunk in pendingChunks) {
+            combined.set(chunk, offset)
+            offset += chunk.length
+        }
+        pendingChunks.clear()
+        pendingBytes = 0
+
+        // Destroy old stream and use pure JS helper
+        stream?.destroy()
+        stream = null
+
+        val algString =
+            when (algorithm) {
+                CompressionAlgorithm.Gzip -> "gzip"
+                CompressionAlgorithm.Deflate -> "deflate"
+                CompressionAlgorithm.Raw -> "raw"
+            }
+
+        val result = nodeCompressAsync(combined, algString, level.value).await()
+        return listOf(result.toJsBuffer())
+    }
+
+    override fun reset() {
+        stream?.destroy()
+        pendingChunks.clear()
+        pendingBytes = 0
+        initStream()
+    }
+
+    override fun close() {
+        if (!closed) {
+            stream?.destroy()
+            stream = null
+            pendingChunks.clear()
+            closed = true
+        }
+    }
+}
+
+/**
+ * Node.js streaming decompressor using Transform stream API.
+ * Maintains decompression state across calls.
+ *
+ * Uses pure JS async helpers for finish() to work correctly with runTest virtual time.
+ */
+private class NodeTransformStreamingDecompressor(
+    private val algorithm: CompressionAlgorithm,
+    override val allocator: BufferAllocator,
+) : SuspendingStreamingDecompressor {
+    private var stream: dynamic = null
+    private var closed = false
+    private val pendingChunks = mutableListOf<Uint8Array>()
+    private var pendingBytes = 0
+
+    init {
+        initStream()
+    }
+
+    private fun initStream() {
+        val zlib = getNodeZlib()
+
+        // Use Z_SYNC_FLUSH as finishFlush for raw deflate to handle sync-flushed data
+        val options = js("{}")
+        if (algorithm == CompressionAlgorithm.Raw) {
+            options["finishFlush"] = zlib.constants.Z_SYNC_FLUSH
+        }
+
+        stream =
+            when (algorithm) {
+                CompressionAlgorithm.Gzip -> zlib.createGunzip(options)
+                CompressionAlgorithm.Deflate -> zlib.createInflate(options)
+                CompressionAlgorithm.Raw -> zlib.createInflateRaw(options)
+            }
+
+        // Keep stream in paused mode (no 'data' listener = paused mode)
+    }
+
+    override suspend fun decompress(input: ReadBuffer): List<ReadBuffer> {
+        check(!closed) { "Decompressor is closed" }
+
+        val remaining = input.remaining()
+        if (remaining == 0) return emptyList()
+
+        // Accumulate chunks for later processing
+        val chunk = input.toUint8Array()
+        pendingChunks.add(chunk)
+        pendingBytes += remaining
+
+        return emptyList()
+    }
+
+    override suspend fun finish(): List<ReadBuffer> {
+        check(!closed) { "Decompressor is closed" }
+
+        if (pendingBytes == 0) return emptyList()
+
+        // Combine all pending chunks
+        val combined = Uint8Array(pendingBytes)
+        var offset = 0
+        for (chunk in pendingChunks) {
+            combined.set(chunk, offset)
+            offset += chunk.length
+        }
+        pendingChunks.clear()
+        pendingBytes = 0
+
+        // Destroy old stream and use pure JS helper
+        stream?.destroy()
+        stream = null
+
+        val algString =
+            when (algorithm) {
+                CompressionAlgorithm.Gzip -> "gzip"
+                CompressionAlgorithm.Deflate -> "deflate"
+                CompressionAlgorithm.Raw -> "raw"
+            }
+
+        val result = nodeDecompressAsync(combined, algString).await()
+        return listOf(result.toJsBuffer())
+    }
+
+    override fun reset() {
+        stream?.destroy()
+        pendingChunks.clear()
+        pendingBytes = 0
+        initStream()
+    }
+
+    override fun close() {
+        if (!closed) {
+            stream?.destroy()
+            stream = null
+            pendingChunks.clear()
+            closed = true
+        }
+    }
+}
