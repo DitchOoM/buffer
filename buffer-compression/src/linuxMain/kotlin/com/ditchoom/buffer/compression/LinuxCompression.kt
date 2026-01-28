@@ -22,6 +22,7 @@ import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.usePinned
 import platform.posix.memcpy
+import platform.zlib.Z_BUF_ERROR
 import platform.zlib.Z_DEFLATED
 import platform.zlib.Z_FINISH
 import platform.zlib.Z_OK
@@ -231,7 +232,7 @@ private fun decompressWithZStream(
 
                 when (result) {
                     Z_STREAM_END -> break
-                    Z_OK, -5 -> {
+                    Z_OK, Z_BUF_ERROR -> {
                         if (s.avail_out > 0u && s.avail_in == 0u) {
                             // No more input and output space available means inflate
                             // can't make progress. Stream is complete even without

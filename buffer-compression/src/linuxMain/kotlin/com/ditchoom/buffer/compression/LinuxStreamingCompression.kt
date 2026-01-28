@@ -1,5 +1,3 @@
-@file:Suppress("UNCHECKED_CAST")
-
 package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.ByteArrayBuffer
@@ -19,6 +17,7 @@ import kotlinx.cinterop.rawPtr
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.usePinned
+import platform.zlib.Z_BUF_ERROR
 import platform.zlib.Z_DEFLATED
 import platform.zlib.Z_FINISH
 import platform.zlib.Z_NO_FLUSH
@@ -62,6 +61,18 @@ actual fun StreamingDecompressor.Companion.create(
 private const val WINDOW_BITS_ZLIB = 15
 private const val WINDOW_BITS_RAW = -15
 private const val WINDOW_BITS_GZIP = 31
+
+/**
+ * Allocates a NativeBuffer from the allocator with runtime validation.
+ * Linux streaming compression requires direct memory access via NativeBuffer.
+ */
+private fun BufferAllocator.allocateNativeBuffer(size: Int): NativeBuffer {
+    val buffer = allocate(size)
+    return buffer as? NativeBuffer
+        ?: throw CompressionException(
+            "Linux streaming compression requires NativeBuffer allocator, got ${buffer::class.simpleName}",
+        )
+}
 
 /**
  * Linux streaming compressor using zlib z_stream for true incremental compression.
@@ -133,7 +144,7 @@ private class LinuxZlibStreamingCompressor(
             s.pointed.avail_in = remaining.convert()
 
             while (s.pointed.avail_in > 0u) {
-                val chunk = allocator.allocate(outputBufferSize) as NativeBuffer
+                val chunk = allocator.allocateNativeBuffer(outputBufferSize)
                 val chunkPtr = chunk.nativeAddress.toCPointer<ByteVar>()!!
 
                 s.pointed.next_out = chunkPtr.reinterpret()
@@ -165,7 +176,7 @@ private class LinuxZlibStreamingCompressor(
 
         // Drain with Z_SYNC_FLUSH until no more output
         while (true) {
-            val chunk = allocator.allocate(outputBufferSize) as NativeBuffer
+            val chunk = allocator.allocateNativeBuffer(outputBufferSize)
             val chunkPtr = chunk.nativeAddress.toCPointer<ByteVar>()!!
 
             s.pointed.next_out = chunkPtr.reinterpret()
@@ -197,7 +208,7 @@ private class LinuxZlibStreamingCompressor(
 
         var finished = false
         while (!finished) {
-            val chunk = allocator.allocate(outputBufferSize) as NativeBuffer
+            val chunk = allocator.allocateNativeBuffer(outputBufferSize)
             val chunkPtr = chunk.nativeAddress.toCPointer<ByteVar>()!!
 
             s.pointed.next_out = chunkPtr.reinterpret()
@@ -306,7 +317,7 @@ private class LinuxZlibStreamingDecompressor(
                 s.pointed.avail_in = remaining.convert()
 
                 while (s.pointed.avail_in > 0u && !streamEnded) {
-                    val chunk = allocator.allocate(outputBufferSize) as NativeBuffer
+                    val chunk = allocator.allocateNativeBuffer(outputBufferSize)
                     val chunkPtr = chunk.nativeAddress.toCPointer<ByteVar>()!!
 
                     s.pointed.next_out = chunkPtr.reinterpret()
@@ -343,7 +354,7 @@ private class LinuxZlibStreamingDecompressor(
         s.pointed.avail_in = 0u
 
         while (!streamEnded) {
-            val chunk = allocator.allocate(outputBufferSize) as NativeBuffer
+            val chunk = allocator.allocateNativeBuffer(outputBufferSize)
             val chunkPtr = chunk.nativeAddress.toCPointer<ByteVar>()!!
 
             s.pointed.next_out = chunkPtr.reinterpret()
@@ -353,8 +364,8 @@ private class LinuxZlibStreamingDecompressor(
             when (result) {
                 Z_OK -> {}
                 Z_STREAM_END -> streamEnded = true
-                -5 -> {
-                    // Z_BUF_ERROR (-5) with no input means the stream produced all
+                Z_BUF_ERROR -> {
+                    // Z_BUF_ERROR with no input means the stream produced all
                     // available output. This is expected for raw deflate streams
                     // without BFINAL=1 (e.g., WebSocket per-message-deflate RFC 7692).
                     streamEnded = true
@@ -406,7 +417,13 @@ private inline fun <R> withInputPointer(
     when (buffer) {
         is NativeBuffer -> block(buffer.nativeAddress.toCPointer<ByteVar>()!!)
         is ByteArrayBuffer -> {
-            buffer.backingArray.usePinned { pinned ->
+            val array = buffer.backingArray
+            if (array.isEmpty()) {
+                // Can't get addressOf(0) on empty array, but we also won't read from it
+                // This case is handled at the caller level (remaining == 0 check)
+                throw CompressionException("Cannot get pointer to empty buffer")
+            }
+            array.usePinned { pinned ->
                 block(pinned.addressOf(0))
             }
         }
