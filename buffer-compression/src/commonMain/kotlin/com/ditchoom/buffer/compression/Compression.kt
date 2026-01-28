@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.allocate
@@ -339,14 +340,19 @@ fun ReadBuffer.stripSyncFlushMarker(): ReadBuffer {
     if (remaining() < 4) return this
 
     val markerStart = limit() - 4
-    // Check bytes individually to be byte-order agnostic
-    val hasSyncMarker =
-        this[markerStart] == 0x00.toByte() &&
-            this[markerStart + 1] == 0x00.toByte() &&
-            this[markerStart + 2] == 0xFF.toByte() &&
-            this[markerStart + 3] == 0xFF.toByte()
+    val lastFourBytes = getInt(markerStart)
 
-    if (hasSyncMarker) {
+    // Sync marker bytes are 00 00 FF FF. When read as int:
+    // - Big-endian: 0x0000FFFF
+    // - Little-endian: 0xFFFF0000
+    val expectedMarker =
+        if (byteOrder == ByteOrder.BIG_ENDIAN) {
+            DeflateFormat.SYNC_FLUSH_MARKER
+        } else {
+            0xFFFF0000.toInt()
+        }
+
+    if (lastFourBytes == expectedMarker) {
         setLimit(markerStart)
     }
     return this
