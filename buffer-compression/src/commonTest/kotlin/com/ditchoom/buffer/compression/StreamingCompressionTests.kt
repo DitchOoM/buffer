@@ -658,6 +658,39 @@ class StreamingCompressionTests {
         }
 
     @Test
+    fun suspendingFlushAllowsContinuedCompression() =
+        runTest {
+            if (!supportsSyncCompression) return@runTest
+
+            val compressor = SuspendingStreamingCompressor.create(algorithm = CompressionAlgorithm.Raw)
+            val allChunks = mutableListOf<ReadBuffer>()
+
+            try {
+                // First message
+                allChunks += compressor.compress("Hello".toReadBuffer())
+                allChunks += compressor.flush()
+
+                // Second message - compressor should still work with preserved dictionary
+                allChunks += compressor.compress(" World".toReadBuffer())
+                allChunks += compressor.finish()
+
+                // Decompress all data
+                val combined = combineBuffers(allChunks)
+                val decompressedChunks = mutableListOf<ReadBuffer>()
+                StreamingDecompressor.create(algorithm = CompressionAlgorithm.Raw).use(
+                    onOutput = { decompressedChunks.add(it) },
+                ) { decompress ->
+                    decompress(combined)
+                }
+
+                val decompressed = combineBuffers(decompressedChunks)
+                assertEquals("Hello World", decompressed.readString(decompressed.remaining()))
+            } finally {
+                compressor.close()
+            }
+        }
+
+    @Test
     fun flushGzipProducesDecompressibleOutput() {
         if (!supportsSyncCompression) return
         // Gzip flush requires stateful compression to produce valid stream after finish

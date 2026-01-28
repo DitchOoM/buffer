@@ -609,23 +609,36 @@ private class NodeTransformStreamingCompressor(
     override suspend fun finish(): List<ReadBuffer> {
         check(!closed) { "Compressor is closed" }
 
-        // Take pending chunks without copying
-        val chunks = pendingChunks.toList()
-        pendingChunks.clear()
+        // Properly end the stream to preserve dictionary state from previous flush() calls
+        // Use same pattern as nodeCompressAsync - collect in JS array and wait for 'end' event
+        val result =
+            Promise<Uint8Array> { resolve, reject ->
+                val outputChunks = js("[]")
 
-        // Destroy old stream and use pure JS helper
-        stream?.destroy()
+                stream.on("data") { chunk: dynamic ->
+                    outputChunks.push(chunk)
+                }
+                stream.on("error") { err: dynamic ->
+                    reject(Error(err.toString()))
+                }
+                stream.on("end") {
+                    val concatenated: dynamic = js("Buffer").concat(outputChunks)
+                    val uint8 = Uint8Array(concatenated.buffer, concatenated.byteOffset, concatenated.length)
+                    resolve(uint8)
+                }
+
+                // Write any pending chunks
+                for (chunk in pendingChunks) {
+                    stream.write(chunk)
+                }
+                pendingChunks.clear()
+
+                // End the stream (triggers 'end' event when all data is read)
+                stream.end()
+            }.await()
+
         stream = null
-
-        val algString =
-            when (algorithm) {
-                CompressionAlgorithm.Gzip -> "gzip"
-                CompressionAlgorithm.Deflate -> "deflate"
-                CompressionAlgorithm.Raw -> "raw"
-            }
-
-        val result = nodeCompressAsync(chunks, algString, level.value).await()
-        return listOf(result.toJsBuffer())
+        return if (result.length > 0) listOf(result.toJsBuffer()) else emptyList()
     }
 
     override fun reset() {
