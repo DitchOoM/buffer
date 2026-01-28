@@ -92,6 +92,7 @@ actual object UnsafeMemory {
         destOffset: Int,
         length: Int,
     ) {
+        if (length == 0) return
         dest.usePinned { pinned ->
             memcpy(pinned.addressOf(destOffset), srcAddress.toCPointer<ByteVar>(), length.convert())
         }
@@ -103,6 +104,7 @@ actual object UnsafeMemory {
         dstAddress: Long,
         length: Int,
     ) {
+        if (length == 0) return
         src.usePinned { pinned ->
             memcpy(dstAddress.toCPointer<ByteVar>(), pinned.addressOf(srcOffset), length.convert())
         }

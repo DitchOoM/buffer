@@ -570,39 +570,40 @@ private class NodeTransformStreamingCompressor(
 
     override suspend fun flush(): List<ReadBuffer> {
         check(!closed) { "Compressor is closed" }
+        val currentStream = stream ?: return emptyList()
 
         val zlib = getNodeZlib()
         val chunks = mutableListOf<ReadBuffer>()
 
         // Flush with Z_SYNC_FLUSH and collect output via 'readable' events
         Promise<Unit> { resolve, reject ->
-            stream.once("error") { err: dynamic -> reject(Error(err.toString())) }
-            stream.on("readable") {
+            currentStream.once("error") { err: dynamic -> reject(Error(err.toString())) }
+            currentStream.on("readable") {
                 while (true) {
-                    val chunk = stream.read()
+                    val chunk = currentStream.read()
                     if (chunk == null) break
                     chunks.add(chunk.unsafeCast<Uint8Array>().toJsBuffer())
                 }
             }
             // Write pending chunks directly to stream
             for (chunk in pendingChunks) {
-                stream.write(chunk)
+                currentStream.write(chunk)
             }
             pendingChunks.clear()
 
-            stream.flush(zlib.constants.Z_SYNC_FLUSH) {
+            currentStream.flush(zlib.constants.Z_SYNC_FLUSH) {
                 resolve(Unit)
             }
         }.await()
 
-        // Read any remaining data
+        // Read any remaining data from the captured stream reference
         while (true) {
-            val chunk = stream.read()
+            val chunk = currentStream.read()
             if (chunk == null) break
             chunks.add(chunk.unsafeCast<Uint8Array>().toJsBuffer())
         }
 
-        stream.removeAllListeners("readable")
+        currentStream.removeAllListeners("readable")
         return chunks
     }
 
