@@ -148,6 +148,29 @@ For more control, use the extension functions directly:
 val stripped = compressedBuffer.stripSyncFlushMarker()
 ```
 
+### Manual Marker Handling
+
+When decompressing data that had the sync marker stripped, feed the marker as a separate buffer to avoid copying the compressed data:
+
+```kotlin
+val decompressor = SuspendingStreamingDecompressor.create(CompressionAlgorithm.Raw)
+try {
+    val output = mutableListOf<ReadBuffer>()
+    output += decompressor.decompress(compressedData)
+
+    // Feed the sync marker separately (no copy of compressed data)
+    val marker = PlatformBuffer.allocate(4)
+    marker.writeInt(DeflateFormat.SYNC_FLUSH_MARKER)
+    marker.resetForRead()
+    output += decompressor.decompress(marker)
+    output += decompressor.finish()
+
+    // Combine output chunks...
+} finally {
+    decompressor.close()
+}
+```
+
 ### The Sync Marker Constant
 
 The marker value is available as a constant:
