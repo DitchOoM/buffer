@@ -21,9 +21,14 @@ actual val supportsRawDeflate: Boolean by lazy {
 }
 
 /**
- * JS Node.js uses batch compression - flush clears accumulated state.
- * This means Gzip/Deflate flush+finish produces invalid output.
- * Raw deflate works because each flushed block is independently decompressible.
+ * Whether the sync [StreamingCompressor] maintains dictionary across flush() calls.
+ *
+ * JS Node.js sync API uses batch compression - flush clears accumulated state.
+ * This means Gzip/Deflate flush+finish produces invalid output with the sync API.
+ *
+ * Note: The async [SuspendingStreamingCompressor] DOES support stateful flush
+ * on Node.js using the Transform stream API. Use the async API for WebSocket
+ * permessage-deflate with context takeover.
  */
 actual val supportsStatefulFlush: Boolean = false
 
