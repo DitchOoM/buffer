@@ -657,6 +657,100 @@ class StreamingCompressionTests {
             }
         }
 
+    @Test
+    fun flushGzipProducesDecompressibleOutput() {
+        if (!supportsSyncCompression) return
+        // Gzip flush requires stateful compression to produce valid stream after finish
+        if (!supportsStatefulFlush) return
+
+        val compressor = StreamingCompressor.create(algorithm = CompressionAlgorithm.Gzip)
+        val flushedChunks = mutableListOf<ReadBuffer>()
+
+        try {
+            compressor.compress("Hello Gzip".toReadBuffer()) { flushedChunks.add(it) }
+            compressor.flush { flushedChunks.add(it) }
+            compressor.finish { flushedChunks.add(it) }
+
+            // Decompress the flushed data
+            val combined = combineBuffers(flushedChunks)
+            assertTrue(combined.remaining() > 0, "Gzip flush should produce output")
+
+            val decompressedChunks = mutableListOf<ReadBuffer>()
+            StreamingDecompressor.create(algorithm = CompressionAlgorithm.Gzip).use(
+                onOutput = { decompressedChunks.add(it) },
+            ) { decompress ->
+                decompress(combined)
+            }
+
+            val decompressed = combineBuffers(decompressedChunks)
+            assertEquals("Hello Gzip", decompressed.readString(decompressed.remaining()))
+        } finally {
+            compressor.close()
+        }
+    }
+
+    @Test
+    fun flushDeflateProducesDecompressibleOutput() {
+        if (!supportsSyncCompression) return
+        // Deflate flush requires stateful compression to produce valid stream after finish
+        if (!supportsStatefulFlush) return
+
+        val compressor = StreamingCompressor.create(algorithm = CompressionAlgorithm.Deflate)
+        val flushedChunks = mutableListOf<ReadBuffer>()
+
+        try {
+            compressor.compress("Hello Deflate".toReadBuffer()) { flushedChunks.add(it) }
+            compressor.flush { flushedChunks.add(it) }
+            compressor.finish { flushedChunks.add(it) }
+
+            // Decompress the flushed data
+            val combined = combineBuffers(flushedChunks)
+            assertTrue(combined.remaining() > 0, "Deflate flush should produce output")
+
+            val decompressedChunks = mutableListOf<ReadBuffer>()
+            StreamingDecompressor.create(algorithm = CompressionAlgorithm.Deflate).use(
+                onOutput = { decompressedChunks.add(it) },
+            ) { decompress ->
+                decompress(combined)
+            }
+
+            val decompressed = combineBuffers(decompressedChunks)
+            assertEquals("Hello Deflate", decompressed.readString(decompressed.remaining()))
+        } finally {
+            compressor.close()
+        }
+    }
+
+    @Test
+    fun flushWithoutPriorCompressProducesOutput() {
+        if (!supportsSyncCompression) return
+
+        val compressor = StreamingCompressor.create(algorithm = CompressionAlgorithm.Raw)
+        val flushedChunks = mutableListOf<ReadBuffer>()
+
+        try {
+            // Flush without any prior compress calls
+            compressor.flush { flushedChunks.add(it) }
+
+            // Should produce at least the sync marker (empty deflate block)
+            val flushed = combineBuffers(flushedChunks)
+            assertTrue(flushed.remaining() >= 4, "Empty flush should produce at least sync marker")
+
+            // The output should be decompressible (to empty)
+            val decompressedChunks = mutableListOf<ReadBuffer>()
+            StreamingDecompressor.create(algorithm = CompressionAlgorithm.Raw).use(
+                onOutput = { decompressedChunks.add(it) },
+            ) { decompress ->
+                decompress(flushed)
+            }
+
+            val decompressed = combineBuffers(decompressedChunks)
+            assertEquals(0, decompressed.remaining(), "Empty flush should decompress to empty")
+        } finally {
+            compressor.close()
+        }
+    }
+
     // =========================================================================
     // DeflateFormat utility tests
     // =========================================================================

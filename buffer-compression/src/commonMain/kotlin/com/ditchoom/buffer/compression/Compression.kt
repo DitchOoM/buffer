@@ -124,6 +124,23 @@ expect val supportsSyncCompression: Boolean
  */
 expect val supportsRawDeflate: Boolean
 
+/**
+ * Whether the platform maintains compression state across flush() calls.
+ *
+ * When true, calling [StreamingCompressor.flush] produces output that can be
+ * immediately decompressed, and the compressor can continue accepting more data
+ * for the same compression context.
+ *
+ * When false (JS Node.js), flush() produces independent compressed blocks and
+ * clears internal state. This works for Raw deflate but produces invalid output
+ * for Gzip/Deflate formats if you call finish() after flush().
+ *
+ * - JVM, Android, Apple: `true` - true zlib z_stream maintains state
+ * - JS (Node.js): `false` - batch-based, state cleared after flush
+ * - JS (Browser): `false` - CompressionStream doesn't support flush
+ */
+expect val supportsStatefulFlush: Boolean
+
 // =============================================================================
 // Suspending One-Shot API (works on all platforms including browser JS)
 // =============================================================================
@@ -321,11 +338,16 @@ object DeflateFormat {
 fun ReadBuffer.stripSyncFlushMarker(): ReadBuffer {
     if (remaining() < 4) return this
 
-    val positionOfLastFourBytes = limit() - 4
-    val lastFourBytes = getInt(positionOfLastFourBytes)
+    val markerStart = limit() - 4
+    // Check bytes individually to be byte-order agnostic
+    val hasSyncMarker =
+        this[markerStart] == 0x00.toByte() &&
+            this[markerStart + 1] == 0x00.toByte() &&
+            this[markerStart + 2] == 0xFF.toByte() &&
+            this[markerStart + 3] == 0xFF.toByte()
 
-    if (lastFourBytes == DeflateFormat.SYNC_FLUSH_MARKER) {
-        setLimit(positionOfLastFourBytes)
+    if (hasSyncMarker) {
+        setLimit(markerStart)
     }
     return this
 }

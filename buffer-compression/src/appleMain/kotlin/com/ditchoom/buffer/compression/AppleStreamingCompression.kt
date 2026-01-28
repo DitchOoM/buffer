@@ -66,6 +66,10 @@ private const val WINDOW_BITS_GZIP = 31
 /**
  * Apple streaming compressor using zlib z_stream for true incremental compression.
  * Zero-copy: writes directly to output buffers.
+ *
+ * Note: The allocator is expected to produce MutableDataBuffer instances on Apple
+ * platforms (which is the default behavior). The implementation casts to MutableDataBuffer
+ * to access native memory pointers for zero-copy I/O with zlib.
  */
 @OptIn(ExperimentalForeignApi::class)
 private class AppleZlibStreamingCompressor(

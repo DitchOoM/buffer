@@ -9,6 +9,7 @@ import com.ditchoom.buffer.allocate
  */
 actual val supportsSyncCompression: Boolean = true
 actual val supportsRawDeflate: Boolean = true
+actual val supportsStatefulFlush: Boolean = true
 
 /**
  * JVM/Android implementation delegating to streaming compression.

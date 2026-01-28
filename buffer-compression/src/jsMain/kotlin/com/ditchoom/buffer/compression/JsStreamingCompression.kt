@@ -93,6 +93,11 @@ actual fun SuspendingStreamingDecompressor.Companion.create(
 
 /**
  * Node.js streaming compressor using native zlib sync APIs.
+ *
+ * Note: This implementation accumulates chunks and compresses them all at once
+ * on flush/finish. This is because Node.js zlib sync APIs don't maintain state
+ * between calls. Each flush() produces independently compressed data, but the
+ * compression ratio may be lower than true streaming compression.
  */
 private class JsNodeStreamingCompressor(
     private val algorithm: CompressionAlgorithm,

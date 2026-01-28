@@ -206,6 +206,39 @@ private inline fun emitPartialBuffer(
     return false
 }
 
+/**
+ * Drains the deflater with SYNC_FLUSH mode, producing complete deflate blocks.
+ * Returns the final output buffer (which may be null or partially filled).
+ */
+private inline fun drainDeflaterSyncFlush(
+    deflater: Deflater,
+    allocator: BufferAllocator,
+    outputBufferSize: Int,
+    currentOutput: ReadWriteBuffer?,
+    onOutput: (ReadBuffer) -> Unit,
+): ReadWriteBuffer? {
+    var output = currentOutput
+    while (true) {
+        if (output == null) {
+            output = allocator.allocate(outputBufferSize)
+        }
+
+        val buffer = (output as BaseJvmBuffer).byteBuffer
+        val count = deflater.deflate(buffer, Deflater.SYNC_FLUSH)
+
+        if (count > 0 && buffer.remaining() == 0) {
+            output.resetForRead()
+            onOutput(output)
+            output = null
+        } else {
+            // Output buffer not filled, flush is complete
+            break
+        }
+    }
+    emitPartialBuffer(output, onOutput)
+    return null
+}
+
 // =============================================================================
 // Compressors
 // =============================================================================
@@ -231,28 +264,7 @@ private class JvmDeflateStreamingCompressor(
 
     override fun flush(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
-        // For SYNC_FLUSH, keep calling deflate until output buffer is not filled
-        // This forces the sync marker to be written even if there's no pending input
-        while (true) {
-            if (currentOutput == null) {
-                currentOutput = allocator.allocate(outputBufferSize)
-            }
-
-            val output = currentOutput!!
-            val buffer = (output as BaseJvmBuffer).byteBuffer
-            val count = deflater.deflateInto(buffer, Deflater.SYNC_FLUSH)
-
-            if (count > 0 && buffer.remaining() == 0) {
-                output.resetForRead()
-                onOutput(output)
-                currentOutput = null
-            } else {
-                // Output buffer not filled, flush is complete
-                break
-            }
-        }
-        emitPartialBuffer(currentOutput, onOutput)
-        currentOutput = null
+        currentOutput = drainDeflaterSyncFlush(deflater, allocator, outputBufferSize, currentOutput, onOutput)
     }
 
     override fun finish(onOutput: (ReadBuffer) -> Unit) {
@@ -351,26 +363,7 @@ private class JvmGzipStreamingCompressor(
 
     override fun flush(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
-        // For SYNC_FLUSH, keep calling deflate until output buffer is not filled
-        while (true) {
-            if (currentOutput == null) {
-                currentOutput = allocator.allocate(outputBufferSize)
-            }
-
-            val output = currentOutput!!
-            val buffer = (output as BaseJvmBuffer).byteBuffer
-            val count = deflater.deflateInto(buffer, Deflater.SYNC_FLUSH)
-
-            if (count > 0 && buffer.remaining() == 0) {
-                output.resetForRead()
-                onOutput(output)
-                currentOutput = null
-            } else {
-                break
-            }
-        }
-        emitPartialBuffer(currentOutput, onOutput)
-        currentOutput = null
+        currentOutput = drainDeflaterSyncFlush(deflater, allocator, outputBufferSize, currentOutput, onOutput)
     }
 
     override fun finish(onOutput: (ReadBuffer) -> Unit) {

@@ -21,6 +21,13 @@ actual val supportsRawDeflate: Boolean by lazy {
 }
 
 /**
+ * JS Node.js uses batch compression - flush clears accumulated state.
+ * This means Gzip/Deflate flush+finish produces invalid output.
+ * Raw deflate works because each flushed block is independently decompressible.
+ */
+actual val supportsStatefulFlush: Boolean = false
+
+/**
  * Check if running in Node.js environment.
  */
 internal val isNodeJs: Boolean by lazy {
