@@ -59,6 +59,37 @@ suspend fun sendCompressed(socket: Socket, data: String) {
 }
 ```
 
+### Flush vs Finish
+
+The streaming compressor provides two ways to emit output:
+
+- **`flush()`** - Produces output that can be immediately decompressed, but keeps the stream open for more data. The output ends with a sync marker (`00 00 FF FF`).
+- **`finish()`** - Finalizes the stream and produces the final output. The stream cannot accept more data after this.
+
+Use `flush()` when you need independently decompressible messages within a single compression context:
+
+```kotlin
+val compressor = StreamingCompressor.create(algorithm = CompressionAlgorithm.Raw)
+try {
+    // First message - can be decompressed immediately
+    compressor.compress("message1".toReadBuffer()) {}
+    compressor.flush { socket.write(it) }
+
+    // Second message - still using same compression context
+    compressor.compress("message2".toReadBuffer()) {}
+    compressor.flush { socket.write(it) }
+
+    // When done, call finish
+    compressor.finish { socket.write(it) }
+} finally {
+    compressor.close()
+}
+```
+
+:::note
+`flush()` is not supported in browser JavaScript. Use `finish()` instead, or check `supportsSyncCompression` before using `flush()`.
+:::
+
 ### Receive and Decompress from Network
 
 ```kotlin
@@ -91,6 +122,66 @@ CompressionAlgorithm.Deflate
 // Raw - no headers, for custom protocols or when you manage framing yourself
 CompressionAlgorithm.Raw
 ```
+
+## Sync Flush Marker Handling
+
+Some protocols (like WebSocket permessage-deflate) require stripping or appending the deflate sync marker (`00 00 FF FF`). The buffer module provides utilities for this:
+
+### Convenience Functions
+
+For most use cases, use the high-level functions:
+
+```kotlin
+// Compress with sync flush and strip the marker
+val compressed = compressWithSyncFlush(data.toReadBuffer())
+
+// Decompress data that had the marker stripped
+val decompressed = decompressWithSyncFlush(compressed)
+```
+
+### Low-Level Utilities
+
+For more control, use the extension functions directly:
+
+```kotlin
+// Strip the sync marker from the end of compressed data
+val stripped = compressedBuffer.stripSyncFlushMarker()
+```
+
+### Manual Marker Handling
+
+When decompressing data that had the sync marker stripped, feed the marker as a separate buffer to avoid copying the compressed data:
+
+```kotlin
+val decompressor = SuspendingStreamingDecompressor.create(CompressionAlgorithm.Raw)
+try {
+    val output = mutableListOf<ReadBuffer>()
+    output += decompressor.decompress(compressedData)
+
+    // Feed the sync marker separately (no copy of compressed data)
+    val marker = PlatformBuffer.allocate(4)
+    marker.writeInt(DeflateFormat.SYNC_FLUSH_MARKER)
+    marker.resetForRead()
+    output += decompressor.decompress(marker)
+    output += decompressor.finish()
+
+    // Combine output chunks...
+} finally {
+    decompressor.close()
+}
+```
+
+### The Sync Marker Constant
+
+The marker value is available as a constant:
+
+```kotlin
+DeflateFormat.SYNC_FLUSH_MARKER  // 0x0000FFFF (00 00 FF FF)
+```
+
+:::note
+These utilities work with raw deflate (`CompressionAlgorithm.Raw`). The sync marker is a deflate format concept, not specific to any protocol.
+:::
 
 ## Compression Levels
 

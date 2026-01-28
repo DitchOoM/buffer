@@ -21,6 +21,17 @@ actual val supportsRawDeflate: Boolean by lazy {
 }
 
 /**
+ * Whether the sync [StreamingCompressor] maintains dictionary across flush() calls.
+ *
+ * JS Node.js: `false` - sync API uses batch compression, flush clears state.
+ * JS Browser: `false` - CompressionStream API doesn't support flush.
+ *
+ * Note: The async [SuspendingStreamingCompressor] DOES support stateful flush
+ * on Node.js using the Transform stream API.
+ */
+actual val supportsStatefulFlush: Boolean = false
+
+/**
  * Check if running in Node.js environment.
  */
 internal val isNodeJs: Boolean by lazy {
@@ -93,6 +104,32 @@ private fun compressWithNodeZlib(
     options["level"] = level.value
 
     // Get input as Int8Array directly from JsBuffer, or convert
+    val inputArray = buffer.toInt8Array()
+
+    val compressed: Uint8Array =
+        when (algorithm) {
+            CompressionAlgorithm.Gzip -> zlib.gzipSync(inputArray, options).unsafeCast<Uint8Array>()
+            CompressionAlgorithm.Deflate -> zlib.deflateSync(inputArray, options).unsafeCast<Uint8Array>()
+            CompressionAlgorithm.Raw -> zlib.deflateRawSync(inputArray, options).unsafeCast<Uint8Array>()
+        }
+
+    return compressed.toJsBuffer()
+}
+
+/**
+ * Compress with Z_SYNC_FLUSH to produce complete deflate blocks ending with sync marker.
+ * The output can be immediately decompressed without waiting for more data.
+ */
+internal fun compressWithSyncFlush(
+    buffer: ReadBuffer,
+    algorithm: CompressionAlgorithm,
+    level: CompressionLevel,
+): PlatformBuffer {
+    val zlib = getNodeZlib()
+    val options = js("{}")
+    options["level"] = level.value
+    options["finishFlush"] = zlib.constants.Z_SYNC_FLUSH
+
     val inputArray = buffer.toInt8Array()
 
     val compressed: Uint8Array =

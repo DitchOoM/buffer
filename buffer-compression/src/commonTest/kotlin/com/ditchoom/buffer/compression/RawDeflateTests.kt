@@ -7,6 +7,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Tests for raw deflate decompression of streams without BFINAL=1.
@@ -281,8 +282,9 @@ class RawDeflateTests {
      */
     @Test
     fun rawDeflate_largePayload_withSyncTerminator() =
-        runTest {
+        runTest(timeout = 30.seconds) {
             if (!supportsRawDeflate) return@runTest
+
             val text = "WebSocket payload data. ".repeat(500) // ~12KB
             val compressed = compressAsync(text.toReadBuffer(), CompressionAlgorithm.Raw)
 

@@ -43,6 +43,18 @@ interface StreamingCompressor : AutoCloseable {
     )
 
     /**
+     * Flushes buffered data using Z_SYNC_FLUSH, producing complete deflate blocks.
+     * Unlike [finish], the stream remains open for more data.
+     *
+     * The output ends with the sync marker `00 00 FF FF` and can be immediately
+     * decompressed without waiting for more data. Useful for protocols that need
+     * independently decompressible messages within a single compression context.
+     *
+     * @param onOutput Called with flushed compressed data.
+     */
+    fun flush(onOutput: (ReadBuffer) -> Unit)
+
+    /**
      * Finishes compression, flushing any buffered data.
      * Must be called after all input has been provided.
      *
@@ -238,6 +250,15 @@ interface SuspendingStreamingCompressor : AutoCloseable {
     suspend fun compress(input: ReadBuffer): List<ReadBuffer>
 
     /**
+     * Flushes buffered data using Z_SYNC_FLUSH, producing complete deflate blocks.
+     * Unlike [finish], the stream remains open for more data.
+     *
+     * The output ends with the sync marker `00 00 FF FF` and can be immediately
+     * decompressed without waiting for more data.
+     */
+    suspend fun flush(): List<ReadBuffer>
+
+    /**
      * Finishes compression, returning any remaining data.
      */
     suspend fun finish(): List<ReadBuffer>
@@ -342,6 +363,12 @@ internal class SyncWrappingSuspendingCompressor(
     override suspend fun compress(input: ReadBuffer): List<ReadBuffer> {
         val results = mutableListOf<ReadBuffer>()
         delegate.compress(input) { results.add(it) }
+        return results
+    }
+
+    override suspend fun flush(): List<ReadBuffer> {
+        val results = mutableListOf<ReadBuffer>()
+        delegate.flush { results.add(it) }
         return results
     }
 

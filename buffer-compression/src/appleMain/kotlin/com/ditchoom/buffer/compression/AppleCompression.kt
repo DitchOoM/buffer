@@ -40,6 +40,7 @@ import platform.zlib.z_stream
  */
 actual val supportsSyncCompression: Boolean = true
 actual val supportsRawDeflate: Boolean = true
+actual val supportsStatefulFlush: Boolean = true
 
 /**
  * Helper to copy memory with platform-appropriate size_t conversion.
