@@ -68,6 +68,41 @@ class UnsafeMemoryTest {
     }
 
     @Test
+    fun testCopyMemoryEmptyArrays() {
+        if (!UnsafeMemory.isSupported) return
+
+        val buffer = PlatformBuffer.allocate(16, AllocationZone.Direct)
+        val address = (buffer as? NativeMemoryAccess)?.nativeAddress ?: return
+
+        // Initialize buffer with known pattern
+        UnsafeMemory.setMemory(address, 16, 0xAA.toByte())
+
+        // Test copyMemoryFromArray with empty array - should not throw
+        val emptyArray = ByteArray(0)
+        UnsafeMemory.copyMemoryFromArray(emptyArray, 0, address, 0)
+
+        // Verify buffer unchanged
+        assertEquals(0xAA.toByte(), UnsafeMemory.getByte(address))
+
+        // Test copyMemoryToArray with empty array - should not throw
+        UnsafeMemory.copyMemoryToArray(address, emptyArray, 0, 0)
+
+        // Test copyMemoryFromArray with non-empty array but zero length
+        val nonEmptyArray = byteArrayOf(0x11, 0x22, 0x33)
+        UnsafeMemory.copyMemoryFromArray(nonEmptyArray, 0, address, 0)
+
+        // Verify buffer still unchanged
+        assertEquals(0xAA.toByte(), UnsafeMemory.getByte(address))
+
+        // Test copyMemoryToArray with non-empty array but zero length
+        val destArray = ByteArray(3)
+        UnsafeMemory.copyMemoryToArray(address, destArray, 0, 0)
+
+        // Verify destination array unchanged (should be all zeros)
+        assertEquals(0.toByte(), destArray[0])
+    }
+
+    @Test
     fun testLargeBufferOperations() {
         if (!UnsafeMemory.isSupported) return
 
