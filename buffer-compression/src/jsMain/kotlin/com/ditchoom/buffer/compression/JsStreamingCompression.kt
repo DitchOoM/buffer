@@ -442,9 +442,10 @@ private fun createUint8ArrayFromBuffer(buffer: dynamic): Uint8Array = js("new Ui
 /**
  * Pure JS helper that compresses data through a Transform stream and returns a Promise.
  * All stream operations are encapsulated in JS, avoiding runTest virtual time issues.
+ * Accepts multiple input chunks to avoid combining them before compression.
  */
 private fun nodeCompressAsync(
-    input: Uint8Array,
+    inputs: List<Uint8Array>,
     algorithm: String,
     level: Int,
 ): Promise<Uint8Array> {
@@ -473,15 +474,20 @@ private fun nodeCompressAsync(
             val uint8 = Uint8Array(result.buffer, result.byteOffset, result.length)
             resolve(uint8)
         }
-        stream.end(input)
+        // Write each chunk directly without combining
+        for (input in inputs) {
+            stream.write(input)
+        }
+        stream.end()
     }
 }
 
 /**
  * Pure JS helper that decompresses data through a Transform stream and returns a Promise.
+ * Accepts multiple input chunks to avoid combining them before decompression.
  */
 private fun nodeDecompressAsync(
-    input: Uint8Array,
+    inputs: List<Uint8Array>,
     algorithm: String,
 ): Promise<Uint8Array> {
     val zlib = getNodeZlib()
@@ -511,7 +517,11 @@ private fun nodeDecompressAsync(
             val uint8 = Uint8Array(result.buffer, result.byteOffset, result.length)
             resolve(uint8)
         }
-        stream.end(input)
+        // Write each chunk directly without combining
+        for (input in inputs) {
+            stream.write(input)
+        }
+        stream.end()
     }
 }
 
@@ -529,7 +539,6 @@ private class NodeTransformStreamingCompressor(
     private var stream: dynamic = null
     private var closed = false
     private val pendingChunks = mutableListOf<Uint8Array>()
-    private var pendingBytes = 0
 
     init {
         initStream()
@@ -552,15 +561,10 @@ private class NodeTransformStreamingCompressor(
 
     override suspend fun compress(input: ReadBuffer): List<ReadBuffer> {
         check(!closed) { "Compressor is closed" }
+        if (input.remaining() == 0) return emptyList()
 
-        val remaining = input.remaining()
-        if (remaining == 0) return emptyList()
-
-        // Accumulate chunks for later processing
-        val chunk = input.toUint8Array()
-        pendingChunks.add(chunk)
-        pendingBytes += remaining
-
+        // Accumulate chunks for later processing (zero-copy for JsBuffer)
+        pendingChunks.add(input.toUint8Array())
         return emptyList()
     }
 
@@ -580,15 +584,13 @@ private class NodeTransformStreamingCompressor(
                     chunks.add(chunk.unsafeCast<Uint8Array>().toJsBuffer())
                 }
             }
-            // Write pending chunks first
+            // Write pending chunks directly to stream
             for (chunk in pendingChunks) {
                 stream.write(chunk)
             }
             pendingChunks.clear()
-            pendingBytes = 0
 
             stream.flush(zlib.constants.Z_SYNC_FLUSH) {
-                // Flush callback - all data should be available now
                 resolve(Unit)
             }
         }.await()
@@ -600,24 +602,16 @@ private class NodeTransformStreamingCompressor(
             chunks.add(chunk.unsafeCast<Uint8Array>().toJsBuffer())
         }
 
-        // Remove readable listener to avoid memory leak
         stream.removeAllListeners("readable")
-
         return chunks
     }
 
     override suspend fun finish(): List<ReadBuffer> {
         check(!closed) { "Compressor is closed" }
 
-        // Combine all pending chunks
-        val combined = Uint8Array(pendingBytes)
-        var offset = 0
-        for (chunk in pendingChunks) {
-            combined.set(chunk, offset)
-            offset += chunk.length
-        }
+        // Take pending chunks without copying
+        val chunks = pendingChunks.toList()
         pendingChunks.clear()
-        pendingBytes = 0
 
         // Destroy old stream and use pure JS helper
         stream?.destroy()
@@ -630,14 +624,13 @@ private class NodeTransformStreamingCompressor(
                 CompressionAlgorithm.Raw -> "raw"
             }
 
-        val result = nodeCompressAsync(combined, algString, level.value).await()
+        val result = nodeCompressAsync(chunks, algString, level.value).await()
         return listOf(result.toJsBuffer())
     }
 
     override fun reset() {
         stream?.destroy()
         pendingChunks.clear()
-        pendingBytes = 0
         initStream()
     }
 
@@ -664,7 +657,6 @@ private class NodeTransformStreamingDecompressor(
     private var stream: dynamic = null
     private var closed = false
     private val pendingChunks = mutableListOf<Uint8Array>()
-    private var pendingBytes = 0
 
     init {
         initStream()
@@ -691,32 +683,20 @@ private class NodeTransformStreamingDecompressor(
 
     override suspend fun decompress(input: ReadBuffer): List<ReadBuffer> {
         check(!closed) { "Decompressor is closed" }
+        if (input.remaining() == 0) return emptyList()
 
-        val remaining = input.remaining()
-        if (remaining == 0) return emptyList()
-
-        // Accumulate chunks for later processing
-        val chunk = input.toUint8Array()
-        pendingChunks.add(chunk)
-        pendingBytes += remaining
-
+        // Accumulate chunks for later processing (zero-copy for JsBuffer)
+        pendingChunks.add(input.toUint8Array())
         return emptyList()
     }
 
     override suspend fun finish(): List<ReadBuffer> {
         check(!closed) { "Decompressor is closed" }
+        if (pendingChunks.isEmpty()) return emptyList()
 
-        if (pendingBytes == 0) return emptyList()
-
-        // Combine all pending chunks
-        val combined = Uint8Array(pendingBytes)
-        var offset = 0
-        for (chunk in pendingChunks) {
-            combined.set(chunk, offset)
-            offset += chunk.length
-        }
+        // Take pending chunks without copying
+        val chunks = pendingChunks.toList()
         pendingChunks.clear()
-        pendingBytes = 0
 
         // Destroy old stream and use pure JS helper
         stream?.destroy()
@@ -729,14 +709,13 @@ private class NodeTransformStreamingDecompressor(
                 CompressionAlgorithm.Raw -> "raw"
             }
 
-        val result = nodeDecompressAsync(combined, algString).await()
+        val result = nodeDecompressAsync(chunks, algString).await()
         return listOf(result.toJsBuffer())
     }
 
     override fun reset() {
         stream?.destroy()
         pendingChunks.clear()
-        pendingBytes = 0
         initStream()
     }
 
