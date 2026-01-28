@@ -365,7 +365,7 @@ fun ReadBuffer.appendSyncFlushMarker(zone: AllocationZone = AllocationZone.Direc
 suspend fun compressWithSyncFlush(
     buffer: ReadBuffer,
     level: CompressionLevel = CompressionLevel.Default,
-    zone: AllocationZone = AllocationZone.Heap,
+    zone: AllocationZone = AllocationZone.Direct,
 ): ReadBuffer {
     val compressor = SuspendingStreamingCompressor.create(CompressionAlgorithm.Raw, level)
     val chunks = mutableListOf<ReadBuffer>()
