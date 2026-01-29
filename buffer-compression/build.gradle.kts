@@ -2,6 +2,7 @@
 
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.konan.target.HostManager
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -57,15 +58,18 @@ kotlin {
         tvosArm64()
         tvosSimulatorArm64()
         tvosX64()
+        linuxX64()
+        linuxArm64()
     } else {
-        val osName = System.getProperty("os.name")
-        if (osName == "Mac OS X") {
+        if (HostManager.hostIsMac) {
             val osArch = System.getProperty("os.arch")
             if (osArch == "aarch64") {
                 macosArm64()
             } else {
                 macosX64()
             }
+        } else if (HostManager.hostIsLinux) {
+            linuxX64()
         }
     }
     applyDefaultHierarchyTemplate()

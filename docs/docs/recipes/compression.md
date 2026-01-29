@@ -262,10 +262,10 @@ The examples above use the async API which works everywhere. On platforms with s
 | JVM | ✅ | ✅ | java.util.zip |
 | Android | ✅ | ✅ | java.util.zip |
 | iOS/macOS | ✅ | ✅ | zlib |
+| Linux Native | ✅ | ✅ | zlib |
 | JS (Node.js) | ✅ | ✅ | zlib module |
 | JS (Browser) | ❌ | ✅ | CompressionStream |
 | WasmJS | ❌ | ❌ | — |
-| Linux Native | ❌ | ❌ | — |
 
 ### Check Platform Support at Runtime
 
@@ -497,9 +497,6 @@ SuspendingStreamingCompressor.create(
 
 ## Unsupported Platforms
 
-**WasmJS** and **Linux Native** don't currently support compression because:
-- These platforms don't include zlib by default
-- WasmJS would require bundling a WASM-compiled zlib
-- Linux Native would require linking against the system's zlib library
+**WasmJS** doesn't currently support compression because it would require bundling a WASM-compiled zlib library.
 
 Contributions to add support are welcome!
