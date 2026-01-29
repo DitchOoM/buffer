@@ -3,7 +3,7 @@ package com.ditchoom.buffer.compression
 import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.ByteArrayBuffer
 import com.ditchoom.buffer.ByteOrder
-import com.ditchoom.buffer.NativeBuffer
+import com.ditchoom.buffer.NativeMemoryAccess
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.allocate
@@ -123,8 +123,8 @@ private fun compressWithZStream(
 
     // Allocate output buffer sized for worst case
     val maxOutputSize = getCompressBound(inputSize) + 32
-    val output = NativeBuffer.allocate(maxOutputSize, ByteOrder.BIG_ENDIAN)
-    val outputPtr = output.nativeAddress.toCPointer<ByteVar>()!!
+    val output = PlatformBuffer.allocate(maxOutputSize, AllocationZone.Direct, ByteOrder.BIG_ENDIAN)
+    val outputPtr = (output as NativeMemoryAccess).nativeAddress.toCPointer<ByteVar>()!!
 
     val s = nativeHeap.alloc<z_stream>()
     try {
@@ -213,8 +213,8 @@ private fun decompressWithZStream(
 
         // Start with estimate, grow if needed
         var outputSize = maxOf(inputSize * 4, 1024)
-        var output = NativeBuffer.allocate(outputSize, ByteOrder.BIG_ENDIAN)
-        var outputPtr = output.nativeAddress.toCPointer<ByteVar>()!!
+        var output = PlatformBuffer.allocate(outputSize, AllocationZone.Direct, ByteOrder.BIG_ENDIAN)
+        var outputPtr = (output as NativeMemoryAccess).nativeAddress.toCPointer<ByteVar>()!!
 
         var totalDecompressed = 0
 
@@ -242,8 +242,8 @@ private fun decompressWithZStream(
                         if (s.avail_out == 0u) {
                             // Need more output space - grow buffer
                             val newSize = outputSize * 2
-                            val newOutput = NativeBuffer.allocate(newSize, ByteOrder.BIG_ENDIAN)
-                            val newPtr = newOutput.nativeAddress.toCPointer<ByteVar>()!!
+                            val newOutput = PlatformBuffer.allocate(newSize, AllocationZone.Direct, ByteOrder.BIG_ENDIAN)
+                            val newPtr = (newOutput as NativeMemoryAccess).nativeAddress.toCPointer<ByteVar>()!!
                             // Copy existing decompressed data to new buffer
                             copyMemory(newPtr, outputPtr, totalDecompressed)
                             output = newOutput
@@ -283,7 +283,7 @@ private inline fun <R> withBufferPointer(
     block: (CPointer<ByteVar>) -> R,
 ): R =
     when (buffer) {
-        is NativeBuffer -> block(buffer.nativeAddress.toCPointer<ByteVar>()!!)
+        is NativeMemoryAccess -> block(buffer.nativeAddress.toCPointer<ByteVar>()!!)
         is ByteArrayBuffer -> {
             val array = buffer.backingArray
             if (array.isEmpty()) {

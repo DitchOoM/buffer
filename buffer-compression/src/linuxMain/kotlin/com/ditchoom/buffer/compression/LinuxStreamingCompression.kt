@@ -1,7 +1,8 @@
 package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.ByteArrayBuffer
-import com.ditchoom.buffer.NativeBuffer
+import com.ditchoom.buffer.NativeMemoryAccess
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
@@ -63,15 +64,19 @@ private const val WINDOW_BITS_RAW = -15
 private const val WINDOW_BITS_GZIP = 31
 
 /**
- * Allocates a NativeBuffer from the allocator with runtime validation.
- * Linux streaming compression requires direct memory access via NativeBuffer.
+ * Allocates a buffer with native memory access from the allocator with runtime validation.
+ * Linux streaming compression requires direct memory access via NativeMemoryAccess.
+ * Returns both the PlatformBuffer (for position/limit operations) and its native address.
  */
-private fun BufferAllocator.allocateNativeBuffer(size: Int): NativeBuffer {
+private fun BufferAllocator.allocateNativeBuffer(size: Int): Pair<PlatformBuffer, Long> {
     val buffer = allocate(size)
-    return buffer as? NativeBuffer
-        ?: throw CompressionException(
-            "Linux streaming compression requires NativeBuffer allocator, got ${buffer::class.simpleName}",
-        )
+    val nativeAccess =
+        buffer as? NativeMemoryAccess
+            ?: throw CompressionException(
+                "Linux streaming compression requires NativeMemoryAccess allocator, got ${buffer::class.simpleName}",
+            )
+    @Suppress("USELESS_CAST")
+    return (buffer as PlatformBuffer) to nativeAccess.nativeAddress
 }
 
 /**
@@ -144,8 +149,8 @@ private class LinuxZlibStreamingCompressor(
             s.pointed.avail_in = remaining.convert()
 
             while (s.pointed.avail_in > 0u) {
-                val chunk = allocator.allocateNativeBuffer(outputBufferSize)
-                val chunkPtr = chunk.nativeAddress.toCPointer<ByteVar>()!!
+                val (chunk, chunkAddress) = allocator.allocateNativeBuffer(outputBufferSize)
+                val chunkPtr = chunkAddress.toCPointer<ByteVar>()!!
 
                 s.pointed.next_out = chunkPtr.reinterpret()
                 s.pointed.avail_out = outputBufferSize.convert()
@@ -176,8 +181,8 @@ private class LinuxZlibStreamingCompressor(
 
         // Drain with Z_SYNC_FLUSH until no more output
         while (true) {
-            val chunk = allocator.allocateNativeBuffer(outputBufferSize)
-            val chunkPtr = chunk.nativeAddress.toCPointer<ByteVar>()!!
+            val (chunk, chunkAddress) = allocator.allocateNativeBuffer(outputBufferSize)
+            val chunkPtr = chunkAddress.toCPointer<ByteVar>()!!
 
             s.pointed.next_out = chunkPtr.reinterpret()
             s.pointed.avail_out = outputBufferSize.convert()
@@ -208,8 +213,8 @@ private class LinuxZlibStreamingCompressor(
 
         var finished = false
         while (!finished) {
-            val chunk = allocator.allocateNativeBuffer(outputBufferSize)
-            val chunkPtr = chunk.nativeAddress.toCPointer<ByteVar>()!!
+            val (chunk, chunkAddress) = allocator.allocateNativeBuffer(outputBufferSize)
+            val chunkPtr = chunkAddress.toCPointer<ByteVar>()!!
 
             s.pointed.next_out = chunkPtr.reinterpret()
             s.pointed.avail_out = outputBufferSize.convert()
@@ -317,8 +322,8 @@ private class LinuxZlibStreamingDecompressor(
                 s.pointed.avail_in = remaining.convert()
 
                 while (s.pointed.avail_in > 0u && !streamEnded) {
-                    val chunk = allocator.allocateNativeBuffer(outputBufferSize)
-                    val chunkPtr = chunk.nativeAddress.toCPointer<ByteVar>()!!
+                    val (chunk, chunkAddress) = allocator.allocateNativeBuffer(outputBufferSize)
+                    val chunkPtr = chunkAddress.toCPointer<ByteVar>()!!
 
                     s.pointed.next_out = chunkPtr.reinterpret()
                     s.pointed.avail_out = outputBufferSize.convert()
@@ -354,8 +359,8 @@ private class LinuxZlibStreamingDecompressor(
         s.pointed.avail_in = 0u
 
         while (!streamEnded) {
-            val chunk = allocator.allocateNativeBuffer(outputBufferSize)
-            val chunkPtr = chunk.nativeAddress.toCPointer<ByteVar>()!!
+            val (chunk, chunkAddress) = allocator.allocateNativeBuffer(outputBufferSize)
+            val chunkPtr = chunkAddress.toCPointer<ByteVar>()!!
 
             s.pointed.next_out = chunkPtr.reinterpret()
             s.pointed.avail_out = outputBufferSize.convert()
@@ -415,7 +420,7 @@ private inline fun <R> withInputPointer(
     block: (CPointer<ByteVar>) -> R,
 ): R =
     when (buffer) {
-        is NativeBuffer -> block(buffer.nativeAddress.toCPointer<ByteVar>()!!)
+        is NativeMemoryAccess -> block(buffer.nativeAddress.toCPointer<ByteVar>()!!)
         is ByteArrayBuffer -> {
             val array = buffer.backingArray
             if (array.isEmpty()) {
