@@ -3,6 +3,8 @@ package com.ditchoom.buffer.pool
 import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Charset
+import com.ditchoom.buffer.ManagedMemoryAccess
+import com.ditchoom.buffer.NativeMemoryAccess
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
@@ -81,6 +83,13 @@ internal class SimplePooledBuffer(
     override val byteOrder: ByteOrder get() = inner.byteOrder
 
     override fun release() = pool.release(this)
+
+    // Delegate memory access to inner buffer
+    override val nativeMemoryAccess: NativeMemoryAccess?
+        get() = inner as? NativeMemoryAccess
+
+    override val managedMemoryAccess: ManagedMemoryAccess?
+        get() = inner as? ManagedMemoryAccess
 
     // Delegate ReadBuffer
     override fun resetForRead() = inner.resetForRead()

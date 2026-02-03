@@ -147,6 +147,18 @@ interface PooledBuffer : com.ditchoom.buffer.ReadWriteBuffer {
      * Any further access to the buffer results in undefined behavior.
      */
     fun release()
+
+    /**
+     * Access to native memory if the underlying buffer supports it.
+     * Returns null if the buffer uses managed memory (e.g., ByteArrayBuffer).
+     */
+    val nativeMemoryAccess: com.ditchoom.buffer.NativeMemoryAccess?
+
+    /**
+     * Access to managed memory if the underlying buffer supports it.
+     * Returns null if the buffer uses native memory (e.g., NativeBuffer).
+     */
+    val managedMemoryAccess: com.ditchoom.buffer.ManagedMemoryAccess?
 }
 
 /**
