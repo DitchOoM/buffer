@@ -65,16 +65,18 @@ val PlatformBuffer.nativeMemoryAccess: NativeMemoryAccess?
  * Handles PooledBuffer by delegating to its inner buffer.
  */
 val ReadBuffer.nativeMemoryAccess: NativeMemoryAccess?
-    get() = (this as? com.ditchoom.buffer.pool.PooledBuffer)?.nativeMemoryAccess
-        ?: (this as? NativeMemoryAccess)
+    get() =
+        (this as? com.ditchoom.buffer.pool.PooledBuffer)?.nativeMemoryAccess
+            ?: (this as? NativeMemoryAccess)
 
 /**
  * Extension for WriteBuffer to access native memory if available.
  * Handles PooledBuffer by delegating to its inner buffer.
  */
 val WriteBuffer.nativeMemoryAccess: NativeMemoryAccess?
-    get() = (this as? com.ditchoom.buffer.pool.PooledBuffer)?.nativeMemoryAccess
-        ?: (this as? NativeMemoryAccess)
+    get() =
+        (this as? com.ditchoom.buffer.pool.PooledBuffer)?.nativeMemoryAccess
+            ?: (this as? NativeMemoryAccess)
 
 /**
  * Allocates a buffer with guaranteed native memory access.
@@ -145,16 +147,18 @@ val PlatformBuffer.managedMemoryAccess: ManagedMemoryAccess?
  * Handles PooledBuffer by delegating to its inner buffer.
  */
 val ReadBuffer.managedMemoryAccess: ManagedMemoryAccess?
-    get() = (this as? com.ditchoom.buffer.pool.PooledBuffer)?.managedMemoryAccess
-        ?: (this as? ManagedMemoryAccess)
+    get() =
+        (this as? com.ditchoom.buffer.pool.PooledBuffer)?.managedMemoryAccess
+            ?: (this as? ManagedMemoryAccess)
 
 /**
  * Extension for WriteBuffer to access managed memory if available.
  * Handles PooledBuffer by delegating to its inner buffer.
  */
 val WriteBuffer.managedMemoryAccess: ManagedMemoryAccess?
-    get() = (this as? com.ditchoom.buffer.pool.PooledBuffer)?.managedMemoryAccess
-        ?: (this as? ManagedMemoryAccess)
+    get() =
+        (this as? com.ditchoom.buffer.pool.PooledBuffer)?.managedMemoryAccess
+            ?: (this as? ManagedMemoryAccess)
 
 /**
  * Interface for buffers backed by shared memory that can be accessed across
