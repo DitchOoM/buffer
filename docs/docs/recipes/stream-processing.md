@@ -212,6 +212,81 @@ processor.release()
 
 See [Compression](/recipes/compression#streamprocessor-integration) for full details.
 
+## StreamingStringDecoder
+
+Decode UTF-8 bytes to strings with automatic handling of multi-byte sequences split across chunk boundaries:
+
+```kotlin
+import com.ditchoom.buffer.StreamingStringDecoder
+import com.ditchoom.buffer.StreamingStringDecoderConfig
+
+val decoder = StreamingStringDecoder()
+val result = StringBuilder()
+
+// Process chunks as they arrive (handles split UTF-8 sequences)
+chunks.forEach { chunk ->
+    decoder.decode(chunk, result)
+}
+
+// Finalize and get result
+decoder.finish(result)
+val text = result.toString()
+
+// Reuse for next stream
+decoder.reset()
+```
+
+### Key Features
+
+- **Zero intermediate allocations**: Decodes directly to `Appendable`
+- **Automatic boundary handling**: Multi-byte UTF-8 sequences split across chunks are handled transparently
+- **Reusable**: Create once, use for multiple streams via `reset()`
+- **Platform-optimized**: Uses native APIs (JVM CharsetDecoder, simdutf on Linux, TextDecoder on JS)
+
+### Error Handling
+
+Configure how malformed input is handled:
+
+```kotlin
+import com.ditchoom.buffer.DecoderErrorAction
+
+// Strict mode (default) - throws on malformed input
+val strict = StreamingStringDecoder(
+    StreamingStringDecoderConfig(onMalformedInput = DecoderErrorAction.REPORT)
+)
+
+// Lenient mode - replaces errors with U+FFFD
+val lenient = StreamingStringDecoder(StreamingStringDecoderConfig.LENIENT)
+```
+
+### Use with Compression
+
+Combine with `StreamProcessor` for decompressing and decoding in one pipeline:
+
+```kotlin
+val pool = BufferPool(defaultBufferSize = 8192)
+val processor = StreamProcessor.builder(pool)
+    .decompress(CompressionAlgorithm.Gzip)
+    .build()
+
+val decoder = StreamingStringDecoder()
+val result = StringBuilder()
+
+// Append compressed data
+processor.append(compressedChunk)
+processor.finish()
+
+// Decode decompressed output
+while (processor.available() > 0) {
+    val chunk = processor.readBuffer(minOf(processor.available(), 8192))
+    decoder.decode(chunk, result)
+}
+decoder.finish(result)
+
+processor.release()
+println(result.toString())
+```
+
 ## Best Practices
 
 1. **Use peek before read** - check data availability first
@@ -220,3 +295,4 @@ See [Compression](/recipes/compression#streamprocessor-integration) for full det
 4. **Handle fragmentation** - always check `available()` before reading
 5. **Prefer peekMatches** - for magic byte detection
 6. **Call finish() for transforms** - signals end of input for decompression etc.
+7. **Use StreamingStringDecoder** - for efficient chunked UTF-8 decoding without intermediate String allocations

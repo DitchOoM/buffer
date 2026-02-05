@@ -3,6 +3,7 @@
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSetTree
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import org.jetbrains.kotlin.konan.target.HostManager
 
 plugins {
@@ -25,6 +26,10 @@ allOpen {
 
 apply(from = "../gradle/setup.gradle.kts")
 
+// simdutf - SIMD-accelerated Unicode transcoding for Linux
+// CI Requirements: cmake, build-essential, gcc-aarch64-linux-gnu (for ARM64 cross-compilation)
+apply(from = "gradle/simdutf.gradle.kts")
+
 group = "com.ditchoom"
 val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
 val isArm64 = System.getProperty("os.arch") == "aarch64"
@@ -32,6 +37,14 @@ val isArm64 = System.getProperty("os.arch") == "aarch64"
 @Suppress("UNCHECKED_CAST")
 val getNextVersion = project.extra["getNextVersion"] as (Boolean) -> Any
 project.version = getNextVersion(!isRunningOnGithub).toString()
+
+// Get simdutf build tasks and libs directory from simdutf.gradle.kts
+@Suppress("UNCHECKED_CAST")
+val buildSimdutfX64 = extra["buildSimdutfX64"] as TaskProvider<Task>
+
+@Suppress("UNCHECKED_CAST")
+val buildSimdutfArm64 = extra["buildSimdutfArm64"] as TaskProvider<Task>
+val simdutfLibsDir = extra["simdutfLibsDir"] as File
 
 repositories {
     google()
@@ -159,6 +172,52 @@ kotlin {
                 create("simd") {
                     defFile(project.file("src/nativeInterop/cinterop/simd.def"))
                 }
+            }
+        }
+    }
+
+    // Configure simdutf for Linux targets (SIMD-accelerated Unicode transcoding)
+    if (HostManager.hostIsLinux || isRunningOnGithub) {
+        targets.matching { it.name == "linuxX64" }.configureEach {
+            val target = this as KotlinNativeTarget
+            val simdutfLibDir = simdutfLibsDir.resolve("linux-x64/lib")
+            target.compilations["main"].cinterops {
+                create("simdutf") {
+                    defFile(project.file("src/nativeInterop/cinterop/simdutf.def"))
+                    extraOpts("-libraryPath", simdutfLibDir.absolutePath)
+                    tasks.named(interopProcessingTaskName) {
+                        dependsOn(buildSimdutfX64)
+                    }
+                }
+            }
+            target.binaries.all {
+                linkerOpts(
+                    "-L${simdutfLibDir.absolutePath}",
+                    "-lsimdutf_wrapper",
+                    "-lsimdutf",
+                    "-lstdc++",
+                )
+            }
+        }
+        targets.matching { it.name == "linuxArm64" }.configureEach {
+            val target = this as KotlinNativeTarget
+            val simdutfLibDir = simdutfLibsDir.resolve("linux-arm64/lib")
+            target.compilations["main"].cinterops {
+                create("simdutf") {
+                    defFile(project.file("src/nativeInterop/cinterop/simdutf.def"))
+                    extraOpts("-libraryPath", simdutfLibDir.absolutePath)
+                    tasks.named(interopProcessingTaskName) {
+                        dependsOn(buildSimdutfArm64)
+                    }
+                }
+            }
+            target.binaries.all {
+                linkerOpts(
+                    "-L${simdutfLibDir.absolutePath}",
+                    "-lsimdutf_wrapper",
+                    "-lsimdutf",
+                    "-lstdc++",
+                )
             }
         }
     }

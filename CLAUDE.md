@@ -241,6 +241,45 @@ val length = processor.readInt()
 val payload = processor.readBuffer(length)
 ```
 
+### Streaming String Decoder (`com.ditchoom.buffer`)
+
+Stateful UTF-8 decoder for streaming scenarios (chunked network I/O, compression output):
+
+- `StreamingStringDecoder` - Decodes bytes to strings with automatic multi-byte boundary handling
+- `StreamingStringDecoderConfig` - Configuration for charset, error handling, buffer sizes
+- `DecoderErrorAction` - Error handling: `REPORT` (throw), `REPLACE` (U+FFFD), `IGNORE`
+
+```kotlin
+val decoder = StreamingStringDecoder()
+val result = StringBuilder()
+
+// Process chunks as they arrive (handles split UTF-8 sequences)
+chunks.forEach { chunk ->
+    decoder.decode(chunk, result)
+}
+decoder.finish(result)
+val text = result.toString()
+
+// Reuse for next stream
+decoder.reset()
+```
+
+**Platform Implementations:**
+
+| Platform | Implementation |
+|----------|---------------|
+| JVM/Android | `CharsetDecoder` with reusable `CharBuffer` |
+| Apple | Core Foundation string APIs |
+| Linux | simdutf (SIMD-accelerated UTF-8 → UTF-16) |
+| JS | TextDecoder API |
+| WASM | TextDecoder API |
+
+**Key Features:**
+- Zero intermediate allocations - decodes directly to `Appendable`
+- Automatic boundary handling - multi-byte sequences split across chunks
+- Reusable - create once, use for multiple streams via `reset()`
+- Configurable error handling - strict, lenient, or ignore modes
+
 ### Factory Pattern
 
 Buffers are created via companion object methods:
@@ -258,6 +297,7 @@ PlatformBuffer.wrap(byteArray)
 - **JS SharedArrayBuffer:** Requires CORS headers (`Cross-Origin-Opener-Policy`, `Cross-Origin-Embedder-Policy`)
 - **WASM:** `LinearBuffer` (Direct) uses native WASM memory for JS interop; `ByteArrayBuffer` (Heap) for compute workloads
 - **Linux:** `NativeBuffer` (Direct) uses malloc/free for zero-copy io_uring I/O; `ByteArrayBuffer` (Heap) for managed memory
+- **Linux simdutf:** `StreamingStringDecoder` uses simdutf for SIMD-accelerated UTF-8 decoding; requires cmake and gcc for build
 
 ## Benchmarking
 
@@ -317,6 +357,30 @@ See `PERFORMANCE.md` for detailed benchmark results.
 
 ## CI/CD
 
-- Builds run on macOS with JDK 21
-- PR labels control version bumping: `major`, `minor`, or patch (default)
-- Publishing to Maven Central happens automatically on PR merge to main
+### PR Validation (`review.yaml`)
+
+- **JVM/JS/WASM**: ubuntu-latest
+- **Android**: ubuntu-latest
+- **Apple**: macos-latest (macOS, iOS simulator)
+- **Linux**: ubuntu-24.04 with simdutf build dependencies (cmake, gcc, ARM64 cross-compiler)
+
+### Release (`merged.yaml`)
+
+Split into parallel Linux and macOS jobs:
+- **Linux job** (ubuntu-24.04): JVM, JS, WASM, Android, Linux native (with simdutf)
+- **Apple job** (macos-latest): macOS, iOS, watchOS, tvOS targets
+
+**simdutf Build Dependencies (Linux CI):**
+```bash
+sudo apt-get install -y cmake build-essential qemu-user-static
+sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+```
+
+**PR Labels:**
+- `major` - Bump major version
+- `minor` - Bump minor version
+- (default) - Bump patch version
+- `skip-release` - Dry-run build only
+- `draft-release` - Publish to staging for validation
+
+Publishing to Maven Central happens automatically on PR merge to main.
