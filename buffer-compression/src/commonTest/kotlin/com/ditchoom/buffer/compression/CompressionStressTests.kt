@@ -4,6 +4,7 @@ import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.toReadBuffer
 import kotlinx.coroutines.test.runTest
 import kotlin.random.Random
 import kotlin.test.Test
@@ -927,4 +928,155 @@ class CompressionStressTests {
                 )
             }
         }
+
+    // =========================================================================
+    // Stress tests - Many reset cycles (validates inflateReset/deflateReset)
+    // =========================================================================
+
+    @Test
+    fun stressTestManyCompressorResetCycles() =
+        runTest {
+            if (!supportsSyncCompression) return@runTest
+
+            // Test many reset cycles to ensure no memory corruption
+            // This validates that deflateReset() works correctly
+            val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
+            val resetCycles = 500 // Enough to trigger memory issues if reset is broken
+
+            try {
+                for (cycle in 0 until resetCycles) {
+                    val text = "Reset cycle $cycle - data to compress"
+                    val chunks = mutableListOf<ReadBuffer>()
+
+                    compressor.compress(text.toReadBuffer()) { chunks.add(it) }
+                    compressor.finish { chunks.add(it) }
+
+                    // Verify compression worked
+                    assertTrue(chunks.isNotEmpty(), "Cycle $cycle: Should have output")
+
+                    // Decompress and verify
+                    val combined = combineBuffers(chunks)
+                    val decompressedChunks = mutableListOf<ReadBuffer>()
+                    StreamingDecompressor.create(CompressionAlgorithm.Raw).use(
+                        onOutput = { decompressedChunks.add(it) },
+                    ) { decompress ->
+                        decompress(combined)
+                    }
+                    val decompressed = combineBuffers(decompressedChunks)
+                    assertEquals(
+                        text,
+                        decompressed.readString(decompressed.remaining()),
+                        "Cycle $cycle: Round-trip failed",
+                    )
+
+                    // Reset for next cycle
+                    compressor.reset()
+                }
+            } finally {
+                compressor.close()
+            }
+        }
+
+    @Test
+    fun stressTestManyDecompressorResetCycles() =
+        runTest {
+            if (!supportsSyncCompression) return@runTest
+
+            // Test many reset cycles to ensure no memory corruption
+            // This validates that inflateReset() works correctly
+            val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
+            val resetCycles = 500 // Enough to trigger memory issues if reset is broken
+
+            try {
+                for (cycle in 0 until resetCycles) {
+                    val text = "Reset cycle $cycle - data to decompress"
+
+                    // Compress the data first
+                    val compressedChunks = mutableListOf<ReadBuffer>()
+                    StreamingCompressor.create(CompressionAlgorithm.Raw).use(
+                        onOutput = { compressedChunks.add(it) },
+                    ) { compress ->
+                        compress(text.toReadBuffer())
+                    }
+                    val compressed = combineBuffers(compressedChunks)
+
+                    // Decompress using the reused decompressor
+                    val decompressedChunks = mutableListOf<ReadBuffer>()
+                    decompressor.decompress(compressed) { decompressedChunks.add(it) }
+                    decompressor.finish { decompressedChunks.add(it) }
+
+                    // Verify decompression worked
+                    val decompressed = combineBuffers(decompressedChunks)
+                    assertEquals(
+                        text,
+                        decompressed.readString(decompressed.remaining()),
+                        "Cycle $cycle: Round-trip failed",
+                    )
+
+                    // Reset for next cycle
+                    decompressor.reset()
+                }
+            } finally {
+                decompressor.close()
+            }
+        }
+
+    @Test
+    fun stressTestManyResetCyclesWithLargerData() =
+        runTest {
+            if (!supportsSyncCompression) return@runTest
+
+            // Test reset cycles with larger data to stress native heap more
+            val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
+            val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
+            val resetCycles = 100
+            val dataSize = 10_000
+
+            try {
+                for (cycle in 0 until resetCycles) {
+                    val original = generateMixedBuffer(dataSize)
+                    val originalCopy = copyBuffer(original)
+
+                    // Compress
+                    val compressedChunks = mutableListOf<ReadBuffer>()
+                    compressor.compress(original) { compressedChunks.add(it) }
+                    compressor.finish { compressedChunks.add(it) }
+                    val compressed = combineBuffers(compressedChunks)
+
+                    // Decompress
+                    val decompressedChunks = mutableListOf<ReadBuffer>()
+                    decompressor.decompress(compressed) { decompressedChunks.add(it) }
+                    decompressor.finish { decompressedChunks.add(it) }
+                    val decompressed = combineBuffers(decompressedChunks)
+
+                    // Verify
+                    assertBuffersEqual(
+                        originalCopy,
+                        decompressed,
+                        "Cycle $cycle: Round-trip with larger data failed",
+                    )
+
+                    // Reset both for next cycle
+                    compressor.reset()
+                    decompressor.reset()
+                }
+            } finally {
+                compressor.close()
+                decompressor.close()
+            }
+        }
+
+    /**
+     * Helper to combine buffers for stress tests.
+     */
+    private fun combineBuffers(buffers: List<ReadBuffer>): PlatformBuffer {
+        if (buffers.isEmpty()) return PlatformBuffer.allocate(0)
+        val totalSize = buffers.sumOf { it.remaining() }
+        val combined = PlatformBuffer.allocate(totalSize)
+        for (buffer in buffers) {
+            combined.write(buffer)
+        }
+        combined.resetForRead()
+        return combined
+    }
 }

@@ -28,9 +28,11 @@ import platform.zlib.Z_SYNC_FLUSH
 import platform.zlib.deflate
 import platform.zlib.deflateEnd
 import platform.zlib.deflateInit2
+import platform.zlib.deflateReset
 import platform.zlib.inflate
 import platform.zlib.inflateEnd
 import platform.zlib.inflateInit2
+import platform.zlib.inflateReset
 import platform.zlib.z_stream
 
 /**
@@ -236,12 +238,17 @@ private class LinuxZlibStreamingCompressor(
     }
 
     override fun reset() {
-        streamPtr?.let {
-            deflateEnd(it)
-            nativeHeap.free(it.pointed.rawPtr)
+        val s = streamPtr ?: return
+        // Use deflateReset instead of deflateEnd+deflateInit2 to avoid
+        // native heap allocation/deallocation churn which can cause memory corruption.
+        val result = deflateReset(s)
+        if (result != Z_OK) {
+            // Fallback to full re-init on error
+            deflateEnd(s)
+            nativeHeap.free(s.pointed.rawPtr)
+            streamPtr = null
+            initStream()
         }
-        streamPtr = null
-        initStream()
     }
 
     override fun close() {
@@ -390,12 +397,19 @@ private class LinuxZlibStreamingDecompressor(
     }
 
     override fun reset() {
-        streamPtr?.let {
-            inflateEnd(it)
-            nativeHeap.free(it.pointed.rawPtr)
+        val s = streamPtr ?: return
+        // Use inflateReset instead of inflateEnd+inflateInit2 to avoid
+        // native heap allocation/deallocation churn which can cause memory corruption.
+        val result = inflateReset(s)
+        if (result != Z_OK) {
+            // Fallback to full re-init on error
+            inflateEnd(s)
+            nativeHeap.free(s.pointed.rawPtr)
+            streamPtr = null
+            initStream()
+        } else {
+            streamEnded = false
         }
-        streamPtr = null
-        initStream()
     }
 
     override fun close() {
