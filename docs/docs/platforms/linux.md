@@ -156,6 +156,40 @@ val data = buffer.readByteArray(bytesRead)
 
 See [Platform Interop](../recipes/platform-interop) for more details.
 
+## SIMD-Accelerated Unicode (simdutf)
+
+On Linux, `StreamingStringDecoder` uses [simdutf](https://github.com/simdutf/simdutf) for SIMD-accelerated UTF-8 to UTF-16 transcoding. This provides significant performance improvements for text-heavy workloads.
+
+### Features
+
+- **SIMD acceleration**: Uses SSE/AVX on x64, NEON on ARM64
+- **Boundary detection**: Efficiently finds safe UTF-8 boundaries for chunk processing
+- **Zero-copy decoding**: Converts directly from native buffer to CharArray
+
+### Usage
+
+```kotlin
+import com.ditchoom.buffer.StreamingStringDecoder
+
+val decoder = StreamingStringDecoder()
+val result = StringBuilder()
+
+// simdutf handles multi-byte sequences split across chunks
+chunks.forEach { chunk ->
+    decoder.decode(chunk, result)
+}
+decoder.finish(result)
+
+println(result.toString())
+```
+
+:::note Platform Availability
+simdutf is only used on Linux (linuxX64, linuxArm64). Other platforms use their native APIs:
+- **JVM/Android**: `java.nio.charset.CharsetDecoder`
+- **Apple**: Core Foundation string APIs
+- **JS/WASM**: TextDecoder API
+:::
+
 ## Best Practices
 
 1. **Use Direct for I/O** - `NativeBuffer` avoids copies to/from kernel space
@@ -163,3 +197,4 @@ See [Platform Interop](../recipes/platform-interop) for more details.
 3. **Pool buffers** - Reuse `NativeBuffer` instances to reduce malloc/free overhead
 4. **Close explicitly** - If not using scopes, always close `NativeBuffer` when done
 5. **Use Heap for short-lived data** - `ByteArrayBuffer` is simpler when native access isn't needed
+6. **Use StreamingStringDecoder for text** - Leverages simdutf for fast UTF-8 decoding

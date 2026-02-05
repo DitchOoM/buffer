@@ -102,7 +102,7 @@ jobs:
 
   linux:
     name: "Linux Target Tests"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 21
@@ -115,12 +115,39 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.konan
-          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
-          restore-keys: konan-${{ runner.os }}-
-      - name: Run buffer Linux tests
+          key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-linux-
+      - name: Cache simdutf x64
+        uses: actions/cache@v4
+        with:
+          path: buffer/libs/simdutf/linux-x64
+          key: simdutf-linux-x64-${{ hashFiles('gradle/libs.versions.toml') }}
+      - name: Cache simdutf ARM64
+        uses: actions/cache@v4
+        with:
+          path: buffer/libs/simdutf/linux-arm64
+          key: simdutf-linux-arm64-${{ hashFiles('gradle/libs.versions.toml') }}
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential qemu-user-static
+          # ARM64 cross-compilation toolchain
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          # ARM64 runtime libraries for QEMU
+          mkdir -p /tmp/arm64-libs
+          cd /tmp/arm64-libs
+          curl -LO http://ports.ubuntu.com/pool/main/libx/libxcrypt/libcrypt1_4.4.36-4build1_arm64.deb
+          ar x libcrypt1_*.deb
+          tar xf data.tar.zst
+          sudo cp -r usr/lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
+      - name: Run buffer Linux x64 tests
         run: ./gradlew :buffer:linuxX64Test --no-build-cache
-      - name: Run compression Linux tests
+      - name: Run compression Linux x64 tests
         run: ./gradlew :buffer-compression:linuxX64Test --no-build-cache
+      - name: Build ARM64 test binary
+        run: ./gradlew :buffer:linkDebugTestLinuxArm64 --no-build-cache
+      - name: Run ARM64 tests via QEMU
+        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer/build/bin/linuxArm64/debugTest/test.kexe
 
   docs:
     name: "Validate Docs Generation"

@@ -18,6 +18,7 @@ memory copies:
 - **Zero-copy performance**: Direct delegation to platform-native buffers
 - **Buffer pooling**: High-performance buffer reuse for network I/O
 - **Stream processing**: Handle fragmented data across chunk boundaries
+- **Streaming string decoder**: UTF-8 decoding with automatic multi-byte boundary handling
 - **Android IPC**: `SharedMemory` support for zero-copy inter-process communication
 
 ## Installation
@@ -106,6 +107,25 @@ if (processor.available() >= 4 + messageLength) {
     processor.skip(4)
     val payload = processor.readBuffer(messageLength)
 }
+```
+
+## Streaming String Decoder
+
+Decode UTF-8 bytes with automatic handling of multi-byte sequences split across chunks:
+
+```kotlin
+val decoder = StreamingStringDecoder()
+val result = StringBuilder()
+
+// Process chunks as they arrive
+chunks.forEach { chunk ->
+    decoder.decode(chunk, result)
+}
+decoder.finish(result)
+println(result.toString())
+
+// Reuse for next stream
+decoder.reset()
 ```
 
 ## License
