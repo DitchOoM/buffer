@@ -4,6 +4,7 @@ import com.ditchoom.buffer.ByteArrayBuffer
 import com.ditchoom.buffer.NativeMemoryAccess
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.nativeMemoryAccess
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -433,9 +434,10 @@ private inline fun <R> withInputPointer(
     buffer: ReadBuffer,
     block: (CPointer<ByteVar>) -> R,
 ): R =
-    when (buffer) {
-        is NativeMemoryAccess -> block(buffer.nativeAddress.toCPointer<ByteVar>()!!)
-        is ByteArrayBuffer -> {
+    when {
+        buffer is NativeMemoryAccess -> block(buffer.nativeAddress.toCPointer<ByteVar>()!!)
+        buffer.nativeMemoryAccess != null -> block(buffer.nativeMemoryAccess!!.nativeAddress.toCPointer<ByteVar>()!!)
+        buffer is ByteArrayBuffer -> {
             val array = buffer.backingArray
             if (array.isEmpty()) {
                 // Can't get addressOf(0) on empty array, but we also won't read from it
