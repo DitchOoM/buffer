@@ -71,7 +71,12 @@ internal class LockFreeBufferPool(
                 // Update peak if needed
                 val currentSize = poolSize.value
                 updatePeak(currentSize)
+            } else {
+                // CAS push failed because pool became full - free the buffer
+                buffer.inner.freeNativeMemory()
             }
+        } else {
+            buffer.inner.freeNativeMemory()
         }
     }
 
@@ -85,9 +90,10 @@ internal class LockFreeBufferPool(
         )
 
     override fun clear() {
-        // Pop all elements
-        while (pop() != null) {
-            // Discard buffer
+        // Pop all elements and free their native memory
+        while (true) {
+            val buffer = pop() ?: break
+            buffer.freeNativeMemory()
         }
     }
 

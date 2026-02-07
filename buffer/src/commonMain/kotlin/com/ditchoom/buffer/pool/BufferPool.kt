@@ -2,6 +2,7 @@ package com.ditchoom.buffer.pool
 
 import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.ByteOrder
+import com.ditchoom.buffer.SuspendCloseable
 
 /**
  * High-performance buffer pool that minimizes allocations by reusing buffers.
@@ -137,7 +138,7 @@ enum class ThreadingMode {
  *
  * **Warning**: Do not use a buffer after releasing it.
  */
-interface PooledBuffer : com.ditchoom.buffer.ReadWriteBuffer {
+interface PooledBuffer : com.ditchoom.buffer.ReadWriteBuffer, SuspendCloseable {
     override val byteOrder: ByteOrder
 
     /**
@@ -147,6 +148,12 @@ interface PooledBuffer : com.ditchoom.buffer.ReadWriteBuffer {
      * Any further access to the buffer results in undefined behavior.
      */
     fun release()
+
+    /**
+     * Closes this pooled buffer by releasing it back to the pool.
+     * Implements [SuspendCloseable] so that `closeIfNeeded()` works on pooled buffers.
+     */
+    override suspend fun close() = release()
 
     /**
      * Access to native memory if the underlying buffer supports it.

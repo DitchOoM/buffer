@@ -55,6 +55,8 @@ internal class SingleThreadedBufferPool(
             if (pool.size > peakPoolSize) {
                 peakPoolSize = pool.size
             }
+        } else {
+            buffer.inner.freeNativeMemory()
         }
     }
 
@@ -68,6 +70,9 @@ internal class SingleThreadedBufferPool(
         )
 
     override fun clear() {
+        for (buffer in pool) {
+            buffer.freeNativeMemory()
+        }
         pool.clear()
     }
 }
