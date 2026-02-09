@@ -14,6 +14,7 @@ import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.nativeHeap
+import kotlinx.cinterop.pin
 import kotlinx.cinterop.plus
 import kotlinx.cinterop.pointed
 import kotlinx.cinterop.ptr
@@ -69,26 +70,56 @@ private const val WINDOW_BITS_RAW = -15
 private const val WINDOW_BITS_GZIP = 31
 
 /**
- * Allocates a buffer with native memory access from the allocator with runtime validation.
- * Linux streaming compression requires direct memory access via NativeMemoryAccess.
- * Returns both the ReadWriteBuffer (for position/limit operations) and its native address.
- * Supports PlatformBuffer with NativeMemoryAccess.
+ * Holds an output buffer and its native address.
+ * For NativeMemoryAccess buffers, the address is direct.
+ * For managed (ByteArray-backed) buffers, the backing array is pinned to get a stable address.
  */
-private fun BufferAllocator.allocateNativeBuffer(size: Int): Pair<ReadWriteBuffer, Long> {
-    val buffer = allocate(size)
-    val nativeAccess =
-        (buffer as ReadBuffer).nativeMemoryAccess
-            ?: throw CompressionException(
-                "Linux streaming compression requires NativeMemoryAccess allocator, got ${buffer::class.simpleName}",
-            )
-    return buffer to nativeAccess.nativeAddress
+@OptIn(ExperimentalForeignApi::class)
+private class OutputBuffer(
+    val buffer: ReadWriteBuffer,
+    val address: Long,
+    private val pinnedArray: kotlinx.cinterop.Pinned<ByteArray>? = null,
+) {
+    fun release(allocator: BufferAllocator) {
+        pinnedArray?.unpin()
+        if (allocator is BufferAllocator.FromPool) {
+            allocator.pool.release(buffer)
+        } else {
+            (buffer as? PlatformBuffer)?.freeNativeMemory()
+        }
+    }
 }
 
 /**
- * Frees a buffer's native memory if it is a PlatformBuffer.
+ * Allocates an output buffer from the allocator and resolves its native address.
+ * Supports NativeMemoryAccess (direct pointer) and ManagedMemoryAccess (pinned ByteArray).
  */
-private fun ReadWriteBuffer.releaseOrFree() {
-    (this as? PlatformBuffer)?.freeNativeMemory()
+@OptIn(ExperimentalForeignApi::class)
+private fun BufferAllocator.allocateOutputBuffer(size: Int): OutputBuffer {
+    val buffer = allocate(size)
+    val readBuf = buffer as ReadBuffer
+
+    // Fast path: buffer has native memory (NativeBuffer, DirectByteBuffer, etc.)
+    val nativeAccess = readBuf.nativeMemoryAccess
+    if (nativeAccess != null) {
+        return OutputBuffer(buffer, nativeAccess.nativeAddress)
+    }
+
+    // Slow path: managed memory (ByteArrayBuffer) — pin the backing array
+    val managed = readBuf.managedMemoryAccess
+    if (managed != null) {
+        val array = managed.backingArray
+        if (array.isEmpty()) {
+            throw CompressionException("Cannot get pointer to empty buffer")
+        }
+        val pinned = array.pin()
+        val address = pinned.addressOf(0).rawValue.toLong()
+        return OutputBuffer(buffer, address, pinned)
+    }
+
+    throw CompressionException(
+        "Buffer must have NativeMemoryAccess or ManagedMemoryAccess, got ${buffer::class.simpleName}",
+    )
 }
 
 /**
@@ -106,9 +137,8 @@ private class LinuxZlibStreamingCompressor(
     private var closed = false
 
     // Reusable output buffer — persists across iterations and calls.
-    // Only allocated when null, emitted when full, freed on reset/close.
-    private var currentOutput: ReadWriteBuffer? = null
-    private var currentOutputAddr: Long = 0L
+    // Only allocated when null, emitted when full, released on reset/close.
+    private var currentOutput: OutputBuffer? = null
     private var currentOutputWritten: Int = 0
 
     init {
@@ -152,29 +182,27 @@ private class LinuxZlibStreamingCompressor(
 
     private fun ensureOutput() {
         if (currentOutput == null) {
-            val (buf, addr) = allocator.allocateNativeBuffer(outputBufferSize)
-            currentOutput = buf
-            currentOutputAddr = addr
+            currentOutput = allocator.allocateOutputBuffer(outputBufferSize)
             currentOutputWritten = 0
         }
     }
 
     private fun emitFullOutput(onOutput: (ReadBuffer) -> Unit) {
-        val output = currentOutput!!
-        output.position(currentOutputWritten)
-        output.resetForRead()
-        onOutput(output)
+        val out = currentOutput!!
+        out.buffer.position(currentOutputWritten)
+        out.buffer.resetForRead()
+        onOutput(out.buffer)
         currentOutput = null
     }
 
     private fun emitPartialOutput(onOutput: (ReadBuffer) -> Unit) {
-        val output = currentOutput ?: return
+        val out = currentOutput ?: return
         if (currentOutputWritten > 0) {
-            output.position(currentOutputWritten)
-            output.resetForRead()
-            onOutput(output)
+            out.buffer.position(currentOutputWritten)
+            out.buffer.resetForRead()
+            onOutput(out.buffer)
         } else {
-            output.releaseOrFree()
+            out.release(allocator)
         }
         currentOutput = null
     }
@@ -197,8 +225,9 @@ private class LinuxZlibStreamingCompressor(
 
             while (s.pointed.avail_in > 0u) {
                 ensureOutput()
+                val out = currentOutput!!
                 val available = outputBufferSize - currentOutputWritten
-                s.pointed.next_out = (currentOutputAddr + currentOutputWritten).toCPointer<ByteVar>()!!.reinterpret()
+                s.pointed.next_out = (out.address + currentOutputWritten).toCPointer<ByteVar>()!!.reinterpret()
                 s.pointed.avail_out = available.convert()
 
                 val result = deflate(s, Z_NO_FLUSH)
@@ -212,9 +241,6 @@ private class LinuxZlibStreamingCompressor(
                 when {
                     currentOutputWritten >= outputBufferSize -> emitFullOutput(onOutput)
                     produced == 0 -> {
-                        // zlib couldn't produce output — if the buffer has data, emit
-                        // partial and retry with a fresh buffer (remaining space may be
-                        // too small for zlib to make progress).
                         if (currentOutputWritten > 0) {
                             emitPartialOutput(onOutput)
                         } else {
@@ -237,8 +263,9 @@ private class LinuxZlibStreamingCompressor(
 
         while (true) {
             ensureOutput()
+            val out = currentOutput!!
             val available = outputBufferSize - currentOutputWritten
-            s.pointed.next_out = (currentOutputAddr + currentOutputWritten).toCPointer<ByteVar>()!!.reinterpret()
+            s.pointed.next_out = (out.address + currentOutputWritten).toCPointer<ByteVar>()!!.reinterpret()
             s.pointed.avail_out = available.convert()
 
             val result = deflate(s, Z_SYNC_FLUSH)
@@ -252,7 +279,6 @@ private class LinuxZlibStreamingCompressor(
             if (currentOutputWritten >= outputBufferSize) {
                 emitFullOutput(onOutput)
             } else {
-                // Output buffer not full — flush is complete
                 break
             }
         }
@@ -270,8 +296,9 @@ private class LinuxZlibStreamingCompressor(
         var finished = false
         while (!finished) {
             ensureOutput()
+            val out = currentOutput!!
             val available = outputBufferSize - currentOutputWritten
-            s.pointed.next_out = (currentOutputAddr + currentOutputWritten).toCPointer<ByteVar>()!!.reinterpret()
+            s.pointed.next_out = (out.address + currentOutputWritten).toCPointer<ByteVar>()!!.reinterpret()
             s.pointed.avail_out = available.convert()
 
             val result = deflate(s, Z_FINISH)
@@ -294,7 +321,7 @@ private class LinuxZlibStreamingCompressor(
     }
 
     override fun reset() {
-        currentOutput?.releaseOrFree()
+        currentOutput?.release(allocator)
         currentOutput = null
         currentOutputWritten = 0
         val s = streamPtr ?: return
@@ -309,7 +336,7 @@ private class LinuxZlibStreamingCompressor(
 
     override fun close() {
         if (!closed) {
-            currentOutput?.releaseOrFree()
+            currentOutput?.release(allocator)
             currentOutput = null
             streamPtr?.let {
                 deflateEnd(it)
@@ -336,8 +363,7 @@ private class LinuxZlibStreamingDecompressor(
     private var streamEnded = false
 
     // Reusable output buffer — persists across iterations and calls.
-    private var currentOutput: ReadWriteBuffer? = null
-    private var currentOutputAddr: Long = 0L
+    private var currentOutput: OutputBuffer? = null
     private var currentOutputWritten: Int = 0
 
     init {
@@ -374,29 +400,27 @@ private class LinuxZlibStreamingDecompressor(
 
     private fun ensureOutput() {
         if (currentOutput == null) {
-            val (buf, addr) = allocator.allocateNativeBuffer(outputBufferSize)
-            currentOutput = buf
-            currentOutputAddr = addr
+            currentOutput = allocator.allocateOutputBuffer(outputBufferSize)
             currentOutputWritten = 0
         }
     }
 
     private fun emitFullOutput(onOutput: (ReadBuffer) -> Unit) {
-        val output = currentOutput!!
-        output.position(currentOutputWritten)
-        output.resetForRead()
-        onOutput(output)
+        val out = currentOutput!!
+        out.buffer.position(currentOutputWritten)
+        out.buffer.resetForRead()
+        onOutput(out.buffer)
         currentOutput = null
     }
 
     private fun emitPartialOutput(onOutput: (ReadBuffer) -> Unit) {
-        val output = currentOutput ?: return
+        val out = currentOutput ?: return
         if (currentOutputWritten > 0) {
-            output.position(currentOutputWritten)
-            output.resetForRead()
-            onOutput(output)
+            out.buffer.position(currentOutputWritten)
+            out.buffer.resetForRead()
+            onOutput(out.buffer)
         } else {
-            output.releaseOrFree()
+            out.release(allocator)
         }
         currentOutput = null
     }
@@ -422,8 +446,9 @@ private class LinuxZlibStreamingDecompressor(
 
                 while (s.pointed.avail_in > 0u && !streamEnded) {
                     ensureOutput()
+                    val out = currentOutput!!
                     val available = outputBufferSize - currentOutputWritten
-                    s.pointed.next_out = (currentOutputAddr + currentOutputWritten).toCPointer<ByteVar>()!!.reinterpret()
+                    s.pointed.next_out = (out.address + currentOutputWritten).toCPointer<ByteVar>()!!.reinterpret()
                     s.pointed.avail_out = available.convert()
 
                     val result = inflate(s, Z_SYNC_FLUSH)
@@ -468,8 +493,9 @@ private class LinuxZlibStreamingDecompressor(
 
         while (!streamEnded) {
             ensureOutput()
+            val out = currentOutput!!
             val available = outputBufferSize - currentOutputWritten
-            s.pointed.next_out = (currentOutputAddr + currentOutputWritten).toCPointer<ByteVar>()!!.reinterpret()
+            s.pointed.next_out = (out.address + currentOutputWritten).toCPointer<ByteVar>()!!.reinterpret()
             s.pointed.avail_out = available.convert()
 
             val result = inflate(s, Z_FINISH)
@@ -499,7 +525,7 @@ private class LinuxZlibStreamingDecompressor(
     }
 
     override fun reset() {
-        currentOutput?.releaseOrFree()
+        currentOutput?.release(allocator)
         currentOutput = null
         currentOutputWritten = 0
         val s = streamPtr ?: return
@@ -516,7 +542,7 @@ private class LinuxZlibStreamingDecompressor(
 
     override fun close() {
         if (!closed) {
-            currentOutput?.releaseOrFree()
+            currentOutput?.release(allocator)
             currentOutput = null
             streamPtr?.let {
                 inflateEnd(it)
