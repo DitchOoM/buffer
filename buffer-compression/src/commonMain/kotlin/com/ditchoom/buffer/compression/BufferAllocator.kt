@@ -4,6 +4,7 @@ import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.pool.BufferPool
 import kotlin.jvm.JvmInline
 
 /**
@@ -39,6 +40,15 @@ sealed interface BufferAllocator {
      */
     data object Heap : BufferAllocator {
         override fun allocate(size: Int): ReadWriteBuffer = PlatformBuffer.allocate(size, AllocationZone.Heap)
+    }
+
+    /**
+     * Allocate buffers from a buffer pool for reuse.
+     */
+    class FromPool(
+        val pool: BufferPool,
+    ) : BufferAllocator {
+        override fun allocate(size: Int): ReadWriteBuffer = pool.acquire(size)
     }
 
     companion object {

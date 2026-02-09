@@ -8,7 +8,8 @@ package = com.ditchoom.buffer.cinterop.simdutf
 linkerOpts.linux = -lstdc++
 
 # Static library path is set via build.gradle.kts extraOpts("-libraryPath", ...)
-staticLibraries.linux = libsimdutf.a
+# Both the core library and the C wrapper must be included so consumers get them via klib
+staticLibraries.linux = libsimdutf_wrapper.a libsimdutf.a
 
 compilerOpts = -O2
 

@@ -2,6 +2,7 @@
 
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import org.jetbrains.kotlin.konan.target.HostManager
 
 plugins {
@@ -72,6 +73,34 @@ kotlin {
             linuxX64()
         }
     }
+    // Link against simdutf (transitive dependency via :buffer module)
+    if (HostManager.hostIsLinux || isRunningOnGithub) {
+        targets.matching { it.name == "linuxX64" }.configureEach {
+            val target = this as KotlinNativeTarget
+            val simdutfLibDir = project(":buffer").projectDir.resolve("libs/simdutf/linux-x64/lib")
+            target.binaries.all {
+                linkerOpts(
+                    "-L${simdutfLibDir.absolutePath}",
+                    "-lsimdutf_wrapper",
+                    "-lsimdutf",
+                    "-lstdc++",
+                )
+            }
+        }
+        targets.matching { it.name == "linuxArm64" }.configureEach {
+            val target = this as KotlinNativeTarget
+            val simdutfLibDir = project(":buffer").projectDir.resolve("libs/simdutf/linux-arm64/lib")
+            target.binaries.all {
+                linkerOpts(
+                    "-L${simdutfLibDir.absolutePath}",
+                    "-lsimdutf_wrapper",
+                    "-lsimdutf",
+                    "-lstdc++",
+                )
+            }
+        }
+    }
+
     applyDefaultHierarchyTemplate()
     sourceSets {
         commonMain.dependencies {

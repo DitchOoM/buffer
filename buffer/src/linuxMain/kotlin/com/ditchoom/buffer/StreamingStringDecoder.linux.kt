@@ -5,6 +5,7 @@ package com.ditchoom.buffer
 import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_convert_utf8_to_chararray
 import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_utf16_length_from_utf8
 import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_utf8_find_boundary
+import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_validate_utf8
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.ShortVar
@@ -220,6 +221,11 @@ private class LinuxStreamingStringDecoder(
         destination: Appendable,
     ): Int {
         if (length == 0) return 0
+
+        // Validate UTF-8 before conversion — simdutf silently replaces invalid sequences
+        if (buf_simdutf_validate_utf8(ptr, length.convert()) == 0) {
+            return handleMalformedInput(destination).charsWritten
+        }
 
         // Calculate required UTF-16 buffer size
         val utf16Len = buf_simdutf_utf16_length_from_utf8(ptr, length.convert()).toInt()
