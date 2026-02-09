@@ -10,6 +10,7 @@ import com.ditchoom.buffer.cinterop.buf_indexof_short
 import com.ditchoom.buffer.cinterop.buf_indexof_short_aligned
 import com.ditchoom.buffer.cinterop.buf_mismatch
 import com.ditchoom.buffer.cinterop.buf_xor_mask
+import com.ditchoom.buffer.cinterop.buf_xor_mask_copy
 import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_convert_utf8_to_chararray
 import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_utf16_length_from_utf8
 import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_validate_utf8
@@ -326,6 +327,41 @@ class NativeBuffer private constructor(
             nativeMask,
             maskOffset.toULong(),
         )
+    }
+
+    /**
+     * SIMD-optimized fused copy + XOR mask using buf_xor_mask_copy.
+     */
+    override fun xorMaskCopy(
+        source: ReadBuffer,
+        mask: Int,
+        maskOffset: Int,
+    ) {
+        checkOpen()
+        val size = source.remaining()
+        if (size == 0) return
+        if (mask == 0) {
+            write(source)
+            return
+        }
+
+        val srcNative = source.nativeMemoryAccess
+        if (srcNative != null) {
+            val nativeMask = mask.reverseBytes().toUInt()
+            buf_xor_mask_copy(
+                (srcNative.nativeAddress + source.position()).toCPointer<UByteVar>(),
+                (ptr + positionValue)!!.reinterpret<UByteVar>(),
+                size.convert(),
+                nativeMask,
+                maskOffset.toULong(),
+            )
+            positionValue += size
+            source.position(source.position() + size)
+            return
+        }
+
+        // Fallback: use default byte-at-a-time implementation
+        super.xorMaskCopy(source, mask, maskOffset)
     }
 
     /**

@@ -254,6 +254,85 @@ abstract class BaseJvmBuffer(
         }
     }
 
+    /**
+     * Optimized fused copy + XOR mask using ByteBuffer getLong/putLong.
+     */
+    override fun xorMaskCopy(
+        source: ReadBuffer,
+        mask: Int,
+        maskOffset: Int,
+    ) {
+        val size = source.remaining()
+        if (size == 0) return
+        if (mask == 0) {
+            write(source)
+            return
+        }
+
+        // Rotate the mask so that mask byte at (maskOffset % 4) becomes byte 0
+        val shift = (maskOffset and 3) * 8
+        val rotatedMask =
+            if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
+        val maskLong = (rotatedMask.toLong() shl 32) or (rotatedMask.toLong() and 0xFFFFFFFFL)
+
+        val srcBB =
+            if (source is BaseJvmBuffer) {
+                val dup = source.byteBuffer.duplicate()
+                dup.order(java.nio.ByteOrder.BIG_ENDIAN)
+                dup
+            } else {
+                null
+            }
+
+        val dstDup = byteBuffer.duplicate()
+        (dstDup as java.nio.Buffer).position(position())
+        dstDup.order(java.nio.ByteOrder.BIG_ENDIAN)
+
+        var srcOff = source.position()
+        var dstOff = position()
+        var processed = 0
+
+        if (srcBB != null) {
+            // Fast path: both are JVM ByteBuffers, use getLong/putLong
+            while (processed + 8 <= size) {
+                val value = srcBB.getLong(srcOff)
+                dstDup.putLong(dstOff, value xor maskLong)
+                srcOff += 8
+                dstOff += 8
+                processed += 8
+            }
+        }
+
+        // Handle remaining bytes (or all bytes if source wasn't a JVM buffer)
+        val maskByte0 = (mask ushr 24).toByte()
+        val maskByte1 = (mask ushr 16).toByte()
+        val maskByte2 = (mask ushr 8).toByte()
+        val maskByte3 = mask.toByte()
+
+        while (processed < size) {
+            val srcByte =
+                if (srcBB != null) {
+                    srcBB.get(srcOff)
+                } else {
+                    source.get(srcOff)
+                }
+            val maskByte =
+                when ((processed + maskOffset) and 3) {
+                    0 -> maskByte0
+                    1 -> maskByte1
+                    2 -> maskByte2
+                    else -> maskByte3
+                }
+            byteBuffer.put(dstOff, (srcByte.toInt() xor maskByte.toInt()).toByte())
+            srcOff++
+            dstOff++
+            processed++
+        }
+
+        source.position(srcOff)
+        position(dstOff)
+    }
+
     override fun position(newPosition: Int) {
         buffer.position(newPosition)
     }

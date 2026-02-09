@@ -452,6 +452,119 @@ class XorMaskTests {
         }
     }
 
+    // ============================================================================
+    // xorMaskCopy tests
+    // ============================================================================
+
+    @Test
+    fun xorMaskCopyMatchesWritePlusXorMask() {
+        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+            val mask = 0xCAFEBABE.toInt()
+            val size = 33 // odd to test remainder
+
+            val src = PlatformBuffer.allocate(size, zone)
+            for (i in 0 until size) src.writeByte((i * 7).toByte())
+            src.resetForRead()
+
+            // Reference: write then mask in-place
+            val src2 = PlatformBuffer.allocate(size, zone)
+            for (i in 0 until size) src2.writeByte((i * 7).toByte())
+            src2.resetForRead()
+
+            val ref = PlatformBuffer.allocate(size, zone) as ReadWriteBuffer
+            ref.write(src2)
+            ref.resetForRead()
+            ref.xorMask(mask)
+
+            // Test: xorMaskCopy
+            val dst = PlatformBuffer.allocate(size, zone) as ReadWriteBuffer
+            dst.xorMaskCopy(src, mask)
+            dst.resetForRead()
+
+            for (i in 0 until size) {
+                assertEquals(ref.readByte(), dst.readByte(), "Mismatch at $i for zone $zone")
+            }
+        }
+    }
+
+    @Test
+    fun xorMaskCopyWithOffset() {
+        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+            val mask = 0x12345678
+            val totalSize = 20
+            val data = ByteArray(totalSize) { it.toByte() }
+
+            // Contiguous reference
+            val contiguous = PlatformBuffer.allocate(totalSize, zone) as ReadWriteBuffer
+            contiguous.writeBytes(data)
+            contiguous.resetForRead()
+            contiguous.xorMask(mask)
+
+            // Chunked xorMaskCopy with offset tracking
+            val dst = PlatformBuffer.allocate(totalSize, zone) as ReadWriteBuffer
+            val chunkSizes = intArrayOf(7, 6, 7)
+            var offset = 0
+            var dataPos = 0
+            for (chunkSize in chunkSizes) {
+                val chunk = PlatformBuffer.allocate(chunkSize, zone)
+                chunk.writeBytes(data, dataPos, chunkSize)
+                chunk.resetForRead()
+                dst.xorMaskCopy(chunk, mask, offset)
+                offset += chunkSize
+                dataPos += chunkSize
+            }
+            dst.resetForRead()
+
+            for (i in 0 until totalSize) {
+                assertEquals(contiguous.readByte(), dst.readByte(), "Mismatch at $i")
+            }
+        }
+    }
+
+    @Test
+    fun xorMaskCopyAdvancesPositions() {
+        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+            val src = PlatformBuffer.allocate(8, zone)
+            for (i in 0 until 8) src.writeByte(i.toByte())
+            src.resetForRead()
+
+            val dst = PlatformBuffer.allocate(16, zone) as ReadWriteBuffer
+            dst.xorMaskCopy(src, 0x12345678)
+
+            assertEquals(8, src.position(), "Source position should advance")
+            assertEquals(8, dst.position(), "Dest position should advance")
+        }
+    }
+
+    @Test
+    fun xorMaskCopyZeroMaskIsCopy() {
+        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+            val src = PlatformBuffer.allocate(8, zone)
+            for (i in 0 until 8) src.writeByte(i.toByte())
+            src.resetForRead()
+
+            val dst = PlatformBuffer.allocate(8, zone) as ReadWriteBuffer
+            dst.xorMaskCopy(src, 0)
+            dst.resetForRead()
+
+            for (i in 0 until 8) {
+                assertEquals(i.toByte(), dst.readByte(), "Zero mask should be plain copy at $i")
+            }
+        }
+    }
+
+    @Test
+    fun xorMaskCopyEmptySourceIsNoOp() {
+        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+            val src = PlatformBuffer.allocate(8, zone)
+            src.resetForRead() // position=0, limit=0
+
+            val dst = PlatformBuffer.allocate(8, zone) as ReadWriteBuffer
+            dst.xorMaskCopy(src, 0x12345678)
+            assertEquals(0, dst.position(), "Dest position should not move")
+        }
+    }
+
     @Test
     fun littleEndianBuffer() {
         val buffer = PlatformBuffer.allocate(8, AllocationZone.Direct, ByteOrder.LITTLE_ENDIAN)
