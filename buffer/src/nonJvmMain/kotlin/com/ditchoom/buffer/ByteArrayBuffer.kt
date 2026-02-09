@@ -236,35 +236,42 @@ class ByteArrayBuffer(
     /**
      * Optimized XOR mask operating directly on the backing byte array.
      */
-    override fun xorMask(mask: Int) {
+    override fun xorMask(
+        mask: Int,
+        maskOffset: Int,
+    ) {
         if (mask == 0) return
         val pos = positionValue
         val lim = limitValue
         val size = lim - pos
         if (size == 0) return
 
-        val maskByte0 = (mask ushr 24).toByte()
-        val maskByte1 = (mask ushr 16).toByte()
-        val maskByte2 = (mask ushr 8).toByte()
-        val maskByte3 = mask.toByte()
+        // Rotate mask so byte at (maskOffset % 4) becomes byte 0
+        val shift = (maskOffset and 3) * 8
+        val rotated = if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
+
+        val rb0 = (rotated ushr 24).toByte()
+        val rb1 = (rotated ushr 16).toByte()
+        val rb2 = (rotated ushr 8).toByte()
+        val rb3 = rotated.toByte()
 
         var i = 0
-        // Process 4 bytes at a time
+        // Process 4 bytes at a time with rotated mask
         while (i + 4 <= size) {
-            data[pos + i] = (data[pos + i].toInt() xor maskByte0.toInt()).toByte()
-            data[pos + i + 1] = (data[pos + i + 1].toInt() xor maskByte1.toInt()).toByte()
-            data[pos + i + 2] = (data[pos + i + 2].toInt() xor maskByte2.toInt()).toByte()
-            data[pos + i + 3] = (data[pos + i + 3].toInt() xor maskByte3.toInt()).toByte()
+            data[pos + i] = (data[pos + i].toInt() xor rb0.toInt()).toByte()
+            data[pos + i + 1] = (data[pos + i + 1].toInt() xor rb1.toInt()).toByte()
+            data[pos + i + 2] = (data[pos + i + 2].toInt() xor rb2.toInt()).toByte()
+            data[pos + i + 3] = (data[pos + i + 3].toInt() xor rb3.toInt()).toByte()
             i += 4
         }
-        // Handle remaining bytes
+        // Handle remaining bytes (at most 3)
         while (i < size) {
             val maskByte =
                 when (i and 3) {
-                    0 -> maskByte0
-                    1 -> maskByte1
-                    2 -> maskByte2
-                    else -> maskByte3
+                    0 -> rb0
+                    1 -> rb1
+                    2 -> rb2
+                    else -> rb3
                 }
             data[pos + i] = (data[pos + i].toInt() xor maskByte.toInt()).toByte()
             i++

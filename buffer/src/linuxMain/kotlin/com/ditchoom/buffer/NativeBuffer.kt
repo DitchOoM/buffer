@@ -12,6 +12,7 @@ import com.ditchoom.buffer.cinterop.buf_mismatch
 import com.ditchoom.buffer.cinterop.buf_xor_mask
 import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_convert_utf8_to_chararray
 import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_utf16_length_from_utf8
+import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_validate_utf8
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.ShortVar
@@ -308,7 +309,10 @@ class NativeBuffer private constructor(
     /**
      * SIMD-optimized XOR mask using buf_xor_mask.
      */
-    override fun xorMask(mask: Int) {
+    override fun xorMask(
+        mask: Int,
+        maskOffset: Int,
+    ) {
         checkOpen()
         if (mask == 0) return
         val size = remaining()
@@ -316,7 +320,12 @@ class NativeBuffer private constructor(
         // The mask Int is big-endian (byte 0 = MSB). Native memory is little-endian,
         // so reverseBytes() ensures mask_bytes[0] from memcpy matches the first byte to XOR.
         val nativeMask = mask.reverseBytes().toUInt()
-        buf_xor_mask((ptr + positionValue)!!.reinterpret<UByteVar>(), size.convert(), nativeMask)
+        buf_xor_mask(
+            (ptr + positionValue)!!.reinterpret<UByteVar>(),
+            size.convert(),
+            nativeMask,
+            maskOffset.toULong(),
+        )
     }
 
     /**
@@ -611,6 +620,10 @@ private fun simdutfDecodeUtf8(
     length: Int,
 ): String {
     if (length == 0) return ""
+    // Validate UTF-8 before conversion — simdutf silently replaces invalid sequences
+    if (buf_simdutf_validate_utf8(ptr, length.convert()) == 0) {
+        throw IllegalArgumentException("Invalid UTF-8 sequence")
+    }
     val utf16Len = buf_simdutf_utf16_length_from_utf8(ptr, length.convert()).toInt()
     if (utf16Len == 0) return ""
     val charArray = CharArray(utf16Len)

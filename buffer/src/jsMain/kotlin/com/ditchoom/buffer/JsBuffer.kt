@@ -166,22 +166,30 @@ class JsBuffer(
     /**
      * Optimized XOR mask using DataView Int32 operations with big-endian.
      */
-    override fun xorMask(mask: Int) {
+    override fun xorMask(
+        mask: Int,
+        maskOffset: Int,
+    ) {
         if (mask == 0) return
         val pos = positionValue
         val lim = limitValue
         val size = lim - pos
         if (size == 0) return
 
+        // Rotate the mask so that mask byte at (maskOffset % 4) becomes byte 0
+        val shift = (maskOffset and 3) * 8
+        val rotatedMask =
+            if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
+
         var offset = pos
-        // Process 4 bytes at a time using big-endian Int32 (matches mask byte order)
+        // Process 4 bytes at a time using big-endian Int32 (matches rotated mask byte order)
         while (offset + 4 <= lim) {
             val value = dataView.getInt32(offset, false) // big-endian read
-            dataView.setInt32(offset, value xor mask, false) // big-endian write
+            dataView.setInt32(offset, value xor rotatedMask, false) // big-endian write
             offset += 4
         }
 
-        // Handle remaining bytes
+        // Handle remaining bytes using the ORIGINAL mask with offset
         val maskByte0 = (mask ushr 24).toByte()
         val maskByte1 = (mask ushr 16).toByte()
         val maskByte2 = (mask ushr 8).toByte()
@@ -189,7 +197,7 @@ class JsBuffer(
         var i = offset - pos
         while (offset < lim) {
             val maskByte =
-                when (i and 3) {
+                when ((i + maskOffset) and 3) {
                     0 -> maskByte0
                     1 -> maskByte1
                     2 -> maskByte2

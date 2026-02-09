@@ -311,14 +311,22 @@ class MutableDataBuffer(
     /**
      * SIMD-optimized XOR mask using buf_xor_mask (auto-vectorized by clang at -O2).
      */
-    override fun xorMask(mask: Int) {
+    override fun xorMask(
+        mask: Int,
+        maskOffset: Int,
+    ) {
         if (mask == 0) return
         val size = limit - position
         if (size == 0) return
         // The mask Int is big-endian (byte 0 = MSB). Native memory is little-endian,
         // so reverseBytes() ensures mask_bytes[0] from memcpy matches the first byte to XOR.
         val nativeMask = mask.reverseBytes().toUInt()
-        buf_xor_mask((bytePointer + position)!!.reinterpret(), size.convert(), nativeMask)
+        buf_xor_mask(
+            (bytePointer + position)!!.reinterpret(),
+            size.convert(),
+            nativeMask,
+            maskOffset.toULong(),
+        )
     }
 
     /**

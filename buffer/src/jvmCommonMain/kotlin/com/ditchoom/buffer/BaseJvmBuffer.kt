@@ -202,15 +202,23 @@ abstract class BaseJvmBuffer(
     /**
      * Optimized XOR mask using ByteBuffer getLong/putLong with forced BIG_ENDIAN.
      */
-    override fun xorMask(mask: Int) {
+    override fun xorMask(
+        mask: Int,
+        maskOffset: Int,
+    ) {
         if (mask == 0) return
         val pos = position()
         val lim = limit()
         val size = lim - pos
         if (size == 0) return
 
-        // Create 8-byte mask (big-endian: mask repeated twice)
-        val maskLong = (mask.toLong() shl 32) or (mask.toLong() and 0xFFFFFFFFL)
+        // Rotate the mask so that mask byte at (maskOffset % 4) becomes byte 0
+        val shift = (maskOffset and 3) * 8
+        val rotatedMask =
+            if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
+
+        // Create 8-byte mask (big-endian: rotatedMask repeated twice)
+        val maskLong = (rotatedMask.toLong() shl 32) or (rotatedMask.toLong() and 0xFFFFFFFFL)
 
         // Use a duplicate with BIG_ENDIAN to avoid byte-order interference
         val dup = byteBuffer.duplicate()
@@ -226,7 +234,7 @@ abstract class BaseJvmBuffer(
             offset += 8
         }
 
-        // Handle remaining bytes
+        // Handle remaining bytes using the ORIGINAL mask with offset
         val maskByte0 = (mask ushr 24).toByte()
         val maskByte1 = (mask ushr 16).toByte()
         val maskByte2 = (mask ushr 8).toByte()
@@ -234,7 +242,7 @@ abstract class BaseJvmBuffer(
         var i = offset - pos
         while (offset < lim) {
             val maskByte =
-                when (i and 3) {
+                when ((i + maskOffset) and 3) {
                     0 -> maskByte0
                     1 -> maskByte1
                     2 -> maskByte2

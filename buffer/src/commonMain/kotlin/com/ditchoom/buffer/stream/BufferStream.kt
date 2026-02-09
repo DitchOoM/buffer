@@ -1,8 +1,8 @@
 package com.ditchoom.buffer.stream
 
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.pool.BufferPool
-import com.ditchoom.buffer.pool.PooledBuffer
 
 /**
  * Represents a stream of buffer chunks for protocol parsing.
@@ -109,7 +109,7 @@ fun BufferStream.collectToBuffer(pool: BufferPool): ReadBuffer {
 interface StreamProcessor {
     /**
      * Appends a chunk to the processor.
-     * The processor takes ownership and will release PooledBuffers when consumed.
+     * The processor takes ownership and will free PlatformBuffers when consumed.
      */
     fun append(chunk: ReadBuffer)
 
@@ -519,8 +519,11 @@ internal class DefaultStreamProcessor(
     }
 
     private fun releaseIfPooled(buffer: ReadBuffer) {
-        if (buffer is PooledBuffer) {
-            buffer.release()
+        // Use pool.release() rather than freeNativeMemory() because readBuffer()
+        // returns slices that reference the parent chunk's memory. Freeing the
+        // parent would invalidate those slices. Pool release keeps memory alive.
+        if (buffer is PlatformBuffer) {
+            pool.release(buffer)
         }
     }
 }

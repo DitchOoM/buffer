@@ -22,7 +22,7 @@ import com.ditchoom.buffer.ReadBuffer
 interface SuspendingStreamProcessor {
     /**
      * Appends a chunk to the processor.
-     * The processor takes ownership and will release PooledBuffers when consumed.
+     * The processor takes ownership and will free PlatformBuffers when consumed.
      */
     suspend fun append(chunk: ReadBuffer)
 

@@ -6,9 +6,9 @@ package com.ditchoom.buffer
  * This interface combines [ReadBuffer] and [WriteBuffer] capabilities,
  * providing a common type for buffers that can be both written to and read from.
  *
- * Both [PlatformBuffer] and [com.ditchoom.buffer.pool.PooledBuffer] implement
- * this interface, making it useful for APIs that need to allocate and return
- * buffers without caring about the specific buffer type.
+ * Both [PlatformBuffer] and pool-acquired buffers implement this interface,
+ * making it useful for APIs that need to allocate and return buffers without
+ * caring about the specific buffer type.
  */
 interface ReadWriteBuffer :
     ReadBuffer,
@@ -29,8 +29,13 @@ interface ReadWriteBuffer :
      * This is commonly used for WebSocket frame masking (RFC 6455).
      *
      * @param mask The 4-byte XOR mask in big-endian order
+     * @param maskOffset Byte offset into the mask cycle (0-3). Allows masking
+     *   chunked data where each chunk continues the mask cycle from the previous chunk.
      */
-    fun xorMask(mask: Int) {
+    fun xorMask(
+        mask: Int,
+        maskOffset: Int = 0,
+    ) {
         if (mask == 0) return
         val pos = position()
         val lim = limit()
@@ -43,7 +48,7 @@ interface ReadWriteBuffer :
 
         for (i in 0 until size) {
             val maskByte =
-                when (i and 3) {
+                when ((i + maskOffset) and 3) {
                     0 -> maskByte0
                     1 -> maskByte1
                     2 -> maskByte2
