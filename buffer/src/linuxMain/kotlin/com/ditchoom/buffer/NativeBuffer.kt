@@ -301,7 +301,48 @@ class NativeBuffer private constructor(
         charset: Charset,
     ): WriteBuffer {
         checkOpen()
-        writeBytes(text.toString().encodeToByteArray())
+        val str = text.toString()
+        val len = str.length
+        if (len == 0) return this
+        // Direct UTF-8 encoding into native buffer — zero intermediate allocation.
+        // Reads characters via str[i] (no bulk copy) and writes UTF-8 bytes directly to ptr.
+        val dst = (ptr + positionValue)!!
+        var offset = 0
+        var i = 0
+        while (i < len) {
+            val c = str[i].code
+            if (c < 0x80) {
+                dst[offset++] = c.toByte()
+                i++
+            } else if (c < 0x800) {
+                dst[offset++] = (0xC0 or (c shr 6)).toByte()
+                dst[offset++] = (0x80 or (c and 0x3F)).toByte()
+                i++
+            } else if (c in 0xD800..0xDBFF) {
+                // High surrogate — decode surrogate pair to supplementary code point
+                val low = if (i + 1 < len) str[i + 1].code else 0
+                if (low in 0xDC00..0xDFFF) {
+                    val cp = 0x10000 + ((c - 0xD800) shl 10) + (low - 0xDC00)
+                    dst[offset++] = (0xF0 or (cp shr 18)).toByte()
+                    dst[offset++] = (0x80 or ((cp shr 12) and 0x3F)).toByte()
+                    dst[offset++] = (0x80 or ((cp shr 6) and 0x3F)).toByte()
+                    dst[offset++] = (0x80 or (cp and 0x3F)).toByte()
+                    i += 2
+                } else {
+                    // Lone high surrogate — U+FFFD replacement
+                    dst[offset++] = 0xEF.toByte()
+                    dst[offset++] = 0xBF.toByte()
+                    dst[offset++] = 0xBD.toByte()
+                    i++
+                }
+            } else {
+                dst[offset++] = (0xE0 or (c shr 12)).toByte()
+                dst[offset++] = (0x80 or ((c shr 6) and 0x3F)).toByte()
+                dst[offset++] = (0x80 or (c and 0x3F)).toByte()
+                i++
+            }
+        }
+        positionValue += offset
         return this
     }
 

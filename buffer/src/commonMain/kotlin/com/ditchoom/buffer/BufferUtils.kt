@@ -1,8 +1,13 @@
 package com.ditchoom.buffer
 
-/** Frees native memory if this is a PlatformBuffer. No-op on JVM (GC handles it). */
+import com.ditchoom.buffer.pool.PoolReleasable
+
+/** Frees native memory if this is a PlatformBuffer, or releases pool ref if TrackedSlice. */
 fun ReadBuffer.freeIfNeeded() {
-    (this as? PlatformBuffer)?.freeNativeMemory()
+    when (this) {
+        is PlatformBuffer -> freeNativeMemory()
+        is PoolReleasable -> releaseToPool()
+    }
 }
 
 /** Frees all buffers in the list. */

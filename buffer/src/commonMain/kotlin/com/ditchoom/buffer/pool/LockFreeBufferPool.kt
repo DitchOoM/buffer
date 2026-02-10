@@ -46,22 +46,29 @@ internal class LockFreeBufferPool(
         // Try to pop from stack (lock-free)
         val buffer = pop()
 
-        return if (buffer != null && buffer.capacity >= size) {
-            poolHits.incrementAndGet()
-            buffer.resetForWrite()
-            buffer
-        } else {
-            poolMisses.incrementAndGet()
-            PlatformBuffer.allocate(size, allocationZone, byteOrder)
-        }
+        val raw =
+            if (buffer != null && buffer.capacity >= size) {
+                poolHits.incrementAndGet()
+                buffer.resetForWrite()
+                buffer
+            } else {
+                poolMisses.incrementAndGet()
+                PlatformBuffer.allocate(size, allocationZone, byteOrder)
+            }
+        return PooledBuffer(raw, this)
     }
 
     override fun release(buffer: ReadWriteBuffer) {
-        val platformBuffer = buffer as? PlatformBuffer ?: return
+        // Unwrap PooledBuffer to store the raw PlatformBuffer in the pool
+        val platformBuffer =
+            when (buffer) {
+                is PooledBuffer -> buffer.inner
+                is PlatformBuffer -> buffer
+                else -> return
+            }
 
         // Only push if under max size (check first to avoid unnecessary work)
         if (poolSize.value < maxPoolSize) {
-            platformBuffer.resetForWrite()
             if (push(platformBuffer)) {
                 // Update peak if needed
                 val currentSize = poolSize.value

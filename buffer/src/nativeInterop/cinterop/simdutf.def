@@ -65,3 +65,14 @@ size_t buf_simdutf_convert_utf8_to_chararray(
     size_t length,
     int16_t* output
 );
+
+/**
+ * Convert UTF-16LE to UTF-8.
+ * Returns number of UTF-8 bytes written, or 0 on error.
+ * Uses SIMD-accelerated conversion (SSE4.2/AVX2 on x86_64).
+ */
+size_t buf_simdutf_convert_utf16le_to_utf8(
+    const uint16_t* input,
+    size_t length,
+    int8_t* output
+);

@@ -212,8 +212,8 @@ class ByteArrayBuffer(
         if (buffer is ByteArrayBuffer) {
             buffer.data.copyInto(data, positionValue, buffer.positionValue, buffer.positionValue + size)
         } else {
+            // readByteArray() already advances buffer position, don't increment again
             writeBytes(buffer.readByteArray(size))
-            buffer.position(buffer.position() + size)
             return
         }
         positionValue += size

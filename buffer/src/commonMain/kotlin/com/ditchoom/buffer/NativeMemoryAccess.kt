@@ -58,19 +58,26 @@ interface NativeMemoryAccess {
  * ```
  */
 val PlatformBuffer.nativeMemoryAccess: NativeMemoryAccess?
-    get() = this as? NativeMemoryAccess
+    get() = unwrap() as? NativeMemoryAccess
 
 /**
  * Extension for ReadBuffer to access native memory if available.
+ * Unwraps pooled buffers and TrackedSlice wrappers to reach the underlying platform buffer.
  */
 val ReadBuffer.nativeMemoryAccess: NativeMemoryAccess?
-    get() = this as? NativeMemoryAccess
+    get() {
+        if (this is NativeMemoryAccess) return this
+        if (this is PlatformBuffer) return unwrap() as? NativeMemoryAccess
+        if (this is com.ditchoom.buffer.pool.TrackedSlice) return inner.nativeMemoryAccess
+        return null
+    }
 
 /**
  * Extension for WriteBuffer to access native memory if available.
+ * Unwraps pooled buffers to reach the underlying platform buffer.
  */
 val WriteBuffer.nativeMemoryAccess: NativeMemoryAccess?
-    get() = this as? NativeMemoryAccess
+    get() = ((this as? PlatformBuffer)?.unwrap() ?: this) as? NativeMemoryAccess
 
 /**
  * Allocates a buffer with guaranteed native memory access.
@@ -134,19 +141,26 @@ interface ManagedMemoryAccess {
  * ```
  */
 val PlatformBuffer.managedMemoryAccess: ManagedMemoryAccess?
-    get() = this as? ManagedMemoryAccess
+    get() = unwrap() as? ManagedMemoryAccess
 
 /**
  * Extension for ReadBuffer to access managed memory if available.
+ * Unwraps pooled buffers and TrackedSlice wrappers to reach the underlying platform buffer.
  */
 val ReadBuffer.managedMemoryAccess: ManagedMemoryAccess?
-    get() = this as? ManagedMemoryAccess
+    get() {
+        if (this is ManagedMemoryAccess) return this
+        if (this is PlatformBuffer) return unwrap() as? ManagedMemoryAccess
+        if (this is com.ditchoom.buffer.pool.TrackedSlice) return inner.managedMemoryAccess
+        return null
+    }
 
 /**
  * Extension for WriteBuffer to access managed memory if available.
+ * Unwraps pooled buffers to reach the underlying platform buffer.
  */
 val WriteBuffer.managedMemoryAccess: ManagedMemoryAccess?
-    get() = this as? ManagedMemoryAccess
+    get() = ((this as? PlatformBuffer)?.unwrap() ?: this) as? ManagedMemoryAccess
 
 /**
  * Interface for buffers backed by shared memory that can be accessed across

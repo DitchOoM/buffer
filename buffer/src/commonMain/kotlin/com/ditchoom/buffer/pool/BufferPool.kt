@@ -54,7 +54,8 @@ import com.ditchoom.buffer.ReadWriteBuffer
 sealed interface BufferPool {
     /**
      * Acquires a buffer of at least the specified size.
-     * The returned buffer is a raw [PlatformBuffer] — no wrapper.
+     * The returned buffer is a [PooledBuffer] wrapper whose [freeNativeMemory][PlatformBuffer.freeNativeMemory]
+     * returns the buffer to this pool instead of freeing it.
      * The buffer may be larger than requested.
      */
     fun acquire(minSize: Int = 0): ReadWriteBuffer

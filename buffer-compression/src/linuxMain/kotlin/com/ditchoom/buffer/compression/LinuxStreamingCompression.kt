@@ -1,7 +1,6 @@
 package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.ByteArrayBuffer
-import com.ditchoom.buffer.NativeMemoryAccess
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
@@ -564,7 +563,6 @@ private inline fun <R> withInputPointer(
     block: (CPointer<ByteVar>) -> R,
 ): R =
     when {
-        buffer is NativeMemoryAccess -> block(buffer.nativeAddress.toCPointer<ByteVar>()!!)
         buffer.nativeMemoryAccess != null -> block(buffer.nativeMemoryAccess!!.nativeAddress.toCPointer<ByteVar>()!!)
         buffer is ByteArrayBuffer -> {
             val array = buffer.backingArray
@@ -584,7 +582,9 @@ private inline fun <R> withInputPointer(
                 block(pinned.addressOf(0))
             }
         }
-        else -> throw CompressionException("Unsupported buffer type: ${buffer::class}")
+        else -> throw CompressionException(
+            "Buffer must have NativeMemoryAccess or ManagedMemoryAccess, got ${buffer::class.simpleName}",
+        )
     }
 
 // =============================================================================

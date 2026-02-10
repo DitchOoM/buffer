@@ -519,11 +519,8 @@ internal class DefaultStreamProcessor(
     }
 
     private fun releaseIfPooled(buffer: ReadBuffer) {
-        // Use pool.release() rather than freeNativeMemory() because readBuffer()
-        // returns slices that reference the parent chunk's memory. Freeing the
-        // parent would invalidate those slices. Pool release keeps memory alive.
-        if (buffer is PlatformBuffer) {
-            pool.release(buffer)
-        }
+        // Release consumed chunks. For PooledBuffer, freeNativeMemory() decrements
+        // refCount — the buffer is only returned to pool when all slices are also freed.
+        (buffer as? PlatformBuffer)?.freeNativeMemory()
     }
 }

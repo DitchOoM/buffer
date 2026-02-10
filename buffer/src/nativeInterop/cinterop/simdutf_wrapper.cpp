@@ -79,4 +79,12 @@ size_t buf_simdutf_utf8_find_boundary(const char* buffer, size_t length) {
     return check_start;
 }
 
+size_t buf_simdutf_convert_utf16le_to_utf8(
+    const uint16_t* input,
+    size_t length,
+    char* output
+) {
+    return simdutf::convert_utf16le_to_utf8(reinterpret_cast<const char16_t*>(input), length, output);
+}
+
 } // extern "C"

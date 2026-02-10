@@ -31,21 +31,28 @@ internal class SingleThreadedBufferPool(
 
         val buffer = pool.removeLastOrNull()
 
-        return if (buffer != null && buffer.capacity >= size) {
-            poolHits++
-            buffer.resetForWrite()
-            buffer
-        } else {
-            poolMisses++
-            PlatformBuffer.allocate(size, allocationZone, byteOrder)
-        }
+        val raw =
+            if (buffer != null && buffer.capacity >= size) {
+                poolHits++
+                buffer.resetForWrite()
+                buffer
+            } else {
+                poolMisses++
+                PlatformBuffer.allocate(size, allocationZone, byteOrder)
+            }
+        return PooledBuffer(raw, this)
     }
 
     override fun release(buffer: ReadWriteBuffer) {
-        val platformBuffer = buffer as? PlatformBuffer ?: return
+        // Unwrap PooledBuffer to store the raw PlatformBuffer in the pool
+        val platformBuffer =
+            when (buffer) {
+                is PooledBuffer -> buffer.inner
+                is PlatformBuffer -> buffer
+                else -> return
+            }
 
         if (pool.size < maxPoolSize) {
-            platformBuffer.resetForWrite()
             pool.addLast(platformBuffer)
             if (pool.size > peakPoolSize) {
                 peakPoolSize = pool.size

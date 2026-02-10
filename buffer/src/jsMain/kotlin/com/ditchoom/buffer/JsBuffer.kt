@@ -146,7 +146,10 @@ class JsBuffer(
             val sourceSubarray = buffer.buffer.subarray(buffer.position(), buffer.position() + size)
             this.buffer.set(sourceSubarray, positionValue)
         } else {
+            // readByteArray already advances buffer position
             this.buffer.set(buffer.readByteArray(size).toTypedArray(), positionValue)
+            positionValue += size
+            return
         }
         positionValue += size
         buffer.position(buffer.position() + size)

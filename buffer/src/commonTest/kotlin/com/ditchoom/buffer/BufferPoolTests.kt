@@ -1159,6 +1159,106 @@ class BufferPoolTests {
         }
 
     // ============================================================================
+    // Regression: release() must NOT corrupt buffer data (resetForWrite deferred to acquire)
+    // ============================================================================
+
+    @Test
+    fun releaseDoesNotCorruptBufferData() {
+        // Regression test: pool.release() must NOT call resetForWrite() on the buffer.
+        // If it did, any code that frees a buffer while downstream still reads from it
+        // (e.g., freeIfNeeded after socket.write) would see corrupted data.
+        // The reset should only happen at acquire() time.
+        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 4)
+        val buffer = pool.acquire(256)
+
+        // Write data and switch to read mode
+        buffer.writeInt(0x12345678)
+        buffer.writeInt(0xDEADBEEF.toInt())
+        buffer.resetForRead()
+
+        // Verify data is readable before release
+        assertEquals(0x12345678, buffer.readInt())
+
+        // Release the buffer back to pool (simulates freeIfNeeded)
+        pool.release(buffer)
+
+        // CRITICAL: data must still be intact after release
+        // position was at 4 (after reading first int), should still be there
+        assertEquals(0xDEADBEEF.toInt(), buffer.readInt())
+
+        pool.clear()
+    }
+
+    @Test
+    fun releaseDoesNotCorruptBufferDataViaFreeNativeMemory() {
+        // Same regression test but using the freeNativeMemory() path (PooledBuffer)
+        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 4)
+        val buffer = pool.acquire(256)
+
+        buffer.writeInt(0xCAFEBABE.toInt())
+        buffer.writeInt(0xDEADC0DE.toInt())
+        buffer.resetForRead()
+
+        // Read first int
+        val first = buffer.readInt()
+        assertEquals(0xCAFEBABE.toInt(), first)
+
+        // Free via freeNativeMemory (the PooledBuffer path)
+        (buffer as PlatformBuffer).freeNativeMemory()
+
+        // Data must still be readable - position/limit not corrupted
+        assertEquals(0xDEADC0DE.toInt(), buffer.readInt())
+
+        pool.clear()
+    }
+
+    @Test
+    fun releaseDoesNotCorruptMultiThreadedPool() {
+        // Same test for the lock-free pool variant
+        val pool =
+            BufferPool(
+                threadingMode = ThreadingMode.MultiThreaded,
+                defaultBufferSize = 1024,
+                maxPoolSize = 4,
+            )
+        val buffer = pool.acquire(256)
+
+        buffer.writeLong(0x0102030405060708L)
+        buffer.resetForRead()
+
+        // Read 4 bytes
+        val firstInt = buffer.readInt()
+        assertEquals(0x01020304, firstInt)
+
+        // Release back to pool
+        pool.release(buffer)
+
+        // Remaining data must still be intact
+        assertEquals(0x05060708, buffer.readInt())
+
+        pool.clear()
+    }
+
+    @Test
+    fun acquireAfterReleaseGetsResetBuffer() {
+        // Complement to above: verify that acquire() DOES reset the buffer
+        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 4)
+
+        // First acquire, write data, release
+        val buffer1 = pool.acquire(256)
+        buffer1.writeInt(0x12345678)
+        pool.release(buffer1)
+
+        // Re-acquire from pool - should be reset for writing
+        val buffer2 = pool.acquire(256)
+        assertEquals(0, buffer2.position())
+        assertTrue(buffer2.capacity >= 256)
+
+        pool.release(buffer2)
+        pool.clear()
+    }
+
+    // ============================================================================
     // Additional Code Path Coverage Tests
     // ============================================================================
 

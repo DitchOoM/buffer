@@ -305,7 +305,9 @@ private inline fun <R> withBufferPointer(
                 block(pinned.addressOf(0))
             }
         }
-        else -> throw CompressionException("Unsupported buffer type for compression: ${buffer::class}")
+        else -> throw CompressionException(
+            "Buffer must have NativeMemoryAccess or ManagedMemoryAccess, got ${buffer::class.simpleName}",
+        )
     }
 
 /**
