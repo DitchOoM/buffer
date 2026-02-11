@@ -1,8 +1,13 @@
-@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, kotlinx.cinterop.BetaInteropApi::class)
+@file:OptIn(
+    kotlinx.cinterop.ExperimentalForeignApi::class,
+    kotlinx.cinterop.BetaInteropApi::class,
+    kotlinx.cinterop.UnsafeNumber::class,
+)
 
 package com.ditchoom.buffer
 
 import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.convert
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.usePinned
 import platform.CoreFoundation.CFStringCreateWithBytes
@@ -153,7 +158,7 @@ private class AppleStreamingStringDecoder(
                 CFStringCreateWithBytes(
                     kCFAllocatorDefault,
                     pinned.addressOf(0).reinterpret(),
-                    length.toLong(),
+                    length.convert(),
                     kCFStringEncodingUTF8,
                     false,
                 )
