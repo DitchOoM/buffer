@@ -70,7 +70,13 @@ kotlin {
         tvosArm64()
         tvosSimulatorArm64()
         tvosX64()
-        linuxX64()
+        linuxX64 {
+            if (HostManager.hostIsLinux) {
+                compilations.create("benchmark") {
+                    associateWith(this@linuxX64.compilations.getByName("main"))
+                }
+            }
+        }
         linuxArm64()
     } else {
         if (HostManager.hostIsMac) {
