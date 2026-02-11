@@ -3,7 +3,6 @@
 package com.ditchoom.buffer
 
 import kotlinx.cinterop.addressOf
-import kotlinx.cinterop.convert
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.usePinned
 import platform.CoreFoundation.CFStringCreateWithBytes
@@ -154,7 +153,7 @@ private class AppleStreamingStringDecoder(
                 CFStringCreateWithBytes(
                     kCFAllocatorDefault,
                     pinned.addressOf(0).reinterpret(),
-                    length.convert(),
+                    length.toLong(),
                     kCFStringEncodingUTF8,
                     false,
                 )
@@ -261,5 +260,4 @@ private class AppleStreamingStringDecoder(
     )
 }
 
-actual fun StreamingStringDecoder(config: StreamingStringDecoderConfig): StreamingStringDecoder =
-    AppleStreamingStringDecoder(config)
+actual fun StreamingStringDecoder(config: StreamingStringDecoderConfig): StreamingStringDecoder = AppleStreamingStringDecoder(config)

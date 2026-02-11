@@ -121,12 +121,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: buffer/libs/simdutf/linux-x64
-          key: simdutf-linux-x64-${{ hashFiles('gradle/libs.versions.toml') }}
+          key: simdutf-linux-x64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
       - name: Cache simdutf ARM64
         uses: actions/cache@v4
         with:
           path: buffer/libs/simdutf/linux-arm64
-          key: simdutf-linux-arm64-${{ hashFiles('gradle/libs.versions.toml') }}
+          key: simdutf-linux-arm64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
       - name: Install dependencies
         run: |
           sudo apt-get update

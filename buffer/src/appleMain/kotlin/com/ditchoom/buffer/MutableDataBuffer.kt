@@ -325,7 +325,7 @@ class MutableDataBuffer(
             (bytePointer + position)!!.reinterpret(),
             size.convert(),
             nativeMask,
-            maskOffset.toULong(),
+            maskOffset.convert(),
         )
     }
 
