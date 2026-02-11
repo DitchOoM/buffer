@@ -23,6 +23,9 @@
 import java.net.URI
 import java.security.MessageDigest
 
+// Equivalent to HostManager.hostIsLinux (HostManager is not on the classpath in applied scripts)
+val hostIsLinux = org.gradle.internal.os.OperatingSystem.current().isLinux
+
 // =============================================================================
 // Version Configuration (from libs.versions.toml)
 // =============================================================================
@@ -108,7 +111,7 @@ fun createBuildSimdutfTask(arch: String): TaskProvider<Task> {
         inputs.file(projectDir.resolve("src/nativeInterop/cinterop/simdutf_wrapper.cpp"))
         outputs.file(markerFile)
 
-        onlyIf { !markerFile.exists() }
+        onlyIf { !markerFile.exists() && hostIsLinux }
 
         doLast {
             val buildDir = simdutfBuildDir.get().asFile

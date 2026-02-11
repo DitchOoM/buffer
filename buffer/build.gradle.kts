@@ -185,8 +185,11 @@ kotlin {
                 create("simdutf") {
                     defFile(project.file("src/nativeInterop/cinterop/simdutf.def"))
                     extraOpts("-libraryPath", simdutfLibDir.absolutePath)
-                    tasks.named(interopProcessingTaskName) {
-                        dependsOn(buildSimdutfX64)
+                    // Only depend on simdutf build when on Linux (cmake/g++ not available on macOS)
+                    if (HostManager.hostIsLinux) {
+                        tasks.named(interopProcessingTaskName) {
+                            dependsOn(buildSimdutfX64)
+                        }
                     }
                 }
             }
@@ -206,8 +209,11 @@ kotlin {
                 create("simdutf") {
                     defFile(project.file("src/nativeInterop/cinterop/simdutf.def"))
                     extraOpts("-libraryPath", simdutfLibDir.absolutePath)
-                    tasks.named(interopProcessingTaskName) {
-                        dependsOn(buildSimdutfArm64)
+                    // Only depend on simdutf build when on Linux (cmake/g++ not available on macOS)
+                    if (HostManager.hostIsLinux) {
+                        tasks.named(interopProcessingTaskName) {
+                            dependsOn(buildSimdutfArm64)
+                        }
                     }
                 }
             }

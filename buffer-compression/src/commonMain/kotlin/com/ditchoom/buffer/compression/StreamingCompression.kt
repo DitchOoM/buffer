@@ -100,6 +100,21 @@ interface StreamingDecompressor : AutoCloseable {
     fun finish(onOutput: (ReadBuffer) -> Unit)
 
     /**
+     * Emits any buffered partial output without finalizing the stream.
+     *
+     * Use this instead of [finish] when maintaining decompressor state across
+     * multiple logical messages (e.g., WebSocket context takeover). Unlike
+     * [finish], this does not signal end-of-stream and allows continued
+     * decompression via [decompress].
+     *
+     * @param onOutput Called with any buffered decompressed data.
+     */
+    fun flush(onOutput: (ReadBuffer) -> Unit) {
+        // Default implementation delegates to finish for backward compatibility.
+        finish(onOutput)
+    }
+
+    /**
      * Resets the decompressor to initial state for reuse.
      */
     fun reset()
@@ -195,12 +210,17 @@ suspend inline fun <R> StreamingDecompressor.useSuspending(
  * @param level The compression level.
  * @param allocator Strategy for allocating output buffers.
  * @param outputBufferSize Size of output buffers (default 32KB).
+ * @param windowBits The zlib window size (log2 of the LZ77 window size).
+ *   When 0 (the default), uses the algorithm's default: 15 for Deflate/Zlib, -15 for Raw, 31 for Gzip.
+ *   When non-zero, the value is passed directly to deflateInit2(). Valid range depends on the algorithm.
+ *   Note: JVM's java.util.zip.Deflater does not support custom window sizes; this parameter is ignored on JVM.
  */
 expect fun StreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Deflate,
     level: CompressionLevel = CompressionLevel.Default,
     allocator: BufferAllocator = BufferAllocator.Default,
     outputBufferSize: Int = 32768,
+    windowBits: Int = 0,
 ): StreamingCompressor
 
 /**
@@ -286,6 +306,12 @@ interface SuspendingStreamingDecompressor : AutoCloseable {
      * Finishes decompression, returning any remaining data.
      */
     suspend fun finish(): List<ReadBuffer>
+
+    /**
+     * Emits any buffered partial output without finalizing the stream.
+     * See [StreamingDecompressor.flush] for details.
+     */
+    suspend fun flush(): List<ReadBuffer> = finish()
 
     /**
      * Resets the decompressor for reuse.
@@ -401,6 +427,12 @@ internal class SyncWrappingSuspendingDecompressor(
     override suspend fun finish(): List<ReadBuffer> {
         val results = mutableListOf<ReadBuffer>()
         delegate.finish { results.add(it) }
+        return results
+    }
+
+    override suspend fun flush(): List<ReadBuffer> {
+        val results = mutableListOf<ReadBuffer>()
+        delegate.flush { results.add(it) }
         return results
     }
 

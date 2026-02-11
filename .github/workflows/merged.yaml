@@ -124,10 +124,12 @@ jobs:
           sudo cp -r usr/lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
       - name: Run checks and tests
         run: ./gradlew jvmTest jsTest wasmJsNodeTest linuxX64Test ktlintCheck --no-configuration-cache
-      - name: Build ARM64 test binary
-        run: ./gradlew :buffer:linkDebugTestLinuxArm64 --no-configuration-cache
-      - name: Run ARM64 tests via QEMU
+      - name: Build ARM64 test binaries
+        run: ./gradlew :buffer:linkDebugTestLinuxArm64 :buffer-compression:linkDebugTestLinuxArm64 --no-configuration-cache
+      - name: Run buffer ARM64 tests via QEMU
         run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer/build/bin/linuxArm64/debugTest/test.kexe
+      - name: Run buffer-compression ARM64 tests via QEMU
+        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-compression/build/bin/linuxArm64/debugTest/test.kexe
       - name: Dry-run publish (build artifacts without deploying)
         run: ./gradlew publishToMavenLocal --no-configuration-cache
       - name: Upload Maven local artifacts

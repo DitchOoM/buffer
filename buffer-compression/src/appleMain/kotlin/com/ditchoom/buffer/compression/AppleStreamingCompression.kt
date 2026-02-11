@@ -41,6 +41,7 @@ actual fun StreamingCompressor.Companion.create(
     level: CompressionLevel,
     allocator: BufferAllocator,
     outputBufferSize: Int,
+    windowBits: Int,
 ): StreamingCompressor = AppleZlibStreamingCompressor(algorithm, level, allocator, outputBufferSize)
 
 /**
@@ -343,6 +344,11 @@ private class AppleZlibStreamingDecompressor(
             }
 
         input.position(inputPosition + consumed)
+    }
+
+    override fun flush(onOutput: (ReadBuffer) -> Unit) {
+        // No-op: Apple decompressor emits output eagerly in decompress(),
+        // no partial buffering that needs flushing.
     }
 
     override fun finish(onOutput: (ReadBuffer) -> Unit) {

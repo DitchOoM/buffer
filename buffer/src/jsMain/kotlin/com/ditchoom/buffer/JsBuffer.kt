@@ -3,9 +3,14 @@ package com.ditchoom.buffer
 import js.buffer.BufferSource
 import js.buffer.SharedArrayBuffer
 import org.khronos.webgl.DataView
+import org.khronos.webgl.Int32Array
 import org.khronos.webgl.Int8Array
+import org.khronos.webgl.Uint8Array
+import org.khronos.webgl.get
+import org.khronos.webgl.set
 import web.encoding.TextDecoder
 import web.encoding.TextDecoderOptions
+import web.encoding.TextEncoder
 
 class JsBuffer(
     val buffer: Int8Array,
@@ -29,6 +34,11 @@ class JsBuffer(
      * Whether this buffer is backed by a SharedArrayBuffer.
      */
     override val isShared: Boolean get() = sharedArrayBuffer != null
+
+    companion object {
+        // TextEncoder is stateless (always UTF-8), safe to share across instances
+        private val textEncoder = TextEncoder()
+    }
 
     // Cached DataView for the entire buffer - avoids creating new DataView on each operation
     private val dataView = DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength)
@@ -160,14 +170,62 @@ class JsBuffer(
         charset: Charset,
     ): WriteBuffer {
         when (charset) {
-            Charset.UTF8 -> writeBytes(text.toString().encodeToByteArray())
+            Charset.UTF8 -> {
+                val str = text.toString()
+                if (str.isEmpty()) return this
+                // Zero-alloc: TextEncoder.encodeInto() writes UTF-8 directly into the buffer
+                val target = Uint8Array(buffer.buffer, buffer.byteOffset + positionValue, capacity - positionValue)
+                val result = textEncoder.asDynamic().encodeInto(str, target)
+                positionValue += (result.written as Int)
+            }
             else -> throw UnsupportedOperationException("Unable to encode in $charset. Must use Charset.UTF8")
         }
         return this
     }
 
     /**
-     * Optimized XOR mask using DataView Int32 operations with big-endian.
+     * Reverses bytes of an Int for little-endian Int32Array compatibility.
+     * JS bitwise ops are 32-bit, so this is the widest we can go.
+     */
+    private fun reverseBytes(value: Int): Int =
+        ((value and 0xFF) shl 24) or
+            ((value and 0xFF00) shl 8) or
+            ((value ushr 8) and 0xFF00) or
+            ((value ushr 24) and 0xFF)
+
+    /**
+     * XOR remaining 0-3 bytes after bulk Int32 processing.
+     */
+    private fun xorMaskRemaining(
+        startOffset: Int,
+        endOffset: Int,
+        mask: Int,
+        maskOffset: Int,
+        bytesProcessed: Int,
+    ) {
+        val m0 = (mask ushr 24).toByte()
+        val m1 = (mask ushr 16).toByte()
+        val m2 = (mask ushr 8).toByte()
+        val m3 = mask.toByte()
+        var offset = startOffset
+        var i = bytesProcessed
+        while (offset < endOffset) {
+            val mb =
+                when ((i + maskOffset) and 3) {
+                    0 -> m0
+                    1 -> m1
+                    2 -> m2
+                    else -> m3
+                }
+            dataView.setInt8(offset, (dataView.getInt8(offset).toInt() xor mb.toInt()).toByte())
+            offset++
+            i++
+        }
+    }
+
+    /**
+     * Optimized XOR mask using Int32Array when 4-byte aligned (V8 inlines typed
+     * array access), falling back to DataView Int32 when unaligned.
      */
     override fun xorMask(
         mask: Int,
@@ -179,38 +237,118 @@ class JsBuffer(
         val size = lim - pos
         if (size == 0) return
 
-        // Rotate the mask so that mask byte at (maskOffset % 4) becomes byte 0
         val shift = (maskOffset and 3) * 8
         val rotatedMask =
             if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
 
-        var offset = pos
-        // Process 4 bytes at a time using big-endian Int32 (matches rotated mask byte order)
-        while (offset + 4 <= lim) {
-            val value = dataView.getInt32(offset, false) // big-endian read
-            dataView.setInt32(offset, value xor rotatedMask, false) // big-endian write
-            offset += 4
+        val startByte = buffer.byteOffset + pos
+        val int32Count = size ushr 2
+        var bulkEnd = pos
+
+        if (startByte and 3 == 0 && int32Count > 0) {
+            // Aligned: Int32Array — V8 JIT-compiles to direct memory access
+            val leMask = reverseBytes(rotatedMask)
+            val view = Int32Array(buffer.buffer, startByte, int32Count)
+            for (i in 0 until int32Count) {
+                view[i] = view[i] xor leMask
+            }
+            bulkEnd = pos + (int32Count shl 2)
+        } else if (int32Count > 0) {
+            // Unaligned: DataView (still 4 bytes at a time, no alignment required)
+            var offset = pos
+            val limit4 = lim - 3
+            while (offset < limit4) {
+                dataView.setInt32(offset, dataView.getInt32(offset, false) xor rotatedMask, false)
+                offset += 4
+            }
+            bulkEnd = offset
         }
 
-        // Handle remaining bytes using the ORIGINAL mask with offset
-        val maskByte0 = (mask ushr 24).toByte()
-        val maskByte1 = (mask ushr 16).toByte()
-        val maskByte2 = (mask ushr 8).toByte()
-        val maskByte3 = mask.toByte()
-        var i = offset - pos
-        while (offset < lim) {
-            val maskByte =
-                when ((i + maskOffset) and 3) {
-                    0 -> maskByte0
-                    1 -> maskByte1
-                    2 -> maskByte2
-                    else -> maskByte3
-                }
-            val b = dataView.getInt8(offset)
-            dataView.setInt8(offset, (b.toInt() xor maskByte.toInt()).toByte())
-            offset++
-            i++
+        if (bulkEnd < lim) {
+            xorMaskRemaining(bulkEnd, lim, mask, maskOffset, bulkEnd - pos)
         }
+    }
+
+    /**
+     * Fused copy + XOR mask using Int32Array when aligned, DataView otherwise.
+     * The default implementation is byte-by-byte — this is 4x faster minimum.
+     */
+    override fun xorMaskCopy(
+        source: ReadBuffer,
+        mask: Int,
+        maskOffset: Int,
+    ) {
+        val size = source.remaining()
+        if (size == 0) return
+        if (mask == 0) {
+            write(source)
+            return
+        }
+
+        if (source !is JsBuffer) {
+            super.xorMaskCopy(source, mask, maskOffset)
+            return
+        }
+
+        val shift = (maskOffset and 3) * 8
+        val rotatedMask =
+            if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
+
+        val srcPos = source.position()
+        val srcStartByte = source.buffer.byteOffset + srcPos
+        val dstStartByte = buffer.byteOffset + positionValue
+        val int32Count = size ushr 2
+        var srcOff = srcPos
+        var dstOff = positionValue
+
+        if (srcStartByte and 3 == 0 && dstStartByte and 3 == 0 && int32Count > 0) {
+            // Both aligned: Int32Array — single-pass read+XOR+write
+            val leMask = reverseBytes(rotatedMask)
+            val srcView = Int32Array(source.buffer.buffer, srcStartByte, int32Count)
+            val dstView = Int32Array(buffer.buffer, dstStartByte, int32Count)
+            for (i in 0 until int32Count) {
+                dstView[i] = srcView[i] xor leMask
+            }
+            val bulkBytes = int32Count shl 2
+            srcOff += bulkBytes
+            dstOff += bulkBytes
+        } else if (int32Count > 0) {
+            // Unaligned: DataView (still 4 bytes at a time)
+            val srcDv = source.dataView
+            val end4 = srcPos + size - 3
+            while (srcOff < end4) {
+                dataView.setInt32(dstOff, srcDv.getInt32(srcOff, false) xor rotatedMask, false)
+                srcOff += 4
+                dstOff += 4
+            }
+        }
+
+        // Remaining 0-3 bytes
+        val end = srcPos + size
+        if (srcOff < end) {
+            val srcDv = source.dataView
+            val m0 = (mask ushr 24).toByte()
+            val m1 = (mask ushr 16).toByte()
+            val m2 = (mask ushr 8).toByte()
+            val m3 = mask.toByte()
+            var i = srcOff - srcPos
+            while (srcOff < end) {
+                val mb =
+                    when ((i + maskOffset) and 3) {
+                        0 -> m0
+                        1 -> m1
+                        2 -> m2
+                        else -> m3
+                    }
+                dataView.setInt8(dstOff, (srcDv.getInt8(srcOff).toInt() xor mb.toInt()).toByte())
+                srcOff++
+                dstOff++
+                i++
+            }
+        }
+
+        source.position(srcOff)
+        positionValue = dstOff
     }
 
     /**

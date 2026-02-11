@@ -4,10 +4,9 @@ package com.ditchoom.buffer
 
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
+import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.usePinned
 import platform.CoreFoundation.CFStringCreateWithBytes
-import platform.CoreFoundation.CFStringGetCStringPtr
-import platform.CoreFoundation.CFStringGetLength
 import platform.CoreFoundation.CFStringRef
 import platform.CoreFoundation.kCFAllocatorDefault
 import platform.CoreFoundation.kCFStringEncodingUTF8
@@ -32,7 +31,7 @@ private class AppleStreamingStringDecoder(
     init {
         if (config.charset != Charset.UTF8) {
             throw UnsupportedOperationException(
-                "Apple StreamingStringDecoder currently only supports UTF-8, got: ${config.charset}"
+                "Apple StreamingStringDecoder currently only supports UTF-8, got: ${config.charset}",
             )
         }
     }
@@ -43,7 +42,10 @@ private class AppleStreamingStringDecoder(
     private var pending2: Byte = 0
     private var pendingCount: Int = 0
 
-    override fun decode(buffer: ReadBuffer, destination: Appendable): Int {
+    override fun decode(
+        buffer: ReadBuffer,
+        destination: Appendable,
+    ): Int {
         val remaining = buffer.remaining()
         if (remaining == 0) return 0
 
@@ -96,18 +98,22 @@ private class AppleStreamingStringDecoder(
         return totalChars
     }
 
-    private fun completePendingSequence(buffer: ReadBuffer, destination: Appendable): DecodeResult {
+    private fun completePendingSequence(
+        buffer: ReadBuffer,
+        destination: Appendable,
+    ): DecodeResult {
         val leadByte = pending0.toInt() and 0xFF
-        val expectedLen = when {
-            leadByte < 0x80 -> 1
-            leadByte and 0xE0 == 0xC0 -> 2
-            leadByte and 0xF0 == 0xE0 -> 3
-            leadByte and 0xF8 == 0xF0 -> 4
-            else -> {
-                pendingCount = 0
-                return handleMalformedInput(destination)
+        val expectedLen =
+            when {
+                leadByte < 0x80 -> 1
+                leadByte and 0xE0 == 0xC0 -> 2
+                leadByte and 0xF0 == 0xE0 -> 3
+                leadByte and 0xF8 == 0xF0 -> 4
+                else -> {
+                    pendingCount = 0
+                    return handleMalformedInput(destination)
+                }
             }
-        }
 
         val needed = expectedLen - pendingCount
         val available = buffer.remaining()
@@ -136,18 +142,23 @@ private class AppleStreamingStringDecoder(
         return DecodeResult(chars, needed)
     }
 
-    private fun convertUtf8ToAppendable(input: ByteArray, length: Int, destination: Appendable): Int {
+    private fun convertUtf8ToAppendable(
+        input: ByteArray,
+        length: Int,
+        destination: Appendable,
+    ): Int {
         if (length == 0) return 0
 
-        val cfString: CFStringRef? = input.usePinned { pinned ->
-            CFStringCreateWithBytes(
-                kCFAllocatorDefault,
-                pinned.addressOf(0).reinterpret(),
-                length.convert(),
-                kCFStringEncodingUTF8,
-                false
-            )
-        }
+        val cfString: CFStringRef? =
+            input.usePinned { pinned ->
+                CFStringCreateWithBytes(
+                    kCFAllocatorDefault,
+                    pinned.addressOf(0).reinterpret(),
+                    length.convert(),
+                    kCFStringEncodingUTF8,
+                    false,
+                )
+            }
 
         if (cfString == null) {
             return handleMalformedInput(destination).charsWritten
@@ -164,7 +175,10 @@ private class AppleStreamingStringDecoder(
         }
     }
 
-    private fun findUtf8Boundary(buffer: ByteArray, length: Int): Int {
+    private fun findUtf8Boundary(
+        buffer: ByteArray,
+        length: Int,
+    ): Int {
         if (length == 0) return 0
 
         // Fast path: if last byte is ASCII
@@ -179,13 +193,14 @@ private class AppleStreamingStringDecoder(
             val b = buffer[i].toInt() and 0xFF
             // Found a lead byte (not a continuation byte 10xxxxxx)
             if ((b and 0xC0) != 0x80) {
-                val seqLen = when {
-                    b < 0x80 -> 1
-                    (b and 0xE0) == 0xC0 -> 2
-                    (b and 0xF0) == 0xE0 -> 3
-                    (b and 0xF8) == 0xF0 -> 4
-                    else -> return i
-                }
+                val seqLen =
+                    when {
+                        b < 0x80 -> 1
+                        (b and 0xE0) == 0xC0 -> 2
+                        (b and 0xF0) == 0xE0 -> 3
+                        (b and 0xF8) == 0xF0 -> 4
+                        else -> return i
+                    }
                 val available = length - i
                 return if (seqLen <= available) length else i
             }
@@ -194,7 +209,10 @@ private class AppleStreamingStringDecoder(
         return checkStart
     }
 
-    private fun setPendingByte(index: Int, value: Byte) {
+    private fun setPendingByte(
+        index: Int,
+        value: Byte,
+    ) {
         when (index) {
             0 -> pending0 = value
             1 -> pending1 = value
@@ -202,12 +220,13 @@ private class AppleStreamingStringDecoder(
         }
     }
 
-    private fun getPendingByte(index: Int): Byte = when (index) {
-        0 -> pending0
-        1 -> pending1
-        2 -> pending2
-        else -> 0
-    }
+    private fun getPendingByte(index: Int): Byte =
+        when (index) {
+            0 -> pending0
+            1 -> pending1
+            2 -> pending2
+            else -> 0
+        }
 
     override fun finish(destination: Appendable): Int {
         if (pendingCount == 0) return 0
@@ -227,19 +246,20 @@ private class AppleStreamingStringDecoder(
         // Nothing to close
     }
 
-    private fun handleMalformedInput(destination: Appendable): DecodeResult {
-        return when (config.onMalformedInput) {
+    private fun handleMalformedInput(destination: Appendable): DecodeResult =
+        when (config.onMalformedInput) {
             DecoderErrorAction.REPORT -> throw CharacterDecodingException("Malformed UTF-8 sequence")
             DecoderErrorAction.REPLACE -> {
                 destination.append('\uFFFD')
                 DecodeResult(1, 0)
             }
         }
-    }
 
-    private data class DecodeResult(val charsWritten: Int, val bytesConsumed: Int)
+    private data class DecodeResult(
+        val charsWritten: Int,
+        val bytesConsumed: Int,
+    )
 }
 
-actual fun StreamingStringDecoder(
-    config: StreamingStringDecoderConfig,
-): StreamingStringDecoder = AppleStreamingStringDecoder(config)
+actual fun StreamingStringDecoder(config: StreamingStringDecoderConfig): StreamingStringDecoder =
+    AppleStreamingStringDecoder(config)
