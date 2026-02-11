@@ -84,6 +84,7 @@ class StreamingCompressionResetTest {
 
     @Test
     fun decompressorResetProducesIdenticalOutput() {
+        if (!supportsSyncCompression) return
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
 
@@ -107,6 +108,7 @@ class StreamingCompressionResetTest {
 
     @Test
     fun decompressorResetWorksWithSmallPayload() {
+        if (!supportsSyncCompression) return
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
 
@@ -127,6 +129,7 @@ class StreamingCompressionResetTest {
 
     @Test
     fun decompressorResetWorksWithMediumPayload() {
+        if (!supportsSyncCompression) return
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
 
@@ -147,6 +150,7 @@ class StreamingCompressionResetTest {
 
     @Test
     fun decompressorResetWorksWithLargePayload() {
+        if (!supportsSyncCompression) return
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
 
@@ -167,6 +171,7 @@ class StreamingCompressionResetTest {
 
     @Test
     fun decompressorResetAfterFinishRestoresState() {
+        if (!supportsSyncCompression) return
         // finish() sets streamEnded on Linux — verify reset() clears it
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
@@ -192,6 +197,7 @@ class StreamingCompressionResetTest {
 
     @Test
     fun decompressorOutputSizeScalesWithInput() {
+        if (!supportsSyncCompression) return
         // Validates that decompression actually processes the full payload.
         // If reset is broken, all sizes would produce the same (empty/trivial) output.
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
@@ -240,6 +246,7 @@ class StreamingCompressionResetTest {
 
     @Test
     fun compressorResetProducesIdenticalOutput() {
+        if (!supportsSyncCompression) return
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val text = "Compressor reset test with some repeated data repeated data repeated data"
 
@@ -267,6 +274,7 @@ class StreamingCompressionResetTest {
 
     @Test
     fun compressorResetClearsState() {
+        if (!supportsSyncCompression) return
         // Verify that compressor doesn't carry state from previous messages
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
