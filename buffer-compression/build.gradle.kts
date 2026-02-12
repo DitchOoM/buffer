@@ -47,23 +47,24 @@ kotlin {
         nodejs()
     }
     if (isRunningOnGithub) {
-        // CI: register ALL native targets on both hosts so that the root module metadata
-        // (kotlinMultiplatform publication) references all platform variants. Non-host
-        // targets are registered for metadata completeness but their compilation and
-        // publication tasks are disabled (see afterEvaluate block below).
-        macosX64()
-        macosArm64()
-        iosArm64()
-        iosSimulatorArm64()
-        iosX64()
-        watchosArm64()
-        watchosSimulatorArm64()
-        watchosX64()
-        tvosArm64()
-        tvosSimulatorArm64()
-        tvosX64()
-        linuxX64()
-        linuxArm64()
+        // CI: register all targets for the current host OS
+        if (HostManager.hostIsMac) {
+            macosX64()
+            macosArm64()
+            iosArm64()
+            iosSimulatorArm64()
+            iosX64()
+            watchosArm64()
+            watchosSimulatorArm64()
+            watchosX64()
+            tvosArm64()
+            tvosSimulatorArm64()
+            tvosX64()
+        }
+        if (HostManager.hostIsLinux) {
+            linuxX64()
+            linuxArm64()
+        }
     } else {
         if (HostManager.hostIsMac) {
             val osArch = System.getProperty("os.arch")
@@ -195,53 +196,22 @@ mavenPublishing {
     }
 }
 
-// Split publishing: Linux publishes root metadata + non-Apple artifacts,
-// Apple publishes only Apple-specific artifacts (see buffer/build.gradle.kts).
+// Split publishing metadata fix (see buffer/build.gradle.kts for details)
 afterEvaluate {
     if (isRunningOnGithub) {
-        val applePublicationNames =
-            listOf(
-                "MacosX64",
-                "MacosArm64",
-                "IosArm64",
-                "IosSimulatorArm64",
-                "IosX64",
-                "WatchosArm64",
-                "WatchosSimulatorArm64",
-                "WatchosX64",
-                "TvosArm64",
-                "TvosSimulatorArm64",
-                "TvosX64",
-            )
         if (HostManager.hostIsLinux) {
-            applePublicationNames.forEach { name ->
-                tasks
-                    .matching {
-                        it.name == "publish${name}PublicationToMavenCentralRepository"
-                    }.configureEach { enabled = false }
+            tasks.named("generateMetadataFileForKotlinMultiplatformPublication") {
+                doLast {
+                    val moduleFile = outputs.files.singleFile
+                    injectAppleVariantsIntoModuleMetadata(moduleFile, project.version.toString(), "buffer-compression")
+                }
             }
         }
         if (HostManager.hostIsMac) {
             tasks
                 .matching {
-                    it.name == "publishKotlinMultiplatformPublicationToMavenCentralRepository"
+                    it.name.startsWith("publishKotlinMultiplatformPublication")
                 }.configureEach { enabled = false }
-            val nonApplePublicationNames =
-                listOf(
-                    "Jvm",
-                    "Js",
-                    "WasmJs",
-                    "AndroidRelease",
-                    "AndroidDebug",
-                    "LinuxX64",
-                    "LinuxArm64",
-                )
-            nonApplePublicationNames.forEach { name ->
-                tasks
-                    .matching {
-                        it.name == "publish${name}PublicationToMavenCentralRepository"
-                    }.configureEach { enabled = false }
-            }
         }
     }
 }
@@ -267,4 +237,73 @@ dokka {
         }
         reportUndocumented.set(false)
     }
+}
+
+/** See buffer/build.gradle.kts for full documentation. */
+@Suppress("UNCHECKED_CAST")
+fun injectAppleVariantsIntoModuleMetadata(
+    moduleFile: File,
+    version: String,
+    artifactId: String,
+) {
+    val appleTargets =
+        listOf(
+            "iosArm64" to "ios_arm64",
+            "iosSimulatorArm64" to "ios_simulator_arm64",
+            "iosX64" to "ios_x64",
+            "macosArm64" to "macos_arm64",
+            "macosX64" to "macos_x64",
+            "tvosArm64" to "tvos_arm64",
+            "tvosSimulatorArm64" to "tvos_simulator_arm64",
+            "tvosX64" to "tvos_x64",
+            "watchosArm64" to "watchos_arm64",
+            "watchosSimulatorArm64" to "watchos_simulator_arm64",
+            "watchosX64" to "watchos_x64",
+        )
+
+    val json = groovy.json.JsonSlurper().parseText(moduleFile.readText()) as MutableMap<String, Any>
+    val variants = json["variants"] as MutableList<Any>
+
+    appleTargets.forEach { (gradleName, konanName) ->
+        val moduleName = "$artifactId-${gradleName.lowercase()}"
+        val availableAt =
+            mapOf(
+                "url" to "../../$moduleName/$version/$moduleName-$version.module",
+                "group" to "com.ditchoom",
+                "module" to moduleName,
+                "version" to version,
+            )
+        variants.add(
+            mapOf(
+                "name" to "${gradleName}ApiElements-published",
+                "attributes" to
+                    mapOf(
+                        "org.gradle.category" to "library",
+                        "org.gradle.jvm.environment" to "non-jvm",
+                        "org.gradle.usage" to "kotlin-api",
+                        "org.jetbrains.kotlin.native.target" to konanName,
+                        "org.jetbrains.kotlin.platform.type" to "native",
+                    ),
+                "available-at" to availableAt,
+            ),
+        )
+        variants.add(
+            mapOf(
+                "name" to "${gradleName}SourcesElements-published",
+                "attributes" to
+                    mapOf(
+                        "org.gradle.category" to "documentation",
+                        "org.gradle.dependency.bundling" to "external",
+                        "org.gradle.docstype" to "sources",
+                        "org.gradle.jvm.environment" to "non-jvm",
+                        "org.gradle.usage" to "kotlin-runtime",
+                        "org.jetbrains.kotlin.native.target" to konanName,
+                        "org.jetbrains.kotlin.platform.type" to "native",
+                    ),
+                "available-at" to availableAt,
+            ),
+        )
+    }
+
+    moduleFile.writeText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(json)))
 }
