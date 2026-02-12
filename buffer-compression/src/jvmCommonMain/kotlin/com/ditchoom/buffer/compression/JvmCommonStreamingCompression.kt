@@ -18,6 +18,7 @@ actual fun StreamingCompressor.Companion.create(
     level: CompressionLevel,
     allocator: BufferAllocator,
     outputBufferSize: Int,
+    windowBits: Int,
 ): StreamingCompressor =
     when (algorithm) {
         CompressionAlgorithm.Gzip -> JvmGzipStreamingCompressor(level, allocator, outputBufferSize)
@@ -478,6 +479,16 @@ private class JvmInflateStreamingDecompressor(
 
         if (!inflater.finished() && !inflater.needsInput()) {
             throw CompressionException("Incomplete compressed data stream")
+        }
+    }
+
+    override fun flush(onOutput: (ReadBuffer) -> Unit) {
+        check(!closed) { "Decompressor is closed" }
+        // Drain any remaining output the inflater can produce from previously
+        // consumed input (e.g., after processing the sync marker).
+        drainInflater(onOutput)
+        if (emitPartialBuffer(currentOutput, onOutput)) {
+            currentOutput = null
         }
     }
 

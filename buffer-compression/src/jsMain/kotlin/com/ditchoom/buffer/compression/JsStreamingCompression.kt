@@ -18,6 +18,7 @@ actual fun StreamingCompressor.Companion.create(
     level: CompressionLevel,
     allocator: BufferAllocator,
     outputBufferSize: Int,
+    windowBits: Int,
 ): StreamingCompressor =
     if (isNodeJs) {
         JsNodeStreamingCompressor(algorithm, level, allocator)

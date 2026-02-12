@@ -7,6 +7,8 @@ import com.ditchoom.buffer.NativeMemoryAccess
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.managedMemoryAccess
+import com.ditchoom.buffer.nativeMemoryAccess
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -282,20 +284,30 @@ private inline fun <R> withBufferPointer(
     buffer: ReadBuffer,
     block: (CPointer<ByteVar>) -> R,
 ): R =
-    when (buffer) {
-        is NativeMemoryAccess -> block(buffer.nativeAddress.toCPointer<ByteVar>()!!)
-        is ByteArrayBuffer -> {
+    when {
+        buffer is NativeMemoryAccess -> block(buffer.nativeAddress.toCPointer<ByteVar>()!!)
+        buffer.nativeMemoryAccess != null -> block(buffer.nativeMemoryAccess!!.nativeAddress.toCPointer<ByteVar>()!!)
+        buffer is ByteArrayBuffer -> {
             val array = buffer.backingArray
             if (array.isEmpty()) {
-                // Can't get addressOf(0) on empty array, but we also won't read from it
-                // This case is handled at the caller level (remaining == 0 check)
                 throw CompressionException("Cannot get pointer to empty buffer")
             }
             array.usePinned { pinned ->
                 block(pinned.addressOf(0))
             }
         }
-        else -> throw CompressionException("Unsupported buffer type for compression: ${buffer::class}")
+        buffer.managedMemoryAccess != null -> {
+            val array = buffer.managedMemoryAccess!!.backingArray
+            if (array.isEmpty()) {
+                throw CompressionException("Cannot get pointer to empty buffer")
+            }
+            array.usePinned { pinned ->
+                block(pinned.addressOf(0))
+            }
+        }
+        else -> throw CompressionException(
+            "Buffer must have NativeMemoryAccess or ManagedMemoryAccess, got ${buffer::class.simpleName}",
+        )
     }
 
 /**
