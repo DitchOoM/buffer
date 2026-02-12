@@ -13,9 +13,21 @@ compilerOpts = -O2
  * The `mask` parameter must be in native byte order such that after
  * `memcpy(mask_bytes, &mask, 4)`, mask_bytes[0] corresponds to the first
  * byte to XOR, mask_bytes[1] to the second, and so on.
+ *
+ * @param offset Byte offset into the mask cycle (0-3). The mask bytes are
+ *   rotated so that mask_bytes[(offset % 4)] becomes the first byte applied.
+ *   This allows masking chunked data with correct mask continuity.
  */
-void buf_xor_mask(uint8_t* buffer, size_t length, uint32_t mask) {
-    uint64_t mask64 = ((uint64_t)mask << 32) | (uint64_t)mask;
+void buf_xor_mask(uint8_t* buffer, size_t length, uint32_t mask, size_t offset) {
+    // Rotate mask bytes by offset for correct alignment
+    uint8_t mask_bytes[4];
+    memcpy(mask_bytes, &mask, 4);
+    uint8_t rotated[4];
+    for (int j = 0; j < 4; j++) rotated[j] = mask_bytes[(j + offset) & 3];
+
+    uint32_t rotated_mask;
+    memcpy(&rotated_mask, rotated, 4);
+    uint64_t mask64 = ((uint64_t)rotated_mask << 32) | (uint64_t)rotated_mask;
     size_t i = 0;
 
     // Process 8 bytes at a time using memcpy for safe unaligned access
@@ -27,10 +39,40 @@ void buf_xor_mask(uint8_t* buffer, size_t length, uint32_t mask) {
     }
 
     // Handle remaining bytes
+    for (; i < length; i++) {
+        buffer[i] ^= rotated[i & 3];
+    }
+}
+
+/**
+ * XOR mask copy: reads from src, XORs with repeating 4-byte mask, writes to dst.
+ * Fuses copy + mask into a single pass. Auto-vectorized by Clang at -O2.
+ *
+ * @param src Source buffer to read from
+ * @param dst Destination buffer to write to
+ * @param length Number of bytes to process
+ * @param mask 4-byte XOR mask in native byte order
+ * @param offset Byte offset into the mask cycle (0-3)
+ */
+void buf_xor_mask_copy(const uint8_t* src, uint8_t* dst, size_t length, uint32_t mask, size_t offset) {
     uint8_t mask_bytes[4];
     memcpy(mask_bytes, &mask, 4);
+    uint8_t rotated[4];
+    for (int j = 0; j < 4; j++) rotated[j] = mask_bytes[(j + offset) & 3];
+
+    uint32_t rotated_mask;
+    memcpy(&rotated_mask, rotated, 4);
+    uint64_t mask64 = ((uint64_t)rotated_mask << 32) | (uint64_t)rotated_mask;
+
+    size_t i = 0;
+    for (; i + 8 <= length; i += 8) {
+        uint64_t val;
+        memcpy(&val, src + i, 8);
+        val ^= mask64;
+        memcpy(dst + i, &val, 8);
+    }
     for (; i < length; i++) {
-        buffer[i] ^= mask_bytes[i & 3];
+        dst[i] = src[i] ^ rotated[i & 3];
     }
 }
 

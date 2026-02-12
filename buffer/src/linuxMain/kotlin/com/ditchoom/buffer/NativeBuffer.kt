@@ -10,6 +10,7 @@ import com.ditchoom.buffer.cinterop.buf_indexof_short
 import com.ditchoom.buffer.cinterop.buf_indexof_short_aligned
 import com.ditchoom.buffer.cinterop.buf_mismatch
 import com.ditchoom.buffer.cinterop.buf_xor_mask
+import com.ditchoom.buffer.cinterop.buf_xor_mask_copy
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.UByteVar
@@ -19,6 +20,7 @@ import kotlinx.cinterop.get
 import kotlinx.cinterop.plus
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.set
+import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.toLong
 import kotlinx.cinterop.usePinned
 import platform.posix.free
@@ -302,7 +304,10 @@ class NativeBuffer private constructor(
     /**
      * SIMD-optimized XOR mask using buf_xor_mask.
      */
-    override fun xorMask(mask: Int) {
+    override fun xorMask(
+        mask: Int,
+        maskOffset: Int,
+    ) {
         checkOpen()
         if (mask == 0) return
         val size = remaining()
@@ -310,7 +315,47 @@ class NativeBuffer private constructor(
         // The mask Int is big-endian (byte 0 = MSB). Native memory is little-endian,
         // so reverseBytes() ensures mask_bytes[0] from memcpy matches the first byte to XOR.
         val nativeMask = mask.reverseBytes().toUInt()
-        buf_xor_mask((ptr + positionValue)!!.reinterpret<UByteVar>(), size.convert(), nativeMask)
+        buf_xor_mask(
+            (ptr + positionValue)!!.reinterpret<UByteVar>(),
+            size.convert(),
+            nativeMask,
+            maskOffset.toULong(),
+        )
+    }
+
+    /**
+     * SIMD-optimized fused copy + XOR mask using buf_xor_mask_copy.
+     */
+    override fun xorMaskCopy(
+        source: ReadBuffer,
+        mask: Int,
+        maskOffset: Int,
+    ) {
+        checkOpen()
+        val size = source.remaining()
+        if (size == 0) return
+        if (mask == 0) {
+            write(source)
+            return
+        }
+
+        val srcNative = source.nativeMemoryAccess
+        if (srcNative != null) {
+            val nativeMask = mask.reverseBytes().toUInt()
+            buf_xor_mask_copy(
+                (srcNative.nativeAddress + source.position()).toCPointer<UByteVar>(),
+                (ptr + positionValue)!!.reinterpret<UByteVar>(),
+                size.convert(),
+                nativeMask,
+                maskOffset.toULong(),
+            )
+            positionValue += size
+            source.position(source.position() + size)
+            return
+        }
+
+        // Fallback: use default byte-at-a-time implementation
+        super.xorMaskCopy(source, mask, maskOffset)
     }
 
     /**
