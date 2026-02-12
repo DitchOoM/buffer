@@ -128,30 +128,29 @@ kotlin {
         }
     }
     if (isRunningOnGithub) {
-        // CI: register all targets for the current host OS
-        if (HostManager.hostIsMac) {
-            macosX64()
-            macosArm64 {
-                if (isArm64) {
-                    compilations.create("benchmark") {
-                        associateWith(this@macosArm64.compilations.getByName("main"))
-                    }
+        // CI: register ALL native targets on both hosts so that the root module metadata
+        // (kotlinMultiplatform publication) references all platform variants. Non-host
+        // targets are registered for metadata completeness but their compilation and
+        // publication tasks are disabled (see afterEvaluate block below).
+        macosX64()
+        macosArm64 {
+            if (isArm64) {
+                compilations.create("benchmark") {
+                    associateWith(this@macosArm64.compilations.getByName("main"))
                 }
             }
-            iosArm64()
-            iosSimulatorArm64()
-            iosX64()
-            watchosArm64()
-            watchosSimulatorArm64()
-            watchosX64()
-            tvosArm64()
-            tvosSimulatorArm64()
-            tvosX64()
         }
-        if (HostManager.hostIsLinux) {
-            linuxX64()
-            linuxArm64()
-        }
+        iosArm64()
+        iosSimulatorArm64()
+        iosX64()
+        watchosArm64()
+        watchosSimulatorArm64()
+        watchosX64()
+        tvosArm64()
+        tvosSimulatorArm64()
+        tvosX64()
+        linuxX64()
+        linuxArm64()
     } else {
         if (HostManager.hostIsMac) {
             if (isArm64) {
@@ -172,10 +171,21 @@ kotlin {
         }
     }
     targets.withType<org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget>().configureEach {
-        compilations.getByName("main") {
-            cinterops {
-                create("simd") {
-                    defFile(project.file("src/nativeInterop/cinterop/simd.def"))
+        // Only create cinterop for targets that can compile on the current host.
+        // Non-host targets are registered for metadata but never compiled.
+        val canCompileOnHost =
+            when {
+                !isRunningOnGithub -> true // local dev: only host targets are registered
+                HostManager.hostIsLinux -> name.startsWith("linux")
+                HostManager.hostIsMac -> !name.startsWith("linux")
+                else -> true
+            }
+        if (canCompileOnHost) {
+            compilations.getByName("main") {
+                cinterops {
+                    create("simd") {
+                        defFile(project.file("src/nativeInterop/cinterop/simd.def"))
+                    }
                 }
             }
         }
@@ -550,6 +560,60 @@ ktlint {
 // Also fix: the benchmark executable link task doesn't include cinterop klibs,
 // causing IrLinkageError at runtime for cinterop functions.
 afterEvaluate {
+    // Split publishing: Linux publishes root metadata + non-Apple artifacts,
+    // Apple publishes only Apple-specific artifacts. This ensures the root module
+    // metadata references all platform variants (all targets are registered on both
+    // hosts) while avoiding duplicate artifacts across deployments.
+    if (isRunningOnGithub) {
+        val applePublicationNames =
+            listOf(
+                "MacosX64",
+                "MacosArm64",
+                "IosArm64",
+                "IosSimulatorArm64",
+                "IosX64",
+                "WatchosArm64",
+                "WatchosSimulatorArm64",
+                "WatchosX64",
+                "TvosArm64",
+                "TvosSimulatorArm64",
+                "TvosX64",
+            )
+        if (HostManager.hostIsLinux) {
+            // Disable Apple publication tasks — Apple artifacts are published from macOS
+            applePublicationNames.forEach { name ->
+                tasks
+                    .matching {
+                        it.name == "publish${name}PublicationToMavenCentralRepository"
+                    }.configureEach { enabled = false }
+            }
+        }
+        if (HostManager.hostIsMac) {
+            // Skip root metadata — published from Linux with all variant references
+            tasks
+                .matching {
+                    it.name == "publishKotlinMultiplatformPublicationToMavenCentralRepository"
+                }.configureEach { enabled = false }
+            // Skip non-Apple publications — published from Linux
+            val nonApplePublicationNames =
+                listOf(
+                    "Jvm",
+                    "Js",
+                    "WasmJs",
+                    "AndroidRelease",
+                    "AndroidDebug",
+                    "LinuxX64",
+                    "LinuxArm64",
+                )
+            nonApplePublicationNames.forEach { name ->
+                tasks
+                    .matching {
+                        it.name == "publish${name}PublicationToMavenCentralRepository"
+                    }.configureEach { enabled = false }
+            }
+        }
+    }
+
     // Determine which target's cinterop klib to use for metadata compilation
     val metadataCinteropTarget =
         when {

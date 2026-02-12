@@ -47,24 +47,23 @@ kotlin {
         nodejs()
     }
     if (isRunningOnGithub) {
-        // CI: register all targets for the current host OS
-        if (HostManager.hostIsMac) {
-            macosX64()
-            macosArm64()
-            iosArm64()
-            iosSimulatorArm64()
-            iosX64()
-            watchosArm64()
-            watchosSimulatorArm64()
-            watchosX64()
-            tvosArm64()
-            tvosSimulatorArm64()
-            tvosX64()
-        }
-        if (HostManager.hostIsLinux) {
-            linuxX64()
-            linuxArm64()
-        }
+        // CI: register ALL native targets on both hosts so that the root module metadata
+        // (kotlinMultiplatform publication) references all platform variants. Non-host
+        // targets are registered for metadata completeness but their compilation and
+        // publication tasks are disabled (see afterEvaluate block below).
+        macosX64()
+        macosArm64()
+        iosArm64()
+        iosSimulatorArm64()
+        iosX64()
+        watchosArm64()
+        watchosSimulatorArm64()
+        watchosX64()
+        tvosArm64()
+        tvosSimulatorArm64()
+        tvosX64()
+        linuxX64()
+        linuxArm64()
     } else {
         if (HostManager.hostIsMac) {
             val osArch = System.getProperty("os.arch")
@@ -192,6 +191,57 @@ mavenPublishing {
             connection.set(gitUrl)
             developerConnection.set(gitUrl)
             url.set(siteUrl)
+        }
+    }
+}
+
+// Split publishing: Linux publishes root metadata + non-Apple artifacts,
+// Apple publishes only Apple-specific artifacts (see buffer/build.gradle.kts).
+afterEvaluate {
+    if (isRunningOnGithub) {
+        val applePublicationNames =
+            listOf(
+                "MacosX64",
+                "MacosArm64",
+                "IosArm64",
+                "IosSimulatorArm64",
+                "IosX64",
+                "WatchosArm64",
+                "WatchosSimulatorArm64",
+                "WatchosX64",
+                "TvosArm64",
+                "TvosSimulatorArm64",
+                "TvosX64",
+            )
+        if (HostManager.hostIsLinux) {
+            applePublicationNames.forEach { name ->
+                tasks
+                    .matching {
+                        it.name == "publish${name}PublicationToMavenCentralRepository"
+                    }.configureEach { enabled = false }
+            }
+        }
+        if (HostManager.hostIsMac) {
+            tasks
+                .matching {
+                    it.name == "publishKotlinMultiplatformPublicationToMavenCentralRepository"
+                }.configureEach { enabled = false }
+            val nonApplePublicationNames =
+                listOf(
+                    "Jvm",
+                    "Js",
+                    "WasmJs",
+                    "AndroidRelease",
+                    "AndroidDebug",
+                    "LinuxX64",
+                    "LinuxArm64",
+                )
+            nonApplePublicationNames.forEach { name ->
+                tasks
+                    .matching {
+                        it.name == "publish${name}PublicationToMavenCentralRepository"
+                    }.configureEach { enabled = false }
+            }
         }
     }
 }
