@@ -126,7 +126,7 @@ jobs:
           curl -LO http://ports.ubuntu.com/pool/main/z/zlib/zlib1g_1.3.dfsg-3.1ubuntu2_arm64.deb
           ar x zlib1g_*.deb
           tar xf data.tar.zst
-          sudo cp -r lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
+          sudo cp -r usr/lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
       - name: Run checks and tests
         run: ./gradlew jvmTest jsTest wasmJsNodeTest linuxX64Test ktlintCheck --no-configuration-cache
       - name: Build ARM64 test binaries
@@ -233,7 +233,7 @@ jobs:
           curl -LO http://ports.ubuntu.com/pool/main/z/zlib/zlib1g_1.3.dfsg-3.1ubuntu2_arm64.deb
           ar x zlib1g_*.deb
           tar xf data.tar.zst
-          sudo cp -r lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
+          sudo cp -r usr/lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
       - name: Test and publish to staging (Major)
         if: needs.check-release.outputs.is_major == 'true'
         run: ./gradlew jvmTest jsTest wasmJsNodeTest linuxX64Test publishToMavenCentral --no-configuration-cache -PincrementMajor=true
@@ -377,7 +377,7 @@ jobs:
           curl -LO http://ports.ubuntu.com/pool/main/z/zlib/zlib1g_1.3.dfsg-3.1ubuntu2_arm64.deb
           ar x zlib1g_*.deb
           tar xf data.tar.zst
-          sudo cp -r lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
+          sudo cp -r usr/lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
       - name: Test and deploy (Major)
         if: needs.check-release.outputs.is_major == 'true'
         run: ./gradlew jvmTest jsTest wasmJsNodeTest linuxX64Test publishAndReleaseToMavenCentral --no-configuration-cache -PincrementMajor=true

@@ -6,6 +6,7 @@ import com.ditchoom.buffer.ByteArrayBuffer
 import com.ditchoom.buffer.MutableDataBuffer
 import com.ditchoom.buffer.MutableDataBufferSlice
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
@@ -459,7 +460,7 @@ private inline fun <R> withOutputPointer(
     block: (CPointer<ByteVar>) -> R,
 ): R {
     // Unwrap PooledBuffer or other wrappers to get the actual buffer
-    val actual = buffer.unwrap()
+    val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
     return when (actual) {
         is MutableDataBufferSlice -> block(actual.bytePointer)
         is MutableDataBuffer -> {
