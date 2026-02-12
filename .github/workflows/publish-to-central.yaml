@@ -1,0 +1,164 @@
+name: "Publish to Maven Central"
+
+on:
+  workflow_call:
+    inputs:
+      publishing-type:
+        description: "USER_MANAGED (staging only) or AUTOMATIC (auto-release)"
+        required: true
+        type: string
+      version:
+        description: "Version being published"
+        required: true
+        type: string
+    secrets:
+      GPG_KEY_CONTENTS:
+        required: true
+      SIGNING_PASSWORD:
+        required: true
+      MAVEN_CENTRAL_USERNAME:
+        required: true
+      MAVEN_CENTRAL_PASSWORD:
+        required: true
+    outputs:
+      deployment-id:
+        description: "Sonatype Central Portal deployment ID"
+        value: ${{ jobs.publish.outputs.deployment-id }}
+
+jobs:
+  publish:
+    name: "Sign, Bundle & Upload"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      deployment-id: ${{ steps.upload.outputs.deployment-id }}
+    steps:
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: maven-local-linux
+          path: /tmp/maven-repo/com/ditchoom
+
+      - name: Download Apple artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: maven-local-apple
+          path: /tmp/maven-repo/com/ditchoom
+
+      - name: Clean local metadata
+        run: |
+          find /tmp/maven-repo -name "maven-metadata-local.xml" -delete
+          find /tmp/maven-repo -name "_remote.repositories" -delete
+
+      - name: Import GPG key
+        env:
+          GPG_KEY_CONTENTS: ${{ secrets.GPG_KEY_CONTENTS }}
+        run: |
+          # Detect format: if it starts with "-----BEGIN" it's ASCII-armored, otherwise base64
+          if echo "$GPG_KEY_CONTENTS" | head -1 | grep -q "^-----BEGIN"; then
+            echo "$GPG_KEY_CONTENTS" | gpg --batch --import
+          else
+            echo "$GPG_KEY_CONTENTS" | base64 -d | gpg --batch --import
+          fi
+          # Verify key was imported
+          gpg --list-secret-keys --keyid-format LONG
+
+      - name: Sign all artifacts
+        env:
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: |
+          cd /tmp/maven-repo
+          find . -type f \( -name "*.jar" -o -name "*.klib" -o -name "*.pom" -o -name "*.module" \) | while read -r file; do
+            gpg --batch --yes --pinentry-mode loopback --passphrase "$SIGNING_PASSWORD" \
+              --detach-sign --armor "$file"
+          done
+          echo "Signed $(find . -name "*.asc" | wc -l) files"
+
+      - name: Generate checksums
+        run: |
+          cd /tmp/maven-repo
+          # Generate checksums for all publishable files and their signatures
+          find . -type f \( -name "*.jar" -o -name "*.klib" -o -name "*.pom" -o -name "*.module" -o -name "*.asc" \) | while read -r file; do
+            md5sum "$file" | cut -d' ' -f1 > "${file}.md5"
+            sha1sum "$file" | cut -d' ' -f1 > "${file}.sha1"
+          done
+          echo "Generated checksums for $(find . -name "*.md5" | wc -l) files"
+
+      - name: Create bundle
+        run: cd /tmp/maven-repo && zip -r /tmp/bundle.zip .
+
+      - name: Upload bundle to Central Portal
+        id: upload
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+        run: |
+          TOKEN=$(echo -n "${MAVEN_CENTRAL_USERNAME}:${MAVEN_CENTRAL_PASSWORD}" | base64)
+          BUNDLE_SIZE=$(du -h /tmp/bundle.zip | cut -f1)
+          echo "Uploading bundle (${BUNDLE_SIZE}) with publishingType=${{ inputs.publishing-type }}"
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST "https://central.sonatype.com/api/v1/publisher/upload?publishingType=${{ inputs.publishing-type }}&name=buffer-${{ inputs.version }}" \
+            -H "Authorization: Bearer $TOKEN" \
+            -F "bundle=@/tmp/bundle.zip")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" != "201" ]; then
+            echo "Upload failed with HTTP $HTTP_CODE"
+            echo "$BODY"
+            exit 1
+          fi
+
+          DEPLOYMENT_ID="$BODY"
+          echo "deployment-id=${DEPLOYMENT_ID}" >> $GITHUB_OUTPUT
+          echo "Deployment ID: ${DEPLOYMENT_ID}"
+
+      - name: Poll deployment status
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+        run: |
+          TOKEN=$(echo -n "${MAVEN_CENTRAL_USERNAME}:${MAVEN_CENTRAL_PASSWORD}" | base64)
+          DEPLOYMENT_ID="${{ steps.upload.outputs.deployment-id }}"
+          MAX_ATTEMPTS=60
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            sleep 10
+
+            STATUS_RESPONSE=$(curl -s \
+              -X POST "https://central.sonatype.com/api/v1/publisher/status?id=${DEPLOYMENT_ID}" \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Content-Type: application/json")
+
+            STATE=$(echo "$STATUS_RESPONSE" | jq -r '.deploymentState // empty')
+
+            if [ -z "$STATE" ]; then
+              echo "Attempt ${ATTEMPT}/${MAX_ATTEMPTS}: Unable to parse status response"
+              echo "$STATUS_RESPONSE"
+              continue
+            fi
+
+            echo "Attempt ${ATTEMPT}/${MAX_ATTEMPTS}: ${STATE}"
+
+            case "$STATE" in
+              VALIDATED|PUBLISHED)
+                echo "Deployment ${STATE} successfully!"
+                exit 0
+                ;;
+              FAILED)
+                echo "Deployment FAILED!"
+                echo "$STATUS_RESPONSE" | jq '.errors // empty'
+                exit 1
+                ;;
+              *)
+                # PENDING, VALIDATING, PUBLISHING - keep polling
+                ;;
+            esac
+          done
+
+          echo "Timed out waiting for deployment status after ${MAX_ATTEMPTS} attempts"
+          exit 1

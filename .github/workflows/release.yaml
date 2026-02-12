@@ -22,30 +22,94 @@ jobs:
   complete-release:
     name: Complete Release
     if: github.event.inputs.action == 'complete'
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     env:
-      ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-      ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-      ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_KEY_ID }}
-      ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_PASSWORD }}
-      ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_KEY_CONTENTS }}
+      MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+      MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '21'
-          cache: gradle
-
-      - name: Release from Maven Central staging
+      - name: Extract deployment ID from draft release
+        id: extract
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # The vanniktech plugin's releaseToMavenCentral task releases the staging repo
-          # This only works if there's a staging repo from a previous publishToMavenCentral
-          echo "Releasing version ${{ github.event.inputs.version }} from Maven Central staging..."
-          ./gradlew releaseToMavenCentral --no-configuration-cache
+          version="${{ github.event.inputs.version }}"
+          tag="v${version}"
 
-      - name: Publish draft release (creates tag)
+          # Get draft release body
+          body=$(gh release view "$tag" --repo="$GITHUB_REPOSITORY" --json body -q .body 2>/dev/null || echo "")
+          if [ -z "$body" ]; then
+            echo "Release ${tag} not found"
+            exit 1
+          fi
+
+          # Extract deployment ID from "**Deployment ID:** `<id>`"
+          deployment_id=$(echo "$body" | grep -oP 'Deployment ID:\*\* `\K[^`]+')
+          if [ -z "$deployment_id" ]; then
+            echo "Could not extract deployment ID from release notes"
+            echo "Release body:"
+            echo "$body"
+            exit 1
+          fi
+
+          echo "deployment-id=${deployment_id}" >> $GITHUB_OUTPUT
+          echo "Deployment ID: ${deployment_id}"
+
+      - name: Publish deployment
+        run: |
+          TOKEN=$(echo -n "${MAVEN_CENTRAL_USERNAME}:${MAVEN_CENTRAL_PASSWORD}" | base64)
+          DEPLOYMENT_ID="${{ steps.extract.outputs.deployment-id }}"
+
+          echo "Publishing deployment ${DEPLOYMENT_ID}..."
+          HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/publish-response.txt \
+            -X POST "https://central.sonatype.com/api/v1/publisher/deployment/${DEPLOYMENT_ID}" \
+            -H "Authorization: Bearer $TOKEN")
+
+          if [ "$HTTP_CODE" != "204" ] && [ "$HTTP_CODE" != "200" ]; then
+            echo "Publish request failed with HTTP $HTTP_CODE"
+            cat /tmp/publish-response.txt
+            exit 1
+          fi
+          echo "Publish request accepted"
+
+      - name: Poll until published
+        run: |
+          TOKEN=$(echo -n "${MAVEN_CENTRAL_USERNAME}:${MAVEN_CENTRAL_PASSWORD}" | base64)
+          DEPLOYMENT_ID="${{ steps.extract.outputs.deployment-id }}"
+          MAX_ATTEMPTS=60
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            sleep 10
+
+            STATUS_RESPONSE=$(curl -s \
+              -X POST "https://central.sonatype.com/api/v1/publisher/status?id=${DEPLOYMENT_ID}" \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Content-Type: application/json")
+
+            STATE=$(echo "$STATUS_RESPONSE" | jq -r '.deploymentState // empty')
+
+            echo "Attempt ${ATTEMPT}/${MAX_ATTEMPTS}: ${STATE}"
+
+            case "$STATE" in
+              PUBLISHED)
+                echo "Deployment published successfully!"
+                exit 0
+                ;;
+              FAILED)
+                echo "Deployment FAILED!"
+                echo "$STATUS_RESPONSE" | jq '.errors // empty'
+                exit 1
+                ;;
+              *)
+                ;;
+            esac
+          done
+
+          echo "Timed out waiting for PUBLISHED state"
+          exit 1
+
+      - name: Update GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -53,55 +117,73 @@ jobs:
           tag="v${version}"
           maven_url="https://central.sonatype.com/artifact/com.ditchoom/buffer/${version}"
 
-          # Get the draft release and update its notes
-          echo "Publishing draft release ${tag}..."
+          # Get existing release body and strip staging notes
+          body=$(gh release view "$tag" --repo="$GITHUB_REPOSITORY" --json body -q .body)
+          # Keep only the first line (PR link) and add Maven Central link
+          pr_line=$(echo "$body" | head -1)
 
-          # Update the release notes and publish (removes draft status, creates tag)
           gh release edit "$tag" \
               --repo="$GITHUB_REPOSITORY" \
               --draft=false \
-              --notes="$(gh release view "$tag" --repo="$GITHUB_REPOSITORY" --json body -q .body | sed "s|Awaiting validation.*|Released to Maven Central|" | sed "s|### To complete release:.*||" | sed "s|### To cancel:.*||")"$'\n\n'"**Maven Central:** [com.ditchoom:buffer:${version}](${maven_url})"
+              --notes="$(cat <<EOF
+          ${pr_line}
 
-          echo "✅ Release ${tag} published!"
-          echo "   Tag created: ${tag}"
-          echo "   Maven Central: ${maven_url}"
+          **Maven Central:** [com.ditchoom:buffer:${version}](${maven_url})
+          EOF
+          )"
+
+          echo "Release ${tag} published!"
+          echo "  Maven Central: ${maven_url}"
 
   cancel-release:
     name: Cancel Release
     if: github.event.inputs.action == 'cancel'
     runs-on: ubuntu-latest
+    env:
+      MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+      MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
     steps:
-      - name: Delete draft release
+      - name: Extract deployment ID and drop deployment
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           version="${{ github.event.inputs.version }}"
           tag="v${version}"
 
-          echo "Cancelling release ${tag}..."
-
-          # Check if the release exists and is a draft
-          release_info=$(gh release view "$tag" --repo="$GITHUB_REPOSITORY" --json isDraft,tagName 2>/dev/null || echo "not_found")
-
+          # Get draft release body
+          release_info=$(gh release view "$tag" --repo="$GITHUB_REPOSITORY" --json isDraft,body 2>/dev/null || echo "not_found")
           if [ "$release_info" = "not_found" ]; then
-            echo "⚠️  Release ${tag} not found. Nothing to delete."
+            echo "Release ${tag} not found. Nothing to cancel."
             exit 0
           fi
 
           is_draft=$(echo "$release_info" | jq -r .isDraft)
-
           if [ "$is_draft" != "true" ]; then
-            echo "❌ Release ${tag} is not a draft. Cannot cancel a published release."
-            echo "   If you need to remove this release, do so manually."
+            echo "Release ${tag} is not a draft. Cannot cancel a published release."
             exit 1
           fi
 
-          # Delete the draft release (no tag exists for drafts)
-          gh release delete "$tag" --repo="$GITHUB_REPOSITORY" --yes
+          # Extract deployment ID
+          body=$(echo "$release_info" | jq -r .body)
+          deployment_id=$(echo "$body" | grep -oP 'Deployment ID:\*\* `\K[^`]+')
 
-          echo "✅ Draft release ${tag} deleted!"
-          echo ""
-          echo "⚠️  IMPORTANT: You must also drop the staging repository in Maven Central:"
-          echo "   https://central.sonatype.com/publishing/deployments"
-          echo ""
-          echo "   No git tag was created. No artifacts were published to Maven Central."
+          if [ -n "$deployment_id" ]; then
+            echo "Dropping deployment ${deployment_id}..."
+            TOKEN=$(echo -n "${MAVEN_CENTRAL_USERNAME}:${MAVEN_CENTRAL_PASSWORD}" | base64)
+            HTTP_CODE=$(curl -s -w "%{http_code}" -o /dev/null \
+              -X DELETE "https://central.sonatype.com/api/v1/publisher/deployment/${deployment_id}" \
+              -H "Authorization: Bearer $TOKEN")
+
+            if [ "$HTTP_CODE" = "204" ] || [ "$HTTP_CODE" = "200" ]; then
+              echo "Deployment ${deployment_id} dropped"
+            else
+              echo "Warning: Drop request returned HTTP ${HTTP_CODE} (deployment may already be dropped)"
+            fi
+          else
+            echo "No deployment ID found in release notes, skipping drop"
+          fi
+
+          # Delete the draft release
+          gh release delete "$tag" --repo="$GITHUB_REPOSITORY" --yes
+          echo "Draft release ${tag} deleted!"
+          echo "No git tag was created. No artifacts were published to Maven Central."

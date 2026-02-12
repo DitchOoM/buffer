@@ -1,0 +1,125 @@
+name: "Validate Merged Artifacts"
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Version string to validate"
+        required: true
+        type: string
+
+jobs:
+  validate:
+    name: "Validate Artifacts"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: maven-local-linux
+          path: /tmp/maven-local/com/ditchoom
+
+      - name: Download Apple artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: maven-local-apple
+          path: /tmp/maven-local/com/ditchoom
+
+      - name: Validate artifacts
+        run: |
+          version="${{ inputs.version }}"
+          FAILED=false
+          BASE="/tmp/maven-local/com/ditchoom"
+
+          echo "=== Validating v${version} Merged Artifacts ==="
+          echo ""
+
+          # 1. Root module metadata - all platform variants
+          # buffer has wasmJs; buffer-compression does not
+          BUFFER_PLATFORMS="jvm js linuxx64 linuxarm64 macosarm64 macosx64 iosarm64 iossimulatorarm64 wasmJs"
+          COMPRESSION_PLATFORMS="jvm js linuxx64 linuxarm64 macosarm64 macosx64 iosarm64 iossimulatorarm64"
+
+          for module in buffer buffer-compression; do
+            echo "--- ${module} module metadata ---"
+            MODULE_FILE="${BASE}/${module}/${version}/${module}-${version}.module"
+            if [ ! -f "$MODULE_FILE" ]; then
+              echo "FAIL: ${MODULE_FILE} not found"
+              FAILED=true
+              continue
+            fi
+            if [ "$module" = "buffer" ]; then
+              platforms="$BUFFER_PLATFORMS"
+            else
+              platforms="$COMPRESSION_PLATFORMS"
+            fi
+            for platform in $platforms; do
+              if grep -q "$platform" "$MODULE_FILE"; then
+                echo "  $platform variant present"
+              else
+                echo "  FAIL: ${platform} variant not found in ${module} metadata"
+                FAILED=true
+              fi
+            done
+            echo ""
+          done
+
+          # 2. Multi-Release JAR
+          echo "--- Multi-Release JAR ---"
+          JAR_FILE=$(find "${BASE}/buffer-jvm" -name "buffer-jvm-${version}.jar" | head -1)
+          if [ -z "$JAR_FILE" ]; then
+            echo "FAIL: buffer-jvm JAR not found"
+            FAILED=true
+          else
+            unzip -p "$JAR_FILE" META-INF/MANIFEST.MF | grep -q "Multi-Release: true" || { echo "FAIL: Multi-Release attribute missing"; FAILED=true; }
+            echo "  Multi-Release: true"
+
+            jar tf "$JAR_FILE" | grep -q "META-INF/versions/11/com/ditchoom/buffer/BufferMismatchHelper.class" || { echo "FAIL: Java 11 class missing"; FAILED=true; }
+            echo "  Java 11 BufferMismatchHelper.class present"
+
+            jar tf "$JAR_FILE" | grep -q "META-INF/versions/21/com/ditchoom/buffer/DirectBufferAddressHelperKt.class" || { echo "FAIL: Java 21 class missing"; FAILED=true; }
+            echo "  Java 21 DirectBufferAddressHelperKt.class present"
+
+            if jar tf "$JAR_FILE" | grep -q "StreamingStringDecoder"; then
+              echo "  StreamingStringDecoder classes present"
+            else
+              echo "FAIL: StreamingStringDecoder classes missing from JVM jar"
+              FAILED=true
+            fi
+          fi
+          echo ""
+
+          # 3. simdutf klibs (Linux x64 + ARM64)
+          echo "--- simdutf klibs ---"
+          for arch in linuxx64 linuxarm64; do
+            KLIB=$(find "${BASE}/buffer-${arch}" -name "*simdutf*.klib" | head -1)
+            if [ -z "$KLIB" ]; then
+              echo "FAIL: simdutf klib not found for ${arch}"
+              FAILED=true
+              continue
+            fi
+            echo "  ${arch}: $(basename "$KLIB")"
+            unzip -l "$KLIB" | grep -q "libsimdutf.a" || { echo "FAIL: libsimdutf.a missing from ${arch}"; FAILED=true; }
+            unzip -l "$KLIB" | grep -q "libsimdutf_wrapper.a" || { echo "FAIL: libsimdutf_wrapper.a missing from ${arch}"; FAILED=true; }
+            echo "  ${arch}: libsimdutf.a + libsimdutf_wrapper.a present"
+          done
+          echo ""
+
+          # 4. Apple klibs
+          echo "--- Apple klibs ---"
+          for target in macosarm64 macosx64 iosarm64 iossimulatorarm64; do
+            KLIB=$(find "${BASE}/buffer-${target}" -name "buffer-${target}-${version}.klib" 2>/dev/null | head -1)
+            if [ -z "$KLIB" ]; then
+              echo "FAIL: ${target} klib not found"
+              FAILED=true
+            else
+              echo "  ${target} klib present"
+            fi
+          done
+          echo ""
+
+          if [ "$FAILED" = true ]; then
+            echo "=== VALIDATION FAILED ==="
+            exit 1
+          fi
+          echo "=== ALL VALIDATIONS PASSED ==="

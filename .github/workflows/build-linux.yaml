@@ -1,0 +1,110 @@
+name: "Build & Test (Linux)"
+
+on:
+  workflow_call:
+    inputs:
+      gradle-args:
+        description: "Extra Gradle arguments (e.g., -PincrementMinor=true)"
+        required: false
+        default: ""
+        type: string
+    outputs:
+      version:
+        description: "Computed next version"
+        value: ${{ jobs.build.outputs.version }}
+
+jobs:
+  build:
+    name: "Linux / JVM / JS / WASM / Android"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: gradle
+
+      - name: Setup Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
+
+      - name: Cache Konan
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-linux-
+
+      - name: Cache simdutf x64
+        uses: actions/cache@v4
+        with:
+          path: buffer/build/simdutf/libs/linux-x64
+          key: simdutf-linux-x64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
+
+      - name: Cache simdutf ARM64
+        uses: actions/cache@v4
+        with:
+          path: buffer/build/simdutf/libs/linux-arm64
+          key: simdutf-linux-arm64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
+
+      - name: Install ARM64 dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static gcc-aarch64-linux-gnu
+          # ARM64 runtime libraries for QEMU
+          mkdir -p /tmp/arm64-libs
+          cd /tmp/arm64-libs
+          curl -LO http://ports.ubuntu.com/pool/main/libx/libxcrypt/libcrypt1_4.4.36-4build1_arm64.deb
+          ar x libcrypt1_*.deb
+          tar xf data.tar.zst
+          sudo cp -r usr/lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
+          # ARM64 zlib for buffer-compression QEMU tests
+          curl -LO http://ports.ubuntu.com/pool/main/z/zlib/zlib1g_1.3.dfsg-3.1ubuntu2_arm64.deb
+          ar x zlib1g_*.deb
+          tar xf data.tar.zst
+          sudo cp -r usr/lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
+
+      - name: Get version
+        id: version
+        run: echo "version=$(./gradlew -q nextVersion ${{ inputs.gradle-args }})" >> $GITHUB_OUTPUT
+
+      - name: Run JVM / JS / WASM / Android tests
+        run: >-
+          ./gradlew ktlintCheck
+          jvmTest jsNodeTest jsBrowserTest wasmJsNodeTest wasmJsBrowserTest
+          testDebugUnitTest testReleaseUnitTest
+          --no-build-cache ${{ inputs.gradle-args }}
+
+      - name: Run Linux x64 tests
+        run: >-
+          ./gradlew :buffer:linuxX64Test :buffer-compression:linuxX64Test
+          --no-build-cache ${{ inputs.gradle-args }}
+
+      - name: Build ARM64 test binaries
+        run: >-
+          ./gradlew :buffer:linkDebugTestLinuxArm64 :buffer-compression:linkDebugTestLinuxArm64
+          --no-build-cache ${{ inputs.gradle-args }}
+
+      - name: Run buffer ARM64 tests via QEMU
+        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer/build/bin/linuxArm64/debugTest/test.kexe
+
+      - name: Run buffer-compression ARM64 tests via QEMU
+        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-compression/build/bin/linuxArm64/debugTest/test.kexe
+
+      - name: Publish to Maven Local
+        run: ./gradlew publishToMavenLocal --no-build-cache ${{ inputs.gradle-args }}
+
+      - name: Upload Maven local artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: maven-local-linux
+          path: ~/.m2/repository/com/ditchoom
+          retention-days: 3
