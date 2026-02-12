@@ -112,9 +112,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-user-static
+          sudo apt-get install -y qemu-user-static gcc-aarch64-linux-gnu
           # ARM64 runtime libraries for QEMU
-          sudo mkdir -p /usr/aarch64-linux-gnu/lib
           mkdir -p /tmp/arm64-libs
           cd /tmp/arm64-libs
           curl -LO http://ports.ubuntu.com/pool/main/libx/libxcrypt/libcrypt1_4.4.36-4build1_arm64.deb
@@ -220,8 +219,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-user-static
-          sudo mkdir -p /usr/aarch64-linux-gnu/lib
+          sudo apt-get install -y qemu-user-static gcc-aarch64-linux-gnu
           mkdir -p /tmp/arm64-libs
           cd /tmp/arm64-libs
           curl -LO http://ports.ubuntu.com/pool/main/libx/libxcrypt/libcrypt1_4.4.36-4build1_arm64.deb
@@ -364,8 +362,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-user-static
-          sudo mkdir -p /usr/aarch64-linux-gnu/lib
+          sudo apt-get install -y qemu-user-static gcc-aarch64-linux-gnu
           mkdir -p /tmp/arm64-libs
           cd /tmp/arm64-libs
           curl -LO http://ports.ubuntu.com/pool/main/libx/libxcrypt/libcrypt1_4.4.36-4build1_arm64.deb

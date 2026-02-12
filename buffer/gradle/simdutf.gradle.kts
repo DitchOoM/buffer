@@ -250,5 +250,19 @@ fun createBuildSimdutfTask(arch: String): TaskProvider<Task> {
 val buildSimdutfX64: TaskProvider<Task> by extra { createBuildSimdutfTask("x64") }
 val buildSimdutfArm64: TaskProvider<Task> by extra { createBuildSimdutfTask("arm64") }
 
+// On non-Linux hosts (macOS CI), create empty placeholder .a files so
+// cinterop linuxX64/linuxArm64 metadata compilation can resolve the library path.
+// The actual libraries are only built and used on Linux.
+if (!hostIsLinux) {
+    for (arch in listOf("x64", "arm64")) {
+        val libDir = simdutfLibsDir.resolve("linux-$arch/lib")
+        if (!libDir.resolve("libsimdutf.a").exists()) {
+            libDir.mkdirs()
+            libDir.resolve("libsimdutf.a").writeBytes(byteArrayOf())
+            libDir.resolve("libsimdutf_wrapper.a").writeBytes(byteArrayOf())
+        }
+    }
+}
+
 // Export the libs directory for use in cinterop configuration
 extra["simdutfLibsDir"] = simdutfLibsDir
