@@ -158,12 +158,12 @@ jobs:
       - name: Verify simdutf in Linux klib
         run: |
           ./gradlew :buffer:publishLinuxX64PublicationToMavenLocal :buffer:publishLinuxArm64PublicationToMavenLocal --no-build-cache
-          KLIB_X64=$(find ~/.m2/repository/com/ditchoom/buffer-linuxx64 -name "*.klib" | head -1)
-          KLIB_ARM64=$(find ~/.m2/repository/com/ditchoom/buffer-linuxarm64 -name "*.klib" | head -1)
+          KLIB_X64=$(find ~/.m2/repository/com/ditchoom/buffer-linuxx64 -name "*simdutf*.klib" | head -1)
+          KLIB_ARM64=$(find ~/.m2/repository/com/ditchoom/buffer-linuxarm64 -name "*simdutf*.klib" | head -1)
           echo "=== simdutf klib Validation ==="
           for KLIB in "$KLIB_X64" "$KLIB_ARM64"; do
             echo "Checking: $KLIB"
-            if [ -z "$KLIB" ]; then echo "FAIL: klib not found" && exit 1; fi
+            if [ -z "$KLIB" ]; then echo "FAIL: simdutf klib not found" && exit 1; fi
             unzip -l "$KLIB" | grep -q "libsimdutf.a" || (echo "FAIL: libsimdutf.a missing from $KLIB" && exit 1)
             unzip -l "$KLIB" | grep -q "libsimdutf_wrapper.a" || (echo "FAIL: libsimdutf_wrapper.a missing from $KLIB" && exit 1)
             echo "✓ simdutf libraries present"
