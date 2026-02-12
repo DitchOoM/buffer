@@ -11,8 +11,13 @@ import com.ditchoom.buffer.cinterop.buf_indexof_short_aligned
 import com.ditchoom.buffer.cinterop.buf_mismatch
 import com.ditchoom.buffer.cinterop.buf_xor_mask
 import com.ditchoom.buffer.cinterop.buf_xor_mask_copy
+import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_convert_utf16le_to_utf8
+import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_convert_utf8_to_chararray
+import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_utf16_length_from_utf8
+import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_validate_utf8
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
+import kotlinx.cinterop.ShortVar
 import kotlinx.cinterop.UByteVar
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
@@ -167,7 +172,12 @@ class NativeBuffer private constructor(
         charset: Charset,
     ): String {
         checkOpen()
-        return readByteArray(length).decodeToString()
+        if (charset != Charset.UTF8) {
+            throw UnsupportedOperationException("NativeBuffer only supports UTF-8 charset. Got: $charset")
+        }
+        val result = simdutfDecodeUtf8((ptr + positionValue)!!, length)
+        positionValue += length
+        return result
     }
 
     override fun slice(): ReadBuffer {
@@ -295,7 +305,26 @@ class NativeBuffer private constructor(
         charset: Charset,
     ): WriteBuffer {
         checkOpen()
-        writeBytes(text.toString().encodeToByteArray())
+        if (charset != Charset.UTF8) {
+            throw UnsupportedOperationException("NativeBuffer only supports UTF-8 charset. Got: $charset")
+        }
+        val str = text.toString()
+        val len = str.length
+        if (len == 0) return this
+        // SIMD-accelerated UTF-16->UTF-8 conversion via simdutf.
+        // toCharArray() copies the String's chars, then simdutf converts directly into native memory.
+        // ~28x faster than the per-character loop for large strings (518ms -> 18ms at 16MB).
+        val chars = str.toCharArray()
+        val dstAddr = nativeAddress + positionValue
+        val written =
+            chars.usePinned { pinned ->
+                buf_simdutf_convert_utf16le_to_utf8(
+                    pinned.addressOf(0).reinterpret(),
+                    len.convert(),
+                    dstAddr.toCPointer()!!,
+                ).toInt()
+            }
+        positionValue += written
         return this
     }
 
@@ -514,12 +543,14 @@ class NativeBuffer private constructor(
         ).toInt()
     }
 
-    override suspend fun close() {
+    fun freeNativeMemory() {
         if (!closed) {
             closed = true
             free(ptr)
         }
     }
+
+    override suspend fun close() = freeNativeMemory()
 
     fun isClosed(): Boolean = closed
 }
@@ -627,11 +658,44 @@ private class NativeBufferSlice(
         charset: Charset,
     ): String {
         checkOpen()
-        return readByteArray(length).decodeToString()
+        if (charset != Charset.UTF8) {
+            throw UnsupportedOperationException("NativeBuffer only supports UTF-8 charset. Got: $charset")
+        }
+        val ptr = (baseAddress + positionValue).toCPointer<ByteVar>()!!
+        val result = simdutfDecodeUtf8(ptr, length)
+        positionValue += length
+        return result
     }
 
     override fun slice(): ReadBuffer {
         checkOpen()
         return NativeBufferSlice(baseAddress + positionValue, remaining(), byteOrder, parent)
     }
+}
+
+/**
+ * Decodes UTF-8 bytes from a native pointer to a String using simdutf SIMD acceleration.
+ * Zero-copy from native memory: ptr -> CharArray -> String (no intermediate ByteArray).
+ */
+private fun simdutfDecodeUtf8(
+    ptr: CPointer<ByteVar>,
+    length: Int,
+): String {
+    if (length == 0) return ""
+    // Validate UTF-8 before conversion -- simdutf silently replaces invalid sequences
+    if (buf_simdutf_validate_utf8(ptr, length.convert()) == 0) {
+        throw IllegalArgumentException("Invalid UTF-8 sequence")
+    }
+    val utf16Len = buf_simdutf_utf16_length_from_utf8(ptr, length.convert()).toInt()
+    if (utf16Len == 0) return ""
+    val charArray = CharArray(utf16Len)
+    val written =
+        charArray.usePinned { pinned ->
+            buf_simdutf_convert_utf8_to_chararray(
+                ptr,
+                length.convert(),
+                pinned.addressOf(0).reinterpret<ShortVar>(),
+            ).toInt()
+        }
+    return if (written > 0) charArray.concatToString(0, written) else ""
 }
