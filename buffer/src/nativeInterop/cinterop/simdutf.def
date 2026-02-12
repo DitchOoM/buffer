@@ -1,0 +1,78 @@
+package = com.ditchoom.buffer.cinterop.simdutf
+
+# simdutf - SIMD-accelerated Unicode validation and transcoding
+# This is a pure C interface - we don't include simdutf.h directly because it's C++.
+# Instead, we declare our own C wrapper functions and link against libsimdutf.a
+
+# Link against simdutf and C++ runtime
+linkerOpts.linux = -lstdc++
+
+# Static library path is set via build.gradle.kts extraOpts("-libraryPath", ...)
+# Both the core library and the C wrapper must be included so consumers get them via klib
+staticLibraries.linux = libsimdutf_wrapper.a libsimdutf.a
+
+compilerOpts = -O2
+
+---
+
+#include <stddef.h>
+#include <stdint.h>
+
+// ============================================================================
+// C declarations for simdutf wrapper functions
+// These are implemented in simdutf_wrapper.cpp and compiled into libsimdutf_wrapper.a
+//
+// Note: We use const int8_t* instead of const char* to prevent cinterop from
+// generating String? parameters. The types are binary-compatible.
+// ============================================================================
+
+/**
+ * Validate UTF-8 encoded string.
+ * Returns 1 if valid, 0 if invalid.
+ */
+int buf_simdutf_validate_utf8(const int8_t* buf, size_t len);
+
+/**
+ * Convert UTF-8 to UTF-16LE.
+ * Returns number of UTF-16 code units written, or 0 on error.
+ */
+size_t buf_simdutf_convert_utf8_to_utf16le(
+    const int8_t* input,
+    size_t length,
+    uint16_t* output
+);
+
+/**
+ * Calculate UTF-16 length from UTF-8 input.
+ * Returns number of UTF-16 code units needed.
+ */
+size_t buf_simdutf_utf16_length_from_utf8(const int8_t* input, size_t length);
+
+/**
+ * Find the last complete UTF-8 sequence boundary in a buffer.
+ * Returns the number of bytes that form complete UTF-8 sequences.
+ * Bytes from return value to length are an incomplete trailing sequence.
+ */
+size_t buf_simdutf_utf8_find_boundary(const int8_t* buffer, size_t length);
+
+/**
+ * Convert UTF-8 to UTF-16LE, writing directly to a char16_t array (Kotlin CharArray).
+ * Returns number of UTF-16 code units written, or 0 on error.
+ * This is optimized for direct output to pinned Kotlin CharArray.
+ */
+size_t buf_simdutf_convert_utf8_to_chararray(
+    const int8_t* input,
+    size_t length,
+    int16_t* output
+);
+
+/**
+ * Convert UTF-16LE to UTF-8.
+ * Returns number of UTF-8 bytes written, or 0 on error.
+ * Uses SIMD-accelerated conversion (SSE4.2/AVX2 on x86_64).
+ */
+size_t buf_simdutf_convert_utf16le_to_utf8(
+    const uint16_t* input,
+    size_t length,
+    int8_t* output
+);
