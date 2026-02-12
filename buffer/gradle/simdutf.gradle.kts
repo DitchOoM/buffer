@@ -2,20 +2,21 @@
  * simdutf Build Configuration for Linux
  *
  * Downloads the pre-built amalgamated single-file source (simdutf.cpp + simdutf.h)
- * from GitHub releases, compiles it with g++, and produces static libraries.
+ * from GitHub releases, compiles with clang++ from Kotlin/Native's bundled LLVM,
+ * and produces static libraries.
  *
  * All artifacts are built into build/simdutf/ (never committed to git).
  * Gradle's up-to-date checks (keyed on version + SHA256 in libs.versions.toml)
  * skip rebuilds when unchanged. CI caches build/simdutf/libs/ across runs.
  *
+ * Uses Kotlin/Native's bundled LLVM toolchain (clang++) so no system compiler
+ * packages are needed. ARM64 cross-compilation uses clang's --target flag with
+ * K/N's bundled aarch64 GCC sysroot.
+ *
  * simdutf is used only on Linux because:
  * - Apple platforms have optimized CoreFoundation APIs
  * - JVM has optimized CharsetDecoder
  * - JS/Wasm have native TextDecoder
- *
- * CI Requirements:
- * - g++ (build-essential)
- * - For ARM64 cross-compilation: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
  *
  * Exports (via extra properties):
  * - buildSimdutfX64: TaskProvider<Task> - builds simdutf for x64
@@ -49,6 +50,32 @@ val simdutfSha256: String by extra {
 // All simdutf artifacts go into build/simdutf/ (gitignored, cacheable)
 val simdutfBuildDir = layout.buildDirectory.dir("simdutf")
 val simdutfLibsDir = layout.buildDirectory.dir("simdutf/libs").get().asFile
+
+// =============================================================================
+// Kotlin/Native LLVM Toolchain Discovery
+// =============================================================================
+val konanDir = File(System.getProperty("user.home"), ".konan/dependencies")
+
+fun findKonanDir(prefix: String): File? =
+    konanDir.listFiles()?.firstOrNull { it.isDirectory && it.name.startsWith(prefix) }
+
+fun findClangPP(): String {
+    val llvmDir = findKonanDir("llvm-")
+    val clang = llvmDir?.resolve("bin/clang++")
+    if (clang != null && clang.exists()) return clang.absolutePath
+    // Fallback to system g++ if K/N's LLVM is not available
+    return "g++"
+}
+
+fun findLlvmAr(): String {
+    val llvmDir = findKonanDir("llvm-")
+    val ar = llvmDir?.resolve("bin/llvm-ar")
+    if (ar != null && ar.exists()) return ar.absolutePath
+    return "ar"
+}
+
+fun findAarch64GccToolchain(): File? =
+    findKonanDir("aarch64-unknown-linux-gnu-gcc-")
 
 // =============================================================================
 // Download Amalgamated Source from GitHub Release
@@ -122,23 +149,28 @@ fun createBuildSimdutfTask(arch: String): TaskProvider<Task> {
         doLast {
             val downloadDir = simdutfBuildDir.get().asFile
             val sourceDir = downloadAmalgamatedSource(downloadDir, simdutfVersion, simdutfSha256)
-
-            // Determine compilers for cross-compilation
             val isArmCross = arch == "arm64" && System.getProperty("os.arch") != "aarch64"
-            val cxx = if (isArmCross) "aarch64-linux-gnu-g++" else "g++"
-            val ar = if (isArmCross) "aarch64-linux-gnu-ar" else "ar"
 
-            // Check for cross-compiler if needed
-            if (isArmCross) {
-                val result = ProcessBuilder("which", cxx).start().waitFor()
-                if (result != 0) {
-                    throw GradleException(
-                        """
-                        Cross-compiler not found for ARM64. Install with:
-                          sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-                        """.trimIndent()
+            // Use K/N's bundled clang++ and llvm-ar
+            val cxx = findClangPP()
+            val ar = findLlvmAr()
+            logger.lifecycle("Using compiler: $cxx")
+
+            // Build cross-compilation flags for ARM64
+            val crossFlags = if (isArmCross) {
+                val gccToolchain = findAarch64GccToolchain()
+                    ?: throw GradleException(
+                        "Kotlin/Native aarch64 GCC toolchain not found in ${konanDir.absolutePath}. " +
+                            "Run a K/N linuxArm64 build first to trigger dependency download."
                     )
-                }
+                val sysroot = gccToolchain.resolve("aarch64-unknown-linux-gnu/sysroot")
+                listOf(
+                    "--target=aarch64-unknown-linux-gnu",
+                    "--sysroot=${sysroot.absolutePath}",
+                    "--gcc-toolchain=${gccToolchain.absolutePath}",
+                )
+            } else {
+                emptyList()
             }
 
             // Create output dirs
@@ -150,13 +182,17 @@ fun createBuildSimdutfTask(arch: String): TaskProvider<Task> {
             val simdutfLib = outputDir.resolve("lib/libsimdutf.a")
 
             logger.lifecycle("Compiling simdutf $simdutfVersion (amalgamated) for $arch...")
-            val compileSimdutfResult = ProcessBuilder(
+            val compileArgs = mutableListOf(
                 cxx, "-c", "-O2", "-fPIC",
                 "-ffunction-sections", "-fdata-sections",
                 "-I${sourceDir.absolutePath}",
                 "-o", simdutfObj.absolutePath,
-                sourceDir.resolve("simdutf.cpp").absolutePath
-            ).inheritIO().start().waitFor()
+                sourceDir.resolve("simdutf.cpp").absolutePath,
+            )
+            compileArgs.addAll(compileArgs.size - 1, crossFlags)
+
+            val compileSimdutfResult = ProcessBuilder(compileArgs)
+                .inheritIO().start().waitFor()
 
             if (compileSimdutfResult != 0) {
                 throw GradleException("simdutf compilation failed for $arch")
@@ -180,12 +216,16 @@ fun createBuildSimdutfTask(arch: String): TaskProvider<Task> {
             val wrapperLib = outputDir.resolve("lib/libsimdutf_wrapper.a")
 
             logger.lifecycle("Compiling simdutf C wrapper...")
-            val compileResult = ProcessBuilder(
+            val wrapperArgs = mutableListOf(
                 cxx, "-c", "-O2", "-fPIC",
                 "-I${outputDir.resolve("include").absolutePath}",
                 "-o", wrapperObj.absolutePath,
-                wrapperSrc.absolutePath
-            ).inheritIO().start().waitFor()
+                wrapperSrc.absolutePath,
+            )
+            wrapperArgs.addAll(wrapperArgs.size - 1, crossFlags)
+
+            val compileResult = ProcessBuilder(wrapperArgs)
+                .inheritIO().start().waitFor()
 
             if (compileResult != 0) {
                 throw GradleException("Failed to compile simdutf wrapper for $arch")
