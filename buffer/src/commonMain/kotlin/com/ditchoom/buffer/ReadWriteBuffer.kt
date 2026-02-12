@@ -6,9 +6,9 @@ package com.ditchoom.buffer
  * This interface combines [ReadBuffer] and [WriteBuffer] capabilities,
  * providing a common type for buffers that can be both written to and read from.
  *
- * Both [PlatformBuffer] and [com.ditchoom.buffer.pool.PooledBuffer] implement
- * this interface, making it useful for APIs that need to allocate and return
- * buffers without caring about the specific buffer type.
+ * Both [PlatformBuffer] and pool-acquired buffers implement this interface,
+ * making it useful for APIs that need to allocate and return buffers without
+ * caring about the specific buffer type.
  */
 interface ReadWriteBuffer :
     ReadBuffer,
@@ -29,8 +29,13 @@ interface ReadWriteBuffer :
      * This is commonly used for WebSocket frame masking (RFC 6455).
      *
      * @param mask The 4-byte XOR mask in big-endian order
+     * @param maskOffset Byte offset into the mask cycle (0-3). Allows masking
+     *   chunked data where each chunk continues the mask cycle from the previous chunk.
      */
-    fun xorMask(mask: Int) {
+    fun xorMask(
+        mask: Int,
+        maskOffset: Int = 0,
+    ) {
         if (mask == 0) return
         val pos = position()
         val lim = limit()
@@ -43,7 +48,7 @@ interface ReadWriteBuffer :
 
         for (i in 0 until size) {
             val maskByte =
-                when (i and 3) {
+                when ((i + maskOffset) and 3) {
                     0 -> maskByte0
                     1 -> maskByte1
                     2 -> maskByte2
@@ -51,5 +56,49 @@ interface ReadWriteBuffer :
                 }
             set(pos + i, (get(pos + i).toInt() xor maskByte.toInt()).toByte())
         }
+    }
+
+    /**
+     * Reads bytes from [source] `[source.position, source.limit)`, XORs with
+     * the repeating 4-byte [mask], and writes the result into this buffer at
+     * the current position. Advances both positions by `source.remaining()`.
+     *
+     * This fuses copy + mask into a single pass, avoiding a separate xorMask() call.
+     *
+     * @param source The source buffer to read from
+     * @param mask The 4-byte XOR mask in big-endian order
+     * @param maskOffset Byte offset into the mask cycle (0-3)
+     */
+    fun xorMaskCopy(
+        source: ReadBuffer,
+        mask: Int,
+        maskOffset: Int = 0,
+    ) {
+        val size = source.remaining()
+        if (size == 0) return
+        if (mask == 0) {
+            write(source)
+            return
+        }
+
+        val maskByte0 = (mask ushr 24).toByte()
+        val maskByte1 = (mask ushr 16).toByte()
+        val maskByte2 = (mask ushr 8).toByte()
+        val maskByte3 = mask.toByte()
+
+        val srcPos = source.position()
+        val dstPos = position()
+        for (i in 0 until size) {
+            val maskByte =
+                when ((i + maskOffset) and 3) {
+                    0 -> maskByte0
+                    1 -> maskByte1
+                    2 -> maskByte2
+                    else -> maskByte3
+                }
+            set(dstPos + i, (source.get(srcPos + i).toInt() xor maskByte.toInt()).toByte())
+        }
+        source.position(srcPos + size)
+        position(dstPos + size)
     }
 }
