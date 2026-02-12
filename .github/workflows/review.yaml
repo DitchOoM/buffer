@@ -97,8 +97,8 @@ jobs:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: konan-${{ runner.os }}-
-      - name: Run tests and verify Linux cross-compilation
-        run: ./gradlew macosArm64Test iosSimulatorArm64Test compileKotlinLinuxX64 compileKotlinLinuxArm64 :buffer-compression:compileLinuxMainKotlinMetadata
+      - name: Run Apple target tests
+        run: ./gradlew macosArm64Test iosSimulatorArm64Test
       - name: Validate publishToMavenLocal (catches target registration issues)
         run: ./gradlew publishToMavenLocal --no-build-cache
 
