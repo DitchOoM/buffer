@@ -8,583 +8,145 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
 jobs:
   check-release:
     name: Check if release is needed
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     outputs:
-      should_release: ${{ steps.check.outputs.should_release }}
-      skip_release: ${{ steps.check.outputs.skip_release }}
-      draft_release: ${{ steps.check.outputs.draft_release }}
-      is_major: ${{ contains(github.event.pull_request.labels.*.name, 'major') }}
-      is_minor: ${{ contains(github.event.pull_request.labels.*.name, 'minor') }}
+      flow: ${{ steps.check.outputs.flow }}
+      gradle-args: ${{ steps.check.outputs.gradle-args }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Check for skip-release label or non-code changes only
+      - name: Determine release flow
         id: check
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          gradle_args=""
+          if ${{ contains(github.event.pull_request.labels.*.name, 'major') }}; then
+            gradle_args="-PincrementMajor=true"
+          elif ${{ contains(github.event.pull_request.labels.*.name, 'minor') }}; then
+            gradle_args="-PincrementMinor=true"
+          fi
+          echo "gradle-args=${gradle_args}" >> $GITHUB_OUTPUT
+
           # Check for skip-release label
           if ${{ contains(github.event.pull_request.labels.*.name, 'skip-release') }}; then
-            echo "skip-release label found, will run dry-run build only"
-            echo "should_release=false" >> $GITHUB_OUTPUT
-            echo "skip_release=true" >> $GITHUB_OUTPUT
-            echo "draft_release=false" >> $GITHUB_OUTPUT
+            echo "flow=dry-run" >> $GITHUB_OUTPUT
             exit 0
           fi
-
-          echo "skip_release=false" >> $GITHUB_OUTPUT
 
           # Check for draft-release label
           if ${{ contains(github.event.pull_request.labels.*.name, 'draft-release') }}; then
-            echo "draft-release label found, will publish to staging only"
-            echo "should_release=false" >> $GITHUB_OUTPUT
-            echo "draft_release=true" >> $GITHUB_OUTPUT
+            echo "flow=draft" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          echo "draft_release=false" >> $GITHUB_OUTPUT
-
-          # Get list of changed files
+          # Check if only non-code files changed
           changed_files=$(gh pr diff ${{ github.event.pull_request.number }} --name-only)
-
-          # Check if all changed files are non-code (CI, docs, config)
-          should_release=true
           for file in $changed_files; do
             case "$file" in
               .github/*|*.md|.gitignore|.editorconfig|CLAUDE.md|LICENSE|*.txt)
-                # Non-code file, continue checking
                 ;;
               *)
-                # Code file found, should release
                 echo "Code file changed: $file"
-                echo "should_release=true" >> $GITHUB_OUTPUT
+                echo "flow=release" >> $GITHUB_OUTPUT
                 exit 0
                 ;;
             esac
           done
 
-          # Only non-code files changed
-          echo "Only non-code files changed, skipping release"
-          echo "should_release=false" >> $GITHUB_OUTPUT
+          echo "Only non-code files changed, skipping"
+          echo "flow=skip" >> $GITHUB_OUTPUT
 
-  # ===========================================================================
-  # Dry-run builds (skip-release label)
-  # ===========================================================================
-  dry-run-linux:
-    name: Dry-run Linux (skip-release)
+  build-linux:
     needs: check-release
-    if: needs.check-release.outputs.skip_release == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '21'
-          cache: gradle
-      - name: Setup Chrome
-        uses: browser-actions/setup-chrome@v1
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v2
-      - name: Cache Konan
-        uses: actions/cache@v4
-        with:
-          path: ~/.konan
-          key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
-          restore-keys: konan-linux-
-      - name: Cache simdutf x64
-        uses: actions/cache@v4
-        with:
-          path: buffer/build/simdutf/libs/linux-x64
-          key: simdutf-linux-x64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
-      - name: Cache simdutf ARM64
-        uses: actions/cache@v4
-        with:
-          path: buffer/build/simdutf/libs/linux-arm64
-          key: simdutf-linux-arm64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static gcc-aarch64-linux-gnu
-          # ARM64 runtime libraries for QEMU
-          mkdir -p /tmp/arm64-libs
-          cd /tmp/arm64-libs
-          curl -LO http://ports.ubuntu.com/pool/main/libx/libxcrypt/libcrypt1_4.4.36-4build1_arm64.deb
-          ar x libcrypt1_*.deb
-          tar xf data.tar.zst
-          sudo cp -r usr/lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
-          # ARM64 zlib for buffer-compression QEMU tests
-          curl -LO http://ports.ubuntu.com/pool/main/z/zlib/zlib1g_1.3.dfsg-3.1ubuntu2_arm64.deb
-          ar x zlib1g_*.deb
-          tar xf data.tar.zst
-          sudo cp -r usr/lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
-      - name: Run checks and tests
-        run: ./gradlew jvmTest jsTest wasmJsNodeTest linuxX64Test ktlintCheck --no-configuration-cache
-      - name: Build ARM64 test binaries
-        run: ./gradlew :buffer:linkDebugTestLinuxArm64 :buffer-compression:linkDebugTestLinuxArm64 --no-configuration-cache
-      - name: Run buffer ARM64 tests via QEMU
-        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer/build/bin/linuxArm64/debugTest/test.kexe
-      - name: Run buffer-compression ARM64 tests via QEMU
-        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-compression/build/bin/linuxArm64/debugTest/test.kexe
-      - name: Dry-run publish (build artifacts without deploying)
-        run: ./gradlew publishToMavenLocal --no-configuration-cache
-      - name: Upload Maven local artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dry-run-maven-local-linux
-          path: ~/.m2/repository/com/ditchoom
-          retention-days: 7
+    if: needs.check-release.outputs.flow != 'skip'
+    uses: ./.github/workflows/build-linux.yaml
+    with:
+      gradle-args: ${{ needs.check-release.outputs.gradle-args }}
 
-  dry-run-apple:
-    name: Dry-run Apple (skip-release)
+  build-apple:
     needs: check-release
-    if: needs.check-release.outputs.skip_release == 'true'
-    runs-on: macos-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '21'
-          cache: gradle
-      - name: Cache Konan
-        uses: actions/cache@v4
-        with:
-          path: ~/.konan
-          key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
-          restore-keys: konan-macos-
-      - name: Run Apple tests
-        run: ./gradlew macosArm64Test iosSimulatorArm64Test --no-configuration-cache
-      - name: Dry-run publish (build artifacts without deploying)
-        run: ./gradlew publishToMavenLocal --no-configuration-cache
-      - name: Upload Maven local artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dry-run-maven-local-apple
-          path: ~/.m2/repository/com/ditchoom
-          retention-days: 7
+    if: needs.check-release.outputs.flow != 'skip'
+    uses: ./.github/workflows/build-apple.yaml
+    with:
+      gradle-args: ${{ needs.check-release.outputs.gradle-args }}
 
-  # ===========================================================================
-  # Draft release (staging only)
-  # ===========================================================================
-  draft-release-linux:
-    name: Draft Release Linux (staging)
-    needs: check-release
-    if: needs.check-release.outputs.draft_release == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    env:
-      ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-      ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-      ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_KEY_ID }}
-      ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_PASSWORD }}
-      ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_KEY_CONTENTS }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '21'
-          cache: gradle
-      - name: Setup Chrome
-        uses: browser-actions/setup-chrome@v1
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v2
-      - name: Cache Konan
-        uses: actions/cache@v4
-        with:
-          path: ~/.konan
-          key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
-          restore-keys: konan-linux-
-      - name: Cache simdutf x64
-        uses: actions/cache@v4
-        with:
-          path: buffer/build/simdutf/libs/linux-x64
-          key: simdutf-linux-x64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
-      - name: Cache simdutf ARM64
-        uses: actions/cache@v4
-        with:
-          path: buffer/build/simdutf/libs/linux-arm64
-          key: simdutf-linux-arm64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static gcc-aarch64-linux-gnu
-          mkdir -p /tmp/arm64-libs
-          cd /tmp/arm64-libs
-          curl -LO http://ports.ubuntu.com/pool/main/libx/libxcrypt/libcrypt1_4.4.36-4build1_arm64.deb
-          ar x libcrypt1_*.deb
-          tar xf data.tar.zst
-          sudo cp -r usr/lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
-          # ARM64 zlib for buffer-compression QEMU tests
-          curl -LO http://ports.ubuntu.com/pool/main/z/zlib/zlib1g_1.3.dfsg-3.1ubuntu2_arm64.deb
-          ar x zlib1g_*.deb
-          tar xf data.tar.zst
-          sudo cp -r usr/lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
-      - name: Test and publish to staging (Major)
-        if: needs.check-release.outputs.is_major == 'true'
-        run: ./gradlew jvmTest jsTest wasmJsNodeTest linuxX64Test publishToMavenCentral --no-configuration-cache -PincrementMajor=true
-      - name: Test and publish to staging (Minor)
-        if: needs.check-release.outputs.is_minor == 'true'
-        run: ./gradlew jvmTest jsTest wasmJsNodeTest linuxX64Test publishToMavenCentral --no-configuration-cache -PincrementMinor=true
-      - name: Test and publish to staging (Patch)
-        if: needs.check-release.outputs.is_major != 'true' && needs.check-release.outputs.is_minor != 'true'
-        run: ./gradlew jvmTest jsTest wasmJsNodeTest linuxX64Test publishToMavenCentral --no-configuration-cache
+  validate:
+    needs: [check-release, build-linux, build-apple]
+    if: needs.check-release.outputs.flow != 'skip'
+    uses: ./.github/workflows/validate-artifacts.yaml
+    with:
+      version: ${{ needs.build-linux.outputs.version }}
 
-  draft-release-apple:
-    name: Draft Release Apple (staging)
-    needs: check-release
-    if: needs.check-release.outputs.draft_release == 'true'
-    runs-on: macos-latest
-    timeout-minutes: 60
-    env:
-      ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-      ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-      ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_KEY_ID }}
-      ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_PASSWORD }}
-      ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_KEY_CONTENTS }}
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '21'
-          cache: gradle
-      - name: Cache Konan
-        uses: actions/cache@v4
-        with:
-          path: ~/.konan
-          key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
-          restore-keys: konan-macos-
-      - name: Get version (Major)
-        if: needs.check-release.outputs.is_major == 'true'
-        id: version_major
-        run: echo "version=$(./gradlew -q nextVersion -PincrementMajor=true)" >> $GITHUB_OUTPUT
-      - name: Get version (Minor)
-        if: needs.check-release.outputs.is_minor == 'true'
-        id: version_minor
-        run: echo "version=$(./gradlew -q nextVersion -PincrementMinor=true)" >> $GITHUB_OUTPUT
-      - name: Get version (Patch)
-        if: needs.check-release.outputs.is_major != 'true' && needs.check-release.outputs.is_minor != 'true'
-        id: version_patch
-        run: echo "version=$(./gradlew -q nextVersion)" >> $GITHUB_OUTPUT
-      - name: Set version output
-        id: version
-        run: echo "version=${{ steps.version_major.outputs.version }}${{ steps.version_minor.outputs.version }}${{ steps.version_patch.outputs.version }}" >> $GITHUB_OUTPUT
-      - name: Test and publish to staging (Major)
-        if: needs.check-release.outputs.is_major == 'true'
-        run: ./gradlew macosArm64Test iosSimulatorArm64Test publishToMavenCentral --no-configuration-cache -PincrementMajor=true
-      - name: Test and publish to staging (Minor)
-        if: needs.check-release.outputs.is_minor == 'true'
-        run: ./gradlew macosArm64Test iosSimulatorArm64Test publishToMavenCentral --no-configuration-cache -PincrementMinor=true
-      - name: Test and publish to staging (Patch)
-        if: needs.check-release.outputs.is_major != 'true' && needs.check-release.outputs.is_minor != 'true'
-        run: ./gradlew macosArm64Test iosSimulatorArm64Test publishToMavenCentral --no-configuration-cache
-
-  validate-staging:
-    name: Validate Staging Artifacts
-    needs: [check-release, draft-release-linux, draft-release-apple]
-    if: needs.check-release.outputs.draft_release == 'true'
-    runs-on: ubuntu-latest
-    env:
+  publish:
+    needs: [check-release, validate]
+    if: needs.check-release.outputs.flow == 'draft' || needs.check-release.outputs.flow == 'release'
+    uses: ./.github/workflows/publish-to-central.yaml
+    with:
+      publishing-type: ${{ needs.check-release.outputs.flow == 'draft' && 'USER_MANAGED' || 'AUTOMATIC' }}
+      version: ${{ needs.build-linux.outputs.version }}
+    secrets:
+      GPG_KEY_CONTENTS: ${{ secrets.GPG_KEY_CONTENTS }}
+      SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
       MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
       MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-    steps:
-      - name: Validate staging artifacts
-        run: |
-          version="${{ needs.draft-release-apple.outputs.version }}"
-          TOKEN=$(echo -n "${MAVEN_CENTRAL_USERNAME}:${MAVEN_CENTRAL_PASSWORD}" | base64)
-          BASE_URL="https://central.sonatype.com/api/v1/publisher/deployments/download"
-          FAILED=false
 
-          download() {
-            local path="$1"
-            local output="$2"
-            local status
-            status=$(curl -s -w "%{http_code}" -o "$output" \
-              -H "Authorization: Bearer $TOKEN" \
-              "${BASE_URL}/${path}")
-            if [ "$status" != "200" ]; then
-              echo "FAIL: HTTP $status for $path"
-              FAILED=true
-              return 1
-            fi
-            return 0
-          }
-
-          echo "=== Validating v${version} Staging Artifacts ==="
-          echo ""
-
-          # 1. Linux x64 simdutf klib
-          echo "--- simdutf klib (linux-x64) ---"
-          if download "com/ditchoom/buffer-linuxx64/${version}/buffer-linuxx64-${version}-cinterop-simdutf.klib" /tmp/simdutf.klib; then
-            echo "Size: $(du -h /tmp/simdutf.klib | cut -f1)"
-            if unzip -l /tmp/simdutf.klib | grep -q "libsimdutf.a"; then
-              echo "✓ libsimdutf.a present"
-            else
-              echo "FAIL: libsimdutf.a missing from simdutf klib"
-              FAILED=true
-            fi
-            if unzip -l /tmp/simdutf.klib | grep -q "libsimdutf_wrapper.a"; then
-              echo "✓ libsimdutf_wrapper.a present"
-            else
-              echo "FAIL: libsimdutf_wrapper.a missing from simdutf klib"
-              FAILED=true
-            fi
-          fi
-          echo ""
-
-          # 2. Linux ARM64 simdutf klib
-          echo "--- simdutf klib (linux-arm64) ---"
-          if download "com/ditchoom/buffer-linuxarm64/${version}/buffer-linuxarm64-${version}-cinterop-simdutf.klib" /tmp/simdutf-arm64.klib; then
-            echo "Size: $(du -h /tmp/simdutf-arm64.klib | cut -f1)"
-            if unzip -l /tmp/simdutf-arm64.klib | grep -q "libsimdutf.a"; then
-              echo "✓ libsimdutf.a present (ARM64)"
-            else
-              echo "FAIL: libsimdutf.a missing from ARM64 simdutf klib"
-              FAILED=true
-            fi
-          fi
-          echo ""
-
-          # 3. Main buffer klib - verify StreamingStringDecoder
-          echo "--- Main buffer klib (linux-x64) ---"
-          if download "com/ditchoom/buffer-linuxx64/${version}/buffer-linuxx64-${version}.klib" /tmp/buffer.klib; then
-            echo "Size: $(du -h /tmp/buffer.klib | cut -f1)"
-            COUNT=$(unzip -p /tmp/buffer.klib 2>/dev/null | grep -ac "StreamingStringDecoder" || echo "0")
-            echo "StreamingStringDecoder references: $COUNT"
-            if [ "$COUNT" -gt 0 ]; then
-              echo "✓ StreamingStringDecoder present"
-            else
-              echo "FAIL: StreamingStringDecoder not found in buffer klib"
-              FAILED=true
-            fi
-          fi
-          echo ""
-
-          # 4. JVM jar - verify Multi-Release + StreamingStringDecoder
-          echo "--- JVM JAR ---"
-          if download "com/ditchoom/buffer-jvm/${version}/buffer-jvm-${version}.jar" /tmp/buffer-jvm.jar; then
-            echo "Size: $(du -h /tmp/buffer-jvm.jar | cut -f1)"
-            if unzip -p /tmp/buffer-jvm.jar META-INF/MANIFEST.MF | grep -q "Multi-Release: true"; then
-              echo "✓ Multi-Release: true"
-            else
-              echo "FAIL: Multi-Release attribute missing"
-              FAILED=true
-            fi
-            if jar tf /tmp/buffer-jvm.jar | grep -q "StreamingStringDecoder"; then
-              echo "✓ StreamingStringDecoder classes present"
-            else
-              echo "FAIL: StreamingStringDecoder classes missing from JVM jar"
-              FAILED=true
-            fi
-            if jar tf /tmp/buffer-jvm.jar | grep -q "META-INF/versions/21/"; then
-              echo "✓ Java 21 multi-release classes present"
-            else
-              echo "FAIL: Java 21 multi-release classes missing"
-              FAILED=true
-            fi
-          fi
-          echo ""
-
-          # 5. Apple klib - verify macOS ARM64 exists
-          echo "--- Apple klib (macOS ARM64) ---"
-          if download "com/ditchoom/buffer-macosarm64/${version}/buffer-macosarm64-${version}.klib" /tmp/buffer-macos.klib; then
-            echo "Size: $(du -h /tmp/buffer-macos.klib | cut -f1)"
-            echo "✓ macOS ARM64 klib present"
-          fi
-          echo ""
-
-          # 6. Module metadata - verify all platform variants listed
-          echo "--- Module metadata ---"
-          if download "com/ditchoom/buffer/${version}/buffer-${version}.module" /tmp/buffer.module; then
-            for platform in jvm js linuxx64 linuxarm64 macosarm64 macosx64 iosarm64 iossimulatorarm64 wasmjs; do
-              if grep -q "$platform" /tmp/buffer.module; then
-                echo "✓ ${platform} variant present"
-              else
-                echo "FAIL: ${platform} variant not found in metadata"
-                FAILED=true
-              fi
-            done
-          fi
-          echo ""
-
-          if [ "$FAILED" = true ]; then
-            echo "=== VALIDATION FAILED ==="
-            exit 1
-          fi
-          echo "=== ALL STAGING VALIDATIONS PASSED ==="
-
-  draft-release-finalize:
-    name: Create Draft Release
-    needs: [check-release, draft-release-linux, draft-release-apple, validate-staging]
-    if: needs.check-release.outputs.draft_release == 'true'
+  finalize:
+    name: Finalize Release
+    needs: [check-release, build-linux, publish]
+    if: always() && needs.check-release.outputs.flow != 'skip' && needs.check-release.outputs.flow != 'dry-run'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Create draft release (no tag)
+
+      - name: Create draft GitHub release
+        if: needs.check-release.outputs.flow == 'draft' && needs.publish.result == 'success'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
-          version="${{ needs.draft-release-apple.outputs.version }}"
+          version="${{ needs.build-linux.outputs.version }}"
+          deployment_id="${{ needs.publish.outputs.deployment-id }}"
           staging_url="https://central.sonatype.com/publishing/deployments"
 
           gh release create "v${version}" \
               --draft \
               --repo="$GITHUB_REPOSITORY" \
               --title="v${version}" \
-              --notes="## [${PR_TITLE}](${PR_URL})"$'\n\n'"**Status:** Awaiting validation in [Maven Central Staging](${staging_url})"$'\n\n'"### To complete release:"$'\n'"1. Validate artifacts in Maven Central staging area"$'\n'"2. Run the 'Complete Release' workflow, or"$'\n'"3. Publish this draft release (will create tag and release to Maven Central)"$'\n\n'"### To cancel:"$'\n'"1. Drop the staging repository in Maven Central"$'\n'"2. Delete this draft release"$'\n'"   No tag or Maven Central artifacts will remain."
+              --notes="$(cat <<EOF
+          ## [${PR_TITLE}](${PR_URL})
 
-  # ===========================================================================
-  # Full release (publish to Maven Central)
-  # ===========================================================================
-  release-linux:
-    name: Release Linux
-    needs: check-release
-    if: needs.check-release.outputs.should_release == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    env:
-      ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-      ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-      ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_KEY_ID }}
-      ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_PASSWORD }}
-      ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_KEY_CONTENTS }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '21'
-          cache: gradle
-      - name: Setup Chrome
-        uses: browser-actions/setup-chrome@v1
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v2
-      - name: Cache Konan
-        uses: actions/cache@v4
-        with:
-          path: ~/.konan
-          key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
-          restore-keys: konan-linux-
-      - name: Cache simdutf x64
-        uses: actions/cache@v4
-        with:
-          path: buffer/build/simdutf/libs/linux-x64
-          key: simdutf-linux-x64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
-      - name: Cache simdutf ARM64
-        uses: actions/cache@v4
-        with:
-          path: buffer/build/simdutf/libs/linux-arm64
-          key: simdutf-linux-arm64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static gcc-aarch64-linux-gnu
-          mkdir -p /tmp/arm64-libs
-          cd /tmp/arm64-libs
-          curl -LO http://ports.ubuntu.com/pool/main/libx/libxcrypt/libcrypt1_4.4.36-4build1_arm64.deb
-          ar x libcrypt1_*.deb
-          tar xf data.tar.zst
-          sudo cp -r usr/lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
-          # ARM64 zlib for buffer-compression QEMU tests
-          curl -LO http://ports.ubuntu.com/pool/main/z/zlib/zlib1g_1.3.dfsg-3.1ubuntu2_arm64.deb
-          ar x zlib1g_*.deb
-          tar xf data.tar.zst
-          sudo cp -r usr/lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
-      - name: Test and deploy (Major)
-        if: needs.check-release.outputs.is_major == 'true'
-        run: ./gradlew jvmTest jsTest wasmJsNodeTest linuxX64Test publishAndReleaseToMavenCentral --no-configuration-cache -PincrementMajor=true
-      - name: Test and deploy (Minor)
-        if: needs.check-release.outputs.is_minor == 'true'
-        run: ./gradlew jvmTest jsTest wasmJsNodeTest linuxX64Test publishAndReleaseToMavenCentral --no-configuration-cache -PincrementMinor=true
-      - name: Test and deploy (Patch)
-        if: needs.check-release.outputs.is_major != 'true' && needs.check-release.outputs.is_minor != 'true'
-        run: ./gradlew jvmTest jsTest wasmJsNodeTest linuxX64Test publishAndReleaseToMavenCentral --no-configuration-cache
+          **Status:** Awaiting validation in [Maven Central Staging](${staging_url})
+          **Deployment ID:** \`${deployment_id}\`
 
-  release-apple:
-    name: Release Apple
-    needs: check-release
-    if: needs.check-release.outputs.should_release == 'true'
-    runs-on: macos-latest
-    timeout-minutes: 60
-    env:
-      ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-      ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-      ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_KEY_ID }}
-      ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_PASSWORD }}
-      ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_KEY_CONTENTS }}
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '21'
-          cache: gradle
-      - name: Cache Konan
-        uses: actions/cache@v4
-        with:
-          path: ~/.konan
-          key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
-          restore-keys: konan-macos-
-      - name: Get version (Major)
-        if: needs.check-release.outputs.is_major == 'true'
-        id: version_major
-        run: echo "version=$(./gradlew -q nextVersion -PincrementMajor=true)" >> $GITHUB_OUTPUT
-      - name: Get version (Minor)
-        if: needs.check-release.outputs.is_minor == 'true'
-        id: version_minor
-        run: echo "version=$(./gradlew -q nextVersion -PincrementMinor=true)" >> $GITHUB_OUTPUT
-      - name: Get version (Patch)
-        if: needs.check-release.outputs.is_major != 'true' && needs.check-release.outputs.is_minor != 'true'
-        id: version_patch
-        run: echo "version=$(./gradlew -q nextVersion)" >> $GITHUB_OUTPUT
-      - name: Set version output
-        id: version
-        run: echo "version=${{ steps.version_major.outputs.version }}${{ steps.version_minor.outputs.version }}${{ steps.version_patch.outputs.version }}" >> $GITHUB_OUTPUT
-      - name: Test and deploy (Major)
-        if: needs.check-release.outputs.is_major == 'true'
-        run: ./gradlew macosArm64Test iosSimulatorArm64Test publishAndReleaseToMavenCentral --no-configuration-cache -PincrementMajor=true
-      - name: Test and deploy (Minor)
-        if: needs.check-release.outputs.is_minor == 'true'
-        run: ./gradlew macosArm64Test iosSimulatorArm64Test publishAndReleaseToMavenCentral --no-configuration-cache -PincrementMinor=true
-      - name: Test and deploy (Patch)
-        if: needs.check-release.outputs.is_major != 'true' && needs.check-release.outputs.is_minor != 'true'
-        run: ./gradlew macosArm64Test iosSimulatorArm64Test publishAndReleaseToMavenCentral --no-configuration-cache
+          ### To complete release:
+          1. Validate artifacts in Maven Central staging area
+          2. Run the 'Complete or Cancel Release' workflow with action 'complete' and version '${version}'
 
-  release-finalize:
-    name: Create Tag and Release
-    needs: [check-release, release-linux, release-apple]
-    if: needs.check-release.outputs.should_release == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Create tag and release
+          ### To cancel:
+          1. Run the 'Complete or Cancel Release' workflow with action 'cancel' and version '${version}'
+          2. This will drop the deployment and delete this draft release
+          EOF
+          )"
+
+      - name: Create tag and GitHub release
+        if: needs.check-release.outputs.flow == 'release' && needs.publish.result == 'success'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
-          version="${{ needs.release-apple.outputs.version }}"
+          version="${{ needs.build-linux.outputs.version }}"
           tag="v${version}"
 
           # Check if tag already exists
@@ -597,9 +159,14 @@ jobs:
           git tag "$tag"
           git push origin "$tag"
 
-          # Create release with Maven Central link
+          # Create release
           maven_url="https://central.sonatype.com/artifact/com.ditchoom/buffer/${version}"
           gh release create "$tag" \
               --repo="$GITHUB_REPOSITORY" \
               --title="${tag}" \
-              --notes="## [${PR_TITLE}](${PR_URL})"$'\n\n'"**Maven Central:** [com.ditchoom:buffer:${version}](${maven_url})"
+              --notes="$(cat <<EOF
+          ## [${PR_TITLE}](${PR_URL})
+
+          **Maven Central:** [com.ditchoom:buffer:${version}](${maven_url})
+          EOF
+          )"
