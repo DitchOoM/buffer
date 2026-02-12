@@ -99,6 +99,8 @@ jobs:
           restore-keys: konan-${{ runner.os }}-
       - name: Run tests and verify Linux cross-compilation
         run: ./gradlew macosArm64Test iosSimulatorArm64Test compileKotlinLinuxX64 compileKotlinLinuxArm64 :buffer-compression:compileLinuxMainKotlinMetadata
+      - name: Validate publishToMavenLocal (catches target registration issues)
+        run: ./gradlew publishToMavenLocal --no-build-cache
 
   linux:
     name: "Linux Target Tests"
@@ -153,9 +155,10 @@ jobs:
         run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer/build/bin/linuxArm64/debugTest/test.kexe
       - name: Run buffer-compression ARM64 tests via QEMU
         run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-compression/build/bin/linuxArm64/debugTest/test.kexe
+      - name: Validate publishToMavenLocal (catches target registration issues)
+        run: ./gradlew publishToMavenLocal --no-build-cache
       - name: Verify simdutf in Linux klib
         run: |
-          ./gradlew :buffer:publishLinuxX64PublicationToMavenLocal :buffer:publishLinuxArm64PublicationToMavenLocal --no-build-cache
           KLIB_X64=$(find ~/.m2/repository/com/ditchoom/buffer-linuxx64 -name "*simdutf*.klib" | head -1)
           KLIB_ARM64=$(find ~/.m2/repository/com/ditchoom/buffer-linuxarm64 -name "*simdutf*.klib" | head -1)
           echo "=== simdutf klib Validation ==="
