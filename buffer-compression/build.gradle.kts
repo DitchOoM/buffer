@@ -47,20 +47,26 @@ kotlin {
         nodejs()
     }
     if (isRunningOnGithub) {
-        macosX64()
-        macosArm64()
-        iosArm64()
-        iosSimulatorArm64()
-        iosX64()
-        watchosArm64()
-        watchosSimulatorArm64()
-        watchosX64()
-        tvosArm64()
-        tvosSimulatorArm64()
-        tvosX64()
-        linuxX64()
-        linuxArm64()
+        // CI: register all targets for the current host OS
+        if (HostManager.hostIsMac) {
+            macosX64()
+            macosArm64()
+            iosArm64()
+            iosSimulatorArm64()
+            iosX64()
+            watchosArm64()
+            watchosSimulatorArm64()
+            watchosX64()
+            tvosArm64()
+            tvosSimulatorArm64()
+            tvosX64()
+        }
+        if (HostManager.hostIsLinux) {
+            linuxX64()
+            linuxArm64()
+        }
     } else {
+        // Local dev: register only the host target
         if (HostManager.hostIsMac) {
             val osArch = System.getProperty("os.arch")
             if (osArch == "aarch64") {
