@@ -13,10 +13,8 @@ import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.reinterpret
-import kotlinx.cinterop.set
 import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.usePinned
-import kotlinx.cinterop.value
 
 /**
  * Linux implementation using simdutf for SIMD-accelerated UTF-8 decoding.
@@ -44,10 +42,8 @@ private class LinuxStreamingStringDecoder(
         }
     }
 
-    // Pending incomplete multi-byte sequence stored as primitives (max 3 bytes for incomplete UTF-8)
-    private var pending0: Byte = 0
-    private var pending1: Byte = 0
-    private var pending2: Byte = 0
+    // Pending incomplete multi-byte sequence packed into a Long (avoids ByteArray allocation)
+    private var pendingLong: Long = 0
     private var pendingCount: Int = 0
 
     // Reusable CharArray buffer for direct simdutf output (avoids intermediate UTF-16 buffer)
@@ -114,10 +110,11 @@ private class LinuxStreamingStringDecoder(
 
         if (boundary < dataRemaining) {
             pendingCount = dataRemaining - boundary
+            pendingLong = 0L
             val basePos = buffer.position() + bytesConsumed + boundary
-            if (pendingCount > 0) pending0 = buffer.get(basePos)
-            if (pendingCount > 1) pending1 = buffer.get(basePos + 1)
-            if (pendingCount > 2) pending2 = buffer.get(basePos + 2)
+            for (i in 0 until pendingCount) {
+                pendingLong = pendingLong or ((buffer.get(basePos + i).toLong() and 0xFF) shl (i * 8))
+            }
         }
 
         return if (boundary > 0) {
@@ -170,7 +167,7 @@ private class LinuxStreamingStringDecoder(
         destination: Appendable,
     ): DecodeResult {
         // Determine expected sequence length from lead byte
-        val leadByte = pending0.toInt() and 0xFF
+        val leadByte = (pendingLong and 0xFF).toInt()
         val expectedLen =
             when {
                 leadByte < 0x80 -> 1
@@ -191,28 +188,68 @@ private class LinuxStreamingStringDecoder(
             // Still not enough - buffer all available
             val basePos = buffer.position()
             for (i in 0 until available) {
-                setPendingByte(pendingCount + i, buffer.get(basePos + i))
+                val b = buffer.get(basePos + i)
+                pendingLong = pendingLong or ((b.toLong() and 0xFF) shl ((pendingCount + i) * 8))
             }
             pendingCount += available
             return DecodeResult(0, available)
         }
 
-        // Complete the sequence - collect all bytes (pending + new from buffer)
-        val completeSeq = ByteArray(expectedLen)
-        for (i in 0 until pendingCount) {
-            completeSeq[i] = getPendingByte(i)
-        }
+        // Load remaining bytes from buffer into pendingLong
         val basePos = buffer.position()
         for (i in 0 until needed) {
-            completeSeq[pendingCount + i] = buffer.get(basePos + i)
+            val b = buffer.get(basePos + i)
+            pendingLong = pendingLong or ((b.toLong() and 0xFF) shl ((pendingCount + i) * 8))
         }
         pendingCount = 0
 
-        val chars =
-            completeSeq.usePinned { pinned ->
-                convertUtf8PtrToAppendable(pinned.addressOf(0).reinterpret(), expectedLen, destination)
-            }
+        // Decode UTF-8 codepoint directly from Long — zero allocation
+        val chars = decodeUtf8CodePointToAppendable(expectedLen, destination)
         return DecodeResult(chars, needed)
+    }
+
+    private fun decodeUtf8CodePointToAppendable(
+        byteCount: Int,
+        destination: Appendable,
+    ): Int {
+        val b0 = (pendingLong and 0xFF).toInt()
+        val b1 = if (byteCount > 1) ((pendingLong ushr 8) and 0xFF).toInt() else 0
+        val b2 = if (byteCount > 2) ((pendingLong ushr 16) and 0xFF).toInt() else 0
+        val b3 = if (byteCount > 3) ((pendingLong ushr 24) and 0xFF).toInt() else 0
+
+        // Validate continuation bytes
+        if (byteCount > 1 && (b1 and 0xC0) != 0x80) return handleMalformedInput(destination).charsWritten
+        if (byteCount > 2 && (b2 and 0xC0) != 0x80) return handleMalformedInput(destination).charsWritten
+        if (byteCount > 3 && (b3 and 0xC0) != 0x80) return handleMalformedInput(destination).charsWritten
+
+        val codePoint =
+            when (byteCount) {
+                1 -> b0
+                2 -> ((b0 and 0x1F) shl 6) or (b1 and 0x3F)
+                3 -> ((b0 and 0x0F) shl 12) or ((b1 and 0x3F) shl 6) or (b2 and 0x3F)
+                4 -> ((b0 and 0x07) shl 18) or ((b1 and 0x3F) shl 12) or ((b2 and 0x3F) shl 6) or (b3 and 0x3F)
+                else -> return handleMalformedInput(destination).charsWritten
+            }
+
+        // Reject overlong encodings and surrogate codepoints
+        val isValid =
+            when (byteCount) {
+                2 -> codePoint >= 0x80
+                3 -> codePoint >= 0x800 && (codePoint < 0xD800 || codePoint > 0xDFFF)
+                4 -> codePoint in 0x10000..0x10FFFF
+                else -> true
+            }
+        if (!isValid) return handleMalformedInput(destination).charsWritten
+
+        return if (codePoint <= 0xFFFF) {
+            destination.append(codePoint.toChar())
+            1
+        } else {
+            val adjusted = codePoint - 0x10000
+            destination.append((0xD800 + (adjusted shr 10)).toChar())
+            destination.append((0xDC00 + (adjusted and 0x3FF)).toChar())
+            2
+        }
     }
 
     private fun convertUtf8PtrToAppendable(
@@ -266,25 +303,6 @@ private class LinuxStreamingStringDecoder(
         return charArrayBuffer!!
     }
 
-    private fun setPendingByte(
-        index: Int,
-        value: Byte,
-    ) {
-        when (index) {
-            0 -> pending0 = value
-            1 -> pending1 = value
-            2 -> pending2 = value
-        }
-    }
-
-    private fun getPendingByte(index: Int): Byte =
-        when (index) {
-            0 -> pending0
-            1 -> pending1
-            2 -> pending2
-            else -> 0
-        }
-
     override fun finish(destination: Appendable): Int {
         if (pendingCount == 0) return 0
 
@@ -295,10 +313,8 @@ private class LinuxStreamingStringDecoder(
     }
 
     override fun reset() {
+        pendingLong = 0L
         pendingCount = 0
-        pending0 = 0
-        pending1 = 0
-        pending2 = 0
     }
 
     override suspend fun close() {
