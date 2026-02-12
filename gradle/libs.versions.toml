@@ -5,7 +5,7 @@ androidGradlePlugin = "8.13.2"
 ktlint = "14.0.1"
 # simdutf - SIMD-accelerated Unicode validation and transcoding (Linux only)
 simdutf = "8.0.0"
-simdutfSha256 = "a21c34c52d91a229591e4ebc8822a876604cf2fffeac9ec065bfda7cbfb9d680"
+simdutfSha256 = "3d9eef727f088abaeaae4d40962a1ca09871c6bbe6d23de7930488c43ab77643"
 mavenPublish = "0.35.0"
 atomicfu = "0.29.0"
 dokka = "2.1.0"

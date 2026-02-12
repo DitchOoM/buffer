@@ -1,8 +1,12 @@
 /**
  * simdutf Build Configuration for Linux
  *
- * This file contains the build logic for downloading, compiling, and configuring
- * simdutf (SIMD-accelerated Unicode validation and transcoding) for Linux targets.
+ * Downloads the pre-built amalgamated single-file source (simdutf.cpp + simdutf.h)
+ * from GitHub releases, compiles it with g++, and produces static libraries.
+ *
+ * All artifacts are built into build/simdutf/ (never committed to git).
+ * Gradle's up-to-date checks (keyed on version + SHA256 in libs.versions.toml)
+ * skip rebuilds when unchanged. CI caches build/simdutf/libs/ across runs.
  *
  * simdutf is used only on Linux because:
  * - Apple platforms have optimized CoreFoundation APIs
@@ -10,8 +14,7 @@
  * - JS/Wasm have native TextDecoder
  *
  * CI Requirements:
- * - cmake (sudo apt install cmake)
- * - build-essential (sudo apt install build-essential)
+ * - g++ (build-essential)
  * - For ARM64 cross-compilation: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
  *
  * Exports (via extra properties):
@@ -43,34 +46,43 @@ val simdutfSha256: String by extra {
     )
 }
 
+// All simdutf artifacts go into build/simdutf/ (gitignored, cacheable)
 val simdutfBuildDir = layout.buildDirectory.dir("simdutf")
-val simdutfLibsDir = projectDir.resolve("libs/simdutf")
+val simdutfLibsDir = layout.buildDirectory.dir("simdutf/libs").get().asFile
 
 // =============================================================================
-// Download and Verify Source
+// Download Amalgamated Source from GitHub Release
 // =============================================================================
-fun downloadSimdutfSource(buildDir: File, version: String, sha256: String): File {
-    val tarball = File(buildDir, "simdutf-$version.tar.gz")
-    val sourceDir = File(buildDir, "simdutf-$version")
+fun downloadAmalgamatedSource(downloadDir: File, version: String, sha256: String): File {
+    val sourceDir = File(downloadDir, "amalgamated-$version")
+    val cppFile = File(sourceDir, "simdutf.cpp")
+    val hFile = File(sourceDir, "simdutf.h")
 
-    if (sourceDir.exists()) return sourceDir
+    if (cppFile.exists() && hFile.exists()) return sourceDir
 
-    buildDir.mkdirs()
+    sourceDir.mkdirs()
 
-    // Download if not present
-    if (!tarball.exists()) {
-        logger.lifecycle("Downloading simdutf $version...")
-        val url = URI("https://github.com/simdutf/simdutf/archive/refs/tags/v$version.tar.gz").toURL()
-        url.openStream().use { input ->
-            tarball.outputStream().use { output ->
-                input.copyTo(output)
-            }
+    val baseUrl = "https://github.com/simdutf/simdutf/releases/download/v$version"
+
+    // Download simdutf.cpp
+    if (!cppFile.exists()) {
+        logger.lifecycle("Downloading simdutf $version amalgamated source...")
+        URI("$baseUrl/simdutf.cpp").toURL().openStream().use { input ->
+            cppFile.outputStream().use { output -> input.copyTo(output) }
         }
     }
 
-    // Verify SHA256
+    // Download simdutf.h
+    if (!hFile.exists()) {
+        logger.lifecycle("Downloading simdutf $version amalgamated header...")
+        URI("$baseUrl/simdutf.h").toURL().openStream().use { input ->
+            hFile.outputStream().use { output -> input.copyTo(output) }
+        }
+    }
+
+    // Verify SHA256 of the source file
     val digest = MessageDigest.getInstance("SHA-256")
-    tarball.inputStream().use { input ->
+    cppFile.inputStream().use { input ->
         val buffer = ByteArray(8192)
         var read: Int
         while (input.read(buffer).also { read = it } != -1) {
@@ -79,17 +91,10 @@ fun downloadSimdutfSource(buildDir: File, version: String, sha256: String): File
     }
     val actualSha256 = digest.digest().joinToString("") { byte -> "%02x".format(byte) }
     if (actualSha256 != sha256) {
-        tarball.delete()
-        throw GradleException("simdutf SHA256 mismatch: expected $sha256, got $actualSha256")
+        cppFile.delete()
+        hFile.delete()
+        throw GradleException("simdutf.cpp SHA256 mismatch: expected $sha256, got $actualSha256")
     }
-
-    // Extract
-    logger.lifecycle("Extracting simdutf source...")
-    ProcessBuilder("tar", "xzf", tarball.name)
-        .directory(buildDir)
-        .inheritIO()
-        .start()
-        .waitFor()
 
     return sourceDir
 }
@@ -110,13 +115,13 @@ fun createBuildSimdutfTask(arch: String): TaskProvider<Task> {
         inputs.property("simdutfSha256", simdutfSha256)
         inputs.file(projectDir.resolve("src/nativeInterop/cinterop/simdutf_wrapper.cpp"))
         outputs.file(markerFile)
+        outputs.dir(outputDir)
 
         onlyIf { !markerFile.exists() && hostIsLinux }
 
         doLast {
-            val buildDir = simdutfBuildDir.get().asFile
-            val sourceDir = downloadSimdutfSource(buildDir, simdutfVersion, simdutfSha256)
-            val cmakeBuildDir = File(sourceDir, "build-$arch")
+            val downloadDir = simdutfBuildDir.get().asFile
+            val sourceDir = downloadAmalgamatedSource(downloadDir, simdutfVersion, simdutfSha256)
 
             // Determine compilers for cross-compilation
             val isArmCross = arch == "arm64" && System.getProperty("os.arch") != "aarch64"
@@ -136,83 +141,38 @@ fun createBuildSimdutfTask(arch: String): TaskProvider<Task> {
                 }
             }
 
-            // Clean previous build if exists
-            if (cmakeBuildDir.exists()) {
-                cmakeBuildDir.deleteRecursively()
-            }
-
-            // Configure CMake
-            // -O2: enables SIMD auto-vectorization (required for simdutf performance)
-            // -ffunction-sections/-fdata-sections + --gc-sections: strip unused code
-            logger.lifecycle("Configuring simdutf $simdutfVersion for $arch...")
-            val cmakeArgs = mutableListOf(
-                "cmake",
-                "-B", cmakeBuildDir.absolutePath,
-                "-S", sourceDir.absolutePath,
-                "-DSIMDUTF_TESTS=OFF",
-                "-DSIMDUTF_BENCHMARKS=OFF",
-                "-DSIMDUTF_TOOLS=OFF",
-                "-DSIMDUTF_ICONV=OFF",
-                "-DBUILD_SHARED_LIBS=OFF",
-                "-DCMAKE_BUILD_TYPE=Release",
-                "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
-                "-DCMAKE_CXX_FLAGS=-O2 -ffunction-sections -fdata-sections",
-                "-DCMAKE_EXE_LINKER_FLAGS=-Wl,--gc-sections"
-            )
-
-            if (isArmCross) {
-                cmakeArgs.addAll(listOf(
-                    "-DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc",
-                    "-DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++",
-                    "-DCMAKE_SYSTEM_NAME=Linux",
-                    "-DCMAKE_SYSTEM_PROCESSOR=aarch64"
-                ))
-            }
-
-            val configureResult = ProcessBuilder(cmakeArgs)
-                .directory(sourceDir)
-                .inheritIO()
-                .start()
-                .waitFor()
-
-            if (configureResult != 0) {
-                throw GradleException("simdutf cmake configure failed")
-            }
-
-            // Build simdutf
-            logger.lifecycle("Building simdutf...")
-            val cpuCount = Runtime.getRuntime().availableProcessors()
-            val buildResult = ProcessBuilder(
-                "cmake", "--build", cmakeBuildDir.absolutePath,
-                "--config", "Release",
-                "-j$cpuCount"
-            )
-                .directory(sourceDir)
-                .inheritIO()
-                .start()
-                .waitFor()
-
-            if (buildResult != 0) {
-                throw GradleException("simdutf build failed")
-            }
-
-            // Copy artifacts
+            // Create output dirs
             outputDir.resolve("lib").mkdirs()
+            outputDir.resolve("include").mkdirs()
 
-            // Copy simdutf static library
-            val libFile = cmakeBuildDir.resolve("src/libsimdutf.a")
-            if (!libFile.exists()) {
-                throw GradleException("simdutf library not found at ${libFile.absolutePath}")
-            }
-            libFile.copyTo(outputDir.resolve("lib/libsimdutf.a"), overwrite = true)
+            // Compile simdutf from amalgamated single-file source
+            val simdutfObj = outputDir.resolve("lib/simdutf.o")
+            val simdutfLib = outputDir.resolve("lib/libsimdutf.a")
 
-            // Copy headers (entire include directory with subdirectories)
-            val srcIncludeDir = sourceDir.resolve("include")
-            val destIncludeDir = outputDir.resolve("include")
-            if (destIncludeDir.exists()) {
-                destIncludeDir.deleteRecursively()
+            logger.lifecycle("Compiling simdutf $simdutfVersion (amalgamated) for $arch...")
+            val compileSimdutfResult = ProcessBuilder(
+                cxx, "-c", "-O2", "-fPIC",
+                "-ffunction-sections", "-fdata-sections",
+                "-I${sourceDir.absolutePath}",
+                "-o", simdutfObj.absolutePath,
+                sourceDir.resolve("simdutf.cpp").absolutePath
+            ).inheritIO().start().waitFor()
+
+            if (compileSimdutfResult != 0) {
+                throw GradleException("simdutf compilation failed for $arch")
             }
-            srcIncludeDir.copyRecursively(destIncludeDir, overwrite = true)
+
+            // Create static library from simdutf object
+            ProcessBuilder(ar, "rcs", simdutfLib.absolutePath, simdutfObj.absolutePath)
+                .inheritIO().start().waitFor()
+
+            // Remove the intermediate .o to save space
+            simdutfObj.delete()
+
+            // Copy the amalgamated header
+            sourceDir.resolve("simdutf.h").copyTo(
+                outputDir.resolve("include/simdutf.h"), overwrite = true
+            )
 
             // Compile our C++ wrapper that provides C-linkage functions
             val wrapperSrc = projectDir.resolve("src/nativeInterop/cinterop/simdutf_wrapper.cpp")
@@ -228,7 +188,7 @@ fun createBuildSimdutfTask(arch: String): TaskProvider<Task> {
             ).inheritIO().start().waitFor()
 
             if (compileResult != 0) {
-                throw GradleException("Failed to compile simdutf wrapper")
+                throw GradleException("Failed to compile simdutf wrapper for $arch")
             }
 
             // Create static library from wrapper
