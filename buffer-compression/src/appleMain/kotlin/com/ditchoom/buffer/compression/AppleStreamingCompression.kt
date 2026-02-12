@@ -5,8 +5,8 @@ package com.ditchoom.buffer.compression
 import com.ditchoom.buffer.ByteArrayBuffer
 import com.ditchoom.buffer.MutableDataBuffer
 import com.ditchoom.buffer.MutableDataBufferSlice
-import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
