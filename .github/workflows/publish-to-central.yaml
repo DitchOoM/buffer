@@ -68,7 +68,7 @@ jobs:
           SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
         run: |
           cd /tmp/maven-repo
-          find . -type f \( -name "*.jar" -o -name "*.klib" -o -name "*.pom" -o -name "*.module" \) | while read -r file; do
+          find . -type f \( -name "*.jar" -o -name "*.klib" -o -name "*.pom" -o -name "*.module" -o -name "*.aar" -o -name "*.json" \) | while read -r file; do
             gpg --batch --yes --pinentry-mode loopback --passphrase "$SIGNING_PASSWORD" \
               --detach-sign --armor "$file"
           done
@@ -78,7 +78,7 @@ jobs:
         run: |
           cd /tmp/maven-repo
           # Generate checksums for all publishable files and their signatures
-          find . -type f \( -name "*.jar" -o -name "*.klib" -o -name "*.pom" -o -name "*.module" -o -name "*.asc" \) | while read -r file; do
+          find . -type f \( -name "*.jar" -o -name "*.klib" -o -name "*.pom" -o -name "*.module" -o -name "*.aar" -o -name "*.json" -o -name "*.asc" \) | while read -r file; do
             md5sum "$file" | cut -d' ' -f1 > "${file}.md5"
             sha1sum "$file" | cut -d' ' -f1 > "${file}.sha1"
           done
