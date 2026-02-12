@@ -36,6 +36,10 @@ jobs:
           echo ""
 
           # 1. Root module metadata - all platform variants
+          # buffer has wasmJs; buffer-compression does not
+          BUFFER_PLATFORMS="jvm js linuxx64 linuxarm64 macosarm64 macosx64 iosarm64 iossimulatorarm64 wasmJs"
+          COMPRESSION_PLATFORMS="jvm js linuxx64 linuxarm64 macosarm64 macosx64 iosarm64 iossimulatorarm64"
+
           for module in buffer buffer-compression; do
             echo "--- ${module} module metadata ---"
             MODULE_FILE="${BASE}/${module}/${version}/${module}-${version}.module"
@@ -44,7 +48,12 @@ jobs:
               FAILED=true
               continue
             fi
-            for platform in jvm js linuxx64 linuxarm64 macosarm64 macosx64 iosarm64 iossimulatorarm64 wasmjs; do
+            if [ "$module" = "buffer" ]; then
+              platforms="$BUFFER_PLATFORMS"
+            else
+              platforms="$COMPRESSION_PLATFORMS"
+            fi
+            for platform in $platforms; do
               if grep -q "$platform" "$MODULE_FILE"; then
                 echo "  $platform variant present"
               else
