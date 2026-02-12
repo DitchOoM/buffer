@@ -51,10 +51,8 @@ private class AppleStreamingStringDecoder(
         }
     }
 
-    // Pending incomplete multi-byte sequence stored as primitives
-    private var pending0: Byte = 0
-    private var pending1: Byte = 0
-    private var pending2: Byte = 0
+    // Pending incomplete multi-byte sequence packed into a Long (avoids ByteArray allocation)
+    private var pendingLong: Long = 0
     private var pendingCount: Int = 0
 
     override fun decode(
@@ -121,12 +119,13 @@ private class AppleStreamingStringDecoder(
         // Find UTF-8 boundary
         val boundary = findUtf8Boundary(ptr, dataRemaining)
 
-        // Save incomplete trailing bytes
+        // Save incomplete trailing bytes into Long
         if (boundary < dataRemaining) {
             pendingCount = dataRemaining - boundary
-            if (pendingCount > 0) pending0 = ptr[boundary]
-            if (pendingCount > 1) pending1 = ptr[boundary + 1]
-            if (pendingCount > 2) pending2 = ptr[boundary + 2]
+            pendingLong = 0L
+            for (i in 0 until pendingCount) {
+                pendingLong = pendingLong or ((ptr[boundary + i].toLong() and 0xFF) shl (i * 8))
+            }
         }
 
         // Convert complete UTF-8 sequences directly from pointer
@@ -159,7 +158,7 @@ private class AppleStreamingStringDecoder(
         buffer: ReadBuffer,
         destination: Appendable,
     ): DecodeResult {
-        val leadByte = pending0.toInt() and 0xFF
+        val leadByte = (pendingLong and 0xFF).toInt()
         val expectedLen =
             when {
                 leadByte < 0x80 -> 1
@@ -178,25 +177,68 @@ private class AppleStreamingStringDecoder(
         if (available < needed) {
             val basePos = buffer.position()
             for (i in 0 until available) {
-                setPendingByte(pendingCount + i, buffer.get(basePos + i))
+                val b = buffer.get(basePos + i)
+                pendingLong = pendingLong or ((b.toLong() and 0xFF) shl ((pendingCount + i) * 8))
             }
             pendingCount += available
             return DecodeResult(0, available)
         }
 
-        // Complete the sequence
-        val completeSeq = ByteArray(expectedLen)
-        for (i in 0 until pendingCount) {
-            completeSeq[i] = getPendingByte(i)
-        }
+        // Load remaining bytes from buffer into pendingLong
         val basePos = buffer.position()
         for (i in 0 until needed) {
-            completeSeq[pendingCount + i] = buffer.get(basePos + i)
+            val b = buffer.get(basePos + i)
+            pendingLong = pendingLong or ((b.toLong() and 0xFF) shl ((pendingCount + i) * 8))
         }
         pendingCount = 0
 
-        val chars = convertUtf8ToAppendable(completeSeq, expectedLen, destination)
+        // Decode UTF-8 codepoint directly from Long — zero allocation
+        val chars = decodeUtf8CodePointToAppendable(expectedLen, destination)
         return DecodeResult(chars, needed)
+    }
+
+    private fun decodeUtf8CodePointToAppendable(
+        byteCount: Int,
+        destination: Appendable,
+    ): Int {
+        val b0 = (pendingLong and 0xFF).toInt()
+        val b1 = if (byteCount > 1) ((pendingLong ushr 8) and 0xFF).toInt() else 0
+        val b2 = if (byteCount > 2) ((pendingLong ushr 16) and 0xFF).toInt() else 0
+        val b3 = if (byteCount > 3) ((pendingLong ushr 24) and 0xFF).toInt() else 0
+
+        // Validate continuation bytes
+        if (byteCount > 1 && (b1 and 0xC0) != 0x80) return handleMalformedInput(destination).charsWritten
+        if (byteCount > 2 && (b2 and 0xC0) != 0x80) return handleMalformedInput(destination).charsWritten
+        if (byteCount > 3 && (b3 and 0xC0) != 0x80) return handleMalformedInput(destination).charsWritten
+
+        val codePoint =
+            when (byteCount) {
+                1 -> b0
+                2 -> ((b0 and 0x1F) shl 6) or (b1 and 0x3F)
+                3 -> ((b0 and 0x0F) shl 12) or ((b1 and 0x3F) shl 6) or (b2 and 0x3F)
+                4 -> ((b0 and 0x07) shl 18) or ((b1 and 0x3F) shl 12) or ((b2 and 0x3F) shl 6) or (b3 and 0x3F)
+                else -> return handleMalformedInput(destination).charsWritten
+            }
+
+        // Reject overlong encodings and surrogate codepoints
+        val isValid =
+            when (byteCount) {
+                2 -> codePoint >= 0x80
+                3 -> codePoint >= 0x800 && (codePoint < 0xD800 || codePoint > 0xDFFF)
+                4 -> codePoint in 0x10000..0x10FFFF
+                else -> true
+            }
+        if (!isValid) return handleMalformedInput(destination).charsWritten
+
+        return if (codePoint <= 0xFFFF) {
+            destination.append(codePoint.toChar())
+            1
+        } else {
+            val adjusted = codePoint - 0x10000
+            destination.append((0xD800 + (adjusted shr 10)).toChar())
+            destination.append((0xDC00 + (adjusted and 0x3FF)).toChar())
+            2
+        }
     }
 
     private fun convertUtf8PtrToAppendable(
@@ -226,17 +268,6 @@ private class AppleStreamingStringDecoder(
             return str.length
         } catch (e: Exception) {
             return handleMalformedInput(destination).charsWritten
-        }
-    }
-
-    private fun convertUtf8ToAppendable(
-        input: ByteArray,
-        length: Int,
-        destination: Appendable,
-    ): Int {
-        if (length == 0) return 0
-        return input.usePinned { pinned ->
-            convertUtf8PtrToAppendable(pinned.addressOf(0).reinterpret(), length, destination)
         }
     }
 
@@ -274,25 +305,6 @@ private class AppleStreamingStringDecoder(
         return checkStart
     }
 
-    private fun setPendingByte(
-        index: Int,
-        value: Byte,
-    ) {
-        when (index) {
-            0 -> pending0 = value
-            1 -> pending1 = value
-            2 -> pending2 = value
-        }
-    }
-
-    private fun getPendingByte(index: Int): Byte =
-        when (index) {
-            0 -> pending0
-            1 -> pending1
-            2 -> pending2
-            else -> 0
-        }
-
     override fun finish(destination: Appendable): Int {
         if (pendingCount == 0) return 0
         val result = handleMalformedInput(destination)
@@ -301,10 +313,8 @@ private class AppleStreamingStringDecoder(
     }
 
     override fun reset() {
+        pendingLong = 0L
         pendingCount = 0
-        pending0 = 0
-        pending1 = 0
-        pending2 = 0
     }
 
     override suspend fun close() {

@@ -45,8 +45,8 @@ private class JvmStreamingStringDecoder(
     // Reusable CharBuffer for decoding output
     private val charBuffer: CharBuffer = CharBuffer.allocate(config.charBufferSize)
 
-    // Pending incomplete bytes from previous decode() call (max 3 for UTF-8, 3 for UTF-16)
-    private val pendingBytes = ByteArray(8)
+    // Pending incomplete bytes stored as a Long (max 7 bytes: UTF-32 can have up to 3 pending)
+    private var pendingLong: Long = 0
     private var pendingCount = 0
 
     // Combined buffer for pending + new input
@@ -89,7 +89,10 @@ private class JvmStreamingStringDecoder(
                     val unconsumed = byteBuffer.remaining()
                     if (unconsumed > 0) {
                         pendingCount = unconsumed
-                        byteBuffer.get(pendingBytes, 0, unconsumed)
+                        pendingLong = 0L
+                        for (i in 0 until unconsumed) {
+                            pendingLong = pendingLong or ((byteBuffer.get().toLong() and 0xFF) shl (i * 8))
+                        }
                     } else {
                         pendingCount = 0
                     }
@@ -165,8 +168,10 @@ private class JvmStreamingStringDecoder(
         }
         (cb as java.nio.Buffer).clear()
 
-        // Add pending bytes first
-        cb.put(pendingBytes, 0, pendingCount)
+        // Add pending bytes first (unpack from Long)
+        for (i in 0 until pendingCount) {
+            cb.put(((pendingLong ushr (i * 8)) and 0xFF).toByte())
+        }
         pendingCount = 0
 
         // Add new bytes
@@ -184,7 +189,18 @@ private class JvmStreamingStringDecoder(
 
         // If there are pending bytes, try to decode them with endOfInput=true
         if (pendingCount > 0) {
-            val byteBuffer = ByteBuffer.wrap(pendingBytes, 0, pendingCount)
+            // Unpack pending Long into a temporary ByteBuffer
+            var cb = combinedBuffer
+            if (cb == null || cb.capacity() < pendingCount) {
+                cb = ByteBuffer.allocate(maxOf(pendingCount, 8192))
+                combinedBuffer = cb
+            }
+            (cb as java.nio.Buffer).clear()
+            for (i in 0 until pendingCount) {
+                cb.put(((pendingLong ushr (i * 8)) and 0xFF).toByte())
+            }
+            (cb as java.nio.Buffer).flip()
+            val byteBuffer = cb
             pendingCount = 0
 
             charBuffer.clear()
@@ -233,6 +249,7 @@ private class JvmStreamingStringDecoder(
     override fun reset() {
         decoder.reset()
         charBuffer.clear()
+        pendingLong = 0L
         pendingCount = 0
     }
 

@@ -128,25 +128,30 @@ kotlin {
         }
     }
     if (isRunningOnGithub) {
-        macosX64()
-        macosArm64 {
-            if (isArm64) {
-                compilations.create("benchmark") {
-                    associateWith(this@macosArm64.compilations.getByName("main"))
+        // CI: register all targets for the current host OS
+        if (HostManager.hostIsMac) {
+            macosX64()
+            macosArm64 {
+                if (isArm64) {
+                    compilations.create("benchmark") {
+                        associateWith(this@macosArm64.compilations.getByName("main"))
+                    }
                 }
             }
+            iosArm64()
+            iosSimulatorArm64()
+            iosX64()
+            watchosArm64()
+            watchosSimulatorArm64()
+            watchosX64()
+            tvosArm64()
+            tvosSimulatorArm64()
+            tvosX64()
         }
-        linuxX64()
-        linuxArm64()
-        iosArm64()
-        iosSimulatorArm64()
-        iosX64()
-        watchosArm64()
-        watchosSimulatorArm64()
-        watchosX64()
-        tvosArm64()
-        tvosSimulatorArm64()
-        tvosX64()
+        if (HostManager.hostIsLinux) {
+            linuxX64()
+            linuxArm64()
+        }
     } else {
         if (HostManager.hostIsMac) {
             if (isArm64) {
@@ -177,7 +182,7 @@ kotlin {
     }
 
     // Configure simdutf for Linux targets (SIMD-accelerated Unicode transcoding)
-    if (HostManager.hostIsLinux || isRunningOnGithub) {
+    if (HostManager.hostIsLinux) {
         targets.matching { it.name == "linuxX64" }.configureEach {
             val target = this as KotlinNativeTarget
             val simdutfLibDir = simdutfLibsDir.resolve("linux-x64/lib")
