@@ -6,9 +6,13 @@
 
 package com.ditchoom.buffer
 
+import kotlinx.cinterop.ByteVar
+import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
+import kotlinx.cinterop.get
 import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.usePinned
 import platform.CoreFoundation.CFStringCreateWithBytes
 import platform.CoreFoundation.CFStringRef
@@ -28,6 +32,13 @@ import platform.Foundation.CFBridgingRelease
  *
  * Uses CFStringCreateWithBytes which is already SIMD-optimized by Apple.
  * Handles incomplete UTF-8 sequences at chunk boundaries with manual tracking.
+ *
+ * ## Memory Access Optimization
+ *
+ * Uses a 3-tier access strategy to avoid unnecessary copies:
+ * 1. NativeMemoryAccess - zero-copy pointer for MutableDataBuffer/NSDataBuffer (and slices)
+ * 2. ManagedMemoryAccess - zero-copy pin for ByteArrayBuffer
+ * 3. Fallback - bulk copy via readByteArray for unknown buffer types
  */
 private class AppleStreamingStringDecoder(
     private val config: StreamingStringDecoderConfig,
@@ -74,32 +85,74 @@ private class AppleStreamingStringDecoder(
             return totalChars
         }
 
-        // Read data into byte array
-        val inputBytes = ByteArray(dataRemaining)
-        val startPos = buffer.position() + bytesConsumed
-        for (i in 0 until dataRemaining) {
-            inputBytes[i] = buffer.get(startPos + i)
-        }
-
-        // Find UTF-8 boundary
-        val boundary = findUtf8Boundary(inputBytes, dataRemaining)
-
-        // Save incomplete trailing bytes
-        if (boundary < dataRemaining) {
-            pendingCount = dataRemaining - boundary
-            if (pendingCount > 0) pending0 = inputBytes[boundary]
-            if (pendingCount > 1) pending1 = inputBytes[boundary + 1]
-            if (pendingCount > 2) pending2 = inputBytes[boundary + 2]
-        }
-
-        // Convert complete UTF-8 sequences
-        if (boundary > 0) {
-            val chars = convertUtf8ToAppendable(inputBytes, boundary, destination)
-            totalChars += chars
+        // Try native memory access first (zero-copy for MutableDataBuffer, NSDataBuffer, slices)
+        val nativeAccess = buffer.nativeMemoryAccess
+        if (nativeAccess != null) {
+            val ptr =
+                (nativeAccess.nativeAddress + buffer.position() + bytesConsumed)
+                    .toCPointer<ByteVar>()!!
+            totalChars += processWithPointer(ptr, dataRemaining, destination)
+        } else {
+            // Try managed memory access (zero-copy pin for ByteArrayBuffer)
+            val managedAccess = buffer.managedMemoryAccess
+            if (managedAccess != null) {
+                val backingArray = managedAccess.backingArray
+                val offset = managedAccess.arrayOffset + buffer.position() + bytesConsumed
+                totalChars +=
+                    backingArray.usePinned { pinned ->
+                        val ptr = pinned.addressOf(offset).reinterpret<ByteVar>()
+                        processWithPointer(ptr, dataRemaining, destination)
+                    }
+            } else {
+                // Fallback: bulk copy via readByteArray for unknown buffer types
+                totalChars += processWithCopy(buffer, bytesConsumed, dataRemaining, destination)
+            }
         }
 
         buffer.position(buffer.position() + remaining)
         return totalChars
+    }
+
+    private fun processWithPointer(
+        ptr: CPointer<ByteVar>,
+        dataRemaining: Int,
+        destination: Appendable,
+    ): Int {
+        // Find UTF-8 boundary
+        val boundary = findUtf8Boundary(ptr, dataRemaining)
+
+        // Save incomplete trailing bytes
+        if (boundary < dataRemaining) {
+            pendingCount = dataRemaining - boundary
+            if (pendingCount > 0) pending0 = ptr[boundary]
+            if (pendingCount > 1) pending1 = ptr[boundary + 1]
+            if (pendingCount > 2) pending2 = ptr[boundary + 2]
+        }
+
+        // Convert complete UTF-8 sequences directly from pointer
+        return if (boundary > 0) {
+            convertUtf8PtrToAppendable(ptr, boundary, destination)
+        } else {
+            0
+        }
+    }
+
+    private fun processWithCopy(
+        buffer: ReadBuffer,
+        bytesConsumed: Int,
+        dataRemaining: Int,
+        destination: Appendable,
+    ): Int {
+        // Save position, bulk-read, restore (caller sets final position)
+        val savedPos = buffer.position()
+        buffer.position(savedPos + bytesConsumed)
+        val tempBuffer = buffer.readByteArray(dataRemaining)
+        buffer.position(savedPos)
+
+        return tempBuffer.usePinned { pinned ->
+            val ptr = pinned.addressOf(0).reinterpret<ByteVar>()
+            processWithPointer(ptr, dataRemaining, destination)
+        }
     }
 
     private fun completePendingSequence(
@@ -146,30 +199,27 @@ private class AppleStreamingStringDecoder(
         return DecodeResult(chars, needed)
     }
 
-    private fun convertUtf8ToAppendable(
-        input: ByteArray,
+    private fun convertUtf8PtrToAppendable(
+        ptr: CPointer<ByteVar>,
         length: Int,
         destination: Appendable,
     ): Int {
         if (length == 0) return 0
 
         val cfString: CFStringRef? =
-            input.usePinned { pinned ->
-                CFStringCreateWithBytes(
-                    kCFAllocatorDefault,
-                    pinned.addressOf(0).reinterpret(),
-                    length.convert(),
-                    kCFStringEncodingUTF8,
-                    false,
-                )
-            }
+            CFStringCreateWithBytes(
+                kCFAllocatorDefault,
+                ptr.reinterpret(),
+                length.convert(),
+                kCFStringEncodingUTF8,
+                false,
+            )
 
         if (cfString == null) {
             return handleMalformedInput(destination).charsWritten
         }
 
         try {
-            // Convert CFString to Kotlin String
             val nsString = CFBridgingRelease(cfString) as platform.Foundation.NSString
             val str = nsString.toString()
             destination.append(str)
@@ -179,14 +229,25 @@ private class AppleStreamingStringDecoder(
         }
     }
 
+    private fun convertUtf8ToAppendable(
+        input: ByteArray,
+        length: Int,
+        destination: Appendable,
+    ): Int {
+        if (length == 0) return 0
+        return input.usePinned { pinned ->
+            convertUtf8PtrToAppendable(pinned.addressOf(0).reinterpret(), length, destination)
+        }
+    }
+
     private fun findUtf8Boundary(
-        buffer: ByteArray,
+        ptr: CPointer<ByteVar>,
         length: Int,
     ): Int {
         if (length == 0) return 0
 
         // Fast path: if last byte is ASCII
-        if ((buffer[length - 1].toInt() and 0xFF) < 0x80) {
+        if ((ptr[length - 1].toInt() and 0xFF) < 0x80) {
             return length
         }
 
@@ -194,7 +255,7 @@ private class AppleStreamingStringDecoder(
         val checkStart = if (length > 4) length - 4 else 0
         var i = length - 1
         while (i >= checkStart) {
-            val b = buffer[i].toInt() and 0xFF
+            val b = ptr[i].toInt() and 0xFF
             // Found a lead byte (not a continuation byte 10xxxxxx)
             if ((b and 0xC0) != 0x80) {
                 val seqLen =
