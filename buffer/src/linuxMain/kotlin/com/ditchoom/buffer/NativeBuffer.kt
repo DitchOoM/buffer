@@ -543,7 +543,7 @@ class NativeBuffer private constructor(
         ).toInt()
     }
 
-    fun freeNativeMemory() {
+    override fun freeNativeMemory() {
         if (!closed) {
             closed = true
             free(ptr)

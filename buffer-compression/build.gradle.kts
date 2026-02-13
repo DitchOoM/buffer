@@ -2,19 +2,28 @@
 
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import org.jetbrains.kotlin.konan.target.HostManager
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.kotlin.allopen)
     alias(libs.plugins.android.library)
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.dokka)
+    alias(libs.plugins.kotlinx.benchmark)
     signing
+}
+
+// Required for JMH @State classes
+allOpen {
+    annotation("org.openjdk.jmh.annotations.State")
 }
 
 group = "com.ditchoom"
 val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
+val isArm64 = System.getProperty("os.arch") == "aarch64"
 
 apply(from = "../gradle/setup.gradle.kts")
 
@@ -40,6 +49,9 @@ kotlin {
     jvm {
         // Keep Java 8 bytecode for maximum compatibility
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
+        compilations.create("benchmark") {
+            associateWith(this@jvm.compilations.getByName("main"))
+        }
     }
     js {
         outputModuleName.set("buffer-compression-kt")
@@ -47,7 +59,7 @@ kotlin {
         nodejs()
     }
     if (isRunningOnGithub) {
-        // CI: register all targets for the current host OS
+        // CI: register targets based on host OS (must match :buffer module)
         if (HostManager.hostIsMac) {
             macosX64()
             macosArm64()
@@ -62,7 +74,11 @@ kotlin {
             tvosX64()
         }
         if (HostManager.hostIsLinux) {
-            linuxX64()
+            linuxX64 {
+                compilations.create("benchmark") {
+                    associateWith(this@linuxX64.compilations.getByName("main"))
+                }
+            }
             linuxArm64()
         }
     } else {
@@ -74,9 +90,51 @@ kotlin {
                 macosX64()
             }
         } else if (HostManager.hostIsLinux) {
-            linuxX64()
+            linuxX64 {
+                compilations.create("benchmark") {
+                    associateWith(this@linuxX64.compilations.getByName("main"))
+                }
+            }
         }
     }
+    // Link against simdutf (transitive dependency via :buffer module)
+    if (HostManager.hostIsLinux || isRunningOnGithub) {
+        targets.matching { it.name == "linuxX64" }.configureEach {
+            val target = this as KotlinNativeTarget
+            val simdutfLibDir =
+                project(":buffer")
+                    .layout.buildDirectory
+                    .dir("simdutf/libs/linux-x64/lib")
+                    .get()
+                    .asFile
+            target.binaries.all {
+                linkerOpts(
+                    "-L${simdutfLibDir.absolutePath}",
+                    "-lsimdutf_wrapper",
+                    "-lsimdutf",
+                    "-lstdc++",
+                )
+            }
+        }
+        targets.matching { it.name == "linuxArm64" }.configureEach {
+            val target = this as KotlinNativeTarget
+            val simdutfLibDir =
+                project(":buffer")
+                    .layout.buildDirectory
+                    .dir("simdutf/libs/linux-arm64/lib")
+                    .get()
+                    .asFile
+            target.binaries.all {
+                linkerOpts(
+                    "-L${simdutfLibDir.absolutePath}",
+                    "-lsimdutf_wrapper",
+                    "-lsimdutf",
+                    "-lstdc++",
+                )
+            }
+        }
+    }
+
     applyDefaultHierarchyTemplate()
     sourceSets {
         commonMain.dependencies {
@@ -102,6 +160,22 @@ kotlin {
         jsMain.dependencies {
             implementation(libs.kotlin.web)
             implementation(libs.kotlin.js)
+        }
+
+        // Benchmark source sets - all share the same source directory
+        val jvmBenchmark by getting {
+            kotlin.srcDir("src/commonBenchmark/kotlin")
+            dependencies {
+                implementation(libs.kotlinx.benchmark.runtime)
+            }
+        }
+        if (HostManager.hostIsLinux) {
+            val linuxX64Benchmark by getting {
+                kotlin.srcDir("src/commonBenchmark/kotlin")
+                dependencies {
+                    implementation(libs.kotlinx.benchmark.runtime)
+                }
+            }
         }
     }
 }
@@ -223,6 +297,34 @@ ktlint {
     filter {
         exclude("**/generated/**")
     }
+}
+
+// kotlinx-benchmark configuration
+benchmark {
+    targets {
+        register("jvmBenchmark")
+        if (HostManager.hostIsLinux) {
+            register("linuxX64Benchmark")
+        }
+    }
+    configurations {
+        named("main") {
+            warmups = 3
+            iterations = 5
+            iterationTime = 1000
+            iterationTimeUnit = "ms"
+        }
+        register("quick") {
+            warmups = 1
+            iterations = 2
+            iterationTime = 500
+            iterationTimeUnit = "ms"
+        }
+    }
+}
+
+tasks.matching { it.name == "testBenchmarkUnitTest" }.configureEach {
+    enabled = false
 }
 
 dokka {

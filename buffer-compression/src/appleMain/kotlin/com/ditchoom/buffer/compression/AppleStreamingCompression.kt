@@ -6,6 +6,7 @@ import com.ditchoom.buffer.ByteArrayBuffer
 import com.ditchoom.buffer.MutableDataBuffer
 import com.ditchoom.buffer.MutableDataBufferSlice
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.ReadWriteBuffer
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -41,6 +42,7 @@ actual fun StreamingCompressor.Companion.create(
     level: CompressionLevel,
     allocator: BufferAllocator,
     outputBufferSize: Int,
+    windowBits: Int,
 ): StreamingCompressor = AppleZlibStreamingCompressor(algorithm, level, allocator, outputBufferSize)
 
 /**
@@ -65,11 +67,8 @@ private const val WINDOW_BITS_GZIP = 31
 
 /**
  * Apple streaming compressor using zlib z_stream for true incremental compression.
- * Zero-copy: writes directly to output buffers.
- *
- * Note: The allocator is expected to produce MutableDataBuffer instances on Apple
- * platforms (which is the default behavior). The implementation casts to MutableDataBuffer
- * to access native memory pointers for zero-copy I/O with zlib.
+ * Zero-copy: writes directly to output buffers via native pointers.
+ * Supports all allocator types including heap-allocated buffers.
  */
 @OptIn(ExperimentalForeignApi::class)
 private class AppleZlibStreamingCompressor(
@@ -137,24 +136,22 @@ private class AppleZlibStreamingCompressor(
             s.pointed.avail_in = remaining.convert()
 
             while (s.pointed.avail_in > 0u) {
-                val chunk = allocator.allocate(outputBufferSize) as MutableDataBuffer
-                val chunkPtr =
-                    chunk.data.mutableBytes as? CPointer<ByteVar>
-                        ?: throw CompressionException("Failed to get output buffer pointer")
+                val chunk = allocator.allocate(outputBufferSize)
+                withOutputPointer(chunk) { chunkPtr ->
+                    s.pointed.next_out = chunkPtr.reinterpret()
+                    s.pointed.avail_out = outputBufferSize.convert()
 
-                s.pointed.next_out = chunkPtr.reinterpret()
-                s.pointed.avail_out = outputBufferSize.convert()
+                    val result = deflate(s, Z_NO_FLUSH)
+                    if (result != Z_OK && result != Z_STREAM_END) {
+                        throw CompressionException("deflate failed with code: $result")
+                    }
 
-                val result = deflate(s, Z_NO_FLUSH)
-                if (result != Z_OK && result != Z_STREAM_END) {
-                    throw CompressionException("deflate failed with code: $result")
-                }
-
-                val produced = outputBufferSize - s.pointed.avail_out.toInt()
-                if (produced > 0) {
-                    chunk.position(produced)
-                    chunk.resetForRead()
-                    onOutput(chunk)
+                    val produced = outputBufferSize - s.pointed.avail_out.toInt()
+                    if (produced > 0) {
+                        chunk.position(produced)
+                        chunk.resetForRead()
+                        onOutput(chunk)
+                    }
                 }
             }
         }
@@ -171,28 +168,28 @@ private class AppleZlibStreamingCompressor(
 
         // Drain with Z_SYNC_FLUSH until no more output
         while (true) {
-            val chunk = allocator.allocate(outputBufferSize) as MutableDataBuffer
-            val chunkPtr =
-                chunk.data.mutableBytes as? CPointer<ByteVar>
-                    ?: throw CompressionException("Failed to get output buffer pointer")
+            val chunk = allocator.allocate(outputBufferSize)
+            val shouldBreak =
+                withOutputPointer(chunk) { chunkPtr ->
+                    s.pointed.next_out = chunkPtr.reinterpret()
+                    s.pointed.avail_out = outputBufferSize.convert()
 
-            s.pointed.next_out = chunkPtr.reinterpret()
-            s.pointed.avail_out = outputBufferSize.convert()
+                    val result = deflate(s, Z_SYNC_FLUSH)
+                    if (result != Z_OK && result != Z_STREAM_END) {
+                        throw CompressionException("deflate flush failed with code: $result")
+                    }
 
-            val result = deflate(s, Z_SYNC_FLUSH)
-            if (result != Z_OK && result != Z_STREAM_END) {
-                throw CompressionException("deflate flush failed with code: $result")
-            }
+                    val produced = outputBufferSize - s.pointed.avail_out.toInt()
+                    if (produced > 0) {
+                        chunk.position(produced)
+                        chunk.resetForRead()
+                        onOutput(chunk)
+                    }
 
-            val produced = outputBufferSize - s.pointed.avail_out.toInt()
-            if (produced > 0) {
-                chunk.position(produced)
-                chunk.resetForRead()
-                onOutput(chunk)
-            }
-
-            // If output buffer wasn't filled, flush is complete
-            if (s.pointed.avail_out > 0u) break
+                    // If output buffer wasn't filled, flush is complete
+                    s.pointed.avail_out > 0u
+                }
+            if (shouldBreak) break
         }
     }
 
@@ -205,26 +202,24 @@ private class AppleZlibStreamingCompressor(
 
         var finished = false
         while (!finished) {
-            val chunk = allocator.allocate(outputBufferSize) as MutableDataBuffer
-            val chunkPtr =
-                chunk.data.mutableBytes as? CPointer<ByteVar>
-                    ?: throw CompressionException("Failed to get output buffer pointer")
+            val chunk = allocator.allocate(outputBufferSize)
+            withOutputPointer(chunk) { chunkPtr ->
+                s.pointed.next_out = chunkPtr.reinterpret()
+                s.pointed.avail_out = outputBufferSize.convert()
 
-            s.pointed.next_out = chunkPtr.reinterpret()
-            s.pointed.avail_out = outputBufferSize.convert()
+                val result = deflate(s, Z_FINISH)
+                when (result) {
+                    Z_STREAM_END -> finished = true
+                    Z_OK -> {}
+                    else -> throw CompressionException("deflate finish failed with code: $result")
+                }
 
-            val result = deflate(s, Z_FINISH)
-            when (result) {
-                Z_STREAM_END -> finished = true
-                Z_OK -> {}
-                else -> throw CompressionException("deflate finish failed with code: $result")
-            }
-
-            val produced = outputBufferSize - s.pointed.avail_out.toInt()
-            if (produced > 0) {
-                chunk.position(produced)
-                chunk.resetForRead()
-                onOutput(chunk)
+                val produced = outputBufferSize - s.pointed.avail_out.toInt()
+                if (produced > 0) {
+                    chunk.position(produced)
+                    chunk.resetForRead()
+                    onOutput(chunk)
+                }
             }
         }
     }
@@ -316,26 +311,24 @@ private class AppleZlibStreamingDecompressor(
                 s.pointed.avail_in = remaining.convert()
 
                 while (s.pointed.avail_in > 0u && !streamEnded) {
-                    val chunk = allocator.allocate(outputBufferSize) as MutableDataBuffer
-                    val chunkPtr =
-                        chunk.data.mutableBytes as? CPointer<ByteVar>
-                            ?: throw CompressionException("Failed to get output buffer pointer")
+                    val chunk = allocator.allocate(outputBufferSize)
+                    withOutputPointer(chunk) { chunkPtr ->
+                        s.pointed.next_out = chunkPtr.reinterpret()
+                        s.pointed.avail_out = outputBufferSize.convert()
 
-                    s.pointed.next_out = chunkPtr.reinterpret()
-                    s.pointed.avail_out = outputBufferSize.convert()
+                        val result = inflate(s, Z_SYNC_FLUSH)
+                        when (result) {
+                            Z_OK -> {}
+                            Z_STREAM_END -> streamEnded = true
+                            else -> throw CompressionException("inflate failed with code: $result")
+                        }
 
-                    val result = inflate(s, Z_SYNC_FLUSH)
-                    when (result) {
-                        Z_OK -> {}
-                        Z_STREAM_END -> streamEnded = true
-                        else -> throw CompressionException("inflate failed with code: $result")
-                    }
-
-                    val produced = outputBufferSize - s.pointed.avail_out.toInt()
-                    if (produced > 0) {
-                        chunk.position(produced)
-                        chunk.resetForRead()
-                        onOutput(chunk)
+                        val produced = outputBufferSize - s.pointed.avail_out.toInt()
+                        if (produced > 0) {
+                            chunk.position(produced)
+                            chunk.resetForRead()
+                            onOutput(chunk)
+                        }
                     }
                 }
 
@@ -343,6 +336,11 @@ private class AppleZlibStreamingDecompressor(
             }
 
         input.position(inputPosition + consumed)
+    }
+
+    override fun flush(onOutput: (ReadBuffer) -> Unit) {
+        // No-op: Apple decompressor emits output eagerly in decompress(),
+        // no partial buffering that needs flushing.
     }
 
     override fun finish(onOutput: (ReadBuffer) -> Unit) {
@@ -355,35 +353,35 @@ private class AppleZlibStreamingDecompressor(
         s.pointed.avail_in = 0u
 
         while (!streamEnded) {
-            val chunk = allocator.allocate(outputBufferSize) as MutableDataBuffer
-            val chunkPtr =
-                chunk.data.mutableBytes as? CPointer<ByteVar>
-                    ?: throw CompressionException("Failed to get output buffer pointer")
+            val chunk = allocator.allocate(outputBufferSize)
+            val shouldBreak =
+                withOutputPointer(chunk) { chunkPtr ->
+                    s.pointed.next_out = chunkPtr.reinterpret()
+                    s.pointed.avail_out = outputBufferSize.convert()
 
-            s.pointed.next_out = chunkPtr.reinterpret()
-            s.pointed.avail_out = outputBufferSize.convert()
+                    val result = inflate(s, Z_FINISH)
+                    when (result) {
+                        Z_OK -> {}
+                        Z_STREAM_END -> streamEnded = true
+                        -5 -> {
+                            // Z_BUF_ERROR (-5) with no input means the stream produced all
+                            // available output. This is expected for raw deflate streams
+                            // without BFINAL=1 (e.g., WebSocket per-message-deflate RFC 7692).
+                            streamEnded = true
+                        }
+                        else -> throw CompressionException("inflate finish failed with code: $result")
+                    }
 
-            val result = inflate(s, Z_FINISH)
-            when (result) {
-                Z_OK -> {}
-                Z_STREAM_END -> streamEnded = true
-                -5 -> {
-                    // Z_BUF_ERROR (-5) with no input means the stream produced all
-                    // available output. This is expected for raw deflate streams
-                    // without BFINAL=1 (e.g., WebSocket per-message-deflate RFC 7692).
-                    streamEnded = true
+                    val produced = outputBufferSize - s.pointed.avail_out.toInt()
+                    if (produced > 0) {
+                        chunk.position(produced)
+                        chunk.resetForRead()
+                        onOutput(chunk)
+                    }
+
+                    s.pointed.avail_out > 0u
                 }
-                else -> throw CompressionException("inflate finish failed with code: $result")
-            }
-
-            val produced = outputBufferSize - s.pointed.avail_out.toInt()
-            if (produced > 0) {
-                chunk.position(produced)
-                chunk.resetForRead()
-                onOutput(chunk)
-            }
-
-            if (s.pointed.avail_out > 0u) break
+            if (shouldBreak) break
         }
     }
 
@@ -409,8 +407,8 @@ private class AppleZlibStreamingDecompressor(
 }
 
 /**
- * Execute a block with a pointer to the buffer's data.
- * Handles pinning for ByteArrayBuffer to ensure the pointer remains valid.
+ * Execute a block with a pointer to the buffer's data (read path).
+ * Handles ByteArrayBuffer pinning to ensure the pointer remains valid.
  */
 @OptIn(ExperimentalForeignApi::class)
 private inline fun <R> withInputPointer(
@@ -429,6 +427,29 @@ private inline fun <R> withInputPointer(
             }
         }
         else -> throw CompressionException("Unsupported buffer type: ${buffer::class}")
+    }
+
+/**
+ * Execute a block with a pointer to the buffer's data (write/output path).
+ * Handles ByteArrayBuffer pinning to ensure the pointer remains valid.
+ */
+@OptIn(ExperimentalForeignApi::class)
+private inline fun <R> withOutputPointer(
+    buffer: ReadWriteBuffer,
+    block: (CPointer<ByteVar>) -> R,
+): R =
+    when (buffer) {
+        is MutableDataBufferSlice -> block(buffer.bytePointer)
+        is MutableDataBuffer -> {
+            @Suppress("UNCHECKED_CAST")
+            block(buffer.data.mutableBytes as CPointer<ByteVar>)
+        }
+        is ByteArrayBuffer -> {
+            buffer.backingArray.usePinned { pinned ->
+                block(pinned.addressOf(0))
+            }
+        }
+        else -> throw CompressionException("Unsupported output buffer type: ${buffer::class}")
     }
 
 // =============================================================================
