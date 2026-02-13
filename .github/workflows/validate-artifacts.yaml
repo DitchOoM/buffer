@@ -118,6 +118,58 @@ jobs:
           done
           echo ""
 
+          # 5. Signing coverage - detect file types not covered by publish signing glob
+          echo "--- Signing Coverage Check ---"
+          # The publish-to-central signing step signs: .jar .klib .pom .module .aar .json
+          # Flag any artifact file types that would be missed
+          KNOWN_SIGNABLE="jar klib pom module aar json"
+          KNOWN_METADATA="xml repositories"
+          UNCOVERED=0
+          while IFS= read -r file; do
+            ext="${file##*.}"
+            COVERED=false
+            for known in $KNOWN_SIGNABLE $KNOWN_METADATA; do
+              if [ "$ext" = "$known" ]; then
+                COVERED=true
+                break
+              fi
+            done
+            if [ "$COVERED" = "false" ]; then
+              REL=$(echo "$file" | sed "s|${BASE}/||")
+              echo "  FAIL: Unsignable file type '.${ext}': ${REL}"
+              UNCOVERED=$((UNCOVERED + 1))
+            fi
+          done < <(find "${BASE}" -type f ! -name "*.md5" ! -name "*.sha1" ! -name "*.asc")
+          if [ "$UNCOVERED" -gt 0 ]; then
+            echo "  ${UNCOVERED} files with types not covered by publish signing glob"
+            FAILED=true
+          else
+            echo "  All artifact file types covered by signing glob"
+          fi
+          echo ""
+
+          # 6. Android AAR and kotlin-tooling-metadata presence
+          echo "--- Android & Metadata Artifacts ---"
+          for module in buffer buffer-compression; do
+            AAR_DIR="${BASE}/${module}-android/${version}"
+            if [ -d "$AAR_DIR" ]; then
+              AAR=$(find "$AAR_DIR" -name "*.aar" | head -1)
+              if [ -z "$AAR" ]; then
+                echo "  FAIL: ${module}-android AAR not found in ${AAR_DIR}"
+                FAILED=true
+              else
+                echo "  ${module}-android AAR present"
+              fi
+            fi
+            METADATA="${BASE}/${module}/${version}/${module}-${version}-kotlin-tooling-metadata.json"
+            if [ -f "$METADATA" ]; then
+              echo "  ${module} kotlin-tooling-metadata.json present"
+            else
+              echo "  WARN: ${module} kotlin-tooling-metadata.json not found (may not be generated for all modules)"
+            fi
+          done
+          echo ""
+
           if [ "$FAILED" = true ]; then
             echo "=== VALIDATION FAILED ==="
             exit 1
