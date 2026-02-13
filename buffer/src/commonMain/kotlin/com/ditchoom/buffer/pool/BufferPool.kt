@@ -2,6 +2,7 @@ package com.ditchoom.buffer.pool
 
 import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.ByteOrder
+import com.ditchoom.buffer.ReadWriteBuffer
 
 /**
  * High-performance buffer pool that minimizes allocations by reusing buffers.
@@ -33,11 +34,12 @@ import com.ditchoom.buffer.ByteOrder
  *
  * ### Manual acquire/release
  * ```kotlin
+ * val pool = BufferPool()
  * val buffer = pool.acquire(1024)
  * try {
  *     buffer.writeInt(42)
  * } finally {
- *     buffer.release()  // MUST release when done
+ *     pool.release(buffer)
  * }
  * ```
  *
@@ -52,14 +54,18 @@ import com.ditchoom.buffer.ByteOrder
 sealed interface BufferPool {
     /**
      * Acquires a buffer of at least the specified size.
+     * The returned buffer is a [PooledBuffer] wrapper whose [freeNativeMemory][PlatformBuffer.freeNativeMemory]
+     * returns the buffer to this pool instead of freeing it.
      * The buffer may be larger than requested.
      */
-    fun acquire(minSize: Int = 0): PooledBuffer
+    fun acquire(minSize: Int = 0): ReadWriteBuffer
 
     /**
      * Releases a buffer back to the pool for reuse.
+     * The buffer must have been acquired from this pool.
+     * Buffers that are not [PlatformBuffer] instances are silently ignored.
      */
-    fun release(buffer: PooledBuffer)
+    fun release(buffer: ReadWriteBuffer)
 
     /**
      * Returns statistics about pool usage.
@@ -130,38 +136,6 @@ enum class ThreadingMode {
 }
 
 /**
- * A buffer that has been acquired from a [BufferPool].
- *
- * Pooled buffers MUST be released when no longer needed to enable reuse.
- * Use [BufferPool.withBuffer] for automatic release, or call [release] manually.
- *
- * **Warning**: Do not use a buffer after releasing it.
- */
-interface PooledBuffer : com.ditchoom.buffer.ReadWriteBuffer {
-    override val byteOrder: ByteOrder
-
-    /**
-     * Returns this buffer to its pool for reuse.
-     *
-     * After calling this method, the buffer should not be used.
-     * Any further access to the buffer results in undefined behavior.
-     */
-    fun release()
-
-    /**
-     * Access to native memory if the underlying buffer supports it.
-     * Returns null if the buffer uses managed memory (e.g., ByteArrayBuffer).
-     */
-    val nativeMemoryAccess: com.ditchoom.buffer.NativeMemoryAccess?
-
-    /**
-     * Access to managed memory if the underlying buffer supports it.
-     * Returns null if the buffer uses native memory (e.g., NativeBuffer).
-     */
-    val managedMemoryAccess: com.ditchoom.buffer.ManagedMemoryAccess?
-}
-
-/**
  * Statistics about buffer pool usage for monitoring and tuning.
  *
  * @property totalAllocations Total number of acquire() calls
@@ -219,7 +193,7 @@ fun createBufferPool(
  */
 inline fun <T> BufferPool.withBuffer(
     minSize: Int = 0,
-    block: (PooledBuffer) -> T,
+    block: (ReadWriteBuffer) -> T,
 ): T {
     val buffer = acquire(minSize)
     try {

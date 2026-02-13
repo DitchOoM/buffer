@@ -10,11 +10,12 @@ import com.ditchoom.buffer.pool.withBuffer
 import com.ditchoom.buffer.pool.withPool
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 /**
- * Comprehensive unit tests for BufferPool and PooledBuffer.
+ * Comprehensive unit tests for BufferPool.
  * Tests cover all public API methods and edge cases.
  */
 class BufferPoolTests {
@@ -34,7 +35,7 @@ class BufferPoolTests {
     fun createPoolWithCustomMaxSize() =
         withPool(maxPoolSize = 2, defaultBufferSize = 1024) { pool ->
             val buffers = (1..5).map { pool.acquire(512) }
-            buffers.forEach { it.release() }
+            buffers.forEach { pool.release(it) }
             // Only maxPoolSize buffers should be kept
             assertTrue(pool.stats().currentPoolSize <= 2)
         }
@@ -108,8 +109,94 @@ class BufferPoolTests {
             buffer1.resetForRead()
             buffer2.resetForRead()
             assertNotEquals(buffer1.readByte(), buffer2.readByte())
-            buffer1.release()
-            buffer2.release()
+            pool.release(buffer1)
+            pool.release(buffer2)
+        }
+
+    // ============================================================================
+    // Pool Transparency Tests
+    // ============================================================================
+
+    @Test
+    fun acquireReturnsPlatformBuffer() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            val buffer = pool.acquire(512)
+            assertIs<PlatformBuffer>(buffer)
+            pool.release(buffer)
+        }
+
+    @Test
+    fun acquiredBufferWorksWithXorMask() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            pool.withBuffer(256) { buffer ->
+                for (i in 0 until 16) buffer.writeByte(i.toByte())
+                buffer.resetForRead()
+                val mask = 0xDEADBEEF.toInt()
+                buffer.xorMask(mask)
+                buffer.position(0)
+                buffer.xorMask(mask)
+                for (i in 0 until 16) {
+                    assertEquals(i.toByte(), buffer.readByte(), "Mismatch at $i after double XOR")
+                }
+            }
+        }
+
+    @Test
+    fun acquiredBufferHasNativeMemoryAccess() {
+        val pool = BufferPool(defaultBufferSize = 1024, allocationZone = AllocationZone.Direct)
+        val buffer = pool.acquire(512)
+        val nma = (buffer as? NativeMemoryAccess)
+        // On JVM Direct / Linux native, should have native memory access
+        // On platforms using Heap, may be null — just verify no crash
+        if (nma != null) {
+            // nativeAddress can be 0 on JS (byteOffset of a fresh Int8Array)
+            assertTrue(nma.nativeSize > 0)
+        }
+        pool.release(buffer)
+        pool.clear()
+    }
+
+    @Test
+    fun acquiredBufferWorksWithWriteSource() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            pool.withBuffer(256) { src ->
+                src.writeInt(0x11223344)
+                src.writeInt(0x55667788)
+                src.resetForRead()
+
+                pool.withBuffer(256) { dst ->
+                    dst.write(src)
+                    dst.resetForRead()
+                    assertEquals(0x11223344, dst.readInt())
+                    assertEquals(0x55667788, dst.readInt())
+                }
+            }
+        }
+
+    @Test
+    fun acquiredBufferWorksWithReadString() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            pool.withBuffer(256) { buffer ->
+                val text = "Hello 世界 🌍"
+                buffer.writeString(text, Charset.UTF8)
+                val len = buffer.position()
+                buffer.resetForRead()
+                assertEquals(text, buffer.readString(len, Charset.UTF8))
+            }
+        }
+
+    @Test
+    fun acquiredBufferWorksWithSlice() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            pool.withBuffer(256) { buffer ->
+                buffer.writeInt(0x11223344)
+                buffer.writeInt(0x55667788)
+                buffer.resetForRead()
+                buffer.readInt() // skip first
+                val slice = buffer.slice()
+                assertEquals(4, slice.remaining())
+                assertEquals(0x55667788, slice.readInt())
+            }
         }
 
     // ============================================================================
@@ -160,7 +247,7 @@ class BufferPoolTests {
     fun releaseWhenPoolFullDiscardsBuffer() =
         withPool(defaultBufferSize = 1024, maxPoolSize = 2) { pool ->
             val buffers = (1..5).map { pool.acquire(512) }
-            buffers.forEach { it.release() }
+            buffers.forEach { pool.release(it) }
             // Pool should only hold maxPoolSize buffers
             assertTrue(pool.stats().currentPoolSize <= 2)
         }
@@ -207,15 +294,15 @@ class BufferPoolTests {
             val buffers = (1..5).map { pool.acquire(512) }
             assertEquals(0, pool.stats().currentPoolSize) // All in use
 
-            buffers[0].release()
+            pool.release(buffers[0])
             assertEquals(1, pool.stats().currentPoolSize)
 
-            buffers[1].release()
-            buffers[2].release()
+            pool.release(buffers[1])
+            pool.release(buffers[2])
             assertEquals(3, pool.stats().currentPoolSize)
 
-            buffers[3].release()
-            buffers[4].release()
+            pool.release(buffers[3])
+            pool.release(buffers[4])
             assertEquals(5, pool.stats().currentPoolSize)
         }
 
@@ -223,11 +310,27 @@ class BufferPoolTests {
     fun statsTracksPeakPoolSize() =
         withPool(defaultBufferSize = 1024, maxPoolSize = 10) { pool ->
             val buffers = (1..5).map { pool.acquire(512) }
-            buffers.forEach { it.release() }
+            buffers.forEach { pool.release(it) }
 
             val stats = pool.stats()
             assertEquals(5, stats.currentPoolSize)
             assertTrue(stats.peakPoolSize >= 5)
+        }
+
+    @Test
+    fun poolStatsAccurate() =
+        withPool(defaultBufferSize = 1024, maxPoolSize = 4) { pool ->
+            repeat(10) { pool.withBuffer(512) { } }
+            val stats = pool.stats()
+            assertEquals(stats.totalAllocations, stats.poolHits + stats.poolMisses)
+        }
+
+    @Test
+    fun maxPoolSizeRespected() =
+        withPool(defaultBufferSize = 1024, maxPoolSize = 3) { pool ->
+            val buffers = (1..10).map { pool.acquire(512) }
+            buffers.forEach { pool.release(it) }
+            assertTrue(pool.stats().currentPoolSize <= 3)
         }
 
     // ============================================================================
@@ -256,8 +359,30 @@ class BufferPoolTests {
         assertEquals(1, pool.stats().totalAllocations)
     }
 
+    @Test
+    fun acquireAfterClearIsMiss() {
+        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 4)
+        pool.withBuffer(512) { }
+        pool.clear()
+        pool.withBuffer(512) { }
+        val stats = pool.stats()
+        assertEquals(2, stats.totalAllocations)
+        assertEquals(2, stats.poolMisses)
+        assertEquals(0, stats.poolHits)
+        pool.clear()
+    }
+
+    @Test
+    fun doubleReleaseNoException() {
+        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 10)
+        val buffer = pool.acquire(512)
+        pool.release(buffer)
+        pool.release(buffer) // second release should not crash
+        pool.clear()
+    }
+
     // ============================================================================
-    // PooledBuffer Primitive Read/Write Tests
+    // Primitive Read/Write Tests
     // ============================================================================
 
     @Test
@@ -328,7 +453,6 @@ class BufferPoolTests {
     fun pooledBufferFloatReadWrite() =
         withPool(defaultBufferSize = 1024) { pool ->
             pool.withBuffer(256) { buffer ->
-                // Use values that round-trip exactly on all platforms (including JS)
                 buffer.writeFloat(1.5f)
                 buffer.writeFloat(-1.5f)
                 buffer.writeFloat(0.0f)
@@ -362,7 +486,7 @@ class BufferPoolTests {
         }
 
     // ============================================================================
-    // PooledBuffer Indexed Read/Write Tests
+    // Indexed Read/Write Tests
     // ============================================================================
 
     @Test
@@ -408,7 +532,7 @@ class BufferPoolTests {
         withPool(defaultBufferSize = 1024) { pool ->
             pool.withBuffer(256) { buffer ->
                 buffer[0] = 0x1122334455667788L
-                buffer[8] = -0x6655443322110100L // Equivalent to 0x99AABBCCDDEEFF00 as signed
+                buffer[8] = -0x6655443322110100L
 
                 assertEquals(0x1122334455667788L, buffer.getLong(0))
                 assertEquals(-0x6655443322110100L, buffer.getLong(8))
@@ -440,7 +564,7 @@ class BufferPoolTests {
         }
 
     // ============================================================================
-    // PooledBuffer ByteArray Operations Tests
+    // ByteArray Operations Tests
     // ============================================================================
 
     @Test
@@ -480,7 +604,7 @@ class BufferPoolTests {
         }
 
     // ============================================================================
-    // PooledBuffer String Operations Tests
+    // String Operations Tests
     // ============================================================================
 
     @Test
@@ -521,7 +645,7 @@ class BufferPoolTests {
         }
 
     // ============================================================================
-    // PooledBuffer Buffer Copy Tests
+    // Buffer Copy Tests
     // ============================================================================
 
     @Test
@@ -543,7 +667,7 @@ class BufferPoolTests {
         }
 
     // ============================================================================
-    // PooledBuffer Position and Limit Tests
+    // Position and Limit Tests
     // ============================================================================
 
     @Test
@@ -610,7 +734,7 @@ class BufferPoolTests {
         }
 
     // ============================================================================
-    // PooledBuffer Slice Tests
+    // Slice Tests
     // ============================================================================
 
     @Test
@@ -659,7 +783,7 @@ class BufferPoolTests {
     fun multipleReleasesOfSameBuffer() =
         withPool(defaultBufferSize = 1024, maxPoolSize = 10) { pool ->
             val buffer = pool.acquire(512)
-            buffer.release()
+            pool.release(buffer)
             // Second release should be safe (no-op or handled gracefully)
         }
 
@@ -668,9 +792,39 @@ class BufferPoolTests {
         withPool(defaultBufferSize = 1024, maxPoolSize = 1) { pool ->
             val buffer1 = pool.acquire(512)
             val buffer2 = pool.acquire(512)
-            buffer1.release()
-            buffer2.release()
+            pool.release(buffer1)
+            pool.release(buffer2)
             assertTrue(pool.stats().currentPoolSize <= 1)
+        }
+
+    @Test
+    fun acquireLargeSize() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            pool.withBuffer(10 * 1024 * 1024) { buffer ->
+                assertTrue(buffer.capacity >= 10 * 1024 * 1024)
+            }
+        }
+
+    @Test
+    fun releaseLargeAcquireSmall() =
+        withPool(defaultBufferSize = 1024, maxPoolSize = 4) { pool ->
+            // Acquire a large buffer and release it
+            pool.withBuffer(1024 * 1024) { }
+            // Pool has the large buffer. Now acquire small — should hit (large >= small)
+            pool.withBuffer(512) { }
+            val stats = pool.stats()
+            assertEquals(1, stats.poolHits)
+        }
+
+    @Test
+    fun releaseSmallAcquireLarge() =
+        withPool(defaultBufferSize = 1024, maxPoolSize = 4) { pool ->
+            // Acquire a default-size buffer and release it
+            pool.withBuffer(512) { }
+            // Pool has default-size buffer. Now acquire much larger — should be a miss
+            pool.withBuffer(1024 * 1024) { }
+            val stats = pool.stats()
+            assertEquals(2, stats.poolMisses)
         }
 
     // ============================================================================
@@ -751,6 +905,27 @@ class BufferPoolTests {
             assertEquals(2, pool.stats().currentPoolSize)
         }
 
+    @Test
+    fun withBufferReleasesOnException() {
+        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 10)
+        try {
+            pool.withBuffer(512) { throw RuntimeException("test") }
+        } catch (_: RuntimeException) {
+        }
+        assertEquals(1, pool.stats().currentPoolSize)
+        pool.clear()
+    }
+
+    @Test
+    fun withPoolAutoClears() {
+        val poolStats =
+            withPool(defaultBufferSize = 1024, maxPoolSize = 10) { pool ->
+                pool.withBuffer(512) { }
+                pool.stats()
+            }
+        assertEquals(1, poolStats.currentPoolSize)
+    }
+
     // ============================================================================
     // withPool Extension Tests
     // ============================================================================
@@ -783,7 +958,7 @@ class BufferPoolTests {
     }
 
     // ============================================================================
-    // Tests Using withBuffer Pattern (demonstrating cleaner syntax)
+    // Tests Using withBuffer Pattern
     // ============================================================================
 
     @Test
@@ -863,8 +1038,8 @@ class BufferPoolTests {
             assertEquals(0x1122334455667788L, buffer1.readLong())
             assertEquals(-0x1122334455667788L, buffer2.readLong())
 
-            buffer1.release()
-            buffer2.release()
+            pool.release(buffer1)
+            pool.release(buffer2)
 
             assertEquals(2, pool.stats().currentPoolSize)
         }
@@ -898,7 +1073,7 @@ class BufferPoolTests {
             val buffers = (1..5).map { pool.acquire(512) }
 
             // Release all
-            buffers.forEach { it.release() }
+            buffers.forEach { pool.release(it) }
 
             // Pool should only keep maxPoolSize
             assertTrue(pool.stats().currentPoolSize <= 2)
@@ -913,7 +1088,7 @@ class BufferPoolTests {
             )
 
         val buffers = (1..5).map { pool.acquire(512) }
-        buffers.forEach { it.release() }
+        buffers.forEach { pool.release(it) }
 
         assertTrue(pool.stats().currentPoolSize > 0)
         pool.clear()
@@ -984,6 +1159,106 @@ class BufferPoolTests {
         }
 
     // ============================================================================
+    // Regression: release() must NOT corrupt buffer data (resetForWrite deferred to acquire)
+    // ============================================================================
+
+    @Test
+    fun releaseDoesNotCorruptBufferData() {
+        // Regression test: pool.release() must NOT call resetForWrite() on the buffer.
+        // If it did, any code that frees a buffer while downstream still reads from it
+        // (e.g., freeIfNeeded after socket.write) would see corrupted data.
+        // The reset should only happen at acquire() time.
+        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 4)
+        val buffer = pool.acquire(256)
+
+        // Write data and switch to read mode
+        buffer.writeInt(0x12345678)
+        buffer.writeInt(0xDEADBEEF.toInt())
+        buffer.resetForRead()
+
+        // Verify data is readable before release
+        assertEquals(0x12345678, buffer.readInt())
+
+        // Release the buffer back to pool (simulates freeIfNeeded)
+        pool.release(buffer)
+
+        // CRITICAL: data must still be intact after release
+        // position was at 4 (after reading first int), should still be there
+        assertEquals(0xDEADBEEF.toInt(), buffer.readInt())
+
+        pool.clear()
+    }
+
+    @Test
+    fun releaseDoesNotCorruptBufferDataViaFreeNativeMemory() {
+        // Same regression test but using the freeNativeMemory() path (PooledBuffer)
+        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 4)
+        val buffer = pool.acquire(256)
+
+        buffer.writeInt(0xCAFEBABE.toInt())
+        buffer.writeInt(0xDEADC0DE.toInt())
+        buffer.resetForRead()
+
+        // Read first int
+        val first = buffer.readInt()
+        assertEquals(0xCAFEBABE.toInt(), first)
+
+        // Free via freeNativeMemory (the PooledBuffer path)
+        (buffer as PlatformBuffer).freeNativeMemory()
+
+        // Data must still be readable - position/limit not corrupted
+        assertEquals(0xDEADC0DE.toInt(), buffer.readInt())
+
+        pool.clear()
+    }
+
+    @Test
+    fun releaseDoesNotCorruptMultiThreadedPool() {
+        // Same test for the lock-free pool variant
+        val pool =
+            BufferPool(
+                threadingMode = ThreadingMode.MultiThreaded,
+                defaultBufferSize = 1024,
+                maxPoolSize = 4,
+            )
+        val buffer = pool.acquire(256)
+
+        buffer.writeLong(0x0102030405060708L)
+        buffer.resetForRead()
+
+        // Read 4 bytes
+        val firstInt = buffer.readInt()
+        assertEquals(0x01020304, firstInt)
+
+        // Release back to pool
+        pool.release(buffer)
+
+        // Remaining data must still be intact
+        assertEquals(0x05060708, buffer.readInt())
+
+        pool.clear()
+    }
+
+    @Test
+    fun acquireAfterReleaseGetsResetBuffer() {
+        // Complement to above: verify that acquire() DOES reset the buffer
+        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 4)
+
+        // First acquire, write data, release
+        val buffer1 = pool.acquire(256)
+        buffer1.writeInt(0x12345678)
+        pool.release(buffer1)
+
+        // Re-acquire from pool - should be reset for writing
+        val buffer2 = pool.acquire(256)
+        assertEquals(0, buffer2.position())
+        assertTrue(buffer2.capacity >= 256)
+
+        pool.release(buffer2)
+        pool.clear()
+    }
+
+    // ============================================================================
     // Additional Code Path Coverage Tests
     // ============================================================================
 
@@ -1045,16 +1320,11 @@ class BufferPoolTests {
     fun pooledBufferFluentWriteChaining() =
         withPool(defaultBufferSize = 1024) { pool ->
             pool.withBuffer(256) { buffer ->
-                // Test that fluent chaining returns the same PooledBuffer
-                val result =
-                    buffer
-                        .writeByte(0x11)
-                        .writeShort(0x2233)
-                        .writeInt(0x44556677)
-                        .writeLong(0x1122334455667788L)
-
-                // Result should be the same buffer
-                assertEquals(buffer.position(), result.position())
+                buffer
+                    .writeByte(0x11)
+                    .writeShort(0x2233)
+                    .writeInt(0x44556677)
+                    .writeLong(0x1122334455667788L)
 
                 buffer.resetForRead()
                 assertEquals(0x11.toByte(), buffer.readByte())
@@ -1068,7 +1338,6 @@ class BufferPoolTests {
     fun pooledBufferFluentSetChaining() =
         withPool(defaultBufferSize = 1024) { pool ->
             pool.withBuffer(256) { buffer ->
-                // Test indexed set operations with chaining
                 buffer[0] = 0x11.toByte()
                 buffer[1] = 0x22.toShort()
                 buffer[3] = 0x33445566
@@ -1090,7 +1359,6 @@ class BufferPoolTests {
                 maxPoolSize = 4,
             )
 
-        // Sequential acquire and release pattern
         for (i in 0 until 10) {
             pool.withBuffer(512) { buffer ->
                 buffer.writeInt(i)
@@ -1101,7 +1369,6 @@ class BufferPoolTests {
 
         val stats = pool.stats()
         assertEquals(10, stats.totalAllocations)
-        // First is miss, rest are hits
         assertEquals(9, stats.poolHits)
         assertEquals(1, stats.poolMisses)
         assertEquals(1, stats.currentPoolSize)
@@ -1140,13 +1407,11 @@ class BufferPoolTests {
             pool.withBuffer(256) { buffer ->
                 buffer.writeInt(0x11223344)
                 buffer.writeInt(0x55667788)
-                buffer.writeInt(0x11223344) // Use valid Int value
+                buffer.writeInt(0x11223344)
                 buffer.resetForRead()
 
-                // Skip first int
                 buffer.readInt()
 
-                // Slice should contain remaining data
                 val slice = buffer.slice()
                 assertEquals(8, slice.remaining())
                 assertEquals(0x55667788, slice.readInt())
@@ -1161,7 +1426,6 @@ class BufferPoolTests {
         val buffer = pool.acquire(512)
         buffer.writeInt(0x12345678)
 
-        // Clear pool while buffer is in use
         pool.clear()
         assertEquals(0, pool.stats().currentPoolSize)
 
@@ -1169,7 +1433,7 @@ class BufferPoolTests {
         buffer.resetForRead()
         assertEquals(0x12345678, buffer.readInt())
 
-        buffer.release()
+        pool.release(buffer)
         pool.clear()
     }
 
@@ -1181,15 +1445,9 @@ class BufferPoolTests {
         val singleBuffer = singlePool.acquire(256)
         val multiBuffer = multiPool.acquire(256)
 
-        // Releasing to wrong pool should be safely ignored (type check)
+        // Cross-pool release — pool accepts any PlatformBuffer
         multiPool.release(singleBuffer)
         singlePool.release(multiBuffer)
-
-        // Original pools should not have the wrong buffers
-        // The internal type checks prevent cross-pool releases
-
-        singleBuffer.release() // This should work
-        multiBuffer.release() // This should work
 
         singlePool.clear()
         multiPool.clear()
@@ -1276,7 +1534,6 @@ class BufferPoolTests {
     fun pooledBufferCapacityConsistent() =
         withPool(defaultBufferSize = 4096) { pool ->
             pool.withBuffer(100) { buffer ->
-                // Capacity should remain constant regardless of position/limit changes
                 val originalCapacity = buffer.capacity
                 assertTrue(originalCapacity >= 4096)
 
