@@ -532,12 +532,7 @@ class MutableDataBufferSlice(
     private val parent: MutableDataBuffer,
     private val sliceOffset: Int,
     private val sliceLength: Int,
-) : ReadBuffer,
-    NativeMemoryAccess {
-    override val nativeAddress: Long get() = bytePointer.toLong()
-
-    override val nativeSize: Long get() = sliceLength.toLong()
-
+) : ReadBuffer {
     private var position: Int = 0
     private var limit: Int = sliceLength
 

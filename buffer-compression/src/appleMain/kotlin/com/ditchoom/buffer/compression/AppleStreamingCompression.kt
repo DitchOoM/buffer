@@ -5,6 +5,7 @@ package com.ditchoom.buffer.compression
 import com.ditchoom.buffer.ByteArrayBuffer
 import com.ditchoom.buffer.MutableDataBuffer
 import com.ditchoom.buffer.MutableDataBufferSlice
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
 import kotlinx.cinterop.ByteVar
@@ -408,7 +409,7 @@ private class AppleZlibStreamingDecompressor(
 
 /**
  * Execute a block with a pointer to the buffer's data (read path).
- * Handles ByteArrayBuffer pinning to ensure the pointer remains valid.
+ * Handles PooledBuffer unwrapping and ByteArrayBuffer pinning.
  */
 @OptIn(ExperimentalForeignApi::class)
 private inline fun <R> withInputPointer(
@@ -426,31 +427,54 @@ private inline fun <R> withInputPointer(
                 block(pinned.addressOf(0))
             }
         }
-        else -> throw CompressionException("Unsupported buffer type: ${buffer::class}")
+        else -> {
+            // Unwrap PooledBuffer or other wrappers
+            val unwrapped = (buffer as? PlatformBuffer)?.unwrap()
+            if (unwrapped != null && unwrapped !== buffer) {
+                when (unwrapped) {
+                    is MutableDataBufferSlice -> block(unwrapped.bytePointer)
+                    is MutableDataBuffer -> {
+                        @Suppress("UNCHECKED_CAST")
+                        block(unwrapped.data.mutableBytes as CPointer<ByteVar>)
+                    }
+                    is ByteArrayBuffer -> {
+                        unwrapped.backingArray.usePinned { pinned ->
+                            block(pinned.addressOf(0))
+                        }
+                    }
+                    else -> throw CompressionException("Unsupported buffer type: ${unwrapped::class}")
+                }
+            } else {
+                throw CompressionException("Unsupported buffer type: ${buffer::class}")
+            }
+        }
     }
 
 /**
  * Execute a block with a pointer to the buffer's data (write/output path).
- * Handles ByteArrayBuffer pinning to ensure the pointer remains valid.
+ * Handles PooledBuffer unwrapping and ByteArrayBuffer pinning.
  */
 @OptIn(ExperimentalForeignApi::class)
 private inline fun <R> withOutputPointer(
     buffer: ReadWriteBuffer,
     block: (CPointer<ByteVar>) -> R,
-): R =
-    when (buffer) {
-        is MutableDataBufferSlice -> block(buffer.bytePointer)
+): R {
+    // Unwrap PooledBuffer or other wrappers to get the actual buffer
+    val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
+    return when (actual) {
+        is MutableDataBufferSlice -> block(actual.bytePointer)
         is MutableDataBuffer -> {
             @Suppress("UNCHECKED_CAST")
-            block(buffer.data.mutableBytes as CPointer<ByteVar>)
+            block(actual.data.mutableBytes as CPointer<ByteVar>)
         }
         is ByteArrayBuffer -> {
-            buffer.backingArray.usePinned { pinned ->
+            actual.backingArray.usePinned { pinned ->
                 block(pinned.addressOf(0))
             }
         }
-        else -> throw CompressionException("Unsupported output buffer type: ${buffer::class}")
+        else -> throw CompressionException("Unsupported output buffer type: ${actual::class}")
     }
+}
 
 // =============================================================================
 // Suspending Variants (wrap sync implementations)

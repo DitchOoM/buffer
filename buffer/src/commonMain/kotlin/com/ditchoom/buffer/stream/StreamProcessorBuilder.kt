@@ -27,7 +27,7 @@ import com.ditchoom.buffer.pool.BufferPool
  * ```
  */
 class StreamProcessorBuilder(
-    private val pool: BufferPool,
+    val pool: BufferPool,
 ) {
     private val transforms = mutableListOf<TransformSpec>()
 

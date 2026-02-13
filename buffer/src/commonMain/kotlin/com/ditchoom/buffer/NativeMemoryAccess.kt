@@ -62,12 +62,13 @@ val PlatformBuffer.nativeMemoryAccess: NativeMemoryAccess?
 
 /**
  * Extension for ReadBuffer to access native memory if available.
- * Unwraps pooled buffers to reach the underlying platform buffer.
+ * Unwraps pooled buffers and TrackedSlice wrappers to reach the underlying platform buffer.
  */
 val ReadBuffer.nativeMemoryAccess: NativeMemoryAccess?
     get() {
         if (this is NativeMemoryAccess) return this
         if (this is PlatformBuffer) return unwrap() as? NativeMemoryAccess
+        if (this is com.ditchoom.buffer.pool.TrackedSlice) return inner.nativeMemoryAccess
         return null
     }
 
@@ -144,12 +145,13 @@ val PlatformBuffer.managedMemoryAccess: ManagedMemoryAccess?
 
 /**
  * Extension for ReadBuffer to access managed memory if available.
- * Unwraps pooled buffers to reach the underlying platform buffer.
+ * Unwraps pooled buffers and TrackedSlice wrappers to reach the underlying platform buffer.
  */
 val ReadBuffer.managedMemoryAccess: ManagedMemoryAccess?
     get() {
         if (this is ManagedMemoryAccess) return this
         if (this is PlatformBuffer) return unwrap() as? ManagedMemoryAccess
+        if (this is com.ditchoom.buffer.pool.TrackedSlice) return inner.managedMemoryAccess
         return null
     }
 
