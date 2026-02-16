@@ -222,10 +222,11 @@ class FfmScopedBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
-        if (buffer is FfmScopedBuffer) {
+        val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
+        if (actual is FfmScopedBuffer) {
             MemorySegment.copy(
-                buffer.segment,
-                buffer.positionValue.toLong(),
+                actual.segment,
+                actual.positionValue.toLong(),
                 segment,
                 positionValue.toLong(),
                 size.toLong(),

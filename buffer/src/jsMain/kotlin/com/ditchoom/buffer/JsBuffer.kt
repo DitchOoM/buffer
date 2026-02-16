@@ -151,9 +151,10 @@ class JsBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
-        if (buffer is JsBuffer) {
+        val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
+        if (actual is JsBuffer) {
             // Zero-copy: copy only the remaining portion using subarray
-            val sourceSubarray = buffer.buffer.subarray(buffer.position(), buffer.position() + size)
+            val sourceSubarray = actual.buffer.subarray(actual.position(), actual.position() + size)
             this.buffer.set(sourceSubarray, positionValue)
         } else {
             // readByteArray already advances buffer position
@@ -285,7 +286,8 @@ class JsBuffer(
             return
         }
 
-        if (source !is JsBuffer) {
+        val actualSource = (source as? PlatformBuffer)?.unwrap() ?: source
+        if (actualSource !is JsBuffer) {
             super.xorMaskCopy(source, mask, maskOffset)
             return
         }
@@ -295,7 +297,7 @@ class JsBuffer(
             if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
 
         val srcPos = source.position()
-        val srcStartByte = source.buffer.byteOffset + srcPos
+        val srcStartByte = actualSource.buffer.byteOffset + srcPos
         val dstStartByte = buffer.byteOffset + positionValue
         val int32Count = size ushr 2
         var srcOff = srcPos
@@ -304,7 +306,7 @@ class JsBuffer(
         if (srcStartByte and 3 == 0 && dstStartByte and 3 == 0 && int32Count > 0) {
             // Both aligned: Int32Array -- single-pass read+XOR+write
             val leMask = reverseBytes(rotatedMask)
-            val srcView = Int32Array(source.buffer.buffer, srcStartByte, int32Count)
+            val srcView = Int32Array(actualSource.buffer.buffer, srcStartByte, int32Count)
             val dstView = Int32Array(buffer.buffer, dstStartByte, int32Count)
             for (i in 0 until int32Count) {
                 dstView[i] = srcView[i] xor leMask
@@ -314,7 +316,7 @@ class JsBuffer(
             dstOff += bulkBytes
         } else if (int32Count > 0) {
             // Unaligned: DataView (still 4 bytes at a time)
-            val srcDv = source.dataView
+            val srcDv = actualSource.dataView
             val end4 = srcPos + size - 3
             while (srcOff < end4) {
                 dataView.setInt32(dstOff, srcDv.getInt32(srcOff, false) xor rotatedMask, false)
@@ -326,7 +328,7 @@ class JsBuffer(
         // Remaining 0-3 bytes
         val end = srcPos + size
         if (srcOff < end) {
-            val srcDv = source.dataView
+            val srcDv = actualSource.dataView
             val m0 = (mask ushr 24).toByte()
             val m1 = (mask ushr 16).toByte()
             val m2 = (mask ushr 8).toByte()

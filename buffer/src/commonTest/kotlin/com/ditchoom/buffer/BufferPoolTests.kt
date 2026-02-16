@@ -8,8 +8,10 @@ import com.ditchoom.buffer.pool.ThreadingMode
 import com.ditchoom.buffer.pool.createBufferPool
 import com.ditchoom.buffer.pool.withBuffer
 import com.ditchoom.buffer.pool.withPool
+import com.ditchoom.buffer.pool.PooledBuffer
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
@@ -1559,5 +1561,106 @@ class BufferPoolTests {
                 val readData = buffer.readByteArray(100)
                 assertTrue(testData.contentEquals(readData))
             }
+        }
+
+    // ============================================================================
+    // PooledBuffer Unwrap / Fast-Path Tests
+    // ============================================================================
+
+    @Test
+    fun pooledBufferWriteToPooledBuffer() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            pool.withBuffer(256) { src ->
+                for (i in 0 until 64) src.writeByte((i and 0xFF).toByte())
+                src.resetForRead()
+
+                pool.withBuffer(256) { dst ->
+                    dst.write(src)
+                    dst.resetForRead()
+                    for (i in 0 until 64) {
+                        assertEquals((i and 0xFF).toByte(), dst.readByte(), "Mismatch at index $i")
+                    }
+                }
+                assertEquals(64, src.position(), "Source position should be advanced")
+            }
+        }
+
+    @Test
+    fun pooledBufferXorMaskCopyToPooledBuffer() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            val mask = 0xDEADBEEF.toInt()
+            pool.withBuffer(256) { src ->
+                for (i in 0 until 32) src.writeByte((i and 0xFF).toByte())
+                src.resetForRead()
+
+                pool.withBuffer(256) { dst ->
+                    dst.xorMaskCopy(src, mask)
+                    dst.resetForRead()
+
+                    // Verify masked data is not equal to original
+                    var anyDifferent = false
+                    for (i in 0 until 32) {
+                        val expected = ((i and 0xFF) xor ((mask ushr (24 - (i % 4) * 8)) and 0xFF)).toByte()
+                        assertEquals(expected, dst.readByte(), "Masked byte mismatch at $i")
+                        if (expected != (i and 0xFF).toByte()) anyDifferent = true
+                    }
+                    assertTrue(anyDifferent, "XOR mask should change at least some bytes")
+                }
+            }
+        }
+
+    @Test
+    fun pooledBufferXorMaskCopyRoundTrip() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            val mask = 0xCAFEBABE.toInt()
+            val original = ByteArray(100) { (it * 7 + 13).toByte() }
+
+            pool.withBuffer(256) { src ->
+                src.writeBytes(original)
+                src.resetForRead()
+
+                pool.withBuffer(256) { masked ->
+                    masked.xorMaskCopy(src, mask)
+                    masked.resetForRead()
+
+                    pool.withBuffer(256) { unmasked ->
+                        unmasked.write(masked)
+                        unmasked.resetForRead()
+                        unmasked.xorMask(mask)
+                        unmasked.position(0)
+
+                        val recovered = unmasked.readByteArray(100)
+                        assertTrue(original.contentEquals(recovered), "Round-trip XOR mask should recover original data")
+                    }
+                }
+            }
+        }
+
+    @Test
+    fun pooledBufferWriteFromNonPooled() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            // Create a non-pooled buffer
+            val src = PlatformBuffer.allocate(256)
+            src.writeInt(0xAABBCCDD.toInt())
+            src.writeInt(0x11223344)
+            src.resetForRead()
+
+            pool.withBuffer(256) { dst ->
+                dst.write(src)
+                dst.resetForRead()
+                assertEquals(0xAABBCCDD.toInt(), dst.readInt())
+                assertEquals(0x11223344, dst.readInt())
+            }
+        }
+
+    @Test
+    fun unwrapReturnsInnerPlatformBuffer() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            val buffer = pool.acquire(512)
+            assertIs<PooledBuffer>(buffer, "Pool should return PooledBuffer")
+            val unwrapped = buffer.unwrap()
+            assertFalse(unwrapped is PooledBuffer, "unwrap() should not return a PooledBuffer")
+            assertTrue(unwrapped.capacity >= 512, "Unwrapped buffer should have correct capacity")
+            pool.release(buffer)
         }
 }

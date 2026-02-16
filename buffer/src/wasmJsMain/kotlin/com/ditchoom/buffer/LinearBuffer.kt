@@ -371,11 +371,12 @@ class LinearBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
-        when (buffer) {
+        val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
+        when (actual) {
             is LinearBuffer -> {
                 // Both are in linear memory - use native memcpy via Uint8Array.set()
                 memcpy(
-                    srcOffset = buffer.baseOffset + buffer.positionValue,
+                    srcOffset = actual.baseOffset + actual.positionValue,
                     dstOffset = baseOffset + positionValue,
                     length = size,
                 )

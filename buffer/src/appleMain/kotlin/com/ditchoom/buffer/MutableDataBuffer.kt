@@ -244,16 +244,17 @@ class MutableDataBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val bytesToCopy = buffer.remaining()
-        when (buffer) {
+        val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
+        when (actual) {
             is MutableDataBuffer -> {
                 // Direct memory copy - no intermediate allocation
-                val srcPtr = buffer.bytePointer + buffer.position()
+                val srcPtr = actual.bytePointer + actual.position()
                 val dstPtr = bytePointer + position
                 memcpy(dstPtr, srcPtr, bytesToCopy.convert())
             }
             is MutableDataBufferSlice -> {
                 // Direct memory copy from slice
-                val srcPtr = buffer.bytePointer + buffer.position()
+                val srcPtr = actual.bytePointer + actual.position()
                 val dstPtr = bytePointer + position
                 memcpy(dstPtr, srcPtr, bytesToCopy.convert())
             }
