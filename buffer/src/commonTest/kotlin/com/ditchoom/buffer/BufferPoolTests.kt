@@ -4,11 +4,11 @@ import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.pool.DEFAULT_FILE_BUFFER_SIZE
 import com.ditchoom.buffer.pool.DEFAULT_NETWORK_BUFFER_SIZE
 import com.ditchoom.buffer.pool.PoolStats
+import com.ditchoom.buffer.pool.PooledBuffer
 import com.ditchoom.buffer.pool.ThreadingMode
 import com.ditchoom.buffer.pool.createBufferPool
 import com.ditchoom.buffer.pool.withBuffer
 import com.ditchoom.buffer.pool.withPool
-import com.ditchoom.buffer.pool.PooledBuffer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
