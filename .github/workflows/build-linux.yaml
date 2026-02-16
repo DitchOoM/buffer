@@ -85,12 +85,12 @@ jobs:
 
       - name: Run Linux x64 tests
         run: >-
-          ./gradlew :buffer:linuxX64Test :buffer-compression:linuxX64Test
+          ./gradlew :buffer:linuxX64Test :buffer-compression:linuxX64Test :buffer-flow:linuxX64Test
           --no-build-cache ${{ inputs.gradle-args }}
 
       - name: Build ARM64 test binaries
         run: >-
-          ./gradlew :buffer:linkDebugTestLinuxArm64 :buffer-compression:linkDebugTestLinuxArm64
+          ./gradlew :buffer:linkDebugTestLinuxArm64 :buffer-compression:linkDebugTestLinuxArm64 :buffer-flow:linkDebugTestLinuxArm64
           --no-build-cache ${{ inputs.gradle-args }}
 
       - name: Run buffer ARM64 tests via QEMU
@@ -98,6 +98,9 @@ jobs:
 
       - name: Run buffer-compression ARM64 tests via QEMU
         run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-compression/build/bin/linuxArm64/debugTest/test.kexe
+
+      - name: Run buffer-flow ARM64 tests via QEMU
+        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-flow/build/bin/linuxArm64/debugTest/test.kexe
 
       - name: Publish to Maven Local
         run: ./gradlew publishToMavenLocal --no-build-cache ${{ inputs.gradle-args }}

@@ -36,11 +36,12 @@ jobs:
           echo ""
 
           # 1. Root module metadata - all platform variants
-          # buffer has wasmJs; buffer-compression does not
+          # buffer has wasmJs; buffer-compression and buffer-flow do not
           BUFFER_PLATFORMS="jvm js linuxx64 linuxarm64 macosarm64 macosx64 iosarm64 iossimulatorarm64 wasmJs"
           COMPRESSION_PLATFORMS="jvm js linuxx64 linuxarm64 macosarm64 macosx64 iosarm64 iossimulatorarm64"
+          FLOW_PLATFORMS="jvm js linuxx64 linuxarm64 macosarm64 macosx64 iosarm64 iossimulatorarm64"
 
-          for module in buffer buffer-compression; do
+          for module in buffer buffer-compression buffer-flow; do
             echo "--- ${module} module metadata ---"
             MODULE_FILE="${BASE}/${module}/${version}/${module}-${version}.module"
             if [ ! -f "$MODULE_FILE" ]; then
@@ -50,6 +51,8 @@ jobs:
             fi
             if [ "$module" = "buffer" ]; then
               platforms="$BUFFER_PLATFORMS"
+            elif [ "$module" = "buffer-flow" ]; then
+              platforms="$FLOW_PLATFORMS"
             else
               platforms="$COMPRESSION_PLATFORMS"
             fi
@@ -150,7 +153,7 @@ jobs:
 
           # 6. Android AAR and kotlin-tooling-metadata presence
           echo "--- Android & Metadata Artifacts ---"
-          for module in buffer buffer-compression; do
+          for module in buffer buffer-compression buffer-flow; do
             AAR_DIR="${BASE}/${module}-android/${version}"
             if [ -d "$AAR_DIR" ]; then
               AAR=$(find "$AAR_DIR" -name "*.aar" | head -1)

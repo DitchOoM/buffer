@@ -9,20 +9,19 @@ Buffer pooling minimizes allocation overhead in performance-critical code like n
 
 ## Why Pool Buffers?
 
-Without pooling:
+Without pooling, every network request allocates a new buffer and waits for GC to clean it up. With pooling, buffers are reused — the same memory handles thousands of requests:
+
 ```
-Request 1: allocate → use → GC
-Request 2: allocate → use → GC
-Request 3: allocate → use → GC
-...
+Without pooling: 10,000 requests = 10,000 allocations + GC pressure
+With pooling:    10,000 requests = ~64 allocations (maxPoolSize), no GC pressure
 ```
 
-With pooling:
 ```
-Request 1: acquire → use → release (back to pool)
-Request 2: acquire (reuse!) → use → release
-Request 3: acquire (reuse!) → use → release
-...
+Without pooling:                    With pooling:
+Request 1: allocate → use → GC     Request 1: acquire → use → release (back to pool)
+Request 2: allocate → use → GC     Request 2: acquire (reuse!) → use → release
+Request 3: allocate → use → GC     Request 3: acquire (reuse!) → use → release
+...                                 ...
 ```
 
 Benefits:
