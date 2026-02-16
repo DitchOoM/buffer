@@ -94,9 +94,7 @@ class StreamProcessorBuilder(
      *     }
      * ```
      */
-    fun buildSuspendingWithAutoFill(
-        refill: suspend (AutoFillingSuspendingStreamProcessor) -> Unit,
-    ): AutoFillingSuspendingStreamProcessor {
+    fun buildSuspendingWithAutoFill(refill: suspend (AutoFillingSuspendingStreamProcessor) -> Unit): AutoFillingSuspendingStreamProcessor {
         val delegate = buildSuspending()
         return AutoFillingSuspendingStreamProcessor(delegate, refill)
     }
