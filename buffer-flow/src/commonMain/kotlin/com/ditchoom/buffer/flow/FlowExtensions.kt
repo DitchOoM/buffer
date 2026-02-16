@@ -15,7 +15,8 @@ fun Flow<String>.lines(): Flow<String> =
     flow {
         var remainder = ""
         collect { chunk ->
-            val combined = remainder + chunk
+            // Avoid concatenation when remainder is empty (common case: lines align with chunks)
+            val combined = if (remainder.isEmpty()) chunk else remainder + chunk
             var start = 0
             while (true) {
                 val idx = combined.indexOf('\n', start)
