@@ -375,6 +375,106 @@ class BufferPoolTests {
     }
 
     @Test
+    fun clearDrainsAllBuffers() {
+        // Regression: clear() must drain via removeFirst(), not iterate.
+        // An iterator-based loop can corrupt the ArrayDeque if freeNativeMemory()
+        // re-enters release() and modifies the deque during iteration.
+        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 64)
+        val buffers = (1..32).map { pool.acquire(512) }
+        buffers.forEach { pool.release(it) }
+        assertEquals(32, pool.stats().currentPoolSize)
+
+        pool.clear()
+        assertEquals(0, pool.stats().currentPoolSize)
+    }
+
+    @Test
+    fun clearThenAcquireReleaseCycleStable() {
+        // Verify pool is not corrupted after clear by doing acquire/release cycles
+        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 8)
+
+        repeat(5) { cycle ->
+            // Fill the pool
+            val buffers = (1..8).map { pool.acquire(512) }
+            buffers.forEach { pool.release(it) }
+            assertTrue(pool.stats().currentPoolSize > 0, "Cycle $cycle: pool should have buffers")
+
+            // Clear
+            pool.clear()
+            assertEquals(0, pool.stats().currentPoolSize, "Cycle $cycle: pool should be empty after clear")
+
+            // Acquire and release again — must not crash
+            pool.withBuffer(512) { buffer ->
+                buffer.writeInt(cycle)
+                buffer.resetForRead()
+                assertEquals(cycle, buffer.readInt())
+            }
+        }
+        pool.clear()
+    }
+
+    @Test
+    fun clearOnEmptyPoolIsNoOp() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        // Clear on empty pool should not throw
+        pool.clear()
+        pool.clear()
+        assertEquals(0, pool.stats().currentPoolSize)
+    }
+
+    @Test
+    fun clearViaFreeNativeMemoryReentry() {
+        // Simulate the re-entry scenario: acquire a PooledBuffer, DON'T release it,
+        // then call freeNativeMemory() which calls releaseRef() -> pool.release(inner).
+        // If clear() runs after this, the pool should be in a consistent state.
+        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 8)
+
+        // Acquire buffers and free them via freeNativeMemory (the PooledBuffer path)
+        // This triggers releaseRef() -> pool.release(inner), adding buffers back to pool
+        val buffers = (1..4).map { pool.acquire(512) }
+        buffers.forEach { (it as PlatformBuffer).freeNativeMemory() }
+
+        // Pool should have received the buffers back via releaseRef
+        assertTrue(pool.stats().currentPoolSize > 0)
+
+        // Clear must not crash (drain pattern handles this safely)
+        pool.clear()
+        assertEquals(0, pool.stats().currentPoolSize)
+    }
+
+    @Test
+    fun clearAfterMixedAcquireAndFreeNativeMemory() {
+        // Mix of release() and freeNativeMemory() paths followed by clear()
+        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 16)
+
+        val buf1 = pool.acquire(512)
+        val buf2 = pool.acquire(512)
+        val buf3 = pool.acquire(512)
+        val buf4 = pool.acquire(512)
+
+        // Release some via pool.release(), others via freeNativeMemory()
+        pool.release(buf1)
+        (buf2 as PlatformBuffer).freeNativeMemory()
+        pool.release(buf3)
+        (buf4 as PlatformBuffer).freeNativeMemory()
+
+        // All 4 should be back in the pool
+        assertEquals(4, pool.stats().currentPoolSize)
+
+        // Clear must succeed without corruption
+        pool.clear()
+        assertEquals(0, pool.stats().currentPoolSize)
+
+        // Pool must still be usable
+        pool.withBuffer(512) { buffer ->
+            buffer.writeInt(0xDEADBEEF.toInt())
+            buffer.resetForRead()
+            assertEquals(0xDEADBEEF.toInt(), buffer.readInt())
+        }
+        pool.clear()
+    }
+
+    @Test
     fun doubleReleaseNoException() {
         val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 10)
         val buffer = pool.acquire(512)
