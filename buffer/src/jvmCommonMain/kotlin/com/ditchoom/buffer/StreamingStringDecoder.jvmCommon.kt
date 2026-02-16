@@ -119,9 +119,10 @@ private class JvmStreamingStringDecoder(
         buffer: ReadBuffer,
         remaining: Int,
     ): ByteBuffer {
-        // Try to get zero-copy access
-        if (buffer is BaseJvmBuffer) {
-            val bb = buffer.byteBuffer.asReadOnlyBuffer()
+        // Try to get zero-copy access (unwrap PooledBuffer if needed)
+        val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
+        if (actual is BaseJvmBuffer) {
+            val bb = actual.byteBuffer.asReadOnlyBuffer()
             (bb as java.nio.Buffer).position(buffer.position())
             (bb as java.nio.Buffer).limit(buffer.position() + remaining)
             return bb

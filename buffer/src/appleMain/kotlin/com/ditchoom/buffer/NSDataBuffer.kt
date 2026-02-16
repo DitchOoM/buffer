@@ -163,18 +163,19 @@ class NSDataBuffer(
 
     override fun contentEquals(other: ReadBuffer): Boolean {
         if (remaining() != other.remaining()) return false
-        if (other is NSDataBuffer) {
+        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
+        if (actual is NSDataBuffer) {
             return memcmp(
                 bytePointer + position,
-                other.bytePointer + other.position,
+                actual.bytePointer + actual.position,
                 remaining().convert(),
             ) == 0
         }
-        if (other is MutableDataBuffer) {
-            val otherPointer = other.data.mutableBytes as CPointer<ByteVar>
+        if (actual is MutableDataBuffer) {
+            val otherPointer = actual.data.mutableBytes as CPointer<ByteVar>
             return memcmp(
                 bytePointer + position,
-                otherPointer + other.position(),
+                otherPointer + actual.position(),
                 remaining().convert(),
             ) == 0
         }
