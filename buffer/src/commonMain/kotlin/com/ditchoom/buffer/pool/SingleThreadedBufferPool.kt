@@ -72,9 +72,13 @@ internal class SingleThreadedBufferPool(
         )
 
     override fun clear() {
-        for (buffer in pool) {
-            buffer.freeNativeMemory()
+        // Drain-and-free: remove each buffer before freeing it.
+        // Using an iterator (for-in) is unsafe because freeNativeMemory() could
+        // re-enter release() (via PooledBuffer.releaseRef) and modify the ArrayDeque
+        // during iteration, corrupting its internal head/tail indices (size becomes -1).
+        // This pattern matches LockFreeBufferPool.clear().
+        while (pool.isNotEmpty()) {
+            pool.removeFirst().freeNativeMemory()
         }
-        pool.clear()
     }
 }
