@@ -9,7 +9,7 @@ Handle data that arrives in chunks, like network packets or file reads.
 
 ## The Problem
 
-Network data doesn't arrive in neat message boundaries:
+Network data doesn't arrive in neat message boundaries. You're parsing an MQTT protocol over TCP — the server sends a 300-byte message, but your socket returns it in two chunks: 256 bytes, then 44 bytes. Without `StreamProcessor`, you need manual accumulator code to track partial reads and reassemble messages. With it, you `append()` chunks and `peekInt()`/`readBuffer()` across boundaries transparently.
 
 ![Stream Fragmentation Problem](/img/stream-fragmentation.svg)
 

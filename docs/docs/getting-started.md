@@ -16,8 +16,11 @@ dependencies {
     // Core buffer library
     implementation("com.ditchoom:buffer:<latest-version>")
 
-    // Optional: Compression support (gzip, deflate)
+    // Optional: Compression (gzip, deflate)
     implementation("com.ditchoom:buffer-compression:<latest-version>")
+
+    // Optional: Flow extensions (lines, mapBuffer, asStringFlow)
+    implementation("com.ditchoom:buffer-flow:<latest-version>")
 }
 ```
 
@@ -219,6 +222,38 @@ withPool(defaultBufferSize = 8192) { pool ->
 ```
 
 See [Buffer Pooling](./recipes/buffer-pooling) for more patterns.
+
+## Compression
+
+Compress and decompress any `ReadBuffer` — works on all platforms:
+
+```kotlin
+import com.ditchoom.buffer.compression.*
+
+val data = "Hello, World!".toReadBuffer()
+val compressed = compress(data, CompressionAlgorithm.Gzip).getOrThrow()
+val decompressed = decompress(compressed, CompressionAlgorithm.Gzip).getOrThrow()
+```
+
+See [Compression](./recipes/compression) for streaming compression, algorithms, and integration with `StreamProcessor`.
+
+## Flow Extensions
+
+Compose streaming transforms with Kotlin Flow:
+
+```kotlin
+import com.ditchoom.buffer.flow.*
+
+// Split arbitrarily chunked strings into complete lines
+stringFlow.lines().collect { line -> process(line) }
+
+// Transform buffer flows
+bufferFlow
+    .mapBuffer { decompress(it, Gzip).getOrThrow() }
+    .asStringFlow()
+    .lines()
+    .collect { line -> process(line) }
+```
 
 ## Next Steps
 

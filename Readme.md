@@ -3,34 +3,37 @@ Buffer
 
 See the [project website][docs] for documentation and APIs.
 
-Buffer is a Kotlin Multiplatform library for platform-agnostic byte buffer
-management. It delegates to native implementations on each platform to avoid
-memory copies:
+**Kotlin Multiplatform byte buffers — same code on JVM, Android, iOS, macOS, Linux, JS, and WASM with zero-copy performance.**
 
-- **JVM/Android**: `java.nio.ByteBuffer` (Direct buffers for zero-copy I/O)
-- **iOS/macOS**: `NSMutableData` (native) or `ByteArray` (managed)
-- **JavaScript**: `Uint8Array` with `SharedArrayBuffer` support
-- **WASM**: Native linear memory (Direct) or `ByteArray` (Heap)
-- **Linux**: `NativeBuffer` (malloc/free) for zero-copy I/O, or `ByteArray` (managed)
-
-## Features
-
-- **Zero-copy performance**: Direct delegation to platform-native buffers
-- **Buffer pooling**: High-performance buffer reuse for network I/O
-- **Stream processing**: Handle fragmented data across chunk boundaries
-- **Android IPC**: `SharedMemory` support for zero-copy inter-process communication
-
-## Installation
+Buffer gives you one `ReadBuffer`/`WriteBuffer` API that delegates to platform-native types — `ByteBuffer` on JVM, `NSData` on Apple, `malloc` on Linux, `Uint8Array` on JS — so data never copies between your code and the OS.
 
 [![Maven Central](https://img.shields.io/maven-central/v/com.ditchoom/buffer.svg)](https://central.sonatype.com/artifact/com.ditchoom/buffer)
+
+## Why Buffer?
+
+**Why not just use `ByteArray`?**
+
+| Concern | ByteArray | Buffer |
+|---------|-----------|--------|
+| Platform I/O | Copy into `ByteBuffer`/`NSData`/`Uint8Array` every time | Zero-copy — delegates to the native type directly |
+| Memory reuse | Allocate per request, GC cleans up | `BufferPool` — acquire, use, release, same buffer reused |
+| Fragmented data | Manual accumulator + boundary tracking | `StreamProcessor` — peek/read across chunk boundaries |
+| Compression | Platform-specific zlib wrappers | `compress()`/`decompress()` on any `ReadBuffer` |
+| Streaming transforms | Build your own pipeline | `mapBuffer()`, `asStringFlow()`, `lines()` — compose with Flow |
+| Cross-platform | Only type that's truly portable | Same API on JVM, Android, iOS, macOS, Linux, JS, WASM |
+
+## Installation
 
 ```kotlin
 dependencies {
     // Core buffer library
     implementation("com.ditchoom:buffer:<latest-version>")
 
-    // Optional: Compression support (gzip, deflate)
+    // Optional: Compression (gzip, deflate)
     implementation("com.ditchoom:buffer-compression:<latest-version>")
+
+    // Optional: Flow extensions (lines, mapBuffer, asStringFlow)
+    implementation("com.ditchoom:buffer-flow:<latest-version>")
 }
 ```
 
@@ -40,24 +43,89 @@ Find the latest version on [Maven Central](https://central.sonatype.com/artifact
 
 | Module | Description |
 |--------|-------------|
-| `buffer` | Core buffer interfaces and implementations |
-| `buffer-compression` | Compression/decompression (gzip, deflate) |
+| `buffer` | Core `ReadBuffer`/`WriteBuffer` interfaces, `BufferPool`, `StreamProcessor` |
+| `buffer-compression` | `compress()`/`decompress()` (gzip, deflate) on `ReadBuffer` |
+| `buffer-flow` | Kotlin Flow extensions: `mapBuffer()`, `asStringFlow()`, `lines()` |
 
 ## Quick Example
 
 ```kotlin
+// Works identically on JVM, Android, iOS, macOS, Linux, JS, WASM
 val buffer = PlatformBuffer.allocate(1024)
 buffer.writeInt(42)
 buffer.writeString("Hello!")
 buffer.resetForRead()
 
-val number = buffer.readInt()
-val text = buffer.readString(6)
+val number = buffer.readInt()     // 42
+val text = buffer.readString(6)   // "Hello!"
+```
+
+## Buffer Pooling
+
+Allocate once, reuse for every request — no GC pressure:
+
+```kotlin
+withPool(defaultBufferSize = 8192) { pool ->
+    repeat(10_000) {
+        pool.withBuffer(1024) { buffer ->
+            buffer.writeInt(requestId)
+            buffer.writeString(payload)
+            buffer.resetForRead()
+            sendToNetwork(buffer)
+        } // buffer returned to pool, not GC'd
+    }
+} // pool cleared
+```
+
+Without pooling: 10,000 requests = 10,000 allocations. With pooling: 10,000 requests = ~64 allocations (`maxPoolSize`).
+
+## Stream Processing
+
+Parse protocols that span chunk boundaries — no manual accumulator code:
+
+```kotlin
+val processor = StreamProcessor.create(pool)
+
+// Chunks arrive from the network
+processor.append(chunk1)  // partial message
+processor.append(chunk2)  // rest of message + start of next
+
+// Parse length-prefixed messages across boundaries
+while (processor.available() >= 4) {
+    val length = processor.peekInt()
+    if (processor.available() < 4 + length) break  // wait for more data
+    processor.skip(4)
+    val payload = processor.readBuffer(length)
+    handleMessage(payload)
+}
+```
+
+## Compression
+
+Compress and decompress any `ReadBuffer` — works on all platforms:
+
+```kotlin
+val data = "Hello, World!".toReadBuffer()
+val compressed = compress(data, CompressionAlgorithm.Gzip).getOrThrow()
+val decompressed = decompress(compressed, CompressionAlgorithm.Gzip).getOrThrow()
+```
+
+## Flow Extensions
+
+Compose streaming transforms with Kotlin Flow:
+
+```kotlin
+// Transform a flow of raw buffers into processed lines
+bufferFlow
+    .mapBuffer { decompress(it, Gzip).getOrThrow() }
+    .asStringFlow()
+    .lines()
+    .collect { line -> process(line) }
 ```
 
 ## Scoped Buffers
 
-For FFI/JNI interop or when you need deterministic memory management:
+For FFI/JNI interop or deterministic memory management:
 
 ```kotlin
 withScope { scope ->
@@ -66,46 +134,38 @@ withScope { scope ->
     buffer.writeString("Hello")
     buffer.resetForRead()
 
-    val value = buffer.readInt()
-    val text = buffer.readString(5)
-
     // Native address available for FFI/JNI
     val address = buffer.nativeAddress
 } // Memory freed immediately when scope closes
 ```
 
-**When to use `ScopedBuffer`:**
-- **FFI/JNI interop**: Guaranteed `nativeAddress` on all platforms (except JS)
-- **Deterministic cleanup**: Memory freed immediately when scope closes, no GC pressure
-- **Avoiding GC pauses**: For latency-sensitive code where GC pauses are problematic
+## Platform Implementations
 
-## Compression Example
+| Platform | Native Type | Notes |
+|----------|-------------|-------|
+| JVM | `java.nio.ByteBuffer` | Direct buffers for zero-copy NIO |
+| Android | `ByteBuffer` + `SharedMemory` | IPC via Parcelable |
+| iOS/macOS | `NSMutableData` | Foundation integration |
+| JavaScript | `Uint8Array` | `SharedArrayBuffer` support |
+| WASM | `LinearBuffer` / `ByteArrayBuffer` | Zero-copy JS interop |
+| Linux | `NativeBuffer` (malloc/free) | Zero-copy io_uring I/O |
 
-```kotlin
-import com.ditchoom.buffer.compression.*
+## Part of the DitchOoM Stack
 
-val data = "Hello, World!".toReadBuffer()
-val compressed = compress(data, CompressionAlgorithm.Gzip).getOrThrow()
-val decompressed = decompress(compressed, CompressionAlgorithm.Gzip).getOrThrow()
+Buffer is the foundation for the [Socket](https://github.com/DitchOoM/socket) library — cross-platform TCP + TLS that streams these same `ReadBuffer`/`WriteBuffer` types.
+
 ```
-
-## Stream Processing
-
-Handle fragmented data with `StreamProcessor`:
-
-```kotlin
-val processor = StreamProcessor.builder(pool).build()
-
-// Append chunks as they arrive
-processor.append(chunk1)
-processor.append(chunk2)
-
-// Parse protocol headers
-val messageLength = processor.peekInt()
-if (processor.available() >= 4 + messageLength) {
-    processor.skip(4)
-    val payload = processor.readBuffer(messageLength)
-}
+┌─────────────────────────────┐
+│  Your Protocol              │
+├─────────────────────────────┤
+│  socket (TCP + TLS)         │  ← com.ditchoom:socket
+├─────────────────────────────┤
+│  buffer-compression         │  ← com.ditchoom:buffer-compression
+├─────────────────────────────┤
+│  buffer-flow                │  ← com.ditchoom:buffer-flow
+├─────────────────────────────┤
+│  buffer                     │  ← com.ditchoom:buffer
+└─────────────────────────────┘
 ```
 
 ## License
