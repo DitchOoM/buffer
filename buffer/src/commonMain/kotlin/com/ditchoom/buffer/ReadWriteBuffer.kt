@@ -81,22 +81,40 @@ interface ReadWriteBuffer :
             return
         }
 
-        val maskByte0 = (mask ushr 24).toByte()
-        val maskByte1 = (mask ushr 16).toByte()
-        val maskByte2 = (mask ushr 8).toByte()
-        val maskByte3 = mask.toByte()
-
         val srcPos = source.position()
         val dstPos = position()
-        for (i in 0 until size) {
-            val maskByte =
-                when ((i + maskOffset) and 3) {
-                    0 -> maskByte0
-                    1 -> maskByte1
-                    2 -> maskByte2
-                    else -> maskByte3
-                }
-            set(dstPos + i, (source.get(srcPos + i).toInt() xor maskByte.toInt()).toByte())
+
+        // Use bulk Long XOR when byte orders match (8x fewer iterations)
+        if (source.byteOrder == byteOrder) {
+            val maskLong = buildMaskLong(mask, maskOffset, byteOrder == ByteOrder.LITTLE_ENDIAN)
+            bulkXorMaskCopy(
+                srcPos = srcPos,
+                dstPos = dstPos,
+                size = size,
+                maskLong = maskLong,
+                mask = mask,
+                maskOffset = maskOffset,
+                srcGetLong = { source.getLong(it) },
+                dstSetLong = { idx, value -> set(idx, value) },
+                srcGetByte = { source.get(it) },
+                dstSetByte = { idx, value -> set(idx, value) },
+            )
+        } else {
+            // Byte-at-a-time fallback for mixed byte orders
+            val maskByte0 = (mask ushr 24).toByte()
+            val maskByte1 = (mask ushr 16).toByte()
+            val maskByte2 = (mask ushr 8).toByte()
+            val maskByte3 = mask.toByte()
+            for (i in 0 until size) {
+                val maskByte =
+                    when ((i + maskOffset) and 3) {
+                        0 -> maskByte0
+                        1 -> maskByte1
+                        2 -> maskByte2
+                        else -> maskByte3
+                    }
+                set(dstPos + i, (source.get(srcPos + i).toInt() xor maskByte.toInt()).toByte())
+            }
         }
         source.position(srcPos + size)
         position(dstPos + size)

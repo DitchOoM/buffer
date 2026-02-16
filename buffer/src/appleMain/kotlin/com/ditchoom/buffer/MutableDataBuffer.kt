@@ -8,6 +8,7 @@ import com.ditchoom.buffer.cinterop.buf_indexof_short
 import com.ditchoom.buffer.cinterop.buf_indexof_short_aligned
 import com.ditchoom.buffer.cinterop.buf_mismatch
 import com.ditchoom.buffer.cinterop.buf_xor_mask
+import com.ditchoom.buffer.cinterop.buf_xor_mask_copy
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.IntVar
@@ -244,16 +245,17 @@ class MutableDataBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val bytesToCopy = buffer.remaining()
-        when (buffer) {
+        val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
+        when (actual) {
             is MutableDataBuffer -> {
                 // Direct memory copy - no intermediate allocation
-                val srcPtr = buffer.bytePointer + buffer.position()
+                val srcPtr = actual.bytePointer + actual.position()
                 val dstPtr = bytePointer + position
                 memcpy(dstPtr, srcPtr, bytesToCopy.convert())
             }
             is MutableDataBufferSlice -> {
                 // Direct memory copy from slice
-                val srcPtr = buffer.bytePointer + buffer.position()
+                val srcPtr = actual.bytePointer + actual.position()
                 val dstPtr = bytePointer + position
                 memcpy(dstPtr, srcPtr, bytesToCopy.convert())
             }
@@ -330,6 +332,62 @@ class MutableDataBuffer(
     }
 
     /**
+     * SIMD-optimized fused copy + XOR mask using buf_xor_mask_copy (auto-vectorized by clang at -O2).
+     */
+    override fun xorMaskCopy(
+        source: ReadBuffer,
+        mask: Int,
+        maskOffset: Int,
+    ) {
+        val size = source.remaining()
+        if (size == 0) return
+        if (mask == 0) {
+            write(source)
+            return
+        }
+
+        val nativeMask = mask.reverseBytes().toUInt()
+        val actual = (source as? PlatformBuffer)?.unwrap() ?: source
+        when (actual) {
+            is MutableDataBuffer -> {
+                buf_xor_mask_copy(
+                    (actual.bytePointer + actual.position())!!.reinterpret(),
+                    (bytePointer + position)!!.reinterpret(),
+                    size.convert(),
+                    nativeMask,
+                    maskOffset.convert(),
+                )
+            }
+            is MutableDataBufferSlice -> {
+                buf_xor_mask_copy(
+                    (actual.bytePointer + actual.position())!!.reinterpret(),
+                    (bytePointer + position)!!.reinterpret(),
+                    size.convert(),
+                    nativeMask,
+                    maskOffset.convert(),
+                )
+            }
+            is ByteArrayBuffer -> {
+                actual.backingArray.usePinned { pinned ->
+                    buf_xor_mask_copy(
+                        pinned.addressOf(actual.position()).reinterpret(),
+                        (bytePointer + position)!!.reinterpret(),
+                        size.convert(),
+                        nativeMask,
+                        maskOffset.convert(),
+                    )
+                }
+            }
+            else -> {
+                super.xorMaskCopy(source, mask, maskOffset)
+                return
+            }
+        }
+        position += size
+        source.position(source.position() + size)
+    }
+
+    /**
      * Optimized fill using memset (OS-provided SIMD implementation).
      */
     override fun fill(value: Byte): WriteBuffer {
@@ -352,16 +410,17 @@ class MutableDataBuffer(
         val size = remaining()
         if (size == 0) return true
 
-        return when (other) {
+        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
+        return when (actual) {
             is MutableDataBuffer -> {
-                memcmp(bytePointer + position, other.bytePointer + other.position(), size.convert()) == 0
+                memcmp(bytePointer + position, actual.bytePointer + actual.position(), size.convert()) == 0
             }
             is MutableDataBufferSlice -> {
-                memcmp(bytePointer + position, other.bytePointer + other.position(), size.convert()) == 0
+                memcmp(bytePointer + position, actual.bytePointer + actual.position(), size.convert()) == 0
             }
             is ByteArrayBuffer -> {
-                other.backingArray.usePinned { pinned ->
-                    memcmp(bytePointer + position, pinned.addressOf(other.position()), size.convert()) == 0
+                actual.backingArray.usePinned { pinned ->
+                    memcmp(bytePointer + position, pinned.addressOf(actual.position()), size.convert()) == 0
                 }
             }
             else -> {
@@ -388,27 +447,28 @@ class MutableDataBuffer(
             return if (thisRemaining != otherRemaining) 0 else -1
         }
 
+        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
         val result =
-            when (other) {
+            when (actual) {
                 is MutableDataBuffer -> {
                     buf_mismatch(
                         (bytePointer + position)!!.reinterpret(),
-                        (other.bytePointer + other.position())!!.reinterpret(),
+                        (actual.bytePointer + actual.position())!!.reinterpret(),
                         minLength.convert(),
                     ).toInt()
                 }
                 is MutableDataBufferSlice -> {
                     buf_mismatch(
                         (bytePointer + position)!!.reinterpret(),
-                        (other.bytePointer + other.position())!!.reinterpret(),
+                        (actual.bytePointer + actual.position())!!.reinterpret(),
                         minLength.convert(),
                     ).toInt()
                 }
                 is ByteArrayBuffer -> {
-                    other.backingArray.usePinned { pinned ->
+                    actual.backingArray.usePinned { pinned ->
                         buf_mismatch(
                             (bytePointer + position)!!.reinterpret(),
-                            pinned.addressOf(other.position()).reinterpret(),
+                            pinned.addressOf(actual.position()).reinterpret(),
                             minLength.convert(),
                         ).toInt()
                     }

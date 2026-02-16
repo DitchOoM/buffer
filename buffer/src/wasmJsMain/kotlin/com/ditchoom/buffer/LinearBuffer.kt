@@ -288,6 +288,73 @@ class LinearBuffer(
         }
     }
 
+    /**
+     * Optimized XOR mask copy using Pointer Long operations (8 bytes at a time).
+     * WASM i64 instructions are native hardware ops on 64-bit CPUs.
+     */
+    override fun xorMaskCopy(
+        source: ReadBuffer,
+        mask: Int,
+        maskOffset: Int,
+    ) {
+        val size = source.remaining()
+        if (size == 0) return
+        if (mask == 0) {
+            write(source)
+            return
+        }
+
+        // Build mask Long for little-endian WASM memory
+        val shift = (maskOffset and 3) * 8
+        val rotatedMask =
+            if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
+        val leMask = rotatedMask.reverseBytes()
+        val maskLong = (leMask.toLong() and 0xFFFFFFFFL) or (leMask.toLong() shl 32)
+
+        val actual = (source as? PlatformBuffer)?.unwrap() ?: source
+        if (actual is LinearBuffer) {
+            // Both in linear memory: use Pointer Long operations
+            var srcOffset = actual.baseOffset + actual.positionValue
+            var dstOffset = baseOffset + positionValue
+
+            // Process 8 bytes at a time
+            while (srcOffset + 8 <= actual.baseOffset + actual.positionValue + size) {
+                val srcPtr = Pointer(srcOffset.toUInt())
+                val dstPtr = Pointer(dstOffset.toUInt())
+                dstPtr.storeLong(srcPtr.loadLong() xor maskLong)
+                srcOffset += 8
+                dstOffset += 8
+            }
+
+            // Handle remaining bytes using the ORIGINAL mask with offset
+            val maskByte0 = (mask ushr 24).toByte()
+            val maskByte1 = (mask ushr 16).toByte()
+            val maskByte2 = (mask ushr 8).toByte()
+            val maskByte3 = mask.toByte()
+            var i = srcOffset - (actual.baseOffset + actual.positionValue)
+            while (srcOffset < actual.baseOffset + actual.positionValue + size) {
+                val maskByte =
+                    when ((i + maskOffset) and 3) {
+                        0 -> maskByte0
+                        1 -> maskByte1
+                        2 -> maskByte2
+                        else -> maskByte3
+                    }
+                val b = Pointer(srcOffset.toUInt()).loadByte()
+                Pointer(dstOffset.toUInt()).storeByte((b.toInt() xor maskByte.toInt()).toByte())
+                srcOffset++
+                dstOffset++
+                i++
+            }
+
+            positionValue += size
+            source.position(source.position() + size)
+        } else {
+            // Fallback for non-LinearBuffer sources
+            super.xorMaskCopy(source, mask, maskOffset)
+        }
+    }
+
     override fun slice(): ReadBuffer {
         // Create a new LinearBuffer view of the remaining portion
         // This is zero-copy - just creates a new view with different base offset
@@ -371,11 +438,12 @@ class LinearBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
-        when (buffer) {
+        val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
+        when (actual) {
             is LinearBuffer -> {
                 // Both are in linear memory - use native memcpy via Uint8Array.set()
                 memcpy(
-                    srcOffset = buffer.baseOffset + buffer.positionValue,
+                    srcOffset = actual.baseOffset + actual.positionValue,
                     dstOffset = baseOffset + positionValue,
                     length = size,
                 )
@@ -443,15 +511,16 @@ class LinearBuffer(
         val size = remaining()
         if (size == 0) return true
 
-        if (other is LinearBuffer) {
+        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
+        if (actual is LinearBuffer) {
             return bulkCompareEquals(
                 thisPos = positionValue,
-                otherPos = other.positionValue,
+                otherPos = actual.positionValue,
                 length = size,
                 getLong = { ptr(it).loadLong() },
-                otherGetLong = { other.ptr(it).loadLong() },
+                otherGetLong = { actual.ptr(it).loadLong() },
                 getByte = { loadByte(it) },
-                otherGetByte = { other.loadByte(it) },
+                otherGetByte = { actual.loadByte(it) },
             )
         }
         return super.contentEquals(other)
@@ -465,17 +534,18 @@ class LinearBuffer(
         val otherRemaining = other.remaining()
         val minLength = minOf(thisRemaining, otherRemaining)
 
-        if (other is LinearBuffer) {
+        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
+        if (actual is LinearBuffer) {
             return bulkMismatch(
                 thisPos = positionValue,
-                otherPos = other.positionValue,
+                otherPos = actual.positionValue,
                 minLength = minLength,
                 thisRemaining = thisRemaining,
                 otherRemaining = otherRemaining,
                 getLong = { ptr(it).loadLong() },
-                otherGetLong = { other.ptr(it).loadLong() },
+                otherGetLong = { actual.ptr(it).loadLong() },
                 getByte = { loadByte(it) },
-                otherGetByte = { other.loadByte(it) },
+                otherGetByte = { actual.loadByte(it) },
             )
         }
         return super.mismatch(other)

@@ -254,3 +254,211 @@ internal inline fun bulkMismatchInt(
     }
     return if (thisRemaining != otherRemaining) minLength else -1
 }
+
+// =========================================================================
+// Bulk XOR Mask operations
+// =========================================================================
+
+/**
+ * XOR mask a buffer in-place using Long (8-byte) chunks.
+ *
+ * @param pos Start position in the buffer
+ * @param size Number of bytes to process
+ * @param maskLong Pre-built 8-byte mask matching the buffer's byte order interpretation.
+ *   Must be constructed with mask rotation (for maskOffset) and byte order already applied.
+ * @param mask Original 4-byte XOR mask in big-endian order (for tail bytes)
+ * @param maskOffset Byte offset into the mask cycle (0-3)
+ */
+internal inline fun bulkXorMask(
+    pos: Int,
+    size: Int,
+    maskLong: Long,
+    mask: Int,
+    maskOffset: Int,
+    getLong: (Int) -> Long,
+    setLong: (Int, Long) -> Unit,
+    getByte: (Int) -> Byte,
+    setByte: (Int, Byte) -> Unit,
+) {
+    val maskByte0 = (mask ushr 24).toByte()
+    val maskByte1 = (mask ushr 16).toByte()
+    val maskByte2 = (mask ushr 8).toByte()
+    val maskByte3 = mask.toByte()
+
+    var i = 0
+    while (i + 8 <= size) {
+        setLong(pos + i, getLong(pos + i) xor maskLong)
+        i += 8
+    }
+    while (i < size) {
+        val maskByte =
+            when ((i + maskOffset) and 3) {
+                0 -> maskByte0
+                1 -> maskByte1
+                2 -> maskByte2
+                else -> maskByte3
+            }
+        setByte(pos + i, (getByte(pos + i).toInt() xor maskByte.toInt()).toByte())
+        i++
+    }
+}
+
+/**
+ * Copy bytes from source to destination while XORing with a repeating mask, using Long (8-byte) chunks.
+ *
+ * @param srcPos Start position in the source
+ * @param dstPos Start position in the destination
+ * @param size Number of bytes to process
+ * @param maskLong Pre-built 8-byte mask matching the buffers' byte order interpretation
+ * @param mask Original 4-byte XOR mask in big-endian order (for tail bytes)
+ * @param maskOffset Byte offset into the mask cycle (0-3)
+ */
+internal inline fun bulkXorMaskCopy(
+    srcPos: Int,
+    dstPos: Int,
+    size: Int,
+    maskLong: Long,
+    mask: Int,
+    maskOffset: Int,
+    srcGetLong: (Int) -> Long,
+    dstSetLong: (Int, Long) -> Unit,
+    srcGetByte: (Int) -> Byte,
+    dstSetByte: (Int, Byte) -> Unit,
+) {
+    val maskByte0 = (mask ushr 24).toByte()
+    val maskByte1 = (mask ushr 16).toByte()
+    val maskByte2 = (mask ushr 8).toByte()
+    val maskByte3 = mask.toByte()
+
+    var i = 0
+    while (i + 8 <= size) {
+        dstSetLong(dstPos + i, srcGetLong(srcPos + i) xor maskLong)
+        i += 8
+    }
+    while (i < size) {
+        val maskByte =
+            when ((i + maskOffset) and 3) {
+                0 -> maskByte0
+                1 -> maskByte1
+                2 -> maskByte2
+                else -> maskByte3
+            }
+        dstSetByte(dstPos + i, (srcGetByte(srcPos + i).toInt() xor maskByte.toInt()).toByte())
+        i++
+    }
+}
+
+/**
+ * XOR mask a buffer in-place using Int (4-byte) chunks.
+ * For platforms where Long access is slower (e.g., JS where Long is emulated).
+ */
+internal inline fun bulkXorMaskInt(
+    pos: Int,
+    size: Int,
+    maskInt: Int,
+    mask: Int,
+    maskOffset: Int,
+    getInt: (Int) -> Int,
+    setInt: (Int, Int) -> Unit,
+    getByte: (Int) -> Byte,
+    setByte: (Int, Byte) -> Unit,
+) {
+    val maskByte0 = (mask ushr 24).toByte()
+    val maskByte1 = (mask ushr 16).toByte()
+    val maskByte2 = (mask ushr 8).toByte()
+    val maskByte3 = mask.toByte()
+
+    var i = 0
+    while (i + 4 <= size) {
+        setInt(pos + i, getInt(pos + i) xor maskInt)
+        i += 4
+    }
+    while (i < size) {
+        val maskByte =
+            when ((i + maskOffset) and 3) {
+                0 -> maskByte0
+                1 -> maskByte1
+                2 -> maskByte2
+                else -> maskByte3
+            }
+        setByte(pos + i, (getByte(pos + i).toInt() xor maskByte.toInt()).toByte())
+        i++
+    }
+}
+
+/**
+ * Copy bytes from source to destination while XORing with a repeating mask, using Int (4-byte) chunks.
+ * For platforms where Long access is slower (e.g., JS where Long is emulated).
+ */
+internal inline fun bulkXorMaskCopyInt(
+    srcPos: Int,
+    dstPos: Int,
+    size: Int,
+    maskInt: Int,
+    mask: Int,
+    maskOffset: Int,
+    srcGetInt: (Int) -> Int,
+    dstSetInt: (Int, Int) -> Unit,
+    srcGetByte: (Int) -> Byte,
+    dstSetByte: (Int, Byte) -> Unit,
+) {
+    val maskByte0 = (mask ushr 24).toByte()
+    val maskByte1 = (mask ushr 16).toByte()
+    val maskByte2 = (mask ushr 8).toByte()
+    val maskByte3 = mask.toByte()
+
+    var i = 0
+    while (i + 4 <= size) {
+        dstSetInt(dstPos + i, srcGetInt(srcPos + i) xor maskInt)
+        i += 4
+    }
+    while (i < size) {
+        val maskByte =
+            when ((i + maskOffset) and 3) {
+                0 -> maskByte0
+                1 -> maskByte1
+                2 -> maskByte2
+                else -> maskByte3
+            }
+        dstSetByte(dstPos + i, (srcGetByte(srcPos + i).toInt() xor maskByte.toInt()).toByte())
+        i++
+    }
+}
+
+/**
+ * Build a Long mask for bulk XOR operations from a big-endian mask Int.
+ * Handles mask rotation (for maskOffset) and byte order conversion.
+ *
+ * @param mask The 4-byte XOR mask in big-endian order
+ * @param maskOffset Byte offset into the mask cycle (0-3)
+ * @param littleEndian Whether the buffer uses little-endian byte order
+ * @return Long mask suitable for XOR with getLong() results in the given byte order
+ */
+internal fun buildMaskLong(
+    mask: Int,
+    maskOffset: Int,
+    littleEndian: Boolean,
+): Long {
+    val shift = (maskOffset and 3) * 8
+    val rotated = if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
+    return if (littleEndian) {
+        val le = rotated.reverseBytes()
+        (le.toLong() and 0xFFFFFFFFL) or (le.toLong() shl 32)
+    } else {
+        (rotated.toLong() shl 32) or (rotated.toLong() and 0xFFFFFFFFL)
+    }
+}
+
+/**
+ * Build an Int mask for bulk XOR operations from a big-endian mask Int.
+ * Handles mask rotation (for maskOffset) and byte order conversion.
+ */
+internal fun buildMaskInt(
+    mask: Int,
+    maskOffset: Int,
+    littleEndian: Boolean,
+): Int {
+    val shift = (maskOffset and 3) * 8
+    val rotated = if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
+    return if (littleEndian) rotated.reverseBytes() else rotated
+}

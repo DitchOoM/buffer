@@ -4,12 +4,14 @@ import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.pool.DEFAULT_FILE_BUFFER_SIZE
 import com.ditchoom.buffer.pool.DEFAULT_NETWORK_BUFFER_SIZE
 import com.ditchoom.buffer.pool.PoolStats
+import com.ditchoom.buffer.pool.PooledBuffer
 import com.ditchoom.buffer.pool.ThreadingMode
 import com.ditchoom.buffer.pool.createBufferPool
 import com.ditchoom.buffer.pool.withBuffer
 import com.ditchoom.buffer.pool.withPool
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
@@ -369,6 +371,106 @@ class BufferPoolTests {
         assertEquals(2, stats.totalAllocations)
         assertEquals(2, stats.poolMisses)
         assertEquals(0, stats.poolHits)
+        pool.clear()
+    }
+
+    @Test
+    fun clearDrainsAllBuffers() {
+        // Regression: clear() must drain via removeFirst(), not iterate.
+        // An iterator-based loop can corrupt the ArrayDeque if freeNativeMemory()
+        // re-enters release() and modifies the deque during iteration.
+        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 64)
+        val buffers = (1..32).map { pool.acquire(512) }
+        buffers.forEach { pool.release(it) }
+        assertEquals(32, pool.stats().currentPoolSize)
+
+        pool.clear()
+        assertEquals(0, pool.stats().currentPoolSize)
+    }
+
+    @Test
+    fun clearThenAcquireReleaseCycleStable() {
+        // Verify pool is not corrupted after clear by doing acquire/release cycles
+        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 8)
+
+        repeat(5) { cycle ->
+            // Fill the pool
+            val buffers = (1..8).map { pool.acquire(512) }
+            buffers.forEach { pool.release(it) }
+            assertTrue(pool.stats().currentPoolSize > 0, "Cycle $cycle: pool should have buffers")
+
+            // Clear
+            pool.clear()
+            assertEquals(0, pool.stats().currentPoolSize, "Cycle $cycle: pool should be empty after clear")
+
+            // Acquire and release again — must not crash
+            pool.withBuffer(512) { buffer ->
+                buffer.writeInt(cycle)
+                buffer.resetForRead()
+                assertEquals(cycle, buffer.readInt())
+            }
+        }
+        pool.clear()
+    }
+
+    @Test
+    fun clearOnEmptyPoolIsNoOp() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        // Clear on empty pool should not throw
+        pool.clear()
+        pool.clear()
+        assertEquals(0, pool.stats().currentPoolSize)
+    }
+
+    @Test
+    fun clearViaFreeNativeMemoryReentry() {
+        // Simulate the re-entry scenario: acquire a PooledBuffer, DON'T release it,
+        // then call freeNativeMemory() which calls releaseRef() -> pool.release(inner).
+        // If clear() runs after this, the pool should be in a consistent state.
+        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 8)
+
+        // Acquire buffers and free them via freeNativeMemory (the PooledBuffer path)
+        // This triggers releaseRef() -> pool.release(inner), adding buffers back to pool
+        val buffers = (1..4).map { pool.acquire(512) }
+        buffers.forEach { (it as PlatformBuffer).freeNativeMemory() }
+
+        // Pool should have received the buffers back via releaseRef
+        assertTrue(pool.stats().currentPoolSize > 0)
+
+        // Clear must not crash (drain pattern handles this safely)
+        pool.clear()
+        assertEquals(0, pool.stats().currentPoolSize)
+    }
+
+    @Test
+    fun clearAfterMixedAcquireAndFreeNativeMemory() {
+        // Mix of release() and freeNativeMemory() paths followed by clear()
+        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 16)
+
+        val buf1 = pool.acquire(512)
+        val buf2 = pool.acquire(512)
+        val buf3 = pool.acquire(512)
+        val buf4 = pool.acquire(512)
+
+        // Release some via pool.release(), others via freeNativeMemory()
+        pool.release(buf1)
+        (buf2 as PlatformBuffer).freeNativeMemory()
+        pool.release(buf3)
+        (buf4 as PlatformBuffer).freeNativeMemory()
+
+        // All 4 should be back in the pool
+        assertEquals(4, pool.stats().currentPoolSize)
+
+        // Clear must succeed without corruption
+        pool.clear()
+        assertEquals(0, pool.stats().currentPoolSize)
+
+        // Pool must still be usable
+        pool.withBuffer(512) { buffer ->
+            buffer.writeInt(0xDEADBEEF.toInt())
+            buffer.resetForRead()
+            assertEquals(0xDEADBEEF.toInt(), buffer.readInt())
+        }
         pool.clear()
     }
 
@@ -1558,6 +1660,181 @@ class BufferPoolTests {
 
                 val readData = buffer.readByteArray(100)
                 assertTrue(testData.contentEquals(readData))
+            }
+        }
+
+    // ============================================================================
+    // PooledBuffer Unwrap / Fast-Path Tests
+    // ============================================================================
+
+    @Test
+    fun pooledBufferWriteToPooledBuffer() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            pool.withBuffer(256) { src ->
+                for (i in 0 until 64) src.writeByte((i and 0xFF).toByte())
+                src.resetForRead()
+
+                pool.withBuffer(256) { dst ->
+                    dst.write(src)
+                    dst.resetForRead()
+                    for (i in 0 until 64) {
+                        assertEquals((i and 0xFF).toByte(), dst.readByte(), "Mismatch at index $i")
+                    }
+                }
+                assertEquals(64, src.position(), "Source position should be advanced")
+            }
+        }
+
+    @Test
+    fun pooledBufferXorMaskCopyToPooledBuffer() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            val mask = 0xDEADBEEF.toInt()
+            pool.withBuffer(256) { src ->
+                for (i in 0 until 32) src.writeByte((i and 0xFF).toByte())
+                src.resetForRead()
+
+                pool.withBuffer(256) { dst ->
+                    dst.xorMaskCopy(src, mask)
+                    dst.resetForRead()
+
+                    // Verify masked data is not equal to original
+                    var anyDifferent = false
+                    for (i in 0 until 32) {
+                        val expected = ((i and 0xFF) xor ((mask ushr (24 - (i % 4) * 8)) and 0xFF)).toByte()
+                        assertEquals(expected, dst.readByte(), "Masked byte mismatch at $i")
+                        if (expected != (i and 0xFF).toByte()) anyDifferent = true
+                    }
+                    assertTrue(anyDifferent, "XOR mask should change at least some bytes")
+                }
+            }
+        }
+
+    @Test
+    fun pooledBufferXorMaskCopyRoundTrip() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            val mask = 0xCAFEBABE.toInt()
+            val original = ByteArray(100) { (it * 7 + 13).toByte() }
+
+            pool.withBuffer(256) { src ->
+                src.writeBytes(original)
+                src.resetForRead()
+
+                pool.withBuffer(256) { masked ->
+                    masked.xorMaskCopy(src, mask)
+                    masked.resetForRead()
+
+                    pool.withBuffer(256) { unmasked ->
+                        unmasked.write(masked)
+                        unmasked.resetForRead()
+                        unmasked.xorMask(mask)
+                        unmasked.position(0)
+
+                        val recovered = unmasked.readByteArray(100)
+                        assertTrue(original.contentEquals(recovered), "Round-trip XOR mask should recover original data")
+                    }
+                }
+            }
+        }
+
+    @Test
+    fun pooledBufferWriteFromNonPooled() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            // Create a non-pooled buffer
+            val src = PlatformBuffer.allocate(256)
+            src.writeInt(0xAABBCCDD.toInt())
+            src.writeInt(0x11223344)
+            src.resetForRead()
+
+            pool.withBuffer(256) { dst ->
+                dst.write(src)
+                dst.resetForRead()
+                assertEquals(0xAABBCCDD.toInt(), dst.readInt())
+                assertEquals(0x11223344, dst.readInt())
+            }
+        }
+
+    @Test
+    fun unwrapReturnsInnerPlatformBuffer() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            val buffer = pool.acquire(512)
+            assertIs<PooledBuffer>(buffer, "Pool should return PooledBuffer")
+            val unwrapped = buffer.unwrap()
+            assertFalse(unwrapped is PooledBuffer, "unwrap() should not return a PooledBuffer")
+            assertTrue(unwrapped.capacity >= 512, "Unwrapped buffer should have correct capacity")
+            pool.release(buffer)
+        }
+
+    @Test
+    fun pooledBufferContentEqualsPooledBuffer() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            pool.withBuffer(256) { a ->
+                pool.withBuffer(256) { b ->
+                    val data = ByteArray(64) { (it * 3 + 7).toByte() }
+                    a.writeBytes(data)
+                    b.writeBytes(data)
+                    a.resetForRead()
+                    b.resetForRead()
+                    assertTrue(a.contentEquals(b), "Pooled buffers with same data should be contentEquals")
+                }
+            }
+        }
+
+    @Test
+    fun pooledBufferContentEqualsNonPooled() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            pool.withBuffer(256) { pooled ->
+                val direct = PlatformBuffer.allocate(256)
+                val data = ByteArray(64) { (it * 3 + 7).toByte() }
+                pooled.writeBytes(data)
+                direct.writeBytes(data)
+                pooled.resetForRead()
+                direct.resetForRead()
+                assertTrue(pooled.contentEquals(direct), "Pooled vs direct should be contentEquals")
+                assertTrue(direct.contentEquals(pooled), "Direct vs pooled should be contentEquals")
+            }
+        }
+
+    @Test
+    fun pooledBufferContentEqualsDetectsDifference() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            pool.withBuffer(256) { a ->
+                pool.withBuffer(256) { b ->
+                    a.writeBytes(ByteArray(32) { 0x11 })
+                    b.writeBytes(ByteArray(32) { 0x22 })
+                    a.resetForRead()
+                    b.resetForRead()
+                    assertFalse(a.contentEquals(b), "Different data should not be contentEquals")
+                }
+            }
+        }
+
+    @Test
+    fun pooledBufferMismatchPooledBuffer() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            pool.withBuffer(256) { a ->
+                pool.withBuffer(256) { b ->
+                    val data = ByteArray(64) { it.toByte() }
+                    a.writeBytes(data)
+                    b.writeBytes(data.copyOf().also { it[42] = 0xFF.toByte() })
+                    a.resetForRead()
+                    b.resetForRead()
+                    assertEquals(42, a.mismatch(b), "Mismatch should be at index 42")
+                }
+            }
+        }
+
+    @Test
+    fun pooledBufferMismatchIdentical() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            pool.withBuffer(256) { a ->
+                pool.withBuffer(256) { b ->
+                    val data = ByteArray(64) { it.toByte() }
+                    a.writeBytes(data)
+                    b.writeBytes(data)
+                    a.resetForRead()
+                    b.resetForRead()
+                    assertEquals(-1, a.mismatch(b), "Identical data should return -1")
+                }
             }
         }
 }
