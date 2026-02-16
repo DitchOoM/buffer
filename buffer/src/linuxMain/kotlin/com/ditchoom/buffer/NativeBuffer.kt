@@ -408,13 +408,14 @@ class NativeBuffer private constructor(
         val size = remaining()
         if (size == 0) return true
 
-        when (other) {
+        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
+        when (actual) {
             is NativeBuffer -> {
-                return memcmp(ptr + positionValue, other.ptr + other.position(), size.convert()) == 0
+                return memcmp(ptr + positionValue, actual.ptr + actual.position(), size.convert()) == 0
             }
             is ByteArrayBuffer -> {
-                return other.backingArray.usePinned { pinned ->
-                    memcmp(ptr + positionValue, pinned.addressOf(other.position()), size.convert()) == 0
+                return actual.backingArray.usePinned { pinned ->
+                    memcmp(ptr + positionValue, pinned.addressOf(actual.position()), size.convert()) == 0
                 }
             }
             else -> return super.contentEquals(other)
@@ -434,20 +435,21 @@ class NativeBuffer private constructor(
             return if (thisRemaining != otherRemaining) 0 else -1
         }
 
+        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
         val result =
-            when (other) {
+            when (actual) {
                 is NativeBuffer -> {
                     buf_mismatch(
                         (ptr + positionValue)!!.reinterpret(),
-                        (other.ptr + other.position())!!.reinterpret(),
+                        (actual.ptr + actual.position())!!.reinterpret(),
                         minLength.convert(),
                     ).toInt()
                 }
                 is ByteArrayBuffer -> {
-                    other.backingArray.usePinned { pinned ->
+                    actual.backingArray.usePinned { pinned ->
                         buf_mismatch(
                             (ptr + positionValue)!!.reinterpret(),
-                            pinned.addressOf(other.position())!!.reinterpret(),
+                            pinned.addressOf(actual.position())!!.reinterpret(),
                             minLength.convert(),
                         ).toInt()
                     }

@@ -444,15 +444,16 @@ class LinearBuffer(
         val size = remaining()
         if (size == 0) return true
 
-        if (other is LinearBuffer) {
+        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
+        if (actual is LinearBuffer) {
             return bulkCompareEquals(
                 thisPos = positionValue,
-                otherPos = other.positionValue,
+                otherPos = actual.positionValue,
                 length = size,
                 getLong = { ptr(it).loadLong() },
-                otherGetLong = { other.ptr(it).loadLong() },
+                otherGetLong = { actual.ptr(it).loadLong() },
                 getByte = { loadByte(it) },
-                otherGetByte = { other.loadByte(it) },
+                otherGetByte = { actual.loadByte(it) },
             )
         }
         return super.contentEquals(other)
@@ -466,17 +467,18 @@ class LinearBuffer(
         val otherRemaining = other.remaining()
         val minLength = minOf(thisRemaining, otherRemaining)
 
-        if (other is LinearBuffer) {
+        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
+        if (actual is LinearBuffer) {
             return bulkMismatch(
                 thisPos = positionValue,
-                otherPos = other.positionValue,
+                otherPos = actual.positionValue,
                 minLength = minLength,
                 thisRemaining = thisRemaining,
                 otherRemaining = otherRemaining,
                 getLong = { ptr(it).loadLong() },
-                otherGetLong = { other.ptr(it).loadLong() },
+                otherGetLong = { actual.ptr(it).loadLong() },
                 getByte = { loadByte(it) },
-                otherGetByte = { other.loadByte(it) },
+                otherGetByte = { actual.loadByte(it) },
             )
         }
         return super.mismatch(other)

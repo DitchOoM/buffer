@@ -373,15 +373,16 @@ class JsBuffer(
         val size = remaining()
         if (size == 0) return true
 
-        if (other is JsBuffer) {
+        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
+        if (actual is JsBuffer) {
             return bulkCompareEqualsInt(
                 thisPos = positionValue,
-                otherPos = other.positionValue,
+                otherPos = actual.positionValue,
                 length = size,
                 getInt = { dataView.getInt32(it, true) },
-                otherGetInt = { other.dataView.getInt32(it, true) },
+                otherGetInt = { actual.dataView.getInt32(it, true) },
                 getByte = { dataView.getInt8(it) },
-                otherGetByte = { other.dataView.getInt8(it) },
+                otherGetByte = { actual.dataView.getInt8(it) },
             )
         }
         return super.contentEquals(other)
@@ -395,17 +396,18 @@ class JsBuffer(
         val otherRemaining = other.remaining()
         val minLength = minOf(thisRemaining, otherRemaining)
 
-        if (other is JsBuffer) {
+        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
+        if (actual is JsBuffer) {
             return bulkMismatchInt(
                 thisPos = positionValue,
-                otherPos = other.positionValue,
+                otherPos = actual.positionValue,
                 minLength = minLength,
                 thisRemaining = thisRemaining,
                 otherRemaining = otherRemaining,
                 getInt = { dataView.getInt32(it, true) },
-                otherGetInt = { other.dataView.getInt32(it, true) },
+                otherGetInt = { actual.dataView.getInt32(it, true) },
                 getByte = { dataView.getInt8(it) },
-                otherGetByte = { other.dataView.getInt8(it) },
+                otherGetByte = { actual.dataView.getInt8(it) },
             )
         }
         return super.mismatch(other)

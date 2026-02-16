@@ -353,16 +353,17 @@ class MutableDataBuffer(
         val size = remaining()
         if (size == 0) return true
 
-        return when (other) {
+        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
+        return when (actual) {
             is MutableDataBuffer -> {
-                memcmp(bytePointer + position, other.bytePointer + other.position(), size.convert()) == 0
+                memcmp(bytePointer + position, actual.bytePointer + actual.position(), size.convert()) == 0
             }
             is MutableDataBufferSlice -> {
-                memcmp(bytePointer + position, other.bytePointer + other.position(), size.convert()) == 0
+                memcmp(bytePointer + position, actual.bytePointer + actual.position(), size.convert()) == 0
             }
             is ByteArrayBuffer -> {
-                other.backingArray.usePinned { pinned ->
-                    memcmp(bytePointer + position, pinned.addressOf(other.position()), size.convert()) == 0
+                actual.backingArray.usePinned { pinned ->
+                    memcmp(bytePointer + position, pinned.addressOf(actual.position()), size.convert()) == 0
                 }
             }
             else -> {
@@ -389,27 +390,28 @@ class MutableDataBuffer(
             return if (thisRemaining != otherRemaining) 0 else -1
         }
 
+        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
         val result =
-            when (other) {
+            when (actual) {
                 is MutableDataBuffer -> {
                     buf_mismatch(
                         (bytePointer + position)!!.reinterpret(),
-                        (other.bytePointer + other.position())!!.reinterpret(),
+                        (actual.bytePointer + actual.position())!!.reinterpret(),
                         minLength.convert(),
                     ).toInt()
                 }
                 is MutableDataBufferSlice -> {
                     buf_mismatch(
                         (bytePointer + position)!!.reinterpret(),
-                        (other.bytePointer + other.position())!!.reinterpret(),
+                        (actual.bytePointer + actual.position())!!.reinterpret(),
                         minLength.convert(),
                     ).toInt()
                 }
                 is ByteArrayBuffer -> {
-                    other.backingArray.usePinned { pinned ->
+                    actual.backingArray.usePinned { pinned ->
                         buf_mismatch(
                             (bytePointer + position)!!.reinterpret(),
-                            pinned.addressOf(other.position()).reinterpret(),
+                            pinned.addressOf(actual.position()).reinterpret(),
                             minLength.convert(),
                         ).toInt()
                     }

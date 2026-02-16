@@ -209,8 +209,9 @@ class ByteArrayBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
-        if (buffer is ByteArrayBuffer) {
-            buffer.data.copyInto(data, positionValue, buffer.positionValue, buffer.positionValue + size)
+        val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
+        if (actual is ByteArrayBuffer) {
+            actual.data.copyInto(data, positionValue, actual.positionValue, actual.positionValue + size)
         } else {
             // readByteArray() already advances buffer position, don't increment again
             writeBytes(buffer.readByteArray(size))
@@ -299,11 +300,12 @@ class ByteArrayBuffer(
         val size = remaining()
         if (size == 0) return true
 
-        if (other is ByteArrayBuffer) {
+        val actualOther = (other as? PlatformBuffer)?.unwrap() ?: other
+        if (actualOther is ByteArrayBuffer) {
             // Intentionally allocation-free: compare elements directly rather than
             // using copyOfRange().contentEquals() which would allocate two temp arrays.
             for (i in 0 until size) {
-                if (data[positionValue + i] != other.data[other.positionValue + i]) {
+                if (data[positionValue + i] != actualOther.data[actualOther.positionValue + i]) {
                     return false
                 }
             }

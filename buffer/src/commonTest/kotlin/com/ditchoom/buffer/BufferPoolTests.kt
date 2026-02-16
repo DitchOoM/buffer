@@ -1663,4 +1663,78 @@ class BufferPoolTests {
             assertTrue(unwrapped.capacity >= 512, "Unwrapped buffer should have correct capacity")
             pool.release(buffer)
         }
+
+    @Test
+    fun pooledBufferContentEqualsPooledBuffer() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            pool.withBuffer(256) { a ->
+                pool.withBuffer(256) { b ->
+                    val data = ByteArray(64) { (it * 3 + 7).toByte() }
+                    a.writeBytes(data)
+                    b.writeBytes(data)
+                    a.resetForRead()
+                    b.resetForRead()
+                    assertTrue(a.contentEquals(b), "Pooled buffers with same data should be contentEquals")
+                }
+            }
+        }
+
+    @Test
+    fun pooledBufferContentEqualsNonPooled() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            pool.withBuffer(256) { pooled ->
+                val direct = PlatformBuffer.allocate(256)
+                val data = ByteArray(64) { (it * 3 + 7).toByte() }
+                pooled.writeBytes(data)
+                direct.writeBytes(data)
+                pooled.resetForRead()
+                direct.resetForRead()
+                assertTrue(pooled.contentEquals(direct), "Pooled vs direct should be contentEquals")
+                assertTrue(direct.contentEquals(pooled), "Direct vs pooled should be contentEquals")
+            }
+        }
+
+    @Test
+    fun pooledBufferContentEqualsDetectsDifference() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            pool.withBuffer(256) { a ->
+                pool.withBuffer(256) { b ->
+                    a.writeBytes(ByteArray(32) { 0x11 })
+                    b.writeBytes(ByteArray(32) { 0x22 })
+                    a.resetForRead()
+                    b.resetForRead()
+                    assertFalse(a.contentEquals(b), "Different data should not be contentEquals")
+                }
+            }
+        }
+
+    @Test
+    fun pooledBufferMismatchPooledBuffer() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            pool.withBuffer(256) { a ->
+                pool.withBuffer(256) { b ->
+                    val data = ByteArray(64) { it.toByte() }
+                    a.writeBytes(data)
+                    b.writeBytes(data.copyOf().also { it[42] = 0xFF.toByte() })
+                    a.resetForRead()
+                    b.resetForRead()
+                    assertEquals(42, a.mismatch(b), "Mismatch should be at index 42")
+                }
+            }
+        }
+
+    @Test
+    fun pooledBufferMismatchIdentical() =
+        withPool(defaultBufferSize = 1024) { pool ->
+            pool.withBuffer(256) { a ->
+                pool.withBuffer(256) { b ->
+                    val data = ByteArray(64) { it.toByte() }
+                    a.writeBytes(data)
+                    b.writeBytes(data)
+                    a.resetForRead()
+                    b.resetForRead()
+                    assertEquals(-1, a.mismatch(b), "Identical data should return -1")
+                }
+            }
+        }
 }
