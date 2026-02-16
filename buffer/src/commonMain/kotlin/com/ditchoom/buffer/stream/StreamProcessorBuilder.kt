@@ -72,6 +72,32 @@ class StreamProcessorBuilder(
 
         return processor
     }
+
+    /**
+     * Builds a suspending StreamProcessor that auto-fills from the given callback.
+     *
+     * Read and peek operations automatically invoke [refill] when the processor
+     * doesn't have enough data, eliminating manual `ensureAvailable` loops.
+     *
+     * The [refill] callback must call [AutoFillingSuspendingStreamProcessor.append]
+     * with new data, or throw [EndOfStreamException] if the data source is exhausted.
+     *
+     * ```kotlin
+     * val processor = StreamProcessor.builder(pool)
+     *     .buildSuspendingWithAutoFill { stream ->
+     *         val buffer = pool.acquire(bufferSize)
+     *         val bytesRead = socket.read(buffer, timeout)
+     *         if (bytesRead <= 0) throw EndOfStreamException()
+     *         buffer.setLimit(buffer.position())
+     *         buffer.position(0)
+     *         stream.append(buffer)
+     *     }
+     * ```
+     */
+    fun buildSuspendingWithAutoFill(refill: suspend (AutoFillingSuspendingStreamProcessor) -> Unit): AutoFillingSuspendingStreamProcessor {
+        val delegate = buildSuspending()
+        return AutoFillingSuspendingStreamProcessor(delegate, refill)
+    }
 }
 
 /**

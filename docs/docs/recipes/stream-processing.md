@@ -212,6 +212,66 @@ processor.release()
 
 See [Compression](/recipes/compression#streamprocessor-integration) for full details.
 
+## Auto-Filling Stream Processor
+
+For network protocols, you typically need a loop that reads from the socket and appends to the stream processor until enough data is available. `AutoFillingSuspendingStreamProcessor` eliminates this boilerplate by automatically calling a refill callback when peek/read operations need more data:
+
+```kotlin
+val processor = StreamProcessor.builder(pool)
+    .buildSuspendingWithAutoFill { stream ->
+        val buffer = pool.acquire(bufferSize)
+        val bytesRead = socket.read(buffer, timeout)
+        if (bytesRead <= 0) {
+            buffer.freeIfNeeded()
+            throw EndOfStreamException()
+        }
+        buffer.setLimit(buffer.position())
+        buffer.position(0)
+        stream.append(buffer)
+    }
+
+// Now peek/read operations automatically trigger socket reads!
+val messageType = processor.peekByte()       // triggers refill if empty
+val length = processor.peekInt(offset = 1)   // triggers refill if < 5 bytes
+val payload = processor.readBuffer(length)   // triggers refill if needed
+```
+
+### Before vs After
+
+**Before** (manual ensureAvailable loop):
+```kotlin
+// This pattern is repeated everywhere data is consumed
+while (stream.available() < neededBytes) {
+    val buf = pool.acquire()
+    val n = socket.read(buf, timeout)
+    if (n <= 0) break
+    buf.resetForRead()
+    stream.append(buf)
+}
+val data = stream.readBuffer(neededBytes)
+```
+
+**After** (auto-filling):
+```kotlin
+// Just read — refill happens automatically
+val data = processor.readBuffer(neededBytes)
+```
+
+### EndOfStreamException
+
+When the data source is exhausted (socket closed, file ended), the refill callback should throw `EndOfStreamException`. Callers can catch this to handle clean disconnection:
+
+```kotlin
+try {
+    while (true) {
+        val message = parseNextMessage(processor)
+        handleMessage(message)
+    }
+} catch (e: EndOfStreamException) {
+    // Clean shutdown — peer closed connection
+}
+```
+
 ## Best Practices
 
 1. **Use peek before read** - check data availability first
