@@ -14,6 +14,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -154,6 +155,29 @@ class BufferPoolTests {
             // nativeAddress can be 0 on JS (byteOffset of a fresh Int8Array)
             assertTrue(nma.nativeSize > 0)
         }
+        pool.release(buffer)
+        pool.clear()
+    }
+
+    @Test
+    fun poolBufferSlicePreservesNativeMemoryAccess() {
+        val pool = BufferPool(defaultBufferSize = 1024, allocationZone = AllocationZone.Direct)
+        val buffer = pool.acquire(64)
+        buffer.writeInt(0x12345678)
+        buffer.resetForRead()
+
+        // Verify the buffer itself has nativeMemoryAccess
+        val bufferNma = (buffer as ReadBuffer).nativeMemoryAccess
+        if (bufferNma != null) {
+            // If the pool buffer has nativeMemoryAccess, its slice must too.
+            // This catches regressions where slice wrappers (TrackedSlice) break
+            // the nativeMemoryAccess delegation chain.
+            val slice = buffer.slice()
+            val sliceNma = slice.nativeMemoryAccess
+            assertNotNull(sliceNma, "Slice of pool buffer with nativeMemoryAccess must also have nativeMemoryAccess")
+            assertTrue(sliceNma.nativeSize > 0, "Slice nativeSize must be > 0")
+        }
+
         pool.release(buffer)
         pool.clear()
     }
