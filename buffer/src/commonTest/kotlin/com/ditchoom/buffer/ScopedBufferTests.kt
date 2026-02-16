@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class ScopedBufferTests {
@@ -814,6 +815,44 @@ class ScopedBufferTests {
 
             val result = buffer.readInts(size)
             assertContentEquals(data, result)
+        }
+    }
+
+    // ===== Slice Memory Access Preservation Tests =====
+
+    @Test
+    fun scopedBufferSlicePreservesNativeMemoryAccess() {
+        withScope { scope ->
+            val buffer = scope.allocate(64)
+            buffer.writeInt(0x11223344)
+            buffer.writeInt(0x55667788)
+            buffer.resetForRead()
+            buffer.readInt() // skip first
+
+            val nma = (buffer as ReadBuffer).nativeMemoryAccess
+            assertNotNull(nma, "ScopedBuffer must have nativeMemoryAccess")
+
+            val slice = buffer.slice()
+            val sliceNma = slice.nativeMemoryAccess
+            assertNotNull(sliceNma, "Slice of ScopedBuffer must preserve nativeMemoryAccess")
+            assertTrue(sliceNma.nativeSize > 0, "Slice nativeSize must be > 0")
+            assertEquals(0x55667788, slice.readInt())
+        }
+    }
+
+    @Test
+    fun scopedBufferDoubleSlicePreservesNativeMemoryAccess() {
+        withScope { scope ->
+            val buffer = scope.allocate(128)
+            for (i in 0 until 32) buffer.writeInt(i)
+            buffer.resetForRead()
+            buffer.readInt() // skip first
+
+            val slice1 = buffer.slice()
+            val slice2 = slice1.slice()
+            val sliceNma = slice2.nativeMemoryAccess
+            assertNotNull(sliceNma, "Double-sliced ScopedBuffer must preserve nativeMemoryAccess")
+            assertTrue(sliceNma.nativeSize > 0)
         }
     }
 }

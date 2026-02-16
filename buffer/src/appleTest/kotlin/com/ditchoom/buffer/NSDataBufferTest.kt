@@ -9,6 +9,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -280,6 +281,105 @@ class NSDataBufferTest {
 
         val resultBuffer = PlatformBuffer.wrapReadOnly(result)
         assertContentEquals(byteArrayOf(2, 3, 4, 5, 6, 7, 8), resultBuffer.toByteArray())
+    }
+
+    // endregion
+
+    // region slice NativeMemoryAccess preservation tests
+
+    @Test
+    fun nsDataBufferSlicePreservesNativeMemoryAccess() {
+        val mutableData = NSMutableData.create(length = 16.convert())!!
+        val writeBuffer = PlatformBuffer.wrap(mutableData)
+        for (i in 0 until 16) writeBuffer.writeByte(i.toByte())
+
+        val readBuffer = PlatformBuffer.wrapReadOnly(mutableData as NSData)
+        val nma = (readBuffer as ReadBuffer).nativeMemoryAccess
+        assertNotNull(nma, "NSDataBuffer must have nativeMemoryAccess")
+
+        readBuffer.position(4)
+        readBuffer.setLimit(12)
+        val slice = readBuffer.slice()
+
+        val sliceNma = slice.nativeMemoryAccess
+        assertNotNull(sliceNma, "NSDataBuffer slice must preserve nativeMemoryAccess")
+        assertTrue(sliceNma.nativeSize > 0, "Slice nativeSize must be > 0")
+        assertEquals(8, sliceNma.nativeSize.toInt())
+        assertEquals(4.toByte(), slice.readByte())
+    }
+
+    @Test
+    fun nsDataBufferDoubleSlicePreservesNativeMemoryAccess() {
+        val mutableData = NSMutableData.create(length = 32.convert())!!
+        val writeBuffer = PlatformBuffer.wrap(mutableData)
+        for (i in 0 until 32) writeBuffer.writeByte(i.toByte())
+
+        val readBuffer = PlatformBuffer.wrapReadOnly(mutableData as NSData)
+        readBuffer.position(4)
+
+        val slice1 = readBuffer.slice()
+        val slice1Nma = slice1.nativeMemoryAccess
+        assertNotNull(slice1Nma, "First slice must have nativeMemoryAccess")
+
+        slice1.position(4)
+        val slice2 = slice1.slice()
+        val slice2Nma = slice2.nativeMemoryAccess
+        assertNotNull(slice2Nma, "Double-sliced NSDataBuffer must preserve nativeMemoryAccess")
+        assertTrue(slice2Nma.nativeSize > 0)
+        assertEquals(8.toByte(), slice2.readByte())
+    }
+
+    @Test
+    fun mutableDataBufferSlicePreservesNativeMemoryAccess() {
+        val buffer = PlatformBuffer.allocate(64, AllocationZone.Direct)
+        buffer.writeInt(0x11223344)
+        buffer.writeInt(0x55667788)
+        buffer.resetForRead()
+        buffer.readInt() // skip first
+
+        val nma = (buffer as ReadBuffer).nativeMemoryAccess
+        assertNotNull(nma, "MutableDataBuffer must have nativeMemoryAccess")
+
+        val slice = buffer.slice()
+        val sliceNma = slice.nativeMemoryAccess
+        assertNotNull(sliceNma, "MutableDataBuffer slice must preserve nativeMemoryAccess")
+        assertTrue(sliceNma.nativeSize > 0, "Slice nativeSize must be > 0")
+        assertEquals(0x55667788, slice.readInt())
+    }
+
+    @Test
+    fun mutableDataBufferDoubleSlicePreservesNativeMemoryAccess() {
+        val buffer = PlatformBuffer.allocate(128, AllocationZone.Direct)
+        for (i in 0 until 32) buffer.writeInt(i)
+        buffer.resetForRead()
+        buffer.readInt() // skip first
+
+        val slice1 = buffer.slice()
+        slice1.readInt() // skip one more
+        val slice2 = slice1.slice()
+
+        val sliceNma = slice2.nativeMemoryAccess
+        assertNotNull(sliceNma, "Double-sliced MutableDataBuffer must preserve nativeMemoryAccess")
+        assertTrue(sliceNma.nativeSize > 0)
+        assertEquals(2, slice2.readInt())
+    }
+
+    @Test
+    fun nsDataBufferSliceNativeAddressPointsToCorrectMemory() {
+        val mutableData = NSMutableData.create(length = 16.convert())!!
+        val writeBuffer = PlatformBuffer.wrap(mutableData)
+        for (i in 0 until 16) writeBuffer.writeByte(i.toByte())
+
+        val readBuffer = PlatformBuffer.wrapReadOnly(mutableData as NSData)
+        val parentNma = (readBuffer as NativeMemoryAccess)
+        val parentAddr = parentNma.nativeAddress
+
+        readBuffer.position(4)
+        val slice = readBuffer.slice()
+        val sliceNma = slice.nativeMemoryAccess!!
+
+        // Slice address should be parent address + offset
+        assertEquals(parentAddr + 4, sliceNma.nativeAddress)
     }
 
     // endregion
