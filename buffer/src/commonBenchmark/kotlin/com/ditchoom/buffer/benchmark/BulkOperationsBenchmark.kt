@@ -37,6 +37,8 @@ open class BulkOperationsBenchmark {
 
     private lateinit var directBuffer1: PlatformBuffer
     private lateinit var directBuffer2: PlatformBuffer
+    private lateinit var heapBuffer1: PlatformBuffer
+    private lateinit var heapBuffer2: PlatformBuffer
     private lateinit var intArray: IntArray
     private lateinit var shortArray: ShortArray
 
@@ -44,14 +46,20 @@ open class BulkOperationsBenchmark {
     fun setup() {
         directBuffer1 = PlatformBuffer.allocate(size64k, AllocationZone.Direct)
         directBuffer2 = PlatformBuffer.allocate(size64k, AllocationZone.Direct)
+        heapBuffer1 = PlatformBuffer.allocate(size64k, AllocationZone.Heap)
+        heapBuffer2 = PlatformBuffer.allocate(size64k, AllocationZone.Heap)
 
         // Fill buffers with test data
         for (i in 0 until size64k) {
             directBuffer1.writeByte(i.toByte())
             directBuffer2.writeByte(i.toByte())
+            heapBuffer1.writeByte(i.toByte())
+            heapBuffer2.writeByte(i.toByte())
         }
         directBuffer1.resetForRead()
         directBuffer2.resetForRead()
+        heapBuffer1.resetForRead()
+        heapBuffer2.resetForRead()
 
         intArray = IntArray(size64k / 4) { it }
         shortArray = ShortArray(size64k / 2) { it.toShort() }
@@ -424,6 +432,22 @@ open class BulkOperationsBenchmark {
     }
 
     // =========================================================================
+    // XOR Mask Copy
+    // =========================================================================
+
+    /**
+     * Current: uses buffer.xorMaskCopy() on Direct buffers.
+     */
+    @Benchmark
+    fun xorMaskCopy64kDirect(): Int {
+        directBuffer2.position(0)
+        directBuffer1.position(0)
+        directBuffer1.setLimit(size64k)
+        directBuffer1.xorMaskCopy(directBuffer2, 0x12345678)
+        return directBuffer1.get(0).toInt()
+    }
+
+    // =========================================================================
     // Buffer Copy
     // =========================================================================
 
@@ -434,5 +458,42 @@ open class BulkOperationsBenchmark {
         directBuffer1.setLimit(size64k)
         directBuffer1.write(directBuffer2)
         return directBuffer1.get(0).toInt()
+    }
+
+    // =========================================================================
+    // Heap (ByteArrayBuffer) variants
+    // =========================================================================
+
+    @Benchmark
+    fun xorMask64kHeap(): Int {
+        heapBuffer1.position(0)
+        heapBuffer1.setLimit(size64k)
+        heapBuffer1.xorMask(0x12345678)
+        heapBuffer1.position(0)
+        heapBuffer1.setLimit(size64k)
+        heapBuffer1.xorMask(0x12345678)
+        return heapBuffer1.get(0).toInt()
+    }
+
+    @Benchmark
+    fun xorMaskCopy64kHeap(): Int {
+        heapBuffer2.position(0)
+        heapBuffer1.position(0)
+        heapBuffer1.setLimit(size64k)
+        heapBuffer1.xorMaskCopy(heapBuffer2, 0x12345678)
+        return heapBuffer1.get(0).toInt()
+    }
+
+    @Benchmark
+    fun contentEquals64kHeap(): Boolean {
+        heapBuffer1.position(0)
+        heapBuffer2.position(0)
+        return heapBuffer1.contentEquals(heapBuffer2)
+    }
+
+    @Benchmark
+    fun indexOfByte64kHeap(): Int {
+        heapBuffer1.position(0)
+        return heapBuffer1.indexOf(0xFF.toByte())
     }
 }

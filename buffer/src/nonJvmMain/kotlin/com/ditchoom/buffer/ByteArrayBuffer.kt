@@ -280,6 +280,67 @@ class ByteArrayBuffer(
     }
 
     /**
+     * Optimized XOR mask copy operating directly on backing byte arrays.
+     * Uses 4-byte unrolled loop for ByteArrayBuffer-to-ByteArrayBuffer copies.
+     */
+    override fun xorMaskCopy(
+        source: ReadBuffer,
+        mask: Int,
+        maskOffset: Int,
+    ) {
+        val size = source.remaining()
+        if (size == 0) return
+        if (mask == 0) {
+            write(source)
+            return
+        }
+
+        val actual = (source as? PlatformBuffer)?.unwrap() ?: source
+        if (actual is ByteArrayBuffer) {
+            val srcData = actual.data
+            val srcPos = actual.positionValue
+            val dstPos = positionValue
+
+            // Rotate mask so byte at (maskOffset % 4) becomes byte 0
+            val shift = (maskOffset and 3) * 8
+            val rotated = if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
+
+            val rb0 = (rotated ushr 24).toByte()
+            val rb1 = (rotated ushr 16).toByte()
+            val rb2 = (rotated ushr 8).toByte()
+            val rb3 = rotated.toByte()
+
+            var i = 0
+            // Process 4 bytes at a time with rotated mask
+            while (i + 4 <= size) {
+                data[dstPos + i] = (srcData[srcPos + i].toInt() xor rb0.toInt()).toByte()
+                data[dstPos + i + 1] = (srcData[srcPos + i + 1].toInt() xor rb1.toInt()).toByte()
+                data[dstPos + i + 2] = (srcData[srcPos + i + 2].toInt() xor rb2.toInt()).toByte()
+                data[dstPos + i + 3] = (srcData[srcPos + i + 3].toInt() xor rb3.toInt()).toByte()
+                i += 4
+            }
+            // Handle remaining bytes
+            while (i < size) {
+                val maskByte =
+                    when (i and 3) {
+                        0 -> rb0
+                        1 -> rb1
+                        2 -> rb2
+                        else -> rb3
+                    }
+                data[dstPos + i] = (srcData[srcPos + i].toInt() xor maskByte.toInt()).toByte()
+                i++
+            }
+
+            positionValue += size
+            source.position(srcPos + size)
+        } else {
+            // Fallback to default bulk Long-based implementation
+            super.xorMaskCopy(source, mask, maskOffset)
+        }
+    }
+
+    /**
      * Optimized fill using ByteArray.fill().
      */
     override fun fill(value: Byte): WriteBuffer {
@@ -290,43 +351,8 @@ class ByteArrayBuffer(
         return this
     }
 
-    /**
-     * Optimized contentEquals for ByteArrayBuffer-to-ByteArrayBuffer comparison.
-     * Uses a direct element-by-element loop to avoid allocating temporary arrays
-     * (copyOfRange would allocate two ByteArrays for the slicing).
-     */
-    override fun contentEquals(other: ReadBuffer): Boolean {
-        if (remaining() != other.remaining()) return false
-        val size = remaining()
-        if (size == 0) return true
-
-        val actualOther = (other as? PlatformBuffer)?.unwrap() ?: other
-        if (actualOther is ByteArrayBuffer) {
-            // Intentionally allocation-free: compare elements directly rather than
-            // using copyOfRange().contentEquals() which would allocate two temp arrays.
-            for (i in 0 until size) {
-                if (data[positionValue + i] != actualOther.data[actualOther.positionValue + i]) {
-                    return false
-                }
-            }
-            return true
-        }
-        return super.contentEquals(other)
-    }
-
-    /**
-     * Optimized indexOf(Byte) using direct array scan.
-     */
-    override fun indexOf(byte: Byte): Int {
-        val pos = positionValue
-        val size = remaining()
-        for (i in 0 until size) {
-            if (data[pos + i] == byte) {
-                return i
-            }
-        }
-        return -1
-    }
+    // contentEquals() and indexOf() delegate to super which uses bulk Long operations
+    // (bulkCompareEquals/bulkIndexOf with 8-byte chunks via getLong()).
 
     override suspend fun close() = Unit
 

@@ -8,6 +8,7 @@ import com.ditchoom.buffer.cinterop.buf_indexof_short
 import com.ditchoom.buffer.cinterop.buf_indexof_short_aligned
 import com.ditchoom.buffer.cinterop.buf_mismatch
 import com.ditchoom.buffer.cinterop.buf_xor_mask
+import com.ditchoom.buffer.cinterop.buf_xor_mask_copy
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.IntVar
@@ -328,6 +329,62 @@ class MutableDataBuffer(
             nativeMask,
             maskOffset.convert(),
         )
+    }
+
+    /**
+     * SIMD-optimized fused copy + XOR mask using buf_xor_mask_copy (auto-vectorized by clang at -O2).
+     */
+    override fun xorMaskCopy(
+        source: ReadBuffer,
+        mask: Int,
+        maskOffset: Int,
+    ) {
+        val size = source.remaining()
+        if (size == 0) return
+        if (mask == 0) {
+            write(source)
+            return
+        }
+
+        val nativeMask = mask.reverseBytes().toUInt()
+        val actual = (source as? PlatformBuffer)?.unwrap() ?: source
+        when (actual) {
+            is MutableDataBuffer -> {
+                buf_xor_mask_copy(
+                    (actual.bytePointer + actual.position())!!.reinterpret(),
+                    (bytePointer + position)!!.reinterpret(),
+                    size.convert(),
+                    nativeMask,
+                    maskOffset.convert(),
+                )
+            }
+            is MutableDataBufferSlice -> {
+                buf_xor_mask_copy(
+                    (actual.bytePointer + actual.position())!!.reinterpret(),
+                    (bytePointer + position)!!.reinterpret(),
+                    size.convert(),
+                    nativeMask,
+                    maskOffset.convert(),
+                )
+            }
+            is ByteArrayBuffer -> {
+                actual.backingArray.usePinned { pinned ->
+                    buf_xor_mask_copy(
+                        pinned.addressOf(actual.position()).reinterpret(),
+                        (bytePointer + position)!!.reinterpret(),
+                        size.convert(),
+                        nativeMask,
+                        maskOffset.convert(),
+                    )
+                }
+            }
+            else -> {
+                super.xorMaskCopy(source, mask, maskOffset)
+                return
+            }
+        }
+        position += size
+        source.position(source.position() + size)
     }
 
     /**
