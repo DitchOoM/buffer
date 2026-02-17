@@ -75,12 +75,12 @@ jobs:
         run: |
           TOKEN=$(echo -n "${MAVEN_CENTRAL_USERNAME}:${MAVEN_CENTRAL_PASSWORD}" | base64)
           DEPLOYMENT_ID="${{ steps.extract.outputs.deployment-id }}"
-          MAX_ATTEMPTS=60
+          MAX_ATTEMPTS=50
           ATTEMPT=0
 
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             ATTEMPT=$((ATTEMPT + 1))
-            sleep 10
+            sleep 30
 
             STATUS_RESPONSE=$(curl -s \
               -X POST "https://central.sonatype.com/api/v1/publisher/status?id=${DEPLOYMENT_ID}" \

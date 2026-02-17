@@ -14,6 +14,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -156,6 +157,142 @@ class BufferPoolTests {
         }
         pool.release(buffer)
         pool.clear()
+    }
+
+    @Test
+    fun poolBufferSlicePreservesNativeMemoryAccess() {
+        val pool = BufferPool(defaultBufferSize = 1024, allocationZone = AllocationZone.Direct)
+        val buffer = pool.acquire(64)
+        buffer.writeInt(0x12345678)
+        buffer.resetForRead()
+
+        // Verify the buffer itself has nativeMemoryAccess
+        val bufferNma = (buffer as ReadBuffer).nativeMemoryAccess
+        if (bufferNma != null) {
+            // If the pool buffer has nativeMemoryAccess, its slice must too.
+            // This catches regressions where slice wrappers (TrackedSlice) break
+            // the nativeMemoryAccess delegation chain.
+            val slice = buffer.slice()
+            val sliceNma = slice.nativeMemoryAccess
+            assertNotNull(sliceNma, "Slice of pool buffer with nativeMemoryAccess must also have nativeMemoryAccess")
+            assertTrue(sliceNma.nativeSize > 0, "Slice nativeSize must be > 0")
+        }
+
+        pool.release(buffer)
+        pool.clear()
+    }
+
+    @Test
+    fun poolBufferSlicePreservesManagedMemoryAccess() {
+        val pool = BufferPool(defaultBufferSize = 1024, allocationZone = AllocationZone.Heap)
+        val buffer = pool.acquire(64)
+        buffer.writeInt(0x12345678)
+        buffer.resetForRead()
+
+        val bufferMma = (buffer as ReadBuffer).managedMemoryAccess
+        if (bufferMma != null) {
+            val slice = buffer.slice()
+            val sliceMma = slice.managedMemoryAccess
+            assertNotNull(sliceMma, "Slice of pool buffer with managedMemoryAccess must also have managedMemoryAccess")
+            assertTrue(sliceMma.backingArray.isNotEmpty(), "Slice backingArray must not be empty")
+        }
+
+        pool.release(buffer)
+        pool.clear()
+    }
+
+    // ============================================================================
+    // Memory Access Preservation Through slice() Tests
+    // ============================================================================
+
+    @Test
+    fun directBufferSlicePreservesNativeMemoryAccess() {
+        val buffer = PlatformBuffer.allocate(64, AllocationZone.Direct)
+        buffer.writeInt(0x12345678)
+        buffer.resetForRead()
+
+        val nma = (buffer as ReadBuffer).nativeMemoryAccess
+        if (nma != null) {
+            val slice = buffer.slice()
+            val sliceNma = slice.nativeMemoryAccess
+            assertNotNull(sliceNma, "Slice of direct buffer must preserve nativeMemoryAccess")
+            assertTrue(sliceNma.nativeSize > 0, "Slice nativeSize must be > 0")
+        }
+    }
+
+    @Test
+    fun heapBufferSlicePreservesManagedMemoryAccess() {
+        val buffer = PlatformBuffer.allocate(64, AllocationZone.Heap)
+        buffer.writeInt(0x12345678)
+        buffer.resetForRead()
+
+        val mma = (buffer as ReadBuffer).managedMemoryAccess
+        if (mma != null) {
+            val slice = buffer.slice()
+            val sliceMma = slice.managedMemoryAccess
+            assertNotNull(sliceMma, "Slice of heap buffer must preserve managedMemoryAccess")
+            assertTrue(sliceMma.backingArray.isNotEmpty(), "Slice backingArray must not be empty")
+        }
+    }
+
+    @Test
+    fun directBufferDoubleSlicePreservesNativeMemoryAccess() {
+        val buffer = PlatformBuffer.allocate(128, AllocationZone.Direct)
+        for (i in 0 until 32) buffer.writeInt(i)
+        buffer.resetForRead()
+        buffer.readInt() // skip first
+
+        val nma = (buffer as ReadBuffer).nativeMemoryAccess
+        if (nma != null) {
+            val slice1 = buffer.slice()
+            val slice2 = slice1.slice()
+            val sliceNma = slice2.nativeMemoryAccess
+            assertNotNull(sliceNma, "Double-sliced direct buffer must preserve nativeMemoryAccess")
+            assertTrue(sliceNma.nativeSize > 0)
+        }
+    }
+
+    @Test
+    fun heapBufferDoubleSlicePreservesManagedMemoryAccess() {
+        val buffer = PlatformBuffer.allocate(128, AllocationZone.Heap)
+        for (i in 0 until 32) buffer.writeInt(i)
+        buffer.resetForRead()
+        buffer.readInt() // skip first
+
+        val mma = (buffer as ReadBuffer).managedMemoryAccess
+        if (mma != null) {
+            val slice1 = buffer.slice()
+            val slice2 = slice1.slice()
+            val sliceMma = slice2.managedMemoryAccess
+            assertNotNull(sliceMma, "Double-sliced heap buffer must preserve managedMemoryAccess")
+            assertTrue(sliceMma.backingArray.isNotEmpty())
+        }
+    }
+
+    @Test
+    fun directBufferSliceDataIntegrity() {
+        val buffer = PlatformBuffer.allocate(64, AllocationZone.Direct)
+        buffer.writeInt(0x11223344)
+        buffer.writeInt(0x55667788)
+        buffer.resetForRead()
+        buffer.readInt() // skip first int
+
+        val slice = buffer.slice()
+        assertEquals(4, slice.remaining())
+        assertEquals(0x55667788, slice.readInt())
+    }
+
+    @Test
+    fun heapBufferSliceDataIntegrity() {
+        val buffer = PlatformBuffer.allocate(64, AllocationZone.Heap)
+        buffer.writeInt(0x11223344)
+        buffer.writeInt(0x55667788)
+        buffer.resetForRead()
+        buffer.readInt() // skip first int
+
+        val slice = buffer.slice()
+        assertEquals(4, slice.remaining())
+        assertEquals(0x55667788, slice.readInt())
     }
 
     @Test

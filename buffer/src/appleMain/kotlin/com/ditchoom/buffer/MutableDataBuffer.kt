@@ -592,13 +592,18 @@ class MutableDataBufferSlice(
     private val parent: MutableDataBuffer,
     private val sliceOffset: Int,
     private val sliceLength: Int,
-) : ReadBuffer {
+) : ReadBuffer,
+    NativeMemoryAccess {
     private var position: Int = 0
     private var limit: Int = sliceLength
 
     // Pointer to the start of this slice's data
     @Suppress("UNCHECKED_CAST")
     val bytePointer: CPointer<ByteVar> = (parent.data.mutableBytes as CPointer<ByteVar> + sliceOffset)!!
+
+    override val nativeAddress: Long get() = bytePointer.toLong()
+
+    override val nativeSize: Long get() = sliceLength.toLong()
 
     override val byteOrder: ByteOrder get() = parent.byteOrder
 
