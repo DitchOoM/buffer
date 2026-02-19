@@ -2,9 +2,11 @@
 
 package com.ditchoom.buffer
 
+import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_convert_utf16le_to_utf8
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.COpaquePointerVar
 import kotlinx.cinterop.CPointer
+import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.get
@@ -14,6 +16,7 @@ import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.set
 import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.toLong
+import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
 import platform.posix.free
 import platform.posix.malloc
@@ -642,6 +645,23 @@ class NativeScopedBuffer(
         text: CharSequence,
         charset: Charset,
     ): WriteBuffer {
+        if (charset == Charset.UTF8) {
+            val str = text.toString()
+            val len = str.length
+            if (len == 0) return this
+            val chars = str.toCharArray()
+            val dstAddr = nativeAddress + positionValue
+            val written =
+                chars.usePinned { pinned ->
+                    buf_simdutf_convert_utf16le_to_utf8(
+                        pinned.addressOf(0).reinterpret(),
+                        len.convert(),
+                        dstAddr.toCPointer()!!,
+                    ).toInt()
+                }
+            positionValue += written
+            return this
+        }
         val bytes = text.toString().encodeToByteArray()
         writeBytes(bytes)
         return this
