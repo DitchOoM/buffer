@@ -26,8 +26,8 @@ allOpen {
 
 apply(from = "../gradle/setup.gradle.kts")
 
-// simdutf - SIMD-accelerated Unicode transcoding for Linux
-// CI Requirements: cmake, build-essential, gcc-aarch64-linux-gnu (for ARM64 cross-compilation)
+// simdutf - SIMD-accelerated Unicode transcoding for Linux and Apple native targets
+// CI Requirements (Linux): cmake, build-essential, gcc-aarch64-linux-gnu (for ARM64 cross-compilation)
 apply(from = "gradle/simdutf.gradle.kts")
 
 group = "com.ditchoom"
@@ -44,6 +44,12 @@ val buildSimdutfX64 = extra["buildSimdutfX64"] as TaskProvider<Task>
 
 @Suppress("UNCHECKED_CAST")
 val buildSimdutfArm64 = extra["buildSimdutfArm64"] as TaskProvider<Task>
+
+@Suppress("UNCHECKED_CAST")
+val buildSimdutfAppleArm64 = extra["buildSimdutfAppleArm64"] as TaskProvider<Task>
+
+@Suppress("UNCHECKED_CAST")
+val buildSimdutfAppleX64 = extra["buildSimdutfAppleX64"] as TaskProvider<Task>
 val simdutfLibsDir = extra["simdutfLibsDir"] as File
 
 repositories {
@@ -190,11 +196,8 @@ kotlin {
                 create("simdutf") {
                     defFile(project.file("src/nativeInterop/cinterop/simdutf.def"))
                     extraOpts("-libraryPath", simdutfLibDir.absolutePath)
-                    // Only depend on simdutf build when on Linux (cmake/g++ not available on macOS)
-                    if (HostManager.hostIsLinux) {
-                        tasks.named(interopProcessingTaskName) {
-                            dependsOn(buildSimdutfX64)
-                        }
+                    tasks.named(interopProcessingTaskName) {
+                        dependsOn(buildSimdutfX64)
                     }
                 }
             }
@@ -214,11 +217,8 @@ kotlin {
                 create("simdutf") {
                     defFile(project.file("src/nativeInterop/cinterop/simdutf.def"))
                     extraOpts("-libraryPath", simdutfLibDir.absolutePath)
-                    // Only depend on simdutf build when on Linux (cmake/g++ not available on macOS)
-                    if (HostManager.hostIsLinux) {
-                        tasks.named(interopProcessingTaskName) {
-                            dependsOn(buildSimdutfArm64)
-                        }
+                    tasks.named(interopProcessingTaskName) {
+                        dependsOn(buildSimdutfArm64)
                     }
                 }
             }
@@ -228,6 +228,70 @@ kotlin {
                     "-lsimdutf_wrapper",
                     "-lsimdutf",
                     "-lstdc++",
+                )
+            }
+        }
+    }
+
+    // Configure simdutf for Apple targets (SIMD-accelerated Unicode transcoding via NEON)
+    if (HostManager.hostIsMac) {
+        // Map K/N target names to simdutf library directories
+        val appleArm64Targets =
+            setOf(
+                "macosArm64",
+                "iosArm64",
+                "iosSimulatorArm64",
+                "watchosArm64",
+                "watchosSimulatorArm64",
+                "tvosArm64",
+                "tvosSimulatorArm64",
+            )
+        val appleX64Targets =
+            setOf(
+                "macosX64",
+                "iosX64",
+                "watchosX64",
+                "tvosX64",
+            )
+
+        targets.withType<KotlinNativeTarget>().matching { it.name in appleArm64Targets }.configureEach {
+            val simdutfLibDir = simdutfLibsDir.resolve("apple-arm64/lib")
+            compilations["main"].cinterops {
+                create("simdutf") {
+                    defFile(project.file("src/nativeInterop/cinterop/simdutf.def"))
+                    extraOpts("-libraryPath", simdutfLibDir.absolutePath)
+                    tasks.named(interopProcessingTaskName) {
+                        dependsOn(buildSimdutfAppleArm64)
+                    }
+                }
+            }
+            binaries.all {
+                linkerOpts(
+                    "-L${simdutfLibDir.absolutePath}",
+                    "-lsimdutf_wrapper",
+                    "-lsimdutf",
+                    "-lc++",
+                )
+            }
+        }
+
+        targets.withType<KotlinNativeTarget>().matching { it.name in appleX64Targets }.configureEach {
+            val simdutfLibDir = simdutfLibsDir.resolve("apple-x64/lib")
+            compilations["main"].cinterops {
+                create("simdutf") {
+                    defFile(project.file("src/nativeInterop/cinterop/simdutf.def"))
+                    extraOpts("-libraryPath", simdutfLibDir.absolutePath)
+                    tasks.named(interopProcessingTaskName) {
+                        dependsOn(buildSimdutfAppleX64)
+                    }
+                }
+            }
+            binaries.all {
+                linkerOpts(
+                    "-L${simdutfLibDir.absolutePath}",
+                    "-lsimdutf_wrapper",
+                    "-lsimdutf",
+                    "-lc++",
                 )
             }
         }
@@ -495,6 +559,13 @@ benchmark {
             iterationTimeUnit = "ms"
             include("BulkOperations")
         }
+        register("streaming") {
+            warmups = 3
+            iterations = 5
+            iterationTime = 1000
+            iterationTimeUnit = "ms"
+            include("StreamingStringDecoder")
+        }
         // Fast configuration for WASM - runs only key benchmarks to avoid long run times
         register("wasmFast") {
             warmups = 2
@@ -581,20 +652,25 @@ afterEvaluate {
             HostManager.hostIsMac -> "macosX64"
             else -> "linuxX64"
         }
-    val metadataCinteropKlib =
+    val metadataSimdKlib =
         project.file(
             "${project.layout.buildDirectory.get()}/classes/kotlin/$metadataCinteropTarget/main/cinterop/buffer-cinterop-simd",
         )
-    val metadataCinteropTaskName = "cinteropSimd${metadataCinteropTarget.replaceFirstChar { it.uppercase() }}"
+    val metadataSimdutfKlib =
+        project.file(
+            "${project.layout.buildDirectory.get()}/classes/kotlin/$metadataCinteropTarget/main/cinterop/buffer-cinterop-simdutf",
+        )
+    val metadataSimdTaskName = "cinteropSimd${metadataCinteropTarget.replaceFirstChar { it.uppercase() }}"
+    val metadataSimdutfTaskName = "cinteropSimdutf${metadataCinteropTarget.replaceFirstChar { it.uppercase() }}"
 
-    // Add cinterop klib to intermediate source set metadata compilation tasks
+    // Add cinterop klibs to intermediate source set metadata compilation tasks
     tasks
         .matching {
             it.name.startsWith("compile") && it.name.endsWith("KotlinMetadata")
         }.configureEach {
-            dependsOn(metadataCinteropTaskName)
+            dependsOn(metadataSimdTaskName, metadataSimdutfTaskName)
             if (this is org.jetbrains.kotlin.gradle.tasks.AbstractKotlinCompileTool<*>) {
-                libraries.from(metadataCinteropKlib)
+                libraries.from(metadataSimdKlib, metadataSimdutfKlib)
             }
         }
     // Disable cross-platform metadata compilation tasks that can't resolve on the current host.
@@ -622,11 +698,15 @@ afterEvaluate {
         }
     tasks.withType(kotlinx.benchmark.gradle.NativeSourceGeneratorTask::class.java).configureEach {
         val gradleTarget = name.substringBefore("Benchmark")
-        val cinteropKlib =
+        val simdKlib =
             project.file(
                 "${project.layout.buildDirectory.get()}/classes/kotlin/$gradleTarget/main/cinterop/buffer-cinterop-simd",
             )
-        inputDependencies = inputDependencies + project.files(cinteropKlib)
+        val simdutfKlib =
+            project.file(
+                "${project.layout.buildDirectory.get()}/classes/kotlin/$gradleTarget/main/cinterop/buffer-cinterop-simdutf",
+            )
+        inputDependencies = inputDependencies + project.files(simdKlib, simdutfKlib)
     }
     tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinNativeLink::class.java).configureEach {
         if (name.contains("BenchmarkBenchmark")) {
@@ -638,11 +718,15 @@ afterEvaluate {
                     name.contains("LinuxArm64", ignoreCase = true) -> "linuxArm64"
                     else -> return@configureEach
                 }
-            val cinteropKlib =
+            val simdKlib =
                 project.file(
                     "${project.layout.buildDirectory.get()}/classes/kotlin/$targetName/main/cinterop/buffer-cinterop-simd",
                 )
-            libraries.from(cinteropKlib)
+            val simdutfKlib =
+                project.file(
+                    "${project.layout.buildDirectory.get()}/classes/kotlin/$targetName/main/cinterop/buffer-cinterop-simdutf",
+                )
+            libraries.from(simdKlib, simdutfKlib)
         }
     }
 }

@@ -4,12 +4,16 @@ package = com.ditchoom.buffer.cinterop.simdutf
 # This is a pure C interface - we don't include simdutf.h directly because it's C++.
 # Instead, we declare our own C wrapper functions and link against libsimdutf.a
 
-# Link against simdutf and C++ runtime
+# Link against simdutf and C++ runtime (platform-specific C++ stdlib)
 linkerOpts.linux = -lstdc++
+linkerOpts.osx = -lc++
+linkerOpts.ios = -lc++
+linkerOpts.watchos = -lc++
+linkerOpts.tvos = -lc++
 
 # Static library path is set via build.gradle.kts extraOpts("-libraryPath", ...)
 # Both the core library and the C wrapper must be included so consumers get them via klib
-staticLibraries.linux = libsimdutf_wrapper.a libsimdutf.a
+staticLibraries = libsimdutf_wrapper.a libsimdutf.a
 
 compilerOpts = -O2
 

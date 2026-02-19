@@ -9,6 +9,7 @@ import com.ditchoom.buffer.cinterop.buf_indexof_short_aligned
 import com.ditchoom.buffer.cinterop.buf_mismatch
 import com.ditchoom.buffer.cinterop.buf_xor_mask
 import com.ditchoom.buffer.cinterop.buf_xor_mask_copy
+import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_convert_utf16le_to_utf8
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.IntVar
@@ -272,6 +273,24 @@ class MutableDataBuffer(
         text: CharSequence,
         charset: Charset,
     ): WriteBuffer {
+        if (charset == Charset.UTF8) {
+            // SIMD-accelerated UTF-16→UTF-8 via simdutf, same approach as Linux NativeBuffer
+            val str = text.toString()
+            val len = str.length
+            if (len == 0) return this
+            val chars = str.toCharArray()
+            val written =
+                chars.usePinned { pinned ->
+                    buf_simdutf_convert_utf16le_to_utf8(
+                        pinned.addressOf(0).reinterpret(),
+                        len.convert(),
+                        (bytePointer + position)!!.reinterpret(),
+                    ).toInt()
+                }
+            position += written
+            return this
+        }
+        // Fallback for non-UTF-8 charsets via NSString
         val string =
             if (text is String) {
                 @Suppress("CAST_NEVER_SUCCEEDS")
