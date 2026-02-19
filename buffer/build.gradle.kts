@@ -46,10 +46,7 @@ val buildSimdutfX64 = extra["buildSimdutfX64"] as TaskProvider<Task>
 val buildSimdutfArm64 = extra["buildSimdutfArm64"] as TaskProvider<Task>
 
 @Suppress("UNCHECKED_CAST")
-val buildSimdutfAppleArm64 = extra["buildSimdutfAppleArm64"] as TaskProvider<Task>
-
-@Suppress("UNCHECKED_CAST")
-val buildSimdutfAppleX64 = extra["buildSimdutfAppleX64"] as TaskProvider<Task>
+val buildSimdutfAppleTasks = extra["buildSimdutfAppleTasksExport"] as Map<String, TaskProvider<Task>>
 val simdutfLibsDir = extra["simdutfLibsDir"] as File
 
 repositories {
@@ -233,56 +230,20 @@ kotlin {
         }
     }
 
-    // Configure simdutf for Apple targets (SIMD-accelerated Unicode transcoding via NEON)
+    // Configure simdutf for Apple targets (SIMD-accelerated Unicode transcoding via NEON/SSE)
+    // Each K/N target gets its own simdutf build with the correct Mach-O platform tag.
     if (HostManager.hostIsMac) {
-        // Map K/N target names to simdutf library directories
-        val appleArm64Targets =
-            setOf(
-                "macosArm64",
-                "iosArm64",
-                "iosSimulatorArm64",
-                "watchosArm64",
-                "watchosSimulatorArm64",
-                "tvosArm64",
-                "tvosSimulatorArm64",
-            )
-        val appleX64Targets =
-            setOf(
-                "macosX64",
-                "iosX64",
-                "watchosX64",
-                "tvosX64",
-            )
-
-        targets.withType<KotlinNativeTarget>().matching { it.name in appleArm64Targets }.configureEach {
-            val simdutfLibDir = simdutfLibsDir.resolve("apple-arm64/lib")
+        val allAppleTargets = buildSimdutfAppleTasks.keys
+        targets.withType<KotlinNativeTarget>().matching { it.name in allAppleTargets }.configureEach {
+            val targetName = this.name
+            val simdutfLibDir = simdutfLibsDir.resolve("apple-$targetName/lib")
+            val buildTask = buildSimdutfAppleTasks[targetName]!!
             compilations["main"].cinterops {
                 create("simdutf") {
                     defFile(project.file("src/nativeInterop/cinterop/simdutf.def"))
                     extraOpts("-libraryPath", simdutfLibDir.absolutePath)
                     tasks.named(interopProcessingTaskName) {
-                        dependsOn(buildSimdutfAppleArm64)
-                    }
-                }
-            }
-            binaries.all {
-                linkerOpts(
-                    "-L${simdutfLibDir.absolutePath}",
-                    "-lsimdutf_wrapper",
-                    "-lsimdutf",
-                    "-lc++",
-                )
-            }
-        }
-
-        targets.withType<KotlinNativeTarget>().matching { it.name in appleX64Targets }.configureEach {
-            val simdutfLibDir = simdutfLibsDir.resolve("apple-x64/lib")
-            compilations["main"].cinterops {
-                create("simdutf") {
-                    defFile(project.file("src/nativeInterop/cinterop/simdutf.def"))
-                    extraOpts("-libraryPath", simdutfLibDir.absolutePath)
-                    tasks.named(interopProcessingTaskName) {
-                        dependsOn(buildSimdutfAppleX64)
+                        dependsOn(buildTask)
                     }
                 }
             }

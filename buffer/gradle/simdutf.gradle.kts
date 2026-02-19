@@ -19,8 +19,7 @@
  * Exports (via extra properties):
  * - buildSimdutfLinuxX64: TaskProvider<Task> - builds simdutf for Linux x64
  * - buildSimdutfLinuxArm64: TaskProvider<Task> - builds simdutf for Linux arm64
- * - buildSimdutfAppleArm64: TaskProvider<Task> - builds simdutf for Apple arm64
- * - buildSimdutfAppleX64: TaskProvider<Task> - builds simdutf for Apple x64
+ * - buildSimdutfAppleTasks: Map<String, TaskProvider<Task>> - per-K/N-target Apple build tasks
  * - simdutfLibsDir: File - directory containing built libraries
  */
 
@@ -292,33 +291,37 @@ val buildSimdutfX64: TaskProvider<Task> by extra { buildSimdutfLinuxX64 }
 val buildSimdutfArm64: TaskProvider<Task> by extra { buildSimdutfLinuxArm64 }
 
 // =============================================================================
-// Apple Build Tasks
+// Apple Build Tasks (one per K/N target, each with correct --target triple)
 // =============================================================================
-val buildSimdutfAppleArm64: TaskProvider<Task> by extra {
-    createBuildSimdutfTask("apple", "arm64", hostCheck = { hostIsMac }) {
-        // K/N's bundled clang needs macOS SDK sysroot for C++ standard library headers
-        val sysroot = findMacOsSdkPath()
-        if (System.getProperty("os.arch") == "aarch64") {
-            // Native compilation on Apple Silicon
-            listOf("-isysroot", sysroot)
-        } else {
-            // Cross-compile from Intel Mac to ARM64
-            listOf("-isysroot", sysroot, "--target=arm64-apple-macosx")
+
+// Each Apple K/N target needs its own simdutf build so the Mach-O platform tag
+// matches what the linker expects (e.g., iOS-simulator != macOS).
+val appleTargetTriples = mapOf(
+    "macosArm64" to "arm64-apple-macosx",
+    "macosX64" to "x86_64-apple-macosx",
+    "iosArm64" to "arm64-apple-ios",
+    "iosSimulatorArm64" to "arm64-apple-ios-simulator",
+    "iosX64" to "x86_64-apple-ios-simulator",
+    "watchosArm64" to "arm64-apple-watchos",
+    "watchosSimulatorArm64" to "arm64-apple-watchos-simulator",
+    "watchosX64" to "x86_64-apple-watchos-simulator",
+    "tvosArm64" to "arm64-apple-tvos",
+    "tvosSimulatorArm64" to "arm64-apple-tvos-simulator",
+    "tvosX64" to "x86_64-apple-tvos-simulator",
+)
+
+val buildSimdutfAppleTasks = mutableMapOf<String, TaskProvider<Task>>()
+for ((knTarget, triple) in appleTargetTriples) {
+    buildSimdutfAppleTasks[knTarget] =
+        createBuildSimdutfTask("apple", knTarget, hostCheck = { hostIsMac }) {
+            val sysroot = findMacOsSdkPath()
+            listOf("-isysroot", sysroot, "--target=$triple")
         }
-    }
 }
 
-val buildSimdutfAppleX64: TaskProvider<Task> by extra {
-    createBuildSimdutfTask("apple", "x64", hostCheck = { hostIsMac }) {
-        val sysroot = findMacOsSdkPath()
-        if (System.getProperty("os.arch") != "aarch64") {
-            // Native compilation on Intel Mac
-            listOf("-isysroot", sysroot)
-        } else {
-            // Cross-compile from Apple Silicon to x64
-            listOf("-isysroot", sysroot, "--target=x86_64-apple-macosx")
-        }
-    }
+@Suppress("UNCHECKED_CAST")
+val buildSimdutfAppleTasksExport: Map<String, TaskProvider<Task>> by extra {
+    buildSimdutfAppleTasks as Map<String, TaskProvider<Task>>
 }
 
 // =============================================================================
@@ -340,8 +343,8 @@ if (!hostIsLinux) {
 // On non-macOS hosts (Linux CI), create empty placeholder .a files so
 // cinterop Apple metadata compilation can resolve the library path.
 if (!hostIsMac) {
-    for (arch in listOf("arm64", "x64")) {
-        val libDir = simdutfLibsDir.resolve("apple-$arch/lib")
+    for (knTarget in appleTargetTriples.keys) {
+        val libDir = simdutfLibsDir.resolve("apple-$knTarget/lib")
         if (!libDir.resolve("libsimdutf.a").exists()) {
             libDir.mkdirs()
             libDir.resolve("libsimdutf.a").writeBytes(byteArrayOf())
