@@ -8,15 +8,25 @@ package com.ditchoom.buffer
 
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
+import kotlinx.cinterop.UShortVar
 import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.alloc
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.get
+import kotlinx.cinterop.nativeHeap
+import kotlinx.cinterop.readValue
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.usePinned
+import platform.CoreFoundation.CFRange
+import platform.CoreFoundation.CFRelease
 import platform.CoreFoundation.CFStringCreateWithBytes
+import platform.CoreFoundation.CFStringCreateWithBytesNoCopy
+import platform.CoreFoundation.CFStringGetCharacters
+import platform.CoreFoundation.CFStringGetLength
 import platform.CoreFoundation.CFStringRef
 import platform.CoreFoundation.kCFAllocatorDefault
+import platform.CoreFoundation.kCFAllocatorNull
 import platform.CoreFoundation.kCFStringEncodingUTF8
 import platform.Foundation.CFBridgingRelease
 
@@ -54,6 +64,12 @@ private class AppleStreamingStringDecoder(
     // Pending incomplete multi-byte sequence packed into a Long (avoids ByteArray allocation)
     private var pendingLong: Long = 0
     private var pendingCount: Int = 0
+
+    // Reusable CharArray for CFStringGetCharacters output (avoids per-call allocation)
+    private var charBuffer = CharArray(config.charBufferSize)
+
+    // Reusable CFRange allocated once on native heap (avoids per-call memScoped/alloc)
+    private val cfRange = nativeHeap.alloc<CFRange>()
 
     override fun decode(
         buffer: ReadBuffer,
@@ -248,27 +264,76 @@ private class AppleStreamingStringDecoder(
     ): Int {
         if (length == 0) return 0
 
+        // Small strings: CFStringCreateWithBytes copies + pre-processes into an optimized
+        // internal format, making the subsequent toString() fast. The copy cost is negligible
+        // for small inputs, and this avoids the overhead of CFStringGetLength + pin + readValue.
+        if (length <= SMALL_STRING_BYTE_THRESHOLD) {
+            val cfString: CFStringRef? =
+                CFStringCreateWithBytes(
+                    kCFAllocatorDefault,
+                    ptr.reinterpret(),
+                    length.convert(),
+                    kCFStringEncodingUTF8,
+                    false,
+                )
+            if (cfString == null) {
+                return handleMalformedInput(destination).charsWritten
+            }
+            val nsString = CFBridgingRelease(cfString) as platform.Foundation.NSString
+            val str = nsString.toString()
+            destination.append(str)
+            return str.length
+        }
+
+        // Large strings: zero-copy input + direct UTF-16 extraction avoids intermediate
+        // Kotlin String allocation. CFStringCreateWithBytesNoCopy with kCFAllocatorNull
+        // references our pointer without copying (valid for the duration of this call).
         val cfString: CFStringRef? =
-            CFStringCreateWithBytes(
+            CFStringCreateWithBytesNoCopy(
                 kCFAllocatorDefault,
                 ptr.reinterpret(),
                 length.convert(),
                 kCFStringEncodingUTF8,
                 false,
+                kCFAllocatorNull,
             )
 
         if (cfString == null) {
             return handleMalformedInput(destination).charsWritten
         }
 
-        try {
-            val nsString = CFBridgingRelease(cfString) as platform.Foundation.NSString
-            val str = nsString.toString()
-            destination.append(str)
-            return str.length
-        } catch (e: Exception) {
-            return handleMalformedInput(destination).charsWritten
+        val charCount = CFStringGetLength(cfString).toInt()
+        if (charCount == 0) {
+            CFRelease(cfString)
+            return 0
         }
+
+        // Grow reusable char buffer if needed
+        if (charBuffer.size < charCount) {
+            charBuffer = CharArray(charCount)
+        }
+
+        // Extract UTF-16 characters directly into pinned CharArray — no intermediate String
+        cfRange.location = 0
+        cfRange.length = charCount.convert()
+        charBuffer.usePinned { pinned ->
+            CFStringGetCharacters(
+                cfString,
+                cfRange.readValue(),
+                pinned.addressOf(0).reinterpret<UShortVar>(),
+            )
+        }
+        CFRelease(cfString)
+
+        // Append characters to destination
+        if (destination is StringBuilder) {
+            destination.appendRange(charBuffer, 0, charCount)
+        } else {
+            for (i in 0 until charCount) {
+                destination.append(charBuffer[i])
+            }
+        }
+        return charCount
     }
 
     private fun findUtf8Boundary(
@@ -318,7 +383,7 @@ private class AppleStreamingStringDecoder(
     }
 
     override suspend fun close() {
-        // Nothing to close
+        nativeHeap.free(cfRange.rawPtr)
     }
 
     private fun handleMalformedInput(destination: Appendable): DecodeResult =
@@ -334,6 +399,13 @@ private class AppleStreamingStringDecoder(
         val charsWritten: Int,
         val bytesConsumed: Int,
     )
+
+    private companion object {
+        // Below this byte count, NSString.toString() is faster than CFStringGetCharacters + pin.
+        // At 256B the CF extraction path's per-call overhead (CFStringGetLength, readValue,
+        // usePinned) exceeds the cost of a small Kotlin String allocation.
+        const val SMALL_STRING_BYTE_THRESHOLD = 512
+    }
 }
 
 actual fun StreamingStringDecoder(config: StreamingStringDecoderConfig): StreamingStringDecoder = AppleStreamingStringDecoder(config)

@@ -495,6 +495,13 @@ benchmark {
             iterationTimeUnit = "ms"
             include("BulkOperations")
         }
+        register("streaming") {
+            warmups = 3
+            iterations = 5
+            iterationTime = 1000
+            iterationTimeUnit = "ms"
+            include("StreamingStringDecoder")
+        }
         // Fast configuration for WASM - runs only key benchmarks to avoid long run times
         register("wasmFast") {
             warmups = 2
