@@ -2,12 +2,10 @@
 
 package com.ditchoom.buffer.compression
 
-import com.ditchoom.buffer.ByteArrayBuffer
-import com.ditchoom.buffer.MutableDataBuffer
-import com.ditchoom.buffer.MutableDataBufferSlice
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
+import com.ditchoom.buffer.managedMemoryAccess
+import com.ditchoom.buffer.nativeMemoryAccess
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -20,6 +18,7 @@ import kotlinx.cinterop.pointed
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.rawPtr
 import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.usePinned
 import platform.zlib.Z_DEFLATED
 import platform.zlib.Z_FINISH
@@ -415,40 +414,19 @@ private class AppleZlibStreamingDecompressor(
 private inline fun <R> withInputPointer(
     buffer: ReadBuffer,
     block: (CPointer<ByteVar>) -> R,
-): R =
-    when (buffer) {
-        is MutableDataBufferSlice -> block(buffer.bytePointer)
-        is MutableDataBuffer -> {
-            @Suppress("UNCHECKED_CAST")
-            block(buffer.data.mutableBytes as CPointer<ByteVar>)
-        }
-        is ByteArrayBuffer -> {
-            buffer.backingArray.usePinned { pinned ->
-                block(pinned.addressOf(0))
-            }
-        }
-        else -> {
-            // Unwrap PooledBuffer or other wrappers
-            val unwrapped = (buffer as? PlatformBuffer)?.unwrap()
-            if (unwrapped != null && unwrapped !== buffer) {
-                when (unwrapped) {
-                    is MutableDataBufferSlice -> block(unwrapped.bytePointer)
-                    is MutableDataBuffer -> {
-                        @Suppress("UNCHECKED_CAST")
-                        block(unwrapped.data.mutableBytes as CPointer<ByteVar>)
-                    }
-                    is ByteArrayBuffer -> {
-                        unwrapped.backingArray.usePinned { pinned ->
-                            block(pinned.addressOf(0))
-                        }
-                    }
-                    else -> throw CompressionException("Unsupported buffer type: ${unwrapped::class}")
-                }
-            } else {
-                throw CompressionException("Unsupported buffer type: ${buffer::class}")
-            }
+): R {
+    val nativeAccess = buffer.nativeMemoryAccess
+    if (nativeAccess != null) {
+        return block(nativeAccess.nativeAddress.toCPointer<ByteVar>()!!)
+    }
+    val managedAccess = buffer.managedMemoryAccess
+    if (managedAccess != null) {
+        return managedAccess.backingArray.usePinned { pinned ->
+            block(pinned.addressOf(managedAccess.arrayOffset))
         }
     }
+    throw CompressionException("Unsupported buffer type: ${buffer::class}")
+}
 
 /**
  * Execute a block with a pointer to the buffer's data (write/output path).
@@ -459,21 +437,19 @@ private inline fun <R> withOutputPointer(
     buffer: ReadWriteBuffer,
     block: (CPointer<ByteVar>) -> R,
 ): R {
-    // Unwrap PooledBuffer or other wrappers to get the actual buffer
-    val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
-    return when (actual) {
-        is MutableDataBufferSlice -> block(actual.bytePointer)
-        is MutableDataBuffer -> {
-            @Suppress("UNCHECKED_CAST")
-            block(actual.data.mutableBytes as CPointer<ByteVar>)
-        }
-        is ByteArrayBuffer -> {
-            actual.backingArray.usePinned { pinned ->
-                block(pinned.addressOf(0))
-            }
-        }
-        else -> throw CompressionException("Unsupported output buffer type: ${actual::class}")
+    // Cast to ReadBuffer to resolve extension ambiguity (ReadWriteBuffer extends both ReadBuffer and WriteBuffer)
+    val buf = buffer as ReadBuffer
+    val nativeAccess = buf.nativeMemoryAccess
+    if (nativeAccess != null) {
+        return block(nativeAccess.nativeAddress.toCPointer<ByteVar>()!!)
     }
+    val managedAccess = buf.managedMemoryAccess
+    if (managedAccess != null) {
+        return managedAccess.backingArray.usePinned { pinned ->
+            block(pinned.addressOf(managedAccess.arrayOffset))
+        }
+    }
+    throw CompressionException("Unsupported output buffer type: ${buffer::class}")
 }
 
 // =============================================================================

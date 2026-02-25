@@ -63,7 +63,7 @@ src/
 ### Memory Access Interfaces
 
 - `NativeMemoryAccess` - Direct native memory pointer (DirectJvmBuffer, MutableDataBuffer, LinearBuffer, JsBuffer, NativeBuffer)
-- `ManagedMemoryAccess` - Kotlin ByteArray backing (HeapJvmBuffer, ByteArrayBuffer)
+- `ManagedMemoryAccess` - Kotlin ByteArray backing (HeapJvmBuffer, ByteArrayBuffer, JsBuffer)
 - `SharedMemoryAccess` - Cross-process shared memory (ParcelableSharedMemoryBuffer, JsBuffer with SharedArrayBuffer)
 
 ### Native Data Conversions
@@ -240,6 +240,29 @@ processor.append(networkData)
 val length = processor.readInt()
 val payload = processor.readBuffer(length)
 ```
+
+### Wrapper Transparency
+
+Buffer wrappers (PooledBuffer, TrackedSlice) delegate to an underlying PlatformBuffer. Code that consumes buffers must work transparently through these wrappers.
+
+**Correct pattern — interface-based dispatch:**
+```kotlin
+val nma = buffer.nativeMemoryAccess   // returns NativeMemoryAccess? via extension
+val mma = buffer.managedMemoryAccess  // returns ManagedMemoryAccess? via extension
+```
+
+**Correct pattern — unwrap for platform-specific fast paths:**
+```kotlin
+val actual = buffer.unwrapFully()     // strips all wrapper layers
+if (actual is JsBuffer) { /* fast path */ }
+```
+
+**Anti-pattern — NEVER do this:**
+```kotlin
+(buffer as? PlatformBuffer)?.unwrap() ?: buffer  // breaks on PooledBuffer/TrackedSlice
+```
+
+All new buffer-consuming code must be tested with wrapper types (see `WrapperTransparencyTests`).
 
 ### Factory Pattern
 

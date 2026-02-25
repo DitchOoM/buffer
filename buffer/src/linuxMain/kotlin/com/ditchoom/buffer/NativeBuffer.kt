@@ -408,18 +408,25 @@ class NativeBuffer private constructor(
         val size = remaining()
         if (size == 0) return true
 
-        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
-        when (actual) {
-            is NativeBuffer -> {
-                return memcmp(ptr + positionValue, actual.ptr + actual.position(), size.convert()) == 0
-            }
-            is ByteArrayBuffer -> {
-                return actual.backingArray.usePinned { pinned ->
-                    memcmp(ptr + positionValue, pinned.addressOf(actual.position()), size.convert()) == 0
-                }
-            }
-            else -> return super.contentEquals(other)
+        val otherNative = other.nativeMemoryAccess
+        if (otherNative != null) {
+            return memcmp(
+                ptr + positionValue,
+                otherNative.nativeAddress.toCPointer<ByteVar>()!! + other.position(),
+                size.convert(),
+            ) == 0
         }
+        val otherManaged = other.managedMemoryAccess
+        if (otherManaged != null) {
+            return otherManaged.backingArray.usePinned { pinned ->
+                memcmp(
+                    ptr + positionValue,
+                    pinned.addressOf(otherManaged.arrayOffset + other.position()),
+                    size.convert(),
+                ) == 0
+            }
+        }
+        return super.contentEquals(other)
     }
 
     /**
@@ -435,33 +442,30 @@ class NativeBuffer private constructor(
             return if (thisRemaining != otherRemaining) 0 else -1
         }
 
-        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
+        val otherNative = other.nativeMemoryAccess
+        val otherManaged = other.managedMemoryAccess
         val result =
-            when (actual) {
-                is NativeBuffer -> {
+            if (otherNative != null) {
+                buf_mismatch(
+                    (ptr + positionValue)!!.reinterpret(),
+                    (otherNative.nativeAddress.toCPointer<ByteVar>()!! + other.position())!!.reinterpret(),
+                    minLength.convert(),
+                ).toInt()
+            } else if (otherManaged != null) {
+                otherManaged.backingArray.usePinned { pinned ->
                     buf_mismatch(
                         (ptr + positionValue)!!.reinterpret(),
-                        (actual.ptr + actual.position())!!.reinterpret(),
+                        pinned.addressOf(otherManaged.arrayOffset + other.position())!!.reinterpret(),
                         minLength.convert(),
                     ).toInt()
                 }
-                is ByteArrayBuffer -> {
-                    actual.backingArray.usePinned { pinned ->
-                        buf_mismatch(
-                            (ptr + positionValue)!!.reinterpret(),
-                            pinned.addressOf(actual.position())!!.reinterpret(),
-                            minLength.convert(),
-                        ).toInt()
+            } else {
+                for (i in 0 until minLength) {
+                    if (get(positionValue + i) != other.get(other.position() + i)) {
+                        return i
                     }
                 }
-                else -> {
-                    for (i in 0 until minLength) {
-                        if (get(positionValue + i) != other.get(other.position() + i)) {
-                            return i
-                        }
-                    }
-                    -1
-                }
+                -1
             }
 
         if (result != -1) return result

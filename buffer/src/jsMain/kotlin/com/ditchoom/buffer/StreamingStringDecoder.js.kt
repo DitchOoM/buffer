@@ -63,7 +63,7 @@ private class JsStreamingStringDecoder(
         remaining: Int,
     ): Uint8Array {
         // Try to get direct access to underlying Int8Array (unwrap PooledBuffer if needed)
-        val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
+        val actual = buffer.unwrapFully()
         if (actual is JsBuffer) {
             val int8Array = actual.buffer
             // Create a view of just the remaining bytes

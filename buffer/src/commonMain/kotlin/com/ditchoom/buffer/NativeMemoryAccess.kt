@@ -77,7 +77,11 @@ val ReadBuffer.nativeMemoryAccess: NativeMemoryAccess?
  * Unwraps pooled buffers to reach the underlying platform buffer.
  */
 val WriteBuffer.nativeMemoryAccess: NativeMemoryAccess?
-    get() = ((this as? PlatformBuffer)?.unwrap() ?: this) as? NativeMemoryAccess
+    get() {
+        if (this is NativeMemoryAccess) return this
+        if (this is PlatformBuffer) return unwrap() as? NativeMemoryAccess
+        return null
+    }
 
 /**
  * Allocates a buffer with guaranteed native memory access.
@@ -160,7 +164,11 @@ val ReadBuffer.managedMemoryAccess: ManagedMemoryAccess?
  * Unwraps pooled buffers to reach the underlying platform buffer.
  */
 val WriteBuffer.managedMemoryAccess: ManagedMemoryAccess?
-    get() = ((this as? PlatformBuffer)?.unwrap() ?: this) as? ManagedMemoryAccess
+    get() {
+        if (this is ManagedMemoryAccess) return this
+        if (this is PlatformBuffer) return unwrap() as? ManagedMemoryAccess
+        return null
+    }
 
 /**
  * Interface for buffers backed by shared memory that can be accessed across

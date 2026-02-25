@@ -38,8 +38,10 @@ actual class MutableNativeData(
  * **Memory management**: If a copy is made, the allocated memory is managed
  * by LinearMemoryAllocator.
  */
-actual fun ReadBuffer.toNativeData(): NativeData =
-    NativeData(
+actual fun ReadBuffer.toNativeData(): NativeData {
+    val unwrapped = unwrapFully()
+    if (unwrapped !== this) return unwrapped.toNativeData()
+    return NativeData(
         when (this) {
             is LinearBuffer -> this.slice() as LinearBuffer
             else -> {
@@ -52,6 +54,7 @@ actual fun ReadBuffer.toNativeData(): NativeData =
             }
         },
     )
+}
 
 /**
  * Converts the remaining bytes of this buffer to a mutable LinearBuffer.
@@ -71,8 +74,10 @@ actual fun ReadBuffer.toNativeData(): NativeData =
  * **Memory management**: If a copy is made, the allocated memory is managed
  * by LinearMemoryAllocator.
  */
-actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData =
-    MutableNativeData(
+actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData {
+    val unwrapped = unwrap()
+    if (unwrapped !== this) return unwrapped.toMutableNativeData()
+    return MutableNativeData(
         when (this) {
             is LinearBuffer -> {
                 // Create a new LinearBuffer view sharing the same memory
@@ -89,3 +94,4 @@ actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData =
             }
         },
     )
+}

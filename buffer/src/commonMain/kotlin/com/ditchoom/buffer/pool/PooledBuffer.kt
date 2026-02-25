@@ -42,6 +42,7 @@ internal class PooledBuffer(
         return TrackedSlice(inner.slice(), this)
     }
 
+    @Suppress("DEPRECATION")
     override fun unwrap(): PlatformBuffer = inner.unwrap()
 
     override suspend fun close() {

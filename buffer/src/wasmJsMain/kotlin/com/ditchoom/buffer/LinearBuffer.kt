@@ -311,7 +311,7 @@ class LinearBuffer(
         val leMask = rotatedMask.reverseBytes()
         val maskLong = (leMask.toLong() and 0xFFFFFFFFL) or (leMask.toLong() shl 32)
 
-        val actual = (source as? PlatformBuffer)?.unwrap() ?: source
+        val actual = source.unwrapFully()
         if (actual is LinearBuffer) {
             // Both in linear memory: use Pointer Long operations
             var srcOffset = actual.baseOffset + actual.positionValue
@@ -438,7 +438,7 @@ class LinearBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
-        val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
+        val actual = buffer.unwrapFully()
         when (actual) {
             is LinearBuffer -> {
                 // Both are in linear memory - use native memcpy via Uint8Array.set()
@@ -511,7 +511,7 @@ class LinearBuffer(
         val size = remaining()
         if (size == 0) return true
 
-        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
+        val actual = other.unwrapFully()
         if (actual is LinearBuffer) {
             return bulkCompareEquals(
                 thisPos = positionValue,
@@ -534,7 +534,7 @@ class LinearBuffer(
         val otherRemaining = other.remaining()
         val minLength = minOf(thisRemaining, otherRemaining)
 
-        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
+        val actual = other.unwrapFully()
         if (actual is LinearBuffer) {
             return bulkMismatch(
                 thisPos = positionValue,

@@ -38,6 +38,8 @@ actual class MutableNativeData(
  * - If the buffer is heap-backed, copies remaining bytes to a new direct ByteBuffer.
  */
 actual fun ReadBuffer.toNativeData(): NativeData {
+    val unwrapped = unwrapFully()
+    if (unwrapped !== this) return unwrapped.toNativeData()
     if (this is BaseJvmBuffer && byteBuffer.isDirect) {
         val duplicate = byteBuffer.duplicate()
         duplicate.position(position())
@@ -69,8 +71,10 @@ actual fun ReadBuffer.toNativeData(): NativeData {
  * - Heap buffers with non-zero position/offset or partial remaining: copies to new array
  * - Non-JVM buffer types: copies via readByteArray()
  */
-actual fun ReadBuffer.toByteArray(): ByteArray =
-    when (this) {
+actual fun ReadBuffer.toByteArray(): ByteArray {
+    val unwrapped = unwrapFully()
+    if (unwrapped !== this) return unwrapped.toByteArray()
+    return when (this) {
         is BaseJvmBuffer -> {
             if (byteBuffer.hasArray()) {
                 val array = byteBuffer.array()
@@ -100,6 +104,7 @@ actual fun ReadBuffer.toByteArray(): ByteArray =
             result
         }
     }
+}
 
 /**
  * Converts the remaining bytes of this buffer to a mutable direct ByteBuffer.
@@ -119,6 +124,8 @@ actual fun ReadBuffer.toByteArray(): ByteArray =
  * - If the buffer is heap-backed, copies remaining bytes to a new direct ByteBuffer.
  */
 actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData {
+    val unwrapped = unwrap()
+    if (unwrapped !== this) return unwrapped.toMutableNativeData()
     if (this is BaseJvmBuffer && byteBuffer.isDirect) {
         val duplicate = byteBuffer.duplicate()
         duplicate.position(position())

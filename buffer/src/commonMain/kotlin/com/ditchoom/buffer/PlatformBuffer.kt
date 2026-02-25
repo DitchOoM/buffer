@@ -12,10 +12,19 @@ interface PlatformBuffer :
     fun freeNativeMemory() {}
 
     /**
-     * Returns the underlying platform buffer, unwrapping any decorators (e.g. [PooledBuffer][com.ditchoom.buffer.pool.PooledBuffer]).
-     * For non-wrapped buffers, returns itself.
-     * Use this when you need to downcast to a platform-specific type (e.g. BaseJvmBuffer, NativeBuffer).
+     * Returns the underlying platform buffer, unwrapping one layer of decoration.
+     *
+     * @see [unwrapFully] for the correct replacement that strips all wrapper layers.
+     * @see [nativeMemoryAccess] and [managedMemoryAccess] for interface-based access that
+     * works transparently through wrappers without downcasting.
      */
+    @Deprecated(
+        "unwrap() only peels one layer and requires callers to cast to PlatformBuffer first, " +
+            "which breaks on TrackedSlice and other non-PlatformBuffer wrappers. " +
+            "Use ReadBuffer.unwrapFully() for concrete type access, or " +
+            "nativeMemoryAccess/managedMemoryAccess extensions for interface-based dispatch.",
+        ReplaceWith("(this as ReadBuffer).unwrapFully()", "com.ditchoom.buffer.unwrapFully"),
+    )
     fun unwrap(): PlatformBuffer = this
 
     companion object

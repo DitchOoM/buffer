@@ -22,6 +22,7 @@ import kotlinx.cinterop.plus
 import kotlinx.cinterop.readBytes
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.set
+import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.toLong
 import kotlinx.cinterop.usePinned
 import platform.Foundation.NSMakeRange
@@ -245,21 +246,18 @@ class MutableDataBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val bytesToCopy = buffer.remaining()
-        val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
-        when (actual) {
-            is MutableDataBuffer -> {
-                // Direct memory copy - no intermediate allocation
-                val srcPtr = actual.bytePointer + actual.position()
-                val dstPtr = bytePointer + position
-                memcpy(dstPtr, srcPtr, bytesToCopy.convert())
-            }
-            is MutableDataBufferSlice -> {
-                // Direct memory copy from slice
-                val srcPtr = actual.bytePointer + actual.position()
-                val dstPtr = bytePointer + position
-                memcpy(dstPtr, srcPtr, bytesToCopy.convert())
-            }
-            else -> {
+        val srcNative = buffer.nativeMemoryAccess
+        if (srcNative != null) {
+            val srcPtr = srcNative.nativeAddress.toCPointer<ByteVar>()!! + buffer.position()
+            val dstPtr = bytePointer + position
+            memcpy(dstPtr, srcPtr, bytesToCopy.convert())
+        } else {
+            val srcManaged = buffer.managedMemoryAccess
+            if (srcManaged != null) {
+                srcManaged.backingArray.usePinned { pinned ->
+                    memcpy(bytePointer + position, pinned.addressOf(srcManaged.arrayOffset + buffer.position()), bytesToCopy.convert())
+                }
+            } else {
                 writeBytes(buffer.readByteArray(bytesToCopy))
                 return // readByteArray already advances buffer position
             }
@@ -347,38 +345,28 @@ class MutableDataBuffer(
         }
 
         val nativeMask = mask.reverseBytes().toUInt()
-        val actual = (source as? PlatformBuffer)?.unwrap() ?: source
-        when (actual) {
-            is MutableDataBuffer -> {
-                buf_xor_mask_copy(
-                    (actual.bytePointer + actual.position())!!.reinterpret(),
-                    (bytePointer + position)!!.reinterpret(),
-                    size.convert(),
-                    nativeMask,
-                    maskOffset.convert(),
-                )
-            }
-            is MutableDataBufferSlice -> {
-                buf_xor_mask_copy(
-                    (actual.bytePointer + actual.position())!!.reinterpret(),
-                    (bytePointer + position)!!.reinterpret(),
-                    size.convert(),
-                    nativeMask,
-                    maskOffset.convert(),
-                )
-            }
-            is ByteArrayBuffer -> {
-                actual.backingArray.usePinned { pinned ->
+        val srcNative = source.nativeMemoryAccess
+        if (srcNative != null) {
+            buf_xor_mask_copy(
+                (srcNative.nativeAddress.toCPointer<ByteVar>()!! + source.position())!!.reinterpret(),
+                (bytePointer + position)!!.reinterpret(),
+                size.convert(),
+                nativeMask,
+                maskOffset.convert(),
+            )
+        } else {
+            val srcManaged = source.managedMemoryAccess
+            if (srcManaged != null) {
+                srcManaged.backingArray.usePinned { pinned ->
                     buf_xor_mask_copy(
-                        pinned.addressOf(actual.position()).reinterpret(),
+                        pinned.addressOf(srcManaged.arrayOffset + source.position()).reinterpret(),
                         (bytePointer + position)!!.reinterpret(),
                         size.convert(),
                         nativeMask,
                         maskOffset.convert(),
                     )
                 }
-            }
-            else -> {
+            } else {
                 super.xorMaskCopy(source, mask, maskOffset)
                 return
             }
@@ -410,29 +398,31 @@ class MutableDataBuffer(
         val size = remaining()
         if (size == 0) return true
 
-        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
-        return when (actual) {
-            is MutableDataBuffer -> {
-                memcmp(bytePointer + position, actual.bytePointer + actual.position(), size.convert()) == 0
-            }
-            is MutableDataBufferSlice -> {
-                memcmp(bytePointer + position, actual.bytePointer + actual.position(), size.convert()) == 0
-            }
-            is ByteArrayBuffer -> {
-                actual.backingArray.usePinned { pinned ->
-                    memcmp(bytePointer + position, pinned.addressOf(actual.position()), size.convert()) == 0
-                }
-            }
-            else -> {
-                // Fallback for other buffer types
-                for (i in 0 until size) {
-                    if (get(position + i) != other.get(other.position() + i)) {
-                        return false
-                    }
-                }
-                true
+        val otherNative = other.nativeMemoryAccess
+        if (otherNative != null) {
+            return memcmp(
+                bytePointer + position,
+                otherNative.nativeAddress.toCPointer<ByteVar>()!! + other.position(),
+                size.convert(),
+            ) == 0
+        }
+        val otherManaged = other.managedMemoryAccess
+        if (otherManaged != null) {
+            return otherManaged.backingArray.usePinned { pinned ->
+                memcmp(
+                    bytePointer + position,
+                    pinned.addressOf(otherManaged.arrayOffset + other.position()),
+                    size.convert(),
+                ) == 0
             }
         }
+        // Fallback for other buffer types
+        for (i in 0 until size) {
+            if (get(position + i) != other.get(other.position() + i)) {
+                return false
+            }
+        }
+        return true
     }
 
     /**
@@ -447,41 +437,31 @@ class MutableDataBuffer(
             return if (thisRemaining != otherRemaining) 0 else -1
         }
 
-        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
+        val otherNative = other.nativeMemoryAccess
+        val otherManaged = other.managedMemoryAccess
         val result =
-            when (actual) {
-                is MutableDataBuffer -> {
+            if (otherNative != null) {
+                buf_mismatch(
+                    (bytePointer + position)!!.reinterpret(),
+                    (otherNative.nativeAddress.toCPointer<ByteVar>()!! + other.position())!!.reinterpret(),
+                    minLength.convert(),
+                ).toInt()
+            } else if (otherManaged != null) {
+                otherManaged.backingArray.usePinned { pinned ->
                     buf_mismatch(
                         (bytePointer + position)!!.reinterpret(),
-                        (actual.bytePointer + actual.position())!!.reinterpret(),
+                        pinned.addressOf(otherManaged.arrayOffset + other.position())!!.reinterpret(),
                         minLength.convert(),
                     ).toInt()
                 }
-                is MutableDataBufferSlice -> {
-                    buf_mismatch(
-                        (bytePointer + position)!!.reinterpret(),
-                        (actual.bytePointer + actual.position())!!.reinterpret(),
-                        minLength.convert(),
-                    ).toInt()
-                }
-                is ByteArrayBuffer -> {
-                    actual.backingArray.usePinned { pinned ->
-                        buf_mismatch(
-                            (bytePointer + position)!!.reinterpret(),
-                            pinned.addressOf(actual.position()).reinterpret(),
-                            minLength.convert(),
-                        ).toInt()
+            } else {
+                // Fallback for other buffer types
+                for (i in 0 until minLength) {
+                    if (get(position + i) != other.get(other.position() + i)) {
+                        return i
                     }
                 }
-                else -> {
-                    // Fallback for other buffer types
-                    for (i in 0 until minLength) {
-                        if (get(position + i) != other.get(other.position() + i)) {
-                            return i
-                        }
-                    }
-                    -1
-                }
+                -1
             }
 
         if (result != -1) return result
