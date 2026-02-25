@@ -616,6 +616,221 @@ class WrapperTransparencyTests {
         pool.clear()
     }
 
+    // ============================================================================
+    // Deep nesting (3-level TrackedSlice chains)
+    // ============================================================================
+
+    @Test
+    fun deeplyNestedSlicePreservesNativeMemoryAccess() {
+        val pool = BufferPool(defaultBufferSize = 32, allocationZone = AllocationZone.Direct)
+        val pooled = pool.acquire(32)
+        pooled.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
+        pooled.resetForRead()
+
+        val slice1 = pooled.slice()
+        val slice2 = slice1.slice()
+        val slice3 = slice2.slice()
+
+        assertNotNull((pooled as WriteBuffer).nativeMemoryAccess, "pooled NMA should be non-null")
+        assertNotNull(slice1.nativeMemoryAccess, "slice1 NMA should be non-null")
+        assertNotNull(slice2.nativeMemoryAccess, "slice2 NMA should be non-null")
+        assertNotNull(slice3.nativeMemoryAccess, "slice3 NMA should be non-null")
+
+        (slice3 as? PoolReleasable)?.releaseToPool()
+        (slice2 as? PoolReleasable)?.releaseToPool()
+        (slice1 as? PoolReleasable)?.releaseToPool()
+        pool.release(pooled)
+        pool.clear()
+    }
+
+    @Test
+    fun deeplyNestedSlicePreservesManagedMemoryAccess() {
+        val pool = BufferPool(defaultBufferSize = 32, allocationZone = AllocationZone.Heap)
+        val pooled = pool.acquire(32)
+        pooled.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
+        pooled.resetForRead()
+
+        val slice1 = pooled.slice()
+        val slice2 = slice1.slice()
+        val slice3 = slice2.slice()
+
+        assertNotNull((pooled as WriteBuffer).managedMemoryAccess, "pooled MMA should be non-null")
+        assertNotNull(slice1.managedMemoryAccess, "slice1 MMA should be non-null")
+        assertNotNull(slice2.managedMemoryAccess, "slice2 MMA should be non-null")
+        assertNotNull(slice3.managedMemoryAccess, "slice3 MMA should be non-null")
+
+        (slice3 as? PoolReleasable)?.releaseToPool()
+        (slice2 as? PoolReleasable)?.releaseToPool()
+        (slice1 as? PoolReleasable)?.releaseToPool()
+        pool.release(pooled)
+        pool.clear()
+    }
+
+    @Test
+    fun deeplyNestedSliceContentEquals() {
+        val pool = createPool()
+        val pooled = pool.acquire(16)
+        pooled.writeBytes(byteArrayOf(0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88.toByte()))
+        pooled.resetForRead()
+
+        val slice1 = pooled.slice()
+        val slice2 = slice1.slice()
+        val slice3 = slice2.slice()
+
+        val plain = PlatformBuffer.allocate(8)
+        plain.writeBytes(byteArrayOf(0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88.toByte()))
+        plain.resetForRead()
+
+        assertTrue(plain.contentEquals(slice3), "plain.contentEquals(3-level slice) should be true")
+        assertTrue(slice3.contentEquals(plain), "3-level slice.contentEquals(plain) should be true")
+
+        (slice3 as? PoolReleasable)?.releaseToPool()
+        (slice2 as? PoolReleasable)?.releaseToPool()
+        (slice1 as? PoolReleasable)?.releaseToPool()
+        pool.release(pooled)
+        pool.clear()
+    }
+
+    @Test
+    fun deeplyNestedSliceMismatch() {
+        val pool = createPool()
+        val pooled = pool.acquire(16)
+        pooled.writeBytes(byteArrayOf(1, 2, 3, 4, 99, 6, 7, 8))
+        pooled.resetForRead()
+
+        val slice1 = pooled.slice()
+        val slice2 = slice1.slice()
+        val slice3 = slice2.slice()
+
+        val plain = PlatformBuffer.allocate(8)
+        plain.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
+        plain.resetForRead()
+
+        assertEquals(4, plain.mismatch(slice3), "Mismatch with 3-level slice should be at index 4")
+        assertEquals(4, slice3.mismatch(plain), "Mismatch with 3-level slice should be at index 4 (reverse)")
+
+        (slice3 as? PoolReleasable)?.releaseToPool()
+        (slice2 as? PoolReleasable)?.releaseToPool()
+        (slice1 as? PoolReleasable)?.releaseToPool()
+        pool.release(pooled)
+        pool.clear()
+    }
+
+    @Test
+    fun deeplyNestedSliceWrite() {
+        val pool = createPool()
+        val pooled = pool.acquire(16)
+        pooled.writeBytes(byteArrayOf(0xAA.toByte(), 0xBB.toByte(), 0xCC.toByte(), 0xDD.toByte()))
+        pooled.resetForRead()
+
+        val slice1 = pooled.slice()
+        val slice2 = slice1.slice()
+        val slice3 = slice2.slice()
+
+        val dest = PlatformBuffer.allocate(4)
+        dest.write(slice3)
+        dest.resetForRead()
+
+        assertEquals(0xAA.toByte(), dest.readByte())
+        assertEquals(0xBB.toByte(), dest.readByte())
+        assertEquals(0xCC.toByte(), dest.readByte())
+        assertEquals(0xDD.toByte(), dest.readByte())
+
+        (slice3 as? PoolReleasable)?.releaseToPool()
+        (slice2 as? PoolReleasable)?.releaseToPool()
+        (slice1 as? PoolReleasable)?.releaseToPool()
+        pool.release(pooled)
+        pool.clear()
+    }
+
+    @Test
+    fun deeplyNestedSliceToByteArray() {
+        val pool = createPool()
+        val pooled = pool.acquire(16)
+        pooled.writeBytes(byteArrayOf(10, 20, 30, 40, 50))
+        pooled.resetForRead()
+
+        val slice1 = pooled.slice()
+        val slice2 = slice1.slice()
+        val slice3 = slice2.slice()
+
+        assertContentEquals(
+            byteArrayOf(10, 20, 30, 40, 50),
+            slice3.toByteArray(),
+            "toByteArray through 3-level slice",
+        )
+
+        (slice3 as? PoolReleasable)?.releaseToPool()
+        (slice2 as? PoolReleasable)?.releaseToPool()
+        (slice1 as? PoolReleasable)?.releaseToPool()
+        pool.release(pooled)
+        pool.clear()
+    }
+
+    @Test
+    fun deeplyNestedSliceXorMaskCopy() {
+        val mask = 0xDEADBEEF.toInt()
+        val pool = createPool()
+        val pooled = pool.acquire(16)
+        val sourceBytes = byteArrayOf(0x11, 0x22, 0x33, 0x44)
+        pooled.writeBytes(sourceBytes)
+        pooled.resetForRead()
+
+        val slice1 = pooled.slice()
+        val slice2 = slice1.slice()
+        val slice3 = slice2.slice()
+
+        val dest = PlatformBuffer.allocate(4)
+        dest.xorMaskCopy(slice3, mask)
+        dest.resetForRead()
+
+        val maskBytes =
+            byteArrayOf(
+                (mask ushr 24).toByte(),
+                (mask ushr 16).toByte(),
+                (mask ushr 8).toByte(),
+                mask.toByte(),
+            )
+        val expected = ByteArray(4) { i -> (sourceBytes[i].toInt() xor maskBytes[i].toInt()).toByte() }
+        val actual = ByteArray(4) { dest.readByte() }
+        assertContentEquals(expected, actual, "xorMaskCopy from 3-level slice")
+
+        (slice3 as? PoolReleasable)?.releaseToPool()
+        (slice2 as? PoolReleasable)?.releaseToPool()
+        (slice1 as? PoolReleasable)?.releaseToPool()
+        pool.release(pooled)
+        pool.clear()
+    }
+
+    @Test
+    fun deeplyNestedSliceUnwrapFully() {
+        val pool = createPool()
+        val pooled = pool.acquire(16)
+        pooled.writeBytes(byteArrayOf(1, 2, 3, 4))
+        pooled.resetForRead()
+
+        val slice1 = pooled.slice()
+        val slice2 = slice1.slice()
+        val slice3 = slice2.slice()
+
+        val unwrapped = slice3.unwrapFully()
+        // Should not be a TrackedSlice
+        assertFalse(
+            unwrapped is com.ditchoom.buffer.pool.TrackedSlice,
+            "unwrapFully should strip all TrackedSlice layers",
+        )
+
+        (slice3 as? PoolReleasable)?.releaseToPool()
+        (slice2 as? PoolReleasable)?.releaseToPool()
+        (slice1 as? PoolReleasable)?.releaseToPool()
+        pool.release(pooled)
+        pool.clear()
+    }
+
+    // ============================================================================
+    // Cross-wrapper operations
+    // ============================================================================
+
     @Test
     fun xorMaskCopyFromPooledBufferIntoPooledBuffer() {
         val mask = 0x11223344

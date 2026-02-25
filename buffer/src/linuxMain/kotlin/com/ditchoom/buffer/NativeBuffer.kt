@@ -460,12 +460,7 @@ class NativeBuffer private constructor(
                     ).toInt()
                 }
             } else {
-                for (i in 0 until minLength) {
-                    if (get(positionValue + i) != other.get(other.position() + i)) {
-                        return i
-                    }
-                }
-                -1
+                return super.mismatch(other)
             }
 
         if (result != -1) return result

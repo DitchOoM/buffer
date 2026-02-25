@@ -416,13 +416,7 @@ class MutableDataBuffer(
                 ) == 0
             }
         }
-        // Fallback for other buffer types
-        for (i in 0 until size) {
-            if (get(position + i) != other.get(other.position() + i)) {
-                return false
-            }
-        }
-        return true
+        return super.contentEquals(other)
     }
 
     /**
@@ -455,13 +449,7 @@ class MutableDataBuffer(
                     ).toInt()
                 }
             } else {
-                // Fallback for other buffer types
-                for (i in 0 until minLength) {
-                    if (get(position + i) != other.get(other.position() + i)) {
-                        return i
-                    }
-                }
-                -1
+                return super.mismatch(other)
             }
 
         if (result != -1) return result
