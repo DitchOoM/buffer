@@ -462,7 +462,7 @@ class UnsafeScopedBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
-        val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
+        val actual = buffer.unwrapFully()
         if (actual is UnsafeScopedBuffer) {
             UnsafeMemory.copyMemory(
                 actual.nativeAddress + actual.positionValue,

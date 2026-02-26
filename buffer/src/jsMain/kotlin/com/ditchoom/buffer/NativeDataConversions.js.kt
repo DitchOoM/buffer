@@ -41,8 +41,10 @@ actual class MutableNativeData(
  *
  * For zero-copy access to a portion, use [toMutableNativeData] which returns Int8Array.
  */
-actual fun ReadBuffer.toNativeData(): NativeData =
-    NativeData(
+actual fun ReadBuffer.toNativeData(): NativeData {
+    val unwrapped = unwrapFully()
+    if (unwrapped !== this) return unwrapped.toNativeData()
+    return NativeData(
         when (this) {
             is JsBuffer -> {
                 val pos = position()
@@ -62,6 +64,7 @@ actual fun ReadBuffer.toNativeData(): NativeData =
             }
         },
     )
+}
 
 /**
  * Converts the remaining bytes of this buffer to a ByteArray.
@@ -77,8 +80,10 @@ actual fun ReadBuffer.toNativeData(): NativeData =
  * **Copy path:**
  * - Otherwise, copies via readByteArray().
  */
-actual fun ReadBuffer.toByteArray(): ByteArray =
-    when (this) {
+actual fun ReadBuffer.toByteArray(): ByteArray {
+    val unwrapped = unwrapFully()
+    if (unwrapped !== this) return unwrapped.toByteArray()
+    return when (this) {
         is JsBuffer -> {
             // ByteArray IS Int8Array in Kotlin/JS, and subarray() creates a zero-copy view
             buffer.subarray(position(), position() + remaining()).unsafeCast<ByteArray>()
@@ -90,6 +95,7 @@ actual fun ReadBuffer.toByteArray(): ByteArray =
             result
         }
     }
+}
 
 /**
  * Converts the remaining bytes of this buffer to an Int8Array.
@@ -104,10 +110,13 @@ actual fun ReadBuffer.toByteArray(): ByteArray =
  * **Copy path:**
  * - Otherwise, copies the remaining bytes to a new Int8Array.
  */
-actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData =
-    MutableNativeData(
+actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData {
+    val unwrapped = unwrap()
+    if (unwrapped !== this) return unwrapped.toMutableNativeData()
+    return MutableNativeData(
         when (this) {
             is JsBuffer -> buffer.subarray(position(), position() + remaining())
             else -> toByteArray().unsafeCast<Int8Array>()
         },
     )
+}

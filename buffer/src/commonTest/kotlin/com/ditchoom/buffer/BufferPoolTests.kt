@@ -1890,6 +1890,7 @@ class BufferPoolTests {
             }
         }
 
+    @Suppress("DEPRECATION")
     @Test
     fun unwrapReturnsInnerPlatformBuffer() =
         withPool(defaultBufferSize = 1024) { pool ->

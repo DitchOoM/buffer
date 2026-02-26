@@ -192,7 +192,7 @@ abstract class BaseJvmBuffer(
     }
 
     override fun write(buffer: ReadBuffer) {
-        val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
+        val actual = buffer.unwrapFully()
         if (actual is BaseJvmBuffer) {
             byteBuffer.put(actual.byteBuffer)
         } else {
@@ -276,7 +276,7 @@ abstract class BaseJvmBuffer(
             if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
         val maskLong = (rotatedMask.toLong() shl 32) or (rotatedMask.toLong() and 0xFFFFFFFFL)
 
-        val actualSource = (source as? PlatformBuffer)?.unwrap() ?: source
+        val actualSource = source.unwrapFully()
         val srcBB =
             if (actualSource is BaseJvmBuffer) {
                 val dup = actualSource.byteBuffer.duplicate()
@@ -371,7 +371,7 @@ abstract class BaseJvmBuffer(
      * Falls back to default ReadBuffer.mismatch() on Java 8 and Android.
      */
     override fun mismatch(other: ReadBuffer): Int {
-        val actualOther = (other as? PlatformBuffer)?.unwrap() ?: other
+        val actualOther = other.unwrapFully()
         if (actualOther is BaseJvmBuffer) {
             val result = BufferMismatchHelper.mismatch(byteBuffer, actualOther.byteBuffer)
             if (result != USE_DEFAULT_MISMATCH) {

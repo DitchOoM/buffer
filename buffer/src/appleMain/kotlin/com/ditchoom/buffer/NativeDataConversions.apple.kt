@@ -47,8 +47,10 @@ actual class MutableNativeData(
  * **Copy path:**
  * - Otherwise, copies the remaining bytes to a new NSData.
  */
-actual fun ReadBuffer.toNativeData(): NativeData =
-    NativeData(
+actual fun ReadBuffer.toNativeData(): NativeData {
+    val unwrapped = unwrapFully()
+    if (unwrapped !== this) return unwrapped.toNativeData()
+    return NativeData(
         when (this) {
             is NSDataBuffer -> {
                 val pos = position()
@@ -71,6 +73,7 @@ actual fun ReadBuffer.toNativeData(): NativeData =
             else -> toByteArray().toNSData()
         },
     )
+}
 
 /**
  * Converts the remaining bytes of this buffer to NSMutableData.
@@ -87,8 +90,10 @@ actual fun ReadBuffer.toNativeData(): NativeData =
  * - Otherwise, copies the remaining bytes to a new NSMutableData.
  *   Note: NSMutableData requires its own mutable memory, so partial views must copy.
  */
-actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData =
-    MutableNativeData(
+actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData {
+    val unwrapped = unwrap()
+    if (unwrapped !== this) return unwrapped.toMutableNativeData()
+    return MutableNativeData(
         when (this) {
             is MutableDataBuffer -> {
                 val pos = position()
@@ -105,6 +110,7 @@ actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData =
             else -> toByteArray().toNSMutableData()
         },
     )
+}
 
 /**
  * Converts a ByteArray to NSData.

@@ -6,12 +6,15 @@ import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.LongVar
 import kotlinx.cinterop.ShortVar
 import kotlinx.cinterop.UnsafeNumber
+import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.get
 import kotlinx.cinterop.plus
 import kotlinx.cinterop.readBytes
 import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.toLong
+import kotlinx.cinterop.usePinned
 import platform.Foundation.NSData
 import platform.Foundation.NSMakeRange
 import platform.Foundation.NSString
@@ -163,21 +166,25 @@ class NSDataBuffer(
 
     override fun contentEquals(other: ReadBuffer): Boolean {
         if (remaining() != other.remaining()) return false
-        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
-        if (actual is NSDataBuffer) {
+        val size = remaining()
+        if (size == 0) return true
+        val otherNative = other.nativeMemoryAccess
+        if (otherNative != null) {
             return memcmp(
                 bytePointer + position,
-                actual.bytePointer + actual.position,
-                remaining().convert(),
+                otherNative.nativeAddress.toCPointer<ByteVar>()!! + other.position(),
+                size.convert(),
             ) == 0
         }
-        if (actual is MutableDataBuffer) {
-            val otherPointer = actual.data.mutableBytes as CPointer<ByteVar>
-            return memcmp(
-                bytePointer + position,
-                otherPointer + actual.position(),
-                remaining().convert(),
-            ) == 0
+        val otherManaged = other.managedMemoryAccess
+        if (otherManaged != null) {
+            return otherManaged.backingArray.usePinned { pinned ->
+                memcmp(
+                    bytePointer + position,
+                    pinned.addressOf(otherManaged.arrayOffset + other.position()),
+                    size.convert(),
+                ) == 0
+            }
         }
         return super.contentEquals(other)
     }

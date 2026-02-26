@@ -18,7 +18,12 @@ class JsBuffer(
     val sharedArrayBuffer: SharedArrayBuffer? = null,
 ) : BaseWebBuffer(buffer.byteLength, byteOrder),
     NativeMemoryAccess,
+    ManagedMemoryAccess,
     SharedMemoryAccess {
+    // In Kotlin/JS, ByteArray IS Int8Array at runtime — they're the same type.
+    override val backingArray: ByteArray get() = buffer.unsafeCast<ByteArray>()
+    override val arrayOffset: Int get() = 0
+
     /**
      * The byte offset within the underlying ArrayBuffer.
      * Use with `new DataView(buffer.buffer, nativeAddress, nativeSize)`.
@@ -151,7 +156,7 @@ class JsBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
-        val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
+        val actual = buffer.unwrapFully()
         if (actual is JsBuffer) {
             // Zero-copy: copy only the remaining portion using subarray
             val sourceSubarray = actual.buffer.subarray(actual.position(), actual.position() + size)
@@ -286,7 +291,7 @@ class JsBuffer(
             return
         }
 
-        val actualSource = (source as? PlatformBuffer)?.unwrap() ?: source
+        val actualSource = source.unwrapFully()
         if (actualSource !is JsBuffer) {
             super.xorMaskCopy(source, mask, maskOffset)
             return
@@ -373,7 +378,7 @@ class JsBuffer(
         val size = remaining()
         if (size == 0) return true
 
-        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
+        val actual = other.unwrapFully()
         if (actual is JsBuffer) {
             return bulkCompareEqualsInt(
                 thisPos = positionValue,
@@ -396,7 +401,7 @@ class JsBuffer(
         val otherRemaining = other.remaining()
         val minLength = minOf(thisRemaining, otherRemaining)
 
-        val actual = (other as? PlatformBuffer)?.unwrap() ?: other
+        val actual = other.unwrapFully()
         if (actual is JsBuffer) {
             return bulkMismatchInt(
                 thisPos = positionValue,

@@ -209,7 +209,7 @@ class ByteArrayBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
-        val actual = (buffer as? PlatformBuffer)?.unwrap() ?: buffer
+        val actual = buffer.unwrapFully()
         if (actual is ByteArrayBuffer) {
             actual.data.copyInto(data, positionValue, actual.positionValue, actual.positionValue + size)
         } else {
@@ -295,7 +295,7 @@ class ByteArrayBuffer(
             return
         }
 
-        val actual = (source as? PlatformBuffer)?.unwrap() ?: source
+        val actual = source.unwrapFully()
         if (actual is ByteArrayBuffer) {
             val srcData = actual.data
             val srcPos = actual.positionValue

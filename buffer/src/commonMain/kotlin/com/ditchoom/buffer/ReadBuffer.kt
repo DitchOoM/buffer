@@ -831,3 +831,17 @@ interface ReadBuffer : PositionBuffer {
         }
     }
 }
+
+/**
+ * Recursively unwraps all wrapper types (PooledBuffer, TrackedSlice) to reach the
+ * underlying concrete buffer implementation.
+ *
+ * Use this instead of `(buffer as? PlatformBuffer)?.unwrap() ?: buffer` to correctly
+ * handle TrackedSlice, which implements ReadBuffer but NOT PlatformBuffer.
+ */
+@Suppress("DEPRECATION")
+fun ReadBuffer.unwrapFully(): ReadBuffer {
+    if (this is PlatformBuffer) return unwrap()
+    if (this is com.ditchoom.buffer.pool.TrackedSlice) return inner.unwrapFully()
+    return this
+}

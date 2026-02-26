@@ -1,19 +1,19 @@
 package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.BaseJvmBuffer
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
+import com.ditchoom.buffer.unwrapFully
 import java.nio.Buffer
 import java.nio.ByteBuffer
 import java.util.zip.CRC32
 import java.util.zip.Deflater
 import java.util.zip.Inflater
 
-// Helper to unwrap PooledBuffer and access the underlying ByteBuffer.
-private fun ReadWriteBuffer.jvmByteBuffer(): ByteBuffer = ((this as PlatformBuffer).unwrap() as BaseJvmBuffer).byteBuffer
+// Helper to unwrap PooledBuffer/TrackedSlice and access the underlying ByteBuffer.
+private fun ReadWriteBuffer.jvmByteBuffer(): ByteBuffer = ((this as ReadBuffer).unwrapFully() as BaseJvmBuffer).byteBuffer
 
-private fun ReadBuffer.jvmByteBufferOrNull(): ByteBuffer? = ((this as? PlatformBuffer)?.unwrap() as? BaseJvmBuffer)?.byteBuffer
+private fun ReadBuffer.jvmByteBufferOrNull(): ByteBuffer? = (unwrapFully() as? BaseJvmBuffer)?.byteBuffer
 
 // =============================================================================
 // Factory Functions

@@ -1,13 +1,13 @@
 package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.AllocationZone
-import com.ditchoom.buffer.ByteArrayBuffer
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.MutableDataBuffer
-import com.ditchoom.buffer.MutableDataBufferSlice
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.managedMemoryAccess
+import com.ditchoom.buffer.nativeMemoryAccess
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -20,6 +20,7 @@ import kotlinx.cinterop.plus
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.rawPtr
 import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.usePinned
 import platform.posix.memcpy
 import platform.zlib.Z_DEFLATED
@@ -289,20 +290,19 @@ private fun decompressWithZStream(
 private inline fun <R> withBufferPointer(
     buffer: ReadBuffer,
     block: (CPointer<ByteVar>) -> R,
-): R =
-    when (buffer) {
-        is MutableDataBufferSlice -> block(buffer.bytePointer)
-        is MutableDataBuffer -> {
-            @Suppress("UNCHECKED_CAST")
-            block(buffer.data.mutableBytes as CPointer<ByteVar>)
-        }
-        is ByteArrayBuffer -> {
-            buffer.backingArray.usePinned { pinned ->
-                block(pinned.addressOf(0))
-            }
-        }
-        else -> throw CompressionException("Unsupported buffer type for compression: ${buffer::class}")
+): R {
+    val nativeAccess = buffer.nativeMemoryAccess
+    if (nativeAccess != null) {
+        return block(nativeAccess.nativeAddress.toCPointer<ByteVar>()!!)
     }
+    val managedAccess = buffer.managedMemoryAccess
+    if (managedAccess != null) {
+        return managedAccess.backingArray.usePinned { pinned ->
+            block(pinned.addressOf(managedAccess.arrayOffset))
+        }
+    }
+    throw CompressionException("Unsupported buffer type for compression: ${buffer::class}")
+}
 
 /**
  * Create empty compressed data for different formats.
