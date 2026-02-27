@@ -137,7 +137,7 @@ jobs:
         with:
           name: maven-local-merged
           path: /tmp/maven-local
-          retention-days: 1
+          retention-days: 3
 
       - name: Checkout validation project
         uses: actions/checkout@v4
