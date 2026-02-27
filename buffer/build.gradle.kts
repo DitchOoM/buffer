@@ -754,6 +754,21 @@ fun injectAppleVariantsIntoModuleMetadata(
                 "available-at" to availableAt,
             ),
         )
+        variants.add(
+            mapOf(
+                "name" to "${gradleName}MetadataElements-published",
+                "attributes" to
+                    mapOf(
+                        "artifactType" to "org.jetbrains.kotlin.klib",
+                        "org.gradle.category" to "library",
+                        "org.gradle.jvm.environment" to "non-jvm",
+                        "org.gradle.usage" to "kotlin-metadata",
+                        "org.jetbrains.kotlin.native.target" to konanName,
+                        "org.jetbrains.kotlin.platform.type" to "native",
+                    ),
+                "available-at" to availableAt,
+            ),
+        )
     }
 
     moduleFile.writeText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(json)))
