@@ -263,7 +263,7 @@ afterEvaluate {
                 }
             }
         }
-        if (HostManager.hostIsMac) {
+        if (HostManager.hostIsMac && System.getenv("ALLOW_ROOT_PUBLISH") == null) {
             tasks
                 .matching {
                     it.name.startsWith("publishKotlinMultiplatformPublication")
@@ -381,6 +381,20 @@ fun injectAppleVariantsIntoModuleMetadata(
                         "org.gradle.docstype" to "sources",
                         "org.gradle.jvm.environment" to "non-jvm",
                         "org.gradle.usage" to "kotlin-runtime",
+                        "org.jetbrains.kotlin.native.target" to konanName,
+                        "org.jetbrains.kotlin.platform.type" to "native",
+                    ),
+                "available-at" to availableAt,
+            ),
+        )
+        variants.add(
+            mapOf(
+                "name" to "${gradleName}MetadataElements-published",
+                "attributes" to
+                    mapOf(
+                        "org.gradle.category" to "library",
+                        "org.gradle.jvm.environment" to "non-jvm",
+                        "org.gradle.usage" to "kotlin-metadata",
                         "org.jetbrains.kotlin.native.target" to konanName,
                         "org.jetbrains.kotlin.platform.type" to "native",
                     ),
