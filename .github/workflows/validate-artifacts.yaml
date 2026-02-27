@@ -18,13 +18,150 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: maven-local-linux
-          path: /tmp/maven-local/com/ditchoom
+          path: /tmp/linux-repo/com/ditchoom
 
       - name: Download Apple artifacts
         uses: actions/download-artifact@v4
         with:
           name: maven-local-apple
-          path: /tmp/maven-local/com/ditchoom
+          path: /tmp/apple-repo/com/ditchoom
+
+      - name: Merge artifacts and module metadata
+        run: |
+          version="${{ inputs.version }}"
+          LINUX_BASE="/tmp/linux-repo/com/ditchoom"
+          APPLE_BASE="/tmp/apple-repo/com/ditchoom"
+          MERGED="/tmp/maven-local/com/ditchoom"
+
+          # Start with Linux artifacts as base
+          mkdir -p /tmp/maven-local/com
+          cp -r "$LINUX_BASE" /tmp/maven-local/com/
+
+          for module in buffer buffer-compression buffer-flow; do
+            echo "=== Merging ${module} ==="
+
+            # Copy Apple per-target artifact directories
+            for dir in "$APPLE_BASE"/${module}-*/; do
+              [ -d "$dir" ] || continue
+              target_name=$(basename "$dir")
+              # Skip if this directory already exists from Linux (e.g., buffer-jvm, buffer-android)
+              if [ -d "$MERGED/$target_name" ]; then
+                echo "  Skipping $target_name (already from Linux)"
+                continue
+              fi
+              cp -r "$dir" "$MERGED/$target_name"
+              echo "  Copied $target_name"
+            done
+
+            # Merge root .module file (jq merge variants, deduplicate by name)
+            LINUX_MODULE="$LINUX_BASE/$module/$version/$module-$version.module"
+            APPLE_MODULE="$APPLE_BASE/$module/$version/$module-$version.module"
+            MERGED_MODULE="$MERGED/$module/$version/$module-$version.module"
+
+            if [ -f "$LINUX_MODULE" ] && [ -f "$APPLE_MODULE" ]; then
+              jq -s '
+                .[0].variants = (
+                  [.[0].variants[], .[1].variants[]]
+                  | group_by(.name)
+                  | map(.[0])
+                )
+                | .[0]
+              ' "$LINUX_MODULE" "$APPLE_MODULE" > "${MERGED_MODULE}.tmp"
+              mv "${MERGED_MODULE}.tmp" "$MERGED_MODULE"
+              echo "  Merged .module: $(jq '.variants | length' "$MERGED_MODULE") variants"
+            fi
+
+            # Merge metadata JAR (kotlin-project-structure-metadata.json + klib dirs)
+            LINUX_JAR="$LINUX_BASE/$module/$version/$module-$version.jar"
+            APPLE_JAR="$APPLE_BASE/$module/$version/$module-$version.jar"
+            MERGED_JAR="$MERGED/$module/$version/$module-$version.jar"
+
+            if [ -f "$LINUX_JAR" ] && [ -f "$APPLE_JAR" ]; then
+              WORK="/tmp/merge-metadata-jar-${module}"
+              mkdir -p "$WORK/linux" "$WORK/apple" "$WORK/merged"
+
+              unzip -qo "$LINUX_JAR" -d "$WORK/linux"
+              unzip -qo "$APPLE_JAR" -d "$WORK/apple"
+
+              # Start with Linux as base
+              cp -r "$WORK/linux/"* "$WORK/merged/"
+
+              # Copy Apple klib directories (not present in Linux jar)
+              if [ -d "$WORK/apple" ]; then
+                for klib_dir in "$WORK/apple"/*/; do
+                  dir_name=$(basename "$klib_dir")
+                  # Skip META-INF — we handle that separately
+                  [ "$dir_name" = "META-INF" ] && continue
+                  if [ ! -d "$WORK/merged/$dir_name" ]; then
+                    cp -r "$klib_dir" "$WORK/merged/$dir_name"
+                    echo "  Copied klib dir: $dir_name"
+                  fi
+                done
+              fi
+
+              # Merge kotlin-project-structure-metadata.json
+              LINUX_PSM="$WORK/linux/META-INF/kotlin-project-structure-metadata.json"
+              APPLE_PSM="$WORK/apple/META-INF/kotlin-project-structure-metadata.json"
+              MERGED_PSM="$WORK/merged/META-INF/kotlin-project-structure-metadata.json"
+
+              if [ -f "$LINUX_PSM" ] && [ -f "$APPLE_PSM" ]; then
+                jq -s '
+                  .[0].projectStructure.variants = (
+                    [.[0].projectStructure.variants[], .[1].projectStructure.variants[]]
+                    | group_by(.name)
+                    | map(.[0])
+                  )
+                  | .[0].projectStructure.sourceSets = (
+                    [.[0].projectStructure.sourceSets[], .[1].projectStructure.sourceSets[]]
+                    | group_by(.name)
+                    | map(.[0])
+                  )
+                  | .[0]
+                ' "$LINUX_PSM" "$APPLE_PSM" > "${MERGED_PSM}.tmp"
+                mv "${MERGED_PSM}.tmp" "$MERGED_PSM"
+                echo "  Merged kotlin-project-structure-metadata.json:"
+                echo "    variants: $(jq '.projectStructure.variants | length' "$MERGED_PSM")"
+                echo "    sourceSets: $(jq '.projectStructure.sourceSets | length' "$MERGED_PSM")"
+              fi
+
+              # Re-create the merged JAR
+              (cd "$WORK/merged" && zip -qr "$MERGED_JAR" .)
+              echo "  Rebuilt metadata JAR"
+
+              rm -rf "$WORK"
+            fi
+          done
+
+      - name: Upload merged artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: maven-local-merged
+          path: /tmp/maven-local
+          retention-days: 1
+
+      - name: Checkout validation project
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .ci/validate-resolution
+            gradle/libs.versions.toml
+          sparse-checkout-cone-mode: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate with Gradle resolution
+        run: |
+          gradle -p .ci/validate-resolution resolveAll \
+            -PbufferVersion=${{ inputs.version }} \
+            -PmavenRepoPath=/tmp/maven-local \
+            --no-daemon
 
       - name: Validate artifacts
         run: |
@@ -123,8 +260,6 @@ jobs:
 
           # 5. Signing coverage - detect file types not covered by publish signing glob
           echo "--- Signing Coverage Check ---"
-          # The publish-to-central signing step signs: .jar .klib .pom .module .aar .json
-          # Flag any artifact file types that would be missed
           KNOWN_SIGNABLE="jar klib pom module aar json"
           KNOWN_METADATA="xml repositories"
           UNCOVERED=0
@@ -170,6 +305,30 @@ jobs:
             else
               echo "  WARN: ${module} kotlin-tooling-metadata.json not found (may not be generated for all modules)"
             fi
+          done
+          echo ""
+
+          # 7. Metadata JAR Apple source sets
+          echo "--- Metadata JAR Apple Source Sets ---"
+          for module in buffer buffer-compression buffer-flow; do
+            METADATA_JAR="${BASE}/${module}/${version}/${module}-${version}.jar"
+            if [ ! -f "$METADATA_JAR" ]; then
+              echo "  WARN: ${module} metadata JAR not found"
+              continue
+            fi
+            PSM_JSON=$(unzip -p "$METADATA_JAR" META-INF/kotlin-project-structure-metadata.json 2>/dev/null)
+            if [ -z "$PSM_JSON" ]; then
+              echo "  WARN: ${module} missing kotlin-project-structure-metadata.json in JAR"
+              continue
+            fi
+            for ss in appleMain iosMain macosMain tvosMain watchosMain; do
+              if echo "$PSM_JSON" | jq -e ".projectStructure.sourceSets[] | select(.name == \"$ss\")" > /dev/null 2>&1; then
+                echo "  ${module}: ${ss} present"
+              else
+                echo "  FAIL: ${module} metadata JAR missing sourceSet '${ss}'"
+                FAILED=true
+              fi
+            done
           done
           echo ""
 

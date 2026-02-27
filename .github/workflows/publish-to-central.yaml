@@ -33,17 +33,11 @@ jobs:
     outputs:
       deployment-id: ${{ steps.upload.outputs.deployment-id }}
     steps:
-      - name: Download Linux artifacts
+      - name: Download merged artifacts
         uses: actions/download-artifact@v4
         with:
-          name: maven-local-linux
-          path: /tmp/maven-repo/com/ditchoom
-
-      - name: Download Apple artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: maven-local-apple
-          path: /tmp/maven-repo/com/ditchoom
+          name: maven-local-merged
+          path: /tmp/maven-repo
 
       - name: Clean local metadata
         run: |
