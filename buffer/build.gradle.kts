@@ -572,7 +572,7 @@ afterEvaluate {
                 }
             }
         }
-        if (HostManager.hostIsMac) {
+        if (HostManager.hostIsMac && System.getenv("ALLOW_ROOT_PUBLISH") == null) {
             // Skip root metadata publication — published from Linux with all variant references
             tasks
                 .matching {
