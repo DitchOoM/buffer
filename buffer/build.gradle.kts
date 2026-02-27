@@ -759,7 +759,6 @@ fun injectAppleVariantsIntoModuleMetadata(
                 "name" to "${gradleName}MetadataElements-published",
                 "attributes" to
                     mapOf(
-                        "artifactType" to "org.jetbrains.kotlin.klib",
                         "org.gradle.category" to "library",
                         "org.gradle.jvm.environment" to "non-jvm",
                         "org.gradle.usage" to "kotlin-metadata",
