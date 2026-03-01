@@ -270,6 +270,57 @@ mavenPublishing {
     }
 }
 
+// Split publishing metadata fix (see buffer/build.gradle.kts for details)
+afterEvaluate {
+    if (isRunningOnGithub) {
+        if (HostManager.hostIsLinux) {
+            tasks.named("generateMetadataFileForKotlinMultiplatformPublication") {
+                doLast {
+                    val moduleFile = outputs.files.singleFile
+                    injectAppleVariantsIntoModuleMetadata(moduleFile, project.version.toString(), "buffer-compression")
+                }
+            }
+        }
+        if (HostManager.hostIsMac) {
+            tasks
+                .matching {
+                    it.name.startsWith("publishKotlinMultiplatformPublication")
+                }.configureEach { enabled = false }
+        }
+    }
+}
+
+// jvmFfmTest: runs ALL JVM tests with buffer's java22 classes first on classpath.
+// This makes PlatformBuffer.allocate(Direct) return FfmBuffer, exercising the FFM path
+// through all compression tests.
+// Configured in afterEvaluate so jvmTest's classpath is fully resolved by all plugins.
+tasks.register<Test>("jvmFfmTest") {
+    description = "Runs JVM tests with FFM-backed BufferFactory (Java 22+)"
+    group = "verification"
+}
+
+afterEvaluate {
+    tasks.named<Test>("jvmFfmTest") {
+        val jvmTestTask = tasks.named<Test>("jvmTest").get()
+        // Depend on test class compilation, not on jvmTest execution
+        dependsOn("compileTestKotlinJvm", ":buffer:compileJava22KotlinJvm")
+        testClassesDirs = jvmTestTask.testClassesDirs
+        val bufferJava22Classes =
+            files(
+                project(":buffer")
+                    .layout
+                    .buildDirectory
+                    .dir("classes/kotlin/jvm/java22"),
+            )
+        classpath = bufferJava22Classes + jvmTestTask.classpath
+    }
+}
+
+tasks.withType<Test>().configureEach {
+    if (!name.contains("benchmark", ignoreCase = true)) {
+        jvmArgs("-ea")
+    }
+}
 ktlint {
     verbose.set(true)
     outputToConsole.set(true)

@@ -58,8 +58,9 @@ val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
 **Platform behavior:**
 | Platform | Implementation |
 |----------|---------------|
-| JVM | [`DirectByteBuffer`](https://docs.oracle.com/javase/8/docs/api/java/nio/ByteBuffer.html#allocateDirect-int-) |
-| Android | [`DirectByteBuffer`](https://developer.android.com/reference/java/nio/ByteBuffer#allocateDirect(int)) |
+| JVM 21+ | `FfmBuffer` (FFM Arena — deterministic free) |
+| JVM < 21 | `DirectByteBuffer` (best-effort free via `Unsafe.invokeCleaner`) |
+| Android | `DirectByteBuffer` (GC-managed) |
 | iOS/macOS | [`NSMutableData`](https://developer.apple.com/documentation/foundation/nsmutabledata) |
 | JavaScript | [`Int8Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int8Array) |
 | WASM | `LinearBuffer` (native WASM memory) |

@@ -101,21 +101,21 @@ class FfmScopedBuffer(
     override fun readByte(): Byte = segment.get(ValueLayout.JAVA_BYTE, positionValue++.toLong())
 
     override fun readShort(): Short {
-        val layout = ValueLayout.JAVA_SHORT.withOrder(javaByteOrder())
+        val layout = ValueLayout.JAVA_SHORT_UNALIGNED.withOrder(javaByteOrder())
         val value = segment.get(layout, positionValue.toLong())
         positionValue += 2
         return value
     }
 
     override fun readInt(): Int {
-        val layout = ValueLayout.JAVA_INT.withOrder(javaByteOrder())
+        val layout = ValueLayout.JAVA_INT_UNALIGNED.withOrder(javaByteOrder())
         val value = segment.get(layout, positionValue.toLong())
         positionValue += 4
         return value
     }
 
     override fun readLong(): Long {
-        val layout = ValueLayout.JAVA_LONG.withOrder(javaByteOrder())
+        val layout = ValueLayout.JAVA_LONG_UNALIGNED.withOrder(javaByteOrder())
         val value = segment.get(layout, positionValue.toLong())
         positionValue += 8
         return value
@@ -125,17 +125,17 @@ class FfmScopedBuffer(
     override fun get(index: Int): Byte = segment.get(ValueLayout.JAVA_BYTE, index.toLong())
 
     override fun getShort(index: Int): Short {
-        val layout = ValueLayout.JAVA_SHORT.withOrder(javaByteOrder())
+        val layout = ValueLayout.JAVA_SHORT_UNALIGNED.withOrder(javaByteOrder())
         return segment.get(layout, index.toLong())
     }
 
     override fun getInt(index: Int): Int {
-        val layout = ValueLayout.JAVA_INT.withOrder(javaByteOrder())
+        val layout = ValueLayout.JAVA_INT_UNALIGNED.withOrder(javaByteOrder())
         return segment.get(layout, index.toLong())
     }
 
     override fun getLong(index: Int): Long {
-        val layout = ValueLayout.JAVA_LONG.withOrder(javaByteOrder())
+        val layout = ValueLayout.JAVA_LONG_UNALIGNED.withOrder(javaByteOrder())
         return segment.get(layout, index.toLong())
     }
 
@@ -146,21 +146,21 @@ class FfmScopedBuffer(
     }
 
     override fun writeShort(short: Short): WriteBuffer {
-        val layout = ValueLayout.JAVA_SHORT.withOrder(javaByteOrder())
+        val layout = ValueLayout.JAVA_SHORT_UNALIGNED.withOrder(javaByteOrder())
         segment.set(layout, positionValue.toLong(), short)
         positionValue += 2
         return this
     }
 
     override fun writeInt(int: Int): WriteBuffer {
-        val layout = ValueLayout.JAVA_INT.withOrder(javaByteOrder())
+        val layout = ValueLayout.JAVA_INT_UNALIGNED.withOrder(javaByteOrder())
         segment.set(layout, positionValue.toLong(), int)
         positionValue += 4
         return this
     }
 
     override fun writeLong(long: Long): WriteBuffer {
-        val layout = ValueLayout.JAVA_LONG.withOrder(javaByteOrder())
+        val layout = ValueLayout.JAVA_LONG_UNALIGNED.withOrder(javaByteOrder())
         segment.set(layout, positionValue.toLong(), long)
         positionValue += 8
         return this
@@ -179,7 +179,7 @@ class FfmScopedBuffer(
         index: Int,
         short: Short,
     ): WriteBuffer {
-        val layout = ValueLayout.JAVA_SHORT.withOrder(javaByteOrder())
+        val layout = ValueLayout.JAVA_SHORT_UNALIGNED.withOrder(javaByteOrder())
         segment.set(layout, index.toLong(), short)
         return this
     }
@@ -188,7 +188,7 @@ class FfmScopedBuffer(
         index: Int,
         int: Int,
     ): WriteBuffer {
-        val layout = ValueLayout.JAVA_INT.withOrder(javaByteOrder())
+        val layout = ValueLayout.JAVA_INT_UNALIGNED.withOrder(javaByteOrder())
         segment.set(layout, index.toLong(), int)
         return this
     }
@@ -197,7 +197,7 @@ class FfmScopedBuffer(
         index: Int,
         long: Long,
     ): WriteBuffer {
-        val layout = ValueLayout.JAVA_LONG.withOrder(javaByteOrder())
+        val layout = ValueLayout.JAVA_LONG_UNALIGNED.withOrder(javaByteOrder())
         segment.set(layout, index.toLong(), long)
         return this
     }

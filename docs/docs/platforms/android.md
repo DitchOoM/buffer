@@ -66,6 +66,10 @@ val buffer = PlatformBuffer.allocate(1024, AllocationZone.SharedMemory)
 
 ## Memory Considerations
 
+### Memory Lifecycle
+
+Android's `DirectJvmBuffer` is GC-managed — no explicit cleanup needed. Calling `freeNativeMemory()` on an Android `DirectJvmBuffer` is a no-op. For deterministic native memory management on Android, use `withScope {}` (backed by `UnsafeBufferScope`).
+
 ### Direct Buffers
 
 ```kotlin

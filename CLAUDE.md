@@ -53,7 +53,8 @@ src/
 
 | Platform | Heap (wrap/Heap zone) | Direct (allocate) | Shared Memory |
 |----------|----------------------|-------------------|---------------|
-| JVM | `HeapJvmBuffer` | `DirectJvmBuffer` | Falls back to Direct |
+| JVM < 21 | `HeapJvmBuffer` | `DirectJvmBuffer` | Falls back to Direct |
+| JVM 21+ | `HeapJvmBuffer` | `FfmBuffer` | Falls back to Direct |
 | Android | `HeapJvmBuffer` | `DirectJvmBuffer` | `ParcelableSharedMemoryBuffer` |
 | Apple | `ByteArrayBuffer` | `MutableDataBuffer` | Falls back to Direct |
 | JS | `JsBuffer` | `JsBuffer` | `JsBuffer` (SharedArrayBuffer) |
@@ -62,7 +63,7 @@ src/
 
 ### Memory Access Interfaces
 
-- `NativeMemoryAccess` - Direct native memory pointer (DirectJvmBuffer, MutableDataBuffer, LinearBuffer, JsBuffer, NativeBuffer)
+- `NativeMemoryAccess` - Direct native memory pointer (FfmBuffer, DirectJvmBuffer, MutableDataBuffer, LinearBuffer, JsBuffer, NativeBuffer)
 - `ManagedMemoryAccess` - Kotlin ByteArray backing (HeapJvmBuffer, ByteArrayBuffer, JsBuffer)
 - `SharedMemoryAccess` - Cross-process shared memory (ParcelableSharedMemoryBuffer, JsBuffer with SharedArrayBuffer)
 
@@ -274,13 +275,63 @@ PlatformBuffer.wrap(byteArray)
 
 ## Platform Notes
 
-- **JVM/Android:** Direct ByteBuffers (`DirectJvmBuffer`) used by default; `HeapJvmBuffer` for `wrap()` and `Heap` zone
+- **JVM 21+:** Direct buffers use `FfmBuffer` (FFM Arena-backed) for deterministic memory management; `HeapJvmBuffer` for `wrap()` and `Heap` zone
+- **JVM < 21/Android:** Direct ByteBuffers (`DirectJvmBuffer`) used by default; `HeapJvmBuffer` for `wrap()` and `Heap` zone
 - **Android SharedMemory:** Use `AllocationZone.SharedMemory` for zero-copy IPC via Parcelable (API 27+)
 - **Apple:** `MutableDataBuffer` wraps NSMutableData (native memory); `wrap(ByteArray)` returns `ByteArrayBuffer`
 - **Apple NSData interop:** Use `PlatformBuffer.wrap(nsData)` or `PlatformBuffer.wrap(nsMutableData)` for zero-copy Apple API interop
 - **JS SharedArrayBuffer:** Requires CORS headers (`Cross-Origin-Opener-Policy`, `Cross-Origin-Embedder-Policy`)
 - **WASM:** `LinearBuffer` (Direct) uses native WASM memory for JS interop; `ByteArrayBuffer` (Heap) for compute workloads
 - **Linux:** `NativeBuffer` (Direct) uses malloc/free for zero-copy io_uring I/O; `ByteArrayBuffer` (Heap) for managed memory
+
+## Buffer Lifecycle
+
+Direct/native buffers on some platforms use native memory that requires explicit cleanup. On platforms where cleanup is required, failing to free buffers will leak native memory.
+
+### Cleanup by Platform
+
+| Platform | Direct buffer cleanup |
+|----------|----------------------|
+| JVM 9-20 | **Best-effort** — `Unsafe.invokeCleaner` (falls back to GC) |
+| JVM 21+  | **Must free** — FFM Arena-backed, not GC'd |
+| Android  | GC-managed (no action needed) |
+| Apple    | ARC-managed (no action needed) |
+| Linux    | **Must free** — malloc-backed |
+| WASM     | **Must free** — linear memory |
+| JS       | GC-managed (no action needed) |
+
+### Recommended Patterns
+
+```kotlin
+// 1. use block (recommended for one-off buffers)
+PlatformBuffer.allocate(1024, AllocationZone.Direct).use { buffer ->
+    buffer.writeInt(42)
+}
+
+// 2. Pool (recommended for repeated allocations)
+withPool { pool ->
+    pool.withBuffer(1024) { buffer ->
+        buffer.writeInt(42)
+    }
+}
+
+// 3. Explicit cleanup (when scope-based patterns don't fit)
+val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+try {
+    buffer.writeInt(42)
+} finally {
+    buffer.freeNativeMemory()
+}
+```
+
+### FFM Interop (JVM 21+)
+
+On JVM 21+, direct buffers are backed by FFM `Arena`/`MemorySegment`. Use `asMemorySegment()` for FFM Panama downcalls:
+
+```kotlin
+val segment = buffer.asMemorySegment() ?: error("No native memory")
+val result = nativeFunctionHandle.invokeExact(segment, buffer.remaining()) as Int
+```
 
 ## Benchmarking
 

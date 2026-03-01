@@ -540,6 +540,46 @@ tasks.named<Jar>("jvmJar") {
     }
 }
 
+// Add Java 21 compilation output to JVM test classpath so FfmBufferTest can reference FfmBuffer directly
+kotlin
+    .jvm()
+    .compilations
+    .getByName("test") {
+        val java21Output =
+            kotlin
+                .jvm()
+                .compilations["java21"]
+                .output
+                .classesDirs
+        compileDependencyFiles += java21Output
+        runtimeDependencyFiles += java21Output
+    }
+
+// jvmFfmTest: runs ALL JVM tests with java21 classes first on classpath.
+// This makes BufferFactoryJvm from jvm21Main shadow jvmMain's version,
+// so PlatformBuffer.allocate(Direct) returns FfmBuffer instead of DirectJvmBuffer.
+// Configured in afterEvaluate so jvmTest's classpath is fully resolved by all plugins.
+tasks.register<Test>("jvmFfmTest") {
+    description = "Runs JVM tests with FFM-backed BufferFactory (Java 21+)"
+    group = "verification"
+}
+
+afterEvaluate {
+    tasks.named<Test>("jvmFfmTest") {
+        val jvmTestTask = tasks.named<Test>("jvmTest").get()
+        // Depend on test class compilation, not on jvmTest execution
+        dependsOn("compileTestKotlinJvm", "transformJvmTestAtomicfu", "compileJava21KotlinJvm")
+        testClassesDirs = jvmTestTask.testClassesDirs
+        val java21Output =
+            kotlin
+                .jvm()
+                .compilations["java21"]
+                .output
+                .classesDirs
+        classpath = java21Output + jvmTestTask.classpath
+    }
+}
+
 ktlint {
     verbose.set(true)
     outputToConsole.set(true)
@@ -643,9 +683,13 @@ tasks.matching { it.name == "testBenchmarkUnitTest" }.configureEach {
 // - java.nio: DirectBufferAddressHelper accesses Buffer.address field
 // - jdk.internal.misc: UnsafeMemory accesses sun.misc.Unsafe
 tasks.withType<Test>().configureEach {
+    val isBenchmark = name.contains("benchmark", ignoreCase = true)
     jvmArgs(
         "--add-opens=java.base/java.nio=ALL-UNNAMED",
     )
+    if (!isBenchmark) {
+        jvmArgs("-ea")
+    }
 }
 
 dokka {

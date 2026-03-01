@@ -83,6 +83,11 @@ jobs:
           testDebugUnitTest testReleaseUnitTest
           --no-build-cache ${{ inputs.gradle-args }}
 
+      - name: Run JVM FFM tests (validates FfmBuffer path on Java 21+)
+        run: >-
+          ./gradlew :buffer:jvmFfmTest :buffer-compression:jvmFfmTest
+          --no-build-cache ${{ inputs.gradle-args }}
+
       - name: Run Linux x64 tests
         run: >-
           ./gradlew :buffer:linuxX64Test :buffer-compression:linuxX64Test :buffer-flow:linuxX64Test

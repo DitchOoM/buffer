@@ -2,6 +2,14 @@ package com.ditchoom.buffer
 
 import kotlin.math.roundToInt
 
+/**
+ * Allocates a new buffer of the given [size] with the specified [zone] and [byteOrder].
+ *
+ * **Important:** Buffers allocated with [AllocationZone.Direct] on some platforms
+ * (Linux, WASM, JVM 21+) use native memory that requires explicit cleanup.
+ * Prefer `withBuffer`, [com.ditchoom.buffer.pool.BufferPool], or `use` blocks
+ * to ensure proper lifecycle management.
+ */
 expect fun PlatformBuffer.Companion.allocate(
     size: Int,
     zone: AllocationZone = AllocationZone.Heap,

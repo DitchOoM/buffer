@@ -9,11 +9,11 @@ Buffer on JVM wraps `java.nio.ByteBuffer` for optimal performance.
 
 ## Implementation
 
-| Zone | JVM Type |
-|------|----------|
-| `Heap` | `HeapByteBuffer` |
-| `Direct` | `DirectByteBuffer` |
-| `SharedMemory` | Falls back to `Direct` |
+| Zone | JVM < 21 | JVM 21+ |
+|------|----------|---------|
+| `Heap` | `HeapJvmBuffer` | `HeapJvmBuffer` |
+| `Direct` | `DirectJvmBuffer` | `FfmBuffer` (FFM Arena) |
+| `SharedMemory` | Falls back to Direct | Falls back to Direct |
 
 ## Direct vs Heap Buffers
 
@@ -115,9 +115,64 @@ All conversion functions operate on remaining bytes (position to limit) and do *
 
 See [Platform Interop](../recipes/platform-interop) for more details.
 
+## Memory Management
+
+Direct buffer memory cleanup varies by JVM version:
+
+| JVM Version | Cleanup Behavior |
+|-------------|-----------------|
+| JVM 21+ | `FfmBuffer` uses FFM `Arena.ofShared()` — deterministic free via `freeNativeMemory()` |
+| JVM 9-20 | `DirectJvmBuffer` uses `Unsafe.invokeCleaner()` — best-effort deterministic free (falls back to GC) |
+| JVM 8 | GC-only (no deterministic free) |
+
+Recommended patterns:
+
+```kotlin
+// 1. use block (recommended)
+PlatformBuffer.allocate(1024, AllocationZone.Direct).use { buffer ->
+    buffer.writeInt(42)
+}
+
+// 2. Pool (recommended for repeated allocations)
+withPool { pool ->
+    pool.withBuffer(1024) { buffer ->
+        buffer.writeInt(42)
+    }
+}
+
+// 3. Explicit cleanup
+val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+try {
+    buffer.writeInt(42)
+} finally {
+    buffer.freeNativeMemory()
+}
+```
+
+## FFM Interop (JVM 21+)
+
+On JVM 21+, direct buffers are backed by FFM `Arena`/`MemorySegment`. Use `asMemorySegment()` for Panama downcalls:
+
+```kotlin
+val segment = buffer.asMemorySegment() ?: error("No native memory")
+val result = nativeFunctionHandle.invokeExact(segment, buffer.remaining()) as Int
+```
+
+## Native Memory Access
+
+Direct buffers expose `nativeAddress` and `nativeSize` for JNI/FFI interop:
+
+```kotlin
+val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+val address = (buffer as NativeMemoryAccess).nativeAddress
+val size = buffer.nativeSize
+// Pass address and size to JNI/FFI functions
+```
+
 ## Best Practices
 
 1. **Use Direct for I/O** - network sockets, file channels
 2. **Use Heap for parsing** - or pool Direct buffers
 3. **Pool Direct buffers** - allocation is expensive
 4. **Watch off-heap memory** - not tracked by `-Xmx`
+5. **Call `freeNativeMemory()`** - or use `use {}` blocks to free direct buffers deterministically
