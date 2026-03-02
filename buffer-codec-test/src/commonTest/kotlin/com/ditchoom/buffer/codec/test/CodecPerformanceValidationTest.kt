@@ -123,15 +123,12 @@ class CodecPerformanceValidationTest {
         verifyBytesConsumed(WsFrameHeaderCodec, WsFrameHeader(WsHeaderByte1(0x81u), WsHeaderByte2(5u)))
     }
 
-    // Generated codecs replace hand-written serialization code:
-    // MQTT v3.1.1: ~1,790 LOC hand-written vs ~150 LOC model definitions
-    // MQTT v5: ~5,598 LOC hand-written vs ~150 LOC model definitions
-    // WebSocket RFC 6455: ~914 LOC hand-written vs ~80 LOC model definitions
     @Test
     fun `code savings are significant`() {
         // The test protocol models validate that KSP generates correct codecs
-        // from concise annotated data classes, replacing thousands of lines
-        // of hand-written serialization code.
+        // from concise annotated data classes. Best suited for protocols with
+        // fixed-width fields, length-prefixed strings, and type-byte discriminators
+        // (e.g., MQTT connect/connack packets, DNS headers).
         assertTrue(true)
     }
 
