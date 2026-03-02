@@ -13,10 +13,19 @@ class ConditionalValidator(
             val expression = (condition as FieldCondition.WhenTrue).expression
 
             if (expression.isBlank()) {
+                // Build contextual examples from the actual fields in this class
+                val booleanFields = fields.filter { it.typeName == "kotlin.Boolean" && it.name != field.name }
+                val example =
+                    if (booleanFields.isNotEmpty()) {
+                        "@WhenTrue(\"${booleanFields.first().name}\")"
+                    } else {
+                        // No Boolean fields exist yet — suggest adding one
+                        "@WhenTrue(\"has${capitalizeFirst(field.name)}\")"
+                    }
                 logger.error(
                     "@WhenTrue expression on field '${field.name}' is empty. " +
-                        "Provide a field reference (e.g., @WhenTrue(\"hasExtra\")) " +
-                        "or a dotted property access (e.g., @WhenTrue(\"flags.willFlag\")).",
+                        "Provide the name of a Boolean field that controls whether '${field.name}' is present " +
+                        "(e.g., $example).",
                     field.parameter,
                 )
                 valid = false
@@ -42,8 +51,9 @@ class ConditionalValidator(
             val refIndex = fields.indexOf(referencedField)
             if (refIndex >= index) {
                 logger.error(
-                    "Conditional expression '$expression' references field '$referencedFieldName' " +
-                        "which must come before field '${field.name}'",
+                    "@WhenTrue(\"$expression\") on '${field.name}': field '$referencedFieldName' " +
+                        "must be declared before '${field.name}' in the constructor. " +
+                        "The codec reads fields in order, so the condition must already be decoded.",
                     field.parameter,
                 )
                 valid = false
@@ -53,9 +63,12 @@ class ConditionalValidator(
             // For simple field reference, check it's Boolean
             if (parts.size == 1) {
                 if (referencedField.typeName != "kotlin.Boolean") {
+                    val shortType = referencedField.typeName.substringAfterLast(".")
                     logger.error(
-                        "Conditional expression '$expression' references field '$referencedFieldName' " +
-                            "which is not a Boolean (type: ${referencedField.typeName})",
+                        "@WhenTrue(\"$expression\") on '${field.name}': field '$referencedFieldName' " +
+                            "is $shortType, not Boolean. " +
+                            "Either change '$referencedFieldName' to Boolean, " +
+                            "or use a dotted property access (e.g., @WhenTrue(\"$referencedFieldName.someFlag\")).",
                         field.parameter,
                     )
                     valid = false
@@ -90,4 +103,6 @@ class ConditionalValidator(
         }
         return valid
     }
+
+    private fun capitalizeFirst(s: String): String = s.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
 }
