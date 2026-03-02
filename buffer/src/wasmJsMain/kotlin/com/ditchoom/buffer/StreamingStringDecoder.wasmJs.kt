@@ -124,8 +124,22 @@ private class WasmJsStreamingStringDecoder(
             ).toString()
         }
 
-        // Bulk copy to linear memory scratch space, then decode in a single JS call.
-        // readByteArray uses copyOfRange (bulk), copyMemoryFromArray uses WASM i32 stores.
+        // Single bulk copy: backing array → linear memory scratch, then decode.
+        // ManagedMemoryAccess gives direct access to ByteArrayBuffer.data (no copy).
+        // copyMemoryFromArray uses WASM i32 stores (no JS boundary crossings).
+        val managed = actual.managedMemoryAccess
+        if (managed != null) {
+            val scratch = ensureScratch()
+            UnsafeMemory.copyMemoryFromArray(
+                managed.backingArray,
+                managed.arrayOffset + absoluteOffset,
+                scratch.toLong(),
+                length,
+            )
+            return decodeStreamLinear(decoder, scratch, length, true.toJsBoolean()).toString()
+        }
+
+        // Final fallback for unknown buffer types
         val savedPos = buffer.position()
         buffer.position(absoluteOffset)
         val bytes = buffer.readByteArray(length)
