@@ -60,6 +60,11 @@ fun ReadBuffer.readVariableByteInteger(): Int {
 }
 
 /**
+ * Convenience wrapper returning Int instead of Byte, for use in codec sizeOf computations.
+ */
+fun variableByteSizeInt(value: Int): Int = variableByteSize(value).toInt()
+
+/**
  * Returns the number of bytes (1–4) needed to encode [value] as a variable-byte integer.
  *
  * @throws IllegalArgumentException if [value] is outside 0..[VARIABLE_BYTE_INT_MAX]

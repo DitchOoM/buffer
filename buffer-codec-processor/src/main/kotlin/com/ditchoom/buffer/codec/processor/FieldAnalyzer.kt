@@ -1,5 +1,8 @@
 package com.ditchoom.buffer.codec.processor
 
+import com.ditchoom.buffer.codec.processor.spi.CodecFieldProvider
+import com.ditchoom.buffer.codec.processor.spi.CustomFieldDescriptor
+import com.ditchoom.buffer.codec.processor.spi.FieldContext
 import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.symbol.KSAnnotation
 import com.google.devtools.ksp.symbol.KSClassDeclaration
@@ -109,11 +112,16 @@ sealed class FieldReadStrategy {
         val typeParamName: String,
     ) : FieldReadStrategy()
 
+    data class Custom(
+        val descriptor: CustomFieldDescriptor,
+    ) : FieldReadStrategy()
+
     val fixedSize: Int
         get() =
             when (this) {
                 is PrimitiveField -> wireBytes
                 is ValueClassField -> innerStrategy.fixedSize
+                is Custom -> descriptor.fixedSize
                 else -> -1
             }
 
@@ -134,6 +142,7 @@ sealed class FieldReadStrategy {
 
 class FieldAnalyzer(
     private val logger: KSPLogger,
+    private val customProviders: Map<String, CodecFieldProvider> = emptyMap(),
 ) {
     private val forbiddenTypes =
         setOf(
@@ -362,8 +371,27 @@ class FieldAnalyzer(
             return resolvePayloadLengthKind(param, fieldName, typeDecl.name.asString())
         }
 
-        // String field annotations
+        // Check SPI-registered custom annotations
         val annotations = param.annotations.toList()
+        for (annotation in annotations) {
+            val fqn = annotation.qualifiedName() ?: continue
+            val provider = customProviders[fqn]
+            if (provider != null) {
+                val args = annotation.arguments.associate { it.name!!.asString() to it.value }
+                val ctx = FieldContext(fieldName, typeName, args)
+                return try {
+                    FieldReadStrategy.Custom(provider.describe(ctx))
+                } catch (e: Exception) {
+                    logger.error(
+                        "SPI provider for @${fqn.substringAfterLast('.')} failed on field '$fieldName': ${e.message}",
+                        param,
+                    )
+                    null
+                }
+            }
+        }
+
+        // String field annotations
         if (typeName == "kotlin.String") {
             return resolveStringStrategy(param, annotations, fieldName)
         }

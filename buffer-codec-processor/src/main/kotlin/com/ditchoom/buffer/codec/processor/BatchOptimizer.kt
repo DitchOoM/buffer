@@ -88,8 +88,8 @@ class BatchOptimizer {
             }
 
             val fieldSize = field.strategy.fixedSize
-            if (fieldSize < 0) {
-                // Variable-length field, break batch
+            if (fieldSize < 0 || field.strategy is FieldReadStrategy.Custom) {
+                // Variable-length or custom field, break batch
                 flushBatch()
                 result.add(CodegenItem.Single(field))
                 continue

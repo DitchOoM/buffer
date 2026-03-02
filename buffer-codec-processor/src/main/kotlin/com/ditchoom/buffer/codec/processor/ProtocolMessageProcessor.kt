@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.processor
 
+import com.ditchoom.buffer.codec.processor.spi.CodecFieldProvider
 import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.processing.Resolver
@@ -11,6 +12,7 @@ import com.google.devtools.ksp.symbol.Modifier
 class ProtocolMessageProcessor(
     private val codeGenerator: CodeGenerator,
     private val logger: KSPLogger,
+    private val customProviders: Map<String, CodecFieldProvider> = emptyMap(),
 ) : SymbolProcessor {
     private val processed = mutableSetOf<String>()
 
@@ -52,7 +54,7 @@ class ProtocolMessageProcessor(
         classDeclaration: KSClassDeclaration,
         resolver: Resolver,
     ) {
-        val fieldAnalyzer = FieldAnalyzer(logger)
+        val fieldAnalyzer = FieldAnalyzer(logger, customProviders)
         val fields = fieldAnalyzer.analyze(classDeclaration)
         if (fields == null) return // errors already reported
 

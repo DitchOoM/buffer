@@ -1,5 +1,9 @@
 package com.ditchoom.buffer.codec.processor
 
+import com.ditchoom.buffer.codec.processor.spi.CodecFieldProvider
+import com.ditchoom.buffer.codec.processor.spi.CustomFieldDescriptor
+import com.ditchoom.buffer.codec.processor.spi.FieldContext
+import com.ditchoom.buffer.codec.processor.spi.FunctionRef
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
 import kotlin.test.Test
@@ -491,6 +495,452 @@ class DataClassCodegenTest {
             """,
             )
         val result = compileWithKsp(source)
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    // ──────────────────────── Custom SPI annotation tests ────────────────────────
+
+    @Test
+    fun `custom annotation variable byte integer compiles`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+            @Target(AnnotationTarget.VALUE_PARAMETER)
+            @Retention(AnnotationRetention.BINARY)
+            annotation class VariableByteInteger
+
+            @ProtocolMessage
+            data class VbiMsg(val header: UByte, @VariableByteInteger val length: Int)
+            """,
+            )
+        val vbiProvider =
+            object : CodecFieldProvider {
+                override val annotationFqn = "test.VariableByteInteger"
+
+                override fun describe(context: FieldContext): CustomFieldDescriptor =
+                    CustomFieldDescriptor(
+                        readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
+                        writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
+                        fixedSize = -1,
+                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
+                    )
+            }
+        val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    @Test
+    fun `custom annotation repeated compiles`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+            @Target(AnnotationTarget.VALUE_PARAMETER)
+            @Retention(AnnotationRetention.BINARY)
+            annotation class Repeated(val countField: String)
+
+            @ProtocolMessage
+            data class RepMsg(val count: UByte, @Repeated(countField = "count") val items: List<Short>)
+            """,
+            )
+        val repeatedProvider =
+            object : CodecFieldProvider {
+                override val annotationFqn = "test.Repeated"
+
+                override fun describe(context: FieldContext): CustomFieldDescriptor {
+                    val countField =
+                        context.annotationArguments["countField"] as? String
+                            ?: error("@Repeated requires countField argument")
+                    return CustomFieldDescriptor(
+                        readFunction = FunctionRef("com.ditchoom.buffer.codec.test", "readRepeatedShorts"),
+                        writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writeRepeatedShorts"),
+                        fixedSize = -1,
+                        sizeOfFunction = FunctionRef("com.ditchoom.buffer.codec.test", "repeatedShortsSize"),
+                        contextFields = listOf(countField),
+                    )
+                }
+            }
+        val result = compileWithKspAndCustomProviders(source, providers = listOf(repeatedProvider))
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    @Test
+    fun `custom annotation property bag compiles`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+            @Target(AnnotationTarget.VALUE_PARAMETER)
+            @Retention(AnnotationRetention.BINARY)
+            annotation class PropertyBag
+
+            @ProtocolMessage
+            data class PropMsg(val version: UByte, @PropertyBag val props: Map<Int, Int>)
+            """,
+            )
+        val propBagProvider =
+            object : CodecFieldProvider {
+                override val annotationFqn = "test.PropertyBag"
+
+                override fun describe(context: FieldContext): CustomFieldDescriptor =
+                    CustomFieldDescriptor(
+                        readFunction = FunctionRef("com.ditchoom.buffer.codec.test", "readPropertyBag"),
+                        writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writePropertyBag"),
+                        fixedSize = -1,
+                        sizeOfFunction = null,
+                    )
+            }
+        val result = compileWithKspAndCustomProviders(source, providers = listOf(propBagProvider))
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    @Test
+    fun `custom annotation variable byte integer wrong type rejected`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+            @Target(AnnotationTarget.VALUE_PARAMETER)
+            @Retention(AnnotationRetention.BINARY)
+            annotation class VariableByteInteger
+
+            @ProtocolMessage
+            data class BadVbi(val header: UByte, @VariableByteInteger val name: String)
+            """,
+            )
+        val vbiProvider =
+            object : CodecFieldProvider {
+                override val annotationFqn = "test.VariableByteInteger"
+
+                override fun describe(context: FieldContext): CustomFieldDescriptor {
+                    require(context.typeName == "kotlin.Int") {
+                        "@VariableByteInteger can only be applied to Int fields, found: ${context.typeName}"
+                    }
+                    return CustomFieldDescriptor(
+                        readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
+                        writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
+                    )
+                }
+            }
+        val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
+        val hasError =
+            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
+                result.messages.contains("can only be applied to Int fields")
+        assertTrue(hasError, "Expected type mismatch error but got: ${result.exitCode}\n${result.messages}")
+    }
+
+    @Test
+    fun `cannot override built-in annotation`() {
+        val overrideProvider =
+            object : CodecFieldProvider {
+                override val annotationFqn = "com.ditchoom.buffer.codec.annotations.LengthPrefixed"
+
+                override fun describe(context: FieldContext): CustomFieldDescriptor =
+                    CustomFieldDescriptor(
+                        readFunction = FunctionRef("test", "read"),
+                        writeFunction = FunctionRef("test", "write"),
+                    )
+            }
+        val result = compileWithKspAndCustomProviders(providers = listOf(overrideProvider))
+        val hasError =
+            result.exitCode != KotlinCompilation.ExitCode.OK ||
+                result.messages.contains("cannot override built-in annotation", ignoreCase = true)
+        assertTrue(hasError, "Expected built-in override rejection but got: ${result.exitCode}\n${result.messages}")
+    }
+
+    @Test
+    fun `duplicate provider fqn conflict rejected`() {
+        val provider1 =
+            object : CodecFieldProvider {
+                override val annotationFqn = "test.DuplicateAnnotation"
+
+                override fun describe(context: FieldContext): CustomFieldDescriptor =
+                    CustomFieldDescriptor(
+                        readFunction = FunctionRef("test", "read1"),
+                        writeFunction = FunctionRef("test", "write1"),
+                    )
+            }
+        val provider2 =
+            object : CodecFieldProvider {
+                override val annotationFqn = "test.DuplicateAnnotation"
+
+                override fun describe(context: FieldContext): CustomFieldDescriptor =
+                    CustomFieldDescriptor(
+                        readFunction = FunctionRef("test", "read2"),
+                        writeFunction = FunctionRef("test", "write2"),
+                    )
+            }
+        val result = compileWithKspAndCustomProviders(providers = listOf(provider1, provider2))
+        val hasError =
+            result.exitCode != KotlinCompilation.ExitCode.OK ||
+                result.messages.contains("Duplicate CodecFieldProvider", ignoreCase = true)
+        assertTrue(hasError, "Expected duplicate provider rejection but got: ${result.exitCode}\n${result.messages}")
+    }
+
+    @Test
+    fun `provider describe throws propagates as ksp error`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+            @Target(AnnotationTarget.VALUE_PARAMETER)
+            @Retention(AnnotationRetention.BINARY)
+            annotation class Broken
+
+            @ProtocolMessage
+            data class BrokenMsg(val id: UByte, @Broken val data: Int)
+            """,
+            )
+        val brokenProvider =
+            object : CodecFieldProvider {
+                override val annotationFqn = "test.Broken"
+
+                override fun describe(context: FieldContext): CustomFieldDescriptor =
+                    throw IllegalArgumentException("intentional test failure")
+            }
+        val result = compileWithKspAndCustomProviders(source, providers = listOf(brokenProvider))
+        val hasError =
+            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
+                result.messages.contains("intentional test failure")
+        assertTrue(hasError, "Expected provider error propagation but got: ${result.exitCode}\n${result.messages}")
+    }
+
+    @Test
+    fun `custom annotation breaks batch`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+            @Target(AnnotationTarget.VALUE_PARAMETER)
+            @Retention(AnnotationRetention.BINARY)
+            annotation class VariableByteInteger
+
+            @ProtocolMessage
+            data class BatchBreaker(val a: Byte, @VariableByteInteger val b: Int, val c: Byte)
+            """,
+            )
+        val vbiProvider =
+            object : CodecFieldProvider {
+                override val annotationFqn = "test.VariableByteInteger"
+
+                override fun describe(context: FieldContext): CustomFieldDescriptor =
+                    CustomFieldDescriptor(
+                        readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
+                        writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
+                        fixedSize = -1,
+                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
+                    )
+            }
+        val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    @Test
+    fun `custom field with fixed size generates constant sizeOf`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+            @Target(AnnotationTarget.VALUE_PARAMETER)
+            @Retention(AnnotationRetention.BINARY)
+            annotation class CustomFixed
+
+            @ProtocolMessage
+            data class FixedMsg(val header: Byte, @CustomFixed val payload: Int)
+            """,
+            )
+        val fixedProvider =
+            object : CodecFieldProvider {
+                override val annotationFqn = "test.CustomFixed"
+
+                override fun describe(context: FieldContext): CustomFieldDescriptor =
+                    CustomFieldDescriptor(
+                        readFunction = FunctionRef("com.ditchoom.buffer.codec.test", "readFixedInt"),
+                        writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writeFixedInt"),
+                        fixedSize = 4,
+                    )
+            }
+        val result = compileWithKspAndCustomProviders(source, providers = listOf(fixedProvider))
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    @Test
+    fun `custom field with sizeOf function generates runtime sizeOf`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+            @Target(AnnotationTarget.VALUE_PARAMETER)
+            @Retention(AnnotationRetention.BINARY)
+            annotation class VariableByteInteger
+
+            @ProtocolMessage
+            data class RuntimeSizeMsg(val header: Byte, @VariableByteInteger val length: Int)
+            """,
+            )
+        val vbiProvider =
+            object : CodecFieldProvider {
+                override val annotationFqn = "test.VariableByteInteger"
+
+                override fun describe(context: FieldContext): CustomFieldDescriptor =
+                    CustomFieldDescriptor(
+                        readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
+                        writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
+                        fixedSize = -1,
+                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
+                    )
+            }
+        val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    @Test
+    fun `mixed built-in and custom annotations compile`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+
+            @Target(AnnotationTarget.VALUE_PARAMETER)
+            @Retention(AnnotationRetention.BINARY)
+            annotation class VariableByteInteger
+
+            @ProtocolMessage
+            data class MixedMsg(
+                val id: UShort,
+                @LengthPrefixed val name: String,
+                @VariableByteInteger val remaining: Int,
+                val checksum: Byte,
+            )
+            """,
+            )
+        val vbiProvider =
+            object : CodecFieldProvider {
+                override val annotationFqn = "test.VariableByteInteger"
+
+                override fun describe(context: FieldContext): CustomFieldDescriptor =
+                    CustomFieldDescriptor(
+                        readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
+                        writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
+                        fixedSize = -1,
+                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
+                    )
+            }
+        val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    @Test
+    fun `conditional custom field compiles`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.WhenTrue
+
+            @Target(AnnotationTarget.VALUE_PARAMETER)
+            @Retention(AnnotationRetention.BINARY)
+            annotation class VariableByteInteger
+
+            @ProtocolMessage
+            data class ConditionalVbi(
+                val hasVbi: Boolean,
+                @WhenTrue("hasVbi") @VariableByteInteger val vbi: Int? = null,
+            )
+            """,
+            )
+        val vbiProvider =
+            object : CodecFieldProvider {
+                override val annotationFqn = "test.VariableByteInteger"
+
+                override fun describe(context: FieldContext): CustomFieldDescriptor =
+                    CustomFieldDescriptor(
+                        readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
+                        writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
+                        fixedSize = -1,
+                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
+                    )
+            }
+        val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    @Test
+    fun `multiple custom annotations on same field uses first match`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+            @Target(AnnotationTarget.VALUE_PARAMETER)
+            @Retention(AnnotationRetention.BINARY)
+            annotation class VariableByteInteger
+
+            @Target(AnnotationTarget.VALUE_PARAMETER)
+            @Retention(AnnotationRetention.BINARY)
+            annotation class PropertyBag
+
+            @ProtocolMessage
+            data class MultiAnnotated(val id: UByte, @VariableByteInteger @PropertyBag val data: Int)
+            """,
+            )
+        val vbiProvider =
+            object : CodecFieldProvider {
+                override val annotationFqn = "test.VariableByteInteger"
+
+                override fun describe(context: FieldContext): CustomFieldDescriptor =
+                    CustomFieldDescriptor(
+                        readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
+                        writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
+                        fixedSize = -1,
+                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
+                    )
+            }
+        val propBagProvider =
+            object : CodecFieldProvider {
+                override val annotationFqn = "test.PropertyBag"
+
+                override fun describe(context: FieldContext): CustomFieldDescriptor =
+                    CustomFieldDescriptor(
+                        readFunction = FunctionRef("com.ditchoom.buffer.codec.test", "readPropertyBag"),
+                        writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writePropertyBag"),
+                        fixedSize = -1,
+                        sizeOfFunction = null,
+                    )
+            }
+        val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider, propBagProvider))
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
     }
 }
