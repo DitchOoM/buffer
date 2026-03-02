@@ -4,6 +4,18 @@ import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.Dependencies
 import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.symbol.KSClassDeclaration
+import com.squareup.kotlinpoet.ClassName
+import com.squareup.kotlinpoet.CodeBlock
+import com.squareup.kotlinpoet.FileSpec
+import com.squareup.kotlinpoet.FunSpec
+import com.squareup.kotlinpoet.KModifier
+import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
+import com.squareup.kotlinpoet.TypeSpec
+import com.squareup.kotlinpoet.ksp.writeTo
+
+private val READ_BUFFER = ClassName("com.ditchoom.buffer", "ReadBuffer")
+private val WRITE_BUFFER = ClassName("com.ditchoom.buffer", "WriteBuffer")
+private val CODEC = ClassName("com.ditchoom.buffer.codec", "Codec")
 
 class SealedDispatchGenerator(
     private val codeGenerator: CodeGenerator,
@@ -16,6 +28,7 @@ class SealedDispatchGenerator(
         val interfaceName = sealedInterface.simpleName.asString()
         val packageName = sealedInterface.packageName.asString()
         val codecName = "${interfaceName}Codec"
+        val interfaceTypeName = ClassName(packageName, interfaceName)
 
         // Collect @PacketType values
         val variants = mutableListOf<Pair<Int, KSClassDeclaration>>()
@@ -57,48 +70,63 @@ class SealedDispatchGenerator(
                 Dependencies(true)
             }
 
-        val file =
-            codeGenerator.createNewFile(
-                dependencies = dependencies,
-                packageName = packageName,
-                fileName = codecName,
-            )
+        // Build decode function
+        val decodeBody =
+            CodeBlock
+                .builder()
+                .addStatement("val type = buffer.readByte().toInt() and 0xFF")
+                .beginControlFlow("return when (type)")
+        for ((value, subclass) in variants) {
+            val subName = subclass.simpleName.asString()
+            decodeBody.addStatement("$value -> ${subName}Codec.decode(buffer)")
+        }
+        decodeBody
+            .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
+            .endControlFlow()
 
-        file.write(
-            buildString {
-                appendLine("package $packageName")
-                appendLine()
-                appendLine("import com.ditchoom.buffer.ReadBuffer")
-                appendLine("import com.ditchoom.buffer.WriteBuffer")
-                appendLine("import com.ditchoom.buffer.codec.Codec")
-                appendLine()
-                appendLine("object $codecName : Codec<$interfaceName> {")
-                appendLine("    override fun decode(buffer: ReadBuffer): $interfaceName {")
-                appendLine("        val type = buffer.readByte().toInt() and 0xFF")
-                appendLine("        return when (type) {")
-                for ((value, subclass) in variants) {
-                    val subName = subclass.simpleName.asString()
-                    appendLine("            $value -> ${subName}Codec.decode(buffer)")
-                }
-                appendLine("            else -> throw IllegalArgumentException(\"Unknown packet type: \$type\")")
-                appendLine("        }")
-                appendLine("    }")
-                appendLine()
-                appendLine("    override fun encode(buffer: WriteBuffer, value: $interfaceName) {")
-                appendLine("        when (value) {")
-                for ((value, subclass) in variants) {
-                    val subName = subclass.simpleName.asString()
-                    appendLine("            is $subName -> {")
-                    appendLine("                buffer.writeByte($value.toByte())")
-                    appendLine("                ${subName}Codec.encode(buffer, value)")
-                    appendLine("            }")
-                }
-                appendLine("        }")
-                appendLine("    }")
-                appendLine("}")
-            }.toByteArray(),
-        )
+        val decodeFun =
+            FunSpec
+                .builder("decode")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("buffer", READ_BUFFER)
+                .returns(interfaceTypeName)
+                .addCode(decodeBody.build())
+                .build()
 
-        file.close()
+        // Build encode function
+        val encodeBody = CodeBlock.builder().beginControlFlow("when (value)")
+        for ((value, subclass) in variants) {
+            val subName = subclass.simpleName.asString()
+            encodeBody.beginControlFlow("is $subName ->")
+            encodeBody.addStatement("buffer.writeByte($value.toByte())")
+            encodeBody.addStatement("${subName}Codec.encode(buffer, value)")
+            encodeBody.endControlFlow()
+        }
+        encodeBody.endControlFlow()
+
+        val encodeFun =
+            FunSpec
+                .builder("encode")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("buffer", WRITE_BUFFER)
+                .addParameter("value", interfaceTypeName)
+                .addCode(encodeBody.build())
+                .build()
+
+        val objectSpec =
+            TypeSpec
+                .objectBuilder(codecName)
+                .addSuperinterface(CODEC.parameterizedBy(interfaceTypeName))
+                .addFunction(decodeFun)
+                .addFunction(encodeFun)
+                .build()
+
+        val fileSpec =
+            FileSpec
+                .builder(packageName, codecName)
+                .addType(objectSpec)
+                .build()
+
+        fileSpec.writeTo(codeGenerator, dependencies)
     }
 }

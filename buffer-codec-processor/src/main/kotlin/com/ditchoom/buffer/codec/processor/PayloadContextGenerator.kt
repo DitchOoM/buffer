@@ -4,6 +4,14 @@ import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.Dependencies
 import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.symbol.KSClassDeclaration
+import com.squareup.kotlinpoet.ClassName
+import com.squareup.kotlinpoet.FileSpec
+import com.squareup.kotlinpoet.FunSpec
+import com.squareup.kotlinpoet.KModifier
+import com.squareup.kotlinpoet.ParameterSpec
+import com.squareup.kotlinpoet.PropertySpec
+import com.squareup.kotlinpoet.TypeSpec
+import com.squareup.kotlinpoet.ksp.writeTo
 
 class PayloadContextGenerator(
     private val codeGenerator: CodeGenerator,
@@ -28,27 +36,25 @@ class PayloadContextGenerator(
                 Dependencies(true)
             }
 
-        val file =
-            codeGenerator.createNewFile(
-                dependencies = dependencies,
-                packageName = packageName,
-                fileName = contextName,
+        val constructorBuilder = FunSpec.constructorBuilder()
+        val typeSpecBuilder = TypeSpec.classBuilder(contextName).addModifiers(KModifier.DATA)
+
+        for (field in nonPayloadFields) {
+            val typeName = ClassName.bestGuess(field.typeName).copy(nullable = field.isNullable)
+            constructorBuilder.addParameter(ParameterSpec.builder(field.name, typeName).build())
+            typeSpecBuilder.addProperty(
+                PropertySpec.builder(field.name, typeName).initializer(field.name).build(),
             )
+        }
 
-        file.write(
-            buildString {
-                appendLine("package $packageName")
-                appendLine()
-                appendLine("data class $contextName(")
-                nonPayloadFields.forEachIndexed { index, field ->
-                    val comma = if (index < nonPayloadFields.size - 1) "," else ""
-                    val nullableMarker = if (field.isNullable) "?" else ""
-                    appendLine("    val ${field.name}: ${field.typeName}$nullableMarker$comma")
-                }
-                appendLine(")")
-            }.toByteArray(),
-        )
+        typeSpecBuilder.primaryConstructor(constructorBuilder.build())
 
-        file.close()
+        val fileSpec =
+            FileSpec
+                .builder(packageName, contextName)
+                .addType(typeSpecBuilder.build())
+                .build()
+
+        fileSpec.writeTo(codeGenerator, dependencies)
     }
 }

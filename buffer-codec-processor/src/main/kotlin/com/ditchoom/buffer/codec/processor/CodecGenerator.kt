@@ -4,7 +4,23 @@ import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.Dependencies
 import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.symbol.KSClassDeclaration
-import java.io.OutputStream
+import com.squareup.kotlinpoet.ClassName
+import com.squareup.kotlinpoet.CodeBlock
+import com.squareup.kotlinpoet.FileSpec
+import com.squareup.kotlinpoet.FunSpec
+import com.squareup.kotlinpoet.KModifier
+import com.squareup.kotlinpoet.LambdaTypeName
+import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
+import com.squareup.kotlinpoet.TypeSpec
+import com.squareup.kotlinpoet.TypeVariableName
+import com.squareup.kotlinpoet.ksp.writeTo
+
+private val READ_BUFFER = ClassName("com.ditchoom.buffer", "ReadBuffer")
+private val WRITE_BUFFER = ClassName("com.ditchoom.buffer", "WriteBuffer")
+private val CODEC = ClassName("com.ditchoom.buffer.codec", "Codec")
+private val PAYLOAD_READER = ClassName("com.ditchoom.buffer.codec.payload", "PayloadReader")
+private val READ_BUFFER_PAYLOAD_READER = ClassName("com.ditchoom.buffer.codec.payload", "ReadBufferPayloadReader")
+private val UNIT = ClassName("kotlin", "Unit")
 
 class CodecGenerator(
     private val codeGenerator: CodeGenerator,
@@ -28,67 +44,74 @@ class CodecGenerator(
                 Dependencies(true)
             }
 
-        val file =
-            codeGenerator.createNewFile(
-                dependencies = dependencies,
-                packageName = packageName,
-                fileName = codecName,
-            )
+        val fileSpec =
+            if (hasPayload) {
+                buildPayloadCodecFile(packageName, className, codecName, fields, batches)
+            } else {
+                buildCodecFile(packageName, className, codecName, fields, batches)
+            }
 
-        if (hasPayload) {
-            file.writePayloadCodec(packageName, className, codecName, fields, batches, classDeclaration)
-        } else {
-            file.writeCodec(packageName, className, codecName, fields, batches)
-        }
-        file.close()
+        fileSpec.writeTo(codeGenerator, dependencies)
     }
 
     // ──────────────────────── Standard (non-payload) codec ────────────────────────
 
-    private fun OutputStream.writeCodec(
+    private fun buildCodecFile(
         packageName: String,
         className: String,
         codecName: String,
         fields: List<FieldInfo>,
         batches: List<CodegenItem>,
-    ) {
-        writeLine("package $packageName")
-        writeLine()
-        writeLine("import com.ditchoom.buffer.ReadBuffer")
-        writeLine("import com.ditchoom.buffer.WriteBuffer")
-        writeLine("import com.ditchoom.buffer.codec.Codec")
-        writeLine("import com.ditchoom.buffer.readLengthPrefixedUtf8String")
-        writeLine("import com.ditchoom.buffer.writeLengthPrefixedUtf8String")
-        writeLine()
-        writeLine("object $codecName : Codec<$className> {")
-        writeLine("    override fun decode(buffer: ReadBuffer): $className {")
+    ): FileSpec {
+        val classTypeName = ClassName(packageName, className)
 
-        // Generate decode body with batch optimization
+        // Build decode function body
+        val decodeBody = CodeBlock.builder()
         var batchIndex = 0
         for (item in batches) {
             when (item) {
                 is CodegenItem.Batched -> {
-                    writeBatchRead(item.group, batchIndex)
+                    addBatchRead(decodeBody, item.group, batchIndex)
                     batchIndex++
                 }
                 is CodegenItem.Single -> {
-                    generateFieldRead(item.field)
+                    addFieldRead(decodeBody, item.field)
                 }
             }
         }
-
-        // Constructor call
         val fieldNames = fields.joinToString(", ") { it.name }
-        writeLine("        return $className($fieldNames)")
-        writeLine("    }")
-        writeLine()
+        decodeBody.addStatement("return %L(%L)", className, fieldNames)
 
-        // Generate encode
-        writeLine("    override fun encode(buffer: WriteBuffer, value: $className) {")
+        val decodeFun =
+            FunSpec
+                .builder("decode")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("buffer", READ_BUFFER)
+                .returns(classTypeName)
+                .addCode(decodeBody.build())
+                .build()
+
+        // Build encode function body
+        val encodeBody = CodeBlock.builder()
         for (field in fields) {
-            generateFieldWrite(field, "value.${field.name}")
+            addFieldWrite(encodeBody, field, "value.${field.name}")
         }
-        writeLine("    }")
+
+        val encodeFun =
+            FunSpec
+                .builder("encode")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("buffer", WRITE_BUFFER)
+                .addParameter("value", classTypeName)
+                .addCode(encodeBody.build())
+                .build()
+
+        val objectBuilder =
+            TypeSpec
+                .objectBuilder(codecName)
+                .addSuperinterface(CODEC.parameterizedBy(classTypeName))
+                .addFunction(decodeFun)
+                .addFunction(encodeFun)
 
         // Generate sizeOf if all fields are fixed-size
         val totalFixedSize =
@@ -98,64 +121,90 @@ class CodecGenerator(
                 s
             }
         if (totalFixedSize >= 0) {
-            writeLine()
-            writeLine("    override fun sizeOf(value: $className): Int? = $totalFixedSize")
+            val sizeOfFun =
+                FunSpec
+                    .builder("sizeOf")
+                    .addModifiers(KModifier.OVERRIDE)
+                    .addParameter("value", classTypeName)
+                    .returns(ClassName("kotlin", "Int").copy(nullable = true))
+                    .addStatement("return %L", totalFixedSize)
+                    .build()
+            objectBuilder.addFunction(sizeOfFun)
         }
 
-        writeLine("}")
+        val fileBuilder =
+            FileSpec
+                .builder(packageName, codecName)
+                .addType(objectBuilder.build())
+        addExtensionImports(fileBuilder, fields)
+        return fileBuilder.build()
     }
 
     // ──────────────────────── Payload codec ────────────────────────
 
-    private fun OutputStream.writePayloadCodec(
+    private fun buildPayloadCodecFile(
         packageName: String,
         className: String,
         codecName: String,
         fields: List<FieldInfo>,
         batches: List<CodegenItem>,
-        classDeclaration: KSClassDeclaration,
-    ) {
+    ): FileSpec {
         val payloadFields = fields.filter { it.strategy is FieldReadStrategy.PayloadField }
-        val payloadTypeParams = payloadFields.map { (it.strategy as FieldReadStrategy.PayloadField).typeParamName }.distinct()
+        val payloadTypeParams =
+            payloadFields.map { (it.strategy as FieldReadStrategy.PayloadField).typeParamName }.distinct()
         val typeParamList = payloadTypeParams.joinToString(", ")
         val contextName = "${className}Context"
+        val typeVariables = payloadTypeParams.map { TypeVariableName(it) }
 
-        writeLine("package $packageName")
-        writeLine()
-        writeLine("import com.ditchoom.buffer.ReadBuffer")
-        writeLine("import com.ditchoom.buffer.WriteBuffer")
-        writeLine("import com.ditchoom.buffer.codec.payload.PayloadReader")
-        writeLine("import com.ditchoom.buffer.codec.payload.ReadBufferPayloadReader")
-        writeLine("import com.ditchoom.buffer.readLengthPrefixedUtf8String")
-        writeLine("import com.ditchoom.buffer.writeLengthPrefixedUtf8String")
-        writeLine()
-        writeLine("object $codecName {")
+        // Build decode function
+        val decodeBuilder =
+            FunSpec
+                .builder("decode")
+                .addParameter("buffer", READ_BUFFER)
 
-        // ── decode ──
-        val decodeTypeParams = "<$typeParamList>"
-        writeLine("    fun $decodeTypeParams decode(")
-        writeLine("        buffer: ReadBuffer,")
+        for (tv in typeVariables) {
+            decodeBuilder.addTypeVariable(tv)
+        }
+
         for (pf in payloadFields) {
             val strategy = pf.strategy as FieldReadStrategy.PayloadField
-            val tpName = strategy.typeParamName
-            writeLine("        decode${capitalizeFirst(pf.name)}: $contextName.(PayloadReader) -> $tpName,")
+            val tpName = TypeVariableName(strategy.typeParamName)
+            val contextType = ClassName(packageName, contextName)
+            val lambdaType = LambdaTypeName.get(receiver = contextType, parameters = listOf(), returnType = tpName)
+            // The lambda takes PayloadReader as a parameter
+            val paramLambdaType =
+                LambdaTypeName.get(
+                    receiver = contextType,
+                    parameters =
+                        listOf(
+                            com.squareup.kotlinpoet.ParameterSpec
+                                .unnamed(PAYLOAD_READER),
+                        ),
+                    returnType = tpName,
+                )
+            decodeBuilder.addParameter("decode${capitalizeFirst(pf.name)}", paramLambdaType)
         }
-        writeLine("    ): $className<$typeParamList> {")
+
+        val classWithTypeParams = "$className<$typeParamList>"
+        val returnType = ClassName(packageName, className).parameterizedBy(typeVariables)
+        decodeBuilder.returns(returnType)
+
+        val decodeBody = CodeBlock.builder()
 
         // Phase 1: read all wire data in order
         var batchIndex = 0
         for (item in batches) {
             when (item) {
                 is CodegenItem.Batched -> {
-                    writeBatchRead(item.group, batchIndex)
+                    addBatchRead(decodeBody, item.group, batchIndex)
                     batchIndex++
                 }
                 is CodegenItem.Single -> {
                     val strategy = item.field.strategy
                     if (strategy is FieldReadStrategy.PayloadField) {
-                        generatePayloadRawRead(item.field)
+                        addPayloadRawRead(decodeBody, item.field)
                     } else {
-                        generateFieldRead(item.field)
+                        addFieldRead(decodeBody, item.field)
                     }
                 }
             }
@@ -163,121 +212,167 @@ class CodecGenerator(
 
         // Phase 2: create context from non-payload fields
         val nonPayloadFields = fields.filter { it.strategy !is FieldReadStrategy.PayloadField }
-        writeLine("        val _ctx = $contextName(${nonPayloadFields.joinToString(", ") { it.name }})")
+        decodeBody.addStatement(
+            "val _ctx = %L(%L)",
+            contextName,
+            nonPayloadFields.joinToString(", ") { it.name },
+        )
 
         // Phase 3: decode payload fields using stored bytes + lambdas
         for (pf in payloadFields) {
             val rawVar = "_raw_${pf.name}"
             val condition = pf.condition
             if (condition != null || pf.isNullable) {
-                writeLine("        val ${pf.name} = if ($rawVar != null) {")
-                writeLine("            val _pr = ReadBufferPayloadReader($rawVar)")
-                writeLine("            try { _ctx.decode${capitalizeFirst(pf.name)}(_pr) } finally { _pr.release() }")
-                writeLine("        } else {")
-                writeLine("            null")
-                writeLine("        }")
+                decodeBody.beginControlFlow("val %L = if (%L != null)", pf.name, rawVar)
+                decodeBody.addStatement("val _pr = %T(%L)", READ_BUFFER_PAYLOAD_READER, rawVar)
+                decodeBody.addStatement(
+                    "try { _ctx.decode%L(_pr) } finally { _pr.release() }",
+                    capitalizeFirst(pf.name),
+                )
+                decodeBody.nextControlFlow("else")
+                decodeBody.addStatement("null")
+                decodeBody.endControlFlow()
             } else {
-                writeLine("        val ${pf.name} = run {")
-                writeLine("            val _pr = ReadBufferPayloadReader($rawVar)")
-                writeLine("            try { _ctx.decode${capitalizeFirst(pf.name)}(_pr) } finally { _pr.release() }")
-                writeLine("        }")
+                decodeBody.beginControlFlow("val %L = run", pf.name)
+                decodeBody.addStatement("val _pr = %T(%L)", READ_BUFFER_PAYLOAD_READER, rawVar)
+                decodeBody.addStatement(
+                    "try { _ctx.decode%L(_pr) } finally { _pr.release() }",
+                    capitalizeFirst(pf.name),
+                )
+                decodeBody.endControlFlow()
             }
         }
 
         // Phase 4: return constructor call
         val fieldNames = fields.joinToString(", ") { it.name }
-        writeLine("        return $className($fieldNames)")
-        writeLine("    }")
-        writeLine()
+        decodeBody.addStatement("return %L(%L)", className, fieldNames)
 
-        // ── encode ──
-        writeLine("    fun $decodeTypeParams encode(")
-        writeLine("        buffer: WriteBuffer,")
-        writeLine("        value: $className<$typeParamList>,")
+        decodeBuilder.addCode(decodeBody.build())
+
+        // Build encode function
+        val encodeBuilder =
+            FunSpec
+                .builder("encode")
+                .addParameter("buffer", WRITE_BUFFER)
+                .addParameter("value", returnType)
+
+        for (tv in typeVariables) {
+            encodeBuilder.addTypeVariable(tv)
+        }
+
         for (pf in payloadFields) {
             val strategy = pf.strategy as FieldReadStrategy.PayloadField
-            val tpName = strategy.typeParamName
-            writeLine("        encode${capitalizeFirst(pf.name)}: (WriteBuffer, $tpName) -> Unit,")
+            val tpName = TypeVariableName(strategy.typeParamName)
+            val encodeLambdaType =
+                LambdaTypeName.get(
+                    parameters =
+                        listOf(
+                            com.squareup.kotlinpoet.ParameterSpec
+                                .unnamed(WRITE_BUFFER),
+                            com.squareup.kotlinpoet.ParameterSpec
+                                .unnamed(tpName),
+                        ),
+                    returnType = UNIT,
+                )
+            encodeBuilder.addParameter("encode${capitalizeFirst(pf.name)}", encodeLambdaType)
         }
-        writeLine("    ) {")
+
+        val encodeBody = CodeBlock.builder()
         for (field in fields) {
             val strategy = field.strategy
             if (strategy is FieldReadStrategy.PayloadField) {
-                generatePayloadWrite(field)
+                addPayloadWrite(encodeBody, field)
             } else {
-                generateFieldWrite(field, "value.${field.name}")
+                addFieldWrite(encodeBody, field, "value.${field.name}")
             }
         }
-        writeLine("    }")
+        encodeBuilder.addCode(encodeBody.build())
 
-        writeLine("}")
+        val objectSpec =
+            TypeSpec
+                .objectBuilder(codecName)
+                .addFunction(decodeBuilder.build())
+                .addFunction(encodeBuilder.build())
+                .build()
+
+        val fileBuilder =
+            FileSpec
+                .builder(packageName, codecName)
+                .addType(objectSpec)
+        addExtensionImports(fileBuilder, fields)
+        return fileBuilder.build()
     }
 
     // ──────────────────────── Payload raw read (Phase 1) ────────────────────────
 
-    private fun OutputStream.generatePayloadRawRead(field: FieldInfo) {
+    private fun addPayloadRawRead(
+        code: CodeBlock.Builder,
+        field: FieldInfo,
+    ) {
         val strategy = field.strategy as FieldReadStrategy.PayloadField
         val rawVar = "_raw_${field.name}"
         val condition = field.condition
 
         if (condition != null) {
             val condExpr = (condition as FieldCondition.WhenTrue).expression
-            writeLine("        val $rawVar: ReadBuffer? = if ($condExpr) {")
-            writePayloadRawReadBody(strategy, "            ")
-            writeLine("        } else {")
-            writeLine("            null")
-            writeLine("        }")
+            code.beginControlFlow("val %L: %T? = if (%L)", rawVar, READ_BUFFER, condExpr)
+            addPayloadRawReadBody(code, strategy)
+            code.nextControlFlow("else")
+            code.addStatement("null")
+            code.endControlFlow()
         } else if (field.isNullable) {
-            // Nullable without condition shouldn't normally happen for payloads, but handle gracefully
-            writeLine("        val $rawVar: ReadBuffer? = run {")
-            writePayloadRawReadBody(strategy, "            ")
-            writeLine("        }")
+            code.beginControlFlow("val %L: %T? = run", rawVar, READ_BUFFER)
+            addPayloadRawReadBody(code, strategy)
+            code.endControlFlow()
         } else {
-            writeLine("        val $rawVar: ReadBuffer = run {")
-            writePayloadRawReadBody(strategy, "            ")
-            writeLine("        }")
+            code.beginControlFlow("val %L: %T = run", rawVar, READ_BUFFER)
+            addPayloadRawReadBody(code, strategy)
+            code.endControlFlow()
         }
     }
 
-    private fun OutputStream.writePayloadRawReadBody(
+    private fun addPayloadRawReadBody(
+        code: CodeBlock.Builder,
         strategy: FieldReadStrategy.PayloadField,
-        indent: String,
     ) {
         when (val lk = strategy.lengthKind) {
             is LengthKind.Prefixed -> {
                 val lenExpr = prefixConfig(lk.prefix).readExpr
-                writeLine("${indent}val _len = $lenExpr")
-                writeLine("${indent}buffer.readBytes(_len)")
+                code.addStatement("val _len = %L", lenExpr)
+                code.addStatement("buffer.readBytes(_len)")
             }
             is LengthKind.Remaining -> {
-                writeLine("${indent}buffer.readBytes(buffer.remaining())")
+                code.addStatement("buffer.readBytes(buffer.remaining())")
             }
             is LengthKind.FromField -> {
-                writeLine("${indent}buffer.readBytes(${lk.field}.toInt())")
+                code.addStatement("buffer.readBytes(%L.toInt())", lk.field)
             }
         }
     }
 
     // ──────────────────────── Payload write (encode) ────────────────────────
 
-    private fun OutputStream.generatePayloadWrite(field: FieldInfo) {
+    private fun addPayloadWrite(
+        code: CodeBlock.Builder,
+        field: FieldInfo,
+    ) {
         val strategy = field.strategy as FieldReadStrategy.PayloadField
         val condition = field.condition
 
         if (condition != null) {
             val condExpr = (condition as FieldCondition.WhenTrue).expression.replace(Regex("^([^.]+)"), "value.$1")
-            writeLine("        if ($condExpr) {")
-            writePayloadEncodeBody(strategy, field, "            ")
-            writeLine("        }")
+            code.beginControlFlow("if (%L)", condExpr)
+            addPayloadEncodeBody(code, strategy, field)
+            code.endControlFlow()
         } else {
-            writePayloadEncodeBody(strategy, field, "        ")
+            addPayloadEncodeBody(code, strategy, field)
         }
     }
 
-    private fun OutputStream.writePayloadEncodeBody(
+    private fun addPayloadEncodeBody(
+        code: CodeBlock.Builder,
         strategy: FieldReadStrategy.PayloadField,
         field: FieldInfo,
-        indent: String,
     ) {
         val valueExpr = if (field.isNullable && field.condition != null) "value.${field.name}!!" else "value.${field.name}"
         val encodeFn = "encode${capitalizeFirst(field.name)}"
@@ -286,21 +381,20 @@ class CodecGenerator(
         when (val lk = strategy.lengthKind) {
             is LengthKind.Prefixed -> {
                 val cfg = prefixConfig(lk.prefix)
-                writeLine("${indent}val _pos$suffix = buffer.position()")
-                writeLine("${indent}${cfg.writePlaceholder}")
-                writeLine("${indent}$encodeFn(buffer, $valueExpr)")
-                writeLine("${indent}val _end$suffix = buffer.position()")
-                writeLine("${indent}val _len$suffix = _end$suffix - _pos$suffix - ${cfg.byteCount}")
-                writeLine("${indent}buffer.position(_pos$suffix)")
-                writeLine("${indent}${cfg.writeExpr("_len$suffix")}")
-                writeLine("${indent}buffer.position(_end$suffix)")
+                code.addStatement("val _pos%L = buffer.position()", suffix)
+                code.addStatement("%L", cfg.writePlaceholder)
+                code.addStatement("%L(buffer, %L)", encodeFn, valueExpr)
+                code.addStatement("val _end%L = buffer.position()", suffix)
+                code.addStatement("val _len%L = _end%L - _pos%L - %L", suffix, suffix, suffix, cfg.byteCount)
+                code.addStatement("buffer.position(_pos%L)", suffix)
+                code.addStatement("%L", cfg.writeExpr("_len$suffix"))
+                code.addStatement("buffer.position(_end%L)", suffix)
             }
             is LengthKind.Remaining -> {
-                writeLine("${indent}$encodeFn(buffer, $valueExpr)")
+                code.addStatement("%L(buffer, %L)", encodeFn, valueExpr)
             }
             is LengthKind.FromField -> {
-                // Length field already written
-                writeLine("${indent}$encodeFn(buffer, $valueExpr)")
+                code.addStatement("%L(buffer, %L)", encodeFn, valueExpr)
             }
         }
     }
@@ -340,7 +434,8 @@ class CodecGenerator(
 
     // ──────────────────────── Batch read ────────────────────────
 
-    private fun OutputStream.writeBatchRead(
+    private fun addBatchRead(
+        code: CodeBlock.Builder,
         item: BatchGroup,
         batchIndex: Int,
     ) {
@@ -352,10 +447,13 @@ class CodecGenerator(
                 "readShort" -> "Short"
                 else -> "Byte"
             }
-        writeLine("        val $batchVar = buffer.${item.readMethod}()")
+        code.addStatement("val %L = buffer.%L()", batchVar, item.readMethod)
         if (readType == "Short" || readType == "Byte") {
-            writeLine(
-                "        val ${batchVar}Bits = $batchVar.toInt() and ${if (readType == "Short") "0xFFFF" else "0xFF"}",
+            code.addStatement(
+                "val %LBits = %L.toInt() and %L",
+                batchVar,
+                batchVar,
+                if (readType == "Short") "0xFFFF" else "0xFF",
             )
         }
 
@@ -372,7 +470,7 @@ class CodecGenerator(
                     readType = readType,
                     strategy = field.strategy,
                 )
-            writeLine("        val ${field.name} = $extractExpr")
+            code.addStatement("val %L = %L", field.name, extractExpr)
         }
     }
 
@@ -466,17 +564,20 @@ class CodecGenerator(
 
     // ──────────────────────── Individual field read/write ────────────────────────
 
-    private fun OutputStream.generateFieldRead(field: FieldInfo) {
+    private fun addFieldRead(
+        code: CodeBlock.Builder,
+        field: FieldInfo,
+    ) {
         val condition = field.condition
         if (condition != null) {
             val condExpr = (condition as FieldCondition.WhenTrue).expression
-            writeLine("        val ${field.name} = if ($condExpr) {")
-            writeLine("            ${readExpression(field.strategy)}")
-            writeLine("        } else {")
-            writeLine("            null")
-            writeLine("        }")
+            code.beginControlFlow("val %L = if (%L)", field.name, condExpr)
+            code.addStatement("%L", readExpression(field.strategy))
+            code.nextControlFlow("else")
+            code.addStatement("null")
+            code.endControlFlow()
         } else {
-            writeLine("        val ${field.name} = ${readExpression(field.strategy)}")
+            code.addStatement("val %L = %L", field.name, readExpression(field.strategy))
         }
     }
 
@@ -507,18 +608,19 @@ class CodecGenerator(
             is FieldReadStrategy.PayloadField -> error("PayloadField uses writePayloadCodec path")
         }
 
-    private fun OutputStream.generateFieldWrite(
+    private fun addFieldWrite(
+        code: CodeBlock.Builder,
         field: FieldInfo,
         valueExpr: String,
     ) {
         val condition = field.condition
         if (condition != null) {
             val condExpr = (condition as FieldCondition.WhenTrue).expression.replace(Regex("^([^.]+)"), "value.$1")
-            writeLine("        if ($condExpr) {")
-            writeLine("            ${writeExpression(field.strategy, "$valueExpr!!")}")
-            writeLine("        }")
+            code.beginControlFlow("if (%L)", condExpr)
+            code.addStatement("%L", writeExpression(field.strategy, "$valueExpr!!"))
+            code.endControlFlow()
         } else {
-            writeLine("        ${writeExpression(field.strategy, valueExpr)}")
+            code.addStatement("%L", writeExpression(field.strategy, valueExpr))
         }
     }
 
@@ -656,9 +758,24 @@ class CodecGenerator(
 
     // ──────────────────────── Utility ────────────────────────
 
-    private fun capitalizeFirst(s: String): String = s.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+    private fun needsLengthPrefixedImports(fields: List<FieldInfo>): Boolean = fields.any { needsLengthPrefixedImport(it.strategy) }
 
-    private fun OutputStream.writeLine(line: String = "") {
-        write("$line\n".toByteArray())
+    private fun needsLengthPrefixedImport(strategy: FieldReadStrategy): Boolean =
+        when (strategy) {
+            is FieldReadStrategy.LengthPrefixedStringField -> strategy.prefix == "Short"
+            is FieldReadStrategy.ValueClassField -> needsLengthPrefixedImport(strategy.innerStrategy)
+            else -> false
+        }
+
+    private fun addExtensionImports(
+        fileBuilder: FileSpec.Builder,
+        fields: List<FieldInfo>,
+    ) {
+        if (needsLengthPrefixedImports(fields)) {
+            fileBuilder.addImport("com.ditchoom.buffer", "readLengthPrefixedUtf8String")
+            fileBuilder.addImport("com.ditchoom.buffer", "writeLengthPrefixedUtf8String")
+        }
     }
+
+    private fun capitalizeFirst(s: String): String = s.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
 }
