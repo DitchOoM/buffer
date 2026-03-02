@@ -193,21 +193,105 @@ class FfmBufferTest {
     }
 
     @Test
-    fun `slice after parent free - slice retains own state`() {
-        // Slices created BEFORE free retain their own ByteBuffer position/limit
-        // and will NOT be invalidated. This is documented behavior — slices
-        // must not outlive the parent FfmBuffer.
+    fun `slice after parent free throws IllegalStateException`() {
+        // FfmSliceBuffer's ByteBuffer is derived from the arena-scoped segment.
+        // After arena.close(), the JDK invalidates it automatically.
         val buffer = createFfmBuffer(64)
         buffer.writeInt(0x12345678)
         buffer.resetForRead()
         val slice = buffer.slice()
         buffer.freeNativeMemory()
-        // The slice's ByteBuffer has its own position/limit state,
-        // so it doesn't throw. However, the underlying native memory
-        // is freed — the slice is reading freed memory (undefined behavior).
-        // This test documents the limitation; users must ensure slices
-        // do not outlive the parent.
-        assertIs<DirectJvmBuffer>(slice)
+        assertIs<FfmSliceBuffer>(slice)
+        assertFailsWith<IllegalStateException> { slice.readInt() }
+    }
+
+    @Test
+    fun `slice of slice throws after parent free`() {
+        val buffer = createFfmBuffer(64)
+        buffer.writeLong(0x123456789ABCDEF0L)
+        buffer.resetForRead()
+        val slice1 = buffer.slice()
+        val slice2 = slice1.slice()
+        buffer.freeNativeMemory()
+        assertFailsWith<IllegalStateException> { slice1.readLong() }
+        assertFailsWith<IllegalStateException> { slice2.readLong() }
+    }
+
+    @Test
+    fun `FfmSliceBuffer nativeAddress throws after parent free`() {
+        val buffer = createFfmBuffer(64)
+        buffer.writeInt(42)
+        buffer.resetForRead()
+        val slice = buffer.slice() as FfmSliceBuffer
+        buffer.freeNativeMemory()
+        assertFailsWith<IllegalStateException> { slice.nativeAddress }
+    }
+
+    @Test
+    fun `FfmSliceBuffer nativeSize throws after parent free`() {
+        val buffer = createFfmBuffer(64)
+        buffer.writeInt(42)
+        buffer.resetForRead()
+        val slice = buffer.slice() as FfmSliceBuffer
+        buffer.freeNativeMemory()
+        assertFailsWith<IllegalStateException> { slice.nativeSize }
+    }
+
+    @Test
+    fun `slice write after parent free throws IllegalStateException`() {
+        val buffer = createFfmBuffer(64)
+        // Don't resetForRead — slice needs remaining capacity to attempt a write
+        val slice = buffer.slice()
+        buffer.freeNativeMemory()
+        assertFailsWith<IllegalStateException> { slice.writeInt(42) }
+    }
+
+    @Test
+    fun `slice created from dead FfmSliceBuffer cannot read`() {
+        // Creating a slice view from a dead buffer may succeed (JDK doesn't check
+        // scope during view creation), but any memory access on the result throws.
+        val buffer = createFfmBuffer(64)
+        buffer.writeInt(0x12345678)
+        buffer.resetForRead()
+        val slice = buffer.slice()
+        buffer.freeNativeMemory()
+        val subSlice = slice.slice() // view creation may succeed
+        assertFailsWith<IllegalStateException> { subSlice.readInt() }
+    }
+
+    @Test
+    fun `FfmSliceBuffer implements NativeMemoryAccess`() =
+        createFfmBuffer(64).use { buffer ->
+            buffer.writeInt(0x12345678)
+            buffer.resetForRead()
+            val slice = buffer.slice()
+            assertIs<NativeMemoryAccess>(slice)
+            assertNotNull(slice.nativeMemoryAccess)
+            Unit
+        }
+
+    @Test
+    fun `slice preserves little-endian byte order`() =
+        createFfmBuffer(64, ByteOrder.LITTLE_ENDIAN).use { buffer ->
+            buffer.writeInt(0x01020304)
+            buffer.resetForRead()
+            val slice = buffer.slice()
+            assertEquals(0x01020304, slice.readInt())
+            // Verify the raw first byte is LE layout (0x04, not 0x01)
+            slice.position(0)
+            assertEquals(0x04.toByte(), slice.readByte())
+        }
+
+    @Test
+    fun `multiple independent slices all invalidated after parent free`() {
+        val buffer = createFfmBuffer(64)
+        repeat(16) { buffer.writeInt(it) }
+        buffer.resetForRead()
+        val slices = (0 until 4).map { buffer.slice() }
+        buffer.freeNativeMemory()
+        slices.forEach { slice ->
+            assertFailsWith<IllegalStateException> { slice.readInt() }
+        }
     }
 
     // ============================================================================
@@ -259,12 +343,12 @@ class FfmBufferTest {
     // ============================================================================
 
     @Test
-    fun `slice returns DirectJvmBuffer not FfmBuffer`() =
+    fun `slice returns FfmSliceBuffer not FfmBuffer`() =
         createFfmBuffer(64).use { buffer ->
             buffer.writeInt(0x12345678)
             buffer.resetForRead()
             val slice = buffer.slice()
-            assertIs<DirectJvmBuffer>(slice)
+            assertIs<FfmSliceBuffer>(slice)
             Unit
         }
 
@@ -274,7 +358,7 @@ class FfmBufferTest {
             buffer.writeInt(0x12345678)
             buffer.resetForRead()
             val slice = buffer.slice()
-            slice.freeNativeMemory() // no-op on DirectJvmBuffer
+            slice.freeNativeMemory() // no-op on FfmSliceBuffer
             assertTrue(buffer.segment.scope().isAlive, "Parent Arena should still be alive")
             buffer.position(0)
             assertEquals(0x12345678, buffer.readInt())
@@ -437,6 +521,18 @@ class FfmBufferTest {
         assertNotNull(segment)
         assertEquals(buffer.remaining().toLong(), segment.byteSize())
     }
+
+    @Test
+    fun `asMemorySegment returns valid segment for FfmSliceBuffer`() =
+        createFfmBuffer(64).use { buffer ->
+            buffer.writeInt(0x12345678)
+            buffer.writeLong(0x123456789ABCDEF0L)
+            buffer.resetForRead()
+            val slice = buffer.slice()
+            val segment = slice.asMemorySegment()
+            assertNotNull(segment)
+            assertEquals(slice.remaining().toLong(), segment.byteSize())
+        }
 
     @Test
     fun `asMemorySegment reflects position and limit`() =

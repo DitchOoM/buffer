@@ -29,6 +29,7 @@ fun ReadBuffer.asMemorySegment(): MemorySegment? {
     val unwrapped = unwrapFully()
     return when (unwrapped) {
         is FfmBuffer -> unwrapped.segment.asSlice(unwrapped.position().toLong(), unwrapped.remaining().toLong())
+        is FfmSliceBuffer -> unwrapped.segment.asSlice(unwrapped.position().toLong(), unwrapped.remaining().toLong())
         is BaseJvmBuffer ->
             if (unwrapped.byteBuffer.isDirect) {
                 MemorySegment
