@@ -64,7 +64,7 @@ src/
 ### Memory Access Interfaces
 
 - `NativeMemoryAccess` - Direct native memory pointer (FfmBuffer, DirectJvmBuffer, MutableDataBuffer, LinearBuffer, JsBuffer, NativeBuffer)
-- `ManagedMemoryAccess` - Kotlin ByteArray backing (HeapJvmBuffer, ByteArrayBuffer, JsBuffer)
+- `ManagedMemoryAccess` - Kotlin ByteArray backing (HeapJvmBuffer, ByteArrayBuffer, JsBuffer, Android DirectJvmBuffer)
 - `SharedMemoryAccess` - Cross-process shared memory (ParcelableSharedMemoryBuffer, JsBuffer with SharedArrayBuffer)
 
 ### Native Data Conversions
@@ -109,6 +109,7 @@ val nativeBuffer: NativeBuffer = buffer.toNativeData().nativeBuffer
 **Zero-copy vs Copy:**
 - Zero-copy when source already matches target type (e.g., direct buffer → direct ByteBuffer)
 - Copies when conversion is needed (e.g., heap buffer → direct ByteBuffer)
+- **Android special case:** `DirectJvmBuffer` implements both `NativeMemoryAccess` and `ManagedMemoryAccess` — the native address and backing `byte[]` are the same non-movable memory, so `toByteArray()` and `toNativeData()` are both zero-copy
 
 **Platform wrapper contents:**
 
@@ -294,7 +295,7 @@ Direct/native buffers on some platforms use native memory that requires explicit
 |----------|----------------------|
 | JVM 9-20 | **Best-effort** — `Unsafe.invokeCleaner` (falls back to GC) |
 | JVM 21+  | **Must free** — FFM Arena-backed, not GC'd |
-| Android  | GC-managed (no action needed) |
+| Android  | GC-managed (no action needed) — `DirectByteBuffer` uses `VMRuntime.newNonMovableArray()`, not `Unsafe.allocateMemory()`; `Unsafe.invokeCleaner` unavailable |
 | Apple    | ARC-managed (no action needed) |
 | Linux    | **Must free** — malloc-backed |
 | WASM     | **Must free** — linear memory |

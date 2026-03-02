@@ -68,12 +68,54 @@ val buffer = PlatformBuffer.allocate(1024, AllocationZone.SharedMemory)
 
 ### Memory Lifecycle
 
-Android's `DirectJvmBuffer` is GC-managed — no explicit cleanup needed. Calling `freeNativeMemory()` on an Android `DirectJvmBuffer` is a no-op. For deterministic native memory management on Android, use `withScope {}` (backed by `UnsafeBufferScope`).
+Android's `DirectJvmBuffer` is GC-managed — no explicit cleanup needed. Calling
+`freeNativeMemory()` on an Android `DirectJvmBuffer` is a no-op.
 
-### Direct Buffers
+Unlike the JVM (which allocates direct buffers with `Unsafe.allocateMemory()` and can
+free them early via `Unsafe.invokeCleaner()`), Android's `DirectByteBuffer` is backed by
+a non-movable byte array allocated through
+[`VMRuntime.newNonMovableArray()`](https://cs.android.com/android/platform/superproject/+/android-16.0.0_r2:libcore/ojluni/src/main/java/java/nio/DirectByteBuffer.java;l=73).
+This memory is owned by the GC — there is no public API to free it deterministically.
+The [`MemoryRef.free()`](https://cs.android.com/android/platform/superproject/+/android-16.0.0_r2:libcore/ojluni/src/main/java/java/nio/DirectByteBuffer.java;l=90)
+method simply nulls the backing array reference and lets the GC reclaim it. The Android
+source itself
+[notes](https://cs.android.com/android/platform/superproject/+/android-16.0.0_r2:libcore/ojluni/src/main/java/java/nio/DirectByteBuffer.java;l=103):
+*"Only have references to java objects, no need for a cleaner since the GC will do all
+the work."* This has not changed from API 28 through API 36.
+
+While Android does expose
+[`Unsafe.freeMemory(long)`](https://developer.android.com/reference/sun/misc/Unsafe#freeMemory(long)),
+it can only free memory allocated via `Unsafe.allocateMemory()` — not `DirectByteBuffer`
+memory from `VMRuntime.newNonMovableArray()`. Android does **not** expose
+`Unsafe.invokeCleaner(ByteBuffer)` (a JDK 9+ addition).
+
+For deterministic native memory management on Android, use `withScope {}` (backed by
+`UnsafeBufferScope`, which allocates via `Unsafe.allocateMemory()` /
+`Unsafe.freeMemory()` — a separate allocation path from `ByteBuffer.allocateDirect()`).
+
+### Zero-Copy Direct Buffers
+
+On Android, `DirectByteBuffer` is backed by a non-movable `byte[]` — the native address
+and the backing array point to the **same memory**. Android's own
+[source confirms](https://cs.android.com/android/platform/superproject/+/android-16.0.0_r2:libcore/ojluni/src/main/java/java/nio/ByteBuffer.java;l=1160):
+*"isDirect() doesn't imply !hasArray(), ByteBuffer.allocateDirect allocated buffer will
+have a backing, non-gc-movable byte array."*
+
+This means `DirectJvmBuffer` on Android implements **both** `NativeMemoryAccess` and
+`ManagedMemoryAccess` — conversions like `toByteArray()` and `toNativeData()` are
+zero-copy when the buffer is already direct.
+
+This differs from the JVM, where direct buffers are off-heap (`hasArray() = false`) and
+any conversion to `ByteArray` requires a copy.
+
+**Why do JNI/Camera2/MediaCodec require direct buffers?**
+
+"Direct" on Android means **pinned/non-movable**, not off-heap. A regular `byte[]` can
+be relocated by the GC at any time. Native code (camera HAL, video codecs, OpenGL) needs
+a stable pointer that won't move mid-operation, which only `newNonMovableArray` guarantees.
 
 ```kotlin
-// Large buffers should use Direct to avoid GC
+// Large buffers should use Direct to avoid GC pressure from relocation
 val videoFrame = PlatformBuffer.allocate(
     size = 1920 * 1080 * 4,  // 8MB RGBA
     zone = AllocationZone.Direct

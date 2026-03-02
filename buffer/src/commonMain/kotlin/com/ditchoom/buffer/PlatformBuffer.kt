@@ -18,7 +18,7 @@ interface PlatformBuffer :
      * |----------|----------------------|
      * | JVM 9-20 | **Best-effort** — `Unsafe.invokeCleaner` (falls back to GC) |
      * | JVM 21+  | **Must free** — Arena-backed, not GC'd |
-     * | Android  | GC-managed (no action needed) |
+     * | Android  | GC-managed (no action needed) — backed by `VMRuntime.newNonMovableArray()`, `invokeCleaner` unavailable |
      * | Apple    | ARC-managed (no action needed) |
      * | Linux    | **Must free** — malloc-backed |
      * | WASM     | **Must free** — linear memory |
