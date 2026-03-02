@@ -7,8 +7,9 @@ package com.ditchoom.buffer
 // Thread Safety: StreamingStringDecoder is NOT thread-safe. Use one instance per stream/thread.
 //
 // Uses the browser's native TextDecoder API with `stream: true` option.
-// In Kotlin/WASM, ByteArray lives in WasmGC heap (separate from linear memory),
-// so we use a callback-based approach to pass bytes to JS.
+// Two fast paths to avoid per-byte WASM→JS boundary crossings:
+// - LinearBuffer: zero-copy decode via Uint8Array view on wasmExports.memory.buffer
+// - Other buffers: getInt callback fills JS Uint8Array 4 bytes at a time (4x fewer crossings)
 
 /** Create a streaming TextDecoder instance. Returns an opaque handle to the decoder. */
 @JsFun(
@@ -24,24 +25,56 @@ private external fun createDecoder(
 ): JsAny
 
 /**
- * Decode bytes using a streaming decoder.
- * Returns the decoded string.
+ * Decode bytes from WASM linear memory using a streaming decoder.
+ * Zero-copy: creates a Uint8Array view directly on wasmExports.memory.buffer.
  */
 @JsFun(
     """
-(decoder, size, getByte, stream) => {
+(decoder, offset, length, stream) => {
+    const bytes = new Uint8Array(wasmExports.memory.buffer, offset, length);
+    return decoder.decode(bytes, { stream: stream });
+}
+""",
+)
+private external fun decodeStreamLinear(
+    decoder: JsAny,
+    offset: Int,
+    length: Int,
+    stream: JsBoolean,
+): JsString
+
+/**
+ * Decode bytes using a streaming decoder with getInt callback.
+ * Fills Uint8Array 4 bytes at a time — 4x fewer WASM→JS boundary crossings than getByte.
+ */
+@JsFun(
+    """
+(decoder, size, getInt, stream) => {
     const bytes = new Uint8Array(size);
-    for (let i = 0; i < size; i++) {
-        bytes[i] = getByte(i);
+    const fullInts = size >>> 2;
+    for (let i = 0; i < fullInts; i++) {
+        const v = getInt(i);
+        const off = i << 2;
+        bytes[off] = v & 0xFF;
+        bytes[off + 1] = (v >>> 8) & 0xFF;
+        bytes[off + 2] = (v >>> 16) & 0xFF;
+        bytes[off + 3] = (v >>> 24) & 0xFF;
+    }
+    const tailStart = fullInts << 2;
+    if (tailStart < size) {
+        const v = getInt(fullInts);
+        for (let j = 0; j < size - tailStart; j++) {
+            bytes[tailStart + j] = (v >>> (j << 3)) & 0xFF;
+        }
     }
     return decoder.decode(bytes, { stream: stream });
 }
 """,
 )
-private external fun decodeStream(
+private external fun decodeStreamBulk(
     decoder: JsAny,
     size: Int,
-    getByte: (Int) -> Byte,
+    getInt: (Int) -> Int,
     stream: JsBoolean,
 ): JsString
 
@@ -81,18 +114,10 @@ private class WasmJsStreamingStringDecoder(
         val remaining = buffer.remaining()
         if (remaining == 0) return 0
 
-        // Read bytes with indexed access
         val startPos = buffer.position()
 
         return try {
-            val result =
-                decodeStream(
-                    decoder,
-                    remaining,
-                    { i -> buffer.get(startPos + i) },
-                    true.toJsBoolean(),
-                ).toString()
-
+            val result = decodeBuffer(buffer, startPos, remaining)
             buffer.position(startPos + remaining)
             destination.append(result)
             result.length
@@ -100,6 +125,47 @@ private class WasmJsStreamingStringDecoder(
             buffer.position(startPos + remaining)
             handleError(destination, e)
         }
+    }
+
+    private fun decodeBuffer(
+        buffer: ReadBuffer,
+        startPos: Int,
+        remaining: Int,
+    ): String {
+        val actual = buffer.unwrapFully()
+        if (actual is LinearBuffer) {
+            // Zero-copy: decode directly from WASM linear memory
+            return decodeStreamLinear(
+                decoder,
+                actual.baseOffset + startPos,
+                remaining,
+                true.toJsBoolean(),
+            ).toString()
+        }
+
+        // Fallback: getInt callback fills JS Uint8Array 4 bytes at a time
+        return decodeStreamBulk(
+            decoder,
+            remaining,
+            { intIndex ->
+                val byteIndex = startPos + (intIndex shl 2)
+                val remainingBytes = remaining - (intIndex shl 2)
+                if (remainingBytes >= 4) {
+                    (buffer.get(byteIndex).toInt() and 0xFF) or
+                        ((buffer.get(byteIndex + 1).toInt() and 0xFF) shl 8) or
+                        ((buffer.get(byteIndex + 2).toInt() and 0xFF) shl 16) or
+                        ((buffer.get(byteIndex + 3).toInt() and 0xFF) shl 24)
+                } else {
+                    // Pack remaining 1-3 bytes into an Int (JS side unpacks only what's needed)
+                    var v = 0
+                    for (j in 0 until remainingBytes) {
+                        v = v or ((buffer.get(byteIndex + j).toInt() and 0xFF) shl (j shl 3))
+                    }
+                    v
+                }
+            },
+            true.toJsBoolean(),
+        ).toString()
     }
 
     override fun finish(destination: Appendable): Int =

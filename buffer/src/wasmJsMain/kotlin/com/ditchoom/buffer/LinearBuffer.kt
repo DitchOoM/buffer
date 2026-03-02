@@ -560,14 +560,8 @@ class LinearBuffer(
         if (limitValue != other.limitValue) return false
         if (capacity != other.capacity) return false
 
-        // Compare contents
-        val size = remaining()
-        for (i in 0 until size) {
-            if (loadByte(positionValue + i) != other.loadByte(other.positionValue + i)) {
-                return false
-            }
-        }
-        return true
+        // Delegate to contentEquals which uses bulk Long comparisons
+        return contentEquals(other)
     }
 
     override fun hashCode(): Int {
@@ -576,9 +570,16 @@ class LinearBuffer(
         result = 31 * result + limitValue
         result = 31 * result + capacity
 
+        // Hash 4 bytes at a time using Int loads
         val size = remaining()
-        for (i in 0 until size) {
+        var i = 0
+        while (i + 4 <= size) {
+            result = 31 * result + ptr(positionValue + i).loadInt()
+            i += 4
+        }
+        while (i < size) {
             result = 31 * result + loadByte(positionValue + i).hashCode()
+            i++
         }
         return result
     }

@@ -100,11 +100,24 @@ actual object UnsafeMemory {
         destOffset: Int,
         length: Int,
     ) {
-        // Copy byte by byte from WASM memory to Kotlin array
+        // Copy 4 bytes at a time using Int loads (pure WASM i32 instructions, no JS boundary)
         var addr = srcAddress
-        for (i in destOffset until destOffset + length) {
+        var i = destOffset
+        val end = destOffset + length
+        while (i + 4 <= end) {
+            val v = ptr(addr).loadInt()
+            dest[i] = v.toByte()
+            dest[i + 1] = (v shr 8).toByte()
+            dest[i + 2] = (v shr 16).toByte()
+            dest[i + 3] = (v shr 24).toByte()
+            addr += 4
+            i += 4
+        }
+        // Handle remaining bytes
+        while (i < end) {
             dest[i] = ptr(addr).loadByte()
             addr++
+            i++
         }
     }
 
@@ -114,11 +127,25 @@ actual object UnsafeMemory {
         dstAddress: Long,
         length: Int,
     ) {
-        // Copy byte by byte from Kotlin array to WASM memory
+        // Copy 4 bytes at a time using Int stores (pure WASM i32 instructions, no JS boundary)
         var addr = dstAddress
-        for (i in srcOffset until srcOffset + length) {
+        var i = srcOffset
+        val end = srcOffset + length
+        while (i + 4 <= end) {
+            val v =
+                (src[i].toInt() and 0xFF) or
+                    ((src[i + 1].toInt() and 0xFF) shl 8) or
+                    ((src[i + 2].toInt() and 0xFF) shl 16) or
+                    ((src[i + 3].toInt() and 0xFF) shl 24)
+            ptr(addr).storeInt(v)
+            addr += 4
+            i += 4
+        }
+        // Handle remaining bytes
+        while (i < end) {
             ptr(addr).storeByte(src[i])
             addr++
+            i++
         }
     }
 }

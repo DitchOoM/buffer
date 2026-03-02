@@ -266,9 +266,7 @@ class WasmScopedBuffer(
     override fun readByteArray(size: Int): ByteArray {
         checkValid()
         val array = ByteArray(size)
-        for (i in 0 until size) {
-            array[i] = ptr(positionValue + i).loadByte()
-        }
+        UnsafeMemory.copyMemoryToArray(nativeAddress + positionValue, array, 0, size)
         positionValue += size
         return array
     }
@@ -279,9 +277,7 @@ class WasmScopedBuffer(
         length: Int,
     ): WriteBuffer {
         checkValid()
-        for (i in 0 until length) {
-            ptr(positionValue + i).storeByte(bytes[offset + i])
-        }
+        UnsafeMemory.copyMemoryFromArray(bytes, offset, nativeAddress + positionValue, length)
         positionValue += length
         return this
     }

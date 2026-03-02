@@ -6,27 +6,39 @@ import kotlin.js.ExperimentalWasmJsInterop
 
 /**
  * Decode bytes to a string using the specified encoding.
- * Creates a Uint8Array from the byte values and uses TextDecoder.
+ * Uses getInt callback to fill Uint8Array 4 bytes at a time — 4x fewer WASM→JS crossings.
  *
  * Note: In Kotlin/WASM, ByteArray lives in the WasmGC heap (separate from linear memory),
  * so we cannot directly cast to Uint8Array like in Kotlin/JS. A copy is required.
- * This implementation batches the copy in JS for better performance.
  */
 @JsFun(
     """
-(size, getByte, encoding) => {
+(size, getInt, encoding) => {
     const bytes = new Uint8Array(size);
-    for (let i = 0; i < size; i++) {
-        bytes[i] = getByte(i);
+    const fullInts = size >>> 2;
+    for (let i = 0; i < fullInts; i++) {
+        const v = getInt(i);
+        const off = i << 2;
+        bytes[off] = v & 0xFF;
+        bytes[off + 1] = (v >>> 8) & 0xFF;
+        bytes[off + 2] = (v >>> 16) & 0xFF;
+        bytes[off + 3] = (v >>> 24) & 0xFF;
+    }
+    const tailStart = fullInts << 2;
+    if (tailStart < size) {
+        const v = getInt(fullInts);
+        for (let j = 0; j < size - tailStart; j++) {
+            bytes[tailStart + j] = (v >>> (j << 3)) & 0xFF;
+        }
     }
     const decoder = new TextDecoder(encoding, { fatal: true });
     return decoder.decode(bytes);
 }
 """,
 )
-private external fun decodeWithCallback(
+private external fun decodeWithIntCallback(
     size: Int,
-    getByte: (Int) -> Byte,
+    getInt: (Int) -> Int,
     encoding: JsString,
 ): JsString
 
@@ -56,5 +68,24 @@ internal actual fun decodeByteArrayToString(
         }
 
     val length = endIndex - startIndex
-    return decodeWithCallback(length, { i -> data[startIndex + i] }, encoding.toJsString()).toString()
+    return decodeWithIntCallback(
+        length,
+        { intIndex ->
+            val byteIndex = startIndex + (intIndex shl 2)
+            val remainingBytes = length - (intIndex shl 2)
+            if (remainingBytes >= 4) {
+                (data[byteIndex].toInt() and 0xFF) or
+                    ((data[byteIndex + 1].toInt() and 0xFF) shl 8) or
+                    ((data[byteIndex + 2].toInt() and 0xFF) shl 16) or
+                    ((data[byteIndex + 3].toInt() and 0xFF) shl 24)
+            } else {
+                var v = 0
+                for (j in 0 until remainingBytes) {
+                    v = v or ((data[byteIndex + j].toInt() and 0xFF) shl (j shl 3))
+                }
+                v
+            }
+        },
+        encoding.toJsString(),
+    ).toString()
 }
