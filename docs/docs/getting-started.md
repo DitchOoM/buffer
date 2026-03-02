@@ -46,6 +46,16 @@ kotlin {
 }
 ```
 
+## JVM Configuration
+
+On JDK 21+, Direct and SharedMemory buffers use the FFM API which requires native access to be enabled:
+
+```
+--enable-native-access=com.ditchoom.buffer
+```
+
+See [JVM Platform — JVM Flags](./platforms/jvm#jvm-flags) for details on all JDK versions.
+
 ## Your First Buffer
 
 ### Allocating a Buffer

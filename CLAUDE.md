@@ -276,7 +276,9 @@ PlatformBuffer.wrap(byteArray)
 
 ## Platform Notes
 
-- **JVM 21+:** Direct buffers use `FfmBuffer` (FFM Arena-backed) for deterministic memory management; `HeapJvmBuffer` for `wrap()` and `Heap` zone
+- **JVM module name:** `Automatic-Module-Name` is `com.ditchoom.buffer`
+- **JVM 21+:** Direct buffers use `FfmBuffer` (FFM Arena-backed) for deterministic memory management; `HeapJvmBuffer` for `wrap()` and `Heap` zone. Requires `--enable-native-access=com.ditchoom.buffer` for FFM `reinterpret()`
+- **JVM 9-20:** `--add-opens=java.base/java.nio=com.ditchoom.buffer` recommended for reflection-based `nativeAddress` access
 - **JVM < 21/Android:** Direct ByteBuffers (`DirectJvmBuffer`) used by default; `HeapJvmBuffer` for `wrap()` and `Heap` zone
 - **Android SharedMemory:** Use `AllocationZone.SharedMemory` for zero-copy IPC via Parcelable (API 27+)
 - **Apple:** `MutableDataBuffer` wraps NSMutableData (native memory); `wrap(ByteArray)` returns `ByteArrayBuffer`

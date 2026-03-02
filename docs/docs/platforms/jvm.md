@@ -15,6 +15,56 @@ Buffer on JVM wraps `java.nio.ByteBuffer` for optimal performance.
 | `Direct` | `DirectJvmBuffer` | `FfmBuffer` (FFM Arena) |
 | `SharedMemory` | Falls back to Direct | Falls back to Direct |
 
+## JVM Flags
+
+The library's `Automatic-Module-Name` is `com.ditchoom.buffer`. This lets you grant permissions to the library specifically instead of using `ALL-UNNAMED`.
+
+### JDK 21+ (FFM)
+
+Direct and SharedMemory buffers use the FFM API (`MemorySegment.reinterpret()`), which is a restricted method. You must enable native access:
+
+```
+--enable-native-access=com.ditchoom.buffer
+```
+
+Without this flag, JDK 22-23 print warnings and JDK 24+ throws `IllegalCallerException`.
+
+### JDK 9-20 (Reflection)
+
+`nativeAddress` access uses reflection into `java.nio.Buffer.address`. This is recommended but not strictly required (the library falls back gracefully):
+
+```
+--add-opens=java.base/java.nio=com.ditchoom.buffer
+```
+
+### JDK 8
+
+No flags needed (no module system).
+
+### Gradle Configuration
+
+```kotlin
+// build.gradle.kts
+tasks.withType<JavaExec>().configureEach {
+    jvmArgs(
+        "--enable-native-access=com.ditchoom.buffer",
+        "--add-opens=java.base/java.nio=com.ditchoom.buffer",
+    )
+}
+
+// For test tasks
+tasks.withType<Test>().configureEach {
+    jvmArgs(
+        "--enable-native-access=com.ditchoom.buffer",
+        "--add-opens=java.base/java.nio=com.ditchoom.buffer",
+    )
+}
+```
+
+:::note Classpath Usage
+If you run the library from the classpath (unnamed module) rather than the module path, use `ALL-UNNAMED` instead of `com.ditchoom.buffer`.
+:::
+
 ## Direct vs Heap Buffers
 
 ### Direct Buffers (Default)

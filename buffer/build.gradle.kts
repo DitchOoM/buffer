@@ -516,7 +516,10 @@ benchmark {
 // Configure multi-release JAR for Java 11+ and Java 21+ optimizations
 tasks.named<Jar>("jvmJar") {
     manifest {
-        attributes("Multi-Release" to "true")
+        attributes(
+            "Multi-Release" to "true",
+            "Automatic-Module-Name" to "com.ditchoom.buffer",
+        )
     }
     // Include Java 11 classes in META-INF/versions/11/
     into("META-INF/versions/11") {
@@ -679,13 +682,15 @@ tasks.matching { it.name == "testBenchmarkUnitTest" }.configureEach {
     enabled = false
 }
 
-// Allow reflective access to internal JDK fields:
-// - java.nio: DirectBufferAddressHelper accesses Buffer.address field
-// - jdk.internal.misc: UnsafeMemory accesses sun.misc.Unsafe
+// JVM flags for test tasks:
+// - --add-opens java.nio: DirectBufferAddressHelper accesses Buffer.address field via reflection
+// - --enable-native-access: FFM reinterpret() is a restricted method (warnings on JDK 22+, error on JDK 24+)
+// Tests run from the classpath (unnamed module), so ALL-UNNAMED is required.
 tasks.withType<Test>().configureEach {
     val isBenchmark = name.contains("benchmark", ignoreCase = true)
     jvmArgs(
         "--add-opens=java.base/java.nio=ALL-UNNAMED",
+        "--enable-native-access=ALL-UNNAMED",
     )
     if (!isBenchmark) {
         jvmArgs("-ea")
