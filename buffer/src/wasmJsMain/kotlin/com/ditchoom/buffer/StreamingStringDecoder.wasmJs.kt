@@ -90,6 +90,8 @@ private external fun decodeStreamBulk(
 )
 private external fun finishDecode(decoder: JsAny): JsString
 
+private const val DECODE_CHUNK_SIZE = 32 * 1024
+
 private class WasmJsStreamingStringDecoder(
     private val config: StreamingStringDecoderConfig,
 ) : StreamingStringDecoder {
@@ -115,48 +117,51 @@ private class WasmJsStreamingStringDecoder(
         if (remaining == 0) return 0
 
         val startPos = buffer.position()
-
-        return try {
-            val result = decodeBuffer(buffer, startPos, remaining)
-            buffer.position(startPos + remaining)
-            destination.append(result)
-            result.length
+        var totalChars = 0
+        var offset = 0
+        try {
+            while (offset < remaining) {
+                val chunkSize = minOf(DECODE_CHUNK_SIZE, remaining - offset)
+                val result = decodeChunk(buffer, startPos + offset, chunkSize)
+                destination.append(result)
+                totalChars += result.length
+                offset += chunkSize
+            }
         } catch (e: Throwable) {
+            totalChars += handleError(destination, e)
+        } finally {
             buffer.position(startPos + remaining)
-            handleError(destination, e)
         }
+        return totalChars
     }
 
-    private fun decodeBuffer(
+    private fun decodeChunk(
         buffer: ReadBuffer,
-        startPos: Int,
-        remaining: Int,
+        absoluteOffset: Int,
+        length: Int,
     ): String {
         val actual = buffer.unwrapFully()
         if (actual is LinearBuffer) {
-            // Zero-copy: decode directly from WASM linear memory
             return decodeStreamLinear(
                 decoder,
-                actual.baseOffset + startPos,
-                remaining,
+                actual.baseOffset + absoluteOffset,
+                length,
                 true.toJsBoolean(),
             ).toString()
         }
 
-        // Fallback: getInt callback fills JS Uint8Array 4 bytes at a time
         return decodeStreamBulk(
             decoder,
-            remaining,
+            length,
             { intIndex ->
-                val byteIndex = startPos + (intIndex shl 2)
-                val remainingBytes = remaining - (intIndex shl 2)
+                val byteIndex = absoluteOffset + (intIndex shl 2)
+                val remainingBytes = length - (intIndex shl 2)
                 if (remainingBytes >= 4) {
                     (buffer.get(byteIndex).toInt() and 0xFF) or
                         ((buffer.get(byteIndex + 1).toInt() and 0xFF) shl 8) or
                         ((buffer.get(byteIndex + 2).toInt() and 0xFF) shl 16) or
                         ((buffer.get(byteIndex + 3).toInt() and 0xFF) shl 24)
                 } else {
-                    // Pack remaining 1-3 bytes into an Int (JS side unpacks only what's needed)
                     var v = 0
                     for (j in 0 until remainingBytes) {
                         v = v or ((buffer.get(byteIndex + j).toInt() and 0xFF) shl (j shl 3))

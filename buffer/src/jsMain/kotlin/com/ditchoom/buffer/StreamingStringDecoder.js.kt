@@ -15,6 +15,8 @@ import org.khronos.webgl.Uint8Array
  * Uses the browser's native TextDecoder API with `stream: true` option,
  * which automatically handles incomplete multi-byte sequences across chunks.
  */
+private const val DECODE_CHUNK_SIZE = 32 * 1024
+
 private class JsStreamingStringDecoder(
     private val config: StreamingStringDecoderConfig,
 ) : StreamingStringDecoder {
@@ -45,36 +47,41 @@ private class JsStreamingStringDecoder(
         val remaining = buffer.remaining()
         if (remaining == 0) return 0
 
-        // Get data as Uint8Array
-        val uint8Array = getUint8Array(buffer, remaining)
-        buffer.position(buffer.position() + remaining)
-
-        return try {
-            val result: String = decoder.decode(uint8Array, js("{ stream: true }"))
-            destination.append(result)
-            result.length
+        val startPos = buffer.position()
+        var totalChars = 0
+        try {
+            var offset = 0
+            while (offset < remaining) {
+                val chunkSize = minOf(DECODE_CHUNK_SIZE, remaining - offset)
+                val uint8Array = getUint8ArrayChunk(buffer, startPos + offset, chunkSize)
+                val result: String = decoder.decode(uint8Array, js("{ stream: true }"))
+                destination.append(result)
+                totalChars += result.length
+                offset += chunkSize
+            }
         } catch (e: Throwable) {
-            handleError(destination, e)
+            totalChars += handleError(destination, e)
+        } finally {
+            buffer.position(startPos + remaining)
         }
+        return totalChars
     }
 
-    private fun getUint8Array(
+    private fun getUint8ArrayChunk(
         buffer: ReadBuffer,
-        remaining: Int,
+        offset: Int,
+        length: Int,
     ): Uint8Array {
-        // Try to get direct access to underlying Int8Array (unwrap PooledBuffer if needed)
         val actual = buffer.unwrapFully()
         if (actual is JsBuffer) {
             val int8Array = actual.buffer
-            // Create a view of just the remaining bytes
-            return Uint8Array(int8Array.buffer, int8Array.byteOffset + buffer.position(), remaining)
+            return Uint8Array(int8Array.buffer, int8Array.byteOffset + offset, length)
         }
 
         // Fallback: copy bytes
-        val bytes = ByteArray(remaining)
-        val startPos = buffer.position()
-        for (i in 0 until remaining) {
-            bytes[i] = buffer.get(startPos + i)
+        val bytes = ByteArray(length)
+        for (i in 0 until length) {
+            bytes[i] = buffer.get(offset + i)
         }
         return Uint8Array(bytes.unsafeCast<Int8Array>().buffer)
     }
