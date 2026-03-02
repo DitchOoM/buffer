@@ -7,9 +7,8 @@ package com.ditchoom.buffer
 // Thread Safety: StreamingStringDecoder is NOT thread-safe. Use one instance per stream/thread.
 //
 // Uses the browser's native TextDecoder API with `stream: true` option.
-// Two fast paths to avoid per-byte WASM→JS boundary crossings:
 // - LinearBuffer: zero-copy decode via Uint8Array view on wasmExports.memory.buffer
-// - Other buffers: getInt callback fills JS Uint8Array 4 bytes at a time (4x fewer crossings)
+// - Other buffers: bulk copy to linear memory scratch space, then decode (single JS call)
 
 /** Create a streaming TextDecoder instance. Returns an opaque handle to the decoder. */
 @JsFun(
@@ -44,41 +43,6 @@ private external fun decodeStreamLinear(
 ): JsString
 
 /**
- * Decode bytes using a streaming decoder with getInt callback.
- * Fills Uint8Array 4 bytes at a time — 4x fewer WASM→JS boundary crossings than getByte.
- */
-@JsFun(
-    """
-(decoder, size, getInt, stream) => {
-    const bytes = new Uint8Array(size);
-    const fullInts = size >>> 2;
-    for (let i = 0; i < fullInts; i++) {
-        const v = getInt(i);
-        const off = i << 2;
-        bytes[off] = v & 0xFF;
-        bytes[off + 1] = (v >>> 8) & 0xFF;
-        bytes[off + 2] = (v >>> 16) & 0xFF;
-        bytes[off + 3] = (v >>> 24) & 0xFF;
-    }
-    const tailStart = fullInts << 2;
-    if (tailStart < size) {
-        const v = getInt(fullInts);
-        for (let j = 0; j < size - tailStart; j++) {
-            bytes[tailStart + j] = (v >>> (j << 3)) & 0xFF;
-        }
-    }
-    return decoder.decode(bytes, { stream: stream });
-}
-""",
-)
-private external fun decodeStreamBulk(
-    decoder: JsAny,
-    size: Int,
-    getInt: (Int) -> Int,
-    stream: JsBoolean,
-): JsString
-
-/**
  * Finish decoding and flush any pending bytes.
  */
 @JsFun(
@@ -108,6 +72,16 @@ private class WasmJsStreamingStringDecoder(
 
     private val fatal = config.onMalformedInput == DecoderErrorAction.REPORT
     private val decoder = createDecoder(encoding.toJsString(), fatal.toJsBoolean())
+
+    /** Lazy scratch region in linear memory for non-LinearBuffer decoding. */
+    private var scratchOffset: Int = -1
+
+    private fun ensureScratch(): Int {
+        if (scratchOffset == -1) {
+            scratchOffset = LinearMemoryAllocator.allocateOffset(DECODE_CHUNK_SIZE)
+        }
+        return scratchOffset
+    }
 
     override fun decode(
         buffer: ReadBuffer,
@@ -150,27 +124,15 @@ private class WasmJsStreamingStringDecoder(
             ).toString()
         }
 
-        return decodeStreamBulk(
-            decoder,
-            length,
-            { intIndex ->
-                val byteIndex = absoluteOffset + (intIndex shl 2)
-                val remainingBytes = length - (intIndex shl 2)
-                if (remainingBytes >= 4) {
-                    (buffer.get(byteIndex).toInt() and 0xFF) or
-                        ((buffer.get(byteIndex + 1).toInt() and 0xFF) shl 8) or
-                        ((buffer.get(byteIndex + 2).toInt() and 0xFF) shl 16) or
-                        ((buffer.get(byteIndex + 3).toInt() and 0xFF) shl 24)
-                } else {
-                    var v = 0
-                    for (j in 0 until remainingBytes) {
-                        v = v or ((buffer.get(byteIndex + j).toInt() and 0xFF) shl (j shl 3))
-                    }
-                    v
-                }
-            },
-            true.toJsBoolean(),
-        ).toString()
+        // Bulk copy to linear memory scratch space, then decode in a single JS call.
+        // readByteArray uses copyOfRange (bulk), copyMemoryFromArray uses WASM i32 stores.
+        val savedPos = buffer.position()
+        buffer.position(absoluteOffset)
+        val bytes = buffer.readByteArray(length)
+        buffer.position(savedPos)
+        val scratch = ensureScratch()
+        UnsafeMemory.copyMemoryFromArray(bytes, 0, scratch.toLong(), length)
+        return decodeStreamLinear(decoder, scratch, length, true.toJsBoolean()).toString()
     }
 
     override fun finish(destination: Appendable): Int =

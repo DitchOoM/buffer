@@ -78,11 +78,11 @@ private class JsStreamingStringDecoder(
             return Uint8Array(int8Array.buffer, int8Array.byteOffset + offset, length)
         }
 
-        // Fallback: copy bytes
-        val bytes = ByteArray(length)
-        for (i in 0 until length) {
-            bytes[i] = buffer.get(offset + i)
-        }
+        // Fallback: bulk copy via readByteArray (uses copyOfRange on ByteArrayBuffer)
+        val savedPos = buffer.position()
+        buffer.position(offset)
+        val bytes = buffer.readByteArray(length)
+        buffer.position(savedPos)
         return Uint8Array(bytes.unsafeCast<Int8Array>().buffer)
     }
 
