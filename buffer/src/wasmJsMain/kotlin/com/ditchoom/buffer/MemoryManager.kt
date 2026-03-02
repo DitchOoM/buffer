@@ -3,7 +3,6 @@
 package com.ditchoom.buffer
 
 import kotlin.js.ExperimentalWasmJsInterop
-import kotlin.wasm.unsafe.Pointer
 import kotlin.wasm.unsafe.UnsafeWasmMemoryApi
 
 private const val PAGE_SIZE = 65536 // 64KB per WASM page
@@ -234,23 +233,13 @@ object LinearMemoryAllocator {
     }
 
     /**
-     * Zero-initialize a memory region.
+     * Zero-initialize a memory region using JS Uint8Array.fill(0) — single native call.
      */
     private fun zeroMemory(
         offset: Int,
         size: Int,
     ) {
-        var i = 0
-        // Zero 8 bytes at a time for efficiency
-        while (i + 8 <= size) {
-            Pointer((offset + i).toUInt()).storeLong(0L)
-            i += 8
-        }
-        // Handle remaining bytes
-        while (i < size) {
-            Pointer((offset + i).toUInt()).storeByte(0)
-            i++
-        }
+        UnsafeMemory.setMemory(offset.toLong(), size.toLong(), 0)
     }
 
     /**
