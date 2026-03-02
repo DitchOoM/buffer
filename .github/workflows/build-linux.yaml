@@ -81,16 +81,19 @@ jobs:
           ./gradlew ktlintCheck
           jvmTest jsNodeTest jsBrowserTest wasmJsNodeTest wasmJsBrowserTest
           testDebugUnitTest testReleaseUnitTest
+          :buffer-codec-processor:test
           --no-build-cache ${{ inputs.gradle-args }}
 
       - name: Run Linux x64 tests
         run: >-
           ./gradlew :buffer:linuxX64Test :buffer-compression:linuxX64Test :buffer-flow:linuxX64Test
+          :buffer-codec:linuxX64Test :buffer-codec-test:linuxX64Test
           --no-build-cache ${{ inputs.gradle-args }}
 
       - name: Build ARM64 test binaries
         run: >-
           ./gradlew :buffer:linkDebugTestLinuxArm64 :buffer-compression:linkDebugTestLinuxArm64 :buffer-flow:linkDebugTestLinuxArm64
+          :buffer-codec:linkDebugTestLinuxArm64 :buffer-codec-test:linkDebugTestLinuxArm64
           --no-build-cache ${{ inputs.gradle-args }}
 
       - name: Run buffer ARM64 tests via QEMU
@@ -101,6 +104,12 @@ jobs:
 
       - name: Run buffer-flow ARM64 tests via QEMU
         run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-flow/build/bin/linuxArm64/debugTest/test.kexe
+
+      - name: Run buffer-codec ARM64 tests via QEMU
+        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-codec/build/bin/linuxArm64/debugTest/test.kexe
+
+      - name: Run buffer-codec-test ARM64 tests via QEMU
+        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-codec-test/build/bin/linuxArm64/debugTest/test.kexe
 
       - name: Publish to Maven Local
         run: ./gradlew publishToMavenLocal --no-build-cache ${{ inputs.gradle-args }}

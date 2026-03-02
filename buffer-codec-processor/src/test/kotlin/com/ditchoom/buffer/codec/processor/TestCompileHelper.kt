@@ -1,0 +1,199 @@
+@file:Suppress("ktlint:standard:filename")
+
+package com.ditchoom.buffer.codec.processor
+
+import com.tschuchort.compiletesting.KotlinCompilation
+import com.tschuchort.compiletesting.SourceFile
+import com.tschuchort.compiletesting.configureKsp
+
+data class CompileResult(
+    val exitCode: KotlinCompilation.ExitCode,
+    val messages: String,
+)
+
+/**
+ * Annotation source included directly in test compilations so KSP can resolve
+ * them from source rather than binary jars (avoids Kotlin version mismatch issues
+ * with kctfork's embedded compiler).
+ */
+private val annotationSource =
+    SourceFile.kotlin(
+        "Annotations.kt",
+        """
+    package com.ditchoom.buffer.codec.annotations
+
+    @Target(AnnotationTarget.CLASS)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class ProtocolMessage
+
+    @Target(AnnotationTarget.CLASS)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class PacketType(val value: Int)
+
+    @Target(AnnotationTarget.TYPE_PARAMETER)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class Payload
+
+    enum class LengthPrefix {
+        Byte, Short, Int,
+    }
+
+    @Target(AnnotationTarget.PROPERTY, AnnotationTarget.VALUE_PARAMETER)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class LengthPrefixed(val prefix: LengthPrefix = LengthPrefix.Short)
+
+    @Target(AnnotationTarget.PROPERTY, AnnotationTarget.VALUE_PARAMETER)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class RemainingBytes
+
+    @Target(AnnotationTarget.PROPERTY, AnnotationTarget.VALUE_PARAMETER)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class LengthFrom(val field: String)
+
+    @Target(AnnotationTarget.VALUE_PARAMETER)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class WireBytes(val value: Int)
+
+    @Target(AnnotationTarget.PROPERTY, AnnotationTarget.VALUE_PARAMETER)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class WhenTrue(val expression: String)
+
+    """,
+    )
+
+/**
+ * Stub ReadBuffer and WriteBuffer interfaces for tests that need to reference buffer types.
+ */
+private val bufferStubs =
+    SourceFile.kotlin(
+        "BufferStubs.kt",
+        """
+    package com.ditchoom.buffer
+    interface ReadBuffer {
+        fun readByte(): Byte
+        fun readUnsignedByte(): UByte
+        fun readShort(): Short
+        fun readUnsignedShort(): UShort
+        fun readInt(): Int
+        fun readUnsignedInt(): UInt
+        fun readLong(): Long
+        fun readUnsignedLong(): ULong
+        fun readFloat(): Float
+        fun readDouble(): Double
+        fun readString(length: Int): String
+        fun readBytes(size: Int): ReadBuffer
+        fun remaining(): Int
+        fun position(): Int
+        fun position(newPosition: Int)
+    }
+    interface WriteBuffer {
+        fun writeByte(value: Byte): WriteBuffer
+        fun writeUByte(value: UByte): WriteBuffer
+        fun writeShort(value: Short): WriteBuffer
+        fun writeUShort(value: UShort): WriteBuffer
+        fun writeInt(value: Int): WriteBuffer
+        fun writeUInt(value: UInt): WriteBuffer
+        fun writeLong(value: Long): WriteBuffer
+        fun writeULong(value: ULong): WriteBuffer
+        fun writeFloat(value: Float): WriteBuffer
+        fun writeDouble(value: Double): WriteBuffer
+        fun writeString(text: CharSequence): WriteBuffer
+        fun position(): Int
+        fun position(newPosition: Int)
+    }
+    fun ReadBuffer.readLengthPrefixedUtf8String(): Pair<Int, String> = TODO()
+    fun WriteBuffer.writeLengthPrefixedUtf8String(value: String): WriteBuffer = TODO()
+    fun ReadBuffer.readVariableByteInteger(): Int = TODO()
+    fun WriteBuffer.writeVariableByteInteger(value: Int): WriteBuffer = TODO()
+    """,
+    )
+
+/**
+ * Codec stub for tests that check generated code compilation.
+ */
+private val codecStubs =
+    SourceFile.kotlin(
+        "CodecStubs.kt",
+        """
+    package com.ditchoom.buffer.codec
+    import com.ditchoom.buffer.ReadBuffer
+    import com.ditchoom.buffer.WriteBuffer
+    interface Codec<T> {
+        fun decode(buffer: ReadBuffer): T
+        fun encode(buffer: WriteBuffer, value: T)
+        fun sizeOf(value: T): Int? = null
+    }
+    """,
+    )
+
+private val payloadStubs =
+    SourceFile.kotlin(
+        "PayloadStubs.kt",
+        """
+    package com.ditchoom.buffer.codec.payload
+    import com.ditchoom.buffer.ReadBuffer
+    interface PayloadReader {
+        fun readByte(): Byte
+        fun readShort(): Short
+        fun readInt(): Int
+        fun readLong(): Long
+        fun readFloat(): Float
+        fun readDouble(): Double
+        fun readString(length: Int): String
+        fun remaining(): Int
+    }
+    class ReadBufferPayloadReader(private val buffer: ReadBuffer) : PayloadReader {
+        override fun readByte(): Byte = TODO()
+        override fun readShort(): Short = TODO()
+        override fun readInt(): Int = TODO()
+        override fun readLong(): Long = TODO()
+        override fun readFloat(): Float = TODO()
+        override fun readDouble(): Double = TODO()
+        override fun readString(length: Int): String = TODO()
+        override fun remaining(): Int = TODO()
+        fun release() {}
+    }
+    """,
+    )
+
+fun compileWithKsp(vararg sources: SourceFile): CompileResult {
+    val allSources = listOf(annotationSource, codecStubs, bufferStubs) + sources.toList()
+    val compilation =
+        KotlinCompilation().apply {
+            this.sources = allSources
+            configureKsp(useKsp2 = true) {
+                symbolProcessorProviders += ProtocolMessageProcessorProvider()
+            }
+            kotlincArguments = listOf("-Xskip-metadata-version-check")
+        }
+    val result = compilation.compile()
+    return CompileResult(result.exitCode, result.messages)
+}
+
+fun compileWithKspAndBufferStubs(vararg sources: SourceFile): CompileResult {
+    val allSources = listOf(annotationSource, codecStubs, bufferStubs) + sources.toList()
+    val compilation =
+        KotlinCompilation().apply {
+            this.sources = allSources
+            configureKsp(useKsp2 = true) {
+                symbolProcessorProviders += ProtocolMessageProcessorProvider()
+            }
+            kotlincArguments = listOf("-Xskip-metadata-version-check")
+        }
+    val result = compilation.compile()
+    return CompileResult(result.exitCode, result.messages)
+}
+
+fun compileWithKspAndPayloadStubs(vararg sources: SourceFile): CompileResult {
+    val allSources = listOf(annotationSource, codecStubs, bufferStubs, payloadStubs) + sources.toList()
+    val compilation =
+        KotlinCompilation().apply {
+            this.sources = allSources
+            configureKsp(useKsp2 = true) {
+                symbolProcessorProviders += ProtocolMessageProcessorProvider()
+            }
+            kotlincArguments = listOf("-Xskip-metadata-version-check")
+        }
+    val result = compilation.compile()
+    return CompileResult(result.exitCode, result.messages)
+}
