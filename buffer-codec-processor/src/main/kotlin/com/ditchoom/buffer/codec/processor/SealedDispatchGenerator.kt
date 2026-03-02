@@ -38,14 +38,19 @@ class SealedDispatchGenerator(
                     it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.PacketType"
                 }
             if (packetType == null) {
-                logger.error("@PacketType is required on sealed subclass '${subclass.simpleName.asString()}'", subclass)
+                logger.error(
+                    "Sealed subclass '${subclass.simpleName.asString()}' is missing @PacketType. " +
+                        "Each subclass of sealed @ProtocolMessage '$interfaceName' needs " +
+                        "@PacketType(N) to specify its 1-byte type discriminator (0-255).",
+                    subclass,
+                )
                 return
             }
             val value = packetType.arguments.first().value as Int
             if (value < 0 || value > 255) {
                 logger.error(
-                    "@PacketType value $value on '${subclass.simpleName.asString()}' is out of range. " +
-                        "The discriminator is a single byte on the wire (0-255).",
+                    "@PacketType($value) on '${subclass.simpleName.asString()}' is out of range. " +
+                        "The type discriminator is encoded as a single byte, so valid values are 0-255.",
                     subclass,
                 )
                 return
@@ -54,7 +59,8 @@ class SealedDispatchGenerator(
             if (existing != null) {
                 logger.error(
                     "@PacketType($value) is used by both '${existing.second.simpleName.asString()}' " +
-                        "and '${subclass.simpleName.asString()}'. Each variant must have a unique discriminator value.",
+                        "and '${subclass.simpleName.asString()}'. " +
+                        "Each subclass needs a unique discriminator so the codec can identify which type to decode.",
                     subclass,
                 )
                 return

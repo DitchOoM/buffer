@@ -173,9 +173,11 @@ class FieldAnalyzer(
 
             // Check forbidden types
             if (typeName in forbiddenTypes) {
+                val shortType = typeName.substringAfterLast(".")
                 logger.error(
-                    "Field '$name' has forbidden type '$typeName'. " +
-                        "Protocol messages cannot contain buffer or byte array fields.",
+                    "Field '$name' has type $shortType, which cannot be used in @ProtocolMessage classes. " +
+                        "Use a primitive type (Int, Short, etc.), String with a length annotation, " +
+                        "or a nested @ProtocolMessage class instead.",
                     param,
                 )
                 hasError = true
@@ -222,7 +224,9 @@ class FieldAnalyzer(
             val names = remainingBytesFields.joinToString(", ") { "'${it.name}'" }
             logger.error(
                 "Only one field can use @RemainingBytes, but found ${remainingBytesFields.size}: $names. " +
-                    "The codec reads all remaining bytes for this field, so only the last field can use it.",
+                    "@RemainingBytes consumes all bytes until end of buffer, " +
+                    "so only one field (the last) can use it. " +
+                    "Consider using @LengthPrefixed or @LengthFrom on the others.",
                 classDeclaration,
             )
             return null
@@ -230,7 +234,13 @@ class FieldAnalyzer(
         if (remainingBytesFields.size == 1) {
             val rbField = remainingBytesFields.first()
             if (rbField != nonConditionalFields.lastOrNull()) {
-                logger.error("@RemainingBytes can only be used on the last non-conditional field", rbField.parameter)
+                val lastField = nonConditionalFields.lastOrNull()?.name ?: "the last field"
+                logger.error(
+                    "@RemainingBytes on '${rbField.name}' is invalid — it must be the last non-conditional field. " +
+                        "Currently '$lastField' comes after it. " +
+                        "Move '${rbField.name}' to the end, or use @LengthPrefixed instead.",
+                    rbField.parameter,
+                )
                 return null
             }
         }
@@ -250,13 +260,23 @@ class FieldAnalyzer(
             if (refFieldName != null) {
                 val referencedField = fields.find { it.name == refFieldName }
                 if (referencedField == null) {
-                    logger.error("@LengthFrom references non-existent field '$refFieldName'", field.parameter)
+                    val available = fields.map { it.name }.joinToString(", ")
+                    logger.error(
+                        "@LengthFrom(\"$refFieldName\") on '${field.name}': no field named '$refFieldName' exists. " +
+                            "Available fields: $available",
+                        field.parameter,
+                    )
                     return null
                 }
                 val fieldIndex = fields.indexOf(field)
                 val refIndex = fields.indexOf(referencedField)
                 if (refIndex >= fieldIndex) {
-                    logger.error("@LengthFrom field '$refFieldName' must come before '${field.name}'", field.parameter)
+                    logger.error(
+                        "@LengthFrom(\"$refFieldName\") on '${field.name}': " +
+                            "field '$refFieldName' must be declared before '${field.name}' in the constructor. " +
+                            "The codec reads fields in order, so the length must already be decoded.",
+                        field.parameter,
+                    )
                     return null
                 }
                 val refStrategy = referencedField.strategy
@@ -264,9 +284,12 @@ class FieldAnalyzer(
                     isNumericStrategy(refStrategy) ||
                         (refStrategy is FieldReadStrategy.ValueClassField && isNumericStrategy(refStrategy.innerStrategy))
                 if (!isNumeric) {
+                    val shortType = referencedField.typeName.substringAfterLast(".")
                     logger.error(
-                        "@LengthFrom field '$refFieldName' must be a numeric type, " +
-                            "but has type '${referencedField.typeName}'",
+                        "@LengthFrom(\"$refFieldName\") on '${field.name}': " +
+                            "field '$refFieldName' is $shortType, but must be a numeric type " +
+                            "(Byte, UByte, Short, UShort, Int, UInt, Long, or ULong) " +
+                            "so the codec can use its value as a byte count.",
                         field.parameter,
                     )
                     return null
@@ -388,11 +411,12 @@ class FieldAnalyzer(
     ): FieldReadStrategy? {
         val typeDecl =
             param.type.resolve().declaration as? KSClassDeclaration ?: run {
+                val shortType = typeName.substringAfterLast(".")
                 logger.error(
-                    "Unsupported type '$typeName' for field '$fieldName'. " +
-                        "Supported types: primitives (Byte, Short, Int, Long, Float, Double, Boolean and unsigned variants), " +
-                        "String (with @LengthPrefixed, @RemainingBytes, or @LengthFrom), " +
-                        "value classes wrapping a primitive, or nested @ProtocolMessage classes.",
+                    "Field '$fieldName' has unsupported type $shortType. @ProtocolMessage fields must be one of: " +
+                        "a primitive (Byte, Short, Int, Long, Float, Double, Boolean, or unsigned variants), " +
+                        "a String (annotated with @LengthPrefixed, @RemainingBytes, or @LengthFrom), " +
+                        "a value class wrapping a primitive, or a nested @ProtocolMessage class.",
                     param,
                 )
                 return null
@@ -413,9 +437,11 @@ class FieldAnalyzer(
             val innerPropertyName = innerParam.name?.asString() ?: "value"
             val innerPrimitive =
                 Primitive.fromTypeName(innerTypeName) ?: run {
+                    val shortInner = innerTypeName.substringAfterLast(".")
+                    val shortWrapper = typeName.substringAfterLast(".")
                     logger.error(
-                        "Unsupported inner type '$innerTypeName' for value class '$typeName'. " +
-                            "Value classes must wrap a primitive type: " +
+                        "Value class $shortWrapper wraps $shortInner, which is not a supported primitive. " +
+                            "The inner type must be one of: " +
                             "Byte, UByte, Short, UShort, Int, UInt, Long, ULong, Float, Double, or Boolean.",
                         param,
                     )
@@ -436,12 +462,13 @@ class FieldAnalyzer(
             return FieldReadStrategy.NestedMessageField(codecName)
         }
 
+        val shortType = typeName.substringAfterLast(".")
         logger.error(
-            "Unsupported type '$typeName' for field '$fieldName'. " +
-                "Supported types: primitives (Byte, Short, Int, Long, Float, Double, Boolean and unsigned variants), " +
-                "String (with @LengthPrefixed, @RemainingBytes, or @LengthFrom), " +
-                "value classes wrapping a primitive, or nested @ProtocolMessage classes. " +
-                "If '$typeName' is a @ProtocolMessage, make sure it is annotated.",
+            "Field '$fieldName' has unsupported type $shortType. @ProtocolMessage fields must be one of: " +
+                "a primitive (Byte, Short, Int, Long, Float, Double, Boolean, or unsigned variants), " +
+                "a String (annotated with @LengthPrefixed, @RemainingBytes, or @LengthFrom), " +
+                "a value class wrapping a primitive, or a nested @ProtocolMessage class. " +
+                "If $shortType is a protocol message, add @ProtocolMessage to its declaration.",
             param,
         )
         return null
@@ -457,16 +484,26 @@ class FieldAnalyzer(
             } ?: return null
         val wireBytes = ann.arguments.first().value as Int
         if (wireBytes < 1 || wireBytes > 8) {
-            logger.error("@WireBytes value must be between 1 and 8, got $wireBytes", param)
+            logger.error(
+                "@WireBytes($wireBytes) is out of range. Value must be between 1 and 8.",
+                param,
+            )
             return null
         }
         if (!primitive.isNumeric) {
-            logger.error("@WireBytes cannot be used on ${primitive.typeName} (only numeric types)", param)
+            val shortType = primitive.typeName.substringAfterLast(".")
+            logger.error(
+                "@WireBytes cannot be used on $shortType — only numeric types " +
+                    "(Byte, Short, Int, Long, and unsigned variants) support custom wire sizes.",
+                param,
+            )
             return null
         }
         if (wireBytes > primitive.defaultWireBytes) {
+            val shortType = primitive.typeName.substringAfterLast(".")
             logger.error(
-                "@WireBytes($wireBytes) exceeds ${primitive.typeName} size of ${primitive.defaultWireBytes} bytes",
+                "@WireBytes($wireBytes) exceeds $shortType's native size of ${primitive.defaultWireBytes} byte(s). " +
+                    "Use a larger type (e.g., Int for 4 bytes, Long for 8 bytes).",
                 param,
             )
             return null
@@ -529,8 +566,10 @@ class FieldAnalyzer(
         }
 
         logger.error(
-            "$fieldKind field '$fieldName' requires a length annotation. " +
-                "Use @LengthPrefixed, @RemainingBytes, or @LengthFrom.",
+            "$fieldKind field '$fieldName' requires a length annotation so the codec knows how many bytes to read. " +
+                "Add one of: @LengthPrefixed (writes/reads a length prefix before the data), " +
+                "@RemainingBytes (reads all remaining bytes — only valid on the last field), " +
+                "or @LengthFrom(\"fieldName\") (reads length from a previously decoded field).",
             param,
         )
         return null

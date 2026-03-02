@@ -22,8 +22,8 @@ class ProtocolMessageProcessor(
         for (symbol in symbolList) {
             if (symbol !is KSClassDeclaration) {
                 logger.error(
-                    "@ProtocolMessage can only be applied to classes, " +
-                        "but was applied to ${symbol::class.simpleName ?: "a non-class element"}",
+                    "@ProtocolMessage can only be applied to data classes, value classes, or sealed interfaces, " +
+                        "but was applied to a ${symbol::class.simpleName ?: "non-class element"}.",
                     symbol,
                 )
                 continue
@@ -72,7 +72,11 @@ class ProtocolMessageProcessor(
     private fun processSealedInterface(classDeclaration: KSClassDeclaration) {
         val sealedSubclasses = classDeclaration.getSealedSubclasses().toList()
         if (sealedSubclasses.isEmpty()) {
-            logger.error("Sealed interface has no subclasses", classDeclaration)
+            logger.error(
+                "Sealed interface '${classDeclaration.simpleName.asString()}' has no subclasses. " +
+                    "Add at least one data class that implements this sealed interface.",
+                classDeclaration,
+            )
             return
         }
 
