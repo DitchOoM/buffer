@@ -584,6 +584,157 @@ The processor handles all Kotlin primitive types:
 
 The generated code automatically groups consecutive fixed-size fields into single bulk reads where possible (e.g., reading a `Long` and splitting it into two `Int` fields), reducing the number of read/write calls in the hot path.
 
+### Custom Annotations (SPI)
+
+When the built-in annotations don't cover your protocol's encoding (e.g., variable-byte integers,
+repeated fields, TLV property bags), you can register custom annotations via the codec SPI.
+
+The SPI lets you:
+- Define your own annotation (e.g., `@VariableByteInteger`)
+- Write the read/write/sizeOf functions in plain Kotlin
+- Register a `CodecFieldProvider` that maps the annotation to those functions
+- The generated codec calls your functions — type-safe, debuggable, no string templates
+
+#### Step 1: Define Your Annotation
+
+```kotlin
+package com.example.myprotocol.annotations
+
+@Target(AnnotationTarget.VALUE_PARAMETER)
+@Retention(AnnotationRetention.BINARY)
+annotation class VariableByteInteger
+```
+
+#### Step 2: Write Your Functions
+
+Write `ReadBuffer`/`WriteBuffer` extension functions that handle the encoding:
+
+```kotlin
+package com.example.myprotocol.codec
+
+import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.WriteBuffer
+
+fun ReadBuffer.readVariableByteInteger(): Int { /* ... */ }
+fun WriteBuffer.writeVariableByteInteger(value: Int) { /* ... */ }
+fun variableByteSizeInt(value: Int): Int { /* ... */ }
+```
+
+These are real Kotlin functions — debuggable, testable, IDE-navigable.
+
+#### Step 3: Create a CodecFieldProvider
+
+```kotlin
+package com.example.myprotocol.spi
+
+import com.ditchoom.buffer.codec.processor.spi.*
+
+class VariableByteIntegerProvider : CodecFieldProvider {
+    override val annotationFqn = "com.example.myprotocol.annotations.VariableByteInteger"
+
+    override fun describe(context: FieldContext): CustomFieldDescriptor {
+        require(context.typeName == "kotlin.Int") {
+            "@VariableByteInteger can only be applied to Int fields"
+        }
+        return CustomFieldDescriptor(
+            readFunction = FunctionRef("com.example.myprotocol.codec", "readVariableByteInteger"),
+            writeFunction = FunctionRef("com.example.myprotocol.codec", "writeVariableByteInteger"),
+            sizeOfFunction = FunctionRef("com.example.myprotocol.codec", "variableByteSizeInt"),
+        )
+    }
+}
+```
+
+#### Step 4: Create a KSP Provider Module
+
+Custom providers run at **build time** on the KSP processor classpath. Create a JVM-only module:
+
+```kotlin
+// my-protocol-ksp/build.gradle.kts
+plugins {
+    kotlin("jvm")
+}
+dependencies {
+    implementation("com.ditchoom:buffer-codec-processor:<version>")
+}
+```
+
+Register via `META-INF/services/com.ditchoom.buffer.codec.processor.spi.CodecFieldProvider`:
+
+```
+com.example.myprotocol.spi.VariableByteIntegerProvider
+```
+
+#### Step 5: Wire KSP Dependencies
+
+In your protocol module's `build.gradle.kts`:
+
+```kotlin
+dependencies {
+    ksp("com.ditchoom:buffer-codec-processor:<version>")
+    ksp(project(":my-protocol-ksp"))  // your providers
+}
+```
+
+The KSP classloader merges both JARs, so `ServiceLoader` discovers your providers automatically.
+
+#### Step 6: Use It
+
+```kotlin
+@ProtocolMessage
+data class MqttHeader(
+    val packetType: UByte,
+    @VariableByteInteger val remainingLength: Int,
+)
+// Generates MqttHeaderCodec with buffer.readVariableByteInteger() calls
+```
+
+#### Context Fields — Dependent Parsing
+
+Some custom fields need values from previously decoded fields. Use `contextFields` to pass them
+as extra arguments to your read/write functions:
+
+```kotlin
+class RepeatedShortsProvider : CodecFieldProvider {
+    override val annotationFqn = "com.example.annotations.RepeatedShorts"
+
+    override fun describe(context: FieldContext): CustomFieldDescriptor {
+        val countField = context.annotationArguments["countField"] as String
+        return CustomFieldDescriptor(
+            readFunction = FunctionRef("com.example.codec", "readRepeatedShorts"),
+            writeFunction = FunctionRef("com.example.codec", "writeRepeatedShorts"),
+            contextFields = listOf(countField),
+        )
+    }
+}
+```
+
+Generated code passes the context field:
+```kotlin
+// decode: buffer.readRepeatedShorts(count)
+// encode: buffer.writeRepeatedShorts(value.items, value.count)
+```
+
+#### Validation
+
+Providers can validate field types and annotation arguments in `describe()`. Thrown exceptions
+become compile-time KSP errors:
+
+```kotlin
+override fun describe(context: FieldContext): CustomFieldDescriptor {
+    require(context.typeName == "kotlin.Int") {
+        "@VariableByteInteger can only be applied to Int fields, found: ${context.typeName}"
+    }
+    // ...
+}
+```
+
+#### Restrictions
+
+- Cannot override built-in annotations (`@LengthPrefixed`, `@WireBytes`, etc.)
+- Custom fields break batch optimization (each custom field is read/written individually)
+- Two providers cannot register the same annotation FQN
+
 ### Compatibility with Manual Codecs
 
 Generated codecs implement the same `Codec<T>` interface, so all manual usage patterns apply:

@@ -113,22 +113,9 @@ class CodecGenerator(
                 .addFunction(decodeFun)
                 .addFunction(encodeFun)
 
-        // Generate sizeOf if all fields are fixed-size
-        val totalFixedSize =
-            fields.sumOf {
-                val s = it.strategy.fixedSize
-                if (s < 0 || it.condition != null) return@sumOf Int.MIN_VALUE
-                s
-            }
-        if (totalFixedSize >= 0) {
-            val sizeOfFun =
-                FunSpec
-                    .builder("sizeOf")
-                    .addModifiers(KModifier.OVERRIDE)
-                    .addParameter("value", classTypeName)
-                    .returns(ClassName("kotlin", "Int").copy(nullable = true))
-                    .addStatement("return %L", totalFixedSize)
-                    .build()
+        // Generate sizeOf if possible
+        val sizeOfFun = generateSizeOf(fields, classTypeName)
+        if (sizeOfFun != null) {
             objectBuilder.addFunction(sizeOfFun)
         }
 
@@ -507,6 +494,7 @@ class CodecGenerator(
                 val innerExpr = generateExtractExpression(batchVar, bitOffset, fieldBits, readType, strategy.innerStrategy)
                 "${strategy.wrapperType}($innerExpr)"
             }
+            is FieldReadStrategy.Custom -> error("Custom fields cannot participate in batch reads")
             else -> rawExpr
         }
     }
@@ -606,6 +594,11 @@ class CodecGenerator(
             }
             is FieldReadStrategy.NestedMessageField -> "${strategy.codecName}.decode(buffer)"
             is FieldReadStrategy.PayloadField -> error("PayloadField uses writePayloadCodec path")
+            is FieldReadStrategy.Custom -> {
+                val d = strategy.descriptor
+                val args = d.contextFields.joinToString(", ")
+                if (args.isEmpty()) "buffer.${d.readFunction.functionName}()" else "buffer.${d.readFunction.functionName}($args)"
+            }
         }
 
     private fun addFieldWrite(
@@ -655,6 +648,12 @@ class CodecGenerator(
             }
             is FieldReadStrategy.NestedMessageField -> "${strategy.codecName}.encode(buffer, $valueExpr)"
             is FieldReadStrategy.PayloadField -> error("PayloadField uses writePayloadCodec path")
+            is FieldReadStrategy.Custom -> {
+                val d = strategy.descriptor
+                val contextArgs = d.contextFields.joinToString(", ") { "value.$it" }
+                val allArgs = if (contextArgs.isEmpty()) valueExpr else "$valueExpr, $contextArgs"
+                "buffer.${d.writeFunction.functionName}($allArgs)"
+            }
         }
 
     // ──────────────────────── Custom-width read/write codegen ────────────────────────
@@ -756,6 +755,64 @@ class CodecGenerator(
             else -> expr
         }
 
+    // ──────────────────────── sizeOf generation ────────────────────────
+
+    private fun generateSizeOf(
+        fields: List<FieldInfo>,
+        classTypeName: ClassName,
+    ): FunSpec? {
+        // Skip if any field has a condition (can't compute size statically)
+        if (fields.any { it.condition != null }) return null
+
+        var fixedTotal = 0
+        val runtimeExprs = mutableListOf<String>()
+        var canGenerate = true
+
+        for (field in fields) {
+            val strategy = field.strategy
+            val size = strategy.fixedSize
+            if (size >= 0) {
+                fixedTotal += size
+            } else if (strategy is FieldReadStrategy.Custom) {
+                val sizeOfFn = strategy.descriptor.sizeOfFunction
+                if (sizeOfFn != null) {
+                    runtimeExprs.add("${sizeOfFn.functionName}(value.${field.name})")
+                } else {
+                    // Variable-length custom with no sizeOf — can't generate
+                    canGenerate = false
+                    break
+                }
+            } else {
+                // Variable-length built-in (String, etc.) — can't generate
+                canGenerate = false
+                break
+            }
+        }
+
+        if (!canGenerate) return null
+
+        val builder =
+            FunSpec
+                .builder("sizeOf")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("value", classTypeName)
+                .returns(ClassName("kotlin", "Int").copy(nullable = true))
+
+        if (runtimeExprs.isEmpty()) {
+            // All fixed-size — constant return
+            builder.addStatement("return %L", fixedTotal)
+        } else {
+            // Mixed fixed + runtime
+            builder.addStatement("var size = %L", fixedTotal)
+            for (expr in runtimeExprs) {
+                builder.addStatement("size += %L", expr)
+            }
+            builder.addStatement("return size")
+        }
+
+        return builder.build()
+    }
+
     // ──────────────────────── Utility ────────────────────────
 
     private fun needsLengthPrefixedImports(fields: List<FieldInfo>): Boolean = fields.any { needsLengthPrefixedImport(it.strategy) }
@@ -774,6 +831,15 @@ class CodecGenerator(
         if (needsLengthPrefixedImports(fields)) {
             fileBuilder.addImport("com.ditchoom.buffer", "readLengthPrefixedUtf8String")
             fileBuilder.addImport("com.ditchoom.buffer", "writeLengthPrefixedUtf8String")
+        }
+        for (field in fields) {
+            val strategy = field.strategy
+            if (strategy is FieldReadStrategy.Custom) {
+                val d = strategy.descriptor
+                fileBuilder.addImport(d.readFunction.packageName, d.readFunction.functionName)
+                fileBuilder.addImport(d.writeFunction.packageName, d.writeFunction.functionName)
+                d.sizeOfFunction?.let { fileBuilder.addImport(it.packageName, it.functionName) }
+            }
         }
     }
 

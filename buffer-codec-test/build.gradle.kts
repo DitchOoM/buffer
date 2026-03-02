@@ -54,6 +54,7 @@ kotlin {
 kotlin.targets.configureEach {
     if (name != "metadata") {
         dependencies.add("ksp${name.replaceFirstChar { it.uppercase() }}", project(":buffer-codec-processor"))
+        dependencies.add("ksp${name.replaceFirstChar { it.uppercase() }}", project(":buffer-codec-test-spi"))
     }
 }
 

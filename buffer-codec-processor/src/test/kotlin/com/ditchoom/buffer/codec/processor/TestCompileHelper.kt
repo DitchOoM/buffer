@@ -2,6 +2,7 @@
 
 package com.ditchoom.buffer.codec.processor
 
+import com.ditchoom.buffer.codec.processor.spi.CodecFieldProvider
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
 import com.tschuchort.compiletesting.configureKsp
@@ -105,6 +106,7 @@ private val bufferStubs =
     fun WriteBuffer.writeLengthPrefixedUtf8String(value: String): WriteBuffer = TODO()
     fun ReadBuffer.readVariableByteInteger(): Int = TODO()
     fun WriteBuffer.writeVariableByteInteger(value: Int): WriteBuffer = TODO()
+    fun variableByteSizeInt(value: Int): Int = TODO()
     """,
     )
 
@@ -191,6 +193,44 @@ fun compileWithKspAndPayloadStubs(vararg sources: SourceFile): CompileResult {
             this.sources = allSources
             configureKsp(useKsp2 = true) {
                 symbolProcessorProviders += ProtocolMessageProcessorProvider()
+            }
+            kotlincArguments = listOf("-Xskip-metadata-version-check")
+        }
+    val result = compilation.compile()
+    return CompileResult(result.exitCode, result.messages)
+}
+
+private val customFunctionStubs =
+    SourceFile.kotlin(
+        "CustomFunctionStubs.kt",
+        """
+    package com.ditchoom.buffer.codec.test
+    import com.ditchoom.buffer.ReadBuffer
+    import com.ditchoom.buffer.WriteBuffer
+
+    fun ReadBuffer.readRepeatedShorts(count: UByte): List<Short> = TODO()
+    fun WriteBuffer.writeRepeatedShorts(items: List<Short>, count: UByte): Unit = TODO()
+    fun repeatedShortsSize(items: List<Short>): Int = TODO()
+
+    fun ReadBuffer.readPropertyBag(): Map<Int, Int> = TODO()
+    fun WriteBuffer.writePropertyBag(props: Map<Int, Int>): Unit = TODO()
+
+    fun ReadBuffer.readFixedInt(): Int = TODO()
+    fun WriteBuffer.writeFixedInt(value: Int): Unit = TODO()
+    """,
+    )
+
+fun compileWithKspAndCustomProviders(
+    vararg sources: SourceFile,
+    providers: List<CodecFieldProvider> = emptyList(),
+): CompileResult {
+    val allSources =
+        listOf(annotationSource, codecStubs, bufferStubs, customFunctionStubs) + sources.toList()
+    val compilation =
+        KotlinCompilation().apply {
+            this.sources = allSources
+            configureKsp(useKsp2 = true) {
+                symbolProcessorProviders += ProtocolMessageProcessorProvider(providers)
             }
             kotlincArguments = listOf("-Xskip-metadata-version-check")
         }
