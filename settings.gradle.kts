@@ -24,3 +24,6 @@ develocity {
 include(":buffer")
 include(":buffer-compression")
 include(":buffer-flow")
+include(":buffer-codec")
+include(":buffer-codec-processor")
+include(":buffer-codec-test")

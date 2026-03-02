@@ -374,17 +374,45 @@ interface ReadBuffer : PositionBuffer {
      */
     fun readNumberWithByteSize(numberOfBytes: Int): Long {
         check(numberOfBytes in 1..8) { "byte size out of range" }
-        val byteSizeRange =
-            when (byteOrder) {
-                ByteOrder.LITTLE_ENDIAN -> 0 until numberOfBytes
-                ByteOrder.BIG_ENDIAN -> numberOfBytes - 1 downTo 0
+        // Decompose into bulk reads (readLong/readInt/readShort/readByte) instead of N readByte() calls.
+        // E.g. 7 bytes → readInt(4) + readShort(2) + readByte(1), 3 calls instead of 7.
+        var result = 0L
+        var remaining = numberOfBytes
+        if (byteOrder == ByteOrder.BIG_ENDIAN) {
+            if (remaining >= 8) {
+                return readLong()
             }
-        var number = 0L
-        for (i in byteSizeRange) {
-            val bitIndex = i * 8
-            number = readByte().toLong() and 0xff shl bitIndex or number
+            if (remaining >= 4) {
+                result = readInt().toLong() and 0xFFFFFFFFL shl ((remaining - 4) * 8)
+                remaining -= 4
+            }
+            if (remaining >= 2) {
+                result = result or (readShort().toLong() and 0xFFFF shl ((remaining - 2) * 8))
+                remaining -= 2
+            }
+            if (remaining >= 1) {
+                result = result or (readByte().toLong() and 0xFF)
+            }
+        } else {
+            var shift = 0
+            if (remaining >= 8) {
+                return readLong()
+            }
+            if (remaining >= 4) {
+                result = readInt().toLong() and 0xFFFFFFFFL
+                shift = 32
+                remaining -= 4
+            }
+            if (remaining >= 2) {
+                result = result or (readShort().toLong() and 0xFFFF shl shift)
+                shift += 16
+                remaining -= 2
+            }
+            if (remaining >= 1) {
+                result = result or (readByte().toLong() and 0xFF shl shift)
+            }
         }
-        return number
+        return result
     }
 
     /**
@@ -400,18 +428,11 @@ interface ReadBuffer : PositionBuffer {
         numberOfBytes: Int,
     ): Long {
         check(numberOfBytes in 1..8) { "byte size out of range" }
-        val byteSizeRange =
-            when (byteOrder) {
-                ByteOrder.LITTLE_ENDIAN -> 0 until numberOfBytes
-                ByteOrder.BIG_ENDIAN -> numberOfBytes - 1 downTo 0
-            }
-        var number = 0L
-        var index = startIndex
-        for (i in byteSizeRange) {
-            val bitIndex = i * 8
-            number = get(index++).toLong() and 0xff shl bitIndex or number
-        }
-        return number
+        val savedPos = position()
+        position(startIndex)
+        val result = readNumberWithByteSize(numberOfBytes)
+        position(savedPos)
+        return result
     }
 
     /**

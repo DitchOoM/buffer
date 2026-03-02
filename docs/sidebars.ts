@@ -22,6 +22,7 @@ const sidebars: SidebarsConfig = {
         'recipes/stream-processing',
         'recipes/compression',
         'recipes/protocol-parsing',
+        'recipes/protocol-codecs',
         'recipes/platform-interop',
       ],
     },
