@@ -39,6 +39,8 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
 
 dependencies {
     implementation(libs.ksp.api)
+    implementation(libs.kotlinpoet)
+    implementation(libs.kotlinpoet.ksp)
     implementation(project(":buffer-codec"))
     testImplementation(kotlin("test"))
     testImplementation(libs.kctfork.ksp)
