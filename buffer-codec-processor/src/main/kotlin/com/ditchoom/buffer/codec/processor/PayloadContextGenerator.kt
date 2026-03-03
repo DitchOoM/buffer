@@ -31,9 +31,9 @@ class PayloadContextGenerator(
         val containingFile = classDeclaration.containingFile
         val dependencies =
             if (containingFile != null) {
-                Dependencies(true, containingFile)
+                Dependencies(aggregating = false, sources = arrayOf(containingFile))
             } else {
-                Dependencies(true)
+                Dependencies(aggregating = false)
             }
 
         val constructorBuilder = FunSpec.constructorBuilder()

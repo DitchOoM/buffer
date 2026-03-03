@@ -112,6 +112,11 @@ sealed class FieldReadStrategy {
         val typeParamName: String,
     ) : FieldReadStrategy()
 
+    data class CollectionField(
+        val lengthKind: LengthKind,
+        val elementCodecName: String,
+    ) : FieldReadStrategy()
+
     data class Custom(
         val descriptor: CustomFieldDescriptor,
     ) : FieldReadStrategy()
@@ -227,7 +232,8 @@ class FieldAnalyzer(
         val remainingBytesFields =
             fields.filter {
                 it.strategy is FieldReadStrategy.RemainingBytesStringField ||
-                    (it.strategy is FieldReadStrategy.PayloadField && it.strategy.lengthKind is LengthKind.Remaining)
+                    (it.strategy is FieldReadStrategy.PayloadField && it.strategy.lengthKind is LengthKind.Remaining) ||
+                    (it.strategy is FieldReadStrategy.CollectionField && it.strategy.lengthKind is LengthKind.Remaining)
             }
         if (remainingBytesFields.size > 1) {
             val names = remainingBytesFields.joinToString(", ") { "'${it.name}'" }
@@ -261,6 +267,10 @@ class FieldAnalyzer(
                 when (strategy) {
                     is FieldReadStrategy.LengthFromStringField -> strategy.field
                     is FieldReadStrategy.PayloadField -> {
+                        val lk = strategy.lengthKind
+                        if (lk is LengthKind.FromField) lk.field else null
+                    }
+                    is FieldReadStrategy.CollectionField -> {
                         val lk = strategy.lengthKind
                         if (lk is LengthKind.FromField) lk.field else null
                     }
@@ -437,6 +447,11 @@ class FieldAnalyzer(
         typeName: String,
         fieldName: String,
     ): FieldReadStrategy? {
+        // Check for List<T> where T is a @ProtocolMessage
+        if (typeName == "kotlin.collections.List") {
+            return resolveCollectionType(param, fieldName)
+        }
+
         val typeDecl =
             param.type.resolve().declaration as? KSClassDeclaration ?: run {
                 val shortType = typeName.substringAfterLast(".")
@@ -444,7 +459,8 @@ class FieldAnalyzer(
                     "Field '$fieldName' has unsupported type $shortType. @ProtocolMessage fields must be one of: " +
                         "a primitive (Byte, Short, Int, Long, Float, Double, Boolean, or unsigned variants), " +
                         "a String (annotated with @LengthPrefixed, @RemainingBytes, or @LengthFrom), " +
-                        "a value class wrapping a primitive, or a nested @ProtocolMessage class.",
+                        "a value class wrapping a primitive, a nested @ProtocolMessage class, " +
+                        "or a List<T> where T is a @ProtocolMessage class.",
                     param,
                 )
                 return null
@@ -495,11 +511,98 @@ class FieldAnalyzer(
             "Field '$fieldName' has unsupported type $shortType. @ProtocolMessage fields must be one of: " +
                 "a primitive (Byte, Short, Int, Long, Float, Double, Boolean, or unsigned variants), " +
                 "a String (annotated with @LengthPrefixed, @RemainingBytes, or @LengthFrom), " +
-                "a value class wrapping a primitive, or a nested @ProtocolMessage class. " +
+                "a value class wrapping a primitive, a nested @ProtocolMessage class, " +
+                "or a List<T> where T is a @ProtocolMessage class. " +
                 "If $shortType is a protocol message, add @ProtocolMessage to its declaration.",
             param,
         )
         return null
+    }
+
+    private fun resolveCollectionType(
+        param: KSValueParameter,
+        fieldName: String,
+    ): FieldReadStrategy? {
+        val resolvedType = param.type.resolve()
+        val typeArgs = resolvedType.arguments
+        if (typeArgs.size != 1) {
+            logger.error(
+                "List field '$fieldName' must have exactly one type argument.",
+                param,
+            )
+            return null
+        }
+        val elementType =
+            typeArgs.first().type?.resolve() ?: run {
+                logger.error(
+                    "List field '$fieldName': cannot resolve element type.",
+                    param,
+                )
+                return null
+            }
+        val elementDecl =
+            elementType.declaration as? KSClassDeclaration ?: run {
+                logger.error(
+                    "List field '$fieldName': element type must be a @ProtocolMessage class.",
+                    param,
+                )
+                return null
+            }
+        val elementTypeName = elementDecl.qualifiedName?.asString() ?: ""
+
+        // Reject primitive wrappers, strings, collections, arrays
+        val rejectedTypes =
+            setOf(
+                "kotlin.Byte",
+                "kotlin.UByte",
+                "kotlin.Short",
+                "kotlin.UShort",
+                "kotlin.Int",
+                "kotlin.UInt",
+                "kotlin.Long",
+                "kotlin.ULong",
+                "kotlin.Float",
+                "kotlin.Double",
+                "kotlin.Boolean",
+                "kotlin.String",
+                "kotlin.ByteArray",
+                "kotlin.ShortArray",
+                "kotlin.IntArray",
+                "kotlin.LongArray",
+                "kotlin.collections.List",
+            )
+        if (elementTypeName in rejectedTypes) {
+            val shortType = elementTypeName.substringAfterLast(".")
+            logger.error(
+                "List<$shortType> on field '$fieldName' is not supported. " +
+                    "List elements must be @ProtocolMessage classes. " +
+                    "For primitive sequences, use @Payload with a buffer instead.",
+                param,
+            )
+            return null
+        }
+
+        // Require @ProtocolMessage on element type
+        val hasProtocolMessage =
+            elementDecl.annotations.any {
+                it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.ProtocolMessage"
+            }
+        if (!hasProtocolMessage) {
+            val shortType = elementTypeName.substringAfterLast(".")
+            logger.error(
+                "List<$shortType> on field '$fieldName': element type $shortType must be annotated with @ProtocolMessage. " +
+                    "Add @ProtocolMessage to the $shortType class declaration.",
+                param,
+            )
+            return null
+        }
+
+        // Require a length annotation
+        val annotations = param.annotations.toList()
+        val lk = resolveLengthKind(param, annotations, fieldName, "List") ?: return null
+
+        val codecName = "${elementDecl.simpleName.asString()}Codec"
+        return FieldReadStrategy.CollectionField(lk, codecName)
     }
 
     private fun extractWireBytes(

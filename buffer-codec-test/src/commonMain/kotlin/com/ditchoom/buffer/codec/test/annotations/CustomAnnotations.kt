@@ -6,10 +6,4 @@ annotation class VariableByteInteger
 
 @Target(AnnotationTarget.VALUE_PARAMETER)
 @Retention(AnnotationRetention.BINARY)
-annotation class Repeated(
-    val countField: String,
-)
-
-@Target(AnnotationTarget.VALUE_PARAMETER)
-@Retention(AnnotationRetention.BINARY)
 annotation class PropertyBag

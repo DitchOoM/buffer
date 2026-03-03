@@ -24,7 +24,7 @@ class ProtocolMessageProcessor(
         for (symbol in symbolList) {
             if (symbol !is KSClassDeclaration) {
                 logger.error(
-                    "@ProtocolMessage can only be applied to data classes, value classes, or sealed interfaces, " +
+                    "@ProtocolMessage can only be applied to classes or sealed interfaces, " +
                         "but was applied to a ${symbol::class.simpleName ?: "non-class element"}.",
                     symbol,
                 )
@@ -36,15 +36,25 @@ class ProtocolMessageProcessor(
 
             when {
                 Modifier.SEALED in symbol.modifiers -> processSealedInterface(symbol)
-                Modifier.DATA in symbol.modifiers -> processDataClass(symbol, resolver)
-                Modifier.VALUE in symbol.modifiers -> processDataClass(symbol, resolver)
-                else ->
-                    logger.error(
-                        "@ProtocolMessage requires a data class, value class, or sealed interface, " +
-                            "but '${symbol.simpleName.asString()}' is a plain class. " +
-                            "Fix: add the 'data' modifier (e.g., 'data class ${symbol.simpleName.asString()}').",
-                        symbol,
-                    )
+                else -> {
+                    val constructor = symbol.primaryConstructor
+                    if (constructor == null) {
+                        logger.error(
+                            "@ProtocolMessage class '${symbol.simpleName.asString()}' must have a primary constructor " +
+                                "with val parameters. " +
+                                "Fix: add a primary constructor (e.g., 'class ${symbol.simpleName.asString()}(val id: Int)').",
+                            symbol,
+                        )
+                    } else if (constructor.parameters.isEmpty()) {
+                        logger.error(
+                            "@ProtocolMessage class '${symbol.simpleName.asString()}' must have at least one val parameter " +
+                                "in its primary constructor.",
+                            symbol,
+                        )
+                    } else {
+                        processDataClass(symbol, resolver)
+                    }
+                }
             }
         }
         return emptyList()

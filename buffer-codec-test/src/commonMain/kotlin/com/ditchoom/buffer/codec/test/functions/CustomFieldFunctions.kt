@@ -5,15 +5,6 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.readVariableByteInteger
 import com.ditchoom.buffer.writeVariableByteInteger
 
-fun ReadBuffer.readRepeatedShorts(count: UByte): List<Short> = buildList { repeat(count.toInt()) { add(readShort()) } }
-
-fun WriteBuffer.writeRepeatedShorts(
-    items: List<Short>,
-    count: UByte,
-) = items.forEach { writeShort(it) }
-
-fun repeatedShortsSize(items: List<Short>): Int = items.size * 2
-
 fun ReadBuffer.readPropertyBag(): Map<Int, Int> {
     val len = readVariableByteInteger()
     val end = position() + len

@@ -13,10 +13,6 @@ import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 import com.squareup.kotlinpoet.TypeSpec
 import com.squareup.kotlinpoet.ksp.writeTo
 
-private val READ_BUFFER = ClassName("com.ditchoom.buffer", "ReadBuffer")
-private val WRITE_BUFFER = ClassName("com.ditchoom.buffer", "WriteBuffer")
-private val CODEC = ClassName("com.ditchoom.buffer.codec", "Codec")
-
 class SealedDispatchGenerator(
     private val codeGenerator: CodeGenerator,
     private val logger: KSPLogger,
@@ -68,13 +64,15 @@ class SealedDispatchGenerator(
             variants.add(value to subclass)
         }
 
-        val containingFile = sealedInterface.containingFile
-        val dependencies =
-            if (containingFile != null) {
-                Dependencies(true, containingFile)
-            } else {
-                Dependencies(true)
+        // Sealed dispatch is aggregating: it depends on the sealed interface AND all subclass files
+        val sourceFiles =
+            buildList {
+                sealedInterface.containingFile?.let { add(it) }
+                for (sub in subclasses) {
+                    sub.containingFile?.let { add(it) }
+                }
             }
+        val dependencies = Dependencies(aggregating = true, sources = sourceFiles.toTypedArray())
 
         // Build decode function
         val decodeBody =

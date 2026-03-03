@@ -21,23 +21,6 @@ class VariableByteIntegerProvider : CodecFieldProvider {
     }
 }
 
-class RepeatedProvider : CodecFieldProvider {
-    override val annotationFqn = "com.ditchoom.buffer.codec.test.annotations.Repeated"
-
-    override fun describe(context: FieldContext): CustomFieldDescriptor {
-        val countField =
-            context.annotationArguments["countField"] as? String
-                ?: error("@Repeated requires countField argument")
-        return CustomFieldDescriptor(
-            readFunction = FunctionRef("com.ditchoom.buffer.codec.test.functions", "readRepeatedShorts"),
-            writeFunction = FunctionRef("com.ditchoom.buffer.codec.test.functions", "writeRepeatedShorts"),
-            fixedSize = -1,
-            sizeOfFunction = FunctionRef("com.ditchoom.buffer.codec.test.functions", "repeatedShortsSize"),
-            contextFields = listOf(countField),
-        )
-    }
-}
-
 class PropertyBagProvider : CodecFieldProvider {
     override val annotationFqn = "com.ditchoom.buffer.codec.test.annotations.PropertyBag"
 

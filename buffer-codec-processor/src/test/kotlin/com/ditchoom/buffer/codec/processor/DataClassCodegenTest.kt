@@ -98,7 +98,7 @@ class DataClassCodegenTest {
     }
 
     @Test
-    fun `non-data class causes error`() {
+    fun `plain class with primary constructor compiles`() {
         val source =
             SourceFile.kotlin(
                 "Test.kt",
@@ -107,14 +107,53 @@ class DataClassCodegenTest {
             import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 
             @ProtocolMessage
-            class NotDataClass(val id: Int)
+            class PlainClass(val id: Int, val value: UByte)
+            """,
+            )
+        val result = compileWithKsp(source)
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    @Test
+    fun `class without primary constructor causes error`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+            @ProtocolMessage
+            class NoPrimaryCtor {
+                val id: Int = 0
+            }
             """,
             )
         val result = compileWithKsp(source)
         val hasError =
             result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
-                result.messages.contains("must be applied to a data class or sealed interface")
-        assertTrue(hasError, "Expected error for non-data class but got: ${result.exitCode}\n${result.messages}")
+                result.messages.contains("must have a primary constructor")
+        assertTrue(hasError, "Expected error for class without primary constructor but got: ${result.exitCode}\n${result.messages}")
+    }
+
+    @Test
+    fun `class with empty primary constructor causes error`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+            @ProtocolMessage
+            class EmptyCtor()
+            """,
+            )
+        val result = compileWithKsp(source)
+        val hasError =
+            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
+                result.messages.contains("must have at least one val parameter")
+        assertTrue(hasError, "Expected error for empty constructor but got: ${result.exitCode}\n${result.messages}")
     }
 
     @Test
@@ -941,6 +980,160 @@ class DataClassCodegenTest {
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider, propBagProvider))
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    // ──────────────────────── List<NestedMessage> codegen tests ────────────────────────
+
+    @Test
+    fun `list of nested message with LengthFrom compiles`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.LengthFrom
+
+            @ProtocolMessage
+            data class Entry(val value: Short)
+
+            @ProtocolMessage
+            data class Container(val count: UByte, @LengthFrom("count") val items: List<Entry>)
+            """,
+            )
+        val result = compileWithKsp(source)
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    @Test
+    fun `list of nested message with RemainingBytes compiles`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.RemainingBytes
+
+            @ProtocolMessage
+            data class Entry(val value: Short)
+
+            @ProtocolMessage
+            data class Container(val header: UByte, @RemainingBytes val items: List<Entry>)
+            """,
+            )
+        val result = compileWithKsp(source)
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    @Test
+    fun `list of nested message with LengthPrefixed compiles`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+            import com.ditchoom.buffer.codec.annotations.LengthPrefix
+
+            @ProtocolMessage
+            data class Entry(val value: Short)
+
+            @ProtocolMessage
+            data class Container(val header: UByte, @LengthPrefixed(LengthPrefix.Byte) val items: List<Entry>)
+            """,
+            )
+        val result = compileWithKsp(source)
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    @Test
+    fun `list of primitive type rejected`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.LengthFrom
+
+            @ProtocolMessage
+            data class BadList(val count: UByte, @LengthFrom("count") val items: List<Short>)
+            """,
+            )
+        val result = compileWithKsp(source)
+        val hasError =
+            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
+                result.messages.contains("not supported")
+        assertTrue(hasError, "Expected error for List<Short> but got: ${result.exitCode}\n${result.messages}")
+    }
+
+    @Test
+    fun `list without length annotation rejected`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+            @ProtocolMessage
+            data class Entry(val value: Short)
+
+            @ProtocolMessage
+            data class BadList(val items: List<Entry>)
+            """,
+            )
+        val result = compileWithKsp(source)
+        val hasError =
+            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
+                result.messages.contains("requires a length annotation")
+        assertTrue(hasError, "Expected error for List without length annotation but got: ${result.exitCode}\n${result.messages}")
+    }
+
+    @Test
+    fun `list of non-protocol-message class rejected`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.LengthFrom
+
+            data class PlainEntry(val value: Short)
+
+            @ProtocolMessage
+            data class BadList(val count: UByte, @LengthFrom("count") val items: List<PlainEntry>)
+            """,
+            )
+        val result = compileWithKsp(source)
+        val hasError =
+            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
+                result.messages.contains("must be annotated with @ProtocolMessage")
+        assertTrue(hasError, "Expected error for List of non-@ProtocolMessage but got: ${result.exitCode}\n${result.messages}")
+    }
+
+    @Test
+    fun `length from zero count produces empty list`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.LengthFrom
+
+            @ProtocolMessage
+            data class Entry(val value: Short)
+
+            @ProtocolMessage
+            data class ZeroCount(val count: UByte, @LengthFrom("count") val items: List<Entry>)
+            """,
+            )
+        val result = compileWithKsp(source)
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
     }
 }
