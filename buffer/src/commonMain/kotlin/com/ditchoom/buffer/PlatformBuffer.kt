@@ -3,8 +3,8 @@ package com.ditchoom.buffer
 /**
  * Primary buffer interface combining read/write operations with platform lifecycle support.
  *
- * `PlatformBuffer` extends [Buffer] with Android [Parcelable] and [SuspendCloseable]
- * support. All buffer implementations on every platform implement this interface.
+ * `PlatformBuffer` extends [Buffer] with Android [Parcelable] support.
+ * All buffer implementations on every platform implement this interface.
  *
  * ## Creation
  *
@@ -19,7 +19,6 @@ package com.ditchoom.buffer
  */
 interface PlatformBuffer :
     Buffer,
-    SuspendCloseable,
     Parcelable {
     @Deprecated(
         "unwrap() only peels one layer and requires callers to cast to PlatformBuffer first, " +

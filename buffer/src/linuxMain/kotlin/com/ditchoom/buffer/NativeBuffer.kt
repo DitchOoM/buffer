@@ -555,7 +555,7 @@ class NativeBuffer private constructor(
         }
     }
 
-    override suspend fun close() = freeNativeMemory()
+    fun close() = freeNativeMemory()
 
     fun isClosed(): Boolean = closed
 }

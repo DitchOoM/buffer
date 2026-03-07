@@ -317,7 +317,7 @@ private class LinuxStreamingStringDecoder(
         pendingCount = 0
     }
 
-    override suspend fun close() {
+    override fun close() {
         charArrayBuffer = null
         charArrayCapacity = 0
         byteArrayBuffer = null

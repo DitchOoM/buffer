@@ -61,7 +61,7 @@ fun processData(): PlatformBuffer {
 ```
 
 :::note Implementation Detail
-The `close()` method on Apple buffers is a no-op since ARC handles cleanup automatically. The `SuspendCloseable` interface is implemented for API consistency across platforms.
+The `close()` method on Apple buffers is a no-op since ARC handles cleanup automatically.
 :::
 
 ## Native Data Conversion

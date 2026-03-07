@@ -52,7 +52,7 @@ internal class PooledBuffer(
         return TrackedSlice(inner.slice(), this)
     }
 
-    override suspend fun close() {
+    fun close() {
         freeNativeMemory()
     }
 

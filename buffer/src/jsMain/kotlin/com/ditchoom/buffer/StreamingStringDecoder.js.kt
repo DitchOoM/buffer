@@ -108,7 +108,7 @@ private class JsStreamingStringDecoder(
         }
     }
 
-    override suspend fun close() {
+    override fun close() {
         // Nothing to close
     }
 

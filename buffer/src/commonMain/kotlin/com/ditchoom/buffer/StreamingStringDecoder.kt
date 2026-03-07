@@ -39,7 +39,12 @@ package com.ditchoom.buffer
  *
  * @see StreamingStringDecoderConfig for configuration options
  */
-interface StreamingStringDecoder : SuspendCloseable {
+interface StreamingStringDecoder {
+    /**
+     * Releases any resources held by this decoder.
+     * Safe to call multiple times.
+     */
+    fun close()
     /**
      * Decodes bytes from buffer and appends characters to destination.
      *
