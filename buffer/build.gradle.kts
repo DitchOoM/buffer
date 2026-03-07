@@ -481,13 +481,6 @@ benchmark {
             iterations = 5
             exclude(".*sliceBuffer.*")
         }
-        register("scoped") {
-            warmups = 2
-            iterations = 3
-            iterationTime = 500
-            iterationTimeUnit = "ms"
-            include(".*ScopedBuffer.*")
-        }
         register("bulk") {
             warmups = 3
             iterations = 5
@@ -506,9 +499,7 @@ benchmark {
         register("wasmFast") {
             warmups = 2
             iterations = 2
-            include("allocateScopedBuffer")
-            include("bulkWriteIntsScoped")
-            include("readWriteIntScoped")
+            include("BufferBaseline")
         }
     }
 }
