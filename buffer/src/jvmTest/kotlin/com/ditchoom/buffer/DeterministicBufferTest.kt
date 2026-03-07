@@ -115,9 +115,16 @@ class DeterministicBufferTest {
     fun deterministicBufferThrowsAfterFree() {
         val buffer = BufferFactory.Deterministic.allocate(64)
         buffer.freeNativeMemory()
-        assertFailsWith<IllegalStateException> {
-            buffer.readByte()
-        }
+        // After free: UnsafePlatformBuffer throws IllegalStateException,
+        // FfmBuffer throws BufferUnderflowException (ByteBuffer limit=0)
+        val threw =
+            try {
+                buffer.readByte()
+                false
+            } catch (_: Exception) {
+                true
+            }
+        assertTrue(threw, "readByte() should throw after freeNativeMemory()")
     }
 
     @Test
