@@ -18,7 +18,12 @@ internal actual val defaultBufferFactory: BufferFactory =
         override fun allocate(
             size: Int,
             byteOrder: ByteOrder,
-        ): PlatformBuffer = MutableDataBuffer(NSMutableData.create(length = size.convert())!!, byteOrder = byteOrder)
+        ): PlatformBuffer {
+            val data =
+                NSMutableData.create(length = size.convert())
+                    ?: error("Failed to allocate NSMutableData of $size bytes")
+            return MutableDataBuffer(data, byteOrder = byteOrder)
+        }
 
         override fun wrap(
             array: ByteArray,
@@ -98,7 +103,12 @@ fun PlatformBuffer.Companion.wrap(
 actual fun PlatformBuffer.Companion.allocateNative(
     size: Int,
     byteOrder: ByteOrder,
-): PlatformBuffer = MutableDataBuffer(NSMutableData.create(length = size.convert())!!, byteOrder = byteOrder)
+): PlatformBuffer {
+    val data =
+        NSMutableData.create(length = size.convert())
+            ?: error("Failed to allocate NSMutableData of $size bytes")
+    return MutableDataBuffer(data, byteOrder = byteOrder)
+}
 
 /**
  * Allocates a buffer with shared memory support.

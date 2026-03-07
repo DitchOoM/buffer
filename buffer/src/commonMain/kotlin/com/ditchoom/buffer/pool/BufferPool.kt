@@ -33,14 +33,14 @@ import com.ditchoom.buffer.ReadWriteBuffer
  * } // Pool automatically cleared
  * ```
  *
- * ### Manual acquire/release
+ * ### Manual acquire/freeNativeMemory
  * ```kotlin
  * val pool = BufferPool(factory = BufferFactory.Default)
- * val buffer = pool.acquire(1024)
+ * val buffer = pool.acquire(1024) as PlatformBuffer
  * try {
  *     buffer.writeInt(42)
  * } finally {
- *     pool.release(buffer)
+ *     buffer.freeNativeMemory() // returns to pool
  * }
  * ```
  *
@@ -63,8 +63,11 @@ sealed interface BufferPool {
 
     /**
      * Releases a buffer back to the pool for reuse.
-     * The buffer must have been acquired from this pool.
-     * Buffers that are not [PlatformBuffer] instances are silently ignored.
+     *
+     * Prefer [withBuffer] (auto-release) or [PlatformBuffer.freeNativeMemory]
+     * on pool-acquired buffers instead of calling this directly.
+     *
+     * @throws IllegalArgumentException if [buffer] is a [PooledBuffer] from a different pool
      */
     fun release(buffer: ReadWriteBuffer)
 

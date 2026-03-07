@@ -36,7 +36,7 @@ internal actual val sharedBufferFactory: BufferFactory =
             val sharedArrayBuffer =
                 try {
                     SharedArrayBuffer(size)
-                } catch (_: Throwable) {
+                } catch (_: Exception) {
                     null
                 }
             return if (sharedArrayBuffer != null) {

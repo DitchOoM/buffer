@@ -42,7 +42,10 @@ interface PlatformBuffer :
         fun allocate(
             size: Int,
             byteOrder: ByteOrder = ByteOrder.NATIVE,
-        ): PlatformBuffer = BufferFactory.Default.allocate(size, byteOrder)
+        ): PlatformBuffer {
+            require(size >= 0) { "Buffer size must be non-negative, got $size" }
+            return BufferFactory.Default.allocate(size, byteOrder)
+        }
 
         /**
          * Wraps an existing byte array in a buffer without copying.

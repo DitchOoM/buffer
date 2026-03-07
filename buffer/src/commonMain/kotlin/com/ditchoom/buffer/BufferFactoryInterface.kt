@@ -69,9 +69,10 @@ interface BufferFactory {
     /**
      * Allocates a new buffer of the specified size.
      *
-     * @param size The buffer capacity in bytes
+     * @param size The buffer capacity in bytes. Must be non-negative.
      * @param byteOrder The byte order for multi-byte operations
      * @return A new [PlatformBuffer] with position at 0 and limit at [size]
+     * @throws IllegalArgumentException if [size] is negative
      */
     fun allocate(
         size: Int,
@@ -221,7 +222,10 @@ internal class RequiringFactory(
         val buffer = delegate.allocate(size, byteOrder)
         val unwrapped = buffer.unwrapFully()
         if (!capability.isInstance(buffer) && !capability.isInstance(unwrapped)) {
-            buffer.freeNativeMemory()
+            try {
+                buffer.freeNativeMemory()
+            } catch (_: Exception) {
+            }
             throw UnsupportedOperationException(
                 "BufferFactory.requiring<${capability.simpleName}>(): " +
                     "allocated buffer ${buffer::class.simpleName} does not implement ${capability.simpleName}",
@@ -237,7 +241,10 @@ internal class RequiringFactory(
         val buffer = delegate.wrap(array, byteOrder)
         val unwrapped = buffer.unwrapFully()
         if (!capability.isInstance(buffer) && !capability.isInstance(unwrapped)) {
-            buffer.freeNativeMemory()
+            try {
+                buffer.freeNativeMemory()
+            } catch (_: Exception) {
+            }
             throw UnsupportedOperationException(
                 "BufferFactory.requiring<${capability.simpleName}>(): " +
                     "wrapped buffer ${buffer::class.simpleName} does not implement ${capability.simpleName}",

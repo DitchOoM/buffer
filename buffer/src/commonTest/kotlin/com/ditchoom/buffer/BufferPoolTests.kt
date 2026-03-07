@@ -53,8 +53,20 @@ class BufferPoolTests {
         }
 
     @Test
-    fun createPoolWithBigEndianByteOrder() =
-        withPool(byteOrder = ByteOrder.BIG_ENDIAN) { pool ->
+    fun createPoolWithBigEndianByteOrder() {
+        val factory =
+            object : BufferFactory {
+                override fun allocate(
+                    size: Int,
+                    byteOrder: ByteOrder,
+                ) = BufferFactory.Default.allocate(size, ByteOrder.BIG_ENDIAN)
+
+                override fun wrap(
+                    array: ByteArray,
+                    byteOrder: ByteOrder,
+                ) = BufferFactory.Default.wrap(array, ByteOrder.BIG_ENDIAN)
+            }
+        withPool(factory = factory) { pool ->
             pool.withBuffer(256) { buffer ->
                 assertEquals(ByteOrder.BIG_ENDIAN, buffer.byteOrder)
                 buffer.writeInt(0x12345678)
@@ -62,10 +74,23 @@ class BufferPoolTests {
                 assertEquals(0x12.toByte(), buffer.get(0))
             }
         }
+    }
 
     @Test
-    fun createPoolWithLittleEndianByteOrder() =
-        withPool(byteOrder = ByteOrder.LITTLE_ENDIAN) { pool ->
+    fun createPoolWithLittleEndianByteOrder() {
+        val factory =
+            object : BufferFactory {
+                override fun allocate(
+                    size: Int,
+                    byteOrder: ByteOrder,
+                ) = BufferFactory.Default.allocate(size, ByteOrder.LITTLE_ENDIAN)
+
+                override fun wrap(
+                    array: ByteArray,
+                    byteOrder: ByteOrder,
+                ) = BufferFactory.Default.wrap(array, ByteOrder.LITTLE_ENDIAN)
+            }
+        withPool(factory = factory) { pool ->
             pool.withBuffer(256) { buffer ->
                 assertEquals(ByteOrder.LITTLE_ENDIAN, buffer.byteOrder)
                 buffer.writeInt(0x12345678)
@@ -73,6 +98,7 @@ class BufferPoolTests {
                 assertEquals(0x78.toByte(), buffer.get(0))
             }
         }
+    }
 
     // ============================================================================
     // Buffer Acquisition Tests
@@ -1678,16 +1704,24 @@ class BufferPoolTests {
     }
 
     @Test
-    fun releaseBufferFromDifferentPoolType() {
+    fun releaseBufferFromDifferentPoolThrows() {
         val singlePool = BufferPool(threadingMode = ThreadingMode.SingleThreaded)
         val multiPool = BufferPool(threadingMode = ThreadingMode.MultiThreaded)
 
         val singleBuffer = singlePool.acquire(256)
         val multiBuffer = multiPool.acquire(256)
 
-        // Cross-pool release — pool accepts any PlatformBuffer
-        multiPool.release(singleBuffer)
-        singlePool.release(multiBuffer)
+        // Cross-pool release is now rejected
+        assertFailsWith<IllegalArgumentException> {
+            multiPool.release(singleBuffer)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            singlePool.release(multiBuffer)
+        }
+
+        // Release to correct pools
+        singlePool.release(singleBuffer)
+        multiPool.release(multiBuffer)
 
         singlePool.clear()
         multiPool.clear()
@@ -1724,11 +1758,9 @@ class BufferPoolTests {
                 threadingMode = ThreadingMode.SingleThreaded,
                 maxPoolSize = 16,
                 defaultBufferSize = 2048,
-                byteOrder = ByteOrder.LITTLE_ENDIAN,
             )
 
         pool.withBuffer(100) { buffer ->
-            assertEquals(ByteOrder.LITTLE_ENDIAN, buffer.byteOrder)
             assertTrue(buffer.capacity >= 2048)
         }
 

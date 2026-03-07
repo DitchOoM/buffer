@@ -45,11 +45,15 @@ internal actual val sharedBufferFactory: BufferFactory =
             byteOrder: ByteOrder,
         ): PlatformBuffer {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && size > 0) {
-                val sharedMemory = SharedMemory.create(null, size)
-                return ParcelableSharedMemoryBuffer(
-                    sharedMemory.mapReadWrite().order(byteOrder.toJava()),
-                    sharedMemory,
-                )
+                try {
+                    val sharedMemory = SharedMemory.create(null, size)
+                    return ParcelableSharedMemoryBuffer(
+                        sharedMemory.mapReadWrite().order(byteOrder.toJava()),
+                        sharedMemory,
+                    )
+                } catch (_: Exception) {
+                    // Fall back to direct allocation if SharedMemory fails
+                }
             }
             return DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrder.toJava()))
         }
@@ -60,12 +64,6 @@ internal actual val sharedBufferFactory: BufferFactory =
         ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJava()))
     }
 
-private fun ByteOrder.toJava(): java.nio.ByteOrder =
-    when (this) {
-        ByteOrder.BIG_ENDIAN -> java.nio.ByteOrder.BIG_ENDIAN
-        ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
-    }
-
 /**
  * Allocates a buffer with guaranteed native memory access (DirectJvmBuffer).
  * Uses a direct ByteBuffer with accessible native memory address.
@@ -73,14 +71,7 @@ private fun ByteOrder.toJava(): java.nio.ByteOrder =
 actual fun PlatformBuffer.Companion.allocateNative(
     size: Int,
     byteOrder: ByteOrder,
-): PlatformBuffer {
-    val byteOrderNative =
-        when (byteOrder) {
-            ByteOrder.BIG_ENDIAN -> java.nio.ByteOrder.BIG_ENDIAN
-            ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
-        }
-    return DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
-}
+): PlatformBuffer = DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrder.toJava()))
 
 /**
  * Allocates a buffer with shared memory (SharedMemory) if available.

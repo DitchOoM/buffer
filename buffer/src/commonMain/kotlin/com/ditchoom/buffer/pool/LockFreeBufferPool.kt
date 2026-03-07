@@ -58,7 +58,12 @@ internal class LockFreeBufferPool(
     override fun release(buffer: ReadWriteBuffer) {
         val raw =
             when (buffer) {
-                is PooledBuffer -> buffer.inner
+                is PooledBuffer -> {
+                    require(buffer.pool === this) {
+                        "Cannot release a buffer to a different pool than the one it was acquired from"
+                    }
+                    buffer.inner
+                }
                 is PlatformBuffer -> buffer
                 else -> return
             }
