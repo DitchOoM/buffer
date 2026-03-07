@@ -490,7 +490,6 @@ abstract class BaseJvmBuffer(
     }
 }
 
-
 fun ByteBuffer.toArray(size: Int = remaining()): ByteArray =
     if (hasArray()) {
         val result = ByteArray(size)

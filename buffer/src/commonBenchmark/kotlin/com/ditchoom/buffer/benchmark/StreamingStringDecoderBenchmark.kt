@@ -49,10 +49,10 @@ open class StreamingStringDecoderBenchmark {
     private lateinit var asciiHeapBuffer: PlatformBuffer
     private lateinit var mixedUtf8Buffer: PlatformBuffer
     private lateinit var emojiBuffer: PlatformBuffer
-    private lateinit var asciiChunks: List<Buffer>
-    private lateinit var asciiChunks256: List<Buffer>
-    private lateinit var asciiChunks4k: List<Buffer>
-    private lateinit var asciiChunks16k: List<Buffer>
+    private lateinit var asciiChunks: List<PlatformBuffer>
+    private lateinit var asciiChunks256: List<PlatformBuffer>
+    private lateinit var asciiChunks4k: List<PlatformBuffer>
+    private lateinit var asciiChunks16k: List<PlatformBuffer>
 
     private lateinit var decoder: StreamingStringDecoder
     private val destination = StringBuilder(size64k)
@@ -207,7 +207,7 @@ open class StreamingStringDecoderBenchmark {
         private fun buildChunks(
             source: PlatformBuffer,
             chunkSize: Int,
-        ): List<Buffer> {
+        ): List<PlatformBuffer> {
             val total = source.limit()
             val savedLimit = source.limit()
             return (0 until total step chunkSize)

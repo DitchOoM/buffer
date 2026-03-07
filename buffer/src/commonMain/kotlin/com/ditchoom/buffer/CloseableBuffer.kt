@@ -4,7 +4,7 @@ package com.ditchoom.buffer
  * Marker interface for buffers that hold resources NOT managed by garbage collection.
  *
  * Buffers implementing this interface **must** be explicitly cleaned up via
- * [Buffer.freeNativeMemory] or the [use] extension to prevent resource leaks.
+ * [PlatformBuffer.freeNativeMemory] or the [use] extension to prevent resource leaks.
  * Buffers that do NOT implement this interface are GC-managed — cleanup is optional.
  *
  * ## Which buffers implement CloseableBuffer?
@@ -44,7 +44,7 @@ interface CloseableBuffer {
 /**
  * Executes [block] with this [PlatformBuffer] and ensures cleanup when the block completes.
  *
- * If the buffer implements [CloseableBuffer], [freeNativeMemory][Buffer.freeNativeMemory]
+ * If the buffer implements [CloseableBuffer], [freeNativeMemory][PlatformBuffer.freeNativeMemory]
  * is called after the block. Otherwise this is a no-op on completion (the buffer is
  * GC-managed).
  *

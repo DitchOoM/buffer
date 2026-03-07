@@ -45,6 +45,7 @@ interface StreamingStringDecoder {
      * Safe to call multiple times.
      */
     fun close()
+
     /**
      * Decodes bytes from buffer and appends characters to destination.
      *

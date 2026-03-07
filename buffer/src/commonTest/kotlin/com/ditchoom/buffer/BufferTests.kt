@@ -49,7 +49,7 @@ class BufferTests {
         testAllPrimitives(platformBuffer)
     }
 
-    private fun testAllPrimitives(platformBuffer: Buffer) {
+    private fun testAllPrimitives(platformBuffer: PlatformBuffer) {
         var index = 0
         platformBuffer[index] = Byte.MIN_VALUE
         index += Byte.SIZE_BYTES

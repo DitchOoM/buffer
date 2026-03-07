@@ -195,7 +195,7 @@ fun BufferFactory.withSizeLimit(maxBytes: Int): BufferFactory = SizeLimitedFacto
 /**
  * Returns a factory that acquires buffers from the given [pool] instead of
  * allocating new ones. The returned buffers are [PooledBuffer][com.ditchoom.buffer.pool.PooledBuffer]
- * instances whose [freeNativeMemory][Buffer.freeNativeMemory] returns them to the pool.
+ * instances whose [freeNativeMemory][PlatformBuffer.freeNativeMemory] returns them to the pool.
  *
  * ```kotlin
  * val pool = BufferPool()

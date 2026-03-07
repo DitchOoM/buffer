@@ -3,7 +3,6 @@ package com.ditchoom.buffer
 /**
  * Primary buffer interface combining read/write operations with platform lifecycle support.
  *
- * `PlatformBuffer` extends [Buffer] with Android [Parcelable] support.
  * All buffer implementations on every platform implement this interface.
  *
  * ## Creation
@@ -15,11 +14,17 @@ package com.ditchoom.buffer
  * ```
  *
  * @see BufferFactory for buffer creation
- * @see Buffer for the minimal buffer supertype
  */
 interface PlatformBuffer :
-    Buffer,
+    ReadWriteBuffer,
     Parcelable {
+    /**
+     * Frees native memory resources.
+     * No-op on platforms where GC handles cleanup (JVM, JS, Apple ARC).
+     * For pool-acquired buffers, returns the buffer to its pool instead of freeing.
+     */
+    fun freeNativeMemory() {}
+
     @Deprecated(
         "unwrap() only peels one layer and requires callers to cast to PlatformBuffer first, " +
             "which breaks on TrackedSlice and other non-PlatformBuffer wrappers. " +
@@ -27,7 +32,7 @@ interface PlatformBuffer :
             "nativeMemoryAccess/managedMemoryAccess extensions for interface-based dispatch.",
         ReplaceWith("(this as ReadBuffer).unwrapFully()", "com.ditchoom.buffer.unwrapFully"),
     )
-    override fun unwrap(): PlatformBuffer = this
+    fun unwrap(): PlatformBuffer = this
 
     companion object
 }

@@ -3,7 +3,6 @@
 package com.ditchoom.buffer.pool
 
 import com.ditchoom.buffer.AllocationZone
-import com.ditchoom.buffer.Buffer
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -62,7 +61,7 @@ import com.ditchoom.buffer.shared
 sealed interface BufferPool {
     /**
      * Acquires a buffer of at least the specified size.
-     * The returned buffer is a [PooledBuffer] wrapper whose [freeNativeMemory][Buffer.freeNativeMemory]
+     * The returned buffer is a [PooledBuffer] wrapper whose [freeNativeMemory][PlatformBuffer.freeNativeMemory]
      * returns the buffer to this pool instead of freeing it.
      * The buffer may be larger than requested.
      */
@@ -71,7 +70,7 @@ sealed interface BufferPool {
     /**
      * Releases a buffer back to the pool for reuse.
      * The buffer must have been acquired from this pool.
-     * Buffers that are not [Buffer] instances are silently ignored.
+     * Buffers that are not [PlatformBuffer] instances are silently ignored.
      */
     fun release(buffer: ReadWriteBuffer)
 

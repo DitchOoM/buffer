@@ -2,7 +2,7 @@ package com.ditchoom.buffer
 
 import com.ditchoom.buffer.pool.PoolReleasable
 
-/** Frees native memory if this is a Buffer, or releases pool ref if TrackedSlice. */
+/** Frees native memory if this is a PlatformBuffer, or releases pool ref if TrackedSlice. */
 fun ReadBuffer.freeIfNeeded() {
     when (this) {
         is PlatformBuffer -> freeNativeMemory()
