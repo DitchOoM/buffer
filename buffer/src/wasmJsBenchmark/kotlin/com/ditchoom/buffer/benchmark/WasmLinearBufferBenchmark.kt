@@ -85,7 +85,7 @@ open class WasmLinearBufferBenchmark {
 
     // Allocator stress tests disabled - they exhaust the bump allocator's memory
     // after millions of benchmark iterations. These tests proved the optimizer bug
-    // workaround works. Use AllocationZone.Heap for high-frequency allocations.
+    // workaround works. Use BufferFactory.managed() for high-frequency allocations.
     //
     // Results when enabled (all passing, ~95-103M ops/sec):
     // - z1AllocatorMinimal: 95.3M ops/sec

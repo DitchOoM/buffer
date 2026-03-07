@@ -1,11 +1,11 @@
 package com.ditchoom.buffer.compression
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.MutableDataBuffer
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.managedMemoryAccess
 import com.ditchoom.buffer.nativeMemoryAccess
 import kotlinx.cinterop.ByteVar
@@ -102,7 +102,7 @@ actual fun decompress(
     try {
         val remaining = buffer.remaining()
         if (remaining == 0) {
-            CompressionResult.Success(PlatformBuffer.allocate(0))
+            CompressionResult.Success(BufferFactory.Default.allocate(0))
         } else {
             val result = decompressWithZStream(buffer, algorithm)
             CompressionResult.Success(result)
@@ -126,7 +126,7 @@ private fun compressWithZStream(
 
     // Allocate output buffer sized for worst case
     val maxOutputSize = getCompressBound(inputSize) + 32
-    val output = PlatformBuffer.allocate(maxOutputSize, AllocationZone.Direct) as MutableDataBuffer
+    val output = BufferFactory.Default.allocate(maxOutputSize) as MutableDataBuffer
 
     @Suppress("UNCHECKED_CAST")
     val outputPtr = output.data.mutableBytes as CPointer<ByteVar>
@@ -218,7 +218,7 @@ private fun decompressWithZStream(
 
         // Start with estimate, grow if needed
         var outputSize = maxOf(inputSize * 4, 1024)
-        var output = PlatformBuffer.allocate(outputSize, AllocationZone.Direct) as MutableDataBuffer
+        var output = BufferFactory.Default.allocate(outputSize) as MutableDataBuffer
 
         @Suppress("UNCHECKED_CAST")
         var outputPtr = output.data.mutableBytes as CPointer<ByteVar>
@@ -249,7 +249,7 @@ private fun decompressWithZStream(
                         if (s.avail_out == 0u) {
                             // Need more output space - grow buffer
                             val newSize = outputSize * 2
-                            val newOutput = PlatformBuffer.allocate(newSize, AllocationZone.Direct) as MutableDataBuffer
+                            val newOutput = BufferFactory.Default.allocate(newSize) as MutableDataBuffer
 
                             @Suppress("UNCHECKED_CAST")
                             val newPtr = newOutput.data.mutableBytes as CPointer<ByteVar>
@@ -344,7 +344,7 @@ private fun createEmptyCompressed(algorithm: CompressionAlgorithm): PlatformBuff
                 )
             }
         }
-    val buffer = PlatformBuffer.allocate(bytes.size, AllocationZone.Direct, ByteOrder.BIG_ENDIAN)
+    val buffer = BufferFactory.Default.allocate(bytes.size, ByteOrder.BIG_ENDIAN)
     buffer.writeBytes(bytes)
     buffer.resetForRead()
     return buffer

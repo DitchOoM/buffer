@@ -399,7 +399,7 @@ class StreamingStringDecoderTest {
         val decoder = StreamingStringDecoder()
         val result = StringBuilder()
 
-        val buffer = "Hello 你好 🎉".toReadBuffer(zone = AllocationZone.Direct)
+        val buffer = "Hello 你好 🎉".toReadBuffer(factory = BufferFactory.Default)
 
         decoder.decode(buffer, result)
         decoder.finish(result)
@@ -412,7 +412,7 @@ class StreamingStringDecoderTest {
         val decoder = StreamingStringDecoder()
         val result = StringBuilder()
 
-        val buffer = "Hello 你好 🎉".toReadBuffer(zone = AllocationZone.Heap)
+        val buffer = "Hello 你好 🎉".toReadBuffer(factory = BufferFactory.managed())
 
         decoder.decode(buffer, result)
         decoder.finish(result)

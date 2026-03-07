@@ -368,7 +368,7 @@ class WrapperTransparencyTests {
 
     @Test
     fun nativeMemoryAccessThroughPooledBufferDirect() {
-        val pool = BufferPool(defaultBufferSize = 16, allocationZone = AllocationZone.Direct)
+        val pool = BufferPool(defaultBufferSize = 16)
         val pooled = pool.acquire(16)
         pooled.writeInt(42)
         pooled.resetForRead()
@@ -384,7 +384,7 @@ class WrapperTransparencyTests {
 
     @Test
     fun nativeMemoryAccessThroughTrackedSliceDirect() {
-        val pool = BufferPool(defaultBufferSize = 16, allocationZone = AllocationZone.Direct)
+        val pool = BufferPool(defaultBufferSize = 16)
         val pooled = pool.acquire(16)
         pooled.writeInt(42)
         pooled.resetForRead()
@@ -401,7 +401,7 @@ class WrapperTransparencyTests {
 
     @Test
     fun managedMemoryAccessThroughPooledBufferHeap() {
-        val pool = BufferPool(defaultBufferSize = 16, allocationZone = AllocationZone.Heap)
+        val pool = BufferPool(defaultBufferSize = 16, factory = BufferFactory.managed())
         val pooled = pool.acquire(16)
         pooled.writeBytes(byteArrayOf(1, 2, 3))
         pooled.resetForRead()
@@ -416,7 +416,7 @@ class WrapperTransparencyTests {
 
     @Test
     fun managedMemoryAccessThroughTrackedSliceHeap() {
-        val pool = BufferPool(defaultBufferSize = 16, allocationZone = AllocationZone.Heap)
+        val pool = BufferPool(defaultBufferSize = 16, factory = BufferFactory.managed())
         val pooled = pool.acquire(16)
         pooled.writeBytes(byteArrayOf(1, 2, 3))
         pooled.resetForRead()
@@ -622,7 +622,7 @@ class WrapperTransparencyTests {
 
     @Test
     fun deeplyNestedSlicePreservesNativeMemoryAccess() {
-        val pool = BufferPool(defaultBufferSize = 32, allocationZone = AllocationZone.Direct)
+        val pool = BufferPool(defaultBufferSize = 32)
         val pooled = pool.acquire(32)
         pooled.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         pooled.resetForRead()
@@ -645,7 +645,7 @@ class WrapperTransparencyTests {
 
     @Test
     fun deeplyNestedSlicePreservesManagedMemoryAccess() {
-        val pool = BufferPool(defaultBufferSize = 32, allocationZone = AllocationZone.Heap)
+        val pool = BufferPool(defaultBufferSize = 32, factory = BufferFactory.managed())
         val pooled = pool.acquire(32)
         pooled.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         pooled.resetForRead()

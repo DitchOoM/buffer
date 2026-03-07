@@ -147,7 +147,7 @@ class BufferPoolTests {
 
     @Test
     fun acquiredBufferHasNativeMemoryAccess() {
-        val pool = BufferPool(defaultBufferSize = 1024, allocationZone = AllocationZone.Direct)
+        val pool = BufferPool(defaultBufferSize = 1024)
         val buffer = pool.acquire(512)
         val nma = (buffer as? NativeMemoryAccess)
         // On JVM Direct / Linux native, should have native memory access
@@ -162,7 +162,7 @@ class BufferPoolTests {
 
     @Test
     fun poolBufferSlicePreservesNativeMemoryAccess() {
-        val pool = BufferPool(defaultBufferSize = 1024, allocationZone = AllocationZone.Direct)
+        val pool = BufferPool(defaultBufferSize = 1024)
         val buffer = pool.acquire(64)
         buffer.writeInt(0x12345678)
         buffer.resetForRead()
@@ -185,7 +185,7 @@ class BufferPoolTests {
 
     @Test
     fun poolBufferSlicePreservesManagedMemoryAccess() {
-        val pool = BufferPool(defaultBufferSize = 1024, allocationZone = AllocationZone.Heap)
+        val pool = BufferPool(defaultBufferSize = 1024, factory = BufferFactory.managed())
         val buffer = pool.acquire(64)
         buffer.writeInt(0x12345678)
         buffer.resetForRead()

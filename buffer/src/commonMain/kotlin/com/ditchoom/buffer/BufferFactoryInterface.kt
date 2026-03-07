@@ -5,9 +5,9 @@ import com.ditchoom.buffer.pool.BufferPool
 /**
  * Factory for creating [PlatformBuffer] instances with a specific allocation strategy.
  *
- * `BufferFactory` replaces the old [AllocationZone]-based API with a composable,
- * extensible factory pattern. Instead of passing a zone parameter, you choose
- * (or create) a factory that encapsulates the allocation strategy.
+ * `BufferFactory` provides a composable, extensible factory pattern for buffer allocation.
+ * Instead of passing a zone parameter, you choose (or create) a factory that encapsulates
+ * the allocation strategy.
  *
  * ## Built-in presets
  *
@@ -132,18 +132,17 @@ internal expect val managedBufferFactory: BufferFactory
 internal expect val sharedBufferFactory: BufferFactory
 
 /**
- * Platform-optimal native memory. Replaces `AllocationZone.Direct`.
+ * Platform-optimal native memory.
  */
 val BufferFactory.Companion.Default: BufferFactory get() = defaultBufferFactory
 
 /**
- * GC-managed heap memory. Replaces `AllocationZone.Heap`.
+ * GC-managed heap memory.
  */
 fun BufferFactory.Companion.managed(): BufferFactory = managedBufferFactory
 
 /**
  * Cross-process shared memory. Falls back to [Default] where unavailable.
- * Replaces `AllocationZone.SharedMemory`.
  */
 fun BufferFactory.Companion.shared(): BufferFactory = sharedBufferFactory
 

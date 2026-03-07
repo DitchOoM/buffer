@@ -1,62 +1,17 @@
-@file:Suppress("DEPRECATION")
-
 package com.ditchoom.buffer
 
 import kotlin.math.roundToInt
-
-/**
- * Legacy allocate function. Use [BufferFactory.Default].allocate() instead.
- */
-@Deprecated(
-    "Use BufferFactory.Default.allocate(size) or BufferFactory.managed().allocate(size) instead",
-    ReplaceWith(
-        "BufferFactory.Default.allocate(size, byteOrder)",
-        "com.ditchoom.buffer.BufferFactory",
-    ),
-)
-expect fun PlatformBuffer.Companion.allocate(
-    size: Int,
-    zone: AllocationZone = AllocationZone.Heap,
-    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-): PlatformBuffer
-
-/**
- * Legacy wrap function. Use [BufferFactory.Default].wrap() instead.
- */
-@Deprecated(
-    "Use BufferFactory.Default.wrap(array, byteOrder) instead",
-    ReplaceWith(
-        "BufferFactory.Default.wrap(array, byteOrder)",
-        "com.ditchoom.buffer.BufferFactory",
-    ),
-)
-expect fun PlatformBuffer.Companion.wrap(
-    array: ByteArray,
-    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-): PlatformBuffer
-
-@Deprecated(
-    "Use toReadBuffer instead",
-    ReplaceWith("toReadBuffer(Charset.UTF8, zone)", "com.ditchoom.buffer.Charset"),
-)
-fun String.toBuffer(zone: AllocationZone = AllocationZone.Heap): ReadBuffer = toReadBuffer(Charset.UTF8, zone)
 
 fun CharSequence.maxBufferSize(charset: Charset): Int = (charset.maxBytesPerChar * this.length).roundToInt()
 
 fun String.toReadBuffer(
     charset: Charset = Charset.UTF8,
-    zone: AllocationZone = AllocationZone.Heap,
+    factory: BufferFactory = BufferFactory.Default,
 ): ReadBuffer {
     if (this == "") {
         return ReadBuffer.EMPTY_BUFFER
     }
     val maxBytes = maxBufferSize(charset)
-    val factory =
-        when (zone) {
-            AllocationZone.Heap -> BufferFactory.managed()
-            AllocationZone.Direct -> BufferFactory.Default
-            AllocationZone.SharedMemory -> BufferFactory.shared()
-        }
     val buffer = factory.allocate(maxBytes)
     buffer.writeString(this, charset)
     buffer.resetForRead()

@@ -34,5 +34,23 @@ interface PlatformBuffer :
     )
     fun unwrap(): PlatformBuffer = this
 
-    companion object
+    companion object {
+        /**
+         * Allocates a buffer using platform-optimal native memory.
+         * Convenience shorthand for `BufferFactory.Default.allocate(size, byteOrder)`.
+         */
+        fun allocate(
+            size: Int,
+            byteOrder: ByteOrder = ByteOrder.NATIVE,
+        ): PlatformBuffer = BufferFactory.Default.allocate(size, byteOrder)
+
+        /**
+         * Wraps an existing byte array in a buffer without copying.
+         * Convenience shorthand for `BufferFactory.Default.wrap(array, byteOrder)`.
+         */
+        fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder = ByteOrder.NATIVE,
+        ): PlatformBuffer = BufferFactory.Default.wrap(array, byteOrder)
+    }
 }

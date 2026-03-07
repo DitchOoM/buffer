@@ -1,10 +1,11 @@
 package com.ditchoom.buffer.compression
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.managed
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -29,7 +30,7 @@ class StreamingCompressionResetTest {
     fun resetForReadIsWriteToReadFlipNotRewind() {
         // resetForRead() sets limit=position, position=0.
         // For a buffer already in read mode (position=0), this zeroes the limit.
-        val buf = PlatformBuffer.allocate(16, AllocationZone.Direct)
+        val buf = BufferFactory.Default.allocate(16)
         buf.writeBytes(ByteArray(10) { it.toByte() })
         buf.resetForRead() // Now: position=0, limit=10
         assertEquals(10, buf.remaining())
@@ -41,7 +42,7 @@ class StreamingCompressionResetTest {
 
     @Test
     fun positionZeroIsCorrectWayToRewindReadableBuffer() {
-        val buf = PlatformBuffer.allocate(16, AllocationZone.Direct)
+        val buf = BufferFactory.Default.allocate(16)
         buf.writeBytes(ByteArray(10) { it.toByte() })
         buf.resetForRead() // position=0, limit=10
 
@@ -59,7 +60,7 @@ class StreamingCompressionResetTest {
     fun resetForReadAfterFullConsumptionPreservesLimit() {
         // After fully reading a buffer, position == limit.
         // resetForRead() does limit = position (== old limit), position = 0 -> correct!
-        val buf = PlatformBuffer.allocate(16, AllocationZone.Direct)
+        val buf = BufferFactory.Default.allocate(16)
         buf.writeBytes(ByteArray(10) { it.toByte() })
         buf.resetForRead() // position=0, limit=10
 
@@ -282,7 +283,7 @@ class StreamingCompressionResetTest {
 
     private fun textToBuffer(text: String): ReadBuffer {
         val bytes = text.encodeToByteArray()
-        val buf = PlatformBuffer.allocate(bytes.size, AllocationZone.Direct)
+        val buf = BufferFactory.Default.allocate(bytes.size)
         buf.writeBytes(bytes)
         buf.resetForRead()
         return buf
@@ -304,7 +305,7 @@ class StreamingCompressionResetTest {
         compressor.compress(input) { chunks.add(it) }
         compressor.flush { chunks.add(it) }
 
-        if (chunks.isEmpty()) return PlatformBuffer.allocate(0, AllocationZone.Direct)
+        if (chunks.isEmpty()) return BufferFactory.Default.allocate(0)
 
         // Strip sync flush marker from end
         val lastChunk = chunks.last()
@@ -327,7 +328,7 @@ class StreamingCompressionResetTest {
         // Combine into single buffer
         var totalSize = 0
         for (chunk in chunks) totalSize += chunk.remaining()
-        val combined = PlatformBuffer.allocate(totalSize, AllocationZone.Direct)
+        val combined = BufferFactory.Default.allocate(totalSize)
         for (chunk in chunks) {
             chunk.position(0)
             combined.write(chunk)
@@ -352,7 +353,7 @@ class StreamingCompressionResetTest {
         }
 
         // Append sync marker and decompress
-        val marker = PlatformBuffer.allocate(4, AllocationZone.Direct)
+        val marker = BufferFactory.Default.allocate(4)
         marker.writeInt(SYNC_FLUSH_MARKER)
         marker.resetForRead()
         decompressor.decompress(marker) { chunk ->
@@ -374,7 +375,7 @@ class StreamingCompressionResetTest {
 
         var totalSize = 0
         for (chunk in chunks) totalSize += chunk.remaining()
-        val combined = PlatformBuffer.allocate(totalSize, AllocationZone.Heap)
+        val combined = BufferFactory.managed().allocate(totalSize)
         for (chunk in chunks) {
             chunk.position(0)
             combined.write(chunk)

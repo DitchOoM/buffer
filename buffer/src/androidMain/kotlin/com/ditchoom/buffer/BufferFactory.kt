@@ -1,5 +1,4 @@
 @file:JvmName("BufferFactoryAndroid")
-@file:Suppress("DEPRECATION") // AllocationZone is deprecated
 
 package com.ditchoom.buffer
 
@@ -67,47 +66,6 @@ private fun ByteOrder.toJava(): java.nio.ByteOrder =
         ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
     }
 
-// =============================================================================
-// Legacy factory functions (backward compat)
-// =============================================================================
-
-@SuppressLint("NewApi") // SharedMemory API (API 27+) is guarded with Build.VERSION.SDK_INT check
-actual fun PlatformBuffer.Companion.allocate(
-    size: Int,
-    zone: AllocationZone,
-    byteOrder: ByteOrder,
-): PlatformBuffer {
-    val byteOrderNative =
-        when (byteOrder) {
-            ByteOrder.BIG_ENDIAN -> java.nio.ByteOrder.BIG_ENDIAN
-            ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
-        }
-    return when (zone) {
-        AllocationZone.Heap -> HeapJvmBuffer(ByteBuffer.allocate(size).order(byteOrderNative))
-        AllocationZone.Direct -> DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
-        AllocationZone.SharedMemory ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && size > 0) {
-                val sharedMemory = SharedMemory.create(null, size)
-                val buffer = sharedMemory.mapReadWrite().order(byteOrderNative)
-                ParcelableSharedMemoryBuffer(buffer, sharedMemory)
-            } else {
-                DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
-            }
-    }
-}
-
-actual fun PlatformBuffer.Companion.wrap(
-    array: ByteArray,
-    byteOrder: ByteOrder,
-): PlatformBuffer {
-    val byteOrderNative =
-        when (byteOrder) {
-            ByteOrder.BIG_ENDIAN -> java.nio.ByteOrder.BIG_ENDIAN
-            ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
-        }
-    return HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrderNative))
-}
-
 /**
  * Allocates a buffer with guaranteed native memory access (DirectJvmBuffer).
  * Uses a direct ByteBuffer with accessible native memory address.
@@ -134,4 +92,4 @@ actual fun PlatformBuffer.Companion.allocateNative(
 actual fun PlatformBuffer.Companion.allocateShared(
     size: Int,
     byteOrder: ByteOrder,
-): PlatformBuffer = allocate(size, AllocationZone.SharedMemory, byteOrder)
+): PlatformBuffer = BufferFactory.shared().allocate(size, byteOrder)

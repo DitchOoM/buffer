@@ -1,5 +1,3 @@
-@file:Suppress("DEPRECATION") // AllocationZone is deprecated
-
 package com.ditchoom.buffer
 
 import js.buffer.SharedArrayBuffer
@@ -59,59 +57,6 @@ internal actual val sharedBufferFactory: BufferFactory =
             )
     }
 
-// =============================================================================
-// Legacy factory functions (backward compat)
-// =============================================================================
-
-fun PlatformBuffer.Companion.allocate(
-    size: Int,
-    byteOrder: ByteOrder,
-) = allocate(size, AllocationZone.SharedMemory, byteOrder)
-
-actual fun PlatformBuffer.Companion.allocate(
-    size: Int,
-    zone: AllocationZone,
-    byteOrder: ByteOrder,
-): PlatformBuffer {
-    val sharedArrayBuffer =
-        try {
-            if (zone is AllocationZone.SharedMemory) {
-                SharedArrayBuffer(size)
-            } else {
-                null
-            }
-        } catch (t: Throwable) {
-            null
-        }
-    if (sharedArrayBuffer == null && zone is AllocationZone.SharedMemory) {
-        console.warn(
-            "Failed to allocate shared buffer in BufferFactory.kt. Please check and validate the " +
-                "appropriate headers are set on the http request as defined in the SharedArrayBuffer MDN docs." +
-                "see: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects" +
-                "/SharedArrayBuffer#security_requirements",
-        )
-    }
-    return if (sharedArrayBuffer != null) {
-        val arrayBuffer = sharedArrayBuffer.unsafeCast<ArrayBuffer>().slice(0, size)
-        JsBuffer(
-            Int8Array(arrayBuffer),
-            byteOrder,
-            sharedArrayBuffer = sharedArrayBuffer,
-        )
-    } else {
-        JsBuffer(Int8Array(size), byteOrder)
-    }
-}
-
-actual fun PlatformBuffer.Companion.wrap(
-    array: ByteArray,
-    byteOrder: ByteOrder,
-): PlatformBuffer =
-    JsBuffer(
-        array.unsafeCast<Int8Array>(),
-        byteOrder,
-    )
-
 /**
  * Allocates a buffer with guaranteed native memory access (JsBuffer).
  * In JavaScript, all buffers have native access via ArrayBuffer.
@@ -132,4 +77,4 @@ actual fun PlatformBuffer.Companion.allocateNative(
 actual fun PlatformBuffer.Companion.allocateShared(
     size: Int,
     byteOrder: ByteOrder,
-): PlatformBuffer = allocate(size, AllocationZone.SharedMemory, byteOrder)
+): PlatformBuffer = BufferFactory.shared().allocate(size, byteOrder)

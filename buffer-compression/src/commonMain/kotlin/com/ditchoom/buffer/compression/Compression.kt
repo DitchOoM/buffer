@@ -1,10 +1,9 @@
 package com.ditchoom.buffer.compression
 
-import com.ditchoom.buffer.AllocationZone
-import com.ditchoom.buffer.ByteOrder
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
 
 /**
  * Compression algorithm types.
@@ -157,21 +156,21 @@ expect val supportsStatefulFlush: Boolean
  * @param buffer The data to compress (reads from position to limit). **Fully consumed after call.**
  * @param algorithm The compression algorithm to use
  * @param level The compression level
- * @param zone The allocation zone for the output buffer
+ * @param factory The buffer factory for the output buffer
  * @return The compressed data as a single buffer (position=0, limit=compressed size)
  */
 suspend fun compressAsync(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Gzip,
     level: CompressionLevel = CompressionLevel.Default,
-    zone: AllocationZone = AllocationZone.Direct,
+    factory: BufferFactory = BufferFactory.Default,
 ): PlatformBuffer {
     val compressor = SuspendingStreamingCompressor.create(algorithm, level)
     return try {
         val output = mutableListOf<ReadBuffer>()
         output += compressor.compress(buffer)
         output += compressor.finish()
-        combineBuffers(output, zone)
+        combineBuffers(output, factory)
     } finally {
         compressor.close()
     }
@@ -186,7 +185,7 @@ suspend fun compressAsync(
  *
  * @param buffer The compressed data (reads from position to limit). Position is advanced.
  * @param algorithm The compression algorithm to use
- * @param zone The allocation zone for the output buffer
+ * @param factory The buffer factory for the output buffer
  * @param expectedOutputSize Hint for pre-allocating the output buffer. If the actual
  *   decompressed size exceeds this, the buffer grows automatically. Use 0 (default)
  *   if unknown. Providing a good estimate reduces memory allocations.
@@ -195,20 +194,20 @@ suspend fun compressAsync(
 suspend fun decompressAsync(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Gzip,
-    zone: AllocationZone = AllocationZone.Direct,
+    factory: BufferFactory = BufferFactory.Default,
     expectedOutputSize: Int = 0,
 ): PlatformBuffer {
     val decompressor = SuspendingStreamingDecompressor.create(algorithm)
     return try {
         if (expectedOutputSize > 0) {
             // Optimized path: write directly to pre-allocated buffer
-            decompressToBuffer(decompressor, buffer, zone, expectedOutputSize)
+            decompressToBuffer(decompressor, buffer, factory, expectedOutputSize)
         } else {
             // Default path: collect chunks then combine
             val output = mutableListOf<ReadBuffer>()
             output += decompressor.decompress(buffer)
             output += decompressor.finish()
-            combineBuffers(output, zone)
+            combineBuffers(output, factory)
         }
     } finally {
         decompressor.close()
@@ -222,22 +221,22 @@ suspend fun decompressAsync(
 private suspend fun decompressToBuffer(
     decompressor: SuspendingStreamingDecompressor,
     input: ReadBuffer,
-    zone: AllocationZone,
+    factory: BufferFactory,
     expectedSize: Int,
 ): PlatformBuffer {
-    var output = PlatformBuffer.allocate(expectedSize, zone)
+    var output = factory.allocate(expectedSize)
     var capacity = expectedSize // Track capacity since it's not exposed in API
 
     // Process decompression chunks
     for (chunk in decompressor.decompress(input)) {
-        val result = ensureCapacityAndWrite(output, capacity, chunk, zone)
+        val result = ensureCapacityAndWrite(output, capacity, chunk, factory)
         output = result.first
         capacity = result.second
     }
 
     // Process finish chunks
     for (chunk in decompressor.finish()) {
-        val result = ensureCapacityAndWrite(output, capacity, chunk, zone)
+        val result = ensureCapacityAndWrite(output, capacity, chunk, factory)
         output = result.first
         capacity = result.second
     }
@@ -251,7 +250,7 @@ private suspend fun decompressToBuffer(
         // Return a right-sized buffer to avoid memory waste
         output.position(0)
         output.setLimit(actualSize)
-        val result = PlatformBuffer.allocate(actualSize, zone)
+        val result = factory.allocate(actualSize)
         result.write(output)
         result.resetForRead()
         result
@@ -266,7 +265,7 @@ private fun ensureCapacityAndWrite(
     output: PlatformBuffer,
     capacity: Int,
     chunk: ReadBuffer,
-    zone: AllocationZone,
+    factory: BufferFactory,
 ): Pair<PlatformBuffer, Int> {
     val needed = chunk.remaining()
     val available = capacity - output.position()
@@ -277,7 +276,7 @@ private fun ensureCapacityAndWrite(
     } else {
         // Grow buffer: double size or add needed space, whichever is larger
         val newCapacity = maxOf(capacity * 2, capacity + needed)
-        val newOutput = PlatformBuffer.allocate(newCapacity, zone)
+        val newOutput = factory.allocate(newCapacity)
 
         // Copy existing data
         val written = output.position()
@@ -296,10 +295,10 @@ private fun ensureCapacityAndWrite(
  */
 internal fun combineBuffers(
     buffers: List<ReadBuffer>,
-    zone: AllocationZone,
+    factory: BufferFactory = BufferFactory.Default,
 ): PlatformBuffer {
     val totalSize = buffers.sumOf { it.remaining() }
-    val result = PlatformBuffer.allocate(totalSize, zone)
+    val result = factory.allocate(totalSize)
     for (buf in buffers) {
         result.write(buf)
     }
@@ -369,13 +368,13 @@ fun ReadBuffer.stripSyncFlushMarker(): ReadBuffer {
  *
  * @param buffer The data to compress.
  * @param level The compression level.
- * @param zone The allocation zone for the output buffer.
+ * @param factory The buffer factory for the output buffer.
  * @return Compressed data with the sync marker stripped.
  */
 suspend fun compressWithSyncFlush(
     buffer: ReadBuffer,
     level: CompressionLevel = CompressionLevel.Default,
-    zone: AllocationZone = AllocationZone.Direct,
+    factory: BufferFactory = BufferFactory.Default,
 ): ReadBuffer {
     val compressor = SuspendingStreamingCompressor.create(CompressionAlgorithm.Raw, level)
     val chunks = mutableListOf<ReadBuffer>()
@@ -386,7 +385,7 @@ suspend fun compressWithSyncFlush(
         compressor.close()
     }
 
-    val compressed = combineBuffers(chunks, zone)
+    val compressed = combineBuffers(chunks, factory)
     return compressed.stripSyncFlushMarker()
 }
 
@@ -396,24 +395,24 @@ suspend fun compressWithSyncFlush(
  * Automatically appends the sync marker before decompression without copying the input buffer.
  *
  * @param buffer The compressed data (without sync marker).
- * @param zone The allocation zone for the output buffer.
+ * @param factory The buffer factory for the output buffer.
  * @return The decompressed data.
  */
 suspend fun decompressWithSyncFlush(
     buffer: ReadBuffer,
-    zone: AllocationZone = AllocationZone.Direct,
+    factory: BufferFactory = BufferFactory.Default,
 ): ReadBuffer {
     val decompressor = SuspendingStreamingDecompressor.create(CompressionAlgorithm.Raw)
     return try {
         val output = mutableListOf<ReadBuffer>()
         output += decompressor.decompress(buffer)
         // Write just the 4-byte marker without copying the input buffer
-        val marker = PlatformBuffer.allocate(4, zone)
+        val marker = factory.allocate(4)
         marker.writeInt(DeflateFormat.SYNC_FLUSH_MARKER)
         marker.resetForRead()
         output += decompressor.decompress(marker)
         output += decompressor.finish()
-        combineBuffers(output, zone)
+        combineBuffers(output, factory)
     } finally {
         decompressor.close()
     }
