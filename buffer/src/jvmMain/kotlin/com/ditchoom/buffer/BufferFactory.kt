@@ -1,8 +1,62 @@
 @file:JvmName("BufferFactoryJvm")
+@file:Suppress("DEPRECATION") // AllocationZone is deprecated
 
 package com.ditchoom.buffer
 
 import java.nio.ByteBuffer
+
+// =============================================================================
+// v2 BufferFactory implementations
+// =============================================================================
+
+internal actual val defaultBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrder.toJava()))
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJava()))
+    }
+
+internal actual val managedBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.allocate(size).order(byteOrder.toJava()))
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJava()))
+    }
+
+internal actual val sharedBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrder.toJava()))
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJava()))
+    }
+
+private fun ByteOrder.toJava(): java.nio.ByteOrder =
+    when (this) {
+        ByteOrder.BIG_ENDIAN -> java.nio.ByteOrder.BIG_ENDIAN
+        ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
+    }
+
+// =============================================================================
+// Legacy factory functions (backward compat)
+// =============================================================================
 
 actual fun PlatformBuffer.Companion.allocate(
     size: Int,

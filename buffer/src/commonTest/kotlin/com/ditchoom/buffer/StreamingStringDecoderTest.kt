@@ -91,7 +91,7 @@ class StreamingStringDecoderTest {
 
         // Feed one byte at a time
         for (byte in input.encodeToByteArray()) {
-            val buffer = PlatformBuffer.allocate(1)
+            val buffer = BufferFactory.managed().allocate(1)
             buffer.writeByte(byte)
             buffer.resetForRead()
             decoder.decode(buffer, result)
@@ -112,13 +112,13 @@ class StreamingStringDecoderTest {
         assertEquals(3, fullBytes.size)
 
         // First chunk: E4
-        val chunk1 = PlatformBuffer.allocate(1)
+        val chunk1 = BufferFactory.managed().allocate(1)
         chunk1.writeByte(fullBytes[0])
         chunk1.resetForRead()
         decoder.decode(chunk1, result)
 
         // Second chunk: BD A0
-        val chunk2 = PlatformBuffer.allocate(2)
+        val chunk2 = BufferFactory.managed().allocate(2)
         chunk2.writeByte(fullBytes[1])
         chunk2.writeByte(fullBytes[2])
         chunk2.resetForRead()
@@ -140,7 +140,7 @@ class StreamingStringDecoderTest {
 
         // Feed one byte at a time (worst case)
         for (byte in fullBytes) {
-            val buffer = PlatformBuffer.allocate(1)
+            val buffer = BufferFactory.managed().allocate(1)
             buffer.writeByte(byte)
             buffer.resetForRead()
             decoder.decode(buffer, result)
@@ -168,7 +168,7 @@ class StreamingStringDecoderTest {
             )
 
         for (chunk in chunks) {
-            val buffer = PlatformBuffer.wrap(chunk)
+            val buffer = BufferFactory.Default.wrap(chunk)
             decoder.decode(buffer, result)
         }
         decoder.finish(result)
@@ -186,13 +186,13 @@ class StreamingStringDecoderTest {
         assertEquals(2, fullBytes.size)
 
         // First chunk: C3
-        val chunk1 = PlatformBuffer.allocate(1)
+        val chunk1 = BufferFactory.managed().allocate(1)
         chunk1.writeByte(fullBytes[0])
         chunk1.resetForRead()
         decoder.decode(chunk1, result)
 
         // Second chunk: A9
-        val chunk2 = PlatformBuffer.allocate(1)
+        val chunk2 = BufferFactory.managed().allocate(1)
         chunk2.writeByte(fullBytes[1])
         chunk2.resetForRead()
         decoder.decode(chunk2, result)
@@ -212,11 +212,11 @@ class StreamingStringDecoderTest {
         assertEquals(4, fullBytes.size)
 
         // First chunk: F0 9F (2 bytes)
-        val chunk1 = PlatformBuffer.wrap(fullBytes.sliceArray(0..1))
+        val chunk1 = BufferFactory.Default.wrap(fullBytes.sliceArray(0..1))
         decoder.decode(chunk1, result)
 
         // Second chunk: 8E 89 (2 bytes)
-        val chunk2 = PlatformBuffer.wrap(fullBytes.sliceArray(2..3))
+        val chunk2 = BufferFactory.Default.wrap(fullBytes.sliceArray(2..3))
         decoder.decode(chunk2, result)
 
         decoder.finish(result)
@@ -234,11 +234,11 @@ class StreamingStringDecoderTest {
         assertEquals(4, fullBytes.size)
 
         // First chunk: F0 9F 8E (3 bytes)
-        val chunk1 = PlatformBuffer.wrap(fullBytes.sliceArray(0..2))
+        val chunk1 = BufferFactory.Default.wrap(fullBytes.sliceArray(0..2))
         decoder.decode(chunk1, result)
 
         // Second chunk: 89 (1 byte)
-        val chunk2 = PlatformBuffer.wrap(fullBytes.sliceArray(3..3))
+        val chunk2 = BufferFactory.Default.wrap(fullBytes.sliceArray(3..3))
         decoder.decode(chunk2, result)
 
         decoder.finish(result)
@@ -264,7 +264,7 @@ class StreamingStringDecoderTest {
             )
 
         for (chunk in chunks) {
-            val buffer = PlatformBuffer.wrap(chunk)
+            val buffer = BufferFactory.Default.wrap(chunk)
             decoder.decode(buffer, result)
         }
         decoder.finish(result)
@@ -320,7 +320,7 @@ class StreamingStringDecoderTest {
         val result = StringBuilder()
 
         // Invalid UTF-8: continuation byte without lead byte
-        val buffer = PlatformBuffer.wrap(byteArrayOf(0x80.toByte()))
+        val buffer = BufferFactory.Default.wrap(byteArrayOf(0x80.toByte()))
 
         assertFailsWith<CharacterDecodingException> {
             decoder.decode(buffer, result)
@@ -337,7 +337,7 @@ class StreamingStringDecoderTest {
         val result = StringBuilder()
 
         // Invalid: incomplete sequence at end of stream (start of 3-byte sequence)
-        val buffer = PlatformBuffer.wrap(byteArrayOf(0xE4.toByte()))
+        val buffer = BufferFactory.Default.wrap(byteArrayOf(0xE4.toByte()))
 
         decoder.decode(buffer, result)
         decoder.finish(result) // This should trigger replacement
@@ -376,7 +376,7 @@ class StreamingStringDecoderTest {
         // First stream - leave incomplete sequence
         val result1 = StringBuilder()
         val incompleteBytes = "🎉".encodeToByteArray().sliceArray(0..1) // First 2 bytes of 4-byte emoji
-        val buffer1 = PlatformBuffer.wrap(incompleteBytes)
+        val buffer1 = BufferFactory.Default.wrap(incompleteBytes)
         decoder.decode(buffer1, result1)
         // Don't call finish() - leave pending bytes
 
@@ -425,7 +425,7 @@ class StreamingStringDecoderTest {
         val decoder = StreamingStringDecoder()
         val result = StringBuilder()
 
-        val buffer = PlatformBuffer.wrap("Hello 你好 🎉".encodeToByteArray())
+        val buffer = BufferFactory.Default.wrap("Hello 你好 🎉".encodeToByteArray())
 
         decoder.decode(buffer, result)
         decoder.finish(result)
@@ -447,7 +447,7 @@ class StreamingStringDecoderTest {
         val pattern = "Hello World! "
         val patternBytes = pattern.encodeToByteArray()
 
-        val buffer = PlatformBuffer.allocate(size)
+        val buffer = BufferFactory.managed().allocate(size)
         var written = 0
         while (written + patternBytes.size <= size) {
             buffer.writeBytes(patternBytes)
@@ -483,7 +483,7 @@ class StreamingStringDecoderTest {
             val remaining = totalSize - totalWritten
             val thisChunkSize = minOf(chunkSize, remaining)
 
-            val buffer = PlatformBuffer.allocate(thisChunkSize)
+            val buffer = BufferFactory.managed().allocate(thisChunkSize)
             var chunkWritten = 0
             while (chunkWritten + patternBytes.size <= thisChunkSize) {
                 buffer.writeBytes(patternBytes)
@@ -523,7 +523,7 @@ class StreamingStringDecoderTest {
         val inputBytes = input.encodeToByteArray()
 
         for (byte in inputBytes) {
-            val buffer = PlatformBuffer.allocate(1)
+            val buffer = BufferFactory.managed().allocate(1)
             buffer.writeByte(byte)
             buffer.resetForRead()
             decoder.decode(buffer, result)

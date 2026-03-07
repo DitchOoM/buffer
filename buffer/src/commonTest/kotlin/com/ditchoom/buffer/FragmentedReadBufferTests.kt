@@ -10,10 +10,10 @@ class FragmentedReadBufferTests {
     @Test
     fun readByteFromFirstBuffer() {
         val expectedFirstByte = Byte.MAX_VALUE
-        val first = PlatformBuffer.allocate(1)
+        val first = BufferFactory.managed().allocate(1)
         first.writeByte(expectedFirstByte)
         first.resetForRead()
-        val second = PlatformBuffer.allocate(1)
+        val second = BufferFactory.managed().allocate(1)
         val expectedSecondByte = Byte.MIN_VALUE
         second.writeByte(expectedSecondByte)
         second.resetForRead()
@@ -25,10 +25,10 @@ class FragmentedReadBufferTests {
     @Test
     fun readByteFromSecondBuffer() {
         val expectedFirstByte = Byte.MAX_VALUE
-        val first = PlatformBuffer.allocate(1)
+        val first = BufferFactory.managed().allocate(1)
         first.writeByte(expectedFirstByte)
         first.resetForRead()
-        val second = PlatformBuffer.allocate(1)
+        val second = BufferFactory.managed().allocate(1)
         val expectedSecondByte = Byte.MIN_VALUE
         second.writeByte(expectedSecondByte)
         second.resetForRead()
@@ -40,10 +40,10 @@ class FragmentedReadBufferTests {
 
     @Test
     fun readShort() {
-        val first = PlatformBuffer.allocate(Short.SIZE_BYTES)
+        val first = BufferFactory.managed().allocate(Short.SIZE_BYTES)
         first.writeShort(1.toShort())
         first.resetForRead()
-        val second = PlatformBuffer.allocate(Short.SIZE_BYTES)
+        val second = BufferFactory.managed().allocate(Short.SIZE_BYTES)
         second.writeShort(2.toShort())
         second.resetForRead()
         val composableBuffer = FragmentedReadBuffer(first, second)
@@ -53,10 +53,10 @@ class FragmentedReadBufferTests {
 
     @Test
     fun readInt() {
-        val first = PlatformBuffer.allocate(Int.SIZE_BYTES)
+        val first = BufferFactory.managed().allocate(Int.SIZE_BYTES)
         first.writeInt(1)
         first.resetForRead()
-        val second = PlatformBuffer.allocate(Int.SIZE_BYTES)
+        val second = BufferFactory.managed().allocate(Int.SIZE_BYTES)
         second.writeInt(2)
         second.resetForRead()
         val composableBuffer = FragmentedReadBuffer(first, second)
@@ -66,10 +66,10 @@ class FragmentedReadBufferTests {
 
     @Test
     fun readLong() {
-        val first = PlatformBuffer.allocate(Long.SIZE_BYTES)
+        val first = BufferFactory.managed().allocate(Long.SIZE_BYTES)
         first.writeLong(1L)
         first.resetForRead()
-        val second = PlatformBuffer.allocate(Long.SIZE_BYTES)
+        val second = BufferFactory.managed().allocate(Long.SIZE_BYTES)
         second.writeLong(2L)
         second.resetForRead()
         val composableBuffer = FragmentedReadBuffer(first, second)
@@ -80,14 +80,14 @@ class FragmentedReadBufferTests {
     @Test
     fun readBytesFromThreeBuffers() {
         val expectedFirstByte = Byte.MAX_VALUE
-        val first = PlatformBuffer.allocate(1)
+        val first = BufferFactory.managed().allocate(1)
         first.writeByte(expectedFirstByte)
         first.resetForRead()
-        val second = PlatformBuffer.allocate(1)
+        val second = BufferFactory.managed().allocate(1)
         val expectedSecondByte = 6.toByte()
         second.writeByte(expectedSecondByte)
         second.resetForRead()
-        val third = PlatformBuffer.allocate(1)
+        val third = BufferFactory.managed().allocate(1)
         val expectedThirdByte = Byte.MIN_VALUE
         third.writeByte(expectedThirdByte)
         third.resetForRead()
@@ -101,19 +101,19 @@ class FragmentedReadBufferTests {
     @Test
     fun readBytesFromFourBuffers() {
         val expectedFirstByte = Byte.MAX_VALUE
-        val first = PlatformBuffer.allocate(1)
+        val first = BufferFactory.managed().allocate(1)
         first.writeByte(expectedFirstByte)
         first.resetForRead()
-        val second = PlatformBuffer.allocate(1)
+        val second = BufferFactory.managed().allocate(1)
         val expectedSecondByte = 6.toByte()
         second.writeByte(expectedSecondByte)
         second.resetForRead()
-        val third = PlatformBuffer.allocate(1)
+        val third = BufferFactory.managed().allocate(1)
         val expectedThirdByte = 12.toByte()
         third.writeByte(expectedThirdByte)
         third.resetForRead()
 
-        val fourth = PlatformBuffer.allocate(1)
+        val fourth = BufferFactory.managed().allocate(1)
         val expectedFourthByte = Byte.MIN_VALUE
         fourth.writeByte(expectedFourthByte)
         fourth.resetForRead()
@@ -128,24 +128,24 @@ class FragmentedReadBufferTests {
     @Test
     fun readBytesFromFiveBuffers() {
         val expectedFirstByte = Byte.MAX_VALUE
-        val first = PlatformBuffer.allocate(1)
+        val first = BufferFactory.managed().allocate(1)
         first.writeByte(expectedFirstByte)
         first.resetForRead()
-        val second = PlatformBuffer.allocate(1)
+        val second = BufferFactory.managed().allocate(1)
         val expectedSecondByte = 6.toByte()
         second.writeByte(expectedSecondByte)
         second.resetForRead()
-        val third = PlatformBuffer.allocate(1)
+        val third = BufferFactory.managed().allocate(1)
         val expectedThirdByte = (-1).toByte()
         third.writeByte(expectedThirdByte)
         third.resetForRead()
 
-        val fourth = PlatformBuffer.allocate(1)
+        val fourth = BufferFactory.managed().allocate(1)
         val expectedFourthByte = 0.toByte()
         fourth.writeByte(expectedFourthByte)
         fourth.resetForRead()
 
-        val fifth = PlatformBuffer.allocate(1)
+        val fifth = BufferFactory.managed().allocate(1)
         val expectedFifthByte = Byte.MIN_VALUE
         fifth.writeByte(expectedFifthByte)
         fifth.resetForRead()
@@ -161,10 +161,10 @@ class FragmentedReadBufferTests {
     @Test
     fun readUByteFromFirstBuffer() {
         val expectedFirstUByte = UByte.MAX_VALUE
-        val first = PlatformBuffer.allocate(1)
+        val first = BufferFactory.managed().allocate(1)
         first.writeUByte(expectedFirstUByte)
         first.resetForRead()
-        val second = PlatformBuffer.allocate(1)
+        val second = BufferFactory.managed().allocate(1)
         val expectedSecondUByte = UByte.MIN_VALUE
         second.writeUByte(expectedSecondUByte)
         second.resetForRead()
@@ -176,10 +176,10 @@ class FragmentedReadBufferTests {
     @Test
     fun readUByteeFromSecondBuffer() {
         val expectedFirstUByte = UByte.MAX_VALUE
-        val first = PlatformBuffer.allocate(1)
+        val first = BufferFactory.managed().allocate(1)
         first.writeUByte(expectedFirstUByte)
         first.resetForRead()
-        val second = PlatformBuffer.allocate(1)
+        val second = BufferFactory.managed().allocate(1)
         val expectedSecondUByte = UByte.MIN_VALUE
         second.writeUByte(expectedSecondUByte)
         second.resetForRead()
@@ -192,14 +192,14 @@ class FragmentedReadBufferTests {
     @Test
     fun readUByteFromThreeBuffers() {
         val expectedFirstUByte = UByte.MAX_VALUE
-        val first = PlatformBuffer.allocate(1)
+        val first = BufferFactory.managed().allocate(1)
         first.writeUByte(expectedFirstUByte)
         first.resetForRead()
-        val second = PlatformBuffer.allocate(1)
+        val second = BufferFactory.managed().allocate(1)
         val expectedSecondUByte = 6.toUByte()
         second.writeUByte(expectedSecondUByte)
         second.resetForRead()
-        val third = PlatformBuffer.allocate(1)
+        val third = BufferFactory.managed().allocate(1)
         val expectedThirdUByte = UByte.MIN_VALUE
         third.writeUByte(expectedThirdUByte)
         third.resetForRead()
@@ -213,19 +213,19 @@ class FragmentedReadBufferTests {
     @Test
     fun readUByteFromFourBuffers() {
         val expectedFirstUByte = UByte.MAX_VALUE
-        val first = PlatformBuffer.allocate(1)
+        val first = BufferFactory.managed().allocate(1)
         first.writeUByte(expectedFirstUByte)
         first.resetForRead()
-        val second = PlatformBuffer.allocate(1)
+        val second = BufferFactory.managed().allocate(1)
         val expectedSecondUByte = 6.toUByte()
         second.writeUByte(expectedSecondUByte)
         second.resetForRead()
-        val third = PlatformBuffer.allocate(1)
+        val third = BufferFactory.managed().allocate(1)
         val expectedThirdUByte = 12.toUByte()
         third.writeUByte(expectedThirdUByte)
         third.resetForRead()
 
-        val fourth = PlatformBuffer.allocate(1)
+        val fourth = BufferFactory.managed().allocate(1)
         val expectedFourthUByte = UByte.MIN_VALUE
         fourth.writeUByte(expectedFourthUByte)
         fourth.resetForRead()
@@ -240,24 +240,24 @@ class FragmentedReadBufferTests {
     @Test
     fun readUByteFromFiveBuffers() {
         val expectedFirstUByte = UByte.MAX_VALUE
-        val first = PlatformBuffer.allocate(1)
+        val first = BufferFactory.managed().allocate(1)
         first.writeUByte(expectedFirstUByte)
         first.resetForRead()
-        val second = PlatformBuffer.allocate(1)
+        val second = BufferFactory.managed().allocate(1)
         val expectedSecondUByte = 6.toUByte()
         second.writeUByte(expectedSecondUByte)
         second.resetForRead()
-        val third = PlatformBuffer.allocate(1)
+        val third = BufferFactory.managed().allocate(1)
         val expectedThirdUByte = (-1).toUByte()
         third.writeUByte(expectedThirdUByte)
         third.resetForRead()
 
-        val fourth = PlatformBuffer.allocate(1)
+        val fourth = BufferFactory.managed().allocate(1)
         val expectedFourthUByte = 0.toUByte()
         fourth.writeUByte(expectedFourthUByte)
         fourth.resetForRead()
 
-        val fifth = PlatformBuffer.allocate(1)
+        val fifth = BufferFactory.managed().allocate(1)
         val expectedFifthUByte = UByte.MIN_VALUE
         fifth.writeUByte(expectedFifthUByte)
         fifth.resetForRead()
@@ -273,11 +273,11 @@ class FragmentedReadBufferTests {
     @Test
     fun readUnsignedShortFromFirstBuffer() {
         val expectedFirstUShort = UShort.MAX_VALUE
-        val first = PlatformBuffer.allocate(UShort.SIZE_BYTES)
+        val first = BufferFactory.managed().allocate(UShort.SIZE_BYTES)
         first.writeUShort(expectedFirstUShort)
         first.resetForRead()
 
-        val second = PlatformBuffer.allocate(UShort.SIZE_BYTES)
+        val second = BufferFactory.managed().allocate(UShort.SIZE_BYTES)
         val expectedSecondUShort = UShort.MIN_VALUE
         second.writeUShort(expectedSecondUShort)
         second.resetForRead()
@@ -290,10 +290,10 @@ class FragmentedReadBufferTests {
     @Test
     fun readUnsignedShortFromSecondBuffer() {
         val expectedFirstUShort = UShort.MAX_VALUE
-        val first = PlatformBuffer.allocate(UShort.SIZE_BYTES)
+        val first = BufferFactory.managed().allocate(UShort.SIZE_BYTES)
         first.writeUShort(expectedFirstUShort)
         first.resetForRead()
-        val second = PlatformBuffer.allocate(UShort.SIZE_BYTES)
+        val second = BufferFactory.managed().allocate(UShort.SIZE_BYTES)
         val expectedSecondUShort = UShort.MIN_VALUE
         second.writeUShort(expectedSecondUShort)
         second.resetForRead()
@@ -306,14 +306,14 @@ class FragmentedReadBufferTests {
     @Test
     fun readUnsignedShortsFromThreeBuffers() {
         val expectedFirstUShort = UShort.MAX_VALUE
-        val first = PlatformBuffer.allocate(UShort.SIZE_BYTES)
+        val first = BufferFactory.managed().allocate(UShort.SIZE_BYTES)
         first.writeUShort(expectedFirstUShort)
         first.resetForRead()
-        val second = PlatformBuffer.allocate(UShort.SIZE_BYTES)
+        val second = BufferFactory.managed().allocate(UShort.SIZE_BYTES)
         val expectedSecondUShort = 6.toUShort()
         second.writeUShort(expectedSecondUShort)
         second.resetForRead()
-        val third = PlatformBuffer.allocate(UShort.SIZE_BYTES)
+        val third = BufferFactory.managed().allocate(UShort.SIZE_BYTES)
         val expectedThirdUShort = UShort.MIN_VALUE
         third.writeUShort(expectedThirdUShort)
         third.resetForRead()
@@ -327,19 +327,19 @@ class FragmentedReadBufferTests {
     @Test
     fun readUnsignedShortsFromFourBuffers() {
         val expectedFirstUShort = UShort.MAX_VALUE
-        val first = PlatformBuffer.allocate(UShort.SIZE_BYTES)
+        val first = BufferFactory.managed().allocate(UShort.SIZE_BYTES)
         first.writeUShort(expectedFirstUShort)
         first.resetForRead()
-        val second = PlatformBuffer.allocate(UShort.SIZE_BYTES)
+        val second = BufferFactory.managed().allocate(UShort.SIZE_BYTES)
         val expectedSecondUShort = 6.toUShort()
         second.writeUShort(expectedSecondUShort)
         second.resetForRead()
-        val third = PlatformBuffer.allocate(UShort.SIZE_BYTES)
+        val third = BufferFactory.managed().allocate(UShort.SIZE_BYTES)
         val expectedThirdUShort = 12.toUShort()
         third.writeUShort(expectedThirdUShort)
         third.resetForRead()
 
-        val fourth = PlatformBuffer.allocate(UShort.SIZE_BYTES)
+        val fourth = BufferFactory.managed().allocate(UShort.SIZE_BYTES)
         val expectedFourthUShort = UShort.MIN_VALUE
         fourth.writeUShort(expectedFourthUShort)
         fourth.resetForRead()
@@ -354,24 +354,24 @@ class FragmentedReadBufferTests {
     @Test
     fun readUnsignedShortsFromFiveBuffers() {
         val expectedFirstUShort = UShort.MAX_VALUE
-        val first = PlatformBuffer.allocate(UShort.SIZE_BYTES)
+        val first = BufferFactory.managed().allocate(UShort.SIZE_BYTES)
         first.writeUShort(expectedFirstUShort)
         first.resetForRead()
-        val second = PlatformBuffer.allocate(UShort.SIZE_BYTES)
+        val second = BufferFactory.managed().allocate(UShort.SIZE_BYTES)
         val expectedSecondUShort = 6.toUShort()
         second.writeUShort(expectedSecondUShort)
         second.resetForRead()
-        val third = PlatformBuffer.allocate(UShort.SIZE_BYTES)
+        val third = BufferFactory.managed().allocate(UShort.SIZE_BYTES)
         val expectedThirdUShort = (-1).toUShort()
         third.writeUShort(expectedThirdUShort)
         third.resetForRead()
 
-        val fourth = PlatformBuffer.allocate(UShort.SIZE_BYTES)
+        val fourth = BufferFactory.managed().allocate(UShort.SIZE_BYTES)
         val expectedFourthUShort = 0.toUShort()
         fourth.writeUShort(expectedFourthUShort)
         fourth.resetForRead()
 
-        val fifth = PlatformBuffer.allocate(UShort.SIZE_BYTES)
+        val fifth = BufferFactory.managed().allocate(UShort.SIZE_BYTES)
         val expectedFifthUShort = UShort.MIN_VALUE
         fifth.writeUShort(expectedFifthUShort)
         fifth.resetForRead()
@@ -419,7 +419,7 @@ class FragmentedReadBufferTests {
         val buffers = mutableListOf<ReadBuffer>()
         var indexCount = 0
         do { // 64 byte chunks
-            val buffer = PlatformBuffer.allocate(64)
+            val buffer = BufferFactory.managed().allocate(64)
             repeat(64 / 4) {
                 buffer.writeInt(indexCount++)
             }

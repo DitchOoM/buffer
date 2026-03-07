@@ -1,10 +1,8 @@
 package com.ditchoom.buffer.pool
 
-import com.ditchoom.buffer.AllocationZone
-import com.ditchoom.buffer.ByteOrder
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
-import com.ditchoom.buffer.allocate
 import kotlinx.atomicfu.atomic
 
 /**
@@ -18,8 +16,7 @@ import kotlinx.atomicfu.atomic
 internal class LockFreeBufferPool(
     private val maxPoolSize: Int,
     private val defaultBufferSize: Int,
-    private val byteOrder: ByteOrder,
-    private val allocationZone: AllocationZone,
+    private val factory: BufferFactory,
 ) : BufferPool {
     // Treiber stack node
     private class Node(
@@ -53,14 +50,13 @@ internal class LockFreeBufferPool(
                 buffer
             } else {
                 poolMisses.incrementAndGet()
-                PlatformBuffer.allocate(size, allocationZone, byteOrder)
+                factory.allocate(size)
             }
         return PooledBuffer(raw, this)
     }
 
     override fun release(buffer: ReadWriteBuffer) {
-        // Unwrap PooledBuffer to store the raw PlatformBuffer in the pool
-        val platformBuffer =
+        val raw =
             when (buffer) {
                 is PooledBuffer -> buffer.inner
                 is PlatformBuffer -> buffer
@@ -69,16 +65,16 @@ internal class LockFreeBufferPool(
 
         // Only push if under max size (check first to avoid unnecessary work)
         if (poolSize.value < maxPoolSize) {
-            if (push(platformBuffer)) {
+            if (push(raw)) {
                 // Update peak if needed
                 val currentSize = poolSize.value
                 updatePeak(currentSize)
             } else {
                 // CAS push failed because pool became full - free the buffer
-                platformBuffer.freeNativeMemory()
+                raw.freeNativeMemory()
             }
         } else {
-            platformBuffer.freeNativeMemory()
+            raw.freeNativeMemory()
         }
     }
 

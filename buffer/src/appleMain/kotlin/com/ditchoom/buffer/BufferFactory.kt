@@ -1,4 +1,5 @@
 @file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, kotlinx.cinterop.BetaInteropApi::class)
+@file:Suppress("DEPRECATION") // AllocationZone is deprecated
 
 package com.ditchoom.buffer
 
@@ -7,6 +8,43 @@ import kotlinx.cinterop.convert
 import platform.Foundation.NSData
 import platform.Foundation.NSMutableData
 import platform.Foundation.create
+
+// =============================================================================
+// v2 BufferFactory implementations
+// =============================================================================
+
+internal actual val defaultBufferFactory: BufferFactory =
+    object : BufferFactory {
+        @OptIn(UnsafeNumber::class)
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = MutableDataBuffer(NSMutableData.create(length = size.convert())!!, byteOrder = byteOrder)
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = ByteArrayBuffer(array, byteOrder = byteOrder)
+    }
+
+internal actual val managedBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = ByteArrayBuffer(ByteArray(size), byteOrder = byteOrder)
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = ByteArrayBuffer(array, byteOrder = byteOrder)
+    }
+
+internal actual val sharedBufferFactory: BufferFactory = defaultBufferFactory
+
+// =============================================================================
+// Legacy factory functions (backward compat)
+// =============================================================================
 
 /**
  * Allocates a new buffer with the specified size and allocation zone.

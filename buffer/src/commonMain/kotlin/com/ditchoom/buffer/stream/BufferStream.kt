@@ -109,7 +109,7 @@ fun BufferStream.collectToBuffer(pool: BufferPool): ReadBuffer {
 interface StreamProcessor {
     /**
      * Appends a chunk to the processor.
-     * The processor takes ownership and will free PlatformBuffers when consumed.
+     * The processor takes ownership and will free buffers when consumed.
      */
     fun append(chunk: ReadBuffer)
 

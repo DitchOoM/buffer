@@ -1,8 +1,9 @@
 package com.ditchoom.buffer.benchmark
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.managed
 import kotlinx.benchmark.Benchmark
 import kotlinx.benchmark.BenchmarkMode
 import kotlinx.benchmark.BenchmarkTimeUnit
@@ -44,10 +45,10 @@ open class BulkOperationsBenchmark {
 
     @Setup
     fun setup() {
-        directBuffer1 = PlatformBuffer.allocate(size64k, AllocationZone.Direct)
-        directBuffer2 = PlatformBuffer.allocate(size64k, AllocationZone.Direct)
-        heapBuffer1 = PlatformBuffer.allocate(size64k, AllocationZone.Heap)
-        heapBuffer2 = PlatformBuffer.allocate(size64k, AllocationZone.Heap)
+        directBuffer1 = BufferFactory.Default.allocate(size64k)
+        directBuffer2 = BufferFactory.Default.allocate(size64k)
+        heapBuffer1 = BufferFactory.managed().allocate(size64k)
+        heapBuffer2 = BufferFactory.managed().allocate(size64k)
 
         // Fill buffers with test data
         for (i in 0 until size64k) {

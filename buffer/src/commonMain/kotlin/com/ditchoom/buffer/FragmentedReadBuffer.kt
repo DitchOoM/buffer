@@ -65,7 +65,7 @@ class FragmentedReadBuffer(
                 val secondChunkSize = size - firstChunkSize
                 val secondBufferLimit = second.limit()
                 second.setLimit(second.position() + secondChunkSize)
-                val buffer = PlatformBuffer.allocate(size)
+                val buffer = BufferFactory.managed().allocate(size)
                 buffer.write(first)
                 buffer.write(second)
                 second.setLimit(secondBufferLimit)
@@ -86,7 +86,7 @@ class FragmentedReadBuffer(
         }
         val first = first.slice()
         val second = second.slice()
-        val buffer = PlatformBuffer.allocate(first.limit() + second.limit())
+        val buffer = BufferFactory.managed().allocate(first.limit() + second.limit())
         buffer.write(first)
         buffer.write(second)
         buffer.resetForRead()
@@ -142,11 +142,11 @@ class FragmentedReadBuffer(
         }
     }
 
-    fun toSingleBuffer(zone: AllocationZone = AllocationZone.Heap): PlatformBuffer {
+    fun toSingleBuffer(factory: BufferFactory = BufferFactory.managed()): PlatformBuffer {
         val firstLimit = firstInitialLimit
         val secondLimit = secondInitialLimit
         val initialPosition = position()
-        val buffer = PlatformBuffer.allocate(firstLimit + secondLimit - initialPosition, zone)
+        val buffer = factory.allocate(firstLimit + secondLimit - initialPosition)
         walk {
             buffer.write(it)
         }

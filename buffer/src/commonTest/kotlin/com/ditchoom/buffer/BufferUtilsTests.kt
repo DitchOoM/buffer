@@ -5,7 +5,7 @@ import kotlin.test.Test
 class BufferUtilsTests {
     @Test
     fun freeIfNeededOnPlatformBuffer() {
-        val buffer = PlatformBuffer.allocate(64, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(64)
         buffer.writeInt(0x12345678)
         // Should not crash
         buffer.freeIfNeeded()
@@ -13,7 +13,7 @@ class BufferUtilsTests {
 
     @Test
     fun freeIfNeededOnHeapBuffer() {
-        val buffer = PlatformBuffer.allocate(64, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(64)
         buffer.writeInt(0x12345678)
         // Should not crash (no-op or safe free)
         buffer.freeIfNeeded()
@@ -23,8 +23,8 @@ class BufferUtilsTests {
     fun freeAllOnMixedList() {
         val buffers =
             listOf(
-                PlatformBuffer.allocate(64, AllocationZone.Direct) as ReadBuffer,
-                PlatformBuffer.allocate(64, AllocationZone.Heap) as ReadBuffer,
+                BufferFactory.Default.allocate(64) as ReadBuffer,
+                BufferFactory.managed().allocate(64) as ReadBuffer,
             )
         // Should not crash
         buffers.freeAll()

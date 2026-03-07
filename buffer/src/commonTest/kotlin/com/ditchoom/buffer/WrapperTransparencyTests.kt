@@ -33,7 +33,7 @@ class WrapperTransparencyTests {
         pooled.writeInt(0xDEADBEEF.toInt())
         pooled.resetForRead()
 
-        val dest = PlatformBuffer.allocate(8)
+        val dest = BufferFactory.managed().allocate(8)
         dest.write(pooled)
         dest.resetForRead()
 
@@ -52,7 +52,7 @@ class WrapperTransparencyTests {
         pooled.resetForRead()
 
         val slice = pooled.slice()
-        val dest = PlatformBuffer.allocate(12)
+        val dest = BufferFactory.managed().allocate(12)
         dest.write(slice)
         dest.resetForRead()
 
@@ -76,7 +76,7 @@ class WrapperTransparencyTests {
         pooled.writeInt(0x55667788)
         pooled.resetForRead()
 
-        val plain = PlatformBuffer.allocate(8)
+        val plain = BufferFactory.managed().allocate(8)
         plain.writeInt(0x11223344)
         plain.writeInt(0x55667788)
         plain.resetForRead()
@@ -98,7 +98,7 @@ class WrapperTransparencyTests {
 
         val slice = pooled.slice()
 
-        val plain = PlatformBuffer.allocate(4)
+        val plain = BufferFactory.managed().allocate(4)
         plain.writeShort(0x1234.toShort())
         plain.writeShort(0x5678.toShort())
         plain.resetForRead()
@@ -118,7 +118,7 @@ class WrapperTransparencyTests {
         pooled.writeInt(0xAAAAAAAA.toInt())
         pooled.resetForRead()
 
-        val plain = PlatformBuffer.allocate(4)
+        val plain = BufferFactory.managed().allocate(4)
         plain.writeInt(0xBBBBBBBB.toInt())
         plain.resetForRead()
 
@@ -140,7 +140,7 @@ class WrapperTransparencyTests {
         pooled.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         pooled.resetForRead()
 
-        val plain = PlatformBuffer.allocate(8)
+        val plain = BufferFactory.managed().allocate(8)
         plain.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         plain.resetForRead()
 
@@ -158,7 +158,7 @@ class WrapperTransparencyTests {
         pooled.writeBytes(byteArrayOf(1, 2, 3, 99, 5, 6, 7, 8))
         pooled.resetForRead()
 
-        val plain = PlatformBuffer.allocate(8)
+        val plain = BufferFactory.managed().allocate(8)
         plain.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         plain.resetForRead()
 
@@ -178,7 +178,7 @@ class WrapperTransparencyTests {
 
         val slice = pooled.slice()
 
-        val plain = PlatformBuffer.allocate(4)
+        val plain = BufferFactory.managed().allocate(4)
         plain.writeBytes(byteArrayOf(10, 20, 30, 40))
         plain.resetForRead()
 
@@ -199,7 +199,7 @@ class WrapperTransparencyTests {
 
         val slice = pooled.slice()
 
-        val plain = PlatformBuffer.allocate(4)
+        val plain = BufferFactory.managed().allocate(4)
         plain.writeBytes(byteArrayOf(10, 20, 30, 40))
         plain.resetForRead()
 
@@ -223,12 +223,12 @@ class WrapperTransparencyTests {
         pooled.writeBytes(byteArrayOf(0, 0, 0, 0, 0, 0, 0, 0))
         pooled.resetForRead()
 
-        val dest = PlatformBuffer.allocate(8)
+        val dest = BufferFactory.managed().allocate(8)
         dest.xorMaskCopy(pooled, mask)
         dest.resetForRead()
 
         // XOR of 0x00 with mask bytes should produce the mask bytes themselves
-        val expected = PlatformBuffer.allocate(8)
+        val expected = BufferFactory.managed().allocate(8)
         expected.writeBytes(byteArrayOf(0, 0, 0, 0, 0, 0, 0, 0))
         expected.resetForRead()
         expected.xorMask(mask)
@@ -254,7 +254,7 @@ class WrapperTransparencyTests {
 
         val slice = pooled.slice()
 
-        val dest = PlatformBuffer.allocate(4)
+        val dest = BufferFactory.managed().allocate(4)
         dest.xorMaskCopy(slice, mask)
         dest.resetForRead()
 
@@ -446,7 +446,7 @@ class WrapperTransparencyTests {
         // slice() captures [position, limit) = bytes {1, 2, 3, 4}
         val slice = pooled.slice()
 
-        val plain = PlatformBuffer.allocate(4)
+        val plain = BufferFactory.managed().allocate(4)
         plain.writeBytes(byteArrayOf(1, 2, 3, 4))
         plain.resetForRead()
 
@@ -469,7 +469,7 @@ class WrapperTransparencyTests {
         // slice() captures [position, limit) = bytes {10, 20, 99, 40}
         val slice = pooled.slice()
 
-        val plain = PlatformBuffer.allocate(4)
+        val plain = BufferFactory.managed().allocate(4)
         plain.writeBytes(byteArrayOf(10, 20, 30, 40))
         plain.resetForRead()
 
@@ -493,7 +493,7 @@ class WrapperTransparencyTests {
         // slice() captures bytes {0x11, 0x22, 0x33}
         val slice = pooled.slice()
 
-        val dest = PlatformBuffer.allocate(3)
+        val dest = BufferFactory.managed().allocate(3)
         dest.write(slice)
         dest.resetForRead()
 
@@ -538,7 +538,7 @@ class WrapperTransparencyTests {
         // slice() captures bytes {0x11, 0x22, 0x33, 0x44}
         val slice = pooled.slice()
 
-        val dest = PlatformBuffer.allocate(4)
+        val dest = BufferFactory.managed().allocate(4)
         dest.xorMaskCopy(slice, mask)
         dest.resetForRead()
 
@@ -572,7 +572,7 @@ class WrapperTransparencyTests {
             pooled.writeLong(0x0102030405060708L)
             pooled.resetForRead()
 
-            val dest = PlatformBuffer.allocate(8)
+            val dest = BufferFactory.managed().allocate(8)
             dest.write(pooled)
             dest.resetForRead()
 
@@ -677,7 +677,7 @@ class WrapperTransparencyTests {
         val slice2 = slice1.slice()
         val slice3 = slice2.slice()
 
-        val plain = PlatformBuffer.allocate(8)
+        val plain = BufferFactory.managed().allocate(8)
         plain.writeBytes(byteArrayOf(0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88.toByte()))
         plain.resetForRead()
 
@@ -702,7 +702,7 @@ class WrapperTransparencyTests {
         val slice2 = slice1.slice()
         val slice3 = slice2.slice()
 
-        val plain = PlatformBuffer.allocate(8)
+        val plain = BufferFactory.managed().allocate(8)
         plain.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         plain.resetForRead()
 
@@ -727,7 +727,7 @@ class WrapperTransparencyTests {
         val slice2 = slice1.slice()
         val slice3 = slice2.slice()
 
-        val dest = PlatformBuffer.allocate(4)
+        val dest = BufferFactory.managed().allocate(4)
         dest.write(slice3)
         dest.resetForRead()
 
@@ -780,7 +780,7 @@ class WrapperTransparencyTests {
         val slice2 = slice1.slice()
         val slice3 = slice2.slice()
 
-        val dest = PlatformBuffer.allocate(4)
+        val dest = BufferFactory.managed().allocate(4)
         dest.xorMaskCopy(slice3, mask)
         dest.resetForRead()
 

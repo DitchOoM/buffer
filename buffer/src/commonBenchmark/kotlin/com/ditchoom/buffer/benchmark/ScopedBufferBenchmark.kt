@@ -1,9 +1,9 @@
 package com.ditchoom.buffer.benchmark
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.withScope
 import kotlinx.benchmark.Benchmark
 import kotlinx.benchmark.BenchmarkMode
@@ -36,7 +36,7 @@ open class ScopedBufferBenchmark {
     private val smallBufferSize = 1024
     private val largeBufferSize = 64 * 1024
 
-    // Pre-allocated PlatformBuffers for comparison
+    // Pre-allocated Buffers for comparison
     private lateinit var platformBufferDirect: PlatformBuffer
     private lateinit var platformBufferHeap: PlatformBuffer
     private lateinit var largePlatformBuffer: PlatformBuffer
@@ -45,9 +45,9 @@ open class ScopedBufferBenchmark {
     fun setup() {
         // Use Heap to avoid exhausting WASM LinearMemoryAllocator
         // These are kept across iterations, so Direct would accumulate
-        platformBufferDirect = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
-        platformBufferHeap = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
-        largePlatformBuffer = PlatformBuffer.allocate(largeBufferSize, AllocationZone.Heap)
+        platformBufferDirect = BufferFactory.managed().allocate(smallBufferSize)
+        platformBufferHeap = BufferFactory.managed().allocate(smallBufferSize)
+        largePlatformBuffer = BufferFactory.managed().allocate(largeBufferSize)
     }
 
     // ===== Allocation Benchmarks =====
@@ -62,13 +62,13 @@ open class ScopedBufferBenchmark {
 
     @Benchmark
     fun allocatePlatformBufferDirect(): Int {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(smallBufferSize)
         return buffer.capacity
     }
 
     @Benchmark
     fun allocatePlatformBufferHeap(): Int {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(smallBufferSize)
         return buffer.capacity
     }
 
@@ -224,10 +224,10 @@ open class ScopedBufferBenchmark {
 
     @Benchmark
     fun multipleBuffersPlatform(): Long {
-        val buffer1 = PlatformBuffer.allocate(256, AllocationZone.Heap)
-        val buffer2 = PlatformBuffer.allocate(256, AllocationZone.Heap)
-        val buffer3 = PlatformBuffer.allocate(256, AllocationZone.Heap)
-        val buffer4 = PlatformBuffer.allocate(256, AllocationZone.Heap)
+        val buffer1 = BufferFactory.managed().allocate(256)
+        val buffer2 = BufferFactory.managed().allocate(256)
+        val buffer3 = BufferFactory.managed().allocate(256)
+        val buffer4 = BufferFactory.managed().allocate(256)
 
         buffer1.writeLong(1L)
         buffer2.writeLong(2L)
@@ -310,8 +310,8 @@ open class ScopedBufferBenchmark {
 
     @Benchmark
     fun bufferCopyPlatformDirect(): Long {
-        val source = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
-        val dest = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
+        val source = BufferFactory.managed().allocate(smallBufferSize)
+        val dest = BufferFactory.managed().allocate(smallBufferSize)
 
         // Fill source
         repeat(smallBufferSize / 4) { source.writeInt(it) }
@@ -352,14 +352,14 @@ open class ScopedBufferBenchmark {
 
     @Benchmark
     fun bulkWriteIntsPlatformDirect(): Int {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(smallBufferSize)
         buffer.writeInts(bulkIntData)
         return buffer.position()
     }
 
     @Benchmark
     fun bulkReadIntsPlatformDirect(): Long {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(smallBufferSize)
         buffer.writeInts(bulkIntData)
         buffer.resetForRead()
         val result = buffer.readInts(bulkIntData.size)
@@ -376,7 +376,7 @@ open class ScopedBufferBenchmark {
 
     @Benchmark
     fun bulkWriteShortsPlatformDirect(): Int {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(smallBufferSize)
         buffer.writeShorts(bulkShortData)
         return buffer.position()
     }
@@ -391,7 +391,7 @@ open class ScopedBufferBenchmark {
 
     @Benchmark
     fun bulkWriteLongsPlatformDirect(): Int {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(smallBufferSize)
         buffer.writeLongs(bulkLongData)
         return buffer.position()
     }

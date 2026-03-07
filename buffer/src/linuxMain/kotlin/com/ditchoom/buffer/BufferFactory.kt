@@ -1,4 +1,42 @@
+@file:Suppress("DEPRECATION") // AllocationZone is deprecated
+
 package com.ditchoom.buffer
+
+// =============================================================================
+// v2 BufferFactory implementations
+// =============================================================================
+
+internal actual val defaultBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = NativeBuffer.allocate(size, byteOrder)
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = ByteArrayBuffer(array, byteOrder = byteOrder)
+    }
+
+internal actual val managedBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = ByteArrayBuffer(ByteArray(size), byteOrder = byteOrder)
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = ByteArrayBuffer(array, byteOrder = byteOrder)
+    }
+
+internal actual val sharedBufferFactory: BufferFactory = defaultBufferFactory
+
+// =============================================================================
+// Legacy factory functions (backward compat)
+// =============================================================================
 
 /**
  * Allocates a buffer with the specified allocation zone.

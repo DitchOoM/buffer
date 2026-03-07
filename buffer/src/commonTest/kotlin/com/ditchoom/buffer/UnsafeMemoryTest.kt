@@ -8,7 +8,7 @@ class UnsafeMemoryTest {
     fun testDirectBufferOperations() {
         if (!UnsafeMemory.isSupported) return
 
-        val buffer = PlatformBuffer.allocate(64, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(64)
         val address = (buffer as? NativeMemoryAccess)?.nativeAddress ?: return
 
         // Test byte
@@ -32,7 +32,7 @@ class UnsafeMemoryTest {
     fun testSetMemory() {
         if (!UnsafeMemory.isSupported) return
 
-        val buffer = PlatformBuffer.allocate(32, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(32)
         val address = (buffer as? NativeMemoryAccess)?.nativeAddress ?: return
 
         // Fill with 0xAA
@@ -48,8 +48,8 @@ class UnsafeMemoryTest {
     fun testCopyMemory() {
         if (!UnsafeMemory.isSupported) return
 
-        val src = PlatformBuffer.allocate(16, AllocationZone.Direct)
-        val dst = PlatformBuffer.allocate(16, AllocationZone.Direct)
+        val src = BufferFactory.Default.allocate(16)
+        val dst = BufferFactory.Default.allocate(16)
         val srcAddr = (src as? NativeMemoryAccess)?.nativeAddress ?: return
         val dstAddr = (dst as? NativeMemoryAccess)?.nativeAddress ?: return
 
@@ -71,7 +71,7 @@ class UnsafeMemoryTest {
     fun testCopyMemoryEmptyArrays() {
         if (!UnsafeMemory.isSupported) return
 
-        val buffer = PlatformBuffer.allocate(16, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(16)
         val address = (buffer as? NativeMemoryAccess)?.nativeAddress ?: return
 
         // Initialize buffer with known pattern
@@ -108,7 +108,7 @@ class UnsafeMemoryTest {
 
         // Test with 1MB buffer to verify Long size handling
         val size = 1024 * 1024 // 1MB
-        val buffer = PlatformBuffer.allocate(size, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(size)
         val address = (buffer as? NativeMemoryAccess)?.nativeAddress ?: return
 
         // Fill with 0x55 pattern
@@ -120,7 +120,7 @@ class UnsafeMemoryTest {
         assertEquals(0x55.toByte(), UnsafeMemory.getByte(address + size - 1), "Last byte should be 0x55")
 
         // Test copyMemory with large buffer
-        val dst = PlatformBuffer.allocate(size, AllocationZone.Direct)
+        val dst = BufferFactory.Default.allocate(size)
         val dstAddr = (dst as? NativeMemoryAccess)?.nativeAddress ?: return
 
         UnsafeMemory.copyMemory(address, dstAddr, size.toLong())

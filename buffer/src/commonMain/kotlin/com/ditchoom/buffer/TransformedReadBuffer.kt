@@ -33,7 +33,7 @@ class TransformedReadBuffer(
     }
 
     override fun readShort(): Short {
-        val buffer = PlatformBuffer.allocate(Short.SIZE_BYTES)
+        val buffer = BufferFactory.Default.allocate(Short.SIZE_BYTES)
         buffer.writeShort(origin.readShort())
         buffer.resetForRead()
         val byte1 = transformer(position(), buffer.readByte())
@@ -46,7 +46,7 @@ class TransformedReadBuffer(
     }
 
     override fun getShort(index: Int): Short {
-        val buffer = PlatformBuffer.allocate(Short.SIZE_BYTES)
+        val buffer = BufferFactory.Default.allocate(Short.SIZE_BYTES)
         buffer.writeShort(origin.getShort(index))
         buffer.resetForRead()
         val byte1 = transformer(position(), buffer.readByte())
@@ -59,7 +59,7 @@ class TransformedReadBuffer(
     }
 
     override fun readInt(): Int {
-        val buffer = PlatformBuffer.allocate(Int.SIZE_BYTES)
+        val buffer = BufferFactory.Default.allocate(Int.SIZE_BYTES)
         buffer.writeInt(origin.readInt())
         buffer.resetForRead()
         val byte1 = transformer(position(), buffer.readByte())
@@ -76,7 +76,7 @@ class TransformedReadBuffer(
     }
 
     override fun getInt(index: Int): Int {
-        val buffer = PlatformBuffer.allocate(Int.SIZE_BYTES)
+        val buffer = BufferFactory.Default.allocate(Int.SIZE_BYTES)
         buffer.writeInt(origin.getInt(index))
         buffer.resetForRead()
         val byte1 = transformer(position(), buffer.readByte())
@@ -93,7 +93,7 @@ class TransformedReadBuffer(
     }
 
     override fun readLong(): Long {
-        val buffer = PlatformBuffer.allocate(Long.SIZE_BYTES)
+        val buffer = BufferFactory.Default.allocate(Long.SIZE_BYTES)
         buffer.writeLong(origin.readLong())
         buffer.resetForRead()
         val byte1 = transformer(position(), buffer.readByte())
@@ -118,7 +118,7 @@ class TransformedReadBuffer(
     }
 
     override fun getLong(index: Int): Long {
-        val buffer = PlatformBuffer.allocate(Long.SIZE_BYTES)
+        val buffer = BufferFactory.Default.allocate(Long.SIZE_BYTES)
         buffer.writeLong(origin.getLong(index))
         buffer.resetForRead()
         val byte1 = transformer(position(), buffer.readByte())

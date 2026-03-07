@@ -1,8 +1,67 @@
+@file:Suppress("DEPRECATION") // AllocationZone is deprecated
+
 package com.ditchoom.buffer
 
 import js.buffer.SharedArrayBuffer
 import org.khronos.webgl.ArrayBuffer
 import org.khronos.webgl.Int8Array
+
+// =============================================================================
+// v2 BufferFactory implementations
+// =============================================================================
+
+internal actual val defaultBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = JsBuffer(Int8Array(size), byteOrder)
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer =
+            JsBuffer(
+                array.unsafeCast<Int8Array>(),
+                byteOrder,
+            )
+    }
+
+internal actual val managedBufferFactory: BufferFactory = defaultBufferFactory
+
+internal actual val sharedBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer {
+            val sharedArrayBuffer =
+                try {
+                    SharedArrayBuffer(size)
+                } catch (_: Throwable) {
+                    null
+                }
+            return if (sharedArrayBuffer != null) {
+                val arrayBuffer = sharedArrayBuffer.unsafeCast<ArrayBuffer>().slice(0, size)
+                JsBuffer(Int8Array(arrayBuffer), byteOrder, sharedArrayBuffer = sharedArrayBuffer)
+            } else {
+                JsBuffer(Int8Array(size), byteOrder)
+            }
+        }
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer =
+            JsBuffer(
+                array.unsafeCast<Int8Array>(),
+                byteOrder,
+            )
+    }
+
+// =============================================================================
+// Legacy factory functions (backward compat)
+// =============================================================================
 
 fun PlatformBuffer.Companion.allocate(
     size: Int,

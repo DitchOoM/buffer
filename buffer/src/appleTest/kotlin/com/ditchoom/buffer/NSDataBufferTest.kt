@@ -271,7 +271,7 @@ class NSDataBufferTest {
 
     @Test
     fun toNativeDataFromByteArrayBuffer() {
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
         buffer.readByte() // position = 1
@@ -331,7 +331,7 @@ class NSDataBufferTest {
 
     @Test
     fun mutableDataBufferSlicePreservesNativeMemoryAccess() {
-        val buffer = PlatformBuffer.allocate(64, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(64)
         buffer.writeInt(0x11223344)
         buffer.writeInt(0x55667788)
         buffer.resetForRead()
@@ -349,7 +349,7 @@ class NSDataBufferTest {
 
     @Test
     fun mutableDataBufferDoubleSlicePreservesNativeMemoryAccess() {
-        val buffer = PlatformBuffer.allocate(128, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(128)
         for (i in 0 until 32) buffer.writeInt(i)
         buffer.resetForRead()
         buffer.readInt() // skip first

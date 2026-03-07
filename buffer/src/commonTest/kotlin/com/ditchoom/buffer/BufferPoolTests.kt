@@ -11,6 +11,7 @@ import com.ditchoom.buffer.pool.withBuffer
 import com.ditchoom.buffer.pool.withPool
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
@@ -207,7 +208,7 @@ class BufferPoolTests {
 
     @Test
     fun directBufferSlicePreservesNativeMemoryAccess() {
-        val buffer = PlatformBuffer.allocate(64, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(64)
         buffer.writeInt(0x12345678)
         buffer.resetForRead()
 
@@ -222,7 +223,7 @@ class BufferPoolTests {
 
     @Test
     fun heapBufferSlicePreservesManagedMemoryAccess() {
-        val buffer = PlatformBuffer.allocate(64, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(64)
         buffer.writeInt(0x12345678)
         buffer.resetForRead()
 
@@ -237,7 +238,7 @@ class BufferPoolTests {
 
     @Test
     fun directBufferDoubleSlicePreservesNativeMemoryAccess() {
-        val buffer = PlatformBuffer.allocate(128, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(128)
         for (i in 0 until 32) buffer.writeInt(i)
         buffer.resetForRead()
         buffer.readInt() // skip first
@@ -254,7 +255,7 @@ class BufferPoolTests {
 
     @Test
     fun heapBufferDoubleSlicePreservesManagedMemoryAccess() {
-        val buffer = PlatformBuffer.allocate(128, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(128)
         for (i in 0 until 32) buffer.writeInt(i)
         buffer.resetForRead()
         buffer.readInt() // skip first
@@ -271,7 +272,7 @@ class BufferPoolTests {
 
     @Test
     fun directBufferSliceDataIntegrity() {
-        val buffer = PlatformBuffer.allocate(64, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(64)
         buffer.writeInt(0x11223344)
         buffer.writeInt(0x55667788)
         buffer.resetForRead()
@@ -284,7 +285,7 @@ class BufferPoolTests {
 
     @Test
     fun heapBufferSliceDataIntegrity() {
-        val buffer = PlatformBuffer.allocate(64, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(64)
         buffer.writeInt(0x11223344)
         buffer.writeInt(0x55667788)
         buffer.resetForRead()
@@ -1429,24 +1430,24 @@ class BufferPoolTests {
     }
 
     @Test
-    fun releaseDoesNotCorruptBufferDataViaFreeNativeMemory() {
-        // Same regression test but using the freeNativeMemory() path (PooledBuffer)
+    fun freeNativeMemoryPreventsUseAfterFree() {
+        // After freeNativeMemory(), all read/write operations should throw
         val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 4)
         val buffer = pool.acquire(256)
 
         buffer.writeInt(0xCAFEBABE.toInt())
-        buffer.writeInt(0xDEADC0DE.toInt())
         buffer.resetForRead()
 
-        // Read first int
         val first = buffer.readInt()
         assertEquals(0xCAFEBABE.toInt(), first)
 
         // Free via freeNativeMemory (the PooledBuffer path)
         (buffer as PlatformBuffer).freeNativeMemory()
 
-        // Data must still be readable - position/limit not corrupted
-        assertEquals(0xDEADC0DE.toInt(), buffer.readInt())
+        // Further access must throw
+        assertFailsWith<IllegalStateException> {
+            buffer.readInt()
+        }
 
         pool.clear()
     }
@@ -1877,7 +1878,7 @@ class BufferPoolTests {
     fun pooledBufferWriteFromNonPooled() =
         withPool(defaultBufferSize = 1024) { pool ->
             // Create a non-pooled buffer
-            val src = PlatformBuffer.allocate(256)
+            val src = BufferFactory.managed().allocate(256)
             src.writeInt(0xAABBCCDD.toInt())
             src.writeInt(0x11223344)
             src.resetForRead()
@@ -1921,7 +1922,7 @@ class BufferPoolTests {
     fun pooledBufferContentEqualsNonPooled() =
         withPool(defaultBufferSize = 1024) { pool ->
             pool.withBuffer(256) { pooled ->
-                val direct = PlatformBuffer.allocate(256)
+                val direct = BufferFactory.managed().allocate(256)
                 val data = ByteArray(64) { (it * 3 + 7).toByte() }
                 pooled.writeBytes(data)
                 direct.writeBytes(data)

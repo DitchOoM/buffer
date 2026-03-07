@@ -13,13 +13,13 @@ class IPCSimpleService : Service() {
                 num: Int,
                 type: Int,
             ): JvmBuffer {
-                val zone =
+                val factory: BufferFactory =
                     when (type) {
-                        0 -> AllocationZone.Heap
-                        1 -> AllocationZone.Direct
-                        else -> AllocationZone.SharedMemory
+                        0 -> BufferFactory.managed()
+                        1 -> BufferFactory.Default
+                        else -> BufferFactory.shared()
                     }
-                val buffer = PlatformBuffer.allocate(byteSize, zone)
+                val buffer = factory.allocate(byteSize)
                 buffer.writeInt(num)
                 return buffer as JvmBuffer
             }

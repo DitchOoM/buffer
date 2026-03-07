@@ -9,7 +9,7 @@ class TransformedReadBufferTest {
 
     @Test
     fun byte() {
-        val buffer = PlatformBuffer.allocate(Byte.SIZE_BYTES)
+        val buffer = BufferFactory.managed().allocate(Byte.SIZE_BYTES)
         buffer.writeByte(10.toByte())
         buffer.resetForRead()
         val add1TransformedReadBuffer =
@@ -21,7 +21,7 @@ class TransformedReadBufferTest {
 
     @Test
     fun getByte() {
-        val buffer = PlatformBuffer.allocate(5)
+        val buffer = BufferFactory.managed().allocate(5)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5))
         buffer.resetForRead()
 
@@ -32,7 +32,7 @@ class TransformedReadBufferTest {
 
     @Test
     fun readShort() {
-        val buffer = PlatformBuffer.allocate(Short.SIZE_BYTES)
+        val buffer = BufferFactory.managed().allocate(Short.SIZE_BYTES)
         buffer.writeShort(0x1234)
         buffer.resetForRead()
 
@@ -44,7 +44,7 @@ class TransformedReadBufferTest {
 
     @Test
     fun getShort() {
-        val buffer = PlatformBuffer.allocate(4)
+        val buffer = BufferFactory.managed().allocate(4)
         buffer.writeShort(0x0000)
         buffer.writeShort(0x1234)
         buffer.resetForRead()
@@ -56,7 +56,7 @@ class TransformedReadBufferTest {
 
     @Test
     fun readInt() {
-        val buffer = PlatformBuffer.allocate(Int.SIZE_BYTES)
+        val buffer = BufferFactory.managed().allocate(Int.SIZE_BYTES)
         buffer.writeInt(0x12345678)
         buffer.resetForRead()
 
@@ -68,7 +68,7 @@ class TransformedReadBufferTest {
 
     @Test
     fun getInt() {
-        val buffer = PlatformBuffer.allocate(8)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeInt(0)
         buffer.writeInt(0x12345678)
         buffer.resetForRead()
@@ -80,7 +80,7 @@ class TransformedReadBufferTest {
 
     @Test
     fun readLong() {
-        val buffer = PlatformBuffer.allocate(Long.SIZE_BYTES)
+        val buffer = BufferFactory.managed().allocate(Long.SIZE_BYTES)
         // Use a simple value where we can easily verify the XOR result
         buffer.writeLong(0x0000000000000000L)
         buffer.resetForRead()
@@ -93,7 +93,7 @@ class TransformedReadBufferTest {
 
     @Test
     fun getLong() {
-        val buffer = PlatformBuffer.allocate(16)
+        val buffer = BufferFactory.managed().allocate(16)
         buffer.writeLong(0L)
         buffer.writeLong(0x0000000000000000L)
         buffer.resetForRead()
@@ -105,7 +105,7 @@ class TransformedReadBufferTest {
 
     @Test
     fun readByteArray() {
-        val buffer = PlatformBuffer.allocate(4)
+        val buffer = BufferFactory.managed().allocate(4)
         buffer.writeBytes(byteArrayOf(0x01, 0x02, 0x03, 0x04))
         buffer.resetForRead()
 
@@ -120,7 +120,7 @@ class TransformedReadBufferTest {
 
     @Test
     fun readString() {
-        val buffer = PlatformBuffer.allocate(10)
+        val buffer = BufferFactory.managed().allocate(10)
         // Write "Hello" with identity transformer (no transformation)
         buffer.writeString("Hello")
         buffer.resetForRead()
@@ -132,7 +132,7 @@ class TransformedReadBufferTest {
 
     @Test
     fun positionAndLimit() {
-        val buffer = PlatformBuffer.allocate(10)
+        val buffer = BufferFactory.managed().allocate(10)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5))
         buffer.resetForRead()
 
@@ -150,7 +150,7 @@ class TransformedReadBufferTest {
 
     @Test
     fun resetForRead() {
-        val buffer = PlatformBuffer.allocate(10)
+        val buffer = BufferFactory.managed().allocate(10)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5))
 
         val transformed = TransformedReadBuffer(buffer, xorTransformer)
@@ -162,7 +162,7 @@ class TransformedReadBufferTest {
 
     @Test
     fun slice() {
-        val buffer = PlatformBuffer.allocate(10)
+        val buffer = BufferFactory.managed().allocate(10)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5))
         buffer.resetForRead()
         buffer.readByte() // advance to position 1
@@ -176,7 +176,7 @@ class TransformedReadBufferTest {
 
     @Test
     fun byteOrderPreserved() {
-        val buffer = PlatformBuffer.allocate(10, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        val buffer = BufferFactory.managed().allocate(10, byteOrder = ByteOrder.LITTLE_ENDIAN)
         buffer.writeInt(0x12345678)
         buffer.resetForRead()
 

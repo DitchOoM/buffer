@@ -1,8 +1,16 @@
+@file:Suppress("DEPRECATION")
+
 package com.ditchoom.buffer.pool
 
 import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.Buffer
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
+import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
+import com.ditchoom.buffer.managed
+import com.ditchoom.buffer.shared
 
 /**
  * High-performance buffer pool that minimizes allocations by reusing buffers.
@@ -14,7 +22,7 @@ import com.ditchoom.buffer.ReadWriteBuffer
  *
  * ### Recommended: withBuffer (auto-release)
  * ```kotlin
- * val pool = BufferPool()
+ * val pool = BufferPool(factory = BufferFactory.Default)
  * pool.withBuffer(1024) { buffer ->
  *     buffer.writeInt(42)
  *     buffer.writeString("Hello")
@@ -34,7 +42,7 @@ import com.ditchoom.buffer.ReadWriteBuffer
  *
  * ### Manual acquire/release
  * ```kotlin
- * val pool = BufferPool()
+ * val pool = BufferPool(factory = BufferFactory.Default)
  * val buffer = pool.acquire(1024)
  * try {
  *     buffer.writeInt(42)
@@ -54,7 +62,7 @@ import com.ditchoom.buffer.ReadWriteBuffer
 sealed interface BufferPool {
     /**
      * Acquires a buffer of at least the specified size.
-     * The returned buffer is a [PooledBuffer] wrapper whose [freeNativeMemory][PlatformBuffer.freeNativeMemory]
+     * The returned buffer is a [PooledBuffer] wrapper whose [freeNativeMemory][Buffer.freeNativeMemory]
      * returns the buffer to this pool instead of freeing it.
      * The buffer may be larger than requested.
      */
@@ -63,7 +71,7 @@ sealed interface BufferPool {
     /**
      * Releases a buffer back to the pool for reuse.
      * The buffer must have been acquired from this pool.
-     * Buffers that are not [PlatformBuffer] instances are silently ignored.
+     * Buffers that are not [Buffer] instances are silently ignored.
      */
     fun release(buffer: ReadWriteBuffer)
 
@@ -79,26 +87,24 @@ sealed interface BufferPool {
 
     companion object {
         /**
-         * Creates a buffer pool with the specified threading model.
+         * Creates a buffer pool with the specified threading model and buffer factory.
          *
          * @param threadingMode Single-threaded (faster) or multi-threaded (thread-safe)
          * @param maxPoolSize Maximum buffers to keep in pool
          * @param defaultBufferSize Default size for acquired buffers
-         * @param byteOrder Byte order for buffers
-         * @param allocationZone Memory allocation strategy for new buffers
+         * @param factory Buffer factory for allocating new buffers
          */
         operator fun invoke(
             threadingMode: ThreadingMode = ThreadingMode.SingleThreaded,
             maxPoolSize: Int = 64,
             defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
-            byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-            allocationZone: AllocationZone = AllocationZone.Direct,
+            factory: BufferFactory = BufferFactory.Default,
         ): BufferPool =
             when (threadingMode) {
                 ThreadingMode.SingleThreaded ->
-                    SingleThreadedBufferPool(maxPoolSize, defaultBufferSize, byteOrder, allocationZone)
+                    SingleThreadedBufferPool(maxPoolSize, defaultBufferSize, factory)
                 ThreadingMode.MultiThreaded ->
-                    LockFreeBufferPool(maxPoolSize, defaultBufferSize, byteOrder, allocationZone)
+                    LockFreeBufferPool(maxPoolSize, defaultBufferSize, factory)
             }
 
         /**
@@ -106,15 +112,87 @@ sealed interface BufferPool {
          *
          * @param maxPoolSize Maximum buffers to keep in pool
          * @param defaultBufferSize Default size for acquired buffers
-         * @param byteOrder Byte order for buffers
-         * @param allocationZone Memory allocation strategy for new buffers
+         * @param factory Buffer factory for allocating new buffers
          */
+        operator fun invoke(
+            maxPoolSize: Int = 64,
+            defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
+            factory: BufferFactory = BufferFactory.Default,
+        ): BufferPool = SingleThreadedBufferPool(maxPoolSize, defaultBufferSize, factory)
+
+        // Backward-compatible overloads using AllocationZone
+
+        /**
+         * @deprecated Use the overload accepting [BufferFactory] instead.
+         */
+        @Deprecated(
+            "Use BufferPool(threadingMode, maxPoolSize, defaultBufferSize, factory) instead",
+            ReplaceWith(
+                "BufferPool(threadingMode, maxPoolSize, defaultBufferSize, factory = BufferFactory.Default)",
+                "com.ditchoom.buffer.BufferFactory",
+                "com.ditchoom.buffer.Default",
+            ),
+        )
+        operator fun invoke(
+            threadingMode: ThreadingMode = ThreadingMode.SingleThreaded,
+            maxPoolSize: Int = 64,
+            defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
+            byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
+            allocationZone: AllocationZone = AllocationZone.Direct,
+        ): BufferPool {
+            val factory = allocationZone.toFactory(byteOrder)
+            return invoke(threadingMode, maxPoolSize, defaultBufferSize, factory)
+        }
+
+        /**
+         * @deprecated Use the overload accepting [BufferFactory] instead.
+         */
+        @Deprecated(
+            "Use BufferPool(maxPoolSize, defaultBufferSize, factory) instead",
+            ReplaceWith(
+                "BufferPool(maxPoolSize, defaultBufferSize, factory = BufferFactory.Default)",
+                "com.ditchoom.buffer.BufferFactory",
+                "com.ditchoom.buffer.Default",
+            ),
+        )
         operator fun invoke(
             maxPoolSize: Int = 64,
             defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
             byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
             allocationZone: AllocationZone = AllocationZone.Direct,
-        ): BufferPool = SingleThreadedBufferPool(maxPoolSize, defaultBufferSize, byteOrder, allocationZone)
+        ): BufferPool {
+            val factory = allocationZone.toFactory(byteOrder)
+            return SingleThreadedBufferPool(maxPoolSize, defaultBufferSize, factory)
+        }
+    }
+}
+
+/**
+ * Maps a legacy [AllocationZone] to the corresponding [BufferFactory].
+ */
+@PublishedApi
+internal fun AllocationZone.toFactory(byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN): BufferFactory {
+    // Wrap the factory to apply the byte order
+    val baseFactory =
+        when (this) {
+            AllocationZone.Heap -> BufferFactory.managed()
+            AllocationZone.Direct -> BufferFactory.Default
+            AllocationZone.SharedMemory -> BufferFactory.shared()
+        }
+    return if (byteOrder == ByteOrder.BIG_ENDIAN) {
+        baseFactory
+    } else {
+        object : BufferFactory {
+            override fun allocate(
+                size: Int,
+                allocByteOrder: ByteOrder,
+            ): PlatformBuffer = baseFactory.allocate(size, byteOrder)
+
+            override fun wrap(
+                array: ByteArray,
+                wrapByteOrder: ByteOrder,
+            ): PlatformBuffer = baseFactory.wrap(array, byteOrder)
+        }
     }
 }
 
@@ -175,9 +253,27 @@ fun createBufferPool(
     threadingMode: ThreadingMode = ThreadingMode.SingleThreaded,
     maxPoolSize: Int = 64,
     defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
+    factory: BufferFactory = BufferFactory.Default,
+): BufferPool = BufferPool(threadingMode, maxPoolSize, defaultBufferSize, factory)
+
+/**
+ * @deprecated Use the overload accepting [BufferFactory] instead.
+ */
+@Deprecated(
+    "Use createBufferPool(threadingMode, maxPoolSize, defaultBufferSize, factory) instead",
+    ReplaceWith(
+        "createBufferPool(threadingMode, maxPoolSize, defaultBufferSize, factory = BufferFactory.Default)",
+        "com.ditchoom.buffer.BufferFactory",
+        "com.ditchoom.buffer.Default",
+    ),
+)
+fun createBufferPool(
+    threadingMode: ThreadingMode = ThreadingMode.SingleThreaded,
+    maxPoolSize: Int = 64,
+    defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
     byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
     allocationZone: AllocationZone = AllocationZone.Direct,
-): BufferPool = BufferPool(threadingMode, maxPoolSize, defaultBufferSize, byteOrder, allocationZone)
+): BufferPool = BufferPool(threadingMode, maxPoolSize, defaultBufferSize, allocationZone.toFactory(byteOrder))
 
 /**
  * Acquires a buffer, executes the block, and automatically releases the buffer.
@@ -219,14 +315,33 @@ inline fun <T> withPool(
     threadingMode: ThreadingMode = ThreadingMode.SingleThreaded,
     maxPoolSize: Int = 64,
     defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
-    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-    allocationZone: AllocationZone = AllocationZone.Direct,
+    factory: BufferFactory = BufferFactory.Default,
     block: (BufferPool) -> T,
 ): T {
-    val pool = BufferPool(threadingMode, maxPoolSize, defaultBufferSize, byteOrder, allocationZone)
+    val pool = BufferPool(threadingMode, maxPoolSize, defaultBufferSize, factory)
     try {
         return block(pool)
     } finally {
         pool.clear()
     }
 }
+
+/**
+ * @deprecated Use the overload accepting [BufferFactory] instead.
+ */
+@Deprecated(
+    "Use withPool(threadingMode, maxPoolSize, defaultBufferSize, factory) instead",
+    ReplaceWith(
+        "withPool(threadingMode, maxPoolSize, defaultBufferSize, factory = BufferFactory.Default, block)",
+        "com.ditchoom.buffer.BufferFactory",
+        "com.ditchoom.buffer.Default",
+    ),
+)
+inline fun <T> withPool(
+    threadingMode: ThreadingMode = ThreadingMode.SingleThreaded,
+    maxPoolSize: Int = 64,
+    defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
+    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
+    allocationZone: AllocationZone = AllocationZone.Direct,
+    block: (BufferPool) -> T,
+): T = withPool(threadingMode, maxPoolSize, defaultBufferSize, allocationZone.toFactory(byteOrder), block)

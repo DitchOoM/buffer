@@ -1,10 +1,11 @@
 package com.ditchoom.buffer.benchmark
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.StreamingStringDecoder
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.managed
 import kotlinx.benchmark.Benchmark
 import kotlinx.benchmark.BenchmarkMode
 import kotlinx.benchmark.BenchmarkTimeUnit
@@ -48,10 +49,10 @@ open class StreamingStringDecoderBenchmark {
     private lateinit var asciiHeapBuffer: PlatformBuffer
     private lateinit var mixedUtf8Buffer: PlatformBuffer
     private lateinit var emojiBuffer: PlatformBuffer
-    private lateinit var asciiChunks: List<PlatformBuffer>
-    private lateinit var asciiChunks256: List<PlatformBuffer>
-    private lateinit var asciiChunks4k: List<PlatformBuffer>
-    private lateinit var asciiChunks16k: List<PlatformBuffer>
+    private lateinit var asciiChunks: List<Buffer>
+    private lateinit var asciiChunks256: List<Buffer>
+    private lateinit var asciiChunks4k: List<Buffer>
+    private lateinit var asciiChunks16k: List<Buffer>
 
     private lateinit var decoder: StreamingStringDecoder
     private val destination = StringBuilder(size64k)
@@ -61,14 +62,14 @@ open class StreamingStringDecoderBenchmark {
         decoder = StreamingStringDecoder()
 
         // ASCII buffer — repeating printable ASCII written directly
-        asciiBuffer = PlatformBuffer.allocate(size64k, AllocationZone.Direct)
+        asciiBuffer = BufferFactory.Default.allocate(size64k)
         for (i in 0 until size64k) {
             asciiBuffer.writeByte((32 + (i % 95)).toByte())
         }
         asciiBuffer.resetForRead()
 
         // ASCII Heap buffer — bulk copy from Direct buffer
-        asciiHeapBuffer = PlatformBuffer.allocate(size64k, AllocationZone.Heap)
+        asciiHeapBuffer = BufferFactory.managed().allocate(size64k)
         asciiBuffer.position(0)
         asciiHeapBuffer.write(asciiBuffer)
         asciiHeapBuffer.resetForRead()
@@ -206,7 +207,7 @@ open class StreamingStringDecoderBenchmark {
         private fun buildChunks(
             source: PlatformBuffer,
             chunkSize: Int,
-        ): List<PlatformBuffer> {
+        ): List<Buffer> {
             val total = source.limit()
             val savedLimit = source.limit()
             return (0 until total step chunkSize)
@@ -214,7 +215,7 @@ open class StreamingStringDecoderBenchmark {
                     val len = minOf(chunkSize, total - offset)
                     source.position(offset)
                     source.setLimit(offset + len)
-                    val chunk = PlatformBuffer.allocate(len, AllocationZone.Direct)
+                    val chunk = BufferFactory.Default.allocate(len)
                     chunk.write(source)
                     chunk.resetForRead()
                     chunk
@@ -229,12 +230,12 @@ open class StreamingStringDecoderBenchmark {
             targetSize: Int,
         ): PlatformBuffer {
             // Encode pattern once into a temporary buffer to get exact byte length
-            val patternBuffer = PlatformBuffer.allocate(pattern.length * 4, AllocationZone.Direct)
+            val patternBuffer = BufferFactory.Default.allocate(pattern.length * 4)
             patternBuffer.writeString(pattern, Charset.UTF8)
             val patternByteLen = patternBuffer.position()
             patternBuffer.resetForRead()
 
-            val buffer = PlatformBuffer.allocate(targetSize, AllocationZone.Direct)
+            val buffer = BufferFactory.Default.allocate(targetSize)
             var written = 0
             while (written + patternByteLen <= targetSize) {
                 patternBuffer.position(0)

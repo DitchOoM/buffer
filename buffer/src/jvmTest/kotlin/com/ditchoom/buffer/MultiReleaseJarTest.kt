@@ -21,8 +21,8 @@ class MultiReleaseJarTest {
 
     @Test
     fun `mismatch produces correct results`() {
-        val buffer1 = PlatformBuffer.allocate(100)
-        val buffer2 = PlatformBuffer.allocate(100)
+        val buffer1 = BufferFactory.managed().allocate(100)
+        val buffer2 = BufferFactory.managed().allocate(100)
 
         // Write same data to both
         repeat(100) {
@@ -51,13 +51,13 @@ class MultiReleaseJarTest {
     @Test
     fun `mismatch handles edge cases`() {
         // Empty buffers
-        val empty1 = PlatformBuffer.allocate(0)
-        val empty2 = PlatformBuffer.allocate(0)
+        val empty1 = BufferFactory.managed().allocate(0)
+        val empty2 = BufferFactory.managed().allocate(0)
         assertEquals(-1, empty1.mismatch(empty2), "Empty buffers should match")
 
         // Different sizes
-        val small = PlatformBuffer.allocate(10)
-        val large = PlatformBuffer.allocate(20)
+        val small = BufferFactory.managed().allocate(10)
+        val large = BufferFactory.managed().allocate(20)
         repeat(10) {
             small.writeByte(it.toByte())
             large.writeByte(it.toByte())
@@ -70,8 +70,8 @@ class MultiReleaseJarTest {
         assertEquals(10, small.mismatch(large), "Should find mismatch at end of smaller buffer")
 
         // First byte mismatch
-        val a = PlatformBuffer.allocate(10)
-        val b = PlatformBuffer.allocate(10)
+        val a = BufferFactory.managed().allocate(10)
+        val b = BufferFactory.managed().allocate(10)
         a.writeByte(1)
         b.writeByte(2)
         a.resetForRead()
