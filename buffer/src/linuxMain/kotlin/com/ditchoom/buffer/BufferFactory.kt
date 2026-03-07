@@ -32,6 +32,9 @@ internal actual val managedBufferFactory: BufferFactory =
 
 internal actual val sharedBufferFactory: BufferFactory = defaultBufferFactory
 
+// Linux NativeBuffer uses malloc/free — already deterministic
+internal actual val deterministicBufferFactory: BufferFactory = defaultBufferFactory
+
 /**
  * Allocates a buffer with guaranteed native memory access using malloc.
  *

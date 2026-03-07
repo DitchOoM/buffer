@@ -27,6 +27,9 @@ internal actual val defaultBufferFactory: BufferFactory =
 
 internal actual val managedBufferFactory: BufferFactory = defaultBufferFactory
 
+// JS has no deterministic cleanup — GC-managed only
+internal actual val deterministicBufferFactory: BufferFactory = defaultBufferFactory
+
 internal actual val sharedBufferFactory: BufferFactory =
     object : BufferFactory {
         override fun allocate(

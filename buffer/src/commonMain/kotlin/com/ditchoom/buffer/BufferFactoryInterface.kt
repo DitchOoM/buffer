@@ -133,6 +133,23 @@ internal expect val managedBufferFactory: BufferFactory
 internal expect val sharedBufferFactory: BufferFactory
 
 /**
+ * Deterministic cleanup factory.
+ *
+ * Returns buffers that implement [CloseableBuffer] for guaranteed resource cleanup,
+ * independent of garbage collection. Callers must use `buffer.use {}` or call
+ * [PlatformBuffer.freeNativeMemory] explicitly.
+ *
+ * Platform implementations:
+ * - **JVM 9+**: DeterministicDirectJvmBuffer (DirectByteBuffer + Unsafe.invokeCleaner)
+ * - **JVM 8 / Android**: UnsafePlatformBuffer (Unsafe.allocateMemory/freeMemory)
+ * - **Apple**: MutableDataBuffer (ARC-managed, already deterministic)
+ * - **Linux**: NativeBuffer (malloc/free, already deterministic)
+ * - **WASM**: LinearBuffer (linear memory, already deterministic)
+ * - **JS**: JsBuffer (GC-managed, no deterministic alternative)
+ */
+internal expect val deterministicBufferFactory: BufferFactory
+
+/**
  * Platform-optimal native memory.
  */
 val BufferFactory.Companion.Default: BufferFactory get() = defaultBufferFactory
@@ -146,6 +163,18 @@ fun BufferFactory.Companion.managed(): BufferFactory = managedBufferFactory
  * Cross-process shared memory. Falls back to [Default] where unavailable.
  */
 fun BufferFactory.Companion.shared(): BufferFactory = sharedBufferFactory
+
+/**
+ * Deterministic cleanup — buffers implement [CloseableBuffer].
+ *
+ * Use with `buffer.use {}` for automatic cleanup:
+ * ```kotlin
+ * BufferFactory.Deterministic.allocate(1024).use { buffer ->
+ *     buffer.writeInt(42)
+ * } // freed immediately, no GC needed
+ * ```
+ */
+val BufferFactory.Companion.Deterministic: BufferFactory get() = deterministicBufferFactory
 
 // =============================================================================
 // Composable decorators

@@ -46,6 +46,9 @@ internal actual val managedBufferFactory: BufferFactory =
 
 internal actual val sharedBufferFactory: BufferFactory = defaultBufferFactory
 
+// Apple buffers use ARC (MutableDataBuffer) — already deterministic
+internal actual val deterministicBufferFactory: BufferFactory = defaultBufferFactory
+
 /**
  * Wraps an existing NSData in a read-only buffer (zero-copy).
  *

@@ -63,6 +63,73 @@ class BufferFactoryTests {
         assertEquals(0x123456789ABCDEF0L, buffer.readLong())
     }
 
+    // ============================================================================
+    // Deterministic Factory Tests
+    // ============================================================================
+
+    @Test
+    fun deterministicFactoryAllocatesBuffer() {
+        val buffer = BufferFactory.Deterministic.allocate(64)
+        assertEquals(64, buffer.capacity)
+        buffer.writeInt(0x12345678)
+        buffer.resetForRead()
+        assertEquals(0x12345678, buffer.readInt())
+        buffer.freeNativeMemory()
+    }
+
+    @Test
+    fun deterministicFactoryUsePattern() {
+        BufferFactory.Deterministic.allocate(128).use { buffer ->
+            buffer.writeLong(0x123456789ABCDEF0L)
+            buffer.resetForRead()
+            assertEquals(0x123456789ABCDEF0L, buffer.readLong())
+        }
+    }
+
+    @Test
+    fun deterministicFactoryUseWithException() {
+        assertFailsWith<RuntimeException> {
+            BufferFactory.Deterministic.allocate(64).use { _ ->
+                throw RuntimeException("test exception")
+            }
+        }
+    }
+
+    @Test
+    fun deterministicFactoryWrapsArray() {
+        val array = byteArrayOf(1, 2, 3, 4)
+        val buffer = BufferFactory.Deterministic.wrap(array)
+        assertEquals(1, buffer.readByte())
+        assertEquals(2, buffer.readByte())
+    }
+
+    @Test
+    fun deterministicFactoryRespectsLittleEndianByteOrder() {
+        BufferFactory.Deterministic.allocate(8, ByteOrder.LITTLE_ENDIAN).use { buffer ->
+            assertEquals(ByteOrder.LITTLE_ENDIAN, buffer.byteOrder)
+            buffer.writeInt(0x12345678)
+            buffer.resetForRead()
+            assertEquals(0x12345678, buffer.readInt())
+        }
+    }
+
+    @Test
+    fun deterministicFactoryRespectsBigEndianByteOrder() {
+        BufferFactory.Deterministic.allocate(8, ByteOrder.BIG_ENDIAN).use { buffer ->
+            assertEquals(ByteOrder.BIG_ENDIAN, buffer.byteOrder)
+            buffer.writeInt(0x12345678)
+            buffer.resetForRead()
+            assertEquals(0x12345678, buffer.readInt())
+        }
+    }
+
+    @Test
+    fun negativeSizeAllocationThrows() {
+        assertFailsWith<IllegalArgumentException> {
+            PlatformBuffer.allocate(-1)
+        }
+    }
+
     @Test
     fun defaultFactoryRespectsLittleEndianByteOrder() {
         val buffer = BufferFactory.Default.allocate(4, ByteOrder.LITTLE_ENDIAN)

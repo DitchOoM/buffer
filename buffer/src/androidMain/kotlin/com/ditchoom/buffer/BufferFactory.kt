@@ -37,6 +37,22 @@ internal actual val managedBufferFactory: BufferFactory =
         ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJava()))
     }
 
+internal actual val deterministicBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer {
+            // Android: invokeCleaner is not available on ART, use Unsafe.allocateMemory
+            return AndroidUnsafePlatformBuffer.allocate(size, byteOrder)
+        }
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJava()))
+    }
+
 @SuppressLint("NewApi")
 internal actual val sharedBufferFactory: BufferFactory =
     object : BufferFactory {

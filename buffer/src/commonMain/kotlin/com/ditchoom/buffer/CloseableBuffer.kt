@@ -12,8 +12,11 @@ package com.ditchoom.buffer
  * | Platform | Buffer type | Implements CloseableBuffer? |
  * |----------|------------|-----------------------------|
  * | JVM 21+ | FfmBuffer (Arena-backed) | **Yes** |
- * | JVM < 21 | DirectJvmBuffer | No (GC fallback) |
- * | Android | DirectJvmBuffer | No (GC-managed) |
+ * | JVM 9-20 | DeterministicDirectJvmBuffer | **Yes** (via `BufferFactory.Deterministic`) |
+ * | JVM 8 | UnsafePlatformBuffer | **Yes** (via `BufferFactory.Deterministic`) |
+ * | JVM (default) | DirectJvmBuffer | No (GC fallback) |
+ * | Android (deterministic) | UnsafePlatformBuffer | **Yes** (via `BufferFactory.Deterministic`) |
+ * | Android (default) | DirectJvmBuffer | No (GC-managed) |
  * | Apple | MutableDataBuffer (NSMutableData) | No (ARC-managed) |
  * | Linux | NativeBuffer (malloc/free) | **Yes** |
  * | WASM | LinearBuffer (linear memory) | **Yes** |
