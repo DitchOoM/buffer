@@ -78,6 +78,16 @@ val WriteBuffer.nativeMemoryAccess: NativeMemoryAccess?
     }
 
 /**
+ * Extension for PlatformBuffer to access native memory if available.
+ * Resolves ambiguity between ReadBuffer and WriteBuffer extensions.
+ */
+val PlatformBuffer.nativeMemoryAccess: NativeMemoryAccess?
+    get() {
+        if (this is NativeMemoryAccess) return this
+        return unwrapFully() as? NativeMemoryAccess
+    }
+
+/**
  * Allocates a buffer with guaranteed native memory access.
  *
  * This is equivalent to `BufferFactory.Default.allocate(size)` but
@@ -162,6 +172,16 @@ val WriteBuffer.managedMemoryAccess: ManagedMemoryAccess?
         if (this is ManagedMemoryAccess) return this
         if (this is ReadBuffer) return unwrapFully() as? ManagedMemoryAccess
         return null
+    }
+
+/**
+ * Extension for PlatformBuffer to access managed memory if available.
+ * Resolves ambiguity between ReadBuffer and WriteBuffer extensions.
+ */
+val PlatformBuffer.managedMemoryAccess: ManagedMemoryAccess?
+    get() {
+        if (this is ManagedMemoryAccess) return this
+        return unwrapFully() as? ManagedMemoryAccess
     }
 
 /**
