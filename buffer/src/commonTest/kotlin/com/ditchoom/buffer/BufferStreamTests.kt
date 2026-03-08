@@ -1341,4 +1341,120 @@ class BufferStreamTests {
         processor.release()
         pool.clear()
     }
+
+    // ============================================================================
+    // readBuffer() Contract Tests: position may be > 0
+    //
+    // StreamProcessor.readBuffer() returns a buffer with remaining() == size,
+    // ready to read from its current position. Position may be > 0 when the
+    // chunk was partially consumed (e.g., skip/readByte before readBuffer).
+    // Consumers must NOT call position(0).
+    // ============================================================================
+
+    @Test
+    fun readBufferAfterSkipHasCorrectRemaining() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+
+        // Append a 10-byte chunk
+        val buffer = BufferFactory.managed().allocate(10)
+        repeat(10) { buffer.writeByte((it + 0x30).toByte()) } // '0','1',...,'9'
+        buffer.resetForRead()
+        processor.append(buffer)
+
+        // Skip first 3 bytes (simulates consuming a header)
+        processor.skip(3)
+
+        // readBuffer the remaining 7 bytes — exact match path returns chunk with position=3
+        val result = processor.readBuffer(7)
+        assertEquals(7, result.remaining())
+
+        // Verify the data matches bytes 3-9
+        for (i in 3 until 10) {
+            assertEquals((i + 0x30).toByte(), result.readByte())
+        }
+
+        processor.release()
+        pool.clear()
+    }
+
+    @Test
+    fun readBufferAfterSkipWorksWithReadString() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+
+        // Simulate a frame: 2-byte header + text payload
+        val header = byteArrayOf(0x81.toByte(), 0x05)
+        val text = "Hello"
+        val buffer = BufferFactory.managed().allocate(header.size + text.length)
+        buffer.writeBytes(header)
+        buffer.writeString(text, Charset.UTF8)
+        buffer.resetForRead()
+        processor.append(buffer)
+
+        // Skip the 2-byte header
+        processor.skip(2)
+
+        // readBuffer the 5-byte text — this is the exact failure mode from websocket:
+        // the returned buffer has position=2, and readString must work from there
+        val payload = processor.readBuffer(5)
+        assertEquals(5, payload.remaining())
+        assertEquals("Hello", payload.readString(5, Charset.UTF8))
+
+        processor.release()
+        pool.clear()
+    }
+
+    @Test
+    fun readBufferAfterPartialReadHasCorrectData() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+
+        val buffer = BufferFactory.managed().allocate(10)
+        repeat(10) { buffer.writeByte(it.toByte()) }
+        buffer.resetForRead()
+        processor.append(buffer)
+
+        // Consume 2 bytes via readByte
+        assertEquals(0.toByte(), processor.readByte())
+        assertEquals(1.toByte(), processor.readByte())
+
+        // readBuffer the remaining 8 bytes
+        val result = processor.readBuffer(8)
+        assertEquals(8, result.remaining())
+        for (i in 2 until 10) {
+            assertEquals(i.toByte(), result.readByte())
+        }
+
+        processor.release()
+        pool.clear()
+    }
+
+    @Test
+    fun readBufferSliceAfterSkipHasCorrectData() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+
+        // Append a 20-byte chunk
+        val buffer = BufferFactory.managed().allocate(20)
+        repeat(20) { buffer.writeByte(it.toByte()) }
+        buffer.resetForRead()
+        processor.append(buffer)
+
+        // Skip 3 bytes
+        processor.skip(3)
+
+        // readBuffer 7 bytes — contiguous slice path (17 bytes remain in chunk > 7)
+        val result = processor.readBuffer(7)
+        assertEquals(7, result.remaining())
+        for (i in 3 until 10) {
+            assertEquals(i.toByte(), result.readByte())
+        }
+
+        // Remaining 10 bytes should still be available
+        assertEquals(10, processor.available())
+
+        processor.release()
+        pool.clear()
+    }
 }

@@ -184,10 +184,14 @@ interface StreamProcessor {
     /**
      * Reads a buffer of exactly [size] bytes.
      *
+     * The returned buffer has [ReadBuffer.remaining] == [size] and is ready to read
+     * from its current position. **Do not assume position is 0** — the buffer may be
+     * a view/slice of a larger chunk where position > 0 is correct.
+     *
      * Returns the chunk directly when data fits exactly, or a slice when contiguous.
      * Copies when data spans multiple chunks.
      *
-     * **Note:** The returned buffer is not released back to the pool. For proper pool recycling,
+     * The returned buffer is not released back to the pool. For proper pool recycling,
      * prefer [readBufferScoped].
      */
     fun readBuffer(size: Int): ReadBuffer
@@ -504,6 +508,19 @@ internal class DefaultStreamProcessor(
         )
     }
 
+    /**
+     * Reads a buffer of exactly [size] bytes.
+     *
+     * The returned buffer has [ReadBuffer.remaining] == [size] and is ready to read
+     * from its current position. **Do not assume position is 0** — the buffer may be
+     * a view/slice of a larger chunk where position > 0 is correct.
+     *
+     * Returns the chunk directly when data fits exactly, or a slice when contiguous.
+     * Copies when data spans multiple chunks.
+     *
+     * The returned buffer is not released back to the pool. For proper pool recycling,
+     * prefer [readBufferScoped].
+     */
     override fun readBuffer(size: Int): ReadBuffer {
         require(totalAvailable >= size) { "Not enough data: need $size, have $totalAvailable" }
         require(chunks.isNotEmpty() || size == 0) { "No chunks available" }
