@@ -183,7 +183,7 @@ Comparison uses the same Direct buffer type — "Baseline" is the old Kotlin-onl
 | bufferCopy | 939K ops/s | — | — |
 
 **Key takeaways:**
-- Use `AllocationZone.Direct` on native platforms for bulk operations (11-146x faster)
+- Use `BufferFactory.Default` on native platforms for bulk operations (11-146x faster)
 - `xorMask()` gains the most because SIMD avoids byte-order swapping overhead
 - The `aligned` flag enables even faster SIMD scanning when data alignment is known
 
@@ -220,13 +220,13 @@ destBuffer.write(sourceBuffer)
 
 ### JVM
 
-- Use `Direct` for NIO channel I/O
+- Use `BufferFactory.Default` (direct) for NIO channel I/O
 - Pool Direct buffers (allocation is slow)
 - Heap buffers require copying for native I/O
 
 ### Android
 
-- Use `SharedMemory` for IPC
+- Use `BufferFactory.shared()` for IPC
 - Pool camera/video frame buffers
 - Watch memory pressure on low-end devices
 
@@ -245,17 +245,17 @@ destBuffer.write(sourceBuffer)
 
 ### WASM
 
-- **Use `Direct` for JS interop** - LinearBuffer shares memory with JavaScript
-- **Use `Heap` for compute workloads** - ByteArrayBuffer has no memory limits
+- **Use `BufferFactory.Default` for JS interop** - LinearBuffer shares memory with JavaScript
+- **Use `BufferFactory.managed()` for compute workloads** - ByteArrayBuffer has no memory limits
 - **LinearBuffer is faster** - 25% faster single ops, 2x faster bulk ops
 - **Pre-allocated memory** - 256MB limit due to optimizer bug workaround
 
 ```kotlin
-// JS interop: use Direct (LinearBuffer)
-val interopBuffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+// JS interop: use Default (LinearBuffer)
+val interopBuffer = BufferFactory.Default.allocate(1024)
 
-// Compute workloads: use Heap (ByteArrayBuffer)
-val computeBuffer = PlatformBuffer.allocate(1024, AllocationZone.Heap)
+// Compute workloads: use managed (ByteArrayBuffer)
+val computeBuffer = BufferFactory.managed().allocate(1024)
 ```
 
 WASM benchmark results:

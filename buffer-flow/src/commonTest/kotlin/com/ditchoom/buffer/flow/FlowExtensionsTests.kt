@@ -1,7 +1,6 @@
 package com.ditchoom.buffer.flow
 
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList

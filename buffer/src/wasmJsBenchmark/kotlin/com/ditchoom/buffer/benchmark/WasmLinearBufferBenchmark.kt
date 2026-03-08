@@ -4,7 +4,6 @@ import com.ditchoom.buffer.ByteArrayBuffer
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.LinearBuffer
 import com.ditchoom.buffer.LinearMemoryAllocator
-import com.ditchoom.buffer.allocate
 import kotlinx.benchmark.Benchmark
 import kotlinx.benchmark.BenchmarkMode
 import kotlinx.benchmark.BenchmarkTimeUnit
