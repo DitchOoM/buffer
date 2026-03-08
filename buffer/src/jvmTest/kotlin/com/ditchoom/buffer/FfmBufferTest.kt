@@ -593,9 +593,10 @@ class FfmBufferTest {
         buffer.writeInt(0x9ABCDEF0.toInt())
         buffer.resetForRead()
         processor.append(buffer)
-        val (a, b) = processor.readBufferScoped(8) { buf ->
-            Pair(buf.readInt(), buf.readInt())
-        }
+        val (a, b) =
+            processor.readBufferScoped(8) { buf ->
+                Pair(buf.readInt(), buf.readInt())
+            }
         assertEquals(0x12345678, a)
         assertEquals(0x9ABCDEF0.toInt(), b)
         processor.release()

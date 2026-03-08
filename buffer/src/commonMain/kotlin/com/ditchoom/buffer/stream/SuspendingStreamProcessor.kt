@@ -108,7 +108,10 @@ interface SuspendingStreamProcessor {
      *
      * Prefer this over [readBuffer] when pool recycling matters.
      */
-    suspend fun <T> readBufferScoped(size: Int, block: (ReadBuffer) -> T): T
+    suspend fun <T> readBufferScoped(
+        size: Int,
+        block: (ReadBuffer) -> T,
+    ): T
 
     /**
      * Skips [count] bytes.
@@ -166,7 +169,10 @@ internal class SyncToSuspendingProcessor(
 
     override suspend fun readBuffer(size: Int): ReadBuffer = delegate.readBuffer(size)
 
-    override suspend fun <T> readBufferScoped(size: Int, block: (ReadBuffer) -> T): T = delegate.readBufferScoped(size, block)
+    override suspend fun <T> readBufferScoped(
+        size: Int,
+        block: (ReadBuffer) -> T,
+    ): T = delegate.readBufferScoped(size, block)
 
     override suspend fun skip(count: Int) = delegate.skip(count)
 

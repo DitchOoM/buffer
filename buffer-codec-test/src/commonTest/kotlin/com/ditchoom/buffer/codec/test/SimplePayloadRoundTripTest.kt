@@ -2,7 +2,6 @@ package com.ditchoom.buffer.codec.test
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.test.protocols.SimplePayloadMessage
 import com.ditchoom.buffer.codec.test.protocols.SimplePayloadMessageCodec
 import kotlin.test.Test

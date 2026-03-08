@@ -2,7 +2,6 @@ package com.ditchoom.buffer
 
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.pool.withPool
-import com.ditchoom.buffer.stream.AutoFillingSuspendingStreamProcessor
 import com.ditchoom.buffer.stream.EndOfStreamException
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.builder
@@ -357,58 +356,65 @@ class StreamProcessorDownstreamTests {
     // ============================================================================
 
     @Test
-    fun autoFillingStreamProcessorBasicPattern() = runTest {
-        withPool { pool ->
-            // Simulate MQTT packet arriving in fragments
-            val fragments = listOf(
-                byteArrayOf(0x30, 0x05), // PUBLISH header + VBI
-                byteArrayOf(0x00, 0x01, 0x41), // topic length + topic 'A'
-                byteArrayOf(0x48, 0x49), // payload "HI"
-            )
-            val remaining = fragments.map { makeReadBuffer(it) }.toMutableList()
+    fun autoFillingStreamProcessorBasicPattern() =
+        runTest {
+            withPool { pool ->
+                // Simulate MQTT packet arriving in fragments
+                val fragments =
+                    listOf(
+                        byteArrayOf(0x30, 0x05), // PUBLISH header + VBI
+                        byteArrayOf(0x00, 0x01, 0x41), // topic length + topic 'A'
+                        byteArrayOf(0x48, 0x49), // payload "HI"
+                    )
+                val remaining = fragments.map { makeReadBuffer(it) }.toMutableList()
 
-            val processor = StreamProcessor.builder(pool)
-                .buildSuspendingWithAutoFill { stream ->
-                    if (remaining.isEmpty()) throw EndOfStreamException()
-                    stream.append(remaining.removeAt(0))
+                val processor =
+                    StreamProcessor
+                        .builder(pool)
+                        .buildSuspendingWithAutoFill { stream ->
+                            if (remaining.isEmpty()) throw EndOfStreamException()
+                            stream.append(remaining.removeAt(0))
+                        }
+
+                try {
+                    val byte1 = processor.readUnsignedByte()
+                    assertEquals(0x30, byte1)
+
+                    val vbi = processor.readByte().toInt() and 0x7F
+                    assertEquals(5, vbi)
+
+                    val payload = processor.readBuffer(5)
+                    assertEquals(5, payload.remaining())
+                } finally {
+                    processor.release()
                 }
-
-            try {
-                val byte1 = processor.readUnsignedByte()
-                assertEquals(0x30, byte1)
-
-                val vbi = processor.readByte().toInt() and 0x7F
-                assertEquals(5, vbi)
-
-                val payload = processor.readBuffer(5)
-                assertEquals(5, payload.remaining())
-            } finally {
-                processor.release()
             }
         }
-    }
 
     @Test
-    fun autoFillingExhaustsGracefully() = runTest {
-        withPool { pool ->
-            val chunks = listOf(makeReadBuffer(byteArrayOf(0x42))).toMutableList()
+    fun autoFillingExhaustsGracefully() =
+        runTest {
+            withPool { pool ->
+                val chunks = listOf(makeReadBuffer(byteArrayOf(0x42))).toMutableList()
 
-            val processor = StreamProcessor.builder(pool)
-                .buildSuspendingWithAutoFill { stream ->
-                    if (chunks.isEmpty()) throw EndOfStreamException()
-                    stream.append(chunks.removeAt(0))
-                }
+                val processor =
+                    StreamProcessor
+                        .builder(pool)
+                        .buildSuspendingWithAutoFill { stream ->
+                            if (chunks.isEmpty()) throw EndOfStreamException()
+                            stream.append(chunks.removeAt(0))
+                        }
 
-            try {
-                assertEquals(0x42.toByte(), processor.readByte())
-                assertFailsWith<EndOfStreamException> {
-                    processor.readByte()
+                try {
+                    assertEquals(0x42.toByte(), processor.readByte())
+                    assertFailsWith<EndOfStreamException> {
+                        processor.readByte()
+                    }
+                } finally {
+                    processor.release()
                 }
-            } finally {
-                processor.release()
             }
         }
-    }
 
     // ============================================================================
     // Helpers

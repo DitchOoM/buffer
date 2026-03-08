@@ -2,7 +2,6 @@ package com.ditchoom.buffer.codec.test
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.test.protocols.WsCloseBody
 import com.ditchoom.buffer.codec.test.protocols.WsCloseBodyCodec
 import com.ditchoom.buffer.codec.test.protocols.WsCloseCode
