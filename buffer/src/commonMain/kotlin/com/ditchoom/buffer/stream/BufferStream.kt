@@ -184,10 +184,21 @@ interface StreamProcessor {
     /**
      * Reads a buffer of exactly [size] bytes.
      *
-     * Returns a slice when data is contiguous in one chunk.
+     * Returns the chunk directly when data fits exactly, or a slice when contiguous.
      * Copies when data spans multiple chunks.
+     *
+     * **Note:** The returned buffer is not released back to the pool. For proper pool recycling,
+     * prefer [readBufferScoped].
      */
     fun readBuffer(size: Int): ReadBuffer
+
+    /**
+     * Reads exactly [size] bytes and passes them to [block], then releases the buffer back to
+     * the pool. The buffer must not escape the [block] scope — copy data if you need it longer.
+     *
+     * Prefer this over [readBuffer] when pool recycling matters.
+     */
+    fun <T> readBufferScoped(size: Int, block: (ReadBuffer) -> T): T
 
     /**
      * Skips [count] bytes.
@@ -504,7 +515,14 @@ internal class DefaultStreamProcessor(
             empty.resetForRead()
             return empty
         }
-        if (chunk.remaining() >= size) {
+        if (chunk.remaining() == size) {
+            // Transfer chunk to caller (zero-copy).
+            // Don't slice-then-free — that invalidates FfmBuffer slices.
+            chunks.removeFirst()
+            totalAvailable -= size
+            return chunk
+        }
+        if (chunk.remaining() > size) {
             // Data is contiguous, return a slice
             val oldLimit = chunk.limit()
             chunk.setLimit(chunk.position() + size)
@@ -512,7 +530,6 @@ internal class DefaultStreamProcessor(
             chunk.setLimit(oldLimit)
             chunk.position(chunk.position() + size)
             totalAvailable -= size
-            removeChunkIfEmpty(chunk)
             return slice
         }
 
@@ -537,6 +554,63 @@ internal class DefaultStreamProcessor(
         return merged
     }
 
+    override fun <T> readBufferScoped(size: Int, block: (ReadBuffer) -> T): T {
+        require(totalAvailable >= size) { "Not enough data: need $size, have $totalAvailable" }
+        require(chunks.isNotEmpty() || size == 0) { "No chunks available" }
+
+        val chunk = chunks.firstOrNull()
+        if (chunk == null || size == 0) {
+            val empty = pool.acquire(0)
+            empty.resetForRead()
+            return try {
+                block(empty)
+            } finally {
+                freeConsumedChunk(empty)
+            }
+        }
+        if (chunk.remaining() == size) {
+            // Exact match: remove chunk, pass to block, then free
+            chunks.removeFirst()
+            totalAvailable -= size
+            return try {
+                block(chunk)
+            } finally {
+                freeConsumedChunk(chunk)
+            }
+        }
+        if (chunk.remaining() > size) {
+            // Partial: slice without removing chunk (chunk stays in deque)
+            val oldLimit = chunk.limit()
+            chunk.setLimit(chunk.position() + size)
+            val slice = chunk.slice()
+            chunk.setLimit(oldLimit)
+            chunk.position(chunk.position() + size)
+            totalAvailable -= size
+            return block(slice)
+        }
+
+        // Multi-chunk: copy into pooled buffer, pass to block, then free
+        val merged = pool.acquire(size)
+        var remaining = size
+        while (remaining > 0 && chunks.isNotEmpty()) {
+            val currentChunk = chunks.first()
+            val toCopy = minOf(remaining, currentChunk.remaining())
+            val oldLimit = currentChunk.limit()
+            currentChunk.setLimit(currentChunk.position() + toCopy)
+            merged.write(currentChunk)
+            currentChunk.setLimit(oldLimit)
+            remaining -= toCopy
+            totalAvailable -= toCopy
+            removeChunkIfEmpty(currentChunk)
+        }
+        merged.resetForRead()
+        return try {
+            block(merged)
+        } finally {
+            freeConsumedChunk(merged)
+        }
+    }
+
     override fun skip(count: Int) {
         require(totalAvailable >= count) { "Not enough data to skip: need $count, have $totalAvailable" }
         var remaining = count
@@ -552,7 +626,7 @@ internal class DefaultStreamProcessor(
 
     override fun release() {
         for (chunk in chunks) {
-            releaseIfPooled(chunk)
+            freeConsumedChunk(chunk)
         }
         chunks.clear()
         totalAvailable = 0
@@ -561,11 +635,11 @@ internal class DefaultStreamProcessor(
     private fun removeChunkIfEmpty(chunk: ReadBuffer) {
         if (chunk.remaining() == 0) {
             chunks.removeFirst()
-            releaseIfPooled(chunk)
+            freeConsumedChunk(chunk)
         }
     }
 
-    private fun releaseIfPooled(buffer: ReadBuffer) {
+    private fun freeConsumedChunk(buffer: ReadBuffer) {
         // Release consumed chunks. For PooledBuffer, freeNativeMemory() decrements
         // refCount — the buffer is only returned to pool when all slices are also freed.
         (buffer as? PlatformBuffer)?.freeNativeMemory()

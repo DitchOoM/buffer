@@ -99,6 +99,11 @@ class AutoFillingSuspendingStreamProcessor(
         return delegate.readBuffer(size)
     }
 
+    override suspend fun <T> readBufferScoped(size: Int, block: (ReadBuffer) -> T): T {
+        ensureAvailable(size)
+        return delegate.readBufferScoped(size, block)
+    }
+
     override suspend fun skip(count: Int) {
         ensureAvailable(count)
         delegate.skip(count)

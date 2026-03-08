@@ -3,6 +3,7 @@ package com.ditchoom.buffer
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.pool.withBuffer
 import com.ditchoom.buffer.pool.withPool
+import com.ditchoom.buffer.stream.StreamProcessor
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import kotlin.test.Test
@@ -562,4 +563,42 @@ class FfmBufferTest {
             assertNotNull(segment)
             assertEquals(40L, segment.byteSize())
         }
+
+    // ============================================================================
+    // StreamProcessor + FfmBuffer Integration Tests
+    // ============================================================================
+
+    @Test
+    fun `StreamProcessor readBuffer exact size with FfmBuffer does not throw`() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+        val buffer = createFfmBuffer(8)
+        buffer.writeInt(0x12345678)
+        buffer.writeInt(0x9ABCDEF0.toInt())
+        buffer.resetForRead()
+        processor.append(buffer)
+        val result = processor.readBuffer(8)
+        assertEquals(0x12345678, result.readInt())
+        assertEquals(0x9ABCDEF0.toInt(), result.readInt())
+        processor.release()
+        pool.clear()
+    }
+
+    @Test
+    fun `StreamProcessor readBufferScoped exact size with FfmBuffer does not throw`() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+        val buffer = createFfmBuffer(8)
+        buffer.writeInt(0x12345678)
+        buffer.writeInt(0x9ABCDEF0.toInt())
+        buffer.resetForRead()
+        processor.append(buffer)
+        val (a, b) = processor.readBufferScoped(8) { buf ->
+            Pair(buf.readInt(), buf.readInt())
+        }
+        assertEquals(0x12345678, a)
+        assertEquals(0x9ABCDEF0.toInt(), b)
+        processor.release()
+        pool.clear()
+    }
 }

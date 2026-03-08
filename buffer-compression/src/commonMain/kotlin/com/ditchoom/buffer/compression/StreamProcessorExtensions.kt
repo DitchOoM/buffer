@@ -182,6 +182,8 @@ internal class SuspendingDecompressingStreamProcessor(
 
     override suspend fun readBuffer(size: Int): ReadBuffer = inner.readBuffer(size)
 
+    override suspend fun <T> readBufferScoped(size: Int, block: (ReadBuffer) -> T): T = inner.readBufferScoped(size, block)
+
     override suspend fun skip(count: Int) = inner.skip(count)
 
     override fun release() {
