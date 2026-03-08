@@ -13,7 +13,7 @@ class PlatformInteropDocTests {
 
     @Test
     fun toByteArrayBasicUsage() {
-        val buffer = PlatformBuffer.allocate(100)
+        val buffer = BufferFactory.managed().allocate(100)
         buffer.writeInt(42)
         buffer.writeString("Hello")
         buffer.resetForRead()
@@ -31,7 +31,7 @@ class PlatformInteropDocTests {
 
     @Test
     fun positionInvarianceExample() {
-        val buffer = PlatformBuffer.allocate(100)
+        val buffer = BufferFactory.managed().allocate(100)
         buffer.writeInt(1)
         buffer.writeInt(2)
         buffer.writeInt(3)
@@ -62,7 +62,7 @@ class PlatformInteropDocTests {
 
     @Test
     fun toNativeDataBasicUsage() {
-        val buffer = PlatformBuffer.allocate(100)
+        val buffer = BufferFactory.managed().allocate(100)
         val data = byteArrayOf(1, 2, 3, 4, 5)
         buffer.writeBytes(data)
         buffer.resetForRead()
@@ -80,7 +80,7 @@ class PlatformInteropDocTests {
 
     @Test
     fun toMutableNativeDataBasicUsage() {
-        val buffer = PlatformBuffer.allocate(100)
+        val buffer = BufferFactory.managed().allocate(100)
         val data = byteArrayOf(1, 2, 3, 4, 5)
         buffer.writeBytes(data)
         buffer.resetForRead()
@@ -98,7 +98,7 @@ class PlatformInteropDocTests {
 
     @Test
     fun toByteArrayOnPartialBuffer() {
-        val buffer = PlatformBuffer.allocate(100)
+        val buffer = BufferFactory.managed().allocate(100)
         buffer.writeInt(1)
         buffer.writeInt(2)
         buffer.writeInt(3)
@@ -123,7 +123,7 @@ class PlatformInteropDocTests {
 
     @Test
     fun toNativeDataOnPartialBuffer() {
-        val buffer = PlatformBuffer.allocate(100)
+        val buffer = BufferFactory.managed().allocate(100)
         buffer.writeInt(1)
         buffer.writeInt(2)
         buffer.writeInt(3)
@@ -142,7 +142,7 @@ class PlatformInteropDocTests {
 
     @Test
     fun toMutableNativeDataOnPartialBuffer() {
-        val buffer = PlatformBuffer.allocate(100)
+        val buffer = BufferFactory.managed().allocate(100)
         buffer.writeInt(1)
         buffer.writeInt(2)
         buffer.writeInt(3)
@@ -165,7 +165,7 @@ class PlatformInteropDocTests {
     fun wrapByteArrayRoundTrip() {
         // Wrap existing byte array (no copy)
         val data = byteArrayOf(0, 0, 0, 42)
-        val buffer = PlatformBuffer.wrap(data)
+        val buffer = BufferFactory.Default.wrap(data)
 
         val value = buffer.readInt() // 42 (big-endian)
         assertEquals(42, value)
@@ -175,12 +175,12 @@ class PlatformInteropDocTests {
     fun wrapByteArrayWithByteOrder() {
         // Big-endian: 0x0000002A = 42
         val bigEndianData = byteArrayOf(0, 0, 0, 42)
-        val bigEndian = PlatformBuffer.wrap(bigEndianData, ByteOrder.BIG_ENDIAN)
+        val bigEndian = BufferFactory.Default.wrap(bigEndianData, ByteOrder.BIG_ENDIAN)
         assertEquals(42, bigEndian.readInt())
 
         // Little-endian: 0x2A000000
         val littleEndianData = byteArrayOf(42, 0, 0, 0)
-        val littleEndian = PlatformBuffer.wrap(littleEndianData, ByteOrder.LITTLE_ENDIAN)
+        val littleEndian = BufferFactory.Default.wrap(littleEndianData, ByteOrder.LITTLE_ENDIAN)
         assertEquals(42, littleEndian.readInt())
     }
 
@@ -188,7 +188,7 @@ class PlatformInteropDocTests {
 
     @Test
     fun multipleConversionsDontAffectBuffer() {
-        val buffer = PlatformBuffer.allocate(100)
+        val buffer = BufferFactory.managed().allocate(100)
         buffer.writeInt(42)
         buffer.writeString("Hello")
         buffer.resetForRead()
@@ -216,7 +216,7 @@ class PlatformInteropDocTests {
 
     @Test
     fun emptyBufferConversions() {
-        val buffer = PlatformBuffer.allocate(100)
+        val buffer = BufferFactory.managed().allocate(100)
         buffer.resetForRead() // position=0, limit=0
 
         val bytes = buffer.toByteArray()
@@ -231,7 +231,7 @@ class PlatformInteropDocTests {
 
     @Test
     fun directAllocationConversions() {
-        val buffer = PlatformBuffer.allocate(100, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(100)
         buffer.writeInt(42)
         buffer.resetForRead()
 
@@ -246,7 +246,7 @@ class PlatformInteropDocTests {
 
     @Test
     fun heapAllocationConversions() {
-        val buffer = PlatformBuffer.allocate(100, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(100)
         buffer.writeInt(42)
         buffer.resetForRead()
 

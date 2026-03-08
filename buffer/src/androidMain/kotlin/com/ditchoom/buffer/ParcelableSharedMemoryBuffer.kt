@@ -31,7 +31,7 @@ class ParcelableSharedMemoryBuffer(
         dest.writeInt(buffer.limit())
     }
 
-    override suspend fun close() {
+    override fun close() {
         super.close()
         sharedMemory.close()
     }

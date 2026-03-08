@@ -1,7 +1,6 @@
 package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.toReadBuffer
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test

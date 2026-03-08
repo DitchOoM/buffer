@@ -11,7 +11,7 @@ import kotlin.test.assertTrue
 class WasmPlatformInteropDocTests {
     @Test
     fun toNativeDataReturnsLinearBuffer() {
-        val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(1024)
         val data = byteArrayOf(1, 2, 3, 4, 5)
         buffer.writeBytes(data)
         buffer.resetForRead()
@@ -26,7 +26,7 @@ class WasmPlatformInteropDocTests {
 
     @Test
     fun toMutableNativeDataReturnsLinearBuffer() {
-        val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(1024)
         val data = byteArrayOf(1, 2, 3, 4, 5)
         buffer.writeBytes(data)
         buffer.resetForRead()
@@ -41,7 +41,7 @@ class WasmPlatformInteropDocTests {
 
     @Test
     fun linearBufferBaseOffset() {
-        val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct) as LinearBuffer
+        val buffer = BufferFactory.Default.allocate(1024) as LinearBuffer
         buffer.writeInt(42)
         buffer.writeString("Hello from WASM")
         buffer.resetForRead()
@@ -55,7 +55,7 @@ class WasmPlatformInteropDocTests {
 
     @Test
     fun zeroCopyForLinearBuffer() {
-        val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct) as LinearBuffer
+        val buffer = BufferFactory.Default.allocate(1024) as LinearBuffer
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
 
@@ -69,7 +69,7 @@ class WasmPlatformInteropDocTests {
     @Test
     fun byteArrayBufferConversion() {
         // ByteArrayBuffer (Heap) must copy to LinearBuffer
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
 
@@ -79,7 +79,7 @@ class WasmPlatformInteropDocTests {
 
     @Test
     fun positionInvarianceForLinearBuffer() {
-        val buffer = PlatformBuffer.allocate(100, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(100)
         buffer.writeInt(1)
         buffer.writeInt(2)
         buffer.writeInt(3)
@@ -99,7 +99,7 @@ class WasmPlatformInteropDocTests {
 
     @Test
     fun positionInvarianceForMutableLinearBuffer() {
-        val buffer = PlatformBuffer.allocate(100, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(100)
         buffer.writeInt(1)
         buffer.writeInt(2)
         buffer.writeInt(3)
@@ -119,7 +119,7 @@ class WasmPlatformInteropDocTests {
 
     @Test
     fun partialBufferConversion() {
-        val buffer = PlatformBuffer.allocate(100, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(100)
         buffer.writeInt(1)
         buffer.writeInt(2)
         buffer.writeInt(3)

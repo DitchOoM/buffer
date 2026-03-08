@@ -9,11 +9,11 @@ Buffer on Kotlin/Native Linux uses native memory allocation (malloc/free) for ze
 
 ## Implementation
 
-| Zone | Linux Type | Use Case |
-|------|------------|----------|
-| `Heap` | `ByteArrayBuffer` | Managed memory, GC-friendly |
-| `Direct` | `NativeBuffer` | Zero-copy I/O, io_uring, FFI |
-| `SharedMemory` | `NativeBuffer` | Same as Direct |
+| Factory | Linux Type | Use Case |
+|---------|------------|----------|
+| `managed()` | `ByteArrayBuffer` | Managed memory, GC-friendly |
+| `Default` | `NativeBuffer` | Zero-copy I/O, io_uring, FFI |
+| `shared()` | `NativeBuffer` | Same as Default |
 
 ## NativeBuffer: Native Memory
 
@@ -22,7 +22,7 @@ Buffer on Kotlin/Native Linux uses native memory allocation (malloc/free) for ze
 - **Zero-copy I/O**: Memory can be passed directly to io_uring, epoll, or other system calls
 - **No GC pressure**: Memory is not tracked by Kotlin/Native garbage collector
 - **No pinning required**: Unlike `ByteArray`, no need to pin memory for native calls
-- **Explicit cleanup**: Must be closed to free memory (or use `ScopedBuffer`)
+- **Explicit cleanup**: Must be closed to free memory (or use `.use {}` extension)
 
 ### Memory Access
 
@@ -59,13 +59,12 @@ val header = buffer.readInt()
 buffer.close()
 ```
 
-## ScopedBuffer for Deterministic Cleanup
+## Deterministic Cleanup
 
-For automatic memory management, use `ScopedBuffer`:
+For automatic memory management, use the `.use {}` extension:
 
 ```kotlin
-withScope { scope ->
-    val buffer = scope.allocate(65536)
+BufferFactory.Default.allocate(65536).use { buffer ->
     val ptr = buffer.nativeAddress.toCPointer<ByteVar>()!!
 
     // Use with io_uring...
@@ -84,7 +83,7 @@ For workloads that don't need native memory access, `ByteArrayBuffer` provides G
 
 ```kotlin
 // Explicitly request heap allocation
-val buffer = PlatformBuffer.allocate(1024, AllocationZone.Heap)
+val buffer = BufferFactory.managed().allocate(1024)
 
 // Or wrap existing ByteArray
 val wrapped = PlatformBuffer.wrap(existingByteArray)
@@ -159,7 +158,7 @@ See [Platform Interop](../recipes/platform-interop) for more details.
 ## Best Practices
 
 1. **Use Direct for I/O** - `NativeBuffer` avoids copies to/from kernel space
-2. **Use ScopedBuffer** - Ensures memory is freed even on exceptions
+2. **Use `.use {}` extension** - Ensures memory is freed even on exceptions
 3. **Pool buffers** - Reuse `NativeBuffer` instances to reduce malloc/free overhead
 4. **Close explicitly** - If not using scopes, always close `NativeBuffer` when done
 5. **Use Heap for short-lived data** - `ByteArrayBuffer` is simpler when native access isn't needed

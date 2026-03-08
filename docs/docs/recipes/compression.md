@@ -457,10 +457,10 @@ SuspendingStreamingCompressor.create(
     allocator = BufferAllocator.Heap
 )
 
-// Use a specific zone
+// Use heap allocation
 SuspendingStreamingCompressor.create(
     algorithm = CompressionAlgorithm.Gzip,
-    allocator = BufferAllocator.FromZone(AllocationZone.SharedMemory)
+    allocator = BufferAllocator.Heap
 )
 ```
 

@@ -1,10 +1,8 @@
 package com.ditchoom.buffer.pool
 
-import com.ditchoom.buffer.AllocationZone
-import com.ditchoom.buffer.ByteOrder
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
-import com.ditchoom.buffer.allocate
 
 /**
  * Fast buffer pool implementation optimized for single-threaded access.
@@ -15,8 +13,7 @@ import com.ditchoom.buffer.allocate
 internal class SingleThreadedBufferPool(
     private val maxPoolSize: Int,
     private val defaultBufferSize: Int,
-    private val byteOrder: ByteOrder,
-    private val allocationZone: AllocationZone,
+    private val factory: BufferFactory,
 ) : BufferPool {
     private val pool = ArrayDeque<PlatformBuffer>(maxPoolSize)
 
@@ -38,27 +35,31 @@ internal class SingleThreadedBufferPool(
                 buffer
             } else {
                 poolMisses++
-                PlatformBuffer.allocate(size, allocationZone, byteOrder)
+                factory.allocate(size)
             }
         return PooledBuffer(raw, this)
     }
 
     override fun release(buffer: ReadWriteBuffer) {
-        // Unwrap PooledBuffer to store the raw PlatformBuffer in the pool
-        val platformBuffer =
+        val raw =
             when (buffer) {
-                is PooledBuffer -> buffer.inner
+                is PooledBuffer -> {
+                    require(buffer.pool === this) {
+                        "Cannot release a buffer to a different pool than the one it was acquired from"
+                    }
+                    buffer.inner
+                }
                 is PlatformBuffer -> buffer
                 else -> return
             }
 
         if (pool.size < maxPoolSize) {
-            pool.addLast(platformBuffer)
+            pool.addLast(raw)
             if (pool.size > peakPoolSize) {
                 peakPoolSize = pool.size
             }
         } else {
-            platformBuffer.freeNativeMemory()
+            raw.freeNativeMemory()
         }
     }
 

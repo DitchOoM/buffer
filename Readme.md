@@ -123,20 +123,17 @@ bufferFlow
     .collect { line -> process(line) }
 ```
 
-## Scoped Buffers
+## Deterministic Memory
 
-For FFI/JNI interop or deterministic memory management:
+For explicit memory management without relying on GC:
 
 ```kotlin
-withScope { scope ->
-    val buffer = scope.allocate(8192)
+BufferFactory.Deterministic.allocate(8192).use { buffer ->
     buffer.writeInt(42)
     buffer.writeString("Hello")
     buffer.resetForRead()
-
-    // Native address available for FFI/JNI
-    val address = buffer.nativeAddress
-} // Memory freed immediately when scope closes
+    // Use buffer...
+} // Memory freed immediately
 ```
 
 ## Platform Implementations

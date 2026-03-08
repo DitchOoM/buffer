@@ -254,7 +254,7 @@ private class JvmStreamingStringDecoder(
         pendingCount = 0
     }
 
-    override suspend fun close() {
+    override fun close() {
         // Nothing to close - decoder and charBuffer are managed by GC
     }
 

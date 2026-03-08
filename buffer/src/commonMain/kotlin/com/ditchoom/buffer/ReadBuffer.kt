@@ -37,7 +37,7 @@ package com.ditchoom.buffer
  * ## Example Usage
  *
  * ```kotlin
- * val buffer = PlatformBuffer.allocate(100)
+ * val buffer = BufferFactory.Default.allocate(100)
  * buffer.writeInt(42)
  * buffer.writeString("Hello")
  * buffer.resetForRead()
@@ -359,7 +359,7 @@ interface ReadBuffer : PositionBuffer {
         private const val CR: Byte = '\r'.code.toByte()
         private const val LF: Byte = '\n'.code.toByte()
         val newLine = "\r\n".encodeToByteArray()
-        val EMPTY_BUFFER = PlatformBuffer.allocate(0)
+        val EMPTY_BUFFER = BufferFactory.Default.allocate(0)
     }
 
     /**
@@ -664,7 +664,7 @@ interface ReadBuffer : PositionBuffer {
         if (text.isEmpty()) return 0
 
         // Encode the string to bytes
-        val needle = PlatformBuffer.allocate(text.length * 4) // Max 4 bytes per char in UTF-8
+        val needle = BufferFactory.Default.allocate(text.length * 4) // Max 4 bytes per char in UTF-8
         needle.writeString(text, charset)
         needle.resetForRead()
 
@@ -841,7 +841,10 @@ interface ReadBuffer : PositionBuffer {
  */
 @Suppress("DEPRECATION")
 fun ReadBuffer.unwrapFully(): ReadBuffer {
-    if (this is PlatformBuffer) return unwrap()
+    if (this is PlatformBuffer) {
+        val unwrapped = unwrap()
+        return if (unwrapped !== this) unwrapped.unwrapFully() else this
+    }
     if (this is com.ditchoom.buffer.pool.TrackedSlice) return inner.unwrapFully()
     return this
 }

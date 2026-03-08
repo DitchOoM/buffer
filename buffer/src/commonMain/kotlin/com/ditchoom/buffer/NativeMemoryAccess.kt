@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package com.ditchoom.buffer
 
 /**
@@ -11,7 +13,7 @@ package com.ditchoom.buffer
  *
  * Example usage:
  * ```kotlin
- * val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+ * val buffer = BufferFactory.Default.allocate(1024)
  * buffer.nativeMemoryAccess?.let { native ->
  *     val address = native.nativeAddress
  *     val size = native.nativeSize
@@ -45,10 +47,11 @@ interface NativeMemoryAccess {
  * or null if it doesn't (e.g., heap-allocated buffers).
  *
  * This is useful for checking if a buffer can be passed to native code without copying.
+ * Unwraps pooled buffers and TrackedSlice wrappers to reach the underlying platform buffer.
  *
  * Example:
  * ```kotlin
- * val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+ * val buffer = BufferFactory.Default.allocate(1024)
  * buffer.nativeMemoryAccess?.let { native ->
  *     // Buffer supports native access
  *     passToNativeCode(native.nativeAddress, native.nativeSize)
@@ -57,19 +60,10 @@ interface NativeMemoryAccess {
  * }
  * ```
  */
-val PlatformBuffer.nativeMemoryAccess: NativeMemoryAccess?
-    get() = unwrap() as? NativeMemoryAccess
-
-/**
- * Extension for ReadBuffer to access native memory if available.
- * Unwraps pooled buffers and TrackedSlice wrappers to reach the underlying platform buffer.
- */
 val ReadBuffer.nativeMemoryAccess: NativeMemoryAccess?
     get() {
         if (this is NativeMemoryAccess) return this
-        if (this is PlatformBuffer) return unwrap() as? NativeMemoryAccess
-        if (this is com.ditchoom.buffer.pool.TrackedSlice) return inner.nativeMemoryAccess
-        return null
+        return unwrapFully() as? NativeMemoryAccess
     }
 
 /**
@@ -79,18 +73,36 @@ val ReadBuffer.nativeMemoryAccess: NativeMemoryAccess?
 val WriteBuffer.nativeMemoryAccess: NativeMemoryAccess?
     get() {
         if (this is NativeMemoryAccess) return this
-        if (this is PlatformBuffer) return unwrap() as? NativeMemoryAccess
+        if (this is ReadBuffer) return unwrapFully() as? NativeMemoryAccess
         return null
+    }
+
+/**
+ * Extension for PlatformBuffer to access native memory if available.
+ * Resolves ambiguity between ReadBuffer and WriteBuffer extensions.
+ */
+val PlatformBuffer.nativeMemoryAccess: NativeMemoryAccess?
+    get() {
+        if (this is NativeMemoryAccess) return this
+        return unwrapFully() as? NativeMemoryAccess
     }
 
 /**
  * Allocates a buffer with guaranteed native memory access.
  *
- * This is equivalent to `PlatformBuffer.allocate(size, AllocationZone.Direct)` but
+ * This is equivalent to `BufferFactory.Default.allocate(size)` but
  * makes the intent explicit and throws on platforms that don't support native memory.
  *
  * @throws UnsupportedOperationException on platforms without native memory support
  */
+@Deprecated(
+    "Use BufferFactory.Default.allocate(size) with .requiring<NativeMemoryAccess>() instead",
+    ReplaceWith(
+        "BufferFactory.Default.requiring<NativeMemoryAccess>().allocate(size, byteOrder)",
+        "com.ditchoom.buffer.BufferFactory",
+        "com.ditchoom.buffer.requiring",
+    ),
+)
 expect fun PlatformBuffer.Companion.allocateNative(
     size: Int,
     byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
@@ -106,7 +118,7 @@ expect fun PlatformBuffer.Companion.allocateNative(
  *
  * Example usage:
  * ```kotlin
- * val buffer = PlatformBuffer.allocate(1024, AllocationZone.Heap)
+ * val buffer = BufferFactory.managed().allocate(1024)
  * buffer.managedMemoryAccess?.let { managed ->
  *     val array = managed.backingArray
  *     val offset = managed.arrayOffset
@@ -134,29 +146,21 @@ interface ManagedMemoryAccess {
 /**
  * Returns this buffer's [ManagedMemoryAccess] if it's backed by a Kotlin ByteArray,
  * or null if it uses native memory (e.g., direct buffers, linear memory).
+ * Unwraps pooled buffers and TrackedSlice wrappers to reach the underlying platform buffer.
  *
  * Example:
  * ```kotlin
- * val buffer = PlatformBuffer.wrap(byteArrayOf(1, 2, 3))
+ * val buffer = BufferFactory.Default.wrap(byteArrayOf(1, 2, 3))
  * buffer.managedMemoryAccess?.let { managed ->
  *     // Direct access to backing array
  *     managed.backingArray[managed.arrayOffset] = 42
  * }
  * ```
  */
-val PlatformBuffer.managedMemoryAccess: ManagedMemoryAccess?
-    get() = unwrap() as? ManagedMemoryAccess
-
-/**
- * Extension for ReadBuffer to access managed memory if available.
- * Unwraps pooled buffers and TrackedSlice wrappers to reach the underlying platform buffer.
- */
 val ReadBuffer.managedMemoryAccess: ManagedMemoryAccess?
     get() {
         if (this is ManagedMemoryAccess) return this
-        if (this is PlatformBuffer) return unwrap() as? ManagedMemoryAccess
-        if (this is com.ditchoom.buffer.pool.TrackedSlice) return inner.managedMemoryAccess
-        return null
+        return unwrapFully() as? ManagedMemoryAccess
     }
 
 /**
@@ -166,8 +170,18 @@ val ReadBuffer.managedMemoryAccess: ManagedMemoryAccess?
 val WriteBuffer.managedMemoryAccess: ManagedMemoryAccess?
     get() {
         if (this is ManagedMemoryAccess) return this
-        if (this is PlatformBuffer) return unwrap() as? ManagedMemoryAccess
+        if (this is ReadBuffer) return unwrapFully() as? ManagedMemoryAccess
         return null
+    }
+
+/**
+ * Extension for PlatformBuffer to access managed memory if available.
+ * Resolves ambiguity between ReadBuffer and WriteBuffer extensions.
+ */
+val PlatformBuffer.managedMemoryAccess: ManagedMemoryAccess?
+    get() {
+        if (this is ManagedMemoryAccess) return this
+        return unwrapFully() as? ManagedMemoryAccess
     }
 
 /**
@@ -181,7 +195,7 @@ val WriteBuffer.managedMemoryAccess: ManagedMemoryAccess?
  *
  * Example usage:
  * ```kotlin
- * val buffer = PlatformBuffer.allocateShared(1024)
+ * val buffer = BufferFactory.shared().allocate(1024)
  * if (buffer.sharedMemoryAccess?.isShared == true) {
  *     // Buffer can be shared across processes/workers
  * }
@@ -208,8 +222,11 @@ interface SharedMemoryAccess {
  * Note: Even if non-null, check [SharedMemoryAccess.isShared] to verify if the buffer
  * is actually backed by shared memory (allocation may have fallen back to direct).
  */
-val PlatformBuffer.sharedMemoryAccess: SharedMemoryAccess?
-    get() = this as? SharedMemoryAccess
+val ReadBuffer.sharedMemoryAccess: SharedMemoryAccess?
+    get() {
+        if (this is SharedMemoryAccess) return this
+        return unwrapFully() as? SharedMemoryAccess
+    }
 
 /**
  * Allocates a buffer with shared memory if supported by the platform.
@@ -225,6 +242,14 @@ val PlatformBuffer.sharedMemoryAccess: SharedMemoryAccess?
  * @param byteOrder The byte order for multi-byte operations
  * @return A buffer that may or may not be backed by shared memory
  */
+@Deprecated(
+    "Use BufferFactory.shared().allocate(size) instead",
+    ReplaceWith(
+        "BufferFactory.shared().allocate(size, byteOrder)",
+        "com.ditchoom.buffer.BufferFactory",
+        "com.ditchoom.buffer.shared",
+    ),
+)
 expect fun PlatformBuffer.Companion.allocateShared(
     size: Int,
     byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
@@ -239,37 +264,37 @@ expect fun PlatformBuffer.Companion.allocateShared(
 //
 // **JVM/Android** - Get `java.nio.ByteBuffer`:
 // ```kotlin
-// val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
-// val byteBuffer: ByteBuffer = (buffer as BaseJvmBuffer).byteBuffer
+// val buffer = BufferFactory.Default.allocate(1024)
+// val byteBuffer: ByteBuffer = (buffer.unwrapFully() as BaseJvmBuffer).byteBuffer
 // // Use with NIO channels, memory-mapped files, etc.
 // ```
 //
 // **Apple (iOS/macOS)** - Get `NSMutableData`:
 // ```kotlin
-// val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
-// val nsData: NSMutableData = (buffer as MutableDataBuffer).data
+// val buffer = BufferFactory.Default.allocate(1024)
+// val nsData: NSMutableData = (buffer.unwrapFully() as MutableDataBuffer).data
 // // Use with Foundation APIs, file I/O, etc.
 // ```
 //
 // **JavaScript** - Get `Int8Array`:
 // ```kotlin
-// val buffer = PlatformBuffer.allocate(1024)
-// val int8Array: Int8Array = (buffer as JsBuffer).buffer
+// val buffer = BufferFactory.Default.allocate(1024)
+// val int8Array: Int8Array = (buffer.unwrapFully() as JsBuffer).buffer
 // // Use with WebGL, fetch, WebSockets, etc.
 // ```
 //
 // **WASM** - Get linear memory offset for JS interop:
 // ```kotlin
-// val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
-// val linearBuffer = buffer as LinearBuffer
+// val buffer = BufferFactory.Default.allocate(1024)
+// val linearBuffer = buffer.unwrapFully() as LinearBuffer
 // val offset = linearBuffer.baseOffset + linearBuffer.position()
 // // Create JS DataView: new DataView(wasmExports.memory.buffer, offset, size)
 // ```
 //
-// **Linux** - No native buffer (only ByteArrayBuffer with managed memory):
+// **Linux** - Get native buffer:
 // ```kotlin
-// val buffer = PlatformBuffer.allocate(1024)
-// val byteArray: ByteArray = (buffer as ByteArrayBuffer).backingArray
+// val buffer = BufferFactory.Default.allocate(1024)
+// val nativeBuffer = buffer.unwrapFully() as NativeBuffer
 // ```
 //
 // For pointer-based interop (FFI, JNI, C interop), use [NativeMemoryAccess]:

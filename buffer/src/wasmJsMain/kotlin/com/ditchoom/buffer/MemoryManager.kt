@@ -154,7 +154,7 @@ object LinearMemoryAllocator {
         if (nextOffset + aligned > heapEnd) {
             throw OutOfMemoryError(
                 "LinearBuffer allocation exceeded ${LinearMemoryConfig.initialSizeMB}MB pre-allocated memory. " +
-                    "Use AllocationZone.Heap for high-frequency allocations, " +
+                    "Use BufferFactory.managed() for high-frequency allocations, " +
                     "or call LinearMemoryAllocator.configure(initialSizeMB = N) at startup with a larger value.",
             )
         }

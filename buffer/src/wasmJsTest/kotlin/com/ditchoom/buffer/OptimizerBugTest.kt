@@ -83,7 +83,7 @@ class OptimizerBugTest {
     @Test
     fun testFullCycle() {
         repeat(1000) { i ->
-            val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+            val buffer = BufferFactory.Default.allocate(1024)
             buffer.writeInt(i)
             buffer.resetForRead()
             assertEquals(i, buffer.readInt())
@@ -94,8 +94,8 @@ class OptimizerBugTest {
     @Test
     fun testWhenExpression() {
         repeat(10000) {
-            val zone: AllocationZone = if (it % 2 == 0) AllocationZone.Direct else AllocationZone.Heap
-            val buffer = PlatformBuffer.allocate(64, zone)
+            val factory: BufferFactory = if (it % 2 == 0) BufferFactory.Default else BufferFactory.managed()
+            val buffer = factory.allocate(64)
             buffer.writeByte(1)
         }
     }

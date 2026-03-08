@@ -17,7 +17,7 @@ package com.ditchoom.buffer
  *
  * Example usage:
  * ```kotlin
- * val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+ * val buffer = BufferFactory.Default.allocate(1024)
  * val address = buffer.nativeMemoryAccess!!.nativeAddress
  *
  * // Fast header parsing without ByteBuffer overhead

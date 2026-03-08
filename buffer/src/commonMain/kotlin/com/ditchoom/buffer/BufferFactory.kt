@@ -2,34 +2,17 @@ package com.ditchoom.buffer
 
 import kotlin.math.roundToInt
 
-expect fun PlatformBuffer.Companion.allocate(
-    size: Int,
-    zone: AllocationZone = AllocationZone.Heap,
-    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-): PlatformBuffer
-
-expect fun PlatformBuffer.Companion.wrap(
-    array: ByteArray,
-    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-): PlatformBuffer
-
-@Deprecated(
-    "Use toReadBuffer instead",
-    ReplaceWith("toReadBuffer(Charset.UTF8, zone)", "com.ditchoom.buffer.Charset"),
-)
-fun String.toBuffer(zone: AllocationZone = AllocationZone.Heap): ReadBuffer = toReadBuffer(Charset.UTF8, zone)
-
 fun CharSequence.maxBufferSize(charset: Charset): Int = (charset.maxBytesPerChar * this.length).roundToInt()
 
 fun String.toReadBuffer(
     charset: Charset = Charset.UTF8,
-    zone: AllocationZone = AllocationZone.Heap,
+    factory: BufferFactory = BufferFactory.Default,
 ): ReadBuffer {
     if (this == "") {
         return ReadBuffer.EMPTY_BUFFER
     }
     val maxBytes = maxBufferSize(charset)
-    val buffer = PlatformBuffer.allocate(maxBytes, zone)
+    val buffer = factory.allocate(maxBytes)
     buffer.writeString(this, charset)
     buffer.resetForRead()
     return buffer.slice()

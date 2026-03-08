@@ -169,7 +169,7 @@ private class WasmJsStreamingStringDecoder(
         }
     }
 
-    override suspend fun close() {
+    override fun close() {
         // Nothing to close - decoder is GC'd
     }
 

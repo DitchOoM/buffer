@@ -1,0 +1,2 @@
+com.ditchoom.buffer.codec.test.spi.VariableByteIntegerProvider
+com.ditchoom.buffer.codec.test.spi.PropertyBagProvider

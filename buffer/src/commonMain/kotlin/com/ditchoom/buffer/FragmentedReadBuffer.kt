@@ -4,7 +4,15 @@ package com.ditchoom.buffer
  * Provides a single ReadBuffer interface that delegates to multiple buffers.
  * While reading from a buffer sometimes you might need more data to complete the decoding operation. This class will
  * handle reading from multiple fragmented buffers in memory and provide a simple read api.
+ *
+ * @deprecated Use [com.ditchoom.buffer.stream.StreamProcessor] instead. FragmentedReadBuffer has O(n²) copying
+ * for spanning reads and bugs in [get] (ignores the index parameter). StreamProcessor handles fragmented
+ * data correctly with O(1) amortized reads.
  */
+@Deprecated(
+    message = "Use StreamProcessor instead. FragmentedReadBuffer has O(n²) copying and bugs in get(index).",
+    replaceWith = ReplaceWith("StreamProcessor.create(pool)", "com.ditchoom.buffer.stream.StreamProcessor"),
+)
 class FragmentedReadBuffer(
     private val first: ReadBuffer,
     private val second: ReadBuffer,
@@ -65,7 +73,7 @@ class FragmentedReadBuffer(
                 val secondChunkSize = size - firstChunkSize
                 val secondBufferLimit = second.limit()
                 second.setLimit(second.position() + secondChunkSize)
-                val buffer = PlatformBuffer.allocate(size)
+                val buffer = BufferFactory.managed().allocate(size)
                 buffer.write(first)
                 buffer.write(second)
                 second.setLimit(secondBufferLimit)
@@ -86,7 +94,7 @@ class FragmentedReadBuffer(
         }
         val first = first.slice()
         val second = second.slice()
-        val buffer = PlatformBuffer.allocate(first.limit() + second.limit())
+        val buffer = BufferFactory.managed().allocate(first.limit() + second.limit())
         buffer.write(first)
         buffer.write(second)
         buffer.resetForRead()
@@ -142,11 +150,11 @@ class FragmentedReadBuffer(
         }
     }
 
-    fun toSingleBuffer(zone: AllocationZone = AllocationZone.Heap): PlatformBuffer {
+    fun toSingleBuffer(factory: BufferFactory = BufferFactory.managed()): PlatformBuffer {
         val firstLimit = firstInitialLimit
         val secondLimit = secondInitialLimit
         val initialPosition = position()
-        val buffer = PlatformBuffer.allocate(firstLimit + secondLimit - initialPosition, zone)
+        val buffer = factory.allocate(firstLimit + secondLimit - initialPosition)
         walk {
             buffer.write(it)
         }
@@ -168,6 +176,10 @@ class FragmentedReadBuffer(
     }
 }
 
+@Deprecated(
+    message = "Use StreamProcessor instead of FragmentedReadBuffer.",
+    replaceWith = ReplaceWith("StreamProcessor.create(pool)", "com.ditchoom.buffer.stream.StreamProcessor"),
+)
 fun List<ReadBuffer>.toComposableBuffer(): ReadBuffer {
     if (isEmpty()) {
         return ReadBuffer.EMPTY_BUFFER

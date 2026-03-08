@@ -53,12 +53,14 @@ import platform.posix.memset
  * return buffer // caller is responsible for closing
  * ```
  */
+@Suppress("DEPRECATION")
 class NativeBuffer private constructor(
     private val ptr: CPointer<ByteVar>,
     override val capacity: Int,
     override val byteOrder: ByteOrder,
 ) : PlatformBuffer,
-    NativeMemoryAccess {
+    NativeMemoryAccess,
+    CloseableBuffer {
     private var positionValue: Int = 0
     private var limitValue: Int = capacity
     private var closed: Boolean = false
@@ -544,6 +546,8 @@ class NativeBuffer private constructor(
         ).toInt()
     }
 
+    override val isFreed: Boolean get() = closed
+
     override fun freeNativeMemory() {
         if (!closed) {
             closed = true
@@ -551,7 +555,7 @@ class NativeBuffer private constructor(
         }
     }
 
-    override suspend fun close() = freeNativeMemory()
+    fun close() = freeNativeMemory()
 
     fun isClosed(): Boolean = closed
 }

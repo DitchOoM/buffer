@@ -37,14 +37,14 @@ class AndroidBufferBenchmark {
     @Test
     fun allocateHeap() {
         benchmarkRule.measureRepeated {
-            BlackHole.consume(PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap))
+            BlackHole.consume(BufferFactory.managed().allocate(smallBufferSize))
         }
     }
 
     @Test
     fun allocateDirect() {
         benchmarkRule.measureRepeated {
-            BlackHole.consume(PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct))
+            BlackHole.consume(BufferFactory.Default.allocate(smallBufferSize))
         }
     }
 
@@ -52,7 +52,7 @@ class AndroidBufferBenchmark {
 
     @Test
     fun readWriteIntHeap() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(smallBufferSize)
         benchmarkRule.measureRepeated {
             buffer.resetForWrite()
             repeat(smallBufferSize / 4) { buffer.writeInt(it) }
@@ -65,7 +65,7 @@ class AndroidBufferBenchmark {
 
     @Test
     fun readWriteIntDirect() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(smallBufferSize)
         benchmarkRule.measureRepeated {
             buffer.resetForWrite()
             repeat(smallBufferSize / 4) { buffer.writeInt(it) }
@@ -80,10 +80,10 @@ class AndroidBufferBenchmark {
 
     @Test
     fun bulkOperationsHeap() {
-        val sourceBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        val sourceBuffer = BufferFactory.Default.allocate(smallBufferSize)
         sourceBuffer.writeBytes(ByteArray(smallBufferSize) { it.toByte() })
         sourceBuffer.resetForRead()
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(smallBufferSize)
         benchmarkRule.measureRepeated {
             sourceBuffer.position(0)
             buffer.resetForWrite()
@@ -95,10 +95,10 @@ class AndroidBufferBenchmark {
 
     @Test
     fun bulkOperationsDirect() {
-        val sourceBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        val sourceBuffer = BufferFactory.Default.allocate(smallBufferSize)
         sourceBuffer.writeBytes(ByteArray(smallBufferSize) { it.toByte() })
         sourceBuffer.resetForRead()
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(smallBufferSize)
         benchmarkRule.measureRepeated {
             sourceBuffer.position(0)
             buffer.resetForWrite()
@@ -112,7 +112,7 @@ class AndroidBufferBenchmark {
 
     @Test
     fun largeBufferOperations() {
-        val buffer = PlatformBuffer.allocate(largeBufferSize, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(largeBufferSize)
         benchmarkRule.measureRepeated {
             buffer.resetForWrite()
             repeat(largeBufferSize / 8) { buffer.writeLong(it.toLong()) }
@@ -127,7 +127,7 @@ class AndroidBufferBenchmark {
 
     @Test
     fun mixedOperations() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(smallBufferSize)
         benchmarkRule.measureRepeated {
             buffer.resetForWrite()
             repeat(64) {
@@ -154,7 +154,7 @@ class AndroidBufferBenchmark {
 
     @Test
     fun nativeAddressLookup() {
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(smallBufferSize)
         val directBuffer =
             buffer as? NativeMemoryAccess
                 ?: throw IllegalStateException("Direct buffer should implement NativeMemoryAccess")
@@ -170,7 +170,7 @@ class AndroidBufferBenchmark {
     fun nativeAddressLookupFresh() {
         // Measures fresh address lookup (not cached) by creating new buffers
         benchmarkRule.measureRepeated {
-            val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+            val buffer = BufferFactory.Default.allocate(smallBufferSize)
             val directBuffer = buffer as NativeMemoryAccess
             BlackHole.consume(directBuffer.nativeAddress)
         }
@@ -180,10 +180,10 @@ class AndroidBufferBenchmark {
 
     @Test
     fun sliceBuffer() {
-        val sourceBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        val sourceBuffer = BufferFactory.Default.allocate(smallBufferSize)
         sourceBuffer.writeBytes(ByteArray(smallBufferSize) { it.toByte() })
         sourceBuffer.resetForRead()
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(smallBufferSize)
         benchmarkRule.measureRepeated {
             sourceBuffer.position(0)
             buffer.resetForWrite()

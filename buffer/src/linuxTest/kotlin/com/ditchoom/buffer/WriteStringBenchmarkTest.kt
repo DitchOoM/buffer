@@ -42,21 +42,21 @@ class WriteStringBenchmarkTest {
 
             // Warmup all paths
             repeat(2) {
-                val buf = PlatformBuffer.allocate(size * 3, AllocationZone.Direct) as NativeBuffer
+                val buf = BufferFactory.Default.allocate(size * 3) as NativeBuffer
                 writeStringCurrentLoop(buf, text)
                 buf.freeNativeMemory()
 
-                val buf2 = PlatformBuffer.allocate(size * 3, AllocationZone.Direct) as NativeBuffer
+                val buf2 = BufferFactory.Default.allocate(size * 3) as NativeBuffer
                 writeStringEncodeToByteArray(buf2, text)
                 buf2.freeNativeMemory()
 
-                val buf3 = PlatformBuffer.allocate(size * 3, AllocationZone.Direct) as NativeBuffer
+                val buf3 = BufferFactory.Default.allocate(size * 3) as NativeBuffer
                 writeStringSimdutf(buf3, text)
                 buf3.freeNativeMemory()
             }
 
             // Benchmark 1: Current per-char loop
-            val buf1 = PlatformBuffer.allocate(size * 3, AllocationZone.Direct) as NativeBuffer
+            val buf1 = BufferFactory.Default.allocate(size * 3) as NativeBuffer
             val mark1 = TimeSource.Monotonic.markNow()
             writeStringCurrentLoop(buf1, text)
             val time1 = mark1.elapsedNow()
@@ -64,7 +64,7 @@ class WriteStringBenchmarkTest {
             buf1.freeNativeMemory()
 
             // Benchmark 2: encodeToByteArray + writeBytes
-            val buf2 = PlatformBuffer.allocate(size * 3, AllocationZone.Direct) as NativeBuffer
+            val buf2 = BufferFactory.Default.allocate(size * 3) as NativeBuffer
             val mark2 = TimeSource.Monotonic.markNow()
             writeStringEncodeToByteArray(buf2, text)
             val time2 = mark2.elapsedNow()
@@ -72,7 +72,7 @@ class WriteStringBenchmarkTest {
             buf2.freeNativeMemory()
 
             // Benchmark 3: simdutf (toCharArray + pin + convert)
-            val buf3 = PlatformBuffer.allocate(size * 3, AllocationZone.Direct) as NativeBuffer
+            val buf3 = BufferFactory.Default.allocate(size * 3) as NativeBuffer
             val mark3 = TimeSource.Monotonic.markNow()
             writeStringSimdutf(buf3, text)
             val time3 = mark3.elapsedNow()
@@ -85,7 +85,7 @@ class WriteStringBenchmarkTest {
             val chars = text.toCharArray()
             val toCharArrayTime = mark4a.elapsedNow()
 
-            val buf4 = PlatformBuffer.allocate(size * 3, AllocationZone.Direct) as NativeBuffer
+            val buf4 = BufferFactory.Default.allocate(size * 3) as NativeBuffer
             val mark4b = TimeSource.Monotonic.markNow()
             writeStringSimdutfFromCharArray(buf4, chars)
             val simdutfOnlyTime = mark4b.elapsedNow()
@@ -125,7 +125,7 @@ class WriteStringBenchmarkTest {
         for ((i, text) in testCases.withIndex()) {
             val expected = text.encodeToByteArray()
 
-            val buf = PlatformBuffer.allocate(text.length * 4, AllocationZone.Direct) as NativeBuffer
+            val buf = BufferFactory.Default.allocate(text.length * 4) as NativeBuffer
             writeStringSimdutf(buf, text)
             buf.resetForRead()
             val actual = buf.readByteArray(buf.remaining())

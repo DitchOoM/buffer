@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.stream
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.pool.BufferPool
 
 /**
@@ -28,6 +29,7 @@ import com.ditchoom.buffer.pool.BufferPool
  */
 class StreamProcessorBuilder(
     val pool: BufferPool,
+    val byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
 ) {
     private val transforms = mutableListOf<TransformSpec>()
 
@@ -48,7 +50,7 @@ class StreamProcessorBuilder(
      * @throws UnsupportedOperationException if any transform is async-only
      */
     fun build(): StreamProcessor {
-        var processor = StreamProcessor.create(pool)
+        var processor = StreamProcessor.create(pool, byteOrder)
 
         // Apply transforms in order (first added = outermost)
         for (spec in transforms) {
@@ -63,7 +65,7 @@ class StreamProcessorBuilder(
      * This always works, even with async-only transforms like JS CompressionStream.
      */
     fun buildSuspending(): SuspendingStreamProcessor {
-        var processor: SuspendingStreamProcessor = SyncToSuspendingProcessor(StreamProcessor.create(pool))
+        var processor: SuspendingStreamProcessor = SyncToSuspendingProcessor(StreamProcessor.create(pool, byteOrder))
 
         // Apply transforms in order (first added = outermost)
         for (spec in transforms) {
@@ -103,4 +105,7 @@ class StreamProcessorBuilder(
 /**
  * Creates a StreamProcessorBuilder for composing transforms.
  */
-fun StreamProcessor.Companion.builder(pool: BufferPool): StreamProcessorBuilder = StreamProcessorBuilder(pool)
+fun StreamProcessor.Companion.builder(
+    pool: BufferPool,
+    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
+): StreamProcessorBuilder = StreamProcessorBuilder(pool, byteOrder)

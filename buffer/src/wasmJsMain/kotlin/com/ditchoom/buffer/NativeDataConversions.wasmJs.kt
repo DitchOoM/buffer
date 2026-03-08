@@ -75,14 +75,12 @@ actual fun ReadBuffer.toNativeData(): NativeData {
  * by LinearMemoryAllocator.
  */
 actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData {
-    val unwrapped = unwrap()
-    if (unwrapped !== this) return unwrapped.toMutableNativeData()
+    val unwrapped = unwrapFully()
     return MutableNativeData(
-        when (this) {
+        when (unwrapped) {
             is LinearBuffer -> {
                 // Create a new LinearBuffer view sharing the same memory
-                val newBuffer = LinearBuffer(baseOffset + position(), remaining(), byteOrder)
-                newBuffer
+                LinearBuffer(unwrapped.baseOffset + unwrapped.position(), unwrapped.remaining(), unwrapped.byteOrder)
             }
             else -> {
                 val bytes = toByteArray()

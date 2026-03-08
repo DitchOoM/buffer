@@ -4,7 +4,6 @@ import com.ditchoom.buffer.ByteArrayBuffer
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.LinearBuffer
 import com.ditchoom.buffer.LinearMemoryAllocator
-import com.ditchoom.buffer.allocate
 import kotlinx.benchmark.Benchmark
 import kotlinx.benchmark.BenchmarkMode
 import kotlinx.benchmark.BenchmarkTimeUnit
@@ -85,7 +84,7 @@ open class WasmLinearBufferBenchmark {
 
     // Allocator stress tests disabled - they exhaust the bump allocator's memory
     // after millions of benchmark iterations. These tests proved the optimizer bug
-    // workaround works. Use AllocationZone.Heap for high-frequency allocations.
+    // workaround works. Use BufferFactory.managed() for high-frequency allocations.
     //
     // Results when enabled (all passing, ~95-103M ops/sec):
     // - z1AllocatorMinimal: 95.3M ops/sec

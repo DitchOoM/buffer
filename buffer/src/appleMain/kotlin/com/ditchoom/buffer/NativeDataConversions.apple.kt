@@ -91,20 +91,18 @@ actual fun ReadBuffer.toNativeData(): NativeData {
  *   Note: NSMutableData requires its own mutable memory, so partial views must copy.
  */
 actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData {
-    val unwrapped = unwrap()
-    if (unwrapped !== this) return unwrapped.toMutableNativeData()
+    val unwrapped = unwrapFully()
     return MutableNativeData(
-        when (this) {
+        when (unwrapped) {
             is MutableDataBuffer -> {
-                val pos = position()
-                val rem = remaining()
-                if (pos == 0 && rem == data.length.toInt()) {
-                    data
+                val pos = unwrapped.position()
+                val rem = unwrapped.remaining()
+                if (pos == 0 && rem == unwrapped.data.length.toInt()) {
+                    unwrapped.data
                 } else {
-                    // Note: NSMutableData may internally copy even with dataWithBytesNoCopy
-                    // due to implementation details in NSConcreteMutableData.
-                    // Using subdataWithRange + create for consistent behavior.
-                    NSMutableData.create(data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert())))
+                    NSMutableData.create(
+                        unwrapped.data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert())),
+                    )
                 }
             }
             else -> toByteArray().toNSMutableData()

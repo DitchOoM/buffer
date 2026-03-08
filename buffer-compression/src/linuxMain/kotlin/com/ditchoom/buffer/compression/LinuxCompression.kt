@@ -1,12 +1,12 @@
 package com.ditchoom.buffer.compression
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteArrayBuffer
 import com.ditchoom.buffer.ByteOrder
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.NativeMemoryAccess
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.managedMemoryAccess
 import com.ditchoom.buffer.nativeMemoryAccess
 import kotlinx.cinterop.ByteVar
@@ -101,7 +101,7 @@ actual fun decompress(
     try {
         val remaining = buffer.remaining()
         if (remaining == 0) {
-            CompressionResult.Success(PlatformBuffer.allocate(0))
+            CompressionResult.Success(BufferFactory.Default.allocate(0))
         } else {
             val result = decompressWithZStream(buffer, algorithm)
             CompressionResult.Success(result)
@@ -125,7 +125,7 @@ private fun compressWithZStream(
 
     // Allocate output buffer sized for worst case
     val maxOutputSize = getCompressBound(inputSize) + 32
-    val output = PlatformBuffer.allocate(maxOutputSize, AllocationZone.Direct, ByteOrder.BIG_ENDIAN)
+    val output = BufferFactory.Default.allocate(maxOutputSize, ByteOrder.BIG_ENDIAN)
     val outputPtr = (output as NativeMemoryAccess).nativeAddress.toCPointer<ByteVar>()!!
 
     val s = nativeHeap.alloc<z_stream>()
@@ -215,7 +215,7 @@ private fun decompressWithZStream(
 
         // Start with estimate, grow if needed
         var outputSize = maxOf(inputSize * 4, 1024)
-        var output = PlatformBuffer.allocate(outputSize, AllocationZone.Direct, ByteOrder.BIG_ENDIAN)
+        var output = BufferFactory.Default.allocate(outputSize, ByteOrder.BIG_ENDIAN)
         var outputPtr = (output as NativeMemoryAccess).nativeAddress.toCPointer<ByteVar>()!!
 
         var totalDecompressed = 0
@@ -244,7 +244,7 @@ private fun decompressWithZStream(
                         if (s.avail_out == 0u) {
                             // Need more output space - grow buffer
                             val newSize = outputSize * 2
-                            val newOutput = PlatformBuffer.allocate(newSize, AllocationZone.Direct, ByteOrder.BIG_ENDIAN)
+                            val newOutput = BufferFactory.Default.allocate(newSize, ByteOrder.BIG_ENDIAN)
                             val newPtr = (newOutput as NativeMemoryAccess).nativeAddress.toCPointer<ByteVar>()!!
                             // Copy existing decompressed data to new buffer
                             copyMemory(newPtr, outputPtr, totalDecompressed)
@@ -350,7 +350,7 @@ private fun createEmptyCompressed(algorithm: CompressionAlgorithm): PlatformBuff
                 )
             }
         }
-    val buffer = PlatformBuffer.allocate(bytes.size, AllocationZone.Direct, ByteOrder.BIG_ENDIAN)
+    val buffer = BufferFactory.Default.allocate(bytes.size, ByteOrder.BIG_ENDIAN)
     buffer.writeBytes(bytes)
     buffer.resetForRead()
     return buffer
