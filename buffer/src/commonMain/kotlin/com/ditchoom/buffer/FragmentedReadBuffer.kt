@@ -4,7 +4,15 @@ package com.ditchoom.buffer
  * Provides a single ReadBuffer interface that delegates to multiple buffers.
  * While reading from a buffer sometimes you might need more data to complete the decoding operation. This class will
  * handle reading from multiple fragmented buffers in memory and provide a simple read api.
+ *
+ * @deprecated Use [com.ditchoom.buffer.stream.StreamProcessor] instead. FragmentedReadBuffer has O(n²) copying
+ * for spanning reads and bugs in [get] (ignores the index parameter). StreamProcessor handles fragmented
+ * data correctly with O(1) amortized reads.
  */
+@Deprecated(
+    message = "Use StreamProcessor instead. FragmentedReadBuffer has O(n²) copying and bugs in get(index).",
+    replaceWith = ReplaceWith("StreamProcessor.create(pool)", "com.ditchoom.buffer.stream.StreamProcessor"),
+)
 class FragmentedReadBuffer(
     private val first: ReadBuffer,
     private val second: ReadBuffer,
@@ -168,6 +176,10 @@ class FragmentedReadBuffer(
     }
 }
 
+@Deprecated(
+    message = "Use StreamProcessor instead of FragmentedReadBuffer.",
+    replaceWith = ReplaceWith("StreamProcessor.create(pool)", "com.ditchoom.buffer.stream.StreamProcessor"),
+)
 fun List<ReadBuffer>.toComposableBuffer(): ReadBuffer {
     if (isEmpty()) {
         return ReadBuffer.EMPTY_BUFFER

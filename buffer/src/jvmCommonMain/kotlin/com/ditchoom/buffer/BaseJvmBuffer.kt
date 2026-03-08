@@ -346,7 +346,7 @@ abstract class BaseJvmBuffer(
 
     override fun toString() = "Buffer[pos=${position()} lim=${limit()} cap=$capacity]"
 
-    fun close() {
+    open fun close() {
         fileRef?.close()
     }
 

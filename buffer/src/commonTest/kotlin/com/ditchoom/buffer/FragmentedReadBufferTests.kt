@@ -6,6 +6,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+@Suppress("DEPRECATION")
 class FragmentedReadBufferTests {
     @Test
     fun readByteFromFirstBuffer() {

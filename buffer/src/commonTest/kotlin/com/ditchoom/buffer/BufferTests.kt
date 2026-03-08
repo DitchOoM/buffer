@@ -158,6 +158,7 @@ class BufferTests {
         assertEquals(expected, platformBuffer.readString(4, Charset.UTF8))
     }
 
+    @Suppress("DEPRECATION")
     @Test
     fun sliceFragmented() {
         val platformBuffer1 = BufferFactory.managed().allocate(3)
