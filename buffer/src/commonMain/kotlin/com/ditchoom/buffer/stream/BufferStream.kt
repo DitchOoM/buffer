@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.stream
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.pool.BufferPool
@@ -209,7 +210,10 @@ interface StreamProcessor {
     fun release()
 
     companion object {
-        fun create(pool: BufferPool): StreamProcessor = DefaultStreamProcessor(pool)
+        fun create(
+            pool: BufferPool,
+            byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
+        ): StreamProcessor = DefaultStreamProcessor(pool, byteOrder)
     }
 }
 
@@ -218,9 +222,50 @@ interface StreamProcessor {
  */
 internal class DefaultStreamProcessor(
     private val pool: BufferPool,
+    private val byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
 ) : StreamProcessor {
     private val chunks = ArrayDeque<ReadBuffer>()
     private var totalAvailable = 0
+
+    private fun assembleShort(
+        b0: Int,
+        b1: Int,
+    ): Short =
+        if (byteOrder == ByteOrder.BIG_ENDIAN) {
+            ((b0 shl 8) or b1).toShort()
+        } else {
+            ((b1 shl 8) or b0).toShort()
+        }
+
+    private fun assembleInt(
+        b0: Int,
+        b1: Int,
+        b2: Int,
+        b3: Int,
+    ): Int =
+        if (byteOrder == ByteOrder.BIG_ENDIAN) {
+            (b0 shl 24) or (b1 shl 16) or (b2 shl 8) or b3
+        } else {
+            (b3 shl 24) or (b2 shl 16) or (b1 shl 8) or b0
+        }
+
+    private fun assembleLong(
+        b0: Int,
+        b1: Int,
+        b2: Int,
+        b3: Int,
+        b4: Int,
+        b5: Int,
+        b6: Int,
+        b7: Int,
+    ): Long =
+        if (byteOrder == ByteOrder.BIG_ENDIAN) {
+            (b0.toLong() shl 56) or (b1.toLong() shl 48) or (b2.toLong() shl 40) or (b3.toLong() shl 32) or
+                (b4.toLong() shl 24) or (b5.toLong() shl 16) or (b6.toLong() shl 8) or b7.toLong()
+        } else {
+            (b7.toLong() shl 56) or (b6.toLong() shl 48) or (b5.toLong() shl 40) or (b4.toLong() shl 32) or
+                (b3.toLong() shl 24) or (b2.toLong() shl 16) or (b1.toLong() shl 8) or b0.toLong()
+        }
 
     override fun append(chunk: ReadBuffer) {
         if (chunk.remaining() > 0) {
@@ -247,49 +292,50 @@ internal class DefaultStreamProcessor(
         require(totalAvailable >= offset + Short.SIZE_BYTES) { "Not enough data for Short at offset $offset" }
 
         val chunk = chunks.first()
-        if (chunk.remaining() >= offset + Short.SIZE_BYTES) {
+        if (chunk.remaining() >= offset + Short.SIZE_BYTES && chunk.byteOrder == byteOrder) {
             return chunk.getShort(chunk.position() + offset)
         }
 
-        // Slow path: spans chunks
-        return (
-            (peekByte(offset).toInt() and 0xFF shl 8) or
-                (peekByte(offset + 1).toInt() and 0xFF)
-        ).toShort()
+        return assembleShort(
+            peekByte(offset).toInt() and 0xFF,
+            peekByte(offset + 1).toInt() and 0xFF,
+        )
     }
 
     override fun peekInt(offset: Int): Int {
         require(totalAvailable >= offset + Int.SIZE_BYTES) { "Not enough data for Int at offset $offset" }
 
         val chunk = chunks.first()
-        if (chunk.remaining() >= offset + Int.SIZE_BYTES) {
+        if (chunk.remaining() >= offset + Int.SIZE_BYTES && chunk.byteOrder == byteOrder) {
             return chunk.getInt(chunk.position() + offset)
         }
 
-        // Slow path: spans chunks
-        return (peekByte(offset).toInt() and 0xFF shl 24) or
-            (peekByte(offset + 1).toInt() and 0xFF shl 16) or
-            (peekByte(offset + 2).toInt() and 0xFF shl 8) or
-            (peekByte(offset + 3).toInt() and 0xFF)
+        return assembleInt(
+            peekByte(offset).toInt() and 0xFF,
+            peekByte(offset + 1).toInt() and 0xFF,
+            peekByte(offset + 2).toInt() and 0xFF,
+            peekByte(offset + 3).toInt() and 0xFF,
+        )
     }
 
     override fun peekLong(offset: Int): Long {
         require(totalAvailable >= offset + Long.SIZE_BYTES) { "Not enough data for Long at offset $offset" }
 
         val chunk = chunks.first()
-        if (chunk.remaining() >= offset + Long.SIZE_BYTES) {
+        if (chunk.remaining() >= offset + Long.SIZE_BYTES && chunk.byteOrder == byteOrder) {
             return chunk.getLong(chunk.position() + offset)
         }
 
-        // Slow path: spans chunks
-        return (peekByte(offset).toLong() and 0xFF shl 56) or
-            (peekByte(offset + 1).toLong() and 0xFF shl 48) or
-            (peekByte(offset + 2).toLong() and 0xFF shl 40) or
-            (peekByte(offset + 3).toLong() and 0xFF shl 32) or
-            (peekByte(offset + 4).toLong() and 0xFF shl 24) or
-            (peekByte(offset + 5).toLong() and 0xFF shl 16) or
-            (peekByte(offset + 6).toLong() and 0xFF shl 8) or
-            (peekByte(offset + 7).toLong() and 0xFF)
+        return assembleLong(
+            peekByte(offset).toInt() and 0xFF,
+            peekByte(offset + 1).toInt() and 0xFF,
+            peekByte(offset + 2).toInt() and 0xFF,
+            peekByte(offset + 3).toInt() and 0xFF,
+            peekByte(offset + 4).toInt() and 0xFF,
+            peekByte(offset + 5).toInt() and 0xFF,
+            peekByte(offset + 6).toInt() and 0xFF,
+            peekByte(offset + 7).toInt() and 0xFF,
+        )
     }
 
     override fun peekMismatch(pattern: ReadBuffer): Int {
@@ -397,53 +443,54 @@ internal class DefaultStreamProcessor(
     override fun readShort(): Short {
         require(totalAvailable >= Short.SIZE_BYTES) { "Not enough data for Short" }
         val chunk = chunks.first()
-        if (chunk.remaining() >= Short.SIZE_BYTES) {
+        if (chunk.remaining() >= Short.SIZE_BYTES && chunk.byteOrder == byteOrder) {
             val value = chunk.readShort()
             totalAvailable -= Short.SIZE_BYTES
             removeChunkIfEmpty(chunk)
             return value
         }
-        // Slow path: spans chunks
-        return (
-            (readByte().toInt() and 0xFF shl 8) or
-                (readByte().toInt() and 0xFF)
-        ).toShort()
+        return assembleShort(
+            readByte().toInt() and 0xFF,
+            readByte().toInt() and 0xFF,
+        )
     }
 
     override fun readInt(): Int {
         require(totalAvailable >= Int.SIZE_BYTES) { "Not enough data for Int" }
         val chunk = chunks.first()
-        if (chunk.remaining() >= Int.SIZE_BYTES) {
+        if (chunk.remaining() >= Int.SIZE_BYTES && chunk.byteOrder == byteOrder) {
             val value = chunk.readInt()
             totalAvailable -= Int.SIZE_BYTES
             removeChunkIfEmpty(chunk)
             return value
         }
-        // Slow path: spans chunks
-        return (readByte().toInt() and 0xFF shl 24) or
-            (readByte().toInt() and 0xFF shl 16) or
-            (readByte().toInt() and 0xFF shl 8) or
-            (readByte().toInt() and 0xFF)
+        return assembleInt(
+            readByte().toInt() and 0xFF,
+            readByte().toInt() and 0xFF,
+            readByte().toInt() and 0xFF,
+            readByte().toInt() and 0xFF,
+        )
     }
 
     override fun readLong(): Long {
         require(totalAvailable >= Long.SIZE_BYTES) { "Not enough data for Long" }
         val chunk = chunks.first()
-        if (chunk.remaining() >= Long.SIZE_BYTES) {
+        if (chunk.remaining() >= Long.SIZE_BYTES && chunk.byteOrder == byteOrder) {
             val value = chunk.readLong()
             totalAvailable -= Long.SIZE_BYTES
             removeChunkIfEmpty(chunk)
             return value
         }
-        // Slow path: spans chunks
-        return (readByte().toLong() and 0xFF shl 56) or
-            (readByte().toLong() and 0xFF shl 48) or
-            (readByte().toLong() and 0xFF shl 40) or
-            (readByte().toLong() and 0xFF shl 32) or
-            (readByte().toLong() and 0xFF shl 24) or
-            (readByte().toLong() and 0xFF shl 16) or
-            (readByte().toLong() and 0xFF shl 8) or
-            (readByte().toLong() and 0xFF)
+        return assembleLong(
+            readByte().toInt() and 0xFF,
+            readByte().toInt() and 0xFF,
+            readByte().toInt() and 0xFF,
+            readByte().toInt() and 0xFF,
+            readByte().toInt() and 0xFF,
+            readByte().toInt() and 0xFF,
+            readByte().toInt() and 0xFF,
+            readByte().toInt() and 0xFF,
+        )
     }
 
     override fun readBuffer(size: Int): ReadBuffer {

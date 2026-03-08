@@ -9,18 +9,19 @@ Buffer on JVM wraps `java.nio.ByteBuffer` for optimal performance.
 
 ## Implementation
 
-| Zone | JVM Type |
-|------|----------|
-| `Heap` | `HeapByteBuffer` |
-| `Direct` | `DirectByteBuffer` |
-| `SharedMemory` | Falls back to `Direct` |
+| Factory | JVM Type |
+|---------|----------|
+| `managed()` | `HeapByteBuffer` |
+| `Default` | `DirectByteBuffer` |
+| `shared()` | Falls back to `Default` |
 
 ## Direct vs Heap Buffers
 
 ### Direct Buffers (Default)
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+val buffer = BufferFactory.Default.allocate(1024)
+// or simply: PlatformBuffer.allocate(1024)
 ```
 
 - Allocated outside JVM heap via `ByteBuffer.allocateDirect()`
@@ -31,7 +32,7 @@ val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
 ### Heap Buffers
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(1024, AllocationZone.Heap)
+val buffer = BufferFactory.managed().allocate(1024)
 ```
 
 - Allocated on JVM heap
@@ -57,11 +58,11 @@ When passing buffers to JNI:
 
 ```kotlin
 // Direct buffers: zero-copy
-val direct = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+val direct = BufferFactory.Default.allocate(1024)
 nativeFunction(direct.asByteBuffer())  // No copy
 
 // Heap buffers: may copy
-val heap = PlatformBuffer.allocate(1024, AllocationZone.Heap)
+val heap = BufferFactory.managed().allocate(1024)
 nativeFunction(heap.asByteBuffer())  // JVM may copy to temp direct buffer
 ```
 
@@ -80,7 +81,7 @@ channel.write(nioBuffer)
 Convert buffers to JVM-native `ByteBuffer` for NIO and JNI interop:
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+val buffer = BufferFactory.Default.allocate(1024)
 buffer.writeBytes(data)
 buffer.resetForRead()
 
@@ -105,8 +106,8 @@ channel.read(mutableBuffer)
 | `toMutableNativeData()` | Copy to direct | Zero-copy (duplicate) |
 | `toByteArray()` | Zero-copy (backing array) | Copy required |
 
-:::tip Use Direct for Zero-Copy
-For true zero-copy conversion, allocate with `AllocationZone.Direct`. Changes to the returned ByteBuffer will reflect in the original buffer and vice versa.
+:::tip Use Default for Zero-Copy
+For true zero-copy conversion, allocate with `BufferFactory.Default` (the default). Changes to the returned ByteBuffer will reflect in the original buffer and vice versa.
 :::
 
 :::note Position Invariance

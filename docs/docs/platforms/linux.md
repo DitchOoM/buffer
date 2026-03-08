@@ -9,11 +9,11 @@ Buffer on Kotlin/Native Linux uses native memory allocation (malloc/free) for ze
 
 ## Implementation
 
-| Zone | Linux Type | Use Case |
-|------|------------|----------|
-| `Heap` | `ByteArrayBuffer` | Managed memory, GC-friendly |
-| `Direct` | `NativeBuffer` | Zero-copy I/O, io_uring, FFI |
-| `SharedMemory` | `NativeBuffer` | Same as Direct |
+| Factory | Linux Type | Use Case |
+|---------|------------|----------|
+| `managed()` | `ByteArrayBuffer` | Managed memory, GC-friendly |
+| `Default` | `NativeBuffer` | Zero-copy I/O, io_uring, FFI |
+| `shared()` | `NativeBuffer` | Same as Default |
 
 ## NativeBuffer: Native Memory
 
@@ -84,7 +84,7 @@ For workloads that don't need native memory access, `ByteArrayBuffer` provides G
 
 ```kotlin
 // Explicitly request heap allocation
-val buffer = PlatformBuffer.allocate(1024, AllocationZone.Heap)
+val buffer = BufferFactory.managed().allocate(1024)
 
 // Or wrap existing ByteArray
 val wrapped = PlatformBuffer.wrap(existingByteArray)

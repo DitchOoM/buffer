@@ -41,7 +41,6 @@ val pool = BufferPool(
     maxPoolSize = 64,
     defaultBufferSize = 8 * 1024,  // 8KB
     byteOrder = ByteOrder.BIG_ENDIAN,
-    allocationZone = AllocationZone.Direct
 )
 ```
 

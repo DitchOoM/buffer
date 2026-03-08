@@ -8,6 +8,9 @@ import com.ditchoom.buffer.ReadBuffer
  * All operations are suspending to allow for async decompression, decryption, etc.
  * On platforms with sync APIs, implementations can simply delegate without suspending.
  *
+ * Multi-byte reads (Short, Int, Long) use the byte order configured on the underlying
+ * processor (default: big-endian). See [StreamProcessor.create] and [StreamProcessorBuilder].
+ *
  * Example usage:
  * ```kotlin
  * val processor = StreamProcessor.builder(pool)

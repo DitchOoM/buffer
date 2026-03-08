@@ -1,8 +1,8 @@
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.pool.withPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.builder
@@ -207,7 +207,7 @@ class StreamProcessorIntegrationTests {
     fun peekDecompressedData() {
         if (!supportsSyncCompression) return
 
-        val buffer = PlatformBuffer.allocate(12)
+        val buffer = PlatformBuffer.allocate(12, byteOrder = ByteOrder.BIG_ENDIAN)
         buffer.writeInt(0x12345678)
         buffer.writeInt(0xDEADBEEF.toInt())
         buffer.writeInt(0xCAFEBABE.toInt())
@@ -404,7 +404,7 @@ class StreamProcessorIntegrationTests {
 
             // Create a buffer with 3 length-prefixed messages
             val messages = listOf("First message", "Second message", "Third!")
-            val uncompressedBuffer = PlatformBuffer.allocate(1024)
+            val uncompressedBuffer = PlatformBuffer.allocate(1024, byteOrder = ByteOrder.BIG_ENDIAN)
             for (msg in messages) {
                 val msgBytes = msg.encodeToByteArray()
                 uncompressedBuffer.writeInt(msgBytes.size)
@@ -474,7 +474,7 @@ class StreamProcessorIntegrationTests {
                     "Fourth message here",
                     "Fifth and final message",
                 )
-            val uncompressedBuffer = PlatformBuffer.allocate(2048)
+            val uncompressedBuffer = PlatformBuffer.allocate(2048, byteOrder = ByteOrder.BIG_ENDIAN)
             for (msg in messages) {
                 val msgBytes = msg.encodeToByteArray()
                 uncompressedBuffer.writeInt(msgBytes.size)
