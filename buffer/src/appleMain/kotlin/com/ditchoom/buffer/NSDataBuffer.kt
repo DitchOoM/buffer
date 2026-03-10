@@ -208,21 +208,9 @@ class NSDataBuffer(
         // NSData is reference-counted by ARC, no explicit cleanup needed
     }
 
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is NSDataBuffer) return false
-        if (position != other.position) return false
-        if (limit != other.limit) return false
-        if (capacity != other.capacity) return false
-        return data == other.data
-    }
+    override fun equals(other: Any?): Boolean = bufferEquals(this, other)
 
-    override fun hashCode(): Int {
-        var result = position
-        result = 31 * result + limit
-        result = 31 * result + capacity
-        return result
-    }
+    override fun hashCode(): Int = bufferHashCode(this)
 
     override fun toString() = "NSDataBuffer[pos=$position lim=$limit cap=$capacity]"
 }

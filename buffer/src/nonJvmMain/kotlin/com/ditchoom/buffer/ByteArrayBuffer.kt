@@ -356,21 +356,7 @@ class ByteArrayBuffer(
 
     fun close() = Unit
 
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is ByteArrayBuffer) return false
-        if (positionValue != other.positionValue) return false
-        if (limitValue != other.limitValue) return false
-        if (capacity != other.capacity) return false
-        if (!data.contentEquals(other.data)) return false
-        return true
-    }
+    override fun equals(other: Any?): Boolean = bufferEquals(this, other)
 
-    override fun hashCode(): Int {
-        var result = positionValue.hashCode()
-        result = 31 * result + limitValue.hashCode()
-        result = 31 * result + capacity.hashCode()
-        result = 31 * result + data.contentHashCode()
-        return result
-    }
+    override fun hashCode(): Int = bufferHashCode(this)
 }

@@ -336,13 +336,9 @@ abstract class BaseJvmBuffer(
         buffer.position(newPosition)
     }
 
-    override fun equals(other: Any?): Boolean {
-        if (other !is PlatformBuffer) return false
-        if (position() != other.position()) return false
-        if (limit() != other.limit()) return false
-        if (capacity != other.capacity) return false
-        return true
-    }
+    override fun equals(other: Any?): Boolean = bufferEquals(this, other)
+
+    override fun hashCode(): Int = bufferHashCode(this)
 
     override fun toString() = "Buffer[pos=${position()} lim=${limit()} cap=$capacity]"
 

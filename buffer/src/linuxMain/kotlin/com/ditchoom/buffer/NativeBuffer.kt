@@ -558,6 +558,12 @@ class NativeBuffer private constructor(
     fun close() = freeNativeMemory()
 
     fun isClosed(): Boolean = closed
+
+    override fun equals(other: Any?): Boolean = bufferEquals(this, other)
+
+    override fun hashCode(): Int = bufferHashCode(this)
+
+    override fun toString() = "NativeBuffer[pos=${position()} lim=${limit()} cap=$capacity]"
 }
 
 /**
@@ -676,6 +682,12 @@ private class NativeBufferSlice(
         checkOpen()
         return NativeBufferSlice(baseAddress + positionValue, remaining(), byteOrder, parent)
     }
+
+    override fun equals(other: Any?): Boolean = bufferEquals(this, other)
+
+    override fun hashCode(): Int = bufferHashCode(this)
+
+    override fun toString() = "NativeBufferSlice[pos=$positionValue lim=$limitValue cap=$capacity]"
 }
 
 /**

@@ -5,6 +5,8 @@ import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
+import com.ditchoom.buffer.bufferEquals
+import com.ditchoom.buffer.bufferHashCode
 
 /**
  * A buffer wrapper that returns its inner buffer to a pool when all references are released.
@@ -379,4 +381,8 @@ internal class PooledBuffer(
         inner.fill(value)
         return this
     }
+
+    override fun equals(other: Any?): Boolean = bufferEquals(this, other)
+
+    override fun hashCode(): Int = bufferHashCode(this)
 }

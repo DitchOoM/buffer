@@ -530,24 +530,9 @@ class MutableDataBuffer(
 
     // endregion
 
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is MutableDataBuffer) return false
-        if (position != other.position) return false
-        if (limit != other.limit) return false
-        if (capacity != other.capacity) return false
-        if (!data.isEqualToData(other.data)) return false
-        return true
-    }
+    override fun equals(other: Any?): Boolean = bufferEquals(this, other)
 
-    override fun hashCode(): Int {
-        var result = data.hashCode()
-        result = 31 * result + position.hashCode()
-        result = 31 * result + limit.hashCode()
-        result = 31 * result + capacity.hashCode()
-        result = 31 * result + byteOrder.hashCode()
-        return result
-    }
+    override fun hashCode(): Int = bufferHashCode(this)
 }
 
 /**
