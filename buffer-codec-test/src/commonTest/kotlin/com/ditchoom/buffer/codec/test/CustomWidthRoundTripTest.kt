@@ -1,7 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.codec.test.protocols.CustomWidthMessage
 import com.ditchoom.buffer.codec.test.protocols.CustomWidthMessageCodec
 import kotlin.test.Test
@@ -17,7 +17,7 @@ class CustomWidthRoundTripTest {
                 unsignedValue = 0x789ABCu,
                 trailer = 0xFFu,
             )
-        val buffer = PlatformBuffer.allocate(64)
+        val buffer = PlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
         CustomWidthMessageCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = CustomWidthMessageCodec.decode(buffer)
@@ -33,7 +33,7 @@ class CustomWidthRoundTripTest {
                 unsignedValue = 0xFFFFFFu,
                 trailer = 0x00u,
             )
-        val buffer = PlatformBuffer.allocate(64)
+        val buffer = PlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
         CustomWidthMessageCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = CustomWidthMessageCodec.decode(buffer)
@@ -49,7 +49,7 @@ class CustomWidthRoundTripTest {
                 unsignedValue = 0u,
                 trailer = 0u,
             )
-        val buffer = PlatformBuffer.allocate(64)
+        val buffer = PlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
         CustomWidthMessageCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = CustomWidthMessageCodec.decode(buffer)
@@ -65,7 +65,7 @@ class CustomWidthRoundTripTest {
                 unsignedValue = 0xFFFFFFu, // max 24-bit unsigned
                 trailer = 0xFFu,
             )
-        val buffer = PlatformBuffer.allocate(64)
+        val buffer = PlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
         CustomWidthMessageCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = CustomWidthMessageCodec.decode(buffer)
@@ -81,7 +81,7 @@ class CustomWidthRoundTripTest {
                 unsignedValue = 1u,
                 trailer = 0x42u,
             )
-        val buffer = PlatformBuffer.allocate(64)
+        val buffer = PlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
         CustomWidthMessageCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = CustomWidthMessageCodec.decode(buffer)

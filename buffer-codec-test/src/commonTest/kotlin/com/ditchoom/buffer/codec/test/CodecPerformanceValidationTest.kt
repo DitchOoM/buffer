@@ -1,7 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.test.protocols.AllTypesMessage
 import com.ditchoom.buffer.codec.test.protocols.AllTypesMessageCodec
@@ -108,7 +108,7 @@ class CodecPerformanceValidationTest {
     @Test
     fun `buffer position after decode`() {
         val connack = MqttPacketConnAck(ConnAckFlags(0u), ConnectReturnCode(0u))
-        val buffer = PlatformBuffer.allocate(16)
+        val buffer = PlatformBuffer.allocate(16, ByteOrder.BIG_ENDIAN)
         MqttPacketConnAckCodec.encode(buffer, connack)
         buffer.resetForRead()
         assertEquals(2, buffer.remaining())
@@ -136,7 +136,7 @@ class CodecPerformanceValidationTest {
         codec: Codec<T>,
         value: T,
     ) {
-        val buffer = PlatformBuffer.allocate(16)
+        val buffer = PlatformBuffer.allocate(16, ByteOrder.BIG_ENDIAN)
         codec.encode(buffer, value)
         buffer.resetForRead()
         val bytesWritten = buffer.remaining()

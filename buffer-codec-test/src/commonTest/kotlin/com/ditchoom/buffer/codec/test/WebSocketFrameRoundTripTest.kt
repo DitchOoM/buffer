@@ -1,7 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.codec.test.protocols.WsCloseBody
 import com.ditchoom.buffer.codec.test.protocols.WsCloseBodyCodec
 import com.ditchoom.buffer.codec.test.protocols.WsCloseCode
@@ -104,7 +104,7 @@ class WebSocketFrameRoundTripTest {
                 maskingKey = WsMaskingKey(0x37FA213Du),
                 payload = "Hello",
             )
-        val buffer = PlatformBuffer.allocate(256)
+        val buffer = PlatformBuffer.allocate(256, ByteOrder.BIG_ENDIAN)
         WsMaskedFrameCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = WsMaskedFrameCodec.decode(buffer)
@@ -120,7 +120,7 @@ class WebSocketFrameRoundTripTest {
                 byte2 = WsHeaderByte2(0x05u), // mask=0, length=5
                 payload = "Hello",
             )
-        val buffer = PlatformBuffer.allocate(256)
+        val buffer = PlatformBuffer.allocate(256, ByteOrder.BIG_ENDIAN)
         WsMaskedFrameCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = WsMaskedFrameCodec.decode(buffer)

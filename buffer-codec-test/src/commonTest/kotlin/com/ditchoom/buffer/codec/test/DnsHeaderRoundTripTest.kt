@@ -1,7 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.codec.test.protocols.DnsFlags
 import com.ditchoom.buffer.codec.test.protocols.DnsHeader
 import com.ditchoom.buffer.codec.test.protocols.DnsHeaderCodec
@@ -20,7 +20,7 @@ class DnsHeaderRoundTripTest {
                 nsCount = 0u,
                 arCount = 0u,
             )
-        val buffer = PlatformBuffer.allocate(64)
+        val buffer = PlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
         DnsHeaderCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = DnsHeaderCodec.decode(buffer)
@@ -42,7 +42,7 @@ class DnsHeaderRoundTripTest {
     @Test
     fun `round trip all zeros`() {
         val original = DnsHeader(0u, DnsFlags(0u), 0u, 0u, 0u, 0u)
-        val buffer = PlatformBuffer.allocate(64)
+        val buffer = PlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
         DnsHeaderCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = DnsHeaderCodec.decode(buffer)
@@ -60,7 +60,7 @@ class DnsHeaderRoundTripTest {
                 UShort.MAX_VALUE,
                 UShort.MAX_VALUE,
             )
-        val buffer = PlatformBuffer.allocate(64)
+        val buffer = PlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
         DnsHeaderCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = DnsHeaderCodec.decode(buffer)

@@ -1,7 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.codec.test.protocols.ConnAckFlags
 import com.ditchoom.buffer.codec.test.protocols.ConnectReturnCode
 import com.ditchoom.buffer.codec.test.protocols.KeepAlive
@@ -59,7 +59,7 @@ class MqttPacketRoundTripTest {
                 username = "user",
                 password = "pass",
             )
-        val buffer = PlatformBuffer.allocate(256)
+        val buffer = PlatformBuffer.allocate(256, ByteOrder.BIG_ENDIAN)
         MqttPacketConnectCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = MqttPacketConnectCodec.decode(buffer)
@@ -76,7 +76,7 @@ class MqttPacketRoundTripTest {
                 keepAlive = KeepAlive(30u),
                 clientId = "minimal",
             )
-        val buffer = PlatformBuffer.allocate(256)
+        val buffer = PlatformBuffer.allocate(256, ByteOrder.BIG_ENDIAN)
         MqttPacketConnectCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = MqttPacketConnectCodec.decode(buffer)
@@ -97,7 +97,7 @@ class MqttPacketRoundTripTest {
                 keepAlive = KeepAlive(0u),
                 clientId = "",
             )
-        val buffer = PlatformBuffer.allocate(256)
+        val buffer = PlatformBuffer.allocate(256, ByteOrder.BIG_ENDIAN)
         MqttPacketConnectCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = MqttPacketConnectCodec.decode(buffer)
@@ -212,7 +212,7 @@ class MqttPacketRoundTripTest {
 
     @Test
     fun `sealed dispatch unknown type throws`() {
-        val buffer = PlatformBuffer.allocate(16)
+        val buffer = PlatformBuffer.allocate(16, ByteOrder.BIG_ENDIAN)
         buffer.writeByte(0xFF.toByte())
         buffer.resetForRead()
         assertFailsWith<IllegalArgumentException> {
@@ -228,7 +228,7 @@ class MqttPacketRoundTripTest {
                 topicName = "test/topic",
                 payload = "hello",
             )
-        val buffer = PlatformBuffer.allocate(256)
+        val buffer = PlatformBuffer.allocate(256, ByteOrder.BIG_ENDIAN)
         MqttPublishCodec.encode(buffer, original, encodePayload = { buf, s -> buf.writeString(s) })
         buffer.resetForRead()
         val decoded = MqttPublishCodec.decode<String>(buffer, decodePayload = { pr -> pr.readString(pr.remaining()) })
@@ -245,7 +245,7 @@ class MqttPacketRoundTripTest {
                 packetId = PacketId(42u),
                 payload = "hello world",
             )
-        val buffer = PlatformBuffer.allocate(256)
+        val buffer = PlatformBuffer.allocate(256, ByteOrder.BIG_ENDIAN)
         MqttPublishCodec.encode(buffer, original, encodePayload = { buf, s -> buf.writeString(s) })
         buffer.resetForRead()
         val decoded = MqttPublishCodec.decode<String>(buffer, decodePayload = { pr -> pr.readString(pr.remaining()) })
@@ -261,7 +261,7 @@ class MqttPacketRoundTripTest {
                 topicName = "test",
                 payload = "",
             )
-        val buffer = PlatformBuffer.allocate(256)
+        val buffer = PlatformBuffer.allocate(256, ByteOrder.BIG_ENDIAN)
         MqttPublishCodec.encode(buffer, original, encodePayload = { buf, s -> buf.writeString(s) })
         buffer.resetForRead()
         val decoded = MqttPublishCodec.decode<String>(buffer, decodePayload = { pr -> pr.readString(pr.remaining()) })

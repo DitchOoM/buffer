@@ -1,7 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.codec.test.protocols.SimplePayloadMessage
 import com.ditchoom.buffer.codec.test.protocols.SimplePayloadMessageCodec
 import kotlin.test.Test
@@ -11,7 +11,7 @@ class SimplePayloadRoundTripTest {
     @Test
     fun `round trip simple payload with string`() {
         val original = SimplePayloadMessage<String>(id = 42u, data = "hello")
-        val buffer = PlatformBuffer.allocate(256)
+        val buffer = PlatformBuffer.allocate(256, ByteOrder.BIG_ENDIAN)
         SimplePayloadMessageCodec.encode(
             buffer,
             original,
@@ -30,7 +30,7 @@ class SimplePayloadRoundTripTest {
     @Test
     fun `round trip simple payload with int`() {
         val original = SimplePayloadMessage<Int>(id = 100u, data = 12345)
-        val buffer = PlatformBuffer.allocate(256)
+        val buffer = PlatformBuffer.allocate(256, ByteOrder.BIG_ENDIAN)
         SimplePayloadMessageCodec.encode(
             buffer,
             original,
