@@ -1,7 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ByteOrder
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.test.protocols.DnsFlags
 import com.ditchoom.buffer.codec.test.protocols.DnsHeader
 import com.ditchoom.buffer.codec.test.protocols.DnsHeaderCodec

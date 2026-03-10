@@ -1,7 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ByteOrder
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.encodeToBuffer
 import com.ditchoom.buffer.codec.test.protocols.AllTypesMessage

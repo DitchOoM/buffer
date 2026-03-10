@@ -1,7 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ByteOrder
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.test.protocols.ConnAckFlags
 import com.ditchoom.buffer.codec.test.protocols.ConnectReturnCode
 import com.ditchoom.buffer.codec.test.protocols.KeepAlive
