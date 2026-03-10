@@ -69,9 +69,9 @@ class FfmBuffer(
      *
      * This method is idempotent — calling it multiple times is safe.
      *
-     * **Note:** Slices ([FfmSliceBuffer]) created from this buffer are derived from the
-     * arena-scoped segment. After this call, any access to the slice's ByteBuffer throws
-     * [IllegalStateException] ("Already closed") — providing automatic use-after-free safety.
+     * **Note:** Slices ([FfmSliceBuffer]) retain the arena-scoped segment for lifecycle
+     * checking via [FfmSliceBuffer.checkAlive], but use global-scope ByteBuffer views
+     * for JDK API compatibility.
      */
     override fun freeNativeMemory() {
         if (arena.scope().isAlive) {
@@ -96,14 +96,14 @@ class FfmBuffer(
     }
 
     /**
-     * Returns an [FfmSliceBuffer] slice whose ByteBuffer is derived from the arena-scoped
-     * segment. When the parent Arena is closed, the JDK automatically invalidates the
-     * slice's ByteBuffer — any access throws [IllegalStateException].
+     * Returns an [FfmSliceBuffer] slice with a global-scope ByteBuffer view.
+     * The slice retains the arena-scoped segment for lifecycle checking via [FfmSliceBuffer.checkAlive].
      */
     override fun slice(): PlatformBuffer {
         assertAlive()
         val slicedSegment = segment.asSlice(position().toLong(), remaining().toLong())
-        val sliceByteBuffer = slicedSegment.asByteBuffer().order(byteBuffer.order())
+        val globalView = MemorySegment.ofAddress(slicedSegment.address()).reinterpret(slicedSegment.byteSize())
+        val sliceByteBuffer = globalView.asByteBuffer().order(byteBuffer.order())
         return FfmSliceBuffer(slicedSegment, sliceByteBuffer)
     }
 }

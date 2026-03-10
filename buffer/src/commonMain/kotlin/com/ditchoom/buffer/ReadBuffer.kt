@@ -359,7 +359,10 @@ interface ReadBuffer : PositionBuffer {
         private const val CR: Byte = '\r'.code.toByte()
         private const val LF: Byte = '\n'.code.toByte()
         val newLine = "\r\n".encodeToByteArray()
-        val EMPTY_BUFFER = BufferFactory.Default.allocate(0)
+        // Use managed (ByteArrayBuffer) so freeNativeMemory() is a no-op.
+        // BufferFactory.Default creates NativeBuffer on Linux, which would be
+        // permanently destroyed when any code calls freeIfNeeded() on this singleton.
+        val EMPTY_BUFFER: PlatformBuffer = BufferFactory.managed().allocate(0).also { it.resetForRead() }
     }
 
     /**

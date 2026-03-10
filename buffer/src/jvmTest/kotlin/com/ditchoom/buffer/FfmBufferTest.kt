@@ -212,26 +212,29 @@ class FfmBufferTest {
     }
 
     @Test
-    fun `slice after parent free throws IllegalStateException`() {
+    fun `slice after parent free - nativeAddress throws but ByteBuffer reads succeed`() {
         val buffer = createFfmBuffer(64)
         buffer.writeInt(0x12345678)
         buffer.resetForRead()
         val slice = buffer.slice()
         buffer.freeNativeMemory()
-        assertIs<FfmSliceBuffer>(slice)
-        assertFailsWith<IllegalStateException> { slice.readInt() }
+        val ffmSlice = assertIs<FfmSliceBuffer>(slice)
+        // nativeAddress/nativeSize still check scope
+        assertFailsWith<IllegalStateException> { ffmSlice.nativeAddress }
+        // ByteBuffer reads succeed because global-scope views don't auto-invalidate
+        // (trade-off for JDK API compatibility — Deflater/Inflater/CRC32/NIO)
     }
 
     @Test
-    fun `slice of slice throws after parent free`() {
+    fun `slice of slice - nativeAddress throws after parent free`() {
         val buffer = createFfmBuffer(64)
         buffer.writeLong(0x123456789ABCDEF0L)
         buffer.resetForRead()
         val slice1 = buffer.slice()
         val slice2 = slice1.slice()
         buffer.freeNativeMemory()
-        assertFailsWith<IllegalStateException> { slice1.readLong() }
-        assertFailsWith<IllegalStateException> { slice2.readLong() }
+        assertFailsWith<IllegalStateException> { (slice1 as FfmSliceBuffer).nativeAddress }
+        assertFailsWith<IllegalStateException> { (slice2 as FfmSliceBuffer).nativeAddress }
     }
 
     @Test
@@ -255,22 +258,23 @@ class FfmBufferTest {
     }
 
     @Test
-    fun `slice write after parent free throws IllegalStateException`() {
+    fun `slice nativeAddress after parent free throws IllegalStateException`() {
         val buffer = createFfmBuffer(64)
-        val slice = buffer.slice()
+        val slice = buffer.slice() as FfmSliceBuffer
         buffer.freeNativeMemory()
-        assertFailsWith<IllegalStateException> { slice.writeInt(42) }
+        assertFailsWith<IllegalStateException> { slice.nativeAddress }
+        assertFailsWith<IllegalStateException> { slice.nativeSize }
     }
 
     @Test
-    fun `slice created from dead FfmSliceBuffer cannot read`() {
+    fun `slice created from dead FfmSliceBuffer - nativeAddress throws`() {
         val buffer = createFfmBuffer(64)
         buffer.writeInt(0x12345678)
         buffer.resetForRead()
         val slice = buffer.slice()
         buffer.freeNativeMemory()
-        val subSlice = slice.slice()
-        assertFailsWith<IllegalStateException> { subSlice.readInt() }
+        val subSlice = slice.slice() as FfmSliceBuffer
+        assertFailsWith<IllegalStateException> { subSlice.nativeAddress }
     }
 
     @Test
@@ -296,14 +300,14 @@ class FfmBufferTest {
         }
 
     @Test
-    fun `multiple independent slices all invalidated after parent free`() {
+    fun `multiple independent slices - nativeAddress throws after parent free`() {
         val buffer = createFfmBuffer(64)
         repeat(16) { buffer.writeInt(it) }
         buffer.resetForRead()
-        val slices = (0 until 4).map { buffer.slice() }
+        val slices = (0 until 4).map { buffer.slice() as FfmSliceBuffer }
         buffer.freeNativeMemory()
         slices.forEach { slice ->
-            assertFailsWith<IllegalStateException> { slice.readInt() }
+            assertFailsWith<IllegalStateException> { slice.nativeAddress }
         }
     }
 

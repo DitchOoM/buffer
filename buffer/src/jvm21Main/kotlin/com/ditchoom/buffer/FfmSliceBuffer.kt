@@ -6,19 +6,21 @@ import java.lang.foreign.MemorySegment
 import java.nio.ByteBuffer
 
 /**
- * Arena-scoped slice of an [FfmBuffer].
+ * Slice of an [FfmBuffer].
  *
- * The [byteBuffer] is derived from [segment]`.asByteBuffer()`, which binds it to the
- * parent Arena's scope. When the parent calls `arena.close()`, the JDK automatically
- * invalidates ALL ByteBuffers derived from that Arena — any access throws
- * [IllegalStateException] ("Already closed"). This gives zero-overhead use-after-free
- * safety without any manual checking.
+ * The [byteBuffer] is a global-scope view of the slice's memory, created via
+ * `MemorySegment.ofAddress(...).reinterpret(...)`. This makes it compatible with all
+ * JDK APIs (Deflater, Inflater, CRC32, NIO channels) that reject ByteBuffers from
+ * closeable sessions.
+ *
+ * Use-after-free safety is provided by [checkAlive], which verifies the parent Arena's
+ * scope on every access to [nativeAddress] and [nativeSize].
  *
  * Unlike [FfmBuffer], this class does **not** own the Arena and [freeNativeMemory] is a
  * no-op. The parent [FfmBuffer] is solely responsible for closing the Arena.
  *
- * @param segment Arena-scoped MemorySegment (not global-scope).
- * @param byteBuffer ByteBuffer derived from [segment]`.asByteBuffer()`.
+ * @param segment Arena-scoped MemorySegment (retains scope for [checkAlive]).
+ * @param byteBuffer Global-scope ByteBuffer view for JDK API compatibility.
  */
 class FfmSliceBuffer(
     val segment: MemorySegment,
@@ -46,7 +48,8 @@ class FfmSliceBuffer(
 
     override fun slice(): PlatformBuffer {
         val sliced = segment.asSlice(position().toLong(), remaining().toLong())
-        val bb = sliced.asByteBuffer().order(byteBuffer.order())
+        val globalView = MemorySegment.ofAddress(sliced.address()).reinterpret(sliced.byteSize())
+        val bb = globalView.asByteBuffer().order(byteBuffer.order())
         return FfmSliceBuffer(sliced, bb)
     }
 }
