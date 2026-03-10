@@ -11,6 +11,7 @@ import com.squareup.kotlinpoet.KModifier
 import com.squareup.kotlinpoet.ParameterSpec
 import com.squareup.kotlinpoet.PropertySpec
 import com.squareup.kotlinpoet.TypeSpec
+import com.squareup.kotlinpoet.ksp.toTypeName
 import com.squareup.kotlinpoet.ksp.writeTo
 
 class PayloadContextGenerator(
@@ -40,7 +41,9 @@ class PayloadContextGenerator(
         val typeSpecBuilder = TypeSpec.classBuilder(contextName).addModifiers(KModifier.DATA)
 
         for (field in nonPayloadFields) {
-            val typeName = ClassName.bestGuess(field.typeName).copy(nullable = field.isNullable)
+            val typeName = field.parameter?.type?.resolve()?.let { ksType ->
+                ksType.toTypeName()
+            } ?: ClassName.bestGuess(field.typeName).copy(nullable = field.isNullable)
             constructorBuilder.addParameter(ParameterSpec.builder(field.name, typeName).build())
             typeSpecBuilder.addProperty(
                 PropertySpec.builder(field.name, typeName).initializer(field.name).build(),
