@@ -59,7 +59,7 @@ internal fun addFieldWrite(
 ) {
     val condition = field.condition
     if (condition != null) {
-        val condExpr = conditionToValueExpr((condition as FieldCondition.WhenTrue).expression)
+        val condExpr = (condition as FieldCondition.WhenTrue).expression.replace(Regex("^([^.]+)"), "value.$1")
         code.beginControlFlow("if (%L)", condExpr)
         code.addStatement("%L", writeExpression(field.strategy, "$valueExpr!!"))
         code.endControlFlow()

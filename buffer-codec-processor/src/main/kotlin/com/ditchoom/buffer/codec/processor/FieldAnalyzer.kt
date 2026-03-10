@@ -502,10 +502,7 @@ class FieldAnalyzer(
                 it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.ProtocolMessage"
             }
         if (hasProtocolMessage) {
-            val typePackage = typeDecl.packageName.asString()
-            val simpleName = typeDecl.simpleName.asString()
-            val codecName =
-                if (typePackage.isNotEmpty()) "$typePackage.${simpleName}Codec" else "${simpleName}Codec"
+            val codecName = "${typeDecl.simpleName.asString()}Codec"
             return FieldReadStrategy.NestedMessageField(codecName)
         }
 
@@ -604,10 +601,7 @@ class FieldAnalyzer(
         val annotations = param.annotations.toList()
         val lk = resolveLengthKind(param, annotations, fieldName, "List") ?: return null
 
-        val elementPackage = elementDecl.packageName.asString()
-        val elementSimpleName = elementDecl.simpleName.asString()
-        val codecName =
-            if (elementPackage.isNotEmpty()) "$elementPackage.${elementSimpleName}Codec" else "${elementSimpleName}Codec"
+        val codecName = "${elementDecl.simpleName.asString()}Codec"
         return FieldReadStrategy.CollectionField(lk, codecName)
     }
 

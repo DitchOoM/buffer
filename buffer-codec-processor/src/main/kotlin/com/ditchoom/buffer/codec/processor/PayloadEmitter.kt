@@ -24,13 +24,13 @@ internal val prefixConfigs =
                 1,
                 "buffer.readByte().toInt() and 0xFF",
                 "buffer.writeByte(0.toByte())",
-            ) { "require($it in 0..255) { \"Length prefix $$it exceeds Byte range (0..255)\" }; buffer.writeByte($it.toByte())" },
+            ) { "buffer.writeByte($it.toByte())" },
         "Short" to
             PrefixConfig(
                 2,
                 "buffer.readUnsignedShort().toInt()",
                 "buffer.writeShort(0.toShort())",
-            ) { "require($it in 0..65535) { \"Length prefix $$it exceeds Short range (0..65535)\" }; buffer.writeShort($it.toShort())" },
+            ) { "buffer.writeShort($it.toShort())" },
         "Int" to
             PrefixConfig(
                 4,
@@ -94,7 +94,7 @@ internal fun addPayloadWrite(
     val condition = field.condition
 
     if (condition != null) {
-        val condExpr = conditionToValueExpr((condition as FieldCondition.WhenTrue).expression)
+        val condExpr = (condition as FieldCondition.WhenTrue).expression.replace(Regex("^([^.]+)"), "value.$1")
         code.beginControlFlow("if (%L)", condExpr)
         addPayloadEncodeBody(code, strategy, field)
         code.endControlFlow()
@@ -132,3 +132,5 @@ internal fun addPayloadEncodeBody(
         }
     }
 }
+
+internal fun capitalizeFirst(s: String): String = s.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }

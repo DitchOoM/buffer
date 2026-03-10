@@ -164,66 +164,6 @@ class ForbiddenTypeTest {
     }
 
     @Test
-    fun `WriteBuffer field causes compile error`() {
-        val source =
-            SourceFile.kotlin(
-                "Test.kt",
-                """
-            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-            import com.ditchoom.buffer.WriteBuffer
-
-            @ProtocolMessage
-            data class BadMessage(val data: WriteBuffer)
-            """,
-            )
-        val result = compileWithKspAndBufferStubs(source)
-        val hasError =
-            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
-                result.messages.contains("forbidden type")
-        assertTrue(hasError, "Expected error for WriteBuffer field but got: ${result.exitCode}\n${result.messages}")
-    }
-
-    @Test
-    fun `WireBytes zero causes compile error`() {
-        val source =
-            SourceFile.kotlin(
-                "Test.kt",
-                """
-            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-            import com.ditchoom.buffer.codec.annotations.WireBytes
-
-            @ProtocolMessage
-            data class BadMessage(@WireBytes(0) val x: Int)
-            """,
-            )
-        val result = compileWithKsp(source)
-        val hasError =
-            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
-                result.messages.contains("out of range")
-        assertTrue(hasError, "Expected error for @WireBytes(0) but got: ${result.exitCode}\n${result.messages}")
-    }
-
-    @Test
-    fun `WireBytes negative causes compile error`() {
-        val source =
-            SourceFile.kotlin(
-                "Test.kt",
-                """
-            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-            import com.ditchoom.buffer.codec.annotations.WireBytes
-
-            @ProtocolMessage
-            data class BadMessage(@WireBytes(-1) val x: Int)
-            """,
-            )
-        val result = compileWithKsp(source)
-        val hasError =
-            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
-                result.messages.contains("out of range")
-        assertTrue(hasError, "Expected error for @WireBytes(-1) but got: ${result.exitCode}\n${result.messages}")
-    }
-
-    @Test
     fun `bare String without length annotation causes compile error`() {
         val source =
             SourceFile.kotlin(

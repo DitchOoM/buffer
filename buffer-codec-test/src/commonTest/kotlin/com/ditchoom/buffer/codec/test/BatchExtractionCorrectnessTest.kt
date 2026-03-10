@@ -1,9 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
-import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.ByteOrder
-import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.encodeToBuffer
 import com.ditchoom.buffer.codec.test.protocols.AllTypesMessage
@@ -30,6 +28,7 @@ import com.ditchoom.buffer.codec.test.protocols.WsFrameHeader
 import com.ditchoom.buffer.codec.test.protocols.WsFrameHeaderCodec
 import com.ditchoom.buffer.codec.test.protocols.WsHeaderByte1
 import com.ditchoom.buffer.codec.test.protocols.WsHeaderByte2
+import com.ditchoom.buffer.wrap
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -119,7 +118,7 @@ class BatchExtractionCorrectnessTest {
 
     @Test
     fun `decode connack from known bytes`() {
-        val buffer = PlatformBuffer.wrap(byteArrayOf(0x01, 0x05), ByteOrder.BIG_ENDIAN)
+        val buffer = PlatformBuffer.wrap(byteArrayOf(0x01, 0x05))
         val decoded = MqttPacketConnAckCodec.decode(buffer)
         assertEquals(0x01u, decoded.acknowledgeFlags.raw, "acknowledgeFlags.raw")
         assertEquals(0x05u, decoded.returnCode.raw, "returnCode.raw")
@@ -143,7 +142,7 @@ class BatchExtractionCorrectnessTest {
                 0x00,
                 0x03, // arCount
             )
-        val buffer = PlatformBuffer.wrap(bytes, ByteOrder.BIG_ENDIAN)
+        val buffer = PlatformBuffer.wrap(bytes)
         val decoded = DnsHeaderCodec.decode(buffer)
         assertEquals(0x1234u, decoded.id)
         assertEquals(0x8180u, decoded.flags.raw)
@@ -168,7 +167,7 @@ class BatchExtractionCorrectnessTest {
                 0x00,
                 0x01, // flags = 1
             )
-        val buffer = PlatformBuffer.wrap(bytes, ByteOrder.BIG_ENDIAN)
+        val buffer = PlatformBuffer.wrap(bytes)
         val decoded = SimpleHeaderCodec.decode(buffer)
         assertEquals(0xABu, decoded.type)
         assertEquals(16u.toUShort(), decoded.length)
@@ -321,7 +320,7 @@ class BatchExtractionCorrectnessTest {
                 0xEF.toByte(), // unsignedValue = 0xABCDEF = 11259375
                 0xFF.toByte(), // trailer
             )
-        val buffer = PlatformBuffer.wrap(bytes, ByteOrder.BIG_ENDIAN)
+        val buffer = PlatformBuffer.wrap(bytes)
         val decoded = CustomWidthMessageCodec.decode(buffer)
         assertEquals(0x01u, decoded.flags)
         assertEquals(0x123456, decoded.signedValue)
@@ -334,7 +333,7 @@ class BatchExtractionCorrectnessTest {
     @Test
     fun `length from zero produces empty string`() {
         // Manually construct wire bytes: length=0 UShort, then empty string
-        val buffer = BufferFactory.Default.allocate(16)
+        val buffer = PlatformBuffer.allocate(16)
         buffer.writeUShort(0u) // length field = 0
         // No string bytes follow
         buffer.resetForRead()
@@ -396,7 +395,7 @@ class BatchExtractionCorrectnessTest {
         val connack: MqttPacket = MqttPacketConnAck(ConnAckFlags(1u), ConnectReturnCode(0u))
 
         // Encode via sealed dispatch codec
-        val buffer = BufferFactory.Default.allocate(16)
+        val buffer = PlatformBuffer.allocate(16)
         MqttPacketCodec.encode(buffer, connack)
         val bytesWritten = buffer.position()
         buffer.resetForRead()
@@ -411,7 +410,7 @@ class BatchExtractionCorrectnessTest {
     @Test
     fun `sealed dispatch does not silently ignore trailing data`() {
         val connack: MqttPacket = MqttPacketConnAck(ConnAckFlags(0u), ConnectReturnCode(0u))
-        val buffer = BufferFactory.Default.allocate(16)
+        val buffer = PlatformBuffer.allocate(16)
         MqttPacketCodec.encode(buffer, connack)
 
         // Add trailing garbage byte
@@ -513,7 +512,7 @@ class BatchExtractionCorrectnessTest {
                 // cond2 skipped (hasCond2=false)
                 0xFF.toByte(), // trailer
             )
-        val buffer = PlatformBuffer.wrap(bytes, ByteOrder.BIG_ENDIAN)
+        val buffer = PlatformBuffer.wrap(bytes)
         val decoded = ConditionalBatchTestMessageCodec.decode(buffer)
         assertEquals(0xAAu, decoded.header)
         assertEquals(0x42u, decoded.cond1)
@@ -529,7 +528,7 @@ class BatchExtractionCorrectnessTest {
         value: T,
     ) {
         val sizeOf = codec.sizeOf(value)
-        val buffer = BufferFactory.Default.allocate(256)
+        val buffer = PlatformBuffer.allocate(256)
         codec.encode(buffer, value)
         val actualSize = buffer.position()
         assertEquals(sizeOf, actualSize, "sizeOf(${value::class.simpleName}) must match actual encoded size")

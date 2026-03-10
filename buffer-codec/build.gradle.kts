@@ -85,9 +85,11 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":buffer"))
+            api(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
+            implementation(libs.kotlinx.coroutines.test)
         }
     }
 }
@@ -216,6 +218,10 @@ dokka {
         externalDocumentationLinks.register("kotlin-stdlib") {
             url("https://kotlinlang.org/api/latest/jvm/stdlib/")
             packageListUrl("https://kotlinlang.org/api/latest/jvm/stdlib/package-list")
+        }
+        externalDocumentationLinks.register("kotlinx-coroutines") {
+            url("https://kotlinlang.org/api/kotlinx.coroutines/")
+            packageListUrl("https://kotlinlang.org/api/kotlinx.coroutines/package-list")
         }
         reportUndocumented.set(false)
     }

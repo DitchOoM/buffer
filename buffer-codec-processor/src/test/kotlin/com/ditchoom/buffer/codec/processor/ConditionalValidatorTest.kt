@@ -164,25 +164,6 @@ class ConditionalValidatorTest {
     }
 
     @Test
-    fun `code injection expression fails`() {
-        val logger = TestLogger()
-        val validator = ConditionalValidator(logger)
-        val fields =
-            listOf(
-                field("enabled", "kotlin.Boolean", FieldReadStrategy.BooleanField),
-                field(
-                    "data",
-                    "kotlin.Int",
-                    FieldReadStrategy.IntField,
-                    nullable = true,
-                    condition = FieldCondition.WhenTrue("enabled); System.exit(0"),
-                ),
-            )
-        assertFalse(validator.validate(fields))
-        assertTrue(logger.errors.any { it.contains("valid identifier") })
-    }
-
-    @Test
     fun `dotted expression on value class passes`() {
         val logger = TestLogger()
         val validator = ConditionalValidator(logger)

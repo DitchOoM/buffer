@@ -71,7 +71,7 @@ internal fun decomposeWireBytes(wireBytes: Int): List<Int> =
     buildList {
         var r = wireBytes
         for (s in intArrayOf(4, 2, 1)) {
-            while (r >= s) {
+            if (r >= s) {
                 add(s)
                 r -= s
             }

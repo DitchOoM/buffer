@@ -81,15 +81,8 @@ class SealedDispatchGenerator(
                 .addStatement("val type = buffer.readByte().toInt() and 0xFF")
                 .beginControlFlow("return when (type)")
         for ((value, subclass) in variants) {
-            val subPackage = subclass.packageName.asString()
             val subName = subclass.simpleName.asString()
-            val subCodecName =
-                if (subPackage.isNotEmpty() && subPackage != packageName) {
-                    "$subPackage.${subName}Codec"
-                } else {
-                    "${subName}Codec"
-                }
-            decodeBody.addStatement("$value -> $subCodecName.decode(buffer)")
+            decodeBody.addStatement("$value -> ${subName}Codec.decode(buffer)")
         }
         decodeBody
             .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
@@ -107,17 +100,10 @@ class SealedDispatchGenerator(
         // Build encode function
         val encodeBody = CodeBlock.builder().beginControlFlow("when (value)")
         for ((value, subclass) in variants) {
-            val subPackage = subclass.packageName.asString()
             val subName = subclass.simpleName.asString()
-            val subCodecName =
-                if (subPackage.isNotEmpty() && subPackage != packageName) {
-                    "$subPackage.${subName}Codec"
-                } else {
-                    "${subName}Codec"
-                }
             encodeBody.beginControlFlow("is $subName ->")
             encodeBody.addStatement("buffer.writeByte($value.toByte())")
-            encodeBody.addStatement("$subCodecName.encode(buffer, value)")
+            encodeBody.addStatement("${subName}Codec.encode(buffer, value)")
             encodeBody.endControlFlow()
         }
         encodeBody.endControlFlow()

@@ -13,7 +13,7 @@ internal fun addBatchRead(
             "readLong" -> "Long"
             "readInt" -> "Int"
             "readShort" -> "Short"
-            else -> error("BatchGroup readMethod must be readShort/readInt/readLong, got '${item.readMethod}'")
+            else -> "Byte"
         }
     code.addStatement("val %L = buffer.%L()", batchVar, item.readMethod)
     if (readType == "Short" || readType == "Byte") {
@@ -54,7 +54,7 @@ internal fun generateExtractExpression(
             "Long" -> 64
             "Int" -> 32
             "Short" -> 16
-            else -> error("Unexpected readType '$readType'")
+            else -> 8
         }
     val mask = if (fieldBits >= batchBits) "" else hexMask(fieldBits)
 
@@ -76,12 +76,11 @@ internal fun generateExtractExpression(
             "${strategy.wrapperType}($innerExpr)"
         }
         is FieldReadStrategy.Custom -> error("Custom fields cannot participate in batch reads")
-        else -> error("Unexpected strategy type in batch read: ${strategy::class.simpleName}")
+        else -> rawExpr
     }
 }
 
 internal fun hexMask(bits: Int): String {
-    require(bits > 0 && bits % 8 == 0) { "hexMask requires positive bit count divisible by 8, got $bits" }
     val hex = "FF".repeat(bits / 8)
     return if (bits >= 32) "0x${hex}L" else "0x$hex"
 }

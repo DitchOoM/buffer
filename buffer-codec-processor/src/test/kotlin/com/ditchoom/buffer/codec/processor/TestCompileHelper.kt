@@ -143,7 +143,6 @@ private val payloadStubs =
         fun readDouble(): Double
         fun readString(length: Int): String
         fun remaining(): Int
-        fun release()
     }
     class ReadBufferPayloadReader(private val buffer: ReadBuffer) : PayloadReader {
         override fun readByte(): Byte = TODO()
@@ -154,7 +153,7 @@ private val payloadStubs =
         override fun readDouble(): Double = TODO()
         override fun readString(length: Int): String = TODO()
         override fun remaining(): Int = TODO()
-        override fun release() {}
+        fun release() {}
     }
     """,
     )
@@ -173,7 +172,19 @@ fun compileWithKsp(vararg sources: SourceFile): CompileResult {
     return CompileResult(result.exitCode, result.messages)
 }
 
-fun compileWithKspAndBufferStubs(vararg sources: SourceFile): CompileResult = compileWithKsp(*sources)
+fun compileWithKspAndBufferStubs(vararg sources: SourceFile): CompileResult {
+    val allSources = listOf(annotationSource, codecStubs, bufferStubs) + sources.toList()
+    val compilation =
+        KotlinCompilation().apply {
+            this.sources = allSources
+            configureKsp(useKsp2 = true) {
+                symbolProcessorProviders += ProtocolMessageProcessorProvider()
+            }
+            kotlincArguments = listOf("-Xskip-metadata-version-check")
+        }
+    val result = compilation.compile()
+    return CompileResult(result.exitCode, result.messages)
+}
 
 fun compileWithKspAndPayloadStubs(vararg sources: SourceFile): CompileResult {
     val allSources = listOf(annotationSource, codecStubs, bufferStubs, payloadStubs) + sources.toList()

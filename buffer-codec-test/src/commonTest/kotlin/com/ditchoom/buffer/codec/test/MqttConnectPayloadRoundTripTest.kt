@@ -1,7 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
-import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.codec.test.protocols.ConnectFlags
 import com.ditchoom.buffer.codec.test.protocols.MqttConnect
 import com.ditchoom.buffer.codec.test.protocols.MqttConnectCodec
@@ -25,7 +25,7 @@ class MqttConnectPayloadRoundTripTest {
                 username = "user",
                 password = "pass",
             )
-        val buffer = BufferFactory.Default.allocate(512)
+        val buffer = PlatformBuffer.allocate(512)
         MqttConnectCodec.encode(
             buffer,
             original,
@@ -60,7 +60,7 @@ class MqttConnectPayloadRoundTripTest {
                 keepAlive = 30u,
                 clientId = "minimal",
             )
-        val buffer = BufferFactory.Default.allocate(256)
+        val buffer = PlatformBuffer.allocate(256)
         MqttConnectCodec.encode(
             buffer,
             original,
@@ -98,7 +98,7 @@ class MqttConnectPayloadRoundTripTest {
                 willPayload = 0x0102030405060708L,
                 password = 42,
             )
-        val buffer = BufferFactory.Default.allocate(512)
+        val buffer = PlatformBuffer.allocate(512)
         MqttConnectCodec.encode(
             buffer,
             original,

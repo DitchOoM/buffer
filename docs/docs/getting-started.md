@@ -16,6 +16,9 @@ dependencies {
     // Core buffer library
     implementation("com.ditchoom:buffer:<latest-version>")
 
+    // Optional: Protocol codecs (Codec<T> for ReadBuffer/WriteBuffer)
+    implementation("com.ditchoom:buffer-codec:<latest-version>")
+
     // Optional: Compression (gzip, deflate)
     implementation("com.ditchoom:buffer-compression:<latest-version>")
 

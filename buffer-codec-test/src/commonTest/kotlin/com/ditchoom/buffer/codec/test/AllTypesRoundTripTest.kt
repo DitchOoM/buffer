@@ -1,7 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
-import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.codec.test.protocols.AllTypesMessage
 import com.ditchoom.buffer.codec.test.protocols.AllTypesMessageCodec
 import kotlin.test.Test
@@ -25,7 +25,7 @@ class AllTypesRoundTripTest {
                 boolVal = true,
                 stringVal = "Hello, Codec!",
             )
-        val buffer = BufferFactory.Default.allocate(256)
+        val buffer = PlatformBuffer.allocate(256)
         AllTypesMessageCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = AllTypesMessageCodec.decode(buffer)
@@ -49,7 +49,7 @@ class AllTypesRoundTripTest {
                 boolVal = false,
                 stringVal = "",
             )
-        val buffer = BufferFactory.Default.allocate(256)
+        val buffer = PlatformBuffer.allocate(256)
         AllTypesMessageCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = AllTypesMessageCodec.decode(buffer)

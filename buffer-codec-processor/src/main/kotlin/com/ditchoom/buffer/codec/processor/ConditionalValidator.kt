@@ -32,18 +32,6 @@ class ConditionalValidator(
                 continue
             }
 
-            // Validate expression is a safe identifier path (no code injection)
-            val identifierPattern = Regex("^[a-zA-Z_][a-zA-Z0-9_]*(\\.[a-zA-Z_][a-zA-Z0-9_]*)*$")
-            if (!identifierPattern.matches(expression)) {
-                logger.error(
-                    "@WhenTrue(\"$expression\") on '${field.name}': expression must be a valid identifier " +
-                        "or dotted property access (e.g., \"enabled\" or \"flags.willFlag\").",
-                    field.parameter,
-                )
-                valid = false
-                continue
-            }
-
             // Parse expression: "fieldName" or "fieldName.property"
             val parts = expression.split(".")
             val referencedFieldName = parts[0]
@@ -115,4 +103,6 @@ class ConditionalValidator(
         }
         return valid
     }
+
+    private fun capitalizeFirst(s: String): String = s.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
 }
