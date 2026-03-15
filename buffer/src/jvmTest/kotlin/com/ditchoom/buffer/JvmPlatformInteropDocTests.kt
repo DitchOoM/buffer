@@ -11,7 +11,7 @@ import kotlin.test.assertNotNull
 class JvmPlatformInteropDocTests {
     @Test
     fun toNativeDataReturnsReadOnlyByteBuffer() {
-        val buffer = PlatformBuffer.allocate(1024)
+        val buffer = BufferFactory.managed().allocate(1024)
         val data = byteArrayOf(1, 2, 3, 4, 5)
         buffer.writeBytes(data)
         buffer.resetForRead()
@@ -31,7 +31,7 @@ class JvmPlatformInteropDocTests {
 
     @Test
     fun toMutableNativeDataReturnsMutableByteBuffer() {
-        val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(1024)
         val data = byteArrayOf(1, 2, 3, 4, 5)
         buffer.writeBytes(data)
         buffer.resetForRead()
@@ -52,7 +52,7 @@ class JvmPlatformInteropDocTests {
 
     @Test
     fun directBufferZeroCopyConversion() {
-        val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(1024)
         buffer.writeInt(42)
         buffer.resetForRead()
 
@@ -68,7 +68,7 @@ class JvmPlatformInteropDocTests {
 
     @Test
     fun heapBufferConversion() {
-        val buffer = PlatformBuffer.allocate(1024, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(1024)
         buffer.writeInt(42)
         buffer.resetForRead()
 
@@ -85,7 +85,7 @@ class JvmPlatformInteropDocTests {
 
     @Test
     fun partialBufferConversion() {
-        val buffer = PlatformBuffer.allocate(1024)
+        val buffer = BufferFactory.managed().allocate(1024)
         buffer.writeInt(1)
         buffer.writeInt(2)
         buffer.writeInt(3)
@@ -106,7 +106,7 @@ class JvmPlatformInteropDocTests {
     @Test
     fun jniDocumentationExample() {
         // Direct buffers: zero-copy - changes to NIO buffer reflect in original
-        val direct = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+        val direct = BufferFactory.Default.allocate(1024)
         direct.writeInt(42)
         direct.resetForRead()
         val directNio = direct.toMutableNativeData().byteBuffer
@@ -118,7 +118,7 @@ class JvmPlatformInteropDocTests {
         assertEquals(99, direct.readInt())
 
         // Heap buffers: copied to direct for native interop
-        val heap = PlatformBuffer.allocate(1024, AllocationZone.Heap)
+        val heap = BufferFactory.managed().allocate(1024)
         heap.writeInt(42)
         heap.resetForRead()
         val heapNio = heap.toNativeData().byteBuffer

@@ -2,7 +2,6 @@ package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
 
 /**
  * JVM/Android supports synchronous compression via java.util.zip.

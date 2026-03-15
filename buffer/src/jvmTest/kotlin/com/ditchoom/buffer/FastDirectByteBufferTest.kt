@@ -138,7 +138,7 @@ class FastDirectByteBufferTest {
                 0L
             }
 
-        // Benchmark raw Unsafe allocation (current ScopedBuffer approach)
+        // Benchmark raw Unsafe allocation
         val unsafeStart = System.nanoTime()
         repeat(iterations) {
             val addr = unsafe.allocateMemory(size.toLong())

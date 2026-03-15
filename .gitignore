@@ -14,6 +14,7 @@ kotlinx-io-native/repo/
 !.idea/codeStyles
 
 local.properties
+Test Results*
 .claude/settings.local.json
 
 # Docusaurus

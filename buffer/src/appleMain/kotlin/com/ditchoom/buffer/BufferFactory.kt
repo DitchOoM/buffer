@@ -8,38 +8,46 @@ import platform.Foundation.NSData
 import platform.Foundation.NSMutableData
 import platform.Foundation.create
 
-/**
- * Allocates a new buffer with the specified size and allocation zone.
- *
- * - [AllocationZone.Heap]: Returns [ByteArrayBuffer] (Kotlin managed memory)
- * - [AllocationZone.Direct]: Returns [MutableDataBuffer] (Apple native memory)
- * - [AllocationZone.SharedMemory]: Falls back to Direct (no shared memory on Apple)
- */
-actual fun PlatformBuffer.Companion.allocate(
-    size: Int,
-    zone: AllocationZone,
-    byteOrder: ByteOrder,
-): PlatformBuffer =
-    when (zone) {
-        AllocationZone.Heap -> ByteArrayBuffer(ByteArray(size), byteOrder = byteOrder)
-        AllocationZone.Direct, AllocationZone.SharedMemory -> {
-            @OptIn(UnsafeNumber::class)
-            MutableDataBuffer(NSMutableData.create(length = size.convert())!!, byteOrder = byteOrder)
+// =============================================================================
+// v2 BufferFactory implementations
+// =============================================================================
+
+internal actual val defaultBufferFactory: BufferFactory =
+    object : BufferFactory {
+        @OptIn(UnsafeNumber::class)
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer {
+            val data =
+                NSMutableData.create(length = size.convert())
+                    ?: error("Failed to allocate NSMutableData of $size bytes")
+            return MutableDataBuffer(data, byteOrder = byteOrder)
         }
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = ByteArrayBuffer(array, byteOrder = byteOrder)
     }
 
-/**
- * Wraps an existing ByteArray in a buffer.
- *
- * Returns a [ByteArrayBuffer] which shares memory with the original array.
- * Modifications to the buffer will be visible in the original array and vice versa.
- *
- * For wrapping Apple native data, use [wrap] with NSData or NSMutableData instead.
- */
-actual fun PlatformBuffer.Companion.wrap(
-    array: ByteArray,
-    byteOrder: ByteOrder,
-): PlatformBuffer = ByteArrayBuffer(array, byteOrder = byteOrder)
+internal actual val managedBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = ByteArrayBuffer(ByteArray(size), byteOrder = byteOrder)
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = ByteArrayBuffer(array, byteOrder = byteOrder)
+    }
+
+internal actual val sharedBufferFactory: BufferFactory = defaultBufferFactory
+
+// Apple buffers use ARC (MutableDataBuffer) — already deterministic
+internal actual val deterministicBufferFactory: BufferFactory = defaultBufferFactory
 
 /**
  * Wraps an existing NSData in a read-only buffer (zero-copy).
@@ -98,7 +106,12 @@ fun PlatformBuffer.Companion.wrap(
 actual fun PlatformBuffer.Companion.allocateNative(
     size: Int,
     byteOrder: ByteOrder,
-): PlatformBuffer = MutableDataBuffer(NSMutableData.create(length = size.convert())!!, byteOrder = byteOrder)
+): PlatformBuffer {
+    val data =
+        NSMutableData.create(length = size.convert())
+            ?: error("Failed to allocate NSMutableData of $size bytes")
+    return MutableDataBuffer(data, byteOrder = byteOrder)
+}
 
 /**
  * Allocates a buffer with shared memory support.
@@ -107,4 +120,4 @@ actual fun PlatformBuffer.Companion.allocateNative(
 actual fun PlatformBuffer.Companion.allocateShared(
     size: Int,
     byteOrder: ByteOrder,
-): PlatformBuffer = allocate(size, AllocationZone.Direct, byteOrder)
+): PlatformBuffer = BufferFactory.Default.allocate(size, byteOrder)

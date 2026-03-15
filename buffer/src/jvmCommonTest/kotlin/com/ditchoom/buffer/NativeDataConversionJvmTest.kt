@@ -10,7 +10,7 @@ import kotlin.test.assertTrue
 class NativeDataConversionJvmTest {
     @Test
     fun toNativeDataReturnsReadOnlyByteBufferAtPositionZero() {
-        val buffer = PlatformBuffer.allocate(8)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
 
@@ -22,7 +22,7 @@ class NativeDataConversionJvmTest {
 
     @Test
     fun toNativeDataReturnsRemainingBytesFromPosition() {
-        val buffer = PlatformBuffer.allocate(8)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
         buffer.readByte() // position = 1
@@ -40,7 +40,7 @@ class NativeDataConversionJvmTest {
 
     @Test
     fun toNativeDataRespectsLimit() {
-        val buffer = PlatformBuffer.allocate(8)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
         buffer.setLimit(5)
@@ -55,7 +55,7 @@ class NativeDataConversionJvmTest {
 
     @Test
     fun toMutableNativeDataReturnsMutableByteBuffer() {
-        val buffer = PlatformBuffer.allocate(8)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
 
@@ -70,7 +70,7 @@ class NativeDataConversionJvmTest {
 
     @Test
     fun toMutableNativeDataRespectsPositionAndLimit() {
-        val buffer = PlatformBuffer.allocate(8)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
         buffer.readByte() // position = 1
@@ -90,7 +90,7 @@ class NativeDataConversionJvmTest {
 
     @Test
     fun toNativeDataFromDirectBufferReturnsDirect() {
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(8)
         buffer.writeBytes(byteArrayOf(10, 20, 30, 40, 50, 60, 70, 80))
         buffer.resetForRead()
         buffer.readByte() // position = 1
@@ -102,7 +102,7 @@ class NativeDataConversionJvmTest {
 
     @Test
     fun toNativeDataFromHeapBufferReturnsDirect() {
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeBytes(byteArrayOf(10, 20, 30, 40, 50, 60, 70, 80))
         buffer.resetForRead()
         buffer.readByte() // position = 1
@@ -119,7 +119,7 @@ class NativeDataConversionJvmTest {
     @Test
     fun toNativeDataFromWrappedByteArrayReturnsDirect() {
         val original = byteArrayOf(1, 2, 3, 4, 5)
-        val buffer = PlatformBuffer.wrap(original)
+        val buffer = BufferFactory.Default.wrap(original)
         buffer.readByte() // position = 1
 
         val result = buffer.toNativeData().byteBuffer
@@ -133,7 +133,7 @@ class NativeDataConversionJvmTest {
 
     @Test
     fun toMutableNativeDataFromDirectBufferReturnsDirect() {
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(8)
         buffer.writeBytes(byteArrayOf(10, 20, 30, 40, 50, 60, 70, 80))
         buffer.resetForRead()
 
@@ -143,7 +143,7 @@ class NativeDataConversionJvmTest {
 
     @Test
     fun toMutableNativeDataFromHeapBufferReturnsDirect() {
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeBytes(byteArrayOf(10, 20, 30, 40, 50, 60, 70, 80))
         buffer.resetForRead()
 
@@ -158,7 +158,7 @@ class NativeDataConversionJvmTest {
     @Test
     fun toByteArrayZeroCopyForFullHeapBuffer() {
         val original = byteArrayOf(1, 2, 3, 4, 5)
-        val buffer = PlatformBuffer.wrap(original)
+        val buffer = BufferFactory.Default.wrap(original)
 
         val result = buffer.toByteArray()
         assertSame(original, result, "Full heap buffer at position 0 should return same array")
@@ -167,7 +167,7 @@ class NativeDataConversionJvmTest {
     @Test
     fun toByteArrayCopiesWhenPositionNonZero() {
         val original = byteArrayOf(1, 2, 3, 4, 5)
-        val buffer = PlatformBuffer.wrap(original)
+        val buffer = BufferFactory.Default.wrap(original)
         buffer.readByte() // position = 1
 
         val result = buffer.toByteArray()
@@ -178,7 +178,7 @@ class NativeDataConversionJvmTest {
     @Test
     fun toByteArrayCopiesWhenLimitReduced() {
         val original = byteArrayOf(1, 2, 3, 4, 5)
-        val buffer = PlatformBuffer.wrap(original)
+        val buffer = BufferFactory.Default.wrap(original)
         buffer.setLimit(3)
 
         val result = buffer.toByteArray()
@@ -188,7 +188,7 @@ class NativeDataConversionJvmTest {
 
     @Test
     fun toByteArrayAlwaysCopiesForDirectBuffer() {
-        val buffer = PlatformBuffer.allocate(5, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(5)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5))
         buffer.resetForRead()
 
@@ -206,7 +206,7 @@ class NativeDataConversionJvmTest {
 
     @Test
     fun toMutableNativeDataSharesMemoryWithDirectBuffer() {
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
 
@@ -219,7 +219,7 @@ class NativeDataConversionJvmTest {
 
     @Test
     fun toMutableNativeDataCopiesFromHeapBuffer() {
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
 

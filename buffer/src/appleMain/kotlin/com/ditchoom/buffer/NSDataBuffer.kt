@@ -39,7 +39,6 @@ class NSDataBuffer(
     val data: NSData,
     override val byteOrder: ByteOrder,
 ) : ReadBuffer,
-    SuspendCloseable,
     NativeMemoryAccess {
     private var position: Int = 0
     private var limit: Int = data.length.toInt()
@@ -205,7 +204,7 @@ class NSDataBuffer(
 
     // endregion
 
-    override suspend fun close() {
+    fun close() {
         // NSData is reference-counted by ARC, no explicit cleanup needed
     }
 
@@ -227,7 +226,6 @@ internal class NSDataBufferSlice(
     private val sliceOffset: Int,
     val capacity: Int,
 ) : ReadBuffer,
-    SuspendCloseable,
     NativeMemoryAccess {
     private var position: Int = 0
     private var limit: Int = capacity
@@ -343,7 +341,7 @@ internal class NSDataBufferSlice(
         }
     }
 
-    override suspend fun close() {
+    fun close() {
         // No cleanup needed
     }
 

@@ -20,7 +20,7 @@ class StreamProcessorEdgeCaseTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(4)
+        val buffer = BufferFactory.managed().allocate(4)
         buffer.writeInt(42)
         buffer.resetForRead()
         processor.append(buffer)
@@ -43,7 +43,7 @@ class StreamProcessorEdgeCaseTests {
         val processor = StreamProcessor.create(pool)
 
         // Chunk 1: 4 bytes [0x01, 0x02, 0x03, 0x04]
-        val chunk1 = PlatformBuffer.allocate(4)
+        val chunk1 = BufferFactory.managed().allocate(4)
         chunk1.writeByte(0x01)
         chunk1.writeByte(0x02)
         chunk1.writeByte(0x03)
@@ -52,7 +52,7 @@ class StreamProcessorEdgeCaseTests {
         processor.append(chunk1)
 
         // Chunk 2: 4 bytes [0x05, 0x06, 0x07, 0x08]
-        val chunk2 = PlatformBuffer.allocate(4)
+        val chunk2 = BufferFactory.managed().allocate(4)
         chunk2.writeByte(0x05)
         chunk2.writeByte(0x06)
         chunk2.writeByte(0x07)
@@ -84,7 +84,7 @@ class StreamProcessorEdgeCaseTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val chunk = PlatformBuffer.allocate(8)
+        val chunk = BufferFactory.managed().allocate(8)
         for (i in 0 until 8) chunk.writeByte((i + 1).toByte())
         chunk.resetForRead()
         processor.append(chunk)
@@ -110,7 +110,7 @@ class StreamProcessorEdgeCaseTests {
         val processor = StreamProcessor.create(pool)
 
         // Create a buffer, consume 2 bytes, then append the rest
-        val buffer = PlatformBuffer.allocate(6)
+        val buffer = BufferFactory.managed().allocate(6)
         for (i in 1..6) buffer.writeByte(i.toByte())
         buffer.resetForRead()
         buffer.readByte() // consume byte 1
@@ -139,7 +139,7 @@ class StreamProcessorEdgeCaseTests {
         // Write int 0xAABBCCDD as BIG_ENDIAN across 4 single-byte chunks
         val bytes = byteArrayOf(0xAA.toByte(), 0xBB.toByte(), 0xCC.toByte(), 0xDD.toByte())
         for (b in bytes) {
-            val buf = PlatformBuffer.allocate(1)
+            val buf = BufferFactory.managed().allocate(1)
             buf.writeByte(b)
             buf.resetForRead()
             processor.append(buf)
@@ -156,12 +156,12 @@ class StreamProcessorEdgeCaseTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buf1 = PlatformBuffer.allocate(1)
+        val buf1 = BufferFactory.managed().allocate(1)
         buf1.writeByte(0x12)
         buf1.resetForRead()
         processor.append(buf1)
 
-        val buf2 = PlatformBuffer.allocate(1)
+        val buf2 = BufferFactory.managed().allocate(1)
         buf2.writeByte(0x34)
         buf2.resetForRead()
         processor.append(buf2)
@@ -190,7 +190,7 @@ class StreamProcessorEdgeCaseTests {
                 0x08,
             )
         for (b in bytes) {
-            val buf = PlatformBuffer.allocate(1)
+            val buf = BufferFactory.managed().allocate(1)
             buf.writeByte(b)
             buf.resetForRead()
             processor.append(buf)
@@ -237,7 +237,7 @@ class StreamProcessorEdgeCaseTests {
         val processor = StreamProcessor.create(pool)
 
         // Append first data
-        val buf1 = PlatformBuffer.allocate(4)
+        val buf1 = BufferFactory.managed().allocate(4)
         buf1.writeInt(0x01020304)
         buf1.resetForRead()
         processor.append(buf1)
@@ -248,7 +248,7 @@ class StreamProcessorEdgeCaseTests {
         assertEquals(0, processor.available())
 
         // Append more data
-        val buf2 = PlatformBuffer.allocate(4)
+        val buf2 = BufferFactory.managed().allocate(4)
         buf2.writeInt(0x05060708)
         buf2.resetForRead()
         processor.append(buf2)
@@ -271,13 +271,13 @@ class StreamProcessorEdgeCaseTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buf1 = PlatformBuffer.allocate(2)
+        val buf1 = BufferFactory.managed().allocate(2)
         buf1.writeByte(0x01)
         buf1.writeByte(0x02)
         buf1.resetForRead()
         processor.append(buf1)
 
-        val buf2 = PlatformBuffer.allocate(2)
+        val buf2 = BufferFactory.managed().allocate(2)
         buf2.writeByte(0x03)
         buf2.writeByte(0x04)
         buf2.resetForRead()
@@ -300,7 +300,7 @@ class StreamProcessorEdgeCaseTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buf = PlatformBuffer.allocate(4)
+        val buf = BufferFactory.managed().allocate(4)
         buf.writeByte(0xAA.toByte())
         buf.writeByte(0xBB.toByte())
         buf.writeByte(0xCC.toByte())
@@ -337,7 +337,7 @@ class StreamProcessorEdgeCaseTests {
 
         // Append 100 bytes across 10 chunks of 10 bytes each
         for (chunkIdx in 0 until 10) {
-            val chunk = PlatformBuffer.allocate(10)
+            val chunk = BufferFactory.managed().allocate(10)
             for (i in 0 until 10) {
                 chunk.writeByte(((chunkIdx * 10 + i) % 256).toByte())
             }

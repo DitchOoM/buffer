@@ -1,9 +1,9 @@
 package com.ditchoom.buffer.benchmark
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.NativeMemoryAccess
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.managed
 import kotlinx.benchmark.Benchmark
 import kotlinx.benchmark.BenchmarkMode
 import kotlinx.benchmark.BenchmarkTimeUnit
@@ -52,11 +52,11 @@ open class BufferBaselineBenchmark {
 
     @Setup
     fun setup() {
-        heapBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
+        heapBuffer = BufferFactory.managed().allocate(smallBufferSize)
         // Use Heap for buffers that would be Direct - isolates WASM optimizer bug
-        directBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap) // TODO: restore to Direct
-        largeDirectBuffer = PlatformBuffer.allocate(largeBufferSize, AllocationZone.Heap) // TODO: restore to Direct
-        sourceBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap) // TODO: restore to Direct
+        directBuffer = BufferFactory.managed().allocate(smallBufferSize) // TODO: restore to Direct
+        largeDirectBuffer = BufferFactory.managed().allocate(largeBufferSize) // TODO: restore to Direct
+        sourceBuffer = BufferFactory.managed().allocate(smallBufferSize) // TODO: restore to Direct
         testData = ByteArray(smallBufferSize) { it.toByte() }
 
         // Pre-fill source buffer for bulk write operations
@@ -64,21 +64,21 @@ open class BufferBaselineBenchmark {
         sourceBuffer.resetForRead()
 
         // Setup readLine buffers
-        shortLinesBuffer = PlatformBuffer.allocate(shortLineText.length * 2, AllocationZone.Heap)
+        shortLinesBuffer = BufferFactory.managed().allocate(shortLineText.length * 2)
         shortLinesBuffer.writeString(shortLineText)
 
-        longLinesBuffer = PlatformBuffer.allocate(longLineText.length * 2, AllocationZone.Heap)
+        longLinesBuffer = BufferFactory.managed().allocate(longLineText.length * 2)
         longLinesBuffer.writeString(longLineText)
     }
 
     // --- Allocation Benchmarks ---
 
     @Benchmark
-    fun allocateHeap(): PlatformBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
+    fun allocateHeap(): PlatformBuffer = BufferFactory.managed().allocate(smallBufferSize)
 
     // DISABLED: Causes stack overflow in WASM production builds due to optimizer bug
     // @Benchmark
-    // fun allocateDirect(): PlatformBuffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Direct)
+    // fun allocateDirect(): PlatformBuffer = BufferFactory.Default.allocate(smallBufferSize)
 
     // --- Read/Write Int (representative of primitive operations) ---
 
@@ -212,7 +212,7 @@ open class BufferBaselineBenchmark {
     fun nativeAddressLookupFresh(): Long {
         // Create new buffer and access nativeAddress (not cached)
         // Use Heap to avoid exhausting WASM LinearMemoryAllocator
-        val buffer = PlatformBuffer.allocate(smallBufferSize, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(smallBufferSize)
         val access = buffer as? NativeMemoryAccess ?: return 0L
         return access.nativeAddress
     }

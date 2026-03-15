@@ -1,9 +1,9 @@
 package com.ditchoom.buffer.flow.benchmark
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.flow.asStringFlow
 import com.ditchoom.buffer.flow.lines
 import com.ditchoom.buffer.flow.mapBuffer
@@ -231,7 +231,7 @@ open class FlowExtensionsBenchmark {
         val text = buildLines(sizeBytes / 81, 80) // ~81 bytes per line (80 chars + \n)
         val bytes = text.encodeToByteArray()
         return (0 until count).map {
-            val buf = PlatformBuffer.allocate(sizeBytes, AllocationZone.Direct)
+            val buf = BufferFactory.Default.allocate(sizeBytes)
             // Write as many bytes as fit
             val toWrite = minOf(bytes.size, sizeBytes)
             buf.writeBytes(bytes, 0, toWrite)

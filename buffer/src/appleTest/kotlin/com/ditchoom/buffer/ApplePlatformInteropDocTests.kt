@@ -21,7 +21,7 @@ import kotlin.test.assertTrue
 class ApplePlatformInteropDocTests {
     @Test
     fun toNativeDataReturnsNSData() {
-        val buffer = PlatformBuffer.allocate(1024)
+        val buffer = BufferFactory.managed().allocate(1024)
         val data = byteArrayOf(1, 2, 3, 4, 5)
         buffer.writeBytes(data)
         buffer.resetForRead()
@@ -36,7 +36,7 @@ class ApplePlatformInteropDocTests {
 
     @Test
     fun toMutableNativeDataReturnsNSMutableData() {
-        val buffer = PlatformBuffer.allocate(1024)
+        val buffer = BufferFactory.managed().allocate(1024)
         val data = byteArrayOf(1, 2, 3, 4, 5)
         buffer.writeBytes(data)
         buffer.resetForRead()
@@ -111,7 +111,7 @@ class ApplePlatformInteropDocTests {
     @Test
     fun byteArrayBufferConversion() {
         // ByteArrayBuffer must copy to NSData
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
 
@@ -121,7 +121,7 @@ class ApplePlatformInteropDocTests {
 
     @Test
     fun positionInvarianceForNSData() {
-        val buffer = PlatformBuffer.allocate(100)
+        val buffer = BufferFactory.managed().allocate(100)
         buffer.writeInt(1)
         buffer.writeInt(2)
         buffer.writeInt(3)
@@ -141,7 +141,7 @@ class ApplePlatformInteropDocTests {
 
     @Test
     fun positionInvarianceForNSMutableData() {
-        val buffer = PlatformBuffer.allocate(100)
+        val buffer = BufferFactory.managed().allocate(100)
         buffer.writeInt(1)
         buffer.writeInt(2)
         buffer.writeInt(3)

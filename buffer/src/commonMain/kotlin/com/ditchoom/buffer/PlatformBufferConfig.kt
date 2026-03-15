@@ -4,7 +4,7 @@ package com.ditchoom.buffer
  * Platform-specific buffer configuration.
  *
  * Call [configureWasmMemory] at app startup to customize WASM linear memory allocation.
- * This must be called before any `PlatformBuffer.allocate()` with `AllocationZone.Direct`.
+ * This must be called before any `BufferFactory.Default.allocate()` with direct allocation.
  *
  * ```kotlin
  * // At app startup:

@@ -45,7 +45,7 @@ actual fun StreamingDecompressor.Companion.create(
     }
 
 // =============================================================================
-// Shared Helpers - Use try-catch for ByteBuffer methods (Java 11+ / Android API 35+)
+// Shared Helpers - ByteBuffer overloads require JDK 11+ / Android API 35+
 // =============================================================================
 
 /**
@@ -60,7 +60,7 @@ private fun Deflater.setInputFrom(buffer: ReadBuffer) {
             setInput(byteBuffer)
             return
         } catch (_: NoSuchMethodError) {
-            // ByteBuffer overload not available, use fallback
+            // ByteBuffer overload not available (JDK < 11), use fallback
         }
 
         // Fallback: use array if available
@@ -89,7 +89,7 @@ private fun Deflater.deflateInto(
     try {
         return deflate(buffer, flushMode)
     } catch (_: NoSuchMethodError) {
-        // ByteBuffer overload not available, use fallback
+        // ByteBuffer overload not available (JDK < 11), use fallback
     }
 
     // Fallback: use array if available
@@ -120,7 +120,7 @@ private fun Inflater.setInputFrom(buffer: ReadBuffer) {
             setInput(byteBuffer)
             return
         } catch (_: NoSuchMethodError) {
-            // ByteBuffer overload not available, use fallback
+            // ByteBuffer overload not available (JDK < 11), use fallback
         }
 
         // Fallback: use array if available
@@ -146,7 +146,7 @@ private fun Inflater.inflateInto(buffer: ByteBuffer): Int {
     try {
         return inflate(buffer)
     } catch (_: NoSuchMethodError) {
-        // ByteBuffer overload not available, use fallback
+        // ByteBuffer overload not available (JDK < 11), use fallback
     }
 
     // Fallback: use array if available
@@ -231,7 +231,7 @@ private inline fun drainDeflaterSyncFlush(
         }
 
         val buffer = output.jvmByteBuffer()
-        val count = deflater.deflate(buffer, Deflater.SYNC_FLUSH)
+        val count = deflater.deflateInto(buffer, Deflater.SYNC_FLUSH)
 
         if (count > 0 && buffer.remaining() == 0) {
             output.resetForRead()

@@ -25,9 +25,17 @@ Buffer gives you one `ReadBuffer`/`WriteBuffer` API that delegates to platform-n
 ## Installation
 
 ```kotlin
+plugins {
+    id("com.google.devtools.ksp") version "<ksp-version>" // Only needed for codec code generation
+}
+
 dependencies {
     // Core buffer library
     implementation("com.ditchoom:buffer:<latest-version>")
+
+    // Optional: Protocol codecs (annotation-driven code generation)
+    implementation("com.ditchoom:buffer-codec:<latest-version>")
+    ksp("com.ditchoom:buffer-codec-processor:<latest-version>")
 
     // Optional: Compression (gzip, deflate)
     implementation("com.ditchoom:buffer-compression:<latest-version>")
@@ -44,6 +52,8 @@ Find the latest version on [Maven Central](https://central.sonatype.com/artifact
 | Module | Description |
 |--------|-------------|
 | `buffer` | Core `ReadBuffer`/`WriteBuffer` interfaces, `BufferPool`, `StreamProcessor` |
+| `buffer-codec` | `Codec<T>` interface (operates directly on `ReadBuffer`/`WriteBuffer`), annotations for code generation |
+| `buffer-codec-processor` | KSP processor — generates `Codec` implementations from `@ProtocolMessage` annotations |
 | `buffer-compression` | `compress()`/`decompress()` (gzip, deflate) on `ReadBuffer` |
 | `buffer-flow` | Kotlin Flow extensions: `mapBuffer()`, `asStringFlow()`, `lines()` |
 
@@ -59,6 +69,43 @@ buffer.resetForRead()
 val number = buffer.readInt()     // 42
 val text = buffer.readString(6)   // "Hello!"
 ```
+
+## Protocol Codecs
+
+Define a data class, annotate it, and the codec writes itself:
+
+```kotlin
+@ProtocolMessage
+data class SensorReading(
+    val sensorId: UShort,       // 2 bytes
+    val temperature: Int,       // 4 bytes
+    @LengthPrefixed val label: String,  // 2-byte length prefix + UTF-8
+)
+```
+
+The KSP processor generates a full `Codec<SensorReading>` — encode, decode, and sizeOf — at compile time:
+
+```kotlin
+val buffer = SensorReadingCodec.encodeToBuffer(reading)
+val decoded = SensorReadingCodec.decode(buffer)
+```
+
+Annotations cover common binary protocol patterns:
+
+- `@LengthPrefixed(prefix)` — length-prefixed strings (1, 2, or 4 byte prefix)
+- `@RemainingBytes` — consume all remaining bytes
+- `@LengthFrom("field")` — string length from a preceding numeric field
+- `@WireBytes(n)` — custom wire width for numeric fields (e.g., 3-byte integers)
+- `@WhenTrue("expr")` — conditional nullable fields
+- `@Payload` — generic payload type parameter
+- `@PacketType(value)` on sealed interface variants — auto-dispatched decode by type byte (0-255)
+- Value classes wrapping primitives — zero-overhead typed wrappers (e.g., `value class PacketId(val raw: UShort)`)
+
+Generated codecs implement the same `Codec<T>` interface used for manual codecs, so all patterns (streaming, round-trip testing, composition) work unchanged.
+
+> **Note:** Generated code appears after compilation (`./gradlew build`). IDE features like autocomplete and navigation for generated codecs require an initial build.
+
+See the [full protocol codecs guide](docs/docs/recipes/protocol-codecs.md) for details.
 
 ## Buffer Pooling
 
@@ -130,20 +177,17 @@ bufferFlow
     .collect { line -> process(line) }
 ```
 
-## Scoped Buffers
+## Deterministic Memory
 
-For FFI/JNI interop or deterministic memory management:
+For explicit memory management without relying on GC:
 
 ```kotlin
-withScope { scope ->
-    val buffer = scope.allocate(8192)
+BufferFactory.Deterministic.allocate(8192).use { buffer ->
     buffer.writeInt(42)
     buffer.writeString("Hello")
     buffer.resetForRead()
-
-    // Native address available for FFI/JNI
-    val address = buffer.nativeAddress
-} // Memory freed immediately when scope closes
+    // Use buffer...
+} // Memory freed immediately
 ```
 
 ## Platform Implementations
@@ -164,6 +208,8 @@ Buffer is the foundation for the [Socket](https://github.com/DitchOoM/socket) li
 ```
 ┌─────────────────────────────┐
 │  Your Protocol              │
+├─────────────────────────────┤
+│  buffer-codec               │  ← com.ditchoom:buffer-codec (+ KSP processor)
 ├─────────────────────────────┤
 │  socket (TCP + TLS)         │  ← com.ditchoom:socket
 ├─────────────────────────────┤

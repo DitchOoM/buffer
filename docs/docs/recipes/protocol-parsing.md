@@ -5,6 +5,12 @@ title: Protocol Parsing
 
 # Protocol Parsing
 
+:::tip Recommended: Protocol Codecs
+For new protocol implementations, consider using the [Protocol Codecs](./protocol-codecs) system from the `buffer-codec` module. It pairs encode and decode logic in a single `Codec<T>` interface, provides built-in round-trip testing, and works with both in-memory buffers and streaming sources.
+
+The patterns on this page are still useful for understanding low-level parsing concepts and for cases where you need full manual control.
+:::
+
 Patterns for implementing high-performance protocol parsers.
 
 ## Parser Architecture

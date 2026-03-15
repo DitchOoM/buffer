@@ -8,6 +8,7 @@ on:
       - 'docs/**'
       - 'buffer/src/**'
       - 'buffer-compression/src/**'
+      - 'buffer-codec/src/**'
       - 'MODULE.md'
       - '.github/workflows/docs.yaml'
   release:

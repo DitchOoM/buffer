@@ -1,8 +1,8 @@
 package com.ditchoom.buffer.benchmark
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.managed
 import kotlinx.benchmark.Benchmark
 import kotlinx.benchmark.BenchmarkMode
 import kotlinx.benchmark.BenchmarkTimeUnit
@@ -29,12 +29,12 @@ open class LinearBufferIsolationBenchmark {
     @Setup
     fun setup() {
         // Only allocate Heap buffer in setup - Direct would trigger the bug
-        heapBuffer = PlatformBuffer.allocate(1024, AllocationZone.Heap)
+        heapBuffer = BufferFactory.managed().allocate(1024)
     }
 
     // Benchmark 1: Just heap allocation - should work
     @Benchmark
-    fun heapAllocationOnly(): PlatformBuffer = PlatformBuffer.allocate(1024, AllocationZone.Heap)
+    fun heapAllocationOnly(): PlatformBuffer = BufferFactory.managed().allocate(1024)
 
     // Benchmark 2: Heap buffer operations - should work
     @Benchmark
@@ -50,6 +50,6 @@ open class LinearBufferIsolationBenchmark {
     // Benchmark 3: Direct allocation (this is likely to crash)
     // @Benchmark
     // fun directAllocation(): PlatformBuffer {
-    //     return PlatformBuffer.allocate(1024, AllocationZone.Direct)
+    //     return BufferFactory.Default.allocate(1024)
     // }
 }

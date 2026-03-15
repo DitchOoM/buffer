@@ -53,7 +53,6 @@ class MutableDataBuffer(
     val data: NSMutableData,
     override val byteOrder: ByteOrder,
 ) : PlatformBuffer,
-    SuspendCloseable,
     Parcelable,
     NativeMemoryAccess {
     private var position: Int = 0
@@ -302,7 +301,7 @@ class MutableDataBuffer(
         position = newPosition
     }
 
-    override suspend fun close() = Unit
+    fun close() = Unit
 
     // endregion
 

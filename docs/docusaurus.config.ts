@@ -103,6 +103,10 @@ const config: Config = {
               label: 'Buffer Compression',
             },
             {
+              href: 'pathname:///api/buffer-codec/index.html',
+              label: 'Buffer Codec',
+            },
+            {
               href: 'pathname:///api/buffer-flow/index.html',
               label: 'Buffer Flow',
             },

@@ -1,7 +1,8 @@
 package com.ditchoom.buffer.pool
 
-import com.ditchoom.buffer.AllocationZone
-import com.ditchoom.buffer.ByteOrder
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
 
 /**
@@ -14,7 +15,7 @@ import com.ditchoom.buffer.ReadWriteBuffer
  *
  * ### Recommended: withBuffer (auto-release)
  * ```kotlin
- * val pool = BufferPool()
+ * val pool = BufferPool(factory = BufferFactory.Default)
  * pool.withBuffer(1024) { buffer ->
  *     buffer.writeInt(42)
  *     buffer.writeString("Hello")
@@ -32,14 +33,14 @@ import com.ditchoom.buffer.ReadWriteBuffer
  * } // Pool automatically cleared
  * ```
  *
- * ### Manual acquire/release
+ * ### Manual acquire/freeNativeMemory
  * ```kotlin
- * val pool = BufferPool()
- * val buffer = pool.acquire(1024)
+ * val pool = BufferPool(factory = BufferFactory.Default)
+ * val buffer = pool.acquire(1024) as PlatformBuffer
  * try {
  *     buffer.writeInt(42)
  * } finally {
- *     pool.release(buffer)
+ *     buffer.freeNativeMemory() // returns to pool
  * }
  * ```
  *
@@ -82,26 +83,24 @@ sealed interface BufferPool {
 
     companion object {
         /**
-         * Creates a buffer pool with the specified threading model.
+         * Creates a buffer pool with the specified threading model and buffer factory.
          *
          * @param threadingMode Single-threaded (faster) or multi-threaded (thread-safe)
          * @param maxPoolSize Maximum buffers to keep in pool
          * @param defaultBufferSize Default size for acquired buffers
-         * @param byteOrder Byte order for buffers
-         * @param allocationZone Memory allocation strategy for new buffers
+         * @param factory Buffer factory for allocating new buffers
          */
         operator fun invoke(
             threadingMode: ThreadingMode = ThreadingMode.SingleThreaded,
             maxPoolSize: Int = 64,
             defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
-            byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-            allocationZone: AllocationZone = AllocationZone.Direct,
+            factory: BufferFactory = BufferFactory.Default,
         ): BufferPool =
             when (threadingMode) {
                 ThreadingMode.SingleThreaded ->
-                    SingleThreadedBufferPool(maxPoolSize, defaultBufferSize, byteOrder, allocationZone)
+                    SingleThreadedBufferPool(maxPoolSize, defaultBufferSize, factory)
                 ThreadingMode.MultiThreaded ->
-                    LockFreeBufferPool(maxPoolSize, defaultBufferSize, byteOrder, allocationZone)
+                    LockFreeBufferPool(maxPoolSize, defaultBufferSize, factory)
             }
 
         /**
@@ -109,15 +108,13 @@ sealed interface BufferPool {
          *
          * @param maxPoolSize Maximum buffers to keep in pool
          * @param defaultBufferSize Default size for acquired buffers
-         * @param byteOrder Byte order for buffers
-         * @param allocationZone Memory allocation strategy for new buffers
+         * @param factory Buffer factory for allocating new buffers
          */
         operator fun invoke(
             maxPoolSize: Int = 64,
             defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
-            byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-            allocationZone: AllocationZone = AllocationZone.Direct,
-        ): BufferPool = SingleThreadedBufferPool(maxPoolSize, defaultBufferSize, byteOrder, allocationZone)
+            factory: BufferFactory = BufferFactory.Default,
+        ): BufferPool = SingleThreadedBufferPool(maxPoolSize, defaultBufferSize, factory)
     }
 }
 
@@ -178,9 +175,8 @@ fun createBufferPool(
     threadingMode: ThreadingMode = ThreadingMode.SingleThreaded,
     maxPoolSize: Int = 64,
     defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
-    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-    allocationZone: AllocationZone = AllocationZone.Direct,
-): BufferPool = BufferPool(threadingMode, maxPoolSize, defaultBufferSize, byteOrder, allocationZone)
+    factory: BufferFactory = BufferFactory.Default,
+): BufferPool = BufferPool(threadingMode, maxPoolSize, defaultBufferSize, factory)
 
 /**
  * Acquires a buffer, executes the block, and automatically releases the buffer.
@@ -222,11 +218,10 @@ inline fun <T> withPool(
     threadingMode: ThreadingMode = ThreadingMode.SingleThreaded,
     maxPoolSize: Int = 64,
     defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
-    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-    allocationZone: AllocationZone = AllocationZone.Direct,
+    factory: BufferFactory = BufferFactory.Default,
     block: (BufferPool) -> T,
 ): T {
-    val pool = BufferPool(threadingMode, maxPoolSize, defaultBufferSize, byteOrder, allocationZone)
+    val pool = BufferPool(threadingMode, maxPoolSize, defaultBufferSize, factory)
     try {
         return block(pool)
     } finally {

@@ -1,9 +1,10 @@
 package com.ditchoom.buffer.compression
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.toReadBuffer
 import kotlinx.coroutines.test.runTest
 import kotlin.random.Random
@@ -797,46 +798,46 @@ class CompressionStressTests {
         }
 
     // =========================================================================
-    // Stress tests - Allocation zones
+    // Stress tests - Buffer factories
     // =========================================================================
 
     @Test
-    fun stressTestAllocationZones() =
+    fun stressTestBufferFactories() =
         runTest {
-            val zones = listOf(AllocationZone.Heap, AllocationZone.Direct)
+            val factories = listOf(BufferFactory.managed(), BufferFactory.Default)
             val size = 50_000
             val original = generateMixedBuffer(size)
             val originalCopy = copyBuffer(original)
 
-            for (zone in zones) {
+            for (factory in factories) {
                 original.position(0)
-                val compressed = compressAsync(copyBuffer(original), zone = zone)
-                val decompressed = decompressAsync(compressed, zone = zone)
+                val compressed = compressAsync(copyBuffer(original), factory = factory)
+                val decompressed = decompressAsync(compressed, factory = factory)
 
                 originalCopy.position(0)
                 assertBuffersEqual(
                     originalCopy,
                     decompressed,
-                    "Round-trip failed for zone $zone",
+                    "Round-trip failed for factory $factory",
                 )
             }
         }
 
     @Test
-    fun stressTestAllocationZonesWithExpectedSize() =
+    fun stressTestBufferFactoriesWithExpectedSize() =
         runTest {
-            val zones = listOf(AllocationZone.Heap, AllocationZone.Direct)
+            val factories = listOf(BufferFactory.managed(), BufferFactory.Default)
             val size = 50_000
             val original = generateMixedBuffer(size)
             val originalCopy = copyBuffer(original)
 
-            for (zone in zones) {
+            for (factory in factories) {
                 original.position(0)
-                val compressed = compressAsync(copyBuffer(original), zone = zone)
+                val compressed = compressAsync(copyBuffer(original), factory = factory)
                 val decompressed =
                     decompressAsync(
                         compressed,
-                        zone = zone,
+                        factory = factory,
                         expectedOutputSize = size,
                     )
 
@@ -844,7 +845,7 @@ class CompressionStressTests {
                 assertBuffersEqual(
                     originalCopy,
                     decompressed,
-                    "Round-trip with expectedSize failed for zone $zone",
+                    "Round-trip with expectedSize failed for factory $factory",
                 )
             }
         }

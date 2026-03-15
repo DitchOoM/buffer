@@ -38,14 +38,14 @@ package com.ditchoom.buffer
  * ## Example Usage
  *
  * ```kotlin
- * val buffer = PlatformBuffer.allocate(100)
+ * val buffer = BufferFactory.Default.allocate(100)
  * buffer.writeInt(42)
  * buffer.writeString("Hello")
  * buffer.resetForRead()  // Switch to read mode
  * ```
  *
  * @see ReadBuffer for read operations
- * @see PlatformBuffer for creating buffers
+ * @see BufferFactory for creating buffers
  */
 interface WriteBuffer : PositionBuffer {
     /**

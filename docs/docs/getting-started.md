@@ -16,6 +16,9 @@ dependencies {
     // Core buffer library
     implementation("com.ditchoom:buffer:<latest-version>")
 
+    // Optional: Protocol codecs (Codec<T> for ReadBuffer/WriteBuffer)
+    implementation("com.ditchoom:buffer-codec:<latest-version>")
+
     // Optional: Compression (gzip, deflate)
     implementation("com.ditchoom:buffer-compression:<latest-version>")
 
@@ -107,24 +110,29 @@ val buffer = PlatformBuffer.wrap(data)
 buffer.readInt()  // 0x00010203 (big-endian)
 ```
 
-## Allocation Zones
+## Buffer Factories
 
-Choose where the buffer is allocated:
+Choose how the buffer is allocated:
 
 ```kotlin
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
 
-// Heap allocation (GC managed)
-val heapBuffer = PlatformBuffer.allocate(1024, AllocationZone.Heap)
+// Platform-optimal native memory (default)
+val buffer = PlatformBuffer.allocate(1024)
 
-// Direct/off-heap (default, zero-copy I/O)
-val directBuffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+// GC-managed heap memory
+val heapBuffer = BufferFactory.managed().allocate(1024)
 
-// Shared memory (for IPC on Android)
-val sharedBuffer = PlatformBuffer.allocate(1024, AllocationZone.SharedMemory)
+// Cross-process shared memory (for IPC on Android)
+val sharedBuffer = BufferFactory.shared().allocate(1024)
+
+// Deterministic cleanup (explicit free, no GC dependency)
+BufferFactory.Deterministic.allocate(1024).use { buf ->
+    buf.writeInt(42)
+} // freed immediately
 ```
 
-See [Allocation Zones](./core-concepts/allocation-zones) for details.
+See [Buffer Factories](./core-concepts/allocation-zones) for details.
 
 ## Byte Order
 
