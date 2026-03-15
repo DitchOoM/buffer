@@ -8,6 +8,9 @@ import com.ditchoom.buffer.ReadBuffer
  * All operations are suspending to allow for async decompression, decryption, etc.
  * On platforms with sync APIs, implementations can simply delegate without suspending.
  *
+ * Multi-byte reads (Short, Int, Long) use the byte order configured on the underlying
+ * processor (default: big-endian). See [StreamProcessor.create] and [StreamProcessorBuilder].
+ *
  * Example usage:
  * ```kotlin
  * val processor = StreamProcessor.builder(pool)
@@ -93,8 +96,22 @@ interface SuspendingStreamProcessor {
 
     /**
      * Reads a buffer of exactly [size] bytes.
+     *
+     * **Note:** The returned buffer is not released back to the pool. For proper pool recycling,
+     * prefer [readBufferScoped].
      */
     suspend fun readBuffer(size: Int): ReadBuffer
+
+    /**
+     * Reads exactly [size] bytes and passes them to [block], then releases the buffer back to
+     * the pool. The buffer must not escape the [block] scope — copy data if you need it longer.
+     *
+     * Prefer this over [readBuffer] when pool recycling matters.
+     */
+    suspend fun <T> readBufferScoped(
+        size: Int,
+        block: ReadBuffer.() -> T,
+    ): T
 
     /**
      * Skips [count] bytes.
@@ -151,6 +168,11 @@ internal class SyncToSuspendingProcessor(
     override suspend fun readLong(): Long = delegate.readLong()
 
     override suspend fun readBuffer(size: Int): ReadBuffer = delegate.readBuffer(size)
+
+    override suspend fun <T> readBufferScoped(
+        size: Int,
+        block: ReadBuffer.() -> T,
+    ): T = delegate.readBufferScoped(size, block)
 
     override suspend fun skip(count: Int) = delegate.skip(count)
 

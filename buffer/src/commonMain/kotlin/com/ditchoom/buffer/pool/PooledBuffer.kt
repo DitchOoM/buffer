@@ -2,6 +2,8 @@ package com.ditchoom.buffer.pool
 
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.bufferEquals
+import com.ditchoom.buffer.bufferHashCode
 
 /**
  * A buffer wrapper that returns its inner buffer to a pool when all references are released.
@@ -15,7 +17,7 @@ import com.ditchoom.buffer.ReadBuffer
  */
 internal class PooledBuffer(
     internal val inner: PlatformBuffer,
-    private val pool: BufferPool,
+    internal val pool: BufferPool,
 ) : PlatformBuffer by inner {
     private var freed = false
     private var refCount = 1 // 1 for the chunk reference in StreamProcessor
@@ -48,4 +50,8 @@ internal class PooledBuffer(
     override suspend fun close() {
         freeNativeMemory()
     }
+
+    override fun equals(other: Any?): Boolean = bufferEquals(this, other)
+
+    override fun hashCode(): Int = bufferHashCode(this)
 }

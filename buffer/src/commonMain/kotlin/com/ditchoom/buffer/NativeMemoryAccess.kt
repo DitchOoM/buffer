@@ -56,11 +56,7 @@ interface NativeMemoryAccess {
  *     // Fallback: copy to a native buffer
  * }
  * ```
- */
-val PlatformBuffer.nativeMemoryAccess: NativeMemoryAccess?
-    get() = unwrap() as? NativeMemoryAccess
-
-/**
+ *
  * Extension for ReadBuffer to access native memory if available.
  * Unwraps pooled buffers and TrackedSlice wrappers to reach the underlying platform buffer.
  */
@@ -81,6 +77,16 @@ val WriteBuffer.nativeMemoryAccess: NativeMemoryAccess?
         if (this is NativeMemoryAccess) return this
         if (this is PlatformBuffer) return unwrap() as? NativeMemoryAccess
         return null
+    }
+
+/**
+ * Extension for PlatformBuffer to access native memory if available.
+ * Resolves ambiguity between ReadBuffer and WriteBuffer extensions.
+ */
+val PlatformBuffer.nativeMemoryAccess: NativeMemoryAccess?
+    get() {
+        if (this is NativeMemoryAccess) return this
+        return unwrapFully() as? NativeMemoryAccess
     }
 
 /**
@@ -143,11 +149,7 @@ interface ManagedMemoryAccess {
  *     managed.backingArray[managed.arrayOffset] = 42
  * }
  * ```
- */
-val PlatformBuffer.managedMemoryAccess: ManagedMemoryAccess?
-    get() = unwrap() as? ManagedMemoryAccess
-
-/**
+ *
  * Extension for ReadBuffer to access managed memory if available.
  * Unwraps pooled buffers and TrackedSlice wrappers to reach the underlying platform buffer.
  */
@@ -168,6 +170,16 @@ val WriteBuffer.managedMemoryAccess: ManagedMemoryAccess?
         if (this is ManagedMemoryAccess) return this
         if (this is PlatformBuffer) return unwrap() as? ManagedMemoryAccess
         return null
+    }
+
+/**
+ * Extension for PlatformBuffer to access managed memory if available.
+ * Resolves ambiguity between ReadBuffer and WriteBuffer extensions.
+ */
+val PlatformBuffer.managedMemoryAccess: ManagedMemoryAccess?
+    get() {
+        if (this is ManagedMemoryAccess) return this
+        return unwrapFully() as? ManagedMemoryAccess
     }
 
 /**

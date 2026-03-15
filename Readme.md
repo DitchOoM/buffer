@@ -95,10 +95,17 @@ while (processor.available() >= 4) {
     val length = processor.peekInt()
     if (processor.available() < 4 + length) break  // wait for more data
     processor.skip(4)
-    val payload = processor.readBuffer(length)
-    handleMessage(payload)
+    // readBufferScoped auto-releases the buffer back to the pool
+    val message = processor.readBufferScoped(length) {
+        MyMessage(readInt(), readString(remaining()))
+    }
+    handleMessage(message)
 }
 ```
+
+> **`readBufferScoped` vs `readBuffer`**: Prefer `readBufferScoped` — it passes the buffer to your
+> block as a receiver and automatically releases it back to the pool. `readBuffer` returns an
+> unmanaged buffer that is **not** returned to the pool, which can cause pool exhaustion under load.
 
 ## Compression
 
