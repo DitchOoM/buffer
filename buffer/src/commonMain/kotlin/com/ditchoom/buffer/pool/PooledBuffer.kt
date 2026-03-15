@@ -17,7 +17,7 @@ import com.ditchoom.buffer.bufferHashCode
  */
 internal class PooledBuffer(
     internal val inner: PlatformBuffer,
-    private val pool: BufferPool,
+    internal val pool: BufferPool,
 ) : PlatformBuffer by inner {
     private var freed = false
     private var refCount = 1 // 1 for the chunk reference in StreamProcessor

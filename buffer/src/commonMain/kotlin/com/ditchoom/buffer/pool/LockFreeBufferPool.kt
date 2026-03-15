@@ -62,7 +62,12 @@ internal class LockFreeBufferPool(
         // Unwrap PooledBuffer to store the raw PlatformBuffer in the pool
         val platformBuffer =
             when (buffer) {
-                is PooledBuffer -> buffer.inner
+                is PooledBuffer -> {
+                    require(buffer.pool === this) {
+                        "Cannot release a buffer to a different pool than the one it was acquired from"
+                    }
+                    buffer.inner
+                }
                 is PlatformBuffer -> buffer
                 else -> return
             }
