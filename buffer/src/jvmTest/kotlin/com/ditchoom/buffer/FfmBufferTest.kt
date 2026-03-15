@@ -598,8 +598,8 @@ class FfmBufferTest {
         buffer.resetForRead()
         processor.append(buffer)
         val (a, b) =
-            processor.readBufferScoped(8) { buf ->
-                Pair(buf.readInt(), buf.readInt())
+            processor.readBufferScoped(8) {
+                Pair(readInt(), readInt())
             }
         assertEquals(0x12345678, a)
         assertEquals(0x9ABCDEF0.toInt(), b)
