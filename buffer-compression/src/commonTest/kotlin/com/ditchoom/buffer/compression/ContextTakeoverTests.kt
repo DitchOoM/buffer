@@ -5,7 +5,6 @@ import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.managed
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -158,16 +157,17 @@ class ContextTakeoverTests {
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
 
-        val messages = listOf(
-            "Hello",
-            "Hello",  // Same message should also work with back-references
-            "World",
-            "Hello World",  // Contains references to previous messages
-            "WebSocket compression test with context takeover",
-            "A".repeat(1000),
-            "B".repeat(1000),
-            "Mixed content: Hello World WebSocket test 12345",
-        )
+        val messages =
+            listOf(
+                "Hello",
+                "Hello", // Same message should also work with back-references
+                "World",
+                "Hello World", // Contains references to previous messages
+                "WebSocket compression test with context takeover",
+                "A".repeat(1000),
+                "B".repeat(1000),
+                "Mixed content: Hello World WebSocket test 12345",
+            )
 
         try {
             for ((i, msg) in messages.withIndex()) {
@@ -429,16 +429,17 @@ class ContextTakeoverTests {
 
         try {
             // Various payloads similar to Autobahn test cases
-            val messages = listOf(
-                "Hello",
-                "Hello",
-                "A".repeat(64),
-                "A".repeat(64),
-                "B".repeat(256),
-                "*".repeat(1000),
-                "*".repeat(1000),
-                "Mixed ${"ABC".repeat(100)} content",
-            )
+            val messages =
+                listOf(
+                    "Hello",
+                    "Hello",
+                    "A".repeat(64),
+                    "A".repeat(64),
+                    "B".repeat(256),
+                    "*".repeat(1000),
+                    "*".repeat(1000),
+                    "Mixed ${"ABC".repeat(100)} content",
+                )
 
             for ((i, msg) in messages.withIndex()) {
                 val compressed = compressAndStripMarker(msg, serverCompressor)
