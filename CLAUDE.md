@@ -238,6 +238,14 @@ Chunked processing for large buffers and streaming data:
 val processor = StreamProcessor.create(pool)
 processor.append(networkData)
 val length = processor.readInt()
+
+// Preferred: readBufferScoped auto-releases the buffer back to the pool
+val message = processor.readBufferScoped(length) {
+    MyMessage(readInt(), readString(remaining()))
+}
+
+// Alternative: readBuffer returns a buffer you must manage yourself
+// Note: the returned buffer is NOT released back to the pool automatically
 val payload = processor.readBuffer(length)
 ```
 
