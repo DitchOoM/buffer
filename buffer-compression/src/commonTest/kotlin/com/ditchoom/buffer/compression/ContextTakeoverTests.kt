@@ -131,7 +131,7 @@ class ContextTakeoverTests {
 
     @Test
     fun contextTakeover_twoMessages_withFlush() {
-        if (!supportsSyncCompression) return
+        if (!supportsStatefulFlush) return
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
 
@@ -153,7 +153,7 @@ class ContextTakeoverTests {
 
     @Test
     fun contextTakeover_multipleMessages_withFlush() {
-        if (!supportsSyncCompression) return
+        if (!supportsStatefulFlush) return
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
 
@@ -183,7 +183,7 @@ class ContextTakeoverTests {
 
     @Test
     fun contextTakeover_manyMessages_withFlush() {
-        if (!supportsSyncCompression) return
+        if (!supportsStatefulFlush) return
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
 
@@ -206,7 +206,7 @@ class ContextTakeoverTests {
 
     @Test
     fun contextTakeover_flushDoesNotCorruptState() {
-        if (!supportsSyncCompression) return
+        if (!supportsStatefulFlush) return
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
 
@@ -296,7 +296,7 @@ class ContextTakeoverTests {
 
     @Test
     fun contextTakeover_sharedMarkerBuffer_twoMessages() {
-        if (!supportsSyncCompression) return
+        if (!supportsStatefulFlush) return
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
 
@@ -320,7 +320,7 @@ class ContextTakeoverTests {
      */
     @Test
     fun contextTakeover_freshMarkerBuffer_twoMessages() {
-        if (!supportsSyncCompression) return
+        if (!supportsStatefulFlush) return
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
 
@@ -377,7 +377,7 @@ class ContextTakeoverTests {
 
     @Test
     fun contextTakeover_sharedMarkerBuffer_manyMessages() {
-        if (!supportsSyncCompression) return
+        if (!supportsStatefulFlush) return
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
 
@@ -400,7 +400,7 @@ class ContextTakeoverTests {
 
     @Test
     fun contextTakeover_serverCompressesClientDecompresses() {
-        if (!supportsSyncCompression) return
+        if (!supportsStatefulFlush) return
         // Server compressor (shared context)
         val serverCompressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         // Client decompressor (shared context)
@@ -423,7 +423,7 @@ class ContextTakeoverTests {
 
     @Test
     fun contextTakeover_serverCompresses_variousPayloads() {
-        if (!supportsSyncCompression) return
+        if (!supportsStatefulFlush) return
         val serverCompressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val clientDecompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
 
