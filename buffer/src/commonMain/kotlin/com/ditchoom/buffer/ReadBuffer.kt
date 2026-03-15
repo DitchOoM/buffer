@@ -845,3 +845,27 @@ fun ReadBuffer.unwrapFully(): ReadBuffer {
     if (this is com.ditchoom.buffer.pool.TrackedSlice) return inner.unwrapFully()
     return this
 }
+
+/**
+ * Content-based equality for buffer implementations.
+ * Two buffers are equal if they have the same remaining content (position to limit).
+ * Accepts any [ReadBuffer], enabling cross-type comparison (e.g. NativeBuffer == NativeBufferSlice).
+ */
+fun bufferEquals(self: ReadBuffer, other: Any?): Boolean {
+    if (self === other) return true
+    if (other !is ReadBuffer) return false
+    if (self.remaining() != other.remaining()) return false
+    return self.contentEquals(other)
+}
+
+/**
+ * Content-based hash code for buffer implementations.
+ * Hashes the remaining bytes (position to limit) using absolute reads to avoid side effects.
+ */
+fun bufferHashCode(self: ReadBuffer): Int {
+    var h = 1
+    for (i in self.position() until self.limit()) {
+        h = 31 * h + self.get(i).toInt()
+    }
+    return h
+}

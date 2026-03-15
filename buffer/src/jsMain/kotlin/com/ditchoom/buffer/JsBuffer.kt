@@ -418,37 +418,7 @@ class JsBuffer(
         return super.mismatch(other)
     }
 
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other == null || this::class.js != other::class.js) return false
+    override fun equals(other: Any?): Boolean = bufferEquals(this, other)
 
-        other as JsBuffer
-
-        if (byteOrder != other.byteOrder) return false
-        if (positionValue != other.positionValue) return false
-        if (limitValue != other.limitValue) return false
-        if (capacity != other.capacity) return false
-        val size = remaining()
-        try {
-            if (!readByteArray(size).contentEquals(other.readByteArray(size))) return false
-        } finally {
-            positionValue -= size
-            other.positionValue -= size
-        }
-        return true
-    }
-
-    override fun hashCode(): Int {
-        var result = byteOrder.hashCode()
-        result = 31 * result + positionValue
-        result = 31 * result + limitValue
-        result = 31 * result + capacity.hashCode()
-        val size = remaining()
-        try {
-            result = 31 * result + readByteArray(size).hashCode()
-        } finally {
-            positionValue -= size
-        }
-        return result
-    }
+    override fun hashCode(): Int = bufferHashCode(this)
 }

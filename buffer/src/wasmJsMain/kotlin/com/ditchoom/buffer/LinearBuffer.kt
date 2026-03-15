@@ -551,36 +551,7 @@ class LinearBuffer(
         return super.mismatch(other)
     }
 
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is LinearBuffer) return false
+    override fun equals(other: Any?): Boolean = bufferEquals(this, other)
 
-        if (byteOrder != other.byteOrder) return false
-        if (positionValue != other.positionValue) return false
-        if (limitValue != other.limitValue) return false
-        if (capacity != other.capacity) return false
-
-        // Delegate to contentEquals which uses bulk Long comparisons
-        return contentEquals(other)
-    }
-
-    override fun hashCode(): Int {
-        var result = byteOrder.hashCode()
-        result = 31 * result + positionValue
-        result = 31 * result + limitValue
-        result = 31 * result + capacity
-
-        // Hash 4 bytes at a time using Int loads
-        val size = remaining()
-        var i = 0
-        while (i + 4 <= size) {
-            result = 31 * result + ptr(positionValue + i).loadInt()
-            i += 4
-        }
-        while (i < size) {
-            result = 31 * result + loadByte(positionValue + i).hashCode()
-            i++
-        }
-        return result
-    }
+    override fun hashCode(): Int = bufferHashCode(this)
 }
