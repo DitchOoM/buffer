@@ -239,12 +239,19 @@ class BufferComparisonEdgeCaseTests {
         // Buffer b: [0,0,1,2,3,4] at position 2
         // remaining bytes should be equal
         val a = PlatformBuffer.allocate(4)
-        a.writeByte(1); a.writeByte(2); a.writeByte(3); a.writeByte(4)
+        a.writeByte(1)
+        a.writeByte(2)
+        a.writeByte(3)
+        a.writeByte(4)
         a.resetForRead()
 
         val b = PlatformBuffer.allocate(6)
-        b.writeByte(0); b.writeByte(0)
-        b.writeByte(1); b.writeByte(2); b.writeByte(3); b.writeByte(4)
+        b.writeByte(0)
+        b.writeByte(0)
+        b.writeByte(1)
+        b.writeByte(2)
+        b.writeByte(3)
+        b.writeByte(4)
         b.resetForRead()
         b.position(2)
 

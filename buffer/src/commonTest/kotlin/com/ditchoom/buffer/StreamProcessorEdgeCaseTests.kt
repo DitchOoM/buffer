@@ -1,12 +1,9 @@
 package com.ditchoom.buffer
 
 import com.ditchoom.buffer.pool.BufferPool
-import com.ditchoom.buffer.pool.withPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
-import kotlin.test.assertTrue
 
 /**
  * Edge case tests for StreamProcessor.
@@ -47,15 +44,19 @@ class StreamProcessorEdgeCaseTests {
 
         // Chunk 1: 4 bytes [0x01, 0x02, 0x03, 0x04]
         val chunk1 = BufferFactory.managed().allocate(4)
-        chunk1.writeByte(0x01); chunk1.writeByte(0x02)
-        chunk1.writeByte(0x03); chunk1.writeByte(0x04)
+        chunk1.writeByte(0x01)
+        chunk1.writeByte(0x02)
+        chunk1.writeByte(0x03)
+        chunk1.writeByte(0x04)
         chunk1.resetForRead()
         processor.append(chunk1)
 
         // Chunk 2: 4 bytes [0x05, 0x06, 0x07, 0x08]
         val chunk2 = BufferFactory.managed().allocate(4)
-        chunk2.writeByte(0x05); chunk2.writeByte(0x06)
-        chunk2.writeByte(0x07); chunk2.writeByte(0x08)
+        chunk2.writeByte(0x05)
+        chunk2.writeByte(0x06)
+        chunk2.writeByte(0x07)
+        chunk2.writeByte(0x08)
         chunk2.resetForRead()
         processor.append(chunk2)
 
@@ -177,9 +178,17 @@ class StreamProcessorEdgeCaseTests {
         val processor = StreamProcessor.create(pool)
 
         // 8 single-byte chunks for one Long
-        val bytes = byteArrayOf(
-            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-        )
+        val bytes =
+            byteArrayOf(
+                0x01,
+                0x02,
+                0x03,
+                0x04,
+                0x05,
+                0x06,
+                0x07,
+                0x08,
+            )
         for (b in bytes) {
             val buf = BufferFactory.managed().allocate(1)
             buf.writeByte(b)
@@ -263,12 +272,14 @@ class StreamProcessorEdgeCaseTests {
         val processor = StreamProcessor.create(pool)
 
         val buf1 = BufferFactory.managed().allocate(2)
-        buf1.writeByte(0x01); buf1.writeByte(0x02)
+        buf1.writeByte(0x01)
+        buf1.writeByte(0x02)
         buf1.resetForRead()
         processor.append(buf1)
 
         val buf2 = BufferFactory.managed().allocate(2)
-        buf2.writeByte(0x03); buf2.writeByte(0x04)
+        buf2.writeByte(0x03)
+        buf2.writeByte(0x04)
         buf2.resetForRead()
         processor.append(buf2)
 

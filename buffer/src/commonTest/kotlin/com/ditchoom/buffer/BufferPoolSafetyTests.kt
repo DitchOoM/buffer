@@ -1,7 +1,6 @@
 package com.ditchoom.buffer
 
 import com.ditchoom.buffer.pool.BufferPool
-import com.ditchoom.buffer.pool.PoolStats
 import com.ditchoom.buffer.pool.withBuffer
 import com.ditchoom.buffer.pool.withPool
 import kotlin.test.Test
