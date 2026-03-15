@@ -4,7 +4,6 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.toReadBuffer
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
