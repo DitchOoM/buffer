@@ -41,9 +41,10 @@ class PayloadContextGenerator(
         val typeSpecBuilder = TypeSpec.classBuilder(contextName).addModifiers(KModifier.DATA)
 
         for (field in nonPayloadFields) {
-            val typeName = field.parameter?.type?.resolve()?.let { ksType ->
-                ksType.toTypeName()
-            } ?: ClassName.bestGuess(field.typeName).copy(nullable = field.isNullable)
+            val typeName =
+                field.parameter?.type?.resolve()?.let { ksType ->
+                    ksType.toTypeName()
+                } ?: ClassName.bestGuess(field.typeName).copy(nullable = field.isNullable)
             constructorBuilder.addParameter(ParameterSpec.builder(field.name, typeName).build())
             typeSpecBuilder.addProperty(
                 PropertySpec.builder(field.name, typeName).initializer(field.name).build(),
