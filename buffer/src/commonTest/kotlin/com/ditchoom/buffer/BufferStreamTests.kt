@@ -1243,4 +1243,102 @@ class BufferStreamTests {
         processor.release()
         pool.clear()
     }
+
+    // ============================================================================
+    // readBuffer Exact-Match Lifetime Tests
+    // ============================================================================
+
+    @Test
+    fun streamProcessorReadBufferExactChunkSizeDataRemainsValid() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+        val buffer = BufferFactory.Default.allocate(8)
+        buffer.writeInt(0x12345678)
+        buffer.writeInt(0x9ABCDEF0.toInt())
+        buffer.resetForRead()
+        processor.append(buffer)
+        val result = processor.readBuffer(8)
+        assertEquals(8, result.remaining())
+        assertEquals(0x12345678, result.readInt())
+        assertEquals(0x9ABCDEF0.toInt(), result.readInt())
+        processor.release()
+        pool.clear()
+    }
+
+    @Test
+    fun streamProcessorReadBufferPartialThenExactRemainder() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+        val buffer = BufferFactory.Default.allocate(8)
+        buffer.writeInt(0x11223344)
+        buffer.writeInt(0x55667788)
+        buffer.resetForRead()
+        processor.append(buffer)
+        val first = processor.readBuffer(4)
+        assertEquals(0x11223344, first.readInt())
+        val second = processor.readBuffer(4)
+        assertEquals(0x55667788, second.readInt())
+        processor.release()
+        pool.clear()
+    }
+
+    // ============================================================================
+    // readBufferScoped Tests
+    // ============================================================================
+
+    @Test
+    fun readBufferScopedExactChunkReturnsCorrectData() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+        val buffer = BufferFactory.Default.allocate(8)
+        buffer.writeInt(0x12345678)
+        buffer.writeInt(0x9ABCDEF0.toInt())
+        buffer.resetForRead()
+        processor.append(buffer)
+        val (a, b) = processor.readBufferScoped(8) { buf ->
+            Pair(buf.readInt(), buf.readInt())
+        }
+        assertEquals(0x12345678, a)
+        assertEquals(0x9ABCDEF0.toInt(), b)
+        processor.release()
+        pool.clear()
+    }
+
+    @Test
+    fun readBufferScopedPartialChunkReturnsCorrectData() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+        val buffer = BufferFactory.Default.allocate(8)
+        buffer.writeInt(0x11223344)
+        buffer.writeInt(0x55667788)
+        buffer.resetForRead()
+        processor.append(buffer)
+        val first = processor.readBufferScoped(4) { it.readInt() }
+        assertEquals(0x11223344, first)
+        val second = processor.readBufferScoped(4) { it.readInt() }
+        assertEquals(0x55667788, second)
+        processor.release()
+        pool.clear()
+    }
+
+    @Test
+    fun readBufferScopedMultiChunkReturnsCorrectData() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+        val buf1 = BufferFactory.Default.allocate(4)
+        buf1.writeInt(0x11223344)
+        buf1.resetForRead()
+        val buf2 = BufferFactory.Default.allocate(4)
+        buf2.writeInt(0x55667788)
+        buf2.resetForRead()
+        processor.append(buf1)
+        processor.append(buf2)
+        val (a, b) = processor.readBufferScoped(8) { buf ->
+            Pair(buf.readInt(), buf.readInt())
+        }
+        assertEquals(0x11223344, a)
+        assertEquals(0x55667788, b)
+        processor.release()
+        pool.clear()
+    }
 }
