@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.toReadBuffer
@@ -476,7 +478,7 @@ class StreamingCompressionTests {
             while (compressed.remaining() > 0) {
                 val bytesToRead = minOf(chunkSize, compressed.remaining())
                 // Create a chunk buffer and copy bytes into it
-                val chunk = PlatformBuffer.allocate(bytesToRead)
+                val chunk = BufferFactory.Default.allocate(bytesToRead)
                 repeat(bytesToRead) {
                     chunk.writeByte(compressed.readByte())
                 }
@@ -514,11 +516,11 @@ class StreamingCompressionTests {
      */
     private fun combineBuffers(buffers: List<ReadBuffer>): PlatformBuffer {
         if (buffers.isEmpty()) {
-            return PlatformBuffer.allocate(0)
+            return BufferFactory.Default.allocate(0)
         }
 
         val totalSize = buffers.sumOf { it.remaining() }
-        val combined = PlatformBuffer.allocate(totalSize)
+        val combined = BufferFactory.Default.allocate(totalSize)
 
         for (buffer in buffers) {
             while (buffer.remaining() > 0) {
@@ -790,7 +792,7 @@ class StreamingCompressionTests {
     @Test
     fun stripSyncFlushMarkerRemovesTrailingMarker() {
         // Create buffer ending with sync marker: 00 00 FF FF
-        val data = PlatformBuffer.allocate(10)
+        val data = BufferFactory.Default.allocate(10)
         data.writeByte(0x01) // some data
         data.writeByte(0x02)
         data.writeByte(0x03)
@@ -821,7 +823,7 @@ class StreamingCompressionTests {
     @Test
     fun stripSyncFlushMarkerLeavesDataWithoutMarker() {
         // Create buffer NOT ending with sync marker
-        val data = PlatformBuffer.allocate(6)
+        val data = BufferFactory.Default.allocate(6)
         data.writeByte(0x01)
         data.writeByte(0x02)
         data.writeByte(0x03)
@@ -837,7 +839,7 @@ class StreamingCompressionTests {
     @Test
     fun stripSyncFlushMarkerHandlesSmallBuffers() {
         // Buffer too small to contain marker
-        val data = PlatformBuffer.allocate(2)
+        val data = BufferFactory.Default.allocate(2)
         data.writeByte(0x01)
         data.writeByte(0x02)
         data.resetForRead()

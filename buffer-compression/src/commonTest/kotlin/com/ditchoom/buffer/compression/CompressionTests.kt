@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.compression
 
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.toReadBuffer
 import kotlinx.coroutines.test.runTest
@@ -450,7 +451,7 @@ class CompressionTests {
         if (!supportsSyncCompression) return
 
         // Test with binary data containing all byte values
-        val buffer = PlatformBuffer.allocate(256)
+        val buffer = BufferFactory.Default.allocate(256)
         for (i in 0 until 256) {
             buffer.writeByte(i.toByte())
         }
