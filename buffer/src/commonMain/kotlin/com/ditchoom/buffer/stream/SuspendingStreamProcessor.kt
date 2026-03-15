@@ -110,7 +110,7 @@ interface SuspendingStreamProcessor {
      */
     suspend fun <T> readBufferScoped(
         size: Int,
-        block: (ReadBuffer) -> T,
+        block: ReadBuffer.() -> T,
     ): T
 
     /**
@@ -171,7 +171,7 @@ internal class SyncToSuspendingProcessor(
 
     override suspend fun <T> readBufferScoped(
         size: Int,
-        block: (ReadBuffer) -> T,
+        block: ReadBuffer.() -> T,
     ): T = delegate.readBufferScoped(size, block)
 
     override suspend fun skip(count: Int) = delegate.skip(count)

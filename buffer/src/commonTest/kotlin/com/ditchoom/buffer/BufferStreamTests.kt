@@ -1296,8 +1296,8 @@ class BufferStreamTests {
         buffer.resetForRead()
         processor.append(buffer)
         val (a, b) =
-            processor.readBufferScoped(8) { buf ->
-                Pair(buf.readInt(), buf.readInt())
+            processor.readBufferScoped(8) {
+                Pair(readInt(), readInt())
             }
         assertEquals(0x12345678, a)
         assertEquals(0x9ABCDEF0.toInt(), b)
@@ -1314,9 +1314,9 @@ class BufferStreamTests {
         buffer.writeInt(0x55667788)
         buffer.resetForRead()
         processor.append(buffer)
-        val first = processor.readBufferScoped(4) { it.readInt() }
+        val first = processor.readBufferScoped(4) { readInt() }
         assertEquals(0x11223344, first)
-        val second = processor.readBufferScoped(4) { it.readInt() }
+        val second = processor.readBufferScoped(4) { readInt() }
         assertEquals(0x55667788, second)
         processor.release()
         pool.clear()
@@ -1335,8 +1335,8 @@ class BufferStreamTests {
         processor.append(buf1)
         processor.append(buf2)
         val (a, b) =
-            processor.readBufferScoped(8) { buf ->
-                Pair(buf.readInt(), buf.readInt())
+            processor.readBufferScoped(8) {
+                Pair(readInt(), readInt())
             }
         assertEquals(0x11223344, a)
         assertEquals(0x55667788, b)

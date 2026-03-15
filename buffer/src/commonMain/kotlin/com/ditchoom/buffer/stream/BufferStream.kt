@@ -200,7 +200,7 @@ interface StreamProcessor {
      */
     fun <T> readBufferScoped(
         size: Int,
-        block: (ReadBuffer) -> T,
+        block: ReadBuffer.() -> T,
     ): T
 
     /**
@@ -559,7 +559,7 @@ internal class DefaultStreamProcessor(
 
     override fun <T> readBufferScoped(
         size: Int,
-        block: (ReadBuffer) -> T,
+        block: ReadBuffer.() -> T,
     ): T {
         require(totalAvailable >= size) { "Not enough data: need $size, have $totalAvailable" }
         require(chunks.isNotEmpty() || size == 0) { "No chunks available" }
