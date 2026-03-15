@@ -642,15 +642,17 @@ private class JvmGzipStreamingDecompressor(
         if (headerFlags < 0) {
             // Fast path: read all 10 bytes at once if available
             if (headerPos == 0 && buffer.remaining() >= 10) {
-                val first8 = buffer.readLong()
-                buffer.readShort() // xfl + os (ignored)
+                // Read header bytes individually to avoid byte-order dependency
+                for (i in 0 until 10) {
+                    headerBytes[i] = buffer.readByte()
+                }
 
-                val magic = (first8 ushr 48).toInt()
+                val magic = (headerBytes[0].toInt() and 0xFF shl 8) or (headerBytes[1].toInt() and 0xFF)
                 if (magic != GzipFormat.MAGIC) {
                     throw CompressionException("Invalid gzip magic number")
                 }
 
-                headerFlags = ((first8 ushr 32) and 0xFF).toInt()
+                headerFlags = headerBytes[3].toInt() and 0xFF
                 headerPos = 10
             } else {
                 // Slow path: accumulate bytes for partial headers
