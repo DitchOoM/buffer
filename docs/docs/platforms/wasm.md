@@ -9,11 +9,11 @@ Buffer on Kotlin/WASM uses native WASM linear memory for optimal performance wit
 
 ## Implementation
 
-| Factory | WASM Type | Use Case |
-|---------|-----------|----------|
-| `managed()` | `ByteArrayBuffer` | High-frequency allocations, compute-heavy workloads |
-| `Default` | `LinearBuffer` | JS interop, zero-copy sharing with JavaScript |
-| `shared()` | `LinearBuffer` | Same as Default |
+| Zone | WASM Type | Use Case |
+|------|-----------|----------|
+| `Heap` | `ByteArrayBuffer` | High-frequency allocations, compute-heavy workloads |
+| `Direct` | `LinearBuffer` | JS interop, zero-copy sharing with JavaScript |
+| `SharedMemory` | `LinearBuffer` | Same as Direct |
 
 ## LinearBuffer: Native WASM Memory
 
@@ -31,10 +31,10 @@ LinearBuffer's main advantage is **JavaScript interoperability**, not raw speed.
 
 ```kotlin
 // Use Heap for high-frequency allocations (compute-heavy workloads)
-val computeBuffer = BufferFactory.managed().allocate(1024)
+val computeBuffer = PlatformBuffer.allocate(1024, AllocationZone.Heap)
 
-// Use Default for JS interop (shares memory with JavaScript)
-val interopBuffer = BufferFactory.Default.allocate(1024)
+// Use Direct for JS interop (shares memory with JavaScript)
+val interopBuffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
 ```
 
 ## Performance
@@ -59,7 +59,7 @@ LinearBuffer uses a bump allocator with pre-allocated memory:
 - Configurable via `LinearMemoryAllocator.configure()`
 - Memory is not freed (bump allocator)
 - Best for buffers with longer lifetimes (interop scenarios)
-- Use `BufferFactory.managed()` for high-frequency, short-lived allocations
+- Use `AllocationZone.Heap` for high-frequency short-lived allocations
 
 ### Configuring Memory Size
 
@@ -75,11 +75,12 @@ LinearMemoryAllocator.configure(initialSizeMB = 4)   // Set to 4MB
 
 ```kotlin
 // Good: Long-lived buffer for JS interop
-val wsBuffer = BufferFactory.Default.allocate(8192)
+val wsBuffer = PlatformBuffer.allocate(8192, AllocationZone.Direct)
 
-// Good: High-frequency allocations using managed factory
-val managed = BufferFactory.managed()
-val computeBuffer = managed.allocate(1024)
+// Good: High-frequency allocations
+pool.withBuffer(1024, AllocationZone.Heap) { buffer ->
+    // Process data
+}
 ```
 
 ## JavaScript Interoperability
@@ -88,7 +89,7 @@ LinearBuffer enables zero-copy data sharing between Kotlin/WASM and JavaScript:
 
 ```kotlin
 // Kotlin side: allocate in linear memory and get offset for JS
-val buffer = BufferFactory.Default.allocate(1024) as LinearBuffer
+val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct) as LinearBuffer
 buffer.writeInt(42)
 buffer.writeString("Hello from WASM")
 
@@ -121,14 +122,14 @@ Due to a Kotlin/WASM production optimizer bug, LinearBuffer pre-allocates memory
 
 1. **Configurable limit** - Default 16MB, adjustable via `configureWasmMemory()`
 2. **No memory reclamation** - Bump allocator doesn't free memory
-3. **Use managed() for benchmarks** - High-frequency allocation benchmarks should use `BufferFactory.managed()`
+3. **Use Heap for benchmarks** - High-frequency allocation benchmarks should use `AllocationZone.Heap`
 
 If you exceed the configured limit, you'll get an `OutOfMemoryError` with guidance:
 
 ```
 LinearBuffer allocation exceeded 16MB pre-allocated memory.
 Call LinearMemoryAllocator.configure(initialSizeMB = N) at startup with a larger value,
-or use BufferFactory.managed() for high-frequency allocation.
+or use AllocationZone.Heap for high-frequency allocation.
 ```
 
 ### ByteArray Conversion
@@ -169,7 +170,7 @@ val s = buffer.readString(10)
 Convert buffers to WASM-native `LinearBuffer` for JavaScript interop:
 
 ```kotlin
-val buffer = BufferFactory.Default.allocate(1024)
+val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
 buffer.writeBytes(data)
 buffer.resetForRead()
 
@@ -197,7 +198,7 @@ WASM has two memory spaces: WasmGC heap (where `ByteArray` lives) and linear mem
 
 ```kotlin
 // Kotlin side
-val buffer = BufferFactory.Default.allocate(1024) as LinearBuffer
+val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct) as LinearBuffer
 buffer.writeInt(42)
 buffer.writeString("Hello from WASM")
 buffer.resetForRead()

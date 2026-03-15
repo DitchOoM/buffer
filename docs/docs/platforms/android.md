@@ -9,11 +9,11 @@ Android extends JVM support with `SharedMemory` for zero-copy IPC.
 
 ## Implementation
 
-| Factory | Android Type |
-|---------|--------------|
-| `managed()` | `HeapByteBuffer` |
-| `Default` | `DirectByteBuffer` |
-| `shared()` | `SharedMemory` (API 27+) or `ParcelFileDescriptor` pipes |
+| Zone | Android Type |
+|------|--------------|
+| `Heap` | `HeapByteBuffer` |
+| `Direct` | `DirectByteBuffer` |
+| `SharedMemory` | `SharedMemory` (API 27+) or `ParcelFileDescriptor` pipes |
 
 ## Parcelable Support
 
@@ -21,7 +21,7 @@ All `JvmBuffer` instances are `Parcelable`:
 
 ```kotlin
 // In your Service
-val buffer = BufferFactory.shared().allocate(1024)
+val buffer = PlatformBuffer.allocate(1024, AllocationZone.SharedMemory)
 buffer.writeBytes(imageData)
 buffer.resetForRead()
 
@@ -41,7 +41,10 @@ Zero-copy IPC using Android's SharedMemory:
 
 ```kotlin
 // Create shared buffer
-val buffer = BufferFactory.shared().allocate(1024 * 1024)  // 1MB
+val buffer = PlatformBuffer.allocate(
+    size = 1024 * 1024,  // 1MB
+    zone = AllocationZone.SharedMemory
+)
 
 // Write data
 buffer.writeBytes(largeData)
@@ -57,7 +60,7 @@ On older devices, uses `ParcelFileDescriptor` pipes:
 
 ```kotlin
 // Same API, but data is piped through file descriptors
-val buffer = BufferFactory.shared().allocate(1024)
+val buffer = PlatformBuffer.allocate(1024, AllocationZone.SharedMemory)
 // Works on all Android versions, but with copy overhead on old devices
 ```
 
@@ -67,7 +70,10 @@ val buffer = BufferFactory.shared().allocate(1024)
 
 ```kotlin
 // Large buffers should use Direct to avoid GC
-val videoFrame = BufferFactory.Default.allocate(1920 * 1080 * 4)  // 8MB RGBA
+val videoFrame = PlatformBuffer.allocate(
+    size = 1920 * 1080 * 4,  // 8MB RGBA
+    zone = AllocationZone.Direct
+)
 ```
 
 ### Buffer Pooling for Camera/Video
@@ -78,6 +84,7 @@ class CameraProcessor {
         threadingMode = ThreadingMode.MultiThreaded,
         maxPoolSize = 8,  // Match camera buffer count
         defaultBufferSize = 1920 * 1080 * 4,
+        allocationZone = AllocationZone.Direct
     )
 
     fun onFrameAvailable(frame: ByteArray) {

@@ -181,7 +181,7 @@ val second = buffer.readInt()  // 2
 
 ```kotlin
 // JVM: Pass to native code via JNI
-val buffer = BufferFactory.Default.allocate(1024)
+val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
 buffer.writeBytes(data)
 buffer.resetForRead()
 
@@ -217,7 +217,7 @@ fetch(url, RequestInit(body = native.arrayBuffer))
 
 ```kotlin
 // WASM: Share memory with JavaScript
-val buffer = BufferFactory.Default.allocate(1024) as LinearBuffer
+val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct) as LinearBuffer
 buffer.writeBytes(data)
 buffer.resetForRead()
 

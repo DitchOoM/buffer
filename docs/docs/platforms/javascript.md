@@ -9,22 +9,22 @@ Buffer on JS wraps `Uint8Array` with optional `SharedArrayBuffer` support.
 
 ## Implementation
 
-| Factory | JS Type |
-|---------|---------|
-| `managed()` | `Uint8Array` (ArrayBuffer) |
-| `Default` | `Uint8Array` (ArrayBuffer) |
-| `shared()` | `Uint8Array` (SharedArrayBuffer) |
+| Zone | JS Type |
+|------|---------|
+| `Heap` | `Uint8Array` (ArrayBuffer) |
+| `Direct` | `Uint8Array` (ArrayBuffer) |
+| `SharedMemory` | `Uint8Array` (SharedArrayBuffer) |
 
 ## SharedArrayBuffer
 
 For multi-threaded scenarios (Web Workers):
 
 ```kotlin
-val buffer = BufferFactory.shared().allocate(1024)
+val buffer = PlatformBuffer.allocate(1024, AllocationZone.SharedMemory)
 
 // Access the SharedArrayBuffer
 val jsBuffer = buffer as JsBuffer
-// jsBuffer.sharedArrayBuffer  // Only set when using shared() factory
+// jsBuffer.sharedArrayBuffer  // Only set if SharedMemory zone
 ```
 
 ### CORS Requirements
@@ -75,7 +75,7 @@ buffer.writeBytes(responseData)
 
 ```kotlin
 // Main thread
-val sharedBuffer = BufferFactory.shared().allocate(1024)
+val sharedBuffer = PlatformBuffer.allocate(1024, AllocationZone.SharedMemory)
 sharedBuffer.writeInt(42)
 
 // Pass to worker (zero-copy with SharedArrayBuffer)
