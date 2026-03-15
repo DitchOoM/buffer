@@ -11,6 +11,7 @@ import com.ditchoom.buffer.pool.withBuffer
 import com.ditchoom.buffer.pool.withPool
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
@@ -1677,16 +1678,24 @@ class BufferPoolTests {
     }
 
     @Test
-    fun releaseBufferFromDifferentPoolType() {
+    fun releaseBufferFromDifferentPoolTypeThrows() {
         val singlePool = BufferPool(threadingMode = ThreadingMode.SingleThreaded)
         val multiPool = BufferPool(threadingMode = ThreadingMode.MultiThreaded)
 
         val singleBuffer = singlePool.acquire(256)
         val multiBuffer = multiPool.acquire(256)
 
-        // Cross-pool release — pool accepts any PlatformBuffer
-        multiPool.release(singleBuffer)
-        singlePool.release(multiBuffer)
+        // Cross-pool release should be rejected
+        assertFailsWith<IllegalArgumentException> {
+            multiPool.release(singleBuffer)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            singlePool.release(multiBuffer)
+        }
+
+        // Release to correct pools
+        singlePool.release(singleBuffer)
+        multiPool.release(multiBuffer)
 
         singlePool.clear()
         multiPool.clear()

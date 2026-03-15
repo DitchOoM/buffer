@@ -359,6 +359,7 @@ interface ReadBuffer : PositionBuffer {
         private const val CR: Byte = '\r'.code.toByte()
         private const val LF: Byte = '\n'.code.toByte()
         val newLine = "\r\n".encodeToByteArray()
+
         // Use wrap(ByteArray) so freeNativeMemory() is a no-op (managed buffer).
         // PlatformBuffer.allocate(0) creates NativeBuffer on Linux, which would be
         // permanently destroyed when any code calls freeIfNeeded() on this singleton.
@@ -854,7 +855,10 @@ fun ReadBuffer.unwrapFully(): ReadBuffer {
  * Two buffers are equal if they have the same remaining content (position to limit).
  * Accepts any [ReadBuffer], enabling cross-type comparison (e.g. NativeBuffer == NativeBufferSlice).
  */
-fun bufferEquals(self: ReadBuffer, other: Any?): Boolean {
+fun bufferEquals(
+    self: ReadBuffer,
+    other: Any?,
+): Boolean {
     if (self === other) return true
     if (other !is ReadBuffer) return false
     if (self.remaining() != other.remaining()) return false

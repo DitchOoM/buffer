@@ -56,11 +56,7 @@ interface NativeMemoryAccess {
  *     // Fallback: copy to a native buffer
  * }
  * ```
- */
-val PlatformBuffer.nativeMemoryAccess: NativeMemoryAccess?
-    get() = unwrap() as? NativeMemoryAccess
-
-/**
+ *
  * Extension for ReadBuffer to access native memory if available.
  * Unwraps pooled buffers and TrackedSlice wrappers to reach the underlying platform buffer.
  */
@@ -153,11 +149,7 @@ interface ManagedMemoryAccess {
  *     managed.backingArray[managed.arrayOffset] = 42
  * }
  * ```
- */
-val PlatformBuffer.managedMemoryAccess: ManagedMemoryAccess?
-    get() = unwrap() as? ManagedMemoryAccess
-
-/**
+ *
  * Extension for ReadBuffer to access managed memory if available.
  * Unwraps pooled buffers and TrackedSlice wrappers to reach the underlying platform buffer.
  */

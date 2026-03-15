@@ -198,7 +198,10 @@ interface StreamProcessor {
      *
      * Prefer this over [readBuffer] when pool recycling matters.
      */
-    fun <T> readBufferScoped(size: Int, block: (ReadBuffer) -> T): T
+    fun <T> readBufferScoped(
+        size: Int,
+        block: (ReadBuffer) -> T,
+    ): T
 
     /**
      * Skips [count] bytes.
@@ -554,7 +557,10 @@ internal class DefaultStreamProcessor(
         return merged
     }
 
-    override fun <T> readBufferScoped(size: Int, block: (ReadBuffer) -> T): T {
+    override fun <T> readBufferScoped(
+        size: Int,
+        block: (ReadBuffer) -> T,
+    ): T {
         require(totalAvailable >= size) { "Not enough data: need $size, have $totalAvailable" }
         require(chunks.isNotEmpty() || size == 0) { "No chunks available" }
 
