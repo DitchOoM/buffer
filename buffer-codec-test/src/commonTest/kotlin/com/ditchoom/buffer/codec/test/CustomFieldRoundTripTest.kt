@@ -1,7 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
-import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.test.protocols.MixedPacket
 import com.ditchoom.buffer.codec.test.protocols.MixedPacketCodec
