@@ -10,13 +10,19 @@ Buffer factories determine how buffer memory is allocated. Instead of passing a 
 ## Overview
 
 ```kotlin
-// Platform-optimal native memory (default)
-val buffer = PlatformBuffer.allocate(1024)
+import com.ditchoom.buffer.BufferFactory
 
-// Or use factories directly for more control
+// Platform-optimal native memory (recommended)
 val buffer = BufferFactory.Default.allocate(1024)
+
+// GC-managed heap memory
 val managed = BufferFactory.managed().allocate(1024)
+
+// Cross-process shared memory (for IPC on Android)
 val shared = BufferFactory.shared().allocate(1024)
+
+// Convenience shorthand (delegates to BufferFactory.Default):
+// val buffer = PlatformBuffer.allocate(1024)
 ```
 
 ## Built-in Presets

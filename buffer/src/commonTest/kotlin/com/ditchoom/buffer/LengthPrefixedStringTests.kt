@@ -27,7 +27,7 @@ class LengthPrefixedStringTests {
     fun returnsByteLengthNotCharLength() {
         val input = "\u00E9" // é — 2 bytes in UTF-8
         val bufferSize = UShort.SIZE_BYTES + input.utf8Length()
-        val buffer = PlatformBuffer.allocate(bufferSize)
+        val buffer = BufferFactory.Default.allocate(bufferSize)
         buffer.writeLengthPrefixedUtf8String(input)
         buffer.resetForRead()
         val (byteLength, decoded) = buffer.readLengthPrefixedUtf8String()
@@ -40,7 +40,7 @@ class LengthPrefixedStringTests {
         // A string whose UTF-8 encoding is exactly UShort.MAX_VALUE (65535) bytes
         val input = "a".repeat(65535)
         val bufferSize = UShort.SIZE_BYTES + 65535
-        val buffer = PlatformBuffer.allocate(bufferSize)
+        val buffer = BufferFactory.Default.allocate(bufferSize)
         buffer.writeLengthPrefixedUtf8String(input)
         buffer.resetForRead()
         val (byteLength, decoded) = buffer.readLengthPrefixedUtf8String()
@@ -53,7 +53,7 @@ class LengthPrefixedStringTests {
         // A string whose UTF-8 encoding exceeds UShort.MAX_VALUE
         val input = "a".repeat(65536)
         val bufferSize = UShort.SIZE_BYTES + 65536
-        val buffer = PlatformBuffer.allocate(bufferSize)
+        val buffer = BufferFactory.Default.allocate(bufferSize)
         assertFailsWith<IllegalArgumentException> {
             buffer.writeLengthPrefixedUtf8String(input)
         }
@@ -61,7 +61,7 @@ class LengthPrefixedStringTests {
 
     private fun roundTrip(input: String) {
         val bufferSize = UShort.SIZE_BYTES + input.utf8Length()
-        val buffer = PlatformBuffer.allocate(bufferSize)
+        val buffer = BufferFactory.Default.allocate(bufferSize)
         buffer.writeLengthPrefixedUtf8String(input)
         buffer.resetForRead()
         val (_, decoded) = buffer.readLengthPrefixedUtf8String()

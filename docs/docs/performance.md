@@ -13,7 +13,7 @@ Tips for maximizing Buffer performance across platforms.
 2. **Prefer zero-copy operations** - slicing over copying
 3. **Use largest primitives** - `readLong()` over 8x `readByte()`
 4. **Use bulk operations** - multi-byte reads/writes
-5. **Choose the right allocation zone** - Direct for I/O
+5. **Choose the right buffer factory** - `BufferFactory.Default` for I/O
 
 ## Buffer Pooling
 
@@ -49,7 +49,7 @@ Create views without copying:
 val slice = buffer.slice()
 
 // Copy: creates new buffer
-val copy = PlatformBuffer.allocate(buffer.remaining())
+val copy = BufferFactory.Default.allocate(buffer.remaining())
 copy.write(buffer)
 ```
 
@@ -183,7 +183,7 @@ Comparison uses the same Direct buffer type — "Baseline" is the old Kotlin-onl
 | bufferCopy | 939K ops/s | — | — |
 
 **Key takeaways:**
-- Use `BufferFactory.Default` on native platforms for bulk operations (11-146x faster)
+- Use `BufferFactory.Default` (native/direct memory) on native platforms for bulk operations (11-146x faster)
 - `xorMask()` gains the most because SIMD avoids byte-order swapping overhead
 - The `aligned` flag enables even faster SIMD scanning when data alignment is known
 
@@ -329,12 +329,12 @@ val slice = buffer.readBytes(length)
 ```kotlin
 // Anti-pattern
 repeat(1000) {
-    val buffer = PlatformBuffer.allocate(1024)
+    val buffer = BufferFactory.Default.allocate(1024)
     // ...
 }
 
 // Better: pool or reuse
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 repeat(1000) {
     buffer.resetForWrite()
     // ...

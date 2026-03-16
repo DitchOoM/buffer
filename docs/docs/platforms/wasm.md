@@ -27,7 +27,7 @@ Buffer on Kotlin/WASM uses native WASM linear memory for optimal performance wit
 LinearBuffer's main advantage is **JavaScript interoperability**, not raw speed. For pure Kotlin operations without JS interop, ByteArrayBuffer can be faster for bulk operations since it stays in the WasmGC heap.
 :::
 
-### When to Use Each Zone
+### When to Use Each Factory
 
 ```kotlin
 // Use Heap for high-frequency allocations (compute-heavy workloads)
@@ -153,7 +153,7 @@ Kotlin/WASM Module    SSL WASM Module     Compression Module
 
 ```kotlin
 // Standard usage - API is identical to other platforms
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 buffer.writeInt(42)
 buffer.writeLong(123456789L)
 buffer.writeString("Hello WASM")

@@ -234,7 +234,7 @@ val id = payloadReader.readInt()
 val name = payloadReader.readString(nameLength)
 
 // Or copy the entire payload to a new buffer
-val copy = payloadReader.copyToBuffer(AllocationZone.Heap)
+val copy = payloadReader.copyToBuffer(BufferFactory.managed())
 
 // Or transfer bytes to a WriteBuffer
 payloadReader.transferTo(writeBuffer)

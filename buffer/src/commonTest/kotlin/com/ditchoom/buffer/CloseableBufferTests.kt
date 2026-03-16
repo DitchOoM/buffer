@@ -38,7 +38,7 @@ class CloseableBufferTests {
     @Test
     fun useBlockSafeOnNonCloseableBuffer() {
         // wrap() typically returns GC-managed buffers (not CloseableBuffer)
-        val buf = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4))
+        val buf = BufferFactory.Default.wrap(byteArrayOf(1, 2, 3, 4))
         buf.use { b ->
             assertEquals(1.toByte(), b.readByte())
         }

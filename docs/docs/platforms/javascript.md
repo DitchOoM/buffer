@@ -57,7 +57,7 @@ Without these headers, falls back to regular `ArrayBuffer`.
 
 ```kotlin
 // Works with Node.js Buffer
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 buffer.writeString("Hello from Kotlin/JS!")
 ```
 
@@ -65,7 +65,7 @@ buffer.writeString("Hello from Kotlin/JS!")
 
 ```kotlin
 // Works with browser APIs
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 
 // Can be used with Fetch API, WebSocket, etc.
 buffer.writeBytes(responseData)
@@ -91,7 +91,7 @@ val value = buffer.readInt()  // 42
 Convert buffers to JavaScript-native types for Web API interop:
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 buffer.writeBytes(data)
 buffer.resetForRead()
 
@@ -133,7 +133,7 @@ webSocket.onmessage = { event ->
 }
 
 // Send via WebSocket
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 buffer.writeInt(messageId)
 buffer.writeString(payload)
 buffer.resetForRead()

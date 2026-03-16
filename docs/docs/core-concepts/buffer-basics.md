@@ -28,6 +28,7 @@ Every buffer has three key properties:
 ### After Allocation (Write Mode)
 
 ```kotlin
+// PlatformBuffer.allocate() is shorthand for BufferFactory.Default.allocate()
 val buffer = PlatformBuffer.allocate(10)
 // position=0, limit=10, capacity=10
 ```

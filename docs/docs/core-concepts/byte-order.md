@@ -37,17 +37,20 @@ Consider the integer `0x12345678` stored in a 4-byte buffer:
 
 ## Specifying Byte Order
 
+The default byte order is `ByteOrder.NATIVE` (matches the CPU's native endianness). Specify a different byte order when needed:
+
 ```kotlin
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 
-// Big-endian (default)
-val bigEndian = PlatformBuffer.allocate(
+// Big-endian (network byte order)
+val bigEndian = BufferFactory.Default.allocate(
     size = 1024,
     byteOrder = ByteOrder.BIG_ENDIAN
 )
 
 // Little-endian
-val littleEndian = PlatformBuffer.allocate(
+val littleEndian = BufferFactory.Default.allocate(
     size = 1024,
     byteOrder = ByteOrder.LITTLE_ENDIAN
 )
@@ -56,8 +59,8 @@ val littleEndian = PlatformBuffer.allocate(
 ## Checking Byte Order
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(1024)
-println(buffer.byteOrder)  // BIG_ENDIAN
+val buffer = BufferFactory.Default.allocate(1024)
+println(buffer.byteOrder)  // NATIVE (matches CPU endianness)
 ```
 
 ## When to Use Each
@@ -66,11 +69,10 @@ println(buffer.byteOrder)  // BIG_ENDIAN
 
 - **Network protocols**: TCP/IP, HTTP, TLS
 - **File formats**: PNG, JPEG, PDF
-- **Default** for ByteBuffer
 
 ```kotlin
 // Network packet parsing
-val buffer = PlatformBuffer.allocate(1024, byteOrder = ByteOrder.BIG_ENDIAN)
+val buffer = BufferFactory.Default.allocate(1024, ByteOrder.BIG_ENDIAN)
 buffer.writeShort(80)  // Port number in network byte order
 ```
 
@@ -82,7 +84,7 @@ buffer.writeShort(80)  // Port number in network byte order
 
 ```kotlin
 // Windows BMP file parsing
-val buffer = PlatformBuffer.allocate(1024, byteOrder = ByteOrder.LITTLE_ENDIAN)
+val buffer = BufferFactory.Default.allocate(1024, ByteOrder.LITTLE_ENDIAN)
 buffer.writeInt(fileSize)
 ```
 
@@ -103,7 +105,7 @@ buffer.writeInt(fileSize)
 
 ```kotlin
 // MQTT uses big-endian for packet length
-val mqttBuffer = PlatformBuffer.allocate(1024, byteOrder = ByteOrder.BIG_ENDIAN)
+val mqttBuffer = BufferFactory.Default.allocate(1024, ByteOrder.BIG_ENDIAN)
 
 // Write packet type and length
 mqttBuffer.writeByte(0x30)  // PUBLISH packet
@@ -144,6 +146,6 @@ fun ReadBuffer.readLittleEndianLong(): Long {
 
 1. **Use big-endian for network code** - it's the standard
 2. **Match the protocol spec** - always check documentation
-3. **Be explicit** - specify byte order even when using default
+3. **Be explicit** - specify byte order when it matters (default is `ByteOrder.NATIVE`)
 4. **Document byte order** - especially at API boundaries
 5. **Read largest primitive** - swap bytes after rather than reading byte-by-byte

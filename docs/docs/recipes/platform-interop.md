@@ -24,7 +24,7 @@ All three functions operate on the **remaining** bytes (from `position()` to `li
 Converts the remaining bytes to a Kotlin `ByteArray`:
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(100)
+val buffer = BufferFactory.Default.allocate(100)
 buffer.writeInt(42)
 buffer.writeString("Hello")
 buffer.resetForRead()
@@ -60,7 +60,7 @@ Use `toByteArray()` when you need a Kotlin `ByteArray` for:
 Converts to a platform-native read-only wrapper. Each platform returns a `NativeData` object containing the native type:
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(100)
+val buffer = BufferFactory.Default.allocate(100)
 buffer.writeBytes(data)
 buffer.resetForRead()
 
@@ -106,7 +106,7 @@ On JVM, `toNativeData()` and `toMutableNativeData()` always return direct ByteBu
 Converts to a platform-native mutable wrapper. Returns a `MutableNativeData` object:
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(100)
+val buffer = BufferFactory.Default.allocate(100)
 buffer.writeBytes(data)
 buffer.resetForRead()
 
@@ -152,7 +152,7 @@ On Apple, `toMutableNativeData()` is zero-copy only when the buffer position is 
 All conversion functions preserve the buffer's position and limit:
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(100)
+val buffer = BufferFactory.Default.allocate(100)
 buffer.writeInt(1)
 buffer.writeInt(2)
 buffer.writeInt(3)
@@ -193,7 +193,7 @@ nativeLibrary.processData(nativeData.byteBuffer)
 
 ```kotlin
 // iOS/macOS: Pass to Foundation/CoreFoundation APIs
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 buffer.writeBytes(imageData)
 buffer.resetForRead()
 
@@ -205,7 +205,7 @@ NSFileManager.defaultManager.createFileAtPath(path, native.nsData, null)
 
 ```kotlin
 // JS: Use with Fetch, WebSocket, etc.
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 buffer.writeBytes(payload)
 buffer.resetForRead()
 

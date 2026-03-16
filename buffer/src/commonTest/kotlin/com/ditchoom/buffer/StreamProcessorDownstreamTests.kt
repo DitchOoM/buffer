@@ -192,7 +192,7 @@ class StreamProcessorDownstreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(16, byteOrder = ByteOrder.BIG_ENDIAN)
+        val buffer = BufferFactory.Default.allocate(16, byteOrder = ByteOrder.BIG_ENDIAN)
         buffer.writeInt(0x11223344)
         buffer.writeInt(0x55667788)
         buffer.writeInt(0xAABBCCDD.toInt())
@@ -217,13 +217,13 @@ class StreamProcessorDownstreamTests {
         val processor = StreamProcessor.create(pool)
 
         // Split 0x11223344 across two chunks: [0x11, 0x22] and [0x33, 0x44]
-        val buf1 = PlatformBuffer.allocate(2, byteOrder = ByteOrder.BIG_ENDIAN)
+        val buf1 = BufferFactory.Default.allocate(2, byteOrder = ByteOrder.BIG_ENDIAN)
         buf1.writeByte(0x11)
         buf1.writeByte(0x22)
         buf1.resetForRead()
         processor.append(buf1)
 
-        val buf2 = PlatformBuffer.allocate(2, byteOrder = ByteOrder.BIG_ENDIAN)
+        val buf2 = BufferFactory.Default.allocate(2, byteOrder = ByteOrder.BIG_ENDIAN)
         buf2.writeByte(0x33)
         buf2.writeByte(0x44)
         buf2.resetForRead()
@@ -241,12 +241,12 @@ class StreamProcessorDownstreamTests {
         val processor = StreamProcessor.create(pool)
 
         // Split short across chunks
-        val buf1 = PlatformBuffer.allocate(1)
+        val buf1 = BufferFactory.Default.allocate(1)
         buf1.writeByte(0xAB.toByte())
         buf1.resetForRead()
         processor.append(buf1)
 
-        val buf2 = PlatformBuffer.allocate(1)
+        val buf2 = BufferFactory.Default.allocate(1)
         buf2.writeByte(0xCD.toByte())
         buf2.resetForRead()
         processor.append(buf2)

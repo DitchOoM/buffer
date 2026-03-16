@@ -19,7 +19,7 @@ class AndroidUnsafePlatformBuffer private constructor(
     ): Unit =
         throw UnsupportedOperationException(
             "UnsafePlatformBuffer cannot be parceled. " +
-                "Use PlatformBuffer.allocate() for parcelable buffers.",
+                "Use BufferFactory.shared().allocate() for parcelable buffers.",
         )
 
     companion object {

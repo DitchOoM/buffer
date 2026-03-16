@@ -18,7 +18,7 @@ class AndroidDeterministicDirectJvmBuffer(
     ): Unit =
         throw UnsupportedOperationException(
             "DeterministicDirectJvmBuffer cannot be parceled. " +
-                "Use PlatformBuffer.allocate() for parcelable buffers.",
+                "Use BufferFactory.shared().allocate() for parcelable buffers.",
         )
 
     override fun slice() = AndroidDeterministicDirectJvmBuffer(byteBuffer.slice().order(byteBuffer.order()))

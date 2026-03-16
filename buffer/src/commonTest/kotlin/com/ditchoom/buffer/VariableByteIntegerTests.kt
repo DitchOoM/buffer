@@ -46,7 +46,7 @@ class VariableByteIntegerTests {
 
     @Test
     fun handlesMaxPlus1() {
-        val buffer = PlatformBuffer.allocate(4)
+        val buffer = BufferFactory.Default.allocate(4)
         assertFailsWith<IllegalArgumentException> {
             buffer.writeVariableByteInteger(VARIABLE_BYTE_INT_MAX + 1)
         }
@@ -54,7 +54,7 @@ class VariableByteIntegerTests {
 
     @Test
     fun negativeValueThrows() {
-        val buffer = PlatformBuffer.allocate(4)
+        val buffer = BufferFactory.Default.allocate(4)
         assertFailsWith<IllegalArgumentException> {
             buffer.writeVariableByteInteger(-1)
         }
@@ -70,7 +70,7 @@ class VariableByteIntegerTests {
     @Test
     fun malformedInputAllContinuationBytesThrows() {
         // 4 continuation bytes (all with high bit set) followed by no terminator
-        val buffer = PlatformBuffer.allocate(4)
+        val buffer = BufferFactory.Default.allocate(4)
         buffer.writeByte(0x80.toByte())
         buffer.writeByte(0x80.toByte())
         buffer.writeByte(0x80.toByte())
@@ -84,7 +84,7 @@ class VariableByteIntegerTests {
     @Test
     fun malformedInputTruncatedStreamThrows() {
         // A single continuation byte with no following data
-        val buffer = PlatformBuffer.allocate(1)
+        val buffer = BufferFactory.Default.allocate(1)
         buffer.writeByte(0x80.toByte()) // continuation bit set but no next byte
         buffer.resetForRead()
         assertFailsWith<IllegalArgumentException> {
@@ -96,7 +96,7 @@ class VariableByteIntegerTests {
         value: Int,
         expectedSize: Int,
     ) {
-        val buffer = PlatformBuffer.allocate(expectedSize)
+        val buffer = BufferFactory.Default.allocate(expectedSize)
         buffer.writeVariableByteInteger(value)
         buffer.resetForRead()
         assertEquals(value, buffer.readVariableByteInteger(), "Failed round-trip for value $value")

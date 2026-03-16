@@ -3,7 +3,6 @@ package com.ditchoom.buffer.compression
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.managed
 import kotlin.test.Test
@@ -243,9 +242,9 @@ class ContextTakeoverTests {
      * SYNC_FLUSH_MARKER_BUFFER. Reused across all decompress calls.
      */
     private val sharedMarkerBuffer: ReadBuffer by lazy {
-        val buffer = PlatformBuffer.allocate(4)
+        val buffer = BufferFactory.Default.allocate(4)
         // Write individual bytes to avoid byte order issues.
-        // PlatformBuffer.allocate() defaults to ByteOrder.NATIVE (LITTLE_ENDIAN on x86).
+        // BufferFactory.Default.allocate() defaults to ByteOrder.NATIVE (LITTLE_ENDIAN on x86).
         // writeInt(0x0000FFFF) on little-endian produces FF FF 00 00 — wrong marker.
         buffer.writeByte(0x00)
         buffer.writeByte(0x00)
@@ -335,7 +334,7 @@ class ContextTakeoverTests {
             decompressor.decompress(buffer) { collectChunk(it) }
 
             // Fresh marker buffer each time — write bytes to avoid byte order issues
-            val marker = PlatformBuffer.allocate(4)
+            val marker = BufferFactory.Default.allocate(4)
             marker.writeByte(0x00)
             marker.writeByte(0x00)
             marker.writeByte(0xFF.toByte())

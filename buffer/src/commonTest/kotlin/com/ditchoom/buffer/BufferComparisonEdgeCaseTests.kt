@@ -18,9 +18,9 @@ class BufferComparisonEdgeCaseTests {
 
     @Test
     fun emptyBuffersAreEqual() {
-        val a = PlatformBuffer.allocate(0)
+        val a = BufferFactory.Default.allocate(0)
         a.resetForRead()
-        val b = PlatformBuffer.allocate(0)
+        val b = BufferFactory.Default.allocate(0)
         b.resetForRead()
         assertEquals(a, b)
         assertEquals(a.hashCode(), b.hashCode())
@@ -29,7 +29,7 @@ class BufferComparisonEdgeCaseTests {
     @Test
     fun emptyBufferEqualsEmptyBuffer() {
         val a = ReadBuffer.EMPTY_BUFFER
-        val b = PlatformBuffer.allocate(0)
+        val b = BufferFactory.Default.allocate(0)
         b.resetForRead()
         assertEquals(a, b)
         assertEquals(a.hashCode(), b.hashCode())
@@ -43,9 +43,9 @@ class BufferComparisonEdgeCaseTests {
 
     @Test
     fun emptyBufferNotEqualToNonEmpty() {
-        val empty = PlatformBuffer.allocate(0)
+        val empty = BufferFactory.Default.allocate(0)
         empty.resetForRead()
-        val nonEmpty = PlatformBuffer.allocate(1)
+        val nonEmpty = BufferFactory.Default.allocate(1)
         nonEmpty.writeByte(0x42)
         nonEmpty.resetForRead()
         assertNotEquals(empty, nonEmpty)
@@ -57,8 +57,8 @@ class BufferComparisonEdgeCaseTests {
 
     @Test
     fun singleByteMismatchAtPosition0() {
-        val a = PlatformBuffer.allocate(8)
-        val b = PlatformBuffer.allocate(8)
+        val a = BufferFactory.Default.allocate(8)
+        val b = BufferFactory.Default.allocate(8)
         for (i in 0 until 8) {
             a.writeByte(i.toByte())
             b.writeByte(i.toByte())
@@ -78,8 +78,8 @@ class BufferComparisonEdgeCaseTests {
     @Test
     fun singleByteMismatchAtLastPosition() {
         val size = 16
-        val a = PlatformBuffer.allocate(size)
-        val b = PlatformBuffer.allocate(size)
+        val a = BufferFactory.Default.allocate(size)
+        val b = BufferFactory.Default.allocate(size)
         for (i in 0 until size) {
             a.writeByte(i.toByte())
             b.writeByte(i.toByte())
@@ -96,8 +96,8 @@ class BufferComparisonEdgeCaseTests {
 
     @Test
     fun identicalBuffersMismatchReturnsNegativeOne() {
-        val a = PlatformBuffer.allocate(32)
-        val b = PlatformBuffer.allocate(32)
+        val a = BufferFactory.Default.allocate(32)
+        val b = BufferFactory.Default.allocate(32)
         for (i in 0 until 32) {
             a.writeByte(i.toByte())
             b.writeByte(i.toByte())
@@ -114,7 +114,7 @@ class BufferComparisonEdgeCaseTests {
 
     @Test
     fun sliceEqualsOriginalContent() {
-        val buf = PlatformBuffer.allocate(10)
+        val buf = BufferFactory.Default.allocate(10)
         for (i in 0 until 10) buf.writeByte((i + 1).toByte())
         buf.resetForRead()
 
@@ -126,7 +126,7 @@ class BufferComparisonEdgeCaseTests {
         buf.setLimit(oldLimit)
 
         // Create equivalent buffer
-        val expected = PlatformBuffer.allocate(4)
+        val expected = BufferFactory.Default.allocate(4)
         expected.writeByte(4)
         expected.writeByte(5)
         expected.writeByte(6)
@@ -140,10 +140,10 @@ class BufferComparisonEdgeCaseTests {
     fun sliceEqualityAcrossDifferentBufferTypes() {
         // wrap() uses HeapJvmBuffer, allocate() uses DirectJvmBuffer (on JVM)
         val heapData = byteArrayOf(1, 2, 3, 4, 5)
-        val heap = PlatformBuffer.wrap(heapData)
+        val heap = BufferFactory.Default.wrap(heapData)
         // wrap() already returns buffer in read mode (position=0, limit=size)
 
-        val direct = PlatformBuffer.allocate(5)
+        val direct = BufferFactory.Default.allocate(5)
         direct.writeBytes(heapData)
         direct.resetForRead()
 
@@ -164,7 +164,7 @@ class BufferComparisonEdgeCaseTests {
             pooled.writeBytes(byteArrayOf(0x11, 0x22, 0x33, 0x44))
             pooled.resetForRead()
 
-            val plain = PlatformBuffer.wrap(byteArrayOf(0x11, 0x22, 0x33, 0x44))
+            val plain = BufferFactory.Default.wrap(byteArrayOf(0x11, 0x22, 0x33, 0x44))
 
             assertEquals(pooled, plain)
             assertEquals(plain, pooled)
@@ -184,7 +184,7 @@ class BufferComparisonEdgeCaseTests {
             // readBytes() on PooledBuffer returns TrackedSlice
             val slice = pooled.readBytes(4)
 
-            val plain = PlatformBuffer.wrap(byteArrayOf(0x11, 0x22, 0x33, 0x44))
+            val plain = BufferFactory.Default.wrap(byteArrayOf(0x11, 0x22, 0x33, 0x44))
 
             assertEquals(slice, plain)
 
@@ -198,8 +198,8 @@ class BufferComparisonEdgeCaseTests {
 
     @Test
     fun hashCodeConsistentForSameContent() {
-        val a = PlatformBuffer.allocate(8)
-        val b = PlatformBuffer.allocate(8)
+        val a = BufferFactory.Default.allocate(8)
+        val b = BufferFactory.Default.allocate(8)
         a.writeLong(0x0102030405060708L)
         b.writeLong(0x0102030405060708L)
         a.resetForRead()
@@ -209,8 +209,8 @@ class BufferComparisonEdgeCaseTests {
 
     @Test
     fun hashCodeDiffersForDifferentContent() {
-        val a = PlatformBuffer.allocate(4)
-        val b = PlatformBuffer.allocate(4)
+        val a = BufferFactory.Default.allocate(4)
+        val b = BufferFactory.Default.allocate(4)
         a.writeInt(1)
         b.writeInt(2)
         a.resetForRead()
@@ -221,7 +221,7 @@ class BufferComparisonEdgeCaseTests {
 
     @Test
     fun hashCodeStableAcrossReads() {
-        val buf = PlatformBuffer.allocate(4)
+        val buf = BufferFactory.Default.allocate(4)
         buf.writeInt(42)
         buf.resetForRead()
         val hash1 = buf.hashCode()
@@ -238,14 +238,14 @@ class BufferComparisonEdgeCaseTests {
         // Buffer a: [1,2,3,4] at position 0
         // Buffer b: [0,0,1,2,3,4] at position 2
         // remaining bytes should be equal
-        val a = PlatformBuffer.allocate(4)
+        val a = BufferFactory.Default.allocate(4)
         a.writeByte(1)
         a.writeByte(2)
         a.writeByte(3)
         a.writeByte(4)
         a.resetForRead()
 
-        val b = PlatformBuffer.allocate(6)
+        val b = BufferFactory.Default.allocate(6)
         b.writeByte(0)
         b.writeByte(0)
         b.writeByte(1)
@@ -260,11 +260,11 @@ class BufferComparisonEdgeCaseTests {
 
     @Test
     fun contentEqualsWithDifferentCapacitySameRemaining() {
-        val small = PlatformBuffer.allocate(4)
+        val small = BufferFactory.Default.allocate(4)
         small.writeInt(0xDEADBEEF.toInt())
         small.resetForRead()
 
-        val large = PlatformBuffer.allocate(1024)
+        val large = BufferFactory.Default.allocate(1024)
         large.writeInt(0xDEADBEEF.toInt())
         large.resetForRead()
         large.setLimit(4)
@@ -274,7 +274,7 @@ class BufferComparisonEdgeCaseTests {
 
     @Test
     fun bufferNotEqualToNonBuffer() {
-        val buf = PlatformBuffer.allocate(4)
+        val buf = BufferFactory.Default.allocate(4)
         buf.writeInt(42)
         buf.resetForRead()
         assertFalse(bufferEquals(buf, "not a buffer"))
@@ -288,18 +288,18 @@ class BufferComparisonEdgeCaseTests {
 
     @Test
     fun mismatchBothEmpty() {
-        val a = PlatformBuffer.allocate(0)
+        val a = BufferFactory.Default.allocate(0)
         a.resetForRead()
-        val b = PlatformBuffer.allocate(0)
+        val b = BufferFactory.Default.allocate(0)
         b.resetForRead()
         assertEquals(-1, a.mismatch(b))
     }
 
     @Test
     fun mismatchOneEmptyOneNot() {
-        val empty = PlatformBuffer.allocate(0)
+        val empty = BufferFactory.Default.allocate(0)
         empty.resetForRead()
-        val nonEmpty = PlatformBuffer.allocate(4)
+        val nonEmpty = BufferFactory.Default.allocate(4)
         nonEmpty.writeInt(1)
         nonEmpty.resetForRead()
         assertEquals(0, empty.mismatch(nonEmpty))
@@ -308,11 +308,11 @@ class BufferComparisonEdgeCaseTests {
 
     @Test
     fun mismatchDifferentLengthsSamePrefix() {
-        val short = PlatformBuffer.allocate(4)
+        val short = BufferFactory.Default.allocate(4)
         short.writeInt(0x01020304)
         short.resetForRead()
 
-        val long = PlatformBuffer.allocate(8)
+        val long = BufferFactory.Default.allocate(8)
         long.writeInt(0x01020304)
         long.writeInt(0x05060708)
         long.resetForRead()

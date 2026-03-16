@@ -69,7 +69,7 @@ nativeFunction(heap.asByteBuffer())  // JVM may copy to temp direct buffer
 ## Accessing Underlying ByteBuffer
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(1024) as JvmBuffer
+val buffer = BufferFactory.Default.allocate(1024) as JvmBuffer
 val nioBuffer: ByteBuffer = buffer.byteBuffer
 
 // Use with NIO channels

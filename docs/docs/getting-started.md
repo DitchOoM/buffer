@@ -54,10 +54,13 @@ kotlin {
 ### Allocating a Buffer
 
 ```kotlin
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.BufferFactory
 
-// Allocate 1024 bytes
-val buffer = PlatformBuffer.allocate(1024)
+// Allocate 1024 bytes using the recommended factory pattern
+val buffer = BufferFactory.Default.allocate(1024)
+
+// Shorthand (delegates to BufferFactory.Default):
+// val buffer = PlatformBuffer.allocate(1024)
 ```
 
 ### Writing Data
@@ -117,8 +120,8 @@ Choose how the buffer is allocated:
 ```kotlin
 import com.ditchoom.buffer.BufferFactory
 
-// Platform-optimal native memory (default)
-val buffer = PlatformBuffer.allocate(1024)
+// Platform-optimal native memory (recommended)
+val buffer = BufferFactory.Default.allocate(1024)
 
 // GC-managed heap memory
 val heapBuffer = BufferFactory.managed().allocate(1024)
@@ -136,16 +139,16 @@ See [Buffer Factories](./core-concepts/allocation-zones) for details.
 
 ## Byte Order
 
-Specify endianness:
+The default byte order is `ByteOrder.NATIVE` (matches the CPU's native endianness). Specify a different byte order when needed:
 
 ```kotlin
 import com.ditchoom.buffer.ByteOrder
 
-// Big-endian (network byte order, default)
-val bigEndian = PlatformBuffer.allocate(1024, byteOrder = ByteOrder.BIG_ENDIAN)
+// Big-endian (network byte order)
+val bigEndian = BufferFactory.Default.allocate(1024, ByteOrder.BIG_ENDIAN)
 
 // Little-endian
-val littleEndian = PlatformBuffer.allocate(1024, byteOrder = ByteOrder.LITTLE_ENDIAN)
+val littleEndian = BufferFactory.Default.allocate(1024, ByteOrder.LITTLE_ENDIAN)
 ```
 
 ## Searching Buffers
@@ -153,7 +156,7 @@ val littleEndian = PlatformBuffer.allocate(1024, byteOrder = ByteOrder.LITTLE_EN
 Find values within a buffer:
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(100)
+val buffer = BufferFactory.Default.allocate(100)
 buffer.writeString("Hello, World!")
 buffer.resetForRead()
 
@@ -193,7 +196,7 @@ buf1.mismatch(buf3)       // 2 (index where they differ)
 Fill a buffer with a repeated value:
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 
 // Zero-fill (optimized: writes 8 bytes at a time)
 buffer.fill(0x00.toByte())

@@ -211,7 +211,7 @@ class StreamProcessorEdgeCaseTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(12, byteOrder = ByteOrder.BIG_ENDIAN)
+        val buffer = BufferFactory.Default.allocate(12, byteOrder = ByteOrder.BIG_ENDIAN)
         buffer.writeInt(0x11111111)
         buffer.writeInt(0x22222222)
         buffer.writeInt(0x33333333)

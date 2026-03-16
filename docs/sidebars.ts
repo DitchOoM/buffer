@@ -39,6 +39,7 @@ const sidebars: SidebarsConfig = {
       ],
     },
     'performance',
+    'migration',
   ],
 };
 

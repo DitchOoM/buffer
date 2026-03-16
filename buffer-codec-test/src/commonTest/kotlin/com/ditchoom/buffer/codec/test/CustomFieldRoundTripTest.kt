@@ -1,7 +1,8 @@
 package com.ditchoom.buffer.codec.test
 
 import com.ditchoom.buffer.ByteOrder
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.test.protocols.MixedPacket
 import com.ditchoom.buffer.codec.test.protocols.MixedPacketCodec
 import com.ditchoom.buffer.codec.test.protocols.PrefixedEntries
@@ -38,7 +39,7 @@ class CustomFieldRoundTripTest {
     @Test
     fun repeatedRoundTripEmpty() {
         val original = RepeatedPacket(0u, emptyList())
-        val buffer = PlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         RepeatedPacketCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = RepeatedPacketCodec.decode(buffer)
@@ -48,7 +49,7 @@ class CustomFieldRoundTripTest {
     @Test
     fun repeatedRoundTripMultiple() {
         val original = RepeatedPacket(3u, listOf(ShortEntry(1), ShortEntry(2), ShortEntry(3)))
-        val buffer = PlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         RepeatedPacketCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = RepeatedPacketCodec.decode(buffer)
@@ -58,7 +59,7 @@ class CustomFieldRoundTripTest {
     @Test
     fun propertyBagRoundTripEmpty() {
         val original = PropertyBagPacket(1u, emptyMap())
-        val buffer = PlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         PropertyBagPacketCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = PropertyBagPacketCodec.decode(buffer)
@@ -68,7 +69,7 @@ class CustomFieldRoundTripTest {
     @Test
     fun propertyBagRoundTripMultipleEntries() {
         val original = PropertyBagPacket(2u, mapOf(1 to 42, 2 to 300, 3 to 0))
-        val buffer = PlatformBuffer.allocate(128, ByteOrder.BIG_ENDIAN)
+        val buffer = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
         PropertyBagPacketCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = PropertyBagPacketCodec.decode(buffer)
@@ -84,7 +85,7 @@ class CustomFieldRoundTripTest {
                 name = "hello",
                 props = mapOf(1 to 10, 2 to 20),
             )
-        val buffer = PlatformBuffer.allocate(256, ByteOrder.BIG_ENDIAN)
+        val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
         MixedPacketCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = MixedPacketCodec.decode(buffer)
@@ -107,7 +108,7 @@ class CustomFieldRoundTripTest {
         for ((value, expectedBytes) in testCases) {
             assertEquals(expectedBytes, variableByteSizeInt(value), "variableByteSizeInt($value)")
             val packet = VbiPacket(0u, value, 0)
-            val buffer = PlatformBuffer.allocate(16, ByteOrder.BIG_ENDIAN)
+            val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
             VbiPacketCodec.encode(buffer, packet)
             val actualTotalBytes = buffer.position()
             val actualVbiBytes = actualTotalBytes - 2
@@ -129,7 +130,7 @@ class CustomFieldRoundTripTest {
                         Subscription("sensor/humidity", 0u),
                     ),
             )
-        val buffer = PlatformBuffer.allocate(256, ByteOrder.BIG_ENDIAN)
+        val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
         SubscribeByCountCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = SubscribeByCountCodec.decode(buffer)
@@ -139,7 +140,7 @@ class CustomFieldRoundTripTest {
     @Test
     fun subscribeByCountRoundTripEmpty() {
         val original = SubscribeByCount(packetId = 1u, count = 0u, subscriptions = emptyList())
-        val buffer = PlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         SubscribeByCountCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = SubscribeByCountCodec.decode(buffer)
@@ -157,7 +158,7 @@ class CustomFieldRoundTripTest {
                         Subscription("c/d/e", 1u),
                     ),
             )
-        val buffer = PlatformBuffer.allocate(256, ByteOrder.BIG_ENDIAN)
+        val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
         SubscribeRemainingCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = SubscribeRemainingCodec.decode(buffer)
@@ -171,7 +172,7 @@ class CustomFieldRoundTripTest {
                 packetId = 0x0001u,
                 subscriptions = listOf(Subscription("test", 0u)),
             )
-        val buffer = PlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         SubscribeRemainingCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = SubscribeRemainingCodec.decode(buffer)
@@ -185,7 +186,7 @@ class CustomFieldRoundTripTest {
                 header = 0xAAu,
                 items = listOf(ShortEntry(100), ShortEntry(200), ShortEntry(300)),
             )
-        val buffer = PlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         PrefixedEntriesCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = PrefixedEntriesCodec.decode(buffer)
@@ -195,7 +196,7 @@ class CustomFieldRoundTripTest {
     @Test
     fun prefixedEntriesRoundTripEmpty() {
         val original = PrefixedEntries(header = 0x00u, items = emptyList())
-        val buffer = PlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         PrefixedEntriesCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = PrefixedEntriesCodec.decode(buffer)
@@ -203,7 +204,7 @@ class CustomFieldRoundTripTest {
     }
 
     private fun roundTripVbi(original: VbiPacket) {
-        val buffer = PlatformBuffer.allocate(16, ByteOrder.BIG_ENDIAN)
+        val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
         VbiPacketCodec.encode(buffer, original)
         buffer.resetForRead()
         val decoded = VbiPacketCodec.decode(buffer)

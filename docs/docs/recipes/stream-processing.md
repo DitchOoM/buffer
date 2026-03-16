@@ -22,7 +22,7 @@ Split a buffer into chunks for processing:
 ```kotlin
 import com.ditchoom.buffer.stream.BufferStream
 
-val largeBuffer = PlatformBuffer.allocate(1024 * 1024)  // 1MB
+val largeBuffer = BufferFactory.Default.allocate(1024 * 1024)  // 1MB
 // ... fill buffer ...
 largeBuffer.resetForRead()
 

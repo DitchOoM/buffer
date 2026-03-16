@@ -126,7 +126,7 @@ class BufferFactoryTests {
     @Test
     fun negativeSizeAllocationThrows() {
         assertFailsWith<IllegalArgumentException> {
-            PlatformBuffer.allocate(-1)
+            BufferFactory.Default.allocate(-1)
         }
     }
 

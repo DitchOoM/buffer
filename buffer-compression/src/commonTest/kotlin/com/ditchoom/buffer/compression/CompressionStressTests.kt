@@ -113,7 +113,7 @@ class CompressionStressTests {
      */
     private fun generateCompressibleBuffer(size: Int): PlatformBuffer {
         val pattern = "ABCDEFGHIJKLMNOP" // 16 chars
-        val buffer = PlatformBuffer.allocate(size)
+        val buffer = BufferFactory.Default.allocate(size)
         for (i in 0 until size) {
             buffer.writeByte(pattern[i % pattern.length].code.toByte())
         }
@@ -130,7 +130,7 @@ class CompressionStressTests {
         seed: Long = 42L,
     ): PlatformBuffer {
         val random = Random(seed)
-        val buffer = PlatformBuffer.allocate(size)
+        val buffer = BufferFactory.Default.allocate(size)
         // Write in Long chunks for efficiency, then remaining bytes
         var i = 0
         while (i + 8 <= size) {
@@ -150,7 +150,7 @@ class CompressionStressTests {
      * Returns a buffer ready for reading.
      */
     private fun generateMixedBuffer(size: Int): PlatformBuffer {
-        val buffer = PlatformBuffer.allocate(size)
+        val buffer = BufferFactory.Default.allocate(size)
         val random = Random(123)
         var i = 0
         while (i < size) {
@@ -186,7 +186,7 @@ class CompressionStressTests {
      */
     private fun copyBuffer(source: ReadBuffer): PlatformBuffer {
         val size = source.remaining()
-        val copy = PlatformBuffer.allocate(size)
+        val copy = BufferFactory.Default.allocate(size)
         copy.write(source)
         copy.resetForRead()
         // Reset source position for reuse
@@ -206,7 +206,7 @@ class CompressionStressTests {
         val originalPosition = source.position()
         while (source.remaining() > 0) {
             val thisChunkSize = minOf(chunkSize, source.remaining())
-            val chunk = PlatformBuffer.allocate(thisChunkSize)
+            val chunk = BufferFactory.Default.allocate(thisChunkSize)
             for (j in 0 until thisChunkSize) {
                 chunk.writeByte(source.readByte())
             }
@@ -231,7 +231,7 @@ class CompressionStressTests {
         while (source.remaining() > 0) {
             // Random chunk size between 1 and 4KB
             val chunkSize = minOf(random.nextInt(1, 4096), source.remaining())
-            val chunk = PlatformBuffer.allocate(chunkSize)
+            val chunk = BufferFactory.Default.allocate(chunkSize)
             for (j in 0 until chunkSize) {
                 chunk.writeByte(source.readByte())
             }
@@ -423,7 +423,7 @@ class CompressionStressTests {
 
                 // Combine compressed chunks
                 val totalCompressedSize = compressedChunks.sumOf { it.remaining() }
-                val compressed = PlatformBuffer.allocate(totalCompressedSize)
+                val compressed = BufferFactory.Default.allocate(totalCompressedSize)
                 for (chunk in compressedChunks) {
                     compressed.write(chunk)
                 }
@@ -475,7 +475,7 @@ class CompressionStressTests {
 
                 // Combine decompressed chunks
                 val totalDecompressedSize = decompressedChunks.sumOf { it.remaining() }
-                val decompressed = PlatformBuffer.allocate(totalDecompressedSize)
+                val decompressed = BufferFactory.Default.allocate(totalDecompressedSize)
                 for (chunk in decompressedChunks) {
                     decompressed.write(chunk)
                 }
@@ -515,7 +515,7 @@ class CompressionStressTests {
 
             // Combine compressed data
             val totalCompressedSize = compressedOutput.sumOf { it.remaining() }
-            val compressed = PlatformBuffer.allocate(totalCompressedSize)
+            val compressed = BufferFactory.Default.allocate(totalCompressedSize)
             for (chunk in compressedOutput) {
                 compressed.write(chunk)
             }
@@ -537,7 +537,7 @@ class CompressionStressTests {
 
             // Combine and verify
             val totalDecompressedSize = decompressedOutput.sumOf { it.remaining() }
-            val decompressed = PlatformBuffer.allocate(totalDecompressedSize)
+            val decompressed = BufferFactory.Default.allocate(totalDecompressedSize)
             for (chunk in decompressedOutput) {
                 decompressed.write(chunk)
             }
@@ -859,7 +859,7 @@ class CompressionStressTests {
         runTest {
             // Test all possible single byte values
             for (byteValue in 0..255) {
-                val original = PlatformBuffer.allocate(1)
+                val original = BufferFactory.Default.allocate(1)
                 original.writeByte(byteValue.toByte())
                 original.resetForRead()
                 val originalCopy = copyBuffer(original)
@@ -881,7 +881,7 @@ class CompressionStressTests {
             // Test various sizes of repeated single byte (highly compressible)
             for (byteValue in listOf(0x00, 0x55, 0xAA, 0xFF)) {
                 for (size in listOf(100, 1000, 10_000, 100_000)) {
-                    val original = PlatformBuffer.allocate(size)
+                    val original = BufferFactory.Default.allocate(size)
                     repeat(size) {
                         original.writeByte(byteValue.toByte())
                     }
@@ -1071,9 +1071,9 @@ class CompressionStressTests {
      * Helper to combine buffers for stress tests.
      */
     private fun combineBuffers(buffers: List<ReadBuffer>): PlatformBuffer {
-        if (buffers.isEmpty()) return PlatformBuffer.allocate(0)
+        if (buffers.isEmpty()) return BufferFactory.Default.allocate(0)
         val totalSize = buffers.sumOf { it.remaining() }
-        val combined = PlatformBuffer.allocate(totalSize)
+        val combined = BufferFactory.Default.allocate(totalSize)
         for (buffer in buffers) {
             combined.write(buffer)
         }

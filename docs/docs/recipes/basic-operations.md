@@ -12,6 +12,7 @@ Common patterns for reading, writing, and manipulating buffers.
 ### Relative Writes (advance position)
 
 ```kotlin
+// PlatformBuffer.allocate() is shorthand for BufferFactory.Default.allocate()
 val buffer = PlatformBuffer.allocate(1024)
 
 // Signed types

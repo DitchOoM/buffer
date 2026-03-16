@@ -133,7 +133,7 @@ val nsMutableData = byteArray.toNSMutableData()
 - `PlatformBuffer` - Main buffer interface combining read/write operations
 - `ReadBuffer` - Read operations (relative and absolute)
 - `WriteBuffer` - Write operations (relative and absolute)
-- `AllocationZone` - Memory allocation strategy: `Heap`, `Direct`, `SharedMemory`, `Custom`
+- `BufferFactory` - Memory allocation strategy: `Default` (native), `managed()` (heap), `shared()` (IPC), `Deterministic` (explicit cleanup)
 
 ### Scoped Buffers (`com.ditchoom.buffer`)
 
@@ -274,16 +274,20 @@ All new buffer-consuming code must be tested with wrapper types (see `WrapperTra
 
 ### Factory Pattern
 
-Buffers are created via companion object methods:
+Buffers are created via factories:
 ```kotlin
-PlatformBuffer.allocate(size, zone = AllocationZone.Direct, byteOrder = ByteOrder.BIG_ENDIAN)
-PlatformBuffer.wrap(byteArray)
+BufferFactory.Default.allocate(size)                    // Native memory (platform-optimal)
+BufferFactory.managed().allocate(size)                  // Heap memory (ByteArray-backed)
+BufferFactory.shared().allocate(size)                   // Shared memory (Android IPC)
+BufferFactory.Deterministic.allocate(size)              // Explicit cleanup via .use {}
+PlatformBuffer.allocate(size)                           // Shorthand for Default
+PlatformBuffer.wrap(byteArray)                          // Wrap existing ByteArray
 ```
 
 ## Platform Notes
 
-- **JVM/Android:** Direct ByteBuffers (`DirectJvmBuffer`) used by default; `HeapJvmBuffer` for `wrap()` and `Heap` zone
-- **Android SharedMemory:** Use `AllocationZone.SharedMemory` for zero-copy IPC via Parcelable (API 27+)
+- **JVM/Android:** Direct ByteBuffers (`DirectJvmBuffer`) used by default; `HeapJvmBuffer` for `wrap()` and `BufferFactory.managed()`
+- **Android SharedMemory:** Use `BufferFactory.shared()` for zero-copy IPC via Parcelable (API 27+)
 - **Apple:** `MutableDataBuffer` wraps NSMutableData (native memory); `wrap(ByteArray)` returns `ByteArrayBuffer`
 - **Apple NSData interop:** Use `PlatformBuffer.wrap(nsData)` or `PlatformBuffer.wrap(nsMutableData)` for zero-copy Apple API interop
 - **JS SharedArrayBuffer:** Requires CORS headers (`Cross-Origin-Opener-Policy`, `Cross-Origin-Embedder-Policy`)

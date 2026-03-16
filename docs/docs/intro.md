@@ -24,8 +24,10 @@ Buffer gives you one `ReadBuffer`/`WriteBuffer` API that delegates to platform-n
 ## Quick Example
 
 ```kotlin
+import com.ditchoom.buffer.BufferFactory
+
 // Works identically on all platforms
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 buffer.writeInt(42)
 buffer.writeString("Hello, Buffer!")
 buffer.resetForRead()
