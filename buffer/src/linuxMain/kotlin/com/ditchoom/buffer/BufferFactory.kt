@@ -9,7 +9,10 @@ internal actual val defaultBufferFactory: BufferFactory =
         override fun allocate(
             size: Int,
             byteOrder: ByteOrder,
-        ): PlatformBuffer = NativeBuffer.allocate(size, byteOrder)
+        ): PlatformBuffer {
+            require(size >= 0) { "Buffer size must be non-negative, got $size" }
+            return NativeBuffer.allocate(size, byteOrder)
+        }
 
         override fun wrap(
             array: ByteArray,

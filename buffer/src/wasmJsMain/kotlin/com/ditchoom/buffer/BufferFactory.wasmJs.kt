@@ -10,6 +10,7 @@ internal actual val defaultBufferFactory: BufferFactory =
             size: Int,
             byteOrder: ByteOrder,
         ): PlatformBuffer {
+            require(size >= 0) { "Buffer size must be non-negative, got $size" }
             val (offset, _) = LinearMemoryAllocator.allocate(size)
             return LinearBuffer(offset, size, byteOrder)
         }

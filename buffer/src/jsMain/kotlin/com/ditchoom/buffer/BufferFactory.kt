@@ -13,7 +13,10 @@ internal actual val defaultBufferFactory: BufferFactory =
         override fun allocate(
             size: Int,
             byteOrder: ByteOrder,
-        ): PlatformBuffer = JsBuffer(Int8Array(size), byteOrder)
+        ): PlatformBuffer {
+            require(size >= 0) { "Buffer size must be non-negative, got $size" }
+            return JsBuffer(Int8Array(size), byteOrder)
+        }
 
         override fun wrap(
             array: ByteArray,
