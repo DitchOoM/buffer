@@ -3,16 +3,13 @@ package com.ditchoom.buffer
 import android.os.Build
 import android.os.Bundle
 import android.os.Parcel
-import android.os.SharedMemory
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.LargeTest
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.nio.ByteBuffer
 import kotlin.random.Random
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 /**
  * Integration tests for Parcelable buffer round-trips through Parcel and Bundle.
@@ -24,7 +21,6 @@ import kotlin.test.assertTrue
 @RunWith(AndroidJUnit4::class)
 @LargeTest
 class ParcelBundleIntegrationTests {
-
     // --- Parcel round-trip with content validation ---
 
     @Test
@@ -187,7 +183,10 @@ class ParcelBundleIntegrationTests {
 
     // --- Helpers ---
 
-    private fun parcelRoundTrip(buffer: PlatformBuffer, size: Int) {
+    private fun parcelRoundTrip(
+        buffer: PlatformBuffer,
+        size: Int,
+    ) {
         val jvmBuffer = buffer as JvmBuffer
         val data = Random.nextBytes(size)
         jvmBuffer.writeBytes(data)
@@ -200,17 +199,20 @@ class ParcelBundleIntegrationTests {
 
             val restored = JvmBuffer.CREATOR.createFromParcel(parcel)
             restored.resetForRead()
-            assertEquals(size, restored.remaining(), "Size mismatch for ${size}-byte buffer")
+            assertEquals(size, restored.remaining(), "Size mismatch for $size-byte buffer")
 
             val readBack = ByteArray(size)
             for (i in readBack.indices) readBack[i] = restored.readByte()
-            assertContentEquals(data, readBack, "Content mismatch for ${size}-byte buffer")
+            assertContentEquals(data, readBack, "Content mismatch for $size-byte buffer")
         } finally {
             parcel.recycle()
         }
     }
 
-    private fun bundleSaveRestore(buffer: PlatformBuffer, size: Int) {
+    private fun bundleSaveRestore(
+        buffer: PlatformBuffer,
+        size: Int,
+    ) {
         val jvmBuffer = buffer as JvmBuffer
         val data = Random.nextBytes(size)
         jvmBuffer.writeBytes(data)
@@ -232,11 +234,11 @@ class ParcelBundleIntegrationTests {
             @Suppress("DEPRECATION")
             val restored = restoredBundle.getParcelable<JvmBuffer>("buffer")!!
             restored.resetForRead()
-            assertEquals(size, restored.remaining(), "Bundle size mismatch for ${size}-byte buffer")
+            assertEquals(size, restored.remaining(), "Bundle size mismatch for $size-byte buffer")
 
             val readBack = ByteArray(size)
             for (i in readBack.indices) readBack[i] = restored.readByte()
-            assertContentEquals(data, readBack, "Bundle content mismatch for ${size}-byte buffer")
+            assertContentEquals(data, readBack, "Bundle content mismatch for $size-byte buffer")
         } finally {
             parcel.recycle()
         }

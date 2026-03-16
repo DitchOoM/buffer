@@ -19,6 +19,7 @@ internal actual val defaultBufferFactory: BufferFactory =
             size: Int,
             byteOrder: ByteOrder,
         ): PlatformBuffer {
+            require(size >= 0) { "Buffer size must be non-negative, got $size" }
             val data =
                 NSMutableData.create(length = size.convert())
                     ?: error("Failed to allocate NSMutableData of $size bytes")
@@ -107,6 +108,7 @@ actual fun PlatformBuffer.Companion.allocateNative(
     size: Int,
     byteOrder: ByteOrder,
 ): PlatformBuffer {
+    require(size >= 0) { "Buffer size must be non-negative, got $size" }
     val data =
         NSMutableData.create(length = size.convert())
             ?: error("Failed to allocate NSMutableData of $size bytes")
