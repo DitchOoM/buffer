@@ -111,11 +111,10 @@ actual fun ReadBuffer.toByteArray(): ByteArray {
  * - Otherwise, copies the remaining bytes to a new Int8Array.
  */
 actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData {
-    val unwrapped = unwrap()
-    if (unwrapped !== this) return unwrapped.toMutableNativeData()
+    val unwrapped = unwrapFully()
     return MutableNativeData(
-        when (this) {
-            is JsBuffer -> buffer.subarray(position(), position() + remaining())
+        when (unwrapped) {
+            is JsBuffer -> unwrapped.buffer.subarray(unwrapped.position(), unwrapped.position() + unwrapped.remaining())
             else -> toByteArray().unsafeCast<Int8Array>()
         },
     )

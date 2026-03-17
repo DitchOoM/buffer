@@ -1,5 +1,5 @@
 ---
-sidebar_position: 2
+sidebar_position: 1
 title: Buffer Pooling
 ---
 
@@ -41,7 +41,6 @@ val pool = BufferPool(
     maxPoolSize = 64,
     defaultBufferSize = 8 * 1024,  // 8KB
     byteOrder = ByteOrder.BIG_ENDIAN,
-    allocationZone = AllocationZone.Direct
 )
 ```
 

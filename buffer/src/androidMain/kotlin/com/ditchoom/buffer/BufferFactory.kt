@@ -1,5 +1,4 @@
 @file:JvmName("BufferFactoryAndroid")
-@file:Suppress("DEPRECATION")
 
 package com.ditchoom.buffer
 
@@ -8,42 +7,80 @@ import android.os.Build
 import android.os.SharedMemory
 import java.nio.ByteBuffer
 
-@SuppressLint("NewApi") // SharedMemory API (API 27+) is guarded with Build.VERSION.SDK_INT check
-actual fun PlatformBuffer.Companion.allocate(
-    size: Int,
-    zone: AllocationZone,
-    byteOrder: ByteOrder,
-): PlatformBuffer {
-    val byteOrderNative =
-        when (byteOrder) {
-            ByteOrder.BIG_ENDIAN -> java.nio.ByteOrder.BIG_ENDIAN
-            ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
-        }
-    return when (zone) {
-        AllocationZone.Heap -> HeapJvmBuffer(ByteBuffer.allocate(size).order(byteOrderNative))
-        AllocationZone.Direct -> DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
-        AllocationZone.SharedMemory ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && size > 0) {
-                val sharedMemory = SharedMemory.create(null, size)
-                val buffer = sharedMemory.mapReadWrite().order(byteOrderNative)
-                ParcelableSharedMemoryBuffer(buffer, sharedMemory)
-            } else {
-                DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
-            }
-    }
-}
+// =============================================================================
+// v2 BufferFactory implementations
+// =============================================================================
 
-actual fun PlatformBuffer.Companion.wrap(
-    array: ByteArray,
-    byteOrder: ByteOrder,
-): PlatformBuffer {
-    val byteOrderNative =
-        when (byteOrder) {
-            ByteOrder.BIG_ENDIAN -> java.nio.ByteOrder.BIG_ENDIAN
-            ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
+internal actual val defaultBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrder.toJava()))
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJava()))
+    }
+
+internal actual val managedBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.allocate(size).order(byteOrder.toJava()))
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJava()))
+    }
+
+private val deterministicFactoryInstance: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer {
+            // Android: invokeCleaner is not available on ART, use Unsafe.allocateMemory
+            return AndroidUnsafePlatformBuffer.allocate(size, byteOrder)
         }
-    return HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrderNative))
-}
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJava()))
+    }
+
+internal actual fun deterministicBufferFactory(threadConfined: Boolean): BufferFactory = deterministicFactoryInstance
+
+@SuppressLint("NewApi")
+internal actual val sharedBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && size > 0) {
+                try {
+                    val sharedMemory = SharedMemory.create(null, size)
+                    return ParcelableSharedMemoryBuffer(
+                        sharedMemory.mapReadWrite().order(byteOrder.toJava()),
+                        sharedMemory,
+                    )
+                } catch (_: Exception) {
+                    // Fall back to direct allocation if SharedMemory fails
+                }
+            }
+            return DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrder.toJava()))
+        }
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJava()))
+    }
 
 /**
  * Allocates a buffer with guaranteed native memory access (DirectJvmBuffer).
@@ -52,14 +89,7 @@ actual fun PlatformBuffer.Companion.wrap(
 actual fun PlatformBuffer.Companion.allocateNative(
     size: Int,
     byteOrder: ByteOrder,
-): PlatformBuffer {
-    val byteOrderNative =
-        when (byteOrder) {
-            ByteOrder.BIG_ENDIAN -> java.nio.ByteOrder.BIG_ENDIAN
-            ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
-        }
-    return DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
-}
+): PlatformBuffer = DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrder.toJava()))
 
 /**
  * Allocates a buffer with shared memory (SharedMemory) if available.
@@ -71,4 +101,4 @@ actual fun PlatformBuffer.Companion.allocateNative(
 actual fun PlatformBuffer.Companion.allocateShared(
     size: Int,
     byteOrder: ByteOrder,
-): PlatformBuffer = allocate(size, AllocationZone.SharedMemory, byteOrder)
+): PlatformBuffer = BufferFactory.shared().allocate(size, byteOrder)

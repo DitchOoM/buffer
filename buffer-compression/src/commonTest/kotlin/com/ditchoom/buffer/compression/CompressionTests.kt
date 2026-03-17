@@ -1,8 +1,8 @@
 package com.ditchoom.buffer.compression
 
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.toReadBuffer
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -52,14 +52,25 @@ class CompressionTests {
     }
 
     /**
-     * Read a little-endian Int from buffer (swaps bytes from big-endian read).
+     * Read a big-endian Int from buffer (byte-order-independent).
+     */
+    private fun readBigEndianInt(buf: ReadBuffer): Int {
+        val b0 = buf.readByte().toInt() and 0xFF
+        val b1 = buf.readByte().toInt() and 0xFF
+        val b2 = buf.readByte().toInt() and 0xFF
+        val b3 = buf.readByte().toInt() and 0xFF
+        return (b0 shl 24) or (b1 shl 16) or (b2 shl 8) or b3
+    }
+
+    /**
+     * Read a little-endian Int from buffer (byte-order-independent).
      */
     private fun ReadBuffer.readLittleEndianInt(): Int {
-        val bigEndian = readInt()
-        return ((bigEndian and 0xFF) shl 24) or
-            ((bigEndian and 0xFF00) shl 8) or
-            ((bigEndian shr 8) and 0xFF00) or
-            ((bigEndian shr 24) and 0xFF)
+        val b0 = readByte().toInt() and 0xFF
+        val b1 = readByte().toInt() and 0xFF
+        val b2 = readByte().toInt() and 0xFF
+        val b3 = readByte().toInt() and 0xFF
+        return b0 or (b1 shl 8) or (b2 shl 16) or (b3 shl 24)
     }
 
     // =========================================================================
@@ -349,7 +360,7 @@ class CompressionTests {
         // Zlib trailer (last 4 bytes): Adler32 checksum (big-endian)
         assertTrue(totalSize >= 6, "Zlib must be at least 6 bytes (2 header + 4 trailer)")
         compressedBuffer.position(totalSize - 4)
-        val storedAdler32 = compressedBuffer.readInt() // Big-endian
+        val storedAdler32 = readBigEndianInt(compressedBuffer) // Big-endian per zlib spec
 
         // Compute expected Adler32 and verify it matches stored value
         val expectedAdler32 = adler32(originalBytes)
@@ -451,7 +462,7 @@ class CompressionTests {
         if (!supportsSyncCompression) return
 
         // Test with binary data containing all byte values
-        val buffer = PlatformBuffer.allocate(256)
+        val buffer = BufferFactory.Default.allocate(256)
         for (i in 0 until 256) {
             buffer.writeByte(i.toByte())
         }

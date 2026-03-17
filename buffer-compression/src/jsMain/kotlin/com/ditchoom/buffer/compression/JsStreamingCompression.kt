@@ -1,8 +1,8 @@
 package com.ditchoom.buffer.compression
 
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
 import kotlinx.coroutines.await
 import org.khronos.webgl.Int8Array
 import org.khronos.webgl.Uint8Array
@@ -124,7 +124,7 @@ private class JsNodeStreamingCompressor(
 
         if (totalBytes == 0) {
             // Compress empty data with SYNC_FLUSH
-            val result = compressWithSyncFlush(PlatformBuffer.allocate(0), algorithm, level)
+            val result = compressWithSyncFlush(BufferFactory.Default.allocate(0), algorithm, level)
             onOutput(result)
             return
         }
@@ -149,7 +149,7 @@ private class JsNodeStreamingCompressor(
         check(!closed) { "Compressor is closed" }
 
         if (totalBytes == 0) {
-            when (val result = compress(PlatformBuffer.allocate(0), algorithm, level)) {
+            when (val result = compress(BufferFactory.Default.allocate(0), algorithm, level)) {
                 is CompressionResult.Success -> onOutput(result.buffer)
                 is CompressionResult.Failure -> throw CompressionException(result.message, result.cause)
             }

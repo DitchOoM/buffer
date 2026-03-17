@@ -25,7 +25,7 @@ class BufferStreamTests {
     @Test
     fun bufferStreamReportsContentLength() =
         withPool(defaultBufferSize = 1024) { pool ->
-            val source = PlatformBuffer.allocate(104) // 13 Longs = 104 bytes
+            val source = BufferFactory.managed().allocate(104) // 13 Longs = 104 bytes
             repeat(13) { source.writeLong(it.toLong()) }
             source.resetForRead()
 
@@ -36,7 +36,7 @@ class BufferStreamTests {
     @Test
     fun bufferStreamSplitsIntoCorrectChunkCount() =
         withPool(defaultBufferSize = 1024) { pool ->
-            val source = PlatformBuffer.allocate(100)
+            val source = BufferFactory.managed().allocate(100)
             repeat(100) { source.writeByte(it.toByte()) }
             source.resetForRead()
 
@@ -51,7 +51,7 @@ class BufferStreamTests {
     @Test
     fun bufferStreamLastChunkIsMarkedCorrectly() =
         withPool(defaultBufferSize = 1024) { pool ->
-            val source = PlatformBuffer.allocate(50)
+            val source = BufferFactory.managed().allocate(50)
             repeat(50) { source.writeByte(it.toByte()) }
             source.resetForRead()
 
@@ -68,7 +68,7 @@ class BufferStreamTests {
     @Test
     fun bufferStreamChunksHaveCorrectOffsets() =
         withPool(defaultBufferSize = 1024) { pool ->
-            val source = PlatformBuffer.allocate(100)
+            val source = BufferFactory.managed().allocate(100)
             repeat(100) { source.writeByte(it.toByte()) }
             source.resetForRead()
 
@@ -84,7 +84,7 @@ class BufferStreamTests {
     @Test
     fun bufferStreamChunksContainCorrectData() =
         withPool(defaultBufferSize = 1024) { pool ->
-            val source = PlatformBuffer.allocate(10)
+            val source = BufferFactory.managed().allocate(10)
             repeat(10) { source.writeByte((it + 1).toByte()) }
             source.resetForRead()
 
@@ -102,7 +102,7 @@ class BufferStreamTests {
     @Test
     fun bufferStreamWithExactChunkSizeMultiple() =
         withPool(defaultBufferSize = 1024) { pool ->
-            val source = PlatformBuffer.allocate(100)
+            val source = BufferFactory.managed().allocate(100)
             repeat(100) { source.writeByte(it.toByte()) }
             source.resetForRead()
 
@@ -116,7 +116,7 @@ class BufferStreamTests {
     @Test
     fun bufferStreamWithSingleByteChunks() =
         withPool(defaultBufferSize = 1024) { pool ->
-            val source = PlatformBuffer.allocate(5)
+            val source = BufferFactory.managed().allocate(5)
             repeat(5) { source.writeByte((it + 10).toByte()) }
             source.resetForRead()
 
@@ -132,7 +132,7 @@ class BufferStreamTests {
     @Test
     fun bufferStreamWithLargeChunkSize() =
         withPool(defaultBufferSize = 1024) { pool ->
-            val source = PlatformBuffer.allocate(50)
+            val source = BufferFactory.managed().allocate(50)
             repeat(50) { source.writeByte(it.toByte()) }
             source.resetForRead()
 
@@ -152,7 +152,7 @@ class BufferStreamTests {
     @Test
     fun bufferStreamContentLengthMatchesTotalData() =
         withPool(defaultBufferSize = 1024) { pool ->
-            val source = PlatformBuffer.allocate(123)
+            val source = BufferFactory.managed().allocate(123)
             repeat(123) { source.writeByte(it.toByte()) }
             source.resetForRead()
 
@@ -220,7 +220,7 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(10)
+        val buffer = BufferFactory.managed().allocate(10)
         repeat(10) { buffer.writeByte(it.toByte()) }
         buffer.resetForRead()
 
@@ -238,7 +238,7 @@ class BufferStreamTests {
         val processor = StreamProcessor.create(pool)
 
         for (i in 0 until 3) {
-            val buffer = PlatformBuffer.allocate(5)
+            val buffer = BufferFactory.managed().allocate(5)
             repeat(5) { buffer.writeByte((i * 5 + it).toByte()) }
             buffer.resetForRead()
             processor.append(buffer)
@@ -260,7 +260,7 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(10)
+        val buffer = BufferFactory.managed().allocate(10)
         buffer.resetForRead() // Empty buffer
 
         processor.append(buffer)
@@ -280,7 +280,7 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(3)
+        val buffer = BufferFactory.managed().allocate(3)
         buffer.writeByte(0x11)
         buffer.writeByte(0x22)
         buffer.writeByte(0x33)
@@ -302,7 +302,7 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(2)
+        val buffer = BufferFactory.managed().allocate(2)
         buffer.writeByte(0xFF.toByte())
         buffer.writeByte(0x80.toByte())
         buffer.resetForRead()
@@ -325,7 +325,7 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(3)
+        val buffer = BufferFactory.managed().allocate(3)
         buffer.writeByte(0x11)
         buffer.writeByte(0x22)
         buffer.writeByte(0x33)
@@ -351,7 +351,7 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(8)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeInt(0x11223344)
         buffer.writeInt(0x55667788)
         buffer.resetForRead()
@@ -372,7 +372,7 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(4)
+        val buffer = BufferFactory.managed().allocate(4)
         buffer.writeShort(0x1122)
         buffer.writeShort(0x3344)
         buffer.resetForRead()
@@ -391,7 +391,7 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(10)
+        val buffer = BufferFactory.managed().allocate(10)
         buffer.writeByte(0x1f)
         buffer.writeByte(0x8b.toByte())
         buffer.writeByte(0x08)
@@ -399,8 +399,8 @@ class BufferStreamTests {
 
         processor.append(buffer)
 
-        assertTrue(processor.peekMatches(PlatformBuffer.wrap(byteArrayOf(0x1f, 0x8b.toByte()))))
-        assertFalse(processor.peekMatches(PlatformBuffer.wrap(byteArrayOf(0x1f, 0x00))))
+        assertTrue(processor.peekMatches(BufferFactory.Default.wrap(byteArrayOf(0x1f, 0x8b.toByte()))))
+        assertFalse(processor.peekMatches(BufferFactory.Default.wrap(byteArrayOf(0x1f, 0x00))))
 
         processor.release()
         pool.clear()
@@ -415,7 +415,7 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(4)
+        val buffer = BufferFactory.managed().allocate(4)
         buffer.writeShort(0x1122)
         buffer.writeShort(0x3344)
         buffer.resetForRead()
@@ -439,7 +439,7 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(8)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeInt(0x11223344)
         buffer.writeInt(0x55667788)
         buffer.resetForRead()
@@ -463,7 +463,7 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(16)
+        val buffer = BufferFactory.managed().allocate(16)
         buffer.writeLong(0x1122334455667788L)
         buffer.writeLong(-0x1122334455667788L)
         buffer.resetForRead()
@@ -487,7 +487,7 @@ class BufferStreamTests {
         withPool(defaultBufferSize = 1024) { pool ->
             val processor = StreamProcessor.create(pool)
 
-            val buffer = PlatformBuffer.allocate(20)
+            val buffer = BufferFactory.managed().allocate(20)
             repeat(20) { buffer.writeByte(it.toByte()) }
             buffer.resetForRead()
 
@@ -508,12 +508,12 @@ class BufferStreamTests {
         withPool(defaultBufferSize = 1024) { pool ->
             val processor = StreamProcessor.create(pool)
 
-            val buffer1 = PlatformBuffer.allocate(5)
+            val buffer1 = BufferFactory.managed().allocate(5)
             repeat(5) { buffer1.writeByte(it.toByte()) }
             buffer1.resetForRead()
             processor.append(buffer1)
 
-            val buffer2 = PlatformBuffer.allocate(5)
+            val buffer2 = BufferFactory.managed().allocate(5)
             repeat(5) { buffer2.writeByte((it + 5).toByte()) }
             buffer2.resetForRead()
             processor.append(buffer2)
@@ -537,7 +537,7 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(10)
+        val buffer = BufferFactory.managed().allocate(10)
         repeat(10) { buffer.writeByte(it.toByte()) }
         buffer.resetForRead()
 
@@ -557,12 +557,12 @@ class BufferStreamTests {
         val processor = StreamProcessor.create(pool)
 
         // Append two chunks of 5 bytes each
-        val buffer1 = PlatformBuffer.allocate(5)
+        val buffer1 = BufferFactory.managed().allocate(5)
         repeat(5) { buffer1.writeByte(it.toByte()) }
         buffer1.resetForRead()
         processor.append(buffer1)
 
-        val buffer2 = PlatformBuffer.allocate(5)
+        val buffer2 = BufferFactory.managed().allocate(5)
         repeat(5) { buffer2.writeByte((it + 5).toByte()) }
         buffer2.resetForRead()
         processor.append(buffer2)
@@ -611,13 +611,13 @@ class BufferStreamTests {
         val processor = StreamProcessor.create(pool)
 
         // Create two chunks where the Int spans the boundary
-        val buffer1 = PlatformBuffer.allocate(2)
+        val buffer1 = BufferFactory.managed().allocate(2)
         buffer1.writeByte(0x11)
         buffer1.writeByte(0x22)
         buffer1.resetForRead()
         processor.append(buffer1)
 
-        val buffer2 = PlatformBuffer.allocate(2)
+        val buffer2 = BufferFactory.managed().allocate(2)
         buffer2.writeByte(0x33)
         buffer2.writeByte(0x44)
         buffer2.resetForRead()
@@ -635,12 +635,12 @@ class BufferStreamTests {
         val processor = StreamProcessor.create(pool)
 
         // Create two chunks where the Short spans the boundary
-        val buffer1 = PlatformBuffer.allocate(1)
+        val buffer1 = BufferFactory.managed().allocate(1)
         buffer1.writeByte(0x11)
         buffer1.resetForRead()
         processor.append(buffer1)
 
-        val buffer2 = PlatformBuffer.allocate(1)
+        val buffer2 = BufferFactory.managed().allocate(1)
         buffer2.writeByte(0x22)
         buffer2.resetForRead()
         processor.append(buffer2)
@@ -657,14 +657,14 @@ class BufferStreamTests {
         val processor = StreamProcessor.create(pool)
 
         // Create chunks where the Long spans boundaries
-        val buffer1 = PlatformBuffer.allocate(3)
+        val buffer1 = BufferFactory.managed().allocate(3)
         buffer1.writeByte(0x11)
         buffer1.writeByte(0x22)
         buffer1.writeByte(0x33)
         buffer1.resetForRead()
         processor.append(buffer1)
 
-        val buffer2 = PlatformBuffer.allocate(5)
+        val buffer2 = BufferFactory.managed().allocate(5)
         buffer2.writeByte(0x44)
         buffer2.writeByte(0x55)
         buffer2.writeByte(0x66)
@@ -687,7 +687,7 @@ class BufferStreamTests {
     fun collectToBufferCombinesChunks() {
         val pool = BufferPool(defaultBufferSize = 1024)
 
-        val source = PlatformBuffer.allocate(20)
+        val source = BufferFactory.managed().allocate(20)
         repeat(20) { source.writeByte(it.toByte()) }
         source.resetForRead()
 
@@ -711,7 +711,7 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(4)
+        val buffer = BufferFactory.managed().allocate(4)
         buffer.writeInt(0x12345678)
         buffer.resetForRead()
 
@@ -726,7 +726,7 @@ class BufferStreamTests {
 
     @Test
     fun bufferStreamEmptySource() {
-        val source = PlatformBuffer.allocate(0)
+        val source = BufferFactory.managed().allocate(0)
         source.resetForRead()
 
         val stream = BufferStream(source, chunkSize = 10)
@@ -747,14 +747,14 @@ class BufferStreamTests {
         val processor = StreamProcessor.create(pool)
 
         // First chunk with 2 bytes
-        val buffer1 = PlatformBuffer.allocate(2)
+        val buffer1 = BufferFactory.managed().allocate(2)
         buffer1.writeByte(0xAA.toByte())
         buffer1.writeByte(0xBB.toByte())
         buffer1.resetForRead()
         processor.append(buffer1)
 
         // Second chunk with 2 bytes
-        val buffer2 = PlatformBuffer.allocate(2)
+        val buffer2 = BufferFactory.managed().allocate(2)
         buffer2.writeByte(0xCC.toByte())
         buffer2.writeByte(0xDD.toByte())
         buffer2.resetForRead()
@@ -779,13 +779,13 @@ class BufferStreamTests {
         val processor = StreamProcessor.create(pool)
 
         // First chunk with 1 byte
-        val buffer1 = PlatformBuffer.allocate(1)
+        val buffer1 = BufferFactory.managed().allocate(1)
         buffer1.writeByte(0x11)
         buffer1.resetForRead()
         processor.append(buffer1)
 
         // Second chunk with 3 bytes
-        val buffer2 = PlatformBuffer.allocate(3)
+        val buffer2 = BufferFactory.managed().allocate(3)
         buffer2.writeByte(0x22)
         buffer2.writeByte(0x33)
         buffer2.writeByte(0x44)
@@ -806,13 +806,13 @@ class BufferStreamTests {
         val processor = StreamProcessor.create(pool)
 
         // First chunk with 1 byte
-        val buffer1 = PlatformBuffer.allocate(1)
+        val buffer1 = BufferFactory.managed().allocate(1)
         buffer1.writeByte(0xAB.toByte())
         buffer1.resetForRead()
         processor.append(buffer1)
 
         // Second chunk with 1 byte
-        val buffer2 = PlatformBuffer.allocate(1)
+        val buffer2 = BufferFactory.managed().allocate(1)
         buffer2.writeByte(0xCD.toByte())
         buffer2.resetForRead()
         processor.append(buffer2)
@@ -831,20 +831,20 @@ class BufferStreamTests {
         val processor = StreamProcessor.create(pool)
 
         // Split pattern across chunks
-        val buffer1 = PlatformBuffer.allocate(1)
+        val buffer1 = BufferFactory.managed().allocate(1)
         buffer1.writeByte(0x1f)
         buffer1.resetForRead()
         processor.append(buffer1)
 
-        val buffer2 = PlatformBuffer.allocate(2)
+        val buffer2 = BufferFactory.managed().allocate(2)
         buffer2.writeByte(0x8b.toByte())
         buffer2.writeByte(0x08)
         buffer2.resetForRead()
         processor.append(buffer2)
 
         // Pattern spans chunks
-        assertTrue(processor.peekMatches(PlatformBuffer.wrap(byteArrayOf(0x1f, 0x8b.toByte(), 0x08))))
-        assertFalse(processor.peekMatches(PlatformBuffer.wrap(byteArrayOf(0x1f, 0x8b.toByte(), 0x00))))
+        assertTrue(processor.peekMatches(BufferFactory.Default.wrap(byteArrayOf(0x1f, 0x8b.toByte(), 0x08))))
+        assertFalse(processor.peekMatches(BufferFactory.Default.wrap(byteArrayOf(0x1f, 0x8b.toByte(), 0x00))))
 
         processor.release()
         pool.clear()
@@ -858,7 +858,7 @@ class BufferStreamTests {
             val processor = StreamProcessor.create(pool)
 
             // First chunk
-            val buffer1 = PlatformBuffer.allocate(boundary)
+            val buffer1 = BufferFactory.managed().allocate(boundary)
             for (i in 0 until boundary) {
                 buffer1.writeByte((0x11 + i * 0x11).toByte())
             }
@@ -866,7 +866,7 @@ class BufferStreamTests {
             processor.append(buffer1)
 
             // Second chunk
-            val buffer2 = PlatformBuffer.allocate(4 - boundary)
+            val buffer2 = BufferFactory.managed().allocate(4 - boundary)
             for (i in boundary until 4) {
                 buffer2.writeByte((0x11 + i * 0x11).toByte())
             }
@@ -888,7 +888,7 @@ class BufferStreamTests {
             val processor = StreamProcessor.create(pool)
 
             // First chunk
-            val buffer1 = PlatformBuffer.allocate(boundary)
+            val buffer1 = BufferFactory.managed().allocate(boundary)
             val bytes = byteArrayOf(0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88.toByte())
             for (i in 0 until boundary) {
                 buffer1.writeByte(bytes[i])
@@ -897,7 +897,7 @@ class BufferStreamTests {
             processor.append(buffer1)
 
             // Second chunk
-            val buffer2 = PlatformBuffer.allocate(8 - boundary)
+            val buffer2 = BufferFactory.managed().allocate(8 - boundary)
             for (i in boundary until 8) {
                 buffer2.writeByte(bytes[i])
             }
@@ -916,7 +916,7 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(10)
+        val buffer = BufferFactory.managed().allocate(10)
         repeat(10) { buffer.writeByte(it.toByte()) }
         buffer.resetForRead()
         processor.append(buffer)
@@ -935,7 +935,7 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(10)
+        val buffer = BufferFactory.managed().allocate(10)
         repeat(10) { buffer.writeByte(it.toByte()) }
         buffer.resetForRead()
         processor.append(buffer)
@@ -954,12 +954,12 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer1 = PlatformBuffer.allocate(5)
+        val buffer1 = BufferFactory.managed().allocate(5)
         repeat(5) { buffer1.writeByte(it.toByte()) }
         buffer1.resetForRead()
         processor.append(buffer1)
 
-        val buffer2 = PlatformBuffer.allocate(5)
+        val buffer2 = BufferFactory.managed().allocate(5)
         repeat(5) { buffer2.writeByte((it + 5).toByte()) }
         buffer2.resetForRead()
         processor.append(buffer2)
@@ -978,7 +978,7 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(10)
+        val buffer = BufferFactory.managed().allocate(10)
         repeat(10) { buffer.writeByte(it.toByte()) }
         buffer.resetForRead()
         processor.append(buffer)
@@ -997,7 +997,7 @@ class BufferStreamTests {
 
         // Create 4 small chunks of 3 bytes each
         for (chunkIdx in 0 until 4) {
-            val buffer = PlatformBuffer.allocate(3)
+            val buffer = BufferFactory.managed().allocate(3)
             for (i in 0 until 3) {
                 buffer.writeByte((chunkIdx * 3 + i).toByte())
             }
@@ -1025,7 +1025,7 @@ class BufferStreamTests {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
 
-        val buffer = PlatformBuffer.allocate(8)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeInt(0x11223344)
         buffer.writeInt(0x55667788)
         buffer.resetForRead()
@@ -1070,13 +1070,13 @@ class BufferStreamTests {
         val processor = StreamProcessor.create(pool)
 
         // First chunk with single byte
-        val buffer1 = PlatformBuffer.allocate(1)
+        val buffer1 = BufferFactory.managed().allocate(1)
         buffer1.writeByte(0x11)
         buffer1.resetForRead()
         processor.append(buffer1)
 
         // Second chunk
-        val buffer2 = PlatformBuffer.allocate(1)
+        val buffer2 = BufferFactory.managed().allocate(1)
         buffer2.writeByte(0x22)
         buffer2.resetForRead()
         processor.append(buffer2)
@@ -1102,12 +1102,12 @@ class BufferStreamTests {
 
         // Simulate receiving a message: 4-byte length prefix + payload
         val messageLength = 10
-        val header = PlatformBuffer.allocate(4)
+        val header = BufferFactory.managed().allocate(4)
         header.writeInt(messageLength)
         header.resetForRead()
         processor.append(header)
 
-        val payload = PlatformBuffer.allocate(messageLength)
+        val payload = BufferFactory.managed().allocate(messageLength)
         repeat(messageLength) { payload.writeByte((it + 1).toByte()) }
         payload.resetForRead()
         processor.append(payload)
@@ -1137,7 +1137,7 @@ class BufferStreamTests {
         // Message format: 2-byte length + payload
 
         // First fragment: partial header (1 byte)
-        val frag1 = PlatformBuffer.allocate(1)
+        val frag1 = BufferFactory.managed().allocate(1)
         frag1.writeByte(0x00) // High byte of length
         frag1.resetForRead()
         processor.append(frag1)
@@ -1145,7 +1145,7 @@ class BufferStreamTests {
         assertEquals(1, processor.available())
 
         // Second fragment: rest of header + partial payload
-        val frag2 = PlatformBuffer.allocate(4)
+        val frag2 = BufferFactory.managed().allocate(4)
         frag2.writeByte(0x05) // Low byte of length (length = 5)
         frag2.writeByte(0x11)
         frag2.writeByte(0x22)
@@ -1160,7 +1160,7 @@ class BufferStreamTests {
         assertEquals(5, length)
 
         // Third fragment: rest of payload
-        val frag3 = PlatformBuffer.allocate(2)
+        val frag3 = BufferFactory.managed().allocate(2)
         frag3.writeByte(0x44)
         frag3.writeByte(0x55)
         frag3.resetForRead()
@@ -1187,7 +1187,7 @@ class BufferStreamTests {
 
         // Simulate worst case: single-byte chunks
         for (i in 0 until 20) {
-            val buffer = PlatformBuffer.allocate(1)
+            val buffer = BufferFactory.managed().allocate(1)
             buffer.writeByte(i.toByte())
             buffer.resetForRead()
             processor.append(buffer)
@@ -1222,7 +1222,7 @@ class BufferStreamTests {
 
         assertEquals(0, processor.available())
 
-        val buffer = PlatformBuffer.allocate(10)
+        val buffer = BufferFactory.managed().allocate(10)
         repeat(10) { buffer.writeByte(it.toByte()) }
         buffer.resetForRead()
 
@@ -1252,7 +1252,7 @@ class BufferStreamTests {
     fun streamProcessorReadBufferExactChunkSizeDataRemainsValid() {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
-        val buffer = PlatformBuffer.allocate(8)
+        val buffer = BufferFactory.Default.allocate(8)
         buffer.writeInt(0x12345678)
         buffer.writeInt(0x9ABCDEF0.toInt())
         buffer.resetForRead()
@@ -1269,7 +1269,7 @@ class BufferStreamTests {
     fun streamProcessorReadBufferPartialThenExactRemainder() {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
-        val buffer = PlatformBuffer.allocate(8)
+        val buffer = BufferFactory.Default.allocate(8)
         buffer.writeInt(0x11223344)
         buffer.writeInt(0x55667788)
         buffer.resetForRead()
@@ -1290,7 +1290,7 @@ class BufferStreamTests {
     fun readBufferScopedExactChunkReturnsCorrectData() {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
-        val buffer = PlatformBuffer.allocate(8)
+        val buffer = BufferFactory.Default.allocate(8)
         buffer.writeInt(0x12345678)
         buffer.writeInt(0x9ABCDEF0.toInt())
         buffer.resetForRead()
@@ -1309,7 +1309,7 @@ class BufferStreamTests {
     fun readBufferScopedPartialChunkReturnsCorrectData() {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
-        val buffer = PlatformBuffer.allocate(8)
+        val buffer = BufferFactory.Default.allocate(8)
         buffer.writeInt(0x11223344)
         buffer.writeInt(0x55667788)
         buffer.resetForRead()
@@ -1326,10 +1326,10 @@ class BufferStreamTests {
     fun readBufferScopedMultiChunkReturnsCorrectData() {
         val pool = BufferPool(defaultBufferSize = 1024)
         val processor = StreamProcessor.create(pool)
-        val buf1 = PlatformBuffer.allocate(4)
+        val buf1 = BufferFactory.Default.allocate(4)
         buf1.writeInt(0x11223344)
         buf1.resetForRead()
-        val buf2 = PlatformBuffer.allocate(4)
+        val buf2 = BufferFactory.Default.allocate(4)
         buf2.writeInt(0x55667788)
         buf2.resetForRead()
         processor.append(buf1)
@@ -1340,6 +1340,122 @@ class BufferStreamTests {
             }
         assertEquals(0x11223344, a)
         assertEquals(0x55667788, b)
+        processor.release()
+        pool.clear()
+    }
+
+    // ============================================================================
+    // readBuffer() Contract Tests: position may be > 0
+    //
+    // StreamProcessor.readBuffer() returns a buffer with remaining() == size,
+    // ready to read from its current position. Position may be > 0 when the
+    // chunk was partially consumed (e.g., skip/readByte before readBuffer).
+    // Consumers must NOT call position(0).
+    // ============================================================================
+
+    @Test
+    fun readBufferAfterSkipHasCorrectRemaining() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+
+        // Append a 10-byte chunk
+        val buffer = BufferFactory.managed().allocate(10)
+        repeat(10) { buffer.writeByte((it + 0x30).toByte()) } // '0','1',...,'9'
+        buffer.resetForRead()
+        processor.append(buffer)
+
+        // Skip first 3 bytes (simulates consuming a header)
+        processor.skip(3)
+
+        // readBuffer the remaining 7 bytes — exact match path returns chunk with position=3
+        val result = processor.readBuffer(7)
+        assertEquals(7, result.remaining())
+
+        // Verify the data matches bytes 3-9
+        for (i in 3 until 10) {
+            assertEquals((i + 0x30).toByte(), result.readByte())
+        }
+
+        processor.release()
+        pool.clear()
+    }
+
+    @Test
+    fun readBufferAfterSkipWorksWithReadString() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+
+        // Simulate a frame: 2-byte header + text payload
+        val header = byteArrayOf(0x81.toByte(), 0x05)
+        val text = "Hello"
+        val buffer = BufferFactory.managed().allocate(header.size + text.length)
+        buffer.writeBytes(header)
+        buffer.writeString(text, Charset.UTF8)
+        buffer.resetForRead()
+        processor.append(buffer)
+
+        // Skip the 2-byte header
+        processor.skip(2)
+
+        // readBuffer the 5-byte text — this is the exact failure mode from websocket:
+        // the returned buffer has position=2, and readString must work from there
+        val payload = processor.readBuffer(5)
+        assertEquals(5, payload.remaining())
+        assertEquals("Hello", payload.readString(5, Charset.UTF8))
+
+        processor.release()
+        pool.clear()
+    }
+
+    @Test
+    fun readBufferAfterPartialReadHasCorrectData() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+
+        val buffer = BufferFactory.managed().allocate(10)
+        repeat(10) { buffer.writeByte(it.toByte()) }
+        buffer.resetForRead()
+        processor.append(buffer)
+
+        // Consume 2 bytes via readByte
+        assertEquals(0.toByte(), processor.readByte())
+        assertEquals(1.toByte(), processor.readByte())
+
+        // readBuffer the remaining 8 bytes
+        val result = processor.readBuffer(8)
+        assertEquals(8, result.remaining())
+        for (i in 2 until 10) {
+            assertEquals(i.toByte(), result.readByte())
+        }
+
+        processor.release()
+        pool.clear()
+    }
+
+    @Test
+    fun readBufferSliceAfterSkipHasCorrectData() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+
+        // Append a 20-byte chunk
+        val buffer = BufferFactory.managed().allocate(20)
+        repeat(20) { buffer.writeByte(it.toByte()) }
+        buffer.resetForRead()
+        processor.append(buffer)
+
+        // Skip 3 bytes
+        processor.skip(3)
+
+        // readBuffer 7 bytes — contiguous slice path (17 bytes remain in chunk > 7)
+        val result = processor.readBuffer(7)
+        assertEquals(7, result.remaining())
+        for (i in 3 until 10) {
+            assertEquals(i.toByte(), result.readByte())
+        }
+
+        // Remaining 10 bytes should still be available
+        assertEquals(10, processor.available())
+
         processor.release()
         pool.clear()
     }

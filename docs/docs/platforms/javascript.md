@@ -9,22 +9,22 @@ Buffer on JS wraps `Uint8Array` with optional `SharedArrayBuffer` support.
 
 ## Implementation
 
-| Zone | JS Type |
-|------|---------|
-| `Heap` | `Uint8Array` (ArrayBuffer) |
-| `Direct` | `Uint8Array` (ArrayBuffer) |
-| `SharedMemory` | `Uint8Array` (SharedArrayBuffer) |
+| Factory | JS Type |
+|---------|---------|
+| `managed()` | `Uint8Array` (ArrayBuffer) |
+| `Default` | `Uint8Array` (ArrayBuffer) |
+| `shared()` | `Uint8Array` (SharedArrayBuffer) |
 
 ## SharedArrayBuffer
 
 For multi-threaded scenarios (Web Workers):
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(1024, AllocationZone.SharedMemory)
+val buffer = BufferFactory.shared().allocate(1024)
 
 // Access the SharedArrayBuffer
 val jsBuffer = buffer as JsBuffer
-// jsBuffer.sharedArrayBuffer  // Only set if SharedMemory zone
+// jsBuffer.sharedArrayBuffer  // Only set when using shared() factory
 ```
 
 ### CORS Requirements
@@ -57,7 +57,7 @@ Without these headers, falls back to regular `ArrayBuffer`.
 
 ```kotlin
 // Works with Node.js Buffer
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 buffer.writeString("Hello from Kotlin/JS!")
 ```
 
@@ -65,7 +65,7 @@ buffer.writeString("Hello from Kotlin/JS!")
 
 ```kotlin
 // Works with browser APIs
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 
 // Can be used with Fetch API, WebSocket, etc.
 buffer.writeBytes(responseData)
@@ -75,14 +75,14 @@ buffer.writeBytes(responseData)
 
 ```kotlin
 // Main thread
-val sharedBuffer = PlatformBuffer.allocate(1024, AllocationZone.SharedMemory)
+val sharedBuffer = BufferFactory.shared().allocate(1024)
 sharedBuffer.writeInt(42)
 
 // Pass to worker (zero-copy with SharedArrayBuffer)
 worker.postMessage(sharedBuffer.asArrayBuffer())
 
 // Worker thread
-val buffer = PlatformBuffer.wrap(receivedArrayBuffer)
+val buffer = BufferFactory.Default.wrap(receivedArrayBuffer)
 val value = buffer.readInt()  // 42
 ```
 
@@ -91,7 +91,7 @@ val value = buffer.readInt()  // 42
 Convert buffers to JavaScript-native types for Web API interop:
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 buffer.writeBytes(data)
 buffer.resetForRead()
 
@@ -123,17 +123,17 @@ val int8Array: Int8Array = mutableData.int8Array
 // Fetch API
 val response = fetch(url).await()
 val arrayBuffer = response.arrayBuffer().await()
-val buffer = PlatformBuffer.wrap(arrayBuffer)
+val buffer = BufferFactory.Default.wrap(arrayBuffer)
 
 // WebSocket
 webSocket.onmessage = { event ->
     val data = event.data as ArrayBuffer
-    val buffer = PlatformBuffer.wrap(data)
+    val buffer = BufferFactory.Default.wrap(data)
     processMessage(buffer)
 }
 
 // Send via WebSocket
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 buffer.writeInt(messageId)
 buffer.writeString(payload)
 buffer.resetForRead()

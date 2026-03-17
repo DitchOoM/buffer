@@ -1,8 +1,8 @@
 package com.ditchoom.buffer.compression
 
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
 
 /**
  * JVM/Android supports synchronous compression via java.util.zip.
@@ -38,7 +38,7 @@ actual fun compress(
         }
 
         // Combine chunks into single buffer using buffer-to-buffer copy
-        val result = PlatformBuffer.allocate(totalSize)
+        val result = BufferFactory.Default.allocate(totalSize)
         for (chunk in outputChunks) {
             result.write(chunk)
         }
@@ -72,7 +72,7 @@ actual fun decompress(
         }
 
         // Combine chunks into single buffer using buffer-to-buffer copy
-        val result = PlatformBuffer.allocate(totalSize)
+        val result = BufferFactory.Default.allocate(totalSize)
         for (chunk in outputChunks) {
             result.write(chunk)
         }

@@ -8,14 +8,14 @@ class NativeDataConversionTests {
     @Test
     fun toByteArrayReturnsFullBufferAtPositionZero() {
         val original = byteArrayOf(1, 2, 3, 4, 5)
-        val buffer = PlatformBuffer.wrap(original)
+        val buffer = BufferFactory.Default.wrap(original)
         val result = buffer.toByteArray()
         assertContentEquals(original, result)
     }
 
     @Test
     fun toByteArrayReturnsRemainingBytesFromPosition() {
-        val buffer = PlatformBuffer.allocate(5)
+        val buffer = BufferFactory.managed().allocate(5)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5))
         buffer.resetForRead()
         buffer.readByte() // position = 1
@@ -27,7 +27,7 @@ class NativeDataConversionTests {
 
     @Test
     fun toByteArrayRespectsLimit() {
-        val buffer = PlatformBuffer.allocate(5)
+        val buffer = BufferFactory.managed().allocate(5)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5))
         buffer.resetForRead()
         buffer.setLimit(3)
@@ -38,7 +38,7 @@ class NativeDataConversionTests {
 
     @Test
     fun toByteArrayRespectsPositionAndLimit() {
-        val buffer = PlatformBuffer.allocate(5)
+        val buffer = BufferFactory.managed().allocate(5)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5))
         buffer.resetForRead()
         buffer.readByte() // position = 1
@@ -50,7 +50,7 @@ class NativeDataConversionTests {
 
     @Test
     fun toByteArrayReturnsEmptyForEmptyRemaining() {
-        val buffer = PlatformBuffer.allocate(5)
+        val buffer = BufferFactory.managed().allocate(5)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5))
         buffer.resetForRead()
         buffer.position(5) // position = limit
@@ -61,7 +61,7 @@ class NativeDataConversionTests {
 
     @Test
     fun toByteArrayWorksWithDirectBuffer() {
-        val buffer = PlatformBuffer.allocate(5, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(5)
         buffer.writeBytes(byteArrayOf(10, 20, 30, 40, 50))
         buffer.resetForRead()
         buffer.readByte() // position = 1
@@ -72,7 +72,7 @@ class NativeDataConversionTests {
 
     @Test
     fun toByteArrayWorksWithHeapBuffer() {
-        val buffer = PlatformBuffer.allocate(5, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(5)
         buffer.writeBytes(byteArrayOf(10, 20, 30, 40, 50))
         buffer.resetForRead()
         buffer.readByte() // position = 1
@@ -85,7 +85,7 @@ class NativeDataConversionTests {
 
     @Test
     fun toByteArrayDoesNotModifyPositionForHeapBuffer() {
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
         buffer.readByte() // position = 1
@@ -103,7 +103,7 @@ class NativeDataConversionTests {
 
     @Test
     fun toByteArrayDoesNotModifyPositionForDirectBuffer() {
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
         buffer.readByte() // position = 1
@@ -121,7 +121,7 @@ class NativeDataConversionTests {
 
     @Test
     fun toByteArrayDoesNotModifyPositionForWrappedBuffer() {
-        val buffer = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
+        val buffer = BufferFactory.Default.wrap(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.readByte() // position = 1
         buffer.readByte() // position = 2
         buffer.setLimit(6) // limit = 6
@@ -137,7 +137,7 @@ class NativeDataConversionTests {
 
     @Test
     fun toNativeDataDoesNotModifyPositionForHeapBuffer() {
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
         buffer.readByte() // position = 1
@@ -155,7 +155,7 @@ class NativeDataConversionTests {
 
     @Test
     fun toNativeDataDoesNotModifyPositionForDirectBuffer() {
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
         buffer.readByte() // position = 1
@@ -173,7 +173,7 @@ class NativeDataConversionTests {
 
     @Test
     fun toNativeDataDoesNotModifyPositionForWrappedBuffer() {
-        val buffer = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
+        val buffer = BufferFactory.Default.wrap(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.readByte() // position = 1
         buffer.readByte() // position = 2
         buffer.setLimit(6) // limit = 6
@@ -189,7 +189,7 @@ class NativeDataConversionTests {
 
     @Test
     fun toMutableNativeDataDoesNotModifyPositionForHeapBuffer() {
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
         buffer.readByte() // position = 1
@@ -207,7 +207,7 @@ class NativeDataConversionTests {
 
     @Test
     fun toMutableNativeDataDoesNotModifyPositionForDirectBuffer() {
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
         buffer.readByte() // position = 1
@@ -225,7 +225,7 @@ class NativeDataConversionTests {
 
     @Test
     fun toMutableNativeDataDoesNotModifyPositionForWrappedBuffer() {
-        val buffer = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
+        val buffer = BufferFactory.Default.wrap(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.readByte() // position = 1
         buffer.readByte() // position = 2
         buffer.setLimit(6) // limit = 6
@@ -241,7 +241,7 @@ class NativeDataConversionTests {
 
     @Test
     fun multipleCallsToByteArrayReturnSameContent() {
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
         buffer.readByte() // position = 1
@@ -258,7 +258,7 @@ class NativeDataConversionTests {
 
     @Test
     fun multipleCallsToNativeDataReturnSameContent() {
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(8)
         buffer.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         buffer.resetForRead()
         buffer.readByte() // position = 1

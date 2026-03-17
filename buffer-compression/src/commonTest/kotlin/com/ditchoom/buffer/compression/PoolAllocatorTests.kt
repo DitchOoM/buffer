@@ -1,8 +1,9 @@
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.pool.withPool
 import com.ditchoom.buffer.toReadBuffer
 import kotlin.test.Test
@@ -261,7 +262,7 @@ class PoolAllocatorTests {
                 var offset = 0
                 while (offset < bytes.size) {
                     val chunkSize = minOf(4096, bytes.size - offset)
-                    val chunk = PlatformBuffer.allocate(chunkSize)
+                    val chunk = BufferFactory.Default.allocate(chunkSize)
                     chunk.writeBytes(bytes, offset, chunkSize)
                     chunk.resetForRead()
                     compress(chunk)
@@ -293,9 +294,9 @@ class PoolAllocatorTests {
     // =========================================================================
 
     private fun combineBuffers(buffers: List<ReadBuffer>): PlatformBuffer {
-        if (buffers.isEmpty()) return PlatformBuffer.allocate(0)
+        if (buffers.isEmpty()) return BufferFactory.Default.allocate(0)
         val totalSize = buffers.sumOf { it.remaining() }
-        val combined = PlatformBuffer.allocate(totalSize)
+        val combined = BufferFactory.Default.allocate(totalSize)
         for (buffer in buffers) {
             combined.write(buffer)
         }

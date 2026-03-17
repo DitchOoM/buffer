@@ -97,31 +97,26 @@ Benchmarks run on:
 | mixedOperations | 64,152 | 119 |
 | sliceBuffer | 5,746 | 1,329 |
 
-## ScopedBuffer
+## Deterministic Memory
 
-ScopedBuffer provides deterministic memory management for FFI/JNI interop and latency-sensitive code.
+`BufferFactory.deterministic()` provides buffers with guaranteed cleanup (no GC reliance).
+Use `.use {}` for automatic resource management:
 
-| Platform | Allocation | Cleanup | Native Address |
-|----------|-----------|---------|----------------|
-| JVM 21+  | FFM Arena.allocate() | Arena.close() | MemorySegment.address() |
-| JVM < 21 | Unsafe.allocateMemory() | Unsafe.freeMemory() | Direct pointer |
-| Android  | Unsafe.allocateMemory() | Unsafe.freeMemory() | Direct pointer |
-| Native   | malloc() | free() | CPointer address |
-| WASM     | LinearMemory | Bump allocator | Pointer offset |
-| JS       | ArrayBuffer (GC) | Reference release | N/A (GC managed) |
-
-**Use cases:**
-- **FFI/JNI interop**: Pass `nativeAddress` directly to native code
-- **Deterministic cleanup**: Memory freed immediately when scope closes
-- **Latency-sensitive code**: Avoid GC pauses by managing memory explicitly
-
-**Note:** Raw read/write performance is similar to `PlatformBuffer` with `AllocationZone.Direct` since they use the same underlying memory mechanisms.
-
-Run ScopedBuffer benchmarks:
-```bash
-./gradlew jvmBenchmarkBenchmark -Pbenchmark.include=Scoped
-./gradlew macosArm64BenchmarkBenchmark -Pbenchmark.include=Scoped
+```kotlin
+BufferFactory.deterministic().allocate(1024).use { buffer ->
+    buffer.writeInt(42)
+} // freed immediately
 ```
+
+| Platform | Strategy |
+|----------|----------|
+| JVM 21+ | FFM Arena (Foreign Function & Memory API) |
+| JVM 9-20 | DirectByteBuffer + Unsafe.invokeCleaner |
+| Android | Unsafe.allocateMemory/freeMemory |
+| Apple | MutableDataBuffer (ARC, already deterministic) |
+| Linux | NativeBuffer (malloc/free, already deterministic) |
+| WASM | LinearBuffer (already deterministic) |
+| JS | JsBuffer (GC-managed, no alternative) |
 
 ## Running Benchmarks
 

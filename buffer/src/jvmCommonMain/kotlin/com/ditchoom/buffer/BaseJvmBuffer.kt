@@ -5,9 +5,6 @@ import java.nio.Buffer
 import java.nio.ByteBuffer
 import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
-import kotlin.coroutines.suspendCoroutine
 
 abstract class BaseJvmBuffer(
     open val byteBuffer: ByteBuffer,
@@ -345,8 +342,8 @@ abstract class BaseJvmBuffer(
 
     override fun toString() = "Buffer[pos=${position()} lim=${limit()} cap=$capacity]"
 
-    override suspend fun close() {
-        fileRef?.aClose()
+    open fun close() {
+        fileRef?.close()
     }
 
     override fun limit() = buffer.limit()
@@ -488,18 +485,6 @@ abstract class BaseJvmBuffer(
         return this
     }
 }
-
-suspend fun RandomAccessFile.aClose() =
-    suspendCoroutine<Unit> {
-        try {
-            // TODO: fix the blocking call
-            @Suppress("BlockingMethodInNonBlockingContext")
-            close()
-            it.resume(Unit)
-        } catch (e: Throwable) {
-            it.resumeWithException(e)
-        }
-    }
 
 fun ByteBuffer.toArray(size: Int = remaining()): ByteArray =
     if (hasArray()) {

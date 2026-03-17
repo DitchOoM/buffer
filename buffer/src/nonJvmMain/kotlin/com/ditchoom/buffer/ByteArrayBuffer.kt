@@ -354,7 +354,7 @@ class ByteArrayBuffer(
     // contentEquals() and indexOf() delegate to super which uses bulk Long operations
     // (bulkCompareEquals/bulkIndexOf with 8-byte chunks via getLong()).
 
-    override suspend fun close() = Unit
+    fun close() = Unit
 
     override fun equals(other: Any?): Boolean = bufferEquals(this, other)
 

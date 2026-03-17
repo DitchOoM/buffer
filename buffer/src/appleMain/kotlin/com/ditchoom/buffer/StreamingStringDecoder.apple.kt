@@ -382,7 +382,7 @@ private class AppleStreamingStringDecoder(
         pendingCount = 0
     }
 
-    override suspend fun close() {
+    override fun close() {
         nativeHeap.free(cfRange.rawPtr)
     }
 

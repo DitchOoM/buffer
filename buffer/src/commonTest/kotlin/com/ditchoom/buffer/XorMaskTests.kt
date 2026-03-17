@@ -10,12 +10,12 @@ class XorMaskTests {
 
     @Test
     fun offsetZeroMatchesNoOffset() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
             val size = 32
             val mask = 0xCAFEBABE.toInt()
 
-            val buf1 = PlatformBuffer.allocate(size, zone)
-            val buf2 = PlatformBuffer.allocate(size, zone)
+            val buf1 = factory.allocate(size)
+            val buf2 = factory.allocate(size)
             for (i in 0 until size) {
                 buf1.writeByte(i.toByte())
                 buf2.writeByte(i.toByte())
@@ -27,15 +27,15 @@ class XorMaskTests {
             buf2.xorMask(mask, 0)
 
             for (i in 0 until size) {
-                assertEquals(buf1.readByte(), buf2.readByte(), "Mismatch at $i for zone $zone")
+                assertEquals(buf1.readByte(), buf2.readByte(), "Mismatch at $i for factory $factory")
             }
         }
     }
 
     @Test
     fun offsetOneRotatesMask() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
-            val buffer = PlatformBuffer.allocate(4, zone)
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
+            val buffer = factory.allocate(4)
             buffer.writeInt(0x00000000)
             buffer.resetForRead()
             buffer.xorMask(0x12345678, 1)
@@ -50,13 +50,13 @@ class XorMaskTests {
 
     @Test
     fun offsetCyclesEveryFour() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
             val size = 16
             val mask = 0xDEADBEEF.toInt()
 
             for (base in 0..3) {
-                val buf1 = PlatformBuffer.allocate(size, zone)
-                val buf2 = PlatformBuffer.allocate(size, zone)
+                val buf1 = factory.allocate(size)
+                val buf2 = factory.allocate(size)
                 for (i in 0 until size) {
                     buf1.writeByte(i.toByte())
                     buf2.writeByte(i.toByte())
@@ -81,7 +81,7 @@ class XorMaskTests {
     @Test
     fun offsetWorksWithBulkPath() {
         // Buffer > 8 bytes to exercise the 8-byte (or 4-byte) bulk path
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
             val mask = 0xABCD1234.toInt()
             val maskBytes =
                 byteArrayOf(
@@ -93,7 +93,7 @@ class XorMaskTests {
 
             for (offset in 1..3) {
                 val size = 33 // odd size to test remainder path too
-                val buffer = PlatformBuffer.allocate(size, zone)
+                val buffer = factory.allocate(size)
                 for (i in 0 until size) buffer.writeByte(0)
                 buffer.resetForRead()
                 buffer.xorMask(mask, offset)
@@ -102,7 +102,7 @@ class XorMaskTests {
                     assertEquals(
                         maskBytes[(i + offset) % 4],
                         buffer.readByte(),
-                        "offset=$offset mismatch at index $i in zone $zone",
+                        "offset=$offset mismatch at index $i in factory $factory",
                     )
                 }
             }
@@ -111,12 +111,12 @@ class XorMaskTests {
 
     @Test
     fun offsetPreservesDoubleXorIdentity() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
             val size = 64
             val mask = 0xFEEDFACE.toInt()
 
             for (offset in 0..3) {
-                val buffer = PlatformBuffer.allocate(size, zone)
+                val buffer = factory.allocate(size)
                 for (i in 0 until size) buffer.writeByte(i.toByte())
                 buffer.resetForRead()
 
@@ -138,13 +138,13 @@ class XorMaskTests {
     @Test
     fun offsetChunkedEqualsContiguous() {
         // Mask chunks separately with offset tracking == mask combined buffer at once
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
             val mask = 0x12345678
             val totalSize = 20
             val data = ByteArray(totalSize) { it.toByte() }
 
             // Contiguous: mask all at once
-            val contiguous = PlatformBuffer.allocate(totalSize, zone)
+            val contiguous = factory.allocate(totalSize)
             contiguous.writeBytes(data)
             contiguous.resetForRead()
             contiguous.xorMask(mask)
@@ -155,7 +155,7 @@ class XorMaskTests {
             var offset = 0
             var dataPos = 0
             for (chunkSize in chunkSizes) {
-                val chunk = PlatformBuffer.allocate(chunkSize, zone)
+                val chunk = factory.allocate(chunkSize)
                 chunk.writeBytes(data, dataPos, chunkSize)
                 chunk.resetForRead()
                 chunk.xorMask(mask, offset)
@@ -180,14 +180,14 @@ class XorMaskTests {
     @Test
     fun offsetWithOddSizedChunks() {
         // Chunks of 1, 3, 5, 7 bytes
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
             val mask = 0xAABBCCDD.toInt()
             val chunkSizes = intArrayOf(1, 3, 5, 7)
             val totalSize = chunkSizes.sum()
             val data = ByteArray(totalSize) { (it * 17).toByte() }
 
             // Contiguous reference
-            val contiguous = PlatformBuffer.allocate(totalSize, zone)
+            val contiguous = factory.allocate(totalSize)
             contiguous.writeBytes(data)
             contiguous.resetForRead()
             contiguous.xorMask(mask)
@@ -197,7 +197,7 @@ class XorMaskTests {
             var offset = 0
             var dataPos = 0
             for (chunkSize in chunkSizes) {
-                val chunk = PlatformBuffer.allocate(chunkSize, zone)
+                val chunk = factory.allocate(chunkSize)
                 chunk.writeBytes(data, dataPos, chunkSize)
                 chunk.resetForRead()
                 chunk.xorMask(mask, offset)
@@ -214,8 +214,8 @@ class XorMaskTests {
 
     @Test
     fun offsetWithEmptyBuffer() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
-            val buffer = PlatformBuffer.allocate(8, zone)
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
+            val buffer = factory.allocate(8)
             buffer.resetForRead() // position=0, limit=0
             // Should not crash for any offset
             buffer.xorMask(0x12345678, 0)
@@ -230,16 +230,16 @@ class XorMaskTests {
         val mask = 0x12345678
         val maskBytes = byteArrayOf(0x12, 0x34, 0x56, 0x78)
 
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
             for (offset in 0..3) {
-                val buffer = PlatformBuffer.allocate(1, zone)
+                val buffer = factory.allocate(1)
                 buffer.writeByte(0)
                 buffer.resetForRead()
                 buffer.xorMask(mask, offset)
                 assertEquals(
                     maskBytes[offset],
                     buffer.readByte(),
-                    "Single byte with offset=$offset in zone $zone",
+                    "Single byte with offset=$offset in factory $factory",
                 )
             }
         }
@@ -251,8 +251,8 @@ class XorMaskTests {
 
     @Test
     fun zeroMaskIsNoOp() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
-            val buffer = PlatformBuffer.allocate(8, zone)
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
+            val buffer = factory.allocate(8)
             buffer.writeInt(0x12345678)
             buffer.writeInt(0x9ABCDEF0.toInt())
             buffer.resetForRead()
@@ -264,8 +264,8 @@ class XorMaskTests {
 
     @Test
     fun emptyBufferIsNoOp() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
-            val buffer = PlatformBuffer.allocate(8, zone)
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
+            val buffer = factory.allocate(8)
             buffer.resetForRead() // position=0, limit=0
             buffer.xorMask(0x12345678) // Should not crash
             assertEquals(0, buffer.remaining())
@@ -274,8 +274,8 @@ class XorMaskTests {
 
     @Test
     fun exact4ByteBuffer() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
-            val buffer = PlatformBuffer.allocate(4, zone)
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
+            val buffer = factory.allocate(4)
             buffer.writeInt(0x00000000)
             buffer.resetForRead()
             buffer.xorMask(0x12345678)
@@ -285,8 +285,8 @@ class XorMaskTests {
 
     @Test
     fun exact8ByteBuffer() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
-            val buffer = PlatformBuffer.allocate(8, zone)
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
+            val buffer = factory.allocate(8)
             buffer.writeInt(0x00000000)
             buffer.writeInt(0x00000000)
             buffer.resetForRead()
@@ -298,10 +298,10 @@ class XorMaskTests {
 
     @Test
     fun oddLengthRemainder() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
             // Test buffers of size 1, 2, 3, 5, 6, 7
             for (size in listOf(1, 2, 3, 5, 6, 7)) {
-                val buffer = PlatformBuffer.allocate(size, zone)
+                val buffer = factory.allocate(size)
                 for (i in 0 until size) {
                     buffer.writeByte(0)
                 }
@@ -314,7 +314,7 @@ class XorMaskTests {
                     assertEquals(
                         maskBytes[i % 4],
                         buffer.readByte(),
-                        "Mismatch at index $i for size $size in zone $zone",
+                        "Mismatch at index $i for size $size in factory $factory",
                     )
                 }
             }
@@ -323,9 +323,9 @@ class XorMaskTests {
 
     @Test
     fun doubleXorIsIdentity() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
             val size = 1024
-            val buffer = PlatformBuffer.allocate(size, zone)
+            val buffer = factory.allocate(size)
             // Fill with known data
             for (i in 0 until size) {
                 buffer.writeByte(i.toByte())
@@ -353,8 +353,8 @@ class XorMaskTests {
 
     @Test
     fun positionPreservation() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
-            val buffer = PlatformBuffer.allocate(16, zone)
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
+            val buffer = factory.allocate(16)
             for (i in 0 until 16) {
                 buffer.writeByte(0)
             }
@@ -371,8 +371,8 @@ class XorMaskTests {
 
     @Test
     fun rangeRespected() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
-            val buffer = PlatformBuffer.allocate(16, zone)
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
+            val buffer = factory.allocate(16)
             for (i in 0 until 16) {
                 buffer.writeByte(0)
             }
@@ -406,9 +406,9 @@ class XorMaskTests {
 
     @Test
     fun largeBuffer() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
             val size = 4096
-            val buffer = PlatformBuffer.allocate(size, zone)
+            val buffer = factory.allocate(size)
             for (i in 0 until size) {
                 buffer.writeByte(i.toByte())
             }
@@ -430,7 +430,7 @@ class XorMaskTests {
                 assertEquals(
                     expected,
                     buffer.readByte(),
-                    "Mismatch at index $i for zone $zone",
+                    "Mismatch at index $i for factory $factory",
                 )
             }
         }
@@ -438,8 +438,8 @@ class XorMaskTests {
 
     @Test
     fun allOnesData() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
-            val buffer = PlatformBuffer.allocate(8, zone)
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
+            val buffer = factory.allocate(8)
             buffer.writeLong(-1L) // All 0xFF bytes
             buffer.resetForRead()
             buffer.xorMask(0x12345678)
@@ -458,55 +458,55 @@ class XorMaskTests {
 
     @Test
     fun xorMaskCopyMatchesWritePlusXorMask() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
             val mask = 0xCAFEBABE.toInt()
             val size = 33 // odd to test remainder
 
-            val src = PlatformBuffer.allocate(size, zone)
+            val src = factory.allocate(size)
             for (i in 0 until size) src.writeByte((i * 7).toByte())
             src.resetForRead()
 
             // Reference: write then mask in-place
-            val src2 = PlatformBuffer.allocate(size, zone)
+            val src2 = factory.allocate(size)
             for (i in 0 until size) src2.writeByte((i * 7).toByte())
             src2.resetForRead()
 
-            val ref = PlatformBuffer.allocate(size, zone) as ReadWriteBuffer
+            val ref = factory.allocate(size) as ReadWriteBuffer
             ref.write(src2)
             ref.resetForRead()
             ref.xorMask(mask)
 
             // Test: xorMaskCopy
-            val dst = PlatformBuffer.allocate(size, zone) as ReadWriteBuffer
+            val dst = factory.allocate(size) as ReadWriteBuffer
             dst.xorMaskCopy(src, mask)
             dst.resetForRead()
 
             for (i in 0 until size) {
-                assertEquals(ref.readByte(), dst.readByte(), "Mismatch at $i for zone $zone")
+                assertEquals(ref.readByte(), dst.readByte(), "Mismatch at $i for factory $factory")
             }
         }
     }
 
     @Test
     fun xorMaskCopyWithOffset() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
             val mask = 0x12345678
             val totalSize = 20
             val data = ByteArray(totalSize) { it.toByte() }
 
             // Contiguous reference
-            val contiguous = PlatformBuffer.allocate(totalSize, zone) as ReadWriteBuffer
+            val contiguous = factory.allocate(totalSize) as ReadWriteBuffer
             contiguous.writeBytes(data)
             contiguous.resetForRead()
             contiguous.xorMask(mask)
 
             // Chunked xorMaskCopy with offset tracking
-            val dst = PlatformBuffer.allocate(totalSize, zone) as ReadWriteBuffer
+            val dst = factory.allocate(totalSize) as ReadWriteBuffer
             val chunkSizes = intArrayOf(7, 6, 7)
             var offset = 0
             var dataPos = 0
             for (chunkSize in chunkSizes) {
-                val chunk = PlatformBuffer.allocate(chunkSize, zone)
+                val chunk = factory.allocate(chunkSize)
                 chunk.writeBytes(data, dataPos, chunkSize)
                 chunk.resetForRead()
                 dst.xorMaskCopy(chunk, mask, offset)
@@ -523,12 +523,12 @@ class XorMaskTests {
 
     @Test
     fun xorMaskCopyAdvancesPositions() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
-            val src = PlatformBuffer.allocate(8, zone)
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
+            val src = factory.allocate(8)
             for (i in 0 until 8) src.writeByte(i.toByte())
             src.resetForRead()
 
-            val dst = PlatformBuffer.allocate(16, zone) as ReadWriteBuffer
+            val dst = factory.allocate(16) as ReadWriteBuffer
             dst.xorMaskCopy(src, 0x12345678)
 
             assertEquals(8, src.position(), "Source position should advance")
@@ -538,12 +538,12 @@ class XorMaskTests {
 
     @Test
     fun xorMaskCopyZeroMaskIsCopy() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
-            val src = PlatformBuffer.allocate(8, zone)
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
+            val src = factory.allocate(8)
             for (i in 0 until 8) src.writeByte(i.toByte())
             src.resetForRead()
 
-            val dst = PlatformBuffer.allocate(8, zone) as ReadWriteBuffer
+            val dst = factory.allocate(8) as ReadWriteBuffer
             dst.xorMaskCopy(src, 0)
             dst.resetForRead()
 
@@ -555,11 +555,11 @@ class XorMaskTests {
 
     @Test
     fun xorMaskCopyEmptySourceIsNoOp() {
-        for (zone in listOf(AllocationZone.Heap, AllocationZone.Direct)) {
-            val src = PlatformBuffer.allocate(8, zone)
+        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default)) {
+            val src = factory.allocate(8)
             src.resetForRead() // position=0, limit=0
 
-            val dst = PlatformBuffer.allocate(8, zone) as ReadWriteBuffer
+            val dst = factory.allocate(8) as ReadWriteBuffer
             dst.xorMaskCopy(src, 0x12345678)
             assertEquals(0, dst.position(), "Dest position should not move")
         }
@@ -567,7 +567,7 @@ class XorMaskTests {
 
     @Test
     fun littleEndianBuffer() {
-        val buffer = PlatformBuffer.allocate(8, AllocationZone.Direct, ByteOrder.LITTLE_ENDIAN)
+        val buffer = BufferFactory.Default.allocate(8, ByteOrder.LITTLE_ENDIAN)
         for (i in 0 until 8) {
             buffer.writeByte(0)
         }

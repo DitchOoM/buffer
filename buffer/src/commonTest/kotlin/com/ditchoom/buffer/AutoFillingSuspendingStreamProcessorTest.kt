@@ -176,7 +176,7 @@ class AutoFillingSuspendingStreamProcessorTest {
                 val chunks = makeChunks("Hello".encodeToByteArray())
                 val processor = buildAutoFilling(pool, chunks)
                 try {
-                    val pattern = PlatformBuffer.allocate(5)
+                    val pattern = BufferFactory.managed().allocate(5)
                     pattern.writeBytes("Hello".encodeToByteArray())
                     pattern.resetForRead()
                     assertTrue(processor.peekMatches(pattern))
@@ -213,7 +213,7 @@ class AutoFillingSuspendingStreamProcessorTest {
                 val processor = buildAutoFilling(pool, chunks)
                 try {
                     // Directly append data (not via refill)
-                    val buf = PlatformBuffer.allocate(4)
+                    val buf = BufferFactory.managed().allocate(4)
                     buf.writeInt(0xDEADBEEF.toInt())
                     buf.resetForRead()
                     processor.append(buf)
@@ -243,7 +243,7 @@ class AutoFillingSuspendingStreamProcessorTest {
     private fun makeChunks(vararg arrays: ByteArray): List<ReadBuffer> = arrays.map { makeBuffer(it) }
 
     private fun makeBuffer(data: ByteArray): ReadBuffer {
-        val buf = PlatformBuffer.allocate(data.size)
+        val buf = BufferFactory.managed().allocate(data.size)
         buf.writeBytes(data)
         buf.resetForRead()
         return buf

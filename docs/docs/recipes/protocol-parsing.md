@@ -1,9 +1,15 @@
 ---
-sidebar_position: 4
+sidebar_position: 5
 title: Protocol Parsing
 ---
 
 # Protocol Parsing
+
+:::tip Recommended: Protocol Codecs
+For new protocol implementations, consider using the [Protocol Codecs](./protocol-codecs) system from the `buffer-codec` module. It pairs encode and decode logic in a single `Codec<T>` interface, provides built-in round-trip testing, and works with both in-memory buffers and streaming sources.
+
+The patterns on this page are still useful for understanding low-level parsing concepts and for cases where you need full manual control.
+:::
 
 Patterns for implementing high-performance protocol parsers.
 
@@ -71,7 +77,7 @@ fun parsePacket(): Packet? {
 
 ## Variable-Length Encoding
 
-Some protocols (MQTT, Protocol Buffers) use variable-length integers:
+Some protocols use variable-length integers:
 
 ```kotlin
 fun peekVariableInt(): Pair<Int, Int>? {  // value to bytesUsed
@@ -101,8 +107,8 @@ fun peekVariableInt(): Pair<Int, Int>? {  // value to bytesUsed
 Detect file/protocol formats by their magic bytes:
 
 ```kotlin
-val GZIP_MAGIC = PlatformBuffer.wrap(byteArrayOf(0x1f, 0x8b.toByte()))
-val PNG_MAGIC = PlatformBuffer.wrap(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47))
+val GZIP_MAGIC = BufferFactory.Default.wrap(byteArrayOf(0x1f, 0x8b.toByte()))
+val PNG_MAGIC = BufferFactory.Default.wrap(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47))
 val HTTP_GET = "GET ".toReadBuffer()  // No intermediate ByteArray
 
 fun detectFormat(): Format {

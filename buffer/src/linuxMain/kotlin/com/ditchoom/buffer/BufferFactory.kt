@@ -1,26 +1,47 @@
 package com.ditchoom.buffer
 
-/**
- * Allocates a buffer with the specified allocation zone.
- *
- * - [AllocationZone.Heap]: Uses [ByteArrayBuffer] backed by Kotlin ByteArray (GC managed)
- * - [AllocationZone.Direct]: Uses [NativeBuffer] backed by malloc (zero-copy for io_uring)
- * - [AllocationZone.SharedMemory]: Falls back to Direct on Linux
- */
-actual fun PlatformBuffer.Companion.allocate(
-    size: Int,
-    zone: AllocationZone,
-    byteOrder: ByteOrder,
-): PlatformBuffer =
-    when (zone) {
-        AllocationZone.Heap -> ByteArrayBuffer(ByteArray(size), byteOrder = byteOrder)
-        AllocationZone.Direct, AllocationZone.SharedMemory -> NativeBuffer.allocate(size, byteOrder)
+// =============================================================================
+// v2 BufferFactory implementations
+// =============================================================================
+
+internal actual val managedBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer {
+            require(size >= 0) { "Buffer size must be non-negative, got $size" }
+            return ByteArrayBuffer(ByteArray(size), byteOrder = byteOrder)
+        }
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = ByteArrayBuffer(array, byteOrder = byteOrder)
     }
 
-actual fun PlatformBuffer.Companion.wrap(
-    array: ByteArray,
-    byteOrder: ByteOrder,
-): PlatformBuffer = ByteArrayBuffer(array, byteOrder = byteOrder)
+// Linux Default is now GC-managed (ByteArrayBuffer), same as managed()
+internal actual val defaultBufferFactory: BufferFactory = managedBufferFactory
+
+internal actual val sharedBufferFactory: BufferFactory = managedBufferFactory
+
+private val deterministicFactoryInstance: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer {
+            require(size >= 0) { "Buffer size must be non-negative, got $size" }
+            return NativeBuffer.allocate(size, byteOrder)
+        }
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = ByteArrayBuffer(array, byteOrder = byteOrder)
+    }
+
+internal actual fun deterministicBufferFactory(threadConfined: Boolean): BufferFactory = deterministicFactoryInstance
 
 /**
  * Allocates a buffer with guaranteed native memory access using malloc.

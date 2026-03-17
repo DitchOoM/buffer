@@ -1,7 +1,8 @@
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.toReadBuffer
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -33,7 +34,7 @@ class RawDeflateTests {
      */
     private fun rawDeflateBuffer(compressedPayload: ByteArray): PlatformBuffer {
         val fullInput = compressedPayload + syncTerminator
-        val buffer = PlatformBuffer.allocate(fullInput.size)
+        val buffer = BufferFactory.Default.allocate(fullInput.size)
         buffer.writeBytes(fullInput)
         buffer.resetForRead()
         return buffer
@@ -164,7 +165,7 @@ class RawDeflateTests {
                 val output = mutableListOf<ByteArray>()
 
                 // Feed first fragment
-                val buf1 = PlatformBuffer.allocate(fragment1.size)
+                val buf1 = BufferFactory.Default.allocate(fragment1.size)
                 buf1.writeBytes(fragment1)
                 buf1.resetForRead()
                 for (chunk in decompressor.decompress(buf1)) {
@@ -172,7 +173,7 @@ class RawDeflateTests {
                 }
 
                 // Feed second fragment (includes terminator)
-                val buf2 = PlatformBuffer.allocate(fragment2.size)
+                val buf2 = BufferFactory.Default.allocate(fragment2.size)
                 buf2.writeBytes(fragment2)
                 buf2.resetForRead()
                 for (chunk in decompressor.decompress(buf2)) {
@@ -291,7 +292,7 @@ class RawDeflateTests {
             // Read compressed bytes and append sync terminator (simulating receiver side)
             val compressedBytes = compressed.readByteArray(compressed.remaining())
             val withTerminator = compressedBytes + syncTerminator
-            val buffer = PlatformBuffer.allocate(withTerminator.size)
+            val buffer = BufferFactory.Default.allocate(withTerminator.size)
             buffer.writeBytes(withTerminator)
             buffer.resetForRead()
 
@@ -310,7 +311,7 @@ class RawDeflateTests {
         runTest {
             if (!supportsRawDeflate) return@runTest
             // Just the sync terminator: an empty stored block
-            val buffer = PlatformBuffer.allocate(syncTerminator.size)
+            val buffer = BufferFactory.Default.allocate(syncTerminator.size)
             buffer.writeBytes(syncTerminator)
             buffer.resetForRead()
 
@@ -321,7 +322,7 @@ class RawDeflateTests {
     @Test
     fun rawDeflate_onlySyncTerminator_sync() {
         if (!supportsSyncCompression) return
-        val buffer = PlatformBuffer.allocate(syncTerminator.size)
+        val buffer = BufferFactory.Default.allocate(syncTerminator.size)
         buffer.writeBytes(syncTerminator)
         buffer.resetForRead()
 
@@ -403,7 +404,7 @@ class RawDeflateTests {
         runTest {
             if (!supportsRawDeflate) return@runTest
             val data = ByteArray(256) { it.toByte() }
-            val input = PlatformBuffer.allocate(data.size)
+            val input = BufferFactory.Default.allocate(data.size)
             input.writeBytes(data)
             input.resetForRead()
 

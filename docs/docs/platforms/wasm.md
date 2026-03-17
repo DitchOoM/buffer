@@ -9,11 +9,11 @@ Buffer on Kotlin/WASM uses native WASM linear memory for optimal performance wit
 
 ## Implementation
 
-| Zone | WASM Type | Use Case |
-|------|-----------|----------|
-| `Heap` | `ByteArrayBuffer` | High-frequency allocations, compute-heavy workloads |
-| `Direct` | `LinearBuffer` | JS interop, zero-copy sharing with JavaScript |
-| `SharedMemory` | `LinearBuffer` | Same as Direct |
+| Factory | WASM Type | Use Case |
+|---------|-----------|----------|
+| `managed()` | `ByteArrayBuffer` | High-frequency allocations, compute-heavy workloads |
+| `Default` | `LinearBuffer` | JS interop, zero-copy sharing with JavaScript |
+| `shared()` | `LinearBuffer` | Same as Default |
 
 ## LinearBuffer: Native WASM Memory
 
@@ -27,14 +27,14 @@ Buffer on Kotlin/WASM uses native WASM linear memory for optimal performance wit
 LinearBuffer's main advantage is **JavaScript interoperability**, not raw speed. For pure Kotlin operations without JS interop, ByteArrayBuffer can be faster for bulk operations since it stays in the WasmGC heap.
 :::
 
-### When to Use Each Zone
+### When to Use Each Factory
 
 ```kotlin
 // Use Heap for high-frequency allocations (compute-heavy workloads)
-val computeBuffer = PlatformBuffer.allocate(1024, AllocationZone.Heap)
+val computeBuffer = BufferFactory.managed().allocate(1024)
 
-// Use Direct for JS interop (shares memory with JavaScript)
-val interopBuffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+// Use Default for JS interop (shares memory with JavaScript)
+val interopBuffer = BufferFactory.Default.allocate(1024)
 ```
 
 ## Performance
@@ -59,7 +59,7 @@ LinearBuffer uses a bump allocator with pre-allocated memory:
 - Configurable via `LinearMemoryAllocator.configure()`
 - Memory is not freed (bump allocator)
 - Best for buffers with longer lifetimes (interop scenarios)
-- Use `AllocationZone.Heap` for high-frequency short-lived allocations
+- Use `BufferFactory.managed()` for high-frequency, short-lived allocations
 
 ### Configuring Memory Size
 
@@ -75,12 +75,11 @@ LinearMemoryAllocator.configure(initialSizeMB = 4)   // Set to 4MB
 
 ```kotlin
 // Good: Long-lived buffer for JS interop
-val wsBuffer = PlatformBuffer.allocate(8192, AllocationZone.Direct)
+val wsBuffer = BufferFactory.Default.allocate(8192)
 
-// Good: High-frequency allocations
-pool.withBuffer(1024, AllocationZone.Heap) { buffer ->
-    // Process data
-}
+// Good: High-frequency allocations using managed factory
+val managed = BufferFactory.managed()
+val computeBuffer = managed.allocate(1024)
 ```
 
 ## JavaScript Interoperability
@@ -89,7 +88,7 @@ LinearBuffer enables zero-copy data sharing between Kotlin/WASM and JavaScript:
 
 ```kotlin
 // Kotlin side: allocate in linear memory and get offset for JS
-val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct) as LinearBuffer
+val buffer = BufferFactory.Default.allocate(1024) as LinearBuffer
 buffer.writeInt(42)
 buffer.writeString("Hello from WASM")
 
@@ -122,14 +121,14 @@ Due to a Kotlin/WASM production optimizer bug, LinearBuffer pre-allocates memory
 
 1. **Configurable limit** - Default 16MB, adjustable via `configureWasmMemory()`
 2. **No memory reclamation** - Bump allocator doesn't free memory
-3. **Use Heap for benchmarks** - High-frequency allocation benchmarks should use `AllocationZone.Heap`
+3. **Use managed() for benchmarks** - High-frequency allocation benchmarks should use `BufferFactory.managed()`
 
 If you exceed the configured limit, you'll get an `OutOfMemoryError` with guidance:
 
 ```
 LinearBuffer allocation exceeded 16MB pre-allocated memory.
 Call LinearMemoryAllocator.configure(initialSizeMB = N) at startup with a larger value,
-or use AllocationZone.Heap for high-frequency allocation.
+or use BufferFactory.managed() for high-frequency allocation.
 ```
 
 ### ByteArray Conversion
@@ -154,7 +153,7 @@ Kotlin/WASM Module    SSL WASM Module     Compression Module
 
 ```kotlin
 // Standard usage - API is identical to other platforms
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 buffer.writeInt(42)
 buffer.writeLong(123456789L)
 buffer.writeString("Hello WASM")
@@ -170,7 +169,7 @@ val s = buffer.readString(10)
 Convert buffers to WASM-native `LinearBuffer` for JavaScript interop:
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+val buffer = BufferFactory.Default.allocate(1024)
 buffer.writeBytes(data)
 buffer.resetForRead()
 
@@ -198,7 +197,7 @@ WASM has two memory spaces: WasmGC heap (where `ByteArray` lives) and linear mem
 
 ```kotlin
 // Kotlin side
-val buffer = PlatformBuffer.allocate(1024, AllocationZone.Direct) as LinearBuffer
+val buffer = BufferFactory.Default.allocate(1024) as LinearBuffer
 buffer.writeInt(42)
 buffer.writeString("Hello from WASM")
 buffer.resetForRead()

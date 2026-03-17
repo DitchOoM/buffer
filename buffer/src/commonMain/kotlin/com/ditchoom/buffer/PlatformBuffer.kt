@@ -1,23 +1,30 @@
 package com.ditchoom.buffer
 
+/**
+ * Primary buffer interface combining read/write operations with platform lifecycle support.
+ *
+ * All buffer implementations on every platform implement this interface.
+ *
+ * ## Creation
+ *
+ * Use [BufferFactory] to create buffers:
+ * ```kotlin
+ * val buf = BufferFactory.Default.allocate(1024)
+ * val wrapped = BufferFactory.Default.wrap(byteArray)
+ * ```
+ *
+ * @see BufferFactory for buffer creation
+ */
 interface PlatformBuffer :
     ReadWriteBuffer,
-    SuspendCloseable,
     Parcelable {
     /**
-     * Frees native memory resources without requiring suspend context.
-     * No-op on JVM/JS where GC handles cleanup. On Linux, frees the underlying malloc'd memory.
+     * Frees native memory resources.
+     * No-op on platforms where GC handles cleanup (JVM, JS, Apple ARC).
      * For pool-acquired buffers, returns the buffer to its pool instead of freeing.
      */
     fun freeNativeMemory() {}
 
-    /**
-     * Returns the underlying platform buffer, unwrapping one layer of decoration.
-     *
-     * @see [unwrapFully] for the correct replacement that strips all wrapper layers.
-     * @see [nativeMemoryAccess] and [managedMemoryAccess] for interface-based access that
-     * works transparently through wrappers without downcasting.
-     */
     @Deprecated(
         "unwrap() only peels one layer and requires callers to cast to PlatformBuffer first, " +
             "which breaks on TrackedSlice and other non-PlatformBuffer wrappers. " +

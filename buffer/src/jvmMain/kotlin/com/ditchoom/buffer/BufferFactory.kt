@@ -4,35 +4,72 @@ package com.ditchoom.buffer
 
 import java.nio.ByteBuffer
 
-actual fun PlatformBuffer.Companion.allocate(
-    size: Int,
-    zone: AllocationZone,
-    byteOrder: ByteOrder,
-): PlatformBuffer {
-    val byteOrderNative =
-        when (byteOrder) {
-            ByteOrder.BIG_ENDIAN -> java.nio.ByteOrder.BIG_ENDIAN
-            ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
-        }
-    return when (zone) {
-        AllocationZone.Heap -> HeapJvmBuffer(ByteBuffer.allocate(size).order(byteOrderNative))
-        AllocationZone.SharedMemory,
-        AllocationZone.Direct,
-        -> DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
-    }
-}
+// =============================================================================
+// v2 BufferFactory implementations
+// =============================================================================
 
-actual fun PlatformBuffer.Companion.wrap(
-    array: ByteArray,
-    byteOrder: ByteOrder,
-): PlatformBuffer {
-    val byteOrderNative =
-        when (byteOrder) {
-            ByteOrder.BIG_ENDIAN -> java.nio.ByteOrder.BIG_ENDIAN
-            ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
+internal actual val defaultBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrder.toJava()))
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJava()))
+    }
+
+internal actual val managedBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.allocate(size).order(byteOrder.toJava()))
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJava()))
+    }
+
+internal actual val sharedBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrder.toJava()))
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJava()))
+    }
+
+private val deterministicFactoryInstance: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer {
+            // JVM 9+: use invokeCleaner on a direct ByteBuffer
+            if (invokeCleanerFn != null) {
+                return JvmDeterministicDirectJvmBuffer(
+                    ByteBuffer.allocateDirect(size).order(byteOrder.toJava()),
+                )
+            }
+            // JVM 8: fall back to Unsafe.allocateMemory
+            return JvmUnsafePlatformBuffer.allocate(size, byteOrder)
         }
-    return HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrderNative))
-}
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJava()))
+    }
+
+internal actual fun deterministicBufferFactory(threadConfined: Boolean): BufferFactory = deterministicFactoryInstance
 
 /**
  * Allocates a buffer with guaranteed native memory access (DirectJvmBuffer).
@@ -41,14 +78,7 @@ actual fun PlatformBuffer.Companion.wrap(
 actual fun PlatformBuffer.Companion.allocateNative(
     size: Int,
     byteOrder: ByteOrder,
-): PlatformBuffer {
-    val byteOrderNative =
-        when (byteOrder) {
-            ByteOrder.BIG_ENDIAN -> java.nio.ByteOrder.BIG_ENDIAN
-            ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
-        }
-    return DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrderNative))
-}
+): PlatformBuffer = DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrder.toJava()))
 
 /**
  * Allocates a buffer with shared memory support.
@@ -57,4 +87,4 @@ actual fun PlatformBuffer.Companion.allocateNative(
 actual fun PlatformBuffer.Companion.allocateShared(
     size: Int,
     byteOrder: ByteOrder,
-): PlatformBuffer = allocate(size, AllocationZone.Direct, byteOrder)
+): PlatformBuffer = BufferFactory.Default.allocate(size, byteOrder)

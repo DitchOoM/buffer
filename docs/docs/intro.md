@@ -15,6 +15,7 @@ Buffer gives you one `ReadBuffer`/`WriteBuffer` API that delegates to platform-n
 - **Zero-copy I/O**: Delegates directly to platform-native buffers — no copying between your code and the OS
 - **Buffer Pooling**: Allocate once, reuse for every network request — no GC pauses, predictable latency
 - **Stream Processing**: Parse protocols that span chunk boundaries without manual accumulator code
+- **Protocol Codecs**: Pair encode/decode logic in a single `Codec<T>` with built-in round-trip testing
 - **Compression**: `compress()`/`decompress()` on any `ReadBuffer` across all platforms
 - **Flow Extensions**: `mapBuffer()`, `asStringFlow()`, `lines()` — compose streaming transforms with Kotlin Flow
 - **SIMD-Accelerated Operations**: Bulk comparison, search (`indexOf`), fill, and XOR masking
@@ -23,8 +24,10 @@ Buffer gives you one `ReadBuffer`/`WriteBuffer` API that delegates to platform-n
 ## Quick Example
 
 ```kotlin
+import com.ditchoom.buffer.BufferFactory
+
 // Works identically on all platforms
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 buffer.writeInt(42)
 buffer.writeString("Hello, Buffer!")
 buffer.resetForRead()
@@ -79,6 +82,8 @@ Buffer is the foundation for the [Socket](https://github.com/DitchOoM/socket) li
 ├─────────────────────────────┤
 │  socket (TCP + TLS)         │  ← com.ditchoom:socket
 ├─────────────────────────────┤
+│  buffer-codec               │  ← com.ditchoom:buffer-codec
+├─────────────────────────────┤
 │  buffer-compression         │  ← com.ditchoom:buffer-compression
 ├─────────────────────────────┤
 │  buffer-flow                │  ← com.ditchoom:buffer-flow
@@ -96,6 +101,9 @@ dependencies {
     // Core buffer library
     implementation("com.ditchoom:buffer:<latest-version>")
 
+    // Optional: Protocol codecs (Codec<T> for ReadBuffer/WriteBuffer)
+    implementation("com.ditchoom:buffer-codec:<latest-version>")
+
     // Optional: Compression (gzip, deflate)
     implementation("com.ditchoom:buffer-compression:<latest-version>")
 
@@ -107,6 +115,7 @@ dependencies {
 ## Next Steps
 
 - [Getting Started](./getting-started) - Installation and first buffer
-- [Core Concepts](./core-concepts/buffer-basics) - Understanding buffers, positions, and limits
-- [Recipes](./recipes/basic-operations) - Common patterns and examples
+- [Buffer Pooling](./recipes/buffer-pooling) - Eliminate allocation overhead
+- [Stream Processing](./recipes/stream-processing) - Handle chunked network data
+- [Protocol Codecs](./recipes/protocol-codecs) - Type-safe encode/decode
 - [Performance](./performance) - Optimization tips

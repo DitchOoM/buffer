@@ -1,10 +1,10 @@
 package com.ditchoom.buffer.compression.benchmark
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
@@ -270,7 +270,7 @@ open class StreamingCompressionBenchmark {
 
     private fun textToDirectBuffer(text: String): PlatformBuffer {
         val bytes = text.encodeToByteArray()
-        val buffer = PlatformBuffer.allocate(bytes.size, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(bytes.size)
         buffer.writeBytes(bytes)
         buffer.resetForRead()
         return buffer
@@ -284,7 +284,7 @@ open class StreamingCompressionBenchmark {
         compressor.reset()
 
         val totalSize = chunks.sumOf { it.remaining() }
-        val result = PlatformBuffer.allocate(totalSize, AllocationZone.Direct)
+        val result = BufferFactory.Default.allocate(totalSize)
         for (chunk in chunks) {
             chunk.position(0)
             result.write(chunk)
@@ -301,7 +301,7 @@ open class StreamingCompressionBenchmark {
         decompressor.reset()
 
         val totalSize = chunks.sumOf { it.remaining() }
-        val result = PlatformBuffer.allocate(totalSize, AllocationZone.Direct)
+        val result = BufferFactory.Default.allocate(totalSize)
         for (chunk in chunks) {
             chunk.position(0)
             result.write(chunk)

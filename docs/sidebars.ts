@@ -6,23 +6,24 @@ const sidebars: SidebarsConfig = {
     'getting-started',
     {
       type: 'category',
-      label: 'Core Concepts',
+      label: 'Recipes',
       items: [
-        'core-concepts/buffer-basics',
-        'core-concepts/allocation-zones',
-        'core-concepts/byte-order',
+        'recipes/buffer-pooling',
+        'recipes/stream-processing',
+        'recipes/protocol-codecs',
+        'recipes/compression',
+        'recipes/protocol-parsing',
+        'recipes/basic-operations',
+        'recipes/platform-interop',
       ],
     },
     {
       type: 'category',
-      label: 'Recipes',
+      label: 'Core Concepts',
       items: [
-        'recipes/basic-operations',
-        'recipes/buffer-pooling',
-        'recipes/stream-processing',
-        'recipes/compression',
-        'recipes/protocol-parsing',
-        'recipes/platform-interop',
+        'core-concepts/allocation-zones',
+        'core-concepts/buffer-basics',
+        'core-concepts/byte-order',
       ],
     },
     {
@@ -38,6 +39,7 @@ const sidebars: SidebarsConfig = {
       ],
     },
     'performance',
+    'migration',
   ],
 };
 

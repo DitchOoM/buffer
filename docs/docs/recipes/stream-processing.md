@@ -1,5 +1,5 @@
 ---
-sidebar_position: 3
+sidebar_position: 2
 title: Stream Processing
 ---
 
@@ -9,7 +9,7 @@ Handle data that arrives in chunks, like network packets or file reads.
 
 ## The Problem
 
-Network data doesn't arrive in neat message boundaries. You're parsing an MQTT protocol over TCP — the server sends a 300-byte message, but your socket returns it in two chunks: 256 bytes, then 44 bytes. Without `StreamProcessor`, you need manual accumulator code to track partial reads and reassemble messages. With it, you `append()` chunks and `peekInt()`/`readBuffer()` across boundaries transparently.
+Network data doesn't arrive in neat message boundaries. A server sends a 300-byte message, but your socket returns it in two chunks: 256 bytes, then 44 bytes. Without `StreamProcessor`, you need manual accumulator code to track partial reads and reassemble messages. With it, you `append()` chunks and `peekInt()`/`readBuffer()` across boundaries transparently.
 
 ![Stream Fragmentation Problem](/img/stream-fragmentation.svg)
 
@@ -22,7 +22,7 @@ Split a buffer into chunks for processing:
 ```kotlin
 import com.ditchoom.buffer.stream.BufferStream
 
-val largeBuffer = PlatformBuffer.allocate(1024 * 1024)  // 1MB
+val largeBuffer = BufferFactory.Default.allocate(1024 * 1024)  // 1MB
 // ... fill buffer ...
 largeBuffer.resetForRead()
 
@@ -101,7 +101,7 @@ val timestamp = processor.peekLong(offset = 5)    // bytes 5-12: timestamp
 
 ```kotlin
 // Check for magic bytes (e.g., gzip header 0x1f 0x8b)
-val gzipMagic = PlatformBuffer.wrap(byteArrayOf(0x1f, 0x8b.toByte()))
+val gzipMagic = BufferFactory.Default.wrap(byteArrayOf(0x1f, 0x8b.toByte()))
 if (processor.peekMatches(gzipMagic)) {
     // It's gzip compressed
 }

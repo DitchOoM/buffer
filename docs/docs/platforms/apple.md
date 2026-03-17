@@ -9,18 +9,18 @@ Buffer on iOS, macOS, watchOS, and tvOS wraps Foundation's `NSData`.
 
 ## Implementation
 
-| Zone | Apple Type |
-|------|------------|
-| `Heap` | `ByteArray` |
-| `Direct` | `NSMutableData` |
-| `SharedMemory` | `NSMutableData` |
+| Factory | Apple Type |
+|---------|------------|
+| `managed()` | `ByteArrayBuffer` |
+| `Default` | `MutableDataBuffer` (NSMutableData) |
+| `shared()` | `MutableDataBuffer` (NSMutableData) |
 
 ## NSData Integration
 
 Buffers wrap `NSMutableData` for seamless Foundation interop:
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 buffer.writeString("Hello from Kotlin!")
 buffer.resetForRead()
 
@@ -51,7 +51,7 @@ When the Kotlin buffer object is garbage collected, the reference to the underly
 
 ```kotlin
 fun processData(): PlatformBuffer {
-    val buffer = PlatformBuffer.allocate(1024)
+    val buffer = BufferFactory.Default.allocate(1024)
     buffer.writeBytes(data)
     buffer.resetForRead()
     return buffer  // Kotlin GC + ARC manage lifecycle automatically
@@ -61,7 +61,7 @@ fun processData(): PlatformBuffer {
 ```
 
 :::note Implementation Detail
-The `close()` method on Apple buffers is a no-op since ARC handles cleanup automatically. The `SuspendCloseable` interface is implemented for API consistency across platforms.
+The `close()` method on Apple buffers is a no-op since ARC handles cleanup automatically.
 :::
 
 ## Native Data Conversion
@@ -69,7 +69,7 @@ The `close()` method on Apple buffers is a no-op since ARC handles cleanup autom
 Convert buffers to Apple-native `NSData`/`NSMutableData` for Foundation API interop:
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 buffer.writeBytes(data)
 buffer.resetForRead()
 
@@ -104,11 +104,11 @@ You can also create buffers from existing NSData:
 ```kotlin
 // Wrap NSData (read-only, zero-copy)
 val nsData: NSData = // ... from API ...
-val buffer = PlatformBuffer.wrap(nsData)
+val buffer = BufferFactory.Default.wrap(nsData)
 
 // Wrap NSMutableData (mutable, zero-copy)
 val nsMutableData: NSMutableData = // ... from API ...
-val buffer = PlatformBuffer.wrap(nsMutableData)
+val buffer = BufferFactory.Default.wrap(nsMutableData)
 ```
 
 See [Platform Interop](../recipes/platform-interop) for more details.

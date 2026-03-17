@@ -1,5 +1,5 @@
 ---
-sidebar_position: 1
+sidebar_position: 2
 title: Buffer Basics
 ---
 
@@ -28,7 +28,7 @@ Every buffer has three key properties:
 ### After Allocation (Write Mode)
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(10)
+val buffer = BufferFactory.Default.allocate(10)
 // position=0, limit=10, capacity=10
 ```
 
@@ -77,7 +77,7 @@ buffer.resetForRead()
 ## Key Properties
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 
 buffer.capacity    // Total size (1024)
 buffer.position()  // Current position
@@ -129,7 +129,7 @@ buffer.write(otherBuffer)
 Combines both interfaces with platform-specific extensions:
 
 ```kotlin
-val buffer: PlatformBuffer = PlatformBuffer.allocate(1024)
+val buffer: PlatformBuffer = BufferFactory.Default.allocate(1024)
 buffer.writeInt(42)
 buffer.resetForRead()
 val value = buffer.readInt()
@@ -140,7 +140,7 @@ val value = buffer.readInt()
 Create a view into a buffer without copying:
 
 ```kotlin
-val original = PlatformBuffer.allocate(10)
+val original = BufferFactory.Default.allocate(10)
 original.writeString("HELLOWORLD")
 original.resetForRead()
 

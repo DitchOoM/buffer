@@ -53,8 +53,20 @@ class BufferPoolTests {
         }
 
     @Test
-    fun createPoolWithBigEndianByteOrder() =
-        withPool(byteOrder = ByteOrder.BIG_ENDIAN) { pool ->
+    fun createPoolWithBigEndianByteOrder() {
+        val factory =
+            object : BufferFactory {
+                override fun allocate(
+                    size: Int,
+                    byteOrder: ByteOrder,
+                ) = BufferFactory.Default.allocate(size, ByteOrder.BIG_ENDIAN)
+
+                override fun wrap(
+                    array: ByteArray,
+                    byteOrder: ByteOrder,
+                ) = BufferFactory.Default.wrap(array, ByteOrder.BIG_ENDIAN)
+            }
+        withPool(factory = factory) { pool ->
             pool.withBuffer(256) { buffer ->
                 assertEquals(ByteOrder.BIG_ENDIAN, buffer.byteOrder)
                 buffer.writeInt(0x12345678)
@@ -62,10 +74,23 @@ class BufferPoolTests {
                 assertEquals(0x12.toByte(), buffer.get(0))
             }
         }
+    }
 
     @Test
-    fun createPoolWithLittleEndianByteOrder() =
-        withPool(byteOrder = ByteOrder.LITTLE_ENDIAN) { pool ->
+    fun createPoolWithLittleEndianByteOrder() {
+        val factory =
+            object : BufferFactory {
+                override fun allocate(
+                    size: Int,
+                    byteOrder: ByteOrder,
+                ) = BufferFactory.Default.allocate(size, ByteOrder.LITTLE_ENDIAN)
+
+                override fun wrap(
+                    array: ByteArray,
+                    byteOrder: ByteOrder,
+                ) = BufferFactory.Default.wrap(array, ByteOrder.LITTLE_ENDIAN)
+            }
+        withPool(factory = factory) { pool ->
             pool.withBuffer(256) { buffer ->
                 assertEquals(ByteOrder.LITTLE_ENDIAN, buffer.byteOrder)
                 buffer.writeInt(0x12345678)
@@ -73,6 +98,7 @@ class BufferPoolTests {
                 assertEquals(0x78.toByte(), buffer.get(0))
             }
         }
+    }
 
     // ============================================================================
     // Buffer Acquisition Tests
@@ -147,7 +173,7 @@ class BufferPoolTests {
 
     @Test
     fun acquiredBufferHasNativeMemoryAccess() {
-        val pool = BufferPool(defaultBufferSize = 1024, allocationZone = AllocationZone.Direct)
+        val pool = BufferPool(defaultBufferSize = 1024)
         val buffer = pool.acquire(512)
         val nma = (buffer as? NativeMemoryAccess)
         // On JVM Direct / Linux native, should have native memory access
@@ -162,7 +188,7 @@ class BufferPoolTests {
 
     @Test
     fun poolBufferSlicePreservesNativeMemoryAccess() {
-        val pool = BufferPool(defaultBufferSize = 1024, allocationZone = AllocationZone.Direct)
+        val pool = BufferPool(defaultBufferSize = 1024)
         val buffer = pool.acquire(64)
         buffer.writeInt(0x12345678)
         buffer.resetForRead()
@@ -185,7 +211,7 @@ class BufferPoolTests {
 
     @Test
     fun poolBufferSlicePreservesManagedMemoryAccess() {
-        val pool = BufferPool(defaultBufferSize = 1024, allocationZone = AllocationZone.Heap)
+        val pool = BufferPool(defaultBufferSize = 1024, factory = BufferFactory.managed())
         val buffer = pool.acquire(64)
         buffer.writeInt(0x12345678)
         buffer.resetForRead()
@@ -208,7 +234,7 @@ class BufferPoolTests {
 
     @Test
     fun directBufferSlicePreservesNativeMemoryAccess() {
-        val buffer = PlatformBuffer.allocate(64, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(64)
         buffer.writeInt(0x12345678)
         buffer.resetForRead()
 
@@ -223,7 +249,7 @@ class BufferPoolTests {
 
     @Test
     fun heapBufferSlicePreservesManagedMemoryAccess() {
-        val buffer = PlatformBuffer.allocate(64, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(64)
         buffer.writeInt(0x12345678)
         buffer.resetForRead()
 
@@ -238,7 +264,7 @@ class BufferPoolTests {
 
     @Test
     fun directBufferDoubleSlicePreservesNativeMemoryAccess() {
-        val buffer = PlatformBuffer.allocate(128, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(128)
         for (i in 0 until 32) buffer.writeInt(i)
         buffer.resetForRead()
         buffer.readInt() // skip first
@@ -255,7 +281,7 @@ class BufferPoolTests {
 
     @Test
     fun heapBufferDoubleSlicePreservesManagedMemoryAccess() {
-        val buffer = PlatformBuffer.allocate(128, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(128)
         for (i in 0 until 32) buffer.writeInt(i)
         buffer.resetForRead()
         buffer.readInt() // skip first
@@ -272,7 +298,7 @@ class BufferPoolTests {
 
     @Test
     fun directBufferSliceDataIntegrity() {
-        val buffer = PlatformBuffer.allocate(64, AllocationZone.Direct)
+        val buffer = BufferFactory.Default.allocate(64)
         buffer.writeInt(0x11223344)
         buffer.writeInt(0x55667788)
         buffer.resetForRead()
@@ -285,7 +311,7 @@ class BufferPoolTests {
 
     @Test
     fun heapBufferSliceDataIntegrity() {
-        val buffer = PlatformBuffer.allocate(64, AllocationZone.Heap)
+        val buffer = BufferFactory.managed().allocate(64)
         buffer.writeInt(0x11223344)
         buffer.writeInt(0x55667788)
         buffer.resetForRead()
@@ -1430,24 +1456,24 @@ class BufferPoolTests {
     }
 
     @Test
-    fun releaseDoesNotCorruptBufferDataViaFreeNativeMemory() {
-        // Same regression test but using the freeNativeMemory() path (PooledBuffer)
+    fun freeNativeMemoryPreventsUseAfterFree() {
+        // After freeNativeMemory(), all read/write operations should throw
         val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 4)
         val buffer = pool.acquire(256)
 
         buffer.writeInt(0xCAFEBABE.toInt())
-        buffer.writeInt(0xDEADC0DE.toInt())
         buffer.resetForRead()
 
-        // Read first int
         val first = buffer.readInt()
         assertEquals(0xCAFEBABE.toInt(), first)
 
         // Free via freeNativeMemory (the PooledBuffer path)
         (buffer as PlatformBuffer).freeNativeMemory()
 
-        // Data must still be readable - position/limit not corrupted
-        assertEquals(0xDEADC0DE.toInt(), buffer.readInt())
+        // Further access must throw
+        assertFailsWith<IllegalStateException> {
+            buffer.readInt()
+        }
 
         pool.clear()
     }
@@ -1678,14 +1704,14 @@ class BufferPoolTests {
     }
 
     @Test
-    fun releaseBufferFromDifferentPoolTypeThrows() {
+    fun releaseBufferFromDifferentPoolThrows() {
         val singlePool = BufferPool(threadingMode = ThreadingMode.SingleThreaded)
         val multiPool = BufferPool(threadingMode = ThreadingMode.MultiThreaded)
 
         val singleBuffer = singlePool.acquire(256)
         val multiBuffer = multiPool.acquire(256)
 
-        // Cross-pool release should be rejected
+        // Cross-pool release is now rejected
         assertFailsWith<IllegalArgumentException> {
             multiPool.release(singleBuffer)
         }
@@ -1732,11 +1758,9 @@ class BufferPoolTests {
                 threadingMode = ThreadingMode.SingleThreaded,
                 maxPoolSize = 16,
                 defaultBufferSize = 2048,
-                byteOrder = ByteOrder.LITTLE_ENDIAN,
             )
 
         pool.withBuffer(100) { buffer ->
-            assertEquals(ByteOrder.LITTLE_ENDIAN, buffer.byteOrder)
             assertTrue(buffer.capacity >= 2048)
         }
 
@@ -1886,7 +1910,7 @@ class BufferPoolTests {
     fun pooledBufferWriteFromNonPooled() =
         withPool(defaultBufferSize = 1024) { pool ->
             // Create a non-pooled buffer
-            val src = PlatformBuffer.allocate(256)
+            val src = BufferFactory.managed().allocate(256)
             src.writeInt(0xAABBCCDD.toInt())
             src.writeInt(0x11223344)
             src.resetForRead()
@@ -1930,7 +1954,7 @@ class BufferPoolTests {
     fun pooledBufferContentEqualsNonPooled() =
         withPool(defaultBufferSize = 1024) { pool ->
             pool.withBuffer(256) { pooled ->
-                val direct = PlatformBuffer.allocate(256)
+                val direct = BufferFactory.managed().allocate(256)
                 val data = ByteArray(64) { (it * 3 + 7).toByte() }
                 pooled.writeBytes(data)
                 direct.writeBytes(data)

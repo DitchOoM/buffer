@@ -1,5 +1,5 @@
 ---
-sidebar_position: 1
+sidebar_position: 6
 title: Basic Operations
 ---
 
@@ -12,7 +12,7 @@ Common patterns for reading, writing, and manipulating buffers.
 ### Relative Writes (advance position)
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 
 // Signed types
 buffer.writeByte(42.toByte())
@@ -117,11 +117,11 @@ val slice = buffer.readBytes(5)
 ## Buffer-to-Buffer Copy
 
 ```kotlin
-val source = PlatformBuffer.allocate(100)
+val source = BufferFactory.Default.allocate(100)
 source.writeString("Hello")
 source.resetForRead()
 
-val dest = PlatformBuffer.allocate(100)
+val dest = BufferFactory.Default.allocate(100)
 
 // Copy remaining bytes from source to dest
 dest.write(source)
@@ -132,7 +132,7 @@ dest.write(source)
 Create a view without copying:
 
 ```kotlin
-val original = PlatformBuffer.allocate(100)
+val original = BufferFactory.Default.allocate(100)
 original.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
 original.resetForRead()
 
@@ -148,7 +148,7 @@ val slice = original.slice()
 ## Position and Limit Manipulation
 
 ```kotlin
-val buffer = PlatformBuffer.allocate(100)
+val buffer = BufferFactory.Default.allocate(100)
 
 // Write some data
 buffer.writeInt(1)
@@ -197,12 +197,12 @@ buffer.resetForRead()
 ```kotlin
 // Wrap existing byte array (no copy)
 val data = byteArrayOf(0, 0, 0, 42)
-val buffer = PlatformBuffer.wrap(data)
+val buffer = BufferFactory.Default.wrap(data)
 
 val value = buffer.readInt()  // 42 (big-endian)
 
 // Wrap with byte order
-val littleEndian = PlatformBuffer.wrap(data, ByteOrder.LITTLE_ENDIAN)
+val littleEndian = BufferFactory.Default.wrap(data, ByteOrder.LITTLE_ENDIAN)
 ```
 
 ## Complete Example

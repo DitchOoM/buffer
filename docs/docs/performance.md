@@ -13,7 +13,7 @@ Tips for maximizing Buffer performance across platforms.
 2. **Prefer zero-copy operations** - slicing over copying
 3. **Use largest primitives** - `readLong()` over 8x `readByte()`
 4. **Use bulk operations** - multi-byte reads/writes
-5. **Choose the right allocation zone** - Direct for I/O
+5. **Choose the right buffer factory** - `BufferFactory.Default` for I/O
 
 ## Buffer Pooling
 
@@ -22,7 +22,7 @@ Allocation is expensive. Pool buffers in hot paths:
 ```kotlin
 // Bad: allocate per request
 fun handleRequest(data: ByteArray) {
-    val buffer = PlatformBuffer.allocate(data.size)  // Allocation!
+    val buffer = BufferFactory.Default.allocate(data.size)  // Allocation!
     buffer.writeBytes(data)
     process(buffer)
 }
@@ -49,7 +49,7 @@ Create views without copying:
 val slice = buffer.slice()
 
 // Copy: creates new buffer
-val copy = PlatformBuffer.allocate(buffer.remaining())
+val copy = BufferFactory.Default.allocate(buffer.remaining())
 copy.write(buffer)
 ```
 
@@ -183,7 +183,7 @@ Comparison uses the same Direct buffer type — "Baseline" is the old Kotlin-onl
 | bufferCopy | 939K ops/s | — | — |
 
 **Key takeaways:**
-- Use `AllocationZone.Direct` on native platforms for bulk operations (11-146x faster)
+- Use `BufferFactory.Default` (native/direct memory) on native platforms for bulk operations (11-146x faster)
 - `xorMask()` gains the most because SIMD avoids byte-order swapping overhead
 - The `aligned` flag enables even faster SIMD scanning when data alignment is known
 
@@ -220,13 +220,13 @@ destBuffer.write(sourceBuffer)
 
 ### JVM
 
-- Use `Direct` for NIO channel I/O
+- Use `BufferFactory.Default` (direct) for NIO channel I/O
 - Pool Direct buffers (allocation is slow)
 - Heap buffers require copying for native I/O
 
 ### Android
 
-- Use `SharedMemory` for IPC
+- Use `BufferFactory.shared()` for IPC
 - Pool camera/video frame buffers
 - Watch memory pressure on low-end devices
 
@@ -245,17 +245,17 @@ destBuffer.write(sourceBuffer)
 
 ### WASM
 
-- **Use `Direct` for JS interop** - LinearBuffer shares memory with JavaScript
-- **Use `Heap` for compute workloads** - ByteArrayBuffer has no memory limits
+- **Use `BufferFactory.Default` for JS interop** - LinearBuffer shares memory with JavaScript
+- **Use `BufferFactory.managed()` for compute workloads** - ByteArrayBuffer has no memory limits
 - **LinearBuffer is faster** - 25% faster single ops, 2x faster bulk ops
 - **Pre-allocated memory** - 256MB limit due to optimizer bug workaround
 
 ```kotlin
-// JS interop: use Direct (LinearBuffer)
-val interopBuffer = PlatformBuffer.allocate(1024, AllocationZone.Direct)
+// JS interop: use Default (LinearBuffer)
+val interopBuffer = BufferFactory.Default.allocate(1024)
 
-// Compute workloads: use Heap (ByteArrayBuffer)
-val computeBuffer = PlatformBuffer.allocate(1024, AllocationZone.Heap)
+// Compute workloads: use managed (ByteArrayBuffer)
+val computeBuffer = BufferFactory.managed().allocate(1024)
 ```
 
 WASM benchmark results:
@@ -318,7 +318,7 @@ class BufferBenchmark {
 ```kotlin
 // Anti-pattern: copy to ByteArray then wrap
 val bytes = buffer.readByteArray(length)
-val newBuffer = PlatformBuffer.wrap(bytes)
+val newBuffer = BufferFactory.Default.wrap(bytes)
 
 // Better: slice directly
 val slice = buffer.readBytes(length)
@@ -329,12 +329,12 @@ val slice = buffer.readBytes(length)
 ```kotlin
 // Anti-pattern
 repeat(1000) {
-    val buffer = PlatformBuffer.allocate(1024)
+    val buffer = BufferFactory.Default.allocate(1024)
     // ...
 }
 
 // Better: pool or reuse
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 repeat(1000) {
     buffer.resetForWrite()
     // ...

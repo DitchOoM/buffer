@@ -1,7 +1,7 @@
 package com.ditchoom.buffer.flow
 
-import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
@@ -80,7 +80,7 @@ class FlowExtensionsTests {
     @Test
     fun mapBufferIdentityPreservesData() =
         runTest {
-            val buf = PlatformBuffer.allocate(16)
+            val buf = BufferFactory.Default.allocate(16)
             buf.writeInt(42)
             buf.resetForRead()
 
@@ -92,7 +92,7 @@ class FlowExtensionsTests {
     @Test
     fun mapBufferTransformApplied() =
         runTest {
-            val buf = PlatformBuffer.allocate(16)
+            val buf = BufferFactory.Default.allocate(16)
             buf.writeString("hello")
             buf.resetForRead()
 
@@ -100,7 +100,7 @@ class FlowExtensionsTests {
                 flowOf(buf)
                     .mapBuffer { original ->
                         val text = original.readString(original.remaining())
-                        val newBuf = PlatformBuffer.allocate(32)
+                        val newBuf = BufferFactory.Default.allocate(32)
                         newBuf.writeString(text.uppercase())
                         newBuf.resetForRead()
                         newBuf
@@ -115,10 +115,10 @@ class FlowExtensionsTests {
     @Test
     fun asStringFlowConvertsBuffers() =
         runTest {
-            val buf1 = PlatformBuffer.allocate(16)
+            val buf1 = BufferFactory.Default.allocate(16)
             buf1.writeString("hello")
             buf1.resetForRead()
-            val buf2 = PlatformBuffer.allocate(16)
+            val buf2 = BufferFactory.Default.allocate(16)
             buf2.writeString(" world")
             buf2.resetForRead()
 
@@ -129,7 +129,7 @@ class FlowExtensionsTests {
     @Test
     fun asStringFlowReadsFromCurrentPosition() =
         runTest {
-            val buf = PlatformBuffer.allocate(16)
+            val buf = BufferFactory.Default.allocate(16)
             buf.writeString("test")
             buf.resetForRead()
 
@@ -142,10 +142,10 @@ class FlowExtensionsTests {
     @Test
     fun mapBufferToStringFlowToLines() =
         runTest {
-            val buf1 = PlatformBuffer.allocate(32)
+            val buf1 = BufferFactory.Default.allocate(32)
             buf1.writeString("hello\nwor")
             buf1.resetForRead()
-            val buf2 = PlatformBuffer.allocate(32)
+            val buf2 = BufferFactory.Default.allocate(32)
             buf2.writeString("ld\n")
             buf2.resetForRead()
 

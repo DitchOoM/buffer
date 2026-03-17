@@ -155,7 +155,7 @@ abstract class BaseWebBuffer(
         return this
     }
 
-    override suspend fun close() {
+    fun close() {
         // Default no-op, can be overridden if cleanup is needed
     }
 }
