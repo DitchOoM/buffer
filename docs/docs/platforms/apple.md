@@ -104,11 +104,11 @@ You can also create buffers from existing NSData:
 ```kotlin
 // Wrap NSData (read-only, zero-copy)
 val nsData: NSData = // ... from API ...
-val buffer = PlatformBuffer.wrap(nsData)
+val buffer = BufferFactory.Default.wrap(nsData)
 
 // Wrap NSMutableData (mutable, zero-copy)
 val nsMutableData: NSMutableData = // ... from API ...
-val buffer = PlatformBuffer.wrap(nsMutableData)
+val buffer = BufferFactory.Default.wrap(nsMutableData)
 ```
 
 See [Platform Interop](../recipes/platform-interop) for more details.

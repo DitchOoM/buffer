@@ -86,7 +86,7 @@ For workloads that don't need native memory access, `ByteArrayBuffer` provides G
 val buffer = BufferFactory.managed().allocate(1024)
 
 // Or wrap existing ByteArray
-val wrapped = PlatformBuffer.wrap(existingByteArray)
+val wrapped = BufferFactory.Default.wrap(existingByteArray)
 ```
 
 ### When to Use Each

@@ -37,7 +37,9 @@ internal actual val managedBufferFactory: BufferFactory =
 internal actual val sharedBufferFactory: BufferFactory = defaultBufferFactory
 
 // WASM LinearBuffer uses linear memory — already deterministic
-internal actual val deterministicBufferFactory: BufferFactory = defaultBufferFactory
+private val deterministicFactoryInstance: BufferFactory = defaultBufferFactory
+
+internal actual fun deterministicBufferFactory(threadConfined: Boolean): BufferFactory = deterministicFactoryInstance
 
 /**
  * Allocates a buffer with guaranteed native memory access (LinearBuffer).

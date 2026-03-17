@@ -12,7 +12,7 @@ import kotlin.test.assertTrue
 class DeterministicBufferTest {
     @Test
     fun deterministicFactoryAllocatesCloseableBuffer() {
-        val buffer = BufferFactory.Deterministic.allocate(64)
+        val buffer = BufferFactory.deterministic().allocate(64)
         assertIs<CloseableBuffer>(buffer)
         assertIs<NativeMemoryAccess>(buffer)
         buffer.freeNativeMemory()
@@ -21,7 +21,7 @@ class DeterministicBufferTest {
     @Test
     fun deterministicBufferUseLifecycle() {
         var freed = false
-        BufferFactory.Deterministic.allocate(128).use { buffer ->
+        BufferFactory.deterministic().allocate(128).use { buffer ->
             buffer.writeInt(42)
             buffer.resetForRead()
             assertEquals(42, buffer.readInt())
@@ -34,7 +34,7 @@ class DeterministicBufferTest {
     @Test
     fun deterministicBufferUseWithException() {
         assertFailsWith<RuntimeException> {
-            BufferFactory.Deterministic.allocate(64).use { _ ->
+            BufferFactory.deterministic().allocate(64).use { _ ->
                 throw RuntimeException("test")
             }
         }
@@ -43,7 +43,7 @@ class DeterministicBufferTest {
 
     @Test
     fun deterministicBufferRoundTripAllPrimitives() {
-        BufferFactory.Deterministic.allocate(64).use { buffer ->
+        BufferFactory.deterministic().allocate(64).use { buffer ->
             buffer.writeByte(0x42)
             buffer.writeShort(0x1234.toShort())
             buffer.writeInt(0x12345678)
@@ -60,7 +60,7 @@ class DeterministicBufferTest {
 
     @Test
     fun deterministicBufferBulkOperations() {
-        BufferFactory.Deterministic.allocate(256).use { buffer ->
+        BufferFactory.deterministic().allocate(256).use { buffer ->
             val data = ByteArray(100) { it.toByte() }
             buffer.writeBytes(data)
             buffer.resetForRead()
@@ -71,7 +71,7 @@ class DeterministicBufferTest {
 
     @Test
     fun deterministicBufferStringOperations() {
-        BufferFactory.Deterministic.allocate(256).use { buffer ->
+        BufferFactory.deterministic().allocate(256).use { buffer ->
             buffer.writeString("Hello, World!", Charset.UTF8)
             buffer.resetForRead()
             assertEquals("Hello, World!", buffer.readString(13, Charset.UTF8))
@@ -80,7 +80,7 @@ class DeterministicBufferTest {
 
     @Test
     fun deterministicBufferSlice() {
-        BufferFactory.Deterministic.allocate(64).use { buffer ->
+        BufferFactory.deterministic().allocate(64).use { buffer ->
             buffer.writeInt(0x11111111)
             buffer.writeInt(0x22222222)
             buffer.writeInt(0x33333333)
@@ -96,7 +96,7 @@ class DeterministicBufferTest {
 
     @Test
     fun deterministicBufferNativeAddress() {
-        BufferFactory.Deterministic.allocate(64).use { buffer ->
+        BufferFactory.deterministic().allocate(64).use { buffer ->
             val nma = buffer as NativeMemoryAccess
             assertTrue(nma.nativeAddress != 0L, "nativeAddress should not be 0")
             assertEquals(64L, nma.nativeSize)
@@ -105,7 +105,7 @@ class DeterministicBufferTest {
 
     @Test
     fun deterministicBufferDoubleFreeIsSafe() {
-        val buffer = BufferFactory.Deterministic.allocate(64)
+        val buffer = BufferFactory.deterministic().allocate(64)
         buffer.freeNativeMemory()
         // Second free should be a no-op, not crash
         buffer.freeNativeMemory()
@@ -113,7 +113,7 @@ class DeterministicBufferTest {
 
     @Test
     fun deterministicBufferThrowsAfterFree() {
-        val buffer = BufferFactory.Deterministic.allocate(64)
+        val buffer = BufferFactory.deterministic().allocate(64)
         buffer.freeNativeMemory()
         // After free: UnsafePlatformBuffer throws IllegalStateException,
         // FfmBuffer throws BufferUnderflowException (ByteBuffer limit=0)

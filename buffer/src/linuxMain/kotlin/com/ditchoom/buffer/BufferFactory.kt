@@ -4,7 +4,28 @@ package com.ditchoom.buffer
 // v2 BufferFactory implementations
 // =============================================================================
 
-internal actual val defaultBufferFactory: BufferFactory =
+internal actual val managedBufferFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer {
+            require(size >= 0) { "Buffer size must be non-negative, got $size" }
+            return ByteArrayBuffer(ByteArray(size), byteOrder = byteOrder)
+        }
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = ByteArrayBuffer(array, byteOrder = byteOrder)
+    }
+
+// Linux Default is now GC-managed (ByteArrayBuffer), same as managed()
+internal actual val defaultBufferFactory: BufferFactory = managedBufferFactory
+
+internal actual val sharedBufferFactory: BufferFactory = managedBufferFactory
+
+private val deterministicFactoryInstance: BufferFactory =
     object : BufferFactory {
         override fun allocate(
             size: Int,
@@ -20,23 +41,7 @@ internal actual val defaultBufferFactory: BufferFactory =
         ): PlatformBuffer = ByteArrayBuffer(array, byteOrder = byteOrder)
     }
 
-internal actual val managedBufferFactory: BufferFactory =
-    object : BufferFactory {
-        override fun allocate(
-            size: Int,
-            byteOrder: ByteOrder,
-        ): PlatformBuffer = ByteArrayBuffer(ByteArray(size), byteOrder = byteOrder)
-
-        override fun wrap(
-            array: ByteArray,
-            byteOrder: ByteOrder,
-        ): PlatformBuffer = ByteArrayBuffer(array, byteOrder = byteOrder)
-    }
-
-internal actual val sharedBufferFactory: BufferFactory = defaultBufferFactory
-
-// Linux NativeBuffer uses malloc/free — already deterministic
-internal actual val deterministicBufferFactory: BufferFactory = defaultBufferFactory
+internal actual fun deterministicBufferFactory(threadConfined: Boolean): BufferFactory = deterministicFactoryInstance
 
 /**
  * Allocates a buffer with guaranteed native memory access using malloc.

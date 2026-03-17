@@ -21,7 +21,6 @@ Buffer on JVM wraps `java.nio.ByteBuffer` for optimal performance.
 
 ```kotlin
 val buffer = BufferFactory.Default.allocate(1024)
-// or simply: PlatformBuffer.allocate(1024)
 ```
 
 - Allocated outside JVM heap via `ByteBuffer.allocateDirect()`

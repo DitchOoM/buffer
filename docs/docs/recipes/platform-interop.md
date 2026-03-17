@@ -1,5 +1,5 @@
 ---
-sidebar_position: 6
+sidebar_position: 7
 title: Platform Interop
 ---
 
@@ -245,19 +245,19 @@ You can also create buffers from native platform types:
 ```kotlin
 // JVM: Wrap ByteBuffer
 val nioBuffer = ByteBuffer.allocate(1024)
-val buffer = PlatformBuffer.wrap(nioBuffer)
+val buffer = BufferFactory.Default.wrap(nioBuffer)
 
 // Apple: Wrap NSData
 val nsData: NSData = // ... from API ...
-val buffer = PlatformBuffer.wrap(nsData)
+val buffer = BufferFactory.Default.wrap(nsData)
 
 // Apple: Wrap NSMutableData (zero-copy mutable)
 val nsMutableData: NSMutableData = // ... from API ...
-val buffer = PlatformBuffer.wrap(nsMutableData)
+val buffer = BufferFactory.Default.wrap(nsMutableData)
 
 // JS: Wrap ArrayBuffer
 val arrayBuffer: ArrayBuffer = // ... from API ...
-val buffer = PlatformBuffer.wrap(arrayBuffer)
+val buffer = BufferFactory.Default.wrap(arrayBuffer)
 ```
 
 ## Best Practices

@@ -22,7 +22,7 @@ Allocation is expensive. Pool buffers in hot paths:
 ```kotlin
 // Bad: allocate per request
 fun handleRequest(data: ByteArray) {
-    val buffer = PlatformBuffer.allocate(data.size)  // Allocation!
+    val buffer = BufferFactory.Default.allocate(data.size)  // Allocation!
     buffer.writeBytes(data)
     process(buffer)
 }
@@ -318,7 +318,7 @@ class BufferBenchmark {
 ```kotlin
 // Anti-pattern: copy to ByteArray then wrap
 val bytes = buffer.readByteArray(length)
-val newBuffer = PlatformBuffer.wrap(bytes)
+val newBuffer = BufferFactory.Default.wrap(bytes)
 
 // Better: slice directly
 val slice = buffer.readBytes(length)

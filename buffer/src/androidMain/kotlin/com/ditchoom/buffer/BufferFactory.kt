@@ -37,7 +37,7 @@ internal actual val managedBufferFactory: BufferFactory =
         ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJava()))
     }
 
-internal actual val deterministicBufferFactory: BufferFactory =
+private val deterministicFactoryInstance: BufferFactory =
     object : BufferFactory {
         override fun allocate(
             size: Int,
@@ -52,6 +52,8 @@ internal actual val deterministicBufferFactory: BufferFactory =
             byteOrder: ByteOrder,
         ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJava()))
     }
+
+internal actual fun deterministicBufferFactory(threadConfined: Boolean): BufferFactory = deterministicFactoryInstance
 
 @SuppressLint("NewApi")
 internal actual val sharedBufferFactory: BufferFactory =

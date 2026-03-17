@@ -104,13 +104,13 @@ buffer.writeInt(fileSize)
 ## Example: Protocol Parsing
 
 ```kotlin
-// MQTT uses big-endian for packet length
-val mqttBuffer = BufferFactory.Default.allocate(1024, ByteOrder.BIG_ENDIAN)
+// Network protocols use big-endian
+val buffer = BufferFactory.Default.allocate(1024, ByteOrder.BIG_ENDIAN)
 
-// Write packet type and length
-mqttBuffer.writeByte(0x30)  // PUBLISH packet
-mqttBuffer.writeShort(topicLength.toShort())
-mqttBuffer.writeString(topic)
+// Write a length-prefixed message
+buffer.writeByte(0x01)  // message type
+buffer.writeShort(payloadLength.toShort())
+buffer.writeString(payload)
 ```
 
 ## Mixing Byte Orders

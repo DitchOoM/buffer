@@ -103,7 +103,7 @@ suspend fun receiveDecompressed(socket: Socket): PlatformBuffer {
     }
     // Combine chunks
     val totalSize = output.sumOf { it.remaining() }
-    val result = PlatformBuffer.allocate(totalSize)
+    val result = BufferFactory.Default.allocate(totalSize)
     output.forEach { result.write(it) }
     result.resetForRead()
     return result
@@ -159,7 +159,7 @@ try {
     output += decompressor.decompress(compressedData)
 
     // Feed the sync marker separately (no copy of compressed data)
-    val marker = PlatformBuffer.allocate(4)
+    val marker = BufferFactory.Default.allocate(4)
     marker.writeInt(DeflateFormat.SYNC_FLUSH_MARKER)
     marker.resetForRead()
     output += decompressor.decompress(marker)
@@ -210,7 +210,7 @@ suspend fun compressFile(input: FileChannel, output: FileChannel) {
     val chunkSize = 64 * 1024  // 64KB chunks
 
     SuspendingStreamingCompressor.create(CompressionAlgorithm.Gzip).use { compressor ->
-        val buffer = PlatformBuffer.allocate(chunkSize)
+        val buffer = BufferFactory.Default.allocate(chunkSize)
 
         while (input.read(buffer) > 0) {
             buffer.resetForRead()

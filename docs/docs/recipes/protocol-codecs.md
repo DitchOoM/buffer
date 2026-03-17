@@ -1,385 +1,22 @@
 ---
-sidebar_position: 5
+sidebar_position: 3
 title: Protocol Codecs
 ---
 
 # Protocol Codecs
 
-The `buffer-codec` module provides a structured codec system for encoding and decoding binary protocol messages. Instead of writing ad-hoc parsers that manually read fields one by one, you define a `Codec<T>` that pairs encode and decode logic together, making your protocol implementations type-safe and testable.
+Annotate a data class, get a type-safe codec at compile time — with batch-optimized reads, round-trip testing, and zero manual field wiring.
 
 ## Why Protocol Codecs?
 
-Hand-written protocol parsers work fine for simple cases, but they become error-prone as protocols grow:
+Hand-written protocol parsers break silently as protocols grow:
 
 - **Field order mismatches** between encode and decode go undetected until runtime
 - **Missing fields** in one direction cause subtle data corruption
 - **No round-trip guarantee** without manual test discipline
-- **Duplicated logic** when the same struct appears in multiple message types
-
-The codec system solves these problems by:
-
-- Pairing encode and decode in a single `Codec<T>` interface
-- Providing `testRoundTrip()` to verify correctness with one call
-- Operating directly on `ReadBuffer`/`WriteBuffer` for zero-overhead access
+- **Tedious boilerplate** — every field needs matching read/write calls in exact order
 
 ## Installation
-
-```kotlin
-dependencies {
-    implementation("com.ditchoom:buffer:<latest-version>")
-    implementation("com.ditchoom:buffer-codec:<latest-version>")
-}
-```
-
-## Quick Start
-
-Define a data class for your protocol struct and implement a `Codec` for it:
-
-```kotlin
-import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.WriteBuffer
-import com.ditchoom.buffer.codec.Codec
-
-data class SensorReading(
-    val sensorId: UShort,
-    val temperature: Int,
-)
-
-object SensorReadingCodec : Codec<SensorReading> {
-    override fun decode(buffer: ReadBuffer): SensorReading =
-        SensorReading(
-            sensorId = buffer.readUnsignedShort(),
-            temperature = buffer.readInt(),
-        )
-
-    override fun encode(buffer: WriteBuffer, value: SensorReading) {
-        buffer.writeUShort(value.sensorId)
-        buffer.writeInt(value.temperature)
-    }
-
-    override fun sizeOf(value: SensorReading): Int = 6 // 2 + 4 bytes
-}
-```
-
-Encode and decode:
-
-```kotlin
-import com.ditchoom.buffer.codec.encodeToBuffer
-
-// Encode to a new buffer
-val buffer = SensorReadingCodec.encodeToBuffer(reading)
-
-// Decode from a ReadBuffer
-val decoded = SensorReadingCodec.decode(buffer)
-
-// Encode into an existing WriteBuffer
-SensorReadingCodec.encode(existingBuffer, reading)
-```
-
-## The Codec Interface
-
-The core interface is minimal:
-
-```kotlin
-interface Codec<T> {
-    fun decode(buffer: ReadBuffer): T
-    fun encode(buffer: WriteBuffer, value: T)
-    fun sizeOf(value: T): Int? = null
-}
-```
-
-- **`decode`** reads fields from a `ReadBuffer` and constructs the value
-- **`encode`** writes fields to a `WriteBuffer`
-- **`sizeOf`** returns the encoded byte size if known, or `null` for variable-length encodings
-
-Codecs operate directly on `ReadBuffer`/`WriteBuffer` with no wrapper overhead.
-
-## Length-Prefixed Strings
-
-Use the `readLengthPrefixedUtf8String()` and `writeLengthPrefixedUtf8String()` extension functions for MQTT-style length-prefixed strings: a 2-byte big-endian length prefix followed by UTF-8 data.
-
-```kotlin
-import com.ditchoom.buffer.readLengthPrefixedUtf8String
-import com.ditchoom.buffer.writeLengthPrefixedUtf8String
-
-data class ConnectMessage(val clientId: String, val username: String)
-
-object ConnectMessageCodec : Codec<ConnectMessage> {
-    override fun decode(buffer: ReadBuffer): ConnectMessage =
-        ConnectMessage(
-            clientId = buffer.readLengthPrefixedUtf8String().second,
-            username = buffer.readLengthPrefixedUtf8String().second,
-        )
-
-    override fun encode(buffer: WriteBuffer, value: ConnectMessage) {
-        buffer.writeLengthPrefixedUtf8String(value.clientId)
-        buffer.writeLengthPrefixedUtf8String(value.username)
-    }
-}
-```
-
-## Variable-Length Integers
-
-The `readVariableByteInteger()` and `writeVariableByteInteger()` extension functions handle MQTT-style variable-byte integers (1-4 bytes, max value 268,435,455). Each byte uses 7 bits for data and 1 bit as a continuation flag.
-
-```kotlin
-import com.ditchoom.buffer.readVariableByteInteger
-import com.ditchoom.buffer.writeVariableByteInteger
-
-data class PublishHeader(val topicLength: Int, val payloadLength: Int)
-
-object PublishHeaderCodec : Codec<PublishHeader> {
-    override fun decode(buffer: ReadBuffer): PublishHeader =
-        PublishHeader(
-            topicLength = buffer.readVariableByteInteger(),
-            payloadLength = buffer.readVariableByteInteger(),
-        )
-
-    override fun encode(buffer: WriteBuffer, value: PublishHeader) {
-        buffer.writeVariableByteInteger(value.topicLength)
-        buffer.writeVariableByteInteger(value.payloadLength)
-    }
-}
-```
-
-## Composing Codecs
-
-Codecs compose naturally. Use one codec inside another to decode nested structures:
-
-```kotlin
-data class Envelope(val version: UByte, val sensor: SensorReading)
-
-object EnvelopeCodec : Codec<Envelope> {
-    override fun decode(buffer: ReadBuffer): Envelope =
-        Envelope(
-            version = buffer.readUnsignedByte(),
-            sensor = SensorReadingCodec.decode(buffer),
-        )
-
-    override fun encode(buffer: WriteBuffer, value: Envelope) {
-        buffer.writeUByte(value.version)
-        SensorReadingCodec.encode(buffer, value.sensor)
-    }
-
-    override fun sizeOf(value: Envelope): Int? {
-        val sensorSize = SensorReadingCodec.sizeOf(value.sensor) ?: return null
-        return 1 + sensorSize
-    }
-}
-```
-
-## Message Dispatch with Sealed Interfaces
-
-For protocols with multiple message types distinguished by a type byte, combine sealed interfaces with codec dispatch:
-
-```kotlin
-sealed interface Message {
-    val typeCode: Byte
-}
-
-data class PingMessage(val timestamp: Long) : Message {
-    override val typeCode: Byte = 0x01
-}
-
-data class DataMessage(val payload: String) : Message {
-    override val typeCode: Byte = 0x02
-}
-
-object PingCodec : Codec<PingMessage> {
-    override fun decode(buffer: ReadBuffer) =
-        PingMessage(buffer.readLong())
-
-    override fun encode(buffer: WriteBuffer, value: PingMessage) {
-        buffer.writeLong(value.timestamp)
-    }
-}
-
-object DataCodec : Codec<DataMessage> {
-    override fun decode(buffer: ReadBuffer) =
-        DataMessage(buffer.readLengthPrefixedUtf8String().second)
-
-    override fun encode(buffer: WriteBuffer, value: DataMessage) {
-        buffer.writeLengthPrefixedUtf8String(value.payload)
-    }
-}
-
-object MessageCodec : Codec<Message> {
-    override fun decode(buffer: ReadBuffer): Message {
-        return when (val type = buffer.readByte()) {
-            0x01.toByte() -> PingCodec.decode(buffer)
-            0x02.toByte() -> DataCodec.decode(buffer)
-            else -> throw IllegalArgumentException("Unknown type: $type")
-        }
-    }
-
-    override fun encode(buffer: WriteBuffer, value: Message) {
-        buffer.writeByte(value.typeCode)
-        when (value) {
-            is PingMessage -> PingCodec.encode(buffer, value)
-            is DataMessage -> DataCodec.encode(buffer, value)
-        }
-    }
-}
-```
-
-## PayloadReader
-
-When your protocol has a length-delimited payload section that you want to hand off to application code, use `PayloadReader`:
-
-```kotlin
-val payloadReader = ReadBufferPayloadReader(payloadBuffer)
-
-// Read structured data from the payload
-val id = payloadReader.readInt()
-val name = payloadReader.readString(nameLength)
-
-// Or copy the entire payload to a new buffer
-val copy = payloadReader.copyToBuffer(BufferFactory.managed())
-
-// Or transfer bytes to a WriteBuffer
-payloadReader.transferTo(writeBuffer)
-```
-
-`PayloadReader` tracks whether it has been released, preventing use-after-release bugs:
-
-```kotlin
-val reader = ReadBufferPayloadReader(buffer)
-// ... use reader ...
-reader.release()
-reader.readByte()  // throws IllegalStateException
-```
-
-## Streaming Integration
-
-For streaming scenarios where data arrives in chunks, use `StreamProcessor` to accumulate bytes, then read contiguous buffers for codec decoding:
-
-```kotlin
-withPool { pool ->
-    val processor = StreamProcessor.create(pool)
-
-    // Feed chunks as they arrive from the network
-    for (chunk in networkChannel) {
-        processor.append(chunk)
-
-        // Parse complete messages when enough data is available
-        while (processor.available() >= HEADER_SIZE) {
-            val headerBuffer = processor.readBuffer(HEADER_SIZE)
-            val message = MessageCodec.decode(headerBuffer)
-            handleMessage(message)
-        }
-    }
-}
-```
-
-## Round-Trip Testing
-
-The `testRoundTrip` extension function verifies that encode followed by decode produces the original value:
-
-```kotlin
-// Basic round-trip test
-val decoded = SensorReadingCodec.testRoundTrip(
-    SensorReading(42u.toUShort(), 123456)
-)
-
-// With expected wire bytes
-val decoded = SensorReadingCodec.testRoundTrip(
-    SensorReading(1u.toUShort(), 2),
-    expectedBytes = byteArrayOf(0x00, 0x01, 0x00, 0x00, 0x00, 0x02)
-)
-```
-
-This is especially useful in unit tests:
-
-```kotlin
-@Test
-fun sensorReadingRoundTrip() {
-    val original = SensorReading(42u.toUShort(), -17)
-    val decoded = SensorReadingCodec.testRoundTrip(original)
-    assertEquals(original, decoded)
-}
-```
-
-## Extension Functions Reference
-
-The `buffer-codec` module provides convenience extensions on `Codec<T>`:
-
-| Function | Description |
-|----------|-------------|
-| `codec.encodeToBuffer(value)` | Allocate a new buffer, encode, and return it ready for reading |
-| `codec.testRoundTrip(value)` | Encode then decode, returning the decoded value |
-| `codec.testRoundTrip(value, expectedBytes)` | Same, but also verifies the wire bytes match |
-
-## Complete Example: Simple Binary Protocol
-
-```kotlin
-import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.WriteBuffer
-import com.ditchoom.buffer.codec.Codec
-import com.ditchoom.buffer.readLengthPrefixedUtf8String
-import com.ditchoom.buffer.writeLengthPrefixedUtf8String
-
-/**
- * Protocol format:
- * - 1 byte:  message type
- * - 2 bytes: sequence number (UShort)
- * - 4 bytes: payload length (Int)
- * - N bytes: payload (length-prefixed UTF-8 string)
- */
-data class ProtocolMessage(
-    val type: UByte,
-    val sequence: UShort,
-    val payload: String,
-)
-
-object ProtocolMessageCodec : Codec<ProtocolMessage> {
-    override fun decode(buffer: ReadBuffer): ProtocolMessage =
-        ProtocolMessage(
-            type = buffer.readUnsignedByte(),
-            sequence = buffer.readUnsignedShort(),
-            payload = buffer.readLengthPrefixedUtf8String().second,
-        )
-
-    override fun encode(buffer: WriteBuffer, value: ProtocolMessage) {
-        buffer.writeUByte(value.type)
-        buffer.writeUShort(value.sequence)
-        buffer.writeLengthPrefixedUtf8String(value.payload)
-    }
-
-    override fun sizeOf(value: ProtocolMessage): Int {
-        val payloadBytes = value.payload.encodeToByteArray().size
-        return 1 + 2 + 2 + payloadBytes  // type + seq + length prefix + string
-    }
-}
-
-// Usage
-fun main() {
-    val message = ProtocolMessage(
-        type = 0x01u,
-        sequence = 42u.toUShort(),
-        payload = "Hello, Protocol!"
-    )
-
-    // Encode
-    val buffer = ProtocolMessageCodec.encodeToBuffer(message)
-
-    // Decode
-    val decoded = ProtocolMessageCodec.decode(buffer)
-    println(decoded) // ProtocolMessage(type=1, sequence=42, payload=Hello, Protocol!)
-
-    // Verify round-trip in tests
-    ProtocolMessageCodec.testRoundTrip(message)
-}
-```
-
-## Code Generation with @ProtocolMessage
-
-Instead of writing codecs by hand, annotate your data class and let the KSP processor generate `decode`, `encode`, and `sizeOf` at compile time.
-
-> **Note:** Generated code appears after compilation (`./gradlew build`). IDE features like autocomplete and navigation for generated codecs require an initial build.
-
-### Installation
-
-Add the KSP plugin and the processor dependency:
 
 ```kotlin
 plugins {
@@ -392,51 +29,113 @@ dependencies {
 }
 ```
 
-### Basic Example
+## Quick Start
+
+Define your wire format as a data class:
 
 ```kotlin
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 
 @ProtocolMessage
-data class SensorReading(
-    val sensorId: UShort,    // 2 bytes
-    val temperature: Int,    // 4 bytes
+data class DeviceReport(
+    val protocolVersion: UByte,       // 1 byte
+    val deviceType: UShort,           // 2 bytes
+    val sequenceNumber: UInt,         // 4 bytes
+    val timestamp: Long,              // 8 bytes
+    val latitude: Double,             // 8 bytes
+    val longitude: Double,            // 8 bytes
+    val altitude: Float,              // 4 bytes
+    val batteryLevel: UByte,          // 1 byte
+    val signalStrength: Short,        // 2 bytes
+    @LengthPrefixed val deviceName: String,
 )
 ```
 
-The processor generates `SensorReadingCodec`:
+That's it. The KSP processor generates `DeviceReportCodec` with `decode`, `encode`, and `sizeOf` — all type-safe and batch-optimized:
 
 ```kotlin
-// Generated — don't edit
-object SensorReadingCodec : Codec<SensorReading> {
-    override fun decode(buffer: ReadBuffer): SensorReading =
-        SensorReading(
-            sensorId = buffer.readUnsignedShort(),
-            temperature = buffer.readInt(),
-        )
+val buffer = DeviceReportCodec.encodeToBuffer(report)
+val decoded = DeviceReportCodec.decode(buffer)
+DeviceReportCodec.testRoundTrip(report) // verify correctness in one call
+```
 
-    override fun encode(buffer: WriteBuffer, value: SensorReading) {
-        buffer.writeUShort(value.sensorId)
-        buffer.writeInt(value.temperature)
+> **Note:** Generated code appears after `./gradlew build`. IDE autocomplete for generated codecs requires an initial build.
+
+### What you'd have to write manually
+
+Without code gen, this 10-field message requires writing every field in exact order — twice. One mismatch (e.g., swapping `latitude`/`longitude`, or reading a `Float` where you wrote a `Double`) silently corrupts data:
+
+```kotlin
+// 30+ lines of error-prone boilerplate
+object DeviceReportCodec : Codec<DeviceReport> {
+    override fun decode(buffer: ReadBuffer) = DeviceReport(
+        protocolVersion = buffer.readUnsignedByte(),
+        deviceType = buffer.readUnsignedShort(),
+        sequenceNumber = buffer.readUnsignedInt(),
+        timestamp = buffer.readLong(),
+        latitude = buffer.readDouble(),
+        longitude = buffer.readDouble(),
+        altitude = buffer.readFloat(),
+        batteryLevel = buffer.readUnsignedByte(),
+        signalStrength = buffer.readShort(),
+        deviceName = buffer.readLengthPrefixedUtf8String().second,
+    )
+
+    override fun encode(buffer: WriteBuffer, value: DeviceReport) {
+        buffer.writeUByte(value.protocolVersion)
+        buffer.writeUShort(value.deviceType)
+        buffer.writeUInt(value.sequenceNumber)
+        buffer.writeLong(value.timestamp)
+        buffer.writeDouble(value.latitude)
+        buffer.writeDouble(value.longitude)
+        buffer.writeFloat(value.altitude)
+        buffer.writeUByte(value.batteryLevel)
+        buffer.writeShort(value.signalStrength)
+        buffer.writeLengthPrefixedUtf8String(value.deviceName)
     }
 
-    override fun sizeOf(value: SensorReading): Int? = 6
+    override fun sizeOf(value: DeviceReport): Int {
+        val nameBytes = value.deviceName.encodeToByteArray().size
+        return 1 + 2 + 4 + 8 + 8 + 8 + 4 + 1 + 2 + 2 + nameBytes
+    }
 }
 ```
 
-Use it exactly like a hand-written codec:
+The generated version is identical but also applies **batch optimization** — consecutive fixed-size fields are grouped into bulk reads, reducing the number of read/write calls in the hot path.
+
+### Round-Trip Testing
+
+Verify that encode → decode produces the original value:
 
 ```kotlin
-val buffer = SensorReadingCodec.encodeToBuffer(reading)
-val decoded = SensorReadingCodec.decode(buffer)
-SensorReadingCodec.testRoundTrip(reading) // round-trip verification
+@Test
+fun deviceReportRoundTrip() {
+    val report = DeviceReport(
+        protocolVersion = 1u,
+        deviceType = 42u.toUShort(),
+        sequenceNumber = 1000u,
+        timestamp = 1710000000000L,
+        latitude = 37.7749,
+        longitude = -122.4194,
+        altitude = 15.5f,
+        batteryLevel = 87u,
+        signalStrength = -65,
+        deviceName = "sensor-north-1",
+    )
+    val decoded = DeviceReportCodec.testRoundTrip(report)
+    assertEquals(report, decoded)
+}
+
+// Or verify exact wire bytes
+DeviceReportCodec.testRoundTrip(report, expectedBytes = wireBytes)
 ```
 
-### Annotation Reference
+## Annotation Reference
 
-#### `@LengthPrefixed` — Length-Prefixed Strings
+### `@LengthPrefixed` — Length-Prefixed Strings
 
-Reads/writes a string with a byte-length prefix. Default prefix is 2-byte big-endian (`LengthPrefix.Short`).
+Reads/writes a string with a byte-length prefix. Default is 2-byte big-endian.
 
 ```kotlin
 @ProtocolMessage
@@ -447,7 +146,7 @@ data class GreetingMessage(
 )
 ```
 
-#### `@RemainingBytes` — Consume Remaining Bytes
+### `@RemainingBytes` — Consume Remaining Bytes
 
 Reads all remaining bytes as a UTF-8 string. Must be the last constructor parameter.
 
@@ -459,7 +158,7 @@ data class LogEntry(
 )
 ```
 
-#### `@LengthFrom("field")` — Length from Preceding Field
+### `@LengthFrom("field")` — Length from Preceding Field
 
 The string's byte length is determined by a preceding numeric field instead of a prefix in the wire format.
 
@@ -472,7 +171,7 @@ data class NamedRecord(
 )
 ```
 
-#### `@WireBytes(n)` — Custom Wire Width
+### `@WireBytes(n)` — Custom Wire Width
 
 Override the default wire size of a numeric field. Useful for protocols that use 3-byte, 5-byte, 6-byte, or 7-byte integers.
 
@@ -484,9 +183,9 @@ data class CompactHeader(
 )
 ```
 
-Only applies to integer types (`Byte`, `UByte`, `Short`, `UShort`, `Int`, `UInt`, `Long`, `ULong`). Not allowed on `Float`, `Double`, or `Boolean`.
+Only applies to integer types. Not allowed on `Float`, `Double`, or `Boolean`.
 
-#### `@WhenTrue("expression")` — Conditional Fields
+### `@WhenTrue("expression")` — Conditional Fields
 
 A field that is only present on the wire when a preceding Boolean field is `true`. The annotated field must be nullable with a default of `null`.
 
@@ -494,11 +193,11 @@ A field that is only present on the wire when a preceding Boolean field is `true
 @ProtocolMessage
 data class OptionalPayload(
     val hasExtra: Boolean,
-    @WhenTrue("hasExtra") val extra: Int? = null,  // only read/written when hasExtra == true
+    @WhenTrue("hasExtra") val extra: Int? = null,
 )
 ```
 
-#### `@Payload` + Type Parameter — Generic Payloads
+### `@Payload` + Type Parameter — Generic Payloads
 
 Mark a type parameter with `@Payload` to create a codec that is generic over its payload. A context class is generated to carry the non-payload fields needed for payload decoding.
 
@@ -511,9 +210,9 @@ data class Packet<@Payload P>(
 )
 ```
 
-#### `@PacketType` + Sealed Interfaces — Auto-Dispatched Decode
+### `@PacketType` + Sealed Interfaces — Auto-Dispatched Decode
 
-Annotate a sealed interface with `@ProtocolMessage` and each variant with `@PacketType(value)` to generate a dispatch codec that reads the type discriminator and delegates to the correct variant codec. The value must be 0-255 (single byte on the wire). Duplicate values across variants are rejected at compile time.
+Annotate a sealed interface with `@ProtocolMessage` and each variant with `@PacketType(value)` to generate a dispatch codec. The processor reads the type discriminator and delegates to the correct variant codec. Duplicate values are rejected at compile time.
 
 ```kotlin
 @ProtocolMessage
@@ -535,7 +234,7 @@ The processor generates:
 - `CommandCodec` that reads one byte, dispatches to the correct variant codec, and writes the type byte + variant on encode
 
 ```kotlin
-val cmd: Command = CommandCodec.decode(buffer) // reads type byte, dispatches automatically
+val cmd: Command = CommandCodec.decode(buffer)
 CommandCodec.encode(outputBuffer, Command.Ping(System.currentTimeMillis()))
 ```
 
@@ -548,22 +247,18 @@ Value classes wrapping a primitive type are supported as fields. The generated c
 value class PacketId(val raw: UShort)
 
 @JvmInline
-value class ConnAckFlags(val raw: UByte) {
+value class Flags(val raw: UByte) {
     val sessionPresent: Boolean get() = raw.toInt() and 1 == 1
 }
 
 @ProtocolMessage
-data class ConnAck(
-    val flags: ConnAckFlags,   // reads 1 byte, wraps in ConnAckFlags
-    val packetId: PacketId,    // reads 2 bytes, wraps in PacketId
+data class Acknowledgement(
+    val flags: Flags,       // reads 1 byte, wraps in Flags
+    val packetId: PacketId, // reads 2 bytes, wraps in PacketId
 )
 ```
 
-This is the recommended pattern for protocol-specific types — you get type safety at the Kotlin level while the wire representation stays as a raw primitive.
-
 ### Supported Types
-
-The processor handles all Kotlin primitive types:
 
 | Kotlin Type | Default Wire Size | Signed |
 |-------------|------------------|--------|
@@ -584,10 +279,11 @@ The processor handles all Kotlin primitive types:
 
 The generated code automatically groups consecutive fixed-size fields into single bulk reads where possible (e.g., reading a `Long` and splitting it into two `Int` fields), reducing the number of read/write calls in the hot path.
 
-### Custom Annotations (SPI)
+---
 
-When the built-in annotations don't cover your protocol's encoding (e.g., variable-byte integers,
-repeated fields, TLV property bags), you can register custom annotations via the codec SPI.
+## Custom Annotations (SPI)
+
+When the built-in annotations don't cover your protocol's encoding (e.g., variable-byte integers, repeated fields, TLV property bags), register custom annotations via the codec SPI.
 
 The SPI lets you:
 - Define your own annotation (e.g., `@VariableByteInteger`)
@@ -595,7 +291,7 @@ The SPI lets you:
 - Register a `CodecFieldProvider` that maps the annotation to those functions
 - The generated codec calls your functions — type-safe, debuggable, no string templates
 
-#### Step 1: Define Your Annotation
+### Step 1: Define Your Annotation
 
 ```kotlin
 package com.example.myprotocol.annotations
@@ -605,9 +301,7 @@ package com.example.myprotocol.annotations
 annotation class VariableByteInteger
 ```
 
-#### Step 2: Write Your Functions
-
-Write `ReadBuffer`/`WriteBuffer` extension functions that handle the encoding:
+### Step 2: Write Your Functions
 
 ```kotlin
 package com.example.myprotocol.codec
@@ -620,9 +314,7 @@ fun WriteBuffer.writeVariableByteInteger(value: Int) { /* ... */ }
 fun variableByteSizeInt(value: Int): Int { /* ... */ }
 ```
 
-These are real Kotlin functions — debuggable, testable, IDE-navigable.
-
-#### Step 3: Create a CodecFieldProvider
+### Step 3: Create a CodecFieldProvider
 
 ```kotlin
 package com.example.myprotocol.spi
@@ -645,7 +337,7 @@ class VariableByteIntegerProvider : CodecFieldProvider {
 }
 ```
 
-#### Step 4: Create a KSP Provider Module
+### Step 4: Create a KSP Provider Module
 
 Custom providers run at **build time** on the KSP processor classpath. Create a JVM-only module:
 
@@ -665,9 +357,7 @@ Register via `META-INF/services/com.ditchoom.buffer.codec.processor.spi.CodecFie
 com.example.myprotocol.spi.VariableByteIntegerProvider
 ```
 
-#### Step 5: Wire KSP Dependencies
-
-In your protocol module's `build.gradle.kts`:
+### Step 5: Wire KSP Dependencies
 
 ```kotlin
 dependencies {
@@ -676,23 +366,20 @@ dependencies {
 }
 ```
 
-The KSP classloader merges both JARs, so `ServiceLoader` discovers your providers automatically.
-
-#### Step 6: Use It
+### Step 6: Use It
 
 ```kotlin
 @ProtocolMessage
-data class MqttHeader(
+data class FrameHeader(
     val packetType: UByte,
     @VariableByteInteger val remainingLength: Int,
 )
-// Generates MqttHeaderCodec with buffer.readVariableByteInteger() calls
+// Generates FrameHeaderCodec with buffer.readVariableByteInteger() calls
 ```
 
-#### Context Fields — Dependent Parsing
+### Context Fields — Dependent Parsing
 
-Some custom fields need values from previously decoded fields. Use `contextFields` to pass them
-as extra arguments to your read/write functions:
+Some custom fields need values from previously decoded fields. Use `contextFields` to pass them as extra arguments to your read/write functions:
 
 ```kotlin
 class RepeatedShortsProvider : CodecFieldProvider {
@@ -715,30 +402,191 @@ Generated code passes the context field:
 // encode: buffer.writeRepeatedShorts(value.items, value.count)
 ```
 
-#### Validation
-
-Providers can validate field types and annotation arguments in `describe()`. Thrown exceptions
-become compile-time KSP errors:
-
-```kotlin
-override fun describe(context: FieldContext): CustomFieldDescriptor {
-    require(context.typeName == "kotlin.Int") {
-        "@VariableByteInteger can only be applied to Int fields, found: ${context.typeName}"
-    }
-    // ...
-}
-```
-
-#### Restrictions
+### SPI Restrictions
 
 - Cannot override built-in annotations (`@LengthPrefixed`, `@WireBytes`, etc.)
 - Custom fields break batch optimization (each custom field is read/written individually)
 - Two providers cannot register the same annotation FQN
 
-### Compatibility with Manual Codecs
+---
 
-Generated codecs implement the same `Codec<T>` interface, so all manual usage patterns apply:
+## Manual Codecs
 
-- Compose with other codecs (generated or hand-written)
-- Verify with `testRoundTrip()`
-- Use the same `encodeToBuffer` extension function
+When you need full control — custom encoding logic, protocol-level optimizations, or formats that don't map to annotations — implement `Codec<T>` directly.
+
+### The Codec Interface
+
+```kotlin
+interface Codec<T> {
+    fun decode(buffer: ReadBuffer): T
+    fun encode(buffer: WriteBuffer, value: T)
+    fun sizeOf(value: T): Int? = null
+}
+```
+
+- **`decode`** reads fields from a `ReadBuffer` and constructs the value
+- **`encode`** writes fields to a `WriteBuffer`
+- **`sizeOf`** returns the encoded byte size if known, or `null` for variable-length encodings
+
+Generated and manual codecs implement the same interface — they compose freely.
+
+### Simple Example
+
+```kotlin
+data class SensorReading(val sensorId: UShort, val temperature: Int)
+
+object SensorReadingCodec : Codec<SensorReading> {
+    override fun decode(buffer: ReadBuffer) =
+        SensorReading(buffer.readUnsignedShort(), buffer.readInt())
+
+    override fun encode(buffer: WriteBuffer, value: SensorReading) {
+        buffer.writeUShort(value.sensorId)
+        buffer.writeInt(value.temperature)
+    }
+
+    override fun sizeOf(value: SensorReading) = 6
+}
+```
+
+### Length-Prefixed Strings
+
+Use `readLengthPrefixedUtf8String()` and `writeLengthPrefixedUtf8String()` for strings with a 2-byte big-endian length prefix:
+
+```kotlin
+data class ConnectMessage(val clientId: String, val username: String)
+
+object ConnectMessageCodec : Codec<ConnectMessage> {
+    override fun decode(buffer: ReadBuffer) = ConnectMessage(
+        clientId = buffer.readLengthPrefixedUtf8String().second,
+        username = buffer.readLengthPrefixedUtf8String().second,
+    )
+
+    override fun encode(buffer: WriteBuffer, value: ConnectMessage) {
+        buffer.writeLengthPrefixedUtf8String(value.clientId)
+        buffer.writeLengthPrefixedUtf8String(value.username)
+    }
+}
+```
+
+### Variable-Length Integers
+
+`readVariableByteInteger()` and `writeVariableByteInteger()` handle variable-byte integers (1-4 bytes, max value 268,435,455):
+
+```kotlin
+data class PublishHeader(val topicLength: Int, val payloadLength: Int)
+
+object PublishHeaderCodec : Codec<PublishHeader> {
+    override fun decode(buffer: ReadBuffer) = PublishHeader(
+        topicLength = buffer.readVariableByteInteger(),
+        payloadLength = buffer.readVariableByteInteger(),
+    )
+
+    override fun encode(buffer: WriteBuffer, value: PublishHeader) {
+        buffer.writeVariableByteInteger(value.topicLength)
+        buffer.writeVariableByteInteger(value.payloadLength)
+    }
+}
+```
+
+### Composing Codecs
+
+Use one codec inside another for nested structures:
+
+```kotlin
+data class Envelope(val version: UByte, val sensor: SensorReading)
+
+object EnvelopeCodec : Codec<Envelope> {
+    override fun decode(buffer: ReadBuffer) = Envelope(
+        version = buffer.readUnsignedByte(),
+        sensor = SensorReadingCodec.decode(buffer),
+    )
+
+    override fun encode(buffer: WriteBuffer, value: Envelope) {
+        buffer.writeUByte(value.version)
+        SensorReadingCodec.encode(buffer, value.sensor)
+    }
+
+    override fun sizeOf(value: Envelope): Int? {
+        val sensorSize = SensorReadingCodec.sizeOf(value.sensor) ?: return null
+        return 1 + sensorSize
+    }
+}
+```
+
+### Manual Sealed Interface Dispatch
+
+```kotlin
+sealed interface Message { val typeCode: Byte }
+
+data class PingMessage(val timestamp: Long) : Message {
+    override val typeCode: Byte = 0x01
+}
+data class DataMessage(val payload: String) : Message {
+    override val typeCode: Byte = 0x02
+}
+
+object MessageCodec : Codec<Message> {
+    override fun decode(buffer: ReadBuffer): Message =
+        when (val type = buffer.readByte()) {
+            0x01.toByte() -> PingMessage(buffer.readLong())
+            0x02.toByte() -> DataMessage(buffer.readLengthPrefixedUtf8String().second)
+            else -> throw IllegalArgumentException("Unknown type: $type")
+        }
+
+    override fun encode(buffer: WriteBuffer, value: Message) {
+        buffer.writeByte(value.typeCode)
+        when (value) {
+            is PingMessage -> buffer.writeLong(value.timestamp)
+            is DataMessage -> buffer.writeLengthPrefixedUtf8String(value.payload)
+        }
+    }
+}
+```
+
+Compare this to the `@PacketType` approach above — the generated version eliminates the manual dispatch boilerplate and catches duplicate type codes at compile time.
+
+---
+
+## PayloadReader
+
+When your protocol has a length-delimited payload section to hand off to application code:
+
+```kotlin
+val payloadReader = ReadBufferPayloadReader(payloadBuffer)
+val id = payloadReader.readInt()
+val name = payloadReader.readString(nameLength)
+
+// Or copy/transfer
+val copy = payloadReader.copyToBuffer(BufferFactory.managed())
+payloadReader.transferTo(writeBuffer)
+```
+
+`PayloadReader` tracks release state — use-after-release throws `IllegalStateException`.
+
+## Streaming Integration
+
+For streaming scenarios where data arrives in chunks, use `StreamProcessor` to accumulate bytes, then decode with any codec:
+
+```kotlin
+withPool { pool ->
+    val processor = StreamProcessor.create(pool)
+
+    for (chunk in networkChannel) {
+        processor.append(chunk)
+
+        while (processor.available() >= HEADER_SIZE) {
+            val headerBuffer = processor.readBuffer(HEADER_SIZE)
+            val message = MessageCodec.decode(headerBuffer)
+            handleMessage(message)
+        }
+    }
+}
+```
+
+## Extension Functions Reference
+
+| Function | Description |
+|----------|-------------|
+| `codec.encodeToBuffer(value)` | Allocate a new buffer, encode, and return it ready for reading |
+| `codec.testRoundTrip(value)` | Encode then decode, returning the decoded value |
+| `codec.testRoundTrip(value, expectedBytes)` | Same, but also verifies the wire bytes match |

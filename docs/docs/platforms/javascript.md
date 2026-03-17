@@ -82,7 +82,7 @@ sharedBuffer.writeInt(42)
 worker.postMessage(sharedBuffer.asArrayBuffer())
 
 // Worker thread
-val buffer = PlatformBuffer.wrap(receivedArrayBuffer)
+val buffer = BufferFactory.Default.wrap(receivedArrayBuffer)
 val value = buffer.readInt()  // 42
 ```
 
@@ -123,12 +123,12 @@ val int8Array: Int8Array = mutableData.int8Array
 // Fetch API
 val response = fetch(url).await()
 val arrayBuffer = response.arrayBuffer().await()
-val buffer = PlatformBuffer.wrap(arrayBuffer)
+val buffer = BufferFactory.Default.wrap(arrayBuffer)
 
 // WebSocket
 webSocket.onmessage = { event ->
     val data = event.data as ArrayBuffer
-    val buffer = PlatformBuffer.wrap(data)
+    val buffer = BufferFactory.Default.wrap(data)
     processMessage(buffer)
 }
 

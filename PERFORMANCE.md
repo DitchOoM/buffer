@@ -99,11 +99,11 @@ Benchmarks run on:
 
 ## Deterministic Memory
 
-`BufferFactory.Deterministic` provides buffers with guaranteed cleanup (no GC reliance).
+`BufferFactory.deterministic()` provides buffers with guaranteed cleanup (no GC reliance).
 Use `.use {}` for automatic resource management:
 
 ```kotlin
-BufferFactory.Deterministic.allocate(1024).use { buffer ->
+BufferFactory.deterministic().allocate(1024).use { buffer ->
     buffer.writeInt(42)
 } // freed immediately
 ```

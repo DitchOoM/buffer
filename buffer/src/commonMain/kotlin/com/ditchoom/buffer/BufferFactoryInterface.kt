@@ -50,10 +50,10 @@ import com.ditchoom.buffer.pool.BufferPool
  *
  * Accept a factory parameter so callers can control allocation:
  * ```kotlin
- * class MqttConnection(
+ * class ProtocolConnection(
  *     val factory: BufferFactory = BufferFactory.Default,
  * ) {
- *     fun send(packet: MqttPacket) {
+ *     fun send(packet: Packet) {
  *         factory.allocate(bufferSize).use { buffer ->
  *             packet.writeTo(buffer)
  *         }
@@ -102,15 +102,16 @@ interface BufferFactory {
 // =============================================================================
 
 /**
- * Platform-optimal native memory factory.
+ * Safe, GC-managed, no-leak-risk factory.
  *
- * Returns direct/native buffers on platforms that support them:
- * - **JVM**: DirectByteBuffer
- * - **Android**: DirectByteBuffer
- * - **Apple**: MutableDataBuffer (NSMutableData)
- * - **JS**: JsBuffer (Int8Array)
+ * Returns buffers that are garbage-collected on all platforms — no explicit cleanup required:
+ * - **JVM 21+**: FfmAutoBuffer (Arena.ofAuto(), GC-collected)
+ * - **JVM < 21**: DirectJvmBuffer (GC via Cleaner)
+ * - **Android**: DirectJvmBuffer (GC via Cleaner)
+ * - **Apple**: MutableDataBuffer (NSMutableData, ARC-managed)
+ * - **JS**: JsBuffer (Int8Array, GC-managed)
  * - **WASM**: LinearBuffer (WASM linear memory)
- * - **Linux**: NativeBuffer (malloc)
+ * - **Linux**: ByteArrayBuffer (GC-managed)
  */
 internal expect val defaultBufferFactory: BufferFactory
 
@@ -139,18 +140,22 @@ internal expect val sharedBufferFactory: BufferFactory
  * independent of garbage collection. Callers must use `buffer.use {}` or call
  * [PlatformBuffer.freeNativeMemory] explicitly.
  *
+ * @param threadConfined If true, uses a thread-confined arena (JVM 21+ only: Arena.ofConfined()).
+ *   On other platforms this parameter is ignored.
+ *
  * Platform implementations:
- * - **JVM 9+**: DeterministicDirectJvmBuffer (DirectByteBuffer + Unsafe.invokeCleaner)
+ * - **JVM 21+**: FfmBuffer with Arena.ofShared() (default) or Arena.ofConfined() (threadConfined=true)
+ * - **JVM 9-20**: DeterministicDirectJvmBuffer (DirectByteBuffer + Unsafe.invokeCleaner)
  * - **JVM 8 / Android**: UnsafePlatformBuffer (Unsafe.allocateMemory/freeMemory)
  * - **Apple**: MutableDataBuffer (ARC-managed, already deterministic)
- * - **Linux**: NativeBuffer (malloc/free, already deterministic)
+ * - **Linux**: NativeBuffer (malloc/free)
  * - **WASM**: LinearBuffer (linear memory, already deterministic)
  * - **JS**: JsBuffer (GC-managed, no deterministic alternative)
  */
-internal expect val deterministicBufferFactory: BufferFactory
+internal expect fun deterministicBufferFactory(threadConfined: Boolean): BufferFactory
 
 /**
- * Platform-optimal native memory.
+ * Safe, GC-managed, no-leak-risk buffers. No explicit cleanup required.
  */
 val BufferFactory.Companion.Default: BufferFactory get() = defaultBufferFactory
 
@@ -169,12 +174,15 @@ fun BufferFactory.Companion.shared(): BufferFactory = sharedBufferFactory
  *
  * Use with `buffer.use {}` for automatic cleanup:
  * ```kotlin
- * BufferFactory.Deterministic.allocate(1024).use { buffer ->
+ * BufferFactory.deterministic().allocate(1024).use { buffer ->
  *     buffer.writeInt(42)
  * } // freed immediately, no GC needed
  * ```
+ *
+ * @param threadConfined If true, uses a thread-confined arena on JVM 21+
+ *   ([Arena.ofConfined][java.lang.foreign.Arena.ofConfined]). Ignored on other platforms.
  */
-val BufferFactory.Companion.Deterministic: BufferFactory get() = deterministicBufferFactory
+fun BufferFactory.Companion.deterministic(threadConfined: Boolean = false): BufferFactory = deterministicBufferFactory(threadConfined)
 
 // =============================================================================
 // Composable decorators

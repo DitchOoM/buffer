@@ -58,7 +58,7 @@ src/
 | Apple | `ByteArrayBuffer` | `MutableDataBuffer` | Falls back to Direct |
 | JS | `JsBuffer` | `JsBuffer` | `JsBuffer` (SharedArrayBuffer) |
 | WASM | `ByteArrayBuffer` | `LinearBuffer` | Falls back to Direct |
-| Linux | `ByteArrayBuffer` | `NativeBuffer` | Falls back to Direct |
+| Linux | `ByteArrayBuffer` | `ByteArrayBuffer` | Falls back to Direct |
 
 ### Memory Access Interfaces
 
@@ -133,7 +133,7 @@ val nsMutableData = byteArray.toNSMutableData()
 - `PlatformBuffer` - Main buffer interface combining read/write operations
 - `ReadBuffer` - Read operations (relative and absolute)
 - `WriteBuffer` - Write operations (relative and absolute)
-- `BufferFactory` - Memory allocation strategy: `Default` (native), `managed()` (heap), `shared()` (IPC), `Deterministic` (explicit cleanup)
+- `BufferFactory` - Memory allocation strategy: `Default` (native), `managed()` (heap), `shared()` (IPC), `deterministic()` (explicit cleanup)
 
 ### Scoped Buffers (`com.ditchoom.buffer`)
 
@@ -279,7 +279,7 @@ Buffers are created via factories:
 BufferFactory.Default.allocate(size)                    // Native memory (platform-optimal)
 BufferFactory.managed().allocate(size)                  // Heap memory (ByteArray-backed)
 BufferFactory.shared().allocate(size)                   // Shared memory (Android IPC)
-BufferFactory.Deterministic.allocate(size)              // Explicit cleanup via .use {}
+BufferFactory.deterministic().allocate(size)             // Explicit cleanup via .use {}
 PlatformBuffer.allocate(size)                           // Shorthand for Default
 PlatformBuffer.wrap(byteArray)                          // Wrap existing ByteArray
 ```

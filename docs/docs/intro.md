@@ -115,6 +115,7 @@ dependencies {
 ## Next Steps
 
 - [Getting Started](./getting-started) - Installation and first buffer
-- [Core Concepts](./core-concepts/buffer-basics) - Understanding buffers, positions, and limits
-- [Recipes](./recipes/basic-operations) - Common patterns and examples
+- [Buffer Pooling](./recipes/buffer-pooling) - Eliminate allocation overhead
+- [Stream Processing](./recipes/stream-processing) - Handle chunked network data
+- [Protocol Codecs](./recipes/protocol-codecs) - Type-safe encode/decode
 - [Performance](./performance) - Optimization tips

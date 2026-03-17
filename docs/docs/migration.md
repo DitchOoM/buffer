@@ -30,7 +30,7 @@ v4 fixes all of these with a cleaner, more composable API.
 | `Buffer` interface | Removed — use `PlatformBuffer` |
 | `ScopedBuffer` / `SuspendCloseable` | `CloseableBuffer` with `.use {}` |
 | `buffer as? DirectJvmBuffer` | `buffer.nativeMemoryAccess` / `buffer.unwrapFully()` |
-| Manual `ByteBuffer.allocateDirect()` | `BufferFactory.Deterministic.allocate()` |
+| Manual `ByteBuffer.allocateDirect()` | `BufferFactory.deterministic().allocate()` |
 
 ## Allocation
 
@@ -106,7 +106,7 @@ val buf = PlatformBuffer.allocate(1024, AllocationZone.Direct)
 
 ```kotlin
 // Explicit cleanup with CloseableBuffer
-val buf = BufferFactory.Deterministic.allocate(1024)
+val buf = BufferFactory.deterministic().allocate(1024)
 buf.use {
     it.writeInt(42)
     it.resetForRead()
@@ -172,7 +172,7 @@ suspend fun process() {
 ```kotlin
 // CloseableBuffer works anywhere — no coroutines required
 fun process() {
-    BufferFactory.Deterministic.allocate(1024).use { buffer ->
+    BufferFactory.deterministic().allocate(1024).use { buffer ->
         buffer.writeInt(42)
         buffer.resetForRead()
         buffer.readInt()

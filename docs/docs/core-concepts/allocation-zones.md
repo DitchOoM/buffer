@@ -1,5 +1,5 @@
 ---
-sidebar_position: 2
+sidebar_position: 1
 title: Buffer Factories
 ---
 
@@ -21,15 +21,13 @@ val managed = BufferFactory.managed().allocate(1024)
 // Cross-process shared memory (for IPC on Android)
 val shared = BufferFactory.shared().allocate(1024)
 
-// Convenience shorthand (delegates to BufferFactory.Default):
-// val buffer = PlatformBuffer.allocate(1024)
 ```
 
 ## Built-in Presets
 
 ### BufferFactory.Default
 
-Platform-optimal native memory. This is what `PlatformBuffer.allocate()` uses.
+Platform-optimal native memory. This is the recommended default.
 
 ```kotlin
 val buffer = BufferFactory.Default.allocate(1024)
@@ -98,12 +96,12 @@ val buffer = BufferFactory.shared().allocate(1024)
 
 ![SharedMemory IPC](/img/shared-memory-ipc.svg)
 
-### BufferFactory.Deterministic
+### BufferFactory.deterministic()
 
 Buffers with guaranteed resource cleanup, independent of garbage collection.
 
 ```kotlin
-BufferFactory.Deterministic.allocate(1024).use { buffer ->
+BufferFactory.deterministic().allocate(1024).use { buffer ->
     buffer.writeInt(42)
 } // freed immediately, no GC needed
 ```
@@ -150,10 +148,10 @@ class MonitoredFactory(
 Accept a factory parameter so callers can control allocation:
 
 ```kotlin
-class MqttConnection(
+class ProtocolConnection(
     val factory: BufferFactory = BufferFactory.Default,
 ) {
-    fun send(packet: MqttPacket) {
+    fun send(packet: Packet) {
         factory.allocate(bufferSize).use { buffer ->
             packet.writeTo(buffer)
         }
@@ -201,5 +199,5 @@ Without proper headers, falls back to regular `ArrayBuffer`.
 | Short-lived parsing | `managed()` or pool from `Default` |
 | Android IPC | `shared()` |
 | Multi-threaded JS | `shared()` |
-| Deterministic cleanup | `Deterministic` |
+| Deterministic cleanup | `deterministic()` |
 | General purpose | `Default` |

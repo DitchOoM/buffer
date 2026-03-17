@@ -11,14 +11,16 @@ package com.ditchoom.buffer
  *
  * | Platform | Buffer type | Implements CloseableBuffer? |
  * |----------|------------|-----------------------------|
- * | JVM 21+ | FfmBuffer (Arena-backed) | **Yes** |
- * | JVM 9-20 | DeterministicDirectJvmBuffer | **Yes** (via `BufferFactory.Deterministic`) |
- * | JVM 8 | UnsafePlatformBuffer | **Yes** (via `BufferFactory.Deterministic`) |
+ * | JVM 21+ (default) | FfmAutoBuffer (Arena.ofAuto) | No (GC-managed) |
+ * | JVM 21+ (deterministic) | FfmBuffer (Arena.ofShared/ofConfined) | **Yes** (via `BufferFactory.deterministic()`) |
+ * | JVM 9-20 (deterministic) | DeterministicDirectJvmBuffer | **Yes** (via `BufferFactory.deterministic()`) |
+ * | JVM 8 (deterministic) | UnsafePlatformBuffer | **Yes** (via `BufferFactory.deterministic()`) |
  * | JVM (default) | DirectJvmBuffer | No (GC fallback) |
- * | Android (deterministic) | UnsafePlatformBuffer | **Yes** (via `BufferFactory.Deterministic`) |
+ * | Android (deterministic) | UnsafePlatformBuffer | **Yes** (via `BufferFactory.deterministic()`) |
  * | Android (default) | DirectJvmBuffer | No (GC-managed) |
  * | Apple | MutableDataBuffer (NSMutableData) | No (ARC-managed) |
- * | Linux | NativeBuffer (malloc/free) | **Yes** |
+ * | Linux (default) | ByteArrayBuffer | No (GC-managed) |
+ * | Linux (deterministic) | NativeBuffer (malloc/free) | **Yes** (via `BufferFactory.deterministic()`) |
  * | WASM | LinearBuffer (linear memory) | **Yes** |
  * | JS | JsBuffer (Int8Array) | No (GC-managed) |
  *

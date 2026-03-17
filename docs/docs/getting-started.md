@@ -51,188 +51,91 @@ kotlin {
 
 ## Your First Buffer
 
-### Allocating a Buffer
-
 ```kotlin
 import com.ditchoom.buffer.BufferFactory
 
-// Allocate 1024 bytes using the recommended factory pattern
 val buffer = BufferFactory.Default.allocate(1024)
-
-// Shorthand (delegates to BufferFactory.Default):
-// val buffer = PlatformBuffer.allocate(1024)
-```
-
-### Writing Data
-
-```kotlin
-// Write primitives (advances position automatically)
-buffer.writeByte(0x42)
-buffer.writeShort(1000)
-buffer.writeInt(123456)
-buffer.writeLong(9876543210L)
-buffer.writeFloat(3.14f)
-buffer.writeDouble(2.71828)
-
-// Write strings
-buffer.writeString("Hello, World!")
-
-// Write byte arrays
-buffer.writeBytes(byteArrayOf(1, 2, 3, 4))
-```
-
-### Preparing to Read
-
-After writing, call `resetForRead()` to set position to 0 and limit to the written amount:
-
-```kotlin
-buffer.resetForRead()
-```
-
-### Reading Data
-
-```kotlin
-val byte = buffer.readByte()
-val short = buffer.readShort()
-val int = buffer.readInt()
-val long = buffer.readLong()
-val float = buffer.readFloat()
-val double = buffer.readDouble()
-val text = buffer.readString(13)  // "Hello, World!"
-val bytes = buffer.readByteArray(4)
-```
-
-## Wrapping Existing Data
-
-```kotlin
-// Wrap a byte array (no copy)
-val data = byteArrayOf(0x00, 0x01, 0x02, 0x03)
-val buffer = PlatformBuffer.wrap(data)
-
-// Now read from it
-buffer.readInt()  // 0x00010203 (big-endian)
-```
-
-## Buffer Factories
-
-Choose how the buffer is allocated:
-
-```kotlin
-import com.ditchoom.buffer.BufferFactory
-
-// Platform-optimal native memory (recommended)
-val buffer = BufferFactory.Default.allocate(1024)
-
-// GC-managed heap memory
-val heapBuffer = BufferFactory.managed().allocate(1024)
-
-// Cross-process shared memory (for IPC on Android)
-val sharedBuffer = BufferFactory.shared().allocate(1024)
-
-// Deterministic cleanup (explicit free, no GC dependency)
-BufferFactory.Deterministic.allocate(1024).use { buf ->
-    buf.writeInt(42)
-} // freed immediately
-```
-
-See [Buffer Factories](./core-concepts/allocation-zones) for details.
-
-## Byte Order
-
-The default byte order is `ByteOrder.NATIVE` (matches the CPU's native endianness). Specify a different byte order when needed:
-
-```kotlin
-import com.ditchoom.buffer.ByteOrder
-
-// Big-endian (network byte order)
-val bigEndian = BufferFactory.Default.allocate(1024, ByteOrder.BIG_ENDIAN)
-
-// Little-endian
-val littleEndian = BufferFactory.Default.allocate(1024, ByteOrder.LITTLE_ENDIAN)
-```
-
-## Searching Buffers
-
-Find values within a buffer:
-
-```kotlin
-val buffer = BufferFactory.Default.allocate(100)
-buffer.writeString("Hello, World!")
+buffer.writeInt(42)
+buffer.writeString("Hello, Buffer!")
 buffer.resetForRead()
 
-// Find a byte
-val index = buffer.indexOf(','.code.toByte())  // 5
-
-// Find a string
-val worldIndex = buffer.indexOf("World")  // 7
-
-// Find primitive values (respects byte order)
-buffer.indexOf(0x1234.toShort())
-buffer.indexOf(0x12345678)
-buffer.indexOf(0x123456789ABCDEF0L)
-
-// Aligned search (faster, SIMD-accelerated on native)
-// Use when values were written with writeShort/writeInt/writeLong
-buffer.indexOf(0x1234.toShort(), aligned = true)
-buffer.indexOf(0x12345678, aligned = true)
-```
-
-## Comparing Buffers
-
-Compare buffer contents:
-
-```kotlin
-val buf1 = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4))
-val buf2 = PlatformBuffer.wrap(byteArrayOf(1, 2, 3, 4))
-val buf3 = PlatformBuffer.wrap(byteArrayOf(1, 2, 5, 4))
-
-buf1.contentEquals(buf2)  // true
-buf1.contentEquals(buf3)  // false
-buf1.mismatch(buf3)       // 2 (index where they differ)
-```
-
-## Filling Buffers
-
-Fill a buffer with a repeated value:
-
-```kotlin
-val buffer = BufferFactory.Default.allocate(1024)
-
-// Zero-fill (optimized: writes 8 bytes at a time)
-buffer.fill(0x00.toByte())
-
-// Fill with a pattern
-buffer.resetForWrite()
-buffer.fill(0xDEADBEEF.toInt())  // Requires size divisible by 4
-
-// XOR mask (SIMD-accelerated on native, used for WebSocket frame masking)
-buffer.resetForWrite()
-buffer.fill(0x01.toByte())
-buffer.resetForRead()
-buffer.xorMask(0x12345678)  // XOR remaining bytes with repeating 4-byte mask
+val number = buffer.readInt()      // 42
+val text = buffer.readString(14)   // "Hello, Buffer!"
 ```
 
 ## Buffer Pooling
 
-For high-performance scenarios, use buffer pools to avoid allocation overhead:
+Allocate once, reuse for every request — no GC pauses:
 
 ```kotlin
-import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.pool.withPool
 import com.ditchoom.buffer.pool.withBuffer
 
-// Use withPool for scoped pool lifetime
 withPool(defaultBufferSize = 8192) { pool ->
-    // Use withBuffer for automatic acquire/release
     pool.withBuffer(1024) { buffer ->
         buffer.writeInt(42)
         buffer.resetForRead()
         buffer.readInt()
-    } // Buffer automatically returned to pool
-} // Pool automatically cleared
+    } // buffer returned to pool
+} // pool cleared
 ```
 
-See [Buffer Pooling](./recipes/buffer-pooling) for more patterns.
+See [Buffer Pooling](./recipes/buffer-pooling) for threading modes, statistics, and production patterns.
+
+## Stream Processing
+
+Parse protocols that span chunk boundaries — no manual accumulator code:
+
+```kotlin
+import com.ditchoom.buffer.stream.StreamProcessor
+
+val processor = StreamProcessor.create(pool)
+processor.append(networkChunk1)
+processor.append(networkChunk2)
+
+while (processor.available() >= 4) {
+    val length = processor.peekInt()
+    if (processor.available() < 4 + length) break
+    processor.skip(4)
+    val payload = processor.readBuffer(length)
+    handleMessage(payload)
+}
+processor.release()
+```
+
+See [Stream Processing](./recipes/stream-processing) for auto-filling, decompression transforms, and the builder API.
+
+## Protocol Codecs
+
+Annotate a data class, get a type-safe codec at compile time:
+
+```kotlin
+import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+
+@ProtocolMessage
+data class DeviceReport(
+    val protocolVersion: UByte,       // 1 byte
+    val deviceType: UShort,           // 2 bytes
+    val sequenceNumber: UInt,         // 4 bytes
+    val timestamp: Long,              // 8 bytes
+    val latitude: Double,             // 8 bytes
+    val longitude: Double,            // 8 bytes
+    val altitude: Float,              // 4 bytes
+    val batteryLevel: UByte,          // 1 byte
+    val signalStrength: Short,        // 2 bytes
+    @LengthPrefixed val deviceName: String,
+)
+
+// Generated codec — batch-optimized, with round-trip testing
+val buffer = DeviceReportCodec.encodeToBuffer(report)
+val decoded = DeviceReportCodec.decode(buffer)
+DeviceReportCodec.testRoundTrip(report)
+```
+
+No manual read/write matching for 10 fields. No sizeOf arithmetic. No field-order bugs.
+
+See [Protocol Codecs](./recipes/protocol-codecs) for annotations, sealed dispatch, value classes, and the SPI.
 
 ## Compression
 
@@ -255,10 +158,6 @@ Compose streaming transforms with Kotlin Flow:
 ```kotlin
 import com.ditchoom.buffer.flow.*
 
-// Split arbitrarily chunked strings into complete lines
-stringFlow.lines().collect { line -> process(line) }
-
-// Transform buffer flows
 bufferFlow
     .mapBuffer { decompress(it, Gzip).getOrThrow() }
     .asStringFlow()
@@ -266,8 +165,106 @@ bufferFlow
     .collect { line -> process(line) }
 ```
 
+---
+
+## Buffer Factories
+
+Choose how buffers are allocated:
+
+```kotlin
+// Platform-optimal native memory (recommended)
+val buffer = BufferFactory.Default.allocate(1024)
+
+// GC-managed heap memory
+val heapBuffer = BufferFactory.managed().allocate(1024)
+
+// Cross-process shared memory (for IPC on Android)
+val sharedBuffer = BufferFactory.shared().allocate(1024)
+
+// Deterministic cleanup (explicit free, no GC dependency)
+BufferFactory.deterministic().allocate(1024).use { buf ->
+    buf.writeInt(42)
+} // freed immediately
+```
+
+Layer behaviors with composable decorators:
+
+```kotlin
+val factory = BufferFactory.Default
+    .requiring<NativeMemoryAccess>()   // throw if buffer lacks native access
+    .withSizeLimit(1_048_576)          // cap allocation size
+    .withPooling(pool)                 // recycle buffers
+```
+
+See [Buffer Factories](./core-concepts/allocation-zones) for full details.
+
+## Wrapping Existing Data
+
+```kotlin
+val data = byteArrayOf(0x00, 0x01, 0x02, 0x03)
+val buffer = BufferFactory.Default.wrap(data)
+buffer.readInt()  // 0x00010203 (big-endian)
+```
+
+## Reading and Writing Primitives
+
+```kotlin
+val buffer = BufferFactory.Default.allocate(1024)
+
+// Write (advances position automatically)
+buffer.writeByte(0x42)
+buffer.writeShort(1000)
+buffer.writeInt(123456)
+buffer.writeLong(9876543210L)
+buffer.writeFloat(3.14f)
+buffer.writeDouble(2.71828)
+buffer.writeString("Hello, World!")
+
+buffer.resetForRead()
+
+// Read
+val byte = buffer.readByte()
+val short = buffer.readShort()
+val int = buffer.readInt()
+val long = buffer.readLong()
+val float = buffer.readFloat()
+val double = buffer.readDouble()
+val text = buffer.readString(13)
+```
+
+See [Basic Operations](./recipes/basic-operations) for absolute reads/writes, slicing, and byte arrays.
+
+## Searching and Comparing
+
+```kotlin
+val buffer = BufferFactory.Default.allocate(100)
+buffer.writeString("Hello, World!")
+buffer.resetForRead()
+
+buffer.indexOf(','.code.toByte())  // 5
+buffer.indexOf("World")            // 7
+buffer.indexOf(0x1234.toShort(), aligned = true)  // SIMD-accelerated
+
+val buf1 = BufferFactory.Default.wrap(byteArrayOf(1, 2, 3))
+val buf2 = BufferFactory.Default.wrap(byteArrayOf(1, 2, 5))
+buf1.contentEquals(buf2)  // false
+buf1.mismatch(buf2)       // 2
+```
+
+## Byte Order
+
+Default is `ByteOrder.BIG_ENDIAN`. Specify when needed:
+
+```kotlin
+val bigEndian = BufferFactory.Default.allocate(1024, ByteOrder.BIG_ENDIAN)
+val littleEndian = BufferFactory.Default.allocate(1024, ByteOrder.LITTLE_ENDIAN)
+```
+
+See [Byte Order](./core-concepts/byte-order) for protocol-specific guidance.
+
 ## Next Steps
 
-- [Buffer Basics](./core-concepts/buffer-basics) - Position, limit, capacity
-- [Basic Operations](./recipes/basic-operations) - Read/write patterns
-- [Stream Processing](./recipes/stream-processing) - Handle chunked data
+- [Buffer Pooling](./recipes/buffer-pooling) - Eliminate allocation overhead
+- [Stream Processing](./recipes/stream-processing) - Handle chunked network data
+- [Protocol Codecs](./recipes/protocol-codecs) - Type-safe encode/decode
+- [Buffer Basics](./core-concepts/buffer-basics) - Position, limit, capacity internals

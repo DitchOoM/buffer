@@ -25,7 +25,7 @@ internal val defaultBufferFactory: BufferFactory =
         override fun allocate(
             size: Int,
             byteOrder: ByteOrder,
-        ): PlatformBuffer = allocateFfmBuffer(size, byteOrder)
+        ): PlatformBuffer = allocateAutoFfmBuffer(size, byteOrder)
 
         override fun wrap(
             array: ByteArray,
@@ -51,7 +51,7 @@ internal val sharedBufferFactory: BufferFactory =
         override fun allocate(
             size: Int,
             byteOrder: ByteOrder,
-        ): PlatformBuffer = allocateFfmBuffer(size, byteOrder)
+        ): PlatformBuffer = allocateAutoFfmBuffer(size, byteOrder)
 
         override fun wrap(
             array: ByteArray,
@@ -59,7 +59,7 @@ internal val sharedBufferFactory: BufferFactory =
         ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJavaByteOrder()))
     }
 
-internal val deterministicBufferFactory: BufferFactory =
+private val deterministicSharedFactory: BufferFactory =
     object : BufferFactory {
         override fun allocate(
             size: Int,
@@ -72,6 +72,22 @@ internal val deterministicBufferFactory: BufferFactory =
         ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJavaByteOrder()))
     }
 
+private val deterministicConfinedFactory: BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = allocateConfinedFfmBuffer(size, byteOrder)
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = HeapJvmBuffer(ByteBuffer.wrap(array).order(byteOrder.toJavaByteOrder()))
+    }
+
+internal fun deterministicBufferFactory(threadConfined: Boolean): BufferFactory =
+    if (threadConfined) deterministicConfinedFactory else deterministicSharedFactory
+
 fun PlatformBuffer.Companion.allocateNative(
     size: Int,
     byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
@@ -83,18 +99,59 @@ fun PlatformBuffer.Companion.allocateShared(
 ): PlatformBuffer = BufferFactory.Default.allocate(size, byteOrder)
 
 /**
- * Internal factory that creates an FFM-backed buffer.
+ * Creates a GC-managed FFM buffer using [Arena.ofAuto].
  *
- * Uses [Arena.ofShared] for memory ownership — deterministic free from any thread via
- * [FfmBuffer.freeNativeMemory]. The ByteBuffer view is created from a global-scope
- * reinterpretation of the segment address so it is compatible with all JDK APIs
- * (Deflater, Inflater, CRC32, NIO channels).
+ * The returned [FfmAutoBuffer] does not implement [CloseableBuffer] — memory is reclaimed
+ * by the garbage collector. This is used by [defaultBufferFactory] and [sharedBufferFactory].
+ */
+internal fun allocateAutoFfmBuffer(
+    size: Int,
+    byteOrder: ByteOrder,
+): FfmAutoBuffer {
+    val arena = Arena.ofAuto()
+    val segment = arena.allocate(size.toLong())
+    val byteOrderNative = byteOrder.toJavaByteOrder()
+    val globalView =
+        MemorySegment
+            .ofAddress(segment.address())
+            .reinterpret(size.toLong())
+    val byteBuffer = globalView.asByteBuffer().order(byteOrderNative)
+    return FfmAutoBuffer(segment, byteBuffer)
+}
+
+/**
+ * Creates a deterministic FFM buffer using [Arena.ofShared].
+ *
+ * The returned [FfmBuffer] implements [CloseableBuffer] — memory is freed immediately
+ * when [FfmBuffer.freeNativeMemory] is called from any thread.
  */
 internal fun allocateFfmBuffer(
     size: Int,
     byteOrder: ByteOrder,
 ): FfmBuffer {
     val arena = Arena.ofShared()
+    val segment = arena.allocate(size.toLong())
+    val byteOrderNative = byteOrder.toJavaByteOrder()
+    val globalView =
+        MemorySegment
+            .ofAddress(segment.address())
+            .reinterpret(size.toLong())
+    val byteBuffer = globalView.asByteBuffer().order(byteOrderNative)
+    return FfmBuffer(arena, segment, byteBuffer)
+}
+
+/**
+ * Creates a deterministic FFM buffer using [Arena.ofConfined].
+ *
+ * The returned [FfmBuffer] implements [CloseableBuffer] — memory must be freed on the
+ * same thread that created it. This is more efficient than [Arena.ofShared] when
+ * cross-thread access is not needed.
+ */
+internal fun allocateConfinedFfmBuffer(
+    size: Int,
+    byteOrder: ByteOrder,
+): FfmBuffer {
+    val arena = Arena.ofConfined()
     val segment = arena.allocate(size.toLong())
     val byteOrderNative = byteOrder.toJavaByteOrder()
     val globalView =

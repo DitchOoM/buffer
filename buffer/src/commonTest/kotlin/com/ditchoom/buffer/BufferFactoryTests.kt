@@ -69,7 +69,7 @@ class BufferFactoryTests {
 
     @Test
     fun deterministicFactoryAllocatesBuffer() {
-        val buffer = BufferFactory.Deterministic.allocate(64)
+        val buffer = BufferFactory.deterministic().allocate(64)
         assertEquals(64, buffer.capacity)
         buffer.writeInt(0x12345678)
         buffer.resetForRead()
@@ -79,7 +79,7 @@ class BufferFactoryTests {
 
     @Test
     fun deterministicFactoryUsePattern() {
-        BufferFactory.Deterministic.allocate(128).use { buffer ->
+        BufferFactory.deterministic().allocate(128).use { buffer ->
             buffer.writeLong(0x123456789ABCDEF0L)
             buffer.resetForRead()
             assertEquals(0x123456789ABCDEF0L, buffer.readLong())
@@ -89,7 +89,7 @@ class BufferFactoryTests {
     @Test
     fun deterministicFactoryUseWithException() {
         assertFailsWith<RuntimeException> {
-            BufferFactory.Deterministic.allocate(64).use { _ ->
+            BufferFactory.deterministic().allocate(64).use { _ ->
                 throw RuntimeException("test exception")
             }
         }
@@ -98,14 +98,14 @@ class BufferFactoryTests {
     @Test
     fun deterministicFactoryWrapsArray() {
         val array = byteArrayOf(1, 2, 3, 4)
-        val buffer = BufferFactory.Deterministic.wrap(array)
+        val buffer = BufferFactory.deterministic().wrap(array)
         assertEquals(1, buffer.readByte())
         assertEquals(2, buffer.readByte())
     }
 
     @Test
     fun deterministicFactoryRespectsLittleEndianByteOrder() {
-        BufferFactory.Deterministic.allocate(8, ByteOrder.LITTLE_ENDIAN).use { buffer ->
+        BufferFactory.deterministic().allocate(8, ByteOrder.LITTLE_ENDIAN).use { buffer ->
             assertEquals(ByteOrder.LITTLE_ENDIAN, buffer.byteOrder)
             buffer.writeInt(0x12345678)
             buffer.resetForRead()
@@ -115,7 +115,7 @@ class BufferFactoryTests {
 
     @Test
     fun deterministicFactoryRespectsBigEndianByteOrder() {
-        BufferFactory.Deterministic.allocate(8, ByteOrder.BIG_ENDIAN).use { buffer ->
+        BufferFactory.deterministic().allocate(8, ByteOrder.BIG_ENDIAN).use { buffer ->
             assertEquals(ByteOrder.BIG_ENDIAN, buffer.byteOrder)
             buffer.writeInt(0x12345678)
             buffer.resetForRead()

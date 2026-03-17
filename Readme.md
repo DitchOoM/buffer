@@ -182,7 +182,7 @@ bufferFlow
 For explicit memory management without relying on GC:
 
 ```kotlin
-BufferFactory.Deterministic.allocate(8192).use { buffer ->
+BufferFactory.deterministic().allocate(8192).use { buffer ->
     buffer.writeInt(42)
     buffer.writeString("Hello")
     buffer.resetForRead()

@@ -31,7 +31,9 @@ internal actual val defaultBufferFactory: BufferFactory =
 internal actual val managedBufferFactory: BufferFactory = defaultBufferFactory
 
 // JS has no deterministic cleanup — GC-managed only
-internal actual val deterministicBufferFactory: BufferFactory = defaultBufferFactory
+private val deterministicFactoryInstance: BufferFactory = defaultBufferFactory
+
+internal actual fun deterministicBufferFactory(threadConfined: Boolean): BufferFactory = deterministicFactoryInstance
 
 internal actual val sharedBufferFactory: BufferFactory =
     object : BufferFactory {
