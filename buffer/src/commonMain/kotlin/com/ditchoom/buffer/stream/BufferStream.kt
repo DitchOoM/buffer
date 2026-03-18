@@ -536,11 +536,15 @@ internal class DefaultStreamProcessor(
             return empty
         }
         if (chunk.remaining() == size) {
-            // Transfer chunk to caller (zero-copy).
-            // Don't slice-then-free — that invalidates FfmBuffer slices.
             chunks.removeFirst()
             totalAvailable -= size
-            return chunk
+            // If position > 0, the chunk may contain framing bytes (e.g. WebSocket headers)
+            // before the current position. Slice to ensure position 0 = start of payload,
+            // so resetForRead() can't expose those bytes to the caller.
+            if (chunk.position() == 0) {
+                return chunk // already clean — zero-copy transfer
+            }
+            return chunk.slice()
         }
         if (chunk.remaining() > size) {
             // Data is contiguous, return a slice

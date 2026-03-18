@@ -101,6 +101,51 @@ class StreamProcessorEdgeCaseTests {
     }
 
     // ============================================================================
+    // readBuffer returns clean buffers (position 0 = payload start)
+    // ============================================================================
+
+    @Test
+    fun readBufferExactMatchReturnsCleanBuffer() {
+        // Simulates the WebSocket framing bug: a chunk has position > 0 because
+        // earlier bytes (e.g. frame headers) were already consumed. When readBuffer
+        // returns this chunk, resetForRead() must not expose those earlier bytes.
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+
+        // Create a buffer that simulates a WebSocket frame: [0x82, 0x04, 0xDE, 0xAD, 0xBE, 0xEF]
+        // where the first 2 bytes are framing and the last 4 are payload.
+        val chunk = BufferFactory.Default.allocate(6)
+        chunk.writeByte(0x82.toByte()) // frame header
+        chunk.writeByte(0x04.toByte()) // frame length
+        chunk.writeByte(0xDE.toByte()) // payload
+        chunk.writeByte(0xAD.toByte())
+        chunk.writeByte(0xBE.toByte())
+        chunk.writeByte(0xEF.toByte())
+        // Position past the "frame header" to simulate WebSocket already consuming it
+        chunk.position(2)
+        chunk.setLimit(6)
+
+        processor.append(chunk)
+        assertEquals(4, processor.available())
+
+        // readBuffer(4) should return a buffer where position 0 = 0xDE, not 0x82
+        val result = processor.readBuffer(4)
+        assertEquals(4, result.remaining())
+        assertEquals(0xDE.toByte(), result.readByte())
+        assertEquals(0xAD.toByte(), result.readByte())
+        assertEquals(0xBE.toByte(), result.readByte())
+        assertEquals(0xEF.toByte(), result.readByte())
+
+        // Critical: resetForRead must not expose the frame header bytes
+        result.resetForRead()
+        assertEquals(4, result.remaining())
+        assertEquals(0xDE.toByte(), result.readByte())
+
+        processor.release()
+        pool.clear()
+    }
+
+    // ============================================================================
     // Byte Order Preservation Through readBuffer
     // ============================================================================
 
