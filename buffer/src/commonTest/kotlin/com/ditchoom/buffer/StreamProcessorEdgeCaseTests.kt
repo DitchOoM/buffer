@@ -101,6 +101,99 @@ class StreamProcessorEdgeCaseTests {
     }
 
     // ============================================================================
+    // readBuffer returns clean buffers (position 0 = payload start)
+    // ============================================================================
+
+    @Test
+    fun readBufferExactMatchReturnsCleanBuffer() {
+        // Simulates the WebSocket framing bug: a chunk has position > 0 because
+        // earlier bytes (e.g. frame headers) were already consumed. When readBuffer
+        // returns this chunk, resetForRead() must not expose those earlier bytes.
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+
+        // Create a buffer that simulates a WebSocket frame: [0x82, 0x04, 0xDE, 0xAD, 0xBE, 0xEF]
+        // where the first 2 bytes are framing and the last 4 are payload.
+        val chunk = BufferFactory.Default.allocate(6)
+        chunk.writeByte(0x82.toByte()) // frame header
+        chunk.writeByte(0x04.toByte()) // frame length
+        chunk.writeByte(0xDE.toByte()) // payload
+        chunk.writeByte(0xAD.toByte())
+        chunk.writeByte(0xBE.toByte())
+        chunk.writeByte(0xEF.toByte())
+        // Position past the "frame header" to simulate WebSocket already consuming it
+        chunk.position(2)
+        chunk.setLimit(6)
+
+        processor.append(chunk)
+        assertEquals(4, processor.available())
+
+        // readBuffer(4) should return a buffer where position 0 = 0xDE, not 0x82
+        val result = processor.readBuffer(4)
+        assertEquals(4, result.remaining())
+        assertEquals(0xDE.toByte(), result.readByte())
+        assertEquals(0xAD.toByte(), result.readByte())
+        assertEquals(0xBE.toByte(), result.readByte())
+        assertEquals(0xEF.toByte(), result.readByte())
+
+        // Critical: resetForRead must not expose the frame header bytes
+        result.resetForRead()
+        assertEquals(4, result.remaining())
+        assertEquals(0xDE.toByte(), result.readByte())
+
+        processor.release()
+        pool.clear()
+    }
+
+    // ============================================================================
+    // Byte Order Preservation Through readBuffer
+    // ============================================================================
+
+    @Test
+    fun readBufferPreservesBigEndianByteOrderAcrossChunks() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+
+        // Write two chunks with BIG_ENDIAN shorts
+        val chunk1 = BufferFactory.Default.allocate(4, ByteOrder.BIG_ENDIAN)
+        chunk1.writeShort(0x1234.toShort())
+        chunk1.writeShort(0x5678.toShort())
+        chunk1.resetForRead()
+        processor.append(chunk1)
+
+        val chunk2 = BufferFactory.Default.allocate(4, ByteOrder.BIG_ENDIAN)
+        chunk2.writeShort(0x0ABC.toShort())
+        chunk2.writeShort(0x0DEF.toShort())
+        chunk2.resetForRead()
+        processor.append(chunk2)
+
+        // Read across chunk boundary — triggers merge/copy path
+        val merged = merged(processor)
+        assertEquals(ByteOrder.BIG_ENDIAN, merged.byteOrder, "Merged buffer must preserve BIG_ENDIAN byte order")
+        assertEquals(0x1234.toShort(), merged.readShort(), "First short must be 0x1234 (big-endian)")
+        assertEquals(0x5678.toShort(), merged.readShort(), "Second short must be 0x5678 (big-endian)")
+        assertEquals(0x0ABC.toShort(), merged.readShort(), "Third short must be 0x0ABC (big-endian)")
+        assertEquals(0x0DEF.toShort(), merged.readShort(), "Fourth short must be 0x0DEF (big-endian)")
+
+        processor.release()
+        pool.clear()
+    }
+
+    private fun merged(processor: StreamProcessor): ReadBuffer {
+        // Force the multi-chunk merge path by reading all 8 bytes across 2 chunks
+        return processor.readBuffer(8)
+    }
+
+    @Test
+    fun poolAcquireUsesBigEndianByDefault() {
+        val pool = BufferPool(defaultBufferSize = 16)
+        val buf = pool.acquire(16)
+        assertEquals(ByteOrder.BIG_ENDIAN, buf.byteOrder, "Pool buffers must default to BIG_ENDIAN")
+        pool.release(buf)
+        pool.clear()
+    }
+
+    // ============================================================================
     // Partially Consumed Buffer
     // ============================================================================
 
