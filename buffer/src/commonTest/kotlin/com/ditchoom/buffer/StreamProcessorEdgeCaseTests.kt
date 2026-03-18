@@ -101,6 +101,54 @@ class StreamProcessorEdgeCaseTests {
     }
 
     // ============================================================================
+    // Byte Order Preservation Through readBuffer
+    // ============================================================================
+
+    @Test
+    fun readBufferPreservesBigEndianByteOrderAcrossChunks() {
+        val pool = BufferPool(defaultBufferSize = 1024)
+        val processor = StreamProcessor.create(pool)
+
+        // Write two chunks with BIG_ENDIAN shorts
+        val chunk1 = BufferFactory.Default.allocate(4, ByteOrder.BIG_ENDIAN)
+        chunk1.writeShort(0x1234.toShort())
+        chunk1.writeShort(0x5678.toShort())
+        chunk1.resetForRead()
+        processor.append(chunk1)
+
+        val chunk2 = BufferFactory.Default.allocate(4, ByteOrder.BIG_ENDIAN)
+        chunk2.writeShort(0x0ABC.toShort())
+        chunk2.writeShort(0x0DEF.toShort())
+        chunk2.resetForRead()
+        processor.append(chunk2)
+
+        // Read across chunk boundary — triggers merge/copy path
+        val merged = merged(processor)
+        assertEquals(ByteOrder.BIG_ENDIAN, merged.byteOrder, "Merged buffer must preserve BIG_ENDIAN byte order")
+        assertEquals(0x1234.toShort(), merged.readShort(), "First short must be 0x1234 (big-endian)")
+        assertEquals(0x5678.toShort(), merged.readShort(), "Second short must be 0x5678 (big-endian)")
+        assertEquals(0x0ABC.toShort(), merged.readShort(), "Third short must be 0x0ABC (big-endian)")
+        assertEquals(0x0DEF.toShort(), merged.readShort(), "Fourth short must be 0x0DEF (big-endian)")
+
+        processor.release()
+        pool.clear()
+    }
+
+    private fun merged(processor: StreamProcessor): ReadBuffer {
+        // Force the multi-chunk merge path by reading all 8 bytes across 2 chunks
+        return processor.readBuffer(8)
+    }
+
+    @Test
+    fun poolAcquireUsesBigEndianByDefault() {
+        val pool = BufferPool(defaultBufferSize = 16)
+        val buf = pool.acquire(16)
+        assertEquals(ByteOrder.BIG_ENDIAN, buf.byteOrder, "Pool buffers must default to BIG_ENDIAN")
+        pool.release(buf)
+        pool.clear()
+    }
+
+    // ============================================================================
     // Partially Consumed Buffer
     // ============================================================================
 
