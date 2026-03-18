@@ -122,7 +122,11 @@ class WriteEmptyBufferTests {
             for (targetFactory in listOf(BufferFactory.managed(), BufferFactory.Default, BufferFactory.deterministic())) {
                 val target = targetFactory.allocate(8)
                 target.write(empty)
-                assertEquals(0, target.position(), "Writing empty ${empty::class.simpleName} into ${target::class.simpleName} should be a no-op")
+                assertEquals(
+                    0,
+                    target.position(),
+                    "Writing empty ${empty::class.simpleName} into ${target::class.simpleName} should be a no-op",
+                )
             }
         }
     }

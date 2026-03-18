@@ -30,7 +30,6 @@ import platform.Foundation.NSMutableData
 import platform.Foundation.NSString
 import platform.Foundation.create
 import platform.Foundation.dataUsingEncoding
-import platform.Foundation.isEqualToData
 import platform.Foundation.replaceBytesInRange
 import platform.Foundation.subdataWithRange
 import platform.posix.memchr
