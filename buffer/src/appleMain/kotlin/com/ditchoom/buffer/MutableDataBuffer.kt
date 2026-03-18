@@ -30,7 +30,6 @@ import platform.Foundation.NSMutableData
 import platform.Foundation.NSString
 import platform.Foundation.create
 import platform.Foundation.dataUsingEncoding
-import platform.Foundation.isEqualToData
 import platform.Foundation.replaceBytesInRange
 import platform.Foundation.subdataWithRange
 import platform.posix.memchr
@@ -245,6 +244,7 @@ class MutableDataBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val bytesToCopy = buffer.remaining()
+        if (bytesToCopy == 0) return
         val srcNative = buffer.nativeMemoryAccess
         if (srcNative != null) {
             val srcPtr = srcNative.nativeAddress.toCPointer<ByteVar>()!! + buffer.position()
