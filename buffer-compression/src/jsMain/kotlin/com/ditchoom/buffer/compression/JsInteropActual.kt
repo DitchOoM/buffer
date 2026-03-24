@@ -21,7 +21,9 @@ internal actual val isNodeJs: Boolean by lazy {
 // JsByteArray — wraps Int8Array on JS
 // ============================================================================
 
-internal actual class JsByteArray(val array: Int8Array)
+internal actual class JsByteArray(
+    val array: Int8Array,
+)
 
 internal actual fun JsByteArray.byteLength(): Int = array.length
 
@@ -37,7 +39,10 @@ internal actual fun ReadBuffer.toJsByteArray(): JsByteArray {
     }
 }
 
-internal actual fun combineJsByteArrays(arrays: List<JsByteArray>, totalSize: Int): JsByteArray {
+internal actual fun combineJsByteArrays(
+    arrays: List<JsByteArray>,
+    totalSize: Int,
+): JsByteArray {
     val combined = Int8Array(totalSize)
     var offset = 0
     for (a in arrays) {
@@ -68,11 +73,9 @@ internal actual fun JsByteArray.toPlatformBuffer(allocator: BufferAllocator): Re
 // Helpers: typed array conversions
 // ============================================================================
 
-private fun JsByteArray.toUint8Array(): Uint8Array =
-    Uint8Array(array.buffer, array.byteOffset, array.length)
+private fun JsByteArray.toUint8Array(): Uint8Array = Uint8Array(array.buffer, array.byteOffset, array.length)
 
-private fun Uint8Array.toJsByteArray(): JsByteArray =
-    JsByteArray(Int8Array(buffer, byteOffset, length))
+private fun Uint8Array.toJsByteArray(): JsByteArray = JsByteArray(Int8Array(buffer, byteOffset, length))
 
 // ============================================================================
 // Node.js zlib module loading
@@ -158,7 +161,10 @@ private fun createBlob(data: Uint8Array): dynamic = js("new Blob([data])")
 
 private fun getStream(blob: dynamic): dynamic = blob.stream()
 
-private fun pipeThrough(stream: dynamic, transform: dynamic): dynamic = stream.pipeThrough(transform)
+private fun pipeThrough(
+    stream: dynamic,
+    transform: dynamic,
+): dynamic = stream.pipeThrough(transform)
 
 private fun createResponse(stream: dynamic): dynamic = js("new Response(stream)")
 
@@ -200,7 +206,9 @@ internal actual suspend fun browserDecompress(
 // Node.js Transform stream
 // ============================================================================
 
-internal actual class NodeTransformHandle(val stream: dynamic)
+internal actual class NodeTransformHandle(
+    val stream: dynamic,
+)
 
 internal actual fun createCompressStream(
     algorithm: CompressionAlgorithm,

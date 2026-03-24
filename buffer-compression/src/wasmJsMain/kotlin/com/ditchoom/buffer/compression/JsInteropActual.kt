@@ -21,7 +21,9 @@ internal actual val isNodeJs: Boolean by lazy { jsIsNodeJs() }
 // JsByteArray — wraps a JS Uint8Array as opaque JsAny
 // ============================================================================
 
-internal actual class JsByteArray(val ref: JsAny)
+internal actual class JsByteArray(
+    val ref: JsAny,
+)
 
 @JsFun("(arr) => arr.length")
 private external fun jsArrayLength(arr: JsAny): Int
@@ -48,7 +50,10 @@ internal actual fun emptyJsByteArray(): JsByteArray = JsByteArray(jsEmptyUint8Ar
 }
 """,
 )
-private external fun jsCopyFromWasmMemory(offset: Int, length: Int): JsAny
+private external fun jsCopyFromWasmMemory(
+    offset: Int,
+    length: Int,
+): JsAny
 
 internal actual fun ReadBuffer.toJsByteArray(): JsByteArray {
     val remaining = remaining()
@@ -98,15 +103,24 @@ private fun ByteArray.toJsByteArray(): JsByteArray {
 }
 """,
 )
-private external fun jsCombineArrays(arrays: JsAny, totalSize: Int): JsAny
+private external fun jsCombineArrays(
+    arrays: JsAny,
+    totalSize: Int,
+): JsAny
 
 @JsFun("() => []")
 private external fun jsNewArray(): JsAny
 
 @JsFun("(arr, item) => { arr.push(item); }")
-private external fun jsArrayPush(arr: JsAny, item: JsAny)
+private external fun jsArrayPush(
+    arr: JsAny,
+    item: JsAny,
+)
 
-internal actual fun combineJsByteArrays(arrays: List<JsByteArray>, totalSize: Int): JsByteArray {
+internal actual fun combineJsByteArrays(
+    arrays: List<JsByteArray>,
+    totalSize: Int,
+): JsByteArray {
     val jsArr = jsNewArray()
     for (a in arrays) jsArrayPush(jsArr, a.ref)
     return JsByteArray(jsCombineArrays(jsArr, totalSize))
@@ -125,7 +139,10 @@ internal actual fun combineJsByteArrays(arrays: List<JsByteArray>, totalSize: In
 }
 """,
 )
-private external fun jsCopyToWasmMemory(jsArray: JsAny, dstOffset: Int)
+private external fun jsCopyToWasmMemory(
+    jsArray: JsAny,
+    dstOffset: Int,
+)
 
 internal actual fun JsByteArray.toPlatformBuffer(allocator: BufferAllocator): ReadBuffer {
     val length = byteLength()
@@ -177,7 +194,11 @@ internal actual fun JsByteArray.toPlatformBuffer(allocator: BufferAllocator): Re
 }
 """,
 )
-private external fun jsZlibSync(input: JsAny, algorithm: Int, level: Int): JsAny
+private external fun jsZlibSync(
+    input: JsAny,
+    algorithm: Int,
+    level: Int,
+): JsAny
 
 internal actual fun nodeZlibSync(
     input: JsByteArray,
@@ -200,7 +221,11 @@ internal actual fun nodeZlibSync(
 }
 """,
 )
-private external fun jsZlibSyncFlush(input: JsAny, algorithm: Int, level: Int): JsAny
+private external fun jsZlibSyncFlush(
+    input: JsAny,
+    algorithm: Int,
+    level: Int,
+): JsAny
 
 internal actual fun nodeZlibSyncFlush(
     input: JsByteArray,
@@ -225,7 +250,10 @@ internal actual fun nodeZlibSyncFlush(
 }
 """,
 )
-private external fun jsZlibDecompressSync(input: JsAny, algorithm: Int): JsAny
+private external fun jsZlibDecompressSync(
+    input: JsAny,
+    algorithm: Int,
+): JsAny
 
 internal actual fun nodeZlibDecompressSync(
     input: JsByteArray,
@@ -248,7 +276,7 @@ async (data, format) => {
 }
 """,
 )
-private external fun jsBrowserCompress(data: JsAny, format: JsString): JsAny /* Promise */
+private external fun jsBrowserCompress(data: JsAny, format: JsString): JsAny // Promise
 
 internal actual suspend fun browserCompress(
     input: JsByteArray,
@@ -270,7 +298,7 @@ async (data, format) => {
 }
 """,
 )
-private external fun jsBrowserDecompress(data: JsAny, format: JsString): JsAny /* Promise */
+private external fun jsBrowserDecompress(data: JsAny, format: JsString): JsAny // Promise
 
 internal actual suspend fun browserDecompress(
     input: JsByteArray,
@@ -284,7 +312,9 @@ internal actual suspend fun browserDecompress(
 // Node.js Transform stream
 // ============================================================================
 
-internal actual class NodeTransformHandle(val ref: JsAny)
+internal actual class NodeTransformHandle(
+    val ref: JsAny,
+)
 
 @JsFun(
     """
@@ -301,7 +331,10 @@ internal actual class NodeTransformHandle(val ref: JsAny)
 }
 """,
 )
-private external fun jsCreateCompressStream(algorithm: Int, level: Int): JsAny
+private external fun jsCreateCompressStream(
+    algorithm: Int,
+    level: Int,
+): JsAny
 
 internal actual fun createCompressStream(
     algorithm: CompressionAlgorithm,
@@ -326,9 +359,8 @@ internal actual fun createCompressStream(
 )
 private external fun jsCreateDecompressStream(algorithm: Int): JsAny
 
-internal actual fun createDecompressStream(
-    algorithm: CompressionAlgorithm,
-): NodeTransformHandle = NodeTransformHandle(jsCreateDecompressStream(algorithm.toOrdinal()))
+internal actual fun createDecompressStream(algorithm: CompressionAlgorithm): NodeTransformHandle =
+    NodeTransformHandle(jsCreateDecompressStream(algorithm.toOrdinal()))
 
 @JsFun(
     """
@@ -359,13 +391,16 @@ internal actual fun createDecompressStream(
 }
 """,
 )
-private external fun jsWriteAndFlush(stream: JsAny, inputs: JsAny): JsAny /* Promise */
+private external fun jsWriteAndFlush(stream: JsAny, inputs: JsAny): JsAny // Promise
 
 @JsFun("(arr) => arr.length")
 private external fun jsJsArrayLength(arr: JsAny): Int
 
 @JsFun("(arr, i) => arr[i]")
-private external fun jsJsArrayGet(arr: JsAny, i: Int): JsAny
+private external fun jsJsArrayGet(
+    arr: JsAny,
+    i: Int,
+): JsAny
 
 internal actual suspend fun NodeTransformHandle.writeAndFlush(inputs: List<JsByteArray>): List<JsByteArray> {
     val jsInputs = jsNewArray()
@@ -394,7 +429,7 @@ internal actual suspend fun NodeTransformHandle.writeAndFlush(inputs: List<JsByt
 }
 """,
 )
-private external fun jsWriteAndEnd(stream: JsAny, inputs: JsAny): JsAny /* Promise */
+private external fun jsWriteAndEnd(stream: JsAny, inputs: JsAny): JsAny // Promise
 
 internal actual suspend fun NodeTransformHandle.writeAndEnd(inputs: List<JsByteArray>): JsByteArray {
     val jsInputs = jsNewArray()
@@ -439,7 +474,7 @@ internal actual fun NodeTransformHandle.destroy() = jsDestroyStream(ref)
 }
 """,
 )
-private external fun jsTransformCompressOneShot(inputs: JsAny, algorithm: Int, level: Int): JsAny /* Promise */
+private external fun jsTransformCompressOneShot(inputs: JsAny, algorithm: Int, level: Int): JsAny // Promise
 
 internal actual suspend fun nodeTransformCompressOneShot(
     inputs: List<JsByteArray>,
@@ -480,7 +515,7 @@ internal actual suspend fun nodeTransformCompressOneShot(
 }
 """,
 )
-private external fun jsTransformDecompressOneShot(inputs: JsAny, algorithm: Int): JsAny /* Promise */
+private external fun jsTransformDecompressOneShot(inputs: JsAny, algorithm: Int): JsAny // Promise
 
 internal actual suspend fun nodeTransformDecompressOneShot(
     inputs: List<JsByteArray>,
