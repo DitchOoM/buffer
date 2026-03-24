@@ -58,6 +58,10 @@ kotlin {
         browser()
         nodejs()
     }
+    wasmJs {
+        browser()
+        nodejs()
+    }
     if (isRunningOnGithub) {
         // CI: register targets based on host OS (must match :buffer module)
         if (HostManager.hostIsMac) {
@@ -157,7 +161,31 @@ kotlin {
             dependsOn(jvmCommonMain)
         }
 
+        // Shared source set for JS and wasmJs (browser/Node.js compression)
+        val jsAndWasmJsMain by creating {
+            dependsOn(commonMain.get())
+        }
+        val jsAndWasmJsTest by creating {
+            dependsOn(commonTest.get())
+        }
+        jsMain {
+            dependsOn(jsAndWasmJsMain)
+        }
+        wasmJsMain {
+            dependsOn(jsAndWasmJsMain)
+        }
+        jsTest {
+            dependsOn(jsAndWasmJsTest)
+        }
+        wasmJsTest {
+            dependsOn(jsAndWasmJsTest)
+        }
+
         jsMain.dependencies {
+            implementation(libs.kotlin.web)
+            implementation(libs.kotlin.js)
+        }
+        wasmJsMain.dependencies {
             implementation(libs.kotlin.web)
             implementation(libs.kotlin.js)
         }

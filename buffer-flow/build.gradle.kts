@@ -56,6 +56,10 @@ kotlin {
         browser()
         nodejs()
     }
+    wasmJs {
+        browser()
+        nodejs()
+    }
     if (isRunningOnGithub) {
         // CI: register targets based on host OS (must match :buffer module)
         if (HostManager.hostIsMac) {
