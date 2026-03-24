@@ -22,7 +22,10 @@ internal expect fun JsByteArray.byteLength(): Int
 internal expect fun ReadBuffer.toJsByteArray(): JsByteArray
 
 /** Combine multiple [JsByteArray]s into a single one. */
-internal expect fun combineJsByteArrays(arrays: List<JsByteArray>, totalSize: Int): JsByteArray
+internal expect fun combineJsByteArrays(
+    arrays: List<JsByteArray>,
+    totalSize: Int,
+): JsByteArray
 
 /** Create an empty [JsByteArray] of size 0. */
 internal expect fun emptyJsByteArray(): JsByteArray
@@ -84,9 +87,7 @@ internal expect fun createCompressStream(
 ): NodeTransformHandle
 
 /** Create a decompression Transform stream. */
-internal expect fun createDecompressStream(
-    algorithm: CompressionAlgorithm,
-): NodeTransformHandle
+internal expect fun createDecompressStream(algorithm: CompressionAlgorithm): NodeTransformHandle
 
 /** Write chunks and flush with Z_SYNC_FLUSH. Returns output chunks. */
 internal expect suspend fun NodeTransformHandle.writeAndFlush(inputs: List<JsByteArray>): List<JsByteArray>

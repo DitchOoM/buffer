@@ -2,10 +2,8 @@ package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.ReadBuffer
 
-/**
- * Shared JS/wasmJs streaming compression factories and implementations.
- * All JS interop is delegated to [JsByteArray] and the expect functions in JsInterop.kt.
- */
+// Shared JS/wasmJs streaming compression factories and implementations.
+// All JS interop is delegated to JsByteArray and the expect functions in JsInterop.kt.
 
 // ============================================================================
 // Factory functions (actual declarations for commonMain expects)
