@@ -102,18 +102,11 @@ private class JsNodeStreamingCompressor(
 
     override fun finish(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
-        if (totalBytes == 0) {
-            when (val result = compress(emptyJsByteArray().toPlatformBuffer(allocator), algorithm, level)) {
-                is CompressionResult.Success -> onOutput(result.buffer)
-                is CompressionResult.Failure -> throw CompressionException(result.message, result.cause)
-            }
-            return
-        }
-        val combined = combineJsByteArrays(accumulatedChunks, totalBytes)
-        when (val result = compress(combined.toPlatformBuffer(allocator), algorithm, level)) {
-            is CompressionResult.Success -> onOutput(result.buffer)
-            is CompressionResult.Failure -> throw CompressionException(result.message, result.cause)
-        }
+        val input = if (totalBytes == 0) emptyJsByteArray() else combineJsByteArrays(accumulatedChunks, totalBytes)
+        // Call nodeZlibSync directly — avoids allocating an intermediate pool buffer
+        // that compress() would create via toPlatformBuffer then immediately consume.
+        val compressed = nodeZlibSync(input, algorithm, level)
+        onOutput(compressed.toPlatformBuffer(allocator))
     }
 
     override fun reset() {
@@ -153,10 +146,9 @@ private class JsNodeStreamingDecompressor(
         check(!closed) { "Decompressor is closed" }
         if (totalBytes == 0) return
         val combined = combineJsByteArrays(accumulatedChunks, totalBytes)
-        when (val result = decompress(combined.toPlatformBuffer(allocator), algorithm)) {
-            is CompressionResult.Success -> onOutput(result.buffer)
-            is CompressionResult.Failure -> throw CompressionException(result.message, result.cause)
-        }
+        // Call nodeZlibDecompressSync directly — avoids intermediate pool buffer allocation.
+        val decompressed = nodeZlibDecompressSync(combined, algorithm)
+        onOutput(decompressed.toPlatformBuffer(allocator))
     }
 
     override fun reset() {
