@@ -6,6 +6,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.nativeMemoryAccess
 import kotlinx.coroutines.await
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.js.Promise
@@ -55,8 +56,15 @@ private external fun jsCopyFromWasmMemory(offset: Int, length: Int): JsAny
 internal actual fun ReadBuffer.toJsByteArray(): JsByteArray {
     val remaining = remaining()
     if (remaining == 0) return emptyJsByteArray()
-    // readByteArray returns a Kotlin ByteArray in WASM linear memory.
-    // We pin it and copy to a JS Uint8Array.
+    // Zero-copy path: if buffer has native memory (LinearBuffer),
+    // copy directly from WASM linear memory offset to JS Uint8Array.
+    val native = nativeMemoryAccess
+    if (native != null) {
+        val offset = native.nativeAddress.toInt() + position()
+        position(position() + remaining)
+        return JsByteArray(jsCopyFromWasmMemory(offset, remaining))
+    }
+    // Fallback: copy through ByteArray for non-native buffers
     val bytes = readByteArray(remaining)
     return bytes.toJsByteArray()
 }
@@ -122,22 +130,34 @@ internal actual fun combineJsByteArrays(arrays: List<JsByteArray>, totalSize: In
 )
 private external fun jsCopyToWasmMemory(jsArray: JsAny, dstOffset: Int)
 
-@OptIn(kotlin.wasm.unsafe.UnsafeWasmMemoryApi::class)
 internal actual fun JsByteArray.toPlatformBuffer(): PlatformBuffer {
     val length = byteLength()
     if (length == 0) {
         return BufferFactory.Default.allocate(0)
     }
-    // Allocate a ByteArray in WASM memory, get its address, copy JS data into it
-    val bytes = ByteArray(length)
-    kotlin.wasm.unsafe.withScopedMemoryAllocator { allocator ->
-        val ptr = allocator.allocate(length)
-        jsCopyToWasmMemory(ref, ptr.address.toInt())
-        for (i in 0 until length) {
-            bytes[i] = (ptr + i).loadByte()
+    // Allocate a native buffer (LinearBuffer on wasmJs) and copy JS data directly
+    // into its WASM linear memory region. Single copy, no ByteArray intermediate.
+    val buf = BufferFactory.Default.allocate(length)
+    val native = buf.nativeMemoryAccess
+    if (native != null) {
+        jsCopyToWasmMemory(ref, native.nativeAddress.toInt())
+        buf.position(length)
+        buf.resetForRead()
+    } else {
+        // Fallback: should not happen on wasmJs, but be safe
+        val bytes = ByteArray(length)
+        @OptIn(kotlin.wasm.unsafe.UnsafeWasmMemoryApi::class)
+        kotlin.wasm.unsafe.withScopedMemoryAllocator { allocator ->
+            val ptr = allocator.allocate(length)
+            jsCopyToWasmMemory(ref, ptr.address.toInt())
+            for (i in 0 until length) {
+                bytes[i] = (ptr + i).loadByte()
+            }
         }
+        for (b in bytes) buf.writeByte(b)
+        buf.resetForRead()
     }
-    return BufferFactory.Default.wrap(bytes)
+    return buf
 }
 
 // ============================================================================
