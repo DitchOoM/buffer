@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 
 /**
@@ -22,7 +23,7 @@ actual fun compress(
         try {
             val input = buffer.toJsByteArray()
             val compressed = nodeZlibSync(input, algorithm, level)
-            CompressionResult.Success(compressed.toPlatformBuffer())
+            CompressionResult.Success(compressed.toPlatformBuffer() as PlatformBuffer)
         } catch (e: Exception) {
             CompressionResult.Failure("Compression failed: ${e.message}", e)
         }
@@ -41,7 +42,7 @@ actual fun decompress(
         try {
             val input = buffer.toJsByteArray()
             val decompressed = nodeZlibDecompressSync(input, algorithm)
-            CompressionResult.Success(decompressed.toPlatformBuffer())
+            CompressionResult.Success(decompressed.toPlatformBuffer() as PlatformBuffer)
         } catch (e: Exception) {
             CompressionResult.Failure("Decompression failed: ${e.message}", e)
         }

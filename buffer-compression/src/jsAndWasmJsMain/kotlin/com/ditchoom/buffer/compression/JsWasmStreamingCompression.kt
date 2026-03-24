@@ -92,12 +92,12 @@ private class JsNodeStreamingCompressor(
         check(!closed) { "Compressor is closed" }
         if (totalBytes == 0) {
             val result = nodeZlibSyncFlush(emptyJsByteArray(), algorithm, level)
-            onOutput(result.toPlatformBuffer())
+            onOutput(result.toPlatformBuffer(allocator))
             return
         }
         val combined = combineJsByteArrays(accumulatedChunks, totalBytes)
         val result = nodeZlibSyncFlush(combined, algorithm, level)
-        onOutput(result.toPlatformBuffer())
+        onOutput(result.toPlatformBuffer(allocator))
         accumulatedChunks.clear()
         totalBytes = 0
     }
@@ -105,14 +105,14 @@ private class JsNodeStreamingCompressor(
     override fun finish(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         if (totalBytes == 0) {
-            when (val result = compress(emptyJsByteArray().toPlatformBuffer(), algorithm, level)) {
+            when (val result = compress(emptyJsByteArray().toPlatformBuffer(allocator), algorithm, level)) {
                 is CompressionResult.Success -> onOutput(result.buffer)
                 is CompressionResult.Failure -> throw CompressionException(result.message, result.cause)
             }
             return
         }
         val combined = combineJsByteArrays(accumulatedChunks, totalBytes)
-        when (val result = compress(combined.toPlatformBuffer(), algorithm, level)) {
+        when (val result = compress(combined.toPlatformBuffer(allocator), algorithm, level)) {
             is CompressionResult.Success -> onOutput(result.buffer)
             is CompressionResult.Failure -> throw CompressionException(result.message, result.cause)
         }
@@ -155,7 +155,7 @@ private class JsNodeStreamingDecompressor(
         check(!closed) { "Decompressor is closed" }
         if (totalBytes == 0) return
         val combined = combineJsByteArrays(accumulatedChunks, totalBytes)
-        when (val result = decompress(combined.toPlatformBuffer(), algorithm)) {
+        when (val result = decompress(combined.toPlatformBuffer(allocator), algorithm)) {
             is CompressionResult.Success -> onOutput(result.buffer)
             is CompressionResult.Failure -> throw CompressionException(result.message, result.cause)
         }
@@ -210,7 +210,7 @@ private class BrowserStreamingCompressor(
                 combineJsByteArrays(accumulatedChunks, totalBytes)
             }
         val compressed = browserCompress(input, algorithm)
-        return listOf(compressed.toPlatformBuffer())
+        return listOf(compressed.toPlatformBuffer(allocator))
     }
 
     override fun reset() {
@@ -249,7 +249,7 @@ private class BrowserStreamingDecompressor(
         if (totalBytes == 0) return emptyList()
         val combined = combineJsByteArrays(accumulatedChunks, totalBytes)
         val decompressed = browserDecompress(combined, algorithm)
-        return listOf(decompressed.toPlatformBuffer())
+        return listOf(decompressed.toPlatformBuffer(allocator))
     }
 
     override fun reset() {
@@ -299,7 +299,7 @@ private class NodeTransformStreamingCompressor(
         val chunks = pendingChunks.toList()
         pendingChunks.clear()
         val output = s.writeAndFlush(chunks)
-        return output.map { it.toPlatformBuffer() }
+        return output.map { it.toPlatformBuffer(allocator) }
     }
 
     override suspend fun finish(): List<ReadBuffer> {
@@ -309,7 +309,7 @@ private class NodeTransformStreamingCompressor(
         pendingChunks.clear()
         val result = s.writeAndEnd(chunks)
         stream = null
-        return if (result.byteLength() > 0) listOf(result.toPlatformBuffer()) else emptyList()
+        return if (result.byteLength() > 0) listOf(result.toPlatformBuffer(allocator)) else emptyList()
     }
 
     override fun reset() {
@@ -348,7 +348,7 @@ private class NodeTransformStreamingDecompressor(
         val chunks = pendingChunks.toList()
         pendingChunks.clear()
         val result = nodeTransformDecompressOneShot(chunks, algorithm)
-        return listOf(result.toPlatformBuffer())
+        return listOf(result.toPlatformBuffer(allocator))
     }
 
     override fun reset() {

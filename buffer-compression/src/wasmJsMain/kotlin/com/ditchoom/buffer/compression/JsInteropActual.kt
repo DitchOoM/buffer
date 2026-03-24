@@ -2,11 +2,8 @@
 
 package com.ditchoom.buffer.compression
 
-import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.NativeMemoryAccess
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.nativeMemoryAccess
 import kotlinx.coroutines.await
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.js.Promise
@@ -58,7 +55,7 @@ internal actual fun ReadBuffer.toJsByteArray(): JsByteArray {
     if (remaining == 0) return emptyJsByteArray()
     // Zero-copy path: if buffer has native memory (LinearBuffer),
     // copy directly from WASM linear memory offset to JS Uint8Array.
-    val native = nativeMemoryAccess
+    val native = (this as? NativeMemoryAccess)
     if (native != null) {
         val offset = native.nativeAddress.toInt() + position()
         position(position() + remaining)
@@ -130,15 +127,16 @@ internal actual fun combineJsByteArrays(arrays: List<JsByteArray>, totalSize: In
 )
 private external fun jsCopyToWasmMemory(jsArray: JsAny, dstOffset: Int)
 
-internal actual fun JsByteArray.toPlatformBuffer(): PlatformBuffer {
+internal actual fun JsByteArray.toPlatformBuffer(allocator: BufferAllocator): ReadBuffer {
     val length = byteLength()
     if (length == 0) {
-        return BufferFactory.Default.allocate(0)
+        return allocator.allocate(0)
     }
-    // Allocate a native buffer (LinearBuffer on wasmJs) and copy JS data directly
+    // Allocate via the provided allocator (supports pool, direct, heap).
+    // If the buffer has native memory access (LinearBuffer), copy JS data directly
     // into its WASM linear memory region. Single copy, no ByteArray intermediate.
-    val buf = BufferFactory.Default.allocate(length)
-    val native = buf.nativeMemoryAccess
+    val buf = allocator.allocate(length)
+    val native = (buf as? NativeMemoryAccess)
     if (native != null) {
         jsCopyToWasmMemory(ref, native.nativeAddress.toInt())
         buf.position(length)

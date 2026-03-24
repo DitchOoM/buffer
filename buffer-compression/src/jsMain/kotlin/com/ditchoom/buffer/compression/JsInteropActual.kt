@@ -1,7 +1,6 @@
 package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.JsBuffer
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import kotlinx.coroutines.await
 import org.khronos.webgl.Int8Array
@@ -50,7 +49,20 @@ internal actual fun combineJsByteArrays(arrays: List<JsByteArray>, totalSize: In
 
 internal actual fun emptyJsByteArray(): JsByteArray = JsByteArray(Int8Array(0))
 
-internal actual fun JsByteArray.toPlatformBuffer(): PlatformBuffer = JsBuffer(array)
+internal actual fun JsByteArray.toPlatformBuffer(allocator: BufferAllocator): ReadBuffer {
+    val length = array.length
+    if (length == 0) return allocator.allocate(0)
+    // For pool allocators, copy into the pool buffer. For default/heap, wrap directly.
+    return if (allocator is BufferAllocator.FromPool) {
+        val buf = allocator.allocate(length)
+        val src = JsBuffer(array)
+        buf.write(src)
+        buf.resetForRead()
+        buf
+    } else {
+        JsBuffer(array)
+    }
+}
 
 // ============================================================================
 // Helpers: typed array conversions
