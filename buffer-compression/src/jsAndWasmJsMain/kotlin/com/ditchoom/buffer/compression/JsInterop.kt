@@ -18,8 +18,21 @@ internal expect class JsByteArray
 /** Get the byte length of a [JsByteArray]. */
 internal expect fun JsByteArray.byteLength(): Int
 
-/** Convert a [ReadBuffer] to a [JsByteArray], consuming remaining bytes. */
+/**
+ * Convert a [ReadBuffer] to a [JsByteArray] copy, consuming remaining bytes.
+ * Safe for async operations — the copy won't be invalidated by memory growth.
+ */
 internal expect fun ReadBuffer.toJsByteArray(): JsByteArray
+
+/**
+ * Convert a [ReadBuffer] to a [JsByteArray] view, consuming remaining bytes.
+ * Zero-copy on both JS (subarray) and wasmJs (view on linear memory).
+ *
+ * **Only safe for synchronous consumption** — on wasmJs, the view is invalidated
+ * if `memory.grow()` is called (which can happen during any Kotlin allocation).
+ * Use [toJsByteArray] for async paths.
+ */
+internal expect fun ReadBuffer.toJsByteArrayView(): JsByteArray
 
 /** Combine multiple [JsByteArray]s into a single one. */
 internal expect fun combineJsByteArrays(

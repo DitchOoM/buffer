@@ -21,7 +21,7 @@ actual fun compress(
 ): CompressionResult =
     if (isNodeJs) {
         try {
-            val input = buffer.toJsByteArray()
+            val input = buffer.toJsByteArrayView() // zero-copy: sync zlib consumes immediately
             val compressed = nodeZlibSync(input, algorithm, level)
             CompressionResult.Success(compressed.toPlatformBuffer() as PlatformBuffer)
         } catch (e: Exception) {
@@ -40,7 +40,7 @@ actual fun decompress(
 ): CompressionResult =
     if (isNodeJs) {
         try {
-            val input = buffer.toJsByteArray()
+            val input = buffer.toJsByteArrayView() // zero-copy: sync zlib consumes immediately
             val decompressed = nodeZlibDecompressSync(input, algorithm)
             CompressionResult.Success(decompressed.toPlatformBuffer() as PlatformBuffer)
         } catch (e: Exception) {
@@ -61,7 +61,7 @@ internal fun compressWithSyncFlushShared(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
 ): JsByteArray {
-    val input = buffer.toJsByteArray()
+    val input = buffer.toJsByteArrayView() // zero-copy: sync zlib consumes immediately
     return nodeZlibSyncFlush(input, algorithm, level)
 }
 

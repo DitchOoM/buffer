@@ -58,15 +58,43 @@ private external fun jsCopyFromWasmMemory(
 internal actual fun ReadBuffer.toJsByteArray(): JsByteArray {
     val remaining = remaining()
     if (remaining == 0) return emptyJsByteArray()
-    // Zero-copy path: if buffer has native memory (LinearBuffer),
-    // copy directly from WASM linear memory offset to JS Uint8Array.
+    // Single copy from WASM linear memory to a new JS Uint8Array.
+    // Safe for async operations — the copy won't be invalidated by memory.grow().
     val native = (this as? NativeMemoryAccess)
     if (native != null) {
         val offset = native.nativeAddress.toInt() + position()
         position(position() + remaining)
         return JsByteArray(jsCopyFromWasmMemory(offset, remaining))
     }
-    // Fallback: copy through ByteArray for non-native buffers
+    val bytes = readByteArray(remaining)
+    return bytes.toJsByteArray()
+}
+
+@JsFun(
+    """
+(offset, length) => {
+    return new Uint8Array(wasmExports.memory.buffer, offset, length);
+}
+""",
+)
+private external fun jsViewWasmMemory(
+    offset: Int,
+    length: Int,
+): JsAny
+
+internal actual fun ReadBuffer.toJsByteArrayView(): JsByteArray {
+    val remaining = remaining()
+    if (remaining == 0) return emptyJsByteArray()
+    // Zero-copy view on WASM linear memory. Only safe for synchronous consumption —
+    // memory.grow() would invalidate this view. Sync zlib calls (gzipSync, etc.)
+    // consume the input before returning, so no Kotlin allocation can intervene.
+    val native = (this as? NativeMemoryAccess)
+    if (native != null) {
+        val offset = native.nativeAddress.toInt() + position()
+        position(position() + remaining)
+        return JsByteArray(jsViewWasmMemory(offset, remaining))
+    }
+    // Non-native buffer: must copy (no linear memory to view)
     val bytes = readByteArray(remaining)
     return bytes.toJsByteArray()
 }

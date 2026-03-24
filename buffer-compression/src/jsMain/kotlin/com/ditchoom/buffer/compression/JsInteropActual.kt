@@ -27,7 +27,12 @@ internal actual class JsByteArray(
 
 internal actual fun JsByteArray.byteLength(): Int = array.length
 
-internal actual fun ReadBuffer.toJsByteArray(): JsByteArray {
+internal actual fun ReadBuffer.toJsByteArray(): JsByteArray = toJsByteArrayImpl()
+
+internal actual fun ReadBuffer.toJsByteArrayView(): JsByteArray = toJsByteArrayImpl()
+
+// JS is always zero-copy via subarray — no distinction needed between view and copy.
+private fun ReadBuffer.toJsByteArrayImpl(): JsByteArray {
     val remaining = remaining()
     return if (this is JsBuffer) {
         val sub = buffer.subarray(position(), position() + remaining)
