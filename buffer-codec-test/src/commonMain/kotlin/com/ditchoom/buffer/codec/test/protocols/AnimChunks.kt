@@ -1,7 +1,9 @@
 package com.ditchoom.buffer.codec.test.protocols
 
+import com.ditchoom.buffer.codec.annotations.LengthFrom
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
+import com.ditchoom.buffer.codec.annotations.Payload
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.WireBytes
 import kotlin.jvm.JvmInline
@@ -22,13 +24,11 @@ value class ImageSize(
 }
 
 /**
- * Sealed interface with nested @PacketType variants — tests that the KSP processor
- * auto-generates sub-codecs for nested classes and uses qualified names in the dispatch.
- *
- * Validates three fixes:
- * 1. Sub-codecs (AnimChunkHeaderCodec, etc.) are generated for nested variants
- * 2. Dispatch uses qualified names (is AnimChunk.Header, not is Header)
- * 3. Codec names are flattened (AnimChunkHeaderCodec, not HeaderCodec)
+ * Sealed interface with nested @PacketType variants — tests:
+ * 1. Sub-codecs generated for nested classes (AnimChunkHeaderCodec, etc.)
+ * 2. Qualified names in dispatch (is AnimChunk.Header, not is Header)
+ * 3. Flattened codec names (AnimChunkHeaderCodec, not HeaderCodec)
+ * 4. Mixed payload/non-payload variants in sealed dispatch
  */
 @ProtocolMessage
 sealed interface AnimChunk {
@@ -40,11 +40,11 @@ sealed interface AnimChunk {
     ) : AnimChunk
 
     @PacketType(0x02)
-    data class FrameInfo(
+    data class ImageFrame<@Payload P>(
         @WireBytes(3) val index: UInt,
         val size: ImageSize,
-        val bitmapOffset: Int,
         val bitmapLength: Int,
+        @LengthFrom("bitmapLength") val bitmap: P,
     ) : AnimChunk
 
     @PacketType(0x03)

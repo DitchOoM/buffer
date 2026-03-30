@@ -5,8 +5,8 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.test.protocols.AnimChunk
 import com.ditchoom.buffer.codec.test.protocols.AnimChunkCodec
-import com.ditchoom.buffer.codec.test.protocols.AnimChunkFrameInfoCodec
 import com.ditchoom.buffer.codec.test.protocols.AnimChunkHeaderCodec
+import com.ditchoom.buffer.codec.test.protocols.AnimChunkImageFrameCodec
 import com.ditchoom.buffer.codec.test.protocols.AnimChunkMetadataCodec
 import com.ditchoom.buffer.codec.test.protocols.ImageSize
 import com.ditchoom.buffer.codec.testRoundTrip
@@ -16,11 +16,11 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
- * Tests for nested sealed interface @PacketType codecs.
- * Validates that the KSP processor:
- * 1. Generates sub-codecs for nested variants (AnimChunkHeaderCodec, etc.)
- * 2. Uses qualified names in the dispatch (is AnimChunk.Header, not is Header)
- * 3. Flattens codec names (AnimChunkHeaderCodec, not HeaderCodec)
+ * Tests for nested sealed interface @PacketType codecs, including:
+ * - Sub-codec generation for nested classes
+ * - Qualified names in dispatch
+ * - Flattened codec names
+ * - Mixed payload/non-payload variant dispatch
  */
 class AnimChunkRoundTripTest {
     // ========== Individual variant codecs ==========
@@ -64,18 +64,29 @@ class AnimChunkRoundTripTest {
     }
 
     @Test
-    fun frameInfoRoundTrip() {
+    fun imageFrameRoundTripWithPayload() {
         val original =
-            AnimChunk.FrameInfo(
+            AnimChunk.ImageFrame(
                 index = 0u,
                 size = ImageSize.of(1920u.toUShort(), 1080u.toUShort()),
-                bitmapOffset = 1024,
-                bitmapLength = 8294400,
+                bitmapLength = 5,
+                bitmap = "hello",
             )
-        val decoded = AnimChunkFrameInfoCodec.testRoundTrip(original)
-        assertEquals(original, decoded)
-        assertEquals(1920u.toUShort(), decoded.size.width)
-        assertEquals(1080u.toUShort(), decoded.size.height)
+        val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
+        AnimChunkImageFrameCodec.encode(
+            buffer,
+            original,
+            encodeBitmap = { buf, s -> buf.writeString(s) },
+        )
+        buffer.resetForRead()
+        val decoded =
+            AnimChunkImageFrameCodec.decode<String>(
+                buffer,
+                decodeBitmap = { pr -> pr.readString(pr.remaining()) },
+            )
+        assertEquals(original.index, decoded.index)
+        assertEquals(original.size, decoded.size)
+        assertEquals(original.bitmap, decoded.bitmap)
     }
 
     @Test
@@ -96,7 +107,7 @@ class AnimChunkRoundTripTest {
         assertEquals(480u.toUShort(), size.height)
     }
 
-    // ========== Sealed dispatch codec ==========
+    // ========== Sealed dispatch codec (mixed payload/non-payload) ==========
 
     @Test
     fun sealedDispatchHeader() {
@@ -106,23 +117,45 @@ class AnimChunkRoundTripTest {
                 version = 1u,
                 frameCount = 24u,
             )
-        val decoded = AnimChunkCodec.testRoundTrip(original)
+        val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
+        AnimChunkCodec.encode<String>(
+            buffer,
+            original,
+            encodeImageFrameBitmap = { buf, s -> buf.writeString(s) },
+        )
+        buffer.resetForRead()
+        val decoded =
+            AnimChunkCodec.decode<String>(
+                buffer,
+                decodeImageFrameBitmap = { pr -> pr.readString(pr.remaining()) },
+            )
         assertTrue(decoded is AnimChunk.Header)
         assertEquals(original, decoded)
     }
 
     @Test
-    fun sealedDispatchFrameInfo() {
+    fun sealedDispatchImageFrame() {
         val original: AnimChunk =
-            AnimChunk.FrameInfo(
+            AnimChunk.ImageFrame(
                 index = 5u,
                 size = ImageSize.of(320u.toUShort(), 240u.toUShort()),
-                bitmapOffset = 0,
-                bitmapLength = 307200,
+                bitmapLength = 11,
+                bitmap = "hello world",
             )
-        val decoded = AnimChunkCodec.testRoundTrip(original)
-        assertTrue(decoded is AnimChunk.FrameInfo)
-        assertEquals(original, decoded)
+        val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
+        AnimChunkCodec.encode<String>(
+            buffer,
+            original,
+            encodeImageFrameBitmap = { buf, s -> buf.writeString(s) },
+        )
+        buffer.resetForRead()
+        val decoded =
+            AnimChunkCodec.decode<String>(
+                buffer,
+                decodeImageFrameBitmap = { pr -> pr.readString(pr.remaining()) },
+            )
+        assertTrue(decoded is AnimChunk.ImageFrame<*>)
+        assertEquals("hello world", (decoded as AnimChunk.ImageFrame<*>).bitmap)
     }
 
     @Test
@@ -132,7 +165,18 @@ class AnimChunkRoundTripTest {
                 name = "bounce",
                 author = "Bob",
             )
-        val decoded = AnimChunkCodec.testRoundTrip(original)
+        val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
+        AnimChunkCodec.encode<String>(
+            buffer,
+            original,
+            encodeImageFrameBitmap = { buf, s -> buf.writeString(s) },
+        )
+        buffer.resetForRead()
+        val decoded =
+            AnimChunkCodec.decode<String>(
+                buffer,
+                decodeImageFrameBitmap = { pr -> pr.readString(pr.remaining()) },
+            )
         assertTrue(decoded is AnimChunk.Metadata)
         assertEquals(original, decoded)
     }
@@ -143,7 +187,10 @@ class AnimChunkRoundTripTest {
         buffer.writeByte(0xFF.toByte())
         buffer.resetForRead()
         assertFailsWith<IllegalArgumentException> {
-            AnimChunkCodec.decode(buffer)
+            AnimChunkCodec.decode<String>(
+                buffer,
+                decodeImageFrameBitmap = { pr -> pr.readString(pr.remaining()) },
+            )
         }
     }
 }

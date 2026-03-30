@@ -46,3 +46,16 @@ internal fun KSClassDeclaration.toPoetClassName(): ClassName {
     val names = enclosingSimpleNames()
     return ClassName(packageName.asString(), *names.toTypedArray())
 }
+
+/** Payload metadata for a sealed interface variant. */
+data class SealedVariantPayloadInfo(
+    val subclass: KSClassDeclaration,
+    val payloadFields: List<PayloadFieldInfo>,
+)
+
+/** A single @Payload field within a sealed variant. */
+data class PayloadFieldInfo(
+    val fieldName: String,
+    val typeParamName: String,
+    val contextClassName: String,
+)
