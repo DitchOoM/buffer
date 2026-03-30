@@ -137,15 +137,14 @@ actual fun PlatformBuffer.Companion.wrapNativeAddress(
     val ptr =
         address.toCPointer<ByteVar>()
             ?: throw IllegalArgumentException("Cannot wrap null address (0)")
-    // Use NSMutableData constructor (alloc+init) rather than factory method (create)
-    // to ensure the mutable data wraps the pointer without copying.
-    // freeWhenDone=false: the buffer does NOT own this memory.
+    // bytesNoCopy + freeWhenDone=false: wraps existing memory without ownership.
+    // The data object uses the pointer directly — mutableBytes returns the same address.
     val data =
-        NSMutableData(
+        NSMutableData.create(
             bytesNoCopy = ptr,
             length = size.convert(),
             freeWhenDone = false,
-        )
+        ) ?: throw IllegalStateException("Failed to create NSMutableData wrapping address $address")
     val buffer = MutableDataBuffer(data, byteOrder)
     // Verify zero-copy: mutableBytes must return the same pointer we passed in
     check(buffer.nativeAddress == address) {
