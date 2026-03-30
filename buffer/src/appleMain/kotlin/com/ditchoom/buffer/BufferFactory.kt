@@ -125,3 +125,22 @@ actual fun PlatformBuffer.Companion.allocateShared(
     size: Int,
     byteOrder: ByteOrder,
 ): PlatformBuffer = BufferFactory.Default.allocate(size, byteOrder)
+
+@OptIn(UnsafeNumber::class)
+actual fun PlatformBuffer.Companion.wrapNativeAddress(
+    address: Long,
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer {
+    val ptr =
+        address.toCPointer<kotlinx.cinterop.ByteVar>()
+            ?: throw IllegalArgumentException("Cannot wrap null address (0)")
+    // bytesNoCopy + freeWhenDone=false: wraps existing memory without ownership
+    val data =
+        NSMutableData.create(
+            bytesNoCopy = ptr,
+            length = size.convert(),
+            freeWhenDone = false,
+        ) ?: throw IllegalStateException("Failed to create NSMutableData wrapping address $address")
+    return MutableDataBuffer(data, byteOrder)
+}

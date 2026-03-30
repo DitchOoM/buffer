@@ -98,6 +98,18 @@ fun PlatformBuffer.Companion.allocateShared(
     byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
 ): PlatformBuffer = BufferFactory.Default.allocate(size, byteOrder)
 
+fun PlatformBuffer.Companion.wrapNativeAddress(
+    address: Long,
+    size: Int,
+    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
+): PlatformBuffer {
+    // MemorySegment.ofAddress creates a global-scope segment (no Arena = no ownership).
+    // reinterpret extends it to the given size. The buffer does NOT own this memory.
+    val segment = MemorySegment.ofAddress(address).reinterpret(size.toLong())
+    val byteBuffer = segment.asByteBuffer().order(byteOrder.toJavaByteOrder())
+    return FfmAutoBuffer(segment, byteBuffer)
+}
+
 /**
  * Creates a GC-managed FFM buffer using [Arena.ofAuto].
  *

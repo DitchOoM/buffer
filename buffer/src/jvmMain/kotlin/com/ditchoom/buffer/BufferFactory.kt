@@ -88,3 +88,42 @@ actual fun PlatformBuffer.Companion.allocateShared(
     size: Int,
     byteOrder: ByteOrder,
 ): PlatformBuffer = BufferFactory.Default.allocate(size, byteOrder)
+
+actual fun PlatformBuffer.Companion.wrapNativeAddress(
+    address: Long,
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer {
+    // Try FFM first (JVM 21+ at runtime, even if compiled against jvmMain)
+    tryWrapViaFfm(address, size, byteOrder)?.let { return it }
+
+    // Fall back to Unsafe DirectByteBuffer reflection
+    val byteBuffer =
+        UnsafeMemory.tryWrapAsDirectByteBuffer(address, size)
+            ?: throw UnsupportedOperationException(
+                "Cannot wrap native address: neither FFM (JVM 21+) nor DirectByteBuffer reflection is available.",
+            )
+    byteBuffer.order(byteOrder.toJava())
+    return DirectJvmBuffer(byteBuffer)
+}
+
+/** Attempt to wrap via FFM (available on JVM 21+ at runtime). Returns null if FFM is not available. */
+private fun tryWrapViaFfm(
+    address: Long,
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer? =
+    try {
+        val memorySegmentClass = Class.forName("java.lang.foreign.MemorySegment")
+        val ofAddress = memorySegmentClass.getMethod("ofAddress", Long::class.javaPrimitiveType)
+        val reinterpret = memorySegmentClass.getMethod("reinterpret", Long::class.javaPrimitiveType)
+        val asByteBuffer = memorySegmentClass.getMethod("asByteBuffer")
+
+        val zeroSegment = ofAddress.invoke(null, address)
+        val segment = reinterpret.invoke(zeroSegment, size.toLong())
+        val byteBuffer = asByteBuffer.invoke(segment) as ByteBuffer
+        byteBuffer.order(byteOrder.toJava())
+        DirectJvmBuffer(byteBuffer)
+    } catch (_: Exception) {
+        null
+    }
