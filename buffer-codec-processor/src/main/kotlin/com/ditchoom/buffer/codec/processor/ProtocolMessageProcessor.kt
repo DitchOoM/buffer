@@ -35,7 +35,7 @@ class ProtocolMessageProcessor(
             processed.add(qualifiedName)
 
             when {
-                Modifier.SEALED in symbol.modifiers -> processSealedInterface(symbol)
+                Modifier.SEALED in symbol.modifiers -> processSealedInterface(symbol, resolver)
                 else -> {
                     val constructor = symbol.primaryConstructor
                     if (constructor == null) {
@@ -81,7 +81,10 @@ class ProtocolMessageProcessor(
         }
     }
 
-    private fun processSealedInterface(classDeclaration: KSClassDeclaration) {
+    private fun processSealedInterface(
+        classDeclaration: KSClassDeclaration,
+        resolver: Resolver,
+    ) {
         val sealedSubclasses = classDeclaration.getSealedSubclasses().toList()
         if (sealedSubclasses.isEmpty()) {
             logger.error(
@@ -94,5 +97,33 @@ class ProtocolMessageProcessor(
 
         val generator = SealedDispatchGenerator(codeGenerator, logger)
         generator.generate(classDeclaration, sealedSubclasses)
+
+        // Auto-generate codecs for sealed variants (they inherit @ProtocolMessage from the sealed parent)
+        for (subclass in sealedSubclasses) {
+            val qualifiedName = subclass.qualifiedName?.asString() ?: continue
+            if (qualifiedName in processed) continue
+            processed.add(qualifiedName)
+
+            val constructor = subclass.primaryConstructor
+            if (constructor == null) {
+                logger.error(
+                    "Sealed variant '${subclass.simpleName.asString()}' of " +
+                        "'${classDeclaration.simpleName.asString()}' must have a primary constructor " +
+                        "with val parameters.",
+                    subclass,
+                )
+                continue
+            }
+            if (constructor.parameters.isEmpty()) {
+                logger.error(
+                    "Sealed variant '${subclass.simpleName.asString()}' of " +
+                        "'${classDeclaration.simpleName.asString()}' must have at least one val parameter " +
+                        "in its primary constructor.",
+                    subclass,
+                )
+                continue
+            }
+            processDataClass(subclass, resolver)
+        }
     }
 }

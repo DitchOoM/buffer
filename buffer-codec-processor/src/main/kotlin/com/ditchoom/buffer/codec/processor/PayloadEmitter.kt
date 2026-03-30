@@ -132,5 +132,3 @@ internal fun addPayloadEncodeBody(
         }
     }
 }
-
-internal fun capitalizeFirst(s: String): String = s.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
