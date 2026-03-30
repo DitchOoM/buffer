@@ -672,7 +672,38 @@ object RiffImageDecoder {
 
 **What's zero-copy here:** `readBytes()` returns a `ReadBuffer` slice that shares the same underlying native memory as the original buffer. No pixel data is copied during parsing. The headers are tiny (28 bytes total) and parsed by the generated codec — only the multi-megabyte pixel payload gets the zero-copy treatment.
 
+### Render in Compose Multiplatform (Skia)
+
+Use `nativeAddress` to create a Skia `Pixmap` that wraps the buffer's memory directly — no copy:
+
+```kotlin
+@Composable
+fun RiffBitmap(buffer: ReadBuffer, modifier: Modifier = Modifier) {
+    // Hold a reference to the decoded image so the backing buffer stays alive
+    val (imageBitmap, imageRef) = remember(buffer) {
+        val img = RiffImageDecoder.decode(buffer)
+        val w = img.metadata.width.toInt()
+        val h = img.metadata.height.toInt()
+
+        val nma = img.pixelData.nativeMemoryAccess
+            ?: error("Use BufferFactory.Default for zero-copy Skia rendering")
+
+        val info = ImageInfo(w, h, ColorType.RGBA_8888, ColorAlphaType.PREMUL)
+        // Zero-copy: Pixmap wraps the buffer's native memory directly
+        val pixmap = Pixmap(info, nma.nativeAddress, info.minRowBytes)
+        Image.makeFromPixmap(pixmap).toComposeImageBitmap() to img
+    }
+    Image(bitmap = imageBitmap, contentDescription = null, modifier = modifier)
+}
+```
+
+:::warning Buffer Lifetime
+`Pixmap` does not own the memory — it borrows the buffer's native address. The original buffer (or pool) must stay alive while the image is in use. In the example above, `imageRef` keeps the `RiffImage` (and its backing `ReadBuffer` slice) alive alongside the `ImageBitmap` inside `remember`.
+:::
+
 ### Render in Jetpack Compose (Android)
+
+For basic Android rendering, `toNativeData().byteBuffer` avoids an intermediate `ByteArray`:
 
 ```kotlin
 @Composable
@@ -685,29 +716,57 @@ fun RiffBitmap(buffer: ReadBuffer, modifier: Modifier = Modifier) {
         // toNativeData() is zero-copy when the source is already a Direct buffer
         val byteBuffer = img.pixelData.toNativeData().byteBuffer
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        bitmap.copyPixelsFromBuffer(byteBuffer)
+        bitmap.copyPixelsFromBuffer(byteBuffer)  // 1 copy: DirectByteBuffer → Bitmap
         bitmap.asImageBitmap()
     }
     Image(bitmap = imageBitmap, contentDescription = null, modifier = modifier)
 }
 ```
 
-### Render in Compose Multiplatform (Skia)
+### Android GPU-Optimal: HardwareBuffer (API 26+)
+
+For the fastest path to the GPU, lock a `HardwareBuffer` and blit from the buffer's `nativeAddress` directly into GPU-accessible memory — one DMA-capable copy, no intermediate `Bitmap`:
 
 ```kotlin
 @Composable
-fun RiffBitmap(buffer: ReadBuffer, modifier: Modifier = Modifier) {
+fun RiffBitmapHw(buffer: ReadBuffer, modifier: Modifier = Modifier) {
     val imageBitmap = remember(buffer) {
         val img = RiffImageDecoder.decode(buffer)
         val w = img.metadata.width.toInt()
         val h = img.metadata.height.toInt()
 
-        val info = ImageInfo(w, h, ColorType.RGBA_8888, ColorAlphaType.PREMUL)
-        // toByteArray() copies once — Skia's makeRaster needs managed memory
-        val skiaImage = Image.makeRaster(info, img.pixelData.toByteArray(), info.minRowBytes)
-        skiaImage.toComposeImageBitmap()
+        val nma = img.pixelData.nativeMemoryAccess
+            ?: error("Use BufferFactory.Default for zero-copy HardwareBuffer rendering")
+
+        val hwBuffer = HardwareBuffer.create(
+            w, h, HardwareBuffer.RGBA_8888, 1,
+            HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE or HardwareBuffer.USAGE_CPU_WRITE_OFTEN,
+        )
+        // 1 copy: buffer native address → GPU-mapped memory (via JNI)
+        NativeRenderer.blitToHardwareBuffer(nma.nativeAddress, nma.nativeSize, hwBuffer)
+
+        Bitmap.wrapHardwareBuffer(hwBuffer, ColorSpace.get(ColorSpace.Named.SRGB))!!
+            .asImageBitmap()
     }
     Image(bitmap = imageBitmap, contentDescription = null, modifier = modifier)
+}
+```
+
+The JNI helper locks the `HardwareBuffer` for CPU write and does a single `memcpy`:
+
+```c
+#include <android/hardware_buffer_jni.h>
+#include <string.h>
+
+JNIEXPORT void JNICALL
+Java_com_example_NativeRenderer_blitToHardwareBuffer(
+        JNIEnv *env, jclass clazz,
+        jlong src_addr, jlong src_size, jobject hw_buffer) {
+    AHardwareBuffer *ahb = AHardwareBuffer_fromHardwareBuffer(env, hw_buffer);
+    void *dst = NULL;
+    AHardwareBuffer_lock(ahb, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, NULL, &dst);
+    memcpy(dst, (void *)src_addr, (size_t)src_size);
+    AHardwareBuffer_unlock(ahb, NULL);
 }
 ```
 
@@ -743,14 +802,14 @@ fun encodeRiffImage(metadata: ImageMetadata, pixels: ReadBuffer): PlatformBuffer
 
 ### Copy Budget
 
-| Step | Android (Direct) | Skia |
-|------|------------------|------|
-| Parse headers (codec) | Zero-copy (reads in place) | Zero-copy |
-| Extract pixel slice (`readBytes`) | Zero-copy (same memory) | Zero-copy |
-| Handoff to renderer | Zero-copy (`toNativeData().byteBuffer`) | 1 copy (`toByteArray()`) |
-| **Total copies of pixel data** | **0** | **1** |
+| Step | Skia (`Pixmap`) | Android (`HardwareBuffer`) | Android (basic) | Naive (`ByteArray`) |
+|------|-----------------|---------------------------|-----------------|---------------------|
+| Parse headers (codec) | Zero-copy | Zero-copy | Zero-copy | Zero-copy |
+| Extract pixels (`readBytes`) | Zero-copy | Zero-copy | Zero-copy | 1 copy (`readByteArray`) |
+| Handoff to renderer | Zero-copy (`nativeAddress`) | 1 copy (→ GPU memory) | 1 copy (`copyPixelsFromBuffer`) | 1 copy (`wrap` + `copyPixels`) |
+| **Total copies of pixel data** | **0** | **1 (directly to GPU)** | **1** | **2** |
 
-Without the buffer library, the typical approach — `readByteArray()` → `ByteArray` → `ByteBuffer.wrap()` → `Bitmap` — copies pixel data **twice**.
+The Skia `Pixmap` path achieves **zero copies** — the GPU reads from the buffer's native memory at draw time. The `HardwareBuffer` path copies once but lands pixels directly in GPU-accessible memory, skipping the CPU-side `Bitmap` entirely.
 
 ---
 
