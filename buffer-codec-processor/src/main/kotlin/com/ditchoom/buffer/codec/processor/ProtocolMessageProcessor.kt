@@ -95,10 +95,8 @@ class ProtocolMessageProcessor(
             return
         }
 
-        val generator = SealedDispatchGenerator(codeGenerator, logger)
-        generator.generate(classDeclaration, sealedSubclasses)
-
-        // Auto-generate codecs for sealed variants (they inherit @ProtocolMessage from the sealed parent)
+        // Phase 1: Analyze and generate sub-codecs, collecting payload metadata
+        val variantPayloadInfos = mutableListOf<SealedVariantPayloadInfo>()
         for (subclass in sealedSubclasses) {
             val qualifiedName = subclass.qualifiedName?.asString() ?: continue
             if (qualifiedName in processed) continue
@@ -123,7 +121,34 @@ class ProtocolMessageProcessor(
                 )
                 continue
             }
-            processDataClass(subclass, resolver)
+
+            // Analyze fields to detect @Payload
+            val fieldAnalyzer = FieldAnalyzer(logger, customProviders)
+            val fields = fieldAnalyzer.analyze(subclass) ?: continue
+
+            val payloadFields = fields.filter { it.strategy is FieldReadStrategy.PayloadField }
+            val payloadInfos =
+                payloadFields.map { field ->
+                    val strategy = field.strategy as FieldReadStrategy.PayloadField
+                    PayloadFieldInfo(
+                        fieldName = field.name,
+                        typeParamName = strategy.typeParamName,
+                        contextClassName = "${subclass.enclosingSimpleNames().joinToString("")}Context",
+                    )
+                }
+            variantPayloadInfos.add(SealedVariantPayloadInfo(subclass, payloadInfos))
+
+            // Generate the sub-codec
+            val batches = BatchOptimizer().optimize(fields)
+            val hasPayload = payloadFields.isNotEmpty()
+            CodecGenerator(codeGenerator, logger).generate(subclass, fields, batches, hasPayload)
+            if (hasPayload) {
+                PayloadContextGenerator(codeGenerator, logger).generate(subclass, fields)
+            }
         }
+
+        // Phase 2: Generate the dispatch codec with payload awareness
+        val generator = SealedDispatchGenerator(codeGenerator, logger)
+        generator.generate(classDeclaration, sealedSubclasses, variantPayloadInfos)
     }
 }
