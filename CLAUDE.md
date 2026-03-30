@@ -335,6 +335,7 @@ data class MyMessage(
 
 - **Use `slice()` or `readBytes()`** instead of `readByteArray()` + `wrap()` for zero-copy views
 - **Use `toNativeData()`/`toMutableNativeData()`** for platform interop instead of converting to ByteArray first
+- **Use `BufferFactory.wrapNativeAddress()`** to write directly into externally-owned memory (HardwareBuffer, mmap, Skia surface) instead of copying through an intermediate buffer
 - **Use `writeString()` directly** instead of `payload.encodeToByteArray()` + `writeBytes()`
 - **Use `BufferPool`** in hot paths to reuse buffers instead of allocating per request
 - **Accept `ReadBuffer`/`WriteBuffer`** in function signatures, not `ByteArray`

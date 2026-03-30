@@ -701,9 +701,9 @@ fun RiffBitmap(buffer: ReadBuffer, modifier: Modifier = Modifier) {
 `Pixmap` does not own the memory — it borrows the buffer's native address. The original buffer (or pool) must stay alive while the image is in use. In the example above, `imageRef` keeps the `RiffImage` (and its backing `ReadBuffer` slice) alive alongside the `ImageBitmap` inside `remember`.
 :::
 
-### Render in Jetpack Compose (Android)
+### Android: Decompress Directly into HardwareBuffer (API 26+)
 
-For basic Android rendering, `toNativeData().byteBuffer` avoids an intermediate `ByteArray`:
+For the fastest path to the GPU, lock a `HardwareBuffer`, wrap the locked pointer with `BufferFactory.wrapNativeAddress`, and decompress directly into GPU-accessible memory — zero intermediate buffers:
 
 ```kotlin
 @Composable
@@ -712,38 +712,26 @@ fun RiffBitmap(buffer: ReadBuffer, modifier: Modifier = Modifier) {
         val img = RiffImageDecoder.decode(buffer)
         val w = img.metadata.width.toInt()
         val h = img.metadata.height.toInt()
-
-        // toNativeData() is zero-copy when the source is already a Direct buffer
-        val byteBuffer = img.pixelData.toNativeData().byteBuffer
-        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        bitmap.copyPixelsFromBuffer(byteBuffer)  // 1 copy: DirectByteBuffer → Bitmap
-        bitmap.asImageBitmap()
-    }
-    Image(bitmap = imageBitmap, contentDescription = null, modifier = modifier)
-}
-```
-
-### Android GPU-Optimal: HardwareBuffer (API 26+)
-
-For the fastest path to the GPU, lock a `HardwareBuffer` and blit from the buffer's `nativeAddress` directly into GPU-accessible memory — one DMA-capable copy, no intermediate `Bitmap`:
-
-```kotlin
-@Composable
-fun RiffBitmapHw(buffer: ReadBuffer, modifier: Modifier = Modifier) {
-    val imageBitmap = remember(buffer) {
-        val img = RiffImageDecoder.decode(buffer)
-        val w = img.metadata.width.toInt()
-        val h = img.metadata.height.toInt()
-
-        val nma = img.pixelData.nativeMemoryAccess
-            ?: error("Use BufferFactory.Default for zero-copy HardwareBuffer rendering")
+        val pixelSize = w * h * 4
 
         val hwBuffer = HardwareBuffer.create(
             w, h, HardwareBuffer.RGBA_8888, 1,
             HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE or HardwareBuffer.USAGE_CPU_WRITE_OFTEN,
         )
-        // 1 copy: buffer native address → GPU-mapped memory (via JNI)
-        NativeRenderer.blitToHardwareBuffer(nma.nativeAddress, nma.nativeSize, hwBuffer)
+
+        // Lock HardwareBuffer → get GPU-mapped memory address (JNI)
+        val gpuAddr = NativeRenderer.lockHardwareBuffer(hwBuffer)
+
+        // Wrap the GPU memory as a PlatformBuffer — zero-copy, non-owning
+        val dst = BufferFactory.wrapNativeAddress(gpuAddr, pixelSize)
+
+        // Decompress directly from source buffer into GPU memory
+        StreamingDecompressor.create(CompressionAlgorithm.Raw).use(
+            onOutput = { chunk -> dst.write(chunk) }
+        ) { decompress -> decompress(img.pixelData) }
+
+        // Unlock → pixels are in GPU memory, ready to render
+        NativeRenderer.unlockHardwareBuffer(hwBuffer)
 
         Bitmap.wrapHardwareBuffer(hwBuffer, ColorSpace.get(ColorSpace.Named.SRGB))!!
             .asImageBitmap()
@@ -752,20 +740,22 @@ fun RiffBitmapHw(buffer: ReadBuffer, modifier: Modifier = Modifier) {
 }
 ```
 
-The JNI helper locks the `HardwareBuffer` for CPU write and does a single `memcpy`:
+The JNI helper is just lock/unlock — two small functions:
 
 ```c
 #include <android/hardware_buffer_jni.h>
-#include <string.h>
 
-JNIEXPORT void JNICALL
-Java_com_example_NativeRenderer_blitToHardwareBuffer(
-        JNIEnv *env, jclass clazz,
-        jlong src_addr, jlong src_size, jobject hw_buffer) {
+JNIEXPORT jlong JNICALL
+Java_com_example_NativeRenderer_lockHardwareBuffer(JNIEnv *env, jclass clazz, jobject hw_buffer) {
     AHardwareBuffer *ahb = AHardwareBuffer_fromHardwareBuffer(env, hw_buffer);
     void *dst = NULL;
     AHardwareBuffer_lock(ahb, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, NULL, &dst);
-    memcpy(dst, (void *)src_addr, (size_t)src_size);
+    return (jlong)dst;
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_NativeRenderer_unlockHardwareBuffer(JNIEnv *env, jclass clazz, jobject hw_buffer) {
+    AHardwareBuffer *ahb = AHardwareBuffer_fromHardwareBuffer(env, hw_buffer);
     AHardwareBuffer_unlock(ahb, NULL);
 }
 ```
@@ -802,14 +792,15 @@ fun encodeRiffImage(metadata: ImageMetadata, pixels: ReadBuffer): PlatformBuffer
 
 ### Copy Budget
 
-| Step | Skia (`Pixmap`) | Android (`HardwareBuffer`) | Android (basic) | Naive (`ByteArray`) |
-|------|-----------------|---------------------------|-----------------|---------------------|
-| Parse headers (codec) | Zero-copy | Zero-copy | Zero-copy | Zero-copy |
-| Extract pixels (`readBytes`) | Zero-copy | Zero-copy | Zero-copy | 1 copy (`readByteArray`) |
-| Handoff to renderer | Zero-copy (`nativeAddress`) | 1 copy (→ GPU memory) | 1 copy (`copyPixelsFromBuffer`) | 1 copy (`wrap` + `copyPixels`) |
-| **Total copies of pixel data** | **0** | **1 (directly to GPU)** | **1** | **2** |
+| Step | Skia (`Pixmap`) | Android (`HardwareBuffer` + `wrapNativeAddress`) | Naive (`ByteArray`) |
+|------|-----------------|--------------------------------------------------|---------------------|
+| Parse headers (codec) | Zero-copy | Zero-copy | Zero-copy |
+| Extract compressed data (`readBytes`) | Zero-copy (slice) | Zero-copy (slice) | 1 copy (`readByteArray`) |
+| Decompress | → Direct buffer | → GPU memory (`wrapNativeAddress`) | → `ByteArray` |
+| Render | Zero-copy (`Pixmap` borrows memory) | Zero-copy (GPU reads `HardwareBuffer`) | 1 copy (`wrap` + `copyPixels`) |
+| **Intermediate copies** | **0** | **0** | **2** |
 
-The Skia `Pixmap` path achieves **zero copies** — the GPU reads from the buffer's native memory at draw time. The `HardwareBuffer` path copies once but lands pixels directly in GPU-accessible memory, skipping the CPU-side `Bitmap` entirely.
+Both the Skia and HardwareBuffer paths achieve **zero intermediate copies** of pixel data. Decompressed pixels exist in exactly one place — either the Skia-wrapped Direct buffer or the GPU-mapped HardwareBuffer memory. `BufferFactory.wrapNativeAddress` is what makes the HardwareBuffer path possible from pure Kotlin.
 
 ---
 
