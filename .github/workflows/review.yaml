@@ -2,7 +2,7 @@ name: "Build and Test"
 on:
   pull_request:
     paths-ignore:
-      - '*.md'
+      - '**/*.md'
     types:
       - synchronize
       - opened
