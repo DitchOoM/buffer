@@ -9,6 +9,7 @@ import kotlinx.cinterop.toCPointer
 import platform.Foundation.NSData
 import platform.Foundation.NSMutableData
 import platform.Foundation.create
+import platform.Foundation.length
 
 // =============================================================================
 // v2 BufferFactory implementations
@@ -128,7 +129,6 @@ actual fun PlatformBuffer.Companion.allocateShared(
     byteOrder: ByteOrder,
 ): PlatformBuffer = BufferFactory.Default.allocate(size, byteOrder)
 
-@OptIn(UnsafeNumber::class)
 actual fun PlatformBuffer.Companion.wrapNativeAddress(
     address: Long,
     size: Int,
@@ -137,19 +137,7 @@ actual fun PlatformBuffer.Companion.wrapNativeAddress(
     val ptr =
         address.toCPointer<ByteVar>()
             ?: throw IllegalArgumentException("Cannot wrap null address (0)")
-    // bytesNoCopy + freeWhenDone=false: wraps existing memory without ownership.
-    // The data object uses the pointer directly — mutableBytes returns the same address.
-    val data =
-        NSMutableData.create(
-            bytesNoCopy = ptr,
-            length = size.convert(),
-            freeWhenDone = false,
-        ) ?: throw IllegalStateException("Failed to create NSMutableData wrapping address $address")
-    val buffer = MutableDataBuffer(data, byteOrder)
-    // Verify zero-copy: mutableBytes must return the same pointer we passed in
-    check(buffer.nativeAddress == address) {
-        "NSMutableData did not preserve the pointer (expected $address, got ${buffer.nativeAddress}). " +
-            "wrapNativeAddress requires zero-copy pointer sharing."
-    }
-    return buffer
+    // Use the CPointer constructor directly — bypasses NSMutableData entirely.
+    // The buffer does NOT own this memory.
+    return MutableDataBuffer(ptr, size, byteOrder)
 }
