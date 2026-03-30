@@ -86,3 +86,39 @@ actual fun PlatformBuffer.Companion.allocateShared(
     size: Int,
     byteOrder: ByteOrder,
 ): PlatformBuffer = BufferFactory.shared().allocate(size, byteOrder)
+
+actual fun PlatformBuffer.Companion.wrapNativeAddress(
+    address: Long,
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer =
+    throw UnsupportedOperationException(
+        "wrapNativeAddress(Long) is not supported on JavaScript — JS has no global memory address space. " +
+            "Use PlatformBuffer.wrap(Int8Array) or PlatformBuffer.wrap(ArrayBuffer) instead.",
+    )
+
+/**
+ * Wraps an existing [Int8Array] as a [PlatformBuffer] (zero-copy).
+ *
+ * The buffer shares memory with the original typed array — modifications
+ * to one are visible in the other. The buffer does not own the memory.
+ *
+ * This is the JS equivalent of [wrapNativeAddress] on other platforms.
+ */
+fun PlatformBuffer.Companion.wrap(
+    int8Array: Int8Array,
+    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
+): PlatformBuffer = JsBuffer(int8Array, byteOrder)
+
+/**
+ * Wraps an existing [ArrayBuffer] as a [PlatformBuffer] (zero-copy).
+ *
+ * Creates an [Int8Array] view over the entire ArrayBuffer. The buffer shares
+ * memory with the original ArrayBuffer — modifications are visible in both.
+ *
+ * This is the JS equivalent of [wrapNativeAddress] on other platforms.
+ */
+fun PlatformBuffer.Companion.wrap(
+    arrayBuffer: ArrayBuffer,
+    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
+): PlatformBuffer = JsBuffer(Int8Array(arrayBuffer), byteOrder)

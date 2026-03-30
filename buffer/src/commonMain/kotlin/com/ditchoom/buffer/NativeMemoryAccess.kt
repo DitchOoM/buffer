@@ -255,6 +255,52 @@ expect fun PlatformBuffer.Companion.allocateShared(
     byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
 ): PlatformBuffer
 
+/**
+ * Wraps an externally-owned native memory address as a readable/writable [PlatformBuffer].
+ *
+ * The returned buffer does **not** own the memory — the caller must ensure the memory
+ * remains valid for the buffer's lifetime. No cleanup is performed on GC or close.
+ *
+ * The returned buffer implements [NativeMemoryAccess] with the given [address] and [size].
+ *
+ * Use this to write directly into memory owned by another system (e.g., a locked
+ * Android HardwareBuffer, an mmap region, a Skia surface, or an io_uring buffer):
+ *
+ * ```kotlin
+ * val gpuAddr = lockHardwareBuffer(hwBuffer)
+ * val dst = PlatformBuffer.wrapNativeAddress(gpuAddr, pixelSize)
+ * decompressor.decompress(compressedSlice).forEach { dst.write(it) }
+ * unlockHardwareBuffer(hwBuffer)
+ * ```
+ *
+ * Platform behavior:
+ * - **JVM 21+**: FFM `MemorySegment.ofAddress()` → DirectByteBuffer
+ * - **JVM < 21 / Android**: Unsafe reflection to create DirectByteBuffer
+ * - **Apple**: `NSMutableData(bytesNoCopy:freeWhenDone:false)` — zero-copy, non-owning
+ * - **Linux**: `NativeBuffer` wrapping a `CPointer` — non-owning
+ * - **WASM**: [address] is a linear memory offset → `LinearBuffer`
+ * - **JS**: Throws [UnsupportedOperationException] (no raw pointer concept)
+ *
+ * @param address The native memory address (or WASM linear memory offset) to wrap
+ * @param size The size of the memory region in bytes
+ * @param byteOrder The byte order for multi-byte operations
+ * @return A [PlatformBuffer] backed by the given native memory
+ */
+expect fun PlatformBuffer.Companion.wrapNativeAddress(
+    address: Long,
+    size: Int,
+    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
+): PlatformBuffer
+
+/**
+ * Convenience extension on [BufferFactory.Companion] for [PlatformBuffer.Companion.wrapNativeAddress].
+ */
+fun BufferFactory.Companion.wrapNativeAddress(
+    address: Long,
+    size: Int,
+    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
+): PlatformBuffer = PlatformBuffer.wrapNativeAddress(address, size, byteOrder)
+
 // =============================================================================
 // Accessing Platform-Specific Native Buffer Objects
 // =============================================================================

@@ -64,3 +64,9 @@ actual fun PlatformBuffer.Companion.allocateShared(
     size: Int,
     byteOrder: ByteOrder,
 ): PlatformBuffer = NativeBuffer.allocate(size, byteOrder)
+
+actual fun PlatformBuffer.Companion.wrapNativeAddress(
+    address: Long,
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer = NativeBuffer.wrapExternal(address, size, byteOrder)

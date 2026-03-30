@@ -102,3 +102,17 @@ actual fun PlatformBuffer.Companion.allocateShared(
     size: Int,
     byteOrder: ByteOrder,
 ): PlatformBuffer = BufferFactory.shared().allocate(size, byteOrder)
+
+actual fun PlatformBuffer.Companion.wrapNativeAddress(
+    address: Long,
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer {
+    val byteBuffer =
+        UnsafeMemory.tryWrapAsDirectByteBuffer(address, size)
+            ?: throw UnsupportedOperationException(
+                "Cannot wrap native address: DirectByteBuffer reflection is not available on this Android version.",
+            )
+    byteBuffer.order(byteOrder.toJava())
+    return DirectJvmBuffer(byteBuffer)
+}
