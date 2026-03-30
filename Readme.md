@@ -61,7 +61,7 @@ Find the latest version on [Maven Central](https://central.sonatype.com/artifact
 
 ```kotlin
 // Works identically on JVM, Android, iOS, macOS, Linux, JS, WASM
-val buffer = PlatformBuffer.allocate(1024)
+val buffer = BufferFactory.Default.allocate(1024)
 buffer.writeInt(42)
 buffer.writeString("Hello!")
 buffer.resetForRead()
@@ -70,9 +70,11 @@ val number = buffer.readInt()     // 42
 val text = buffer.readString(6)   // "Hello!"
 ```
 
-## Protocol Codecs
+> **Tip:** Always use `BufferFactory` to allocate buffers — not `PlatformBuffer.allocate()`. Factories compose with pooling, deterministic cleanup, and custom allocation strategies. For structured binary data, use [Protocol Codecs](#protocol-codecs--stop-hand-writing-parsers) instead of manual read/write sequences.
 
-Define a data class, annotate it, and the codec writes itself:
+## Protocol Codecs — Stop Hand-Writing Parsers
+
+For structured data, **always use `buffer-codec`** instead of manual `readInt()`/`writeInt()` sequences. Hand-written encode/decode is error-prone (field order mismatches, type mismatches) and doesn't guarantee round-trip correctness. Define a data class, annotate it, and the codec writes itself:
 
 ```kotlin
 @ProtocolMessage
