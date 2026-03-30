@@ -2,8 +2,10 @@
 
 package com.ditchoom.buffer
 
+import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.UnsafeNumber
 import kotlinx.cinterop.convert
+import kotlinx.cinterop.toCPointer
 import platform.Foundation.NSData
 import platform.Foundation.NSMutableData
 import platform.Foundation.create
@@ -133,7 +135,7 @@ actual fun PlatformBuffer.Companion.wrapNativeAddress(
     byteOrder: ByteOrder,
 ): PlatformBuffer {
     val ptr =
-        address.toCPointer<kotlinx.cinterop.ByteVar>()
+        address.toCPointer<ByteVar>()
             ?: throw IllegalArgumentException("Cannot wrap null address (0)")
     // bytesNoCopy + freeWhenDone=false: wraps existing memory without ownership
     val data =
