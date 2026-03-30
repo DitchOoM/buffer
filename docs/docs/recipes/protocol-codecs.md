@@ -583,6 +583,177 @@ withPool { pool ->
 }
 ```
 
+## Real-World Example: Zero-Copy RIFF Image Decoder
+
+This example decodes a custom RIFF-like image container and renders the bitmap in Jetpack Compose — without copying pixel data during parsing.
+
+### Wire Format
+
+```
+┌────────────────────────────┐
+│ FileHeader    (12 bytes)   │  magic("RIFF") + fileSize + format("IMG ")
+├────────────────────────────┤
+│ ChunkHeader   (8 bytes)    │  chunkId("meta") + chunkSize
+│ ImageMetadata (variable)   │  width, height, depth, title
+├────────────────────────────┤
+│ ChunkHeader   (8 bytes)    │  chunkId("pxls") + chunkSize
+│ Raw pixel data             │  ← zero-copy slice, never copied during parse
+└────────────────────────────┘
+```
+
+### Define the Codec Types
+
+Use `@ProtocolMessage` for all structured headers. The binary pixel payload is **not** a codec field — it's extracted manually with `readBytes()` for zero-copy.
+
+```kotlin
+@ProtocolMessage
+data class FileHeader(
+    val magic: Int,       // "RIFF" = 0x52494646
+    val fileSize: UInt,   // total size after this field
+    val format: Int,      // "IMG " = 0x494D4720
+)
+
+@ProtocolMessage
+data class ChunkHeader(
+    val chunkId: Int,     // 4-byte ASCII chunk ID
+    val chunkSize: UInt,  // byte count of chunk data
+)
+
+@ProtocolMessage
+data class ImageMetadata(
+    val width: UInt,
+    val height: UInt,
+    val colorDepth: UShort,              // bits per pixel (32 = ARGB_8888)
+    @LengthPrefixed val title: String,
+)
+```
+
+:::tip Why not put pixel data in the codec?
+`@ProtocolMessage` fields must be primitives, strings, or codec-composed types — not raw byte blobs. For binary payloads:
+
+- **Hybrid (shown here)**: codec for headers, manual `readBytes()` for the blob — simplest approach
+- **Custom SPI annotation**: create a `@BinarySlice("sizeField")` annotation with a `CodecFieldProvider` that generates `readBytes()` calls — fully codec-managed, reusable across protocols (see [Custom Annotations (SPI)](#custom-annotations-spi))
+- **`@Payload` type parameter**: for payloads that have their own structure and codec, not for raw bytes
+:::
+
+### Decode with Zero-Copy Pixel Extraction
+
+```kotlin
+data class RiffImage(
+    val metadata: ImageMetadata,
+    val pixelData: ReadBuffer,  // zero-copy slice of the original buffer
+)
+
+object RiffImageDecoder {
+    private const val MAGIC_RIFF = 0x52494646  // "RIFF"
+    private const val FORMAT_IMG = 0x494D4720  // "IMG "
+    private const val CHUNK_META = 0x6D657461  // "meta"
+    private const val CHUNK_PXLS = 0x70786C73  // "pxls"
+
+    fun decode(buffer: ReadBuffer): RiffImage {
+        // Generated codecs parse the structured headers — type-safe, batch-optimized
+        val header = FileHeaderCodec.decode(buffer)
+        require(header.magic == MAGIC_RIFF && header.format == FORMAT_IMG)
+
+        val metaChunk = ChunkHeaderCodec.decode(buffer)
+        require(metaChunk.chunkId == CHUNK_META)
+        val metadata = ImageMetadataCodec.decode(buffer)
+
+        val pxlsChunk = ChunkHeaderCodec.decode(buffer)
+        require(pxlsChunk.chunkId == CHUNK_PXLS)
+
+        // Zero-copy: readBytes() returns a slice backed by the same memory
+        val pixelData = buffer.readBytes(pxlsChunk.chunkSize.toInt())
+
+        return RiffImage(metadata, pixelData)
+    }
+}
+```
+
+**What's zero-copy here:** `readBytes()` returns a `ReadBuffer` slice that shares the same underlying native memory as the original buffer. No pixel data is copied during parsing. The headers are tiny (28 bytes total) and parsed by the generated codec — only the multi-megabyte pixel payload gets the zero-copy treatment.
+
+### Render in Jetpack Compose (Android)
+
+```kotlin
+@Composable
+fun RiffBitmap(buffer: ReadBuffer, modifier: Modifier = Modifier) {
+    val imageBitmap = remember(buffer) {
+        val img = RiffImageDecoder.decode(buffer)
+        val w = img.metadata.width.toInt()
+        val h = img.metadata.height.toInt()
+
+        // toNativeData() is zero-copy when the source is already a Direct buffer
+        val byteBuffer = img.pixelData.toNativeData().byteBuffer
+        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        bitmap.copyPixelsFromBuffer(byteBuffer)
+        bitmap.asImageBitmap()
+    }
+    Image(bitmap = imageBitmap, contentDescription = null, modifier = modifier)
+}
+```
+
+### Render in Compose Multiplatform (Skia)
+
+```kotlin
+@Composable
+fun RiffBitmap(buffer: ReadBuffer, modifier: Modifier = Modifier) {
+    val imageBitmap = remember(buffer) {
+        val img = RiffImageDecoder.decode(buffer)
+        val w = img.metadata.width.toInt()
+        val h = img.metadata.height.toInt()
+
+        val info = ImageInfo(w, h, ColorType.RGBA_8888, ColorAlphaType.PREMUL)
+        // toByteArray() copies once — Skia's makeRaster needs managed memory
+        val skiaImage = Image.makeRaster(info, img.pixelData.toByteArray(), info.minRowBytes)
+        skiaImage.toComposeImageBitmap()
+    }
+    Image(bitmap = imageBitmap, contentDescription = null, modifier = modifier)
+}
+```
+
+### Writing the Container
+
+```kotlin
+fun encodeRiffImage(metadata: ImageMetadata, pixels: ReadBuffer): PlatformBuffer {
+    val metadataSize = ImageMetadataCodec.sizeOf(metadata)!!
+    val pixelSize = pixels.remaining()
+    val totalSize = 4 + 8 + metadataSize + 8 + pixelSize  // format + 2 chunk headers + data
+
+    val buffer = BufferFactory.Default.allocate(12 + totalSize)
+
+    // File header
+    FileHeaderCodec.encode(buffer, FileHeader(
+        magic = 0x52494646,
+        fileSize = totalSize.toUInt(),
+        format = 0x494D4720,
+    ))
+
+    // Metadata chunk
+    ChunkHeaderCodec.encode(buffer, ChunkHeader(0x6D657461, metadataSize.toUInt()))
+    ImageMetadataCodec.encode(buffer, metadata)
+
+    // Pixel data chunk — bulk copy from source buffer
+    ChunkHeaderCodec.encode(buffer, ChunkHeader(0x70786C73, pixelSize.toUInt()))
+    buffer.write(pixels)
+
+    buffer.resetForRead()
+    return buffer
+}
+```
+
+### Copy Budget
+
+| Step | Android (Direct) | Skia |
+|------|------------------|------|
+| Parse headers (codec) | Zero-copy (reads in place) | Zero-copy |
+| Extract pixel slice (`readBytes`) | Zero-copy (same memory) | Zero-copy |
+| Handoff to renderer | Zero-copy (`toNativeData().byteBuffer`) | 1 copy (`toByteArray()`) |
+| **Total copies of pixel data** | **0** | **1** |
+
+Without the buffer library, the typical approach — `readByteArray()` → `ByteArray` → `ByteBuffer.wrap()` → `Bitmap` — copies pixel data **twice**.
+
+---
+
 ## Extension Functions Reference
 
 | Function | Description |
