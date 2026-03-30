@@ -193,4 +193,102 @@ class AnimChunkRoundTripTest {
             )
         }
     }
+
+    // ========== Sequence of mixed variants through dispatch ==========
+
+    @Test
+    fun sealedDispatchMultipleVariantsInSequence() {
+        val chunks: List<AnimChunk> =
+            listOf(
+                AnimChunk.Header(magic = 0x414E494D, version = 1u, frameCount = 3u),
+                AnimChunk.ImageFrame(index = 0u, size = ImageSize.of(10u.toUShort(), 10u.toUShort()), bitmapLength = 3, bitmap = "abc"),
+                AnimChunk.Metadata(name = "test", author = "dev"),
+                AnimChunk.ImageFrame(index = 1u, size = ImageSize.of(20u.toUShort(), 20u.toUShort()), bitmapLength = 5, bitmap = "hello"),
+                AnimChunk.ImageFrame(index = 2u, size = ImageSize.of(30u.toUShort(), 30u.toUShort()), bitmapLength = 5, bitmap = "world"),
+            )
+
+        val buffer = BufferFactory.Default.allocate(4096, ByteOrder.BIG_ENDIAN)
+
+        // Encode all chunks sequentially
+        for (chunk in chunks) {
+            AnimChunkCodec.encode<String>(buffer, chunk, encodeImageFrameBitmap = { buf, s -> buf.writeString(s) })
+        }
+        buffer.resetForRead()
+
+        // Decode all chunks and verify types and values
+        val decoded = mutableListOf<AnimChunk>()
+        repeat(chunks.size) {
+            decoded.add(
+                AnimChunkCodec.decode<String>(buffer, decodeImageFrameBitmap = { pr -> pr.readString(pr.remaining()) }),
+            )
+        }
+
+        assertTrue(decoded[0] is AnimChunk.Header)
+        assertEquals(chunks[0], decoded[0])
+
+        assertTrue(decoded[1] is AnimChunk.ImageFrame<*>)
+        assertEquals("abc", (decoded[1] as AnimChunk.ImageFrame<*>).bitmap)
+
+        assertTrue(decoded[2] is AnimChunk.Metadata)
+        assertEquals(chunks[2], decoded[2])
+
+        assertTrue(decoded[3] is AnimChunk.ImageFrame<*>)
+        assertEquals("hello", (decoded[3] as AnimChunk.ImageFrame<*>).bitmap)
+
+        assertTrue(decoded[4] is AnimChunk.ImageFrame<*>)
+        assertEquals("world", (decoded[4] as AnimChunk.ImageFrame<*>).bitmap)
+    }
+
+    // ========== Boundary values ==========
+
+    @Test
+    fun headerWithMaxFrameCount() {
+        // @WireBytes(3) means max is 0xFFFFFF (16,777,215)
+        val original =
+            AnimChunk.Header(
+                magic = 0x414E494D,
+                version = UByte.MAX_VALUE,
+                frameCount = 0xFFFFFFu,
+            )
+        val decoded = AnimChunkHeaderCodec.testRoundTrip(original)
+        assertEquals(original, decoded)
+    }
+
+    @Test
+    fun headerWithZeroValues() {
+        val original = AnimChunk.Header(magic = 0, version = 0u, frameCount = 0u)
+        val decoded = AnimChunkHeaderCodec.testRoundTrip(original)
+        assertEquals(original, decoded)
+    }
+
+    @Test
+    fun metadataWithEmptyStrings() {
+        val original = AnimChunk.Metadata(name = "", author = "")
+        val decoded = AnimChunkMetadataCodec.testRoundTrip(original)
+        assertEquals(original, decoded)
+    }
+
+    @Test
+    fun metadataWithUnicodeStrings() {
+        val original = AnimChunk.Metadata(name = "走路循环", author = "café")
+        val decoded = AnimChunkMetadataCodec.testRoundTrip(original)
+        assertEquals(original, decoded)
+    }
+
+    @Test
+    fun imageFrameWithEmptyPayload() {
+        val original =
+            AnimChunk.ImageFrame(
+                index = 0u,
+                size = ImageSize.of(0u.toUShort(), 0u.toUShort()),
+                bitmapLength = 0,
+                bitmap = "",
+            )
+        val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
+        AnimChunkImageFrameCodec.encode(buffer, original, encodeBitmap = { buf, s -> buf.writeString(s) })
+        buffer.resetForRead()
+        val decoded = AnimChunkImageFrameCodec.decode<String>(buffer, decodeBitmap = { pr -> pr.readString(pr.remaining()) })
+        assertEquals(original.index, decoded.index)
+        assertEquals("", decoded.bitmap)
+    }
 }
