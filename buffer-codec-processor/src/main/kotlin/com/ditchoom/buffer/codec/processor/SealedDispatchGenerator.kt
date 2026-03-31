@@ -9,8 +9,12 @@ import com.squareup.kotlinpoet.CodeBlock
 import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
 import com.squareup.kotlinpoet.KModifier
+import com.squareup.kotlinpoet.LambdaTypeName
+import com.squareup.kotlinpoet.ParameterSpec
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
+import com.squareup.kotlinpoet.STAR
 import com.squareup.kotlinpoet.TypeSpec
+import com.squareup.kotlinpoet.TypeVariableName
 import com.squareup.kotlinpoet.ksp.writeTo
 
 class SealedDispatchGenerator(
@@ -20,6 +24,7 @@ class SealedDispatchGenerator(
     fun generate(
         sealedInterface: KSClassDeclaration,
         subclasses: List<KSClassDeclaration>,
+        variantPayloadInfos: List<SealedVariantPayloadInfo> = emptyList(),
     ) {
         val interfaceName = sealedInterface.simpleName.asString()
         val packageName = sealedInterface.packageName.asString()
@@ -74,15 +79,44 @@ class SealedDispatchGenerator(
             }
         val dependencies = Dependencies(aggregating = true, sources = sourceFiles.toTypedArray())
 
-        // Build decode function
+        val hasAnyPayload = variantPayloadInfos.any { it.payloadFields.isNotEmpty() }
+
+        val (decodeFun, encodeFun, implementsCodec) =
+            if (hasAnyPayload) {
+                buildPayloadDispatch(packageName, interfaceTypeName, variants, variantPayloadInfos)
+            } else {
+                buildSimpleDispatch(interfaceTypeName, variants)
+            }
+
+        val objectBuilder = TypeSpec.objectBuilder(codecName)
+        if (implementsCodec) {
+            objectBuilder.addSuperinterface(CODEC.parameterizedBy(interfaceTypeName))
+        }
+        objectBuilder.addFunction(decodeFun)
+        objectBuilder.addFunction(encodeFun)
+
+        val fileSpec =
+            FileSpec
+                .builder(packageName, codecName)
+                .addType(objectBuilder.build())
+                .build()
+
+        fileSpec.writeTo(codeGenerator, dependencies)
+    }
+
+    /** No payload variants — generates a standard Codec<T> implementation. */
+    private fun buildSimpleDispatch(
+        interfaceTypeName: ClassName,
+        variants: List<Pair<Int, KSClassDeclaration>>,
+    ): Triple<FunSpec, FunSpec, Boolean> {
+        // Decode
         val decodeBody =
             CodeBlock
                 .builder()
                 .addStatement("val type = buffer.readByte().toInt() and 0xFF")
                 .beginControlFlow("return when (type)")
         for ((value, subclass) in variants) {
-            val subName = subclass.simpleName.asString()
-            decodeBody.addStatement("$value -> ${subName}Codec.decode(buffer)")
+            decodeBody.addStatement("$value -> ${subclass.codecName()}.decode(buffer)")
         }
         decodeBody
             .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
@@ -97,13 +131,12 @@ class SealedDispatchGenerator(
                 .addCode(decodeBody.build())
                 .build()
 
-        // Build encode function
+        // Encode
         val encodeBody = CodeBlock.builder().beginControlFlow("when (value)")
         for ((value, subclass) in variants) {
-            val subName = subclass.simpleName.asString()
-            encodeBody.beginControlFlow("is $subName ->")
+            encodeBody.beginControlFlow("is %T ->", subclass.toPoetClassName())
             encodeBody.addStatement("buffer.writeByte($value.toByte())")
-            encodeBody.addStatement("${subName}Codec.encode(buffer, value)")
+            encodeBody.addStatement("${subclass.codecName()}.encode(buffer, value)")
             encodeBody.endControlFlow()
         }
         encodeBody.endControlFlow()
@@ -117,20 +150,149 @@ class SealedDispatchGenerator(
                 .addCode(encodeBody.build())
                 .build()
 
-        val objectSpec =
-            TypeSpec
-                .objectBuilder(codecName)
-                .addSuperinterface(CODEC.parameterizedBy(interfaceTypeName))
-                .addFunction(decodeFun)
-                .addFunction(encodeFun)
-                .build()
+        return Triple(decodeFun, encodeFun, true)
+    }
 
-        val fileSpec =
-            FileSpec
-                .builder(packageName, codecName)
-                .addType(objectSpec)
-                .build()
+    /**
+     * Some variants have @Payload — generates a dispatch with type params and lambda forwarding.
+     * Cannot implement Codec<T> because decode/encode need extra lambda parameters.
+     */
+    private fun buildPayloadDispatch(
+        packageName: String,
+        interfaceTypeName: ClassName,
+        variants: List<Pair<Int, KSClassDeclaration>>,
+        variantPayloadInfos: List<SealedVariantPayloadInfo>,
+    ): Triple<FunSpec, FunSpec, Boolean> {
+        // Collect all distinct type params from all payload variants
+        val allTypeParams =
+            variantPayloadInfos
+                .flatMap { it.payloadFields }
+                .map { it.typeParamName }
+                .distinct()
+        val typeVariables = allTypeParams.map { TypeVariableName(it) }
 
-        fileSpec.writeTo(codeGenerator, dependencies)
+        // Build payload info lookup
+        val payloadBySubclass =
+            variantPayloadInfos.associateBy { it.subclass.qualifiedName?.asString() }
+
+        // ── Decode ──
+        val decodeBuilder =
+            FunSpec
+                .builder("decode")
+                .addParameter("buffer", READ_BUFFER)
+                .returns(interfaceTypeName)
+
+        for (tv in typeVariables) {
+            decodeBuilder.addTypeVariable(tv)
+        }
+
+        // Add lambda params for each payload field in each payload variant
+        for (info in variantPayloadInfos) {
+            for (pf in info.payloadFields) {
+                val variantName = info.subclass.simpleName.asString()
+                val paramName = "decode${variantName}${capitalizeFirst(pf.fieldName)}"
+                val tpName = TypeVariableName(pf.typeParamName)
+                val contextType = ClassName(packageName, pf.contextClassName)
+                val lambdaType =
+                    LambdaTypeName.get(
+                        receiver = contextType,
+                        parameters = listOf(ParameterSpec.unnamed(PAYLOAD_READER)),
+                        returnType = tpName,
+                    )
+                decodeBuilder.addParameter(paramName, lambdaType)
+            }
+        }
+
+        val decodeBody =
+            CodeBlock
+                .builder()
+                .addStatement("val type = buffer.readByte().toInt() and 0xFF")
+                .beginControlFlow("return when (type)")
+
+        for ((value, subclass) in variants) {
+            val info = payloadBySubclass[subclass.qualifiedName?.asString()]
+            val subCodecName = subclass.codecName()
+            if (info != null && info.payloadFields.isNotEmpty()) {
+                val lambdaArgs =
+                    info.payloadFields.joinToString(", ") { pf ->
+                        "decode${subclass.simpleName.asString()}${capitalizeFirst(pf.fieldName)}"
+                    }
+                decodeBody.addStatement("$value -> $subCodecName.decode(buffer, $lambdaArgs)")
+            } else {
+                decodeBody.addStatement("$value -> $subCodecName.decode(buffer)")
+            }
+        }
+        decodeBody
+            .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
+            .endControlFlow()
+
+        decodeBuilder.addCode(decodeBody.build())
+
+        // ── Encode ──
+        val encodeBuilder =
+            FunSpec
+                .builder("encode")
+                .addParameter("buffer", WRITE_BUFFER)
+                .addParameter("value", interfaceTypeName)
+
+        for (tv in typeVariables) {
+            encodeBuilder.addTypeVariable(tv)
+        }
+
+        // Add encode lambda params
+        for (info in variantPayloadInfos) {
+            for (pf in info.payloadFields) {
+                val variantName = info.subclass.simpleName.asString()
+                val paramName = "encode${variantName}${capitalizeFirst(pf.fieldName)}"
+                val tpName = TypeVariableName(pf.typeParamName)
+                val encodeLambdaType =
+                    LambdaTypeName.get(
+                        parameters =
+                            listOf(
+                                ParameterSpec.unnamed(WRITE_BUFFER),
+                                ParameterSpec.unnamed(tpName),
+                            ),
+                        returnType = UNIT,
+                    )
+                encodeBuilder.addParameter(paramName, encodeLambdaType)
+            }
+        }
+
+        val encodeBody = CodeBlock.builder().beginControlFlow("when (value)")
+        for ((value, subclass) in variants) {
+            val info = payloadBySubclass[subclass.qualifiedName?.asString()]
+            val subTypeName = subclass.toPoetClassName()
+            val subCodecName = subclass.codecName()
+
+            if (info != null && info.payloadFields.isNotEmpty()) {
+                // Star-projected match for generic variant
+                val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
+                encodeBody.beginControlFlow("is %T ->", starType)
+                encodeBody.addStatement("buffer.writeByte($value.toByte())")
+                // Unchecked cast to typed variant
+                val castTypeParams = info.payloadFields.map { TypeVariableName(it.typeParamName) }
+                val castType = subTypeName.parameterizedBy(castTypeParams)
+                val lambdaArgs =
+                    info.payloadFields.joinToString(", ") { pf ->
+                        "encode${subclass.simpleName.asString()}${capitalizeFirst(pf.fieldName)}"
+                    }
+                encodeBody.addStatement(
+                    "@Suppress(\"UNCHECKED_CAST\") $subCodecName.encode(buffer, value as %T, $lambdaArgs)",
+                    castType,
+                )
+                encodeBody.endControlFlow()
+            } else {
+                // Non-payload variant: simple dispatch
+                encodeBody.beginControlFlow("is %T ->", subTypeName)
+                encodeBody.addStatement("buffer.writeByte($value.toByte())")
+                encodeBody.addStatement("$subCodecName.encode(buffer, value)")
+                encodeBody.endControlFlow()
+            }
+        }
+        encodeBody.endControlFlow()
+
+        encodeBuilder.addCode(encodeBody.build())
+
+        return Triple(decodeBuilder.build(), encodeBuilder.build(), false)
     }
 }

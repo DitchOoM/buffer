@@ -22,9 +22,8 @@ class PayloadContextGenerator(
         classDeclaration: KSClassDeclaration,
         fields: List<FieldInfo>,
     ) {
-        val className = classDeclaration.simpleName.asString()
         val packageName = classDeclaration.packageName.asString()
-        val contextName = "${className}Context"
+        val contextName = "${classDeclaration.enclosingSimpleNames().joinToString("")}Context"
 
         val nonPayloadFields = fields.filter { it.strategy !is FieldReadStrategy.PayloadField }
         if (nonPayloadFields.isEmpty()) return

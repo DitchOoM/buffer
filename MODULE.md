@@ -8,7 +8,7 @@ Core buffer interfaces and implementations:
 - `PlatformBuffer` - Main buffer interface combining read/write operations
 - `ReadBuffer` - Read operations (relative and absolute)
 - `WriteBuffer` - Write operations (relative and absolute)
-- `AllocationZone` - Memory allocation strategy
+- `BufferFactory` - Memory allocation strategy: `Default` (native), `managed()` (heap), `shared()` (IPC), `deterministic()` (explicit cleanup)
 
 ## Package com.ditchoom.buffer.pool
 

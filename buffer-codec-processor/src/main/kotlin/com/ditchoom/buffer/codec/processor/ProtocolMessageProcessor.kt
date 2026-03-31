@@ -35,7 +35,7 @@ class ProtocolMessageProcessor(
             processed.add(qualifiedName)
 
             when {
-                Modifier.SEALED in symbol.modifiers -> processSealedInterface(symbol)
+                Modifier.SEALED in symbol.modifiers -> processSealedInterface(symbol, resolver)
                 else -> {
                     val constructor = symbol.primaryConstructor
                     if (constructor == null) {
@@ -81,7 +81,10 @@ class ProtocolMessageProcessor(
         }
     }
 
-    private fun processSealedInterface(classDeclaration: KSClassDeclaration) {
+    private fun processSealedInterface(
+        classDeclaration: KSClassDeclaration,
+        resolver: Resolver,
+    ) {
         val sealedSubclasses = classDeclaration.getSealedSubclasses().toList()
         if (sealedSubclasses.isEmpty()) {
             logger.error(
@@ -92,7 +95,60 @@ class ProtocolMessageProcessor(
             return
         }
 
+        // Phase 1: Analyze and generate sub-codecs, collecting payload metadata
+        val variantPayloadInfos = mutableListOf<SealedVariantPayloadInfo>()
+        for (subclass in sealedSubclasses) {
+            val qualifiedName = subclass.qualifiedName?.asString() ?: continue
+            if (qualifiedName in processed) continue
+            processed.add(qualifiedName)
+
+            val constructor = subclass.primaryConstructor
+            if (constructor == null) {
+                logger.error(
+                    "Sealed variant '${subclass.simpleName.asString()}' of " +
+                        "'${classDeclaration.simpleName.asString()}' must have a primary constructor " +
+                        "with val parameters.",
+                    subclass,
+                )
+                continue
+            }
+            if (constructor.parameters.isEmpty()) {
+                logger.error(
+                    "Sealed variant '${subclass.simpleName.asString()}' of " +
+                        "'${classDeclaration.simpleName.asString()}' must have at least one val parameter " +
+                        "in its primary constructor.",
+                    subclass,
+                )
+                continue
+            }
+
+            // Analyze fields to detect @Payload
+            val fieldAnalyzer = FieldAnalyzer(logger, customProviders)
+            val fields = fieldAnalyzer.analyze(subclass) ?: continue
+
+            val payloadFields = fields.filter { it.strategy is FieldReadStrategy.PayloadField }
+            val payloadInfos =
+                payloadFields.map { field ->
+                    val strategy = field.strategy as FieldReadStrategy.PayloadField
+                    PayloadFieldInfo(
+                        fieldName = field.name,
+                        typeParamName = strategy.typeParamName,
+                        contextClassName = "${subclass.enclosingSimpleNames().joinToString("")}Context",
+                    )
+                }
+            variantPayloadInfos.add(SealedVariantPayloadInfo(subclass, payloadInfos))
+
+            // Generate the sub-codec
+            val batches = BatchOptimizer().optimize(fields)
+            val hasPayload = payloadFields.isNotEmpty()
+            CodecGenerator(codeGenerator, logger).generate(subclass, fields, batches, hasPayload)
+            if (hasPayload) {
+                PayloadContextGenerator(codeGenerator, logger).generate(subclass, fields)
+            }
+        }
+
+        // Phase 2: Generate the dispatch codec with payload awareness
         val generator = SealedDispatchGenerator(codeGenerator, logger)
-        generator.generate(classDeclaration, sealedSubclasses)
+        generator.generate(classDeclaration, sealedSubclasses, variantPayloadInfos)
     }
 }

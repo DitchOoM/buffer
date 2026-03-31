@@ -58,6 +58,7 @@ class NativeBuffer private constructor(
     private val ptr: CPointer<ByteVar>,
     override val capacity: Int,
     override val byteOrder: ByteOrder,
+    private val ownsMemory: Boolean = true,
 ) : PlatformBuffer,
     NativeMemoryAccess,
     CloseableBuffer {
@@ -83,6 +84,21 @@ class NativeBuffer private constructor(
                 malloc(size.convert())?.reinterpret<ByteVar>()
                     ?: throw OutOfMemoryError("Failed to allocate $size bytes")
             return NativeBuffer(ptr, size, byteOrder)
+        }
+
+        /**
+         * Wraps an externally-owned native address as a [NativeBuffer] without taking ownership.
+         * The caller is responsible for the memory lifetime — [freeNativeMemory] will NOT call free().
+         */
+        fun wrapExternal(
+            address: Long,
+            size: Int,
+            byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
+        ): NativeBuffer {
+            val ptr =
+                address.toCPointer<ByteVar>()
+                    ?: throw IllegalArgumentException("Cannot wrap null address (0)")
+            return NativeBuffer(ptr, size, byteOrder, ownsMemory = false)
         }
     }
 
@@ -551,7 +567,9 @@ class NativeBuffer private constructor(
     override fun freeNativeMemory() {
         if (!closed) {
             closed = true
-            free(ptr)
+            if (ownsMemory) {
+                free(ptr)
+            }
         }
     }
 

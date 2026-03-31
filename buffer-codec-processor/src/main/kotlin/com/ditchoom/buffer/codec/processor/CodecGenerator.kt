@@ -27,7 +27,8 @@ class CodecGenerator(
     ) {
         val className = classDeclaration.simpleName.asString()
         val packageName = classDeclaration.packageName.asString()
-        val codecName = "${className}Codec"
+        val codecName = classDeclaration.codecName()
+        val classTypeName = classDeclaration.toPoetClassName()
         val containingFile = classDeclaration.containingFile
 
         val dependencies =
@@ -39,9 +40,9 @@ class CodecGenerator(
 
         val fileSpec =
             if (hasPayload) {
-                buildPayloadCodecFile(packageName, className, codecName, fields, batches)
+                buildPayloadCodecFile(packageName, classTypeName, codecName, fields, batches)
             } else {
-                buildCodecFile(packageName, className, codecName, fields, batches)
+                buildCodecFile(packageName, classTypeName, codecName, fields, batches)
             }
 
         fileSpec.writeTo(codeGenerator, dependencies)
@@ -51,13 +52,11 @@ class CodecGenerator(
 
     private fun buildCodecFile(
         packageName: String,
-        className: String,
+        classTypeName: ClassName,
         codecName: String,
         fields: List<FieldInfo>,
         batches: List<CodegenItem>,
     ): FileSpec {
-        val classTypeName = ClassName(packageName, className)
-
         // Build decode function body
         val decodeBody = CodeBlock.builder()
         var batchIndex = 0
@@ -73,7 +72,7 @@ class CodecGenerator(
             }
         }
         val fieldNames = fields.joinToString(", ") { it.name }
-        decodeBody.addStatement("return %L(%L)", className, fieldNames)
+        decodeBody.addStatement("return %T(%L)", classTypeName, fieldNames)
 
         val decodeFun =
             FunSpec
@@ -124,16 +123,17 @@ class CodecGenerator(
 
     private fun buildPayloadCodecFile(
         packageName: String,
-        className: String,
+        classTypeName: ClassName,
         codecName: String,
         fields: List<FieldInfo>,
         batches: List<CodegenItem>,
     ): FileSpec {
+        val className = classTypeName.simpleName
         val payloadFields = fields.filter { it.strategy is FieldReadStrategy.PayloadField }
         val payloadTypeParams =
             payloadFields.map { (it.strategy as FieldReadStrategy.PayloadField).typeParamName }.distinct()
         val typeParamList = payloadTypeParams.joinToString(", ")
-        val contextName = "${className}Context"
+        val contextName = "${classTypeName.simpleNames.joinToString("")}Context"
         val typeVariables = payloadTypeParams.map { TypeVariableName(it) }
 
         // Build decode function
@@ -163,7 +163,7 @@ class CodecGenerator(
             decodeBuilder.addParameter("decode${capitalizeFirst(pf.name)}", paramLambdaType)
         }
 
-        val returnType = ClassName(packageName, className).parameterizedBy(typeVariables)
+        val returnType = classTypeName.parameterizedBy(typeVariables)
         decodeBuilder.returns(returnType)
 
         val decodeBody = CodeBlock.builder()
@@ -222,7 +222,7 @@ class CodecGenerator(
 
         // Phase 4: return constructor call
         val fieldNames = fields.joinToString(", ") { it.name }
-        decodeBody.addStatement("return %L(%L)", className, fieldNames)
+        decodeBody.addStatement("return %T(%L)", classTypeName, fieldNames)
 
         decodeBuilder.addCode(decodeBody.build())
 

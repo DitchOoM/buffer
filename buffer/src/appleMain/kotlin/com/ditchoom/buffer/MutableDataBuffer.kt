@@ -48,18 +48,41 @@ import platform.posix.memset
  * @property data The underlying NSMutableData instance.
  */
 @OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, UnsafeNumber::class)
-class MutableDataBuffer(
+class MutableDataBuffer private constructor(
     val data: NSMutableData,
+    private val bytePointer: CPointer<ByteVar>,
+    override val capacity: Int,
     override val byteOrder: ByteOrder,
+    internal val ownsData: Boolean,
 ) : PlatformBuffer,
     Parcelable,
     NativeMemoryAccess {
     private var position: Int = 0
-    private var limit: Int = data.length.toInt()
-    override val capacity: Int = data.length.toInt()
+    private var limit: Int = capacity
 
+    /** Standard constructor wrapping an NSMutableData. */
     @Suppress("UNCHECKED_CAST")
-    private val bytePointer: CPointer<ByteVar> = data.mutableBytes as CPointer<ByteVar>
+    constructor(data: NSMutableData, byteOrder: ByteOrder) : this(
+        data = data,
+        bytePointer = data.mutableBytes as CPointer<ByteVar>,
+        capacity = data.length.toInt(),
+        byteOrder = byteOrder,
+        ownsData = true,
+    )
+
+    /**
+     * Wraps an externally-owned CPointer as a buffer without NSMutableData.
+     * The buffer does NOT own the memory — no cleanup on GC.
+     * A dummy NSMutableData is created to preserve public API compatibility,
+     * but all operations use [bytePointer] directly.
+     */
+    internal constructor(externalPointer: CPointer<ByteVar>, size: Int, byteOrder: ByteOrder) : this(
+        data = NSMutableData.create(length = 0u)!!,
+        bytePointer = externalPointer,
+        capacity = size,
+        byteOrder = byteOrder,
+        ownsData = false,
+    )
 
     /**
      * The native memory address for C interop.
@@ -146,6 +169,11 @@ class MutableDataBuffer(
         charset: Charset,
     ): String {
         if (length == 0) return ""
+        if (!ownsData) {
+            val bytes = (bytePointer + position)!!.readBytes(length)
+            position += length
+            return bytes.decodeToString()
+        }
         val subdata = data.subdataWithRange(NSMakeRange(position.convert(), length.convert()))
         val stringEncoding = charset.toEncoding()
 
@@ -234,9 +262,15 @@ class MutableDataBuffer(
         if (length < 1) {
             return this
         }
-        val range = NSMakeRange(position.convert(), length.convert())
-        bytes.usePinned { pin ->
-            data.replaceBytesInRange(range, pin.addressOf(offset))
+        if (ownsData) {
+            val range = NSMakeRange(position.convert(), length.convert())
+            bytes.usePinned { pin ->
+                data.replaceBytesInRange(range, pin.addressOf(offset))
+            }
+        } else {
+            bytes.usePinned { pin ->
+                memcpy((bytePointer + position)!!, pin.addressOf(offset), length.convert())
+            }
         }
         position += length
         return this
@@ -549,9 +583,8 @@ class MutableDataBufferSlice(
     private var position: Int = 0
     private var limit: Int = sliceLength
 
-    // Pointer to the start of this slice's data
-    @Suppress("UNCHECKED_CAST")
-    val bytePointer: CPointer<ByteVar> = (parent.data.mutableBytes as CPointer<ByteVar> + sliceOffset)!!
+    // Pointer to the start of this slice's data (uses parent's cached pointer, not NSMutableData)
+    val bytePointer: CPointer<ByteVar> = (parent.nativeAddress.toCPointer<ByteVar>()!! + sliceOffset)!!
 
     override val nativeAddress: Long get() = bytePointer.toLong()
 
@@ -627,8 +660,15 @@ class MutableDataBufferSlice(
         charset: Charset,
     ): String {
         if (length == 0) return ""
+        val parentData = parent.data
+        if (!parent.ownsData) {
+            // External pointer: no NSData available, use byte decoding
+            val bytes = (bytePointer + position)!!.readBytes(length)
+            position += length
+            return bytes.decodeToString()
+        }
         val subdata =
-            parent.data.subdataWithRange(
+            parentData.subdataWithRange(
                 NSMakeRange((sliceOffset + position).convert(), length.convert()),
             )
         val stringEncoding = charset.toEncoding()

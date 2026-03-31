@@ -2,11 +2,14 @@
 
 package com.ditchoom.buffer
 
+import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.UnsafeNumber
 import kotlinx.cinterop.convert
+import kotlinx.cinterop.toCPointer
 import platform.Foundation.NSData
 import platform.Foundation.NSMutableData
 import platform.Foundation.create
+import platform.Foundation.length
 
 // =============================================================================
 // v2 BufferFactory implementations
@@ -125,3 +128,16 @@ actual fun PlatformBuffer.Companion.allocateShared(
     size: Int,
     byteOrder: ByteOrder,
 ): PlatformBuffer = BufferFactory.Default.allocate(size, byteOrder)
+
+actual fun PlatformBuffer.Companion.wrapNativeAddress(
+    address: Long,
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer {
+    val ptr =
+        address.toCPointer<ByteVar>()
+            ?: throw IllegalArgumentException("Cannot wrap null address (0)")
+    // Use the CPointer constructor directly — bypasses NSMutableData entirely.
+    // The buffer does NOT own this memory.
+    return MutableDataBuffer(ptr, size, byteOrder)
+}

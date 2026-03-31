@@ -8,6 +8,7 @@ package com.ditchoom.buffer
 
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
+import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.usePinned
 import platform.Foundation.NSData
 import platform.Foundation.NSMakeRange
@@ -62,12 +63,18 @@ actual fun ReadBuffer.toNativeData(): NativeData {
                 }
             }
             is MutableDataBuffer -> {
-                val pos = position()
-                val rem = remaining()
-                if (pos == 0 && rem == data.length.toInt()) {
-                    data
+                if (ownsData) {
+                    val pos = position()
+                    val rem = remaining()
+                    if (pos == 0 && rem == data.length.toInt()) {
+                        data
+                    } else {
+                        data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert()))
+                    }
                 } else {
-                    data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert()))
+                    // External pointer: wrap as read-only NSData (zero-copy)
+                    val addr = (nativeAddress + position()).toCPointer<kotlinx.cinterop.ByteVar>()
+                    NSData.create(bytesNoCopy = addr!!, length = remaining().convert(), freeWhenDone = false)
                 }
             }
             else -> toByteArray().toNSData()
@@ -95,13 +102,23 @@ actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData {
     return MutableNativeData(
         when (unwrapped) {
             is MutableDataBuffer -> {
-                val pos = unwrapped.position()
-                val rem = unwrapped.remaining()
-                if (pos == 0 && rem == unwrapped.data.length.toInt()) {
-                    unwrapped.data
+                if (unwrapped.ownsData) {
+                    val pos = unwrapped.position()
+                    val rem = unwrapped.remaining()
+                    if (pos == 0 && rem == unwrapped.data.length.toInt()) {
+                        unwrapped.data
+                    } else {
+                        NSMutableData.create(
+                            unwrapped.data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert())),
+                        )
+                    }
                 } else {
+                    // External pointer: wrap as NSMutableData (zero-copy, non-owning)
+                    val addr = (unwrapped.nativeAddress + unwrapped.position()).toCPointer<kotlinx.cinterop.ByteVar>()
                     NSMutableData.create(
-                        unwrapped.data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert())),
+                        bytesNoCopy = addr!!,
+                        length = unwrapped.remaining().convert(),
+                        freeWhenDone = false,
                     )
                 }
             }

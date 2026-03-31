@@ -185,3 +185,38 @@ annotation class WireBytes(
 annotation class WhenTrue(
     val expression: String,
 )
+
+/**
+ * Delegates field decoding/encoding to an existing [Codec][com.ditchoom.buffer.codec.Codec] object.
+ *
+ * Use this instead of writing a full SPI module when you need a custom field type.
+ * The referenced [codec] must be a Kotlin `object` implementing `Codec<T>`.
+ *
+ * **Without a length annotation** — the codec reads directly from the buffer:
+ * ```kotlin
+ * @ProtocolMessage
+ * data class Message(
+ *     @UseCodec(VariableIntCodec::class) val length: Int,
+ * )
+ * // Generated: val length = VariableIntCodec.decode(buffer)
+ * ```
+ *
+ * **With a length annotation** — the codec receives a size-limited slice:
+ * ```kotlin
+ * @ProtocolMessage
+ * data class ImageFrame(
+ *     val bitmapLength: Int,
+ *     @UseCodec(PngBitmapCodec::class) @LengthFrom("bitmapLength") val bitmap: ImageBitmap,
+ * )
+ * // Generated: val _slice = buffer.readBytes(bitmapLength); val bitmap = PngBitmapCodec.decode(_slice)
+ * ```
+ *
+ * Composes with [@LengthPrefixed], [@RemainingBytes], and [@LengthFrom].
+ *
+ * @param codec A `KClass` referencing a Kotlin `object` that implements `Codec<T>`.
+ */
+@Target(AnnotationTarget.VALUE_PARAMETER)
+@Retention(AnnotationRetention.BINARY)
+annotation class UseCodec(
+    val codec: kotlin.reflect.KClass<*>,
+)

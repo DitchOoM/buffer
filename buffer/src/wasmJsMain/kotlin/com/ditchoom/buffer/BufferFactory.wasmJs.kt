@@ -61,3 +61,14 @@ actual fun PlatformBuffer.Companion.allocateShared(
     size: Int,
     byteOrder: ByteOrder,
 ): PlatformBuffer = BufferFactory.Default.allocate(size, byteOrder)
+
+actual fun PlatformBuffer.Companion.wrapNativeAddress(
+    address: Long,
+    size: Int,
+    byteOrder: ByteOrder,
+): PlatformBuffer {
+    require(address >= 0 && address <= Int.MAX_VALUE) {
+        "WASM linear memory address must fit in Int range, got $address"
+    }
+    return LinearBuffer(address.toInt(), size, byteOrder)
+}

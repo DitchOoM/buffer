@@ -34,7 +34,7 @@ When exposing to Swift code:
 
 ```swift
 // In Swift
-let buffer = PlatformBuffer.companion.allocate(size: 1024)
+let buffer = BufferFactory.Default.allocate(size: 1024)
 buffer.writeInt(value: 42)
 buffer.resetForRead()
 let value = buffer.readInt()
