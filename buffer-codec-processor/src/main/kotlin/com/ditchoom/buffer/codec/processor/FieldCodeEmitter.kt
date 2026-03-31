@@ -43,6 +43,7 @@ internal fun readExpression(strategy: FieldReadStrategy): String =
             "${strategy.wrapperType}($inner)"
         }
         is FieldReadStrategy.NestedMessageField -> "${strategy.codecName}.decode(buffer)"
+        is FieldReadStrategy.UseCodecField -> readUseCodecExpression(strategy)
         is FieldReadStrategy.CollectionField -> readCollectionExpression(strategy)
         is FieldReadStrategy.PayloadField -> error("PayloadField uses writePayloadCodec path")
         is FieldReadStrategy.Custom -> {
@@ -98,6 +99,7 @@ internal fun writeExpression(
             writeExpression(strategy.innerStrategy, inner)
         }
         is FieldReadStrategy.NestedMessageField -> "${strategy.codecName}.encode(buffer, $valueExpr)"
+        is FieldReadStrategy.UseCodecField -> writeUseCodecExpression(strategy, valueExpr)
         is FieldReadStrategy.CollectionField -> writeCollectionExpression(strategy, valueExpr)
         is FieldReadStrategy.PayloadField -> error("PayloadField uses writePayloadCodec path")
         is FieldReadStrategy.Custom -> {
@@ -136,5 +138,43 @@ private fun writeCollectionExpression(
             val cfg = prefixConfig(lk.prefix)
             "run { ${cfg.writeExpr("$valueExpr.size")}; $valueExpr.forEach { $codecName.encode(buffer, it) } }"
         }
+    }
+}
+
+private fun readUseCodecExpression(strategy: FieldReadStrategy.UseCodecField): String {
+    val codec = strategy.codecName
+    val lk = strategy.lengthKind ?: return "$codec.decode(buffer)"
+    // With a length annotation: slice first, then decode from the slice
+    return when (lk) {
+        is LengthKind.Prefixed -> {
+            val lenExpr = prefixConfig(lk.prefix).readExpr
+            "run { val _len = $lenExpr; $codec.decode(buffer.readBytes(_len)) }"
+        }
+        is LengthKind.Remaining ->
+            "$codec.decode(buffer.readBytes(buffer.remaining()))"
+        is LengthKind.FromField ->
+            "$codec.decode(buffer.readBytes(${lk.field}.toInt()))"
+    }
+}
+
+private fun writeUseCodecExpression(
+    strategy: FieldReadStrategy.UseCodecField,
+    valueExpr: String,
+): String {
+    val codec = strategy.codecName
+    val lk = strategy.lengthKind ?: return "$codec.encode(buffer, $valueExpr)"
+    // With a length prefix: write placeholder, encode, then fill in the length
+    return when (lk) {
+        is LengthKind.Prefixed -> {
+            val cfg = prefixConfig(lk.prefix)
+            "run { val _pos = buffer.position(); ${cfg.writePlaceholder}; " +
+                "$codec.encode(buffer, $valueExpr); " +
+                "val _end = buffer.position(); val _len = _end - _pos - ${cfg.byteCount}; " +
+                "buffer.position(_pos); ${cfg.writeExpr("_len")}; buffer.position(_end) }"
+        }
+        is LengthKind.Remaining ->
+            "$codec.encode(buffer, $valueExpr)"
+        is LengthKind.FromField ->
+            "$codec.encode(buffer, $valueExpr)"
     }
 }

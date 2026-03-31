@@ -117,6 +117,11 @@ sealed class FieldReadStrategy {
         val elementCodecName: String,
     ) : FieldReadStrategy()
 
+    data class UseCodecField(
+        val codecName: String,
+        val lengthKind: LengthKind?,
+    ) : FieldReadStrategy()
+
     data class Custom(
         val descriptor: CustomFieldDescriptor,
     ) : FieldReadStrategy()
@@ -381,8 +386,17 @@ class FieldAnalyzer(
             return resolvePayloadLengthKind(param, fieldName, typeDecl.name.asString())
         }
 
-        // Check SPI-registered custom annotations
+        // Check @UseCodec (built-in custom codec reference)
         val annotations = param.annotations.toList()
+        val decodeWith =
+            annotations.find {
+                it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.UseCodec"
+            }
+        if (decodeWith != null) {
+            return resolveUseCodec(decodeWith, param, annotations, fieldName)
+        }
+
+        // Check SPI-registered custom annotations
         for (annotation in annotations) {
             val fqn = annotation.qualifiedName() ?: continue
             val provider = customProviders[fqn]
@@ -425,6 +439,54 @@ class FieldAnalyzer(
             resolveLengthKind(param, param.annotations.toList(), fieldName, "Payload")
                 ?: return null
         return FieldReadStrategy.PayloadField(lk, typeParamName)
+    }
+
+    private fun resolveUseCodec(
+        decodeWith: KSAnnotation,
+        param: KSValueParameter,
+        annotations: List<KSAnnotation>,
+        fieldName: String,
+    ): FieldReadStrategy? {
+        // Extract the KClass argument and resolve to a qualified codec name
+        val codecArg = decodeWith.arguments.find { it.name?.asString() == "codec" }?.value
+        val codecType = codecArg as? KSType
+        if (codecType == null) {
+            logger.error(
+                "@UseCodec on field '$fieldName' requires a codec KClass argument.",
+                param,
+            )
+            return null
+        }
+        val codecDecl = codecType.declaration as? KSClassDeclaration
+        if (codecDecl == null) {
+            logger.error(
+                "@UseCodec on field '$fieldName': codec must reference a class or object.",
+                param,
+            )
+            return null
+        }
+        val codecName = codecDecl.qualifiedName?.asString()
+        if (codecName == null) {
+            logger.error("@UseCodec on field '$fieldName': cannot resolve codec class name.", param)
+            return null
+        }
+
+        // Optionally combine with a length annotation (not required)
+        val hasLengthAnnotation =
+            annotations.any {
+                val fqn = it.qualifiedName()
+                fqn == "com.ditchoom.buffer.codec.annotations.LengthPrefixed" ||
+                    fqn == "com.ditchoom.buffer.codec.annotations.RemainingBytes" ||
+                    fqn == "com.ditchoom.buffer.codec.annotations.LengthFrom"
+            }
+        val lengthKind =
+            if (hasLengthAnnotation) {
+                resolveLengthKind(param, annotations, fieldName, "@UseCodec") ?: return null
+            } else {
+                null // No length annotation: codec reads directly from buffer
+            }
+
+        return FieldReadStrategy.UseCodecField(codecName, lengthKind)
     }
 
     private fun resolveStringStrategy(
