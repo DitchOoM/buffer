@@ -146,7 +146,7 @@ internal expect val sharedBufferFactory: BufferFactory
  * Platform implementations:
  * - **JVM 21+**: FfmBuffer with Arena.ofShared() (default) or Arena.ofConfined() (threadConfined=true)
  * - **JVM 9-20**: DeterministicDirectJvmBuffer (DirectByteBuffer + Unsafe.invokeCleaner)
- * - **JVM 8 / Android**: UnsafePlatformBuffer (Unsafe.allocateMemory/freeMemory)
+ * - **JVM 8 / Android**: DeterministicUnsafeJvmBuffer (Unsafe.allocateMemory/freeMemory)
  * - **Apple**: MutableDataBuffer (ARC-managed, already deterministic)
  * - **Linux**: NativeBuffer (malloc/free)
  * - **WASM**: LinearBuffer (linear memory, already deterministic)

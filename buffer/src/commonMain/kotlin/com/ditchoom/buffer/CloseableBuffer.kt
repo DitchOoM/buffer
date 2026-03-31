@@ -14,9 +14,9 @@ package com.ditchoom.buffer
  * | JVM 21+ (default) | FfmAutoBuffer (Arena.ofAuto) | No (GC-managed) |
  * | JVM 21+ (deterministic) | FfmBuffer (Arena.ofShared/ofConfined) | **Yes** (via `BufferFactory.deterministic()`) |
  * | JVM 9-20 (deterministic) | DeterministicDirectJvmBuffer | **Yes** (via `BufferFactory.deterministic()`) |
- * | JVM 8 (deterministic) | UnsafePlatformBuffer | **Yes** (via `BufferFactory.deterministic()`) |
+ * | JVM 8 (deterministic) | DeterministicUnsafeJvmBuffer | **Yes** (via `BufferFactory.deterministic()`) |
  * | JVM (default) | DirectJvmBuffer | No (GC fallback) |
- * | Android (deterministic) | UnsafePlatformBuffer | **Yes** (via `BufferFactory.deterministic()`) |
+ * | Android (deterministic) | DeterministicUnsafeJvmBuffer | **Yes** (via `BufferFactory.deterministic()`) |
  * | Android (default) | DirectJvmBuffer | No (GC-managed) |
  * | Apple | MutableDataBuffer (NSMutableData) | No (ARC-managed) |
  * | Linux (default) | ByteArrayBuffer | No (GC-managed) |

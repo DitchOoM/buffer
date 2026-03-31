@@ -115,7 +115,7 @@ class DeterministicBufferTest {
     fun deterministicBufferThrowsAfterFree() {
         val buffer = BufferFactory.deterministic().allocate(64)
         buffer.freeNativeMemory()
-        // After free: UnsafePlatformBuffer throws IllegalStateException,
+        // After free: DeterministicUnsafeJvmBuffer throws IllegalStateException,
         // FfmBuffer throws BufferUnderflowException (ByteBuffer limit=0)
         val threw =
             try {
@@ -128,9 +128,8 @@ class DeterministicBufferTest {
     }
 
     @Test
-    fun unsafePlatformBufferRoundTrip() {
-        val buffer = JvmUnsafePlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
-        try {
+    fun deterministicBufferRoundTripBigEndian() {
+        BufferFactory.deterministic().allocate(64, ByteOrder.BIG_ENDIAN).use { buffer ->
             buffer.writeByte(0x42)
             buffer.writeShort(0x1234.toShort())
             buffer.writeInt(0x12345678)
@@ -142,15 +141,12 @@ class DeterministicBufferTest {
             assertEquals(0x1234.toShort(), buffer.readShort())
             assertEquals(0x12345678, buffer.readInt())
             assertEquals(0x123456789ABCDEF0L, buffer.readLong())
-        } finally {
-            buffer.freeNativeMemory()
         }
     }
 
     @Test
-    fun unsafePlatformBufferLittleEndian() {
-        val buffer = JvmUnsafePlatformBuffer.allocate(64, ByteOrder.LITTLE_ENDIAN)
-        try {
+    fun deterministicBufferLittleEndian() {
+        BufferFactory.deterministic().allocate(64, ByteOrder.LITTLE_ENDIAN).use { buffer ->
             buffer.writeShort(0x1234.toShort())
             buffer.writeInt(0x12345678)
 
@@ -158,63 +154,52 @@ class DeterministicBufferTest {
 
             assertEquals(0x1234.toShort(), buffer.readShort())
             assertEquals(0x12345678, buffer.readInt())
-        } finally {
-            buffer.freeNativeMemory()
         }
     }
 
     @Test
-    fun copyBetweenUnsafeAndHeap() {
-        val unsafe = JvmUnsafePlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
-        try {
-            unsafe.writeInt(0xDEADBEEF.toInt())
-            unsafe.writeInt(0xCAFEBABE.toInt())
-            unsafe.resetForRead()
+    fun copyBetweenDeterministicAndHeap() {
+        BufferFactory.deterministic().allocate(64, ByteOrder.BIG_ENDIAN).use { det ->
+            det.writeInt(0xDEADBEEF.toInt())
+            det.writeInt(0xCAFEBABE.toInt())
+            det.resetForRead()
 
             val heap = BufferFactory.managed().allocate(64)
-            heap.write(unsafe)
+            heap.write(det)
             heap.resetForRead()
 
             assertEquals(0xDEADBEEF.toInt(), heap.readInt())
             assertEquals(0xCAFEBABE.toInt(), heap.readInt())
-        } finally {
-            unsafe.freeNativeMemory()
         }
     }
 
     @Test
-    fun copyBetweenHeapAndUnsafe() {
+    fun copyBetweenHeapAndDeterministic() {
         val heap = BufferFactory.managed().allocate(64)
         heap.writeInt(0xDEADBEEF.toInt())
         heap.writeInt(0xCAFEBABE.toInt())
         heap.resetForRead()
 
-        val unsafe = JvmUnsafePlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
-        try {
-            unsafe.write(heap)
-            unsafe.resetForRead()
+        BufferFactory.deterministic().allocate(64, ByteOrder.BIG_ENDIAN).use { det ->
+            det.write(heap)
+            det.resetForRead()
 
-            assertEquals(0xDEADBEEF.toInt(), unsafe.readInt())
-            assertEquals(0xCAFEBABE.toInt(), unsafe.readInt())
-        } finally {
-            unsafe.freeNativeMemory()
+            assertEquals(0xDEADBEEF.toInt(), det.readInt())
+            assertEquals(0xCAFEBABE.toInt(), det.readInt())
         }
     }
 
     @Test
-    fun copyBetweenUnsafeAndDirect() {
-        val unsafe = JvmUnsafePlatformBuffer.allocate(64, ByteOrder.BIG_ENDIAN)
-        try {
-            unsafe.writeInt(0xDEADBEEF.toInt())
-            unsafe.resetForRead()
+    fun copyBetweenDeterministicAndDirect() {
+        BufferFactory.deterministic().allocate(64, ByteOrder.BIG_ENDIAN).use { det ->
+            det.writeInt(0xDEADBEEF.toInt())
+            det.resetForRead()
 
             val direct = BufferFactory.Default.allocate(64)
-            direct.write(unsafe)
+            direct.write(det)
             direct.resetForRead()
 
             assertEquals(0xDEADBEEF.toInt(), direct.readInt())
-        } finally {
-            unsafe.freeNativeMemory()
         }
     }
 }

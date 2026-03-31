@@ -43,8 +43,8 @@ private val deterministicFactoryInstance: BufferFactory =
             size: Int,
             byteOrder: ByteOrder,
         ): PlatformBuffer {
-            // Android: invokeCleaner is not available on ART, use Unsafe.allocateMemory
-            return AndroidUnsafePlatformBuffer.allocate(size, byteOrder)
+            // Android: invokeCleaner is not available on ART, use Unsafe.allocateMemory + DirectByteBuffer
+            return AndroidDeterministicUnsafeJvmBuffer.allocate(size, byteOrder)
         }
 
         override fun wrap(
