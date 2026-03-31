@@ -209,6 +209,45 @@ data class CompactHeader(
 
 Only applies to integer types. Not allowed on `Float`, `Double`, or `Boolean`.
 
+### `@UseCodec(codec)` — Custom Codec Reference
+
+Delegates field encoding/decoding to an existing `Codec` object, without needing an SPI module. The referenced codec must be a Kotlin `object` implementing `Codec<T>`.
+
+**Without a length annotation** — the codec reads directly from the buffer:
+
+```kotlin
+object RgbCodec : Codec<Rgb> {
+    override fun decode(buffer: ReadBuffer) = Rgb(
+        buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte()
+    )
+    override fun encode(buffer: WriteBuffer, value: Rgb) {
+        buffer.writeUByte(value.r); buffer.writeUByte(value.g); buffer.writeUByte(value.b)
+    }
+    override fun sizeOf(value: Rgb) = 3
+}
+
+@ProtocolMessage
+data class ColoredPoint(
+    val x: Int,
+    val y: Int,
+    @UseCodec(RgbCodec::class) val color: Rgb,
+)
+// Generated: val color = RgbCodec.decode(buffer)
+```
+
+**With a length annotation** — the codec receives a size-limited slice:
+
+```kotlin
+@ProtocolMessage
+data class ImageFrame(
+    val bitmapLength: Int,
+    @UseCodec(PngBitmapCodec::class) @LengthFrom("bitmapLength") val bitmap: ImageBitmap,
+)
+// Generated: val bitmap = PngBitmapCodec.decode(buffer.readBytes(bitmapLength))
+```
+
+Composes with `@LengthPrefixed`, `@RemainingBytes`, and `@LengthFrom`. This replaces the SPI `CodecFieldProvider` approach for most use cases — no extra Gradle module, no META-INF/services, no ServiceLoader.
+
 ### `@WhenTrue("expression")` — Conditional Fields
 
 A field that is only present on the wire when a preceding Boolean field is `true`. The annotated field must be nullable with a default of `null`.
