@@ -8,6 +8,7 @@ package com.ditchoom.buffer
 
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
+import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.usePinned
 import platform.Foundation.NSData
 import platform.Foundation.NSMakeRange
@@ -72,7 +73,9 @@ actual fun ReadBuffer.toNativeData(): NativeData {
                         d.subdataWithRange(NSMakeRange(pos.convert(), rem.convert()))
                     }
                 } else {
-                    toByteArray().toNSData()
+                    // External pointer: wrap as read-only NSData (zero-copy)
+                    val addr = (nativeAddress + position()).toCPointer<kotlinx.cinterop.ByteVar>()
+                    NSData.create(bytesNoCopy = addr!!, length = remaining().convert(), freeWhenDone = false)
                 }
             }
             else -> toByteArray().toNSData()
@@ -112,7 +115,13 @@ actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData {
                         )
                     }
                 } else {
-                    toByteArray().toNSMutableData()
+                    // External pointer: wrap as NSMutableData (zero-copy, non-owning)
+                    val addr = (unwrapped.nativeAddress + unwrapped.position()).toCPointer<kotlinx.cinterop.ByteVar>()
+                    NSMutableData.create(
+                        bytesNoCopy = addr!!,
+                        length = unwrapped.remaining().convert(),
+                        freeWhenDone = false,
+                    )
                 }
             }
             else -> toByteArray().toNSMutableData()
