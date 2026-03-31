@@ -62,12 +62,17 @@ actual fun ReadBuffer.toNativeData(): NativeData {
                 }
             }
             is MutableDataBuffer -> {
-                val pos = position()
-                val rem = remaining()
-                if (pos == 0 && rem == data.length.toInt()) {
-                    data
+                val d = data
+                if (d != null) {
+                    val pos = position()
+                    val rem = remaining()
+                    if (pos == 0 && rem == d.length.toInt()) {
+                        d
+                    } else {
+                        d.subdataWithRange(NSMakeRange(pos.convert(), rem.convert()))
+                    }
                 } else {
-                    data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert()))
+                    toByteArray().toNSData()
                 }
             }
             else -> toByteArray().toNSData()
@@ -95,14 +100,19 @@ actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData {
     return MutableNativeData(
         when (unwrapped) {
             is MutableDataBuffer -> {
-                val pos = unwrapped.position()
-                val rem = unwrapped.remaining()
-                if (pos == 0 && rem == unwrapped.data.length.toInt()) {
-                    unwrapped.data
+                val d = unwrapped.data
+                if (d != null) {
+                    val pos = unwrapped.position()
+                    val rem = unwrapped.remaining()
+                    if (pos == 0 && rem == d.length.toInt()) {
+                        d
+                    } else {
+                        NSMutableData.create(
+                            d.subdataWithRange(NSMakeRange(pos.convert(), rem.convert())),
+                        )
+                    }
                 } else {
-                    NSMutableData.create(
-                        unwrapped.data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert())),
-                    )
+                    toByteArray().toNSMutableData()
                 }
             }
             else -> toByteArray().toNSMutableData()

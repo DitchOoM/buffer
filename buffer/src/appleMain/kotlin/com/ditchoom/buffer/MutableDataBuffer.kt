@@ -164,7 +164,12 @@ class MutableDataBuffer private constructor(
         charset: Charset,
     ): String {
         if (length == 0) return ""
-        val subdata = data.subdataWithRange(NSMakeRange(position.convert(), length.convert()))
+        if (data == null) {
+            val bytes = (bytePointer + position)!!.readBytes(length)
+            position += length
+            return bytes.decodeToString()
+        }
+        val subdata = data!!.subdataWithRange(NSMakeRange(position.convert(), length.convert()))
         val stringEncoding = charset.toEncoding()
 
         @Suppress("CAST_NEVER_SUCCEEDS")
@@ -252,9 +257,15 @@ class MutableDataBuffer private constructor(
         if (length < 1) {
             return this
         }
-        val range = NSMakeRange(position.convert(), length.convert())
-        bytes.usePinned { pin ->
-            data.replaceBytesInRange(range, pin.addressOf(offset))
+        if (data != null) {
+            val range = NSMakeRange(position.convert(), length.convert())
+            bytes.usePinned { pin ->
+                data!!.replaceBytesInRange(range, pin.addressOf(offset))
+            }
+        } else {
+            bytes.usePinned { pin ->
+                memcpy((bytePointer + position)!!, pin.addressOf(offset), length.convert())
+            }
         }
         position += length
         return this
