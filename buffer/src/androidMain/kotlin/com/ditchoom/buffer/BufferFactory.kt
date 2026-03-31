@@ -43,7 +43,13 @@ private val deterministicFactoryInstance: BufferFactory =
             size: Int,
             byteOrder: ByteOrder,
         ): PlatformBuffer {
-            // Android: invokeCleaner is not available on ART, use Unsafe.allocateMemory + DirectByteBuffer
+            // Try invokeCleaner first (available on host JVM during unit tests, not on ART)
+            if (invokeCleanerFn != null) {
+                return JvmDeterministicDirectJvmBuffer(
+                    ByteBuffer.allocateDirect(size).order(byteOrder.toJava()),
+                )
+            }
+            // Android/ART: use Unsafe.allocateMemory + DirectByteBuffer
             return AndroidDeterministicUnsafeJvmBuffer.allocate(size, byteOrder)
         }
 
