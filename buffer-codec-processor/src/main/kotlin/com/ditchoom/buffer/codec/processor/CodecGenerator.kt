@@ -341,17 +341,128 @@ class CodecGenerator(
         }
         encodeBuilder.addCode(encodeBody.build())
 
-        val objectSpec =
+        val objectBuilder =
             TypeSpec
                 .objectBuilder(codecName)
                 .addFunction(decodeBuilder.build())
                 .addFunction(encodeBuilder.build())
-                .build()
+
+        // Generate context keys and context-based decode/encode for each payload field.
+        // These enable the codec to be used as a nested field via Codec.decode(buffer, context).
+        for (pf in payloadFields) {
+            val fieldCapitalized = capitalizeFirst(pf.name)
+            val contextType = ClassName(packageName, contextName)
+
+            // Decode key: data object extending CodecContext.Key
+            val decodeLambdaType =
+                LambdaTypeName.get(
+                    receiver = contextType,
+                    parameters =
+                        listOf(
+                            com.squareup.kotlinpoet.ParameterSpec
+                                .unnamed(PAYLOAD_READER),
+                        ),
+                    returnType = ClassName("kotlin", "Any").copy(nullable = true),
+                )
+            objectBuilder.addType(
+                TypeSpec
+                    .objectBuilder("${fieldCapitalized}DecodeKey")
+                    .addModifiers(KModifier.DATA)
+                    .superclass(CODEC_CONTEXT_KEY.parameterizedBy(decodeLambdaType))
+                    .build(),
+            )
+
+            // Encode key: data object extending CodecContext.Key
+            val encodeLambdaType =
+                LambdaTypeName.get(
+                    parameters =
+                        listOf(
+                            com.squareup.kotlinpoet.ParameterSpec
+                                .unnamed(WRITE_BUFFER),
+                            com.squareup.kotlinpoet.ParameterSpec
+                                .unnamed(ClassName("kotlin", "Any").copy(nullable = true)),
+                        ),
+                    returnType = UNIT,
+                )
+            objectBuilder.addType(
+                TypeSpec
+                    .objectBuilder("${fieldCapitalized}EncodeKey")
+                    .addModifiers(KModifier.DATA)
+                    .superclass(CODEC_CONTEXT_KEY.parameterizedBy(encodeLambdaType))
+                    .build(),
+            )
+        }
+
+        // Context-based decode: reads lambdas from DecodeContext, delegates to Convention 1
+        val ctxDecodeBody = CodeBlock.builder()
+        val lambdaArgs = mutableListOf<String>()
+        for (pf in payloadFields) {
+            val fieldCapitalized = capitalizeFirst(pf.name)
+            val localVar = "_decode$fieldCapitalized"
+            ctxDecodeBody.addStatement(
+                "val %L = context[%L] ?: error(%S)",
+                localVar,
+                "${fieldCapitalized}DecodeKey",
+                "DecodeContext missing $codecName.${fieldCapitalized}DecodeKey. " +
+                    "Register: ctx.with($codecName.${fieldCapitalized}DecodeKey) { pr -> ... }",
+            )
+            lambdaArgs.add(localVar)
+        }
+        ctxDecodeBody.addStatement(
+            "return decode(buffer, %L)",
+            lambdaArgs.joinToString(", "),
+        )
+
+        val starReturnType = classTypeName.parameterizedBy(payloadFields.map { com.squareup.kotlinpoet.STAR })
+        objectBuilder.addFunction(
+            FunSpec
+                .builder("decodeFromContext")
+                .addParameter("buffer", READ_BUFFER)
+                .addParameter("context", DECODE_CONTEXT)
+                .returns(starReturnType)
+                .addCode(ctxDecodeBody.build())
+                .build(),
+        )
+
+        // Context-based encode: reads lambdas from EncodeContext, delegates to Convention 1
+        val ctxEncodeBody = CodeBlock.builder()
+        val encodeLambdaArgs = mutableListOf<String>()
+        for (pf in payloadFields) {
+            val fieldCapitalized = capitalizeFirst(pf.name)
+            val localVar = "_encode$fieldCapitalized"
+            ctxEncodeBody.addStatement(
+                "val %L = context[%L] ?: error(%S)",
+                localVar,
+                "${fieldCapitalized}EncodeKey",
+                "EncodeContext missing $codecName.${fieldCapitalized}EncodeKey. " +
+                    "Register: ctx.with($codecName.${fieldCapitalized}EncodeKey) { buf, v -> ... }",
+            )
+            encodeLambdaArgs.add(localVar)
+        }
+        ctxEncodeBody.addStatement(
+            "encode(buffer, value, %L)",
+            encodeLambdaArgs.joinToString(", "),
+        )
+
+        objectBuilder.addFunction(
+            FunSpec
+                .builder("encodeFromContext")
+                .addParameter("buffer", WRITE_BUFFER)
+                .addParameter("value", starReturnType)
+                .addParameter("context", ENCODE_CONTEXT)
+                .addAnnotation(
+                    com.squareup.kotlinpoet.AnnotationSpec
+                        .builder(Suppress::class)
+                        .addMember("%S", "UNCHECKED_CAST")
+                        .build(),
+                ).addCode(ctxEncodeBody.build())
+                .build(),
+        )
 
         val fileBuilder =
             FileSpec
                 .builder(packageName, codecName)
-                .addType(objectSpec)
+                .addType(objectBuilder.build())
         addExtensionImports(fileBuilder, fields)
         return fileBuilder.build()
     }

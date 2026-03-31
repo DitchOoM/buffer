@@ -321,6 +321,100 @@ class SealedDispatchGenerator(
 
         encodeBuilder.addCode(encodeBody.build())
 
-        return DispatchResult(listOf(decodeBuilder.build(), encodeBuilder.build()), false)
+        // ── Context-based Codec<T> overloads (Convention 2: enables nesting) ──
+
+        // decode(buffer) delegates to decode(buffer, context) with Empty
+        val decodeNoArgFun =
+            FunSpec
+                .builder("decode")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("buffer", READ_BUFFER)
+                .returns(interfaceTypeName)
+                .addStatement("return decode(buffer, %T.Empty)", DECODE_CONTEXT)
+                .build()
+
+        // decode(buffer, context) reads lambdas from context for payload variants
+        val decodeCtxBody =
+            CodeBlock
+                .builder()
+                .addStatement("val type = buffer.readByte().toInt() and 0xFF")
+                .beginControlFlow("return when (type)")
+
+        for ((value, subclass) in variants) {
+            val info = payloadBySubclass[subclass.qualifiedName?.asString()]
+            val subCodecName = subclass.codecName()
+            if (info != null && info.payloadFields.isNotEmpty()) {
+                decodeCtxBody.addStatement("$value -> $subCodecName.decodeFromContext(buffer, context)")
+            } else {
+                decodeCtxBody.addStatement("$value -> $subCodecName.decode(buffer, context)")
+            }
+        }
+        decodeCtxBody
+            .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
+            .endControlFlow()
+
+        val decodeCtxFun =
+            FunSpec
+                .builder("decode")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("buffer", READ_BUFFER)
+                .addParameter("context", DECODE_CONTEXT)
+                .returns(interfaceTypeName)
+                .addCode(decodeCtxBody.build())
+                .build()
+
+        // encode(buffer, value) delegates to encode(buffer, value, context) with Empty
+        val encodeNoArgFun =
+            FunSpec
+                .builder("encode")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("buffer", WRITE_BUFFER)
+                .addParameter("value", interfaceTypeName)
+                .addStatement("encode(buffer, value, %T.Empty)", ENCODE_CONTEXT)
+                .build()
+
+        // encode(buffer, value, context) reads lambdas from context for payload variants
+        val encodeCtxBody = CodeBlock.builder().beginControlFlow("when (value)")
+        for ((value, subclass) in variants) {
+            val info = payloadBySubclass[subclass.qualifiedName?.asString()]
+            val subTypeName = subclass.toPoetClassName()
+            val subCodecName = subclass.codecName()
+
+            if (info != null && info.payloadFields.isNotEmpty()) {
+                val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
+                encodeCtxBody.beginControlFlow("is %T ->", starType)
+                encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
+                encodeCtxBody.addStatement("$subCodecName.encodeFromContext(buffer, value, context)")
+                encodeCtxBody.endControlFlow()
+            } else {
+                encodeCtxBody.beginControlFlow("is %T ->", subTypeName)
+                encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
+                encodeCtxBody.addStatement("$subCodecName.encode(buffer, value, context)")
+                encodeCtxBody.endControlFlow()
+            }
+        }
+        encodeCtxBody.endControlFlow()
+
+        val encodeCtxFun =
+            FunSpec
+                .builder("encode")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("buffer", WRITE_BUFFER)
+                .addParameter("value", interfaceTypeName)
+                .addParameter("context", ENCODE_CONTEXT)
+                .addCode(encodeCtxBody.build())
+                .build()
+
+        return DispatchResult(
+            listOf(
+                decodeBuilder.build(), // Convention 1: explicit lambdas
+                encodeBuilder.build(),
+                decodeNoArgFun, // Codec<T> interface
+                decodeCtxFun, // Codec<T> context overload
+                encodeNoArgFun,
+                encodeCtxFun,
+            ),
+            true, // NOW implements Codec<T>
+        )
     }
 }

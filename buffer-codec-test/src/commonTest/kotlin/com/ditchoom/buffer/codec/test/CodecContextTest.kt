@@ -20,77 +20,80 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class CodecContextTest {
+    // Test keys as data objects (preferred pattern)
+    private data object StringKey : CodecContext.Key<String>()
+
+    private data object IntKey : CodecContext.Key<Int>()
+
+    private data object CountKey : CodecContext.Key<Int>()
+
+    private data object NameKey : CodecContext.Key<String>()
+
+    // Two keys with same type — proves identity comparison
+    private data object Key1 : CodecContext.Key<String>()
+
+    private data object Key2 : CodecContext.Key<String>()
+
+    // Shared key usable in both DecodeContext and EncodeContext
+    private data object VersionKey : CodecContext.Key<Int>()
+
     // ========== CodecContext basics ==========
 
     @Test
     fun emptyContextReturnsNull() {
-        val key = CodecContext.Key<String>("test")
-        assertNull(DecodeContext.Empty[key])
-        assertNull(EncodeContext.Empty[key])
+        assertNull(DecodeContext.Empty[StringKey])
+        assertNull(EncodeContext.Empty[StringKey])
     }
 
     @Test
     fun contextStoresAndRetrievesValue() {
-        val key = CodecContext.Key<Int>("count")
-        val ctx = DecodeContext.Empty.with(key, 42)
-        assertEquals(42, ctx[key])
+        val ctx = DecodeContext.Empty.with(IntKey, 42)
+        assertEquals(42, ctx[IntKey])
     }
 
     @Test
     fun contextIsImmutable() {
-        val key = CodecContext.Key<Int>("count")
-        val ctx1 = DecodeContext.Empty.with(key, 1)
-        val ctx2 = ctx1.with(key, 2)
-        assertEquals(1, ctx1[key])
-        assertEquals(2, ctx2[key])
+        val ctx1 = DecodeContext.Empty.with(CountKey, 1)
+        val ctx2 = ctx1.with(CountKey, 2)
+        assertEquals(1, ctx1[CountKey])
+        assertEquals(2, ctx2[CountKey])
     }
 
     @Test
     fun sharedKeyWorksInBothContexts() {
-        val versionKey = CodecContext.Key<Int>("protocol.version")
-        val dCtx = DecodeContext.Empty.with(versionKey, 2)
-        val eCtx = EncodeContext.Empty.with(versionKey, 2)
-        assertEquals(2, dCtx[versionKey])
-        assertEquals(2, eCtx[versionKey])
+        val dCtx = DecodeContext.Empty.with(VersionKey, 2)
+        val eCtx = EncodeContext.Empty.with(VersionKey, 2)
+        assertEquals(2, dCtx[VersionKey])
+        assertEquals(2, eCtx[VersionKey])
     }
 
     @Test
     fun keysComparedByIdentity() {
-        val key1 = CodecContext.Key<String>("same.name")
-        val key2 = CodecContext.Key<String>("same.name")
-        val ctx = DecodeContext.Empty.with(key1, "hello")
-        assertEquals("hello", ctx[key1])
-        assertNull(ctx[key2]) // different key instance, even though same name
+        val ctx = DecodeContext.Empty.with(Key1, "hello")
+        assertEquals("hello", ctx[Key1])
+        assertNull(ctx[Key2]) // different key, same type
     }
 
     @Test
     fun multipleKeysInSameContext() {
-        val nameKey = CodecContext.Key<String>("name")
-        val countKey = CodecContext.Key<Int>("count")
         val ctx =
             DecodeContext.Empty
-                .with(nameKey, "test")
-                .with(countKey, 5)
-        assertEquals("test", ctx[nameKey])
-        assertEquals(5, ctx[countKey])
+                .with(NameKey, "test")
+                .with(CountKey, 5)
+        assertEquals("test", ctx[NameKey])
+        assertEquals(5, ctx[CountKey])
     }
 
     // ========== Context flows through @UseCodec ==========
 
     @Test
     fun contextFlowsThroughUseCodec() {
-        // RgbCodec is a simple Codec<Rgb> — it doesn't read context by default.
-        // But ColoredPointCodec forwards context to RgbCodec.decode(buffer, context).
-        // We can verify this by using a custom codec that reads a key.
-
-        // For this test, we verify that calling decode with context doesn't crash
-        // and produces the same result as without context.
         val original = ColoredPoint(x = 10, y = 20, color = Rgb(255u, 128u, 0u))
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         ColoredPointCodec.encode(buffer, original)
         buffer.resetForRead()
 
-        val ctx = DecodeContext.Empty.with(CodecContext.Key("test"), "value")
+        val ctx = DecodeContext.Empty.with(StringKey, "value")
         val decoded = ColoredPointCodec.decode(buffer, ctx)
         assertEquals(original, decoded)
     }
@@ -102,7 +105,7 @@ class CodecContextTest {
         MqttPacketCodec.encode(buffer, original)
         buffer.resetForRead()
 
-        val ctx = DecodeContext.Empty.with(CodecContext.Key("test"), "value")
+        val ctx = DecodeContext.Empty.with(StringKey, "value")
         val decoded = MqttPacketCodec.decode(buffer, ctx)
         assertTrue(decoded is MqttPacketConnAck)
         assertEquals(original, decoded)
@@ -113,7 +116,7 @@ class CodecContextTest {
         val original = ColoredPoint(x = 10, y = 20, color = Rgb(255u, 128u, 0u))
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
 
-        val ctx = EncodeContext.Empty.with(CodecContext.Key("test"), "value")
+        val ctx = EncodeContext.Empty.with(StringKey, "value")
         ColoredPointCodec.encode(buffer, original, ctx)
         buffer.resetForRead()
 
@@ -129,16 +132,13 @@ class CodecContextTest {
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         ColoredPointCodec.encode(buffer, original)
         buffer.resetForRead()
-        // Context-free decode — should work via delegation to context overload with Empty
         val decoded = ColoredPointCodec.decode(buffer)
         assertEquals(original, decoded)
     }
 
     @Test
     fun contextIgnoredByFlatCodec() {
-        // SimpleHeaderCodec has no @UseCodec or nested codecs — interface default handles context
-        val key = CodecContext.Key<String>("ignored")
-        val ctx = DecodeContext.Empty.with(key, "should be ignored")
+        val ctx = DecodeContext.Empty.with(StringKey, "should be ignored")
 
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         buffer.writeUByte(1u)
@@ -146,7 +146,6 @@ class CodecContextTest {
         buffer.writeUInt(0xFFu)
         buffer.resetForRead()
 
-        // decode(buffer, context) calls decode(buffer) via Codec interface default
         val decoded =
             com.ditchoom.buffer.codec.test.protocols.SimpleHeaderCodec
                 .decode(buffer, ctx)

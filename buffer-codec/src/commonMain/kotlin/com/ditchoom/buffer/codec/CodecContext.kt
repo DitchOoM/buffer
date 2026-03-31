@@ -23,19 +23,21 @@ interface CodecContext {
     /**
      * A typed key for storing values in a [CodecContext].
      *
-     * Define keys as constants on your codec object:
+     * Keys are compared by identity (reference equality). Define keys as `data object`
+     * or `val` singletons on your codec object:
+     *
      * ```kotlin
      * object MyCodec : Codec<Foo> {
-     *     val AllocatorKey = CodecContext.Key<BufferAllocator>("mycodec.allocator")
+     *     // Preferred: data object (singleton, IDE-navigable)
+     *     data object AllocatorKey : CodecContext.Key<BufferAllocator>()
+     *
+     *     // Also valid: val with anonymous instance
+     *     val MaxSizeKey = object : CodecContext.Key<Int>() {}
      * }
      * ```
-     *
-     * @param name A descriptive name for debugging. Does not affect equality — keys are compared by identity.
      */
-    class Key<T : Any>(
-        val name: String,
-    ) {
-        override fun toString(): String = "CodecContext.Key($name)"
+    abstract class Key<T : Any> {
+        override fun toString(): String = this::class.simpleName ?: "CodecContext.Key"
     }
 }
 
@@ -114,6 +116,5 @@ private class MapContext(
         value: T,
     ): MapContext = MapContext(elements + (key to value))
 
-    override fun toString(): String =
-        elements.entries.joinToString(prefix = "CodecContext(", postfix = ")") { "${it.key.name}=${it.value}" }
+    override fun toString(): String = elements.entries.joinToString(prefix = "CodecContext(", postfix = ")") { "${it.key}=${it.value}" }
 }
