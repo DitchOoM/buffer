@@ -133,9 +133,9 @@ DeviceReportCodec.testRoundTrip(report, expectedBytes = wireBytes)
 
 ## Annotation Reference
 
-### `@LengthPrefixed` — Length-Prefixed Strings
+### `@LengthPrefixed` — Length-Prefixed Data
 
-Reads/writes a string with a byte-length prefix. Default is 2-byte big-endian.
+Reads/writes a length prefix followed by that many bytes. Works on both `String` fields and `@Payload` type parameters. Default is 2-byte big-endian prefix.
 
 ```kotlin
 @ProtocolMessage
@@ -144,11 +144,19 @@ data class GreetingMessage(
     @LengthPrefixed(LengthPrefix.Byte) val nickname: String,   // 1-byte prefix (max 255 bytes)
     @LengthPrefixed(LengthPrefix.Int) val bio: String,         // 4-byte prefix
 )
+
+// Also works with @Payload — the codec reads the prefix, then passes
+// that many bytes to the caller's decode lambda
+@ProtocolMessage
+data class TlvMessage<@Payload P>(
+    val tag: UByte,
+    @LengthPrefixed val value: P,  // 2-byte length prefix + payload bytes
+)
 ```
 
 ### `@RemainingBytes` — Consume Remaining Bytes
 
-Reads all remaining bytes as a UTF-8 string. Must be the last constructor parameter.
+Reads all remaining bytes as a UTF-8 string (or passes them to a `@Payload` decode lambda). Must be the last constructor parameter.
 
 ```kotlin
 @ProtocolMessage
@@ -156,11 +164,18 @@ data class LogEntry(
     val level: UByte,
     @RemainingBytes val message: String,  // reads everything after level byte
 )
+
+// With @Payload — all remaining bytes are passed to the decode lambda
+@ProtocolMessage
+data class RawPacket<@Payload P>(
+    val header: UInt,
+    @RemainingBytes val body: P,
+)
 ```
 
 ### `@LengthFrom("field")` — Length from Preceding Field
 
-The string's byte length is determined by a preceding numeric field instead of a prefix in the wire format.
+The byte length is determined by a preceding numeric field instead of a prefix in the wire format. Works on both `String` fields and `@Payload` type parameters.
 
 ```kotlin
 @ProtocolMessage
@@ -168,6 +183,15 @@ data class NamedRecord(
     val nameLength: UShort,
     @LengthFrom("nameLength") val name: String,  // reads nameLength bytes as UTF-8
     val value: Int,
+)
+
+// With @Payload — reads bitmapLength bytes and passes to decode lambda
+@ProtocolMessage
+data class ImageFrame<@Payload P>(
+    val width: UShort,
+    val height: UShort,
+    val bitmapLength: Int,
+    @LengthFrom("bitmapLength") val bitmap: P,
 )
 ```
 
@@ -184,6 +208,45 @@ data class CompactHeader(
 ```
 
 Only applies to integer types. Not allowed on `Float`, `Double`, or `Boolean`.
+
+### `@UseCodec(codec)` — Custom Codec Reference
+
+Delegates field encoding/decoding to an existing `Codec` object, without needing an SPI module. The referenced codec must be a Kotlin `object` implementing `Codec<T>`.
+
+**Without a length annotation** — the codec reads directly from the buffer:
+
+```kotlin
+object RgbCodec : Codec<Rgb> {
+    override fun decode(buffer: ReadBuffer) = Rgb(
+        buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte()
+    )
+    override fun encode(buffer: WriteBuffer, value: Rgb) {
+        buffer.writeUByte(value.r); buffer.writeUByte(value.g); buffer.writeUByte(value.b)
+    }
+    override fun sizeOf(value: Rgb) = 3
+}
+
+@ProtocolMessage
+data class ColoredPoint(
+    val x: Int,
+    val y: Int,
+    @UseCodec(RgbCodec::class) val color: Rgb,
+)
+// Generated: val color = RgbCodec.decode(buffer)
+```
+
+**With a length annotation** — the codec receives a size-limited slice:
+
+```kotlin
+@ProtocolMessage
+data class ImageFrame(
+    val bitmapLength: Int,
+    @UseCodec(PngBitmapCodec::class) @LengthFrom("bitmapLength") val bitmap: ImageBitmap,
+)
+// Generated: val bitmap = PngBitmapCodec.decode(buffer.readBytes(bitmapLength))
+```
+
+Composes with `@LengthPrefixed`, `@RemainingBytes`, and `@LengthFrom`. This replaces the SPI `CodecFieldProvider` approach for most use cases — no extra Gradle module, no META-INF/services, no ServiceLoader.
 
 ### `@WhenTrue("expression")` — Conditional Fields
 
@@ -582,6 +645,227 @@ withPool { pool ->
     }
 }
 ```
+
+## Real-World Example: Zero-Copy RIFF Image Decoder
+
+This example decodes a custom RIFF-like image container and renders the bitmap in Jetpack Compose — without copying pixel data during parsing.
+
+### Wire Format
+
+```
+┌────────────────────────────┐
+│ FileHeader    (12 bytes)   │  magic("RIFF") + fileSize + format("IMG ")
+├────────────────────────────┤
+│ ChunkHeader   (8 bytes)    │  chunkId("meta") + chunkSize
+│ ImageMetadata (variable)   │  width, height, depth, title
+├────────────────────────────┤
+│ ChunkHeader   (8 bytes)    │  chunkId("pxls") + chunkSize
+│ Raw pixel data             │  ← zero-copy slice, never copied during parse
+└────────────────────────────┘
+```
+
+### Define the Codec Types
+
+Use `@ProtocolMessage` for all structured headers. The binary pixel payload is **not** a codec field — it's extracted manually with `readBytes()` for zero-copy.
+
+```kotlin
+@ProtocolMessage
+data class FileHeader(
+    val magic: Int,       // "RIFF" = 0x52494646
+    val fileSize: UInt,   // total size after this field
+    val format: Int,      // "IMG " = 0x494D4720
+)
+
+@ProtocolMessage
+data class ChunkHeader(
+    val chunkId: Int,     // 4-byte ASCII chunk ID
+    val chunkSize: UInt,  // byte count of chunk data
+)
+
+@ProtocolMessage
+data class ImageMetadata(
+    val width: UInt,
+    val height: UInt,
+    val colorDepth: UShort,              // bits per pixel (32 = ARGB_8888)
+    @LengthPrefixed val title: String,
+)
+```
+
+:::tip Why not put pixel data in the codec?
+`@ProtocolMessage` fields must be primitives, strings, or codec-composed types — not raw byte blobs. For binary payloads:
+
+- **Hybrid (shown here)**: codec for headers, manual `readBytes()` for the blob — simplest approach
+- **Custom SPI annotation**: create a `@BinarySlice("sizeField")` annotation with a `CodecFieldProvider` that generates `readBytes()` calls — fully codec-managed, reusable across protocols (see [Custom Annotations (SPI)](#custom-annotations-spi))
+- **`@Payload` type parameter**: for payloads that have their own structure and codec, not for raw bytes
+:::
+
+### Decode with Zero-Copy Pixel Extraction
+
+```kotlin
+data class RiffImage(
+    val metadata: ImageMetadata,
+    val pixelData: ReadBuffer,  // zero-copy slice of the original buffer
+)
+
+object RiffImageDecoder {
+    private const val MAGIC_RIFF = 0x52494646  // "RIFF"
+    private const val FORMAT_IMG = 0x494D4720  // "IMG "
+    private const val CHUNK_META = 0x6D657461  // "meta"
+    private const val CHUNK_PXLS = 0x70786C73  // "pxls"
+
+    fun decode(buffer: ReadBuffer): RiffImage {
+        // Generated codecs parse the structured headers — type-safe, batch-optimized
+        val header = FileHeaderCodec.decode(buffer)
+        require(header.magic == MAGIC_RIFF && header.format == FORMAT_IMG)
+
+        val metaChunk = ChunkHeaderCodec.decode(buffer)
+        require(metaChunk.chunkId == CHUNK_META)
+        val metadata = ImageMetadataCodec.decode(buffer)
+
+        val pxlsChunk = ChunkHeaderCodec.decode(buffer)
+        require(pxlsChunk.chunkId == CHUNK_PXLS)
+
+        // Zero-copy: readBytes() returns a slice backed by the same memory
+        val pixelData = buffer.readBytes(pxlsChunk.chunkSize.toInt())
+
+        return RiffImage(metadata, pixelData)
+    }
+}
+```
+
+**What's zero-copy here:** `readBytes()` returns a `ReadBuffer` slice that shares the same underlying native memory as the original buffer. No pixel data is copied during parsing. The headers are tiny (28 bytes total) and parsed by the generated codec — only the multi-megabyte pixel payload gets the zero-copy treatment.
+
+### Render in Compose Multiplatform (Skia)
+
+Use `nativeAddress` to create a Skia `Pixmap` that wraps the buffer's memory directly — no copy:
+
+```kotlin
+@Composable
+fun RiffBitmap(buffer: ReadBuffer, modifier: Modifier = Modifier) {
+    // Hold a reference to the decoded image so the backing buffer stays alive
+    val (imageBitmap, imageRef) = remember(buffer) {
+        val img = RiffImageDecoder.decode(buffer)
+        val w = img.metadata.width.toInt()
+        val h = img.metadata.height.toInt()
+
+        val nma = img.pixelData.nativeMemoryAccess
+            ?: error("Use BufferFactory.Default for zero-copy Skia rendering")
+
+        val info = ImageInfo(w, h, ColorType.RGBA_8888, ColorAlphaType.PREMUL)
+        // Zero-copy: Pixmap wraps the buffer's native memory directly
+        val pixmap = Pixmap(info, nma.nativeAddress, info.minRowBytes)
+        Image.makeFromPixmap(pixmap).toComposeImageBitmap() to img
+    }
+    Image(bitmap = imageBitmap, contentDescription = null, modifier = modifier)
+}
+```
+
+:::warning Buffer Lifetime
+`Pixmap` does not own the memory — it borrows the buffer's native address. The original buffer (or pool) must stay alive while the image is in use. In the example above, `imageRef` keeps the `RiffImage` (and its backing `ReadBuffer` slice) alive alongside the `ImageBitmap` inside `remember`.
+:::
+
+### Android: Decompress Directly into HardwareBuffer (API 26+)
+
+For the fastest path to the GPU, lock a `HardwareBuffer`, wrap the locked pointer with `BufferFactory.wrapNativeAddress`, and decompress directly into GPU-accessible memory — zero intermediate buffers:
+
+```kotlin
+@Composable
+fun RiffBitmap(buffer: ReadBuffer, modifier: Modifier = Modifier) {
+    val imageBitmap = remember(buffer) {
+        val img = RiffImageDecoder.decode(buffer)
+        val w = img.metadata.width.toInt()
+        val h = img.metadata.height.toInt()
+        val pixelSize = w * h * 4
+
+        val hwBuffer = HardwareBuffer.create(
+            w, h, HardwareBuffer.RGBA_8888, 1,
+            HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE or HardwareBuffer.USAGE_CPU_WRITE_OFTEN,
+        )
+
+        // Lock HardwareBuffer → get GPU-mapped memory address (JNI)
+        val gpuAddr = NativeRenderer.lockHardwareBuffer(hwBuffer)
+
+        // Wrap the GPU memory as a PlatformBuffer — zero-copy, non-owning
+        val dst = BufferFactory.wrapNativeAddress(gpuAddr, pixelSize)
+
+        // Decompress directly from source buffer into GPU memory
+        StreamingDecompressor.create(CompressionAlgorithm.Raw).use(
+            onOutput = { chunk -> dst.write(chunk) }
+        ) { decompress -> decompress(img.pixelData) }
+
+        // Unlock → pixels are in GPU memory, ready to render
+        NativeRenderer.unlockHardwareBuffer(hwBuffer)
+
+        Bitmap.wrapHardwareBuffer(hwBuffer, ColorSpace.get(ColorSpace.Named.SRGB))!!
+            .asImageBitmap()
+    }
+    Image(bitmap = imageBitmap, contentDescription = null, modifier = modifier)
+}
+```
+
+The JNI helper is just lock/unlock — two small functions:
+
+```c
+#include <android/hardware_buffer_jni.h>
+
+JNIEXPORT jlong JNICALL
+Java_com_example_NativeRenderer_lockHardwareBuffer(JNIEnv *env, jclass clazz, jobject hw_buffer) {
+    AHardwareBuffer *ahb = AHardwareBuffer_fromHardwareBuffer(env, hw_buffer);
+    void *dst = NULL;
+    AHardwareBuffer_lock(ahb, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, NULL, &dst);
+    return (jlong)dst;
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_NativeRenderer_unlockHardwareBuffer(JNIEnv *env, jclass clazz, jobject hw_buffer) {
+    AHardwareBuffer *ahb = AHardwareBuffer_fromHardwareBuffer(env, hw_buffer);
+    AHardwareBuffer_unlock(ahb, NULL);
+}
+```
+
+### Writing the Container
+
+```kotlin
+fun encodeRiffImage(metadata: ImageMetadata, pixels: ReadBuffer): PlatformBuffer {
+    val metadataSize = ImageMetadataCodec.sizeOf(metadata)!!
+    val pixelSize = pixels.remaining()
+    val totalSize = 4 + 8 + metadataSize + 8 + pixelSize  // format + 2 chunk headers + data
+
+    val buffer = BufferFactory.Default.allocate(12 + totalSize)
+
+    // File header
+    FileHeaderCodec.encode(buffer, FileHeader(
+        magic = 0x52494646,
+        fileSize = totalSize.toUInt(),
+        format = 0x494D4720,
+    ))
+
+    // Metadata chunk
+    ChunkHeaderCodec.encode(buffer, ChunkHeader(0x6D657461, metadataSize.toUInt()))
+    ImageMetadataCodec.encode(buffer, metadata)
+
+    // Pixel data chunk — bulk copy from source buffer
+    ChunkHeaderCodec.encode(buffer, ChunkHeader(0x70786C73, pixelSize.toUInt()))
+    buffer.write(pixels)
+
+    buffer.resetForRead()
+    return buffer
+}
+```
+
+### Copy Budget
+
+| Step | Skia (`Pixmap`) | Android (`HardwareBuffer` + `wrapNativeAddress`) | Naive (`ByteArray`) |
+|------|-----------------|--------------------------------------------------|---------------------|
+| Parse headers (codec) | Zero-copy | Zero-copy | Zero-copy |
+| Extract compressed data (`readBytes`) | Zero-copy (slice) | Zero-copy (slice) | 1 copy (`readByteArray`) |
+| Decompress | → Direct buffer | → GPU memory (`wrapNativeAddress`) | → `ByteArray` |
+| Render | Zero-copy (`Pixmap` borrows memory) | Zero-copy (GPU reads `HardwareBuffer`) | 1 copy (`wrap` + `copyPixels`) |
+| **Intermediate copies** | **0** | **0** | **2** |
+
+Both the Skia and HardwareBuffer paths achieve **zero intermediate copies** of pixel data. Decompressed pixels exist in exactly one place — either the Skia-wrapped Direct buffer or the GPU-mapped HardwareBuffer memory. `BufferFactory.wrapNativeAddress` is what makes the HardwareBuffer path possible from pure Kotlin.
+
+---
 
 ## Extension Functions Reference
 

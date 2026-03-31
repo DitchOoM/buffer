@@ -274,14 +274,97 @@ All new buffer-consuming code must be tested with wrapper types (see `WrapperTra
 
 ### Factory Pattern
 
-Buffers are created via factories:
+**Always use `BufferFactory` to create buffers** — never use `PlatformBuffer.allocate()` or `PlatformBuffer.wrap()` directly:
 ```kotlin
 BufferFactory.Default.allocate(size)                    // Native memory (platform-optimal)
+BufferFactory.Default.wrap(byteArray)                   // Wrap existing ByteArray (zero-copy)
 BufferFactory.managed().allocate(size)                  // Heap memory (ByteArray-backed)
 BufferFactory.shared().allocate(size)                   // Shared memory (Android IPC)
 BufferFactory.deterministic().allocate(size)             // Explicit cleanup via .use {}
-PlatformBuffer.allocate(size)                           // Shorthand for Default
-PlatformBuffer.wrap(byteArray)                          // Wrap existing ByteArray
+```
+
+Library code should accept `BufferFactory` as a parameter so callers control allocation:
+```kotlin
+class MyProtocol(private val factory: BufferFactory = BufferFactory.Default) {
+    fun encode(data: MyData): PlatformBuffer {
+        val buffer = factory.allocate(data.sizeOf())
+        // ...
+    }
+}
+```
+
+## Best Practices for Using This Library
+
+### Always Use `BufferFactory`, Not `PlatformBuffer`
+
+`BufferFactory` is the correct entry point for all buffer creation. Do NOT use `PlatformBuffer.allocate()` or `PlatformBuffer.wrap()` — these are legacy shortcuts that bypass factory composition (pooling, monitoring, deterministic cleanup).
+
+```kotlin
+// CORRECT
+val buffer = BufferFactory.Default.allocate(1024)
+val wrapped = BufferFactory.Default.wrap(byteArray)
+
+// WRONG — do not use these
+val buffer = PlatformBuffer.allocate(1024)
+val wrapped = PlatformBuffer.wrap(byteArray)
+```
+
+### Use Protocol Codecs for Structured Data
+
+For any structured binary data, use `buffer-codec` with `@ProtocolMessage` annotations instead of hand-writing `readInt()`/`writeInt()` sequences. Hand-written encode/decode is error-prone and doesn't guarantee round-trip correctness.
+
+```kotlin
+// WRONG — manual field-by-field serialization
+fun encode(buffer: WriteBuffer, msg: MyMessage) {
+    buffer.writeInt(msg.id)
+    buffer.writeShort(msg.type)
+    buffer.writeLengthPrefixedUtf8String(msg.payload)
+}
+
+// CORRECT — annotated data class, codec is generated
+@ProtocolMessage
+data class MyMessage(
+    val id: Int,
+    val type: Short,
+    @LengthPrefixed val payload: String,
+)
+// MyMessageCodec.encode(buffer, msg) — generated, type-safe, batch-optimized
+```
+
+### Avoid Unnecessary Memory Copies
+
+- **Use `slice()` or `readBytes()`** instead of `readByteArray()` + `wrap()` for zero-copy views
+- **Use `toNativeData()`/`toMutableNativeData()`** for platform interop instead of converting to ByteArray first
+- **Use `BufferFactory.wrapNativeAddress()`** to write directly into externally-owned memory (HardwareBuffer, mmap, Skia surface) instead of copying through an intermediate buffer
+- **Use `writeString()` directly** instead of `payload.encodeToByteArray()` + `writeBytes()`
+- **Use `BufferPool`** in hot paths to reuse buffers instead of allocating per request
+- **Accept `ReadBuffer`/`WriteBuffer`** in function signatures, not `ByteArray`
+
+```kotlin
+// WRONG — unnecessary copies
+val bytes = buffer.readByteArray(length)  // copy to ByteArray
+val newBuffer = BufferFactory.Default.wrap(bytes)  // wrap again
+processBytes(bytes)  // works on ByteArray instead of buffer
+
+// CORRECT — zero-copy
+val slice = buffer.readBytes(length)  // zero-copy slice
+processBuffer(slice)  // works directly on buffer
+```
+
+### Accept Factory as a Parameter in Library Code
+
+Library code should accept `BufferFactory` as a constructor parameter so callers control allocation strategy:
+
+```kotlin
+class ProtocolConnection(
+    private val factory: BufferFactory = BufferFactory.Default,
+) {
+    fun send(packet: Packet) {
+        factory.allocate(packet.sizeOf()).use { buffer ->
+            packet.writeTo(buffer)
+        }
+    }
+}
 ```
 
 ## Platform Notes
@@ -289,7 +372,7 @@ PlatformBuffer.wrap(byteArray)                          // Wrap existing ByteArr
 - **JVM/Android:** Direct ByteBuffers (`DirectJvmBuffer`) used by default; `HeapJvmBuffer` for `wrap()` and `BufferFactory.managed()`
 - **Android SharedMemory:** Use `BufferFactory.shared()` for zero-copy IPC via Parcelable (API 27+)
 - **Apple:** `MutableDataBuffer` wraps NSMutableData (native memory); `wrap(ByteArray)` returns `ByteArrayBuffer`
-- **Apple NSData interop:** Use `PlatformBuffer.wrap(nsData)` or `PlatformBuffer.wrap(nsMutableData)` for zero-copy Apple API interop
+- **Apple NSData interop:** Use `BufferFactory.Default.wrap(nsData)` or `BufferFactory.Default.wrap(nsMutableData)` for zero-copy Apple API interop
 - **JS SharedArrayBuffer:** Requires CORS headers (`Cross-Origin-Opener-Policy`, `Cross-Origin-Embedder-Policy`)
 - **WASM:** `LinearBuffer` (Direct) uses native WASM memory for JS interop; `ByteArrayBuffer` (Heap) for compute workloads
 - **Linux:** `NativeBuffer` (Direct) uses malloc/free for zero-copy io_uring I/O; `ByteArrayBuffer` (Heap) for managed memory
