@@ -49,10 +49,11 @@ import platform.posix.memset
  */
 @OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, UnsafeNumber::class)
 class MutableDataBuffer private constructor(
-    val data: NSMutableData?,
+    val data: NSMutableData,
     private val bytePointer: CPointer<ByteVar>,
     override val capacity: Int,
     override val byteOrder: ByteOrder,
+    internal val ownsData: Boolean,
 ) : PlatformBuffer,
     Parcelable,
     NativeMemoryAccess {
@@ -66,17 +67,21 @@ class MutableDataBuffer private constructor(
         bytePointer = data.mutableBytes as CPointer<ByteVar>,
         capacity = data.length.toInt(),
         byteOrder = byteOrder,
+        ownsData = true,
     )
 
     /**
      * Wraps an externally-owned CPointer as a buffer without NSMutableData.
      * The buffer does NOT own the memory — no cleanup on GC.
+     * A dummy NSMutableData is created to preserve public API compatibility,
+     * but all operations use [bytePointer] directly.
      */
     internal constructor(externalPointer: CPointer<ByteVar>, size: Int, byteOrder: ByteOrder) : this(
-        data = null,
+        data = NSMutableData.create(length = 0u)!!,
         bytePointer = externalPointer,
         capacity = size,
         byteOrder = byteOrder,
+        ownsData = false,
     )
 
     /**
@@ -164,12 +169,12 @@ class MutableDataBuffer private constructor(
         charset: Charset,
     ): String {
         if (length == 0) return ""
-        if (data == null) {
+        if (!ownsData) {
             val bytes = (bytePointer + position)!!.readBytes(length)
             position += length
             return bytes.decodeToString()
         }
-        val subdata = data!!.subdataWithRange(NSMakeRange(position.convert(), length.convert()))
+        val subdata = data.subdataWithRange(NSMakeRange(position.convert(), length.convert()))
         val stringEncoding = charset.toEncoding()
 
         @Suppress("CAST_NEVER_SUCCEEDS")
@@ -257,10 +262,10 @@ class MutableDataBuffer private constructor(
         if (length < 1) {
             return this
         }
-        if (data != null) {
+        if (ownsData) {
             val range = NSMakeRange(position.convert(), length.convert())
             bytes.usePinned { pin ->
-                data!!.replaceBytesInRange(range, pin.addressOf(offset))
+                data.replaceBytesInRange(range, pin.addressOf(offset))
             }
         } else {
             bytes.usePinned { pin ->
@@ -655,9 +660,24 @@ class MutableDataBufferSlice(
         charset: Charset,
     ): String {
         if (length == 0) return ""
-        val bytes = (bytePointer + position)!!.readBytes(length)
+        val parentData = parent.data
+        if (!parent.ownsData) {
+            // External pointer: no NSData available, use byte decoding
+            val bytes = (bytePointer + position)!!.readBytes(length)
+            position += length
+            return bytes.decodeToString()
+        }
+        val subdata =
+            parentData.subdataWithRange(
+                NSMakeRange((sliceOffset + position).convert(), length.convert()),
+            )
+        val stringEncoding = charset.toEncoding()
+
+        @Suppress("CAST_NEVER_SUCCEEDS")
+        @OptIn(kotlinx.cinterop.BetaInteropApi::class)
+        val string = NSString.create(subdata, stringEncoding) as String
         position += length
-        return bytes.decodeToString()
+        return string
     }
 
     override fun limit(): Int = limit

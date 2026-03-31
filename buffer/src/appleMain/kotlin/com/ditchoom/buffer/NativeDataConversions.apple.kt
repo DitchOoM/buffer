@@ -63,14 +63,13 @@ actual fun ReadBuffer.toNativeData(): NativeData {
                 }
             }
             is MutableDataBuffer -> {
-                val d = data
-                if (d != null) {
+                if (ownsData) {
                     val pos = position()
                     val rem = remaining()
-                    if (pos == 0 && rem == d.length.toInt()) {
-                        d
+                    if (pos == 0 && rem == data.length.toInt()) {
+                        data
                     } else {
-                        d.subdataWithRange(NSMakeRange(pos.convert(), rem.convert()))
+                        data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert()))
                     }
                 } else {
                     // External pointer: wrap as read-only NSData (zero-copy)
@@ -103,15 +102,14 @@ actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData {
     return MutableNativeData(
         when (unwrapped) {
             is MutableDataBuffer -> {
-                val d = unwrapped.data
-                if (d != null) {
+                if (unwrapped.ownsData) {
                     val pos = unwrapped.position()
                     val rem = unwrapped.remaining()
-                    if (pos == 0 && rem == d.length.toInt()) {
-                        d
+                    if (pos == 0 && rem == unwrapped.data.length.toInt()) {
+                        unwrapped.data
                     } else {
                         NSMutableData.create(
-                            d.subdataWithRange(NSMakeRange(pos.convert(), rem.convert())),
+                            unwrapped.data.subdataWithRange(NSMakeRange(pos.convert(), rem.convert())),
                         )
                     }
                 } else {
