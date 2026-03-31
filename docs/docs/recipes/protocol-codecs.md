@@ -133,9 +133,9 @@ DeviceReportCodec.testRoundTrip(report, expectedBytes = wireBytes)
 
 ## Annotation Reference
 
-### `@LengthPrefixed` — Length-Prefixed Strings
+### `@LengthPrefixed` — Length-Prefixed Data
 
-Reads/writes a string with a byte-length prefix. Default is 2-byte big-endian.
+Reads/writes a length prefix followed by that many bytes. Works on both `String` fields and `@Payload` type parameters. Default is 2-byte big-endian prefix.
 
 ```kotlin
 @ProtocolMessage
@@ -144,11 +144,19 @@ data class GreetingMessage(
     @LengthPrefixed(LengthPrefix.Byte) val nickname: String,   // 1-byte prefix (max 255 bytes)
     @LengthPrefixed(LengthPrefix.Int) val bio: String,         // 4-byte prefix
 )
+
+// Also works with @Payload — the codec reads the prefix, then passes
+// that many bytes to the caller's decode lambda
+@ProtocolMessage
+data class TlvMessage<@Payload P>(
+    val tag: UByte,
+    @LengthPrefixed val value: P,  // 2-byte length prefix + payload bytes
+)
 ```
 
 ### `@RemainingBytes` — Consume Remaining Bytes
 
-Reads all remaining bytes as a UTF-8 string. Must be the last constructor parameter.
+Reads all remaining bytes as a UTF-8 string (or passes them to a `@Payload` decode lambda). Must be the last constructor parameter.
 
 ```kotlin
 @ProtocolMessage
@@ -156,11 +164,18 @@ data class LogEntry(
     val level: UByte,
     @RemainingBytes val message: String,  // reads everything after level byte
 )
+
+// With @Payload — all remaining bytes are passed to the decode lambda
+@ProtocolMessage
+data class RawPacket<@Payload P>(
+    val header: UInt,
+    @RemainingBytes val body: P,
+)
 ```
 
 ### `@LengthFrom("field")` — Length from Preceding Field
 
-The string's byte length is determined by a preceding numeric field instead of a prefix in the wire format.
+The byte length is determined by a preceding numeric field instead of a prefix in the wire format. Works on both `String` fields and `@Payload` type parameters.
 
 ```kotlin
 @ProtocolMessage
@@ -168,6 +183,15 @@ data class NamedRecord(
     val nameLength: UShort,
     @LengthFrom("nameLength") val name: String,  // reads nameLength bytes as UTF-8
     val value: Int,
+)
+
+// With @Payload — reads bitmapLength bytes and passes to decode lambda
+@ProtocolMessage
+data class ImageFrame<@Payload P>(
+    val width: UShort,
+    val height: UShort,
+    val bitmapLength: Int,
+    @LengthFrom("bitmapLength") val bitmap: P,
 )
 ```
 
