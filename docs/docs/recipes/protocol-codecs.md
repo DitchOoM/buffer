@@ -185,13 +185,12 @@ data class NamedRecord(
     val value: Int,
 )
 
-// With @Payload — reads bitmapLength bytes and passes to decode lambda
+// With @Payload — reads payloadLength bytes and passes to decode lambda
 @ProtocolMessage
-data class ImageFrame<@Payload P>(
-    val width: UShort,
-    val height: UShort,
-    val bitmapLength: Int,
-    @LengthFrom("bitmapLength") val bitmap: P,
+data class DataPacket<@Payload P>(
+    val sequenceId: UInt,
+    val payloadLength: Int,
+    @LengthFrom("payloadLength") val payload: P,
 )
 ```
 
@@ -239,11 +238,12 @@ data class ColoredPoint(
 
 ```kotlin
 @ProtocolMessage
-data class ImageFrame(
-    val bitmapLength: Int,
-    @UseCodec(PngBitmapCodec::class) @LengthFrom("bitmapLength") val bitmap: ImageBitmap,
+data class TaggedValue(
+    val tag: UByte,
+    val dataLength: Int,
+    @UseCodec(RgbCodec::class) @LengthFrom("dataLength") val color: Rgb,
 )
-// Generated: val bitmap = PngBitmapCodec.decode(buffer.readBytes(bitmapLength))
+// Generated: val color = RgbCodec.decode(buffer.readBytes(dataLength))
 ```
 
 Composes with `@LengthPrefixed`, `@RemainingBytes`, and `@LengthFrom`. This replaces the SPI `CodecFieldProvider` approach for most use cases — no extra Gradle module, no META-INF/services, no ServiceLoader.
