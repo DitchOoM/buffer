@@ -42,16 +42,7 @@ private val deterministicFactoryInstance: BufferFactory =
         override fun allocate(
             size: Int,
             byteOrder: ByteOrder,
-        ): PlatformBuffer {
-            // Try invokeCleaner first (available on host JVM during unit tests, not on ART)
-            if (invokeCleanerFn != null) {
-                return JvmDeterministicDirectJvmBuffer(
-                    ByteBuffer.allocateDirect(size).order(byteOrder.toJava()),
-                )
-            }
-            // Android/ART: use Unsafe.allocateMemory + DirectByteBuffer
-            return AndroidDeterministicUnsafeJvmBuffer.allocate(size, byteOrder)
-        }
+        ): PlatformBuffer = AndroidDeterministicUnsafeJvmBuffer.allocate(size, byteOrder)
 
         override fun wrap(
             array: ByteArray,
