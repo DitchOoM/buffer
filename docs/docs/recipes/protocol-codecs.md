@@ -473,6 +473,84 @@ Generated code passes the context field:
 
 ---
 
+## CodecContext — Runtime Configuration
+
+Pass typed configuration through the entire codec chain without global state. Useful for allocator hints, compression config, security policies, or protocol version negotiation.
+
+### The Context Hierarchy
+
+```kotlin
+interface CodecContext          // shared keys (version, endianness)
+interface DecodeContext : CodecContext   // decode-only keys (allocator, size limits)
+interface EncodeContext : CodecContext   // encode-only keys (compression, format)
+```
+
+### Define Typed Keys
+
+```kotlin
+object MyCodec : Codec<Bitmap> {
+    val AllocatorKey = CodecContext.Key<BufferAllocator>("mycodec.allocator")
+    val MaxSizeKey = CodecContext.Key<Int>("mycodec.maxsize")
+
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): Bitmap {
+        val allocator = context[AllocatorKey] ?: BufferAllocator.Default
+        val maxSize = context[MaxSizeKey] ?: Int.MAX_VALUE
+        require(buffer.remaining() <= maxSize) { "Payload too large" }
+        return decodeBitmap(buffer, allocator)
+    }
+}
+```
+
+### Pass Context at the Call Site
+
+```kotlin
+val ctx = DecodeContext.Empty
+    .with(MyCodec.AllocatorKey, hardwareAllocator)
+    .with(MyCodec.MaxSizeKey, 1_000_000)
+
+// Context flows automatically through sealed dispatch → @UseCodec → nested codecs
+val result = TopLevelCodec.decode(buffer, ctx)
+```
+
+### How Context Flows
+
+Context is forwarded automatically by generated code:
+
+- **Sealed dispatch codecs** forward context to every sub-codec
+- **`@UseCodec` fields** forward context to the referenced codec
+- **Nested `@ProtocolMessage` fields** forward context to the nested codec
+- **`@Payload` lambdas** access context via closure capture (no generated plumbing)
+
+Codecs that don't read from context ignore it — the `Codec` interface defaults call the context-free overload:
+
+```kotlin
+interface Codec<T> {
+    fun decode(buffer: ReadBuffer): T
+    fun decode(buffer: ReadBuffer, context: DecodeContext): T = decode(buffer)  // default ignores
+}
+```
+
+### Shared Keys
+
+Keys defined with `CodecContext.Key` work in both `DecodeContext` and `EncodeContext`:
+
+```kotlin
+val VersionKey = CodecContext.Key<Int>("protocol.version")
+
+val dCtx = DecodeContext.Empty.with(VersionKey, 2)
+val eCtx = EncodeContext.Empty.with(VersionKey, 2)
+```
+
+### When to Use Context vs @Payload
+
+| Need | Use |
+|------|-----|
+| Caller provides decode/encode logic | `@Payload` with lambdas |
+| Caller provides runtime config (allocator, limits) | `CodecContext` |
+| Both | `@Payload` lambda captures `CodecContext` via closure |
+
+---
+
 ## Manual Codecs
 
 When you need full control — custom encoding logic, protocol-level optimizations, or formats that don't map to annotations — implement `Codec<T>` directly.

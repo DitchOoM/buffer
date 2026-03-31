@@ -21,6 +21,11 @@ class SealedDispatchGenerator(
     private val codeGenerator: CodeGenerator,
     private val logger: KSPLogger,
 ) {
+    private data class DispatchResult(
+        val functions: List<FunSpec>,
+        val implementsCodec: Boolean,
+    )
+
     fun generate(
         sealedInterface: KSClassDeclaration,
         subclasses: List<KSClassDeclaration>,
@@ -81,7 +86,7 @@ class SealedDispatchGenerator(
 
         val hasAnyPayload = variantPayloadInfos.any { it.payloadFields.isNotEmpty() }
 
-        val (decodeFun, encodeFun, implementsCodec) =
+        val result =
             if (hasAnyPayload) {
                 buildPayloadDispatch(packageName, interfaceTypeName, variants, variantPayloadInfos)
             } else {
@@ -89,11 +94,12 @@ class SealedDispatchGenerator(
             }
 
         val objectBuilder = TypeSpec.objectBuilder(codecName)
-        if (implementsCodec) {
+        if (result.implementsCodec) {
             objectBuilder.addSuperinterface(CODEC.parameterizedBy(interfaceTypeName))
         }
-        objectBuilder.addFunction(decodeFun)
-        objectBuilder.addFunction(encodeFun)
+        for (fn in result.functions) {
+            objectBuilder.addFunction(fn)
+        }
 
         val fileSpec =
             FileSpec
@@ -104,53 +110,75 @@ class SealedDispatchGenerator(
         fileSpec.writeTo(codeGenerator, dependencies)
     }
 
-    /** No payload variants — generates a standard Codec<T> implementation. */
+    /** No payload variants — generates a standard Codec<T> implementation with context forwarding. */
     private fun buildSimpleDispatch(
         interfaceTypeName: ClassName,
         variants: List<Pair<Int, KSClassDeclaration>>,
-    ): Triple<FunSpec, FunSpec, Boolean> {
-        // Decode
-        val decodeBody =
-            CodeBlock
-                .builder()
-                .addStatement("val type = buffer.readByte().toInt() and 0xFF")
-                .beginControlFlow("return when (type)")
-        for ((value, subclass) in variants) {
-            decodeBody.addStatement("$value -> ${subclass.codecName()}.decode(buffer)")
-        }
-        decodeBody
-            .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
-            .endControlFlow()
-
+    ): DispatchResult {
+        // Context-free decode delegates to context overload
         val decodeFun =
             FunSpec
                 .builder("decode")
                 .addModifiers(KModifier.OVERRIDE)
                 .addParameter("buffer", READ_BUFFER)
                 .returns(interfaceTypeName)
-                .addCode(decodeBody.build())
+                .addStatement("return decode(buffer, %T.Empty)", DECODE_CONTEXT)
                 .build()
 
-        // Encode
-        val encodeBody = CodeBlock.builder().beginControlFlow("when (value)")
+        // Context-aware decode forwards to sub-codecs
+        val decodeCtxBody =
+            CodeBlock
+                .builder()
+                .addStatement("val type = buffer.readByte().toInt() and 0xFF")
+                .beginControlFlow("return when (type)")
         for ((value, subclass) in variants) {
-            encodeBody.beginControlFlow("is %T ->", subclass.toPoetClassName())
-            encodeBody.addStatement("buffer.writeByte($value.toByte())")
-            encodeBody.addStatement("${subclass.codecName()}.encode(buffer, value)")
-            encodeBody.endControlFlow()
+            decodeCtxBody.addStatement("$value -> ${subclass.codecName()}.decode(buffer, context)")
         }
-        encodeBody.endControlFlow()
+        decodeCtxBody
+            .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
+            .endControlFlow()
 
+        val decodeCtxFun =
+            FunSpec
+                .builder("decode")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("buffer", READ_BUFFER)
+                .addParameter("context", DECODE_CONTEXT)
+                .returns(interfaceTypeName)
+                .addCode(decodeCtxBody.build())
+                .build()
+
+        // Context-free encode delegates to context overload
         val encodeFun =
             FunSpec
                 .builder("encode")
                 .addModifiers(KModifier.OVERRIDE)
                 .addParameter("buffer", WRITE_BUFFER)
                 .addParameter("value", interfaceTypeName)
-                .addCode(encodeBody.build())
+                .addStatement("encode(buffer, value, %T.Empty)", ENCODE_CONTEXT)
                 .build()
 
-        return Triple(decodeFun, encodeFun, true)
+        // Context-aware encode forwards to sub-codecs
+        val encodeCtxBody = CodeBlock.builder().beginControlFlow("when (value)")
+        for ((value, subclass) in variants) {
+            encodeCtxBody.beginControlFlow("is %T ->", subclass.toPoetClassName())
+            encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
+            encodeCtxBody.addStatement("${subclass.codecName()}.encode(buffer, value, context)")
+            encodeCtxBody.endControlFlow()
+        }
+        encodeCtxBody.endControlFlow()
+
+        val encodeCtxFun =
+            FunSpec
+                .builder("encode")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("buffer", WRITE_BUFFER)
+                .addParameter("value", interfaceTypeName)
+                .addParameter("context", ENCODE_CONTEXT)
+                .addCode(encodeCtxBody.build())
+                .build()
+
+        return DispatchResult(listOf(decodeFun, decodeCtxFun, encodeFun, encodeCtxFun), true)
     }
 
     /**
@@ -162,7 +190,7 @@ class SealedDispatchGenerator(
         interfaceTypeName: ClassName,
         variants: List<Pair<Int, KSClassDeclaration>>,
         variantPayloadInfos: List<SealedVariantPayloadInfo>,
-    ): Triple<FunSpec, FunSpec, Boolean> {
+    ): DispatchResult {
         // Collect all distinct type params from all payload variants
         val allTypeParams =
             variantPayloadInfos
@@ -293,6 +321,6 @@ class SealedDispatchGenerator(
 
         encodeBuilder.addCode(encodeBody.build())
 
-        return Triple(decodeBuilder.build(), encodeBuilder.build(), false)
+        return DispatchResult(listOf(decodeBuilder.build(), encodeBuilder.build()), false)
     }
 }
