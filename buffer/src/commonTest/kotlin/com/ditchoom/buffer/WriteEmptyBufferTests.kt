@@ -29,7 +29,7 @@ class WriteEmptyBufferTests {
 
     @Test
     fun writeEmptyBufferIntoDeterministicBuffer() {
-        val target = BufferFactory.deterministic().allocate(16)
+        val target = deterministicAllocateOrSkip(16) ?: return
         target.write(EMPTY_BUFFER)
         assertEquals(0, target.position())
     }
@@ -58,7 +58,6 @@ class WriteEmptyBufferTests {
         val pool = BufferPool()
         val combined = pool.acquire(20)
 
-        // Simulate [EMPTY_BUFFER, 20-byte payload, EMPTY_BUFFER]
         combined.write(EMPTY_BUFFER)
         val payload = BufferFactory.managed().allocate(20)
         repeat(20) { payload.writeByte((it + 1).toByte()) }
@@ -94,6 +93,7 @@ class WriteEmptyBufferTests {
     /** Same test with deterministic factory. */
     @Test
     fun combineEmptyAndNonEmptyFragmentsDeterministicFactory() {
+        if (!isDeterministicAllocateSupported) return
         val factory = BufferFactory.deterministic()
         val pool = BufferPool(factory = factory)
         val combined = pool.acquire(20)
@@ -114,12 +114,20 @@ class WriteEmptyBufferTests {
     /** Write an empty default-allocated buffer (not EMPTY_BUFFER singleton) into each factory type. */
     @Test
     fun writeZeroCapacityAllocatedBuffers() {
-        for (factory in listOf(BufferFactory.managed(), BufferFactory.Default, BufferFactory.deterministic())) {
+        val factories =
+            buildList {
+                add(BufferFactory.managed())
+                add(BufferFactory.Default)
+                if (isDeterministicAllocateSupported) {
+                    add(BufferFactory.deterministic())
+                }
+            }
+        for (factory in factories) {
             val empty = factory.allocate(0)
             empty.resetForRead()
             assertEquals(0, empty.remaining())
 
-            for (targetFactory in listOf(BufferFactory.managed(), BufferFactory.Default, BufferFactory.deterministic())) {
+            for (targetFactory in factories) {
                 val target = targetFactory.allocate(8)
                 target.write(empty)
                 assertEquals(

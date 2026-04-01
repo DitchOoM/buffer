@@ -59,8 +59,8 @@ private val deterministicFactoryInstance: BufferFactory =
                     ByteBuffer.allocateDirect(size).order(byteOrder.toJava()),
                 )
             }
-            // JVM 8: fall back to Unsafe.allocateMemory
-            return JvmUnsafePlatformBuffer.allocate(size, byteOrder)
+            // JVM 8: fall back to Unsafe.allocateMemory + DirectByteBuffer
+            return JvmDeterministicUnsafeJvmBuffer.allocate(size, byteOrder)
         }
 
         override fun wrap(

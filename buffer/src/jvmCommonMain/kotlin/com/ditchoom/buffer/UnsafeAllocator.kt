@@ -6,7 +6,7 @@ import sun.misc.Unsafe
  * JVM-only memory allocator backed by [sun.misc.Unsafe].
  *
  * Provides `allocateMemory` and `freeMemory` for deterministic native memory
- * management on JVM 8+ and Android. Used by [UnsafePlatformBuffer].
+ * management on JVM 8+ and Android. Used by [DeterministicUnsafeJvmBuffer].
  */
 internal object UnsafeAllocator {
     private val unsafe: Unsafe? =

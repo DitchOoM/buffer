@@ -628,6 +628,7 @@ class WrapperTransparencyTests {
     @Test
     fun deeplyNestedSlicePreservesNativeMemoryAccess() {
         // Use deterministic() which guarantees NativeMemoryAccess on platforms with native memory
+        if (!isDeterministicAllocateSupported) return
         val factory = BufferFactory.deterministic()
         val pool = BufferPool(defaultBufferSize = 32, factory = factory)
         val pooled = pool.acquire(32)

@@ -124,7 +124,7 @@ class WrapNativeAddressTest {
 
     @Test
     fun wrappedBufferDoesNotImplementCloseableBuffer() {
-        val original = BufferFactory.deterministic().allocate(64)
+        val original = deterministicAllocateOrSkip(64) ?: return
         val wrapped =
             tryWrap(original) ?: run {
                 original.freeNativeMemory()
@@ -132,7 +132,6 @@ class WrapNativeAddressTest {
             }
 
         if (wrapped is CloseableBuffer) {
-            // Linux: NativeBuffer always implements CloseableBuffer, but ownsMemory=false
             wrapped.freeNativeMemory()
             original.writeInt(42)
             original.resetForRead()
@@ -144,7 +143,7 @@ class WrapNativeAddressTest {
 
     @Test
     fun freeingWrappedBufferDoesNotCorruptOriginal() {
-        val original = BufferFactory.deterministic().allocate(64)
+        val original = deterministicAllocateOrSkip(64) ?: return
         val wrapped =
             tryWrap(original) ?: run {
                 original.freeNativeMemory()
@@ -154,17 +153,15 @@ class WrapNativeAddressTest {
         original.writeInt(0xDEADBEEF.toInt())
         original.resetForRead()
 
-        // "Free" wrapped — should be no-op since it doesn't own memory
         wrapped.freeNativeMemory()
 
-        // Original must still be readable
         assertEquals(0xDEADBEEF.toInt(), original.readInt())
         original.freeNativeMemory()
     }
 
     @Test
     fun originalOwnerFreeDoesNotDoubleFree() {
-        val original = BufferFactory.deterministic().allocate(64)
+        val original = deterministicAllocateOrSkip(64) ?: return
         val wrapped =
             tryWrap(original) ?: run {
                 original.freeNativeMemory()
@@ -173,7 +170,6 @@ class WrapNativeAddressTest {
         wrapped.writeInt(123)
 
         original.freeNativeMemory()
-        // Freeing wrapped after original is safe (no-op, no double-free)
         wrapped.freeNativeMemory()
     }
 

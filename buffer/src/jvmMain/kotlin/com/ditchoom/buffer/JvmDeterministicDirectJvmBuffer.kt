@@ -9,5 +9,10 @@ import java.nio.ByteBuffer
 internal class JvmDeterministicDirectJvmBuffer(
     byteBuffer: ByteBuffer,
 ) : DeterministicDirectJvmBuffer(byteBuffer) {
-    override fun slice() = JvmDeterministicDirectJvmBuffer(byteBuffer.slice().order(byteBuffer.order()))
+    override fun slice(): PlatformBuffer =
+        JvmDeterministicSliceBuffer(
+            super.byteBuffer.slice().order(super.byteBuffer.order()),
+            directAddress,
+            ::isFreed,
+        )
 }
