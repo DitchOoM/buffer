@@ -69,7 +69,7 @@ class BufferFactoryTests {
 
     @Test
     fun deterministicFactoryAllocatesBuffer() {
-        val buffer = tryDeterministicAllocate(64) ?: return
+        val buffer = deterministicAllocateOrSkip(64) ?: return
         assertEquals(64, buffer.capacity)
         buffer.writeInt(0x12345678)
         buffer.resetForRead()
@@ -79,7 +79,7 @@ class BufferFactoryTests {
 
     @Test
     fun deterministicFactoryUsePattern() {
-        val buffer = tryDeterministicAllocate(128) ?: return
+        val buffer = deterministicAllocateOrSkip(128) ?: return
         buffer.use { buf ->
             buf.writeLong(0x123456789ABCDEF0L)
             buf.resetForRead()
@@ -89,7 +89,7 @@ class BufferFactoryTests {
 
     @Test
     fun deterministicFactoryUseWithException() {
-        val buffer = tryDeterministicAllocate(64) ?: return
+        val buffer = deterministicAllocateOrSkip(64) ?: return
         assertFailsWith<RuntimeException> {
             buffer.use { _ ->
                 throw RuntimeException("test exception")
@@ -107,7 +107,7 @@ class BufferFactoryTests {
 
     @Test
     fun deterministicFactoryRespectsLittleEndianByteOrder() {
-        val buffer = tryDeterministicAllocate(8, ByteOrder.LITTLE_ENDIAN) ?: return
+        val buffer = deterministicAllocateOrSkip(8, ByteOrder.LITTLE_ENDIAN) ?: return
         buffer.use { buf ->
             assertEquals(ByteOrder.LITTLE_ENDIAN, buf.byteOrder)
             buf.writeInt(0x12345678)
@@ -118,7 +118,7 @@ class BufferFactoryTests {
 
     @Test
     fun deterministicFactoryRespectsBigEndianByteOrder() {
-        val buffer = tryDeterministicAllocate(8, ByteOrder.BIG_ENDIAN) ?: return
+        val buffer = deterministicAllocateOrSkip(8, ByteOrder.BIG_ENDIAN) ?: return
         buffer.use { buf ->
             assertEquals(ByteOrder.BIG_ENDIAN, buf.byteOrder)
             buf.writeInt(0x12345678)

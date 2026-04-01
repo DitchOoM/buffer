@@ -124,7 +124,7 @@ class WrapNativeAddressTest {
 
     @Test
     fun wrappedBufferDoesNotImplementCloseableBuffer() {
-        val original = tryDeterministicAllocate(64) ?: return
+        val original = deterministicAllocateOrSkip(64) ?: return
         val wrapped =
             tryWrap(original) ?: run {
                 original.freeNativeMemory()
@@ -143,7 +143,7 @@ class WrapNativeAddressTest {
 
     @Test
     fun freeingWrappedBufferDoesNotCorruptOriginal() {
-        val original = tryDeterministicAllocate(64) ?: return
+        val original = deterministicAllocateOrSkip(64) ?: return
         val wrapped =
             tryWrap(original) ?: run {
                 original.freeNativeMemory()
@@ -161,7 +161,7 @@ class WrapNativeAddressTest {
 
     @Test
     fun originalOwnerFreeDoesNotDoubleFree() {
-        val original = tryDeterministicAllocate(64) ?: return
+        val original = deterministicAllocateOrSkip(64) ?: return
         val wrapped =
             tryWrap(original) ?: run {
                 original.freeNativeMemory()

@@ -628,14 +628,10 @@ class WrapperTransparencyTests {
     @Test
     fun deeplyNestedSlicePreservesNativeMemoryAccess() {
         // Use deterministic() which guarantees NativeMemoryAccess on platforms with native memory
+        if (!isDeterministicAllocateSupported) return
         val factory = BufferFactory.deterministic()
         val pool = BufferPool(defaultBufferSize = 32, factory = factory)
-        val pooled =
-            try {
-                pool.acquire(32)
-            } catch (_: UnsupportedOperationException) {
-                return
-            }
+        val pooled = pool.acquire(32)
         pooled.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
         pooled.resetForRead()
 

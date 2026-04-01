@@ -1,18 +1,22 @@
 package com.ditchoom.buffer
 
 /**
- * Attempts to allocate a deterministic buffer, returning null if unsupported.
+ * Whether this platform supports deterministic buffer allocation in tests.
  *
- * Deterministic buffers require Unsafe DirectByteBuffer wrapping which isn't
- * available on Android host JVM unit tests. Real Android validation runs on
- * the emulator via [DeterministicBufferAndroidTest].
+ * False only for Android unit tests (Robolectric) where Unsafe DirectByteBuffer
+ * wrapping is not available on the host JVM. Real Android validation runs on
+ * the emulator via androidInstrumentedTest.
  */
-internal fun tryDeterministicAllocate(
+internal expect val isDeterministicAllocateSupported: Boolean
+
+/**
+ * Allocates a deterministic buffer, or returns null on platforms where
+ * deterministic allocation is not supported in the test environment.
+ */
+internal fun deterministicAllocateOrSkip(
     size: Int,
     byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-): PlatformBuffer? =
-    try {
-        BufferFactory.deterministic().allocate(size, byteOrder)
-    } catch (_: UnsupportedOperationException) {
-        null
-    }
+): PlatformBuffer? {
+    if (!isDeterministicAllocateSupported) return null
+    return BufferFactory.deterministic().allocate(size, byteOrder)
+}
