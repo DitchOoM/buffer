@@ -24,7 +24,6 @@ class AndroidDeterministicDirectJvmBuffer(
     override fun slice(): PlatformBuffer =
         AndroidDeterministicSliceBuffer(
             super.byteBuffer.slice().order(super.byteBuffer.order()),
-            directAddress,
             ::isFreed,
         )
 }

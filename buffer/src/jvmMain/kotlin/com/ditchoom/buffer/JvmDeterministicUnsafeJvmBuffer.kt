@@ -13,7 +13,6 @@ internal class JvmDeterministicUnsafeJvmBuffer(
     override fun sliceImpl(): PlatformBuffer =
         JvmDeterministicSliceBuffer(
             super.byteBuffer.slice().order(super.byteBuffer.order()),
-            unsafeAddress,
             ::isFreed,
         )
 

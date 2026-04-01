@@ -8,13 +8,11 @@ import java.nio.ByteBuffer
  */
 internal class JvmDeterministicSliceBuffer(
     byteBuffer: ByteBuffer,
-    parentNativeAddress: Long,
     isParentFreed: () -> Boolean,
-) : DeterministicSliceBuffer(byteBuffer, parentNativeAddress, isParentFreed) {
+) : DeterministicSliceBuffer(byteBuffer, isParentFreed) {
     override fun slice() =
         JvmDeterministicSliceBuffer(
             byteBuffer.slice().order(byteBuffer.order()),
-            parentNativeAddress,
-            isParentFreed,
+            parentFreedCheck!!,
         )
 }
