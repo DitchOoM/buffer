@@ -38,9 +38,36 @@ abstract class DeterministicUnsafeJvmBuffer(
         if (freed) throw IllegalStateException("Buffer has been freed")
     }
 
+    // Guard all entry points to prevent use-after-free (native memory access would crash the JVM)
+
     override fun readByte(): Byte {
         checkNotFreed()
         return super.readByte()
+    }
+
+    override fun readShort(): Short {
+        checkNotFreed()
+        return super.readShort()
+    }
+
+    override fun readInt(): Int {
+        checkNotFreed()
+        return super.readInt()
+    }
+
+    override fun readLong(): Long {
+        checkNotFreed()
+        return super.readLong()
+    }
+
+    override fun readFloat(): Float {
+        checkNotFreed()
+        return super.readFloat()
+    }
+
+    override fun readDouble(): Double {
+        checkNotFreed()
+        return super.readDouble()
     }
 
     override fun get(index: Int): Byte {
@@ -53,6 +80,31 @@ abstract class DeterministicUnsafeJvmBuffer(
         return super.writeByte(byte)
     }
 
+    override fun writeShort(value: Short): WriteBuffer {
+        checkNotFreed()
+        return super.writeShort(value)
+    }
+
+    override fun writeInt(value: Int): WriteBuffer {
+        checkNotFreed()
+        return super.writeInt(value)
+    }
+
+    override fun writeLong(value: Long): WriteBuffer {
+        checkNotFreed()
+        return super.writeLong(value)
+    }
+
+    override fun writeFloat(value: Float): WriteBuffer {
+        checkNotFreed()
+        return super.writeFloat(value)
+    }
+
+    override fun writeDouble(value: Double): WriteBuffer {
+        checkNotFreed()
+        return super.writeDouble(value)
+    }
+
     override fun set(
         index: Int,
         byte: Byte,
@@ -61,7 +113,12 @@ abstract class DeterministicUnsafeJvmBuffer(
         return super.set(index, byte)
     }
 
-    abstract override fun slice(): PlatformBuffer
+    override fun slice(): PlatformBuffer {
+        checkNotFreed()
+        return sliceImpl()
+    }
+
+    protected abstract fun sliceImpl(): PlatformBuffer
 
     companion object
 }
