@@ -12,7 +12,6 @@ internal class JvmDeterministicDirectJvmBuffer(
     override fun slice(): PlatformBuffer =
         JvmDeterministicSliceBuffer(
             super.byteBuffer.slice().order(super.byteBuffer.order()),
-            directAddress,
             ::isFreed,
         )
 }

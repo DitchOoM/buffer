@@ -341,4 +341,110 @@ class DeterministicBufferTest {
         assertFailsWith<IllegalStateException> { (buffer as NativeMemoryAccess).nativeAddress }
         assertFailsWith<IllegalStateException> { (buffer as NativeMemoryAccess).nativeSize }
     }
+
+    // ========== Slice nativeAddress correctness ==========
+
+    @Test
+    fun sliceNativeAddressPointsToSliceNotParent() {
+        BufferFactory.deterministic().allocate(64).use { buffer ->
+            val parentNma = buffer as NativeMemoryAccess
+            val parentAddr = parentNma.nativeAddress
+
+            // Write data, advance position past 4 bytes, then slice
+            buffer.writeInt(0x11111111)
+            buffer.writeInt(0x22222222)
+            buffer.resetForRead()
+            buffer.readInt() // position = 4
+
+            val slice = buffer.slice()
+            val sliceNma = slice as NativeMemoryAccess
+
+            // Slice address must be parent + 4, NOT parent base
+            assertEquals(parentAddr + 4, sliceNma.nativeAddress)
+        }
+    }
+
+    @Test
+    fun sliceOfSliceNativeAddressIsCorrect() {
+        BufferFactory.deterministic().allocate(64).use { buffer ->
+            val parentAddr = (buffer as NativeMemoryAccess).nativeAddress
+
+            buffer.writeInt(0x11111111) // bytes 0-3
+            buffer.writeInt(0x22222222) // bytes 4-7
+            buffer.writeInt(0x33333333) // bytes 8-11
+            buffer.resetForRead()
+            buffer.readInt() // position = 4
+
+            val slice1 = buffer.slice() // starts at byte 4
+            assertEquals(parentAddr + 4, (slice1 as NativeMemoryAccess).nativeAddress)
+
+            slice1.readInt() // position = 4 within slice1 (byte 8 absolute)
+            val slice2 = slice1.slice() // starts at byte 8
+
+            assertEquals(parentAddr + 8, (slice2 as NativeMemoryAccess).nativeAddress)
+        }
+    }
+
+    @Test
+    fun sliceNativeAddressConsistentWithDataRead() {
+        BufferFactory.deterministic().allocate(64).use { buffer ->
+            // Write a known pattern at offset 16
+            repeat(4) { buffer.writeInt(0) } // fill bytes 0-15 with zeros
+            buffer.writeInt(0xDEADBEEF.toInt()) // bytes 16-19
+
+            buffer.resetForRead()
+            repeat(4) { buffer.readInt() } // advance to position 16
+
+            val slice = buffer.slice()
+            // Verify the slice reads the correct data (the data at its nativeAddress)
+            assertEquals(0xDEADBEEF.toInt(), slice.readInt())
+
+            // And the nativeAddress is offset correctly from parent
+            val parentAddr = (buffer as NativeMemoryAccess).nativeAddress
+            assertEquals(parentAddr + 16, (slice as NativeMemoryAccess).nativeAddress)
+        }
+    }
+
+    // ========== Slice data operations guarded after parent free ==========
+
+    @Test
+    fun sliceDataOperationsThrowAfterParentFree() {
+        val buffer = BufferFactory.deterministic().allocate(64)
+        buffer.writeInt(42)
+        buffer.resetForRead()
+        val slice = buffer.slice()
+
+        // Slice data operations work before parent free
+        assertEquals(42, slice.readInt())
+
+        buffer.freeNativeMemory()
+
+        // All data operations on slice should throw after parent free
+        assertFailsWith<IllegalStateException> { slice.readByte() }
+        assertFailsWith<IllegalStateException> { slice.readShort() }
+        assertFailsWith<IllegalStateException> { slice.readInt() }
+        assertFailsWith<IllegalStateException> { slice.readLong() }
+        val writeSlice = slice as PlatformBuffer
+        assertFailsWith<IllegalStateException> { writeSlice.writeByte(0) }
+        assertFailsWith<IllegalStateException> { writeSlice.writeInt(0) }
+    }
+
+    @Test
+    fun sliceOfSliceDataOperationsThrowAfterParentFree() {
+        val buffer = BufferFactory.deterministic().allocate(64)
+        buffer.writeInt(11)
+        buffer.writeInt(22)
+        buffer.writeInt(33)
+        buffer.resetForRead()
+        buffer.readInt()
+
+        val slice1 = buffer.slice()
+        slice1.readInt()
+        val slice2 = slice1.slice()
+
+        buffer.freeNativeMemory()
+
+        assertFailsWith<IllegalStateException> { slice1.readInt() }
+        assertFailsWith<IllegalStateException> { slice2.readInt() }
+    }
 }

@@ -9,9 +9,8 @@ import java.nio.ByteBuffer
  */
 class AndroidDeterministicSliceBuffer(
     byteBuffer: ByteBuffer,
-    parentNativeAddress: Long,
     isParentFreed: () -> Boolean,
-) : DeterministicSliceBuffer(byteBuffer, parentNativeAddress, isParentFreed) {
+) : DeterministicSliceBuffer(byteBuffer, isParentFreed) {
     override fun describeContents(): Int = 0
 
     override fun writeToParcel(
@@ -26,7 +25,6 @@ class AndroidDeterministicSliceBuffer(
     override fun slice() =
         AndroidDeterministicSliceBuffer(
             byteBuffer.slice().order(byteBuffer.order()),
-            parentNativeAddress,
             isParentFreed,
         )
 }

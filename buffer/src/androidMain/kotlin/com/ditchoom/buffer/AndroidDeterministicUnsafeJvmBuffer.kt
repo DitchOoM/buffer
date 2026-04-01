@@ -25,7 +25,6 @@ class AndroidDeterministicUnsafeJvmBuffer private constructor(
     override fun sliceImpl(): PlatformBuffer =
         AndroidDeterministicSliceBuffer(
             super.byteBuffer.slice().order(super.byteBuffer.order()),
-            unsafeAddress,
             ::isFreed,
         )
 
