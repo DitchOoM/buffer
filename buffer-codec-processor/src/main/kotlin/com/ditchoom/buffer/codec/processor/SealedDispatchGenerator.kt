@@ -189,17 +189,8 @@ class SealedDispatchGenerator(
         val encodeCtxBody = CodeBlock.builder().beginControlFlow("when (value)")
         for ((value, subclass) in variants) {
             encodeCtxBody.beginControlFlow("is %T ->", subclass.toPoetClassName())
-            if (dispatchOnInfo != null) {
-                // Encode the discriminator: reconstruct from the @PacketType value
-                // The sub-codec will write its own fields; we write the discriminator byte(s) via the codec
-                encodeCtxBody.addStatement(
-                    "%T.encode(buffer, value, context)",
-                    ClassName(dispatchOnInfo.poetClassName.packageName, subclass.codecName()),
-                )
-            } else {
-                encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
-                encodeCtxBody.addStatement("${subclass.codecName()}.encode(buffer, value, context)")
-            }
+            encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
+            encodeCtxBody.addStatement("${subclass.codecName()}.encode(buffer, value, context)")
             encodeCtxBody.endControlFlow()
         }
         encodeCtxBody.endControlFlow()
@@ -339,9 +330,7 @@ class SealedDispatchGenerator(
                 // Star-projected match for generic variant
                 val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
                 encodeBody.beginControlFlow("is %T ->", starType)
-                if (dispatchOnInfo == null) {
-                    encodeBody.addStatement("buffer.writeByte($value.toByte())")
-                }
+                encodeBody.addStatement("buffer.writeByte($value.toByte())")
                 // Unchecked cast to typed variant
                 val castTypeParams = info.payloadFields.map { TypeVariableName(it.typeParamName) }
                 val castType = subTypeName.parameterizedBy(castTypeParams)
@@ -357,9 +346,7 @@ class SealedDispatchGenerator(
             } else {
                 // Non-payload variant: simple dispatch
                 encodeBody.beginControlFlow("is %T ->", subTypeName)
-                if (dispatchOnInfo == null) {
-                    encodeBody.addStatement("buffer.writeByte($value.toByte())")
-                }
+                encodeBody.addStatement("buffer.writeByte($value.toByte())")
                 encodeBody.addStatement("$subCodecName.encode(buffer, value)")
                 encodeBody.endControlFlow()
             }
@@ -438,16 +425,12 @@ class SealedDispatchGenerator(
             if (info != null && info.payloadFields.isNotEmpty()) {
                 val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
                 encodeCtxBody.beginControlFlow("is %T ->", starType)
-                if (dispatchOnInfo == null) {
-                    encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
-                }
+                encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
                 encodeCtxBody.addStatement("$subCodecName.encodeFromContext(buffer, value, context)")
                 encodeCtxBody.endControlFlow()
             } else {
                 encodeCtxBody.beginControlFlow("is %T ->", subTypeName)
-                if (dispatchOnInfo == null) {
-                    encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
-                }
+                encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
                 encodeCtxBody.addStatement("$subCodecName.encode(buffer, value, context)")
                 encodeCtxBody.endControlFlow()
             }
