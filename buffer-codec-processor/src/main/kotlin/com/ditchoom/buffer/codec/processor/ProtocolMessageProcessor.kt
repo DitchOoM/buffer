@@ -222,6 +222,15 @@ class ProtocolMessageProcessor(
         }
 
         val dispatchProp = dispatchValueProps.first()
+        val dispatchPropType = dispatchProp.type.resolve().declaration.simpleName.asString()
+        if (dispatchPropType != "Int") {
+            logger.error(
+                "@DispatchValue property '${dispatchProp.simpleName.asString()}' must return Int, " +
+                    "but returns $dispatchPropType.",
+                dispatchProp,
+            )
+            return null
+        }
         val codecName = discriminatorClass.codecName()
         val poetClassName = discriminatorClass.toPoetClassName()
 
