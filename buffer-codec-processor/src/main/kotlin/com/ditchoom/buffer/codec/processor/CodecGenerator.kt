@@ -38,17 +38,11 @@ class CodecGenerator(
                 Dependencies(aggregating = false)
             }
 
-        val needsContext =
-            fields.any {
-                it.strategy is FieldReadStrategy.UseCodecField ||
-                    it.strategy is FieldReadStrategy.NestedMessageField
-            }
-
         val fileSpec =
             if (hasPayload) {
-                buildPayloadCodecFile(packageName, classTypeName, codecName, fields, batches, needsContext)
+                buildPayloadCodecFile(packageName, classTypeName, codecName, fields, batches)
             } else {
-                buildCodecFile(packageName, classTypeName, codecName, fields, batches, needsContext)
+                buildCodecFile(packageName, classTypeName, codecName, fields, batches)
             }
 
         fileSpec.writeTo(codeGenerator, dependencies)
@@ -62,123 +56,78 @@ class CodecGenerator(
         codecName: String,
         fields: List<FieldInfo>,
         batches: List<CodegenItem>,
-        needsContext: Boolean = false,
     ): FileSpec {
         val objectBuilder =
             TypeSpec
                 .objectBuilder(codecName)
                 .addSuperinterface(CODEC.parameterizedBy(classTypeName))
 
-        if (needsContext) {
-            // Context-free decode delegates to context-aware overload
-            objectBuilder.addFunction(
-                FunSpec
-                    .builder("decode")
-                    .addModifiers(KModifier.OVERRIDE)
-                    .addParameter("buffer", READ_BUFFER)
-                    .returns(classTypeName)
-                    .addStatement("return decode(buffer, %T.Empty)", DECODE_CONTEXT)
-                    .build(),
-            )
+        // Context-free decode delegates to context-aware overload
+        objectBuilder.addFunction(
+            FunSpec
+                .builder("decode")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("buffer", READ_BUFFER)
+                .returns(classTypeName)
+                .addStatement("return decode(buffer, %T.Empty)", DECODE_CONTEXT)
+                .build(),
+        )
 
-            // Context-aware decode: forwards context to nested/UseCodec fields
-            val decodeCtxBody = CodeBlock.builder()
-            var batchIndex = 0
-            for (item in batches) {
-                when (item) {
-                    is CodegenItem.Batched -> {
-                        addBatchRead(decodeCtxBody, item.group, batchIndex)
-                        batchIndex++
-                    }
-                    is CodegenItem.Single -> {
-                        addFieldRead(decodeCtxBody, item.field, withContext = true)
-                    }
+        // Context-aware decode (the real implementation)
+        val decodeBody = CodeBlock.builder()
+        var batchIndex = 0
+        for (item in batches) {
+            when (item) {
+                is CodegenItem.Batched -> {
+                    addBatchRead(decodeBody, item.group, batchIndex)
+                    batchIndex++
+                }
+                is CodegenItem.Single -> {
+                    addFieldRead(decodeBody, item.field, withContext = true)
                 }
             }
-            val fieldNames = fields.joinToString(", ") { it.name }
-            decodeCtxBody.addStatement("return %T(%L)", classTypeName, fieldNames)
-
-            objectBuilder.addFunction(
-                FunSpec
-                    .builder("decode")
-                    .addModifiers(KModifier.OVERRIDE)
-                    .addParameter("buffer", READ_BUFFER)
-                    .addParameter("context", DECODE_CONTEXT)
-                    .returns(classTypeName)
-                    .addCode(decodeCtxBody.build())
-                    .build(),
-            )
-
-            // Context-free encode delegates to context-aware overload
-            objectBuilder.addFunction(
-                FunSpec
-                    .builder("encode")
-                    .addModifiers(KModifier.OVERRIDE)
-                    .addParameter("buffer", WRITE_BUFFER)
-                    .addParameter("value", classTypeName)
-                    .addStatement("encode(buffer, value, %T.Empty)", ENCODE_CONTEXT)
-                    .build(),
-            )
-
-            // Context-aware encode
-            val encodeCtxBody = CodeBlock.builder()
-            for (field in fields) {
-                addFieldWrite(encodeCtxBody, field, "value.${field.name}", withContext = true)
-            }
-
-            objectBuilder.addFunction(
-                FunSpec
-                    .builder("encode")
-                    .addModifiers(KModifier.OVERRIDE)
-                    .addParameter("buffer", WRITE_BUFFER)
-                    .addParameter("value", classTypeName)
-                    .addParameter("context", ENCODE_CONTEXT)
-                    .addCode(encodeCtxBody.build())
-                    .build(),
-            )
-        } else {
-            // No context needed — simple decode/encode (existing behavior)
-            val decodeBody = CodeBlock.builder()
-            var batchIndex = 0
-            for (item in batches) {
-                when (item) {
-                    is CodegenItem.Batched -> {
-                        addBatchRead(decodeBody, item.group, batchIndex)
-                        batchIndex++
-                    }
-                    is CodegenItem.Single -> {
-                        addFieldRead(decodeBody, item.field)
-                    }
-                }
-            }
-            val fieldNames = fields.joinToString(", ") { it.name }
-            decodeBody.addStatement("return %T(%L)", classTypeName, fieldNames)
-
-            objectBuilder.addFunction(
-                FunSpec
-                    .builder("decode")
-                    .addModifiers(KModifier.OVERRIDE)
-                    .addParameter("buffer", READ_BUFFER)
-                    .returns(classTypeName)
-                    .addCode(decodeBody.build())
-                    .build(),
-            )
-
-            val encodeBody = CodeBlock.builder()
-            for (field in fields) {
-                addFieldWrite(encodeBody, field, "value.${field.name}")
-            }
-
-            objectBuilder.addFunction(
-                FunSpec
-                    .builder("encode")
-                    .addModifiers(KModifier.OVERRIDE)
-                    .addParameter("buffer", WRITE_BUFFER)
-                    .addParameter("value", classTypeName)
-                    .addCode(encodeBody.build())
-                    .build(),
-            )
         }
+        val fieldNames = fields.joinToString(", ") { it.name }
+        decodeBody.addStatement("return %T(%L)", classTypeName, fieldNames)
+
+        objectBuilder.addFunction(
+            FunSpec
+                .builder("decode")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("buffer", READ_BUFFER)
+                .addParameter("context", DECODE_CONTEXT)
+                .returns(classTypeName)
+                .addCode(decodeBody.build())
+                .build(),
+        )
+
+        // Context-free encode delegates to context-aware overload
+        objectBuilder.addFunction(
+            FunSpec
+                .builder("encode")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("buffer", WRITE_BUFFER)
+                .addParameter("value", classTypeName)
+                .addStatement("encode(buffer, value, %T.Empty)", ENCODE_CONTEXT)
+                .build(),
+        )
+
+        // Context-aware encode (the real implementation)
+        val encodeBody = CodeBlock.builder()
+        for (field in fields) {
+            addFieldWrite(encodeBody, field, "value.${field.name}", withContext = true)
+        }
+
+        objectBuilder.addFunction(
+            FunSpec
+                .builder("encode")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("buffer", WRITE_BUFFER)
+                .addParameter("value", classTypeName)
+                .addParameter("context", ENCODE_CONTEXT)
+                .addCode(encodeBody.build())
+                .build(),
+        )
 
         // Generate sizeOf if possible
         val sizeOfFun = generateSizeOf(fields, classTypeName)
@@ -202,7 +151,6 @@ class CodecGenerator(
         codecName: String,
         fields: List<FieldInfo>,
         batches: List<CodegenItem>,
-        needsContext: Boolean = false,
     ): FileSpec {
         val className = classTypeName.simpleName
         val payloadFields = fields.filter { it.strategy is FieldReadStrategy.PayloadField }

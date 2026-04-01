@@ -51,7 +51,7 @@ internal fun readExpression(
             "${strategy.codecName}.decode(buffer$ctxArg)"
         }
         is FieldReadStrategy.UseCodecField -> readUseCodecExpression(strategy, withContext)
-        is FieldReadStrategy.CollectionField -> readCollectionExpression(strategy)
+        is FieldReadStrategy.CollectionField -> readCollectionExpression(strategy, withContext)
         is FieldReadStrategy.PayloadField -> error("PayloadField uses writePayloadCodec path")
         is FieldReadStrategy.Custom -> {
             val d = strategy.descriptor
@@ -112,7 +112,7 @@ internal fun writeExpression(
             "${strategy.codecName}.encode(buffer, $valueExpr$ctxArg)"
         }
         is FieldReadStrategy.UseCodecField -> writeUseCodecExpression(strategy, valueExpr, withContext)
-        is FieldReadStrategy.CollectionField -> writeCollectionExpression(strategy, valueExpr)
+        is FieldReadStrategy.CollectionField -> writeCollectionExpression(strategy, valueExpr, withContext)
         is FieldReadStrategy.PayloadField -> error("PayloadField uses writePayloadCodec path")
         is FieldReadStrategy.Custom -> {
             val d = strategy.descriptor
@@ -122,16 +122,20 @@ internal fun writeExpression(
         }
     }
 
-private fun readCollectionExpression(strategy: FieldReadStrategy.CollectionField): String {
+private fun readCollectionExpression(
+    strategy: FieldReadStrategy.CollectionField,
+    withContext: Boolean = false,
+): String {
     val codecName = strategy.elementCodecName
+    val ctxArg = if (withContext) ", context" else ""
     return when (val lk = strategy.lengthKind) {
         is LengthKind.FromField ->
-            "buildList { repeat(${lk.field}.toInt()) { add($codecName.decode(buffer)) } }"
+            "buildList { repeat(${lk.field}.toInt()) { add($codecName.decode(buffer$ctxArg)) } }"
         is LengthKind.Remaining ->
-            "buildList { while (buffer.remaining() > 0) { add($codecName.decode(buffer)) } }"
+            "buildList { while (buffer.remaining() > 0) { add($codecName.decode(buffer$ctxArg)) } }"
         is LengthKind.Prefixed -> {
             val cfg = prefixConfig(lk.prefix)
-            "run { val _n = ${cfg.readExpr}; buildList { repeat(_n) { add($codecName.decode(buffer)) } } }"
+            "run { val _n = ${cfg.readExpr}; buildList { repeat(_n) { add($codecName.decode(buffer$ctxArg)) } } }"
         }
     }
 }
@@ -139,16 +143,18 @@ private fun readCollectionExpression(strategy: FieldReadStrategy.CollectionField
 private fun writeCollectionExpression(
     strategy: FieldReadStrategy.CollectionField,
     valueExpr: String,
+    withContext: Boolean = false,
 ): String {
     val codecName = strategy.elementCodecName
+    val ctxArg = if (withContext) ", context" else ""
     return when (val lk = strategy.lengthKind) {
         is LengthKind.FromField ->
-            "$valueExpr.forEach { $codecName.encode(buffer, it) }"
+            "$valueExpr.forEach { $codecName.encode(buffer, it$ctxArg) }"
         is LengthKind.Remaining ->
-            "$valueExpr.forEach { $codecName.encode(buffer, it) }"
+            "$valueExpr.forEach { $codecName.encode(buffer, it$ctxArg) }"
         is LengthKind.Prefixed -> {
             val cfg = prefixConfig(lk.prefix)
-            "run { ${cfg.writeExpr("$valueExpr.size")}; $valueExpr.forEach { $codecName.encode(buffer, it) } }"
+            "run { ${cfg.writeExpr("$valueExpr.size")}; $valueExpr.forEach { $codecName.encode(buffer, it$ctxArg) } }"
         }
     }
 }
