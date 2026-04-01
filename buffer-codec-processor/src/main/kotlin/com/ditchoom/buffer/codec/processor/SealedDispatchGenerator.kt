@@ -33,6 +33,41 @@ class SealedDispatchGenerator(
         val subclass: KSClassDeclaration,
     )
 
+    /**
+     * Generates the encode statement for writing the discriminator byte(s).
+     * Without @DispatchOn: writes a single byte.
+     * With @DispatchOn: constructs the discriminator value class and encodes via its codec.
+     */
+    private fun addWireWrite(
+        code: CodeBlock.Builder,
+        wire: Int,
+        dispatchOnInfo: DispatchOnInfo?,
+    ) {
+        if (dispatchOnInfo != null) {
+            val conversion = wireConversion(dispatchOnInfo.innerTypeName, wire)
+            code.addStatement(
+                "%T.encode(buffer, %T($conversion))",
+                ClassName(dispatchOnInfo.poetClassName.packageName, dispatchOnInfo.codecName),
+                dispatchOnInfo.poetClassName,
+            )
+        } else {
+            code.addStatement("buffer.writeByte($wire.toByte())")
+        }
+    }
+
+    private fun wireConversion(innerTypeName: String, wire: Int): String =
+        when (innerTypeName) {
+            "UByte" -> "${wire}.toUByte()"
+            "Byte" -> "${wire}.toByte()"
+            "UShort" -> "${wire}.toUShort()"
+            "Short" -> "${wire}.toShort()"
+            "UInt" -> "${wire}.toUInt()"
+            "Int" -> "$wire"
+            "ULong" -> "${wire}.toULong()"
+            "Long" -> "${wire}.toLong()"
+            else -> "${wire}.toUByte()" // fallback
+        }
+
     fun generate(
         sealedInterface: KSClassDeclaration,
         subclasses: List<KSClassDeclaration>,
@@ -63,21 +98,18 @@ class SealedDispatchGenerator(
             val value = packetType.arguments.first().value as Int
             val wireArg = packetType.arguments.getOrNull(1)?.value as? Int ?: -1
             val wire = if (wireArg == -1) value else wireArg
-            if (value < 0 || value > 255) {
-                logger.error(
-                    "@PacketType($value) on '${subclass.simpleName.asString()}' is out of range. " +
-                        "The type discriminator is encoded as a single byte, so valid values are 0-255.",
-                    subclass,
-                )
-                return
-            }
-            if (wire < 0 || wire > 255) {
-                logger.error(
-                    "@PacketType(wire=$wire) on '${subclass.simpleName.asString()}' is out of range. " +
-                        "The wire byte is encoded as a single byte, so valid values are 0-255.",
-                    subclass,
-                )
-                return
+            // Without @DispatchOn, dispatch reads/writes a single byte (0-255)
+            // With @DispatchOn, the discriminator type defines the width — allow any Int
+            if (dispatchOnInfo == null) {
+                if (value < 0 || value > 255) {
+                    logger.error(
+                        "@PacketType($value) on '${subclass.simpleName.asString()}' is out of range. " +
+                            "The type discriminator is encoded as a single byte, so valid values are 0-255. " +
+                            "Use @DispatchOn for multi-byte discriminators.",
+                        subclass,
+                    )
+                    return
+                }
             }
             val existing = variants.find { it.value == value }
             if (existing != null) {
@@ -206,7 +238,7 @@ class SealedDispatchGenerator(
         val encodeCtxBody = CodeBlock.builder().beginControlFlow("when (value)")
         for (v in variants) {
             encodeCtxBody.beginControlFlow("is %T ->", v.subclass.toPoetClassName())
-            encodeCtxBody.addStatement("buffer.writeByte(${v.wire}.toByte())")
+            addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
             encodeCtxBody.addStatement("${v.subclass.codecName()}.encode(buffer, value, context)")
             encodeCtxBody.endControlFlow()
         }
@@ -347,7 +379,7 @@ class SealedDispatchGenerator(
                 // Star-projected match for generic variant
                 val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
                 encodeBody.beginControlFlow("is %T ->", starType)
-                encodeBody.addStatement("buffer.writeByte(${v.wire}.toByte())")
+                addWireWrite(encodeBody, v.wire, dispatchOnInfo)
                 // Unchecked cast to typed variant
                 val castTypeParams = info.payloadFields.map { TypeVariableName(it.typeParamName) }
                 val castType = subTypeName.parameterizedBy(castTypeParams)
@@ -363,7 +395,7 @@ class SealedDispatchGenerator(
             } else {
                 // Non-payload variant: simple dispatch
                 encodeBody.beginControlFlow("is %T ->", subTypeName)
-                encodeBody.addStatement("buffer.writeByte(${v.wire}.toByte())")
+                addWireWrite(encodeBody, v.wire, dispatchOnInfo)
                 encodeBody.addStatement("$subCodecName.encode(buffer, value)")
                 encodeBody.endControlFlow()
             }
@@ -442,12 +474,12 @@ class SealedDispatchGenerator(
             if (info != null && info.payloadFields.isNotEmpty()) {
                 val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
                 encodeCtxBody.beginControlFlow("is %T ->", starType)
-                encodeCtxBody.addStatement("buffer.writeByte(${v.wire}.toByte())")
+                addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
                 encodeCtxBody.addStatement("$subCodecName.encodeFromContext(buffer, value, context)")
                 encodeCtxBody.endControlFlow()
             } else {
                 encodeCtxBody.beginControlFlow("is %T ->", subTypeName)
-                encodeCtxBody.addStatement("buffer.writeByte(${v.wire}.toByte())")
+                addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
                 encodeCtxBody.addStatement("$subCodecName.encode(buffer, value, context)")
                 encodeCtxBody.endControlFlow()
             }

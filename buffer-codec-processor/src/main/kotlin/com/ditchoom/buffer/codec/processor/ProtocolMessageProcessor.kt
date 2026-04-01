@@ -212,11 +212,16 @@ class ProtocolMessageProcessor(
         val codecName = discriminatorClass.codecName()
         val poetClassName = discriminatorClass.toPoetClassName()
 
+        // Determine the inner type of the value class for constructing during encode
+        val innerType = discriminatorClass.primaryConstructor?.parameters?.firstOrNull()
+        val innerTypeName = innerType?.type?.resolve()?.declaration?.simpleName?.asString() ?: "UByte"
+
         return DispatchOnInfo(
             typeName = discriminatorClass.qualifiedName?.asString() ?: discriminatorClass.simpleName.asString(),
             codecName = codecName,
             dispatchProperty = dispatchProp.simpleName.asString(),
             poetClassName = poetClassName,
+            innerTypeName = innerTypeName,
         )
     }
 }

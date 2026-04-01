@@ -67,10 +67,13 @@ data class PayloadFieldInfo(
  * @param codecName name of the generated codec for the discriminator type (e.g., "MqttFixedHeaderCodec")
  * @param dispatchProperty name of the @DispatchValue property (e.g., "packetType")
  * @param poetClassName KotlinPoet ClassName for the discriminator type
+ * @param innerTypeName the simple name of the value class's inner type (e.g., "UByte", "UInt")
+ *   Used to construct the discriminator from a wire value during encode.
  */
 data class DispatchOnInfo(
     val typeName: String,
     val codecName: String,
     val dispatchProperty: String,
     val poetClassName: ClassName,
+    val innerTypeName: String,
 )
