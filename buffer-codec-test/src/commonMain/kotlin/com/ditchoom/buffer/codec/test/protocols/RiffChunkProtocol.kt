@@ -8,7 +8,7 @@ import com.ditchoom.buffer.codec.annotations.Payload
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import kotlin.jvm.JvmInline
 
-/**
+/*
  * RIFF container format (used by WAV, AVI, WebP).
  *
  * Wire format:
@@ -30,15 +30,19 @@ import kotlin.jvm.JvmInline
 /** RIFF chunk ID as a 4-byte big-endian integer. */
 @JvmInline
 @ProtocolMessage
-value class RiffChunkId(val raw: UInt) {
+value class RiffChunkId(
+    val raw: UInt,
+) {
     @DispatchValue
     val id: Int get() = raw.toInt()
 
     companion object {
         // "fmt " = 0x666D7420
         val FMT = RiffChunkId(0x666D7420u)
+
         // "data" = 0x64617461
         val DATA = RiffChunkId(0x64617461u)
+
         // "fact" = 0x66616374
         val FACT = RiffChunkId(0x66616374u)
     }

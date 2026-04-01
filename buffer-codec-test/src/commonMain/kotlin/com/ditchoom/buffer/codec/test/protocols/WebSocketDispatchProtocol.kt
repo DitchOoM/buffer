@@ -7,7 +7,7 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import kotlin.jvm.JvmInline
 
-/**
+/*
  * WebSocket frame dispatch by opcode (RFC 6455 §5.2).
  *
  * Wire format (first byte):
@@ -28,7 +28,9 @@ import kotlin.jvm.JvmInline
 /** WebSocket first byte: FIN/RSV flags + opcode. */
 @JvmInline
 @ProtocolMessage
-value class WsOpcodeByte(val raw: UByte) {
+value class WsOpcodeByte(
+    val raw: UByte,
+) {
     @DispatchValue
     val opcode: Int get() = raw.toInt() and 0x0F
 

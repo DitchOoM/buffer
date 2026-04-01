@@ -8,7 +8,7 @@ import com.ditchoom.buffer.codec.annotations.Payload
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import kotlin.jvm.JvmInline
 
-/**
+/*
  * TLS record layer protocol (RFC 5246 §6.2.1).
  *
  * Wire format (every record, no exceptions):
@@ -16,7 +16,7 @@ import kotlin.jvm.JvmInline
  * ContentType type;           // 1 byte
  * ProtocolVersion version;    // 2 bytes (major.minor)
  * uint16 length;              // 2 bytes (max 2^14)
- * opaque fragment[length];    // variable
+ * opaque fragment(length);    // variable
  * ```
  *
  * Identity @DispatchOn — content type byte IS the dispatch value (no extraction).
@@ -25,7 +25,9 @@ import kotlin.jvm.JvmInline
 /** TLS content type byte. Identity dispatch — value equals raw byte. */
 @JvmInline
 @ProtocolMessage
-value class TlsContentType(val raw: UByte) {
+value class TlsContentType(
+    val raw: UByte,
+) {
     @DispatchValue
     val type: Int get() = raw.toInt()
 
@@ -88,7 +90,7 @@ sealed interface TlsRecord {
     /**
      * ContentType 22: Handshake (RFC 5246 §7.4).
      * Fragment is a variable-length handshake message.
-     * Wire: 16 03 03 LL LL [fragment...]
+     * Wire: 16 03 03 LL LL fragment
      */
     @PacketType(22)
     @ProtocolMessage
@@ -101,7 +103,7 @@ sealed interface TlsRecord {
     /**
      * ContentType 23: Application Data (RFC 5246 §6.2.1).
      * Fragment is encrypted application data.
-     * Wire: 17 03 03 LL LL [fragment...]
+     * Wire: 17 03 03 LL LL fragment
      */
     @PacketType(23)
     @ProtocolMessage

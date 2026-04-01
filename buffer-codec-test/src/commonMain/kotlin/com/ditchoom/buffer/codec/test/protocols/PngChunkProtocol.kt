@@ -8,7 +8,7 @@ import com.ditchoom.buffer.codec.annotations.Payload
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import kotlin.jvm.JvmInline
 
-/**
+/*
  * PNG chunk format (PNG Specification §5.3).
  *
  * Wire format:
@@ -30,7 +30,9 @@ import kotlin.jvm.JvmInline
 
 /** PNG chunk type constants as 4-byte big-endian integers. */
 @JvmInline
-value class PngChunkType(val raw: UInt) {
+value class PngChunkType(
+    val raw: UInt,
+) {
     companion object {
         val IHDR = PngChunkType(0x49484452u) // "IHDR"
         val PLTE = PngChunkType(0x504C5445u) // "PLTE"

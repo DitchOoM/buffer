@@ -4,8 +4,8 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.test.protocols.WsControlFrame
-import com.ditchoom.buffer.codec.test.protocols.WsControlFrameCodec
 import com.ditchoom.buffer.codec.test.protocols.WsControlFrameCloseCodec
+import com.ditchoom.buffer.codec.test.protocols.WsControlFrameCodec
 import com.ditchoom.buffer.codec.test.protocols.WsControlFramePingCodec
 import com.ditchoom.buffer.codec.test.protocols.WsControlFramePongCodec
 import com.ditchoom.buffer.codec.test.protocols.WsOpcodeByte

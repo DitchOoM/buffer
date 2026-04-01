@@ -6,7 +6,6 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.test.protocols.PngChunk
 import com.ditchoom.buffer.codec.test.protocols.PngChunkCodec
 import com.ditchoom.buffer.codec.test.protocols.PngChunkHeader
-import com.ditchoom.buffer.codec.test.protocols.PngChunkIhdrCodec
 import com.ditchoom.buffer.codec.test.protocols.PngChunkType
 import com.ditchoom.buffer.codec.test.protocols.PngDataChunk
 import com.ditchoom.buffer.codec.test.protocols.PngDataChunkCodec
@@ -44,13 +43,18 @@ class PngChunkRoundTripTest {
     fun ihdrExactWireBytes() {
         // PNG spec: 00 00 00 0D 49 48 44 52 [13 bytes data] [4 bytes CRC]
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        val ihdr = PngChunk.Ihdr(
-            header = PngChunkHeader(13u, PngChunkType.IHDR.raw),
-            width = 640u, height = 480u,
-            bitDepth = 8u, colorType = 6u, // RGBA
-            compressionMethod = 0u, filterMethod = 0u, interlaceMethod = 0u,
-            crc = 0u,
-        )
+        val ihdr =
+            PngChunk.Ihdr(
+                header = PngChunkHeader(13u, PngChunkType.IHDR.raw),
+                width = 640u,
+                height = 480u,
+                bitDepth = 8u,
+                colorType = 6u, // RGBA
+                compressionMethod = 0u,
+                filterMethod = 0u,
+                interlaceMethod = 0u,
+                crc = 0u,
+            )
         PngChunkCodec.encode(buffer, ihdr)
 
         // Length = 13 (0x0000000D)
@@ -76,10 +80,11 @@ class PngChunkRoundTripTest {
     fun iendExactWireBytes() {
         // PNG spec: 00 00 00 00 49 45 4E 44 AE 42 60 82
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
-        val iend = PngChunk.Iend(
-            header = PngChunkHeader(0u, PngChunkType.IEND.raw),
-            crc = 0xAE426082u,
-        )
+        val iend =
+            PngChunk.Iend(
+                header = PngChunkHeader(0u, PngChunkType.IEND.raw),
+                crc = 0xAE426082u,
+            )
         PngChunkCodec.encode(buffer, iend)
 
         // Length = 0
@@ -157,10 +162,18 @@ class PngChunkRoundTripTest {
 
     @Test
     fun ihdrDispatchRoundTrip() {
-        val original: PngChunk = PngChunk.Ihdr(
-            PngChunkHeader(13u, PngChunkType.IHDR.raw),
-            1920u, 1080u, 8u, 2u, 0u, 0u, 0u, 0xDEADBEEFu,
-        )
+        val original: PngChunk =
+            PngChunk.Ihdr(
+                PngChunkHeader(13u, PngChunkType.IHDR.raw),
+                1920u,
+                1080u,
+                8u,
+                2u,
+                0u,
+                0u,
+                0u,
+                0xDEADBEEFu,
+            )
         val decoded = PngChunkCodec.testRoundTrip(original)
         assertTrue(decoded is PngChunk.Ihdr)
         assertEquals(original, decoded)
@@ -168,10 +181,11 @@ class PngChunkRoundTripTest {
 
     @Test
     fun iendDispatchRoundTrip() {
-        val original: PngChunk = PngChunk.Iend(
-            PngChunkHeader(0u, PngChunkType.IEND.raw),
-            0xAE426082u,
-        )
+        val original: PngChunk =
+            PngChunk.Iend(
+                PngChunkHeader(0u, PngChunkType.IEND.raw),
+                0xAE426082u,
+            )
         val decoded = PngChunkCodec.testRoundTrip(original)
         assertTrue(decoded is PngChunk.Iend)
         assertEquals(original, decoded)
@@ -182,12 +196,13 @@ class PngChunkRoundTripTest {
     @Test
     fun dataChunkRoundTrip() {
         val text = "Comment"
-        val original = PngDataChunk(
-            length = text.length.toUInt(),
-            type = PngChunkType.tEXt.raw,
-            data = text,
-            crc = 0x12345678u,
-        )
+        val original =
+            PngDataChunk(
+                length = text.length.toUInt(),
+                type = PngChunkType.tEXt.raw,
+                data = text,
+                crc = 0x12345678u,
+            )
         val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
         PngDataChunkCodec.encode(buffer, original) { buf, s -> buf.writeString(s) }
         buffer.resetForRead()

@@ -12,7 +12,9 @@ import kotlin.jvm.JvmInline
  */
 @JvmInline
 @ProtocolMessage
-value class FixedHeaderByte(val raw: UByte) {
+value class FixedHeaderByte(
+    val raw: UByte,
+) {
     @DispatchValue
     val packetType: Int get() = raw.toUInt().shr(4).toInt()
 

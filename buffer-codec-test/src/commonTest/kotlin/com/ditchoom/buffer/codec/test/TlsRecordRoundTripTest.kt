@@ -83,7 +83,7 @@ class TlsRecordRoundTripTest {
         assertEquals(0x00.toByte(), buffer[3]) // length high byte
         assertEquals(0x01.toByte(), buffer[4]) // length low byte
         assertEquals(0x01.toByte(), buffer[5]) // message = 1
-        assertEquals(6, buffer.position())     // exactly 6 bytes
+        assertEquals(6, buffer.position()) // exactly 6 bytes
     }
 
     @Test
@@ -98,7 +98,7 @@ class TlsRecordRoundTripTest {
         assertEquals(0x02.toByte(), buffer[4]) // length low
         assertEquals(0x02.toByte(), buffer[5]) // level = fatal
         assertEquals(0x00.toByte(), buffer[6]) // description = close_notify
-        assertEquals(7, buffer.position())     // exactly 7 bytes
+        assertEquals(7, buffer.position()) // exactly 7 bytes
     }
 
     // ========== Decode from spec-compliant wire bytes ==========
@@ -108,7 +108,8 @@ class TlsRecordRoundTripTest {
         // 14 03 03 00 01 01
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
         buffer.writeByte(0x14) // content type
-        buffer.writeByte(0x03); buffer.writeByte(0x03) // TLS 1.2
+        buffer.writeByte(0x03)
+        buffer.writeByte(0x03) // TLS 1.2
         buffer.writeShort(1.toShort()) // length = 1
         buffer.writeByte(0x01) // message = 1
         buffer.resetForRead()
@@ -125,7 +126,8 @@ class TlsRecordRoundTripTest {
         // 15 03 03 00 02 02 28
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
         buffer.writeByte(0x15) // content type
-        buffer.writeByte(0x03); buffer.writeByte(0x03) // TLS 1.2
+        buffer.writeByte(0x03)
+        buffer.writeByte(0x03) // TLS 1.2
         buffer.writeShort(2.toShort()) // length = 2
         buffer.writeByte(0x02) // fatal
         buffer.writeByte(0x28) // handshake_failure (40)

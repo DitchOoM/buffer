@@ -6,8 +6,8 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.test.protocols.RiffChunk
 import com.ditchoom.buffer.codec.test.protocols.RiffChunkCodec
 import com.ditchoom.buffer.codec.test.protocols.RiffChunkDataCodec
-import com.ditchoom.buffer.codec.test.protocols.RiffChunkFmtCodec
 import com.ditchoom.buffer.codec.test.protocols.RiffChunkFactCodec
+import com.ditchoom.buffer.codec.test.protocols.RiffChunkFmtCodec
 import com.ditchoom.buffer.codec.test.protocols.RiffChunkId
 import com.ditchoom.buffer.codec.testRoundTrip
 import kotlin.test.Test
@@ -38,15 +38,16 @@ class RiffChunkRoundTripTest {
 
     @Test
     fun fmtChunkRoundTrip() {
-        val original = RiffChunk.Fmt(
-            chunkSize = 16u,
-            audioFormat = 1u, // PCM
-            numChannels = 2u, // stereo
-            sampleRate = 44100u,
-            byteRate = 176400u, // sampleRate * numChannels * bitsPerSample/8
-            blockAlign = 4u,
-            bitsPerSample = 16u,
-        )
+        val original =
+            RiffChunk.Fmt(
+                chunkSize = 16u,
+                audioFormat = 1u, // PCM
+                numChannels = 2u, // stereo
+                sampleRate = 44100u,
+                byteRate = 176400u, // sampleRate * numChannels * bitsPerSample/8
+                blockAlign = 4u,
+                bitsPerSample = 16u,
+            )
         val decoded = RiffChunkFmtCodec.testRoundTrip(original)
         assertEquals(original, decoded)
     }
