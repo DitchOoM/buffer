@@ -126,6 +126,18 @@ sealed class FieldReadStrategy {
         val descriptor: CustomFieldDescriptor,
     ) : FieldReadStrategy()
 
+    /**
+     * Field populated from @DispatchOn context during decode, written normally during encode.
+     * @param codecName the generated codec name for the discriminator type (e.g., "PngChunkHeaderCodec")
+     * @param dispatchPackage the package of the sealed dispatch codec
+     * @param dispatchCodecSimpleName the simple name of the dispatch codec (e.g., "PngChunkCodec")
+     */
+    data class DiscriminatorField(
+        val codecName: String,
+        val dispatchPackage: String,
+        val dispatchCodecSimpleName: String,
+    ) : FieldReadStrategy()
+
     val fixedSize: Int
         get() =
             when (this) {
@@ -164,8 +176,13 @@ class FieldAnalyzer(
         )
 
     private var payloadTypeParamNames: Set<String> = emptySet()
+    private var currentDispatchOnInfo: DispatchOnInfo? = null
 
-    fun analyze(classDeclaration: KSClassDeclaration): List<FieldInfo>? {
+    fun analyze(
+        classDeclaration: KSClassDeclaration,
+        dispatchOnInfo: DispatchOnInfo? = null,
+    ): List<FieldInfo>? {
+        currentDispatchOnInfo = dispatchOnInfo
         val constructor =
             classDeclaration.primaryConstructor ?: run {
                 logger.error("@ProtocolMessage class must have a primary constructor", classDeclaration)
@@ -558,13 +575,24 @@ class FieldAnalyzer(
             return FieldReadStrategy.ValueClassField(innerStrategy, typeName, innerPropertyName)
         }
 
-        // Check if it has @ProtocolMessage (nested message)
+        // Check if it has @ProtocolMessage (nested message or discriminator)
         val hasProtocolMessage =
             typeDecl.annotations.any {
                 it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.ProtocolMessage"
             }
         if (hasProtocolMessage) {
             val codecName = typeDecl.codecName()
+            // If this field's type matches the @DispatchOn discriminator type,
+            // it should be populated from context during decode (not read from buffer)
+            val qualifiedName = typeDecl.qualifiedName?.asString()
+            val dispatchInfo = currentDispatchOnInfo
+            if (dispatchInfo != null && qualifiedName != null && qualifiedName == dispatchInfo.typeName) {
+                return FieldReadStrategy.DiscriminatorField(
+                    codecName,
+                    dispatchInfo.sealedPackage,
+                    dispatchInfo.sealedCodecSimpleName,
+                )
+            }
             return FieldReadStrategy.NestedMessageField(codecName)
         }
 

@@ -76,4 +76,8 @@ data class DispatchOnInfo(
     val dispatchProperty: String,
     val poetClassName: ClassName,
     val innerTypeName: String,
+    /** Simple name of the sealed interface dispatch codec (e.g., "PngChunkCodec"). */
+    val sealedCodecSimpleName: String = "",
+    /** Package of the sealed interface. */
+    val sealedPackage: String = "",
 )

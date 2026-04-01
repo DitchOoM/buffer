@@ -1,6 +1,9 @@
 package com.ditchoom.buffer.codec.test.protocols
 
+import com.ditchoom.buffer.codec.annotations.DispatchOn
+import com.ditchoom.buffer.codec.annotations.DispatchValue
 import com.ditchoom.buffer.codec.annotations.LengthFrom
+import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.Payload
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import kotlin.jvm.JvmInline
@@ -16,15 +19,16 @@ import kotlin.jvm.JvmInline
  * uint32 crc;        // 4 bytes CRC-32 over type + data
  * ```
  *
- * NOTE: @DispatchOn cannot be used here because the length field comes BEFORE
- * the chunk type on the wire. @DispatchOn reads the discriminator first, but
- * PNG requires reading length first, then type. Instead, each chunk type is
- * modeled as a standalone @ProtocolMessage with explicit type + length fields.
+ * The length field comes BEFORE the type on the wire. This is handled by using
+ * a data class discriminator [PngChunkHeader] that reads both length + type,
+ * then dispatches on type. Each variant includes the header as a field — the
+ * processor detects the matching type and populates it from context during decode,
+ * writes it normally during encode.
  *
  * CRC is modeled as a read/write UInt field — CRC validation is application-level.
  */
 
-/** PNG chunk type as a 4-byte big-endian integer. */
+/** PNG chunk type constants as 4-byte big-endian integers. */
 @JvmInline
 value class PngChunkType(val raw: UInt) {
     companion object {
@@ -37,39 +41,66 @@ value class PngChunkType(val raw: UInt) {
 }
 
 /**
- * IHDR chunk (PNG §11.2.2) — image header, must be first chunk.
- * Wire: 00 00 00 0D 49 48 44 52 [13 bytes data] [4 bytes CRC]
- * Length is always 13 (width + height + bitDepth + colorType + compression + filter + interlace).
+ * PNG chunk header: length (4 bytes) + type (4 bytes).
+ * Read as the @DispatchOn discriminator — dispatches on the type field.
  */
 @ProtocolMessage
-data class PngIhdrChunk(
-    val length: UInt, // always 13
-    val type: UInt, // always 0x49484452 ("IHDR")
-    val width: UInt,
-    val height: UInt,
-    val bitDepth: UByte,
-    val colorType: UByte,
-    val compressionMethod: UByte,
-    val filterMethod: UByte,
-    val interlaceMethod: UByte,
-    val crc: UInt,
-)
+data class PngChunkHeader(
+    val length: UInt,
+    val type: UInt,
+) {
+    @DispatchValue
+    val chunkType: Int get() = type.toInt()
+}
 
 /**
- * IEND chunk (PNG §11.2.5) — image trailer, must be last chunk.
- * Wire: 00 00 00 00 49 45 4E 44 [4 bytes CRC]
- * Length is always 0 (no data).
+ * PNG chunks dispatched by the type field in the 8-byte header.
+ * Each variant includes the header — populated from context during decode,
+ * written normally during encode.
+ *
+ * Models fixed-structure chunks. Variable-length data chunks (IDAT, tEXt) use
+ * [PngDataChunk] directly since @LengthFrom cannot reference dotted paths
+ * into the header.
  */
+@DispatchOn(PngChunkHeader::class)
 @ProtocolMessage
-data class PngIendChunk(
-    val length: UInt, // always 0
-    val type: UInt, // always 0x49454E44 ("IEND")
-    val crc: UInt,
-)
+sealed interface PngChunk {
+    /**
+     * IHDR chunk (PNG §11.2.2) — image header, must be first chunk.
+     * Length is always 13. Data: width + height + bitDepth + colorType + 3 methods.
+     */
+    @PacketType(0x49484452)
+    @ProtocolMessage
+    data class Ihdr(
+        val header: PngChunkHeader,
+        val width: UInt,
+        val height: UInt,
+        val bitDepth: UByte,
+        val colorType: UByte,
+        val compressionMethod: UByte,
+        val filterMethod: UByte,
+        val interlaceMethod: UByte,
+        val crc: UInt,
+    ) : PngChunk
+
+    /**
+     * IEND chunk (PNG §11.2.5) — image trailer, must be last chunk.
+     * Length is always 0, no data, only CRC.
+     */
+    @PacketType(0x49454E44)
+    @ProtocolMessage
+    data class Iend(
+        val header: PngChunkHeader,
+        val crc: UInt,
+    ) : PngChunk
+}
 
 /**
  * Generic PNG data chunk — for IDAT, tEXt, or any chunk with variable-length data.
- * Wire: [4 bytes length] [4 bytes type] [length bytes data] [4 bytes CRC]
+ * Standalone model (not in sealed dispatch) since the payload length comes from
+ * a header field that @LengthFrom can reference directly.
+ *
+ * Wire: length(4) + type(4) + data(length) + crc(4)
  */
 @ProtocolMessage
 data class PngDataChunk<@Payload P>(

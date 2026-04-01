@@ -52,6 +52,12 @@ internal fun readExpression(
         }
         is FieldReadStrategy.UseCodecField -> readUseCodecExpression(strategy, withContext)
         is FieldReadStrategy.CollectionField -> readCollectionExpression(strategy, withContext)
+        is FieldReadStrategy.DiscriminatorField -> {
+            // Read from dispatch context instead of buffer
+            "${strategy.dispatchPackage}.${strategy.dispatchCodecSimpleName}.DiscriminatorKey" +
+                ".let { key -> context[key] ?: error(\"Missing discriminator in context. \" + " +
+                "\"Decode via ${strategy.dispatchCodecSimpleName}.decode() to populate it.\") }"
+        }
         is FieldReadStrategy.PayloadField -> error("PayloadField uses writePayloadCodec path")
         is FieldReadStrategy.Custom -> {
             val d = strategy.descriptor
@@ -113,6 +119,11 @@ internal fun writeExpression(
         }
         is FieldReadStrategy.UseCodecField -> writeUseCodecExpression(strategy, valueExpr, withContext)
         is FieldReadStrategy.CollectionField -> writeCollectionExpression(strategy, valueExpr, withContext)
+        is FieldReadStrategy.DiscriminatorField -> {
+            // Write normally via the discriminator codec during encode
+            val ctxArg = if (withContext) ", context" else ""
+            "${strategy.codecName}.encode(buffer, $valueExpr$ctxArg)"
+        }
         is FieldReadStrategy.PayloadField -> error("PayloadField uses writePayloadCodec path")
         is FieldReadStrategy.Custom -> {
             val d = strategy.descriptor

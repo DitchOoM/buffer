@@ -97,10 +97,17 @@ class ProtocolMessageProcessor(
         }
 
         // Check for @DispatchOn annotation
-        val dispatchOnInfo = resolveDispatchOn(classDeclaration)
+        val dispatchOnInfoRaw = resolveDispatchOn(classDeclaration)
+        val sealedName = classDeclaration.simpleName.asString()
+        val sealedPackage = classDeclaration.packageName.asString()
+        val dispatchOnInfo = dispatchOnInfoRaw?.copy(
+            sealedCodecSimpleName = "${sealedName}Codec",
+            sealedPackage = sealedPackage,
+        )
 
         // Phase 1: Analyze and generate sub-codecs, collecting payload metadata
         val variantPayloadInfos = mutableListOf<SealedVariantPayloadInfo>()
+        var anyVariantHasDiscriminatorField = false
         for (subclass in sealedSubclasses) {
             val qualifiedName = subclass.qualifiedName?.asString() ?: continue
             if (qualifiedName in processed) continue
@@ -126,10 +133,13 @@ class ProtocolMessageProcessor(
                 continue
             }
 
-            // Analyze fields to detect @Payload
+            // Analyze fields to detect @Payload and discriminator fields
             val fieldAnalyzer = FieldAnalyzer(logger, customProviders)
-            val fields = fieldAnalyzer.analyze(subclass) ?: continue
+            val fields = fieldAnalyzer.analyze(subclass, dispatchOnInfo) ?: continue
 
+            if (fields.any { it.strategy is FieldReadStrategy.DiscriminatorField }) {
+                anyVariantHasDiscriminatorField = true
+            }
             val payloadFields = fields.filter { it.strategy is FieldReadStrategy.PayloadField }
             val payloadInfos =
                 payloadFields.map { field ->
@@ -153,7 +163,10 @@ class ProtocolMessageProcessor(
 
         // Phase 2: Generate the dispatch codec with payload awareness
         val generator = SealedDispatchGenerator(codeGenerator, logger)
-        generator.generate(classDeclaration, sealedSubclasses, variantPayloadInfos, dispatchOnInfo)
+        generator.generate(
+            classDeclaration, sealedSubclasses, variantPayloadInfos, dispatchOnInfo,
+            variantsHandleDiscriminator = anyVariantHasDiscriminatorField,
+        )
     }
 
     /**
