@@ -120,9 +120,33 @@ private val codecStubs =
     package com.ditchoom.buffer.codec
     import com.ditchoom.buffer.ReadBuffer
     import com.ditchoom.buffer.WriteBuffer
+    interface CodecContext {
+        operator fun <T : Any> get(key: Key<T>): T?
+        abstract class Key<T : Any>
+    }
+    interface DecodeContext : CodecContext {
+        fun <T : Any> with(key: CodecContext.Key<T>, value: T): DecodeContext
+        companion object {
+            val Empty: DecodeContext = object : DecodeContext {
+                override fun <T : Any> get(key: CodecContext.Key<T>): T? = null
+                override fun <T : Any> with(key: CodecContext.Key<T>, value: T): DecodeContext = this
+            }
+        }
+    }
+    interface EncodeContext : CodecContext {
+        fun <T : Any> with(key: CodecContext.Key<T>, value: T): EncodeContext
+        companion object {
+            val Empty: EncodeContext = object : EncodeContext {
+                override fun <T : Any> get(key: CodecContext.Key<T>): T? = null
+                override fun <T : Any> with(key: CodecContext.Key<T>, value: T): EncodeContext = this
+            }
+        }
+    }
     interface Codec<T> {
         fun decode(buffer: ReadBuffer): T
+        fun decode(buffer: ReadBuffer, context: DecodeContext): T = decode(buffer)
         fun encode(buffer: WriteBuffer, value: T)
+        fun encode(buffer: WriteBuffer, value: T, context: EncodeContext) = encode(buffer, value)
         fun sizeOf(value: T): Int? = null
     }
     """,
