@@ -100,14 +100,16 @@ class ProtocolMessageProcessor(
         val dispatchOnInfoRaw = resolveDispatchOn(classDeclaration)
         val sealedName = classDeclaration.simpleName.asString()
         val sealedPackage = classDeclaration.packageName.asString()
-        val dispatchOnInfo = dispatchOnInfoRaw?.copy(
-            sealedCodecSimpleName = "${sealedName}Codec",
-            sealedPackage = sealedPackage,
-        )
+        val dispatchOnInfo =
+            dispatchOnInfoRaw?.copy(
+                sealedCodecSimpleName = "${sealedName}Codec",
+                sealedPackage = sealedPackage,
+            )
 
         // Phase 1: Analyze and generate sub-codecs, collecting payload metadata
         val variantPayloadInfos = mutableListOf<SealedVariantPayloadInfo>()
         var anyVariantHasDiscriminatorField = false
+        val variantsSupportingPeek = mutableSetOf<String>()
         for (subclass in sealedSubclasses) {
             val qualifiedName = subclass.qualifiedName?.asString() ?: continue
             if (qualifiedName in processed) continue
@@ -152,6 +154,12 @@ class ProtocolMessageProcessor(
                 }
             variantPayloadInfos.add(SealedVariantPayloadInfo(subclass, payloadInfos))
 
+            // Track whether this variant supports peekFrameSize
+            if (PeekFrameSizeEmitter.generate(fields) != null) {
+                val name = subclass.qualifiedName?.asString() ?: subclass.simpleName.asString()
+                variantsSupportingPeek.add(name)
+            }
+
             // Generate the sub-codec
             val batches = BatchOptimizer().optimize(fields)
             val hasPayload = payloadFields.isNotEmpty()
@@ -164,8 +172,12 @@ class ProtocolMessageProcessor(
         // Phase 2: Generate the dispatch codec with payload awareness
         val generator = SealedDispatchGenerator(codeGenerator, logger)
         generator.generate(
-            classDeclaration, sealedSubclasses, variantPayloadInfos, dispatchOnInfo,
+            classDeclaration,
+            sealedSubclasses,
+            variantPayloadInfos,
+            dispatchOnInfo,
             variantsHandleDiscriminator = anyVariantHasDiscriminatorField,
+            variantsSupportingPeek = variantsSupportingPeek,
         )
     }
 
@@ -197,11 +209,13 @@ class ProtocolMessageProcessor(
 
         // Find @DispatchValue property
         val dispatchValueProps =
-            discriminatorClass.getAllProperties().filter { prop ->
-                prop.annotations.any {
-                    it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.DispatchValue"
-                }
-            }.toList()
+            discriminatorClass
+                .getAllProperties()
+                .filter { prop ->
+                    prop.annotations.any {
+                        it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.DispatchValue"
+                    }
+                }.toList()
 
         if (dispatchValueProps.isEmpty()) {
             logger.error(
@@ -222,7 +236,11 @@ class ProtocolMessageProcessor(
         }
 
         val dispatchProp = dispatchValueProps.first()
-        val dispatchPropType = dispatchProp.type.resolve().declaration.simpleName.asString()
+        val dispatchPropType =
+            dispatchProp.type
+                .resolve()
+                .declaration.simpleName
+                .asString()
         if (dispatchPropType != "Int") {
             logger.error(
                 "@DispatchValue property '${dispatchProp.simpleName.asString()}' must return Int, " +
@@ -235,8 +253,35 @@ class ProtocolMessageProcessor(
         val poetClassName = discriminatorClass.toPoetClassName()
 
         // Determine the inner type of the value class for constructing during encode
-        val innerType = discriminatorClass.primaryConstructor?.parameters?.firstOrNull()
-        val innerTypeName = innerType?.type?.resolve()?.declaration?.simpleName?.asString() ?: "UByte"
+        val constructorKsParams = discriminatorClass.primaryConstructor?.parameters ?: emptyList()
+        val innerType = constructorKsParams.firstOrNull()
+        val innerTypeName =
+            innerType
+                ?.type
+                ?.resolve()
+                ?.declaration
+                ?.simpleName
+                ?.asString() ?: "UByte"
+        val isValueClass =
+            constructorKsParams.size == 1 &&
+                discriminatorClass.modifiers.contains(com.google.devtools.ksp.symbol.Modifier.VALUE)
+
+        // Build constructor parameter metadata for data class discriminator peeking
+        val discriminatorParams =
+            constructorKsParams.mapNotNull { param ->
+                val paramTypeName =
+                    param.type
+                        .resolve()
+                        .declaration
+                        .qualifiedName
+                        ?.asString() ?: return@mapNotNull null
+                val primitive = Primitive.fromTypeName(paramTypeName) ?: return@mapNotNull null
+                DiscriminatorParam(
+                    name = param.name?.asString() ?: return@mapNotNull null,
+                    typeName = primitive.typeName,
+                    wireBytes = primitive.defaultWireBytes,
+                )
+            }
 
         return DispatchOnInfo(
             typeName = discriminatorClass.qualifiedName?.asString() ?: discriminatorClass.simpleName.asString(),
@@ -244,6 +289,8 @@ class ProtocolMessageProcessor(
             dispatchProperty = dispatchProp.simpleName.asString(),
             poetClassName = poetClassName,
             innerTypeName = innerTypeName,
+            isValueClass = isValueClass,
+            constructorParams = discriminatorParams,
         )
     }
 }

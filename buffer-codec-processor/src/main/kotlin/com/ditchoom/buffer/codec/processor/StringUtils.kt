@@ -61,23 +61,30 @@ data class PayloadFieldInfo(
 )
 
 /**
- * Discriminator info from @DispatchOn + @DispatchValue.
- *
- * @param typeName fully qualified name of the discriminator type (e.g., "com.example.MqttFixedHeader")
- * @param codecName name of the generated codec for the discriminator type (e.g., "MqttFixedHeaderCodec")
- * @param dispatchProperty name of the @DispatchValue property (e.g., "packetType")
- * @param poetClassName KotlinPoet ClassName for the discriminator type
- * @param innerTypeName the simple name of the value class's inner type (e.g., "UByte", "UInt")
- *   Used to construct the discriminator from a wire value during encode.
+ * Constructor parameter metadata for discriminator types.
+ * Used for peeking data class discriminators byte-by-byte.
  */
+data class DiscriminatorParam(
+    val name: String,
+    val typeName: String,
+    val wireBytes: Int,
+)
+
 data class DispatchOnInfo(
     val typeName: String,
     val codecName: String,
     val dispatchProperty: String,
     val poetClassName: ClassName,
     val innerTypeName: String,
+    /** True if the discriminator is a value class (single constructor parameter). */
+    val isValueClass: Boolean = true,
+    /** All constructor parameters with their wire sizes (for data class discriminators). */
+    val constructorParams: List<DiscriminatorParam> = emptyList(),
     /** Simple name of the sealed interface dispatch codec (e.g., "PngChunkCodec"). */
     val sealedCodecSimpleName: String = "",
     /** Package of the sealed interface. */
     val sealedPackage: String = "",
-)
+) {
+    /** Total wire bytes for the discriminator type. */
+    val totalWireBytes: Int get() = constructorParams.sumOf { it.wireBytes }
+}

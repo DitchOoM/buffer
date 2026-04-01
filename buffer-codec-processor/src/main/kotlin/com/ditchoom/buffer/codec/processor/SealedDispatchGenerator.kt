@@ -8,10 +8,12 @@ import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
 import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
+import com.squareup.kotlinpoet.INT
 import com.squareup.kotlinpoet.KModifier
 import com.squareup.kotlinpoet.LambdaTypeName
 import com.squareup.kotlinpoet.ParameterSpec
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
+import com.squareup.kotlinpoet.PropertySpec
 import com.squareup.kotlinpoet.STAR
 import com.squareup.kotlinpoet.TypeSpec
 import com.squareup.kotlinpoet.TypeVariableName
@@ -55,17 +57,32 @@ class SealedDispatchGenerator(
         }
     }
 
-    private fun wireConversion(innerTypeName: String, wire: Int): String =
+    private fun wireConversion(
+        innerTypeName: String,
+        wire: Int,
+    ): String =
         when (innerTypeName) {
-            "UByte" -> "${wire}.toUByte()"
-            "Byte" -> "${wire}.toByte()"
-            "UShort" -> "${wire}.toUShort()"
-            "Short" -> "${wire}.toShort()"
-            "UInt" -> "${wire}.toUInt()"
+            "UByte" -> "$wire.toUByte()"
+            "Byte" -> "$wire.toByte()"
+            "UShort" -> "$wire.toUShort()"
+            "Short" -> "$wire.toShort()"
+            "UInt" -> "$wire.toUInt()"
             "Int" -> "$wire"
-            "ULong" -> "${wire}.toULong()"
-            "Long" -> "${wire}.toLong()"
-            else -> "${wire}.toUByte()" // fallback
+            "ULong" -> "$wire.toULong()"
+            "Long" -> "$wire.toLong()"
+            else -> "$wire.toUByte()" // fallback
+        }
+
+    /** Returns the valid range for a wire value given the discriminator's inner type, or null if any Int fits. */
+    private fun wireRange(innerTypeName: String): LongRange? =
+        when (innerTypeName) {
+            "UByte" -> 0L..255L
+            "Byte" -> -128L..127L
+            "UShort" -> 0L..65535L
+            "Short" -> -32768L..32767L
+            "UInt" -> 0L..4294967295L
+            // Int, Long, ULong — any @PacketType Int value fits
+            else -> null
         }
 
     fun generate(
@@ -74,6 +91,7 @@ class SealedDispatchGenerator(
         variantPayloadInfos: List<SealedVariantPayloadInfo> = emptyList(),
         dispatchOnInfo: DispatchOnInfo? = null,
         variantsHandleDiscriminator: Boolean = false,
+        variantsSupportingPeek: Set<String> = emptySet(),
     ) {
         val interfaceName = sealedInterface.simpleName.asString()
         val packageName = sealedInterface.packageName.asString()
@@ -100,13 +118,26 @@ class SealedDispatchGenerator(
             val wireArg = packetType.arguments.getOrNull(1)?.value as? Int ?: -1
             val wire = if (wireArg == -1) value else wireArg
             // Without @DispatchOn, dispatch reads/writes a single byte (0-255)
-            // With @DispatchOn, the discriminator type defines the width — allow any Int
+            // With @DispatchOn, the discriminator type defines the width — validate wire fits
             if (dispatchOnInfo == null) {
                 if (value < 0 || value > 255) {
                     logger.error(
                         "@PacketType($value) on '${subclass.simpleName.asString()}' is out of range. " +
                             "The type discriminator is encoded as a single byte, so valid values are 0-255. " +
                             "Use @DispatchOn for multi-byte discriminators.",
+                        subclass,
+                    )
+                    return
+                }
+            } else {
+                val wireRange = wireRange(dispatchOnInfo.innerTypeName)
+                if (wireRange != null && wire.toLong() !in wireRange) {
+                    logger.error(
+                        "@PacketType(wire=$wire) on '${subclass.simpleName.asString()}' overflows " +
+                            "the discriminator's ${dispatchOnInfo.innerTypeName} type (valid range: " +
+                            "${wireRange.first}..${wireRange.last}). The wire value is converted to " +
+                            "${dispatchOnInfo.innerTypeName} during encode, so values outside this range " +
+                            "silently wrap and will not round-trip correctly.",
                         subclass,
                     )
                     return
@@ -163,6 +194,19 @@ class SealedDispatchGenerator(
 
         for (fn in result.functions) {
             objectBuilder.addFunction(fn)
+        }
+
+        // Generate peekFrameSize for sealed dispatch (only if ALL variants support it)
+        val allVariantsSupportPeek =
+            variants.all { v ->
+                val name = v.subclass.qualifiedName?.asString() ?: v.subclass.simpleName.asString()
+                name in variantsSupportingPeek
+            }
+        val sealedPeek = if (allVariantsSupportPeek) buildSealedPeekFrameSize(variants, dispatchOnInfo) else null
+        if (sealedPeek != null) {
+            objectBuilder.addProperty(sealedPeek.minHeaderProperty)
+            objectBuilder.addFunction(sealedPeek.syncFun)
+            objectBuilder.addFunction(sealedPeek.suspendFun)
         }
 
         val fileSpec =
@@ -514,4 +558,148 @@ class SealedDispatchGenerator(
             true, // NOW implements Codec<T>
         )
     }
+
+    // ──────────────────────── peekFrameSize for sealed dispatch ────────────────────────
+
+    private data class SealedPeekResult(
+        val minHeaderProperty: PropertySpec,
+        val syncFun: FunSpec,
+        val suspendFun: FunSpec,
+    )
+
+    /**
+     * Generates peekFrameSize for a sealed dispatch codec.
+     * Peeks the discriminator, branches per variant, delegates to each variant's peekFrameSize.
+     */
+    private fun buildSealedPeekFrameSize(
+        variants: List<PacketTypeInfo>,
+        dispatchOnInfo: DispatchOnInfo?,
+    ): SealedPeekResult? {
+        val discriminatorSize =
+            if (dispatchOnInfo != null) {
+                if (dispatchOnInfo.constructorParams.isEmpty()) return null
+                dispatchOnInfo.totalWireBytes
+            } else {
+                1 // default: single byte
+            }
+
+        val minHeaderBytes = discriminatorSize
+
+        val minHeaderProp =
+            PropertySpec
+                .builder("MIN_HEADER_BYTES", INT)
+                .addModifiers(KModifier.CONST)
+                .initializer("%L", minHeaderBytes)
+                .build()
+
+        return SealedPeekResult(
+            minHeaderProperty = minHeaderProp,
+            syncFun = buildSealedPeekFun(variants, dispatchOnInfo, discriminatorSize, suspending = false),
+            suspendFun = buildSealedPeekFun(variants, dispatchOnInfo, discriminatorSize, suspending = true),
+        )
+    }
+
+    private fun buildSealedPeekFun(
+        variants: List<PacketTypeInfo>,
+        dispatchOnInfo: DispatchOnInfo?,
+        discriminatorSize: Int,
+        suspending: Boolean,
+    ): FunSpec {
+        val streamType = if (suspending) SUSPENDING_STREAM_PROCESSOR else STREAM_PROCESSOR
+        val builder =
+            FunSpec
+                .builder("peekFrameSize")
+                .addParameter("stream", streamType)
+                .addParameter(
+                    com.squareup.kotlinpoet.ParameterSpec
+                        .builder("baseOffset", INT)
+                        .defaultValue("0")
+                        .build(),
+                ).returns(INT.copy(nullable = true))
+
+        if (suspending) builder.addModifiers(KModifier.SUSPEND)
+
+        val code = CodeBlock.builder()
+        code.addStatement("if (stream.available() < baseOffset + %L) return null", discriminatorSize)
+
+        // Peek and extract the dispatch value
+        if (dispatchOnInfo != null) {
+            if (dispatchOnInfo.isValueClass) {
+                // Value class: peek inner type, wrap in constructor
+                val peekExpr = discriminatorPeekExpr("stream", "baseOffset", dispatchOnInfo.innerTypeName)
+                code.addStatement("val _raw = %L", peekExpr)
+                code.addStatement(
+                    "val type = %T(_raw).%L",
+                    dispatchOnInfo.poetClassName,
+                    dispatchOnInfo.dispatchProperty,
+                )
+            } else {
+                // Data class: peek each constructor parameter, build the object
+                var paramOffset = 0
+                val paramExprs = mutableListOf<String>()
+                for (param in dispatchOnInfo.constructorParams) {
+                    val peekExpr = discriminatorPeekExpr("stream", "baseOffset + $paramOffset", paramTypeName(param.typeName))
+                    paramExprs.add(peekExpr)
+                    paramOffset += param.wireBytes
+                }
+                code.addStatement(
+                    "val type = %T(%L).%L",
+                    dispatchOnInfo.poetClassName,
+                    paramExprs.joinToString(", "),
+                    dispatchOnInfo.dispatchProperty,
+                )
+            }
+        } else {
+            code.addStatement("val type = stream.peekByte(baseOffset).toInt() and 0xFF")
+        }
+
+        // Branch per variant, delegate to variant's peekFrameSize
+        code.beginControlFlow("return when (type)")
+        for (v in variants) {
+            val variantCodecName = v.subclass.codecName()
+            code.addStatement(
+                "%L -> %L.peekFrameSize(stream, baseOffset + %L)?.let { it + %L }",
+                v.value,
+                variantCodecName,
+                discriminatorSize,
+                discriminatorSize,
+            )
+        }
+        code.addStatement("else -> null")
+        code.endControlFlow()
+
+        builder.addCode(code.build())
+        return builder.build()
+    }
+
+    /** Returns the wire byte count for a discriminator's inner type name. */
+    private fun innerTypeWireBytes(innerTypeName: String): Int? =
+        when (innerTypeName) {
+            "UByte", "Byte" -> 1
+            "UShort", "Short" -> 2
+            "UInt", "Int" -> 4
+            "ULong", "Long" -> 8
+            else -> null
+        }
+
+    /** Extracts the simple type name from a qualified primitive type (e.g., "kotlin.UInt" -> "UInt"). */
+    private fun paramTypeName(qualifiedName: String): String = qualifiedName.substringAfterLast('.')
+
+    /** Generates a peek expression for the discriminator raw value, casting to the inner type. */
+    private fun discriminatorPeekExpr(
+        stream: String,
+        offset: String,
+        innerTypeName: String,
+    ): String =
+        when (innerTypeName) {
+            "UByte" -> "$stream.peekByte($offset).toUByte()"
+            "Byte" -> "$stream.peekByte($offset)"
+            "UShort" -> "$stream.peekShort($offset).toUShort()"
+            "Short" -> "$stream.peekShort($offset)"
+            "UInt" -> "$stream.peekInt($offset).toUInt()"
+            "Int" -> "$stream.peekInt($offset)"
+            "ULong" -> "$stream.peekLong($offset).toULong()"
+            "Long" -> "$stream.peekLong($offset)"
+            else -> "$stream.peekByte($offset).toUByte()" // fallback
+        }
 }

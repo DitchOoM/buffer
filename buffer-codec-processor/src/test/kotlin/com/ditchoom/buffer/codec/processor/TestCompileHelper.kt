@@ -29,11 +29,19 @@ private val annotationSource =
 
     @Target(AnnotationTarget.CLASS)
     @Retention(AnnotationRetention.BINARY)
-    annotation class PacketType(val value: Int)
+    annotation class PacketType(val value: Int, val wire: Int = -1)
 
     @Target(AnnotationTarget.TYPE_PARAMETER)
     @Retention(AnnotationRetention.BINARY)
     annotation class Payload
+
+    @Target(AnnotationTarget.CLASS)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class DispatchOn(val type: kotlin.reflect.KClass<*>)
+
+    @Target(AnnotationTarget.PROPERTY)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class DispatchValue
 
     enum class LengthPrefix {
         Byte, Short, Int,
@@ -111,6 +119,31 @@ private val bufferStubs =
     )
 
 /**
+ * StreamProcessor stubs so generated peekFrameSize code compiles in tests.
+ */
+private val streamStubs =
+    SourceFile.kotlin(
+        "StreamStubs.kt",
+        """
+    package com.ditchoom.buffer.stream
+    interface StreamProcessor {
+        fun available(): Int
+        fun peekByte(offset: Int = 0): Byte
+        fun peekShort(offset: Int = 0): Short
+        fun peekInt(offset: Int = 0): Int
+        fun peekLong(offset: Int = 0): Long
+    }
+    interface SuspendingStreamProcessor {
+        fun available(): Int
+        suspend fun peekByte(offset: Int = 0): Byte
+        suspend fun peekShort(offset: Int = 0): Short
+        suspend fun peekInt(offset: Int = 0): Int
+        suspend fun peekLong(offset: Int = 0): Long
+    }
+    """,
+    )
+
+/**
  * Codec stub for tests that check generated code compilation.
  */
 private val codecStubs =
@@ -183,7 +216,7 @@ private val payloadStubs =
     )
 
 fun compileWithKsp(vararg sources: SourceFile): CompileResult {
-    val allSources = listOf(annotationSource, codecStubs, bufferStubs) + sources.toList()
+    val allSources = listOf(annotationSource, codecStubs, bufferStubs, streamStubs) + sources.toList()
     val compilation =
         KotlinCompilation().apply {
             this.sources = allSources
@@ -197,7 +230,7 @@ fun compileWithKsp(vararg sources: SourceFile): CompileResult {
 }
 
 fun compileWithKspAndBufferStubs(vararg sources: SourceFile): CompileResult {
-    val allSources = listOf(annotationSource, codecStubs, bufferStubs) + sources.toList()
+    val allSources = listOf(annotationSource, codecStubs, bufferStubs, streamStubs) + sources.toList()
     val compilation =
         KotlinCompilation().apply {
             this.sources = allSources
@@ -211,7 +244,7 @@ fun compileWithKspAndBufferStubs(vararg sources: SourceFile): CompileResult {
 }
 
 fun compileWithKspAndPayloadStubs(vararg sources: SourceFile): CompileResult {
-    val allSources = listOf(annotationSource, codecStubs, bufferStubs, payloadStubs) + sources.toList()
+    val allSources = listOf(annotationSource, codecStubs, bufferStubs, streamStubs, payloadStubs) + sources.toList()
     val compilation =
         KotlinCompilation().apply {
             this.sources = allSources
@@ -249,7 +282,7 @@ fun compileWithKspAndCustomProviders(
     providers: List<CodecFieldProvider> = emptyList(),
 ): CompileResult {
     val allSources =
-        listOf(annotationSource, codecStubs, bufferStubs, customFunctionStubs) + sources.toList()
+        listOf(annotationSource, codecStubs, bufferStubs, streamStubs, customFunctionStubs) + sources.toList()
     val compilation =
         KotlinCompilation().apply {
             this.sources = allSources
