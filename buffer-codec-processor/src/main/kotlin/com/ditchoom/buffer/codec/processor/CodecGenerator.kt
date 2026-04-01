@@ -135,6 +135,15 @@ class CodecGenerator(
             objectBuilder.addFunction(sizeOfFun)
         }
 
+        // Generate peekFrameSize if possible
+        val peekResult = PeekFrameSizeEmitter.generate(fields)
+        if (peekResult != null) {
+            objectBuilder.addProperty(PeekFrameSizeEmitter.buildMinHeaderProperty(peekResult))
+            for (fn in PeekFrameSizeEmitter.buildFunctions(peekResult)) {
+                objectBuilder.addFunction(fn)
+            }
+        }
+
         val fileBuilder =
             FileSpec
                 .builder(packageName, codecName)
@@ -406,6 +415,15 @@ class CodecGenerator(
                 ).addCode(ctxEncodeBody.build())
                 .build(),
         )
+
+        // Generate peekFrameSize for payload codecs too
+        val payloadPeekResult = PeekFrameSizeEmitter.generate(fields)
+        if (payloadPeekResult != null) {
+            objectBuilder.addProperty(PeekFrameSizeEmitter.buildMinHeaderProperty(payloadPeekResult))
+            for (fn in PeekFrameSizeEmitter.buildFunctions(payloadPeekResult)) {
+                objectBuilder.addFunction(fn)
+            }
+        }
 
         val fileBuilder =
             FileSpec
