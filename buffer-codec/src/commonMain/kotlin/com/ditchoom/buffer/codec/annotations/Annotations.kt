@@ -220,3 +220,66 @@ annotation class WhenTrue(
 annotation class UseCodec(
     val codec: kotlin.reflect.KClass<*>,
 )
+
+/**
+ * Specifies a custom discriminator type for a `@ProtocolMessage` sealed interface.
+ *
+ * By default, `@PacketType` dispatch reads a single byte and matches its full value.
+ * `@DispatchOn` overrides this: the processor reads the specified [type] first, then
+ * dispatches on the property marked `@DispatchValue` within that type.
+ *
+ * This enables protocols with bit-packed headers where the discriminator is not
+ * the full byte. The discriminator value is forwarded to sub-codecs via `CodecContext`,
+ * so variants can access fields like flags without re-reading.
+ *
+ * ```kotlin
+ * @JvmInline
+ * @ProtocolMessage
+ * value class MqttFixedHeader(val raw: UByte) {
+ *     @DispatchValue
+ *     val packetType: Int get() = raw.toUInt().shr(4).toInt()
+ *     val flags: UByte get() = (raw and 0x0Fu)
+ * }
+ *
+ * @DispatchOn(MqttFixedHeader::class)
+ * sealed interface MqttControlPacket {
+ *     @PacketType(1) @ProtocolMessage data class Connect(...) : MqttControlPacket
+ *     @PacketType(3) @ProtocolMessage data class Publish(val header: MqttFixedHeader, ...) : MqttControlPacket
+ *     @PacketType(12) object PingRequest : MqttControlPacket
+ * }
+ * ```
+ *
+ * @param type A `KClass` referencing a `@ProtocolMessage` type (typically a value class)
+ *   that contains a `@DispatchValue`-annotated property.
+ */
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.BINARY)
+annotation class DispatchOn(
+    val type: kotlin.reflect.KClass<*>,
+)
+
+/**
+ * Marks a property as the dispatch value within a `@DispatchOn` discriminator type.
+ *
+ * The annotated property must return an `Int`. The generated dispatch codec reads the
+ * discriminator type, evaluates this property, and uses the result to match against
+ * `@PacketType` values.
+ *
+ * Exactly one property per class may be annotated with `@DispatchValue`.
+ *
+ * ```kotlin
+ * @JvmInline
+ * @ProtocolMessage
+ * value class MqttFixedHeader(val raw: UByte) {
+ *     @DispatchValue
+ *     val packetType: Int get() = raw.toUInt().shr(4).toInt()
+ *
+ *     val flags: UByte get() = (raw and 0x0Fu)
+ * }
+ * ```
+ *
+ * @see DispatchOn
+ */
+@Target(AnnotationTarget.PROPERTY)
+@Retention(AnnotationRetention.BINARY)
+annotation class DispatchValue
