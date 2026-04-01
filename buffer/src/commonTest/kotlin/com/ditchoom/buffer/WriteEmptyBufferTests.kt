@@ -13,13 +13,6 @@ import kotlin.test.assertEquals
  * threw ArrayIndexOutOfBoundsException (see autobahn case 6.1.3).
  */
 class WriteEmptyBufferTests {
-    private fun tryDeterministicAllocate(size: Int): PlatformBuffer? =
-        try {
-            BufferFactory.deterministic().allocate(size)
-        } catch (_: UnsupportedOperationException) {
-            null
-        }
-
     @Test
     fun writeEmptyBufferIntoManagedBuffer() {
         val target = BufferFactory.managed().allocate(16)

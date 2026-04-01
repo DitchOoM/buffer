@@ -22,10 +22,11 @@ class AndroidDeterministicUnsafeJvmBuffer private constructor(
                 "Use BufferFactory.shared().allocate() for parcelable buffers.",
         )
 
-    override fun sliceImpl() =
-        AndroidDeterministicUnsafeJvmBuffer(
-            byteBuffer.slice().order(byteBuffer.order()),
-            nativeAddress,
+    override fun sliceImpl(): PlatformBuffer =
+        AndroidDeterministicSliceBuffer(
+            super.byteBuffer.slice().order(super.byteBuffer.order()),
+            unsafeAddress,
+            ::isFreed,
         )
 
     companion object {

@@ -10,10 +10,19 @@ import java.nio.ByteBuffer
  * [UnsafeMemory.tryWrapAsDirectByteBuffer], and delegates all buffer operations to
  * [BaseJvmBuffer]. Implements [CloseableBuffer] — callers must call [freeNativeMemory]
  * or use `buffer.use {}`.
+ *
+ * Use-after-free safety: overrides the [byteBuffer] getter to throw
+ * [IllegalStateException] when [freed]. Since ALL data operations in [BaseJvmBuffer]
+ * go through [byteBuffer], this single guard protects every read/write method.
+ * Metadata operations (position, limit, capacity) still work after free because
+ * [BaseJvmBuffer] captures a separate `Buffer` reference at construction time.
+ *
+ * Slices return [DeterministicSliceBuffer] which does NOT implement [CloseableBuffer]
+ * and checks the parent's freed state on [nativeAddress]/[nativeSize] access.
  */
 abstract class DeterministicUnsafeJvmBuffer(
     byteBuffer: ByteBuffer,
-    private val unsafeAddress: Long,
+    internal val unsafeAddress: Long,
 ) : BaseJvmBuffer(byteBuffer),
     NativeMemoryAccess,
     CloseableBuffer {
@@ -21,8 +30,29 @@ abstract class DeterministicUnsafeJvmBuffer(
         require(byteBuffer.isDirect) { "DeterministicUnsafeJvmBuffer requires a direct ByteBuffer" }
     }
 
-    override val nativeAddress: Long get() = unsafeAddress
-    override val nativeSize: Long get() = capacity.toLong()
+    // --- byteBuffer guard: throws on ALL data operations after free ---
+
+    override val byteBuffer: ByteBuffer
+        get() {
+            if (freed) throw IllegalStateException("Buffer has been freed")
+            return super.byteBuffer
+        }
+
+    // --- NativeMemoryAccess ---
+
+    override val nativeAddress: Long
+        get() {
+            if (freed) throw IllegalStateException("Buffer has been freed")
+            return unsafeAddress
+        }
+
+    override val nativeSize: Long
+        get() {
+            if (freed) throw IllegalStateException("Buffer has been freed")
+            return capacity.toLong()
+        }
+
+    // --- CloseableBuffer ---
 
     private var freed = false
     override val isFreed: Boolean get() = freed
@@ -34,87 +64,11 @@ abstract class DeterministicUnsafeJvmBuffer(
         }
     }
 
-    private fun checkNotFreed() {
-        if (freed) throw IllegalStateException("Buffer has been freed")
-    }
-
-    // Guard all entry points to prevent use-after-free (native memory access would crash the JVM)
-
-    override fun readByte(): Byte {
-        checkNotFreed()
-        return super.readByte()
-    }
-
-    override fun readShort(): Short {
-        checkNotFreed()
-        return super.readShort()
-    }
-
-    override fun readInt(): Int {
-        checkNotFreed()
-        return super.readInt()
-    }
-
-    override fun readLong(): Long {
-        checkNotFreed()
-        return super.readLong()
-    }
-
-    override fun readFloat(): Float {
-        checkNotFreed()
-        return super.readFloat()
-    }
-
-    override fun readDouble(): Double {
-        checkNotFreed()
-        return super.readDouble()
-    }
-
-    override fun get(index: Int): Byte {
-        checkNotFreed()
-        return super.get(index)
-    }
-
-    override fun writeByte(byte: Byte): WriteBuffer {
-        checkNotFreed()
-        return super.writeByte(byte)
-    }
-
-    override fun writeShort(value: Short): WriteBuffer {
-        checkNotFreed()
-        return super.writeShort(value)
-    }
-
-    override fun writeInt(value: Int): WriteBuffer {
-        checkNotFreed()
-        return super.writeInt(value)
-    }
-
-    override fun writeLong(value: Long): WriteBuffer {
-        checkNotFreed()
-        return super.writeLong(value)
-    }
-
-    override fun writeFloat(value: Float): WriteBuffer {
-        checkNotFreed()
-        return super.writeFloat(value)
-    }
-
-    override fun writeDouble(value: Double): WriteBuffer {
-        checkNotFreed()
-        return super.writeDouble(value)
-    }
-
-    override fun set(
-        index: Int,
-        byte: Byte,
-    ): WriteBuffer {
-        checkNotFreed()
-        return super.set(index, byte)
-    }
+    // --- Slicing ---
 
     override fun slice(): PlatformBuffer {
-        checkNotFreed()
+        // Check here too for a clear error message (vs generic byteBuffer guard)
+        if (freed) throw IllegalStateException("Buffer has been freed")
         return sliceImpl()
     }
 

@@ -3,7 +3,9 @@ package com.ditchoom.buffer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertIsNot
 import kotlin.test.assertTrue
 
 /**
@@ -201,5 +203,142 @@ class DeterministicBufferTest {
 
             assertEquals(0xDEADBEEF.toInt(), direct.readInt())
         }
+    }
+
+    // ========== Slice Lifecycle Tests ==========
+
+    @Test
+    fun sliceDoesNotImplementCloseableBuffer() {
+        BufferFactory.deterministic().allocate(64).use { buffer ->
+            buffer.writeInt(42)
+            buffer.resetForRead()
+            val slice = buffer.slice()
+            assertIsNot<CloseableBuffer>(slice)
+            assertIs<NativeMemoryAccess>(slice)
+        }
+    }
+
+    @Test
+    fun sliceNativeAddressThrowsAfterParentFree() {
+        val buffer = BufferFactory.deterministic().allocate(64)
+        buffer.writeInt(42)
+        buffer.resetForRead()
+        val slice = buffer.slice()
+        val nma = slice as NativeMemoryAccess
+
+        // Before free: nativeAddress works
+        assertTrue(nma.nativeAddress != 0L)
+
+        buffer.freeNativeMemory()
+
+        // After parent free: nativeAddress throws
+        assertFailsWith<IllegalStateException> {
+            nma.nativeAddress
+        }
+    }
+
+    @Test
+    fun sliceNativeSizeThrowsAfterParentFree() {
+        val buffer = BufferFactory.deterministic().allocate(64)
+        buffer.writeInt(42)
+        buffer.resetForRead()
+        val slice = buffer.slice()
+        val nma = slice as NativeMemoryAccess
+
+        buffer.freeNativeMemory()
+
+        assertFailsWith<IllegalStateException> {
+            nma.nativeSize
+        }
+    }
+
+    @Test
+    fun sliceOfSliceNativeAddressThrowsAfterParentFree() {
+        val buffer = BufferFactory.deterministic().allocate(64)
+        buffer.writeInt(11)
+        buffer.writeInt(22)
+        buffer.writeInt(33)
+        buffer.resetForRead()
+        buffer.readInt() // skip first int
+
+        val slice1 = buffer.slice()
+        slice1.readInt() // skip second int
+        val slice2 = slice1.slice()
+
+        // Both slices work before free
+        assertTrue((slice1 as NativeMemoryAccess).nativeAddress != 0L)
+        assertTrue((slice2 as NativeMemoryAccess).nativeAddress != 0L)
+
+        buffer.freeNativeMemory()
+
+        // Both slices invalidated by parent free
+        assertFailsWith<IllegalStateException> { (slice1 as NativeMemoryAccess).nativeAddress }
+        assertFailsWith<IllegalStateException> { (slice2 as NativeMemoryAccess).nativeAddress }
+    }
+
+    @Test
+    fun sliceFreeNativeMemoryIsNoOp() {
+        BufferFactory.deterministic().allocate(64).use { buffer ->
+            buffer.writeInt(42)
+            buffer.resetForRead()
+            val slice = buffer.slice() as PlatformBuffer
+
+            // freeNativeMemory on slice is no-op
+            slice.freeNativeMemory()
+
+            // Parent still works
+            assertEquals(42, buffer.readInt())
+        }
+    }
+
+    @Test
+    fun multipleSlicesAllInvalidatedByParentFree() {
+        val buffer = BufferFactory.deterministic().allocate(64)
+        buffer.writeInt(11)
+        buffer.writeInt(22)
+        buffer.resetForRead()
+
+        val slice1 = buffer.slice()
+        buffer.readInt() // advance
+        val slice2 = buffer.slice()
+
+        buffer.freeNativeMemory()
+
+        assertFailsWith<IllegalStateException> { (slice1 as NativeMemoryAccess).nativeAddress }
+        assertFailsWith<IllegalStateException> { (slice2 as NativeMemoryAccess).nativeAddress }
+    }
+
+    @Test
+    fun byteBufferGuardProtectsAllOperationsAfterFree() {
+        val buffer = BufferFactory.deterministic().allocate(64)
+        buffer.writeInt(42)
+        buffer.resetForRead()
+        buffer.freeNativeMemory()
+
+        // All data operations should throw (guarded by byteBuffer override)
+        assertFailsWith<IllegalStateException> { buffer.readByte() }
+        assertFailsWith<IllegalStateException> { buffer.readShort() }
+        assertFailsWith<IllegalStateException> { buffer.readInt() }
+        assertFailsWith<IllegalStateException> { buffer.readLong() }
+        assertFailsWith<IllegalStateException> { buffer.readByteArray(1) }
+        assertFailsWith<IllegalStateException> { buffer.readString(1) }
+        assertFailsWith<IllegalStateException> { buffer.writeByte(0) }
+        assertFailsWith<IllegalStateException> { buffer.writeShort(0) }
+        assertFailsWith<IllegalStateException> { buffer.writeInt(0) }
+        assertFailsWith<IllegalStateException> { buffer.writeLong(0) }
+        assertFailsWith<IllegalStateException> { buffer.writeBytes(byteArrayOf(1)) }
+        assertFailsWith<IllegalStateException> { buffer.writeString("x") }
+
+        // Metadata operations still work (for diagnostics)
+        assertFalse(buffer.position() < 0) // doesn't throw
+    }
+
+    @Test
+    fun nativeAddressAndSizeGuardedAfterFree() {
+        val buffer = BufferFactory.deterministic().allocate(64)
+        buffer.freeNativeMemory()
+
+        assertFailsWith<IllegalStateException> { (buffer as NativeMemoryAccess).nativeAddress }
+        assertFailsWith<IllegalStateException> { (buffer as NativeMemoryAccess).nativeSize }
     }
 }

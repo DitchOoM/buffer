@@ -122,13 +122,6 @@ class WrapNativeAddressTest {
 
     // ========== Ownership: wrapped buffer does NOT own memory ==========
 
-    private fun tryDeterministicAllocate(size: Int): PlatformBuffer? =
-        try {
-            BufferFactory.deterministic().allocate(size)
-        } catch (_: UnsupportedOperationException) {
-            null
-        }
-
     @Test
     fun wrappedBufferDoesNotImplementCloseableBuffer() {
         val original = tryDeterministicAllocate(64) ?: return

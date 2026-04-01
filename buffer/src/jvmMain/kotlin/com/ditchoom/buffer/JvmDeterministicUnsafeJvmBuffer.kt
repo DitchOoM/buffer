@@ -10,10 +10,11 @@ internal class JvmDeterministicUnsafeJvmBuffer(
     byteBuffer: ByteBuffer,
     unsafeAddress: Long,
 ) : DeterministicUnsafeJvmBuffer(byteBuffer, unsafeAddress) {
-    override fun sliceImpl() =
-        JvmDeterministicUnsafeJvmBuffer(
-            byteBuffer.slice().order(byteBuffer.order()),
-            nativeAddress,
+    override fun sliceImpl(): PlatformBuffer =
+        JvmDeterministicSliceBuffer(
+            super.byteBuffer.slice().order(super.byteBuffer.order()),
+            unsafeAddress,
+            ::isFreed,
         )
 
     companion object {

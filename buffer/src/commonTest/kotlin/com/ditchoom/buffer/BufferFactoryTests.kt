@@ -67,19 +67,6 @@ class BufferFactoryTests {
     // Deterministic Factory Tests
     // ============================================================================
 
-    // Deterministic tests may throw UnsupportedOperationException on Android unit tests
-    // (host JVM where DirectByteBuffer(long, int) isn't accessible). The real validation
-    // is in androidInstrumentedTest/DeterministicBufferAndroidTest which runs on the emulator.
-    private fun tryDeterministicAllocate(
-        size: Int,
-        byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-    ): PlatformBuffer? =
-        try {
-            BufferFactory.deterministic().allocate(size, byteOrder)
-        } catch (_: UnsupportedOperationException) {
-            null
-        }
-
     @Test
     fun deterministicFactoryAllocatesBuffer() {
         val buffer = tryDeterministicAllocate(64) ?: return

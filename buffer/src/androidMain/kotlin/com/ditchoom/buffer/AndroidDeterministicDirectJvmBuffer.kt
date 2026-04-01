@@ -21,5 +21,10 @@ class AndroidDeterministicDirectJvmBuffer(
                 "Use BufferFactory.shared().allocate() for parcelable buffers.",
         )
 
-    override fun slice() = AndroidDeterministicDirectJvmBuffer(byteBuffer.slice().order(byteBuffer.order()))
+    override fun slice(): PlatformBuffer =
+        AndroidDeterministicSliceBuffer(
+            super.byteBuffer.slice().order(super.byteBuffer.order()),
+            directAddress,
+            ::isFreed,
+        )
 }
