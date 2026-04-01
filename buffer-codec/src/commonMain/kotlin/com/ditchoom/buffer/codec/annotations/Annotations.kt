@@ -24,30 +24,42 @@ annotation class ProtocolMessage
  * Specifies the discriminator value for a variant of a `@ProtocolMessage` sealed interface.
  *
  * The generated dispatch codec reads one byte, matches it against each variant's [value],
- * and delegates to the correct variant codec. On encode, the type byte is written first.
+ * and delegates to the correct variant codec. On encode, [wire] is written as the type byte.
  *
+ * **Simple dispatch** (no `@DispatchOn`): [value] is both the match value and the wire byte.
  * ```kotlin
  * @ProtocolMessage
  * sealed interface Command {
- *     @ProtocolMessage
- *     @PacketType(0x01)
+ *     @ProtocolMessage @PacketType(0x01)
  *     data class Ping(val timestamp: Long) : Command
  *
- *     @ProtocolMessage
- *     @PacketType(0x02)
+ *     @ProtocolMessage @PacketType(0x02)
  *     data class Echo(@LengthPrefixed val message: String) : Command
  * }
- * // Generates CommandCodec that auto-dispatches by type byte
- * // val cmd: Command = CommandCodec.decode(buffer)
  * ```
  *
- * @param value The discriminator byte value (0-255). Written/read as a single byte on the wire.
- *   Values outside 0-255 are rejected at compile time.
+ * **Bit-packed dispatch** (with `@DispatchOn`): [value] is the extracted dispatch value,
+ * [wire] is the raw byte written on encode.
+ * ```kotlin
+ * @DispatchOn(MqttFixedHeader::class)
+ * sealed interface MqttPacket {
+ *     @PacketType(value = 1, wire = 0x10)  // type=1, raw byte=0x10
+ *     data class Connect(...) : MqttPacket
+ *
+ *     @PacketType(value = 6, wire = 0x62)  // type=6, raw byte=0x62 (flags=0x02)
+ *     data class PubRel(...) : MqttPacket
+ * }
+ * ```
+ *
+ * @param value The discriminator value to match during decode (0-255).
+ * @param wire The raw byte to write during encode. Defaults to -1, meaning use [value].
+ *   Required when `@DispatchOn` extracts a different value than the raw wire byte.
  */
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.BINARY)
 annotation class PacketType(
     val value: Int,
+    val wire: Int = -1,
 )
 
 /**

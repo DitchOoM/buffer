@@ -117,7 +117,41 @@ class DispatchOnRoundTripTest {
         }
     }
 
-    // ========== Sub-codec round-trips (spec-independent, no dispatch) ==========
+    // ========== Full round-trip through dispatch (encode writes wire byte) ==========
+
+    @Test
+    fun connectDispatchRoundTrip() {
+        val original: DispatchOnPacket = DispatchOnPacket.TypeConnect(4u, 60u)
+        val decoded = DispatchOnPacketCodec.testRoundTrip(original)
+        assertTrue(decoded is DispatchOnPacket.TypeConnect)
+        assertEquals(original, decoded)
+    }
+
+    @Test
+    fun connAckDispatchRoundTrip() {
+        val original: DispatchOnPacket = DispatchOnPacket.TypeConnAck(1u, 0u)
+        val decoded = DispatchOnPacketCodec.testRoundTrip(original)
+        assertTrue(decoded is DispatchOnPacket.TypeConnAck)
+        assertEquals(original, decoded)
+    }
+
+    @Test
+    fun pubAckDispatchRoundTrip() {
+        val original: DispatchOnPacket = DispatchOnPacket.TypePubAck(1000u)
+        val decoded = DispatchOnPacketCodec.testRoundTrip(original)
+        assertTrue(decoded is DispatchOnPacket.TypePubAck)
+        assertEquals(original, decoded)
+    }
+
+    @Test
+    fun encodeWritesCorrectWireByte() {
+        // Verify encode writes 0x10 (wire), not 0x01 (value)
+        val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
+        DispatchOnPacketCodec.encode(buffer, DispatchOnPacket.TypeConnect(4u, 60u))
+        assertEquals(0x10.toByte(), buffer[0]) // wire byte, not extracted value
+    }
+
+    // ========== Sub-codec round-trips (no dispatch) ==========
 
     @Test
     fun typeConnectSubCodecRoundTrip() {

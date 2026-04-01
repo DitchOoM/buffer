@@ -26,6 +26,13 @@ class SealedDispatchGenerator(
         val implementsCodec: Boolean,
     )
 
+    /** @PacketType metadata: [value] for decode match, [wire] for encode byte. */
+    private data class PacketTypeInfo(
+        val value: Int,
+        val wire: Int,
+        val subclass: KSClassDeclaration,
+    )
+
     fun generate(
         sealedInterface: KSClassDeclaration,
         subclasses: List<KSClassDeclaration>,
@@ -38,7 +45,7 @@ class SealedDispatchGenerator(
         val interfaceTypeName = ClassName(packageName, interfaceName)
 
         // Collect @PacketType values
-        val variants = mutableListOf<Pair<Int, KSClassDeclaration>>()
+        val variants = mutableListOf<PacketTypeInfo>()
         for (subclass in subclasses) {
             val packetType =
                 subclass.annotations.find {
@@ -54,6 +61,8 @@ class SealedDispatchGenerator(
                 return
             }
             val value = packetType.arguments.first().value as Int
+            val wireArg = packetType.arguments.getOrNull(1)?.value as? Int ?: -1
+            val wire = if (wireArg == -1) value else wireArg
             if (value < 0 || value > 255) {
                 logger.error(
                     "@PacketType($value) on '${subclass.simpleName.asString()}' is out of range. " +
@@ -62,17 +71,25 @@ class SealedDispatchGenerator(
                 )
                 return
             }
-            val existing = variants.find { it.first == value }
+            if (wire < 0 || wire > 255) {
+                logger.error(
+                    "@PacketType(wire=$wire) on '${subclass.simpleName.asString()}' is out of range. " +
+                        "The wire byte is encoded as a single byte, so valid values are 0-255.",
+                    subclass,
+                )
+                return
+            }
+            val existing = variants.find { it.value == value }
             if (existing != null) {
                 logger.error(
-                    "@PacketType($value) is used by both '${existing.second.simpleName.asString()}' " +
+                    "@PacketType($value) is used by both '${existing.subclass.simpleName.asString()}' " +
                         "and '${subclass.simpleName.asString()}'. " +
                         "Each subclass needs a unique discriminator so the codec can identify which type to decode.",
                     subclass,
                 )
                 return
             }
-            variants.add(value to subclass)
+            variants.add(PacketTypeInfo(value, wire, subclass))
         }
 
         // Sealed dispatch is aggregating: it depends on the sealed interface AND all subclass files
@@ -126,7 +143,7 @@ class SealedDispatchGenerator(
     /** No payload variants — generates a standard Codec<T> implementation with context forwarding. */
     private fun buildSimpleDispatch(
         interfaceTypeName: ClassName,
-        variants: List<Pair<Int, KSClassDeclaration>>,
+        variants: List<PacketTypeInfo>,
         dispatchOnInfo: DispatchOnInfo? = null,
     ): DispatchResult {
         // Context-free decode delegates to context overload
@@ -158,8 +175,8 @@ class SealedDispatchGenerator(
         }
         val ctxVar = if (dispatchOnInfo != null) "_ctx" else "context"
         decodeCtxBody.beginControlFlow("return when (type)")
-        for ((value, subclass) in variants) {
-            decodeCtxBody.addStatement("$value -> ${subclass.codecName()}.decode(buffer, $ctxVar)")
+        for (v in variants) {
+            decodeCtxBody.addStatement("${v.value} -> ${v.subclass.codecName()}.decode(buffer, $ctxVar)")
         }
         decodeCtxBody
             .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
@@ -187,10 +204,10 @@ class SealedDispatchGenerator(
 
         // Context-aware encode forwards to sub-codecs
         val encodeCtxBody = CodeBlock.builder().beginControlFlow("when (value)")
-        for ((value, subclass) in variants) {
-            encodeCtxBody.beginControlFlow("is %T ->", subclass.toPoetClassName())
-            encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
-            encodeCtxBody.addStatement("${subclass.codecName()}.encode(buffer, value, context)")
+        for (v in variants) {
+            encodeCtxBody.beginControlFlow("is %T ->", v.subclass.toPoetClassName())
+            encodeCtxBody.addStatement("buffer.writeByte(${v.wire}.toByte())")
+            encodeCtxBody.addStatement("${v.subclass.codecName()}.encode(buffer, value, context)")
             encodeCtxBody.endControlFlow()
         }
         encodeCtxBody.endControlFlow()
@@ -215,7 +232,7 @@ class SealedDispatchGenerator(
     private fun buildPayloadDispatch(
         packageName: String,
         interfaceTypeName: ClassName,
-        variants: List<Pair<Int, KSClassDeclaration>>,
+        variants: List<PacketTypeInfo>,
         variantPayloadInfos: List<SealedVariantPayloadInfo>,
         dispatchOnInfo: DispatchOnInfo? = null,
     ): DispatchResult {
@@ -271,17 +288,17 @@ class SealedDispatchGenerator(
         }
         decodeBody.beginControlFlow("return when (type)")
 
-        for ((value, subclass) in variants) {
-            val info = payloadBySubclass[subclass.qualifiedName?.asString()]
-            val subCodecName = subclass.codecName()
+        for (v in variants) {
+            val info = payloadBySubclass[v.subclass.qualifiedName?.asString()]
+            val subCodecName = v.subclass.codecName()
             if (info != null && info.payloadFields.isNotEmpty()) {
                 val lambdaArgs =
                     info.payloadFields.joinToString(", ") { pf ->
-                        "decode${subclass.simpleName.asString()}${capitalizeFirst(pf.fieldName)}"
+                        "decode${v.subclass.simpleName.asString()}${capitalizeFirst(pf.fieldName)}"
                     }
-                decodeBody.addStatement("$value -> $subCodecName.decode(buffer, $lambdaArgs)")
+                decodeBody.addStatement("${v.value} -> $subCodecName.decode(buffer, $lambdaArgs)")
             } else {
-                decodeBody.addStatement("$value -> $subCodecName.decode(buffer)")
+                decodeBody.addStatement("${v.value} -> $subCodecName.decode(buffer)")
             }
         }
         decodeBody
@@ -321,22 +338,22 @@ class SealedDispatchGenerator(
         }
 
         val encodeBody = CodeBlock.builder().beginControlFlow("when (value)")
-        for ((value, subclass) in variants) {
-            val info = payloadBySubclass[subclass.qualifiedName?.asString()]
-            val subTypeName = subclass.toPoetClassName()
-            val subCodecName = subclass.codecName()
+        for (v in variants) {
+            val info = payloadBySubclass[v.subclass.qualifiedName?.asString()]
+            val subTypeName = v.subclass.toPoetClassName()
+            val subCodecName = v.subclass.codecName()
 
             if (info != null && info.payloadFields.isNotEmpty()) {
                 // Star-projected match for generic variant
                 val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
                 encodeBody.beginControlFlow("is %T ->", starType)
-                encodeBody.addStatement("buffer.writeByte($value.toByte())")
+                encodeBody.addStatement("buffer.writeByte(${v.wire}.toByte())")
                 // Unchecked cast to typed variant
                 val castTypeParams = info.payloadFields.map { TypeVariableName(it.typeParamName) }
                 val castType = subTypeName.parameterizedBy(castTypeParams)
                 val lambdaArgs =
                     info.payloadFields.joinToString(", ") { pf ->
-                        "encode${subclass.simpleName.asString()}${capitalizeFirst(pf.fieldName)}"
+                        "encode${v.subclass.simpleName.asString()}${capitalizeFirst(pf.fieldName)}"
                     }
                 encodeBody.addStatement(
                     "@Suppress(\"UNCHECKED_CAST\") $subCodecName.encode(buffer, value as %T, $lambdaArgs)",
@@ -346,7 +363,7 @@ class SealedDispatchGenerator(
             } else {
                 // Non-payload variant: simple dispatch
                 encodeBody.beginControlFlow("is %T ->", subTypeName)
-                encodeBody.addStatement("buffer.writeByte($value.toByte())")
+                encodeBody.addStatement("buffer.writeByte(${v.wire}.toByte())")
                 encodeBody.addStatement("$subCodecName.encode(buffer, value)")
                 encodeBody.endControlFlow()
             }
@@ -382,13 +399,13 @@ class SealedDispatchGenerator(
         val payloadCtxVar = if (dispatchOnInfo != null) "_ctx" else "context"
         decodeCtxBody.beginControlFlow("return when (type)")
 
-        for ((value, subclass) in variants) {
-            val info = payloadBySubclass[subclass.qualifiedName?.asString()]
-            val subCodecName = subclass.codecName()
+        for (v in variants) {
+            val info = payloadBySubclass[v.subclass.qualifiedName?.asString()]
+            val subCodecName = v.subclass.codecName()
             if (info != null && info.payloadFields.isNotEmpty()) {
-                decodeCtxBody.addStatement("$value -> $subCodecName.decodeFromContext(buffer, $payloadCtxVar)")
+                decodeCtxBody.addStatement("${v.value} -> $subCodecName.decodeFromContext(buffer, $payloadCtxVar)")
             } else {
-                decodeCtxBody.addStatement("$value -> $subCodecName.decode(buffer, $payloadCtxVar)")
+                decodeCtxBody.addStatement("${v.value} -> $subCodecName.decode(buffer, $payloadCtxVar)")
             }
         }
         decodeCtxBody
@@ -417,20 +434,20 @@ class SealedDispatchGenerator(
 
         // encode(buffer, value, context) reads lambdas from context for payload variants
         val encodeCtxBody = CodeBlock.builder().beginControlFlow("when (value)")
-        for ((value, subclass) in variants) {
-            val info = payloadBySubclass[subclass.qualifiedName?.asString()]
-            val subTypeName = subclass.toPoetClassName()
-            val subCodecName = subclass.codecName()
+        for (v in variants) {
+            val info = payloadBySubclass[v.subclass.qualifiedName?.asString()]
+            val subTypeName = v.subclass.toPoetClassName()
+            val subCodecName = v.subclass.codecName()
 
             if (info != null && info.payloadFields.isNotEmpty()) {
                 val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
                 encodeCtxBody.beginControlFlow("is %T ->", starType)
-                encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
+                encodeCtxBody.addStatement("buffer.writeByte(${v.wire}.toByte())")
                 encodeCtxBody.addStatement("$subCodecName.encodeFromContext(buffer, value, context)")
                 encodeCtxBody.endControlFlow()
             } else {
                 encodeCtxBody.beginControlFlow("is %T ->", subTypeName)
-                encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
+                encodeCtxBody.addStatement("buffer.writeByte(${v.wire}.toByte())")
                 encodeCtxBody.addStatement("$subCodecName.encode(buffer, value, context)")
                 encodeCtxBody.endControlFlow()
             }

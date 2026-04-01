@@ -23,35 +23,30 @@ value class FixedHeaderByte(val raw: UByte) {
  * Sealed protocol dispatched by the top 4 bits of the first byte,
  * matching MQTT's fixed header format.
  *
- * @PacketType values are the EXTRACTED packet type (1, 2, 4) — the value
- * returned by [FixedHeaderByte.packetType], not the raw header byte.
- *
- * Note: encode writes the raw @PacketType value as a byte (0x01, 0x02, 0x04),
- * not the MQTT-spec header byte (0x10, 0x20, 0x40). Full encode requires
- * the inverse of the dispatch extraction, which is protocol-specific.
- * Use sub-codecs directly for spec-compliant encode.
+ * [PacketType.value] is the extracted packet type (1, 2, 4) — matched during decode.
+ * [PacketType.wire] is the raw byte written during encode (0x10, 0x20, 0x40).
  */
 @DispatchOn(FixedHeaderByte::class)
 @ProtocolMessage
 sealed interface DispatchOnPacket {
-    /** Packet type 1: like MQTT CONNECT */
-    @PacketType(1)
+    /** Packet type 1 (CONNECT): wire byte 0x10 */
+    @PacketType(value = 1, wire = 0x10)
     @ProtocolMessage
     data class TypeConnect(
         val protocolLevel: UByte,
         val keepAlive: UShort,
     ) : DispatchOnPacket
 
-    /** Packet type 2: like MQTT CONNACK */
-    @PacketType(2)
+    /** Packet type 2 (CONNACK): wire byte 0x20 */
+    @PacketType(value = 2, wire = 0x20)
     @ProtocolMessage
     data class TypeConnAck(
         val sessionPresent: UByte,
         val returnCode: UByte,
     ) : DispatchOnPacket
 
-    /** Packet type 4: like MQTT PUBACK */
-    @PacketType(4)
+    /** Packet type 4 (PUBACK): wire byte 0x40 */
+    @PacketType(value = 4, wire = 0x40)
     @ProtocolMessage
     @JvmInline
     value class TypePubAck(
