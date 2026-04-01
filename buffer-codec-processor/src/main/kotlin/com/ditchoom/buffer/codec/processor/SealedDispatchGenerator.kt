@@ -30,6 +30,7 @@ class SealedDispatchGenerator(
         sealedInterface: KSClassDeclaration,
         subclasses: List<KSClassDeclaration>,
         variantPayloadInfos: List<SealedVariantPayloadInfo> = emptyList(),
+        dispatchOnInfo: DispatchOnInfo? = null,
     ) {
         val interfaceName = sealedInterface.simpleName.asString()
         val packageName = sealedInterface.packageName.asString()
@@ -88,15 +89,27 @@ class SealedDispatchGenerator(
 
         val result =
             if (hasAnyPayload) {
-                buildPayloadDispatch(packageName, interfaceTypeName, variants, variantPayloadInfos)
+                buildPayloadDispatch(packageName, interfaceTypeName, variants, variantPayloadInfos, dispatchOnInfo)
             } else {
-                buildSimpleDispatch(interfaceTypeName, variants)
+                buildSimpleDispatch(interfaceTypeName, variants, dispatchOnInfo)
             }
 
         val objectBuilder = TypeSpec.objectBuilder(codecName)
         if (result.implementsCodec) {
             objectBuilder.addSuperinterface(CODEC.parameterizedBy(interfaceTypeName))
         }
+
+        // If @DispatchOn is used, generate a context key for the discriminator
+        if (dispatchOnInfo != null) {
+            objectBuilder.addType(
+                TypeSpec
+                    .objectBuilder("DiscriminatorKey")
+                    .addModifiers(KModifier.DATA)
+                    .superclass(CODEC_CONTEXT_KEY.parameterizedBy(dispatchOnInfo.poetClassName))
+                    .build(),
+            )
+        }
+
         for (fn in result.functions) {
             objectBuilder.addFunction(fn)
         }
@@ -114,6 +127,7 @@ class SealedDispatchGenerator(
     private fun buildSimpleDispatch(
         interfaceTypeName: ClassName,
         variants: List<Pair<Int, KSClassDeclaration>>,
+        dispatchOnInfo: DispatchOnInfo? = null,
     ): DispatchResult {
         // Context-free decode delegates to context overload
         val decodeFun =
@@ -126,13 +140,26 @@ class SealedDispatchGenerator(
                 .build()
 
         // Context-aware decode forwards to sub-codecs
-        val decodeCtxBody =
-            CodeBlock
-                .builder()
-                .addStatement("val type = buffer.readByte().toInt() and 0xFF")
-                .beginControlFlow("return when (type)")
+        val decodeCtxBody = CodeBlock.builder()
+        if (dispatchOnInfo != null) {
+            decodeCtxBody.addStatement(
+                "val _discriminator = %T.decode(buffer)",
+                ClassName(dispatchOnInfo.poetClassName.packageName, dispatchOnInfo.codecName),
+            )
+            decodeCtxBody.addStatement(
+                "val type = _discriminator.%L",
+                dispatchOnInfo.dispatchProperty,
+            )
+            decodeCtxBody.addStatement(
+                "val _ctx = context.with(DiscriminatorKey, _discriminator)",
+            )
+        } else {
+            decodeCtxBody.addStatement("val type = buffer.readByte().toInt() and 0xFF")
+        }
+        val ctxVar = if (dispatchOnInfo != null) "_ctx" else "context"
+        decodeCtxBody.beginControlFlow("return when (type)")
         for ((value, subclass) in variants) {
-            decodeCtxBody.addStatement("$value -> ${subclass.codecName()}.decode(buffer, context)")
+            decodeCtxBody.addStatement("$value -> ${subclass.codecName()}.decode(buffer, $ctxVar)")
         }
         decodeCtxBody
             .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
@@ -162,8 +189,17 @@ class SealedDispatchGenerator(
         val encodeCtxBody = CodeBlock.builder().beginControlFlow("when (value)")
         for ((value, subclass) in variants) {
             encodeCtxBody.beginControlFlow("is %T ->", subclass.toPoetClassName())
-            encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
-            encodeCtxBody.addStatement("${subclass.codecName()}.encode(buffer, value, context)")
+            if (dispatchOnInfo != null) {
+                // Encode the discriminator: reconstruct from the @PacketType value
+                // The sub-codec will write its own fields; we write the discriminator byte(s) via the codec
+                encodeCtxBody.addStatement(
+                    "%T.encode(buffer, value, context)",
+                    ClassName(dispatchOnInfo.poetClassName.packageName, subclass.codecName()),
+                )
+            } else {
+                encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
+                encodeCtxBody.addStatement("${subclass.codecName()}.encode(buffer, value, context)")
+            }
             encodeCtxBody.endControlFlow()
         }
         encodeCtxBody.endControlFlow()
@@ -190,6 +226,7 @@ class SealedDispatchGenerator(
         interfaceTypeName: ClassName,
         variants: List<Pair<Int, KSClassDeclaration>>,
         variantPayloadInfos: List<SealedVariantPayloadInfo>,
+        dispatchOnInfo: DispatchOnInfo? = null,
     ): DispatchResult {
         // Collect all distinct type params from all payload variants
         val allTypeParams =
@@ -231,11 +268,17 @@ class SealedDispatchGenerator(
             }
         }
 
-        val decodeBody =
-            CodeBlock
-                .builder()
-                .addStatement("val type = buffer.readByte().toInt() and 0xFF")
-                .beginControlFlow("return when (type)")
+        val decodeBody = CodeBlock.builder()
+        if (dispatchOnInfo != null) {
+            decodeBody.addStatement(
+                "val _discriminator = %T.decode(buffer)",
+                ClassName(dispatchOnInfo.poetClassName.packageName, dispatchOnInfo.codecName),
+            )
+            decodeBody.addStatement("val type = _discriminator.%L", dispatchOnInfo.dispatchProperty)
+        } else {
+            decodeBody.addStatement("val type = buffer.readByte().toInt() and 0xFF")
+        }
+        decodeBody.beginControlFlow("return when (type)")
 
         for ((value, subclass) in variants) {
             val info = payloadBySubclass[subclass.qualifiedName?.asString()]
@@ -296,7 +339,9 @@ class SealedDispatchGenerator(
                 // Star-projected match for generic variant
                 val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
                 encodeBody.beginControlFlow("is %T ->", starType)
-                encodeBody.addStatement("buffer.writeByte($value.toByte())")
+                if (dispatchOnInfo == null) {
+                    encodeBody.addStatement("buffer.writeByte($value.toByte())")
+                }
                 // Unchecked cast to typed variant
                 val castTypeParams = info.payloadFields.map { TypeVariableName(it.typeParamName) }
                 val castType = subTypeName.parameterizedBy(castTypeParams)
@@ -312,7 +357,9 @@ class SealedDispatchGenerator(
             } else {
                 // Non-payload variant: simple dispatch
                 encodeBody.beginControlFlow("is %T ->", subTypeName)
-                encodeBody.addStatement("buffer.writeByte($value.toByte())")
+                if (dispatchOnInfo == null) {
+                    encodeBody.addStatement("buffer.writeByte($value.toByte())")
+                }
                 encodeBody.addStatement("$subCodecName.encode(buffer, value)")
                 encodeBody.endControlFlow()
             }
@@ -334,19 +381,27 @@ class SealedDispatchGenerator(
                 .build()
 
         // decode(buffer, context) reads lambdas from context for payload variants
-        val decodeCtxBody =
-            CodeBlock
-                .builder()
-                .addStatement("val type = buffer.readByte().toInt() and 0xFF")
-                .beginControlFlow("return when (type)")
+        val decodeCtxBody = CodeBlock.builder()
+        if (dispatchOnInfo != null) {
+            decodeCtxBody.addStatement(
+                "val _discriminator = %T.decode(buffer)",
+                ClassName(dispatchOnInfo.poetClassName.packageName, dispatchOnInfo.codecName),
+            )
+            decodeCtxBody.addStatement("val type = _discriminator.%L", dispatchOnInfo.dispatchProperty)
+            decodeCtxBody.addStatement("val _ctx = context.with(DiscriminatorKey, _discriminator)")
+        } else {
+            decodeCtxBody.addStatement("val type = buffer.readByte().toInt() and 0xFF")
+        }
+        val payloadCtxVar = if (dispatchOnInfo != null) "_ctx" else "context"
+        decodeCtxBody.beginControlFlow("return when (type)")
 
         for ((value, subclass) in variants) {
             val info = payloadBySubclass[subclass.qualifiedName?.asString()]
             val subCodecName = subclass.codecName()
             if (info != null && info.payloadFields.isNotEmpty()) {
-                decodeCtxBody.addStatement("$value -> $subCodecName.decodeFromContext(buffer, context)")
+                decodeCtxBody.addStatement("$value -> $subCodecName.decodeFromContext(buffer, $payloadCtxVar)")
             } else {
-                decodeCtxBody.addStatement("$value -> $subCodecName.decode(buffer, context)")
+                decodeCtxBody.addStatement("$value -> $subCodecName.decode(buffer, $payloadCtxVar)")
             }
         }
         decodeCtxBody
@@ -383,12 +438,16 @@ class SealedDispatchGenerator(
             if (info != null && info.payloadFields.isNotEmpty()) {
                 val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
                 encodeCtxBody.beginControlFlow("is %T ->", starType)
-                encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
+                if (dispatchOnInfo == null) {
+                    encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
+                }
                 encodeCtxBody.addStatement("$subCodecName.encodeFromContext(buffer, value, context)")
                 encodeCtxBody.endControlFlow()
             } else {
                 encodeCtxBody.beginControlFlow("is %T ->", subTypeName)
-                encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
+                if (dispatchOnInfo == null) {
+                    encodeCtxBody.addStatement("buffer.writeByte($value.toByte())")
+                }
                 encodeCtxBody.addStatement("$subCodecName.encode(buffer, value, context)")
                 encodeCtxBody.endControlFlow()
             }
