@@ -13,6 +13,6 @@ internal class JvmDeterministicSliceBuffer(
     override fun slice() =
         JvmDeterministicSliceBuffer(
             byteBuffer.slice().order(byteBuffer.order()),
-            parentFreedCheck!!,
+            isParentFreed,
         )
 }

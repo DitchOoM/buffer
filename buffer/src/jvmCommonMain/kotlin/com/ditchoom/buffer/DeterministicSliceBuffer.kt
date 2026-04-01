@@ -17,20 +17,24 @@ import java.nio.ByteBuffer
  */
 abstract class DeterministicSliceBuffer(
     byteBuffer: ByteBuffer,
-    isParentFreed: () -> Boolean,
+    internal val isParentFreed: () -> Boolean,
 ) : BaseJvmBuffer(byteBuffer),
     NativeMemoryAccess {
-    // Nullable to handle virtual-call-from-constructor: BaseJvmBuffer's property
-    // initializers call the overridden byteBuffer getter before this field is set.
-    // Null during super-init is safe — the parent can't be freed during construction.
+    // Primitive boolean is JVM-default false during BaseJvmBuffer super-init,
+    // so the byteBuffer guard safely passes through during construction.
+    // Set to true after all fields are initialized.
     @JvmField
-    internal val parentFreedCheck: (() -> Boolean)? = isParentFreed
+    internal var initialized: Boolean = false
+
+    init {
+        initialized = true
+    }
 
     // --- byteBuffer guard: throws on ALL data operations after parent free ---
 
     override val byteBuffer: ByteBuffer
         get() {
-            if (parentFreedCheck?.invoke() == true) {
+            if (initialized && isParentFreed()) {
                 throw IllegalStateException("Slice used after parent buffer freed")
             }
             return super.byteBuffer
@@ -43,17 +47,13 @@ abstract class DeterministicSliceBuffer(
 
     override val nativeAddress: Long
         get() {
-            if (parentFreedCheck?.invoke() == true) {
-                throw IllegalStateException("Slice used after parent buffer freed")
-            }
+            if (isParentFreed()) throw IllegalStateException("Slice used after parent buffer freed")
             return sliceAddress
         }
 
     override val nativeSize: Long
         get() {
-            if (parentFreedCheck?.invoke() == true) {
-                throw IllegalStateException("Slice used after parent buffer freed")
-            }
+            if (isParentFreed()) throw IllegalStateException("Slice used after parent buffer freed")
             return capacity.toLong()
         }
 

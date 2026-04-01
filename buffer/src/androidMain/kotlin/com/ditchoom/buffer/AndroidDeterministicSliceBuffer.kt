@@ -25,6 +25,6 @@ class AndroidDeterministicSliceBuffer(
     override fun slice() =
         AndroidDeterministicSliceBuffer(
             byteBuffer.slice().order(byteBuffer.order()),
-            parentFreedCheck!!,
+            isParentFreed,
         )
 }
