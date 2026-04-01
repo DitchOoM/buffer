@@ -11,7 +11,7 @@ import kotlin.jvm.JvmInline
 /**
  * TLS record layer protocol (RFC 5246 §6.2.1).
  *
- * Wire format:
+ * Wire format (every record, no exceptions):
  * ```
  * ContentType type;           // 1 byte
  * ProtocolVersion version;    // 2 bytes (major.minor)
@@ -52,31 +52,45 @@ data class TlsProtocolVersion(
 }
 
 /**
- * TLS record header (5 bytes, fixed format).
- * Fragment is a @Payload — callers provide encode/decode for the inner protocol.
+ * TLS record dispatched by content type.
+ * Every variant includes version + length + fragment — matching the spec exactly.
  */
 @DispatchOn(TlsContentType::class)
 @ProtocolMessage
 sealed interface TlsRecord {
-    /** ContentType 20: Change Cipher Spec (RFC 5246 §7.1) — always a single byte value 1. */
+    /**
+     * ContentType 20: Change Cipher Spec (RFC 5246 §7.1).
+     * Fragment is always exactly 1 byte with value 1.
+     * Wire: 14 03 03 00 01 01
+     */
     @PacketType(20)
     @ProtocolMessage
     data class ChangeCipherSpec(
         val version: TlsProtocolVersion,
+        val length: UShort, // always 1
         val message: UByte, // always 1
     ) : TlsRecord
 
-    /** ContentType 21: Alert (RFC 5246 §7.2) — level + description. */
+    /**
+     * ContentType 21: Alert (RFC 5246 §7.2).
+     * Fragment is always exactly 2 bytes: level + description.
+     * Wire: 15 03 03 00 02 LL DD
+     */
     @PacketType(21)
     @ProtocolMessage
     data class Alert(
         val version: TlsProtocolVersion,
+        val length: UShort, // always 2
         val level: UByte, // 1=warning, 2=fatal
         val description: UByte,
     ) : TlsRecord
 
-    /** ContentType 22: Handshake (RFC 5246 §7.4) — opaque handshake data. */
-    @PacketType(value = 22, wire = 22)
+    /**
+     * ContentType 22: Handshake (RFC 5246 §7.4).
+     * Fragment is a variable-length handshake message.
+     * Wire: 16 03 03 LL LL [fragment...]
+     */
+    @PacketType(22)
     @ProtocolMessage
     data class Handshake<@Payload P>(
         val version: TlsProtocolVersion,
@@ -84,8 +98,12 @@ sealed interface TlsRecord {
         @LengthFrom("length") val fragment: P,
     ) : TlsRecord
 
-    /** ContentType 23: Application Data — encrypted payload. */
-    @PacketType(value = 23, wire = 23)
+    /**
+     * ContentType 23: Application Data (RFC 5246 §6.2.1).
+     * Fragment is encrypted application data.
+     * Wire: 17 03 03 LL LL [fragment...]
+     */
+    @PacketType(23)
     @ProtocolMessage
     data class ApplicationData<@Payload P>(
         val version: TlsProtocolVersion,

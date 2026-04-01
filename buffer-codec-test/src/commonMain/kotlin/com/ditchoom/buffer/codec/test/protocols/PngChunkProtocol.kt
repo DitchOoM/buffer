@@ -1,9 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols
 
-import com.ditchoom.buffer.codec.annotations.DispatchOn
-import com.ditchoom.buffer.codec.annotations.DispatchValue
 import com.ditchoom.buffer.codec.annotations.LengthFrom
-import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.Payload
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import kotlin.jvm.JvmInline
@@ -13,83 +10,71 @@ import kotlin.jvm.JvmInline
  *
  * Wire format:
  * ```
- * uint32 length;     // 4 bytes big-endian (data only, excludes type and CRC)
- * uint32 type;       // 4 bytes ASCII (e.g., IHDR, IDAT, IEND)
+ * uint32 length;     // 4 bytes big-endian (data bytes only, excludes type and CRC)
+ * char   type[4];    // 4 bytes ASCII (e.g., IHDR, IDAT, IEND)
  * byte   data[length];
  * uint32 crc;        // 4 bytes CRC-32 over type + data
  * ```
  *
- * 4-byte Int @DispatchOn — exercises multi-byte discriminator support.
- * CRC is modeled as a read/write UInt field (validation is application-level).
+ * NOTE: @DispatchOn cannot be used here because the length field comes BEFORE
+ * the chunk type on the wire. @DispatchOn reads the discriminator first, but
+ * PNG requires reading length first, then type. Instead, each chunk type is
+ * modeled as a standalone @ProtocolMessage with explicit type + length fields.
+ *
+ * CRC is modeled as a read/write UInt field — CRC validation is application-level.
  */
 
 /** PNG chunk type as a 4-byte big-endian integer. */
 @JvmInline
-@ProtocolMessage
 value class PngChunkType(val raw: UInt) {
-    @DispatchValue
-    val type: Int get() = raw.toInt()
-
     companion object {
-        // ASCII "IHDR" = 0x49484452
-        val IHDR = PngChunkType(0x49484452u)
-        // ASCII "PLTE" = 0x504C5445
-        val PLTE = PngChunkType(0x504C5445u)
-        // ASCII "IDAT" = 0x49444154
-        val IDAT = PngChunkType(0x49444154u)
-        // ASCII "IEND" = 0x49454E44
-        val IEND = PngChunkType(0x49454E44u)
-        // ASCII "tEXt" = 0x74455874
-        val tEXt = PngChunkType(0x74455874u)
+        val IHDR = PngChunkType(0x49484452u) // "IHDR"
+        val PLTE = PngChunkType(0x504C5445u) // "PLTE"
+        val IDAT = PngChunkType(0x49444154u) // "IDAT"
+        val IEND = PngChunkType(0x49454E44u) // "IEND"
+        val tEXt = PngChunkType(0x74455874u) // "tEXt"
     }
 }
 
 /**
- * PNG chunk sealed interface dispatched by 4-byte chunk type.
- *
- * Models a subset of critical PNG chunks. Each variant's wire value
- * is the 4-byte ASCII chunk type encoded as a big-endian Int.
+ * IHDR chunk (PNG §11.2.2) — image header, must be first chunk.
+ * Wire: 00 00 00 0D 49 48 44 52 [13 bytes data] [4 bytes CRC]
+ * Length is always 13 (width + height + bitDepth + colorType + compression + filter + interlace).
  */
-@DispatchOn(PngChunkType::class)
 @ProtocolMessage
-sealed interface PngChunk {
-    /**
-     * IHDR chunk (PNG §11.2.2) — image header, must be first chunk.
-     * 13 bytes of data + 4 bytes CRC.
-     */
-    @PacketType(value = 0x49484452, wire = 0x49484452)
-    @ProtocolMessage
-    data class Ihdr(
-        val width: UInt,
-        val height: UInt,
-        val bitDepth: UByte,
-        val colorType: UByte,
-        val compressionMethod: UByte,
-        val filterMethod: UByte,
-        val interlaceMethod: UByte,
-        val crc: UInt,
-    ) : PngChunk
+data class PngIhdrChunk(
+    val length: UInt, // always 13
+    val type: UInt, // always 0x49484452 ("IHDR")
+    val width: UInt,
+    val height: UInt,
+    val bitDepth: UByte,
+    val colorType: UByte,
+    val compressionMethod: UByte,
+    val filterMethod: UByte,
+    val interlaceMethod: UByte,
+    val crc: UInt,
+)
 
-    /**
-     * IEND chunk (PNG §11.2.5) — image trailer, must be last chunk.
-     * Zero bytes of data, only CRC.
-     */
-    @PacketType(value = 0x49454E44, wire = 0x49454E44)
-    @ProtocolMessage
-    @JvmInline
-    value class Iend(
-        val crc: UInt,
-    ) : PngChunk
+/**
+ * IEND chunk (PNG §11.2.5) — image trailer, must be last chunk.
+ * Wire: 00 00 00 00 49 45 4E 44 [4 bytes CRC]
+ * Length is always 0 (no data).
+ */
+@ProtocolMessage
+data class PngIendChunk(
+    val length: UInt, // always 0
+    val type: UInt, // always 0x49454E44 ("IEND")
+    val crc: UInt,
+)
 
-    /**
-     * tEXt chunk (PNG §11.3.4.3) — uncompressed text metadata.
-     * Keyword + null separator + text.
-     */
-    @PacketType(value = 0x74455874, wire = 0x74455874)
-    @ProtocolMessage
-    data class Text<@Payload P>(
-        val dataLength: UInt,
-        @LengthFrom("dataLength") val textData: P,
-        val crc: UInt,
-    ) : PngChunk
-}
+/**
+ * Generic PNG data chunk — for IDAT, tEXt, or any chunk with variable-length data.
+ * Wire: [4 bytes length] [4 bytes type] [length bytes data] [4 bytes CRC]
+ */
+@ProtocolMessage
+data class PngDataChunk<@Payload P>(
+    val length: UInt,
+    val type: UInt,
+    @LengthFrom("length") val data: P,
+    val crc: UInt,
+)

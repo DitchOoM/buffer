@@ -3,40 +3,43 @@ package com.ditchoom.buffer.codec.test
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.codec.test.protocols.PngChunk
-import com.ditchoom.buffer.codec.test.protocols.PngChunkCodec
-import com.ditchoom.buffer.codec.test.protocols.PngChunkIendCodec
-import com.ditchoom.buffer.codec.test.protocols.PngChunkIhdrCodec
-import com.ditchoom.buffer.codec.test.protocols.PngChunkTextCodec
 import com.ditchoom.buffer.codec.test.protocols.PngChunkType
+import com.ditchoom.buffer.codec.test.protocols.PngDataChunk
+import com.ditchoom.buffer.codec.test.protocols.PngDataChunkCodec
+import com.ditchoom.buffer.codec.test.protocols.PngIendChunk
+import com.ditchoom.buffer.codec.test.protocols.PngIendChunkCodec
+import com.ditchoom.buffer.codec.test.protocols.PngIhdrChunk
+import com.ditchoom.buffer.codec.test.protocols.PngIhdrChunkCodec
 import com.ditchoom.buffer.codec.testRoundTrip
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
-import kotlin.test.assertTrue
 
 /**
  * PNG chunk format tests (PNG Specification §5.3).
- * Validates 4-byte multi-byte @DispatchOn with spec-compliant chunk types.
+ *
+ * Verifies exact wire byte layout: length(4) + type(4) + data(length) + crc(4).
+ * Each test validates both round-trip correctness and spec-compliant byte positions.
  */
 class PngChunkRoundTripTest {
     // ========== Chunk type constants ==========
 
     @Test
     fun chunkTypeIhdrValue() {
-        assertEquals(0x49484452, PngChunkType.IHDR.type)
+        assertEquals(0x49484452u, PngChunkType.IHDR.raw) // "IHDR"
     }
 
     @Test
     fun chunkTypeIendValue() {
-        assertEquals(0x49454E44, PngChunkType.IEND.type)
+        assertEquals(0x49454E44u, PngChunkType.IEND.raw) // "IEND"
     }
 
-    // ========== Sub-codec round-trips ==========
+    // ========== IHDR round-trip ==========
 
     @Test
     fun ihdrRoundTrip() {
-        val original = PngChunk.Ihdr(
+        val original = PngIhdrChunk(
+            length = 13u,
+            type = PngChunkType.IHDR.raw,
             width = 1920u,
             height = 1080u,
             bitDepth = 8u,
@@ -46,105 +49,123 @@ class PngChunkRoundTripTest {
             interlaceMethod = 0u,
             crc = 0xDEADBEEFu,
         )
-        val decoded = PngChunkIhdrCodec.testRoundTrip(original)
+        val decoded = PngIhdrChunkCodec.testRoundTrip(original)
         assertEquals(original, decoded)
     }
+
+    @Test
+    fun ihdrExactWireBytes() {
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        PngIhdrChunkCodec.encode(
+            buffer,
+            PngIhdrChunk(13u, PngChunkType.IHDR.raw, 640u, 480u, 8u, 6u, 0u, 0u, 0u, 0u),
+        )
+        // Length = 13 (0x0000000D)
+        assertEquals(0x00.toByte(), buffer[0])
+        assertEquals(0x00.toByte(), buffer[1])
+        assertEquals(0x00.toByte(), buffer[2])
+        assertEquals(0x0D.toByte(), buffer[3])
+        // Type = "IHDR" (0x49484452)
+        assertEquals(0x49.toByte(), buffer[4]) // 'I'
+        assertEquals(0x48.toByte(), buffer[5]) // 'H'
+        assertEquals(0x44.toByte(), buffer[6]) // 'D'
+        assertEquals(0x52.toByte(), buffer[7]) // 'R'
+        // Width = 640 (0x00000280)
+        assertEquals(0x00.toByte(), buffer[8])
+        assertEquals(0x00.toByte(), buffer[9])
+        assertEquals(0x02.toByte(), buffer[10])
+        assertEquals(0x80.toByte(), buffer[11])
+    }
+
+    // ========== IEND round-trip ==========
 
     @Test
     fun iendRoundTrip() {
-        val original = PngChunk.Iend(0xAE426082u) // standard IEND CRC
-        val decoded = PngChunkIendCodec.testRoundTrip(original)
+        val original = PngIendChunk(0u, PngChunkType.IEND.raw, 0xAE426082u)
+        val decoded = PngIendChunkCodec.testRoundTrip(original)
         assertEquals(original, decoded)
     }
 
     @Test
-    fun textChunkRoundTrip() {
-        val keyword = "Comment"
-        val original = PngChunk.Text(keyword.length.toUInt(), keyword, 0x12345678u)
+    fun iendExactWireBytes() {
+        val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
+        PngIendChunkCodec.encode(buffer, PngIendChunk(0u, PngChunkType.IEND.raw, 0xAE426082u))
+        // Length = 0
+        assertEquals(0x00.toByte(), buffer[0])
+        assertEquals(0x00.toByte(), buffer[1])
+        assertEquals(0x00.toByte(), buffer[2])
+        assertEquals(0x00.toByte(), buffer[3])
+        // Type = "IEND"
+        assertEquals(0x49.toByte(), buffer[4]) // 'I'
+        assertEquals(0x45.toByte(), buffer[5]) // 'E'
+        assertEquals(0x4E.toByte(), buffer[6]) // 'N'
+        assertEquals(0x44.toByte(), buffer[7]) // 'D'
+        // CRC = 0xAE426082
+        assertEquals(0xAE.toByte(), buffer[8])
+        assertEquals(0x42.toByte(), buffer[9])
+        assertEquals(0x60.toByte(), buffer[10])
+        assertEquals(0x82.toByte(), buffer[11])
+        assertEquals(12, buffer.position()) // exactly 12 bytes
+    }
+
+    // ========== Data chunk with payload ==========
+
+    @Test
+    fun dataChunkRoundTrip() {
+        val text = "Comment"
+        val original = PngDataChunk(
+            length = text.length.toUInt(),
+            type = PngChunkType.tEXt.raw,
+            data = text,
+            crc = 0x12345678u,
+        )
         val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
-        PngChunkTextCodec.encode(buffer, original) { buf, s -> buf.writeString(s) }
+        PngDataChunkCodec.encode(buffer, original) { buf, s -> buf.writeString(s) }
         buffer.resetForRead()
-        val decoded = PngChunkTextCodec.decode<String>(buffer) { pr -> pr.readString(pr.remaining()) }
-        assertEquals(keyword.length.toUInt(), decoded.dataLength)
-        assertEquals(keyword, decoded.textData)
+        val decoded = PngDataChunkCodec.decode<String>(buffer) { pr -> pr.readString(pr.remaining()) }
+        assertEquals(text.length.toUInt(), decoded.length)
+        assertEquals(PngChunkType.tEXt.raw, decoded.type)
+        assertEquals(text, decoded.data)
         assertEquals(0x12345678u, decoded.crc)
     }
 
-    // ========== Dispatch decode from spec bytes ==========
+    // ========== Decode from spec-compliant bytes ==========
 
     @Test
-    fun dispatchDecodesIhdrFromSpecBytes() {
+    fun decodeIhdrFromSpecBytes() {
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        // Write "IHDR" as 4-byte big-endian: 0x49484452
-        buffer.writeInt(0x49484452)
-        // IHDR data: width, height, bitDepth, colorType, compression, filter, interlace
-        buffer.writeInt(640) // width
-        buffer.writeInt(480) // height
-        buffer.writeByte(8)  // bitDepth
-        buffer.writeByte(6)  // colorType (RGBA)
-        buffer.writeByte(0)  // compressionMethod
-        buffer.writeByte(0)  // filterMethod
-        buffer.writeByte(0)  // interlaceMethod
-        buffer.writeInt(0)   // CRC placeholder
+        buffer.writeInt(13) // length
+        buffer.writeInt(0x49484452) // "IHDR"
+        buffer.writeInt(800) // width
+        buffer.writeInt(600) // height
+        buffer.writeByte(8) // bitDepth
+        buffer.writeByte(2) // colorType (RGB)
+        buffer.writeByte(0) // compressionMethod
+        buffer.writeByte(0) // filterMethod
+        buffer.writeByte(0) // interlaceMethod
+        buffer.writeInt(0) // CRC placeholder
         buffer.resetForRead()
 
-        val decoded = PngChunkCodec.decode(buffer)
-        assertTrue(decoded is PngChunk.Ihdr)
-        assertEquals(640u, decoded.width)
-        assertEquals(480u, decoded.height)
+        val decoded = PngIhdrChunkCodec.decode(buffer)
+        assertEquals(13u, decoded.length)
+        assertEquals(PngChunkType.IHDR.raw, decoded.type)
+        assertEquals(800u, decoded.width)
+        assertEquals(600u, decoded.height)
         assertEquals(8u.toUByte(), decoded.bitDepth)
-        assertEquals(6u.toUByte(), decoded.colorType)
+        assertEquals(2u.toUByte(), decoded.colorType)
     }
 
     @Test
-    fun dispatchDecodesIendFromSpecBytes() {
+    fun decodeIendFromSpecBytes() {
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
+        buffer.writeInt(0) // length = 0
         buffer.writeInt(0x49454E44) // "IEND"
         buffer.writeInt(0xAE426082.toInt()) // CRC
         buffer.resetForRead()
 
-        val decoded = PngChunkCodec.decode(buffer)
-        assertTrue(decoded is PngChunk.Iend)
+        val decoded = PngIendChunkCodec.decode(buffer)
+        assertEquals(0u, decoded.length)
+        assertEquals(PngChunkType.IEND.raw, decoded.type)
         assertEquals(0xAE426082u, decoded.crc)
-    }
-
-    @Test
-    fun dispatchUnknownChunkTypeThrows() {
-        val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
-        buffer.writeInt(0x58585858) // "XXXX" — not registered
-        buffer.resetForRead()
-
-        assertFailsWith<IllegalArgumentException> {
-            PngChunkCodec.decode(buffer)
-        }
-    }
-
-    // ========== Dispatch round-trip ==========
-
-    @Test
-    fun ihdrDispatchRoundTrip() {
-        val original: PngChunk = PngChunk.Ihdr(800u, 600u, 8u, 2u, 0u, 0u, 0u, 0u)
-        val decoded = PngChunkCodec.testRoundTrip(original)
-        assertTrue(decoded is PngChunk.Ihdr)
-        assertEquals(original, decoded)
-    }
-
-    @Test
-    fun iendDispatchRoundTrip() {
-        val original: PngChunk = PngChunk.Iend(0xAE426082u)
-        val decoded = PngChunkCodec.testRoundTrip(original)
-        assertTrue(decoded is PngChunk.Iend)
-        assertEquals(original, decoded)
-    }
-
-    @Test
-    fun encodeWritesCorrectChunkTypeBytes() {
-        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        PngChunkCodec.encode(buffer, PngChunk.Iend(0u))
-        // First 4 bytes should be "IEND" = 0x49454E44
-        assertEquals(0x49.toByte(), buffer[0])
-        assertEquals(0x45.toByte(), buffer[1])
-        assertEquals(0x4E.toByte(), buffer[2])
-        assertEquals(0x44.toByte(), buffer[3])
     }
 }
