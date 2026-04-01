@@ -100,14 +100,14 @@ class WriteEmptyBufferTests {
     /** Same test with deterministic factory. */
     @Test
     fun combineEmptyAndNonEmptyFragmentsDeterministicFactory() {
-        val factory =
+        val factory = BufferFactory.deterministic()
+        val pool = BufferPool(factory = factory)
+        val combined =
             try {
-                BufferFactory.deterministic()
+                pool.acquire(20)
             } catch (_: UnsupportedOperationException) {
                 return
             }
-        val pool = BufferPool(factory = factory)
-        val combined = pool.acquire(20)
 
         combined.write(EMPTY_BUFFER)
         val payload = factory.allocate(20)
@@ -129,8 +129,10 @@ class WriteEmptyBufferTests {
             buildList {
                 add(BufferFactory.managed())
                 add(BufferFactory.Default)
+                val det = BufferFactory.deterministic()
                 try {
-                    add(BufferFactory.deterministic())
+                    det.allocate(0) // test if deterministic allocation works
+                    add(det)
                 } catch (_: UnsupportedOperationException) {
                     // skip deterministic on platforms where Unsafe isn't available
                 }
