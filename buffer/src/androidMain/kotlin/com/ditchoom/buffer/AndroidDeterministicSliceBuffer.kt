@@ -11,7 +11,6 @@ class AndroidDeterministicSliceBuffer(
     byteBuffer: ByteBuffer,
     isParentFreed: () -> Boolean,
 ) : DeterministicSliceBuffer(byteBuffer, isParentFreed) {
-
     override fun describeContents(): Int = 0
 
     override fun writeToParcel(
