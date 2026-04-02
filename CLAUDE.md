@@ -27,6 +27,12 @@ ByteBuffer is a Kotlin Multiplatform library providing platform-agnostic byte bu
 # Run specific test class
 ./gradlew :jvmTest --tests "com.ditchoom.buffer.BufferTests"
 ./gradlew :jsNodeTest --tests "com.ditchoom.buffer.BufferTests"
+
+# Codec processor tests (KSP compile-time validation)
+./gradlew :buffer-codec-processor:test
+
+# Codec integration tests (protocol round-trips: TLS, PNG, RIFF, WebSocket, MQTT)
+./gradlew :buffer-codec-test:jvmTest
 ```
 
 ## Architecture
@@ -330,6 +336,73 @@ data class MyMessage(
 )
 // MyMessageCodec.encode(buffer, msg) — generated, type-safe, batch-optimized
 ```
+
+### Sealed Interface Dispatch with `@PacketType` and `@DispatchOn`
+
+For protocols with a type discriminator, use sealed interfaces with `@PacketType`:
+
+```kotlin
+// Simple dispatch — reads one byte, matches against value
+@ProtocolMessage
+sealed interface Command {
+    @ProtocolMessage @PacketType(0x01)
+    data class Ping(val timestamp: Long) : Command
+
+    @ProtocolMessage @PacketType(0x02)
+    data class Echo(@LengthPrefixed val message: String) : Command
+}
+```
+
+For bit-packed headers, multi-byte discriminators, or prefix-before-type formats, use `@DispatchOn` + `@DispatchValue`:
+
+```kotlin
+// Custom discriminator — extracts dispatch value from a value class
+@JvmInline
+@ProtocolMessage
+value class MqttFixedHeader(val raw: UByte) {
+    @DispatchValue
+    val packetType: Int get() = raw.toUInt().shr(4).toInt()
+}
+
+@DispatchOn(MqttFixedHeader::class)
+@ProtocolMessage
+sealed interface MqttPacket {
+    @ProtocolMessage @PacketType(value = 1, wire = 0x10)
+    data class Connect(val header: MqttFixedHeader, ...) : MqttPacket
+}
+```
+
+Key rules: `@DispatchValue` must return `Int`. `wire` values are validated at compile time against the discriminator's inner type range (e.g., UByte 0-255). Duplicate `@PacketType` values are compile errors.
+
+For protocols that mix byte orders within a single message, use `@WireOrder(Endianness.Big)` or `@WireOrder(Endianness.Little)` on individual fields. This overrides the message-level `@ProtocolMessage(wireOrder = ...)`. Combines with `@WireBytes` for custom-width little-endian fields (e.g., BLE ATT 3-byte LE lengths).
+
+### `peekFrameSize` — Generated Stream Framing
+
+Every codec automatically generates `peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): Int?` when the frame size is determinable from the wire format. This peeks at a stream to determine the total bytes needed for decode, without consuming data. Eliminates manual peek offset math in streaming loops:
+
+```kotlin
+while (stream.available() >= PacketCodec.MIN_HEADER_BYTES) {
+    val frameSize = PacketCodec.peekFrameSize(stream) ?: break
+    if (stream.available() < frameSize) break
+    val msg = stream.readBufferScoped(frameSize) { PacketCodec.decode(this) }
+}
+```
+
+Handles `@LengthPrefixed`, `@LengthFrom`, `@WhenTrue` (including value class property conditions), `@WireBytes`, sealed dispatch, `@DispatchOn` (value class and data class discriminators), nested messages, and multiple variable-length fields.
+
+### CodecContext — Typed Runtime Configuration
+
+Pass typed configuration through codec chains without global state:
+
+```kotlin
+val ctx = DecodeContext.Empty
+    .with(MyCodec.AllocatorKey, hardwareAllocator)
+    .with(MyCodec.MaxSizeKey, 1_000_000)
+val result = TopLevelCodec.decode(buffer, ctx)
+// context flows automatically through sealed dispatch → @UseCodec → nested codecs
+```
+
+Context is forwarded automatically by generated code through sealed dispatch, `@UseCodec` fields, and nested `@ProtocolMessage` fields.
 
 ### Avoid Unnecessary Memory Copies
 

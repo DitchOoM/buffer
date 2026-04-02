@@ -18,36 +18,57 @@ package com.ditchoom.buffer.codec.annotations
  */
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.BINARY)
-annotation class ProtocolMessage
+annotation class ProtocolMessage(
+    /**
+     * Wire byte order for all multi-byte numeric fields in this message.
+     * Defaults to [Endianness.Default] (use the buffer's byte order).
+     *
+     * On a sealed interface, variants inherit this value unless they override it.
+     * Individual fields can further override with [WireOrder].
+     */
+    val wireOrder: Endianness = Endianness.Default,
+)
 
 /**
  * Specifies the discriminator value for a variant of a `@ProtocolMessage` sealed interface.
  *
  * The generated dispatch codec reads one byte, matches it against each variant's [value],
- * and delegates to the correct variant codec. On encode, the type byte is written first.
+ * and delegates to the correct variant codec. On encode, [wire] is written as the type byte.
  *
+ * **Simple dispatch** (no `@DispatchOn`): [value] is both the match value and the wire byte.
  * ```kotlin
  * @ProtocolMessage
  * sealed interface Command {
- *     @ProtocolMessage
- *     @PacketType(0x01)
+ *     @ProtocolMessage @PacketType(0x01)
  *     data class Ping(val timestamp: Long) : Command
  *
- *     @ProtocolMessage
- *     @PacketType(0x02)
+ *     @ProtocolMessage @PacketType(0x02)
  *     data class Echo(@LengthPrefixed val message: String) : Command
  * }
- * // Generates CommandCodec that auto-dispatches by type byte
- * // val cmd: Command = CommandCodec.decode(buffer)
  * ```
  *
- * @param value The discriminator byte value (0-255). Written/read as a single byte on the wire.
- *   Values outside 0-255 are rejected at compile time.
+ * **Bit-packed dispatch** (with `@DispatchOn`): [value] is the extracted dispatch value,
+ * [wire] is the raw byte written on encode.
+ * ```kotlin
+ * @DispatchOn(MqttFixedHeader::class)
+ * sealed interface MqttPacket {
+ *     @PacketType(value = 1, wire = 0x10)  // type=1, raw byte=0x10
+ *     data class Connect(...) : MqttPacket
+ *
+ *     @PacketType(value = 6, wire = 0x62)  // type=6, raw byte=0x62 (flags=0x02)
+ *     data class PubRel(...) : MqttPacket
+ * }
+ * ```
+ *
+ * @param value The discriminator value to match during decode (0-255).
+ * @param wire The raw byte to write during encode. Defaults to -1, meaning use [value].
+ *   Required when `@DispatchOn` extracts a different value than the raw wire byte.
  */
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.BINARY)
 annotation class PacketType(
     val value: Int,
+    val wire: Int = -1,
 )
 
 /**
@@ -160,6 +181,41 @@ annotation class WireBytes(
 )
 
 /**
+ * Wire byte order for [ProtocolMessage.wireOrder] and [WireOrder].
+ */
+enum class Endianness {
+    /** Use the buffer's byte order (default — no swap). */
+    Default,
+
+    /** Big-endian (network byte order). */
+    Big,
+
+    /** Little-endian. */
+    Little,
+}
+
+/**
+ * Overrides the byte order for a single field, taking precedence over
+ * [ProtocolMessage.wireOrder]. Use when a protocol mixes byte orders
+ * within a single message (e.g., big-endian magic + little-endian lengths).
+ *
+ * ```kotlin
+ * @ProtocolMessage(wireOrder = Endianness.Little)
+ * data class MixedHeader(
+ *     @WireOrder(Endianness.Big) val magic: UInt,  // overrides to big-endian
+ *     val length: UInt,                              // inherits little-endian
+ * )
+ * ```
+ *
+ * @param order The byte order for this field on the wire.
+ */
+@Target(AnnotationTarget.VALUE_PARAMETER)
+@Retention(AnnotationRetention.BINARY)
+annotation class WireOrder(
+    val order: Endianness,
+)
+
+/**
  * Conditional field: only present on the wire when the referenced expression is `true`.
  * The field must be nullable with a default value of `null`.
  *
@@ -220,3 +276,66 @@ annotation class WhenTrue(
 annotation class UseCodec(
     val codec: kotlin.reflect.KClass<*>,
 )
+
+/**
+ * Specifies a custom discriminator type for a `@ProtocolMessage` sealed interface.
+ *
+ * By default, `@PacketType` dispatch reads a single byte and matches its full value.
+ * `@DispatchOn` overrides this: the processor reads the specified [type] first, then
+ * dispatches on the property marked `@DispatchValue` within that type.
+ *
+ * This enables protocols with bit-packed headers where the discriminator is not
+ * the full byte. The discriminator value is forwarded to sub-codecs via `CodecContext`,
+ * so variants can access fields like flags without re-reading.
+ *
+ * ```kotlin
+ * @JvmInline
+ * @ProtocolMessage
+ * value class MqttFixedHeader(val raw: UByte) {
+ *     @DispatchValue
+ *     val packetType: Int get() = raw.toUInt().shr(4).toInt()
+ *     val flags: UByte get() = (raw and 0x0Fu)
+ * }
+ *
+ * @DispatchOn(MqttFixedHeader::class)
+ * sealed interface MqttControlPacket {
+ *     @PacketType(1) @ProtocolMessage data class Connect(...) : MqttControlPacket
+ *     @PacketType(3) @ProtocolMessage data class Publish(val header: MqttFixedHeader, ...) : MqttControlPacket
+ *     @PacketType(12) object PingRequest : MqttControlPacket
+ * }
+ * ```
+ *
+ * @param type A `KClass` referencing a `@ProtocolMessage` type (typically a value class)
+ *   that contains a `@DispatchValue`-annotated property.
+ */
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.BINARY)
+annotation class DispatchOn(
+    val type: kotlin.reflect.KClass<*>,
+)
+
+/**
+ * Marks a property as the dispatch value within a `@DispatchOn` discriminator type.
+ *
+ * The annotated property must return an `Int`. The generated dispatch codec reads the
+ * discriminator type, evaluates this property, and uses the result to match against
+ * `@PacketType` values.
+ *
+ * Exactly one property per class may be annotated with `@DispatchValue`.
+ *
+ * ```kotlin
+ * @JvmInline
+ * @ProtocolMessage
+ * value class MqttFixedHeader(val raw: UByte) {
+ *     @DispatchValue
+ *     val packetType: Int get() = raw.toUInt().shr(4).toInt()
+ *
+ *     val flags: UByte get() = (raw and 0x0Fu)
+ * }
+ * ```
+ *
+ * @see DispatchOn
+ */
+@Target(AnnotationTarget.PROPERTY)
+@Retention(AnnotationRetention.BINARY)
+annotation class DispatchValue

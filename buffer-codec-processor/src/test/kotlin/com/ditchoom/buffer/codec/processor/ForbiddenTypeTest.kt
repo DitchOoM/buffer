@@ -181,4 +181,182 @@ class ForbiddenTypeTest {
                 result.messages.contains("requires a length annotation")
         assertTrue(hasError, "Expected error for bare String field but got: ${result.exitCode}\n${result.messages}")
     }
+
+    @Test
+    fun `DispatchOn wire value overflowing UByte causes compile error`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.PacketType
+            import com.ditchoom.buffer.codec.annotations.DispatchOn
+            import com.ditchoom.buffer.codec.annotations.DispatchValue
+
+            @JvmInline
+            @ProtocolMessage
+            value class Header(val raw: UByte) {
+                @DispatchValue
+                val type: Int get() = raw.toInt().shr(4)
+            }
+
+            @DispatchOn(Header::class)
+            @ProtocolMessage
+            sealed interface BadProtocol {
+                @ProtocolMessage
+                @PacketType(value = 1, wire = 300)
+                data class Overflow(val x: Int) : BadProtocol
+            }
+            """,
+            )
+        val result = compileWithKsp(source)
+        val hasError =
+            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
+                result.messages.contains("overflows")
+        assertTrue(hasError, "Expected error for wire=300 on UByte discriminator but got: ${result.exitCode}\n${result.messages}")
+    }
+
+    @Test
+    fun `DispatchOn wire value negative for unsigned type causes compile error`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.PacketType
+            import com.ditchoom.buffer.codec.annotations.DispatchOn
+            import com.ditchoom.buffer.codec.annotations.DispatchValue
+
+            @JvmInline
+            @ProtocolMessage
+            value class Header(val raw: UShort) {
+                @DispatchValue
+                val type: Int get() = raw.toInt()
+            }
+
+            @DispatchOn(Header::class)
+            @ProtocolMessage
+            sealed interface BadProtocol {
+                @ProtocolMessage
+                @PacketType(value = 1, wire = -5)
+                data class Negative(val x: Int) : BadProtocol
+            }
+            """,
+            )
+        val result = compileWithKsp(source)
+        val hasError =
+            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
+                result.messages.contains("overflows")
+        assertTrue(hasError, "Expected error for wire=-5 on UShort discriminator but got: ${result.exitCode}\n${result.messages}")
+    }
+
+    @Test
+    fun `LengthFrom referencing non-existent field causes compile error`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.LengthFrom
+
+            @ProtocolMessage
+            data class BadMessage(
+                val size: UShort,
+                @LengthFrom("missing") val data: String,
+            )
+            """,
+            )
+        val result = compileWithKsp(source)
+        val hasError =
+            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
+                result.messages.contains("no field named 'missing'")
+        assertTrue(hasError, "Expected error for @LengthFrom bad ref but got: ${result.exitCode}\n${result.messages}")
+    }
+
+    @Test
+    fun `WhenTrue referencing non-boolean field causes compile error`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.WhenTrue
+
+            @ProtocolMessage
+            data class BadMessage(
+                val count: Int,
+                @WhenTrue("count") val extra: Short? = null,
+            )
+            """,
+            )
+        val result = compileWithKsp(source)
+        val hasError =
+            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
+                result.messages.contains("not Boolean")
+        assertTrue(hasError, "Expected error for non-Boolean @WhenTrue but got: ${result.exitCode}\n${result.messages}")
+    }
+
+    @Test
+    fun `DispatchOn without DispatchValue causes compile error`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.PacketType
+            import com.ditchoom.buffer.codec.annotations.DispatchOn
+
+            @JvmInline
+            @ProtocolMessage
+            value class NoDispatch(val raw: UByte)
+
+            @DispatchOn(NoDispatch::class)
+            @ProtocolMessage
+            sealed interface BadProtocol {
+                @ProtocolMessage
+                @PacketType(1)
+                data class First(val x: Int) : BadProtocol
+            }
+            """,
+            )
+        val result = compileWithKsp(source)
+        val hasError =
+            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
+                result.messages.contains("@DispatchValue")
+        assertTrue(hasError, "Expected error for @DispatchOn without @DispatchValue but got: ${result.exitCode}\n${result.messages}")
+    }
+
+    @Test
+    fun `DispatchValue non-Int return type causes compile error`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.PacketType
+            import com.ditchoom.buffer.codec.annotations.DispatchOn
+            import com.ditchoom.buffer.codec.annotations.DispatchValue
+
+            @JvmInline
+            @ProtocolMessage
+            value class Header(val raw: UByte) {
+                @DispatchValue
+                val type: String get() = raw.toString()
+            }
+
+            @DispatchOn(Header::class)
+            @ProtocolMessage
+            sealed interface BadProtocol {
+                @ProtocolMessage
+                @PacketType(1)
+                data class First(val x: Int) : BadProtocol
+            }
+            """,
+            )
+        val result = compileWithKsp(source)
+        val hasError =
+            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
+                result.messages.contains("must return Int")
+        assertTrue(hasError, "Expected error for non-Int @DispatchValue but got: ${result.exitCode}\n${result.messages}")
+    }
 }

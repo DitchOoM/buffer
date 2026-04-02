@@ -2,30 +2,39 @@ package com.ditchoom.buffer.codec.processor
 
 import com.squareup.kotlinpoet.CodeBlock
 
+// No wrapper needed — byte order is handled inline via swappedReadExpr/swappedWriteExpr on Primitive
+
 internal fun addFieldRead(
     code: CodeBlock.Builder,
     field: FieldInfo,
+    withContext: Boolean = false,
 ) {
     val condition = field.condition
+    val expr = readExpression(field.strategy, withContext, field.byteOrderOverride)
     if (condition != null) {
         val condExpr = (condition as FieldCondition.WhenTrue).expression
         code.beginControlFlow("val %L = if (%L)", field.name, condExpr)
-        code.addStatement("%L", readExpression(field.strategy))
+        code.addStatement("%L", expr)
         code.nextControlFlow("else")
         code.addStatement("null")
         code.endControlFlow()
     } else {
-        code.addStatement("val %L = %L", field.name, readExpression(field.strategy))
+        code.addStatement("val %L = %L", field.name, expr)
     }
 }
 
-internal fun readExpression(strategy: FieldReadStrategy): String =
+internal fun readExpression(
+    strategy: FieldReadStrategy,
+    withContext: Boolean = false,
+    byteOrderOverride: WireOrderOverride? = null,
+): String =
     when (strategy) {
         is FieldReadStrategy.PrimitiveField -> {
             if (strategy.wireBytes == strategy.primitive.defaultWireBytes) {
-                strategy.primitive.readExpr
+                val swapped = if (byteOrderOverride != null) strategy.primitive.swappedReadExpr else null
+                swapped ?: strategy.primitive.readExpr
             } else {
-                customWidthReadExpr(strategy)
+                customWidthReadExpr(strategy, byteOrderOverride)
             }
         }
         is FieldReadStrategy.LengthPrefixedStringField -> {
@@ -39,12 +48,21 @@ internal fun readExpression(strategy: FieldReadStrategy): String =
         is FieldReadStrategy.RemainingBytesStringField -> "buffer.readString(buffer.remaining())"
         is FieldReadStrategy.LengthFromStringField -> "buffer.readString(${strategy.field}.toInt())"
         is FieldReadStrategy.ValueClassField -> {
-            val inner = readExpression(strategy.innerStrategy)
+            val inner = readExpression(strategy.innerStrategy, withContext, byteOrderOverride)
             "${strategy.wrapperType}($inner)"
         }
-        is FieldReadStrategy.NestedMessageField -> "${strategy.codecName}.decode(buffer)"
-        is FieldReadStrategy.UseCodecField -> readUseCodecExpression(strategy)
-        is FieldReadStrategy.CollectionField -> readCollectionExpression(strategy)
+        is FieldReadStrategy.NestedMessageField -> {
+            val ctxArg = if (withContext) ", context" else ""
+            "${strategy.codecName}.decode(buffer$ctxArg)"
+        }
+        is FieldReadStrategy.UseCodecField -> readUseCodecExpression(strategy, withContext)
+        is FieldReadStrategy.CollectionField -> readCollectionExpression(strategy, withContext)
+        is FieldReadStrategy.DiscriminatorField -> {
+            // Read from dispatch context instead of buffer
+            "${strategy.dispatchPackage}.${strategy.dispatchCodecSimpleName}.DiscriminatorKey" +
+                ".let { key -> context[key] ?: error(\"Missing discriminator in context. \" + " +
+                "\"Decode via ${strategy.dispatchCodecSimpleName}.decode() to populate it.\") }"
+        }
         is FieldReadStrategy.PayloadField -> error("PayloadField uses writePayloadCodec path")
         is FieldReadStrategy.Custom -> {
             val d = strategy.descriptor
@@ -57,28 +75,32 @@ internal fun addFieldWrite(
     code: CodeBlock.Builder,
     field: FieldInfo,
     valueExpr: String,
+    withContext: Boolean = false,
 ) {
     val condition = field.condition
     if (condition != null) {
         val condExpr = (condition as FieldCondition.WhenTrue).expression.replace(Regex("^([^.]+)"), "value.$1")
         code.beginControlFlow("if (%L)", condExpr)
-        code.addStatement("%L", writeExpression(field.strategy, "$valueExpr!!"))
+        code.addStatement("%L", writeExpression(field.strategy, "$valueExpr!!", withContext, field.byteOrderOverride))
         code.endControlFlow()
     } else {
-        code.addStatement("%L", writeExpression(field.strategy, valueExpr))
+        code.addStatement("%L", writeExpression(field.strategy, valueExpr, withContext, field.byteOrderOverride))
     }
 }
 
 internal fun writeExpression(
     strategy: FieldReadStrategy,
     valueExpr: String,
+    withContext: Boolean = false,
+    byteOrderOverride: WireOrderOverride? = null,
 ): String =
     when (strategy) {
         is FieldReadStrategy.PrimitiveField -> {
             if (strategy.wireBytes == strategy.primitive.defaultWireBytes) {
-                strategy.primitive.writeExpr(valueExpr)
+                val swapped = if (byteOrderOverride != null) strategy.primitive.swappedWriteExpr else null
+                swapped?.invoke(valueExpr) ?: strategy.primitive.writeExpr(valueExpr)
             } else {
-                customWidthWriteExpr(strategy, valueExpr)
+                customWidthWriteExpr(strategy, valueExpr, byteOrderOverride)
             }
         }
         is FieldReadStrategy.LengthPrefixedStringField -> {
@@ -96,11 +118,19 @@ internal fun writeExpression(
         is FieldReadStrategy.LengthFromStringField -> "buffer.writeString($valueExpr)"
         is FieldReadStrategy.ValueClassField -> {
             val inner = "$valueExpr.${strategy.innerPropertyName}"
-            writeExpression(strategy.innerStrategy, inner)
+            writeExpression(strategy.innerStrategy, inner, withContext, byteOrderOverride)
         }
-        is FieldReadStrategy.NestedMessageField -> "${strategy.codecName}.encode(buffer, $valueExpr)"
-        is FieldReadStrategy.UseCodecField -> writeUseCodecExpression(strategy, valueExpr)
-        is FieldReadStrategy.CollectionField -> writeCollectionExpression(strategy, valueExpr)
+        is FieldReadStrategy.NestedMessageField -> {
+            val ctxArg = if (withContext) ", context" else ""
+            "${strategy.codecName}.encode(buffer, $valueExpr$ctxArg)"
+        }
+        is FieldReadStrategy.UseCodecField -> writeUseCodecExpression(strategy, valueExpr, withContext)
+        is FieldReadStrategy.CollectionField -> writeCollectionExpression(strategy, valueExpr, withContext)
+        is FieldReadStrategy.DiscriminatorField -> {
+            // Write normally via the discriminator codec during encode
+            val ctxArg = if (withContext) ", context" else ""
+            "${strategy.codecName}.encode(buffer, $valueExpr$ctxArg)"
+        }
         is FieldReadStrategy.PayloadField -> error("PayloadField uses writePayloadCodec path")
         is FieldReadStrategy.Custom -> {
             val d = strategy.descriptor
@@ -110,16 +140,20 @@ internal fun writeExpression(
         }
     }
 
-private fun readCollectionExpression(strategy: FieldReadStrategy.CollectionField): String {
+private fun readCollectionExpression(
+    strategy: FieldReadStrategy.CollectionField,
+    withContext: Boolean = false,
+): String {
     val codecName = strategy.elementCodecName
+    val ctxArg = if (withContext) ", context" else ""
     return when (val lk = strategy.lengthKind) {
         is LengthKind.FromField ->
-            "buildList { repeat(${lk.field}.toInt()) { add($codecName.decode(buffer)) } }"
+            "buildList { repeat(${lk.field}.toInt()) { add($codecName.decode(buffer$ctxArg)) } }"
         is LengthKind.Remaining ->
-            "buildList { while (buffer.remaining() > 0) { add($codecName.decode(buffer)) } }"
+            "buildList { while (buffer.remaining() > 0) { add($codecName.decode(buffer$ctxArg)) } }"
         is LengthKind.Prefixed -> {
             val cfg = prefixConfig(lk.prefix)
-            "run { val _n = ${cfg.readExpr}; buildList { repeat(_n) { add($codecName.decode(buffer)) } } }"
+            "run { val _n = ${cfg.readExpr}; buildList { repeat(_n) { add($codecName.decode(buffer$ctxArg)) } } }"
         }
     }
 }
@@ -127,54 +161,61 @@ private fun readCollectionExpression(strategy: FieldReadStrategy.CollectionField
 private fun writeCollectionExpression(
     strategy: FieldReadStrategy.CollectionField,
     valueExpr: String,
+    withContext: Boolean = false,
 ): String {
     val codecName = strategy.elementCodecName
+    val ctxArg = if (withContext) ", context" else ""
     return when (val lk = strategy.lengthKind) {
         is LengthKind.FromField ->
-            "$valueExpr.forEach { $codecName.encode(buffer, it) }"
+            "$valueExpr.forEach { $codecName.encode(buffer, it$ctxArg) }"
         is LengthKind.Remaining ->
-            "$valueExpr.forEach { $codecName.encode(buffer, it) }"
+            "$valueExpr.forEach { $codecName.encode(buffer, it$ctxArg) }"
         is LengthKind.Prefixed -> {
             val cfg = prefixConfig(lk.prefix)
-            "run { ${cfg.writeExpr("$valueExpr.size")}; $valueExpr.forEach { $codecName.encode(buffer, it) } }"
+            "run { ${cfg.writeExpr("$valueExpr.size")}; $valueExpr.forEach { $codecName.encode(buffer, it$ctxArg) } }"
         }
     }
 }
 
-private fun readUseCodecExpression(strategy: FieldReadStrategy.UseCodecField): String {
+private fun readUseCodecExpression(
+    strategy: FieldReadStrategy.UseCodecField,
+    withContext: Boolean = false,
+): String {
     val codec = strategy.codecName
-    val lk = strategy.lengthKind ?: return "$codec.decode(buffer)"
-    // With a length annotation: slice first, then decode from the slice
+    val ctxArg = if (withContext) ", context" else ""
+    val lk = strategy.lengthKind ?: return "$codec.decode(buffer$ctxArg)"
     return when (lk) {
         is LengthKind.Prefixed -> {
             val lenExpr = prefixConfig(lk.prefix).readExpr
-            "run { val _len = $lenExpr; $codec.decode(buffer.readBytes(_len)) }"
+            "run { val _len = $lenExpr; $codec.decode(buffer.readBytes(_len)$ctxArg) }"
         }
         is LengthKind.Remaining ->
-            "$codec.decode(buffer.readBytes(buffer.remaining()))"
+            "$codec.decode(buffer.readBytes(buffer.remaining())$ctxArg)"
         is LengthKind.FromField ->
-            "$codec.decode(buffer.readBytes(${lk.field}.toInt()))"
+            "$codec.decode(buffer.readBytes(${lk.field}.toInt())$ctxArg)"
     }
 }
 
 private fun writeUseCodecExpression(
     strategy: FieldReadStrategy.UseCodecField,
     valueExpr: String,
+    withContext: Boolean = false,
 ): String {
     val codec = strategy.codecName
-    val lk = strategy.lengthKind ?: return "$codec.encode(buffer, $valueExpr)"
+    val ctxArg = if (withContext) ", context" else ""
+    val lk = strategy.lengthKind ?: return "$codec.encode(buffer, $valueExpr$ctxArg)"
     // With a length prefix: write placeholder, encode, then fill in the length
     return when (lk) {
         is LengthKind.Prefixed -> {
             val cfg = prefixConfig(lk.prefix)
             "run { val _pos = buffer.position(); ${cfg.writePlaceholder}; " +
-                "$codec.encode(buffer, $valueExpr); " +
+                "$codec.encode(buffer, $valueExpr$ctxArg); " +
                 "val _end = buffer.position(); val _len = _end - _pos - ${cfg.byteCount}; " +
                 "buffer.position(_pos); ${cfg.writeExpr("_len")}; buffer.position(_end) }"
         }
         is LengthKind.Remaining ->
-            "$codec.encode(buffer, $valueExpr)"
+            "$codec.encode(buffer, $valueExpr$ctxArg)"
         is LengthKind.FromField ->
-            "$codec.encode(buffer, $valueExpr)"
+            "$codec.encode(buffer, $valueExpr$ctxArg)"
     }
 }

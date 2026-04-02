@@ -7,6 +7,7 @@ import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.processing.SymbolProcessor
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
+import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.symbol.Modifier
 
 class ProtocolMessageProcessor(
@@ -95,8 +96,24 @@ class ProtocolMessageProcessor(
             return
         }
 
+        // Check for @DispatchOn annotation
+        val dispatchOnInfoRaw = resolveDispatchOn(classDeclaration)
+        val sealedName = classDeclaration.simpleName.asString()
+        val sealedPackage = classDeclaration.packageName.asString()
+        val dispatchOnInfo =
+            dispatchOnInfoRaw?.copy(
+                sealedCodecSimpleName = "${sealedName}Codec",
+                sealedPackage = sealedPackage,
+            )
+
+        // Extract class-level wireOrder from the sealed interface for inheritance
+        val sealedFieldAnalyzer = FieldAnalyzer(logger, customProviders)
+        val sealedWireOrder = sealedFieldAnalyzer.extractClassWireOrderPublic(classDeclaration)
+
         // Phase 1: Analyze and generate sub-codecs, collecting payload metadata
         val variantPayloadInfos = mutableListOf<SealedVariantPayloadInfo>()
+        var anyVariantHasDiscriminatorField = false
+        val variantsSupportingPeek = mutableSetOf<String>()
         for (subclass in sealedSubclasses) {
             val qualifiedName = subclass.qualifiedName?.asString() ?: continue
             if (qualifiedName in processed) continue
@@ -122,10 +139,13 @@ class ProtocolMessageProcessor(
                 continue
             }
 
-            // Analyze fields to detect @Payload
+            // Analyze fields to detect @Payload and discriminator fields
             val fieldAnalyzer = FieldAnalyzer(logger, customProviders)
-            val fields = fieldAnalyzer.analyze(subclass) ?: continue
+            val fields = fieldAnalyzer.analyze(subclass, dispatchOnInfo, sealedWireOrder) ?: continue
 
+            if (fields.any { it.strategy is FieldReadStrategy.DiscriminatorField }) {
+                anyVariantHasDiscriminatorField = true
+            }
             val payloadFields = fields.filter { it.strategy is FieldReadStrategy.PayloadField }
             val payloadInfos =
                 payloadFields.map { field ->
@@ -138,6 +158,12 @@ class ProtocolMessageProcessor(
                 }
             variantPayloadInfos.add(SealedVariantPayloadInfo(subclass, payloadInfos))
 
+            // Track whether this variant supports peekFrameSize
+            if (PeekFrameSizeEmitter.generate(fields) != null) {
+                val name = subclass.qualifiedName?.asString() ?: subclass.simpleName.asString()
+                variantsSupportingPeek.add(name)
+            }
+
             // Generate the sub-codec
             val batches = BatchOptimizer().optimize(fields)
             val hasPayload = payloadFields.isNotEmpty()
@@ -149,6 +175,126 @@ class ProtocolMessageProcessor(
 
         // Phase 2: Generate the dispatch codec with payload awareness
         val generator = SealedDispatchGenerator(codeGenerator, logger)
-        generator.generate(classDeclaration, sealedSubclasses, variantPayloadInfos)
+        generator.generate(
+            classDeclaration,
+            sealedSubclasses,
+            variantPayloadInfos,
+            dispatchOnInfo,
+            variantsHandleDiscriminator = anyVariantHasDiscriminatorField,
+            variantsSupportingPeek = variantsSupportingPeek,
+        )
+    }
+
+    /**
+     * Resolves @DispatchOn annotation on a sealed interface.
+     * Finds the discriminator type, validates it has exactly one @DispatchValue property,
+     * and returns the dispatch info.
+     */
+    private fun resolveDispatchOn(classDeclaration: KSClassDeclaration): DispatchOnInfo? {
+        val dispatchOnAnnotation =
+            classDeclaration.annotations.find {
+                it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.DispatchOn"
+            } ?: return null
+
+        val typeArg = dispatchOnAnnotation.arguments.first().value as? KSType
+        if (typeArg == null) {
+            logger.error("@DispatchOn requires a type argument.", classDeclaration)
+            return null
+        }
+
+        val discriminatorClass = typeArg.declaration as? KSClassDeclaration
+        if (discriminatorClass == null) {
+            logger.error(
+                "@DispatchOn type must reference a class, got '${typeArg.declaration.simpleName.asString()}'.",
+                classDeclaration,
+            )
+            return null
+        }
+
+        // Find @DispatchValue property
+        val dispatchValueProps =
+            discriminatorClass
+                .getAllProperties()
+                .filter { prop ->
+                    prop.annotations.any {
+                        it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.DispatchValue"
+                    }
+                }.toList()
+
+        if (dispatchValueProps.isEmpty()) {
+            logger.error(
+                "@DispatchOn(${discriminatorClass.simpleName.asString()}::class) requires exactly one " +
+                    "@DispatchValue property in '${discriminatorClass.simpleName.asString()}', but none was found.",
+                classDeclaration,
+            )
+            return null
+        }
+        if (dispatchValueProps.size > 1) {
+            logger.error(
+                "@DispatchOn(${discriminatorClass.simpleName.asString()}::class) requires exactly one " +
+                    "@DispatchValue property, but found ${dispatchValueProps.size}: " +
+                    dispatchValueProps.joinToString { it.simpleName.asString() },
+                classDeclaration,
+            )
+            return null
+        }
+
+        val dispatchProp = dispatchValueProps.first()
+        val dispatchPropType =
+            dispatchProp.type
+                .resolve()
+                .declaration.simpleName
+                .asString()
+        if (dispatchPropType != "Int") {
+            logger.error(
+                "@DispatchValue property '${dispatchProp.simpleName.asString()}' must return Int, " +
+                    "but returns $dispatchPropType.",
+                dispatchProp,
+            )
+            return null
+        }
+        val codecName = discriminatorClass.codecName()
+        val poetClassName = discriminatorClass.toPoetClassName()
+
+        // Determine the inner type of the value class for constructing during encode
+        val constructorKsParams = discriminatorClass.primaryConstructor?.parameters ?: emptyList()
+        val innerType = constructorKsParams.firstOrNull()
+        val innerTypeName =
+            innerType
+                ?.type
+                ?.resolve()
+                ?.declaration
+                ?.simpleName
+                ?.asString() ?: "UByte"
+        val isValueClass =
+            constructorKsParams.size == 1 &&
+                discriminatorClass.modifiers.contains(com.google.devtools.ksp.symbol.Modifier.VALUE)
+
+        // Build constructor parameter metadata for data class discriminator peeking
+        val discriminatorParams =
+            constructorKsParams.mapNotNull { param ->
+                val paramTypeName =
+                    param.type
+                        .resolve()
+                        .declaration
+                        .qualifiedName
+                        ?.asString() ?: return@mapNotNull null
+                val primitive = Primitive.fromTypeName(paramTypeName) ?: return@mapNotNull null
+                DiscriminatorParam(
+                    name = param.name?.asString() ?: return@mapNotNull null,
+                    typeName = primitive.typeName,
+                    wireBytes = primitive.defaultWireBytes,
+                )
+            }
+
+        return DispatchOnInfo(
+            typeName = discriminatorClass.qualifiedName?.asString() ?: discriminatorClass.simpleName.asString(),
+            codecName = codecName,
+            dispatchProperty = dispatchProp.simpleName.asString(),
+            poetClassName = poetClassName,
+            innerTypeName = innerTypeName,
+            isValueClass = isValueClass,
+            constructorParams = discriminatorParams,
+        )
     }
 }

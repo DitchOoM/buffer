@@ -208,6 +208,33 @@ data class CompactHeader(
 
 Only applies to integer types. Not allowed on `Float`, `Double`, or `Boolean`.
 
+### `@WireOrder(order)` — Per-Field Byte Order
+
+Overrides the byte order for a single field, taking precedence over the message-level `@ProtocolMessage(wireOrder = ...)` setting. Use when a protocol mixes byte orders within a single message (e.g., big-endian magic number + little-endian length fields).
+
+```kotlin
+@ProtocolMessage(wireOrder = Endianness.Little)
+data class MixedHeader(
+    @WireOrder(Endianness.Big) val magic: UInt,  // overrides to big-endian
+    val length: UInt,                              // inherits little-endian
+)
+```
+
+Works with `@WireBytes` for custom-width fields:
+
+```kotlin
+@ProtocolMessage
+data class BleAttHeader(
+    val tag: UByte,
+    @WireOrder(Endianness.Little) @WireBytes(3) val leLength: UInt,  // 3-byte little-endian
+    @WireOrder(Endianness.Little) @WireBytes(2) val leFlags: Int,    // 2-byte little-endian
+)
+```
+
+Only applies to multi-byte numeric types (`Short`, `UShort`, `Int`, `UInt`, `Long`, `ULong`, `Float`, `Double`). Single-byte types (`Byte`, `UByte`, `Boolean`) are unaffected.
+
+The message-level `wireOrder` parameter on `@ProtocolMessage` sets the default for all fields. On sealed interfaces, variants inherit the parent's `wireOrder` unless they override it.
+
 ### `@UseCodec(codec)` — Custom Codec Reference
 
 Delegates field encoding/decoding to an existing `Codec` object, without needing an SPI module. The referenced codec must be a Kotlin `object` implementing `Codec<T>`.
@@ -300,6 +327,139 @@ The processor generates:
 val cmd: Command = CommandCodec.decode(buffer)
 CommandCodec.encode(outputBuffer, Command.Ping(System.currentTimeMillis()))
 ```
+
+### `@DispatchOn` + `@DispatchValue` — Custom Discriminator Dispatch
+
+Many protocols don't use a plain byte as their type discriminator. MQTT packs the packet type into the top 4 bits of a byte. PNG puts the chunk length *before* the chunk type. RIFF uses 4-byte ASCII chunk IDs. `@DispatchOn` handles all of these by letting you define a custom discriminator type.
+
+**Step 1:** Define the discriminator as a `@ProtocolMessage` value class (or data class) with one `@DispatchValue` property that returns `Int`:
+
+```kotlin
+@JvmInline
+@ProtocolMessage
+value class MqttFixedHeader(val raw: UByte) {
+    @DispatchValue
+    val packetType: Int get() = raw.toUInt().shr(4).toInt()
+
+    val flags: UByte get() = (raw and 0x0Fu)
+}
+```
+
+**Step 2:** Annotate the sealed interface with `@DispatchOn` and use `@PacketType(value, wire)` on each variant. `value` is what `@DispatchValue` returns; `wire` is the raw byte(s) written during encode:
+
+```kotlin
+@DispatchOn(MqttFixedHeader::class)
+@ProtocolMessage
+sealed interface MqttPacket {
+    @ProtocolMessage @PacketType(value = 1, wire = 0x10)
+    data class Connect(val header: MqttFixedHeader, val protocolLevel: UByte, val keepAlive: UShort) : MqttPacket
+
+    @ProtocolMessage @PacketType(value = 2, wire = 0x20)
+    data class ConnAck(val header: MqttFixedHeader, val sessionPresent: UByte, val returnCode: UByte) : MqttPacket
+}
+```
+
+**Decode flow:** Read discriminator → evaluate `@DispatchValue` → `when` match on `value` → delegate to variant codec. The discriminator is forwarded via `CodecContext` so variants can access it (e.g., flags) without re-reading from the buffer.
+
+**Encode flow:** Construct discriminator from `wire` value → encode via discriminator codec → encode variant fields.
+
+#### Multi-byte discriminators
+
+For protocols with 4-byte type IDs (RIFF, PNG), the discriminator's inner type determines the wire width. The processor validates at compile time that `wire` fits the type — `@PacketType(wire=300)` on a `UByte` discriminator is a compile error.
+
+```kotlin
+@JvmInline
+@ProtocolMessage
+value class RiffChunkId(val id: UInt) {
+    @DispatchValue
+    val chunkType: Int get() = id.toInt()
+}
+
+@DispatchOn(RiffChunkId::class)
+@ProtocolMessage
+sealed interface RiffChunk {
+    @ProtocolMessage @PacketType(value = 0x666D7420, wire = 0x666D7420)  // "fmt "
+    data class Fmt(val chunkId: RiffChunkId, val audioFormat: UShort, ...) : RiffChunk
+}
+```
+
+#### Prefix-before-type (data class discriminators)
+
+Some formats (PNG) put the length *before* the type on the wire. Use a data class discriminator that reads both fields:
+
+```kotlin
+@ProtocolMessage
+data class PngChunkHeader(val length: UInt, val type: UInt) {
+    @DispatchValue
+    val chunkType: Int get() = type.toInt()
+}
+
+@DispatchOn(PngChunkHeader::class)
+@ProtocolMessage
+sealed interface PngChunk {
+    @ProtocolMessage @PacketType(value = 0x49484452, wire = 0x49484452)  // "IHDR"
+    data class Ihdr(val header: PngChunkHeader, val width: UInt, val height: UInt, ...) : PngChunk
+}
+```
+
+When a variant has a field whose type matches the `@DispatchOn` discriminator, the generated codec populates it from context during decode (no double-read) and encodes it normally during encode.
+
+> **Note:** The lambda-based `decode(buffer, ...)` overload does not accept or forward an outer `DecodeContext`. If you need to pass runtime context through sealed dispatch, use the context-based `decode(buffer, context)` overload instead.
+
+### `peekFrameSize` — Stream Framing Without Boilerplate
+
+The processor automatically generates `peekFrameSize(stream, baseOffset): Int?` on every codec where the frame size is determinable from the wire format. This method peeks at a `StreamProcessor` to determine the total number of bytes the codec will read, without consuming any data.
+
+```kotlin
+// Generated on every codec that supports it:
+object PacketCodec {
+    const val MIN_HEADER_BYTES: Int = 3  // minimum bytes to determine frame size
+
+    fun peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): Int?
+    suspend fun peekFrameSize(stream: SuspendingStreamProcessor, baseOffset: Int = 0): Int?
+}
+```
+
+This eliminates the manual peek boilerplate in streaming decode loops:
+
+```kotlin
+// Before: manual offset math, easy to get wrong
+while (stream.available() >= 3) {
+    val type = stream.peekByte(0)
+    val length = stream.peekShort(1).toInt() and 0xFFFF  // hope the offset is right...
+    val frameSize = 3 + length
+    if (stream.available() < frameSize) break
+    val msg = stream.readBufferScoped(frameSize) { PacketCodec.decode(this) }
+}
+
+// After: generated, always correct
+while (stream.available() >= PacketCodec.MIN_HEADER_BYTES) {
+    val frameSize = PacketCodec.peekFrameSize(stream) ?: break
+    if (stream.available() < frameSize) break
+    val msg = stream.readBufferScoped(frameSize) { PacketCodec.decode(this) }
+}
+```
+
+**What the generator handles:**
+
+- Fixed-size fields — accumulated into constant offsets
+- `@LengthPrefixed` — peeks the prefix (1/2/4 bytes), always treated as unsigned
+- `@LengthFrom("field")` — peeks the referenced field's value at its known offset
+- `@WhenTrue` conditions — peeks the boolean (or value class property), branches to include/exclude conditional fields
+- `@Payload` with length annotation — same as the corresponding length type
+- `@UseCodec` with length annotation — same
+- `@WireBytes` custom widths (3, 5, 6, 7 bytes) — byte-by-byte assembly
+- Multiple variable-length fields — sequential peek with dynamic offset tracking
+- Sealed dispatch — peeks discriminator, branches per variant, delegates
+- `@DispatchOn` with value class — peeks inner type, constructs value class, calls `@DispatchValue`
+- `@DispatchOn` with data class — peeks all constructor parameters, constructs discriminator
+- Nested `@ProtocolMessage` — delegates to nested codec's `peekFrameSize`
+
+**When generation is skipped** (the codec compiles but without `peekFrameSize`):
+
+- `@RemainingBytes` at top level — no length on wire
+- `@UseCodec` without a length annotation — opaque codec
+- `@CollectionField` — element iteration can't be peeked
 
 ### Value Classes — Zero-Overhead Typed Wrappers
 
@@ -470,6 +630,84 @@ Generated code passes the context field:
 - Cannot override built-in annotations (`@LengthPrefixed`, `@WireBytes`, etc.)
 - Custom fields break batch optimization (each custom field is read/written individually)
 - Two providers cannot register the same annotation FQN
+
+---
+
+## CodecContext — Runtime Configuration
+
+Pass typed configuration through the entire codec chain without global state. Useful for allocator hints, compression config, security policies, or protocol version negotiation.
+
+### The Context Hierarchy
+
+```kotlin
+interface CodecContext          // shared keys (version, endianness)
+interface DecodeContext : CodecContext   // decode-only keys (allocator, size limits)
+interface EncodeContext : CodecContext   // encode-only keys (compression, format)
+```
+
+### Define Typed Keys
+
+```kotlin
+object MyCodec : Codec<Bitmap> {
+    data object AllocatorKey : CodecContext.Key<BufferAllocator>()
+    data object MaxSizeKey : CodecContext.Key<Int>()
+
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): Bitmap {
+        val allocator = context[AllocatorKey] ?: BufferAllocator.Default
+        val maxSize = context[MaxSizeKey] ?: Int.MAX_VALUE
+        require(buffer.remaining() <= maxSize) { "Payload too large" }
+        return decodeBitmap(buffer, allocator)
+    }
+}
+```
+
+### Pass Context at the Call Site
+
+```kotlin
+val ctx = DecodeContext.Empty
+    .with(MyCodec.AllocatorKey, hardwareAllocator)
+    .with(MyCodec.MaxSizeKey, 1_000_000)
+
+// Context flows automatically through sealed dispatch → @UseCodec → nested codecs
+val result = TopLevelCodec.decode(buffer, ctx)
+```
+
+### How Context Flows
+
+Context is forwarded automatically by generated code:
+
+- **Sealed dispatch codecs** forward context to every sub-codec
+- **`@UseCodec` fields** forward context to the referenced codec
+- **Nested `@ProtocolMessage` fields** forward context to the nested codec
+- **`@Payload` lambdas** access context via closure capture (no generated plumbing)
+
+Codecs that don't read from context ignore it — the `Codec` interface defaults call the context-free overload:
+
+```kotlin
+interface Codec<T> {
+    fun decode(buffer: ReadBuffer): T
+    fun decode(buffer: ReadBuffer, context: DecodeContext): T = decode(buffer)  // default ignores
+}
+```
+
+### Shared Keys
+
+Keys defined with `CodecContext.Key` work in both `DecodeContext` and `EncodeContext`:
+
+```kotlin
+data object VersionKey : CodecContext.Key<Int>()
+
+val dCtx = DecodeContext.Empty.with(VersionKey, 2)
+val eCtx = EncodeContext.Empty.with(VersionKey, 2)
+```
+
+### When to Use Context vs @Payload
+
+| Need | Use |
+|------|-----|
+| Caller provides decode/encode logic | `@Payload` with lambdas |
+| Caller provides runtime config (allocator, limits) | `CodecContext` |
+| Both | `@Payload` lambda captures `CodecContext` via closure |
 
 ---
 
@@ -644,6 +882,43 @@ withPool { pool ->
         }
     }
 }
+```
+
+### Handling Incomplete Data (Buffer Underflow)
+
+Generated codecs trust that their input buffer contains enough bytes — they don't validate `remaining()` before every read. This is by design: the **framing layer** owns the "do I have enough data?" question, not the codec.
+
+`StreamProcessor` is the framing layer:
+
+- **`available()`** — reports total buffered bytes without consuming
+- **`peekInt(offset)`** — reads a value without consuming (e.g., to read a length field before committing)
+- **`readBuffer(size)`** — throws `IllegalArgumentException` if `available() < size`
+
+The pattern: check `available()` first, then decode only when you have a complete message:
+
+```kotlin
+while (processor.available() >= 5) {  // 1 byte type + 4 byte length
+    val type = processor.peekByte(0)
+    val length = processor.peekInt(1)
+    val totalSize = 5 + length
+    if (processor.available() < totalSize) break  // wait for more data
+
+    val frame = processor.readBuffer(totalSize)
+    val message = MessageCodec.decode(frame)
+    handleMessage(message)
+}
+```
+
+For protocols where you want automatic refilling (e.g., reading from a socket), use `AutoFillingSuspendingStreamProcessor` — it calls your refill callback when more bytes are needed, eliminating the manual `available()` loop:
+
+```kotlin
+val processor = AutoFillingSuspendingStreamProcessor(delegate) {
+    val chunk = socket.read()
+    if (chunk == null) throw EndOfStreamException()
+    delegate.append(chunk)
+}
+// Just decode — the processor auto-fills when it needs more bytes
+val message = MessageCodec.decode(processor.readBuffer(frameSize))
 ```
 
 ## Real-World Example: Zero-Copy RIFF Image Decoder

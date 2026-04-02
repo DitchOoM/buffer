@@ -87,6 +87,13 @@ class BatchOptimizer {
                 continue
             }
 
+            // Byte-order override fields must be read individually through the wrapper
+            if (field.byteOrderOverride != null) {
+                flushBatch()
+                result.add(CodegenItem.Single(field))
+                continue
+            }
+
             val fieldSize = field.strategy.fixedSize
             if (fieldSize < 0 || field.strategy is FieldReadStrategy.Custom || field.strategy is FieldReadStrategy.CollectionField) {
                 // Variable-length, custom, or collection field, break batch

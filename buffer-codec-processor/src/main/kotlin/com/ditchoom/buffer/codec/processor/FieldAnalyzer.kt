@@ -18,6 +18,15 @@ internal fun KSAnnotation.qualifiedName(): String? =
         .qualifiedName
         ?.asString()
 
+/**
+ * Byte order override for a field. When non-null, the generated codec
+ * emits inline reverseBytes() calls for this field's read/write.
+ */
+enum class WireOrderOverride {
+    Big,
+    Little,
+}
+
 data class FieldInfo(
     val name: String,
     val typeName: String,
@@ -26,6 +35,7 @@ data class FieldInfo(
     val condition: FieldCondition?,
     val parameter: KSValueParameter?,
     val hasDefault: Boolean = true,
+    val byteOrderOverride: WireOrderOverride? = null,
 )
 
 sealed class FieldCondition {
@@ -53,17 +63,87 @@ enum class Primitive(
     val readExpr: String,
     val writeExpr: (String) -> String,
     val isNumeric: Boolean = true,
+    /** Read expression with byte-order swap applied. Null means swap not applicable (1-byte types). */
+    val swappedReadExpr: String? = null,
+    /** Write expression with byte-order swap applied. Null means swap not applicable. */
+    val swappedWriteExpr: ((String) -> String)? = null,
 ) {
     BYTE("kotlin.Byte", 1, true, "buffer.readByte()", { v -> "buffer.writeByte($v)" }),
     UBYTE("kotlin.UByte", 1, false, "buffer.readUnsignedByte()", { v -> "buffer.writeUByte($v)" }),
-    SHORT("kotlin.Short", 2, true, "buffer.readShort()", { v -> "buffer.writeShort($v)" }),
-    USHORT("kotlin.UShort", 2, false, "buffer.readUnsignedShort()", { v -> "buffer.writeUShort($v)" }),
-    INT("kotlin.Int", 4, true, "buffer.readInt()", { v -> "buffer.writeInt($v)" }),
-    UINT("kotlin.UInt", 4, false, "buffer.readUnsignedInt()", { v -> "buffer.writeUInt($v)" }),
-    LONG("kotlin.Long", 8, true, "buffer.readLong()", { v -> "buffer.writeLong($v)" }),
-    ULONG("kotlin.ULong", 8, false, "buffer.readUnsignedLong()", { v -> "buffer.writeULong($v)" }),
-    FLOAT("kotlin.Float", 4, true, "buffer.readFloat()", { v -> "buffer.writeFloat($v)" }, isNumeric = false),
-    DOUBLE("kotlin.Double", 8, true, "buffer.readDouble()", { v -> "buffer.writeDouble($v)" }, isNumeric = false),
+    SHORT(
+        "kotlin.Short",
+        2,
+        true,
+        "buffer.readShort()",
+        { v -> "buffer.writeShort($v)" },
+        swappedReadExpr = "buffer.readShort().reverseBytes()",
+        swappedWriteExpr = { v -> "buffer.writeShort($v.reverseBytes())" },
+    ),
+    USHORT(
+        "kotlin.UShort",
+        2,
+        false,
+        "buffer.readUnsignedShort()",
+        { v -> "buffer.writeUShort($v)" },
+        swappedReadExpr = "buffer.readShort().reverseBytes().toUShort()",
+        swappedWriteExpr = { v -> "buffer.writeShort($v.toShort().reverseBytes())" },
+    ),
+    INT(
+        "kotlin.Int",
+        4,
+        true,
+        "buffer.readInt()",
+        { v -> "buffer.writeInt($v)" },
+        swappedReadExpr = "buffer.readInt().reverseBytes()",
+        swappedWriteExpr = { v -> "buffer.writeInt($v.reverseBytes())" },
+    ),
+    UINT(
+        "kotlin.UInt",
+        4,
+        false,
+        "buffer.readUnsignedInt()",
+        { v -> "buffer.writeUInt($v)" },
+        swappedReadExpr = "buffer.readInt().reverseBytes().toUInt()",
+        swappedWriteExpr = { v -> "buffer.writeInt($v.toInt().reverseBytes())" },
+    ),
+    LONG(
+        "kotlin.Long",
+        8,
+        true,
+        "buffer.readLong()",
+        { v -> "buffer.writeLong($v)" },
+        swappedReadExpr = "buffer.readLong().reverseBytes()",
+        swappedWriteExpr = { v -> "buffer.writeLong($v.reverseBytes())" },
+    ),
+    ULONG(
+        "kotlin.ULong",
+        8,
+        false,
+        "buffer.readUnsignedLong()",
+        { v -> "buffer.writeULong($v)" },
+        swappedReadExpr = "buffer.readLong().reverseBytes().toULong()",
+        swappedWriteExpr = { v -> "buffer.writeLong($v.toLong().reverseBytes())" },
+    ),
+    FLOAT(
+        "kotlin.Float",
+        4,
+        true,
+        "buffer.readFloat()",
+        { v -> "buffer.writeFloat($v)" },
+        isNumeric = false,
+        swappedReadExpr = "Float.fromBits(buffer.readInt().reverseBytes())",
+        swappedWriteExpr = { v -> "buffer.writeInt($v.toRawBits().reverseBytes())" },
+    ),
+    DOUBLE(
+        "kotlin.Double",
+        8,
+        true,
+        "buffer.readDouble()",
+        { v -> "buffer.writeDouble($v)" },
+        isNumeric = false,
+        swappedReadExpr = "Double.fromBits(buffer.readLong().reverseBytes())",
+        swappedWriteExpr = { v -> "buffer.writeLong($v.toRawBits().reverseBytes())" },
+    ),
     BOOLEAN(
         "kotlin.Boolean",
         1,
@@ -126,6 +206,18 @@ sealed class FieldReadStrategy {
         val descriptor: CustomFieldDescriptor,
     ) : FieldReadStrategy()
 
+    /**
+     * Field populated from @DispatchOn context during decode, written normally during encode.
+     * @param codecName the generated codec name for the discriminator type (e.g., "PngChunkHeaderCodec")
+     * @param dispatchPackage the package of the sealed dispatch codec
+     * @param dispatchCodecSimpleName the simple name of the dispatch codec (e.g., "PngChunkCodec")
+     */
+    data class DiscriminatorField(
+        val codecName: String,
+        val dispatchPackage: String,
+        val dispatchCodecSimpleName: String,
+    ) : FieldReadStrategy()
+
     val fixedSize: Int
         get() =
             when (this) {
@@ -164,8 +256,15 @@ class FieldAnalyzer(
         )
 
     private var payloadTypeParamNames: Set<String> = emptySet()
+    private var currentDispatchOnInfo: DispatchOnInfo? = null
 
-    fun analyze(classDeclaration: KSClassDeclaration): List<FieldInfo>? {
+    fun analyze(
+        classDeclaration: KSClassDeclaration,
+        dispatchOnInfo: DispatchOnInfo? = null,
+        parentWireOrder: WireOrderOverride? = null,
+    ): List<FieldInfo>? {
+        currentDispatchOnInfo = dispatchOnInfo
+        val classWireOrder = extractClassWireOrder(classDeclaration) ?: parentWireOrder
         val constructor =
             classDeclaration.primaryConstructor ?: run {
                 logger.error("@ProtocolMessage class must have a primary constructor", classDeclaration)
@@ -213,6 +312,8 @@ class FieldAnalyzer(
                 continue
             }
 
+            val byteOrderOverride = extractWireOrder(param) ?: classWireOrder
+
             fields.add(
                 FieldInfo(
                     name = name,
@@ -222,6 +323,7 @@ class FieldAnalyzer(
                     condition = condition,
                     parameter = param,
                     hasDefault = param.hasDefault,
+                    byteOrderOverride = byteOrderOverride,
                 ),
             )
         }
@@ -558,13 +660,24 @@ class FieldAnalyzer(
             return FieldReadStrategy.ValueClassField(innerStrategy, typeName, innerPropertyName)
         }
 
-        // Check if it has @ProtocolMessage (nested message)
+        // Check if it has @ProtocolMessage (nested message or discriminator)
         val hasProtocolMessage =
             typeDecl.annotations.any {
                 it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.ProtocolMessage"
             }
         if (hasProtocolMessage) {
             val codecName = typeDecl.codecName()
+            // If this field's type matches the @DispatchOn discriminator type,
+            // it should be populated from context during decode (not read from buffer)
+            val qualifiedName = typeDecl.qualifiedName?.asString()
+            val dispatchInfo = currentDispatchOnInfo
+            if (dispatchInfo != null && qualifiedName != null && qualifiedName == dispatchInfo.typeName) {
+                return FieldReadStrategy.DiscriminatorField(
+                    codecName,
+                    dispatchInfo.sealedPackage,
+                    dispatchInfo.sealedCodecSimpleName,
+                )
+            }
             return FieldReadStrategy.NestedMessageField(codecName)
         }
 
@@ -766,5 +879,62 @@ class FieldAnalyzer(
             param,
         )
         return null
+    }
+
+    private fun extractWireOrder(param: KSValueParameter): WireOrderOverride? {
+        val ann =
+            param.annotations.toList().find { matchAnnotation(it, "WireOrder") }
+                ?: return null
+        return resolveEndianness(ann)
+    }
+
+    fun extractClassWireOrderPublic(classDeclaration: KSClassDeclaration): WireOrderOverride? = extractClassWireOrder(classDeclaration)
+
+    private fun extractClassWireOrder(classDeclaration: KSClassDeclaration): WireOrderOverride? {
+        val ann =
+            classDeclaration.annotations.toList().find { matchAnnotation(it, "ProtocolMessage") }
+                ?: return null
+        val wireOrderArg = ann.arguments.find { it.name?.asString() == "wireOrder" }?.value ?: return null
+        val enumName = wireOrderArg.toString().substringAfterLast(".")
+        return when (enumName) {
+            "Big" -> WireOrderOverride.Big
+            "Little" -> WireOrderOverride.Little
+            else -> null // Default = no override
+        }
+    }
+
+    private fun matchAnnotation(
+        ann: KSAnnotation,
+        simpleName: String,
+    ): Boolean {
+        val qn = ann.qualifiedName()
+        if (qn == "com.ditchoom.buffer.codec.annotations.$simpleName") return true
+        val sn =
+            try {
+                ann.shortName.asString()
+            } catch (_: Exception) {
+                ""
+            }
+        if (sn == simpleName) return true
+        val typeName =
+            try {
+                ann.annotationType
+                    .resolve()
+                    .declaration.simpleName
+                    .asString()
+            } catch (_: Exception) {
+                ""
+            }
+        return typeName == simpleName
+    }
+
+    private fun resolveEndianness(ann: KSAnnotation): WireOrderOverride? {
+        val orderArg = ann.arguments.firstOrNull()?.value ?: return null
+        val enumName = orderArg.toString().substringAfterLast(".")
+        return when (enumName) {
+            "Big" -> WireOrderOverride.Big
+            "Little" -> WireOrderOverride.Little
+            else -> null
+        }
     }
 }

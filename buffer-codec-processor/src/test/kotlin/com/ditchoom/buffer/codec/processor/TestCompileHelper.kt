@@ -23,17 +23,27 @@ private val annotationSource =
         """
     package com.ditchoom.buffer.codec.annotations
 
-    @Target(AnnotationTarget.CLASS)
-    @Retention(AnnotationRetention.BINARY)
-    annotation class ProtocolMessage
+    enum class Endianness { Default, Big, Little }
 
     @Target(AnnotationTarget.CLASS)
     @Retention(AnnotationRetention.BINARY)
-    annotation class PacketType(val value: Int)
+    annotation class ProtocolMessage(val wireOrder: Endianness = Endianness.Default)
+
+    @Target(AnnotationTarget.CLASS)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class PacketType(val value: Int, val wire: Int = -1)
 
     @Target(AnnotationTarget.TYPE_PARAMETER)
     @Retention(AnnotationRetention.BINARY)
     annotation class Payload
+
+    @Target(AnnotationTarget.CLASS)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class DispatchOn(val type: kotlin.reflect.KClass<*>)
+
+    @Target(AnnotationTarget.PROPERTY)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class DispatchValue
 
     enum class LengthPrefix {
         Byte, Short, Int,
@@ -58,6 +68,12 @@ private val annotationSource =
     @Target(AnnotationTarget.PROPERTY, AnnotationTarget.VALUE_PARAMETER)
     @Retention(AnnotationRetention.BINARY)
     annotation class WhenTrue(val expression: String)
+
+    // Endianness enum already defined above with ProtocolMessage
+
+    @Target(AnnotationTarget.VALUE_PARAMETER)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class WireOrder(val order: Endianness)
 
     """,
     )
@@ -102,11 +118,40 @@ private val bufferStubs =
         fun position(): Int
         fun position(newPosition: Int)
     }
+    enum class ByteOrder { BIG_ENDIAN, LITTLE_ENDIAN }
+    fun Short.reverseBytes(): Short = TODO()
+    fun Int.reverseBytes(): Int = TODO()
+    fun Long.reverseBytes(): Long = TODO()
     fun ReadBuffer.readLengthPrefixedUtf8String(): Pair<Int, String> = TODO()
     fun WriteBuffer.writeLengthPrefixedUtf8String(value: String): WriteBuffer = TODO()
     fun ReadBuffer.readVariableByteInteger(): Int = TODO()
     fun WriteBuffer.writeVariableByteInteger(value: Int): WriteBuffer = TODO()
     fun variableByteSizeInt(value: Int): Int = TODO()
+    """,
+    )
+
+/**
+ * StreamProcessor stubs so generated peekFrameSize code compiles in tests.
+ */
+private val streamStubs =
+    SourceFile.kotlin(
+        "StreamStubs.kt",
+        """
+    package com.ditchoom.buffer.stream
+    interface StreamProcessor {
+        fun available(): Int
+        fun peekByte(offset: Int = 0): Byte
+        fun peekShort(offset: Int = 0): Short
+        fun peekInt(offset: Int = 0): Int
+        fun peekLong(offset: Int = 0): Long
+    }
+    interface SuspendingStreamProcessor {
+        fun available(): Int
+        suspend fun peekByte(offset: Int = 0): Byte
+        suspend fun peekShort(offset: Int = 0): Short
+        suspend fun peekInt(offset: Int = 0): Int
+        suspend fun peekLong(offset: Int = 0): Long
+    }
     """,
     )
 
@@ -120,9 +165,33 @@ private val codecStubs =
     package com.ditchoom.buffer.codec
     import com.ditchoom.buffer.ReadBuffer
     import com.ditchoom.buffer.WriteBuffer
+    interface CodecContext {
+        operator fun <T : Any> get(key: Key<T>): T?
+        abstract class Key<T : Any>
+    }
+    interface DecodeContext : CodecContext {
+        fun <T : Any> with(key: CodecContext.Key<T>, value: T): DecodeContext
+        companion object {
+            val Empty: DecodeContext = object : DecodeContext {
+                override fun <T : Any> get(key: CodecContext.Key<T>): T? = null
+                override fun <T : Any> with(key: CodecContext.Key<T>, value: T): DecodeContext = this
+            }
+        }
+    }
+    interface EncodeContext : CodecContext {
+        fun <T : Any> with(key: CodecContext.Key<T>, value: T): EncodeContext
+        companion object {
+            val Empty: EncodeContext = object : EncodeContext {
+                override fun <T : Any> get(key: CodecContext.Key<T>): T? = null
+                override fun <T : Any> with(key: CodecContext.Key<T>, value: T): EncodeContext = this
+            }
+        }
+    }
     interface Codec<T> {
         fun decode(buffer: ReadBuffer): T
+        fun decode(buffer: ReadBuffer, context: DecodeContext): T = decode(buffer)
         fun encode(buffer: WriteBuffer, value: T)
+        fun encode(buffer: WriteBuffer, value: T, context: EncodeContext) = encode(buffer, value)
         fun sizeOf(value: T): Int? = null
     }
     """,
@@ -159,7 +228,7 @@ private val payloadStubs =
     )
 
 fun compileWithKsp(vararg sources: SourceFile): CompileResult {
-    val allSources = listOf(annotationSource, codecStubs, bufferStubs) + sources.toList()
+    val allSources = listOf(annotationSource, codecStubs, bufferStubs, streamStubs) + sources.toList()
     val compilation =
         KotlinCompilation().apply {
             this.sources = allSources
@@ -173,7 +242,7 @@ fun compileWithKsp(vararg sources: SourceFile): CompileResult {
 }
 
 fun compileWithKspAndBufferStubs(vararg sources: SourceFile): CompileResult {
-    val allSources = listOf(annotationSource, codecStubs, bufferStubs) + sources.toList()
+    val allSources = listOf(annotationSource, codecStubs, bufferStubs, streamStubs) + sources.toList()
     val compilation =
         KotlinCompilation().apply {
             this.sources = allSources
@@ -187,7 +256,7 @@ fun compileWithKspAndBufferStubs(vararg sources: SourceFile): CompileResult {
 }
 
 fun compileWithKspAndPayloadStubs(vararg sources: SourceFile): CompileResult {
-    val allSources = listOf(annotationSource, codecStubs, bufferStubs, payloadStubs) + sources.toList()
+    val allSources = listOf(annotationSource, codecStubs, bufferStubs, streamStubs, payloadStubs) + sources.toList()
     val compilation =
         KotlinCompilation().apply {
             this.sources = allSources
@@ -225,7 +294,7 @@ fun compileWithKspAndCustomProviders(
     providers: List<CodecFieldProvider> = emptyList(),
 ): CompileResult {
     val allSources =
-        listOf(annotationSource, codecStubs, bufferStubs, customFunctionStubs) + sources.toList()
+        listOf(annotationSource, codecStubs, bufferStubs, streamStubs, customFunctionStubs) + sources.toList()
     val compilation =
         KotlinCompilation().apply {
             this.sources = allSources

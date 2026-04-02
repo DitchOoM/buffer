@@ -7,11 +7,12 @@ import com.ditchoom.buffer.ReadBuffer
 fun <T> Codec<T>.encodeToBuffer(
     value: T,
     factory: BufferFactory = BufferFactory.Default,
+    context: EncodeContext = EncodeContext.Empty,
 ): ReadBuffer {
     val size = sizeOf(value)
     val bufferSize = size ?: 1024
     val buffer = factory.allocate(bufferSize)
-    encode(buffer, value)
+    encode(buffer, value, context)
     val bytesWritten = buffer.position()
     buffer.setLimit(bytesWritten)
     buffer.position(0)
@@ -26,8 +27,10 @@ fun <T> Codec<T>.testRoundTrip(
     value: T,
     expectedBytes: ByteArray? = null,
     factory: BufferFactory = BufferFactory.Default,
+    decodeContext: DecodeContext = DecodeContext.Empty,
+    encodeContext: EncodeContext = EncodeContext.Empty,
 ): T {
-    val encoded = encodeToBuffer(value, factory)
+    val encoded = encodeToBuffer(value, factory, encodeContext)
     if (expectedBytes != null) {
         val actualBytes = encoded.readByteArray(encoded.remaining())
         check(actualBytes.contentEquals(expectedBytes)) {
@@ -37,7 +40,7 @@ fun <T> Codec<T>.testRoundTrip(
         }
         encoded.resetForRead()
     }
-    return decode(encoded)
+    return decode(encoded, decodeContext)
 }
 
 private fun ByteArray.toHexString(): String = joinToString("") { (it.toInt() and 0xFF).toString(16).padStart(2, '0') }

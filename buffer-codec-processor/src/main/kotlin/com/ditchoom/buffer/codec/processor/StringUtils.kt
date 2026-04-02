@@ -59,3 +59,32 @@ data class PayloadFieldInfo(
     val typeParamName: String,
     val contextClassName: String,
 )
+
+/**
+ * Constructor parameter metadata for discriminator types.
+ * Used for peeking data class discriminators byte-by-byte.
+ */
+data class DiscriminatorParam(
+    val name: String,
+    val typeName: String,
+    val wireBytes: Int,
+)
+
+data class DispatchOnInfo(
+    val typeName: String,
+    val codecName: String,
+    val dispatchProperty: String,
+    val poetClassName: ClassName,
+    val innerTypeName: String,
+    /** True if the discriminator is a value class (single constructor parameter). */
+    val isValueClass: Boolean = true,
+    /** All constructor parameters with their wire sizes (for data class discriminators). */
+    val constructorParams: List<DiscriminatorParam> = emptyList(),
+    /** Simple name of the sealed interface dispatch codec (e.g., "PngChunkCodec"). */
+    val sealedCodecSimpleName: String = "",
+    /** Package of the sealed interface. */
+    val sealedPackage: String = "",
+) {
+    /** Total wire bytes for the discriminator type. */
+    val totalWireBytes: Int get() = constructorParams.sumOf { it.wireBytes }
+}
