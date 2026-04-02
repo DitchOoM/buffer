@@ -18,7 +18,16 @@ package com.ditchoom.buffer.codec.annotations
  */
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.BINARY)
-annotation class ProtocolMessage
+annotation class ProtocolMessage(
+    /**
+     * Wire byte order for all multi-byte numeric fields in this message.
+     * Defaults to [Endianness.Default] (use the buffer's byte order).
+     *
+     * On a sealed interface, variants inherit this value unless they override it.
+     * Individual fields can further override with [WireOrder].
+     */
+    val wireOrder: Endianness = Endianness.Default,
+)
 
 /**
  * Specifies the discriminator value for a variant of a `@ProtocolMessage` sealed interface.
@@ -172,25 +181,29 @@ annotation class WireBytes(
 )
 
 /**
- * Wire byte order for [WireOrder].
+ * Wire byte order for [ProtocolMessage.wireOrder] and [WireOrder].
  */
 enum class Endianness {
-    BIG_ENDIAN,
-    LITTLE_ENDIAN,
+    /** Use the buffer's byte order (default — no swap). */
+    Default,
+
+    /** Big-endian (network byte order). */
+    Big,
+
+    /** Little-endian. */
+    Little,
 }
 
 /**
- * Overrides the byte order for reading/writing a multi-byte numeric field.
- *
- * Use when individual fields have a different byte order than the buffer default.
- * The generated codec wraps the buffer in an internal byte-order adapter for
- * annotated fields only — no runtime branch per read, no buffer mutation.
+ * Overrides the byte order for a single field, taking precedence over
+ * [ProtocolMessage.wireOrder]. Use when a protocol mixes byte orders
+ * within a single message (e.g., big-endian magic + little-endian lengths).
  *
  * ```kotlin
- * @ProtocolMessage
- * data class RiffChunk(
- *     val chunkId: UInt,                                                  // buffer default
- *     @WireOrder(Endianness.LITTLE_ENDIAN) val chunkSize: UInt,           // little-endian on wire
+ * @ProtocolMessage(wireOrder = Endianness.Little)
+ * data class MixedHeader(
+ *     @WireOrder(Endianness.Big) val magic: UInt,  // overrides to big-endian
+ *     val length: UInt,                              // inherits little-endian
  * )
  * ```
  *

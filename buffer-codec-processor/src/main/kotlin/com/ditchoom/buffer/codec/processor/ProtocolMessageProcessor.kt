@@ -106,6 +106,10 @@ class ProtocolMessageProcessor(
                 sealedPackage = sealedPackage,
             )
 
+        // Extract class-level wireOrder from the sealed interface for inheritance
+        val sealedFieldAnalyzer = FieldAnalyzer(logger, customProviders)
+        val sealedWireOrder = sealedFieldAnalyzer.extractClassWireOrderPublic(classDeclaration)
+
         // Phase 1: Analyze and generate sub-codecs, collecting payload metadata
         val variantPayloadInfos = mutableListOf<SealedVariantPayloadInfo>()
         var anyVariantHasDiscriminatorField = false
@@ -137,7 +141,7 @@ class ProtocolMessageProcessor(
 
             // Analyze fields to detect @Payload and discriminator fields
             val fieldAnalyzer = FieldAnalyzer(logger, customProviders)
-            val fields = fieldAnalyzer.analyze(subclass, dispatchOnInfo) ?: continue
+            val fields = fieldAnalyzer.analyze(subclass, dispatchOnInfo, sealedWireOrder) ?: continue
 
             if (fields.any { it.strategy is FieldReadStrategy.DiscriminatorField }) {
                 anyVariantHasDiscriminatorField = true

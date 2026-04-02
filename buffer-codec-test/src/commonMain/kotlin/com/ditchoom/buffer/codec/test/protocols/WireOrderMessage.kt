@@ -12,10 +12,10 @@ import com.ditchoom.buffer.codec.annotations.WireOrder
 @ProtocolMessage
 data class WireOrderMessage(
     val beByte: UByte, // single byte — no swap needed
-    @WireOrder(Endianness.LITTLE_ENDIAN) val leShort: UShort,
+    @WireOrder(Endianness.Little) val leShort: UShort,
     val beInt: Int, // buffer default (BE)
-    @WireOrder(Endianness.LITTLE_ENDIAN) val leInt: UInt,
-    @WireOrder(Endianness.LITTLE_ENDIAN) val leLong: Long,
+    @WireOrder(Endianness.Little) val leInt: UInt,
+    @WireOrder(Endianness.Little) val leLong: Long,
 )
 
 /**
@@ -25,6 +25,6 @@ data class WireOrderMessage(
 @ProtocolMessage
 data class WireOrderCustomWidthMessage(
     val tag: UByte,
-    @WireOrder(Endianness.LITTLE_ENDIAN) @WireBytes(3) val leLength: UInt,
-    @WireOrder(Endianness.LITTLE_ENDIAN) @WireBytes(2) val leFlags: Int,
+    @WireOrder(Endianness.Little) @WireBytes(3) val leLength: UInt,
+    @WireOrder(Endianness.Little) @WireBytes(2) val leFlags: Int,
 )

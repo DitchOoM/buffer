@@ -19,12 +19,12 @@ internal fun KSAnnotation.qualifiedName(): String? =
         ?.asString()
 
 /**
- * Byte order override for a field. When non-null, the generated codec wraps the buffer
- * in a byte-order adapter for this field's read/write only.
+ * Byte order override for a field. When non-null, the generated codec
+ * emits inline reverseBytes() calls for this field's read/write.
  */
 enum class WireOrderOverride {
-    BIG_ENDIAN,
-    LITTLE_ENDIAN,
+    Big,
+    Little,
 }
 
 data class FieldInfo(
@@ -261,8 +261,10 @@ class FieldAnalyzer(
     fun analyze(
         classDeclaration: KSClassDeclaration,
         dispatchOnInfo: DispatchOnInfo? = null,
+        parentWireOrder: WireOrderOverride? = null,
     ): List<FieldInfo>? {
         currentDispatchOnInfo = dispatchOnInfo
+        val classWireOrder = extractClassWireOrder(classDeclaration) ?: parentWireOrder
         val constructor =
             classDeclaration.primaryConstructor ?: run {
                 logger.error("@ProtocolMessage class must have a primary constructor", classDeclaration)
@@ -310,7 +312,7 @@ class FieldAnalyzer(
                 continue
             }
 
-            val byteOrderOverride = extractWireOrder(param)
+            val byteOrderOverride = extractWireOrder(param) ?: classWireOrder
 
             fields.add(
                 FieldInfo(
@@ -881,36 +883,58 @@ class FieldAnalyzer(
 
     private fun extractWireOrder(param: KSValueParameter): WireOrderOverride? {
         val ann =
-            param.annotations.toList().find {
-                val qn = it.qualifiedName()
-                val sn =
-                    try {
-                        it.shortName.asString()
-                    } catch (_: Exception) {
-                        ""
-                    }
-                val typeName =
-                    try {
-                        it.annotationType
-                            .resolve()
-                            .declaration.simpleName
-                            .asString()
-                    } catch (_: Exception) {
-                        ""
-                    }
-                qn == "com.ditchoom.buffer.codec.annotations.WireOrder" ||
-                    sn == "WireOrder" ||
-                    typeName == "WireOrder"
-            } ?: return null
+            param.annotations.toList().find { matchAnnotation(it, "WireOrder") }
+                ?: return null
+        return resolveEndianness(ann)
+    }
+
+    fun extractClassWireOrderPublic(classDeclaration: KSClassDeclaration): WireOrderOverride? = extractClassWireOrder(classDeclaration)
+
+    private fun extractClassWireOrder(classDeclaration: KSClassDeclaration): WireOrderOverride? {
+        val ann =
+            classDeclaration.annotations.toList().find { matchAnnotation(it, "ProtocolMessage") }
+                ?: return null
+        val wireOrderArg = ann.arguments.find { it.name?.asString() == "wireOrder" }?.value ?: return null
+        val enumName = wireOrderArg.toString().substringAfterLast(".")
+        return when (enumName) {
+            "Big" -> WireOrderOverride.Big
+            "Little" -> WireOrderOverride.Little
+            else -> null // Default = no override
+        }
+    }
+
+    private fun matchAnnotation(
+        ann: KSAnnotation,
+        simpleName: String,
+    ): Boolean {
+        val qn = ann.qualifiedName()
+        if (qn == "com.ditchoom.buffer.codec.annotations.$simpleName") return true
+        val sn =
+            try {
+                ann.shortName.asString()
+            } catch (_: Exception) {
+                ""
+            }
+        if (sn == simpleName) return true
+        val typeName =
+            try {
+                ann.annotationType
+                    .resolve()
+                    .declaration.simpleName
+                    .asString()
+            } catch (_: Exception) {
+                ""
+            }
+        return typeName == simpleName
+    }
+
+    private fun resolveEndianness(ann: KSAnnotation): WireOrderOverride? {
         val orderArg = ann.arguments.firstOrNull()?.value ?: return null
         val enumName = orderArg.toString().substringAfterLast(".")
         return when (enumName) {
-            "BIG_ENDIAN" -> WireOrderOverride.BIG_ENDIAN
-            "LITTLE_ENDIAN" -> WireOrderOverride.LITTLE_ENDIAN
-            else -> {
-                logger.error("@WireOrder has unknown value: $enumName", param)
-                null
-            }
+            "Big" -> WireOrderOverride.Big
+            "Little" -> WireOrderOverride.Little
+            else -> null
         }
     }
 }

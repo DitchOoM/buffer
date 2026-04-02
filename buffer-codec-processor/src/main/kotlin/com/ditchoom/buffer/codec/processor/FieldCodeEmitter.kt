@@ -34,7 +34,7 @@ internal fun readExpression(
                 val swapped = if (byteOrderOverride != null) strategy.primitive.swappedReadExpr else null
                 swapped ?: strategy.primitive.readExpr
             } else {
-                customWidthReadExpr(strategy)
+                customWidthReadExpr(strategy, byteOrderOverride)
             }
         }
         is FieldReadStrategy.LengthPrefixedStringField -> {
@@ -100,7 +100,7 @@ internal fun writeExpression(
                 val swapped = if (byteOrderOverride != null) strategy.primitive.swappedWriteExpr else null
                 swapped?.invoke(valueExpr) ?: strategy.primitive.writeExpr(valueExpr)
             } else {
-                customWidthWriteExpr(strategy, valueExpr)
+                customWidthWriteExpr(strategy, valueExpr, byteOrderOverride)
             }
         }
         is FieldReadStrategy.LengthPrefixedStringField -> {

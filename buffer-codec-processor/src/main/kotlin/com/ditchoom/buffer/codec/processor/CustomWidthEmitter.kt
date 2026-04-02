@@ -8,7 +8,7 @@ internal fun customWidthReadExpr(
     val wireBytes = strategy.wireBytes
     val chunks = decomposeWireBytes(wireBytes)
     val h = if (p.defaultWireBytes <= 4) "Int" else "Long"
-    val isLE = byteOrderOverride == WireOrderOverride.LITTLE_ENDIAN
+    val isLE = byteOrderOverride == WireOrderOverride.Little
 
     val stmts = mutableListOf<String>()
     var remainingBytes = wireBytes
@@ -56,7 +56,7 @@ internal fun customWidthWriteExpr(
     val wireBytes = strategy.wireBytes
     val chunks = decomposeWireBytes(wireBytes)
     val h = if (p.defaultWireBytes <= 4) "Int" else "Long"
-    val isLE = byteOrderOverride == WireOrderOverride.LITTLE_ENDIAN
+    val isLE = byteOrderOverride == WireOrderOverride.Little
 
     val stmts = mutableListOf<String>()
     val vExpr = if (p == Primitive.INT || p == Primitive.LONG) valueExpr else "$valueExpr.to$h()"

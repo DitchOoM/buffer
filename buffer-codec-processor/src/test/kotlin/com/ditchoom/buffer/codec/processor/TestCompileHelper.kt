@@ -23,9 +23,11 @@ private val annotationSource =
         """
     package com.ditchoom.buffer.codec.annotations
 
+    enum class Endianness { Default, Big, Little }
+
     @Target(AnnotationTarget.CLASS)
     @Retention(AnnotationRetention.BINARY)
-    annotation class ProtocolMessage
+    annotation class ProtocolMessage(val wireOrder: Endianness = Endianness.Default)
 
     @Target(AnnotationTarget.CLASS)
     @Retention(AnnotationRetention.BINARY)
@@ -67,7 +69,7 @@ private val annotationSource =
     @Retention(AnnotationRetention.BINARY)
     annotation class WhenTrue(val expression: String)
 
-    enum class Endianness { BIG_ENDIAN, LITTLE_ENDIAN }
+    // Endianness enum already defined above with ProtocolMessage
 
     @Target(AnnotationTarget.VALUE_PARAMETER)
     @Retention(AnnotationRetention.BINARY)
