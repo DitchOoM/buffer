@@ -10,12 +10,18 @@ import com.ditchoom.buffer.codec.test.protocols.ColoredPoint
 import com.ditchoom.buffer.codec.test.protocols.ColoredPointCodec
 import com.ditchoom.buffer.codec.test.protocols.ConnAckFlags
 import com.ditchoom.buffer.codec.test.protocols.ConnectReturnCode
+import com.ditchoom.buffer.codec.test.protocols.ContextColoredPoint
+import com.ditchoom.buffer.codec.test.protocols.ContextColoredPointCodec
+import com.ditchoom.buffer.codec.test.protocols.DispatchOnPacket
+import com.ditchoom.buffer.codec.test.protocols.DispatchOnPacketCodec
 import com.ditchoom.buffer.codec.test.protocols.MqttPacket
 import com.ditchoom.buffer.codec.test.protocols.MqttPacketCodec
 import com.ditchoom.buffer.codec.test.protocols.MqttPacketConnAck
 import com.ditchoom.buffer.codec.test.protocols.Rgb
+import com.ditchoom.buffer.codec.test.protocols.RgbOffsetKey
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -150,5 +156,158 @@ class CodecContextTest {
             com.ditchoom.buffer.codec.test.protocols.SimpleHeaderCodec
                 .decode(buffer, ctx)
         assertEquals(1u.toUByte(), decoded.type)
+    }
+
+    // ========== No-context and empty-context produce identical results ==========
+
+    @Test
+    fun sealedDispatchDecodeIdenticalWithAndWithoutContext() {
+        val original: MqttPacket = MqttPacketConnAck(ConnAckFlags(0u), ConnectReturnCode(0u))
+
+        val buf1 = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        MqttPacketCodec.encode(buf1, original)
+        buf1.resetForRead()
+        val result1 = MqttPacketCodec.decode(buf1)
+
+        val buf2 = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        MqttPacketCodec.encode(buf2, original)
+        buf2.resetForRead()
+        val result2 = MqttPacketCodec.decode(buf2, DecodeContext.Empty)
+
+        assertEquals(result1, result2)
+    }
+
+    @Test
+    fun dispatchOnDecodeIdenticalWithAndWithoutContext() {
+        val original: DispatchOnPacket = DispatchOnPacket.TypeConnect(4u, 60u)
+
+        val buf1 = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        DispatchOnPacketCodec.encode(buf1, original)
+        buf1.resetForRead()
+        val result1 = DispatchOnPacketCodec.decode(buf1)
+
+        val buf2 = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        DispatchOnPacketCodec.encode(buf2, original)
+        buf2.resetForRead()
+        val result2 = DispatchOnPacketCodec.decode(buf2, DecodeContext.Empty)
+
+        assertEquals(result1, result2)
+    }
+
+    @Test
+    fun flatCodecDecodeIdenticalWithAndWithoutContext() {
+        val original = ColoredPoint(x = 5, y = 10, color = Rgb(100u, 200u, 50u))
+
+        val buf1 = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        ColoredPointCodec.encode(buf1, original)
+        buf1.resetForRead()
+        val result1 = ColoredPointCodec.decode(buf1)
+
+        val buf2 = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        ColoredPointCodec.encode(buf2, original)
+        buf2.resetForRead()
+        val result2 = ColoredPointCodec.decode(buf2, DecodeContext.Empty)
+
+        assertEquals(result1, result2)
+    }
+
+    @Test
+    fun sealedDispatchEncodeIdenticalWithAndWithoutContext() {
+        val original: MqttPacket = MqttPacketConnAck(ConnAckFlags(1u), ConnectReturnCode(2u))
+
+        val buf1 = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        MqttPacketCodec.encode(buf1, original)
+
+        val buf2 = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        MqttPacketCodec.encode(buf2, original, EncodeContext.Empty)
+
+        assertEquals(buf1.position(), buf2.position())
+        for (i in 0 until buf1.position()) {
+            assertEquals(buf1[i], buf2[i], "Byte mismatch at index $i")
+        }
+    }
+
+    @Test
+    fun dispatchOnEncodeIdenticalWithAndWithoutContext() {
+        val original: DispatchOnPacket = DispatchOnPacket.TypePubAck(999u)
+
+        val buf1 = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        DispatchOnPacketCodec.encode(buf1, original)
+
+        val buf2 = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        DispatchOnPacketCodec.encode(buf2, original, EncodeContext.Empty)
+
+        assertEquals(buf1.position(), buf2.position())
+        for (i in 0 until buf1.position()) {
+            assertEquals(buf1[i], buf2[i], "Byte mismatch at index $i")
+        }
+    }
+
+    // ========== @UseCodec context consumption ==========
+
+    @Test
+    fun useCodecReceivesContextDuringDecode() {
+        val original = ContextColoredPoint(1, 2, Rgb(10u, 20u, 30u))
+
+        // Encode with no offset — writes raw values (10, 20, 30)
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        ContextColoredPointCodec.encode(buffer, original)
+        buffer.resetForRead()
+
+        // Decode with offset=5 — if context flows through, codec adds 5 to each channel
+        val ctx = DecodeContext.Empty.with(RgbOffsetKey, 5)
+        val decoded = ContextColoredPointCodec.decode(buffer, ctx)
+        assertEquals(Rgb(15u, 25u, 35u), decoded.color)
+    }
+
+    @Test
+    fun useCodecReceivesContextDuringEncode() {
+        val original = ContextColoredPoint(1, 2, Rgb(50u, 60u, 70u))
+
+        // Encode with offset=10 — codec subtracts 10 from each channel
+        val eCtx = EncodeContext.Empty.with(RgbOffsetKey, 10)
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        ContextColoredPointCodec.encode(buffer, original, eCtx)
+        buffer.resetForRead()
+
+        // Decode with offset=10 — codec adds 10 back
+        val dCtx = DecodeContext.Empty.with(RgbOffsetKey, 10)
+        val decoded = ContextColoredPointCodec.decode(buffer, dCtx)
+        assertEquals(original, decoded)
+    }
+
+    @Test
+    fun useCodecWithoutContextUsesDefaultBehavior() {
+        val original = ContextColoredPoint(1, 2, Rgb(10u, 20u, 30u))
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        ContextColoredPointCodec.encode(buffer, original)
+        buffer.resetForRead()
+
+        // No context — offset defaults to 0, values unchanged
+        val decoded = ContextColoredPointCodec.decode(buffer)
+        assertEquals(original, decoded)
+    }
+
+    @Test
+    fun useCodecContextProduceDifferentResultWithAndWithoutContext() {
+        val original = ContextColoredPoint(1, 2, Rgb(10u, 20u, 30u))
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        ContextColoredPointCodec.encode(buffer, original)
+
+        // Decode without context
+        buffer.resetForRead()
+        val withoutCtx = ContextColoredPointCodec.decode(buffer)
+
+        // Re-encode and decode with context
+        val buf2 = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        ContextColoredPointCodec.encode(buf2, original)
+        buf2.resetForRead()
+        val ctx = DecodeContext.Empty.with(RgbOffsetKey, 5)
+        val withCtx = ContextColoredPointCodec.decode(buf2, ctx)
+
+        // Same x/y, different color — proves context affected decode
+        assertEquals(withoutCtx.x, withCtx.x)
+        assertEquals(withoutCtx.y, withCtx.y)
+        assertNotEquals(withoutCtx.color, withCtx.color)
     }
 }
