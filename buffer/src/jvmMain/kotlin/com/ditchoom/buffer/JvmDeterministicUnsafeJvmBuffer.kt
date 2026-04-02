@@ -22,15 +22,20 @@ internal class JvmDeterministicUnsafeJvmBuffer(
             byteOrder: ByteOrder,
         ): JvmDeterministicUnsafeJvmBuffer {
             val address = UnsafeAllocator.allocateMemory(size.toLong())
-            UnsafeMemory.setMemory(address, size.toLong(), 0)
-            val byteBuffer =
-                UnsafeMemory.tryWrapAsDirectByteBuffer(address, size)
-                    ?: throw UnsupportedOperationException(
-                        "Cannot create DeterministicUnsafeJvmBuffer: " +
-                            "DirectByteBuffer reflection is not available.",
-                    )
-            byteBuffer.order(byteOrder.toJava())
-            return JvmDeterministicUnsafeJvmBuffer(byteBuffer, address)
+            try {
+                UnsafeMemory.setMemory(address, size.toLong(), 0)
+                val byteBuffer =
+                    UnsafeMemory.tryWrapAsDirectByteBuffer(address, size)
+                        ?: throw UnsupportedOperationException(
+                            "Cannot create DeterministicUnsafeJvmBuffer: " +
+                                "DirectByteBuffer reflection is not available.",
+                        )
+                byteBuffer.order(byteOrder.toJava())
+                return JvmDeterministicUnsafeJvmBuffer(byteBuffer, address)
+            } catch (e: Throwable) {
+                UnsafeAllocator.freeMemory(address)
+                throw e
+            }
         }
     }
 }

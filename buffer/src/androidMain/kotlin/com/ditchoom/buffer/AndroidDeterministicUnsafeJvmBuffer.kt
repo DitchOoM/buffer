@@ -34,15 +34,20 @@ class AndroidDeterministicUnsafeJvmBuffer private constructor(
             byteOrder: ByteOrder,
         ): AndroidDeterministicUnsafeJvmBuffer {
             val address = UnsafeAllocator.allocateMemory(size.toLong())
-            UnsafeMemory.setMemory(address, size.toLong(), 0)
-            val byteBuffer =
-                UnsafeMemory.tryWrapAsDirectByteBuffer(address, size)
-                    ?: throw UnsupportedOperationException(
-                        "Cannot create DeterministicUnsafeJvmBuffer: " +
-                            "DirectByteBuffer reflection is not available on this Android version.",
-                    )
-            byteBuffer.order(byteOrder.toJava())
-            return AndroidDeterministicUnsafeJvmBuffer(byteBuffer, address)
+            try {
+                UnsafeMemory.setMemory(address, size.toLong(), 0)
+                val byteBuffer =
+                    UnsafeMemory.tryWrapAsDirectByteBuffer(address, size)
+                        ?: throw UnsupportedOperationException(
+                            "Cannot create DeterministicUnsafeJvmBuffer: " +
+                                "DirectByteBuffer reflection is not available on this Android version.",
+                        )
+                byteBuffer.order(byteOrder.toJava())
+                return AndroidDeterministicUnsafeJvmBuffer(byteBuffer, address)
+            } catch (e: Throwable) {
+                UnsafeAllocator.freeMemory(address)
+                throw e
+            }
         }
     }
 }

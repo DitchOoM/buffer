@@ -51,7 +51,7 @@ abstract class DeterministicDirectJvmBuffer(
 
     // --- CloseableBuffer ---
 
-    private var freed = false
+    @Volatile private var freed = false
     override val isFreed: Boolean get() = freed
 
     override fun freeNativeMemory() {
