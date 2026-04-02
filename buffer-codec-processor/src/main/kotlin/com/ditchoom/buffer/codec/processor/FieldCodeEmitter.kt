@@ -2,32 +2,37 @@ package com.ditchoom.buffer.codec.processor
 
 import com.squareup.kotlinpoet.CodeBlock
 
+// No wrapper needed — byte order is handled inline via swappedReadExpr/swappedWriteExpr on Primitive
+
 internal fun addFieldRead(
     code: CodeBlock.Builder,
     field: FieldInfo,
     withContext: Boolean = false,
 ) {
     val condition = field.condition
+    val expr = readExpression(field.strategy, withContext, field.byteOrderOverride)
     if (condition != null) {
         val condExpr = (condition as FieldCondition.WhenTrue).expression
         code.beginControlFlow("val %L = if (%L)", field.name, condExpr)
-        code.addStatement("%L", readExpression(field.strategy, withContext))
+        code.addStatement("%L", expr)
         code.nextControlFlow("else")
         code.addStatement("null")
         code.endControlFlow()
     } else {
-        code.addStatement("val %L = %L", field.name, readExpression(field.strategy, withContext))
+        code.addStatement("val %L = %L", field.name, expr)
     }
 }
 
 internal fun readExpression(
     strategy: FieldReadStrategy,
     withContext: Boolean = false,
+    byteOrderOverride: WireOrderOverride? = null,
 ): String =
     when (strategy) {
         is FieldReadStrategy.PrimitiveField -> {
             if (strategy.wireBytes == strategy.primitive.defaultWireBytes) {
-                strategy.primitive.readExpr
+                val swapped = if (byteOrderOverride != null) strategy.primitive.swappedReadExpr else null
+                swapped ?: strategy.primitive.readExpr
             } else {
                 customWidthReadExpr(strategy)
             }
@@ -43,7 +48,7 @@ internal fun readExpression(
         is FieldReadStrategy.RemainingBytesStringField -> "buffer.readString(buffer.remaining())"
         is FieldReadStrategy.LengthFromStringField -> "buffer.readString(${strategy.field}.toInt())"
         is FieldReadStrategy.ValueClassField -> {
-            val inner = readExpression(strategy.innerStrategy, withContext)
+            val inner = readExpression(strategy.innerStrategy, withContext, byteOrderOverride)
             "${strategy.wrapperType}($inner)"
         }
         is FieldReadStrategy.NestedMessageField -> {
@@ -76,10 +81,10 @@ internal fun addFieldWrite(
     if (condition != null) {
         val condExpr = (condition as FieldCondition.WhenTrue).expression.replace(Regex("^([^.]+)"), "value.$1")
         code.beginControlFlow("if (%L)", condExpr)
-        code.addStatement("%L", writeExpression(field.strategy, "$valueExpr!!", withContext))
+        code.addStatement("%L", writeExpression(field.strategy, "$valueExpr!!", withContext, field.byteOrderOverride))
         code.endControlFlow()
     } else {
-        code.addStatement("%L", writeExpression(field.strategy, valueExpr, withContext))
+        code.addStatement("%L", writeExpression(field.strategy, valueExpr, withContext, field.byteOrderOverride))
     }
 }
 
@@ -87,11 +92,13 @@ internal fun writeExpression(
     strategy: FieldReadStrategy,
     valueExpr: String,
     withContext: Boolean = false,
+    byteOrderOverride: WireOrderOverride? = null,
 ): String =
     when (strategy) {
         is FieldReadStrategy.PrimitiveField -> {
             if (strategy.wireBytes == strategy.primitive.defaultWireBytes) {
-                strategy.primitive.writeExpr(valueExpr)
+                val swapped = if (byteOrderOverride != null) strategy.primitive.swappedWriteExpr else null
+                swapped?.invoke(valueExpr) ?: strategy.primitive.writeExpr(valueExpr)
             } else {
                 customWidthWriteExpr(strategy, valueExpr)
             }
@@ -111,7 +118,7 @@ internal fun writeExpression(
         is FieldReadStrategy.LengthFromStringField -> "buffer.writeString($valueExpr)"
         is FieldReadStrategy.ValueClassField -> {
             val inner = "$valueExpr.${strategy.innerPropertyName}"
-            writeExpression(strategy.innerStrategy, inner, withContext)
+            writeExpression(strategy.innerStrategy, inner, withContext, byteOrderOverride)
         }
         is FieldReadStrategy.NestedMessageField -> {
             val ctxArg = if (withContext) ", context" else ""

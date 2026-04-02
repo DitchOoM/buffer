@@ -2,10 +2,12 @@ package com.ditchoom.buffer.codec.test.protocols
 
 import com.ditchoom.buffer.codec.annotations.DispatchOn
 import com.ditchoom.buffer.codec.annotations.DispatchValue
+import com.ditchoom.buffer.codec.annotations.Endianness
 import com.ditchoom.buffer.codec.annotations.LengthFrom
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.Payload
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+import com.ditchoom.buffer.codec.annotations.WireOrder
 import kotlin.jvm.JvmInline
 
 /*
@@ -13,18 +15,14 @@ import kotlin.jvm.JvmInline
  *
  * Wire format:
  * ```
- * char   chunkId[4];    // 4 bytes ASCII (e.g., "fmt ", "data", "RIFF")
- * uint32 chunkSize;     // 4 bytes little-endian (size of data, excludes id+size)
+ * uint32 chunkId;       // 4 bytes ASCII, big-endian (dispatch discriminator)
+ * uint32 chunkSize;     // 4 bytes little-endian
  * byte   data[chunkSize];
- * byte   pad;           // 1 byte if chunkSize is odd (NOT modeled — structural concern)
  * ```
  *
- * Note: RIFF uses little-endian for size fields. The buffer's byte order must
- * be set to LITTLE_ENDIAN for correct size encoding. Chunk IDs are 4-byte ASCII
- * stored as big-endian UInt (first char = most significant byte).
- *
- * Pad byte for odd-length chunks is a structural concern handled at the
- * container level, not the individual chunk codec.
+ * Chunk IDs are 4-byte ASCII stored as big-endian UInt (buffer default).
+ * Size and numeric fields use @WireOrder(LITTLE_ENDIAN) for spec-compliant byte order.
+ * Pad byte for odd-length chunks is a structural concern not modeled here.
  */
 
 /** RIFF chunk ID as a 4-byte big-endian integer. */
@@ -62,13 +60,13 @@ sealed interface RiffChunk {
     @PacketType(value = 0x666D7420, wire = 0x666D7420)
     @ProtocolMessage
     data class Fmt(
-        val chunkSize: UInt, // always 16 for PCM
-        val audioFormat: UShort, // 1 = PCM
-        val numChannels: UShort,
-        val sampleRate: UInt,
-        val byteRate: UInt,
-        val blockAlign: UShort,
-        val bitsPerSample: UShort,
+        @WireOrder(Endianness.LITTLE_ENDIAN) val chunkSize: UInt, // always 16 for PCM
+        @WireOrder(Endianness.LITTLE_ENDIAN) val audioFormat: UShort, // 1 = PCM
+        @WireOrder(Endianness.LITTLE_ENDIAN) val numChannels: UShort,
+        @WireOrder(Endianness.LITTLE_ENDIAN) val sampleRate: UInt,
+        @WireOrder(Endianness.LITTLE_ENDIAN) val byteRate: UInt,
+        @WireOrder(Endianness.LITTLE_ENDIAN) val blockAlign: UShort,
+        @WireOrder(Endianness.LITTLE_ENDIAN) val bitsPerSample: UShort,
     ) : RiffChunk
 
     /**
@@ -77,8 +75,8 @@ sealed interface RiffChunk {
     @PacketType(value = 0x66616374, wire = 0x66616374)
     @ProtocolMessage
     data class Fact(
-        val chunkSize: UInt,
-        val sampleCount: UInt,
+        @WireOrder(Endianness.LITTLE_ENDIAN) val chunkSize: UInt,
+        @WireOrder(Endianness.LITTLE_ENDIAN) val sampleCount: UInt,
     ) : RiffChunk
 
     /**
@@ -87,7 +85,7 @@ sealed interface RiffChunk {
     @PacketType(value = 0x64617461, wire = 0x64617461)
     @ProtocolMessage
     data class Data<@Payload P>(
-        val chunkSize: UInt,
+        @WireOrder(Endianness.LITTLE_ENDIAN) val chunkSize: UInt,
         @LengthFrom("chunkSize") val samples: P,
     ) : RiffChunk
 }

@@ -172,6 +172,37 @@ annotation class WireBytes(
 )
 
 /**
+ * Wire byte order for [WireOrder].
+ */
+enum class Endianness {
+    BIG_ENDIAN,
+    LITTLE_ENDIAN,
+}
+
+/**
+ * Overrides the byte order for reading/writing a multi-byte numeric field.
+ *
+ * Use when individual fields have a different byte order than the buffer default.
+ * The generated codec wraps the buffer in an internal byte-order adapter for
+ * annotated fields only — no runtime branch per read, no buffer mutation.
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * data class RiffChunk(
+ *     val chunkId: UInt,                                                  // buffer default
+ *     @WireOrder(Endianness.LITTLE_ENDIAN) val chunkSize: UInt,           // little-endian on wire
+ * )
+ * ```
+ *
+ * @param order The byte order for this field on the wire.
+ */
+@Target(AnnotationTarget.VALUE_PARAMETER)
+@Retention(AnnotationRetention.BINARY)
+annotation class WireOrder(
+    val order: Endianness,
+)
+
+/**
  * Conditional field: only present on the wire when the referenced expression is `true`.
  * The field must be nullable with a default value of `null`.
  *

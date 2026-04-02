@@ -506,6 +506,9 @@ class CodecGenerator(
             fileBuilder.addImport("com.ditchoom.buffer", "readLengthPrefixedUtf8String")
             fileBuilder.addImport("com.ditchoom.buffer", "writeLengthPrefixedUtf8String")
         }
+        if (fields.any { it.byteOrderOverride != null }) {
+            fileBuilder.addImport("com.ditchoom.buffer", "reverseBytes")
+        }
         for (field in fields) {
             val strategy = field.strategy
             if (strategy is FieldReadStrategy.Custom) {

@@ -67,6 +67,12 @@ private val annotationSource =
     @Retention(AnnotationRetention.BINARY)
     annotation class WhenTrue(val expression: String)
 
+    enum class Endianness { BIG_ENDIAN, LITTLE_ENDIAN }
+
+    @Target(AnnotationTarget.VALUE_PARAMETER)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class WireOrder(val order: Endianness)
+
     """,
     )
 
@@ -110,6 +116,10 @@ private val bufferStubs =
         fun position(): Int
         fun position(newPosition: Int)
     }
+    enum class ByteOrder { BIG_ENDIAN, LITTLE_ENDIAN }
+    fun Short.reverseBytes(): Short = TODO()
+    fun Int.reverseBytes(): Int = TODO()
+    fun Long.reverseBytes(): Long = TODO()
     fun ReadBuffer.readLengthPrefixedUtf8String(): Pair<Int, String> = TODO()
     fun WriteBuffer.writeLengthPrefixedUtf8String(value: String): WriteBuffer = TODO()
     fun ReadBuffer.readVariableByteInteger(): Int = TODO()

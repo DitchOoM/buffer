@@ -18,6 +18,15 @@ internal fun KSAnnotation.qualifiedName(): String? =
         .qualifiedName
         ?.asString()
 
+/**
+ * Byte order override for a field. When non-null, the generated codec wraps the buffer
+ * in a byte-order adapter for this field's read/write only.
+ */
+enum class WireOrderOverride {
+    BIG_ENDIAN,
+    LITTLE_ENDIAN,
+}
+
 data class FieldInfo(
     val name: String,
     val typeName: String,
@@ -26,6 +35,7 @@ data class FieldInfo(
     val condition: FieldCondition?,
     val parameter: KSValueParameter?,
     val hasDefault: Boolean = true,
+    val byteOrderOverride: WireOrderOverride? = null,
 )
 
 sealed class FieldCondition {
@@ -53,17 +63,87 @@ enum class Primitive(
     val readExpr: String,
     val writeExpr: (String) -> String,
     val isNumeric: Boolean = true,
+    /** Read expression with byte-order swap applied. Null means swap not applicable (1-byte types). */
+    val swappedReadExpr: String? = null,
+    /** Write expression with byte-order swap applied. Null means swap not applicable. */
+    val swappedWriteExpr: ((String) -> String)? = null,
 ) {
     BYTE("kotlin.Byte", 1, true, "buffer.readByte()", { v -> "buffer.writeByte($v)" }),
     UBYTE("kotlin.UByte", 1, false, "buffer.readUnsignedByte()", { v -> "buffer.writeUByte($v)" }),
-    SHORT("kotlin.Short", 2, true, "buffer.readShort()", { v -> "buffer.writeShort($v)" }),
-    USHORT("kotlin.UShort", 2, false, "buffer.readUnsignedShort()", { v -> "buffer.writeUShort($v)" }),
-    INT("kotlin.Int", 4, true, "buffer.readInt()", { v -> "buffer.writeInt($v)" }),
-    UINT("kotlin.UInt", 4, false, "buffer.readUnsignedInt()", { v -> "buffer.writeUInt($v)" }),
-    LONG("kotlin.Long", 8, true, "buffer.readLong()", { v -> "buffer.writeLong($v)" }),
-    ULONG("kotlin.ULong", 8, false, "buffer.readUnsignedLong()", { v -> "buffer.writeULong($v)" }),
-    FLOAT("kotlin.Float", 4, true, "buffer.readFloat()", { v -> "buffer.writeFloat($v)" }, isNumeric = false),
-    DOUBLE("kotlin.Double", 8, true, "buffer.readDouble()", { v -> "buffer.writeDouble($v)" }, isNumeric = false),
+    SHORT(
+        "kotlin.Short",
+        2,
+        true,
+        "buffer.readShort()",
+        { v -> "buffer.writeShort($v)" },
+        swappedReadExpr = "buffer.readShort().reverseBytes()",
+        swappedWriteExpr = { v -> "buffer.writeShort($v.reverseBytes())" },
+    ),
+    USHORT(
+        "kotlin.UShort",
+        2,
+        false,
+        "buffer.readUnsignedShort()",
+        { v -> "buffer.writeUShort($v)" },
+        swappedReadExpr = "buffer.readShort().reverseBytes().toUShort()",
+        swappedWriteExpr = { v -> "buffer.writeShort($v.toShort().reverseBytes())" },
+    ),
+    INT(
+        "kotlin.Int",
+        4,
+        true,
+        "buffer.readInt()",
+        { v -> "buffer.writeInt($v)" },
+        swappedReadExpr = "buffer.readInt().reverseBytes()",
+        swappedWriteExpr = { v -> "buffer.writeInt($v.reverseBytes())" },
+    ),
+    UINT(
+        "kotlin.UInt",
+        4,
+        false,
+        "buffer.readUnsignedInt()",
+        { v -> "buffer.writeUInt($v)" },
+        swappedReadExpr = "buffer.readInt().reverseBytes().toUInt()",
+        swappedWriteExpr = { v -> "buffer.writeInt($v.toInt().reverseBytes())" },
+    ),
+    LONG(
+        "kotlin.Long",
+        8,
+        true,
+        "buffer.readLong()",
+        { v -> "buffer.writeLong($v)" },
+        swappedReadExpr = "buffer.readLong().reverseBytes()",
+        swappedWriteExpr = { v -> "buffer.writeLong($v.reverseBytes())" },
+    ),
+    ULONG(
+        "kotlin.ULong",
+        8,
+        false,
+        "buffer.readUnsignedLong()",
+        { v -> "buffer.writeULong($v)" },
+        swappedReadExpr = "buffer.readLong().reverseBytes().toULong()",
+        swappedWriteExpr = { v -> "buffer.writeLong($v.toLong().reverseBytes())" },
+    ),
+    FLOAT(
+        "kotlin.Float",
+        4,
+        true,
+        "buffer.readFloat()",
+        { v -> "buffer.writeFloat($v)" },
+        isNumeric = false,
+        swappedReadExpr = "Float.fromBits(buffer.readInt().reverseBytes())",
+        swappedWriteExpr = { v -> "buffer.writeInt($v.toRawBits().reverseBytes())" },
+    ),
+    DOUBLE(
+        "kotlin.Double",
+        8,
+        true,
+        "buffer.readDouble()",
+        { v -> "buffer.writeDouble($v)" },
+        isNumeric = false,
+        swappedReadExpr = "Double.fromBits(buffer.readLong().reverseBytes())",
+        swappedWriteExpr = { v -> "buffer.writeLong($v.toRawBits().reverseBytes())" },
+    ),
     BOOLEAN(
         "kotlin.Boolean",
         1,
@@ -230,6 +310,8 @@ class FieldAnalyzer(
                 continue
             }
 
+            val byteOrderOverride = extractWireOrder(param)
+
             fields.add(
                 FieldInfo(
                     name = name,
@@ -239,6 +321,7 @@ class FieldAnalyzer(
                     condition = condition,
                     parameter = param,
                     hasDefault = param.hasDefault,
+                    byteOrderOverride = byteOrderOverride,
                 ),
             )
         }
@@ -794,5 +877,40 @@ class FieldAnalyzer(
             param,
         )
         return null
+    }
+
+    private fun extractWireOrder(param: KSValueParameter): WireOrderOverride? {
+        val ann =
+            param.annotations.toList().find {
+                val qn = it.qualifiedName()
+                val sn =
+                    try {
+                        it.shortName.asString()
+                    } catch (_: Exception) {
+                        ""
+                    }
+                val typeName =
+                    try {
+                        it.annotationType
+                            .resolve()
+                            .declaration.simpleName
+                            .asString()
+                    } catch (_: Exception) {
+                        ""
+                    }
+                qn == "com.ditchoom.buffer.codec.annotations.WireOrder" ||
+                    sn == "WireOrder" ||
+                    typeName == "WireOrder"
+            } ?: return null
+        val orderArg = ann.arguments.firstOrNull()?.value ?: return null
+        val enumName = orderArg.toString().substringAfterLast(".")
+        return when (enumName) {
+            "BIG_ENDIAN" -> WireOrderOverride.BIG_ENDIAN
+            "LITTLE_ENDIAN" -> WireOrderOverride.LITTLE_ENDIAN
+            else -> {
+                logger.error("@WireOrder has unknown value: $enumName", param)
+                null
+            }
+        }
     }
 }
