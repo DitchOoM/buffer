@@ -251,6 +251,82 @@ class ForbiddenTypeTest {
     }
 
     @Test
+    fun `LengthFrom referencing non-existent field causes compile error`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.LengthFrom
+
+            @ProtocolMessage
+            data class BadMessage(
+                val size: UShort,
+                @LengthFrom("missing") val data: String,
+            )
+            """,
+            )
+        val result = compileWithKsp(source)
+        val hasError =
+            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
+                result.messages.contains("no field named 'missing'")
+        assertTrue(hasError, "Expected error for @LengthFrom bad ref but got: ${result.exitCode}\n${result.messages}")
+    }
+
+    @Test
+    fun `WhenTrue referencing non-boolean field causes compile error`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.WhenTrue
+
+            @ProtocolMessage
+            data class BadMessage(
+                val count: Int,
+                @WhenTrue("count") val extra: Short? = null,
+            )
+            """,
+            )
+        val result = compileWithKsp(source)
+        val hasError =
+            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
+                result.messages.contains("not Boolean")
+        assertTrue(hasError, "Expected error for non-Boolean @WhenTrue but got: ${result.exitCode}\n${result.messages}")
+    }
+
+    @Test
+    fun `DispatchOn without DispatchValue causes compile error`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.PacketType
+            import com.ditchoom.buffer.codec.annotations.DispatchOn
+
+            @JvmInline
+            @ProtocolMessage
+            value class NoDispatch(val raw: UByte)
+
+            @DispatchOn(NoDispatch::class)
+            @ProtocolMessage
+            sealed interface BadProtocol {
+                @ProtocolMessage
+                @PacketType(1)
+                data class First(val x: Int) : BadProtocol
+            }
+            """,
+            )
+        val result = compileWithKsp(source)
+        val hasError =
+            result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
+                result.messages.contains("@DispatchValue")
+        assertTrue(hasError, "Expected error for @DispatchOn without @DispatchValue but got: ${result.exitCode}\n${result.messages}")
+    }
+
+    @Test
     fun `DispatchValue non-Int return type causes compile error`() {
         val source =
             SourceFile.kotlin(

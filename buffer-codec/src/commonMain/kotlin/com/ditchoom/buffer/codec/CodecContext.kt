@@ -7,7 +7,7 @@ package com.ditchoom.buffer.codec
  * useful for shared configuration like protocol version or byte order.
  *
  * ```kotlin
- * val VersionKey = CodecContext.Key<Int>("protocol.version")
+ * data object VersionKey : CodecContext.Key<Int>()
  *
  * // Works in both directions
  * val dCtx = DecodeContext.Empty.with(VersionKey, 2)
@@ -37,6 +37,10 @@ interface CodecContext {
      * ```
      */
     abstract class Key<T : Any> {
+        final override fun equals(other: Any?): Boolean = this === other
+
+        final override fun hashCode(): Int = super.hashCode()
+
         override fun toString(): String = this::class.simpleName ?: "CodecContext.Key"
     }
 }
@@ -67,7 +71,7 @@ interface DecodeContext : CodecContext {
 
     companion object {
         /** An empty decode context with no keys set. */
-        val Empty: DecodeContext = MapContext(emptyMap())
+        val Empty: DecodeContext = DecodeMapContext(emptyMap())
     }
 }
 
@@ -96,25 +100,40 @@ interface EncodeContext : CodecContext {
 
     companion object {
         /** An empty encode context with no keys set. */
-        val Empty: EncodeContext = MapContext(emptyMap())
+        val Empty: EncodeContext = EncodeMapContext(emptyMap())
     }
 }
 
 /**
- * Immutable map-backed implementation of both [DecodeContext] and [EncodeContext].
- * Keys are compared by identity (reference equality), not by [CodecContext.Key.name].
+ * Immutable map-backed [DecodeContext]. Keys are compared by identity (reference equality).
  */
-private class MapContext(
+private class DecodeMapContext(
     private val elements: Map<CodecContext.Key<*>, Any>,
-) : DecodeContext,
-    EncodeContext {
+) : DecodeContext {
     @Suppress("UNCHECKED_CAST")
     override fun <T : Any> get(key: CodecContext.Key<T>): T? = elements[key] as? T
 
     override fun <T : Any> with(
         key: CodecContext.Key<T>,
         value: T,
-    ): MapContext = MapContext(elements + (key to value))
+    ): DecodeContext = DecodeMapContext(elements + (key to value))
 
-    override fun toString(): String = elements.entries.joinToString(prefix = "CodecContext(", postfix = ")") { "${it.key}=${it.value}" }
+    override fun toString(): String = elements.entries.joinToString(prefix = "DecodeContext(", postfix = ")") { "${it.key}=${it.value}" }
+}
+
+/**
+ * Immutable map-backed [EncodeContext]. Keys are compared by identity (reference equality).
+ */
+private class EncodeMapContext(
+    private val elements: Map<CodecContext.Key<*>, Any>,
+) : EncodeContext {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : Any> get(key: CodecContext.Key<T>): T? = elements[key] as? T
+
+    override fun <T : Any> with(
+        key: CodecContext.Key<T>,
+        value: T,
+    ): EncodeContext = EncodeMapContext(elements + (key to value))
+
+    override fun toString(): String = elements.entries.joinToString(prefix = "EncodeContext(", postfix = ")") { "${it.key}=${it.value}" }
 }

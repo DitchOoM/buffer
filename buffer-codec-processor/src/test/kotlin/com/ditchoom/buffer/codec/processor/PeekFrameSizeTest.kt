@@ -23,7 +23,7 @@ class PeekFrameSizeTest {
     ) {
         for (s in expected) {
             assertTrue(
-                result.messages.contains(s) || true, // generated code is in compiled output, not messages
+                result.messages.contains(s),
                 "Expected generated code to contain: $s",
             )
         }

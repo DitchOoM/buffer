@@ -365,9 +365,11 @@ class SealedDispatchGenerator(
                 ClassName(dispatchOnInfo.poetClassName.packageName, dispatchOnInfo.codecName),
             )
             decodeBody.addStatement("val type = _discriminator.%L", dispatchOnInfo.dispatchProperty)
+            decodeBody.addStatement("val _ctx = %T.Empty.with(DiscriminatorKey, _discriminator)", DECODE_CONTEXT)
         } else {
             decodeBody.addStatement("val type = buffer.readByte().toInt() and 0xFF")
         }
+        val conv1CtxArg = if (dispatchOnInfo != null) ", _ctx" else ""
         decodeBody.beginControlFlow("return when (type)")
 
         for (v in variants) {
@@ -380,7 +382,7 @@ class SealedDispatchGenerator(
                     }
                 decodeBody.addStatement("${v.value} -> $subCodecName.decode(buffer, $lambdaArgs)")
             } else {
-                decodeBody.addStatement("${v.value} -> $subCodecName.decode(buffer)")
+                decodeBody.addStatement("${v.value} -> $subCodecName.decode(buffer$conv1CtxArg)")
             }
         }
         decodeBody
@@ -446,7 +448,11 @@ class SealedDispatchGenerator(
                 // Non-payload variant: simple dispatch
                 encodeBody.beginControlFlow("is %T ->", subTypeName)
                 if (!skipWireWrite) addWireWrite(encodeBody, v.wire, dispatchOnInfo)
-                encodeBody.addStatement("$subCodecName.encode(buffer, value)")
+                if (dispatchOnInfo != null) {
+                    encodeBody.addStatement("$subCodecName.encode(buffer, value, %T.Empty)", ENCODE_CONTEXT)
+                } else {
+                    encodeBody.addStatement("$subCodecName.encode(buffer, value)")
+                }
                 encodeBody.endControlFlow()
             }
         }

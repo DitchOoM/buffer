@@ -3,10 +3,13 @@ package com.ditchoom.buffer.codec.test
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.codec.DecodeContext
+import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.test.protocols.TlsContentType
 import com.ditchoom.buffer.codec.test.protocols.TlsProtocolVersion
 import com.ditchoom.buffer.codec.test.protocols.TlsRecord
 import com.ditchoom.buffer.codec.test.protocols.TlsRecordAlertCodec
+import com.ditchoom.buffer.codec.test.protocols.TlsRecordApplicationDataCodec
 import com.ditchoom.buffer.codec.test.protocols.TlsRecordChangeCipherSpecCodec
 import com.ditchoom.buffer.codec.test.protocols.TlsRecordCodec
 import com.ditchoom.buffer.codec.test.protocols.TlsRecordHandshakeCodec
@@ -165,5 +168,49 @@ class TlsRecordRoundTripTest {
         val decoded = TlsRecordCodec.testRoundTrip(original)
         assertTrue(decoded is TlsRecord.Alert)
         assertEquals(original, decoded)
+    }
+
+    // ========== Payload variants through dispatch (Convention 2) ==========
+
+    @Test
+    fun handshakeDispatchRoundTripViaContext() {
+        val original = TlsRecord.Handshake(TlsProtocolVersion.TLS_1_2, 5u, "hello")
+        val decodeCtx =
+            DecodeContext.Empty
+                .with(TlsRecordHandshakeCodec.FragmentDecodeKey) { pr -> pr.readString(pr.remaining()) }
+        val encodeCtx =
+            EncodeContext.Empty
+                .with(TlsRecordHandshakeCodec.FragmentEncodeKey) { buf, v -> buf.writeString(v as String) }
+
+        val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
+        TlsRecordCodec.encode(buffer, original, encodeCtx)
+        buffer.resetForRead()
+        val decoded = TlsRecordCodec.decode(buffer, decodeCtx)
+
+        assertTrue(decoded is TlsRecord.Handshake<*>)
+        assertEquals(TlsProtocolVersion.TLS_1_2, decoded.version)
+        assertEquals(5u.toUShort(), decoded.length)
+        assertEquals("hello", decoded.fragment)
+    }
+
+    @Test
+    fun applicationDataDispatchRoundTripViaContext() {
+        val original = TlsRecord.ApplicationData(TlsProtocolVersion.TLS_1_2, 3u, "abc")
+        val decodeCtx =
+            DecodeContext.Empty
+                .with(TlsRecordApplicationDataCodec.FragmentDecodeKey) { pr -> pr.readString(pr.remaining()) }
+        val encodeCtx =
+            EncodeContext.Empty
+                .with(TlsRecordApplicationDataCodec.FragmentEncodeKey) { buf, v -> buf.writeString(v as String) }
+
+        val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
+        TlsRecordCodec.encode(buffer, original, encodeCtx)
+        buffer.resetForRead()
+        val decoded = TlsRecordCodec.decode(buffer, decodeCtx)
+
+        assertTrue(decoded is TlsRecord.ApplicationData<*>)
+        assertEquals(TlsProtocolVersion.TLS_1_2, decoded.version)
+        assertEquals(3u.toUShort(), decoded.length)
+        assertEquals("abc", decoded.fragment)
     }
 }

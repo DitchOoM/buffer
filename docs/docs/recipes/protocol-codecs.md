@@ -620,8 +620,8 @@ interface EncodeContext : CodecContext   // encode-only keys (compression, forma
 
 ```kotlin
 object MyCodec : Codec<Bitmap> {
-    val AllocatorKey = CodecContext.Key<BufferAllocator>("mycodec.allocator")
-    val MaxSizeKey = CodecContext.Key<Int>("mycodec.maxsize")
+    data object AllocatorKey : CodecContext.Key<BufferAllocator>()
+    data object MaxSizeKey : CodecContext.Key<Int>()
 
     override fun decode(buffer: ReadBuffer, context: DecodeContext): Bitmap {
         val allocator = context[AllocatorKey] ?: BufferAllocator.Default
@@ -666,7 +666,7 @@ interface Codec<T> {
 Keys defined with `CodecContext.Key` work in both `DecodeContext` and `EncodeContext`:
 
 ```kotlin
-val VersionKey = CodecContext.Key<Int>("protocol.version")
+data object VersionKey : CodecContext.Key<Int>()
 
 val dCtx = DecodeContext.Empty.with(VersionKey, 2)
 val eCtx = EncodeContext.Empty.with(VersionKey, 2)
