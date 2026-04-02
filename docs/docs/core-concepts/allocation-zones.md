@@ -110,7 +110,7 @@ BufferFactory.deterministic().allocate(1024).use { buffer ->
 | Platform | Implementation |
 |----------|---------------|
 | JVM 9+ | `DeterministicDirectJvmBuffer` (DirectByteBuffer + Unsafe.invokeCleaner) |
-| JVM 8 / Android | `UnsafePlatformBuffer` (Unsafe.allocateMemory/freeMemory) |
+| JVM 8 / Android | `DeterministicUnsafeJvmBuffer` (Unsafe.allocateMemory/freeMemory) |
 | JVM 21+ | `FfmBuffer` (FFM Arena-backed) |
 | Apple | `MutableDataBuffer` (ARC-managed, already deterministic) |
 | Linux | `NativeBuffer` (malloc/free, already deterministic) |

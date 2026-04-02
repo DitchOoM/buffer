@@ -98,10 +98,15 @@ Annotations cover common binary protocol patterns:
 - `@RemainingBytes` — consume all remaining bytes
 - `@LengthFrom("field")` — string length from a preceding numeric field
 - `@WireBytes(n)` — custom wire width for numeric fields (e.g., 3-byte integers)
+- `@WireOrder(order)` — per-field byte order override (big/little endian)
 - `@WhenTrue("expr")` — conditional nullable fields
+- `@UseCodec(codec)` — delegate to an existing `Codec` object
 - `@Payload` — generic payload type parameter
-- `@PacketType(value)` on sealed interface variants — auto-dispatched decode by type byte (0-255)
+- `@PacketType(value, wire)` on sealed interface variants — auto-dispatched decode; `wire` for spec-compliant encode values
+- `@DispatchOn(Discriminator::class)` + `@DispatchValue` — custom multi-byte or bit-packed discriminator dispatch
 - Value classes wrapping primitives — zero-overhead typed wrappers (e.g., `value class PacketId(val raw: UShort)`)
+
+Generated codecs also provide `peekFrameSize(stream)` for zero-boilerplate stream framing and `CodecContext` for typed runtime configuration through codec chains.
 
 Generated codecs implement the same `Codec<T>` interface used for manual codecs, so all patterns (streaming, round-trip testing, composition) work unchanged.
 

@@ -374,6 +374,8 @@ sealed interface MqttPacket {
 
 Key rules: `@DispatchValue` must return `Int`. `wire` values are validated at compile time against the discriminator's inner type range (e.g., UByte 0-255). Duplicate `@PacketType` values are compile errors.
 
+For protocols that mix byte orders within a single message, use `@WireOrder(Endianness.Big)` or `@WireOrder(Endianness.Little)` on individual fields. This overrides the message-level `@ProtocolMessage(wireOrder = ...)`. Combines with `@WireBytes` for custom-width little-endian fields (e.g., BLE ATT 3-byte LE lengths).
+
 ### `peekFrameSize` — Generated Stream Framing
 
 Every codec automatically generates `peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): Int?` when the frame size is determinable from the wire format. This peeks at a stream to determine the total bytes needed for decode, without consuming data. Eliminates manual peek offset math in streaming loops:

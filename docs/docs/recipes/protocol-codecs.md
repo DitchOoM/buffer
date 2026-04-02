@@ -208,6 +208,33 @@ data class CompactHeader(
 
 Only applies to integer types. Not allowed on `Float`, `Double`, or `Boolean`.
 
+### `@WireOrder(order)` — Per-Field Byte Order
+
+Overrides the byte order for a single field, taking precedence over the message-level `@ProtocolMessage(wireOrder = ...)` setting. Use when a protocol mixes byte orders within a single message (e.g., big-endian magic number + little-endian length fields).
+
+```kotlin
+@ProtocolMessage(wireOrder = Endianness.Little)
+data class MixedHeader(
+    @WireOrder(Endianness.Big) val magic: UInt,  // overrides to big-endian
+    val length: UInt,                              // inherits little-endian
+)
+```
+
+Works with `@WireBytes` for custom-width fields:
+
+```kotlin
+@ProtocolMessage
+data class BleAttHeader(
+    val tag: UByte,
+    @WireOrder(Endianness.Little) @WireBytes(3) val leLength: UInt,  // 3-byte little-endian
+    @WireOrder(Endianness.Little) @WireBytes(2) val leFlags: Int,    // 2-byte little-endian
+)
+```
+
+Only applies to multi-byte numeric types (`Short`, `UShort`, `Int`, `UInt`, `Long`, `ULong`, `Float`, `Double`). Single-byte types (`Byte`, `UByte`, `Boolean`) are unaffected.
+
+The message-level `wireOrder` parameter on `@ProtocolMessage` sets the default for all fields. On sealed interfaces, variants inherit the parent's `wireOrder` unless they override it.
+
 ### `@UseCodec(codec)` — Custom Codec Reference
 
 Delegates field encoding/decoding to an existing `Codec` object, without needing an SPI module. The referenced codec must be a Kotlin `object` implementing `Codec<T>`.
@@ -362,9 +389,9 @@ Some formats (PNG) put the length *before* the type on the wire. Use a data clas
 
 ```kotlin
 @ProtocolMessage
-data class PngChunkHeader(val dataLength: UInt, val chunkType: UInt) {
+data class PngChunkHeader(val length: UInt, val type: UInt) {
     @DispatchValue
-    val type: Int get() = chunkType.toInt()
+    val chunkType: Int get() = type.toInt()
 }
 
 @DispatchOn(PngChunkHeader::class)
@@ -376,6 +403,8 @@ sealed interface PngChunk {
 ```
 
 When a variant has a field whose type matches the `@DispatchOn` discriminator, the generated codec populates it from context during decode (no double-read) and encodes it normally during encode.
+
+> **Note:** The lambda-based `decode(buffer, ...)` overload does not accept or forward an outer `DecodeContext`. If you need to pass runtime context through sealed dispatch, use the context-based `decode(buffer, context)` overload instead.
 
 ### `peekFrameSize` — Stream Framing Without Boilerplate
 
