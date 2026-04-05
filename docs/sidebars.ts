@@ -11,6 +11,7 @@ const sidebars: SidebarsConfig = {
         'recipes/buffer-pooling',
         'recipes/stream-processing',
         'recipes/protocol-codecs',
+        'recipes/real-protocols',
         'recipes/compression',
         'recipes/protocol-parsing',
         'recipes/basic-operations',
