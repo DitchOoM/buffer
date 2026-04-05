@@ -623,9 +623,8 @@ val factory = BufferFactory.Default.withPooling(pool)
 
 // Library code accepts BufferFactory — pooling is transparent
 class ImageDecoder(private val factory: BufferFactory = BufferFactory.Default) {
-    fun decode(imageBytes: Int): PlatformImage {
-        val buffer = factory.allocate(imageBytes)
-        try {
+    fun decode(imageBytes: Int): PlatformImage =
+        factory.allocate(imageBytes).use { buffer ->
             socket.read(buffer)
             buffer.resetForRead()
 
@@ -635,17 +634,18 @@ class ImageDecoder(private val factory: BufferFactory = BufferFactory.Default) {
 
             // Decode — zero-copy, platform-native
             buffer.resetForRead()
-            return buffer.decodePlatformImage()
-        } finally {
-            buffer.freeNativeMemory() // returns to pool if pooled, frees if not
-        }
-    }
+            buffer.decodePlatformImage()
+        } // .use {} returns to pool if pooled, frees native memory if deterministic,
+          // no-ops if GC-managed — always exception-safe
+
 }
 
 // Caller controls allocation strategy
 val decoder = ImageDecoder(factory) // pooled — high throughput, no GC
 val decoder = ImageDecoder()        // default — simpler, GC-managed
 ```
+
+`buffer.use { }` does the right thing for every allocation strategy — returns to pool, frees native memory, or no-ops for GC-managed buffers. It's exception-safe (cleanup runs even if the block throws). Library code never calls `freeNativeMemory()` directly — `use` handles it.
 
 The `BufferFactory` abstraction means your library code works identically whether the caller uses pooling, managed memory, shared memory (Android IPC), or deterministic cleanup. The allocation strategy is a caller decision, not a library decision.
 
