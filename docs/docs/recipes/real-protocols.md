@@ -5,7 +5,9 @@ title: "Real Protocols: RFC-Compliant Examples"
 
 # Real Protocols
 
-These are real protocol implementations matching their RFC wire formats exactly. Each one compiles, round-trips, and generates frame detection automatically. No external dependencies — just annotated data classes.
+Define your wire format as a data class. Get a correct, type-safe, zero-copy codec — with frame detection, sealed dispatch, and batch-optimized reads — generated at compile time. No hand-written byte manipulation. No external dependencies.
+
+Every example below matches its RFC wire format exactly, compiles, and passes round-trip tests.
 
 ## DNS Header (RFC 1035 &sect;4.1.1)
 
@@ -286,9 +288,9 @@ This is 14 lines for one of the most complex packet types in MQTT. The generated
 
 ---
 
-## HTTP/2 Frame (RFC 7540 &sect;4.1)
+## HTTP/2 Frame Header (RFC 7540 &sect;4.1)
 
-Every HTTP/2 frame starts with a 9-byte header. The length field is 3 bytes (`@WireBytes(3)`), and the frame type byte dispatches to the correct payload structure:
+Every HTTP/2 frame starts with a fixed 9-byte header. The length field is 3 bytes — not a standard primitive width. `@WireBytes(3)` handles this:
 
 ```
 +-----------------------------------------------+
@@ -306,11 +308,7 @@ Every HTTP/2 frame starts with a 9-byte header. The length field is 3 bytes (`@W
 
 ```kotlin
 @JvmInline
-@ProtocolMessage
 value class Http2FrameType(val raw: UByte) {
-    @DispatchValue
-    val type: Int get() = raw.toInt()
-
     companion object {
         val DATA = Http2FrameType(0x0u)
         val HEADERS = Http2FrameType(0x1u)
@@ -329,40 +327,18 @@ value class Http2StreamId(val raw: UInt) {
     val id: Int get() = (raw.toInt() and 0x7FFFFFFF)
 }
 
-@DispatchOn(Http2FrameType::class)
 @ProtocolMessage
-sealed interface Http2Frame {
-    @PacketType(0x0) @ProtocolMessage
-    data class Data<@Payload P>(
-        val flags: UByte,
-        val streamId: Http2StreamId,
-        @WireBytes(3) val length: Int,
-        @LengthFrom("length") val payload: P,
-    ) : Http2Frame
-
-    @PacketType(0x4) @ProtocolMessage
-    data class Settings(
-        val flags: UByte,
-        val streamId: Http2StreamId,
-    ) : Http2Frame
-
-    @PacketType(0x6) @ProtocolMessage
-    data class Ping(
-        val flags: UByte,
-        val streamId: Http2StreamId,
-        val opaqueData: Long,  // always 8 bytes
-    ) : Http2Frame
-
-    @PacketType(0x8) @ProtocolMessage
-    data class WindowUpdate(
-        val flags: UByte,
-        val streamId: Http2StreamId,
-        val windowSizeIncrement: UInt,
-    ) : Http2Frame
-}
+data class Http2FrameHeader(
+    @WireBytes(3) val length: Int,
+    val type: Http2FrameType,
+    val flags: UByte,
+    val streamId: Http2StreamId,
+)
 ```
 
-The 3-byte length field uses `@WireBytes(3)` — the codec reads exactly 3 bytes and assembles them into an `Int`. The reserved bit in the stream identifier is handled by the `Http2StreamId` value class — the codec reads 4 bytes, the `id` property masks off the MSB. Zero allocation, zero ambiguity.
+`@WireBytes(3)` reads exactly 3 bytes and assembles them into an `Int` — matching the RFC's 24-bit length field. The reserved bit in the stream identifier is handled by `Http2StreamId` — the codec reads 4 bytes, the `id` property masks off the MSB. Both value classes inline to their primitive type at runtime.
+
+The generated `Http2FrameHeaderCodec` gives you `sizeOf` → `SizeEstimate.Exact(9)`, batch-optimized read/write, and `peekFrameSize` → `PeekResult.Size(9)`. Frame type dispatch on the payload can use `@DispatchOn` with a data class discriminator (like the PNG example) or a simple `when (header.type)` — your choice based on how many frame types you need.
 
 ---
 
@@ -651,44 +627,17 @@ The `BufferFactory` abstraction means your library code works identically whethe
 
 ---
 
-## What You Get for Free
+## Summary: What Every Example Gets for Free
 
-Every example above generates all of this from the annotations alone:
+Every `@ProtocolMessage` data class above generates all of this at compile time — no runtime reflection, no manual wiring:
 
-| Capability | What it does | Why it matters |
-|---|---|---|
-| **`encode` / `decode`** | Batch-optimized read/write in field order | Consecutive fixed-size fields are grouped into bulk operations |
-| **`sizeOf`** | Returns `SizeEstimate.Exact(n)` for buffer pre-allocation | Zero wasted bytes, no growable buffer overhead |
-| **`peekFrameSize`** | Returns `PeekResult.Size(n)` by peeking at a stream | Frame detection without consuming bytes — the streaming loop writes itself |
-| **`testRoundTrip`** | One-call encode → decode → assert equality | Catches field-order mismatches, type mismatches, off-by-one errors |
-| **Sealed dispatch** | Reads discriminator, dispatches to correct variant | Exhaustive `when` in your code — compiler catches missing cases |
-| **Context forwarding** | `DecodeContext` / `EncodeContext` flows through the chain | Pass allocators, config, version info without global state |
+| Generated | What it does |
+|---|---|
+| `encode` / `decode` | Batch-optimized read/write — consecutive fixed-size fields grouped into bulk operations |
+| `sizeOf` → `SizeEstimate.Exact(n)` | Precise buffer pre-allocation, zero wasted bytes |
+| `peekFrameSize` → `PeekResult.Size(n)` | Frame detection by peeking a stream without consuming bytes |
+| `testRoundTrip` | One-call encode → decode → assert equality |
+| Sealed dispatch | Exhaustive `when` — compiler catches missing packet types |
+| Context forwarding | `DecodeContext` / `EncodeContext` flows through the entire codec chain |
 
-### Zero-copy
-
-The buffer layer delegates to platform-native memory on every target:
-
-| Platform | Direct buffer | What it wraps |
-|---|---|---|
-| JVM | `DirectJvmBuffer` | `java.nio.ByteBuffer` |
-| Android | `DirectJvmBuffer` | `java.nio.ByteBuffer` |
-| Apple | `MutableDataBuffer` | `NSMutableData` |
-| JS | `JsBuffer` | `ArrayBuffer` / `SharedArrayBuffer` |
-| WASM | `LinearBuffer` | Native WASM linear memory |
-| Linux | `NativeBuffer` | `malloc` / `free` |
-
-Codecs read/write directly on native memory. No intermediate `ByteArray` copies unless you explicitly ask for one.
-
-### Type safety
-
-- Sealed interfaces + `@PacketType` = exhaustive dispatch. Add a new packet type → the compiler tells you every `when` that needs updating.
-- `@WhenTrue` conditional fields are forced nullable — you can't forget the null check.
-- `@Payload` type parameters are generic — the codec handles framing, your lambda handles format. Wire format and payload format are decoupled at the type level.
-- `SizeEstimate` and `PeekResult` are sealed — exhaustive `when` forces you to handle both cases. No forgotten null checks.
-
-### Performance
-
-- **Batch optimization**: consecutive fixed-size fields are read in a single bulk operation
-- **Value classes**: bit-packed headers like `DnsFlags`, `ConnectFlags`, `WsHeaderByte1` inline to their primitive type at runtime — zero allocation
-- **SIMD-accelerated operations**: `contentEquals`, `mismatch`, `indexOf`, `xorMask` use platform-optimal implementations (SIMD on native, VarHandle on JVM 11+)
-- **Buffer pooling**: `BufferPool` eliminates GC pressure in hot paths
+All of this runs on native memory across 6 platforms (JVM, Android, Apple, JS, WASM, Linux) — zero-copy from network to codec to platform API, as shown in the [PNG decode showcase](#zero-copy-png-decode-with-platform-apis) above.
