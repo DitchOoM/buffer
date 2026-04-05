@@ -541,6 +541,50 @@ Tracing every copy in a typical `ByteArray`-based image loading path vs the buff
 
 The hidden cost is **copy 3** — crossing the managed/native boundary. `BitmapFactory.decodeByteArray()` can't pass a Java heap `byte[]` pointer to the native Skia decoder. The JNI bridge must copy the entire image to native memory first. On Apple, `NSData(bytes:length:)` from a Kotlin `ByteArray` copies managed bytes into a new `NSData` allocation.
 
+### Why libraries like Coil force copies by design
+
+Coil is built on OkHttp + okio. okio's `Buffer` is a linked list of pooled 8KB `byte[]` **Segments** — managed heap memory. This is an intentional design choice that optimizes for efficient streaming and segment reuse, but it means every path to a native decoder requires a managed→native copy:
+
+```
+Coil image loading path (Android):
+
+1. OkHttp reads network data → okio Segments (pooled byte[] on JVM heap)    ← copy 1
+2. Coil reads from BufferedSource → contiguous ByteArray                     ← copy 2 (scatter→gather)
+3. BitmapFactory.decodeByteArray() → JNI copies heap → native for Skia      ← copy 3
+4. Skia decodes from native memory → Bitmap pixels                           ← decode
+
+Even the disk cache path:
+1. Read cached file → okio Segments (managed heap)                           ← copy 1
+2. Segments → ByteArray or InputStream                                       ← copy 2
+3. BitmapFactory → JNI copies heap → native                                  ← copy 3
+```
+
+This isn't a bug — it's a consequence of okio's architecture. okio Segments are managed `byte[]` arrays. They can't be passed directly to native decoders because the JVM garbage collector can relocate them at any time. The JNI boundary requires either pinning (expensive, not available in all contexts) or copying.
+
+**The buffer approach avoids this entirely** because data starts in native memory and stays there:
+
+```
+buffer image loading path:
+
+1. Network I/O → DirectByteBuffer (native memory)                           ← copy 1 (kernel only)
+2. Codec parses PNG headers in-place                                         ← zero-copy
+3. BitmapFactory.decodeByteBuffer(directBuffer) → Skia reads native directly ← zero-copy
+4. Skia decodes → Bitmap pixels                                              ← decode
+```
+
+`DirectByteBuffer` has a stable native memory address that Skia can read without JNI copying. On Apple, `NSMutableData` is already native memory — `UIImage(data:)` reads it directly. On JS, `ArrayBuffer` is already the browser's native memory.
+
+### When does this matter?
+
+For a single profile picture, the extra copies are negligible. But for:
+- **Gallery scroll** — decoding 20+ images during a fling, each copy adds latency and GC pressure
+- **Camera preview processing** — 30fps × 5MB frames = 150MB/s of unnecessary copies
+- **Server-side thumbnailing** — thousands of images per second, copies dominate CPU time
+- **BLE image transfer** — constrained devices where every byte of memory matters
+- **Streaming video thumbnails** — continuous decode where GC pauses cause visible jank
+
+In these cases, eliminating 2 copies per image is the difference between smooth and janky.
+
 With buffer, the data **never leaves native memory**. It arrives in a `DirectByteBuffer` (JVM), `NSMutableData` (Apple), or `ArrayBuffer` (JS), the codec parses in-place, and the platform decoder reads from the same allocation. The only unavoidable copy is the kernel-to-userspace transfer that every networking stack does.
 
 ### Pool return for request-per-image workloads
