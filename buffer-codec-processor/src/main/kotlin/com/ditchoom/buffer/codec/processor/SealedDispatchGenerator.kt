@@ -581,19 +581,14 @@ class SealedDispatchGenerator(
                     .build(),
             )
             builder.addModifiers(KModifier.SUSPEND)
-            builder.returns(INT.copy(nullable = true))
         } else {
             builder.addParameter("baseOffset", INT)
             builder.addModifiers(KModifier.OVERRIDE)
-            builder.returns(PEEK_RESULT)
         }
+        builder.returns(PEEK_RESULT)
 
         val code = CodeBlock.builder()
-        if (suspending) {
-            code.addStatement("if (stream.available() < baseOffset + %L) return null", discriminatorSize)
-        } else {
-            code.addStatement("if (stream.available() < baseOffset + %L) return %T.NeedsMoreData", discriminatorSize, PEEK_RESULT)
-        }
+        code.addStatement("if (stream.available() < baseOffset + %L) return %T.NeedsMoreData", discriminatorSize, PEEK_RESULT)
 
         // Peek and extract the dispatch value
         if (dispatchOnInfo != null) {
@@ -630,31 +625,17 @@ class SealedDispatchGenerator(
         code.beginControlFlow("return when (type)")
         for (v in variants) {
             val variantCodecName = v.subclass.codecName()
-            if (suspending) {
-                code.addStatement(
-                    "%L -> %L.peekFrameSize(stream, baseOffset + %L)?.let { it + %L }",
-                    v.value,
-                    variantCodecName,
-                    discriminatorSize,
-                    discriminatorSize,
-                )
-            } else {
-                code.addStatement(
-                    "%L -> when (val r = %L.peekFrameSize(stream, baseOffset + %L)) { is %T.Size -> %T.Size(r.bytes + %L); else -> r }",
-                    v.value,
-                    variantCodecName,
-                    discriminatorSize,
-                    PEEK_RESULT,
-                    PEEK_RESULT,
-                    discriminatorSize,
-                )
-            }
+            code.addStatement(
+                "%L -> when (val r = %L.peekFrameSize(stream, baseOffset + %L)) { is %T.Size -> %T.Size(r.bytes + %L); else -> r }",
+                v.value,
+                variantCodecName,
+                discriminatorSize,
+                PEEK_RESULT,
+                PEEK_RESULT,
+                discriminatorSize,
+            )
         }
-        if (suspending) {
-            code.addStatement("else -> null")
-        } else {
-            code.addStatement("else -> %T.NeedsMoreData", PEEK_RESULT)
-        }
+        code.addStatement("else -> %T.NeedsMoreData", PEEK_RESULT)
         code.endControlFlow()
 
         builder.addCode(code.build())
