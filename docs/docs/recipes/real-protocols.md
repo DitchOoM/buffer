@@ -521,13 +521,27 @@ actual fun ReadBuffer.decodePlatformImage(): PlatformImage {
 
 ### Comparison: typical pipeline vs buffer
 
-| Step | Typical pipeline | buffer pipeline |
+Tracing every copy in a typical `ByteArray`-based image loading path vs the buffer path:
+
+| Step | Typical `ByteArray` pipeline | buffer pipeline |
 |---|---|---|
-| Network read | → internal buffer | → `DirectJvmBuffer` (native memory) |
-| Parse headers | copy to ByteArray, manual parsing | codec reads in-place (zero-copy) |
-| Validate | parse again or trust blindly | type-safe: `ihdr.width`, `ihdr.colorType` |
-| Decode pixels | `decodeByteArray(bytes)` (copy) | `decodeByteBuffer(buffer)` (zero-copy) |
-| **Total copies** | **2-3** | **0** |
+| Network → process | kernel buffer → DirectByteBuffer | kernel buffer → DirectByteBuffer |
+| | *copy 1: native → native* | *copy 1: native → native (unavoidable)* |
+| Read into library | DirectByteBuffer → `ByteArray` | codec reads in-place from DirectByteBuffer |
+| | *copy 2: native → managed heap* | *zero-copy* |
+| Parse headers | manual parsing on `ByteArray` | codec reads in-place |
+| | *no copy, but data is on the wrong side of the JNI boundary* | *zero-copy, data stays in native memory* |
+| Decode image (Android) | `BitmapFactory.decodeByteArray(bytes)` | `BitmapFactory.decodeByteBuffer(byteBuffer)` |
+| | *copy 3: JNI copies managed heap → native heap for Skia* | *zero-copy: Skia reads the DirectByteBuffer directly* |
+| Decode image (Apple) | `NSData(bytes:length:)` from Kotlin `ByteArray` | `buffer.toNativeData().nsData` |
+| | *copy 3: managed → NSData allocation* | *zero-copy: same NSMutableData the buffer already wraps* |
+| Decode image (JS) | `Uint8Array` from `ByteArray` | `buffer.toNativeData().arrayBuffer` |
+| | *copy 3: Kotlin heap → JS ArrayBuffer* | *zero-copy: same ArrayBuffer the buffer already wraps* |
+| **Total copies** | **3** (native→heap, heap→parse, heap→native for decoder) | **1** (kernel→DirectByteBuffer, unavoidable) |
+
+The hidden cost is **copy 3** — crossing the managed/native boundary. `BitmapFactory.decodeByteArray()` can't pass a Java heap `byte[]` pointer to the native Skia decoder. The JNI bridge must copy the entire image to native memory first. On Apple, `NSData(bytes:length:)` from a Kotlin `ByteArray` copies managed bytes into a new `NSData` allocation.
+
+With buffer, the data **never leaves native memory**. It arrives in a `DirectByteBuffer` (JVM), `NSMutableData` (Apple), or `ArrayBuffer` (JS), the codec parses in-place, and the platform decoder reads from the same allocation. The only unavoidable copy is the kernel-to-userspace transfer that every networking stack does.
 
 ### Pool return for request-per-image workloads
 
