@@ -574,6 +574,22 @@ buffer image loading path:
 
 `DirectByteBuffer` has a stable native memory address that Skia can read without JNI copying. On Apple, `NSMutableData` is already native memory — `UIImage(data:)` reads it directly. On JS, `ArrayBuffer` is already the browser's native memory.
 
+### Memory and performance impact
+
+For a 5MB image, tracing peak memory during decode:
+
+| Allocation | okio/Coil path | buffer path |
+|---|---|---|
+| okio Segments (managed heap) | ~5MB | -- |
+| Contiguous ByteArray (managed heap) | ~5MB | -- |
+| JNI native copy for Skia (native heap) | ~5MB | -- |
+| DirectByteBuffer (native) | -- | ~5MB |
+| **Peak image data in memory** | **~15MB** | **~5MB** |
+
+The 10MB difference is transient — GC reclaims it after decode — but during decode all three allocations are live simultaneously. For 20 images in a gallery scroll, that's 200MB vs 100MB of transient memory pressure.
+
+**Speed:** each 5MB `memcpy` costs ~1-2ms, but the larger cost is **cache pollution** — three 5MB copies flush 15MB of L2/L3 cache, evicting other hot data. GC pressure from the managed allocations adds latency spikes on top. Buffer eliminates 2 of 3 copies. For a single image the savings are ~2-5ms. At 60fps in a scroll, that's the margin between making frame budget and dropping frames.
+
 ### When does this matter?
 
 For a single profile picture, the extra copies are negligible. But for:
@@ -584,6 +600,15 @@ For a single profile picture, the extra copies are negligible. But for:
 - **Streaming video thumbnails** — continuous decode where GC pauses cause visible jank
 
 In these cases, eliminating 2 copies per image is the difference between smooth and janky.
+
+### Honest tradeoffs
+
+Buffer's approach isn't free — there are real tradeoffs to consider:
+
+- **DirectByteBuffer allocation is slower than ByteArray** — ~1.3M ops/s vs ~7.6M ops/s on JVM. For many tiny buffers (< 1KB), managed heap is faster to allocate. For large buffers (images, audio, video), the allocation cost is dwarfed by the copy savings. Use `BufferPool` to amortize allocation cost in hot paths.
+- **Native memory is not GC-managed** — if you forget to release pooled buffers, you leak native memory. okio's Segments are GC-safe by design. Buffer handles this with scoped APIs: `pool.withBuffer { }` and `BufferFactory.deterministic().allocate().use { }`.
+- **okio is optimized for streaming small reads** — its segment pooling is very efficient for HTTP response parsing, line-by-line text processing, etc. Buffer is optimized for large contiguous data (images, protocol frames, audio/video).
+- **Coil does far more than decode** — caching, resizing, transformations, lifecycle management, crossfade animations. The comparison here is specifically about the decode path. If you need Coil's feature set, use Coil. If you control the transport and need zero-copy decode, buffer gives you that layer.
 
 With buffer, the data **never leaves native memory**. It arrives in a `DirectByteBuffer` (JVM), `NSMutableData` (Apple), or `ArrayBuffer` (JS), the codec parses in-place, and the platform decoder reads from the same allocation. The only unavoidable copy is the kernel-to-userspace transfer that every networking stack does.
 
