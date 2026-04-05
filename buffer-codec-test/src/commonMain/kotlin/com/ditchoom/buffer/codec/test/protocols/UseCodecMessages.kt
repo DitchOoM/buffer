@@ -22,10 +22,16 @@ data class Rgb(
 
 /** Codec object for Rgb — 3 bytes on the wire. */
 object RgbCodec : Codec<Rgb> {
-    override fun decode(buffer: ReadBuffer, context: DecodeContext): Rgb =
-        Rgb(buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte())
+    override fun decode(
+        buffer: ReadBuffer,
+        context: DecodeContext,
+    ): Rgb = Rgb(buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte())
 
-    override fun encode(buffer: WriteBuffer, value: Rgb, context: EncodeContext) {
+    override fun encode(
+        buffer: WriteBuffer,
+        value: Rgb,
+        context: EncodeContext,
+    ) {
         buffer.writeUByte(value.r)
         buffer.writeUByte(value.g)
         buffer.writeUByte(value.b)
@@ -75,7 +81,10 @@ data object RgbOffsetKey : CodecContext.Key<Int>()
  * This proves that context actually flows through @UseCodec fields.
  */
 object ContextAwareRgbCodec : Codec<Rgb> {
-    override fun decode(buffer: ReadBuffer, context: DecodeContext): Rgb {
+    override fun decode(
+        buffer: ReadBuffer,
+        context: DecodeContext,
+    ): Rgb {
         val offset = context[RgbOffsetKey] ?: 0
         return Rgb(
             (buffer.readUnsignedByte().toInt() + offset).toUByte(),
@@ -84,7 +93,11 @@ object ContextAwareRgbCodec : Codec<Rgb> {
         )
     }
 
-    override fun encode(buffer: WriteBuffer, value: Rgb, context: EncodeContext) {
+    override fun encode(
+        buffer: WriteBuffer,
+        value: Rgb,
+        context: EncodeContext,
+    ) {
         val offset = context[RgbOffsetKey] ?: 0
         buffer.writeUByte((value.r.toInt() - offset).toUByte())
         buffer.writeUByte((value.g.toInt() - offset).toUByte())
