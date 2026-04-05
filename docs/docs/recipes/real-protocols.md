@@ -614,26 +614,40 @@ With buffer, the data **never leaves native memory**. It arrives in a `DirectByt
 
 ### Pool return for request-per-image workloads
 
-For high-throughput image processing (thumbnailing service, gallery scroll), pair with `BufferPool` to eliminate GC pressure:
+For high-throughput image processing (thumbnailing service, gallery scroll), compose a `BufferFactory` with pooling. Library code accepts `BufferFactory` as a parameter — it doesn't know or care whether pooling is active:
 
 ```kotlin
+// Compose once at the application level
 val pool = BufferPool.MultiThreaded(defaultBufferSize = 65_536)
+val factory = BufferFactory.Default.withPooling(pool)
 
-pool.withBuffer(imageSize) { buffer ->
-    // Network I/O fills the buffer
-    socket.read(buffer)
-    buffer.resetForRead()
+// Library code accepts BufferFactory — pooling is transparent
+class ImageDecoder(private val factory: BufferFactory = BufferFactory.Default) {
+    fun decode(imageBytes: Int): PlatformImage {
+        val buffer = factory.allocate(imageBytes)
+        try {
+            socket.read(buffer)
+            buffer.resetForRead()
 
-    // Parse PNG header — zero-copy
-    val ihdr = PngChunkCodec.decode(buffer) as PngChunk.Ihdr
+            // Parse PNG header — zero-copy
+            val ihdr = PngChunkCodec.decode(buffer) as PngChunk.Ihdr
+            println("${ihdr.width}x${ihdr.height}")
 
-    // Decode — zero-copy, platform-native
-    buffer.resetForRead()
-    val bitmap = buffer.decodePlatformImage()
+            // Decode — zero-copy, platform-native
+            buffer.resetForRead()
+            return buffer.decodePlatformImage()
+        } finally {
+            buffer.freeNativeMemory() // returns to pool if pooled, frees if not
+        }
+    }
+}
 
-    processBitmap(bitmap)
-} // buffer returned to pool here — no GC, no free(), just reuse
+// Caller controls allocation strategy
+val decoder = ImageDecoder(factory) // pooled — high throughput, no GC
+val decoder = ImageDecoder()        // default — simpler, GC-managed
 ```
+
+The `BufferFactory` abstraction means your library code works identically whether the caller uses pooling, managed memory, shared memory (Android IPC), or deterministic cleanup. The allocation strategy is a caller decision, not a library decision.
 
 ---
 
