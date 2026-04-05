@@ -39,7 +39,10 @@ import kotlin.test.assertTrue
  */
 class PeekFrameSizeRoundTripTest {
     /** Calls the sync [FrameDetector.peekFrameSize] and converts [PeekResult] to [Int?]. */
-    private fun FrameDetector.peekFrameSizeOrNull(stream: StreamProcessor, baseOffset: Int = 0): Int? =
+    private fun FrameDetector.peekFrameSizeOrNull(
+        stream: StreamProcessor,
+        baseOffset: Int = 0,
+    ): Int? =
         when (val result = peekFrameSize(stream, baseOffset)) {
             is PeekResult.Size -> result.bytes
             PeekResult.NeedsMoreData -> null

@@ -3,6 +3,7 @@ package com.ditchoom.buffer.codec.test
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.codec.SizeEstimate
 import com.ditchoom.buffer.codec.test.protocols.WsCloseBody
 import com.ditchoom.buffer.codec.test.protocols.WsCloseBodyCodec
 import com.ditchoom.buffer.codec.test.protocols.WsCloseCode
@@ -15,7 +16,6 @@ import com.ditchoom.buffer.codec.test.protocols.WsMaskedFrameCodec
 import com.ditchoom.buffer.codec.test.protocols.WsMaskingKey
 import com.ditchoom.buffer.codec.test.protocols.WsUnmaskedFrame
 import com.ditchoom.buffer.codec.test.protocols.WsUnmaskedFrameCodec
-import com.ditchoom.buffer.codec.SizeEstimate
 import com.ditchoom.buffer.codec.testRoundTrip
 import kotlin.test.Test
 import kotlin.test.assertEquals
