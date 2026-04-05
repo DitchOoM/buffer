@@ -9,8 +9,11 @@ fun <T> Codec<T>.encodeToBuffer(
     factory: BufferFactory = BufferFactory.Default,
     context: EncodeContext = EncodeContext.Empty,
 ): ReadBuffer {
-    val size = sizeOf(value)
-    val bufferSize = size ?: 1024
+    val bufferSize =
+        when (val estimate = sizeOf(value)) {
+            is SizeEstimate.Exact -> estimate.bytes
+            SizeEstimate.UnableToPrecalculate -> 1024
+        }
     val buffer = factory.allocate(bufferSize)
     encode(buffer, value, context)
     val bytesWritten = buffer.position()

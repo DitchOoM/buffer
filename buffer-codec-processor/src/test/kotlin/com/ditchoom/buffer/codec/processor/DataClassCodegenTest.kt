@@ -1136,4 +1136,64 @@ class DataClassCodegenTest {
         val result = compileWithKsp(source)
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
     }
+
+    // ── Bug fix tests ──
+
+    @Test
+    fun `payload only class generates empty context object and compiles`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.Payload
+            import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+
+            @ProtocolMessage
+            data class BinaryData<@Payload D>(
+                @LengthPrefixed val data: D,
+            )
+            """,
+            )
+        val result = compileWithKspAndPayloadStubs(source)
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    @Test
+    fun `DispatchOn sealed with mixed payload and non-payload variants compiles`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.*
+
+            @JvmInline
+            @ProtocolMessage
+            value class MyHeader(val raw: UByte) {
+                @DispatchValue
+                val packetType: Int get() = raw.toInt() and 0x0F
+            }
+
+            @DispatchOn(MyHeader::class)
+            @ProtocolMessage
+            sealed interface MyProtocol {
+                @PacketType(value = 1, wire = 0x01)
+                @ProtocolMessage
+                @JvmInline
+                value class Simple(val x: UInt) : MyProtocol
+
+                @PacketType(value = 2, wire = 0x02)
+                @ProtocolMessage
+                data class WithPayload<@Payload D>(
+                    val len: UShort,
+                    @LengthFrom("len") val data: D,
+                ) : MyProtocol
+            }
+            """,
+            )
+        val result = compileWithKspAndPayloadStubs(source)
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
 }

@@ -1,9 +1,26 @@
 package com.ditchoom.buffer.codec.processor
 
 import com.google.devtools.ksp.symbol.KSClassDeclaration
+import com.squareup.kotlinpoet.AnnotationSpec
 import com.squareup.kotlinpoet.ClassName
+import com.squareup.kotlinpoet.FileSpec
 
 internal fun capitalizeFirst(s: String): String = s.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+
+/** Creates a [FileSpec.Builder] with `@file:Suppress("ktlint")` and 4-space indentation. */
+internal fun fileSpecBuilder(
+    packageName: String,
+    fileName: String,
+): FileSpec.Builder =
+    FileSpec
+        .builder(packageName, fileName)
+        .addAnnotation(
+            AnnotationSpec
+                .builder(Suppress::class)
+                .useSiteTarget(AnnotationSpec.UseSiteTarget.FILE)
+                .addMember("%S", "ktlint")
+                .build(),
+        ).indent("    ")
 
 /**
  * Prepends "value." to the first path segment of a condition expression,

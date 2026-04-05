@@ -3,6 +3,7 @@ package com.ditchoom.buffer.codec.test
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.codec.SizeEstimate
 import com.ditchoom.buffer.codec.test.protocols.WsCloseBody
 import com.ditchoom.buffer.codec.test.protocols.WsCloseBodyCodec
 import com.ditchoom.buffer.codec.test.protocols.WsCloseCode
@@ -54,7 +55,7 @@ class WebSocketFrameRoundTripTest {
     @Test
     fun `frame header sizeOf is 2`() {
         val header = WsFrameHeader(WsHeaderByte1(0u), WsHeaderByte2(0u))
-        assertEquals(2, WsFrameHeaderCodec.sizeOf(header))
+        assertEquals(SizeEstimate.Exact(2), WsFrameHeaderCodec.sizeOf(header))
     }
 
     @Test

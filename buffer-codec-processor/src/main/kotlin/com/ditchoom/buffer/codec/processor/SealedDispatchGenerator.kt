@@ -6,7 +6,6 @@ import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
-import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
 import com.squareup.kotlinpoet.INT
 import com.squareup.kotlinpoet.KModifier
@@ -210,8 +209,7 @@ class SealedDispatchGenerator(
         }
 
         val fileSpec =
-            FileSpec
-                .builder(packageName, codecName)
+            fileSpecBuilder(packageName, codecName)
                 .addType(objectBuilder.build())
                 .build()
 
@@ -225,17 +223,7 @@ class SealedDispatchGenerator(
         dispatchOnInfo: DispatchOnInfo? = null,
         skipWireWrite: Boolean = false,
     ): DispatchResult {
-        // Context-free decode delegates to context overload
-        val decodeFun =
-            FunSpec
-                .builder("decode")
-                .addModifiers(KModifier.OVERRIDE)
-                .addParameter("buffer", READ_BUFFER)
-                .returns(interfaceTypeName)
-                .addStatement("return decode(buffer, %T.Empty)", DECODE_CONTEXT)
-                .build()
-
-        // Context-aware decode forwards to sub-codecs
+        // decode(buffer, context) — Codec<T> abstract method
         val decodeCtxBody = CodeBlock.builder()
         if (dispatchOnInfo != null) {
             decodeCtxBody.addStatement(
@@ -271,17 +259,7 @@ class SealedDispatchGenerator(
                 .addCode(decodeCtxBody.build())
                 .build()
 
-        // Context-free encode delegates to context overload
-        val encodeFun =
-            FunSpec
-                .builder("encode")
-                .addModifiers(KModifier.OVERRIDE)
-                .addParameter("buffer", WRITE_BUFFER)
-                .addParameter("value", interfaceTypeName)
-                .addStatement("encode(buffer, value, %T.Empty)", ENCODE_CONTEXT)
-                .build()
-
-        // Context-aware encode forwards to sub-codecs
+        // encode(buffer, value, context) — Codec<T> abstract method
         val encodeCtxBody = CodeBlock.builder().beginControlFlow("when (value)")
         for (v in variants) {
             encodeCtxBody.beginControlFlow("is %T ->", v.subclass.toPoetClassName())
@@ -303,7 +281,7 @@ class SealedDispatchGenerator(
                 .addCode(encodeCtxBody.build())
                 .build()
 
-        return DispatchResult(listOf(decodeFun, decodeCtxFun, encodeFun, encodeCtxFun), true)
+        return DispatchResult(listOf(decodeCtxFun, encodeCtxFun), true)
     }
 
     /**
@@ -462,16 +440,6 @@ class SealedDispatchGenerator(
 
         // ── Context-based Codec<T> overloads (Convention 2: enables nesting) ──
 
-        // decode(buffer) delegates to decode(buffer, context) with Empty
-        val decodeNoArgFun =
-            FunSpec
-                .builder("decode")
-                .addModifiers(KModifier.OVERRIDE)
-                .addParameter("buffer", READ_BUFFER)
-                .returns(interfaceTypeName)
-                .addStatement("return decode(buffer, %T.Empty)", DECODE_CONTEXT)
-                .build()
-
         // decode(buffer, context) reads lambdas from context for payload variants
         val decodeCtxBody = CodeBlock.builder()
         if (dispatchOnInfo != null) {
@@ -510,16 +478,6 @@ class SealedDispatchGenerator(
                 .addCode(decodeCtxBody.build())
                 .build()
 
-        // encode(buffer, value) delegates to encode(buffer, value, context) with Empty
-        val encodeNoArgFun =
-            FunSpec
-                .builder("encode")
-                .addModifiers(KModifier.OVERRIDE)
-                .addParameter("buffer", WRITE_BUFFER)
-                .addParameter("value", interfaceTypeName)
-                .addStatement("encode(buffer, value, %T.Empty)", ENCODE_CONTEXT)
-                .build()
-
         // encode(buffer, value, context) reads lambdas from context for payload variants
         val encodeCtxBody = CodeBlock.builder().beginControlFlow("when (value)")
         for (v in variants) {
@@ -556,9 +514,7 @@ class SealedDispatchGenerator(
             listOf(
                 decodeBuilder.build(), // Convention 1: explicit lambdas
                 encodeBuilder.build(),
-                decodeNoArgFun, // Codec<T> interface
                 decodeCtxFun, // Codec<T> context overload
-                encodeNoArgFun,
                 encodeCtxFun,
             ),
             true, // NOW implements Codec<T>
@@ -616,17 +572,23 @@ class SealedDispatchGenerator(
             FunSpec
                 .builder("peekFrameSize")
                 .addParameter("stream", streamType)
-                .addParameter(
-                    com.squareup.kotlinpoet.ParameterSpec
-                        .builder("baseOffset", INT)
-                        .defaultValue("0")
-                        .build(),
-                ).returns(INT.copy(nullable = true))
 
-        if (suspending) builder.addModifiers(KModifier.SUSPEND)
+        if (suspending) {
+            builder.addParameter(
+                com.squareup.kotlinpoet.ParameterSpec
+                    .builder("baseOffset", INT)
+                    .defaultValue("0")
+                    .build(),
+            )
+            builder.addModifiers(KModifier.SUSPEND)
+        } else {
+            builder.addParameter("baseOffset", INT)
+            builder.addModifiers(KModifier.OVERRIDE)
+        }
+        builder.returns(PEEK_RESULT)
 
         val code = CodeBlock.builder()
-        code.addStatement("if (stream.available() < baseOffset + %L) return null", discriminatorSize)
+        code.addStatement("if (stream.available() < baseOffset + %L) return %T.NeedsMoreData", discriminatorSize, PEEK_RESULT)
 
         // Peek and extract the dispatch value
         if (dispatchOnInfo != null) {
@@ -664,14 +626,16 @@ class SealedDispatchGenerator(
         for (v in variants) {
             val variantCodecName = v.subclass.codecName()
             code.addStatement(
-                "%L -> %L.peekFrameSize(stream, baseOffset + %L)?.let { it + %L }",
+                "%L -> when (val r = %L.peekFrameSize(stream, baseOffset + %L)) { is %T.Size -> %T.Size(r.bytes + %L); else -> r }",
                 v.value,
                 variantCodecName,
                 discriminatorSize,
+                PEEK_RESULT,
+                PEEK_RESULT,
                 discriminatorSize,
             )
         }
-        code.addStatement("else -> null")
+        code.addStatement("else -> %T.NeedsMoreData", PEEK_RESULT)
         code.endControlFlow()
 
         builder.addCode(code.build())

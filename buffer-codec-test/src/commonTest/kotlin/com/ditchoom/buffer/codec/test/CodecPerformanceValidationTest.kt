@@ -4,6 +4,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.SizeEstimate
 import com.ditchoom.buffer.codec.test.protocols.AllTypesMessage
 import com.ditchoom.buffer.codec.test.protocols.AllTypesMessageCodec
 import com.ditchoom.buffer.codec.test.protocols.ConnAckFlags
@@ -85,25 +86,25 @@ class CodecPerformanceValidationTest {
                 nsCount = 0u,
                 arCount = 0u,
             )
-        assertEquals(12, DnsHeaderCodec.sizeOf(header))
+        assertEquals(SizeEstimate.Exact(12), DnsHeaderCodec.sizeOf(header))
     }
 
     @Test
     fun `connack sizeOf is 2`() {
         val connack = MqttPacketConnAck(ConnAckFlags(0u), ConnectReturnCode(0u))
-        assertEquals(2, MqttPacketConnAckCodec.sizeOf(connack))
+        assertEquals(SizeEstimate.Exact(2), MqttPacketConnAckCodec.sizeOf(connack))
     }
 
     @Test
     fun `puback sizeOf is 2`() {
         val puback = MqttPacketPubAck(PacketId(1u))
-        assertEquals(2, MqttPacketPubAckCodec.sizeOf(puback))
+        assertEquals(SizeEstimate.Exact(2), MqttPacketPubAckCodec.sizeOf(puback))
     }
 
     @Test
     fun `ws frame header sizeOf is 2`() {
         val header = WsFrameHeader(WsHeaderByte1(0u), WsHeaderByte2(0u))
-        assertEquals(2, WsFrameHeaderCodec.sizeOf(header))
+        assertEquals(SizeEstimate.Exact(2), WsFrameHeaderCodec.sizeOf(header))
     }
 
     @Test
@@ -143,6 +144,6 @@ class CodecPerformanceValidationTest {
         val bytesWritten = buffer.remaining()
         codec.decode(buffer)
         assertEquals(0, buffer.remaining(), "Not all bytes consumed for ${value::class.simpleName}")
-        assertEquals(codec.sizeOf(value), bytesWritten, "sizeOf mismatch for ${value::class.simpleName}")
+        assertEquals(SizeEstimate.Exact(bytesWritten), codec.sizeOf(value), "sizeOf mismatch for ${value::class.simpleName}")
     }
 }
