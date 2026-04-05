@@ -38,11 +38,6 @@ private class MemoryStreamMux<T> : StreamMux<T> {
         return Receiver { ch.receiveAsFlow() }
     }
 
-    override suspend fun close() {
-        bidiQueue.close()
-        uniQueue.close()
-    }
-
     private class MemoryConnection<T>(
         override val id: Long,
         private val outbound: Channel<T>,
@@ -71,7 +66,7 @@ class StreamMuxTest {
             assertEquals("hello", server.receive().first())
             client.close()
             server.close()
-            mux.close()
+            // mux has no close() — lifecycle is owned by the transport scope
         }
 
     @Test
@@ -83,7 +78,7 @@ class StreamMuxTest {
             val receiver = mux.acceptUnidirectional()
             sender.send("fire-and-forget")
             assertEquals("fire-and-forget", receiver.receive().first())
-            mux.close()
+            // mux has no close() — lifecycle is owned by the transport scope
         }
 
     @Test
@@ -94,6 +89,6 @@ class StreamMuxTest {
             val conn1 = mux.openBidirectional()
             assertEquals(0L, conn0.id)
             assertEquals(1L, conn1.id)
-            mux.close()
+            // mux has no close() — lifecycle is owned by the transport scope
         }
 }

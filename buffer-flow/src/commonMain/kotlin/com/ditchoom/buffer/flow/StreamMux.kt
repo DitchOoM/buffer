@@ -14,6 +14,12 @@ package com.ditchoom.buffer.flow
  *
  * Transports without multiplexing (TCP, WebSocket) don't implement this --
  * they provide a single [Connection] directly. No fake capabilities.
+ *
+ * **Lifecycle:** StreamMux does not own the connection lifecycle -- the transport
+ * scope does. When the transport scope ends (block returns or scope is cancelled),
+ * all streams are force-closed automatically via structured concurrency. Graceful
+ * draining is achieved by stopping new stream launches and letting existing child
+ * coroutines complete -- no explicit drain API needed.
  */
 interface StreamMux<T> {
     /** Opens a client-initiated bidirectional stream. */
@@ -27,6 +33,4 @@ interface StreamMux<T> {
 
     /** Accepts a peer-initiated unidirectional (receive-only) stream. Suspends until one is opened by the peer. */
     suspend fun acceptUnidirectional(): Receiver<T>
-
-    suspend fun close()
 }
