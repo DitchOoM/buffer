@@ -17,7 +17,9 @@ package com.ditchoom.buffer.flow
  * - `ReconnectingConnection` (socket library): auto-reconnection wrapper
  * - In-memory pairs for testing
  */
-interface Connection<T> : Sender<T>, Receiver<T> {
+interface Connection<T> :
+    Sender<T>,
+    Receiver<T> {
     /**
      * Opaque identifier for this connection/stream.
      *

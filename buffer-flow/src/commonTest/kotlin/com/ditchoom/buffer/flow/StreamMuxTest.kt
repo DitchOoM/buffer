@@ -49,7 +49,9 @@ private class MemoryStreamMux<T> : StreamMux<T> {
         private val inbound: Channel<T>,
     ) : Connection<T> {
         override suspend fun send(message: T) = outbound.send(message)
+
         override fun receive(): Flow<T> = inbound.receiveAsFlow()
+
         override suspend fun close() {
             outbound.close()
             inbound.close()
@@ -59,36 +61,39 @@ private class MemoryStreamMux<T> : StreamMux<T> {
 
 class StreamMuxTest {
     @Test
-    fun openBidirectionalReturnsConnection() = runTest {
-        val mux = MemoryStreamMux<String>()
-        val client = mux.openBidirectional()
-        assertIs<Connection<String>>(client)
-        val server = mux.acceptBidirectional()
-        client.send("hello")
-        assertEquals("hello", server.receive().first())
-        client.close()
-        server.close()
-        mux.close()
-    }
+    fun openBidirectionalReturnsConnection() =
+        runTest {
+            val mux = MemoryStreamMux<String>()
+            val client = mux.openBidirectional()
+            assertIs<Connection<String>>(client)
+            val server = mux.acceptBidirectional()
+            client.send("hello")
+            assertEquals("hello", server.receive().first())
+            client.close()
+            server.close()
+            mux.close()
+        }
 
     @Test
-    fun openUnidirectionalReturnsSender() = runTest {
-        val mux = MemoryStreamMux<String>()
-        val sender = mux.openUnidirectional()
-        assertIs<Sender<String>>(sender)
-        val receiver = mux.acceptUnidirectional()
-        sender.send("fire-and-forget")
-        assertEquals("fire-and-forget", receiver.receive().first())
-        mux.close()
-    }
+    fun openUnidirectionalReturnsSender() =
+        runTest {
+            val mux = MemoryStreamMux<String>()
+            val sender = mux.openUnidirectional()
+            assertIs<Sender<String>>(sender)
+            val receiver = mux.acceptUnidirectional()
+            sender.send("fire-and-forget")
+            assertEquals("fire-and-forget", receiver.receive().first())
+            mux.close()
+        }
 
     @Test
-    fun streamIdsAreSequential() = runTest {
-        val mux = MemoryStreamMux<Int>()
-        val conn0 = mux.openBidirectional()
-        val conn1 = mux.openBidirectional()
-        assertEquals(0L, conn0.id)
-        assertEquals(1L, conn1.id)
-        mux.close()
-    }
+    fun streamIdsAreSequential() =
+        runTest {
+            val mux = MemoryStreamMux<Int>()
+            val conn0 = mux.openBidirectional()
+            val conn1 = mux.openBidirectional()
+            assertEquals(0L, conn0.id)
+            assertEquals(1L, conn1.id)
+            mux.close()
+        }
 }

@@ -9,8 +9,8 @@ import com.ditchoom.buffer.readVariableByteInteger
 import com.ditchoom.buffer.writeLengthPrefixedUtf8String
 import com.ditchoom.buffer.writeVariableByteInteger
 import kotlin.test.Test
-import kotlin.test.assertIs
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 
 // Simple two-field struct: UShort id + Int value = 6 bytes
 data class SimpleStruct(
@@ -19,10 +19,16 @@ data class SimpleStruct(
 )
 
 object SimpleStructCodec : Codec<SimpleStruct> {
-    override fun decode(buffer: ReadBuffer, context: DecodeContext): SimpleStruct =
-        SimpleStruct(buffer.readUnsignedShort(), buffer.readInt())
+    override fun decode(
+        buffer: ReadBuffer,
+        context: DecodeContext,
+    ): SimpleStruct = SimpleStruct(buffer.readUnsignedShort(), buffer.readInt())
 
-    override fun encode(buffer: WriteBuffer, value: SimpleStruct, context: EncodeContext) {
+    override fun encode(
+        buffer: WriteBuffer,
+        value: SimpleStruct,
+        context: EncodeContext,
+    ) {
         buffer.writeUShort(value.id)
         buffer.writeInt(value.value)
     }
@@ -37,10 +43,16 @@ data class VariableLengthStruct(
 )
 
 object VariableLengthStructCodec : Codec<VariableLengthStruct> {
-    override fun decode(buffer: ReadBuffer, context: DecodeContext): VariableLengthStruct =
-        VariableLengthStruct(buffer.readByte(), buffer.readVariableByteInteger())
+    override fun decode(
+        buffer: ReadBuffer,
+        context: DecodeContext,
+    ): VariableLengthStruct = VariableLengthStruct(buffer.readByte(), buffer.readVariableByteInteger())
 
-    override fun encode(buffer: WriteBuffer, value: VariableLengthStruct, context: EncodeContext) {
+    override fun encode(
+        buffer: WriteBuffer,
+        value: VariableLengthStruct,
+        context: EncodeContext,
+    ) {
         buffer.writeByte(value.tag)
         buffer.writeVariableByteInteger(value.length)
     }
@@ -55,17 +67,22 @@ data class LengthPrefixedStruct(
 )
 
 object LengthPrefixedStructCodec : Codec<LengthPrefixedStruct> {
-    override fun decode(buffer: ReadBuffer, context: DecodeContext): LengthPrefixedStruct =
-        LengthPrefixedStruct(buffer.readUnsignedByte(), buffer.readLengthPrefixedUtf8String().second)
+    override fun decode(
+        buffer: ReadBuffer,
+        context: DecodeContext,
+    ): LengthPrefixedStruct = LengthPrefixedStruct(buffer.readUnsignedByte(), buffer.readLengthPrefixedUtf8String().second)
 
-    override fun encode(buffer: WriteBuffer, value: LengthPrefixedStruct, context: EncodeContext) {
+    override fun encode(
+        buffer: WriteBuffer,
+        value: LengthPrefixedStruct,
+        context: EncodeContext,
+    ) {
         buffer.writeUByte(value.type)
         buffer.writeLengthPrefixedUtf8String(value.name)
     }
 
     // 1 byte for type + 2 bytes for length prefix + string byte length
-    override fun sizeOf(value: LengthPrefixedStruct): SizeEstimate =
-        SizeEstimate.Exact(1 + 2 + value.name.encodeToByteArray().size)
+    override fun sizeOf(value: LengthPrefixedStruct): SizeEstimate = SizeEstimate.Exact(1 + 2 + value.name.encodeToByteArray().size)
 }
 
 class CodecTest {

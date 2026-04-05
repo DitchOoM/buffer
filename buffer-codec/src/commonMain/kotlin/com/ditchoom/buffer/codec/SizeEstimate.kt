@@ -11,7 +11,9 @@ import kotlin.jvm.JvmInline
 sealed interface SizeEstimate {
     /** Exact encoded size in bytes. Enables precise buffer allocation. */
     @JvmInline
-    value class Exact(val bytes: Int) : SizeEstimate
+    value class Exact(
+        val bytes: Int,
+    ) : SizeEstimate
 
     /** Cannot determine size without encoding. Use a default or growable buffer. */
     data object UnableToPrecalculate : SizeEstimate

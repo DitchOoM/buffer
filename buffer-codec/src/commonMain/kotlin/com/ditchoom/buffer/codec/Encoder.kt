@@ -12,7 +12,10 @@ interface Encoder<in T> {
     /**
      * Encodes [value] to [buffer] at the current position.
      */
-    fun encode(buffer: WriteBuffer, value: T)
+    fun encode(
+        buffer: WriteBuffer,
+        value: T,
+    )
 
     /**
      * Estimates the encoded size of [value] for buffer pre-allocation.

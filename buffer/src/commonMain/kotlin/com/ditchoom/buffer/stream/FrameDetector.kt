@@ -11,7 +11,9 @@ import kotlin.jvm.JvmInline
 sealed interface PeekResult {
     /** Frame boundary found. [bytes] is the total frame size including any headers. */
     @JvmInline
-    value class Size(val bytes: Int) : PeekResult
+    value class Size(
+        val bytes: Int,
+    ) : PeekResult
 
     /** Not enough data buffered to determine the frame boundary. Try again after more data arrives. */
     data object NeedsMoreData : PeekResult
@@ -33,5 +35,8 @@ fun interface FrameDetector {
      * @return [PeekResult.Size] with the total frame size, or [PeekResult.NeedsMoreData]
      *         if not enough bytes are buffered to determine the boundary
      */
-    fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult
+    fun peekFrameSize(
+        stream: StreamProcessor,
+        baseOffset: Int,
+    ): PeekResult
 }

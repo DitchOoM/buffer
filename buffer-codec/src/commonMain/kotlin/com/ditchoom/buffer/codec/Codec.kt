@@ -19,23 +19,39 @@ import com.ditchoom.buffer.stream.StreamProcessor
  *
  * Simple codecs that don't use context just ignore the context parameter.
  */
-interface Codec<T> : Encoder<T>, Decoder<T>, FrameDetector {
+interface Codec<T> :
+    Encoder<T>,
+    Decoder<T>,
+    FrameDetector {
     /**
      * Decodes a value from [buffer] with runtime [context].
      */
-    fun decode(buffer: ReadBuffer, context: DecodeContext): T
+    fun decode(
+        buffer: ReadBuffer,
+        context: DecodeContext,
+    ): T
 
     /**
      * Encodes [value] to [buffer] with runtime [context].
      */
-    fun encode(buffer: WriteBuffer, value: T, context: EncodeContext)
+    fun encode(
+        buffer: WriteBuffer,
+        value: T,
+        context: EncodeContext,
+    )
 
     // Context-free overloads delegate to context versions
     override fun decode(buffer: ReadBuffer): T = decode(buffer, DecodeContext.Empty)
 
-    override fun encode(buffer: WriteBuffer, value: T) = encode(buffer, value, EncodeContext.Empty)
+    override fun encode(
+        buffer: WriteBuffer,
+        value: T,
+    ) = encode(buffer, value, EncodeContext.Empty)
 
     override fun sizeOf(value: T): SizeEstimate = SizeEstimate.UnableToPrecalculate
 
-    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NeedsMoreData
+    override fun peekFrameSize(
+        stream: StreamProcessor,
+        baseOffset: Int,
+    ): PeekResult = PeekResult.NeedsMoreData
 }

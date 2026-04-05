@@ -25,12 +25,13 @@ class InterfaceSplitTest {
     @Test
     fun sizeEstimateExhaustiveWhen() {
         val estimates: List<SizeEstimate> = listOf(SizeEstimate.Exact(42), SizeEstimate.UnableToPrecalculate)
-        val results = estimates.map { est ->
-            when (est) {
-                is SizeEstimate.Exact -> est.bytes
-                SizeEstimate.UnableToPrecalculate -> -1
+        val results =
+            estimates.map { est ->
+                when (est) {
+                    is SizeEstimate.Exact -> est.bytes
+                    SizeEstimate.UnableToPrecalculate -> -1
+                }
             }
-        }
         assertEquals(listOf(42, -1), results)
     }
 
@@ -49,23 +50,31 @@ class InterfaceSplitTest {
 
     @Test
     fun encoderSizeOfDefaultsToUnableToPrecalculate() {
-        val encoder = object : Encoder<Int> {
-            override fun encode(buffer: WriteBuffer, value: Int) {
-                buffer.writeInt(value)
+        val encoder =
+            object : Encoder<Int> {
+                override fun encode(
+                    buffer: WriteBuffer,
+                    value: Int,
+                ) {
+                    buffer.writeInt(value)
+                }
             }
-        }
         assertIs<SizeEstimate.UnableToPrecalculate>(encoder.sizeOf(42))
     }
 
     @Test
     fun encoderSizeOfCanBeOverridden() {
-        val encoder = object : Encoder<Int> {
-            override fun encode(buffer: WriteBuffer, value: Int) {
-                buffer.writeInt(value)
-            }
+        val encoder =
+            object : Encoder<Int> {
+                override fun encode(
+                    buffer: WriteBuffer,
+                    value: Int,
+                ) {
+                    buffer.writeInt(value)
+                }
 
-            override fun sizeOf(value: Int): SizeEstimate = SizeEstimate.Exact(4)
-        }
+                override fun sizeOf(value: Int): SizeEstimate = SizeEstimate.Exact(4)
+            }
         val estimate = encoder.sizeOf(42)
         assertIs<SizeEstimate.Exact>(estimate)
         assertEquals(4, estimate.bytes)
@@ -74,9 +83,16 @@ class InterfaceSplitTest {
     // ── Codec: context is THE abstract method ──
 
     private object IntCodec : Codec<Int> {
-        override fun decode(buffer: ReadBuffer, context: DecodeContext): Int = buffer.readInt()
+        override fun decode(
+            buffer: ReadBuffer,
+            context: DecodeContext,
+        ): Int = buffer.readInt()
 
-        override fun encode(buffer: WriteBuffer, value: Int, context: EncodeContext) {
+        override fun encode(
+            buffer: WriteBuffer,
+            value: Int,
+            context: EncodeContext,
+        ) {
             buffer.writeInt(value)
         }
 
@@ -128,6 +144,7 @@ class InterfaceSplitTest {
 
     private fun fakeStreamProcessor(): com.ditchoom.buffer.stream.StreamProcessor =
         com.ditchoom.buffer.pool.withPool(defaultBufferSize = 16) { pool ->
-            com.ditchoom.buffer.stream.StreamProcessor.create(pool)
+            com.ditchoom.buffer.stream.StreamProcessor
+                .create(pool)
         }
 }

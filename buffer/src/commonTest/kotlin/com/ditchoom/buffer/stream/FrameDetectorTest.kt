@@ -17,12 +17,13 @@ class FrameDetectorTest {
     @Test
     fun peekResultExhaustiveWhen() {
         val results = listOf(PeekResult.Size(10), PeekResult.NeedsMoreData)
-        val descriptions = results.map { result ->
-            when (result) {
-                is PeekResult.Size -> "size:${result.bytes}"
-                PeekResult.NeedsMoreData -> "needsMore"
+        val descriptions =
+            results.map { result ->
+                when (result) {
+                    is PeekResult.Size -> "size:${result.bytes}"
+                    PeekResult.NeedsMoreData -> "needsMore"
+                }
             }
-        }
         assertEquals(listOf("size:10", "needsMore"), descriptions)
     }
 
@@ -40,13 +41,14 @@ class FrameDetectorTest {
         withPool(defaultBufferSize = 64) { pool ->
             val processor = StreamProcessor.create(pool)
             // Empty stream — not enough data
-            val detector = FrameDetector { stream, baseOffset ->
-                if (stream.available() < 4) {
-                    PeekResult.NeedsMoreData
-                } else {
-                    PeekResult.Size(stream.peekInt(baseOffset))
+            val detector =
+                FrameDetector { stream, baseOffset ->
+                    if (stream.available() < 4) {
+                        PeekResult.NeedsMoreData
+                    } else {
+                        PeekResult.Size(stream.peekInt(baseOffset))
+                    }
                 }
-            }
             assertEquals(PeekResult.NeedsMoreData, detector.peekFrameSize(processor, 0))
         }
 
@@ -60,13 +62,14 @@ class FrameDetectorTest {
             buf.resetForRead()
             processor.append(buf)
 
-            val detector = FrameDetector { stream, baseOffset ->
-                if (stream.available() < 4) {
-                    PeekResult.NeedsMoreData
-                } else {
-                    PeekResult.Size(stream.peekInt(baseOffset))
+            val detector =
+                FrameDetector { stream, baseOffset ->
+                    if (stream.available() < 4) {
+                        PeekResult.NeedsMoreData
+                    } else {
+                        PeekResult.Size(stream.peekInt(baseOffset))
+                    }
                 }
-            }
             val result = detector.peekFrameSize(processor, 0)
             assertIs<PeekResult.Size>(result)
             assertEquals(20, result.bytes)
