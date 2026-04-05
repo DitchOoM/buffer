@@ -286,6 +286,274 @@ This is 14 lines for one of the most complex packet types in MQTT. The generated
 
 ---
 
+## HTTP/2 Frame (RFC 7540 &sect;4.1)
+
+Every HTTP/2 frame starts with a 9-byte header. The length field is 3 bytes (`@WireBytes(3)`), and the frame type byte dispatches to the correct payload structure:
+
+```
++-----------------------------------------------+
+|                 Length (24)                     |
++---------------+---------------+---------------+
+|   Type (8)    |   Flags (8)   |
++-+-------------+---------------+---------------+
+|R|                 Stream Identifier (31)       |
++-+---------------------------------------------+
+|                 Frame Payload (0...)          ...
++-----------------------------------------------+
+```
+
+**The implementation:**
+
+```kotlin
+@JvmInline
+@ProtocolMessage
+value class Http2FrameType(val raw: UByte) {
+    @DispatchValue
+    val type: Int get() = raw.toInt()
+
+    companion object {
+        val DATA = Http2FrameType(0x0u)
+        val HEADERS = Http2FrameType(0x1u)
+        val PRIORITY = Http2FrameType(0x2u)
+        val RST_STREAM = Http2FrameType(0x3u)
+        val SETTINGS = Http2FrameType(0x4u)
+        val PING = Http2FrameType(0x6u)
+        val GOAWAY = Http2FrameType(0x7u)
+        val WINDOW_UPDATE = Http2FrameType(0x8u)
+    }
+}
+
+@JvmInline
+value class Http2StreamId(val raw: UInt) {
+    /** Stream ID is 31 bits — the reserved bit (MSB) is masked off. */
+    val id: Int get() = (raw.toInt() and 0x7FFFFFFF)
+}
+
+@DispatchOn(Http2FrameType::class)
+@ProtocolMessage
+sealed interface Http2Frame {
+    @PacketType(0x0) @ProtocolMessage
+    data class Data<@Payload P>(
+        val flags: UByte,
+        val streamId: Http2StreamId,
+        @WireBytes(3) val length: Int,
+        @LengthFrom("length") val payload: P,
+    ) : Http2Frame
+
+    @PacketType(0x4) @ProtocolMessage
+    data class Settings(
+        val flags: UByte,
+        val streamId: Http2StreamId,
+    ) : Http2Frame
+
+    @PacketType(0x6) @ProtocolMessage
+    data class Ping(
+        val flags: UByte,
+        val streamId: Http2StreamId,
+        val opaqueData: Long,  // always 8 bytes
+    ) : Http2Frame
+
+    @PacketType(0x8) @ProtocolMessage
+    data class WindowUpdate(
+        val flags: UByte,
+        val streamId: Http2StreamId,
+        val windowSizeIncrement: UInt,
+    ) : Http2Frame
+}
+```
+
+The 3-byte length field uses `@WireBytes(3)` — the codec reads exactly 3 bytes and assembles them into an `Int`. The reserved bit in the stream identifier is handled by the `Http2StreamId` value class — the codec reads 4 bytes, the `id` property masks off the MSB. Zero allocation, zero ambiguity.
+
+---
+
+## BLE ATT Protocol (Bluetooth Core Spec Vol 3 Part F)
+
+The Attribute Protocol (ATT) is the foundation of Bluetooth Low Energy communication. Every PDU starts with an opcode byte that dispatches to the correct structure. Mobile developers on Android and iOS deal with this constantly:
+
+```
++----------+-----------------------------------+
+| Opcode   |     Parameters                    |
+| (1 byte) |     (variable)                    |
++----------+-----------------------------------+
+```
+
+**The implementation:**
+
+```kotlin
+@JvmInline
+value class AttHandle(val raw: UShort)
+
+@ProtocolMessage
+sealed interface AttPdu {
+    /** Error Response (0x01) — returned when a request fails. */
+    @PacketType(0x01) @ProtocolMessage
+    data class ErrorResponse(
+        val requestOpcode: UByte,
+        val handle: AttHandle,
+        val errorCode: UByte,
+    ) : AttPdu
+
+    /** Read Request (0x0A) — client reads an attribute by handle. */
+    @PacketType(0x0A) @ProtocolMessage
+    data class ReadRequest(
+        val handle: AttHandle,
+    ) : AttPdu
+
+    /** Read Response (0x0B) — server returns the attribute value. */
+    @PacketType(0x0B) @ProtocolMessage
+    data class ReadResponse(
+        @RemainingBytes val value: String,
+    ) : AttPdu
+
+    /** Write Request (0x12) — client writes an attribute value. */
+    @PacketType(0x12) @ProtocolMessage
+    data class WriteRequest(
+        val handle: AttHandle,
+        @RemainingBytes val value: String,
+    ) : AttPdu
+
+    /** Handle Value Notification (0x1B) — server pushes a value change. */
+    @PacketType(0x1B) @ProtocolMessage
+    data class Notification(
+        val handle: AttHandle,
+        @RemainingBytes val value: String,
+    ) : AttPdu
+}
+```
+
+This replaces the manual byte parsing that every BLE library does internally. The sealed dispatch means your `when (pdu)` is exhaustive — add a new PDU type and the compiler flags every handler that needs updating. `AttHandle` as a value class gives type safety (can't accidentally pass a raw `UShort` where a handle is expected) with zero runtime overhead.
+
+---
+
+## Zero-Copy PNG Decode with Platform APIs
+
+This is where everything comes together: parse a binary format with the codec, then hand the **same memory** to a platform-native decoder. No `ByteArray` copies anywhere in the pipeline.
+
+### The problem with typical image loading
+
+Most image libraries follow this path:
+
+```
+Network I/O → byte[] copy → library buffer → byte[] copy → platform decoder → Bitmap
+```
+
+For example, a typical Kotlin image loading pipeline:
+1. Read from socket into a library-internal buffer (okio Segment, ByteArray, etc.)
+2. **Copy** to a contiguous `ByteArray` for the decoder
+3. `BitmapFactory.decodeByteArray(bytes)` on Android, `UIImage(data: NSData(bytes:length:))` on iOS
+4. The decoder may copy again internally depending on how you passed the data
+
+Each copy doubles memory pressure and costs CPU time proportional to image size. For a 5MB camera photo, that's 10-15MB of transient allocations just to get it to the decoder.
+
+### The zero-copy path
+
+With buffer, network bytes land directly in platform-native memory. The codec reads from that memory without copying. The platform decoder receives the **same memory handle**:
+
+```
+Network I/O → native buffer → codec parses (zero-copy) → platform decoder (zero-copy) → Bitmap
+```
+
+**Step 1: Define the PNG chunk structure** (already shown above)
+
+```kotlin
+@DispatchOn(PngChunkHeader::class)
+@ProtocolMessage
+sealed interface PngChunk {
+    @PacketType(0x49484452) @ProtocolMessage
+    data class Ihdr(
+        val header: PngChunkHeader,
+        val width: UInt, val height: UInt,
+        val bitDepth: UByte, val colorType: UByte,
+        val compressionMethod: UByte, val filterMethod: UByte,
+        val interlaceMethod: UByte, val crc: UInt,
+    ) : PngChunk
+    // ... other chunk types
+}
+```
+
+**Step 2: Parse and inspect — zero-copy reads from native memory**
+
+```kotlin
+// Buffer arrived from network I/O — already in native memory
+// (DirectByteBuffer on JVM, NSData on Apple, ArrayBuffer on JS)
+val ihdr = PngChunkCodec.decode(buffer) as PngChunk.Ihdr
+
+// Type-safe access to image metadata — no pixel decoding yet
+println("${ihdr.width}x${ihdr.height}, depth=${ihdr.bitDepth}")
+
+// Validate before spending CPU on decode
+require(ihdr.width <= 4096u && ihdr.height <= 4096u) { "Image too large" }
+```
+
+**Step 3: Hand the same memory to the platform decoder — zero-copy**
+
+```kotlin
+// expect declaration — each platform uses its native image API
+expect fun ReadBuffer.decodePlatformImage(): PlatformImage
+```
+
+```kotlin
+// Android — BitmapFactory reads directly from the ByteBuffer
+actual fun ReadBuffer.decodePlatformImage(): PlatformImage {
+    val byteBuffer = toNativeData().byteBuffer  // zero-copy: same native memory
+    return BitmapFactory.decodeByteBuffer(byteBuffer)
+}
+```
+
+```kotlin
+// Apple — UIImage reads directly from NSData
+actual fun ReadBuffer.decodePlatformImage(): PlatformImage {
+    val nsData = toNativeData().nsData  // zero-copy: same native memory
+    return UIImage(data = nsData)
+}
+```
+
+```kotlin
+// JS — createImageBitmap reads directly from ArrayBuffer
+actual fun ReadBuffer.decodePlatformImage(): PlatformImage {
+    val arrayBuffer = toNativeData().arrayBuffer  // zero-copy: same native memory
+    val blob = Blob(arrayOf(arrayBuffer), BlobPropertyBag("image/png"))
+    return createImageBitmap(blob).await()
+}
+```
+
+**The key insight:** `toNativeData()` doesn't copy — it returns the buffer's existing native memory handle. On JVM that's the `java.nio.ByteBuffer` the data already lives in. On Apple it's the `NSData` the buffer already wraps. The platform decoder reads from the same memory the network I/O wrote to.
+
+### Comparison: typical pipeline vs buffer
+
+| Step | Typical pipeline | buffer pipeline |
+|---|---|---|
+| Network read | → internal buffer | → `DirectJvmBuffer` (native memory) |
+| Parse headers | copy to ByteArray, manual parsing | codec reads in-place (zero-copy) |
+| Validate | parse again or trust blindly | type-safe: `ihdr.width`, `ihdr.colorType` |
+| Decode pixels | `decodeByteArray(bytes)` (copy) | `decodeByteBuffer(buffer)` (zero-copy) |
+| **Total copies** | **2-3** | **0** |
+
+### Pool return for request-per-image workloads
+
+For high-throughput image processing (thumbnailing service, gallery scroll), pair with `BufferPool` to eliminate GC pressure:
+
+```kotlin
+val pool = BufferPool.MultiThreaded(defaultBufferSize = 65_536)
+
+pool.withBuffer(imageSize) { buffer ->
+    // Network I/O fills the buffer
+    socket.read(buffer)
+    buffer.resetForRead()
+
+    // Parse PNG header — zero-copy
+    val ihdr = PngChunkCodec.decode(buffer) as PngChunk.Ihdr
+
+    // Decode — zero-copy, platform-native
+    buffer.resetForRead()
+    val bitmap = buffer.decodePlatformImage()
+
+    processBitmap(bitmap)
+} // buffer returned to pool here — no GC, no free(), just reuse
+```
+
+---
+
 ## What You Get for Free
 
 Every example above generates all of this from the annotations alone:
