@@ -6,6 +6,7 @@ import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
+
 import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
 import com.squareup.kotlinpoet.KModifier
@@ -62,18 +63,7 @@ class CodecGenerator(
                 .objectBuilder(codecName)
                 .addSuperinterface(CODEC.parameterizedBy(classTypeName))
 
-        // Context-free decode delegates to context-aware overload
-        objectBuilder.addFunction(
-            FunSpec
-                .builder("decode")
-                .addModifiers(KModifier.OVERRIDE)
-                .addParameter("buffer", READ_BUFFER)
-                .returns(classTypeName)
-                .addStatement("return decode(buffer, %T.Empty)", DECODE_CONTEXT)
-                .build(),
-        )
-
-        // Context-aware decode (the real implementation)
+        // decode(buffer, context) — Codec<T> abstract method
         val decodeBody = CodeBlock.builder()
         var batchIndex = 0
         for (item in batches) {
@@ -101,18 +91,7 @@ class CodecGenerator(
                 .build(),
         )
 
-        // Context-free encode delegates to context-aware overload
-        objectBuilder.addFunction(
-            FunSpec
-                .builder("encode")
-                .addModifiers(KModifier.OVERRIDE)
-                .addParameter("buffer", WRITE_BUFFER)
-                .addParameter("value", classTypeName)
-                .addStatement("encode(buffer, value, %T.Empty)", ENCODE_CONTEXT)
-                .build(),
-        )
-
-        // Context-aware encode (the real implementation)
+        // encode(buffer, value, context) — Codec<T> abstract method
         val encodeBody = CodeBlock.builder()
         for (field in fields) {
             addFieldWrite(encodeBody, field, "value.${field.name}", withContext = true)
@@ -145,8 +124,7 @@ class CodecGenerator(
         }
 
         val fileBuilder =
-            FileSpec
-                .builder(packageName, codecName)
+            fileSpecBuilder(packageName, codecName)
                 .addType(objectBuilder.build())
         addExtensionImports(fileBuilder, fields)
         return fileBuilder.build()
@@ -222,11 +200,16 @@ class CodecGenerator(
 
         // Phase 2: create context from non-payload fields
         val nonPayloadFields = fields.filter { it.strategy !is FieldReadStrategy.PayloadField }
-        decodeBody.addStatement(
-            "val _ctx = %L(%L)",
-            contextName,
-            nonPayloadFields.joinToString(", ") { it.name },
-        )
+        if (nonPayloadFields.isEmpty()) {
+            // Context is an object singleton — reference without parentheses
+            decodeBody.addStatement("val _ctx = %L", contextName)
+        } else {
+            decodeBody.addStatement(
+                "val _ctx = %L(%L)",
+                contextName,
+                nonPayloadFields.joinToString(", ") { it.name },
+            )
+        }
 
         // Phase 3: decode payload fields using stored bytes + lambdas
         for (pf in payloadFields) {
@@ -420,14 +403,13 @@ class CodecGenerator(
         val payloadPeekResult = PeekFrameSizeEmitter.generate(fields)
         if (payloadPeekResult != null) {
             objectBuilder.addProperty(PeekFrameSizeEmitter.buildMinHeaderProperty(payloadPeekResult))
-            for (fn in PeekFrameSizeEmitter.buildFunctions(payloadPeekResult)) {
+            for (fn in PeekFrameSizeEmitter.buildFunctions(payloadPeekResult, implementsCodec = false)) {
                 objectBuilder.addFunction(fn)
             }
         }
 
         val fileBuilder =
-            FileSpec
-                .builder(packageName, codecName)
+            fileSpecBuilder(packageName, codecName)
                 .addType(objectBuilder.build())
         addExtensionImports(fileBuilder, fields)
         return fileBuilder.build()
@@ -472,16 +454,16 @@ class CodecGenerator(
                 .builder("sizeOf")
                 .addModifiers(KModifier.OVERRIDE)
                 .addParameter("value", classTypeName)
-                .returns(ClassName("kotlin", "Int").copy(nullable = true))
+                .returns(SIZE_ESTIMATE)
 
         if (runtimeExprs.isEmpty()) {
-            builder.addStatement("return %L", fixedTotal)
+            builder.addStatement("return %T.Exact(%L)", SIZE_ESTIMATE, fixedTotal)
         } else {
             builder.addStatement("var size = %L", fixedTotal)
             for (expr in runtimeExprs) {
                 builder.addStatement("size += %L", expr)
             }
-            builder.addStatement("return size")
+            builder.addStatement("return %T.Exact(size)", SIZE_ESTIMATE)
         }
 
         return builder.build()

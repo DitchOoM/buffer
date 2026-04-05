@@ -138,6 +138,11 @@ private val streamStubs =
         "StreamStubs.kt",
         """
     package com.ditchoom.buffer.stream
+    import kotlin.jvm.JvmInline
+    sealed interface PeekResult {
+        @JvmInline value class Size(val bytes: Int) : PeekResult
+        data object NeedsMoreData : PeekResult
+    }
     interface StreamProcessor {
         fun available(): Int
         fun peekByte(offset: Int = 0): Byte
@@ -165,6 +170,9 @@ private val codecStubs =
     package com.ditchoom.buffer.codec
     import com.ditchoom.buffer.ReadBuffer
     import com.ditchoom.buffer.WriteBuffer
+    import com.ditchoom.buffer.stream.PeekResult
+    import com.ditchoom.buffer.stream.StreamProcessor
+    import kotlin.jvm.JvmInline
     interface CodecContext {
         operator fun <T : Any> get(key: Key<T>): T?
         abstract class Key<T : Any>
@@ -187,12 +195,24 @@ private val codecStubs =
             }
         }
     }
-    interface Codec<T> {
+    sealed interface SizeEstimate {
+        @JvmInline value class Exact(val bytes: Int) : SizeEstimate
+        data object UnableToPrecalculate : SizeEstimate
+    }
+    fun interface Decoder<out T> {
         fun decode(buffer: ReadBuffer): T
-        fun decode(buffer: ReadBuffer, context: DecodeContext): T = decode(buffer)
+    }
+    interface Encoder<in T> {
         fun encode(buffer: WriteBuffer, value: T)
-        fun encode(buffer: WriteBuffer, value: T, context: EncodeContext) = encode(buffer, value)
-        fun sizeOf(value: T): Int? = null
+        fun sizeOf(value: T): SizeEstimate = SizeEstimate.UnableToPrecalculate
+    }
+    interface Codec<T> : Encoder<T>, Decoder<T> {
+        fun decode(buffer: ReadBuffer, context: DecodeContext): T
+        fun encode(buffer: WriteBuffer, value: T, context: EncodeContext)
+        override fun decode(buffer: ReadBuffer): T = decode(buffer, DecodeContext.Empty)
+        override fun encode(buffer: WriteBuffer, value: T) = encode(buffer, value, EncodeContext.Empty)
+        override fun sizeOf(value: T): SizeEstimate = SizeEstimate.UnableToPrecalculate
+        fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NeedsMoreData
     }
     """,
     )

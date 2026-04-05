@@ -6,6 +6,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.CodecContext
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.SizeEstimate
 import com.ditchoom.buffer.codec.annotations.LengthFrom
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
@@ -21,18 +22,16 @@ data class Rgb(
 
 /** Codec object for Rgb — 3 bytes on the wire. */
 object RgbCodec : Codec<Rgb> {
-    override fun decode(buffer: ReadBuffer): Rgb = Rgb(buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte())
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): Rgb =
+        Rgb(buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte())
 
-    override fun encode(
-        buffer: WriteBuffer,
-        value: Rgb,
-    ) {
+    override fun encode(buffer: WriteBuffer, value: Rgb, context: EncodeContext) {
         buffer.writeUByte(value.r)
         buffer.writeUByte(value.g)
         buffer.writeUByte(value.b)
     }
 
-    override fun sizeOf(value: Rgb): Int = 3
+    override fun sizeOf(value: Rgb): SizeEstimate = SizeEstimate.Exact(3)
 }
 
 /** @UseCodec without a length annotation — codec reads directly from buffer. */
@@ -76,12 +75,7 @@ data object RgbOffsetKey : CodecContext.Key<Int>()
  * This proves that context actually flows through @UseCodec fields.
  */
 object ContextAwareRgbCodec : Codec<Rgb> {
-    override fun decode(buffer: ReadBuffer): Rgb = decode(buffer, DecodeContext.Empty)
-
-    override fun decode(
-        buffer: ReadBuffer,
-        context: DecodeContext,
-    ): Rgb {
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): Rgb {
         val offset = context[RgbOffsetKey] ?: 0
         return Rgb(
             (buffer.readUnsignedByte().toInt() + offset).toUByte(),
@@ -90,23 +84,14 @@ object ContextAwareRgbCodec : Codec<Rgb> {
         )
     }
 
-    override fun encode(
-        buffer: WriteBuffer,
-        value: Rgb,
-    ) = encode(buffer, value, EncodeContext.Empty)
-
-    override fun encode(
-        buffer: WriteBuffer,
-        value: Rgb,
-        context: EncodeContext,
-    ) {
+    override fun encode(buffer: WriteBuffer, value: Rgb, context: EncodeContext) {
         val offset = context[RgbOffsetKey] ?: 0
         buffer.writeUByte((value.r.toInt() - offset).toUByte())
         buffer.writeUByte((value.g.toInt() - offset).toUByte())
         buffer.writeUByte((value.b.toInt() - offset).toUByte())
     }
 
-    override fun sizeOf(value: Rgb): Int = 3
+    override fun sizeOf(value: Rgb): SizeEstimate = SizeEstimate.Exact(3)
 }
 
 /** Uses the context-aware codec — context must flow through for correct round-trip. */

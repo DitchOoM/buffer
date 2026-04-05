@@ -23,6 +23,8 @@ import com.ditchoom.buffer.codec.test.protocols.ProtocolLevel
 import com.ditchoom.buffer.codec.test.protocols.SimpleHeader
 import com.ditchoom.buffer.codec.test.protocols.SimpleHeaderCodec
 import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.stream.FrameDetector
+import com.ditchoom.buffer.stream.PeekResult
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -36,6 +38,13 @@ import kotlin.test.assertTrue
  * against a real StreamProcessor, not just that the code compiles.
  */
 class PeekFrameSizeRoundTripTest {
+    /** Calls the sync [FrameDetector.peekFrameSize] and converts [PeekResult] to [Int?]. */
+    private fun FrameDetector.peekFrameSizeOrNull(stream: StreamProcessor, baseOffset: Int = 0): Int? =
+        when (val result = peekFrameSize(stream, baseOffset)) {
+            is PeekResult.Size -> result.bytes
+            PeekResult.NeedsMoreData -> null
+        }
+
     private fun withStream(block: (StreamProcessor) -> Unit) {
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool)
@@ -58,7 +67,7 @@ class PeekFrameSizeRoundTripTest {
             buffer.resetForRead()
             stream.append(buffer)
 
-            val size = DnsHeaderCodec.peekFrameSize(stream)
+            val size = DnsHeaderCodec.peekFrameSizeOrNull(stream)
             assertEquals(12, size)
         }
     }
@@ -75,7 +84,7 @@ class PeekFrameSizeRoundTripTest {
             buffer.resetForRead()
             stream.append(buffer)
 
-            val size = SimpleHeaderCodec.peekFrameSize(stream)
+            val size = SimpleHeaderCodec.peekFrameSizeOrNull(stream)
             assertEquals(7, size)
         }
     }
@@ -91,7 +100,7 @@ class PeekFrameSizeRoundTripTest {
             buffer.resetForRead()
             stream.append(buffer)
 
-            val size = DispatchOnPacketCodec.peekFrameSize(stream)
+            val size = DispatchOnPacketCodec.peekFrameSizeOrNull(stream)
             assertNotNull(size)
             assertEquals(4, size) // 1 (discriminator) + 1 (protocolLevel) + 2 (keepAlive)
         }
@@ -106,7 +115,7 @@ class PeekFrameSizeRoundTripTest {
             buffer.resetForRead()
             stream.append(buffer)
 
-            val size = DispatchOnPacketCodec.peekFrameSize(stream)
+            val size = DispatchOnPacketCodec.peekFrameSizeOrNull(stream)
             assertNotNull(size)
             assertEquals(3, size) // 1 (discriminator) + 1 + 1
         }
@@ -121,7 +130,7 @@ class PeekFrameSizeRoundTripTest {
             buffer.resetForRead()
             stream.append(buffer)
 
-            val size = DispatchOnPacketCodec.peekFrameSize(stream)
+            val size = DispatchOnPacketCodec.peekFrameSizeOrNull(stream)
             assertNotNull(size)
             assertEquals(3, size) // 1 (discriminator) + 2 (packetId)
         }
@@ -137,7 +146,7 @@ class PeekFrameSizeRoundTripTest {
             buffer.resetForRead()
             stream.append(buffer)
 
-            val size = DispatchOnPacketCodec.peekFrameSize(stream)
+            val size = DispatchOnPacketCodec.peekFrameSizeOrNull(stream)
             assertNull(size)
         }
     }
@@ -147,7 +156,7 @@ class PeekFrameSizeRoundTripTest {
     @Test
     fun `peekFrameSize returns null when stream has no data`() {
         withStream { stream ->
-            val size = DispatchOnPacketCodec.peekFrameSize(stream)
+            val size = DispatchOnPacketCodec.peekFrameSizeOrNull(stream)
             assertNull(size)
         }
     }
@@ -165,7 +174,7 @@ class PeekFrameSizeRoundTripTest {
             stream.append(buffer)
 
             // Step 1: peek to determine frame size
-            val frameSize = DispatchOnPacketCodec.peekFrameSize(stream)
+            val frameSize = DispatchOnPacketCodec.peekFrameSizeOrNull(stream)
             assertNotNull(frameSize)
 
             // Step 2: read exactly that many bytes and decode
@@ -198,7 +207,7 @@ class PeekFrameSizeRoundTripTest {
             // Decode all three using peekFrameSize loop
             val decoded = mutableListOf<DispatchOnPacket>()
             while (stream.available() >= DispatchOnPacketCodec.MIN_HEADER_BYTES) {
-                val frameSize = DispatchOnPacketCodec.peekFrameSize(stream) ?: break
+                val frameSize = DispatchOnPacketCodec.peekFrameSizeOrNull(stream) ?: break
                 if (stream.available() < frameSize) break
                 decoded.add(stream.readBufferScoped(frameSize) { DispatchOnPacketCodec.decode(this) })
             }
@@ -231,7 +240,7 @@ class PeekFrameSizeRoundTripTest {
             buffer.resetForRead()
             stream.append(buffer)
 
-            val peeked = MqttPacketConnectCodec.peekFrameSize(stream)
+            val peeked = MqttPacketConnectCodec.peekFrameSizeOrNull(stream)
             assertNotNull(peeked)
             assertEquals(wireSize, peeked)
         }
@@ -260,7 +269,7 @@ class PeekFrameSizeRoundTripTest {
             buffer.resetForRead()
             stream.append(buffer)
 
-            val peeked = MqttPacketConnectCodec.peekFrameSize(stream)
+            val peeked = MqttPacketConnectCodec.peekFrameSizeOrNull(stream)
             assertNotNull(peeked)
             assertEquals(wireSize, peeked)
         }
@@ -287,7 +296,7 @@ class PeekFrameSizeRoundTripTest {
             buffer.resetForRead()
             stream.append(buffer)
 
-            val frameSize = MqttPacketConnectCodec.peekFrameSize(stream)
+            val frameSize = MqttPacketConnectCodec.peekFrameSizeOrNull(stream)
             assertNotNull(frameSize)
             val decoded =
                 stream.readBufferScoped(frameSize) {
@@ -307,7 +316,7 @@ class PeekFrameSizeRoundTripTest {
             buffer.resetForRead()
             stream.append(buffer)
 
-            val peeked = MqttPacketConnectCodec.peekFrameSize(stream)
+            val peeked = MqttPacketConnectCodec.peekFrameSizeOrNull(stream)
             assertNull(peeked) // not enough data
         }
     }
@@ -333,7 +342,7 @@ class PeekFrameSizeRoundTripTest {
             buffer.resetForRead()
             stream.append(buffer)
 
-            val peeked = MqttPacketCodec.peekFrameSize(stream)
+            val peeked = MqttPacketCodec.peekFrameSizeOrNull(stream)
             assertNotNull(peeked)
             assertEquals(wireSize, peeked)
 
@@ -371,7 +380,7 @@ class PeekFrameSizeRoundTripTest {
 
             val decoded = mutableListOf<MqttPacket>()
             while (stream.available() >= MqttPacketCodec.MIN_HEADER_BYTES) {
-                val frameSize = MqttPacketCodec.peekFrameSize(stream) ?: break
+                val frameSize = MqttPacketCodec.peekFrameSizeOrNull(stream) ?: break
                 if (stream.available() < frameSize) break
                 decoded.add(stream.readBufferScoped(frameSize) { MqttPacketCodec.decode(this) })
             }
@@ -389,7 +398,7 @@ class PeekFrameSizeRoundTripTest {
         // Fixed-size codecs return the constant frame size regardless of stream state.
         // The caller is responsible for checking stream.available() >= frameSize.
         withStream { stream ->
-            val size = SimpleHeaderCodec.peekFrameSize(stream)
+            val size = SimpleHeaderCodec.peekFrameSizeOrNull(stream)
             assertEquals(7, size)
         }
     }

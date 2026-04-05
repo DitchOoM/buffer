@@ -5,7 +5,6 @@ import com.google.devtools.ksp.processing.Dependencies
 import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.squareup.kotlinpoet.ClassName
-import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
 import com.squareup.kotlinpoet.KModifier
 import com.squareup.kotlinpoet.ParameterSpec
@@ -26,7 +25,6 @@ class PayloadContextGenerator(
         val contextName = "${classDeclaration.enclosingSimpleNames().joinToString("")}Context"
 
         val nonPayloadFields = fields.filter { it.strategy !is FieldReadStrategy.PayloadField }
-        if (nonPayloadFields.isEmpty()) return
 
         val containingFile = classDeclaration.containingFile
         val dependencies =
@@ -36,25 +34,28 @@ class PayloadContextGenerator(
                 Dependencies(aggregating = false)
             }
 
-        val constructorBuilder = FunSpec.constructorBuilder()
-        val typeSpecBuilder = TypeSpec.classBuilder(contextName).addModifiers(KModifier.DATA)
-
-        for (field in nonPayloadFields) {
-            val typeName =
-                field.parameter?.type?.resolve()?.let { ksType ->
-                    ksType.toTypeName()
-                } ?: ClassName.bestGuess(field.typeName).copy(nullable = field.isNullable)
-            constructorBuilder.addParameter(ParameterSpec.builder(field.name, typeName).build())
-            typeSpecBuilder.addProperty(
-                PropertySpec.builder(field.name, typeName).initializer(field.name).build(),
-            )
-        }
-
-        typeSpecBuilder.primaryConstructor(constructorBuilder.build())
+        val typeSpecBuilder =
+            if (nonPayloadFields.isEmpty()) {
+                // All fields are @Payload — generate an empty object so the codec reference resolves
+                TypeSpec.objectBuilder(contextName)
+            } else {
+                val constructorBuilder = FunSpec.constructorBuilder()
+                val classBuilder = TypeSpec.classBuilder(contextName).addModifiers(KModifier.DATA)
+                for (field in nonPayloadFields) {
+                    val typeName =
+                        field.parameter?.type?.resolve()?.let { ksType ->
+                            ksType.toTypeName()
+                        } ?: ClassName.bestGuess(field.typeName).copy(nullable = field.isNullable)
+                    constructorBuilder.addParameter(ParameterSpec.builder(field.name, typeName).build())
+                    classBuilder.addProperty(
+                        PropertySpec.builder(field.name, typeName).initializer(field.name).build(),
+                    )
+                }
+                classBuilder.primaryConstructor(constructorBuilder.build())
+            }
 
         val fileSpec =
-            FileSpec
-                .builder(packageName, contextName)
+            fileSpecBuilder(packageName, contextName)
                 .addType(typeSpecBuilder.build())
                 .build()
 

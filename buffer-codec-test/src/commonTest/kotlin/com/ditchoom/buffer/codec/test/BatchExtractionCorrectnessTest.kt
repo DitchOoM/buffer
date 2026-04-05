@@ -4,6 +4,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.SizeEstimate
 import com.ditchoom.buffer.codec.encodeToBuffer
 import com.ditchoom.buffer.codec.test.protocols.AllTypesMessage
 import com.ditchoom.buffer.codec.test.protocols.AllTypesMessageCodec
@@ -531,6 +532,6 @@ class BatchExtractionCorrectnessTest {
         val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
         codec.encode(buffer, value)
         val actualSize = buffer.position()
-        assertEquals(sizeOf, actualSize, "sizeOf(${value::class.simpleName}) must match actual encoded size")
+        assertEquals(SizeEstimate.Exact(actualSize), sizeOf, "sizeOf(${value::class.simpleName}) must match actual encoded size")
     }
 }

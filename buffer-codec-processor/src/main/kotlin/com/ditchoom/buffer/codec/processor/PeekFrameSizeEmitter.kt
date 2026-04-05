@@ -9,6 +9,7 @@ import com.squareup.kotlinpoet.PropertySpec
 
 internal val STREAM_PROCESSOR = ClassName("com.ditchoom.buffer.stream", "StreamProcessor")
 internal val SUSPENDING_STREAM_PROCESSOR = ClassName("com.ditchoom.buffer.stream", "SuspendingStreamProcessor")
+internal val PEEK_RESULT = ClassName("com.ditchoom.buffer.stream", "PeekResult")
 
 /**
  * Generates `peekFrameSize(stream, baseOffset): Int?` and `MIN_HEADER_BYTES` for a codec.
@@ -18,7 +19,7 @@ internal val SUSPENDING_STREAM_PROCESSOR = ClassName("com.ditchoom.buffer.stream
  * available to determine the frame size.
  */
 internal object PeekFrameSizeEmitter {
-    fun generate(fields: List<FieldInfo>): PeekResult? {
+    fun generate(fields: List<FieldInfo>): PeekGenResult? {
         // Pre-scan: find fields referenced by @LengthFrom
         val lengthFromTargets = mutableSetOf<String>()
         // Pre-scan: find fields referenced by @WhenTrue conditions (the root field name)
@@ -106,7 +107,7 @@ internal object PeekFrameSizeEmitter {
                     it is PeekStep.Conditional
             }
 
-        return PeekResult(
+        return PeekGenResult(
             minHeaderBytes = minHeaderBytes,
             steps = steps.filter { it !is PeekStep.FlushFixed || it.bytes > 0 },
             isAllFixed = isAllFixed,
@@ -238,13 +239,13 @@ internal object PeekFrameSizeEmitter {
         }
     }
 
-    fun buildFunctions(result: PeekResult): List<FunSpec> =
+    fun buildFunctions(result: PeekGenResult, implementsCodec: Boolean = true): List<FunSpec> =
         listOf(
-            buildPeekFun(result, suspending = false),
+            buildPeekFun(result, suspending = false, implementsCodec = implementsCodec),
             buildPeekFun(result, suspending = true),
         )
 
-    fun buildMinHeaderProperty(result: PeekResult): PropertySpec =
+    fun buildMinHeaderProperty(result: PeekGenResult): PropertySpec =
         PropertySpec
             .builder("MIN_HEADER_BYTES", INT)
             .addModifiers(KModifier.CONST)
@@ -252,32 +253,57 @@ internal object PeekFrameSizeEmitter {
             .build()
 
     private fun buildPeekFun(
-        result: PeekResult,
+        result: PeekGenResult,
         suspending: Boolean,
+        implementsCodec: Boolean = true,
     ): FunSpec {
         val streamType = if (suspending) SUSPENDING_STREAM_PROCESSOR else STREAM_PROCESSOR
         val builder =
             FunSpec
                 .builder("peekFrameSize")
                 .addParameter("stream", streamType)
-                .addParameter(
+
+        if (suspending) {
+            builder.addParameter(
+                com.squareup.kotlinpoet.ParameterSpec
+                    .builder("baseOffset", INT)
+                    .defaultValue("0")
+                    .build(),
+            )
+            builder.addModifiers(KModifier.SUSPEND)
+            builder.returns(INT.copy(nullable = true))
+        } else {
+            if (implementsCodec) {
+                builder.addParameter("baseOffset", INT)
+                builder.addModifiers(KModifier.OVERRIDE)
+            } else {
+                builder.addParameter(
                     com.squareup.kotlinpoet.ParameterSpec
                         .builder("baseOffset", INT)
                         .defaultValue("0")
                         .build(),
-                ).returns(INT.copy(nullable = true))
-
-        if (suspending) builder.addModifiers(KModifier.SUSPEND)
+                )
+            }
+            builder.returns(PEEK_RESULT)
+        }
 
         val code = CodeBlock.builder()
 
         if (result.isAllFixed) {
             val totalFixed = result.steps.filterIsInstance<PeekStep.FlushFixed>().sumOf { it.bytes }
-            code.addStatement("return %L", totalFixed)
+            if (suspending) {
+                code.addStatement("return %L", totalFixed)
+            } else {
+                code.addStatement("return %T.Size(%L)", PEEK_RESULT, totalFixed)
+            }
         } else {
             code.addStatement("var offset = baseOffset")
-            emitSteps(code, result.steps)
-            code.addStatement("return offset - baseOffset")
+            emitSteps(code, result.steps, suspending)
+            if (suspending) {
+                code.addStatement("return offset - baseOffset")
+            } else {
+                code.addStatement("return %T.Size(offset - baseOffset)", PEEK_RESULT)
+            }
         }
 
         builder.addCode(code.build())
@@ -287,7 +313,11 @@ internal object PeekFrameSizeEmitter {
     private fun emitSteps(
         code: CodeBlock.Builder,
         steps: List<PeekStep>,
+        suspending: Boolean = false,
     ) {
+        val returnNull = if (suspending) "return null" else "return %T.NeedsMoreData"
+        val returnNullArgs: Array<Any> = if (suspending) emptyArray() else arrayOf(PEEK_RESULT)
+
         for (step in steps) {
             when (step) {
                 is PeekStep.FlushFixed -> {
@@ -296,11 +326,11 @@ internal object PeekFrameSizeEmitter {
                     }
                 }
                 is PeekStep.PeekPrefix -> {
-                    code.addStatement("if (stream.available() < offset + %L) return null", step.prefixBytes)
+                    code.addStatement("if (stream.available() < offset + %L) $returnNull", step.prefixBytes, *returnNullArgs)
                     code.addStatement("val %L = %L", step.varName, peekUnsignedExpr("stream", "offset", step.prefixBytes))
                 }
                 is PeekStep.PeekLength -> {
-                    code.addStatement("if (stream.available() < offset + %L) return null", step.info.wireBytes)
+                    code.addStatement("if (stream.available() < offset + %L) $returnNull", step.info.wireBytes, *returnNullArgs)
                     code.addStatement("val %L = %L", step.varName, peekExpr("stream", "offset", step.info))
                 }
                 is PeekStep.AddVariable -> {
@@ -308,12 +338,28 @@ internal object PeekFrameSizeEmitter {
                 }
                 is PeekStep.DelegateNested -> {
                     val varPrefix = step.codecName.removeSuffix("Codec").replaceFirstChar { it.lowercase() }
-                    code.addStatement("val _%LSize = %L.peekFrameSize(stream, offset) ?: return null", varPrefix, step.codecName)
+                    if (suspending) {
+                        code.addStatement("val _%LSize = %L.peekFrameSize(stream, offset) ?: return null", varPrefix, step.codecName)
+                    } else {
+                        code.addStatement(
+                            "val _%LPeek = %L.peekFrameSize(stream, offset)",
+                            varPrefix,
+                            step.codecName,
+                        )
+                        code.addStatement(
+                            "val _%LSize = (_%LPeek as? %T.Size)?.bytes ?: return %T.NeedsMoreData",
+                            varPrefix,
+                            varPrefix,
+                            PEEK_RESULT,
+                            PEEK_RESULT,
+                        )
+                    }
                     code.addStatement("offset += _%LSize", varPrefix)
                 }
                 is PeekStep.PeekConditionBoolean -> {
                     code.addStatement(
-                        "if (stream.available() < offset + 1) return null",
+                        "if (stream.available() < offset + 1) $returnNull",
+                        *returnNullArgs,
                     )
                     code.addStatement(
                         "val %L = stream.peekByte(offset).toInt() != 0",
@@ -322,7 +368,7 @@ internal object PeekFrameSizeEmitter {
                 }
                 is PeekStep.PeekConditionValueClass -> {
                     val wireBytes = step.peekInfo.wireBytes
-                    code.addStatement("if (stream.available() < offset + %L) return null", wireBytes)
+                    code.addStatement("if (stream.available() < offset + %L) $returnNull", wireBytes, *returnNullArgs)
                     code.addStatement(
                         "val %L = %L(%L)",
                         step.varName,
@@ -332,7 +378,7 @@ internal object PeekFrameSizeEmitter {
                 }
                 is PeekStep.Conditional -> {
                     code.beginControlFlow("if (%L)", step.conditionExpr)
-                    emitSteps(code, step.innerSteps)
+                    emitSteps(code, step.innerSteps, suspending)
                     code.endControlFlow()
                 }
             }
@@ -458,7 +504,7 @@ internal object PeekFrameSizeEmitter {
         }
 }
 
-internal data class PeekResult(
+internal data class PeekGenResult(
     val minHeaderBytes: Int,
     val steps: List<PeekStep>,
     val isAllFixed: Boolean,

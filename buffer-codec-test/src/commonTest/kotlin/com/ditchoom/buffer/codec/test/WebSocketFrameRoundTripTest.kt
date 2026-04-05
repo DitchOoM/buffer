@@ -15,6 +15,7 @@ import com.ditchoom.buffer.codec.test.protocols.WsMaskedFrameCodec
 import com.ditchoom.buffer.codec.test.protocols.WsMaskingKey
 import com.ditchoom.buffer.codec.test.protocols.WsUnmaskedFrame
 import com.ditchoom.buffer.codec.test.protocols.WsUnmaskedFrameCodec
+import com.ditchoom.buffer.codec.SizeEstimate
 import com.ditchoom.buffer.codec.testRoundTrip
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -54,7 +55,7 @@ class WebSocketFrameRoundTripTest {
     @Test
     fun `frame header sizeOf is 2`() {
         val header = WsFrameHeader(WsHeaderByte1(0u), WsHeaderByte2(0u))
-        assertEquals(2, WsFrameHeaderCodec.sizeOf(header))
+        assertEquals(SizeEstimate.Exact(2), WsFrameHeaderCodec.sizeOf(header))
     }
 
     @Test
