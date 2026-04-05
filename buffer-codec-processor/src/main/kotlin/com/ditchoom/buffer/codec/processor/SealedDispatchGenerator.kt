@@ -6,7 +6,6 @@ import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
-
 import com.squareup.kotlinpoet.FunSpec
 import com.squareup.kotlinpoet.INT
 import com.squareup.kotlinpoet.KModifier

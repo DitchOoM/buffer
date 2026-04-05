@@ -239,7 +239,10 @@ internal object PeekFrameSizeEmitter {
         }
     }
 
-    fun buildFunctions(result: PeekGenResult, implementsCodec: Boolean = true): List<FunSpec> =
+    fun buildFunctions(
+        result: PeekGenResult,
+        implementsCodec: Boolean = true,
+    ): List<FunSpec> =
         listOf(
             buildPeekFun(result, suspending = false, implementsCodec = implementsCodec),
             buildPeekFun(result, suspending = true),
