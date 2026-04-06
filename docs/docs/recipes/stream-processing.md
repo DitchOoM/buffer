@@ -281,31 +281,9 @@ Coalescing is adaptive by default:
 - **Bulk accumulation** (many appends before any reads): after 8 chunks accumulate, coalescing kicks in and merges subsequent small appends.
 - **Large chunks** (≥ 256 bytes): always zero-copy, never coalesced.
 
-### Tuning Coalescing
-
-```kotlin
-// Default: adaptive coalescing (recommended for most use cases)
-val processor = StreamProcessor.create(pool)
-
-// More aggressive: start coalescing after 2 chunks
-// Good for high-fragmentation streams (BLE, compressed WebSocket)
-val processor = StreamProcessor.create(pool, coalesceMinChunks = 2)
-
-// Disable coalescing entirely
-// Use when chunks are always large or consumed immediately
-val processor = StreamProcessor.create(pool, coalesceThreshold = 0)
-
-// Via builder (composes with transforms)
-val processor = StreamProcessor.builder(pool)
-    .coalescing(threshold = 128, minChunks = 4)
-    .decompress(Gzip)
-    .build()
-```
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `coalesceThreshold` | 256 | Chunks smaller than this (bytes) are eligible for coalescing. Set to 0 to disable. |
-| `coalesceMinChunks` | 8 | Coalescing only starts when the chunk deque reaches this size. |
+Coalescing is fully automatic — no configuration needed. The defaults handle both
+protocol parsing (no coalescing overhead) and bulk accumulation (coalesces to prevent
+O(n) traversals) transparently.
 
 ## Best Practices
 
@@ -315,4 +293,4 @@ val processor = StreamProcessor.builder(pool)
 4. **Handle fragmentation** - always check `available()` before reading
 5. **Prefer peekMatches** - for magic byte detection
 6. **Call finish() for transforms** - signals end of input for decompression etc.
-7. **Tune coalescing for your workload** - lower `coalesceMinChunks` for high-fragmentation streams, disable with `coalesceThreshold = 0` if chunks are always large
+7. **Coalescing is automatic** - StreamProcessor adapts to your workload pattern with no configuration needed

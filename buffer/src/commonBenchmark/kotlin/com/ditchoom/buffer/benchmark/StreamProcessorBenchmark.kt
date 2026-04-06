@@ -3,6 +3,7 @@ package com.ditchoom.buffer.benchmark
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.stream.DefaultStreamProcessor
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlinx.benchmark.Benchmark
 import kotlinx.benchmark.BenchmarkMode
@@ -152,7 +153,7 @@ open class StreamProcessorBenchmark {
 
     @Benchmark
     fun zeroCopy_appendReadLarge(): Int {
-        val p = StreamProcessor.create(pool, coalesceThreshold = 0)
+        val p = DefaultStreamProcessor(pool, coalesceThreshold = 0)
         appendChunks(p, largeChunkData)
         val r = p.readBuffer(TOTAL_BYTES)
         val v = r.get(r.position()).toInt()
@@ -162,7 +163,7 @@ open class StreamProcessorBenchmark {
 
     @Benchmark
     fun zeroCopy_appendReadSmall(): Int {
-        val p = StreamProcessor.create(pool, coalesceThreshold = 0)
+        val p = DefaultStreamProcessor(pool, coalesceThreshold = 0)
         appendChunks(p, smallChunkData)
         val r = p.readBuffer(TOTAL_BYTES)
         val v = r.get(r.position()).toInt()
@@ -172,7 +173,7 @@ open class StreamProcessorBenchmark {
 
     @Benchmark
     fun zeroCopy_peekSmall(): Int {
-        val p = StreamProcessor.create(pool, coalesceThreshold = 0)
+        val p = DefaultStreamProcessor(pool, coalesceThreshold = 0)
         appendChunks(p, smallChunkData)
         val v = p.peekInt(TOTAL_BYTES / 2)
         p.release()
@@ -181,7 +182,7 @@ open class StreamProcessorBenchmark {
 
     @Benchmark
     fun zeroCopy_protocol(): Long {
-        val p = StreamProcessor.create(pool, coalesceThreshold = 0)
+        val p = DefaultStreamProcessor(pool, coalesceThreshold = 0)
         var sum = 0L
         for (data in protocolFrameData) {
             val chunk = factory.allocate(data.size)

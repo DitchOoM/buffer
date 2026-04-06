@@ -205,15 +205,7 @@ When processing highly fragmented streams (e.g., 1 MB delivered in 64-byte netwo
 
 StreamProcessor uses **adaptive coalescing** to automatically merge small chunks (< 256 bytes) into larger buffers when they accumulate. This reduces the chunk count from ~16,000 to ~70 without affecting protocol parsing patterns where data is consumed immediately after each append.
 
-```kotlin
-// High-fragmentation stream (BLE, compressed WebSocket): coalesce earlier
-val processor = StreamProcessor.create(pool, coalesceMinChunks = 2)
-
-// Already using large reads (4KB+): disable coalescing
-val processor = StreamProcessor.create(pool, coalesceThreshold = 0)
-```
-
-See [Stream Processing: Coalescing](/recipes/stream-processing#coalescing) for full details.
+Coalescing is fully automatic — no configuration needed. See [Stream Processing: Coalescing](/recipes/stream-processing#coalescing) for details.
 
 ## Bulk Operations
 

@@ -257,25 +257,10 @@ val payload = processor.readBuffer(length)
 
 **Adaptive coalescing:** StreamProcessor automatically coalesces small appended chunks
 (< 256 bytes) into larger buffers when fragments accumulate in the deque (≥ 8 chunks).
-This prevents O(n) peek scans when thousands of tiny network fragments arrive (e.g., 1 MB
-in 64-byte chunks: 16,384 entries → ~72). Coalescing is zero-cost for protocol parsing
-patterns where data is consumed immediately after each append.
-
-```kotlin
-// Default: adaptive coalescing (recommended for most use cases)
-val processor = StreamProcessor.create(pool)
-
-// Tune coalescing: lower minChunks for high-fragmentation streams
-val processor = StreamProcessor.create(pool, coalesceMinChunks = 2)
-
-// Disable coalescing entirely
-val processor = StreamProcessor.create(pool, coalesceThreshold = 0)
-
-// Via builder (composes with transforms like decompression)
-val processor = StreamProcessor.builder(pool)
-    .coalescing(threshold = 128, minChunks = 4)
-    .build()
-```
+This prevents O(n) `readBuffer` traversals when thousands of tiny network fragments arrive
+(e.g., 1 MB in 64-byte TCP segments: 16,384 entries → ~72). Coalescing is zero-cost for
+protocol parsing patterns where data is consumed immediately after each append — the chunk
+count never reaches the threshold, so no copying occurs.
 
 ### Wrapper Transparency
 
