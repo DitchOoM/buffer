@@ -272,9 +272,15 @@ internal class DefaultStreamProcessor(
     private var coalesceTail: ReadWriteBuffer? = null
     private var coalesceWritten = 0
 
+    // Peek cache: remembers the last peekByte scan position so sequential peeks
+    // (e.g., peekInt calling peekByte 4 times at offset, offset+1, offset+2, offset+3)
+    // avoid rescanning from the beginning. Invalidated on any consume operation.
+    private var peekCacheChunkIdx = 0
+    private var peekCacheCumulative = 0 // cumulative bytes before the cached chunk
+
     companion object {
-        /** Default threshold: appended buffers smaller than this are eligible for coalescing. */
-        internal const val DEFAULT_COALESCE_THRESHOLD = 256
+        /** Default threshold: 0 = zero-copy (no coalescing). Set to 256 for bulk-accumulation workloads. */
+        internal const val DEFAULT_COALESCE_THRESHOLD = 0
 
         /** Default minimum chunk count before coalescing engages. */
         internal const val DEFAULT_COALESCE_MIN_CHUNKS = 8
@@ -387,19 +393,41 @@ internal class DefaultStreamProcessor(
 
     override fun peekByte(offset: Int): Byte {
         require(totalAvailable > offset) { "Not enough data: need ${offset + 1}, have $totalAvailable" }
-        var remaining = offset
-        for (chunk in chunks) {
-            if (remaining < chunk.remaining()) {
-                return chunk.get(chunk.position() + remaining)
-            }
-            remaining -= chunk.remaining()
+
+        // Use cached scan position if the offset is at or after where we last looked
+        var chunkIdx: Int
+        var cumulative: Int
+        if (offset >= peekCacheCumulative && peekCacheChunkIdx < chunks.size) {
+            chunkIdx = peekCacheChunkIdx
+            cumulative = peekCacheCumulative
+        } else {
+            chunkIdx = 0
+            cumulative = 0
         }
+
+        while (chunkIdx < chunks.size) {
+            val chunk = chunks[chunkIdx]
+            val chunkRemaining = chunk.remaining()
+            if (offset - cumulative < chunkRemaining) {
+                peekCacheChunkIdx = chunkIdx
+                peekCacheCumulative = cumulative
+                return chunk.get(chunk.position() + (offset - cumulative))
+            }
+            cumulative += chunkRemaining
+            chunkIdx++
+        }
+
         // Check coalesce tail (data not yet sealed into chunks)
         val tail = coalesceTail
-        if (tail != null && remaining < coalesceWritten) {
-            return tail.get(remaining)
+        if (tail != null && (offset - cumulative) < coalesceWritten) {
+            return tail.get(offset - cumulative)
         }
         throw IllegalStateException("Unexpected end of data")
+    }
+
+    private fun invalidatePeekCache() {
+        peekCacheChunkIdx = 0
+        peekCacheCumulative = 0
     }
 
     override fun peekShort(offset: Int): Short {
@@ -545,6 +573,7 @@ internal class DefaultStreamProcessor(
 
     override fun readByte(): Byte {
         require(totalAvailable >= 1) { "No data available" }
+        invalidatePeekCache()
         ensureChunksContain(1)
         val chunk = chunks.first()
         val byte = chunk.readByte()
@@ -557,6 +586,7 @@ internal class DefaultStreamProcessor(
 
     override fun readShort(): Short {
         require(totalAvailable >= Short.SIZE_BYTES) { "Not enough data for Short" }
+        invalidatePeekCache()
         ensureChunksContain(Short.SIZE_BYTES)
         val chunk = chunks.first()
         if (chunk.remaining() >= Short.SIZE_BYTES && chunk.byteOrder == byteOrder) {
@@ -573,6 +603,7 @@ internal class DefaultStreamProcessor(
 
     override fun readInt(): Int {
         require(totalAvailable >= Int.SIZE_BYTES) { "Not enough data for Int" }
+        invalidatePeekCache()
         ensureChunksContain(Int.SIZE_BYTES)
         val chunk = chunks.first()
         if (chunk.remaining() >= Int.SIZE_BYTES && chunk.byteOrder == byteOrder) {
@@ -591,6 +622,7 @@ internal class DefaultStreamProcessor(
 
     override fun readLong(): Long {
         require(totalAvailable >= Long.SIZE_BYTES) { "Not enough data for Long" }
+        invalidatePeekCache()
         ensureChunksContain(Long.SIZE_BYTES)
         val chunk = chunks.first()
         if (chunk.remaining() >= Long.SIZE_BYTES && chunk.byteOrder == byteOrder) {
@@ -626,6 +658,7 @@ internal class DefaultStreamProcessor(
      */
     override fun readBuffer(size: Int): ReadBuffer {
         require(totalAvailable >= size) { "Not enough data: need $size, have $totalAvailable" }
+        invalidatePeekCache()
         ensureChunksContain(size)
         require(chunks.isNotEmpty() || size == 0) { "No chunks available" }
 
@@ -684,6 +717,7 @@ internal class DefaultStreamProcessor(
         block: ReadBuffer.() -> T,
     ): T {
         require(totalAvailable >= size) { "Not enough data: need $size, have $totalAvailable" }
+        invalidatePeekCache()
         ensureChunksContain(size)
         require(chunks.isNotEmpty() || size == 0) { "No chunks available" }
 
@@ -742,6 +776,7 @@ internal class DefaultStreamProcessor(
 
     override fun skip(count: Int) {
         require(totalAvailable >= count) { "Not enough data to skip: need $count, have $totalAvailable" }
+        invalidatePeekCache()
         ensureChunksContain(count)
         var remaining = count
         while (remaining > 0 && chunks.isNotEmpty()) {
@@ -755,6 +790,7 @@ internal class DefaultStreamProcessor(
     }
 
     override fun release() {
+        invalidatePeekCache()
         val tail = coalesceTail
         if (tail != null) {
             freeConsumedChunk(tail)
