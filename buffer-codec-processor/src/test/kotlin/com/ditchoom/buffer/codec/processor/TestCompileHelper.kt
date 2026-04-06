@@ -25,9 +25,14 @@ private val annotationSource =
 
     enum class Endianness { Default, Big, Little }
 
+    enum class Direction { Infer, Codec, DecodeOnly, EncodeOnly }
+
     @Target(AnnotationTarget.CLASS)
     @Retention(AnnotationRetention.BINARY)
-    annotation class ProtocolMessage(val wireOrder: Endianness = Endianness.Default)
+    annotation class ProtocolMessage(
+        val wireOrder: Endianness = Endianness.Default,
+        val direction: Direction = Direction.Infer,
+    )
 
     @Target(AnnotationTarget.CLASS)
     @Retention(AnnotationRetention.BINARY)
@@ -74,6 +79,10 @@ private val annotationSource =
     @Target(AnnotationTarget.VALUE_PARAMETER)
     @Retention(AnnotationRetention.BINARY)
     annotation class WireOrder(val order: Endianness)
+
+    @Target(AnnotationTarget.VALUE_PARAMETER)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class UseCodec(val codec: kotlin.reflect.KClass<*>)
 
     """,
     )
