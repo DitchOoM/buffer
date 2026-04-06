@@ -272,6 +272,41 @@ try {
 }
 ```
 
+## Coalescing
+
+When thousands of tiny chunks arrive (e.g., 1 MB of data in 64-byte network fragments), `peekByte(offset)` must scan through every chunk to find the target offset — an O(n) cost per peek. StreamProcessor addresses this with **adaptive coalescing**: small appended chunks are automatically copied into a larger tail buffer, reducing 16,384 deque entries to ~72.
+
+Coalescing is adaptive by default:
+- **Protocol parsing** (append → peek → read → repeat): chunks are consumed immediately, so the deque stays small and coalescing never engages. Zero overhead.
+- **Bulk accumulation** (many appends before any reads): after 8 chunks accumulate, coalescing kicks in and merges subsequent small appends.
+- **Large chunks** (≥ 256 bytes): always zero-copy, never coalesced.
+
+### Tuning Coalescing
+
+```kotlin
+// Default: adaptive coalescing (recommended for most use cases)
+val processor = StreamProcessor.create(pool)
+
+// More aggressive: start coalescing after 2 chunks
+// Good for high-fragmentation streams (BLE, compressed WebSocket)
+val processor = StreamProcessor.create(pool, coalesceMinChunks = 2)
+
+// Disable coalescing entirely
+// Use when chunks are always large or consumed immediately
+val processor = StreamProcessor.create(pool, coalesceThreshold = 0)
+
+// Via builder (composes with transforms)
+val processor = StreamProcessor.builder(pool)
+    .coalescing(threshold = 128, minChunks = 4)
+    .decompress(Gzip)
+    .build()
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `coalesceThreshold` | 256 | Chunks smaller than this (bytes) are eligible for coalescing. Set to 0 to disable. |
+| `coalesceMinChunks` | 8 | Coalescing only starts when the chunk deque reaches this size. |
+
 ## Best Practices
 
 1. **Use peek before read** - check data availability first
@@ -280,3 +315,4 @@ try {
 4. **Handle fragmentation** - always check `available()` before reading
 5. **Prefer peekMatches** - for magic byte detection
 6. **Call finish() for transforms** - signals end of input for decompression etc.
+7. **Tune coalescing for your workload** - lower `coalesceMinChunks` for high-fragmentation streams, disable with `coalesceThreshold = 0` if chunks are always large

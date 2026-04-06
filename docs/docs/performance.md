@@ -199,6 +199,22 @@ Comparison uses the same Direct buffer type — "Baseline" is the old Kotlin-onl
 ./gradlew jsBenchmarkBulkBenchmark
 ```
 
+## StreamProcessor Coalescing
+
+When processing highly fragmented streams (e.g., 1 MB delivered in 64-byte network reads), `StreamProcessor` can accumulate thousands of tiny chunks. Peek operations scan through these linearly, which becomes a bottleneck.
+
+StreamProcessor uses **adaptive coalescing** to automatically merge small chunks (< 256 bytes) into larger buffers when they accumulate. This reduces the chunk count from ~16,000 to ~70 without affecting protocol parsing patterns where data is consumed immediately after each append.
+
+```kotlin
+// High-fragmentation stream (BLE, compressed WebSocket): coalesce earlier
+val processor = StreamProcessor.create(pool, coalesceMinChunks = 2)
+
+// Already using large reads (4KB+): disable coalescing
+val processor = StreamProcessor.create(pool, coalesceThreshold = 0)
+```
+
+See [Stream Processing: Coalescing](/recipes/stream-processing#coalescing) for full details.
+
 ## Bulk Operations
 
 Multi-byte operations are faster than byte-by-byte:
@@ -364,6 +380,7 @@ while (buffer.remaining() > 0) {
 | Use largest primitives | High | Low |
 | Zero-copy slicing | High | Low |
 | `xorMask()` for WebSocket | High | Low |
+| StreamProcessor coalescing | High | None (default) |
 | Bulk operations | Medium | Low |
 | Direct allocation | Medium | Low |
 | `indexOf(aligned=true)` | Medium | Low |
