@@ -255,6 +255,13 @@ val message = processor.readBufferScoped(length) {
 val payload = processor.readBuffer(length)
 ```
 
+**Adaptive coalescing:** StreamProcessor automatically coalesces small appended chunks
+(< 256 bytes) into larger buffers when fragments accumulate in the deque (≥ 8 chunks).
+This prevents O(n) `readBuffer` traversals when thousands of tiny network fragments arrive
+(e.g., 1 MB in 64-byte TCP segments: 16,384 entries → ~72). Coalescing is zero-cost for
+protocol parsing patterns where data is consumed immediately after each append — the chunk
+count never reaches the threshold, so no copying occurs.
+
 ### Wrapper Transparency
 
 Buffer wrappers (PooledBuffer, TrackedSlice) delegate to an underlying PlatformBuffer. Code that consumes buffers must work transparently through these wrappers.

@@ -1,8 +1,8 @@
 package com.ditchoom.buffer
 
 import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.stream.DefaultStreamProcessor
 import com.ditchoom.buffer.stream.StreamProcessor
-import com.ditchoom.buffer.stream.builder
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -59,7 +59,7 @@ class StreamProcessorCoalesceTests {
     fun peekIntoCoalesceTail() {
         val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 16)
         // Force immediate coalescing with minChunks=0
-        val processor = StreamProcessor.create(pool, coalesceMinChunks = 0)
+        val processor = DefaultStreamProcessor(pool, coalesceMinChunks = 0)
 
         // Append a small chunk that will be coalesced into the tail
         val buf = BufferFactory.managed().allocate(4)
@@ -95,7 +95,7 @@ class StreamProcessorCoalesceTests {
     @Test
     fun peekShortIntLongIntoCoalesceTail() {
         val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 16)
-        val processor = StreamProcessor.create(pool, coalesceMinChunks = 0)
+        val processor = DefaultStreamProcessor(pool, coalesceMinChunks = 0)
 
         // Append 8 bytes as a small chunk (will be coalesced)
         val buf = BufferFactory.managed().allocate(8)
@@ -117,7 +117,7 @@ class StreamProcessorCoalesceTests {
     @Test
     fun readBufferFromCoalesceTail() {
         val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 16)
-        val processor = StreamProcessor.create(pool, coalesceMinChunks = 0)
+        val processor = DefaultStreamProcessor(pool, coalesceMinChunks = 0)
 
         val buf = BufferFactory.managed().allocate(16)
         for (i in 0 until 16) buf.writeByte(i.toByte())
@@ -139,7 +139,7 @@ class StreamProcessorCoalesceTests {
     @Test
     fun readBufferScopedFromCoalesceTail() {
         val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 16)
-        val processor = StreamProcessor.create(pool, coalesceMinChunks = 0)
+        val processor = DefaultStreamProcessor(pool, coalesceMinChunks = 0)
 
         val buf = BufferFactory.managed().allocate(8)
         buf.writeInt(42)
@@ -211,7 +211,7 @@ class StreamProcessorCoalesceTests {
     @Test
     fun coalescingDisabledWhenThresholdZero() {
         val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 16)
-        val processor = StreamProcessor.create(pool, coalesceThreshold = 0)
+        val processor = DefaultStreamProcessor(pool, coalesceThreshold = 0)
 
         // Append many small chunks — none should be coalesced
         for (i in 0 until 20) {
@@ -248,7 +248,7 @@ class StreamProcessorCoalesceTests {
     @Test
     fun availableCorrectWithCoalesceTail() {
         val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 16)
-        val processor = StreamProcessor.create(pool, coalesceMinChunks = 0)
+        val processor = DefaultStreamProcessor(pool, coalesceMinChunks = 0)
 
         assertEquals(0, processor.available())
 
@@ -288,7 +288,7 @@ class StreamProcessorCoalesceTests {
     @Test
     fun releaseFreesCoalesceTail() {
         val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 16)
-        val processor = StreamProcessor.create(pool, coalesceMinChunks = 0)
+        val processor = DefaultStreamProcessor(pool, coalesceMinChunks = 0)
 
         // Append small data that sits in the coalesce tail
         val buf = BufferFactory.managed().allocate(32)
@@ -312,7 +312,7 @@ class StreamProcessorCoalesceTests {
     @Test
     fun releaseWithMixedChunksAndCoalesceTail() {
         val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 16)
-        val processor = StreamProcessor.create(pool, coalesceMinChunks = 0)
+        val processor = DefaultStreamProcessor(pool, coalesceMinChunks = 0)
 
         // Large chunk → goes to deque
         val large = BufferFactory.managed().allocate(512)
@@ -341,7 +341,7 @@ class StreamProcessorCoalesceTests {
     @Test
     fun noLeakedBuffersAfterCoalescingWorkload() {
         val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 32)
-        val processor = StreamProcessor.create(pool, coalesceMinChunks = 2)
+        val processor = DefaultStreamProcessor(pool, coalesceMinChunks = 2)
 
         // Run a workload: append many small chunks, read them all
         for (round in 0 until 5) {
@@ -380,7 +380,7 @@ class StreamProcessorCoalesceTests {
     @Test
     fun skipIntoCoalesceTail() {
         val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 16)
-        val processor = StreamProcessor.create(pool, coalesceMinChunks = 0)
+        val processor = DefaultStreamProcessor(pool, coalesceMinChunks = 0)
 
         // Large chunk in deque
         val large = BufferFactory.managed().allocate(300)
@@ -417,7 +417,7 @@ class StreamProcessorCoalesceTests {
     fun coalesceTailSealsWhenFull() {
         val pool = BufferPool(defaultBufferSize = 256, maxPoolSize = 16)
         // Coalesce tail will be 256 bytes (pool default). Filling it should seal and start new one.
-        val processor = StreamProcessor.create(pool, coalesceMinChunks = 0)
+        val processor = DefaultStreamProcessor(pool, coalesceMinChunks = 0)
 
         // Append 400 bytes in 20-byte chunks → fills 256-byte tail, seals, starts new tail
         for (i in 0 until 20) {
@@ -443,45 +443,13 @@ class StreamProcessorCoalesceTests {
     }
 
     // ============================================================================
-    // Configurable via Builder
-    // ============================================================================
-
-    @Test
-    fun builderCoalescingConfiguration() {
-        val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 16)
-        val processor =
-            StreamProcessor
-                .builder(pool)
-                .coalescing(threshold = 128, minChunks = 4)
-                .build()
-
-        // Append 10 small chunks (< 128 bytes each)
-        for (i in 0 until 10) {
-            val buf = BufferFactory.managed().allocate(64)
-            for (j in 0 until 64) buf.writeByte(((i * 64 + j) and 0xFF).toByte())
-            buf.resetForRead()
-            processor.append(buf)
-        }
-
-        assertEquals(640, processor.available())
-
-        // Verify all data is correct
-        for (i in 0 until 640) {
-            assertEquals((i and 0xFF).toByte(), processor.readByte(), "Mismatch at byte $i")
-        }
-
-        processor.release()
-        pool.clear()
-    }
-
-    // ============================================================================
     // PeekMismatch With Coalesce Tail
     // ============================================================================
 
     @Test
     fun peekMismatchWithDataInCoalesceTail() {
         val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 16)
-        val processor = StreamProcessor.create(pool, coalesceMinChunks = 0)
+        val processor = DefaultStreamProcessor(pool, coalesceMinChunks = 0)
 
         // Append 4 bytes into coalesce tail
         val buf = BufferFactory.managed().allocate(4)

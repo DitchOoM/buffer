@@ -272,6 +272,19 @@ try {
 }
 ```
 
+## Coalescing
+
+When thousands of tiny chunks arrive (e.g., 1 MB of data in 64-byte network fragments), `peekByte(offset)` must scan through every chunk to find the target offset — an O(n) cost per peek. StreamProcessor addresses this with **adaptive coalescing**: small appended chunks are automatically copied into a larger tail buffer, reducing 16,384 deque entries to ~72.
+
+Coalescing is adaptive by default:
+- **Protocol parsing** (append → peek → read → repeat): chunks are consumed immediately, so the deque stays small and coalescing never engages. Zero overhead.
+- **Bulk accumulation** (many appends before any reads): after 8 chunks accumulate, coalescing kicks in and merges subsequent small appends.
+- **Large chunks** (≥ 256 bytes): always zero-copy, never coalesced.
+
+Coalescing is fully automatic — no configuration needed. The defaults handle both
+protocol parsing (no coalescing overhead) and bulk accumulation (coalesces to prevent
+O(n) traversals) transparently.
+
 ## Best Practices
 
 1. **Use peek before read** - check data availability first
@@ -280,3 +293,4 @@ try {
 4. **Handle fragmentation** - always check `available()` before reading
 5. **Prefer peekMatches** - for magic byte detection
 6. **Call finish() for transforms** - signals end of input for decompression etc.
+7. **Coalescing is automatic** - StreamProcessor adapts to your workload pattern with no configuration needed

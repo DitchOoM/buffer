@@ -229,24 +229,10 @@ interface StreamProcessor {
     fun release()
 
     companion object {
-        /**
-         * Creates a StreamProcessor with optional coalescing configuration.
-         *
-         * @param pool the buffer pool for allocating merged/coalesced buffers
-         * @param byteOrder byte order for multi-byte peek/read operations
-         * @param coalesceThreshold appended buffers smaller than this (bytes) are
-         *   eligible for coalescing into a single tail buffer. Set to 0 to disable
-         *   coalescing entirely. Default: 256.
-         * @param coalesceMinChunks coalescing only engages when the chunk deque
-         *   reaches this size, avoiding overhead in append-then-immediately-read
-         *   patterns. Default: 8.
-         */
         fun create(
             pool: BufferPool,
             byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-            coalesceThreshold: Int = DefaultStreamProcessor.DEFAULT_COALESCE_THRESHOLD,
-            coalesceMinChunks: Int = DefaultStreamProcessor.DEFAULT_COALESCE_MIN_CHUNKS,
-        ): StreamProcessor = DefaultStreamProcessor(pool, byteOrder, coalesceThreshold, coalesceMinChunks)
+        ): StreamProcessor = DefaultStreamProcessor(pool, byteOrder)
     }
 }
 
@@ -279,8 +265,8 @@ internal class DefaultStreamProcessor(
     private var peekCacheCumulative = 0 // cumulative bytes before the cached chunk
 
     companion object {
-        /** Default threshold: 0 = zero-copy (no coalescing). Set to 256 for bulk-accumulation workloads. */
-        internal const val DEFAULT_COALESCE_THRESHOLD = 0
+        /** Default threshold: buffers smaller than this are eligible for coalescing when chunks accumulate. */
+        internal const val DEFAULT_COALESCE_THRESHOLD = 256
 
         /** Default minimum chunk count before coalescing engages. */
         internal const val DEFAULT_COALESCE_MIN_CHUNKS = 8
