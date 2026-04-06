@@ -91,6 +91,7 @@ class SealedDispatchGenerator(
         dispatchOnInfo: DispatchOnInfo? = null,
         variantsHandleDiscriminator: Boolean = false,
         variantsSupportingPeek: Set<String> = emptySet(),
+        direction: CodecDirection = CodecDirection.Bidirectional,
     ) {
         val interfaceName = sealedInterface.simpleName.asString()
         val packageName = sealedInterface.packageName.asString()
@@ -166,18 +167,36 @@ class SealedDispatchGenerator(
         val dependencies = Dependencies(aggregating = true, sources = sourceFiles.toTypedArray())
 
         val hasAnyPayload = variantPayloadInfos.any { it.payloadFields.isNotEmpty() }
+        val isBidirectional = direction == CodecDirection.Bidirectional
+        val canDecode = direction != CodecDirection.EncodeOnly
+        val canEncode = direction != CodecDirection.DecodeOnly
 
         val skipWireWrite = variantsHandleDiscriminator
         val result =
             if (hasAnyPayload) {
-                buildPayloadDispatch(packageName, interfaceTypeName, variants, variantPayloadInfos, dispatchOnInfo, skipWireWrite)
+                buildPayloadDispatch(
+                    packageName,
+                    interfaceTypeName,
+                    variants,
+                    variantPayloadInfos,
+                    dispatchOnInfo,
+                    skipWireWrite,
+                    direction,
+                )
             } else {
-                buildSimpleDispatch(interfaceTypeName, variants, dispatchOnInfo, skipWireWrite)
+                buildSimpleDispatch(interfaceTypeName, variants, dispatchOnInfo, skipWireWrite, direction)
             }
 
         val objectBuilder = TypeSpec.objectBuilder(codecName)
         if (result.implementsCodec) {
-            objectBuilder.addSuperinterface(CODEC.parameterizedBy(interfaceTypeName))
+            when (direction) {
+                CodecDirection.Bidirectional ->
+                    objectBuilder.addSuperinterface(CODEC.parameterizedBy(interfaceTypeName))
+                CodecDirection.DecodeOnly ->
+                    objectBuilder.addSuperinterface(DECODER.parameterizedBy(interfaceTypeName))
+                CodecDirection.EncodeOnly ->
+                    objectBuilder.addSuperinterface(ENCODER.parameterizedBy(interfaceTypeName))
+            }
         }
 
         // If @DispatchOn is used, generate a context key for the discriminator
@@ -195,17 +214,19 @@ class SealedDispatchGenerator(
             objectBuilder.addFunction(fn)
         }
 
-        // Generate peekFrameSize for sealed dispatch (only if ALL variants support it)
-        val allVariantsSupportPeek =
-            variants.all { v ->
-                val name = v.subclass.qualifiedName?.asString() ?: v.subclass.simpleName.asString()
-                name in variantsSupportingPeek
+        // Generate peekFrameSize for sealed dispatch (only if ALL variants support it and direction allows decode)
+        if (canDecode) {
+            val allVariantsSupportPeek =
+                variants.all { v ->
+                    val name = v.subclass.qualifiedName?.asString() ?: v.subclass.simpleName.asString()
+                    name in variantsSupportingPeek
+                }
+            val sealedPeek = if (allVariantsSupportPeek) buildSealedPeekFrameSize(variants, dispatchOnInfo) else null
+            if (sealedPeek != null) {
+                objectBuilder.addProperty(sealedPeek.minHeaderProperty)
+                objectBuilder.addFunction(sealedPeek.syncFun)
+                objectBuilder.addFunction(sealedPeek.suspendFun)
             }
-        val sealedPeek = if (allVariantsSupportPeek) buildSealedPeekFrameSize(variants, dispatchOnInfo) else null
-        if (sealedPeek != null) {
-            objectBuilder.addProperty(sealedPeek.minHeaderProperty)
-            objectBuilder.addFunction(sealedPeek.syncFun)
-            objectBuilder.addFunction(sealedPeek.suspendFun)
         }
 
         val fileSpec =
@@ -222,66 +243,102 @@ class SealedDispatchGenerator(
         variants: List<PacketTypeInfo>,
         dispatchOnInfo: DispatchOnInfo? = null,
         skipWireWrite: Boolean = false,
+        direction: CodecDirection = CodecDirection.Bidirectional,
     ): DispatchResult {
-        // decode(buffer, context) — Codec<T> abstract method
-        val decodeCtxBody = CodeBlock.builder()
-        if (dispatchOnInfo != null) {
-            decodeCtxBody.addStatement(
-                "val _discriminator = %T.decode(buffer)",
-                ClassName(dispatchOnInfo.poetClassName.packageName, dispatchOnInfo.codecName),
-            )
-            decodeCtxBody.addStatement(
-                "val type = _discriminator.%L",
-                dispatchOnInfo.dispatchProperty,
-            )
-            decodeCtxBody.addStatement(
-                "val _ctx = context.with(DiscriminatorKey, _discriminator)",
-            )
-        } else {
-            decodeCtxBody.addStatement("val type = buffer.readByte().toInt() and 0xFF")
-        }
-        val ctxVar = if (dispatchOnInfo != null) "_ctx" else "context"
-        decodeCtxBody.beginControlFlow("return when (type)")
-        for (v in variants) {
-            decodeCtxBody.addStatement("${v.value} -> ${v.subclass.codecName()}.decode(buffer, $ctxVar)")
-        }
-        decodeCtxBody
-            .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
-            .endControlFlow()
+        val isBidirectional = direction == CodecDirection.Bidirectional
+        val canDecode = direction != CodecDirection.EncodeOnly
+        val canEncode = direction != CodecDirection.DecodeOnly
+        val functions = mutableListOf<FunSpec>()
 
-        val decodeCtxFun =
-            FunSpec
-                .builder("decode")
-                .addModifiers(KModifier.OVERRIDE)
-                .addParameter("buffer", READ_BUFFER)
-                .addParameter("context", DECODE_CONTEXT)
-                .returns(interfaceTypeName)
-                .addCode(decodeCtxBody.build())
-                .build()
-
-        // encode(buffer, value, context) — Codec<T> abstract method
-        val encodeCtxBody = CodeBlock.builder().beginControlFlow("when (value)")
-        for (v in variants) {
-            encodeCtxBody.beginControlFlow("is %T ->", v.subclass.toPoetClassName())
-            if (!skipWireWrite) {
-                addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
+        // decode(buffer, context) — context-aware decode
+        if (canDecode) {
+            val decodeCtxBody = CodeBlock.builder()
+            if (dispatchOnInfo != null) {
+                decodeCtxBody.addStatement(
+                    "val _discriminator = %T.decode(buffer)",
+                    ClassName(dispatchOnInfo.poetClassName.packageName, dispatchOnInfo.codecName),
+                )
+                decodeCtxBody.addStatement(
+                    "val type = _discriminator.%L",
+                    dispatchOnInfo.dispatchProperty,
+                )
+                decodeCtxBody.addStatement(
+                    "val _ctx = context.with(DiscriminatorKey, _discriminator)",
+                )
+            } else {
+                decodeCtxBody.addStatement("val type = buffer.readByte().toInt() and 0xFF")
             }
-            encodeCtxBody.addStatement("${v.subclass.codecName()}.encode(buffer, value, context)")
-            encodeCtxBody.endControlFlow()
+            val ctxVar = if (dispatchOnInfo != null) "_ctx" else "context"
+            decodeCtxBody.beginControlFlow("return when (type)")
+            for (v in variants) {
+                decodeCtxBody.addStatement("${v.value} -> ${v.subclass.codecName()}.decode(buffer, $ctxVar)")
+            }
+            decodeCtxBody
+                .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
+                .endControlFlow()
+
+            val decodeCtxBuilder =
+                FunSpec
+                    .builder("decode")
+                    .addParameter("buffer", READ_BUFFER)
+                    .addParameter("context", DECODE_CONTEXT)
+                    .returns(interfaceTypeName)
+                    .addCode(decodeCtxBody.build())
+            if (isBidirectional) decodeCtxBuilder.addModifiers(KModifier.OVERRIDE)
+            functions.add(decodeCtxBuilder.build())
+
+            // For DecodeOnly: override Decoder<T>.decode(buffer)
+            if (direction == CodecDirection.DecodeOnly) {
+                functions.add(
+                    FunSpec
+                        .builder("decode")
+                        .addModifiers(KModifier.OVERRIDE)
+                        .addParameter("buffer", READ_BUFFER)
+                        .returns(interfaceTypeName)
+                        .addStatement("return decode(buffer, %T.Empty)", DECODE_CONTEXT)
+                        .build(),
+                )
+            }
         }
-        encodeCtxBody.endControlFlow()
 
-        val encodeCtxFun =
-            FunSpec
-                .builder("encode")
-                .addModifiers(KModifier.OVERRIDE)
-                .addParameter("buffer", WRITE_BUFFER)
-                .addParameter("value", interfaceTypeName)
-                .addParameter("context", ENCODE_CONTEXT)
-                .addCode(encodeCtxBody.build())
-                .build()
+        // encode(buffer, value, context) — context-aware encode
+        if (canEncode) {
+            val encodeCtxBody = CodeBlock.builder().beginControlFlow("when (value)")
+            for (v in variants) {
+                encodeCtxBody.beginControlFlow("is %T ->", v.subclass.toPoetClassName())
+                if (!skipWireWrite) {
+                    addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
+                }
+                encodeCtxBody.addStatement("${v.subclass.codecName()}.encode(buffer, value, context)")
+                encodeCtxBody.endControlFlow()
+            }
+            encodeCtxBody.endControlFlow()
 
-        return DispatchResult(listOf(decodeCtxFun, encodeCtxFun), true)
+            val encodeCtxBuilder =
+                FunSpec
+                    .builder("encode")
+                    .addParameter("buffer", WRITE_BUFFER)
+                    .addParameter("value", interfaceTypeName)
+                    .addParameter("context", ENCODE_CONTEXT)
+                    .addCode(encodeCtxBody.build())
+            if (isBidirectional) encodeCtxBuilder.addModifiers(KModifier.OVERRIDE)
+            functions.add(encodeCtxBuilder.build())
+
+            // For EncodeOnly: override Encoder<T>.encode(buffer, value)
+            if (direction == CodecDirection.EncodeOnly) {
+                functions.add(
+                    FunSpec
+                        .builder("encode")
+                        .addModifiers(KModifier.OVERRIDE)
+                        .addParameter("buffer", WRITE_BUFFER)
+                        .addParameter("value", interfaceTypeName)
+                        .addStatement("encode(buffer, value, %T.Empty)", ENCODE_CONTEXT)
+                        .build(),
+                )
+            }
+        }
+
+        return DispatchResult(functions, true)
     }
 
     /**
@@ -295,6 +352,7 @@ class SealedDispatchGenerator(
         variantPayloadInfos: List<SealedVariantPayloadInfo>,
         dispatchOnInfo: DispatchOnInfo? = null,
         skipWireWrite: Boolean = false,
+        direction: CodecDirection = CodecDirection.Bidirectional,
     ): DispatchResult {
         // Collect all distinct type params from all payload variants
         val allTypeParams =
@@ -438,87 +496,120 @@ class SealedDispatchGenerator(
 
         encodeBuilder.addCode(encodeBody.build())
 
-        // ── Context-based Codec<T> overloads (Convention 2: enables nesting) ──
+        // ── Context-based overloads (Convention 2: enables nesting) ──
+        val isBidirectional = direction == CodecDirection.Bidirectional
+        val canDecode = direction != CodecDirection.EncodeOnly
+        val canEncode = direction != CodecDirection.DecodeOnly
+        val contextFunctions = mutableListOf<FunSpec>()
 
         // decode(buffer, context) reads lambdas from context for payload variants
-        val decodeCtxBody = CodeBlock.builder()
-        if (dispatchOnInfo != null) {
-            decodeCtxBody.addStatement(
-                "val _discriminator = %T.decode(buffer)",
-                ClassName(dispatchOnInfo.poetClassName.packageName, dispatchOnInfo.codecName),
-            )
-            decodeCtxBody.addStatement("val type = _discriminator.%L", dispatchOnInfo.dispatchProperty)
-            decodeCtxBody.addStatement("val _ctx = context.with(DiscriminatorKey, _discriminator)")
-        } else {
-            decodeCtxBody.addStatement("val type = buffer.readByte().toInt() and 0xFF")
-        }
-        val payloadCtxVar = if (dispatchOnInfo != null) "_ctx" else "context"
-        decodeCtxBody.beginControlFlow("return when (type)")
-
-        for (v in variants) {
-            val info = payloadBySubclass[v.subclass.qualifiedName?.asString()]
-            val subCodecName = v.subclass.codecName()
-            if (info != null && info.payloadFields.isNotEmpty()) {
-                decodeCtxBody.addStatement("${v.value} -> $subCodecName.decodeFromContext(buffer, $payloadCtxVar)")
+        if (canDecode) {
+            val decodeCtxBody = CodeBlock.builder()
+            if (dispatchOnInfo != null) {
+                decodeCtxBody.addStatement(
+                    "val _discriminator = %T.decode(buffer)",
+                    ClassName(dispatchOnInfo.poetClassName.packageName, dispatchOnInfo.codecName),
+                )
+                decodeCtxBody.addStatement("val type = _discriminator.%L", dispatchOnInfo.dispatchProperty)
+                decodeCtxBody.addStatement("val _ctx = context.with(DiscriminatorKey, _discriminator)")
             } else {
-                decodeCtxBody.addStatement("${v.value} -> $subCodecName.decode(buffer, $payloadCtxVar)")
+                decodeCtxBody.addStatement("val type = buffer.readByte().toInt() and 0xFF")
+            }
+            val payloadCtxVar = if (dispatchOnInfo != null) "_ctx" else "context"
+            decodeCtxBody.beginControlFlow("return when (type)")
+
+            for (v in variants) {
+                val info = payloadBySubclass[v.subclass.qualifiedName?.asString()]
+                val subCodecName = v.subclass.codecName()
+                if (info != null && info.payloadFields.isNotEmpty()) {
+                    decodeCtxBody.addStatement("${v.value} -> $subCodecName.decodeFromContext(buffer, $payloadCtxVar)")
+                } else {
+                    decodeCtxBody.addStatement("${v.value} -> $subCodecName.decode(buffer, $payloadCtxVar)")
+                }
+            }
+            decodeCtxBody
+                .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
+                .endControlFlow()
+
+            val decodeCtxBuilder =
+                FunSpec
+                    .builder("decode")
+                    .addParameter("buffer", READ_BUFFER)
+                    .addParameter("context", DECODE_CONTEXT)
+                    .returns(interfaceTypeName)
+                    .addCode(decodeCtxBody.build())
+            if (isBidirectional) decodeCtxBuilder.addModifiers(KModifier.OVERRIDE)
+            contextFunctions.add(decodeCtxBuilder.build())
+
+            // For DecodeOnly: override Decoder<T>.decode(buffer)
+            if (direction == CodecDirection.DecodeOnly) {
+                contextFunctions.add(
+                    FunSpec
+                        .builder("decode")
+                        .addModifiers(KModifier.OVERRIDE)
+                        .addParameter("buffer", READ_BUFFER)
+                        .returns(interfaceTypeName)
+                        .addStatement("return decode(buffer, %T.Empty)", DECODE_CONTEXT)
+                        .build(),
+                )
             }
         }
-        decodeCtxBody
-            .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
-            .endControlFlow()
-
-        val decodeCtxFun =
-            FunSpec
-                .builder("decode")
-                .addModifiers(KModifier.OVERRIDE)
-                .addParameter("buffer", READ_BUFFER)
-                .addParameter("context", DECODE_CONTEXT)
-                .returns(interfaceTypeName)
-                .addCode(decodeCtxBody.build())
-                .build()
 
         // encode(buffer, value, context) reads lambdas from context for payload variants
-        val encodeCtxBody = CodeBlock.builder().beginControlFlow("when (value)")
-        for (v in variants) {
-            val info = payloadBySubclass[v.subclass.qualifiedName?.asString()]
-            val subTypeName = v.subclass.toPoetClassName()
-            val subCodecName = v.subclass.codecName()
+        if (canEncode) {
+            val encodeCtxBody = CodeBlock.builder().beginControlFlow("when (value)")
+            for (v in variants) {
+                val info = payloadBySubclass[v.subclass.qualifiedName?.asString()]
+                val subTypeName = v.subclass.toPoetClassName()
+                val subCodecName = v.subclass.codecName()
 
-            if (info != null && info.payloadFields.isNotEmpty()) {
-                val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
-                encodeCtxBody.beginControlFlow("is %T ->", starType)
-                if (!skipWireWrite) addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
-                encodeCtxBody.addStatement("$subCodecName.encodeFromContext(buffer, value, context)")
-                encodeCtxBody.endControlFlow()
-            } else {
-                encodeCtxBody.beginControlFlow("is %T ->", subTypeName)
-                if (!skipWireWrite) addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
-                encodeCtxBody.addStatement("$subCodecName.encode(buffer, value, context)")
-                encodeCtxBody.endControlFlow()
+                if (info != null && info.payloadFields.isNotEmpty()) {
+                    val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
+                    encodeCtxBody.beginControlFlow("is %T ->", starType)
+                    if (!skipWireWrite) addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
+                    encodeCtxBody.addStatement("$subCodecName.encodeFromContext(buffer, value, context)")
+                    encodeCtxBody.endControlFlow()
+                } else {
+                    encodeCtxBody.beginControlFlow("is %T ->", subTypeName)
+                    if (!skipWireWrite) addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
+                    encodeCtxBody.addStatement("$subCodecName.encode(buffer, value, context)")
+                    encodeCtxBody.endControlFlow()
+                }
+            }
+            encodeCtxBody.endControlFlow()
+
+            val encodeCtxBuilder =
+                FunSpec
+                    .builder("encode")
+                    .addParameter("buffer", WRITE_BUFFER)
+                    .addParameter("value", interfaceTypeName)
+                    .addParameter("context", ENCODE_CONTEXT)
+                    .addCode(encodeCtxBody.build())
+            if (isBidirectional) encodeCtxBuilder.addModifiers(KModifier.OVERRIDE)
+            contextFunctions.add(encodeCtxBuilder.build())
+
+            // For EncodeOnly: override Encoder<T>.encode(buffer, value)
+            if (direction == CodecDirection.EncodeOnly) {
+                contextFunctions.add(
+                    FunSpec
+                        .builder("encode")
+                        .addModifiers(KModifier.OVERRIDE)
+                        .addParameter("buffer", WRITE_BUFFER)
+                        .addParameter("value", interfaceTypeName)
+                        .addStatement("encode(buffer, value, %T.Empty)", ENCODE_CONTEXT)
+                        .build(),
+                )
             }
         }
-        encodeCtxBody.endControlFlow()
 
-        val encodeCtxFun =
-            FunSpec
-                .builder("encode")
-                .addModifiers(KModifier.OVERRIDE)
-                .addParameter("buffer", WRITE_BUFFER)
-                .addParameter("value", interfaceTypeName)
-                .addParameter("context", ENCODE_CONTEXT)
-                .addCode(encodeCtxBody.build())
-                .build()
+        val allFunctions =
+            buildList {
+                if (canDecode) add(decodeBuilder.build())
+                if (canEncode) add(encodeBuilder.build())
+                addAll(contextFunctions)
+            }
 
-        return DispatchResult(
-            listOf(
-                decodeBuilder.build(), // Convention 1: explicit lambdas
-                encodeBuilder.build(),
-                decodeCtxFun, // Codec<T> context overload
-                encodeCtxFun,
-            ),
-            true, // NOW implements Codec<T>
-        )
+        return DispatchResult(allFunctions, true)
     }
 
     // ──────────────────────── peekFrameSize for sealed dispatch ────────────────────────

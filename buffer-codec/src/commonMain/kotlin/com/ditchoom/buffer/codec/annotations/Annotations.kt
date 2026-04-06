@@ -27,6 +27,16 @@ annotation class ProtocolMessage(
      * Individual fields can further override with [WireOrder].
      */
     val wireOrder: Endianness = Endianness.Default,
+    /**
+     * Controls whether the generated codec supports encode, decode, or both.
+     *
+     * - [Direction.Infer] (default): automatically inferred from fields.
+     *   If any field uses a decode-only `@UseCodec`, the codec becomes decode-only.
+     * - [Direction.Codec]: asserts bidirectional — compile error if any field is unidirectional.
+     * - [Direction.DecodeOnly]: generates only `decode()` — compile error if any field is encode-only.
+     * - [Direction.EncodeOnly]: generates only `encode()` — compile error if any field is decode-only.
+     */
+    val direction: Direction = Direction.Infer,
 )
 
 /**
@@ -192,6 +202,28 @@ enum class Endianness {
 
     /** Little-endian. */
     Little,
+}
+
+/**
+ * Controls whether a `@ProtocolMessage` generates encode, decode, or both.
+ *
+ * Used with [ProtocolMessage.direction] to explicitly control or assert the
+ * directionality of the generated codec. Direction is inferred from fields by default:
+ * if any field uses a decode-only `@UseCodec` (one that only implements `Decoder<T>`),
+ * the generated codec becomes decode-only automatically.
+ */
+enum class Direction {
+    /** Infer from fields: decode-only if any field is decode-only, etc. (default, non-breaking). */
+    Infer,
+
+    /** Assert bidirectional — compile error if any field is unidirectional. */
+    Codec,
+
+    /** Force decode-only — compile error if any field is encode-only. */
+    DecodeOnly,
+
+    /** Force encode-only — compile error if any field is decode-only. */
+    EncodeOnly,
 }
 
 /**
