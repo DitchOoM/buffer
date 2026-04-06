@@ -213,7 +213,7 @@ enum class Endianness {
  * the generated codec becomes decode-only automatically.
  */
 enum class Direction {
-    /** Infer from fields: decode-only if any field is decode-only, etc. (default, non-breaking). */
+    /** Infer from fields: decode-only if any field is decode-only, etc. Default, non-breaking. */
     Infer,
 
     /** Assert bidirectional — compile error if any field is unidirectional. */
