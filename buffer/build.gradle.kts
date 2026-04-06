@@ -169,6 +169,7 @@ kotlin {
             }
         } else if (HostManager.hostIsLinux) {
             linuxX64()
+            linuxArm64()
         }
     }
     targets.withType<org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget>().configureEach {
@@ -494,6 +495,13 @@ benchmark {
             iterationTime = 1000
             iterationTimeUnit = "ms"
             include("StreamingStringDecoder")
+        }
+        register("streamProcessor") {
+            warmups = 3
+            iterations = 5
+            iterationTime = 1000
+            iterationTimeUnit = "ms"
+            include("StreamProcessor")
         }
         // Fast configuration for WASM - runs only key benchmarks to avoid long run times
         register("wasmFast") {

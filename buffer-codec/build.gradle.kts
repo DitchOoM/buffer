@@ -78,6 +78,7 @@ kotlin {
             }
         } else if (HostManager.hostIsLinux) {
             linuxX64()
+            linuxArm64()
         }
     }
 
