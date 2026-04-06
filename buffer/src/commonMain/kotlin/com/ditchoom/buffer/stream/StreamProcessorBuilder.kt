@@ -30,27 +30,8 @@ import com.ditchoom.buffer.pool.BufferPool
 class StreamProcessorBuilder(
     val pool: BufferPool,
     val byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-    private var coalesceThreshold: Int = DefaultStreamProcessor.DEFAULT_COALESCE_THRESHOLD,
-    private var coalesceMinChunks: Int = DefaultStreamProcessor.DEFAULT_COALESCE_MIN_CHUNKS,
 ) {
     private val transforms = mutableListOf<TransformSpec>()
-
-    /**
-     * Configures coalescing behavior for small appended chunks.
-     *
-     * @param threshold buffers smaller than this (bytes) are eligible for coalescing.
-     *   Set to 0 to disable coalescing entirely.
-     * @param minChunks coalescing only engages when the chunk deque reaches this size.
-     * @return this builder for chaining
-     */
-    fun coalescing(
-        threshold: Int = DefaultStreamProcessor.DEFAULT_COALESCE_THRESHOLD,
-        minChunks: Int = DefaultStreamProcessor.DEFAULT_COALESCE_MIN_CHUNKS,
-    ): StreamProcessorBuilder {
-        coalesceThreshold = threshold
-        coalesceMinChunks = minChunks
-        return this
-    }
 
     /**
      * Adds a transform to the processing pipeline.
@@ -69,7 +50,7 @@ class StreamProcessorBuilder(
      * @throws UnsupportedOperationException if any transform is async-only
      */
     fun build(): StreamProcessor {
-        var processor = StreamProcessor.create(pool, byteOrder, coalesceThreshold, coalesceMinChunks)
+        var processor = StreamProcessor.create(pool, byteOrder)
 
         // Apply transforms in order (first added = outermost)
         for (spec in transforms) {
@@ -85,7 +66,7 @@ class StreamProcessorBuilder(
      */
     fun buildSuspending(): SuspendingStreamProcessor {
         var processor: SuspendingStreamProcessor =
-            SyncToSuspendingProcessor(StreamProcessor.create(pool, byteOrder, coalesceThreshold, coalesceMinChunks))
+            SyncToSuspendingProcessor(StreamProcessor.create(pool, byteOrder))
 
         // Apply transforms in order (first added = outermost)
         for (spec in transforms) {
