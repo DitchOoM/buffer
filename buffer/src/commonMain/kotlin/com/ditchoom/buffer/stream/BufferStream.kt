@@ -3,6 +3,7 @@ package com.ditchoom.buffer.stream
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.pool.BufferPool
 
 /**
@@ -228,22 +229,56 @@ interface StreamProcessor {
     fun release()
 
     companion object {
+        /**
+         * Creates a StreamProcessor with optional coalescing configuration.
+         *
+         * @param pool the buffer pool for allocating merged/coalesced buffers
+         * @param byteOrder byte order for multi-byte peek/read operations
+         * @param coalesceThreshold appended buffers smaller than this (bytes) are
+         *   eligible for coalescing into a single tail buffer. Set to 0 to disable
+         *   coalescing entirely. Default: 256.
+         * @param coalesceMinChunks coalescing only engages when the chunk deque
+         *   reaches this size, avoiding overhead in append-then-immediately-read
+         *   patterns. Default: 8.
+         */
         fun create(
             pool: BufferPool,
             byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-        ): StreamProcessor = DefaultStreamProcessor(pool, byteOrder)
+            coalesceThreshold: Int = DefaultStreamProcessor.DEFAULT_COALESCE_THRESHOLD,
+            coalesceMinChunks: Int = DefaultStreamProcessor.DEFAULT_COALESCE_MIN_CHUNKS,
+        ): StreamProcessor = DefaultStreamProcessor(pool, byteOrder, coalesceThreshold, coalesceMinChunks)
     }
 }
 
 /**
  * Default implementation of StreamProcessor.
+ *
+ * Small appends (< [COALESCE_THRESHOLD] bytes) are copied into a coalescing tail buffer
+ * to reduce the chunk count. This turns O(n) peek scans into O(1) when thousands of tiny
+ * network fragments arrive (e.g., 1 MB in 64-byte chunks → ~64 coalesced chunks instead
+ * of 16,384). Large appends bypass coalescing entirely (zero-copy).
  */
 internal class DefaultStreamProcessor(
     private val pool: BufferPool,
     private val byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
+    private val coalesceThreshold: Int = DEFAULT_COALESCE_THRESHOLD,
+    private val coalesceMinChunks: Int = DEFAULT_COALESCE_MIN_CHUNKS,
 ) : StreamProcessor {
     private val chunks = ArrayDeque<ReadBuffer>()
     private var totalAvailable = 0
+
+    // Coalescing state: small appends are copied into a tail buffer that is NOT in chunks.
+    // Invariant: totalAvailable == sum(chunks[i].remaining()) + coalesceWritten
+    private var coalesceTail: ReadWriteBuffer? = null
+    private var coalesceWritten = 0
+
+    companion object {
+        /** Default threshold: appended buffers smaller than this are eligible for coalescing. */
+        internal const val DEFAULT_COALESCE_THRESHOLD = 256
+
+        /** Default minimum chunk count before coalescing engages. */
+        internal const val DEFAULT_COALESCE_MIN_CHUNKS = 8
+    }
 
     private fun assembleShort(
         b0: Int,
@@ -286,9 +321,65 @@ internal class DefaultStreamProcessor(
         }
 
     override fun append(chunk: ReadBuffer) {
-        if (chunk.remaining() > 0) {
-            chunks.addLast(chunk)
-            totalAvailable += chunk.remaining()
+        val size = chunk.remaining()
+        if (size <= 0) return
+
+        // Coalesce small chunks only when they are accumulating in the deque.
+        // When data is consumed immediately after append (protocol parsing),
+        // chunks.size stays low and we take the zero-copy path.
+        if (size < coalesceThreshold && (coalesceTail != null || chunks.size >= coalesceMinChunks)) {
+            var tail = coalesceTail
+            if (tail == null || (tail.capacity - coalesceWritten) < size) {
+                sealCoalesceBuffer()
+                tail = pool.acquire(maxOf(coalesceThreshold, size))
+                coalesceTail = tail
+                coalesceWritten = 0
+            }
+
+            tail.position(coalesceWritten)
+            tail.write(chunk)
+            coalesceWritten = tail.position()
+            totalAvailable += size
+
+            // We copied the data — free the original small chunk
+            freeConsumedChunk(chunk)
+            return
+        }
+
+        // Large chunk or chunks not yet accumulating — zero-copy add to deque
+        sealCoalesceBuffer()
+        chunks.addLast(chunk)
+        totalAvailable += size
+    }
+
+    /**
+     * Seals the coalesce tail buffer and moves it into the chunks deque.
+     * After this call, [coalesceTail] is null and [coalesceWritten] is 0.
+     * [totalAvailable] is NOT modified (bytes were already counted on append).
+     */
+    private fun sealCoalesceBuffer() {
+        val tail = coalesceTail ?: return
+        if (coalesceWritten > 0) {
+            tail.position(0)
+            tail.setLimit(coalesceWritten)
+            chunks.addLast(tail)
+        } else {
+            freeConsumedChunk(tail)
+        }
+        coalesceTail = null
+        coalesceWritten = 0
+    }
+
+    /**
+     * Ensures the chunks deque contains at least [needed] bytes.
+     * Seals the coalesce buffer if data from it is required.
+     */
+    private fun ensureChunksContain(needed: Int) {
+        if (coalesceTail != null) {
+            val chunksAvailable = totalAvailable - coalesceWritten
+            if (chunksAvailable < needed) {
+                sealCoalesceBuffer()
+            }
         }
     }
 
@@ -303,14 +394,19 @@ internal class DefaultStreamProcessor(
             }
             remaining -= chunk.remaining()
         }
+        // Check coalesce tail (data not yet sealed into chunks)
+        val tail = coalesceTail
+        if (tail != null && remaining < coalesceWritten) {
+            return tail.get(remaining)
+        }
         throw IllegalStateException("Unexpected end of data")
     }
 
     override fun peekShort(offset: Int): Short {
         require(totalAvailable >= offset + Short.SIZE_BYTES) { "Not enough data for Short at offset $offset" }
 
-        val chunk = chunks.first()
-        if (chunk.remaining() >= offset + Short.SIZE_BYTES && chunk.byteOrder == byteOrder) {
+        val chunk = chunks.firstOrNull()
+        if (chunk != null && chunk.remaining() >= offset + Short.SIZE_BYTES && chunk.byteOrder == byteOrder) {
             return chunk.getShort(chunk.position() + offset)
         }
 
@@ -323,8 +419,8 @@ internal class DefaultStreamProcessor(
     override fun peekInt(offset: Int): Int {
         require(totalAvailable >= offset + Int.SIZE_BYTES) { "Not enough data for Int at offset $offset" }
 
-        val chunk = chunks.first()
-        if (chunk.remaining() >= offset + Int.SIZE_BYTES && chunk.byteOrder == byteOrder) {
+        val chunk = chunks.firstOrNull()
+        if (chunk != null && chunk.remaining() >= offset + Int.SIZE_BYTES && chunk.byteOrder == byteOrder) {
             return chunk.getInt(chunk.position() + offset)
         }
 
@@ -339,8 +435,8 @@ internal class DefaultStreamProcessor(
     override fun peekLong(offset: Int): Long {
         require(totalAvailable >= offset + Long.SIZE_BYTES) { "Not enough data for Long at offset $offset" }
 
-        val chunk = chunks.first()
-        if (chunk.remaining() >= offset + Long.SIZE_BYTES && chunk.byteOrder == byteOrder) {
+        val chunk = chunks.firstOrNull()
+        if (chunk != null && chunk.remaining() >= offset + Long.SIZE_BYTES && chunk.byteOrder == byteOrder) {
             return chunk.getLong(chunk.position() + offset)
         }
 
@@ -362,10 +458,10 @@ internal class DefaultStreamProcessor(
         if (patternSize == 0) return -1
 
         val patternPos = pattern.position()
-        val firstChunk = chunks.first()
+        val firstChunk = chunks.firstOrNull()
 
         // Fast path: pattern fits entirely in first chunk - use primitive comparisons
-        if (firstChunk.remaining() >= patternSize) {
+        if (firstChunk != null && firstChunk.remaining() >= patternSize) {
             val chunkPos = firstChunk.position()
             var offset = 0
 
@@ -449,6 +545,7 @@ internal class DefaultStreamProcessor(
 
     override fun readByte(): Byte {
         require(totalAvailable >= 1) { "No data available" }
+        ensureChunksContain(1)
         val chunk = chunks.first()
         val byte = chunk.readByte()
         totalAvailable--
@@ -460,6 +557,7 @@ internal class DefaultStreamProcessor(
 
     override fun readShort(): Short {
         require(totalAvailable >= Short.SIZE_BYTES) { "Not enough data for Short" }
+        ensureChunksContain(Short.SIZE_BYTES)
         val chunk = chunks.first()
         if (chunk.remaining() >= Short.SIZE_BYTES && chunk.byteOrder == byteOrder) {
             val value = chunk.readShort()
@@ -475,6 +573,7 @@ internal class DefaultStreamProcessor(
 
     override fun readInt(): Int {
         require(totalAvailable >= Int.SIZE_BYTES) { "Not enough data for Int" }
+        ensureChunksContain(Int.SIZE_BYTES)
         val chunk = chunks.first()
         if (chunk.remaining() >= Int.SIZE_BYTES && chunk.byteOrder == byteOrder) {
             val value = chunk.readInt()
@@ -492,6 +591,7 @@ internal class DefaultStreamProcessor(
 
     override fun readLong(): Long {
         require(totalAvailable >= Long.SIZE_BYTES) { "Not enough data for Long" }
+        ensureChunksContain(Long.SIZE_BYTES)
         val chunk = chunks.first()
         if (chunk.remaining() >= Long.SIZE_BYTES && chunk.byteOrder == byteOrder) {
             val value = chunk.readLong()
@@ -526,6 +626,7 @@ internal class DefaultStreamProcessor(
      */
     override fun readBuffer(size: Int): ReadBuffer {
         require(totalAvailable >= size) { "Not enough data: need $size, have $totalAvailable" }
+        ensureChunksContain(size)
         require(chunks.isNotEmpty() || size == 0) { "No chunks available" }
 
         val chunk = chunks.firstOrNull()
@@ -583,6 +684,7 @@ internal class DefaultStreamProcessor(
         block: ReadBuffer.() -> T,
     ): T {
         require(totalAvailable >= size) { "Not enough data: need $size, have $totalAvailable" }
+        ensureChunksContain(size)
         require(chunks.isNotEmpty() || size == 0) { "No chunks available" }
 
         val chunk = chunks.firstOrNull()
@@ -640,6 +742,7 @@ internal class DefaultStreamProcessor(
 
     override fun skip(count: Int) {
         require(totalAvailable >= count) { "Not enough data to skip: need $count, have $totalAvailable" }
+        ensureChunksContain(count)
         var remaining = count
         while (remaining > 0 && chunks.isNotEmpty()) {
             val chunk = chunks.first()
@@ -652,6 +755,12 @@ internal class DefaultStreamProcessor(
     }
 
     override fun release() {
+        val tail = coalesceTail
+        if (tail != null) {
+            freeConsumedChunk(tail)
+            coalesceTail = null
+            coalesceWritten = 0
+        }
         for (chunk in chunks) {
             freeConsumedChunk(chunk)
         }
