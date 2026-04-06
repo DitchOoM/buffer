@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.map
  * textSender.send("hello") // sends WebSocketMessage.Text("hello")
  * ```
  */
-fun <A, B> Sender<A>.contramap(transform: (B) -> A): Sender<B> =
+fun <A, B> Sender<A>.contramap(transform: suspend (B) -> A): Sender<B> =
     Sender { send(transform(it)) }
 
 /**
@@ -28,7 +28,7 @@ fun <A, B> Sender<A>.contramap(transform: (B) -> A): Sender<B> =
  * textReceiver.receive().collect { text -> println(text) }
  * ```
  */
-fun <A, B> Receiver<A>.map(transform: (A) -> B): Receiver<B> =
+fun <A, B> Receiver<A>.map(transform: suspend (A) -> B): Receiver<B> =
     Receiver { receive().map(transform) }
 
 /**
@@ -44,16 +44,16 @@ fun <A, B> Receiver<A>.map(transform: (A) -> B): Receiver<B> =
  * )
  * ```
  *
- * Works with any [Connection] including [ReconnectingConnection] — the mapping
+ * Works with any [Connection] including `ReconnectingConnection` — the mapping
  * is applied per-message, so reconnection is transparent to the mapped layer.
  */
 fun <A, B> Connection<A>.map(
-    encode: (B) -> A,
-    decode: (A) -> B,
+    encode: suspend (B) -> A,
+    decode: suspend (A) -> B,
 ): Connection<B> =
     object : Connection<B> {
         override val id: Long get() = this@map.id
         override suspend fun send(message: B) = this@map.send(encode(message))
-        override fun receive(): Flow<B> = this@map.receive().map(decode)
+        override fun receive(): Flow<B> = this@map.receive().map { decode(it) }
         override suspend fun close() = this@map.close()
     }
