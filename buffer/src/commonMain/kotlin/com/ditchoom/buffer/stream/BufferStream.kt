@@ -332,9 +332,10 @@ internal class DefaultStreamProcessor(
             tail.write(chunk)
             coalesceWritten = tail.position()
             totalAvailable += size
-
-            // We copied the data — free the original small chunk
-            freeConsumedChunk(chunk)
+            // The original chunk is now empty (remaining=0) after write() consumed it.
+            // We do NOT free it here — append() should never free the caller's buffer.
+            // The non-coalescing path doesn't free on append either, so this keeps
+            // behavior consistent regardless of whether coalescing fires.
             return
         }
 
