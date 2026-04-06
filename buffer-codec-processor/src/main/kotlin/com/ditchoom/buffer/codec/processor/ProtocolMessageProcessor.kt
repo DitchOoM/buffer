@@ -69,13 +69,17 @@ class ProtocolMessageProcessor(
         val fields = fieldAnalyzer.analyze(classDeclaration)
         if (fields == null) return // errors already reported
 
+        // Resolve direction: extract explicit annotation, validate against fields
+        val explicit = extractExplicitDirection(classDeclaration)
+        val direction = validateDirection(classDeclaration, fields, explicit) ?: return
+
         val batchOptimizer = BatchOptimizer()
         val batches = batchOptimizer.optimize(fields)
 
         val hasPayload = fields.any { it.strategy is FieldReadStrategy.PayloadField }
 
         val generator = CodecGenerator(codeGenerator, logger)
-        generator.generate(classDeclaration, fields, batches, hasPayload)
+        generator.generate(classDeclaration, fields, batches, hasPayload, direction)
 
         if (hasPayload) {
             PayloadContextGenerator(codeGenerator, logger).generate(classDeclaration, fields)
@@ -110,10 +114,11 @@ class ProtocolMessageProcessor(
         val sealedFieldAnalyzer = FieldAnalyzer(logger, customProviders)
         val sealedWireOrder = sealedFieldAnalyzer.extractClassWireOrderPublic(classDeclaration)
 
-        // Phase 1: Analyze and generate sub-codecs, collecting payload metadata
+        // Phase 1: Analyze and generate sub-codecs, collecting payload and direction metadata
         val variantPayloadInfos = mutableListOf<SealedVariantPayloadInfo>()
         var anyVariantHasDiscriminatorField = false
         val variantsSupportingPeek = mutableSetOf<String>()
+        val variantDirections = mutableListOf<Pair<KSClassDeclaration, CodecDirection>>()
         for (subclass in sealedSubclasses) {
             val qualifiedName = subclass.qualifiedName?.asString() ?: continue
             if (qualifiedName in processed) continue
@@ -143,6 +148,11 @@ class ProtocolMessageProcessor(
             val fieldAnalyzer = FieldAnalyzer(logger, customProviders)
             val fields = fieldAnalyzer.analyze(subclass, dispatchOnInfo, sealedWireOrder) ?: continue
 
+            // Resolve variant direction
+            val variantExplicit = extractExplicitDirection(subclass)
+            val variantDirection = validateDirection(subclass, fields, variantExplicit) ?: continue
+            variantDirections.add(subclass to variantDirection)
+
             if (fields.any { it.strategy is FieldReadStrategy.DiscriminatorField }) {
                 anyVariantHasDiscriminatorField = true
             }
@@ -167,11 +177,14 @@ class ProtocolMessageProcessor(
             // Generate the sub-codec
             val batches = BatchOptimizer().optimize(fields)
             val hasPayload = payloadFields.isNotEmpty()
-            CodecGenerator(codeGenerator, logger).generate(subclass, fields, batches, hasPayload)
+            CodecGenerator(codeGenerator, logger).generate(subclass, fields, batches, hasPayload, variantDirection)
             if (hasPayload) {
                 PayloadContextGenerator(codeGenerator, logger).generate(subclass, fields)
             }
         }
+
+        // Compute sealed interface direction from variants
+        val sealedDirection = computeSealedDirection(classDeclaration, variantDirections) ?: return
 
         // Phase 2: Generate the dispatch codec with payload awareness
         val generator = SealedDispatchGenerator(codeGenerator, logger)
@@ -182,6 +195,7 @@ class ProtocolMessageProcessor(
             dispatchOnInfo,
             variantsHandleDiscriminator = anyVariantHasDiscriminatorField,
             variantsSupportingPeek = variantsSupportingPeek,
+            direction = sealedDirection,
         )
     }
 
@@ -296,5 +310,277 @@ class ProtocolMessageProcessor(
             isValueClass = isValueClass,
             constructorParams = discriminatorParams,
         )
+    }
+
+    // ──────────────────────── Sealed direction cascading ────────────────────────
+
+    /**
+     * Computes the direction for a sealed dispatch codec by combining variant directions
+     * with the sealed interface's own explicit direction annotation.
+     */
+    private fun computeSealedDirection(
+        sealedDecl: KSClassDeclaration,
+        variantDirections: List<Pair<KSClassDeclaration, CodecDirection>>,
+    ): CodecDirection? {
+        val sealedName = sealedDecl.simpleName.asString()
+        val explicit = extractExplicitDirection(sealedDecl)
+
+        // Infer from variants
+        val hasDecodeOnly = variantDirections.any { it.second == CodecDirection.DecodeOnly }
+        val hasEncodeOnly = variantDirections.any { it.second == CodecDirection.EncodeOnly }
+
+        if (hasDecodeOnly && hasEncodeOnly) {
+            val dVariants =
+                variantDirections
+                    .filter { it.second == CodecDirection.DecodeOnly }
+                    .joinToString(", ") { "'${it.first.simpleName.asString()}'" }
+            val eVariants =
+                variantDirections
+                    .filter { it.second == CodecDirection.EncodeOnly }
+                    .joinToString(", ") { "'${it.first.simpleName.asString()}'" }
+            logger.error(
+                "Sealed interface '$sealedName' has both decode-only variants [$dVariants] " +
+                    "and encode-only variants [$eVariants]. These are incompatible.\n" +
+                    "To fix, either:\n" +
+                    "  • Make all variant codecs bidirectional\n" +
+                    "  • Split into separate sealed interfaces for each direction",
+                sealedDecl,
+            )
+            return null
+        }
+
+        val inferred =
+            when {
+                hasDecodeOnly -> CodecDirection.DecodeOnly
+                hasEncodeOnly -> CodecDirection.EncodeOnly
+                else -> CodecDirection.Bidirectional
+            }
+
+        // Validate explicit direction against inferred
+        return when (explicit) {
+            "Infer" -> inferred
+            "Codec" -> {
+                val unidirectional = variantDirections.filter { it.second != CodecDirection.Bidirectional }
+                if (unidirectional.isNotEmpty()) {
+                    val details =
+                        unidirectional.joinToString("\n  • ") {
+                            val dir = if (it.second == CodecDirection.DecodeOnly) "decode-only" else "encode-only"
+                            "'${it.first.simpleName.asString()}' ($dir)"
+                        }
+                    logger.error(
+                        "@ProtocolMessage(direction = Codec) on sealed interface '$sealedName' requires all " +
+                            "variants to be bidirectional, but these are not:\n  • $details\n" +
+                            "To fix, either:\n" +
+                            "  • Make those variants bidirectional\n" +
+                            "  • Change direction to DecodeOnly or EncodeOnly",
+                        sealedDecl,
+                    )
+                    null
+                } else {
+                    CodecDirection.Bidirectional
+                }
+            }
+            "DecodeOnly" -> {
+                val eVariants = variantDirections.filter { it.second == CodecDirection.EncodeOnly }
+                if (eVariants.isNotEmpty()) {
+                    val details = eVariants.joinToString(", ") { "'${it.first.simpleName.asString()}'" }
+                    logger.error(
+                        "@ProtocolMessage(direction = DecodeOnly) on sealed interface '$sealedName' " +
+                            "conflicts with encode-only variants: $details.\n" +
+                            "To fix: make those variants bidirectional or remove the encode-only constraint",
+                        sealedDecl,
+                    )
+                    null
+                } else {
+                    CodecDirection.DecodeOnly
+                }
+            }
+            "EncodeOnly" -> {
+                val dVariants = variantDirections.filter { it.second == CodecDirection.DecodeOnly }
+                if (dVariants.isNotEmpty()) {
+                    val details = dVariants.joinToString(", ") { "'${it.first.simpleName.asString()}'" }
+                    logger.error(
+                        "@ProtocolMessage(direction = EncodeOnly) on sealed interface '$sealedName' " +
+                            "conflicts with decode-only variants: $details.\n" +
+                            "To fix: make those variants bidirectional or remove the decode-only constraint",
+                        sealedDecl,
+                    )
+                    null
+                } else {
+                    CodecDirection.EncodeOnly
+                }
+            }
+            else -> inferred
+        }
+    }
+
+    // ──────────────────────── Direction inference & validation ────────────────────────
+
+    /** Reads the explicit `direction` param from `@ProtocolMessage`, returns the enum name string. */
+    private fun extractExplicitDirection(classDecl: KSClassDeclaration): String {
+        val ann =
+            classDecl.annotations.find {
+                it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.ProtocolMessage"
+            } ?: return "Infer"
+        val dirArg = ann.arguments.find { it.name?.asString() == "direction" }?.value ?: return "Infer"
+        // KSP represents enum annotation values in different ways depending on the KSP version.
+        // Use toString() and extract the enum name, matching the pattern used for wireOrder.
+        return dirArg.toString().substringAfterLast(".")
+    }
+
+    /** Computes the direction implied by the fields (ignoring explicit annotation). */
+    private fun inferDirection(fields: List<FieldInfo>): CodecDirection {
+        var hasDecodeOnly = false
+        var hasEncodeOnly = false
+        for (f in fields) {
+            when (f.strategy.direction()) {
+                CodecDirection.DecodeOnly -> hasDecodeOnly = true
+                CodecDirection.EncodeOnly -> hasEncodeOnly = true
+                CodecDirection.Bidirectional -> {}
+            }
+        }
+        return when {
+            hasDecodeOnly && hasEncodeOnly -> CodecDirection.Bidirectional // conflict — caught in validate
+            hasDecodeOnly -> CodecDirection.DecodeOnly
+            hasEncodeOnly -> CodecDirection.EncodeOnly
+            else -> CodecDirection.Bidirectional
+        }
+    }
+
+    /**
+     * Validates the explicit direction against the fields' inferred direction.
+     * Returns the resolved [CodecDirection] or null if validation fails (errors already reported).
+     */
+    private fun validateDirection(
+        classDecl: KSClassDeclaration,
+        fields: List<FieldInfo>,
+        explicit: String,
+    ): CodecDirection? {
+        val className = classDecl.simpleName.asString()
+
+        fun fieldsWithDir(dir: CodecDirection) = fields.filter { it.strategy.direction() == dir }
+
+        fun describeField(f: FieldInfo): String {
+            val s = f.strategy
+            val dir = if (s.direction() == CodecDirection.DecodeOnly) "decode-only" else "encode-only"
+            val iface = if (s.direction() == CodecDirection.DecodeOnly) "Decoder" else "Encoder"
+            val missing = if (s.direction() == CodecDirection.DecodeOnly) "Encoder" else "Decoder"
+            return when (s) {
+                is FieldReadStrategy.UseCodecField -> {
+                    val short = s.codecName.substringAfterLast('.')
+                    "'${f.name}' ($dir — $short implements $iface but not $missing)"
+                }
+                is FieldReadStrategy.NestedMessageField -> {
+                    val short = s.codecName.removeSuffix("Codec")
+                    "'${f.name}' ($dir — nested message $short is annotated $dir)"
+                }
+                is FieldReadStrategy.CollectionField -> {
+                    val short = s.elementCodecName.removeSuffix("Codec")
+                    "'${f.name}' ($dir — list element $short is $dir)"
+                }
+                else -> "'${f.name}' ($dir)"
+            }
+        }
+
+        fun suggestFix(f: FieldInfo): String {
+            val s = f.strategy
+            val missingIface = if (s.direction() == CodecDirection.DecodeOnly) "Encoder" else "Decoder"
+            return when (s) {
+                is FieldReadStrategy.UseCodecField -> {
+                    val short = s.codecName.substringAfterLast('.')
+                    "make $short implement Codec<T> (or add $missingIface<T>)"
+                }
+                is FieldReadStrategy.NestedMessageField -> {
+                    val short = s.codecName.removeSuffix("Codec")
+                    "change $short to @ProtocolMessage(direction = Codec) or Infer"
+                }
+                is FieldReadStrategy.CollectionField -> {
+                    val short = s.elementCodecName.removeSuffix("Codec")
+                    "change $short to bidirectional"
+                }
+                else -> "add bidirectional support"
+            }
+        }
+
+        return when (explicit) {
+            "Infer" -> {
+                val dFields = fieldsWithDir(CodecDirection.DecodeOnly)
+                val eFields = fieldsWithDir(CodecDirection.EncodeOnly)
+                if (dFields.isNotEmpty() && eFields.isNotEmpty()) {
+                    val dDesc = dFields.joinToString(", ") { describeField(it) }
+                    val eDesc = eFields.joinToString(", ") { describeField(it) }
+                    logger.error(
+                        "Cannot infer direction for '$className': it has both decode-only " +
+                            "fields [$dDesc] and encode-only fields [$eDesc]. These are incompatible.\n" +
+                            "To fix, either:\n" +
+                            "  • Make all codecs bidirectional: " +
+                            (dFields + eFields).joinToString("; ") { suggestFix(it) } +
+                            "\n  • Split into separate decode-only and encode-only messages" +
+                            "\n  • Explicitly annotate: @ProtocolMessage(direction = DecodeOnly) or EncodeOnly",
+                        classDecl,
+                    )
+                    null
+                } else {
+                    inferDirection(fields)
+                }
+            }
+            "Codec" -> {
+                val unidirectional = fieldsWithDir(CodecDirection.DecodeOnly) + fieldsWithDir(CodecDirection.EncodeOnly)
+                if (unidirectional.isNotEmpty()) {
+                    val details = unidirectional.joinToString("\n  • ") { describeField(it) }
+                    val fixes = unidirectional.joinToString("\n  • ") { suggestFix(it) }
+                    logger.error(
+                        "@ProtocolMessage(direction = Codec) on '$className' requires all fields to be " +
+                            "bidirectional, but these are not:\n  • $details\n" +
+                            "To fix, either:\n" +
+                            "  • $fixes\n" +
+                            "  • Change direction to DecodeOnly or EncodeOnly if bidirectional is not needed",
+                        classDecl,
+                    )
+                    null
+                } else {
+                    CodecDirection.Bidirectional
+                }
+            }
+            "DecodeOnly" -> {
+                val eFields = fieldsWithDir(CodecDirection.EncodeOnly)
+                if (eFields.isNotEmpty()) {
+                    val details = eFields.joinToString("\n  • ") { describeField(it) }
+                    val fixes = eFields.joinToString("\n  • ") { suggestFix(it) }
+                    logger.error(
+                        "@ProtocolMessage(direction = DecodeOnly) on '$className' conflicts with " +
+                            "encode-only fields:\n  • $details\n" +
+                            "A decode-only message cannot contain encode-only fields.\n" +
+                            "To fix, either:\n" +
+                            "  • $fixes\n" +
+                            "  • Remove the encode-only fields from this message",
+                        classDecl,
+                    )
+                    null
+                } else {
+                    CodecDirection.DecodeOnly
+                }
+            }
+            "EncodeOnly" -> {
+                val dFields = fieldsWithDir(CodecDirection.DecodeOnly)
+                if (dFields.isNotEmpty()) {
+                    val details = dFields.joinToString("\n  • ") { describeField(it) }
+                    val fixes = dFields.joinToString("\n  • ") { suggestFix(it) }
+                    logger.error(
+                        "@ProtocolMessage(direction = EncodeOnly) on '$className' conflicts with " +
+                            "decode-only fields:\n  • $details\n" +
+                            "An encode-only message cannot contain decode-only fields.\n" +
+                            "To fix, either:\n" +
+                            "  • $fixes\n" +
+                            "  • Remove the decode-only fields from this message",
+                        classDecl,
+                    )
+                    null
+                } else {
+                    CodecDirection.EncodeOnly
+                }
+            }
+            else -> CodecDirection.Bidirectional
+        }
     }
 }

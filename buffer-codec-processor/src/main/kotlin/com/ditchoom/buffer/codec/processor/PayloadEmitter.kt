@@ -6,6 +6,8 @@ import com.squareup.kotlinpoet.CodeBlock
 internal val READ_BUFFER = ClassName("com.ditchoom.buffer", "ReadBuffer")
 internal val WRITE_BUFFER = ClassName("com.ditchoom.buffer", "WriteBuffer")
 internal val CODEC = ClassName("com.ditchoom.buffer.codec", "Codec")
+internal val DECODER = ClassName("com.ditchoom.buffer.codec", "Decoder")
+internal val ENCODER = ClassName("com.ditchoom.buffer.codec", "Encoder")
 internal val DECODE_CONTEXT = ClassName("com.ditchoom.buffer.codec", "DecodeContext")
 internal val ENCODE_CONTEXT = ClassName("com.ditchoom.buffer.codec", "EncodeContext")
 internal val CODEC_CONTEXT_KEY = ClassName("com.ditchoom.buffer.codec", "CodecContext", "Key")

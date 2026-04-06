@@ -24,6 +24,7 @@ class CodecGenerator(
         fields: List<FieldInfo>,
         batches: List<CodegenItem>,
         hasPayload: Boolean,
+        direction: CodecDirection = CodecDirection.Bidirectional,
     ) {
         val className = classDeclaration.simpleName.asString()
         val packageName = classDeclaration.packageName.asString()
@@ -40,9 +41,9 @@ class CodecGenerator(
 
         val fileSpec =
             if (hasPayload) {
-                buildPayloadCodecFile(packageName, classTypeName, codecName, fields, batches)
+                buildPayloadCodecFile(packageName, classTypeName, codecName, fields, batches, direction)
             } else {
-                buildCodecFile(packageName, classTypeName, codecName, fields, batches)
+                buildCodecFile(packageName, classTypeName, codecName, fields, batches, direction)
             }
 
         fileSpec.writeTo(codeGenerator, dependencies)
@@ -56,69 +57,113 @@ class CodecGenerator(
         codecName: String,
         fields: List<FieldInfo>,
         batches: List<CodegenItem>,
+        direction: CodecDirection = CodecDirection.Bidirectional,
     ): FileSpec {
-        val objectBuilder =
-            TypeSpec
-                .objectBuilder(codecName)
-                .addSuperinterface(CODEC.parameterizedBy(classTypeName))
+        val isBidirectional = direction == CodecDirection.Bidirectional
+        val canDecode = direction != CodecDirection.EncodeOnly
+        val canEncode = direction != CodecDirection.DecodeOnly
 
-        // decode(buffer, context) — Codec<T> abstract method
-        val decodeBody = CodeBlock.builder()
-        var batchIndex = 0
-        for (item in batches) {
-            when (item) {
-                is CodegenItem.Batched -> {
-                    addBatchRead(decodeBody, item.group, batchIndex)
-                    batchIndex++
-                }
-                is CodegenItem.Single -> {
-                    addFieldRead(decodeBody, item.field, withContext = true)
+        val objectBuilder = TypeSpec.objectBuilder(codecName)
+
+        // Superinterface depends on direction
+        when (direction) {
+            CodecDirection.Bidirectional ->
+                objectBuilder.addSuperinterface(CODEC.parameterizedBy(classTypeName))
+            CodecDirection.DecodeOnly ->
+                objectBuilder.addSuperinterface(DECODER.parameterizedBy(classTypeName))
+            CodecDirection.EncodeOnly ->
+                objectBuilder.addSuperinterface(ENCODER.parameterizedBy(classTypeName))
+        }
+
+        // decode(buffer, context) — context-aware decode
+        if (canDecode) {
+            val decodeBody = CodeBlock.builder()
+            var batchIndex = 0
+            for (item in batches) {
+                when (item) {
+                    is CodegenItem.Batched -> {
+                        addBatchRead(decodeBody, item.group, batchIndex)
+                        batchIndex++
+                    }
+                    is CodegenItem.Single -> {
+                        addFieldRead(decodeBody, item.field, withContext = true)
+                    }
                 }
             }
-        }
-        val fieldNames = fields.joinToString(", ") { it.name }
-        decodeBody.addStatement("return %T(%L)", classTypeName, fieldNames)
+            val fieldNames = fields.joinToString(", ") { it.name }
+            decodeBody.addStatement("return %T(%L)", classTypeName, fieldNames)
 
-        objectBuilder.addFunction(
-            FunSpec
-                .builder("decode")
-                .addModifiers(KModifier.OVERRIDE)
-                .addParameter("buffer", READ_BUFFER)
-                .addParameter("context", DECODE_CONTEXT)
-                .returns(classTypeName)
-                .addCode(decodeBody.build())
-                .build(),
-        )
+            val decodeCtxBuilder =
+                FunSpec
+                    .builder("decode")
+                    .addParameter("buffer", READ_BUFFER)
+                    .addParameter("context", DECODE_CONTEXT)
+                    .returns(classTypeName)
+                    .addCode(decodeBody.build())
+            if (isBidirectional) decodeCtxBuilder.addModifiers(KModifier.OVERRIDE)
+            objectBuilder.addFunction(decodeCtxBuilder.build())
 
-        // encode(buffer, value, context) — Codec<T> abstract method
-        val encodeBody = CodeBlock.builder()
-        for (field in fields) {
-            addFieldWrite(encodeBody, field, "value.${field.name}", withContext = true)
-        }
-
-        objectBuilder.addFunction(
-            FunSpec
-                .builder("encode")
-                .addModifiers(KModifier.OVERRIDE)
-                .addParameter("buffer", WRITE_BUFFER)
-                .addParameter("value", classTypeName)
-                .addParameter("context", ENCODE_CONTEXT)
-                .addCode(encodeBody.build())
-                .build(),
-        )
-
-        // Generate sizeOf if possible
-        val sizeOfFun = generateSizeOf(fields, classTypeName)
-        if (sizeOfFun != null) {
-            objectBuilder.addFunction(sizeOfFun)
+            // For DecodeOnly: override Decoder<T>.decode(buffer) to delegate to context version
+            if (direction == CodecDirection.DecodeOnly) {
+                objectBuilder.addFunction(
+                    FunSpec
+                        .builder("decode")
+                        .addModifiers(KModifier.OVERRIDE)
+                        .addParameter("buffer", READ_BUFFER)
+                        .returns(classTypeName)
+                        .addStatement("return decode(buffer, %T.Empty)", DECODE_CONTEXT)
+                        .build(),
+                )
+            }
         }
 
-        // Generate peekFrameSize if possible
-        val peekResult = PeekFrameSizeEmitter.generate(fields)
-        if (peekResult != null) {
-            objectBuilder.addProperty(PeekFrameSizeEmitter.buildMinHeaderProperty(peekResult))
-            for (fn in PeekFrameSizeEmitter.buildFunctions(peekResult)) {
-                objectBuilder.addFunction(fn)
+        // encode(buffer, value, context) — context-aware encode
+        if (canEncode) {
+            val encodeBody = CodeBlock.builder()
+            for (field in fields) {
+                addFieldWrite(encodeBody, field, "value.${field.name}", withContext = true)
+            }
+
+            val encodeCtxBuilder =
+                FunSpec
+                    .builder("encode")
+                    .addParameter("buffer", WRITE_BUFFER)
+                    .addParameter("value", classTypeName)
+                    .addParameter("context", ENCODE_CONTEXT)
+                    .addCode(encodeBody.build())
+            if (isBidirectional) encodeCtxBuilder.addModifiers(KModifier.OVERRIDE)
+            objectBuilder.addFunction(encodeCtxBuilder.build())
+
+            // For EncodeOnly: override Encoder<T>.encode(buffer, value) to delegate to context version
+            if (direction == CodecDirection.EncodeOnly) {
+                objectBuilder.addFunction(
+                    FunSpec
+                        .builder("encode")
+                        .addModifiers(KModifier.OVERRIDE)
+                        .addParameter("buffer", WRITE_BUFFER)
+                        .addParameter("value", classTypeName)
+                        .addStatement("encode(buffer, value, %T.Empty)", ENCODE_CONTEXT)
+                        .build(),
+                )
+            }
+        }
+
+        // Generate sizeOf if possible (only for encode-capable codecs)
+        if (canEncode) {
+            val sizeOfFun = generateSizeOf(fields, classTypeName)
+            if (sizeOfFun != null) {
+                objectBuilder.addFunction(sizeOfFun)
+            }
+        }
+
+        // Generate peekFrameSize if possible (only for decode-capable codecs)
+        if (canDecode) {
+            val peekResult = PeekFrameSizeEmitter.generate(fields)
+            if (peekResult != null) {
+                objectBuilder.addProperty(PeekFrameSizeEmitter.buildMinHeaderProperty(peekResult))
+                for (fn in PeekFrameSizeEmitter.buildFunctions(peekResult, implementsCodec = isBidirectional)) {
+                    objectBuilder.addFunction(fn)
+                }
             }
         }
 
@@ -137,6 +182,7 @@ class CodecGenerator(
         codecName: String,
         fields: List<FieldInfo>,
         batches: List<CodegenItem>,
+        direction: CodecDirection = CodecDirection.Bidirectional,
     ): FileSpec {
         val className = classTypeName.simpleName
         val payloadFields = fields.filter { it.strategy is FieldReadStrategy.PayloadField }

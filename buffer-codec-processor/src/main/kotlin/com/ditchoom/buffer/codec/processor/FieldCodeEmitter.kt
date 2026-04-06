@@ -182,7 +182,8 @@ private fun readUseCodecExpression(
     withContext: Boolean = false,
 ): String {
     val codec = strategy.codecName
-    val ctxArg = if (withContext) ", context" else ""
+    // Only pass context to codecs with context overloads (Codec<T> has them; Decoder<T>/Encoder<T> do not)
+    val ctxArg = if (withContext && strategy.hasContextOverloads) ", context" else ""
     val lk = strategy.lengthKind ?: return "$codec.decode(buffer$ctxArg)"
     return when (lk) {
         is LengthKind.Prefixed -> {
@@ -202,7 +203,8 @@ private fun writeUseCodecExpression(
     withContext: Boolean = false,
 ): String {
     val codec = strategy.codecName
-    val ctxArg = if (withContext) ", context" else ""
+    // Only pass context to codecs with context overloads (Codec<T> has them; Decoder<T>/Encoder<T> do not)
+    val ctxArg = if (withContext && strategy.hasContextOverloads) ", context" else ""
     val lk = strategy.lengthKind ?: return "$codec.encode(buffer, $valueExpr$ctxArg)"
     // With a length prefix: write placeholder, encode, then fill in the length
     return when (lk) {
