@@ -18,7 +18,11 @@ interface Encoder<in T> {
     )
 
     /**
-     * Estimates the encoded size of [value] for buffer pre-allocation.
+     * Hint for initial buffer allocation in [encodeToBuffer].
+     *
+     * Generated codecs override this with the sum of their fixed-size fields,
+     * so the growable buffer starts close to the right size and avoids copies.
+     * Defaults to 16 for hand-written codecs.
      */
-    fun sizeOf(value: T): SizeEstimate = SizeEstimate.UnableToPrecalculate
+    val wireSizeHint: Int get() = 16
 }

@@ -10,31 +10,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 class InterfaceSplitTest {
-    // ── SizeEstimate ──
-
-    @Test
-    fun sizeEstimateExactHoldsBytes() {
-        assertEquals(100, SizeEstimate.Exact(100).bytes)
-    }
-
-    @Test
-    fun sizeEstimateExactZero() {
-        assertEquals(0, SizeEstimate.Exact(0).bytes)
-    }
-
-    @Test
-    fun sizeEstimateExhaustiveWhen() {
-        val estimates: List<SizeEstimate> = listOf(SizeEstimate.Exact(42), SizeEstimate.UnableToPrecalculate)
-        val results =
-            estimates.map { est ->
-                when (est) {
-                    is SizeEstimate.Exact -> est.bytes
-                    SizeEstimate.UnableToPrecalculate -> -1
-                }
-            }
-        assertEquals(listOf(42, -1), results)
-    }
-
     // ── Decoder SAM ──
 
     @Test
@@ -44,40 +19,6 @@ class InterfaceSplitTest {
         buf.writeInt(42)
         buf.resetForRead()
         assertEquals(42, decoder.decode(buf))
-    }
-
-    // ── Encoder defaults ──
-
-    @Test
-    fun encoderSizeOfDefaultsToUnableToPrecalculate() {
-        val encoder =
-            object : Encoder<Int> {
-                override fun encode(
-                    buffer: WriteBuffer,
-                    value: Int,
-                ) {
-                    buffer.writeInt(value)
-                }
-            }
-        assertIs<SizeEstimate.UnableToPrecalculate>(encoder.sizeOf(42))
-    }
-
-    @Test
-    fun encoderSizeOfCanBeOverridden() {
-        val encoder =
-            object : Encoder<Int> {
-                override fun encode(
-                    buffer: WriteBuffer,
-                    value: Int,
-                ) {
-                    buffer.writeInt(value)
-                }
-
-                override fun sizeOf(value: Int): SizeEstimate = SizeEstimate.Exact(4)
-            }
-        val estimate = encoder.sizeOf(42)
-        assertIs<SizeEstimate.Exact>(estimate)
-        assertEquals(4, estimate.bytes)
     }
 
     // ── Codec: context is THE abstract method ──
@@ -95,8 +36,6 @@ class InterfaceSplitTest {
         ) {
             buffer.writeInt(value)
         }
-
-        override fun sizeOf(value: Int): SizeEstimate = SizeEstimate.Exact(4)
     }
 
     @Test

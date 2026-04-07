@@ -148,11 +148,17 @@ class CodecGenerator(
             }
         }
 
-        // Generate sizeOf if possible (only for encode-capable codecs)
+        // Generate wireSizeHint (sum of fixed-size fields, variable fields contribute 0)
         if (canEncode) {
-            val sizeOfFun = generateSizeOf(fields, classTypeName)
-            if (sizeOfFun != null) {
-                objectBuilder.addFunction(sizeOfFun)
+            val hint = fields.sumOf { it.strategy.fixedSize.coerceAtLeast(0) }
+            if (hint > 0) {
+                objectBuilder.addProperty(
+                    com.squareup.kotlinpoet.PropertySpec
+                        .builder("wireSizeHint", Int::class)
+                        .addModifiers(KModifier.OVERRIDE)
+                        .initializer("%L", hint)
+                        .build(),
+                )
             }
         }
 
@@ -460,60 +466,6 @@ class CodecGenerator(
         return fileBuilder.build()
     }
 
-    // ──────────────────────── sizeOf generation ────────────────────────
-
-    private fun generateSizeOf(
-        fields: List<FieldInfo>,
-        classTypeName: ClassName,
-    ): FunSpec? {
-        // Skip if any field has a condition (can't compute size statically)
-        if (fields.any { it.condition != null }) return null
-
-        var fixedTotal = 0
-        val runtimeExprs = mutableListOf<String>()
-        var canGenerate = true
-
-        for (field in fields) {
-            val strategy = field.strategy
-            val size = strategy.fixedSize
-            if (size >= 0) {
-                fixedTotal += size
-            } else if (strategy is FieldReadStrategy.Custom) {
-                val sizeOfFn = strategy.descriptor.sizeOfFunction
-                if (sizeOfFn != null) {
-                    runtimeExprs.add("${sizeOfFn.functionName}(value.${field.name})")
-                } else {
-                    canGenerate = false
-                    break
-                }
-            } else {
-                canGenerate = false
-                break
-            }
-        }
-
-        if (!canGenerate) return null
-
-        val builder =
-            FunSpec
-                .builder("sizeOf")
-                .addModifiers(KModifier.OVERRIDE)
-                .addParameter("value", classTypeName)
-                .returns(SIZE_ESTIMATE)
-
-        if (runtimeExprs.isEmpty()) {
-            builder.addStatement("return %T.Exact(%L)", SIZE_ESTIMATE, fixedTotal)
-        } else {
-            builder.addStatement("var size = %L", fixedTotal)
-            for (expr in runtimeExprs) {
-                builder.addStatement("size += %L", expr)
-            }
-            builder.addStatement("return %T.Exact(size)", SIZE_ESTIMATE)
-        }
-
-        return builder.build()
-    }
-
     // ──────────────────────── Utility ────────────────────────
 
     private fun needsLengthPrefixedImports(fields: List<FieldInfo>): Boolean = fields.any { needsLengthPrefixedImport(it.strategy) }
@@ -542,7 +494,6 @@ class CodecGenerator(
                 val d = strategy.descriptor
                 fileBuilder.addImport(d.readFunction.packageName, d.readFunction.functionName)
                 fileBuilder.addImport(d.writeFunction.packageName, d.writeFunction.functionName)
-                d.sizeOfFunction?.let { fileBuilder.addImport(it.packageName, it.functionName) }
             }
         }
     }

@@ -10,7 +10,7 @@ package com.ditchoom.buffer.codec.annotations
  *     val sensorId: UShort,  // 2 bytes
  *     val temperature: Int,  // 4 bytes
  * )
- * // Generates SensorReadingCodec with decode(), encode(), and sizeOf()
+ * // Generates SensorReadingCodec with decode() and encode()
  * ```
  *
  * **Note:** Generated code appears after compilation (`./gradlew build`).

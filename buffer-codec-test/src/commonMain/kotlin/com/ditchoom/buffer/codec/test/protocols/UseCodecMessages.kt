@@ -6,7 +6,6 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.CodecContext
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.SizeEstimate
 import com.ditchoom.buffer.codec.annotations.LengthFrom
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
@@ -36,8 +35,6 @@ object RgbCodec : Codec<Rgb> {
         buffer.writeUByte(value.g)
         buffer.writeUByte(value.b)
     }
-
-    override fun sizeOf(value: Rgb): SizeEstimate = SizeEstimate.Exact(3)
 }
 
 /** @UseCodec without a length annotation — codec reads directly from buffer. */
@@ -103,8 +100,6 @@ object ContextAwareRgbCodec : Codec<Rgb> {
         buffer.writeUByte((value.g.toInt() - offset).toUByte())
         buffer.writeUByte((value.b.toInt() - offset).toUByte())
     }
-
-    override fun sizeOf(value: Rgb): SizeEstimate = SizeEstimate.Exact(3)
 }
 
 /** Uses the context-aware codec — context must flow through for correct round-trip. */
