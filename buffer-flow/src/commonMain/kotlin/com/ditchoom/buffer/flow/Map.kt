@@ -15,8 +15,7 @@ import kotlinx.coroutines.flow.mapNotNull
  * textSender.send("hello") // sends WebSocketMessage.Text("hello")
  * ```
  */
-fun <A, B> Sender<A>.contramap(transform: (B) -> A): Sender<B> =
-    Sender { send(transform(it)) }
+fun <A, B> Sender<A>.contramap(transform: (B) -> A): Sender<B> = Sender { send(transform(it)) }
 
 /**
  * Maps a [Receiver] of type [A] to a [Receiver] of type [B].
@@ -29,8 +28,7 @@ fun <A, B> Sender<A>.contramap(transform: (B) -> A): Sender<B> =
  * textReceiver.receive().collect { text -> println(text) }
  * ```
  */
-fun <A, B> Receiver<A>.map(transform: (A) -> B): Receiver<B> =
-    Receiver { receive().map(transform) }
+fun <A, B> Receiver<A>.map(transform: (A) -> B): Receiver<B> = Receiver { receive().map(transform) }
 
 /**
  * Maps a [Receiver] of type [A] to a [Receiver] of type [B], dropping messages
@@ -45,8 +43,7 @@ fun <A, B> Receiver<A>.map(transform: (A) -> B): Receiver<B> =
  * }
  * ```
  */
-fun <A, B> Receiver<A>.mapNotNull(transform: suspend (A) -> B?): Receiver<B> =
-    Receiver { receive().mapNotNull(transform) }
+fun <A, B> Receiver<A>.mapNotNull(transform: suspend (A) -> B?): Receiver<B> = Receiver { receive().mapNotNull(transform) }
 
 /**
  * Maps a [Connection] of type [A] to a [Connection] of type [B].
@@ -70,8 +67,11 @@ fun <A, B> Connection<A>.map(
 ): Connection<B> =
     object : Connection<B> {
         override val id: Long get() = this@map.id
+
         override suspend fun send(message: B) = this@map.send(encode(message))
+
         override fun receive(): Flow<B> = this@map.receive().map(decode)
+
         override suspend fun close() = this@map.close()
     }
 
@@ -101,7 +101,10 @@ fun <A, B> Connection<A>.mapNotNull(
 ): Connection<B> =
     object : Connection<B> {
         override val id: Long get() = this@mapNotNull.id
+
         override suspend fun send(message: B) = this@mapNotNull.send(encode(message))
+
         override fun receive(): Flow<B> = this@mapNotNull.receive().mapNotNull { decode(it) }
+
         override suspend fun close() = this@mapNotNull.close()
     }

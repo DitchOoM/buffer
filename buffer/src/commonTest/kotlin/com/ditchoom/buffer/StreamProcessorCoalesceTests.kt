@@ -147,9 +147,10 @@ class StreamProcessorCoalesceTests {
         buf.resetForRead()
         processor.append(buf)
 
-        val sum = processor.readBufferScoped(8) {
-            readInt() + readInt()
-        }
+        val sum =
+            processor.readBufferScoped(8) {
+                readInt() + readInt()
+            }
         assertEquals(141, sum)
 
         assertEquals(0, processor.available())

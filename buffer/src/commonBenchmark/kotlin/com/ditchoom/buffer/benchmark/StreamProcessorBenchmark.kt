@@ -65,15 +65,18 @@ open class StreamProcessorBenchmark {
         pool.clear()
     }
 
-    private fun buildChunkData(chunkSize: Int, totalBytes: Int): List<ByteArray> {
+    private fun buildChunkData(
+        chunkSize: Int,
+        totalBytes: Int,
+    ): List<ByteArray> {
         val count = totalBytes / chunkSize
         return (0 until count).map { i ->
             ByteArray(chunkSize) { j -> ((i * chunkSize + j) and 0xFF).toByte() }
         }
     }
 
-    private fun buildProtocolFrameData(): List<ByteArray> {
-        return (0 until FRAME_COUNT).map { i ->
+    private fun buildProtocolFrameData(): List<ByteArray> =
+        (0 until FRAME_COUNT).map { i ->
             val data = ByteArray(FRAME_SIZE)
             val payloadLen = FRAME_SIZE - 4
             data[0] = (payloadLen ushr 24).toByte()
@@ -83,9 +86,11 @@ open class StreamProcessorBenchmark {
             for (j in 4 until FRAME_SIZE) data[j] = ((i + j) and 0xFF).toByte()
             data
         }
-    }
 
-    private fun appendChunks(processor: StreamProcessor, chunkData: List<ByteArray>) {
+    private fun appendChunks(
+        processor: StreamProcessor,
+        chunkData: List<ByteArray>,
+    ) {
         for (data in chunkData) {
             val chunk = factory.allocate(data.size)
             chunk.writeBytes(data)
@@ -99,7 +104,7 @@ open class StreamProcessorBenchmark {
     // =========================================================================
 
     @Benchmark
-    fun coalesce_appendReadLarge(): Int {
+    fun coalesceAppendReadLarge(): Int {
         val p = StreamProcessor.create(pool)
         appendChunks(p, largeChunkData)
         val r = p.readBuffer(TOTAL_BYTES)
@@ -109,7 +114,7 @@ open class StreamProcessorBenchmark {
     }
 
     @Benchmark
-    fun coalesce_appendReadSmall(): Int {
+    fun coalesceAppendReadSmall(): Int {
         val p = StreamProcessor.create(pool)
         appendChunks(p, smallChunkData)
         val r = p.readBuffer(TOTAL_BYTES)
@@ -119,7 +124,7 @@ open class StreamProcessorBenchmark {
     }
 
     @Benchmark
-    fun coalesce_peekSmall(): Int {
+    fun coalescePeekSmall(): Int {
         val p = StreamProcessor.create(pool)
         appendChunks(p, smallChunkData)
         val v = p.peekInt(TOTAL_BYTES / 2)
@@ -128,7 +133,7 @@ open class StreamProcessorBenchmark {
     }
 
     @Benchmark
-    fun coalesce_protocol(): Long {
+    fun coalesceProtocol(): Long {
         val p = StreamProcessor.create(pool)
         var sum = 0L
         for (data in protocolFrameData) {
@@ -152,7 +157,7 @@ open class StreamProcessorBenchmark {
     // =========================================================================
 
     @Benchmark
-    fun zeroCopy_appendReadLarge(): Int {
+    fun zeroCopyAppendReadLarge(): Int {
         val p = DefaultStreamProcessor(pool, coalesceThreshold = 0)
         appendChunks(p, largeChunkData)
         val r = p.readBuffer(TOTAL_BYTES)
@@ -162,7 +167,7 @@ open class StreamProcessorBenchmark {
     }
 
     @Benchmark
-    fun zeroCopy_appendReadSmall(): Int {
+    fun zeroCopyAppendReadSmall(): Int {
         val p = DefaultStreamProcessor(pool, coalesceThreshold = 0)
         appendChunks(p, smallChunkData)
         val r = p.readBuffer(TOTAL_BYTES)
@@ -172,7 +177,7 @@ open class StreamProcessorBenchmark {
     }
 
     @Benchmark
-    fun zeroCopy_peekSmall(): Int {
+    fun zeroCopyPeekSmall(): Int {
         val p = DefaultStreamProcessor(pool, coalesceThreshold = 0)
         appendChunks(p, smallChunkData)
         val v = p.peekInt(TOTAL_BYTES / 2)
@@ -181,7 +186,7 @@ open class StreamProcessorBenchmark {
     }
 
     @Benchmark
-    fun zeroCopy_protocol(): Long {
+    fun zeroCopyProtocol(): Long {
         val p = DefaultStreamProcessor(pool, coalesceThreshold = 0)
         var sum = 0L
         for (data in protocolFrameData) {
