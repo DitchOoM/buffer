@@ -350,7 +350,7 @@ internal actual class NodeTransformHandle(
     const m = 'zl' + 'ib';
     const zlib = require(m);
     const options = { level: level };
-    if (windowBits !== 0) options.windowBits = windowBits;
+    if (windowBits !== 0) options.windowBits = Math.abs(windowBits);
     switch (algorithm) {
         case 0: return zlib.createDeflate(options);
         case 1: return zlib.createGzip(options);
@@ -379,7 +379,7 @@ internal actual fun createCompressStream(
     const zlib = require(m);
     const options = {};
     if (algorithm === 2) options.finishFlush = zlib.constants.Z_SYNC_FLUSH;
-    if (windowBits !== 0) options.windowBits = windowBits;
+    if (windowBits !== 0) options.windowBits = Math.abs(windowBits);
     switch (algorithm) {
         case 0: return zlib.createInflate(options);
         case 1: return zlib.createGunzip(options);

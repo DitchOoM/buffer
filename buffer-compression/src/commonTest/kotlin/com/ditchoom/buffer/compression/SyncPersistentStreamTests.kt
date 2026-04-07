@@ -217,6 +217,85 @@ class SyncPersistentStreamTests {
     }
 
     // =========================================================================
+    // windowBits mismatch: proves decompressor default (15) handles any compressor windowBits
+    // =========================================================================
+
+    @Test
+    fun customWindowBitsCompressorWithDefaultDecompressor() {
+        if (!supportsStatefulFlush) return
+        // Compressor uses windowBits=10 (1KB window), decompressor uses default (15 = 32KB).
+        // This proves the Autobahn 13.3.x "got length 32, expected 16" error is NOT
+        // caused by mismatched windowBits — inflate auto-handles smaller windows.
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, windowBits = 10)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw) // default windowBits
+
+        try {
+            val messages = listOf(
+                "Hello",
+                "Hello", // back-ref with small window
+                "A".repeat(2048), // exceeds 1KB window — tests window wrapping
+                "B".repeat(16384), // chunkSize boundary
+                "Mixed: Hello World A B C " + "X".repeat(4096),
+            )
+
+            for ((i, msg) in messages.withIndex()) {
+                val compressed = compressAndStripMarker(msg, compressor)
+                val result = decompressWithFlush(compressed, decompressor)
+                assertEquals(msg.length, result.length, "windowBits=10 message $i length")
+                assertEquals(msg, result, "windowBits=10 message $i content")
+            }
+        } finally {
+            compressor.close()
+            decompressor.close()
+        }
+    }
+
+    @Test
+    fun negativeWindowBitsNormalizedForNodeJs() {
+        if (!supportsStatefulFlush) return
+        // WebSocket library passes negative windowBits (C zlib convention: -10 = raw deflate, window=10).
+        // Node.js createDeflateRaw rejects negative values (valid range: 8-15).
+        // The fix normalizes to abs(windowBits) before passing to Node.js.
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, windowBits = -10)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
+
+        try {
+            val messages = listOf("Hello", "Hello", "A".repeat(2048), "Test complete")
+            for ((i, msg) in messages.withIndex()) {
+                val compressed = compressAndStripMarker(msg, compressor)
+                val result = decompressWithFlush(compressed, decompressor)
+                assertEquals(msg, result, "Negative windowBits message $i")
+            }
+        } finally {
+            compressor.close()
+            decompressor.close()
+        }
+    }
+
+    @Test
+    fun customWindowBitsRoundTripWithFinishReset() {
+        if (!supportsSyncCompression) return
+        // Same test with finish+reset cycle — proves the one-shot path also works
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, windowBits = 9)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
+
+        try {
+            val text = "Custom windowBits=9 finish test: " + "Q".repeat(5000)
+            val compressed = compressAndStripMarker(text, compressor)
+
+            repeat(3) { cycle ->
+                compressed.position(0)
+                val result = decompressToStringViaFinish(compressed, decompressor)
+                assertEquals(text, result, "windowBits=9 finish+reset cycle $cycle")
+                decompressor.reset()
+            }
+        } finally {
+            compressor.close()
+            decompressor.close()
+        }
+    }
+
+    // =========================================================================
     // Gzip and Deflate algorithms (not just Raw)
     // =========================================================================
 
