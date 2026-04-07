@@ -224,7 +224,9 @@ internal actual fun createCompressStream(
     val options = js("{}")
     options["level"] = level.value
     if (windowBits != 0) {
-        options["windowBits"] = windowBits
+        // C zlib uses negative windowBits for raw deflate; Node.js createDeflateRaw
+        // already implies raw, so windowBits must be positive (8-15).
+        options["windowBits"] = if (windowBits < 0) -windowBits else windowBits
     }
     val stream: dynamic =
         when (algorithm) {
@@ -245,7 +247,7 @@ internal actual fun createDecompressStream(
         options["finishFlush"] = zlib.constants.Z_SYNC_FLUSH
     }
     if (windowBits != 0) {
-        options["windowBits"] = windowBits
+        options["windowBits"] = if (windowBits < 0) -windowBits else windowBits
     }
     val stream: dynamic =
         when (algorithm) {
