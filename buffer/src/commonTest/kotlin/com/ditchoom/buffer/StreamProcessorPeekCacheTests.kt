@@ -20,25 +20,34 @@ import kotlin.test.assertFailsWith
  * - Edge cases: single chunk, single byte, empty after consume
  */
 class StreamProcessorPeekCacheTests {
+    private fun makeProcessor(pool: BufferPool = BufferPool(defaultBufferSize = 1024)): StreamProcessor = StreamProcessor.create(pool)
 
-    private fun makeProcessor(pool: BufferPool = BufferPool(defaultBufferSize = 1024)): StreamProcessor =
-        StreamProcessor.create(pool)
-
-    private fun appendBytes(processor: StreamProcessor, vararg bytes: Byte) {
+    private fun appendBytes(
+        processor: StreamProcessor,
+        vararg bytes: Byte,
+    ) {
         val buf = BufferFactory.managed().allocate(bytes.size)
         for (b in bytes) buf.writeByte(b)
         buf.resetForRead()
         processor.append(buf)
     }
 
-    private fun appendChunk(processor: StreamProcessor, size: Int, fill: Byte) {
+    private fun appendChunk(
+        processor: StreamProcessor,
+        size: Int,
+        fill: Byte,
+    ) {
         val buf = BufferFactory.managed().allocate(size)
         for (i in 0 until size) buf.writeByte(fill)
         buf.resetForRead()
         processor.append(buf)
     }
 
-    private fun appendSequential(processor: StreamProcessor, size: Int, startByte: Int = 0) {
+    private fun appendSequential(
+        processor: StreamProcessor,
+        size: Int,
+        startByte: Int = 0,
+    ) {
         val buf = BufferFactory.managed().allocate(size)
         for (i in 0 until size) buf.writeByte(((startByte + i) and 0xFF).toByte())
         buf.resetForRead()
