@@ -346,10 +346,11 @@ internal actual class NodeTransformHandle(
 
 @JsFun(
     """
-(algorithm, level) => {
+(algorithm, level, windowBits) => {
     const m = 'zl' + 'ib';
     const zlib = require(m);
     const options = { level: level };
+    if (windowBits !== 0) options.windowBits = windowBits;
     switch (algorithm) {
         case 0: return zlib.createDeflate(options);
         case 1: return zlib.createGzip(options);
@@ -362,20 +363,23 @@ internal actual class NodeTransformHandle(
 private external fun jsCreateCompressStream(
     algorithm: Int,
     level: Int,
+    windowBits: Int,
 ): JsAny
 
 internal actual fun createCompressStream(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-): NodeTransformHandle = NodeTransformHandle(jsCreateCompressStream(algorithm.toOrdinal(), level.value))
+    windowBits: Int,
+): NodeTransformHandle = NodeTransformHandle(jsCreateCompressStream(algorithm.toOrdinal(), level.value, windowBits))
 
 @JsFun(
     """
-(algorithm) => {
+(algorithm, windowBits) => {
     const m = 'zl' + 'ib';
     const zlib = require(m);
     const options = {};
     if (algorithm === 2) options.finishFlush = zlib.constants.Z_SYNC_FLUSH;
+    if (windowBits !== 0) options.windowBits = windowBits;
     switch (algorithm) {
         case 0: return zlib.createInflate(options);
         case 1: return zlib.createGunzip(options);
@@ -385,10 +389,15 @@ internal actual fun createCompressStream(
 }
 """,
 )
-private external fun jsCreateDecompressStream(algorithm: Int): JsAny
+private external fun jsCreateDecompressStream(
+    algorithm: Int,
+    windowBits: Int,
+): JsAny
 
-internal actual fun createDecompressStream(algorithm: CompressionAlgorithm): NodeTransformHandle =
-    NodeTransformHandle(jsCreateDecompressStream(algorithm.toOrdinal()))
+internal actual fun createDecompressStream(
+    algorithm: CompressionAlgorithm,
+    windowBits: Int,
+): NodeTransformHandle = NodeTransformHandle(jsCreateDecompressStream(algorithm.toOrdinal(), windowBits))
 
 @JsFun(
     """
@@ -470,6 +479,86 @@ internal actual suspend fun NodeTransformHandle.writeAndEnd(inputs: List<JsByteA
 private external fun jsDestroyStream(stream: JsAny)
 
 internal actual fun NodeTransformHandle.destroy() = jsDestroyStream(ref)
+
+@JsFun(
+    """
+(stream, chunk, flushFlag) => {
+    const handle = stream._handle;
+    if (!handle) throw new Error('zlib handle is null');
+    const chunkSize = stream._chunkSize;
+    const state = stream._writeState;
+    const buffers = [];
+    let nread = 0;
+    let availInBefore = chunk.byteLength;
+    let inOff = 0;
+    let buffer = stream._outBuffer;
+    let offset = stream._outOffset;
+    let availOutBefore = chunkSize - offset;
+    while (true) {
+        handle.writeSync(flushFlag, chunk, inOff, availInBefore, buffer, offset, availOutBefore);
+        const availOutAfter = state[0];
+        const availInAfter = state[1];
+        const have = availOutBefore - availOutAfter;
+        if (have > 0) {
+            buffers.push(buffer.slice(offset, offset + have));
+            offset += have;
+            nread += have;
+        }
+        if (availInAfter <= 0) break;
+        if (availOutAfter === 0) {
+            availOutBefore = chunkSize;
+            offset = 0;
+            buffer = Buffer.allocUnsafe(chunkSize);
+        }
+        inOff += (availInBefore - availInAfter);
+        availInBefore = availInAfter;
+    }
+    stream._outBuffer = Buffer.allocUnsafe(chunkSize);
+    stream._outOffset = 0;
+    if (nread === 0) return new Uint8Array(0);
+    const result = Buffer.concat(buffers, nread);
+    return new Uint8Array(result.buffer, result.byteOffset, result.byteLength);
+}
+""",
+)
+private external fun jsProcessSyncPersistent(
+    stream: JsAny,
+    input: JsAny,
+    flag: Int,
+): JsAny
+
+internal actual fun NodeTransformHandle.processSync(
+    input: JsByteArray,
+    flushFlag: Int,
+): JsByteArray = JsByteArray(jsProcessSyncPersistent(ref, input.ref, flushFlag))
+
+@JsFun(
+    """
+(stream, input, flag) => {
+    return stream._processChunk(input, flag);
+}
+""",
+)
+private external fun jsProcessChunkOneShot(
+    stream: JsAny,
+    input: JsAny,
+    flag: Int,
+): JsAny
+
+internal actual fun NodeTransformHandle.processSyncOneShot(
+    input: JsByteArray,
+    flushFlag: Int,
+): JsByteArray = JsByteArray(jsProcessChunkOneShot(ref, input.ref, flushFlag))
+
+@JsFun("() => { const m = 'zl' + 'ib'; return require(m).constants.Z_SYNC_FLUSH; }")
+private external fun jsZSyncFlush(): Int
+
+@JsFun("() => { const m = 'zl' + 'ib'; return require(m).constants.Z_FINISH; }")
+private external fun jsZFinish(): Int
+
+internal actual fun zlibSyncFlushFlag(): Int = jsZSyncFlush()
+
+internal actual fun zlibFinishFlag(): Int = jsZFinish()
 
 // ============================================================================
 // One-shot Transform stream

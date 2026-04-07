@@ -17,7 +17,7 @@ actual fun StreamingCompressor.Companion.create(
     windowBits: Int,
 ): StreamingCompressor =
     if (isNodeJs) {
-        JsNodeStreamingCompressor(algorithm, level, allocator)
+        JsNodeStreamingCompressor(algorithm, level, windowBits, allocator)
     } else {
         throw UnsupportedOperationException(
             "Synchronous streaming compression not supported in browser. " +
@@ -65,11 +65,24 @@ actual fun SuspendingStreamingDecompressor.Companion.create(
 // Node.js sync streaming (accumulate chunks, compress on flush/finish)
 // ============================================================================
 
+/**
+ * Stateful sync compressor backed by a persistent Node.js zlib Transform stream.
+ * Uses [processSync] (zlib's internal _processChunk) for synchronous operation
+ * while maintaining the LZ77 sliding window across flush calls (context takeover).
+ *
+ * State transitions:
+ * - Created: stream is non-null, ready for compress/flush/finish
+ * - After finish(): stream is destroyed and set to null — only reset() or close() are valid
+ * - After close(): closed=true — all methods throw
+ * - After reset(): fresh stream created, back to Created state
+ */
 private class JsNodeStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
     private val level: CompressionLevel,
+    private val windowBits: Int,
     override val allocator: BufferAllocator,
 ) : StreamingCompressor {
+    private var stream: NodeTransformHandle? = createCompressStream(algorithm, level, windowBits)
     private val accumulatedChunks = mutableListOf<JsByteArray>()
     private var totalBytes = 0
     private var closed = false
@@ -88,44 +101,59 @@ private class JsNodeStreamingCompressor(
 
     override fun flush(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
-        if (totalBytes == 0) {
-            val result = nodeZlibSyncFlush(emptyJsByteArray(), algorithm, level)
-            onOutput(result.toPlatformBuffer(allocator))
-            return
-        }
-        val combined = combineJsByteArrays(accumulatedChunks, totalBytes)
-        val result = nodeZlibSyncFlush(combined, algorithm, level)
-        onOutput(result.toPlatformBuffer(allocator))
+        val s = stream ?: return
+        val input = if (totalBytes == 0) emptyJsByteArray() else combineJsByteArrays(accumulatedChunks, totalBytes)
         accumulatedChunks.clear()
         totalBytes = 0
+        val result = s.processSync(input, zlibSyncFlushFlag())
+        if (result.byteLength() > 0) {
+            onOutput(result.toPlatformBuffer(allocator))
+        }
     }
 
     override fun finish(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
+        val s = stream ?: return
         val input = if (totalBytes == 0) emptyJsByteArray() else combineJsByteArrays(accumulatedChunks, totalBytes)
-        // Call nodeZlibSync directly — avoids allocating an intermediate pool buffer
-        // that compress() would create via toPlatformBuffer then immediately consume.
-        val compressed = nodeZlibSync(input, algorithm, level)
-        onOutput(compressed.toPlatformBuffer(allocator))
+        accumulatedChunks.clear()
+        totalBytes = 0
+        // Use _processChunk (one-shot) for finish — it handles the writeSync loop
+        // correctly and destroys the C++ handle at the end, matching one-shot behavior.
+        val result = s.processSyncOneShot(input, zlibFinishFlag())
+        stream = null // handle already destroyed by _processChunk
+        if (result.byteLength() > 0) {
+            onOutput(result.toPlatformBuffer(allocator))
+        }
     }
 
     override fun reset() {
+        stream?.destroy()
         accumulatedChunks.clear()
         totalBytes = 0
+        stream = createCompressStream(algorithm, level, windowBits)
     }
 
     override fun close() {
         if (!closed) {
+            stream?.destroy()
+            stream = null
             accumulatedChunks.clear()
             closed = true
         }
     }
 }
 
+/**
+ * Stateful sync decompressor backed by a persistent Node.js zlib Transform stream.
+ * Maintains sliding window state across flush calls for context takeover.
+ *
+ * Same state machine as [JsNodeStreamingCompressor].
+ */
 private class JsNodeStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
     override val allocator: BufferAllocator,
 ) : StreamingDecompressor {
+    private var stream: NodeTransformHandle? = createDecompressStream(algorithm)
     private val accumulatedChunks = mutableListOf<JsByteArray>()
     private var totalBytes = 0
     private var closed = false
@@ -142,22 +170,46 @@ private class JsNodeStreamingDecompressor(
         }
     }
 
-    override fun finish(onOutput: (ReadBuffer) -> Unit) {
+    override fun flush(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
+        val s = stream ?: return
         if (totalBytes == 0) return
         val combined = combineJsByteArrays(accumulatedChunks, totalBytes)
-        // Call nodeZlibDecompressSync directly — avoids intermediate pool buffer allocation.
-        val decompressed = nodeZlibDecompressSync(combined, algorithm)
-        onOutput(decompressed.toPlatformBuffer(allocator))
+        accumulatedChunks.clear()
+        totalBytes = 0
+        val result = s.processSync(combined, zlibSyncFlushFlag())
+        if (result.byteLength() > 0) {
+            onOutput(result.toPlatformBuffer(allocator))
+        }
+    }
+
+    override fun finish(onOutput: (ReadBuffer) -> Unit) {
+        check(!closed) { "Decompressor is closed" }
+        val s = stream ?: return
+        if (totalBytes == 0) return
+        val combined = combineJsByteArrays(accumulatedChunks, totalBytes)
+        accumulatedChunks.clear()
+        totalBytes = 0
+        // Use _processChunk (one-shot) for finish — handles Z_SYNC_FLUSH correctly
+        // and destroys the C++ handle, matching the old inflateRawSync behavior.
+        val result = s.processSyncOneShot(combined, zlibSyncFlushFlag())
+        stream = null // handle already destroyed by _processChunk
+        if (result.byteLength() > 0) {
+            onOutput(result.toPlatformBuffer(allocator))
+        }
     }
 
     override fun reset() {
+        stream?.destroy()
         accumulatedChunks.clear()
         totalBytes = 0
+        stream = createDecompressStream(algorithm)
     }
 
     override fun close() {
         if (!closed) {
+            stream?.destroy()
+            stream = null
             accumulatedChunks.clear()
             closed = true
         }
