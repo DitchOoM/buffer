@@ -10,7 +10,6 @@ import com.ditchoom.buffer.writeLengthPrefixedUtf8String
 import com.ditchoom.buffer.writeVariableByteInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 
 // Simple two-field struct: UShort id + Int value = 6 bytes
 data class SimpleStruct(
@@ -32,8 +31,6 @@ object SimpleStructCodec : Codec<SimpleStruct> {
         buffer.writeUShort(value.id)
         buffer.writeInt(value.value)
     }
-
-    override fun sizeOf(value: SimpleStruct): SizeEstimate = SizeEstimate.Exact(6)
 }
 
 // Struct with a variable-length integer field (hand-written, simulating @VariableLength)
@@ -56,8 +53,6 @@ object VariableLengthStructCodec : Codec<VariableLengthStruct> {
         buffer.writeByte(value.tag)
         buffer.writeVariableByteInteger(value.length)
     }
-
-    // sizeOf defaults to UnableToPrecalculate since variable length depends on value
 }
 
 // Struct with a length-prefixed string (hand-written, simulating @LengthPrefixed)
@@ -80,9 +75,6 @@ object LengthPrefixedStructCodec : Codec<LengthPrefixedStruct> {
         buffer.writeUByte(value.type)
         buffer.writeLengthPrefixedUtf8String(value.name)
     }
-
-    // 1 byte for type + 2 bytes for length prefix + string byte length
-    override fun sizeOf(value: LengthPrefixedStruct): SizeEstimate = SizeEstimate.Exact(1 + 2 + value.name.encodeToByteArray().size)
 }
 
 class CodecTest {
@@ -128,14 +120,6 @@ class CodecTest {
         assertEquals(original, decoded)
     }
 
-    @Test
-    fun simpleStructSizeOf() {
-        val value = SimpleStruct(42u.toUShort(), 123)
-        val estimate = SimpleStructCodec.sizeOf(value)
-        assertIs<SizeEstimate.Exact>(estimate)
-        assertEquals(6, estimate.bytes)
-    }
-
     // ========== VariableLengthStruct round-trip ==========
 
     @Test
@@ -178,64 +162,37 @@ class CodecTest {
         assertEquals(original, decoded)
     }
 
-    @Test
-    fun variableLengthStructSizeOfReturnsNull() {
-        val value = VariableLengthStruct(0x01, 128)
-        assertIs<SizeEstimate.UnableToPrecalculate>(VariableLengthStructCodec.sizeOf(value))
-    }
-
     // ========== LengthPrefixedStruct round-trip ==========
 
     @Test
     fun lengthPrefixedStructRoundTrip() {
         val original = LengthPrefixedStruct(0x01u.toUByte(), "Hello")
-        val size = (LengthPrefixedStructCodec.sizeOf(original) as SizeEstimate.Exact).bytes
-        val buf = BufferFactory.Default.allocate(size)
-        LengthPrefixedStructCodec.encode(buf, original)
-        buf.resetForRead()
-        val decoded = LengthPrefixedStructCodec.decode(buf)
+        val encoded = LengthPrefixedStructCodec.encodeToBuffer(original)
+        val decoded = LengthPrefixedStructCodec.decode(encoded)
         assertEquals(original, decoded)
     }
 
     @Test
     fun lengthPrefixedStructEmptyString() {
         val original = LengthPrefixedStruct(0x02u.toUByte(), "")
-        val size = (LengthPrefixedStructCodec.sizeOf(original) as SizeEstimate.Exact).bytes
-        val buf = BufferFactory.Default.allocate(size)
-        LengthPrefixedStructCodec.encode(buf, original)
-        buf.resetForRead()
-        val decoded = LengthPrefixedStructCodec.decode(buf)
+        val encoded = LengthPrefixedStructCodec.encodeToBuffer(original)
+        val decoded = LengthPrefixedStructCodec.decode(encoded)
         assertEquals(original, decoded)
     }
 
     @Test
     fun lengthPrefixedStructUtf8Multibyte() {
         val original = LengthPrefixedStruct(0x03u.toUByte(), "cafe\u0301")
-        val size = (LengthPrefixedStructCodec.sizeOf(original) as SizeEstimate.Exact).bytes
-        val buf = BufferFactory.Default.allocate(size)
-        LengthPrefixedStructCodec.encode(buf, original)
-        buf.resetForRead()
-        val decoded = LengthPrefixedStructCodec.decode(buf)
+        val encoded = LengthPrefixedStructCodec.encodeToBuffer(original)
+        val decoded = LengthPrefixedStructCodec.decode(encoded)
         assertEquals(original, decoded)
-    }
-
-    @Test
-    fun lengthPrefixedStructSizeOf() {
-        val value = LengthPrefixedStruct(0x01u.toUByte(), "Hello")
-        // 1 (UByte) + 2 (length prefix) + 5 (Hello in UTF-8) = 8
-        val estimate = LengthPrefixedStructCodec.sizeOf(value)
-        assertIs<SizeEstimate.Exact>(estimate)
-        assertEquals(8, estimate.bytes)
     }
 
     @Test
     fun lengthPrefixedStructMaxUByte() {
         val original = LengthPrefixedStruct(UByte.MAX_VALUE, "test")
-        val size = (LengthPrefixedStructCodec.sizeOf(original) as SizeEstimate.Exact).bytes
-        val buf = BufferFactory.Default.allocate(size)
-        LengthPrefixedStructCodec.encode(buf, original)
-        buf.resetForRead()
-        val decoded = LengthPrefixedStructCodec.decode(buf)
+        val encoded = LengthPrefixedStructCodec.encodeToBuffer(original)
+        val decoded = LengthPrefixedStructCodec.decode(encoded)
         assertEquals(original, decoded)
     }
 }

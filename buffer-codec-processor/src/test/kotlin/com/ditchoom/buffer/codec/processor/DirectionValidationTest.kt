@@ -46,7 +46,7 @@ class DirectionValidationTest {
                 """
             import com.ditchoom.buffer.WriteBuffer
             import com.ditchoom.buffer.codec.Encoder
-            import com.ditchoom.buffer.codec.SizeEstimate
+
             import com.ditchoom.buffer.codec.annotations.ProtocolMessage
             import com.ditchoom.buffer.codec.annotations.UseCodec
 

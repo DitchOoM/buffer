@@ -3,8 +3,6 @@ package com.ditchoom.buffer.codec.test
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.codec.Codec
-import com.ditchoom.buffer.codec.SizeEstimate
 import com.ditchoom.buffer.codec.encodeToBuffer
 import com.ditchoom.buffer.codec.test.protocols.AllTypesMessage
 import com.ditchoom.buffer.codec.test.protocols.AllTypesMessageCodec
@@ -21,9 +19,6 @@ import com.ditchoom.buffer.codec.test.protocols.MqttPacket
 import com.ditchoom.buffer.codec.test.protocols.MqttPacketCodec
 import com.ditchoom.buffer.codec.test.protocols.MqttPacketConnAck
 import com.ditchoom.buffer.codec.test.protocols.MqttPacketConnAckCodec
-import com.ditchoom.buffer.codec.test.protocols.MqttPacketPubAck
-import com.ditchoom.buffer.codec.test.protocols.MqttPacketPubAckCodec
-import com.ditchoom.buffer.codec.test.protocols.PacketId
 import com.ditchoom.buffer.codec.test.protocols.SimpleHeader
 import com.ditchoom.buffer.codec.test.protocols.SimpleHeaderCodec
 import com.ditchoom.buffer.codec.test.protocols.WsFrameHeader
@@ -345,50 +340,6 @@ class BatchExtractionCorrectnessTest {
         assertEquals(0, buffer.readUnsignedShort().toInt())
     }
 
-    // ──────────────────────── sizeOf consistency for all types ────────────────────────
-
-    @Test
-    fun `sizeOf matches encoded buffer size for SimpleHeader`() {
-        verifySizeOfConsistency(SimpleHeaderCodec, SimpleHeader(0xFFu, 0x1234u, 0xDEADBEEFu))
-    }
-
-    @Test
-    fun `sizeOf matches encoded buffer size for DnsHeader`() {
-        verifySizeOfConsistency(
-            DnsHeaderCodec,
-            DnsHeader(0x1234u, DnsFlags(0x8180u), 1u, 1u, 0u, 0u),
-        )
-    }
-
-    @Test
-    fun `sizeOf matches encoded buffer size for ConnAck`() {
-        verifySizeOfConsistency(
-            MqttPacketConnAckCodec,
-            MqttPacketConnAck(ConnAckFlags(1u), ConnectReturnCode(0u)),
-        )
-    }
-
-    @Test
-    fun `sizeOf matches encoded buffer size for PubAck`() {
-        verifySizeOfConsistency(MqttPacketPubAckCodec, MqttPacketPubAck(PacketId(100u)))
-    }
-
-    @Test
-    fun `sizeOf matches encoded buffer size for WsFrameHeader`() {
-        verifySizeOfConsistency(
-            WsFrameHeaderCodec,
-            WsFrameHeader(WsHeaderByte1(0x81u), WsHeaderByte2(5u)),
-        )
-    }
-
-    @Test
-    fun `sizeOf matches encoded buffer size for CustomWidthMessage`() {
-        verifySizeOfConsistency(
-            CustomWidthMessageCodec,
-            CustomWidthMessage(0xAAu, 0x123456, 0xABCDEFu, 0xBBu),
-        )
-    }
-
     // ──────────────────────── Sealed dispatch buffer consumption ────────────────────────
 
     @Test
@@ -520,18 +471,5 @@ class BatchExtractionCorrectnessTest {
         assertEquals(null, decoded.cond2)
         assertEquals(0xFFu, decoded.trailer)
         assertEquals(0, buffer.remaining(), "All bytes consumed")
-    }
-
-    // ──────────────────────── Helper ────────────────────────
-
-    private fun <T : Any> verifySizeOfConsistency(
-        codec: Codec<T>,
-        value: T,
-    ) {
-        val sizeOf = codec.sizeOf(value)
-        val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
-        codec.encode(buffer, value)
-        val actualSize = buffer.position()
-        assertEquals(SizeEstimate.Exact(actualSize), sizeOf, "sizeOf(${value::class.simpleName}) must match actual encoded size")
     }
 }

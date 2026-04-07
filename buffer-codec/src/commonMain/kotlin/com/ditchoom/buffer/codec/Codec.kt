@@ -48,8 +48,6 @@ interface Codec<T> :
         value: T,
     ) = encode(buffer, value, EncodeContext.Empty)
 
-    override fun sizeOf(value: T): SizeEstimate = SizeEstimate.UnableToPrecalculate
-
     override fun peekFrameSize(
         stream: StreamProcessor,
         baseOffset: Int,

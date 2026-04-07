@@ -204,23 +204,18 @@ private val codecStubs =
             }
         }
     }
-    sealed interface SizeEstimate {
-        @JvmInline value class Exact(val bytes: Int) : SizeEstimate
-        data object UnableToPrecalculate : SizeEstimate
-    }
     fun interface Decoder<out T> {
         fun decode(buffer: ReadBuffer): T
     }
     interface Encoder<in T> {
         fun encode(buffer: WriteBuffer, value: T)
-        fun sizeOf(value: T): SizeEstimate = SizeEstimate.UnableToPrecalculate
+        val wireSizeHint: Int get() = 16
     }
     interface Codec<T> : Encoder<T>, Decoder<T> {
         fun decode(buffer: ReadBuffer, context: DecodeContext): T
         fun encode(buffer: WriteBuffer, value: T, context: EncodeContext)
         override fun decode(buffer: ReadBuffer): T = decode(buffer, DecodeContext.Empty)
         override fun encode(buffer: WriteBuffer, value: T) = encode(buffer, value, EncodeContext.Empty)
-        override fun sizeOf(value: T): SizeEstimate = SizeEstimate.UnableToPrecalculate
         fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NeedsMoreData
     }
     """,

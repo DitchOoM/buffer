@@ -4,7 +4,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.Codec
-import com.ditchoom.buffer.codec.SizeEstimate
+import com.ditchoom.buffer.codec.encodeToBuffer
 import com.ditchoom.buffer.codec.test.protocols.AllTypesMessage
 import com.ditchoom.buffer.codec.test.protocols.AllTypesMessageCodec
 import com.ditchoom.buffer.codec.test.protocols.ConnAckFlags
@@ -76,7 +76,7 @@ class CodecPerformanceValidationTest {
     }
 
     @Test
-    fun `dns header sizeOf is 12`() {
+    fun `dns header wire size is 12`() {
         val header =
             DnsHeader(
                 id = 0x1234u,
@@ -86,25 +86,29 @@ class CodecPerformanceValidationTest {
                 nsCount = 0u,
                 arCount = 0u,
             )
-        assertEquals(SizeEstimate.Exact(12), DnsHeaderCodec.sizeOf(header))
+        val encoded = DnsHeaderCodec.encodeToBuffer(header)
+        assertEquals(12, encoded.remaining())
     }
 
     @Test
-    fun `connack sizeOf is 2`() {
+    fun `connack wire size is 2`() {
         val connack = MqttPacketConnAck(ConnAckFlags(0u), ConnectReturnCode(0u))
-        assertEquals(SizeEstimate.Exact(2), MqttPacketConnAckCodec.sizeOf(connack))
+        val encoded = MqttPacketConnAckCodec.encodeToBuffer(connack)
+        assertEquals(2, encoded.remaining())
     }
 
     @Test
-    fun `puback sizeOf is 2`() {
+    fun `puback wire size is 2`() {
         val puback = MqttPacketPubAck(PacketId(1u))
-        assertEquals(SizeEstimate.Exact(2), MqttPacketPubAckCodec.sizeOf(puback))
+        val encoded = MqttPacketPubAckCodec.encodeToBuffer(puback)
+        assertEquals(2, encoded.remaining())
     }
 
     @Test
-    fun `ws frame header sizeOf is 2`() {
+    fun `ws frame header wire size is 2`() {
         val header = WsFrameHeader(WsHeaderByte1(0u), WsHeaderByte2(0u))
-        assertEquals(SizeEstimate.Exact(2), WsFrameHeaderCodec.sizeOf(header))
+        val encoded = WsFrameHeaderCodec.encodeToBuffer(header)
+        assertEquals(2, encoded.remaining())
     }
 
     @Test
@@ -144,6 +148,5 @@ class CodecPerformanceValidationTest {
         val bytesWritten = buffer.remaining()
         codec.decode(buffer)
         assertEquals(0, buffer.remaining(), "Not all bytes consumed for ${value::class.simpleName}")
-        assertEquals(SizeEstimate.Exact(bytesWritten), codec.sizeOf(value), "sizeOf mismatch for ${value::class.simpleName}")
     }
 }

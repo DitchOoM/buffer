@@ -103,30 +103,18 @@ class CodecExtensionsTest {
     }
 
     @Test
-    fun encodeToBufferUsesSizeOfForAllocation() {
-        // SimpleStructCodec.sizeOf returns 6, so encodeToBuffer should allocate exactly 6 bytes
-        val original = SimpleStruct(42u.toUShort(), 100)
-        val encoded = SimpleStructCodec.encodeToBuffer(original)
-        assertEquals(6, encoded.remaining())
-    }
-
-    @Test
-    fun encodeToBufferFallsBackTo1024WhenSizeOfIsNull() {
-        // VariableLengthStructCodec.sizeOf returns null
+    fun encodeToBufferGrowsAutomatically() {
         val original = VariableLengthStruct(0x01, 0)
         val encoded = VariableLengthStructCodec.encodeToBuffer(original)
-        // Should still contain valid data even though the buffer may be larger
         val decoded = VariableLengthStructCodec.decode(encoded)
         assertEquals(original, decoded)
     }
 
     @Test
-    fun encodeToBufferRemainingMatchesBytesWrittenWhenSizeOfIsNull() {
-        // VariableLengthStructCodec.sizeOf returns null, buffer allocated at 1024
-        // remaining() should equal actual bytes written, not 1024
+    fun encodeToBufferRemainingMatchesBytesWritten() {
+        // 1 byte for tag + 1 byte for VBI(0) = 2 bytes
         val original = VariableLengthStruct(0x01, 0)
         val encoded = VariableLengthStructCodec.encodeToBuffer(original)
-        // 1 byte for tag + 1 byte for VBI(0) = 2 bytes
         assertEquals(2, encoded.remaining())
     }
 

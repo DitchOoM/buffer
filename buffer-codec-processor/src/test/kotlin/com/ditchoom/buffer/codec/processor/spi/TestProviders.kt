@@ -11,7 +11,6 @@ class VariableByteIntegerProvider : CodecFieldProvider {
             readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
             writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
             fixedSize = -1,
-            sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
         )
     }
 }
@@ -27,7 +26,6 @@ class RepeatedProvider : CodecFieldProvider {
             readFunction = FunctionRef("com.ditchoom.buffer.codec.test", "readRepeatedShorts"),
             writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writeRepeatedShorts"),
             fixedSize = -1,
-            sizeOfFunction = FunctionRef("com.ditchoom.buffer.codec.test", "repeatedShortsSize"),
             contextFields = listOf(countField),
         )
     }
@@ -41,11 +39,10 @@ class PropertyBagProvider : CodecFieldProvider {
             readFunction = FunctionRef("com.ditchoom.buffer.codec.test", "readPropertyBag"),
             writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writePropertyBag"),
             fixedSize = -1,
-            sizeOfFunction = null,
         )
 }
 
-/** Test provider that returns a fixed size, for testing constant sizeOf generation */
+/** Test provider that returns a fixed size */
 class FixedCustomProvider : CodecFieldProvider {
     override val annotationFqn = "com.ditchoom.buffer.codec.annotations.test.CustomFixed"
 

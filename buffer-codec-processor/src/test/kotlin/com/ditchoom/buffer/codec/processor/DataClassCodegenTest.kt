@@ -586,7 +586,6 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
                         writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
                         fixedSize = -1,
-                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
@@ -622,7 +621,6 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer.codec.test", "readRepeatedShorts"),
                         writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writeRepeatedShorts"),
                         fixedSize = -1,
-                        sizeOfFunction = FunctionRef("com.ditchoom.buffer.codec.test", "repeatedShortsSize"),
                         contextFields = listOf(countField),
                     )
                 }
@@ -657,7 +655,6 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer.codec.test", "readPropertyBag"),
                         writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writePropertyBag"),
                         fixedSize = -1,
-                        sizeOfFunction = null,
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(propBagProvider))
@@ -807,72 +804,6 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
                         writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
                         fixedSize = -1,
-                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
-                    )
-            }
-        val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
-        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
-    }
-
-    @Test
-    fun `custom field with fixed size generates constant sizeOf`() {
-        val source =
-            SourceFile.kotlin(
-                "Test.kt",
-                """
-            package test
-            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-
-            @Target(AnnotationTarget.VALUE_PARAMETER)
-            @Retention(AnnotationRetention.BINARY)
-            annotation class CustomFixed
-
-            @ProtocolMessage
-            data class FixedMsg(val header: Byte, @CustomFixed val payload: Int)
-            """,
-            )
-        val fixedProvider =
-            object : CodecFieldProvider {
-                override val annotationFqn = "test.CustomFixed"
-
-                override fun describe(context: FieldContext): CustomFieldDescriptor =
-                    CustomFieldDescriptor(
-                        readFunction = FunctionRef("com.ditchoom.buffer.codec.test", "readFixedInt"),
-                        writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writeFixedInt"),
-                        fixedSize = 4,
-                    )
-            }
-        val result = compileWithKspAndCustomProviders(source, providers = listOf(fixedProvider))
-        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
-    }
-
-    @Test
-    fun `custom field with sizeOf function generates runtime sizeOf`() {
-        val source =
-            SourceFile.kotlin(
-                "Test.kt",
-                """
-            package test
-            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-
-            @Target(AnnotationTarget.VALUE_PARAMETER)
-            @Retention(AnnotationRetention.BINARY)
-            annotation class VariableByteInteger
-
-            @ProtocolMessage
-            data class RuntimeSizeMsg(val header: Byte, @VariableByteInteger val length: Int)
-            """,
-            )
-        val vbiProvider =
-            object : CodecFieldProvider {
-                override val annotationFqn = "test.VariableByteInteger"
-
-                override fun describe(context: FieldContext): CustomFieldDescriptor =
-                    CustomFieldDescriptor(
-                        readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
-                        writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
-                        fixedSize = -1,
-                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
@@ -911,7 +842,6 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
                         writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
                         fixedSize = -1,
-                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
@@ -948,7 +878,6 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
                         writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
                         fixedSize = -1,
-                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
@@ -985,7 +914,6 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
                         writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
                         fixedSize = -1,
-                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
                     )
             }
         val propBagProvider =
@@ -997,7 +925,6 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer.codec.test", "readPropertyBag"),
                         writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writePropertyBag"),
                         fixedSize = -1,
-                        sizeOfFunction = null,
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider, propBagProvider))
