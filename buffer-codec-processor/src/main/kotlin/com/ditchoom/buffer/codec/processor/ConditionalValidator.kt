@@ -7,10 +7,17 @@ class ConditionalValidator(
 ) {
     fun validate(fields: List<FieldInfo>): Boolean {
         var valid = true
-        for ((index, field) in fields.withIndex()) {
-            val condition = field.condition ?: continue
+        valid = validateWhenTrue(fields) && valid
+        valid = validateWhenRemaining(fields) && valid
+        return valid
+    }
 
-            val expression = (condition as FieldCondition.WhenTrue).expression
+    private fun validateWhenTrue(fields: List<FieldInfo>): Boolean {
+        var valid = true
+        for ((index, field) in fields.withIndex()) {
+            val condition = field.condition as? FieldCondition.WhenTrue ?: continue
+
+            val expression = condition.expression
 
             if (expression.isBlank()) {
                 // Build contextual examples from the actual fields in this class
@@ -77,30 +84,88 @@ class ConditionalValidator(
             // For dotted access (e.g., "flags.willFlag"), we allow it on value classes
             // The property access will be validated at compile time of generated code
 
-            // Check conditional field is nullable
-            if (!field.isNullable) {
+            valid = validateConditionalFieldShape(field) && valid
+        }
+        return valid
+    }
+
+    private fun validateWhenRemaining(fields: List<FieldInfo>): Boolean {
+        var valid = true
+        val whenRemainingFields = fields.filter { it.condition is FieldCondition.WhenRemaining }
+        if (whenRemainingFields.isEmpty()) return true
+
+        for (field in whenRemainingFields) {
+            val condition = field.condition as FieldCondition.WhenRemaining
+
+            // minBytes must be > 0
+            if (condition.minBytes <= 0) {
                 logger.error(
-                    "Conditional field '${field.name}' must be nullable. " +
-                        "When the condition is false, the codec returns null for this field. " +
-                        "Fix: change the type to nullable (e.g., 'val ${field.name}: ${field.typeName}?').",
+                    "@WhenRemaining(${condition.minBytes}) on '${field.name}': " +
+                        "minBytes must be greater than 0.",
                     field.parameter,
                 )
                 valid = false
             }
 
-            // Check conditional field has a default value
-            if (!field.hasDefault) {
+            // Cannot combine with @RemainingBytes
+            if (field.strategy is FieldReadStrategy.RemainingBytesStringField) {
                 logger.error(
-                    "Conditional field '${field.name}' must have a default value of null. " +
-                        "When the condition is false, the codec skips this field and uses the default. " +
-                        "Without a default, Kotlin requires callers to always provide a value, " +
-                        "defeating the purpose of the condition. " +
-                        "Fix: add '= null' after the type.",
+                    "@WhenRemaining on '${field.name}' cannot be combined with @RemainingBytes. " +
+                        "@RemainingBytes already consumes all remaining bytes.",
                     field.parameter,
                 )
                 valid = false
             }
+
+            valid = validateConditionalFieldShape(field) && valid
         }
+
+        // WhenRemaining fields must be contiguous and at the tail
+        val firstIdx = fields.indexOf(whenRemainingFields.first())
+        for (i in firstIdx until fields.size) {
+            if (fields[i].condition !is FieldCondition.WhenRemaining) {
+                logger.error(
+                    "@WhenRemaining fields must be contiguous and at the tail of the constructor. " +
+                        "Non-@WhenRemaining field '${fields[i].name}' appears after " +
+                        "@WhenRemaining field '${whenRemainingFields.first().name}'.",
+                    fields[i].parameter,
+                )
+                valid = false
+                break
+            }
+        }
+
+        return valid
+    }
+
+    /** Common validation for any conditional field (@WhenTrue or @WhenRemaining). */
+    private fun validateConditionalFieldShape(field: FieldInfo): Boolean {
+        var valid = true
+
+        // Check conditional field is nullable
+        if (!field.isNullable) {
+            logger.error(
+                "Conditional field '${field.name}' must be nullable. " +
+                    "When the condition is false, the codec returns null for this field. " +
+                    "Fix: change the type to nullable (e.g., 'val ${field.name}: ${field.typeName}?').",
+                field.parameter,
+            )
+            valid = false
+        }
+
+        // Check conditional field has a default value
+        if (!field.hasDefault) {
+            logger.error(
+                "Conditional field '${field.name}' must have a default value of null. " +
+                    "When the condition is false, the codec skips this field and uses the default. " +
+                    "Without a default, Kotlin requires callers to always provide a value, " +
+                    "defeating the purpose of the condition. " +
+                    "Fix: add '= null' after the type.",
+                field.parameter,
+            )
+            valid = false
+        }
+
         return valid
     }
 

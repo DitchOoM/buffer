@@ -53,6 +53,10 @@ sealed class FieldCondition {
     data class WhenTrue(
         val expression: String,
     ) : FieldCondition()
+
+    data class WhenRemaining(
+        val minBytes: Int,
+    ) : FieldCondition()
 }
 
 sealed class LengthKind {
@@ -579,6 +583,10 @@ class FieldAnalyzer(
             if (annotName == "com.ditchoom.buffer.codec.annotations.WhenTrue") {
                 val expr = annotation.arguments.first().value as String
                 return FieldCondition.WhenTrue(expr)
+            }
+            if (annotName == "com.ditchoom.buffer.codec.annotations.WhenRemaining") {
+                val minBytes = annotation.arguments.first().value as Int
+                return FieldCondition.WhenRemaining(minBytes)
             }
         }
         return null
