@@ -74,6 +74,10 @@ private val annotationSource =
     @Retention(AnnotationRetention.BINARY)
     annotation class WhenTrue(val expression: String)
 
+    @Target(AnnotationTarget.VALUE_PARAMETER)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class WhenRemaining(val minBytes: Int)
+
     // Endianness enum already defined above with ProtocolMessage
 
     @Target(AnnotationTarget.VALUE_PARAMETER)

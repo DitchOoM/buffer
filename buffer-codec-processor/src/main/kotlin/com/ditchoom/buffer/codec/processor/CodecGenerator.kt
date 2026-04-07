@@ -120,8 +120,16 @@ class CodecGenerator(
         // encode(buffer, value, context) — context-aware encode
         if (canEncode) {
             val encodeBody = CodeBlock.builder()
+            val whenRemainingTail = mutableListOf<FieldInfo>()
             for (field in fields) {
-                addFieldWrite(encodeBody, field, "value.${field.name}", withContext = true)
+                if (field.condition is FieldCondition.WhenRemaining) {
+                    whenRemainingTail.add(field)
+                } else {
+                    addFieldWrite(encodeBody, field, "value.${field.name}", withContext = true)
+                }
+            }
+            if (whenRemainingTail.isNotEmpty()) {
+                emitWhenRemainingEncode(encodeBody, whenRemainingTail, withContext = true)
             }
 
             val encodeCtxBuilder =
@@ -322,13 +330,21 @@ class CodecGenerator(
         }
 
         val encodeBody = CodeBlock.builder()
+        val payloadWhenRemainingTail = mutableListOf<FieldInfo>()
         for (field in fields) {
-            val strategy = field.strategy
-            if (strategy is FieldReadStrategy.PayloadField) {
-                addPayloadWrite(encodeBody, field)
+            if (field.condition is FieldCondition.WhenRemaining) {
+                payloadWhenRemainingTail.add(field)
             } else {
-                addFieldWrite(encodeBody, field, "value.${field.name}")
+                val strategy = field.strategy
+                if (strategy is FieldReadStrategy.PayloadField) {
+                    addPayloadWrite(encodeBody, field)
+                } else {
+                    addFieldWrite(encodeBody, field, "value.${field.name}")
+                }
             }
+        }
+        if (payloadWhenRemainingTail.isNotEmpty()) {
+            emitWhenRemainingEncode(encodeBody, payloadWhenRemainingTail)
         }
         encodeBuilder.addCode(encodeBody.build())
 

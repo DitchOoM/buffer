@@ -11,15 +11,24 @@ internal fun addFieldRead(
 ) {
     val condition = field.condition
     val expr = readExpression(field.strategy, withContext, field.byteOrderOverride)
-    if (condition != null) {
-        val condExpr = (condition as FieldCondition.WhenTrue).expression
-        code.beginControlFlow("val %L = if (%L)", field.name, condExpr)
-        code.addStatement("%L", expr)
-        code.nextControlFlow("else")
-        code.addStatement("null")
-        code.endControlFlow()
-    } else {
-        code.addStatement("val %L = %L", field.name, expr)
+    when (condition) {
+        is FieldCondition.WhenTrue -> {
+            code.beginControlFlow("val %L = if (%L)", field.name, condition.expression)
+            code.addStatement("%L", expr)
+            code.nextControlFlow("else")
+            code.addStatement("null")
+            code.endControlFlow()
+        }
+        is FieldCondition.WhenRemaining -> {
+            code.beginControlFlow("val %L = if (buffer.remaining() >= %L)", field.name, condition.minBytes)
+            code.addStatement("%L", expr)
+            code.nextControlFlow("else")
+            code.addStatement("null")
+            code.endControlFlow()
+        }
+        null -> {
+            code.addStatement("val %L = %L", field.name, expr)
+        }
     }
 }
 
@@ -77,15 +86,40 @@ internal fun addFieldWrite(
     valueExpr: String,
     withContext: Boolean = false,
 ) {
-    val condition = field.condition
-    if (condition != null) {
-        val condExpr = (condition as FieldCondition.WhenTrue).expression.replace(Regex("^([^.]+)"), "value.$1")
-        code.beginControlFlow("if (%L)", condExpr)
-        code.addStatement("%L", writeExpression(field.strategy, "$valueExpr!!", withContext, field.byteOrderOverride))
-        code.endControlFlow()
-    } else {
-        code.addStatement("%L", writeExpression(field.strategy, valueExpr, withContext, field.byteOrderOverride))
+    when (val condition = field.condition) {
+        is FieldCondition.WhenTrue -> {
+            val condExpr = condition.expression.replace(Regex("^([^.]+)"), "value.$1")
+            code.beginControlFlow("if (%L)", condExpr)
+            code.addStatement("%L", writeExpression(field.strategy, "$valueExpr!!", withContext, field.byteOrderOverride))
+            code.endControlFlow()
+        }
+        is FieldCondition.WhenRemaining -> {
+            // Individual null check — cascading is handled by CodecGenerator
+            code.addStatement("%L", writeExpression(field.strategy, "$valueExpr!!", withContext, field.byteOrderOverride))
+        }
+        null -> {
+            code.addStatement("%L", writeExpression(field.strategy, valueExpr, withContext, field.byteOrderOverride))
+        }
     }
+}
+
+/**
+ * Emits cascading null-check encode blocks for @WhenRemaining fields.
+ * If field N is null, all subsequent fields are skipped — preventing impossible wire states.
+ */
+internal fun emitWhenRemainingEncode(
+    code: CodeBlock.Builder,
+    fields: List<FieldInfo>,
+    withContext: Boolean = false,
+) {
+    for (field in fields) {
+        code.beginControlFlow("if (value.%L != null)", field.name)
+        code.addStatement(
+            "%L",
+            writeExpression(field.strategy, "value.${field.name}!!", withContext, field.byteOrderOverride),
+        )
+    }
+    repeat(fields.size) { code.endControlFlow() }
 }
 
 internal fun writeExpression(

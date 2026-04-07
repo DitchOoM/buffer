@@ -275,6 +275,34 @@ annotation class WhenTrue(
 )
 
 /**
+ * Conditional field: only present on the wire when at least [minBytes] remain
+ * in the buffer after reading all preceding fields.
+ *
+ * The field must be nullable with a default value of `null`.
+ * All `@WhenRemaining` fields must be contiguous and at the tail of the constructor.
+ *
+ * On encode, fields are written with cascading null checks: if an earlier
+ * `@WhenRemaining` field is null, all subsequent ones are skipped — preventing
+ * an impossible wire state where a trailing field is present without its predecessor.
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * data class AckV5(
+ *     val packetId: UShort,
+ *     @WhenRemaining(1) val reasonCode: UByte? = null,
+ *     @WhenRemaining(1) val properties: Collection<Property>? = null,
+ * )
+ * ```
+ *
+ * @param minBytes Minimum bytes remaining in buffer for this field to be present.
+ */
+@Target(AnnotationTarget.VALUE_PARAMETER)
+@Retention(AnnotationRetention.BINARY)
+annotation class WhenRemaining(
+    val minBytes: Int,
+)
+
+/**
  * Delegates field decoding/encoding to an existing [Codec][com.ditchoom.buffer.codec.Codec] object.
  *
  * Use this instead of writing a full SPI module when you need a custom field type.
