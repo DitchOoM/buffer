@@ -52,16 +52,13 @@ private val deterministicFactoryInstance: BufferFactory =
         override fun allocate(
             size: Int,
             byteOrder: ByteOrder,
-        ): PlatformBuffer {
-            // JVM 9+: use invokeCleaner on a direct ByteBuffer
-            if (invokeCleanerFn != null) {
-                return JvmDeterministicDirectJvmBuffer(
-                    ByteBuffer.allocateDirect(size).order(byteOrder.toJava()),
-                )
-            }
-            // JVM 8: fall back to Unsafe.allocateMemory + DirectByteBuffer
-            return JvmDeterministicUnsafeJvmBuffer.allocate(size, byteOrder)
-        }
+        ): PlatformBuffer =
+            allocateDeterministicBuffer(
+                size,
+                byteOrder,
+                ::JvmDeterministicDirectJvmBuffer,
+                JvmDeterministicUnsafeJvmBuffer.Companion::allocate,
+            )
 
         override fun wrap(
             array: ByteArray,

@@ -42,7 +42,13 @@ private val deterministicFactoryInstance: BufferFactory =
         override fun allocate(
             size: Int,
             byteOrder: ByteOrder,
-        ): PlatformBuffer = AndroidDeterministicUnsafeJvmBuffer.allocate(size, byteOrder)
+        ): PlatformBuffer =
+            allocateDeterministicBuffer(
+                size,
+                byteOrder,
+                ::AndroidDeterministicDirectJvmBuffer,
+                AndroidDeterministicUnsafeJvmBuffer.Companion::allocate,
+            )
 
         override fun wrap(
             array: ByteArray,

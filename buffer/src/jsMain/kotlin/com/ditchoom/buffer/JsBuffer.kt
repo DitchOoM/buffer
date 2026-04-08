@@ -135,9 +135,18 @@ class JsBuffer(
 
         @Suppress("UNCHECKED_CAST_TO_EXTERNAL_INTERFACE")
         val textDecoder = TextDecoder(encoding, js("{fatal: true}") as TextDecoderOptions)
+        val subarray = buffer.subarray(positionValue, positionValue + length)
+        // TextDecoder.decode() rejects SharedArrayBuffer-backed views in Chrome.
+        // Copy to a regular ArrayBuffer when the backing store is shared.
+        val view =
+            if (sharedArrayBuffer != null) {
+                Int8Array(length).also { it.set(subarray) }
+            } else {
+                subarray
+            }
         val result =
             textDecoder.decode(
-                buffer.subarray(positionValue, positionValue + length).unsafeCast<BufferSource>(),
+                view.unsafeCast<BufferSource>(),
             )
         position(positionValue + length)
         return result
