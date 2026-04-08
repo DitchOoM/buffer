@@ -3,6 +3,10 @@ package com.ditchoom.buffer.flow
 /**
  * A multiplexed connection that can open multiple independent typed streams.
  *
+ * **Thread safety:** Implementations are NOT assumed to be thread-safe. Concurrent
+ * calls to open/accept methods require external synchronization unless the
+ * implementation explicitly documents otherwise.
+ *
  * Models transports with native multiplexing (QUIC, HTTP/2). Each method returns
  * the tightest type for its stream direction, preventing impossible states at
  * compile time:

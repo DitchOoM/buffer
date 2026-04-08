@@ -10,7 +10,12 @@ fun <T> Encoder<T>.encodeToBuffer(
     context: EncodeContext = EncodeContext.Empty,
 ): ReadBuffer {
     val growable = GrowableWriteBuffer(factory, initialSize = wireSizeHint)
-    encode(growable, value)
+    if (this is Codec<*>) {
+        @Suppress("UNCHECKED_CAST")
+        (this as Codec<T>).encode(growable, value, context)
+    } else {
+        encode(growable, value)
+    }
     return growable.toReadBuffer()
 }
 

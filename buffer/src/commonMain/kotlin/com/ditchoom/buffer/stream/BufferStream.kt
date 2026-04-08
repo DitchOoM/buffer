@@ -1,9 +1,11 @@
 package com.ditchoom.buffer.stream
 
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
+import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
 
 /**
@@ -80,6 +82,10 @@ fun BufferStream.collectToBuffer(pool: BufferPool): ReadBuffer {
 
 /**
  * Stream processor for parsing protocols that span multiple chunks.
+ *
+ * **Thread safety:** This interface is NOT thread-safe. All calls (append, peek, read,
+ * skip, release) must be made from a single thread or serialized externally. In coroutine
+ * code, confine the processor to a single coroutine or use a `Mutex` if shared.
  *
  * Design principles:
  * - Returns slices when data is within a single chunk (common case)
@@ -651,8 +657,9 @@ internal class DefaultStreamProcessor(
 
         val chunk = chunks.firstOrNull()
         if (chunk == null || size == 0) {
-            // Empty read - return empty slice from pool
-            val empty = pool.acquire(0)
+            // Empty read — use a managed allocation instead of pool.acquire to avoid
+            // leaking a pooled buffer that the caller will never return to the pool.
+            val empty = BufferFactory.managed().allocate(0)
             empty.resetForRead()
             return empty
         }

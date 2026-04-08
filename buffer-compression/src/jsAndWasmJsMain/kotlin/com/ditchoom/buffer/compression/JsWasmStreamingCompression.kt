@@ -105,7 +105,16 @@ private class JsNodeStreamingCompressor(
         val input = if (totalBytes == 0) emptyJsByteArray() else combineJsByteArrays(accumulatedChunks, totalBytes)
         accumulatedChunks.clear()
         totalBytes = 0
-        val result = s.processSync(input, zlibSyncFlushFlag())
+        val result =
+            try {
+                s.processSync(input, zlibSyncFlushFlag())
+            } catch (e: Exception) {
+                // zlib error — destroy stream to prevent use in corrupt state.
+                // After this, only reset() or close() are valid.
+                stream?.destroy()
+                stream = null
+                throw e
+            }
         if (result.byteLength() > 0) {
             onOutput(result.toPlatformBuffer(allocator))
         }
@@ -119,7 +128,14 @@ private class JsNodeStreamingCompressor(
         totalBytes = 0
         // Use _processChunk (one-shot) for finish — it handles the writeSync loop
         // correctly and destroys the C++ handle at the end, matching one-shot behavior.
-        val result = s.processSyncOneShot(input, zlibFinishFlag())
+        val result =
+            try {
+                s.processSyncOneShot(input, zlibFinishFlag())
+            } catch (e: Exception) {
+                stream?.destroy()
+                stream = null
+                throw e
+            }
         stream = null // handle already destroyed by _processChunk
         if (result.byteLength() > 0) {
             onOutput(result.toPlatformBuffer(allocator))
@@ -177,7 +193,14 @@ private class JsNodeStreamingDecompressor(
         val combined = combineJsByteArrays(accumulatedChunks, totalBytes)
         accumulatedChunks.clear()
         totalBytes = 0
-        val result = s.processSync(combined, zlibSyncFlushFlag())
+        val result =
+            try {
+                s.processSync(combined, zlibSyncFlushFlag())
+            } catch (e: Exception) {
+                stream?.destroy()
+                stream = null
+                throw e
+            }
         if (result.byteLength() > 0) {
             onOutput(result.toPlatformBuffer(allocator))
         }
@@ -192,7 +215,14 @@ private class JsNodeStreamingDecompressor(
         totalBytes = 0
         // Use _processChunk (one-shot) for finish — handles Z_SYNC_FLUSH correctly
         // and destroys the C++ handle, matching the old inflateRawSync behavior.
-        val result = s.processSyncOneShot(combined, zlibSyncFlushFlag())
+        val result =
+            try {
+                s.processSyncOneShot(combined, zlibSyncFlushFlag())
+            } catch (e: Exception) {
+                stream?.destroy()
+                stream = null
+                throw e
+            }
         stream = null // handle already destroyed by _processChunk
         if (result.byteLength() > 0) {
             onOutput(result.toPlatformBuffer(allocator))
