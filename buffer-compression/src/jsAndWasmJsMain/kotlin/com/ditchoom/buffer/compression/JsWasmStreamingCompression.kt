@@ -109,10 +109,11 @@ private class JsNodeStreamingCompressor(
             try {
                 s.processSync(input, zlibSyncFlushFlag())
             } catch (e: Exception) {
-                // zlib error — destroy stream to prevent use in corrupt state.
-                // After this, only reset() or close() are valid.
+                // zlib error — mark closed to prevent silent data loss on subsequent calls.
+                // Only reset() or close() are valid after this.
                 stream?.destroy()
                 stream = null
+                closed = true
                 throw e
             }
         if (result.byteLength() > 0) {
@@ -134,6 +135,7 @@ private class JsNodeStreamingCompressor(
             } catch (e: Exception) {
                 stream?.destroy()
                 stream = null
+                closed = true
                 throw e
             }
         stream = null // handle already destroyed by _processChunk
@@ -146,6 +148,7 @@ private class JsNodeStreamingCompressor(
         stream?.destroy()
         accumulatedChunks.clear()
         totalBytes = 0
+        closed = false
         stream = createCompressStream(algorithm, level, windowBits)
     }
 
@@ -199,6 +202,7 @@ private class JsNodeStreamingDecompressor(
             } catch (e: Exception) {
                 stream?.destroy()
                 stream = null
+                closed = true
                 throw e
             }
         if (result.byteLength() > 0) {
@@ -221,6 +225,7 @@ private class JsNodeStreamingDecompressor(
             } catch (e: Exception) {
                 stream?.destroy()
                 stream = null
+                closed = true
                 throw e
             }
         stream = null // handle already destroyed by _processChunk
@@ -233,6 +238,7 @@ private class JsNodeStreamingDecompressor(
         stream?.destroy()
         accumulatedChunks.clear()
         totalBytes = 0
+        closed = false
         stream = createDecompressStream(algorithm)
     }
 
