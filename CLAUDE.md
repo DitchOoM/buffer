@@ -239,6 +239,7 @@ Chunked processing for large buffers and streaming data:
 
 - `BufferStream` - Iterates over a buffer in fixed-size chunks
 - `StreamProcessor` - Handles fragmented data (e.g., network packets) with peek/read operations
+- `FrameDetector` - Peeks at a stream to determine message frame boundaries without consuming data
 
 ```kotlin
 val processor = StreamProcessor.create(pool)
@@ -261,6 +262,32 @@ This prevents O(n) `readBuffer` traversals when thousands of tiny network fragme
 (e.g., 1 MB in 64-byte TCP segments: 16,384 entries → ~72). Coalescing is zero-cost for
 protocol parsing patterns where data is consumed immediately after each append — the chunk
 count never reaches the threshold, so no copying occurs.
+
+**Thread safety:** StreamProcessor is NOT thread-safe. Confine it to a single coroutine
+or serialize access externally.
+
+### Flow Abstractions (`com.ditchoom.buffer.flow`)
+
+Typed stream abstractions for multi-platform networking:
+
+- `Sender<T>` - Send-only typed stream (fun interface)
+- `Receiver<T>` - Receive-only typed stream (fun interface, exposes `Flow<T>`)
+- `Connection<T>` - Bidirectional typed stream (combines Sender + Receiver + `close()`)
+- `StreamMux<T>` - Multiplexed streams (QUIC, HTTP/2) with `openBidirectional()`, `openUnidirectional()`, `acceptBidirectional()`, `acceptUnidirectional()`
+- `ByteStream` - Raw bidirectional byte transport (TCP, QUIC, unix sockets)
+
+```kotlin
+// Type-safe protocol layering via map/contramap
+val jsonConn: Connection<ChatMessage> = wsConn.map(
+    encode = { msg -> WebSocketMessage.Text(Json.encodeToString(msg)) },
+    decode = { (it as WebSocketMessage.Text).value.let { Json.decodeFromString(it) } },
+)
+jsonConn.send(ChatMessage("hello"))
+jsonConn.receive().collect { msg -> println(msg) }
+```
+
+Thread safety: Connection and StreamMux are NOT assumed thread-safe. Confine
+send/receive to their respective coroutines.
 
 ### Wrapper Transparency
 
@@ -299,9 +326,8 @@ BufferFactory.deterministic().allocate(size)             // Explicit cleanup via
 Library code should accept `BufferFactory` as a parameter so callers control allocation:
 ```kotlin
 class MyProtocol(private val factory: BufferFactory = BufferFactory.Default) {
-    fun encode(data: MyData): PlatformBuffer {
-        val buffer = factory.allocate(data.sizeOf())
-        // ...
+    fun encode(data: MyData): ReadBuffer {
+        return MyDataCodec.encodeToBuffer(data, factory)
     }
 }
 ```
@@ -321,6 +347,18 @@ val wrapped = BufferFactory.Default.wrap(byteArray)
 val buffer = PlatformBuffer.allocate(1024)
 val wrapped = PlatformBuffer.wrap(byteArray)
 ```
+
+### Directional Codecs: Encoder / Decoder / Codec
+
+The codec system has three interface levels:
+
+- `Encoder<in T>` — encode only (send-only streams). Has `encode(buffer, value)` and `wireSizeHint`.
+- `Decoder<out T>` — decode only (receive-only streams). Has `decode(buffer): T`. Fun interface for SAM.
+- `Codec<T>` — bidirectional. Extends both + `FrameDetector`. Adds context-aware `encode(buffer, value, context)` and `decode(buffer, context)`.
+
+Generated codecs default to `Codec<T>`. Use `@ProtocolMessage(direction = Direction.DecodeOnly)` or `Direction.EncodeOnly` to generate only the decoder or encoder. `@UseCodec` accepts `Decoder<T>`, `Encoder<T>`, or `Codec<T>` — direction is validated at compile time.
+
+`encodeToBuffer()` auto-sizes via an internal `GrowableWriteBuffer` (2x doubling). Generated codecs set `wireSizeHint` to the sum of fixed-size fields so the initial allocation avoids copies for fixed-size messages. Defaults to 16 for hand-written codecs.
 
 ### Use Protocol Codecs for Structured Data
 
@@ -395,7 +433,22 @@ while (stream.available() >= PacketCodec.MIN_HEADER_BYTES) {
 }
 ```
 
-Handles `@LengthPrefixed`, `@LengthFrom`, `@WhenTrue` (including value class property conditions), `@WireBytes`, sealed dispatch, `@DispatchOn` (value class and data class discriminators), nested messages, and multiple variable-length fields.
+Handles `@LengthPrefixed`, `@LengthFrom`, `@WhenTrue`, `@WhenRemaining` (including value class property conditions), `@WireBytes`, sealed dispatch, `@DispatchOn` (value class and data class discriminators), nested messages, and multiple variable-length fields.
+
+### `@WhenRemaining` — Optional Trailing Fields
+
+For protocols where trailing fields are present only if bytes remain in the buffer (MQTT v5 ACKs, TLS extensions):
+
+```kotlin
+@ProtocolMessage
+data class AckV5(
+    val packetId: UShort,
+    @WhenRemaining(1) val reasonCode: UByte? = null,
+    @WhenRemaining(1) val properties: Collection<Property>? = null,
+)
+```
+
+Rules: fields must be nullable with default `null`, contiguous, and at the constructor tail. On encode, cascading null checks prevent an impossible wire state where a later field is present without its predecessor.
 
 ### CodecContext — Typed Runtime Configuration
 
@@ -440,9 +493,8 @@ class ProtocolConnection(
     private val factory: BufferFactory = BufferFactory.Default,
 ) {
     fun send(packet: Packet) {
-        factory.allocate(packet.sizeOf()).use { buffer ->
-            packet.writeTo(buffer)
-        }
+        val encoded = PacketCodec.encodeToBuffer(packet, factory)
+        transport.write(encoded)
     }
 }
 ```
