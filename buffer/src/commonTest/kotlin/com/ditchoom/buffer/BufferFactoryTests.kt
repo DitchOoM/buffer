@@ -63,6 +63,38 @@ class BufferFactoryTests {
         assertEquals(0x123456789ABCDEF0L, buffer.readLong())
     }
 
+    @Test
+    fun sharedFactoryReadStringAscii() {
+        val text = "Hello, World!"
+        val buffer = BufferFactory.shared().allocate(64)
+        buffer.writeString(text, Charset.UTF8)
+        buffer.resetForRead()
+        assertEquals(text, buffer.readString(text.length, Charset.UTF8))
+    }
+
+    @Test
+    fun sharedFactoryReadStringMultibyte() {
+        val text = "你好世界🌍"
+        val length = text.utf8Length()
+        val buffer = BufferFactory.shared().allocate(length)
+        buffer.writeString(text, Charset.UTF8)
+        buffer.resetForRead()
+        assertEquals(text, buffer.readString(length, Charset.UTF8))
+    }
+
+    @Test
+    fun sharedFactoryStreamingStringDecoder() {
+        val decoder = StreamingStringDecoder()
+        val result = StringBuilder()
+        val text = "Hello, 世界! 🌍"
+        val buffer = BufferFactory.shared().allocate(text.utf8Length())
+        buffer.writeString(text, Charset.UTF8)
+        buffer.resetForRead()
+        decoder.decode(buffer, result)
+        decoder.finish(result)
+        assertEquals(text, result.toString())
+    }
+
     // ============================================================================
     // Deterministic Factory Tests
     // ============================================================================
