@@ -119,12 +119,13 @@ class SyncPersistentStreamTests {
         try {
             // The decompressor must maintain context to decompress messages
             // that use back-references to previous messages' sliding window.
-            val messages = listOf(
-                "Hello World",
-                "Hello World", // identical — uses back-ref
-                "Hello World Hello World Hello World", // more back-refs
-                "Goodbye World", // partial back-ref to "World"
-            )
+            val messages =
+                listOf(
+                    "Hello World",
+                    "Hello World", // identical — uses back-ref
+                    "Hello World Hello World Hello World", // more back-refs
+                    "Goodbye World", // partial back-ref to "World"
+                )
 
             for ((i, msg) in messages.withIndex()) {
                 val compressed = compressAndStripMarker(msg, compressor)
@@ -230,13 +231,14 @@ class SyncPersistentStreamTests {
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw) // default windowBits
 
         try {
-            val messages = listOf(
-                "Hello",
-                "Hello", // back-ref with small window
-                "A".repeat(2048), // exceeds 1KB window — tests window wrapping
-                "B".repeat(16384), // chunkSize boundary
-                "Mixed: Hello World A B C " + "X".repeat(4096),
-            )
+            val messages =
+                listOf(
+                    "Hello",
+                    "Hello", // back-ref with small window
+                    "A".repeat(2048), // exceeds 1KB window — tests window wrapping
+                    "B".repeat(16384), // chunkSize boundary
+                    "Mixed: Hello World A B C " + "X".repeat(4096),
+                )
 
             for ((i, msg) in messages.withIndex()) {
                 val compressed = compressAndStripMarker(msg, compressor)
@@ -338,16 +340,17 @@ class SyncPersistentStreamTests {
             // Simulate WebSocket per-message-deflate: each message is compressed
             // with flush, marker stripped, then decompressed with marker re-added + flush.
             // No reset between messages (context takeover).
-            val messages = buildList {
-                add("Short")
-                add("A".repeat(100))
-                add("B".repeat(16384)) // exactly chunkSize
-                add("C".repeat(16385)) // chunkSize + 1
-                add("D".repeat(65536)) // 4x chunkSize
-                add("Short again") // back to small after large
-                add("Short again") // identical — back-ref
-                add("E".repeat(32768)) // 2x chunkSize
-            }
+            val messages =
+                buildList {
+                    add("Short")
+                    add("A".repeat(100))
+                    add("B".repeat(16384)) // exactly chunkSize
+                    add("C".repeat(16385)) // chunkSize + 1
+                    add("D".repeat(65536)) // 4x chunkSize
+                    add("Short again") // back to small after large
+                    add("Short again") // identical — back-ref
+                    add("E".repeat(32768)) // 2x chunkSize
+                }
 
             for ((i, msg) in messages.withIndex()) {
                 val compressed = compressAndStripMarker(msg, compressor)

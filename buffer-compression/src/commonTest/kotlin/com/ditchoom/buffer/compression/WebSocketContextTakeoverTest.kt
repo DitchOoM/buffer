@@ -28,7 +28,7 @@ import kotlin.test.assertEquals
 class WebSocketContextTakeoverTest {
     private val factory = BufferFactory.managed()
     private val allocator = BufferAllocator.Default
-    private val SYNC_FLUSH_MARKER = factory.wrap(byteArrayOf(0x00, 0x00, 0xFF.toByte(), 0xFF.toByte()))
+    private val syncFlushMarker = factory.wrap(byteArrayOf(0x00, 0x00, 0xFF.toByte(), 0xFF.toByte()))
 
     private fun stringToBuffer(s: String): ReadBuffer {
         val buf = factory.allocate(s.length * 3)
@@ -39,12 +39,17 @@ class WebSocketContextTakeoverTest {
 
     @Test
     fun twoMessagesWithContextTakeover() {
-        val compressor = StreamingCompressor.create(
-            CompressionAlgorithm.Raw, CompressionLevel.Default, allocator,
-        )
-        val decompressor = StreamingDecompressor.create(
-            CompressionAlgorithm.Raw, allocator,
-        )
+        val compressor =
+            StreamingCompressor.create(
+                CompressionAlgorithm.Raw,
+                CompressionLevel.Default,
+                allocator,
+            )
+        val decompressor =
+            StreamingDecompressor.create(
+                CompressionAlgorithm.Raw,
+                allocator,
+            )
         // Reuse decoder across messages (same as websocket's DefaultWebSocketClient)
         val sharedDecoder = StreamingStringDecoder()
 
@@ -55,9 +60,12 @@ class WebSocketContextTakeoverTest {
         assertEquals(msg1, result1, "Message 1 round-trip failed")
 
         val result2 = compressAndDecompress(compressor, decompressor, msg2, sharedDecoder)
-        assertEquals(msg2, result2,
+        assertEquals(
+            msg2,
+            result2,
             "Message 2 round-trip failed: expected='$msg2' actual='$result2' " +
-                "(if actual='$msg1$msg2' then decompressor leaked msg1 output)")
+                "(if actual='$msg1$msg2' then decompressor leaked msg1 output)",
+        )
 
         compressor.close()
         decompressor.close()
@@ -65,13 +73,18 @@ class WebSocketContextTakeoverTest {
 
     @Test
     fun twoMessagesWithContextTakeover_windowBits9() {
-        val compressor = StreamingCompressor.create(
-            CompressionAlgorithm.Raw, CompressionLevel.Default, allocator,
-            windowBits = -9,
-        )
-        val decompressor = StreamingDecompressor.create(
-            CompressionAlgorithm.Raw, allocator,
-        )
+        val compressor =
+            StreamingCompressor.create(
+                CompressionAlgorithm.Raw,
+                CompressionLevel.Default,
+                allocator,
+                windowBits = -9,
+            )
+        val decompressor =
+            StreamingDecompressor.create(
+                CompressionAlgorithm.Raw,
+                allocator,
+            )
 
         val msg1 = """{"msg":"hello"}"""
         val msg2 = """{"msg":"world"}"""
@@ -88,12 +101,17 @@ class WebSocketContextTakeoverTest {
 
     @Test
     fun tenMessagesWithContextTakeover() {
-        val compressor = StreamingCompressor.create(
-            CompressionAlgorithm.Raw, CompressionLevel.Default, allocator,
-        )
-        val decompressor = StreamingDecompressor.create(
-            CompressionAlgorithm.Raw, allocator,
-        )
+        val compressor =
+            StreamingCompressor.create(
+                CompressionAlgorithm.Raw,
+                CompressionLevel.Default,
+                allocator,
+            )
+        val decompressor =
+            StreamingDecompressor.create(
+                CompressionAlgorithm.Raw,
+                allocator,
+            )
 
         repeat(10) { i ->
             val msg = """{"index":$i,"data":"test payload $i"}"""
@@ -132,8 +150,8 @@ class WebSocketContextTakeoverTest {
         }
 
         decompressor.decompress(stripped) { decodeAndFree(it) }
-        SYNC_FLUSH_MARKER.position(0)
-        decompressor.decompress(SYNC_FLUSH_MARKER) { decodeAndFree(it) }
+        syncFlushMarker.position(0)
+        decompressor.decompress(syncFlushMarker) { decodeAndFree(it) }
         decompressor.flush { decodeAndFree(it) }
         decoder.finish(sb)
         decoder.reset()
