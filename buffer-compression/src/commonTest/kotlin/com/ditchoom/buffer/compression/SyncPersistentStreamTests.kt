@@ -484,4 +484,67 @@ class SyncPersistentStreamTests {
         combined.resetForRead()
         return combined.readString(totalSize, Charset.UTF8)
     }
+
+    // =========================================================================
+    // Error handling: lifecycle transitions must be safe
+    // =========================================================================
+
+    @Test
+    fun decompressorResetAfterFinishRestoresWorkingState() {
+        if (!supportsStatefulFlush) return
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
+        try {
+            // First message: compress, decompress via finish
+            val msg1 = "first message"
+            val compressed1 = compressAndStripMarker(msg1, compressor)
+            decompressor.decompress(compressed1) {}
+            val chunks1 = mutableListOf<ReadBuffer>()
+            decompressor.finish { chunks1.add(it) }
+            assertEquals(msg1, combineAndReadString(chunks1))
+
+            // After finish(), stream is destroyed — reset() must recreate it
+            decompressor.reset()
+            compressor.reset()
+
+            // Second message must work on the fresh stream
+            val msg2 = "second after reset"
+            val compressed2 = compressAndStripMarker(msg2, compressor)
+            val result2 = decompressWithFlush(compressed2, decompressor)
+            assertEquals(msg2, result2)
+        } finally {
+            compressor.close()
+            decompressor.close()
+        }
+    }
+
+    @Test
+    fun compressorCloseAfterFlushIsSafe() {
+        if (!supportsStatefulFlush) return
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
+
+        // Normal compress + flush cycle
+        val msg = "hello"
+        val msgBuf = BufferFactory.managed().allocate(msg.length)
+        msgBuf.writeString(msg, Charset.UTF8)
+        msgBuf.resetForRead()
+        compressor.compress(msgBuf) {}
+        compressor.flush {}
+
+        // close() after normal use must not throw
+        compressor.close()
+    }
+
+    @Test
+    fun doubleCloseIsSafe() {
+        if (!supportsStatefulFlush) return
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
+
+        compressor.close()
+        compressor.close() // must not throw
+
+        decompressor.close()
+        decompressor.close() // must not throw
+    }
 }

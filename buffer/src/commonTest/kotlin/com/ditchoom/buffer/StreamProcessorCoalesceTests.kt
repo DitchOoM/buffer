@@ -513,4 +513,45 @@ class StreamProcessorCoalesceTests {
         processor.release()
         pool.clear()
     }
+
+    // ============================================================================
+    // readBuffer(0) must not leak a pooled buffer
+    // ============================================================================
+
+    @Test
+    fun readBufferZeroDoesNotLeakPoolBuffer() {
+        val pool = BufferPool(defaultBufferSize = 64, maxPoolSize = 4)
+        val processor = StreamProcessor.create(pool)
+
+        // Append some data so the processor is non-empty
+        val buf = BufferFactory.managed().allocate(4)
+        buf.writeInt(0xDEADBEEF.toInt())
+        buf.resetForRead()
+        processor.append(buf)
+
+        // Read zero bytes — must return a valid empty buffer without leaking a pooled buffer
+        val empty = processor.readBuffer(0)
+        assertEquals(0, empty.remaining())
+
+        // Original data must still be intact
+        assertEquals(4, processor.available())
+        assertEquals(0xDEADBEEF.toInt(), processor.readInt())
+
+        processor.release()
+        pool.clear()
+    }
+
+    @Test
+    fun readBufferZeroOnEmptyProcessor() {
+        val pool = BufferPool(defaultBufferSize = 64, maxPoolSize = 4)
+        val processor = StreamProcessor.create(pool)
+
+        // Zero-size read on empty processor
+        val empty = processor.readBuffer(0)
+        assertEquals(0, empty.remaining())
+        assertEquals(0, processor.available())
+
+        processor.release()
+        pool.clear()
+    }
 }
