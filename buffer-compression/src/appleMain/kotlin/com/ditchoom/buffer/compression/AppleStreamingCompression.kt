@@ -29,9 +29,11 @@ import platform.zlib.Z_SYNC_FLUSH
 import platform.zlib.deflate
 import platform.zlib.deflateEnd
 import platform.zlib.deflateInit2
+import platform.zlib.deflateReset
 import platform.zlib.inflate
 import platform.zlib.inflateEnd
 import platform.zlib.inflateInit2
+import platform.zlib.inflateReset
 import platform.zlib.z_stream
 
 /**
@@ -225,12 +227,14 @@ private class AppleZlibStreamingCompressor(
     }
 
     override fun reset() {
-        streamPtr?.let {
-            deflateEnd(it)
-            nativeHeap.free(it.pointed.rawPtr)
+        val s = streamPtr ?: return
+        val result = deflateReset(s)
+        if (result != Z_OK) {
+            deflateEnd(s)
+            nativeHeap.free(s.pointed.rawPtr)
+            streamPtr = null
+            initStream()
         }
-        streamPtr = null
-        initStream()
     }
 
     override fun close() {
@@ -386,12 +390,16 @@ private class AppleZlibStreamingDecompressor(
     }
 
     override fun reset() {
-        streamPtr?.let {
-            inflateEnd(it)
-            nativeHeap.free(it.pointed.rawPtr)
+        val s = streamPtr ?: return
+        val result = inflateReset(s)
+        if (result != Z_OK) {
+            inflateEnd(s)
+            nativeHeap.free(s.pointed.rawPtr)
+            streamPtr = null
+            initStream()
+        } else {
+            streamEnded = false
         }
-        streamPtr = null
-        initStream()
     }
 
     override fun close() {

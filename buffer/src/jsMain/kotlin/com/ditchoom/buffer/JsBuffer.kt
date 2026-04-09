@@ -188,10 +188,21 @@ class JsBuffer(
             Charset.UTF8 -> {
                 val str = text.toString()
                 if (str.isEmpty()) return this
-                // Zero-alloc: TextEncoder.encodeInto() writes UTF-8 directly into the buffer
-                val target = Uint8Array(buffer.buffer, buffer.byteOffset + positionValue, capacity - positionValue)
-                val result = textEncoder.asDynamic().encodeInto(str, target)
-                positionValue += (result.written as Int)
+                val remaining = capacity - positionValue
+                if (sharedArrayBuffer != null) {
+                    // TextEncoder.encodeInto() rejects SharedArrayBuffer-backed views in Chrome.
+                    // Encode into a temporary regular ArrayBuffer then copy back.
+                    val temp = Uint8Array(remaining)
+                    val result = textEncoder.asDynamic().encodeInto(str, temp)
+                    val written = result.written as Int
+                    buffer.set(Int8Array(temp.buffer, 0, written), positionValue)
+                    positionValue += written
+                } else {
+                    // Zero-alloc: TextEncoder.encodeInto() writes UTF-8 directly into the buffer
+                    val target = Uint8Array(buffer.buffer, buffer.byteOffset + positionValue, remaining)
+                    val result = textEncoder.asDynamic().encodeInto(str, target)
+                    positionValue += (result.written as Int)
+                }
             }
             else -> throw UnsupportedOperationException("Unable to encode in $charset. Must use Charset.UTF8")
         }
