@@ -380,6 +380,14 @@ private class AppleZlibStreamingDecompressor(
                             // without BFINAL=1 (e.g., WebSocket per-message-deflate RFC 7692).
                             streamEnded = true
                         }
+                        -3 -> {
+                            // Z_DATA_ERROR (-3) with avail_in=0 means inflate needs more
+                            // input to verify the checksum trailer (e.g., Adler32 for zlib).
+                            // This happens when decompressUnsafe consumed all compressed data
+                            // via Z_SYNC_FLUSH but the trailer wasn't fully processed.
+                            // Since no more input will be provided, treat as stream end.
+                            streamEnded = true
+                        }
                         else -> throw CompressionException("inflate finish failed with code: $result")
                     }
 
