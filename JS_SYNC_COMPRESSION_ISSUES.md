@@ -95,7 +95,7 @@ private class JsNodeStreamingCompressor(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
     windowBits: Int,
-    override val allocator: BufferAllocator,
+    override val bufferFactory: BufferFactory,
 ) : StreamingCompressor {
     private var stream = createDeflateRawStream(algorithm, level, windowBits)
 

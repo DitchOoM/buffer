@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.JsBuffer
 import com.ditchoom.buffer.ReadBuffer
 import kotlinx.coroutines.await
@@ -59,18 +61,19 @@ internal actual fun combineJsByteArrays(
 
 internal actual fun emptyJsByteArray(): JsByteArray = JsByteArray(Int8Array(0))
 
-internal actual fun JsByteArray.toPlatformBuffer(allocator: BufferAllocator): ReadBuffer {
+internal actual fun JsByteArray.toPlatformBuffer(bufferFactory: BufferFactory): ReadBuffer {
     val length = array.length
-    if (length == 0) return allocator.allocate(0)
-    // For pool allocators, copy into the pool buffer. For default/heap, wrap directly.
-    return if (allocator is BufferAllocator.FromPool) {
-        val buf = allocator.allocate(length)
+    if (length == 0) return bufferFactory.allocate(0)
+    // For non-default factories (e.g. pool-backed), copy into the factory's buffer.
+    // For the default factory, wrap directly for zero-copy.
+    return if (bufferFactory === BufferFactory.Default) {
+        JsBuffer(array)
+    } else {
+        val buf = bufferFactory.allocate(length)
         val src = JsBuffer(array)
         buf.write(src)
         buf.resetForRead()
         buf
-    } else {
-        JsBuffer(array)
     }
 }
 

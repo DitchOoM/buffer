@@ -1,6 +1,8 @@
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.pool.asBufferFactory
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.StreamProcessorBuilder
 import com.ditchoom.buffer.stream.SuspendingStreamProcessor
@@ -21,24 +23,24 @@ import com.ditchoom.buffer.stream.TransformSpec
  * ```
  *
  * @param algorithm The compression algorithm to decompress (default: Gzip)
- * @param allocator Buffer allocation strategy (default: Direct)
+ * @param bufferFactory Buffer allocation strategy (default: pool-backed factory)
  */
 fun StreamProcessorBuilder.decompress(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Gzip,
-    allocator: BufferAllocator = BufferAllocator.FromPool(pool),
-): StreamProcessorBuilder = addTransform(DecompressionSpec(algorithm, allocator))
+    bufferFactory: BufferFactory = pool.asBufferFactory(),
+): StreamProcessorBuilder = addTransform(DecompressionSpec(algorithm, bufferFactory))
 
 /**
  * TransformSpec implementation for decompression.
  */
 internal class DecompressionSpec(
     private val algorithm: CompressionAlgorithm,
-    private val allocator: BufferAllocator,
+    private val bufferFactory: BufferFactory,
 ) : TransformSpec {
-    override fun wrapSync(inner: StreamProcessor): StreamProcessor = DecompressingStreamProcessor(inner, algorithm, allocator)
+    override fun wrapSync(inner: StreamProcessor): StreamProcessor = DecompressingStreamProcessor(inner, algorithm, bufferFactory)
 
     override fun wrapSuspending(inner: SuspendingStreamProcessor): SuspendingStreamProcessor =
-        SuspendingDecompressingStreamProcessor(inner, algorithm, allocator)
+        SuspendingDecompressingStreamProcessor(inner, algorithm, bufferFactory)
 }
 
 /**
@@ -63,12 +65,12 @@ internal class DecompressionSpec(
 internal class DecompressingStreamProcessor(
     private val inner: StreamProcessor,
     algorithm: CompressionAlgorithm,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
 ) : StreamProcessor by inner {
     private val decompressor =
         StreamingDecompressor.create(
             algorithm = algorithm,
-            allocator = allocator,
+            bufferFactory = bufferFactory,
         )
     private var finished = false
 
@@ -120,12 +122,12 @@ internal class DecompressingStreamProcessor(
 internal class SuspendingDecompressingStreamProcessor(
     private val inner: SuspendingStreamProcessor,
     algorithm: CompressionAlgorithm,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
 ) : SuspendingStreamProcessor {
     private val decompressor =
         SuspendingStreamingDecompressor.create(
             algorithm = algorithm,
-            allocator = allocator,
+            bufferFactory = bufferFactory,
         )
     private var finished = false
 

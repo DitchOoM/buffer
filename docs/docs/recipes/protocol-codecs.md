@@ -649,11 +649,11 @@ interface EncodeContext : CodecContext   // encode-only keys (compression, forma
 
 ```kotlin
 object MyCodec : Codec<Bitmap> {
-    data object AllocatorKey : CodecContext.Key<BufferAllocator>()
+    data object AllocatorKey : CodecContext.Key<BufferFactory>()
     data object MaxSizeKey : CodecContext.Key<Int>()
 
     override fun decode(buffer: ReadBuffer, context: DecodeContext): Bitmap {
-        val allocator = context[AllocatorKey] ?: BufferAllocator.Default
+        val factory = context[AllocatorKey] ?: BufferFactory.Default
         val maxSize = context[MaxSizeKey] ?: Int.MAX_VALUE
         require(buffer.remaining() <= maxSize) { "Payload too large" }
         return decodeBitmap(buffer, allocator)
