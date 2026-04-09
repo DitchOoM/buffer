@@ -152,9 +152,10 @@ private class LinuxZlibStreamingCompressor(
         s.next_out = null
         s.avail_out = 0u
 
+        val resolved = resolveWindowBits(algorithm, customWindowBits)
         val windowBits =
-            if (customWindowBits != 0) {
-                customWindowBits
+            if (resolved != 0) {
+                resolved
             } else {
                 when (algorithm) {
                     CompressionAlgorithm.Deflate -> WINDOW_BITS_ZLIB
