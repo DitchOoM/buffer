@@ -897,6 +897,389 @@ class StreamingCompressionTests {
         // Verify the constant value matches the expected bytes: 00 00 FF FF
         assertEquals(0x0000FFFF, DeflateFormat.SYNC_FLUSH_MARKER)
     }
+
+    // =========================================================================
+    // Buffer position/limit state tests for streaming scoped APIs
+    // =========================================================================
+
+    @Test
+    fun compressScopedConsumesInputBuffer() {
+        if (!supportsSyncCompression) return
+
+        val compressor = StreamingCompressor.create()
+        try {
+            val input = "Hello, streaming!".toReadBuffer()
+            val initialRemaining = input.remaining()
+            assertTrue(initialRemaining > 0)
+
+            compressor.compressScoped(input) {}
+
+            assertEquals(0, input.remaining(), "compressScoped should fully consume input")
+        } finally {
+            compressor.close()
+        }
+    }
+
+    @Test
+    fun compressScopedOutputChunkReadyForReading() {
+        if (!supportsSyncCompression) return
+
+        val compressor = StreamingCompressor.create()
+        try {
+            // Use enough data to force output on compress (not just buffered)
+            val input = "Repeating data for output. ".repeat(200).toReadBuffer()
+            var chunkCount = 0
+
+            compressor.compressScoped(input) {
+                chunkCount++
+                assertEquals(0, position(), "Output chunk position should be 0")
+                assertTrue(remaining() > 0, "Output chunk should have data")
+            }
+
+            compressor.finishScoped {
+                chunkCount++
+                assertEquals(0, position(), "Finish chunk position should be 0")
+                assertTrue(remaining() > 0, "Finish chunk should have data")
+            }
+
+            assertTrue(chunkCount > 0, "Should have produced at least one output chunk")
+        } finally {
+            compressor.close()
+        }
+    }
+
+    @Test
+    fun decompressScopedConsumesInputBuffer() {
+        if (!supportsSyncCompression) return
+
+        // First compress some data
+        val text = "Data for decompression input test"
+        val compressed = BufferFactory.managed().allocate(4096)
+        val compressor = StreamingCompressor.create()
+        try {
+            compressor.compressScoped(text.toReadBuffer()) { compressed.write(this) }
+            compressor.finishScoped { compressed.write(this) }
+        } finally {
+            compressor.close()
+        }
+        compressed.resetForRead()
+        val initialRemaining = compressed.remaining()
+        assertTrue(initialRemaining > 0)
+
+        // Now decompress and check input consumption
+        val decompressor = StreamingDecompressor.create()
+        try {
+            decompressor.decompressScoped(compressed) {}
+
+            assertEquals(0, compressed.remaining(), "decompressScoped should fully consume input")
+        } finally {
+            decompressor.close()
+        }
+    }
+
+    @Test
+    fun decompressScopedOutputChunkReadyForReading() {
+        if (!supportsSyncCompression) return
+
+        val text = "Output chunk position test for decompression"
+        val compressed = BufferFactory.managed().allocate(4096)
+        val compressor = StreamingCompressor.create()
+        try {
+            compressor.compressScoped(text.toReadBuffer()) { compressed.write(this) }
+            compressor.finishScoped { compressed.write(this) }
+        } finally {
+            compressor.close()
+        }
+        compressed.resetForRead()
+
+        val decompressor = StreamingDecompressor.create()
+        try {
+            var chunkCount = 0
+
+            decompressor.decompressScoped(compressed) {
+                chunkCount++
+                assertEquals(0, position(), "Decompressed chunk position should be 0")
+                assertTrue(remaining() > 0, "Decompressed chunk should have data")
+            }
+
+            decompressor.finishScoped {
+                chunkCount++
+                assertEquals(0, position(), "Finish chunk position should be 0")
+            }
+
+            assertTrue(chunkCount > 0, "Should have produced at least one output chunk")
+        } finally {
+            decompressor.close()
+        }
+    }
+
+    @Test
+    fun finishScopedOutputChunkReadyForReading() {
+        if (!supportsSyncCompression) return
+
+        val compressor = StreamingCompressor.create()
+        try {
+            // Small input — compress may buffer everything, finish produces the output
+            compressor.compressScoped("Small".toReadBuffer()) {}
+
+            var finishChunkCount = 0
+            compressor.finishScoped {
+                finishChunkCount++
+                assertEquals(0, position(), "Finish output chunk position should be 0")
+                assertTrue(remaining() > 0, "Finish output chunk should have data")
+            }
+
+            assertTrue(finishChunkCount > 0, "finishScoped should produce output for buffered data")
+        } finally {
+            compressor.close()
+        }
+    }
+
+    @Test
+    fun flushScopedOutputChunkReadyForReading() {
+        if (!supportsSyncCompression) return
+
+        val compressor = StreamingCompressor.create(algorithm = CompressionAlgorithm.Raw)
+        try {
+            compressor.compressScoped("Flush test data".toReadBuffer()) {}
+
+            var flushChunkCount = 0
+            compressor.flushScoped {
+                flushChunkCount++
+                assertEquals(0, position(), "Flush output chunk position should be 0")
+                assertTrue(remaining() > 0, "Flush output chunk should have data")
+            }
+
+            assertTrue(flushChunkCount > 0, "flushScoped should produce output")
+        } finally {
+            compressor.close()
+        }
+    }
+
+    @Test
+    fun multipleCompressScopedCallsConsumeAllInputs() {
+        if (!supportsSyncCompression) return
+
+        val compressor = StreamingCompressor.create()
+        try {
+            val input1 = "First chunk".toReadBuffer()
+            val input2 = "Second chunk".toReadBuffer()
+            val input3 = "Third chunk".toReadBuffer()
+
+            compressor.compressScoped(input1) {}
+            assertEquals(0, input1.remaining(), "First input should be fully consumed")
+
+            compressor.compressScoped(input2) {}
+            assertEquals(0, input2.remaining(), "Second input should be fully consumed")
+
+            compressor.compressScoped(input3) {}
+            assertEquals(0, input3.remaining(), "Third input should be fully consumed")
+        } finally {
+            compressor.close()
+        }
+    }
+
+    @Test
+    fun streamingRoundTripBufferStateConsistency() {
+        if (!supportsSyncCompression) return
+
+        val text = "Full round-trip buffer state verification"
+        val compressOutput = BufferFactory.managed().allocate(4096)
+        val decompressOutput = BufferFactory.managed().allocate(4096)
+
+        // Compress
+        val compressor = StreamingCompressor.create()
+        val input = text.toReadBuffer()
+        try {
+            compressor.compressScoped(input) {
+                assertEquals(0, position(), "Compress output chunk: position should be 0")
+                compressOutput.write(this)
+            }
+            compressor.finishScoped {
+                assertEquals(0, position(), "Compress finish chunk: position should be 0")
+                compressOutput.write(this)
+            }
+        } finally {
+            compressor.close()
+        }
+        assertEquals(0, input.remaining(), "Input fully consumed after compress")
+        compressOutput.resetForRead()
+        assertEquals(0, compressOutput.position(), "Compressed buffer ready for reading at position 0")
+        assertTrue(compressOutput.remaining() > 0, "Compressed buffer should have data")
+
+        // Decompress
+        val decompressor = StreamingDecompressor.create()
+        try {
+            decompressor.decompressScoped(compressOutput) {
+                assertEquals(0, position(), "Decompress output chunk: position should be 0")
+                decompressOutput.write(this)
+            }
+            decompressor.finishScoped {
+                if (remaining() > 0) {
+                    assertEquals(0, position(), "Decompress finish chunk: position should be 0")
+                    decompressOutput.write(this)
+                }
+            }
+        } finally {
+            decompressor.close()
+        }
+        assertEquals(0, compressOutput.remaining(), "Compressed input fully consumed after decompress")
+        decompressOutput.resetForRead()
+        assertEquals(0, decompressOutput.position(), "Decompressed buffer ready for reading at position 0")
+        assertEquals(text.length, decompressOutput.remaining(), "Decompressed size matches original")
+        assertEquals(text, decompressOutput.readString(decompressOutput.remaining()))
+    }
+
+    // =========================================================================
+    // Empty buffer (remaining == 0) consistency tests
+    // =========================================================================
+
+    @Test
+    fun compressScopedWithEmptyBufferNoCallback() {
+        if (!supportsSyncCompression) return
+
+        val compressor = StreamingCompressor.create()
+        try {
+            val empty = BufferFactory.Default.allocate(0)
+            empty.resetForRead()
+            assertEquals(0, empty.remaining())
+
+            var callbackInvoked = false
+            compressor.compressScoped(empty) { callbackInvoked = true }
+
+            assertEquals(false, callbackInvoked, "Callback should not be invoked for empty input")
+            assertEquals(0, empty.remaining(), "Empty buffer should still have 0 remaining")
+        } finally {
+            compressor.close()
+        }
+    }
+
+    @Test
+    fun decompressScopedWithEmptyBufferNoCallback() {
+        if (!supportsSyncCompression) return
+
+        val decompressor = StreamingDecompressor.create()
+        try {
+            val empty = BufferFactory.Default.allocate(0)
+            empty.resetForRead()
+            assertEquals(0, empty.remaining())
+
+            var callbackInvoked = false
+            decompressor.decompressScoped(empty) { callbackInvoked = true }
+
+            assertEquals(false, callbackInvoked, "Callback should not be invoked for empty input")
+            assertEquals(0, empty.remaining(), "Empty buffer should still have 0 remaining")
+        } finally {
+            decompressor.close()
+        }
+    }
+
+    @Test
+    fun compressScopedWithConsumedBufferNoCallback() {
+        if (!supportsSyncCompression) return
+
+        val compressor = StreamingCompressor.create()
+        try {
+            // Create a buffer, write data, read it all back so remaining == 0
+            val buf = BufferFactory.Default.allocate(10)
+            buf.writeString("hello")
+            buf.resetForRead()
+            // Consume all bytes
+            repeat(5) { buf.readByte() }
+            assertEquals(0, buf.remaining())
+
+            var callbackInvoked = false
+            compressor.compressScoped(buf) { callbackInvoked = true }
+
+            assertEquals(false, callbackInvoked, "Callback should not be invoked for consumed buffer")
+        } finally {
+            compressor.close()
+        }
+    }
+
+    @Test
+    fun emptyCompressThenNonEmptyStillWorks() {
+        if (!supportsSyncCompression) return
+
+        val compressor = StreamingCompressor.create()
+        try {
+            val empty = BufferFactory.Default.allocate(0)
+            empty.resetForRead()
+
+            // Empty compress — should be a no-op
+            compressor.compressScoped(empty) {}
+
+            // Non-empty compress — should still work
+            val input = "Hello after empty".toReadBuffer()
+            compressor.compressScoped(input) {}
+            assertEquals(0, input.remaining(), "Input should be consumed after non-empty compress")
+
+            // Finish and verify we get valid output
+            val output = BufferFactory.managed().allocate(4096)
+            compressor.finishScoped { output.write(this) }
+            output.resetForRead()
+            assertTrue(output.remaining() > 0, "Should produce compressed output")
+
+            // Verify round-trip
+            val decompressor = StreamingDecompressor.create()
+            val decompressed = BufferFactory.managed().allocate(4096)
+            try {
+                decompressor.decompressScoped(output) { decompressed.write(this) }
+                decompressor.finishScoped {
+                    if (remaining() > 0) decompressed.write(this)
+                }
+            } finally {
+                decompressor.close()
+            }
+            decompressed.resetForRead()
+            assertEquals("Hello after empty", decompressed.readString(decompressed.remaining()))
+        } finally {
+            compressor.close()
+        }
+    }
+
+    @Test
+    fun emptyBufferWithAllAlgorithmsNoCallback() {
+        if (!supportsSyncCompression) return
+
+        val algorithms = listOf(CompressionAlgorithm.Deflate, CompressionAlgorithm.Gzip, CompressionAlgorithm.Raw)
+
+        for (algorithm in algorithms) {
+            val compressor = StreamingCompressor.create(algorithm = algorithm)
+            try {
+                val empty = BufferFactory.Default.allocate(0)
+                empty.resetForRead()
+
+                var callbackInvoked = false
+                compressor.compressScoped(empty) { callbackInvoked = true }
+
+                assertEquals(
+                    false,
+                    callbackInvoked,
+                    "Callback should not be invoked for empty input with $algorithm",
+                )
+            } finally {
+                compressor.close()
+            }
+
+            val decompressor = StreamingDecompressor.create(algorithm = algorithm)
+            try {
+                val empty = BufferFactory.Default.allocate(0)
+                empty.resetForRead()
+
+                var callbackInvoked = false
+                decompressor.decompressScoped(empty) { callbackInvoked = true }
+
+                assertEquals(
+                    false,
+                    callbackInvoked,
+                    "Callback should not be invoked for empty decompress input with $algorithm",
+                )
+            } finally {
+                decompressor.close()
+            }
+        }
+    }
 }
 
 // Note: StreamProcessorIntegrationTests are in a separate file to avoid

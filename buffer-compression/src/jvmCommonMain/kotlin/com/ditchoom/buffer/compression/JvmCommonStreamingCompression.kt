@@ -266,6 +266,7 @@ private class JvmDeflateStreamingCompressor(
         onOutput: (ReadBuffer) -> Unit,
     ) {
         check(!closed) { "Compressor is closed" }
+        if (input.remaining() == 0) return
         deflater.setInputFrom(input)
         drainDeflater(onOutput)
     }
@@ -358,6 +359,7 @@ private class JvmGzipStreamingCompressor(
         onOutput: (ReadBuffer) -> Unit,
     ) {
         check(!closed) { "Compressor is closed" }
+        if (input.remaining() == 0) return
 
         if (!headerWritten) {
             onOutput(bufferFactory.allocateGzipHeader())
@@ -579,6 +581,7 @@ private class JvmGzipStreamingDecompressor(
         onOutput: (ReadBuffer) -> Unit,
     ) {
         check(!closed) { "Decompressor is closed" }
+        if (input.remaining() == 0) return
 
         if (!headerParsed) {
             if (!parseGzipHeader(input)) return

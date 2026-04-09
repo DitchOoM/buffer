@@ -46,16 +46,30 @@ suspend fun roundTrip(input: String): String {
 
 ## Streaming API
 
-For large data or network scenarios where data arrives in chunks:
+For large data or network scenarios where data arrives in chunks. The streaming API has two variants:
 
-### Compress and Send Over Network
+- **Scoped** (`compressScoped`, `decompressScoped`, `finishScoped`, `flushScoped`) — auto-releases output buffers when the lambda returns. **Preferred for most use cases.**
+- **Unsafe** (`compressUnsafe`, `decompressUnsafe`, `finishUnsafe`, `flushUnsafe`) — caller owns the output buffers and must manage their lifecycle.
+
+### Compress and Send Over Network (Scoped)
 
 ```kotlin
-suspend fun sendCompressed(socket: Socket, data: String) {
-    SuspendingStreamingCompressor.create(CompressionAlgorithm.Gzip).use { compressor ->
-        compressor.compress(data.toReadBuffer()).forEach { socket.write(it) }
-        compressor.finish().forEach { socket.write(it) }
-    }
+val compressor = StreamingCompressor.create(CompressionAlgorithm.Gzip)
+try {
+    compressor.compressScoped(data.toReadBuffer()) { socket.write(this) }
+    compressor.finishScoped { socket.write(this) }
+} finally {
+    compressor.close()
+}
+```
+
+Or use the `use` extension which calls `finish()` and `close()` automatically:
+
+```kotlin
+StreamingCompressor.create(CompressionAlgorithm.Gzip).use(
+    onOutput = { socket.write(it) }
+) { compress ->
+    compress(data.toReadBuffer())
 }
 ```
 
@@ -63,50 +77,63 @@ suspend fun sendCompressed(socket: Socket, data: String) {
 
 The streaming compressor provides two ways to emit output:
 
-- **`flush()`** - Produces output that can be immediately decompressed, but keeps the stream open for more data. The output ends with a sync marker (`00 00 FF FF`).
-- **`finish()`** - Finalizes the stream and produces the final output. The stream cannot accept more data after this.
+- **`flushScoped`/`flushUnsafe`** — Produces output that can be immediately decompressed, but keeps the stream open for more data. The output ends with a sync marker (`00 00 FF FF`).
+- **`finishScoped`/`finishUnsafe`** — Finalizes the stream and produces the final output. The stream cannot accept more data after this.
 
-Use `flush()` when you need independently decompressible messages within a single compression context:
+Use flush when you need independently decompressible messages within a single compression context:
 
 ```kotlin
 val compressor = StreamingCompressor.create(algorithm = CompressionAlgorithm.Raw)
 try {
     // First message - can be decompressed immediately
-    compressor.compress("message1".toReadBuffer()) {}
-    compressor.flush { socket.write(it) }
+    compressor.compressScoped("message1".toReadBuffer()) {}
+    compressor.flushScoped { socket.write(this) }
 
     // Second message - still using same compression context
-    compressor.compress("message2".toReadBuffer()) {}
-    compressor.flush { socket.write(it) }
+    compressor.compressScoped("message2".toReadBuffer()) {}
+    compressor.flushScoped { socket.write(this) }
 
     // When done, call finish
-    compressor.finish { socket.write(it) }
+    compressor.finishScoped { socket.write(this) }
 } finally {
     compressor.close()
 }
 ```
 
 :::note
-`flush()` is not supported in browser JavaScript. Use `finish()` instead, or check `supportsSyncCompression` before using `flush()`.
+`flushScoped`/`flushUnsafe` is not supported in browser JavaScript. Use `finishScoped` instead, or check `supportsSyncCompression` before using flush.
 :::
 
-### Receive and Decompress from Network
+### Receive and Decompress from Network (Scoped)
 
 ```kotlin
-suspend fun receiveDecompressed(socket: Socket): PlatformBuffer {
-    val output = mutableListOf<ReadBuffer>()
-    SuspendingStreamingDecompressor.create(CompressionAlgorithm.Gzip).use { decompressor ->
-        while (socket.hasData()) {
-            output += decompressor.decompress(socket.read())
-        }
-        output += decompressor.finish()
+val output = BufferFactory.managed().allocate(expectedSize)
+val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Gzip)
+try {
+    while (socket.hasData()) {
+        decompressor.decompressScoped(socket.read()) { output.write(this) }
     }
-    // Combine chunks
-    val totalSize = output.sumOf { it.remaining() }
-    val result = BufferFactory.Default.allocate(totalSize)
-    output.forEach { result.write(it) }
-    result.resetForRead()
-    return result
+    decompressor.finishScoped { output.write(this) }
+} finally {
+    decompressor.close()
+}
+output.resetForRead()
+```
+
+### Receive and Decompress (Unsafe — Caller Manages Buffers)
+
+When you need to collect output buffers for later processing:
+
+```kotlin
+val output = mutableListOf<ReadBuffer>()
+val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Gzip)
+try {
+    while (socket.hasData()) {
+        decompressor.decompressUnsafe(socket.read()) { output += it }
+    }
+    decompressor.finishUnsafe { output += it }
+} finally {
+    decompressor.close()
 }
 ```
 
@@ -153,22 +180,21 @@ val stripped = compressedBuffer.stripSyncFlushMarker()
 When decompressing data that had the sync marker stripped, feed the marker as a separate buffer to avoid copying the compressed data:
 
 ```kotlin
-val decompressor = SuspendingStreamingDecompressor.create(CompressionAlgorithm.Raw)
+val output = BufferFactory.managed().allocate(expectedSize)
+val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
 try {
-    val output = mutableListOf<ReadBuffer>()
-    output += decompressor.decompress(compressedData)
+    decompressor.decompressScoped(compressedData) { output.write(this) }
 
     // Feed the sync marker separately (no copy of compressed data)
     val marker = BufferFactory.Default.allocate(4)
     marker.writeInt(DeflateFormat.SYNC_FLUSH_MARKER)
     marker.resetForRead()
-    output += decompressor.decompress(marker)
-    output += decompressor.finish()
-
-    // Combine output chunks...
+    decompressor.decompressScoped(marker) { output.write(this) }
+    decompressor.finishScoped { output.write(this) }
 } finally {
     decompressor.close()
 }
+output.resetForRead()
 ```
 
 ### The Sync Marker Constant
@@ -206,23 +232,38 @@ compressAsync(data, level = CompressionLevel.Custom(4))
 For large files, process in chunks to avoid loading everything into memory:
 
 ```kotlin
-suspend fun compressFile(input: FileChannel, output: FileChannel) {
+fun compressFile(input: FileChannel, output: FileChannel) {
     val chunkSize = 64 * 1024  // 64KB chunks
 
-    SuspendingStreamingCompressor.create(CompressionAlgorithm.Gzip).use { compressor ->
+    StreamingCompressor.create(CompressionAlgorithm.Gzip).use(
+        onOutput = { output.write(it) }
+    ) { compress ->
         val buffer = BufferFactory.Default.allocate(chunkSize)
-
         while (input.read(buffer) > 0) {
             buffer.resetForRead()
-            compressor.compress(buffer).forEach { chunk ->
-                output.write(chunk)
-            }
+            compress(buffer)
             buffer.clear()
         }
+    }
+}
+```
 
-        compressor.finish().forEach { chunk ->
-            output.write(chunk)
+Or with the scoped API for more control:
+
+```kotlin
+fun compressFile(input: FileChannel, output: FileChannel) {
+    val chunkSize = 64 * 1024
+    val compressor = StreamingCompressor.create(CompressionAlgorithm.Gzip)
+    try {
+        val buffer = BufferFactory.Default.allocate(chunkSize)
+        while (input.read(buffer) > 0) {
+            buffer.resetForRead()
+            compressor.compressScoped(buffer) { output.write(this) }
+            buffer.clear()
         }
+        compressor.finishScoped { output.write(this) }
+    } finally {
+        compressor.close()
     }
 }
 ```
@@ -303,34 +344,45 @@ val buffer = compress(data, algorithm).getOrNull()   // null on failure
 
 ### Synchronous Streaming API (Non-Browser Only)
 
-The sync API avoids coroutine overhead and is slightly faster:
+The sync API avoids coroutine overhead and is slightly faster.
+
+**Using `use` (auto finish + close):**
 
 ```kotlin
-// Compression with callback
+// Compression
 StreamingCompressor.create(CompressionAlgorithm.Gzip).use(
-    onOutput = { compressedChunk ->
-        socket.write(compressedChunk)
-    }
+    onOutput = { compressedChunk -> socket.write(compressedChunk) }
 ) { compress ->
     compress("First chunk".toReadBuffer())
     compress("Second chunk".toReadBuffer())
     compress("Third chunk".toReadBuffer())
 }
 
-// Decompression with callback
+// Decompression
 StreamingDecompressor.create(CompressionAlgorithm.Gzip).use(
-    onOutput = { decompressedChunk ->
-        processData(decompressedChunk)
-    }
+    onOutput = { decompressedChunk -> processData(decompressedChunk) }
 ) { decompress ->
     decompress(compressedChunk1)
     decompress(compressedChunk2)
 }
 ```
 
+**Using scoped API (auto-release output buffers per chunk):**
+
+```kotlin
+val compressor = StreamingCompressor.create(CompressionAlgorithm.Gzip)
+try {
+    compressor.compressScoped("First chunk".toReadBuffer()) { socket.write(this) }
+    compressor.compressScoped("Second chunk".toReadBuffer()) { socket.write(this) }
+    compressor.finishScoped { socket.write(this) }
+} finally {
+    compressor.close()
+}
+```
+
 ### Sync Compression with Suspending I/O
 
-When reading from a network socket (suspending) but using sync compression:
+When reading from a network socket (suspending) but using sync compression, use `useSuspending`:
 
 ```kotlin
 StreamingCompressor.create(CompressionAlgorithm.Gzip).useSuspending(
@@ -338,7 +390,7 @@ StreamingCompressor.create(CompressionAlgorithm.Gzip).useSuspending(
 ) { compress ->
     while (socket.hasData()) {
         val data = socket.read()  // suspend call is OK here
-        compress(data)            // sync compression
+        compress(data)            // sync compression, output auto-finished on exit
     }
 }
 ```
@@ -346,18 +398,13 @@ StreamingCompressor.create(CompressionAlgorithm.Gzip).useSuspending(
 ### Choosing the Right API
 
 ```kotlin
-suspend fun compressEfficiently(data: ReadBuffer): List<ReadBuffer> {
+suspend fun compressEfficiently(data: ReadBuffer): ReadBuffer {
     return if (supportsSyncCompression) {
         // Platform supports sync - use one-shot for simplicity
-        listOf(compress(data, CompressionAlgorithm.Gzip).getOrThrow())
+        compress(data, CompressionAlgorithm.Gzip).getOrThrow()
     } else {
         // Browser - must use async
-        val output = mutableListOf<ReadBuffer>()
-        SuspendingStreamingCompressor.create(CompressionAlgorithm.Gzip).use { compressor ->
-            output += compressor.compress(data)
-            output += compressor.finish()
-        }
-        output
+        compressAsync(data, CompressionAlgorithm.Gzip)
     }
 }
 ```
@@ -487,12 +534,13 @@ SuspendingStreamingCompressor.create(
 
 ## Best Practices
 
-1. **Start with the async API** - Works everywhere, including browser JS
-2. **Use `use` extensions** - Automatically calls `finish()` and `close()`
-3. **Use Gzip for HTTP** - Standard compression for web
-4. **Check `supportsSyncCompression`** - Before using sync APIs
-5. **Process in chunks** - For large files, stream data through
-6. **Use StreamProcessor for protocols** - Combines decompression with parsing
+1. **Prefer scoped APIs** (`compressScoped`, `decompressScoped`, `finishScoped`) — auto-releases output buffers, preventing leaks
+2. **Use `use` extensions** — automatically calls `finish()` and `close()`
+3. **Start with the async API** — works everywhere, including browser JS
+4. **Use Gzip for HTTP** — standard compression for web
+5. **Check `supportsSyncCompression`** — before using sync APIs
+6. **Process in chunks** — for large files, stream data through
+7. **Use StreamProcessor for protocols** — combines decompression with parsing
 
 ---
 
