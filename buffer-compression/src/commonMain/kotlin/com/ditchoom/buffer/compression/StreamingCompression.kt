@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 
 /**
@@ -26,9 +28,9 @@ import com.ditchoom.buffer.ReadBuffer
  */
 interface StreamingCompressor : AutoCloseable {
     /**
-     * The buffer allocator used by this compressor.
+     * The buffer factory used by this compressor.
      */
-    val allocator: BufferAllocator
+    val bufferFactory: BufferFactory
 
     /**
      * Compresses input data, invoking the callback for each output chunk.
@@ -76,9 +78,9 @@ interface StreamingCompressor : AutoCloseable {
  */
 interface StreamingDecompressor : AutoCloseable {
     /**
-     * The buffer allocator used by this decompressor.
+     * The buffer factory used by this decompressor.
      */
-    val allocator: BufferAllocator
+    val bufferFactory: BufferFactory
 
     /**
      * Decompresses input data, invoking the callback for each output chunk.
@@ -236,7 +238,7 @@ internal fun resolveWindowBits(
  *
  * @param algorithm The compression algorithm to use.
  * @param level The compression level.
- * @param allocator Strategy for allocating output buffers.
+ * @param bufferFactory Factory for allocating output buffers.
  * @param outputBufferSize Size of output buffers (default 32KB).
  * @param windowBits The window size (8–15, log2 of the LZ77 window).
  *   When 0 (the default), uses the algorithm's default (15).
@@ -246,7 +248,7 @@ internal fun resolveWindowBits(
 expect fun StreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Deflate,
     level: CompressionLevel = CompressionLevel.Default,
-    allocator: BufferAllocator = BufferAllocator.Default,
+    bufferFactory: BufferFactory = BufferFactory.Default,
     outputBufferSize: Int = 32768,
     windowBits: Int = 0,
 ): StreamingCompressor
@@ -255,13 +257,13 @@ expect fun StreamingCompressor.Companion.create(
  * Creates a streaming decompressor.
  *
  * @param algorithm The compression algorithm to use.
- * @param allocator Strategy for allocating output buffers.
+ * @param bufferFactory Factory for allocating output buffers.
  * @param outputBufferSize Size of output buffers (default 32KB).
  * @param expectedSize Optional hint for expected decompressed size. Used to pre-allocate buffers.
  */
 expect fun StreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Deflate,
-    allocator: BufferAllocator = BufferAllocator.Default,
+    bufferFactory: BufferFactory = BufferFactory.Default,
     outputBufferSize: Int = 32768,
     expectedSize: Int = 0,
 ): StreamingDecompressor
@@ -289,7 +291,7 @@ expect fun StreamingDecompressor.Companion.create(
  * ```
  */
 interface SuspendingStreamingCompressor : AutoCloseable {
-    val allocator: BufferAllocator
+    val bufferFactory: BufferFactory
 
     /**
      * Compresses input data, returning output chunks.
@@ -323,7 +325,7 @@ interface SuspendingStreamingCompressor : AutoCloseable {
  * Suspending streaming decompressor for async-only platforms.
  */
 interface SuspendingStreamingDecompressor : AutoCloseable {
-    val allocator: BufferAllocator
+    val bufferFactory: BufferFactory
 
     /**
      * Decompresses input data, returning output chunks.
@@ -390,7 +392,7 @@ suspend inline fun <R> SuspendingStreamingDecompressor.use(block: (decompress: s
 expect fun SuspendingStreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Deflate,
     level: CompressionLevel = CompressionLevel.Default,
-    allocator: BufferAllocator = BufferAllocator.Default,
+    bufferFactory: BufferFactory = BufferFactory.Default,
 ): SuspendingStreamingCompressor
 
 /**
@@ -398,7 +400,7 @@ expect fun SuspendingStreamingCompressor.Companion.create(
  */
 expect fun SuspendingStreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Deflate,
-    allocator: BufferAllocator = BufferAllocator.Default,
+    bufferFactory: BufferFactory = BufferFactory.Default,
 ): SuspendingStreamingDecompressor
 
 // ============================================================================
@@ -412,7 +414,7 @@ expect fun SuspendingStreamingDecompressor.Companion.create(
 internal class SyncWrappingSuspendingCompressor(
     private val delegate: StreamingCompressor,
 ) : SuspendingStreamingCompressor {
-    override val allocator: BufferAllocator get() = delegate.allocator
+    override val bufferFactory: BufferFactory get() = delegate.bufferFactory
 
     override suspend fun compress(input: ReadBuffer): List<ReadBuffer> {
         val results = mutableListOf<ReadBuffer>()
@@ -444,7 +446,7 @@ internal class SyncWrappingSuspendingCompressor(
 internal class SyncWrappingSuspendingDecompressor(
     private val delegate: StreamingDecompressor,
 ) : SuspendingStreamingDecompressor {
-    override val allocator: BufferAllocator get() = delegate.allocator
+    override val bufferFactory: BufferFactory get() = delegate.bufferFactory
 
     override suspend fun decompress(input: ReadBuffer): List<ReadBuffer> {
         val results = mutableListOf<ReadBuffer>()
@@ -494,7 +496,7 @@ internal object GzipFormat {
 /**
  * Allocates a 10-byte gzip header buffer.
  */
-internal fun BufferAllocator.allocateGzipHeader(): ReadBuffer {
+internal fun BufferFactory.allocateGzipHeader(): ReadBuffer {
     val header = allocate(10)
     header.writeLong(GzipFormat.HEADER_LONG)
     header.writeShort(GzipFormat.HEADER_SHORT)

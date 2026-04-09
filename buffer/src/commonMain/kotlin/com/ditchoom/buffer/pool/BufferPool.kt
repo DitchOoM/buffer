@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.pool
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
@@ -228,3 +229,25 @@ inline fun <T> withPool(
         pool.clear()
     }
 }
+
+/**
+ * Wraps this pool as a [BufferFactory] so it can be used wherever a factory is accepted.
+ * [allocate] calls [acquire]; [wrap] copies the array into a pooled buffer.
+ */
+fun BufferPool.asBufferFactory(): BufferFactory =
+    object : BufferFactory {
+        override fun allocate(
+            size: Int,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer = acquire(size) as PlatformBuffer
+
+        override fun wrap(
+            array: ByteArray,
+            byteOrder: ByteOrder,
+        ): PlatformBuffer {
+            val buf = acquire(array.size) as PlatformBuffer
+            buf.writeBytes(array)
+            buf.resetForRead()
+            return buf
+        }
+    }

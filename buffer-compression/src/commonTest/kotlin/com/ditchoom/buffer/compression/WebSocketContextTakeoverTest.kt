@@ -2,6 +2,7 @@ package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.StreamingStringDecoder
 import com.ditchoom.buffer.freeIfNeeded
@@ -27,7 +28,6 @@ import kotlin.test.assertEquals
  */
 class WebSocketContextTakeoverTest {
     private val factory = BufferFactory.managed()
-    private val allocator = BufferAllocator.Default
     private val syncFlushMarker = factory.wrap(byteArrayOf(0x00, 0x00, 0xFF.toByte(), 0xFF.toByte()))
 
     private fun stringToBuffer(s: String): ReadBuffer {
@@ -44,12 +44,12 @@ class WebSocketContextTakeoverTest {
             StreamingCompressor.create(
                 CompressionAlgorithm.Raw,
                 CompressionLevel.Default,
-                allocator,
+                bufferFactory = BufferFactory.Default,
             )
         val decompressor =
             StreamingDecompressor.create(
                 CompressionAlgorithm.Raw,
-                allocator,
+                bufferFactory = BufferFactory.Default,
             )
         // Reuse decoder across messages (same as websocket's DefaultWebSocketClient)
         val sharedDecoder = StreamingStringDecoder()
@@ -79,13 +79,13 @@ class WebSocketContextTakeoverTest {
             StreamingCompressor.create(
                 CompressionAlgorithm.Raw,
                 CompressionLevel.Default,
-                allocator,
+                bufferFactory = BufferFactory.Default,
                 windowBits = -9,
             )
         val decompressor =
             StreamingDecompressor.create(
                 CompressionAlgorithm.Raw,
-                allocator,
+                bufferFactory = BufferFactory.Default,
             )
 
         val msg1 = """{"msg":"hello"}"""
@@ -108,12 +108,12 @@ class WebSocketContextTakeoverTest {
             StreamingCompressor.create(
                 CompressionAlgorithm.Raw,
                 CompressionLevel.Default,
-                allocator,
+                bufferFactory = BufferFactory.Default,
             )
         val decompressor =
             StreamingDecompressor.create(
                 CompressionAlgorithm.Raw,
-                allocator,
+                bufferFactory = BufferFactory.Default,
             )
 
         repeat(10) { i ->

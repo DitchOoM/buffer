@@ -4,6 +4,8 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.managed
+import com.ditchoom.buffer.pool.asBufferFactory
 import com.ditchoom.buffer.pool.withPool
 import com.ditchoom.buffer.toReadBuffer
 import kotlin.test.Test
@@ -11,18 +13,18 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Tests for BufferAllocator.FromPool and compression with pool-allocated buffers.
+ * Tests for pool.asBufferFactory() and compression with pool-allocated buffers.
  */
 class PoolAllocatorTests {
     // =========================================================================
-    // BufferAllocator.FromPool basic tests
+    // pool.asBufferFactory() basic tests
     // =========================================================================
 
     @Test
     fun fromPoolAllocatesFromPool() =
         withPool(defaultBufferSize = 1024, maxPoolSize = 4) { pool ->
-            val allocator = BufferAllocator.FromPool(pool)
-            val buffer = allocator.allocate(512)
+            val factory = pool.asBufferFactory()
+            val buffer = factory.allocate(512)
             assertTrue(buffer.capacity >= 512)
             assertEquals(1, pool.stats().totalAllocations)
             pool.release(buffer)
@@ -31,10 +33,10 @@ class PoolAllocatorTests {
     @Test
     fun fromPoolReusesBuffers() =
         withPool(defaultBufferSize = 1024, maxPoolSize = 4) { pool ->
-            val allocator = BufferAllocator.FromPool(pool)
-            val buffer1 = allocator.allocate(512)
+            val factory = pool.asBufferFactory()
+            val buffer1 = factory.allocate(512)
             pool.release(buffer1)
-            val buffer2 = allocator.allocate(512)
+            val buffer2 = factory.allocate(512)
             pool.release(buffer2)
 
             val stats = pool.stats()
@@ -51,11 +53,11 @@ class PoolAllocatorTests {
         if (!supportsSyncCompression) return
 
         withPool(defaultBufferSize = 32768, maxPoolSize = 8) { pool ->
-            val allocator = BufferAllocator.FromPool(pool)
+            val factory = pool.asBufferFactory()
             val text = "Hello from pool-allocated compression!"
             val compressedChunks = mutableListOf<ReadBuffer>()
 
-            StreamingCompressor.create(allocator = allocator).use(
+            StreamingCompressor.create(bufferFactory = factory).use(
                 onOutput = { compressedChunks.add(it) },
             ) { compress ->
                 compress(text.toReadBuffer())
@@ -67,7 +69,7 @@ class PoolAllocatorTests {
             val decompressedChunks = mutableListOf<ReadBuffer>()
             val compressed = combineBuffers(compressedChunks)
 
-            StreamingDecompressor.create(allocator = allocator).use(
+            StreamingDecompressor.create(bufferFactory = factory).use(
                 onOutput = { decompressedChunks.add(it) },
             ) { decompress ->
                 decompress(compressed)
@@ -83,7 +85,7 @@ class PoolAllocatorTests {
         if (!supportsSyncCompression) return
 
         withPool(defaultBufferSize = 32768, maxPoolSize = 8) { pool ->
-            val allocator = BufferAllocator.FromPool(pool)
+            val factory = pool.asBufferFactory()
             val chunks =
                 listOf(
                     "First chunk of data. ",
@@ -94,7 +96,7 @@ class PoolAllocatorTests {
 
             val compressedChunks = mutableListOf<ReadBuffer>()
 
-            StreamingCompressor.create(allocator = allocator).use(
+            StreamingCompressor.create(bufferFactory = factory).use(
                 onOutput = { compressedChunks.add(it) },
             ) { compress ->
                 for (chunk in chunks) {
@@ -105,7 +107,7 @@ class PoolAllocatorTests {
             val compressed = combineBuffers(compressedChunks)
             val decompressedChunks = mutableListOf<ReadBuffer>()
 
-            StreamingDecompressor.create(allocator = allocator).use(
+            StreamingDecompressor.create(bufferFactory = factory).use(
                 onOutput = { decompressedChunks.add(it) },
             ) { decompress ->
                 decompress(compressed)
@@ -121,14 +123,14 @@ class PoolAllocatorTests {
         if (!supportsSyncCompression) return
 
         withPool(defaultBufferSize = 32768, maxPoolSize = 8) { pool ->
-            val allocator = BufferAllocator.FromPool(pool)
+            val factory = pool.asBufferFactory()
             val text = "Gzip with pool allocation test data"
             val compressedChunks = mutableListOf<ReadBuffer>()
 
             StreamingCompressor
                 .create(
                     algorithm = CompressionAlgorithm.Gzip,
-                    allocator = allocator,
+                    bufferFactory = factory,
                 ).use(
                     onOutput = { compressedChunks.add(it) },
                 ) { compress ->
@@ -145,7 +147,7 @@ class PoolAllocatorTests {
             StreamingDecompressor
                 .create(
                     algorithm = CompressionAlgorithm.Gzip,
-                    allocator = allocator,
+                    bufferFactory = factory,
                 ).use(
                     onOutput = { decompressedChunks.add(it) },
                 ) { decompress ->
@@ -168,7 +170,7 @@ class PoolAllocatorTests {
         val text = "Hello from heap-allocated compression!"
         val compressedChunks = mutableListOf<ReadBuffer>()
 
-        StreamingCompressor.create(allocator = BufferAllocator.Heap).use(
+        StreamingCompressor.create(bufferFactory = BufferFactory.managed()).use(
             onOutput = { compressedChunks.add(it) },
         ) { compress ->
             compress(text.toReadBuffer())
@@ -179,7 +181,7 @@ class PoolAllocatorTests {
         val compressed = combineBuffers(compressedChunks)
         val decompressedChunks = mutableListOf<ReadBuffer>()
 
-        StreamingDecompressor.create(allocator = BufferAllocator.Heap).use(
+        StreamingDecompressor.create(bufferFactory = BufferFactory.managed()).use(
             onOutput = { decompressedChunks.add(it) },
         ) { decompress ->
             decompress(compressed)
@@ -198,9 +200,9 @@ class PoolAllocatorTests {
         if (!supportsSyncCompression) return
 
         withPool(defaultBufferSize = 32768, maxPoolSize = 8) { pool ->
-            val allocator = BufferAllocator.FromPool(pool)
-            val compressor = StreamingCompressor.create(allocator = allocator)
-            val decompressor = StreamingDecompressor.create(allocator = allocator)
+            val factory = pool.asBufferFactory()
+            val compressor = StreamingCompressor.create(bufferFactory = factory)
+            val decompressor = StreamingDecompressor.create(bufferFactory = factory)
 
             try {
                 for (i in 1..3) {
@@ -243,7 +245,7 @@ class PoolAllocatorTests {
         if (!supportsSyncCompression) return
 
         withPool(defaultBufferSize = 32768, maxPoolSize = 8) { pool ->
-            val allocator = BufferAllocator.FromPool(pool)
+            val factory = pool.asBufferFactory()
 
             // Generate 100KB of compressible data
             val sb = StringBuilder()
@@ -254,7 +256,7 @@ class PoolAllocatorTests {
 
             val compressedChunks = mutableListOf<ReadBuffer>()
 
-            StreamingCompressor.create(allocator = allocator).use(
+            StreamingCompressor.create(bufferFactory = factory).use(
                 onOutput = { compressedChunks.add(it) },
             ) { compress ->
                 // Send in 4KB chunks like a real network scenario
@@ -278,7 +280,7 @@ class PoolAllocatorTests {
 
             val decompressedChunks = mutableListOf<ReadBuffer>()
 
-            StreamingDecompressor.create(allocator = allocator).use(
+            StreamingDecompressor.create(bufferFactory = factory).use(
                 onOutput = { decompressedChunks.add(it) },
             ) { decompress ->
                 decompress(compressed)

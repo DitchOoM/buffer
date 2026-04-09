@@ -2,6 +2,7 @@
 
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.managedMemoryAccess
@@ -42,20 +43,20 @@ import platform.zlib.z_stream
 actual fun StreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
     outputBufferSize: Int,
     windowBits: Int,
-): StreamingCompressor = AppleZlibStreamingCompressor(algorithm, level, allocator, outputBufferSize, windowBits)
+): StreamingCompressor = AppleZlibStreamingCompressor(algorithm, level, bufferFactory, outputBufferSize, windowBits)
 
 /**
  * Apple streaming decompressor factory using z_stream for true incremental decompression.
  */
 actual fun StreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
     outputBufferSize: Int,
     expectedSize: Int,
-): StreamingDecompressor = AppleZlibStreamingDecompressor(algorithm, allocator, outputBufferSize)
+): StreamingDecompressor = AppleZlibStreamingDecompressor(algorithm, bufferFactory, outputBufferSize)
 
 /**
  * Window bits for different compression formats:
@@ -70,13 +71,13 @@ private const val WINDOW_BITS_GZIP = 31
 /**
  * Apple streaming compressor using zlib z_stream for true incremental compression.
  * Zero-copy: writes directly to output buffers via native pointers.
- * Supports all allocator types including heap-allocated buffers.
+ * Supports all buffer factory types including heap-allocated buffers.
  */
 @OptIn(ExperimentalForeignApi::class)
 private class AppleZlibStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
     private val level: CompressionLevel,
-    override val allocator: BufferAllocator,
+    override val bufferFactory: BufferFactory,
     private val outputBufferSize: Int,
     private val customWindowBits: Int,
 ) : StreamingCompressor {
@@ -144,7 +145,7 @@ private class AppleZlibStreamingCompressor(
             s.pointed.avail_in = remaining.convert()
 
             while (s.pointed.avail_in > 0u) {
-                val chunk = allocator.allocate(outputBufferSize)
+                val chunk = bufferFactory.allocate(outputBufferSize)
                 withOutputPointer(chunk) { chunkPtr ->
                     s.pointed.next_out = chunkPtr.reinterpret()
                     s.pointed.avail_out = outputBufferSize.convert()
@@ -176,7 +177,7 @@ private class AppleZlibStreamingCompressor(
 
         // Drain with Z_SYNC_FLUSH until no more output
         while (true) {
-            val chunk = allocator.allocate(outputBufferSize)
+            val chunk = bufferFactory.allocate(outputBufferSize)
             val shouldBreak =
                 withOutputPointer(chunk) { chunkPtr ->
                     s.pointed.next_out = chunkPtr.reinterpret()
@@ -210,7 +211,7 @@ private class AppleZlibStreamingCompressor(
 
         var finished = false
         while (!finished) {
-            val chunk = allocator.allocate(outputBufferSize)
+            val chunk = bufferFactory.allocate(outputBufferSize)
             withOutputPointer(chunk) { chunkPtr ->
                 s.pointed.next_out = chunkPtr.reinterpret()
                 s.pointed.avail_out = outputBufferSize.convert()
@@ -262,7 +263,7 @@ private class AppleZlibStreamingCompressor(
 @OptIn(ExperimentalForeignApi::class)
 private class AppleZlibStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
-    override val allocator: BufferAllocator,
+    override val bufferFactory: BufferFactory,
     private val outputBufferSize: Int,
 ) : StreamingDecompressor {
     private var streamPtr: CPointer<z_stream>? = null
@@ -321,7 +322,7 @@ private class AppleZlibStreamingDecompressor(
                 s.pointed.avail_in = remaining.convert()
 
                 while (s.pointed.avail_in > 0u && !streamEnded) {
-                    val chunk = allocator.allocate(outputBufferSize)
+                    val chunk = bufferFactory.allocate(outputBufferSize)
                     withOutputPointer(chunk) { chunkPtr ->
                         s.pointed.next_out = chunkPtr.reinterpret()
                         s.pointed.avail_out = outputBufferSize.convert()
@@ -363,7 +364,7 @@ private class AppleZlibStreamingDecompressor(
         s.pointed.avail_in = 0u
 
         while (!streamEnded) {
-            val chunk = allocator.allocate(outputBufferSize)
+            val chunk = bufferFactory.allocate(outputBufferSize)
             val shouldBreak =
                 withOutputPointer(chunk) { chunkPtr ->
                     s.pointed.next_out = chunkPtr.reinterpret()
@@ -473,16 +474,16 @@ private inline fun <R> withOutputPointer(
 actual fun SuspendingStreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
 ): SuspendingStreamingCompressor =
     SyncWrappingSuspendingCompressor(
-        StreamingCompressor.create(algorithm, level, allocator),
+        StreamingCompressor.create(algorithm, level, bufferFactory),
     )
 
 actual fun SuspendingStreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
 ): SuspendingStreamingDecompressor =
     SyncWrappingSuspendingDecompressor(
-        StreamingDecompressor.create(algorithm, allocator),
+        StreamingDecompressor.create(algorithm, bufferFactory),
     )

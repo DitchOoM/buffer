@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
 
 // Shared JS/wasmJs streaming compression factories and implementations.
@@ -12,12 +13,12 @@ import com.ditchoom.buffer.ReadBuffer
 actual fun StreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
     outputBufferSize: Int,
     windowBits: Int,
 ): StreamingCompressor =
     if (isNodeJs) {
-        JsNodeStreamingCompressor(algorithm, level, windowBits, allocator)
+        JsNodeStreamingCompressor(algorithm, level, windowBits, bufferFactory)
     } else {
         throw UnsupportedOperationException(
             "Synchronous streaming compression not supported in browser. " +
@@ -27,12 +28,12 @@ actual fun StreamingCompressor.Companion.create(
 
 actual fun StreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
     outputBufferSize: Int,
     expectedSize: Int,
 ): StreamingDecompressor =
     if (isNodeJs) {
-        JsNodeStreamingDecompressor(algorithm, allocator)
+        JsNodeStreamingDecompressor(algorithm, bufferFactory)
     } else {
         throw UnsupportedOperationException(
             "Synchronous streaming decompression not supported in browser. " +
@@ -43,22 +44,22 @@ actual fun StreamingDecompressor.Companion.create(
 actual fun SuspendingStreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
 ): SuspendingStreamingCompressor =
     if (isNodeJs) {
-        NodeTransformStreamingCompressor(algorithm, level, allocator)
+        NodeTransformStreamingCompressor(algorithm, level, bufferFactory)
     } else {
-        BrowserStreamingCompressor(algorithm, allocator)
+        BrowserStreamingCompressor(algorithm, bufferFactory)
     }
 
 actual fun SuspendingStreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
 ): SuspendingStreamingDecompressor =
     if (isNodeJs) {
-        NodeTransformStreamingDecompressor(algorithm, allocator)
+        NodeTransformStreamingDecompressor(algorithm, bufferFactory)
     } else {
-        BrowserStreamingDecompressor(algorithm, allocator)
+        BrowserStreamingDecompressor(algorithm, bufferFactory)
     }
 
 // ============================================================================
@@ -80,7 +81,7 @@ private class JsNodeStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
     private val level: CompressionLevel,
     private val windowBits: Int,
-    override val allocator: BufferAllocator,
+    override val bufferFactory: BufferFactory,
 ) : StreamingCompressor {
     private var stream: NodeTransformHandle? = createCompressStream(algorithm, level, windowBits)
     private val accumulatedChunks = mutableListOf<JsByteArray>()
@@ -117,7 +118,7 @@ private class JsNodeStreamingCompressor(
                 throw e
             }
         if (result.byteLength() > 0) {
-            onOutput(result.toPlatformBuffer(allocator))
+            onOutput(result.toPlatformBuffer(bufferFactory))
         }
     }
 
@@ -140,7 +141,7 @@ private class JsNodeStreamingCompressor(
             }
         stream = null // handle already destroyed by _processChunk
         if (result.byteLength() > 0) {
-            onOutput(result.toPlatformBuffer(allocator))
+            onOutput(result.toPlatformBuffer(bufferFactory))
         }
     }
 
@@ -170,7 +171,7 @@ private class JsNodeStreamingCompressor(
  */
 private class JsNodeStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
-    override val allocator: BufferAllocator,
+    override val bufferFactory: BufferFactory,
 ) : StreamingDecompressor {
     private var stream: NodeTransformHandle? = createDecompressStream(algorithm)
     private val accumulatedChunks = mutableListOf<JsByteArray>()
@@ -206,7 +207,7 @@ private class JsNodeStreamingDecompressor(
                 throw e
             }
         if (result.byteLength() > 0) {
-            onOutput(result.toPlatformBuffer(allocator))
+            onOutput(result.toPlatformBuffer(bufferFactory))
         }
     }
 
@@ -230,7 +231,7 @@ private class JsNodeStreamingDecompressor(
             }
         stream = null // handle already destroyed by _processChunk
         if (result.byteLength() > 0) {
-            onOutput(result.toPlatformBuffer(allocator))
+            onOutput(result.toPlatformBuffer(bufferFactory))
         }
     }
 
@@ -258,7 +259,7 @@ private class JsNodeStreamingDecompressor(
 
 private class BrowserStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
-    override val allocator: BufferAllocator,
+    override val bufferFactory: BufferFactory,
 ) : SuspendingStreamingCompressor {
     private val accumulatedChunks = mutableListOf<JsByteArray>()
     private var totalBytes = 0
@@ -288,7 +289,7 @@ private class BrowserStreamingCompressor(
                 combineJsByteArrays(accumulatedChunks, totalBytes)
             }
         val compressed = browserCompress(input, algorithm)
-        return listOf(compressed.toPlatformBuffer(allocator))
+        return listOf(compressed.toPlatformBuffer(bufferFactory))
     }
 
     override fun reset() {
@@ -306,7 +307,7 @@ private class BrowserStreamingCompressor(
 
 private class BrowserStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
-    override val allocator: BufferAllocator,
+    override val bufferFactory: BufferFactory,
 ) : SuspendingStreamingDecompressor {
     private val accumulatedChunks = mutableListOf<JsByteArray>()
     private var totalBytes = 0
@@ -327,7 +328,7 @@ private class BrowserStreamingDecompressor(
         if (totalBytes == 0) return emptyList()
         val combined = combineJsByteArrays(accumulatedChunks, totalBytes)
         val decompressed = browserDecompress(combined, algorithm)
-        return listOf(decompressed.toPlatformBuffer(allocator))
+        return listOf(decompressed.toPlatformBuffer(bufferFactory))
     }
 
     override fun reset() {
@@ -350,7 +351,7 @@ private class BrowserStreamingDecompressor(
 private class NodeTransformStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
     private val level: CompressionLevel,
-    override val allocator: BufferAllocator,
+    override val bufferFactory: BufferFactory,
 ) : SuspendingStreamingCompressor {
     private var stream: NodeTransformHandle? = null
     private var closed = false
@@ -377,7 +378,7 @@ private class NodeTransformStreamingCompressor(
         val chunks = pendingChunks.toList()
         pendingChunks.clear()
         val output = s.writeAndFlush(chunks)
-        return output.map { it.toPlatformBuffer(allocator) }
+        return output.map { it.toPlatformBuffer(bufferFactory) }
     }
 
     override suspend fun finish(): List<ReadBuffer> {
@@ -387,7 +388,7 @@ private class NodeTransformStreamingCompressor(
         pendingChunks.clear()
         val result = s.writeAndEnd(chunks)
         stream = null
-        return if (result.byteLength() > 0) listOf(result.toPlatformBuffer(allocator)) else emptyList()
+        return if (result.byteLength() > 0) listOf(result.toPlatformBuffer(bufferFactory)) else emptyList()
     }
 
     override fun reset() {
@@ -408,7 +409,7 @@ private class NodeTransformStreamingCompressor(
 
 private class NodeTransformStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
-    override val allocator: BufferAllocator,
+    override val bufferFactory: BufferFactory,
 ) : SuspendingStreamingDecompressor {
     private var closed = false
     private val pendingChunks = mutableListOf<JsByteArray>()
@@ -426,7 +427,7 @@ private class NodeTransformStreamingDecompressor(
         val chunks = pendingChunks.toList()
         pendingChunks.clear()
         val result = nodeTransformDecompressOneShot(chunks, algorithm)
-        return listOf(result.toPlatformBuffer(allocator))
+        return listOf(result.toPlatformBuffer(bufferFactory))
     }
 
     override fun reset() {

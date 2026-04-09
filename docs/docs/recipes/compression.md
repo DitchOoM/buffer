@@ -440,7 +440,7 @@ processor.release()
 
 ## Memory Management
 
-### Using BufferAllocator
+### Using BufferFactory
 
 Control how output buffers are allocated:
 
@@ -448,19 +448,20 @@ Control how output buffers are allocated:
 // Use direct memory (default) - best for I/O
 SuspendingStreamingCompressor.create(
     algorithm = CompressionAlgorithm.Gzip,
-    allocator = BufferAllocator.Direct
+    bufferFactory = BufferFactory.Default
 )
 
 // Use heap memory - faster allocation
 SuspendingStreamingCompressor.create(
     algorithm = CompressionAlgorithm.Gzip,
-    allocator = BufferAllocator.Heap
+    bufferFactory = BufferFactory.managed()
 )
 
-// Use heap allocation
+// Use pool-backed factory for buffer reuse
+val pool = BufferPool(defaultBufferSize = 32768)
 SuspendingStreamingCompressor.create(
     algorithm = CompressionAlgorithm.Gzip,
-    allocator = BufferAllocator.Heap
+    bufferFactory = pool.asBufferFactory()
 )
 ```
 

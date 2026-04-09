@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteArrayBuffer
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
@@ -44,20 +45,20 @@ import platform.zlib.z_stream
 actual fun StreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
     outputBufferSize: Int,
     windowBits: Int,
-): StreamingCompressor = LinuxZlibStreamingCompressor(algorithm, level, allocator, outputBufferSize, windowBits)
+): StreamingCompressor = LinuxZlibStreamingCompressor(algorithm, level, bufferFactory, outputBufferSize, windowBits)
 
 /**
  * Linux streaming decompressor factory using z_stream for true incremental decompression.
  */
 actual fun StreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
     outputBufferSize: Int,
     expectedSize: Int,
-): StreamingDecompressor = LinuxZlibStreamingDecompressor(algorithm, allocator, outputBufferSize)
+): StreamingDecompressor = LinuxZlibStreamingDecompressor(algorithm, bufferFactory, outputBufferSize)
 
 /**
  * Window bits for different compression formats:
@@ -87,11 +88,11 @@ private class OutputBuffer(
 }
 
 /**
- * Allocates an output buffer from the allocator and resolves its native address.
+ * Allocates an output buffer from the factory and resolves its native address.
  * Supports NativeMemoryAccess (direct pointer) and ManagedMemoryAccess (pinned ByteArray).
  */
 @OptIn(ExperimentalForeignApi::class)
-private fun BufferAllocator.allocateOutputBuffer(size: Int): OutputBuffer {
+private fun BufferFactory.allocateOutputBuffer(size: Int): OutputBuffer {
     val buffer = allocate(size)
     val readBuf = buffer as ReadBuffer
 
@@ -126,7 +127,7 @@ private fun BufferAllocator.allocateOutputBuffer(size: Int): OutputBuffer {
 private class LinuxZlibStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
     private val level: CompressionLevel,
-    override val allocator: BufferAllocator,
+    override val bufferFactory: BufferFactory,
     private val outputBufferSize: Int,
     private val customWindowBits: Int = 0,
 ) : StreamingCompressor {
@@ -184,7 +185,7 @@ private class LinuxZlibStreamingCompressor(
 
     private fun ensureOutput() {
         if (currentOutput == null) {
-            currentOutput = allocator.allocateOutputBuffer(outputBufferSize)
+            currentOutput = bufferFactory.allocateOutputBuffer(outputBufferSize)
             currentOutputWritten = 0
         }
     }
@@ -357,7 +358,7 @@ private class LinuxZlibStreamingCompressor(
 @OptIn(ExperimentalForeignApi::class)
 private class LinuxZlibStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
-    override val allocator: BufferAllocator,
+    override val bufferFactory: BufferFactory,
     private val outputBufferSize: Int,
 ) : StreamingDecompressor {
     private var streamPtr: CPointer<z_stream>? = null
@@ -402,7 +403,7 @@ private class LinuxZlibStreamingDecompressor(
 
     private fun ensureOutput() {
         if (currentOutput == null) {
-            currentOutput = allocator.allocateOutputBuffer(outputBufferSize)
+            currentOutput = bufferFactory.allocateOutputBuffer(outputBufferSize)
             currentOutputWritten = 0
         }
     }
@@ -602,16 +603,16 @@ private inline fun <R> withInputPointer(
 actual fun SuspendingStreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
 ): SuspendingStreamingCompressor =
     SyncWrappingSuspendingCompressor(
-        StreamingCompressor.create(algorithm, level, allocator),
+        StreamingCompressor.create(algorithm, level, bufferFactory),
     )
 
 actual fun SuspendingStreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
 ): SuspendingStreamingDecompressor =
     SyncWrappingSuspendingDecompressor(
-        StreamingDecompressor.create(algorithm, allocator),
+        StreamingDecompressor.create(algorithm, bufferFactory),
     )
