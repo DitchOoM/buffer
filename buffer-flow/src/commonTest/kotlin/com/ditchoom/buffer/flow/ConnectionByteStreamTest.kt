@@ -109,22 +109,27 @@ class ConnectionByteStreamTest {
     fun extractSkipsNulls() =
         runTest {
             val (inbound, _, connection) = testConnection()
+
             // Wrapper type that has data and control messages
-            data class Message(val payload: ReadBuffer?, val isControl: Boolean)
+            data class Message(
+                val payload: ReadBuffer?,
+                val isControl: Boolean,
+            )
 
             val wrappedConn =
                 object : Connection<Message> {
                     override val id = 0L
 
-                    override fun receive(): Flow<Message> = inbound.receiveAsFlow().let { flow ->
-                        kotlinx.coroutines.flow.flow {
-                            flow.collect { buf ->
-                                // Simulate: every other message is a control frame
-                                emit(Message(null, isControl = true))
-                                emit(Message(buf, isControl = false))
+                    override fun receive(): Flow<Message> =
+                        inbound.receiveAsFlow().let { flow ->
+                            kotlinx.coroutines.flow.flow {
+                                flow.collect { buf ->
+                                    // Simulate: every other message is a control frame
+                                    emit(Message(null, isControl = true))
+                                    emit(Message(buf, isControl = false))
+                                }
                             }
                         }
-                    }
 
                     override suspend fun send(message: Message) {}
 
