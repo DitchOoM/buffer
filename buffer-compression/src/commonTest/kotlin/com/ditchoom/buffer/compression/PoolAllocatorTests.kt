@@ -206,23 +206,23 @@ class PoolAllocatorTests {
             try {
                 for (i in 1..3) {
                     val text = "Iteration $i: data to compress"
-                    val compressedChunks = mutableListOf<ReadBuffer>()
+                    val compressedOutput = BufferFactory.managed().allocate(1024)
 
-                    compressor.compress(text.toReadBuffer()) { compressedChunks.add(it) }
-                    compressor.finish { compressedChunks.add(it) }
+                    compressor.compressScoped(text.toReadBuffer()) { compressedOutput.write(this) }
+                    compressor.finishScoped { compressedOutput.write(this) }
                     compressor.reset()
+                    compressedOutput.resetForRead()
 
-                    val compressed = combineBuffers(compressedChunks)
-                    val decompressedChunks = mutableListOf<ReadBuffer>()
+                    val decompressedOutput = BufferFactory.managed().allocate(1024)
 
-                    decompressor.decompress(compressed) { decompressedChunks.add(it) }
-                    decompressor.finish { decompressedChunks.add(it) }
+                    decompressor.decompressScoped(compressedOutput) { decompressedOutput.write(this) }
+                    decompressor.finishScoped { decompressedOutput.write(this) }
                     decompressor.reset()
+                    decompressedOutput.resetForRead()
 
-                    val decompressed = combineBuffers(decompressedChunks)
                     assertEquals(
                         text,
-                        decompressed.readString(decompressed.remaining()),
+                        decompressedOutput.readString(decompressedOutput.remaining()),
                         "Failed on iteration $i",
                     )
                 }

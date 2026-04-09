@@ -408,26 +408,21 @@ class CompressionStressTests {
                 // Reset original for each iteration
                 original.position(0)
                 val chunks = splitIntoChunks(original, chunkSize)
-                val compressedChunks = mutableListOf<ReadBuffer>()
+                val compressedOutput = BufferFactory.managed().allocate(dataSize + 1024)
 
                 // Compress using streaming API with chunks
                 val compressor = StreamingCompressor.create(CompressionAlgorithm.Gzip)
                 try {
                     for (chunk in chunks) {
-                        compressor.compress(chunk) { compressedChunks.add(it) }
+                        compressor.compressScoped(chunk) { compressedOutput.write(this) }
                     }
-                    compressor.finish { compressedChunks.add(it) }
+                    compressor.finishScoped { compressedOutput.write(this) }
                 } finally {
                     compressor.close()
                 }
+                compressedOutput.resetForRead()
 
-                // Combine compressed chunks
-                val totalCompressedSize = compressedChunks.sumOf { it.remaining() }
-                val compressed = BufferFactory.Default.allocate(totalCompressedSize)
-                for (chunk in compressedChunks) {
-                    compressed.write(chunk)
-                }
-                compressed.resetForRead()
+                val compressed = compressedOutput
 
                 // Decompress and verify
                 val decompressed = decompressAsync(compressed)
@@ -460,26 +455,21 @@ class CompressionStressTests {
                 // Reset compressed for each iteration
                 compressedCopy.position(0)
                 val chunks = splitIntoChunks(compressedCopy, chunkSize)
-                val decompressedChunks = mutableListOf<ReadBuffer>()
+                val decompressedOutput = BufferFactory.managed().allocate(dataSize + 1024)
 
                 // Decompress using streaming API with chunks
                 val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Gzip)
                 try {
                     for (chunk in chunks) {
-                        decompressor.decompress(chunk) { decompressedChunks.add(it) }
+                        decompressor.decompressScoped(chunk) { decompressedOutput.write(this) }
                     }
-                    decompressor.finish { decompressedChunks.add(it) }
+                    decompressor.finishScoped { decompressedOutput.write(this) }
                 } finally {
                     decompressor.close()
                 }
+                decompressedOutput.resetForRead()
 
-                // Combine decompressed chunks
-                val totalDecompressedSize = decompressedChunks.sumOf { it.remaining() }
-                val decompressed = BufferFactory.Default.allocate(totalDecompressedSize)
-                for (chunk in decompressedChunks) {
-                    decompressed.write(chunk)
-                }
-                decompressed.resetForRead()
+                val decompressed = decompressedOutput
 
                 originalCopy.position(0)
                 assertBuffersEqual(
@@ -501,47 +491,35 @@ class CompressionStressTests {
 
             // Compress with variable chunk sizes
             val compressChunks = splitIntoVariableChunks(original, seed = 111L)
-            val compressedOutput = mutableListOf<ReadBuffer>()
+            val compressedBuf = BufferFactory.managed().allocate(dataSize + 1024)
 
             val compressor = StreamingCompressor.create(CompressionAlgorithm.Gzip)
             try {
                 for (chunk in compressChunks) {
-                    compressor.compress(chunk) { compressedOutput.add(it) }
+                    compressor.compressScoped(chunk) { compressedBuf.write(this) }
                 }
-                compressor.finish { compressedOutput.add(it) }
+                compressor.finishScoped { compressedBuf.write(this) }
             } finally {
                 compressor.close()
             }
-
-            // Combine compressed data
-            val totalCompressedSize = compressedOutput.sumOf { it.remaining() }
-            val compressed = BufferFactory.Default.allocate(totalCompressedSize)
-            for (chunk in compressedOutput) {
-                compressed.write(chunk)
-            }
-            compressed.resetForRead()
+            compressedBuf.resetForRead()
 
             // Decompress with different variable chunk sizes
-            val decompressChunks = splitIntoVariableChunks(compressed, seed = 222L)
-            val decompressedOutput = mutableListOf<ReadBuffer>()
+            val decompressChunks = splitIntoVariableChunks(compressedBuf, seed = 222L)
+            val decompressedBuf = BufferFactory.managed().allocate(dataSize + 1024)
 
             val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Gzip)
             try {
                 for (chunk in decompressChunks) {
-                    decompressor.decompress(chunk) { decompressedOutput.add(it) }
+                    decompressor.decompressScoped(chunk) { decompressedBuf.write(this) }
                 }
-                decompressor.finish { decompressedOutput.add(it) }
+                decompressor.finishScoped { decompressedBuf.write(this) }
             } finally {
                 decompressor.close()
             }
+            decompressedBuf.resetForRead()
 
-            // Combine and verify
-            val totalDecompressedSize = decompressedOutput.sumOf { it.remaining() }
-            val decompressed = BufferFactory.Default.allocate(totalDecompressedSize)
-            for (chunk in decompressedOutput) {
-                decompressed.write(chunk)
-            }
-            decompressed.resetForRead()
+            val decompressed = decompressedBuf
 
             assertBuffersEqual(originalCopy, decompressed, "Variable chunk size round-trip failed")
         }
@@ -947,21 +925,21 @@ class CompressionStressTests {
             try {
                 for (cycle in 0 until resetCycles) {
                     val text = "Reset cycle $cycle - data to compress"
-                    val chunks = mutableListOf<ReadBuffer>()
+                    val compressedOutput = BufferFactory.managed().allocate(1024)
 
-                    compressor.compress(text.toReadBuffer()) { chunks.add(it) }
-                    compressor.finish { chunks.add(it) }
+                    compressor.compressScoped(text.toReadBuffer()) { compressedOutput.write(this) }
+                    compressor.finishScoped { compressedOutput.write(this) }
+                    compressedOutput.resetForRead()
 
                     // Verify compression worked
-                    assertTrue(chunks.isNotEmpty(), "Cycle $cycle: Should have output")
+                    assertTrue(compressedOutput.remaining() > 0, "Cycle $cycle: Should have output")
 
                     // Decompress and verify
-                    val combined = combineBuffers(chunks)
                     val decompressedChunks = mutableListOf<ReadBuffer>()
                     StreamingDecompressor.create(CompressionAlgorithm.Raw).use(
                         onOutput = { decompressedChunks.add(it) },
                     ) { decompress ->
-                        decompress(combined)
+                        decompress(compressedOutput)
                     }
                     val decompressed = combineBuffers(decompressedChunks)
                     assertEquals(
@@ -1002,15 +980,15 @@ class CompressionStressTests {
                     val compressed = combineBuffers(compressedChunks)
 
                     // Decompress using the reused decompressor
-                    val decompressedChunks = mutableListOf<ReadBuffer>()
-                    decompressor.decompress(compressed) { decompressedChunks.add(it) }
-                    decompressor.finish { decompressedChunks.add(it) }
+                    val decompressedOutput = BufferFactory.managed().allocate(1024)
+                    decompressor.decompressScoped(compressed) { decompressedOutput.write(this) }
+                    decompressor.finishScoped { decompressedOutput.write(this) }
+                    decompressedOutput.resetForRead()
 
                     // Verify decompression worked
-                    val decompressed = combineBuffers(decompressedChunks)
                     assertEquals(
                         text,
-                        decompressed.readString(decompressed.remaining()),
+                        decompressedOutput.readString(decompressedOutput.remaining()),
                         "Cycle $cycle: Round-trip failed",
                     )
 
@@ -1039,21 +1017,21 @@ class CompressionStressTests {
                     val originalCopy = copyBuffer(original)
 
                     // Compress
-                    val compressedChunks = mutableListOf<ReadBuffer>()
-                    compressor.compress(original) { compressedChunks.add(it) }
-                    compressor.finish { compressedChunks.add(it) }
-                    val compressed = combineBuffers(compressedChunks)
+                    val compressedOutput = BufferFactory.managed().allocate(dataSize + 1024)
+                    compressor.compressScoped(original) { compressedOutput.write(this) }
+                    compressor.finishScoped { compressedOutput.write(this) }
+                    compressedOutput.resetForRead()
 
                     // Decompress
-                    val decompressedChunks = mutableListOf<ReadBuffer>()
-                    decompressor.decompress(compressed) { decompressedChunks.add(it) }
-                    decompressor.finish { decompressedChunks.add(it) }
-                    val decompressed = combineBuffers(decompressedChunks)
+                    val decompressedOutput = BufferFactory.managed().allocate(dataSize + 1024)
+                    decompressor.decompressScoped(compressedOutput) { decompressedOutput.write(this) }
+                    decompressor.finishScoped { decompressedOutput.write(this) }
+                    decompressedOutput.resetForRead()
 
                     // Verify
                     assertBuffersEqual(
                         originalCopy,
-                        decompressed,
+                        decompressedOutput,
                         "Cycle $cycle: Round-trip with larger data failed",
                     )
 

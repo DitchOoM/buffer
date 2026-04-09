@@ -35,45 +35,32 @@ class ContextTakeoverTests {
         buffer: ReadBuffer,
         decompressor: StreamingDecompressor,
     ): String {
-        val chunks = mutableListOf<ReadBuffer>()
+        val output = BufferFactory.managed().allocate(maxOf(buffer.remaining() * 20, 65536 + 1024))
 
         // Step 1: decompress the payload
-        decompressor.decompress(buffer) { chunk ->
-            if (chunk.position() != 0) chunk.position(0)
-            if (chunk.remaining() > 0) chunks.add(chunk)
+        decompressor.decompressScoped(buffer) {
+            if (position() != 0) position(0)
+            if (remaining() > 0) output.write(this)
         }
 
         // Step 2: decompress the sync flush marker (re-appended per RFC 7692)
         val marker = BufferFactory.Default.allocate(4)
         marker.writeInt(SYNC_FLUSH_MARKER)
         marker.resetForRead()
-        decompressor.decompress(marker) { chunk ->
-            if (chunk.position() != 0) chunk.position(0)
-            if (chunk.remaining() > 0) chunks.add(chunk)
+        decompressor.decompressScoped(marker) {
+            if (position() != 0) position(0)
+            if (remaining() > 0) output.write(this)
         }
 
         // Step 3: flush (NOT finish!) — this is what the websocket code does
-        decompressor.flush { chunk ->
-            if (chunk.position() != 0) chunk.position(0)
-            if (chunk.remaining() > 0) chunks.add(chunk)
+        decompressor.flushScoped {
+            if (position() != 0) position(0)
+            if (remaining() > 0) output.write(this)
         }
 
-        if (chunks.isEmpty()) return ""
-
-        if (chunks.size == 1) {
-            val chunk = chunks[0]
-            return chunk.readString(chunk.remaining(), Charset.UTF8)
-        }
-
-        var totalSize = 0
-        for (chunk in chunks) totalSize += chunk.remaining()
-        val combined = BufferFactory.managed().allocate(totalSize)
-        for (chunk in chunks) {
-            chunk.position(0)
-            combined.write(chunk)
-        }
-        combined.resetForRead()
-        return combined.readString(totalSize, Charset.UTF8)
+        output.resetForRead()
+        if (output.remaining() == 0) return ""
+        return output.readString(output.remaining(), Charset.UTF8)
     }
 
     /**
@@ -88,40 +75,26 @@ class ContextTakeoverTests {
         input.writeBytes(bytes)
         input.resetForRead()
 
-        val chunks = mutableListOf<ReadBuffer>()
-        compressor.compress(input) { chunks.add(it) }
-        compressor.flush { chunks.add(it) }
+        val output = BufferFactory.managed().allocate(text.length + 1024)
+        compressor.compressScoped(input) { output.write(this) }
+        compressor.flushScoped { output.write(this) }
+        output.resetForRead()
 
-        if (chunks.isEmpty()) return BufferFactory.Default.allocate(0)
+        if (output.remaining() == 0) return BufferFactory.Default.allocate(0)
 
         // Strip sync flush marker from end (same logic as websocket's compressSync)
-        val lastChunk = chunks.last()
-        if (lastChunk.remaining() >= 4) {
-            val pos = lastChunk.position()
-            val endPos = pos + lastChunk.remaining()
-            lastChunk.position(endPos - 4)
-            val m = lastChunk.readInt()
+        val size = output.remaining()
+        if (size >= 4) {
+            val pos = output.position()
+            output.position(pos + size - 4)
+            val m = output.readInt()
+            output.position(pos)
             if (m == SYNC_FLUSH_MARKER) {
-                lastChunk.position(pos)
-                lastChunk.setLimit(endPos - 4)
-                if (lastChunk.remaining() == 0) {
-                    chunks.removeLast()
-                }
-            } else {
-                lastChunk.position(pos)
+                output.setLimit(output.limit() - 4)
             }
         }
 
-        // Combine into single buffer
-        var totalSize = 0
-        for (chunk in chunks) totalSize += chunk.remaining()
-        val combined = BufferFactory.Default.allocate(totalSize)
-        for (chunk in chunks) {
-            chunk.position(0)
-            combined.write(chunk)
-        }
-        combined.resetForRead()
-        return combined
+        return output
     }
 
     // =========================================================================
@@ -257,40 +230,33 @@ class ContextTakeoverTests {
     /**
      * Exact replica of websocket's decompressToStringSync with:
      * - Shared/reused SYNC_FLUSH_MARKER_BUFFER
-     * - Collects all chunks then combines before decoding (avoids UTF-8 boundary issues)
+     * - Collects all output then reads string (avoids UTF-8 boundary issues)
      */
     private fun decompressWithSharedMarker(
         buffer: ReadBuffer,
         decompressor: StreamingDecompressor,
     ): String {
-        val chunks = mutableListOf<ReadBuffer>()
+        val output = BufferFactory.managed().allocate(maxOf(buffer.remaining() * 20, 65536 + 1024))
 
-        fun collectChunk(chunk: ReadBuffer) {
-            if (chunk.position() != 0) chunk.position(0)
-            if (chunk.remaining() > 0) chunks.add(chunk)
+        decompressor.decompressScoped(buffer) {
+            if (position() != 0) position(0)
+            if (remaining() > 0) output.write(this)
         }
-
-        decompressor.decompress(buffer) { collectChunk(it) }
 
         sharedMarkerBuffer.position(0)
-        decompressor.decompress(sharedMarkerBuffer) { collectChunk(it) }
-
-        decompressor.flush { collectChunk(it) }
-
-        if (chunks.isEmpty()) return ""
-        if (chunks.size == 1) {
-            val chunk = chunks[0]
-            return chunk.readString(chunk.remaining(), Charset.UTF8)
+        decompressor.decompressScoped(sharedMarkerBuffer) {
+            if (position() != 0) position(0)
+            if (remaining() > 0) output.write(this)
         }
-        var totalSize = 0
-        for (chunk in chunks) totalSize += chunk.remaining()
-        val combined = BufferFactory.managed().allocate(totalSize)
-        for (chunk in chunks) {
-            chunk.position(0)
-            combined.write(chunk)
+
+        decompressor.flushScoped {
+            if (position() != 0) position(0)
+            if (remaining() > 0) output.write(this)
         }
-        combined.resetForRead()
-        return combined.readString(totalSize, Charset.UTF8)
+
+        output.resetForRead()
+        if (output.remaining() == 0) return ""
+        return output.readString(output.remaining(), Charset.UTF8)
     }
 
     @Test
@@ -324,14 +290,12 @@ class ContextTakeoverTests {
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
 
         fun decompressWithFreshMarker(buffer: ReadBuffer): String {
-            val chunks = mutableListOf<ReadBuffer>()
+            val output = BufferFactory.managed().allocate(maxOf(buffer.remaining() * 20, 65536 + 1024))
 
-            fun collectChunk(chunk: ReadBuffer) {
-                if (chunk.position() != 0) chunk.position(0)
-                if (chunk.remaining() > 0) chunks.add(chunk)
+            decompressor.decompressScoped(buffer) {
+                if (position() != 0) position(0)
+                if (remaining() > 0) output.write(this)
             }
-
-            decompressor.decompress(buffer) { collectChunk(it) }
 
             // Fresh marker buffer each time — write bytes to avoid byte order issues
             val marker = BufferFactory.Default.allocate(4)
@@ -340,24 +304,19 @@ class ContextTakeoverTests {
             marker.writeByte(0xFF.toByte())
             marker.writeByte(0xFF.toByte())
             marker.resetForRead()
-            decompressor.decompress(marker) { collectChunk(it) }
-
-            decompressor.flush { collectChunk(it) }
-
-            if (chunks.isEmpty()) return ""
-            if (chunks.size == 1) {
-                val chunk = chunks[0]
-                return chunk.readString(chunk.remaining(), Charset.UTF8)
+            decompressor.decompressScoped(marker) {
+                if (position() != 0) position(0)
+                if (remaining() > 0) output.write(this)
             }
-            var totalSize = 0
-            for (chunk in chunks) totalSize += chunk.remaining()
-            val combined = BufferFactory.managed().allocate(totalSize)
-            for (chunk in chunks) {
-                chunk.position(0)
-                combined.write(chunk)
+
+            decompressor.flushScoped {
+                if (position() != 0) position(0)
+                if (remaining() > 0) output.write(this)
             }
-            combined.resetForRead()
-            return combined.readString(totalSize, Charset.UTF8)
+
+            output.resetForRead()
+            if (output.remaining() == 0) return ""
+            return output.readString(output.remaining(), Charset.UTF8)
         }
 
         try {

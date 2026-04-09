@@ -5,7 +5,6 @@ import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.StreamingStringDecoder
-import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.managed
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -133,49 +132,35 @@ class WebSocketContextTakeoverTest {
         reusedDecoder: StreamingStringDecoder? = null,
     ): String {
         // Step 1: Compress (same as websocket's compressSync)
-        val compressedChunks = mutableListOf<ReadBuffer>()
-        compressor.compress(stringToBuffer(input)) { compressedChunks.add(it) }
-        compressor.flush { compressedChunks.add(it) }
+        val compressedOutput = factory.allocate(input.length * 3 + 1024)
+        compressor.compressScoped(stringToBuffer(input)) { compressedOutput.write(this) }
+        compressor.flushScoped { compressedOutput.write(this) }
+        compressedOutput.resetForRead()
 
         // Strip sync flush marker from end (permessage-deflate requirement)
-        val combined = combineAll(compressedChunks)
-        val stripped = stripSyncFlushMarker(combined)
+        val stripped = stripSyncFlushMarker(compressedOutput)
 
         // Step 2: Decompress (same as websocket's decompressToStringSync)
         val sb = StringBuilder()
         val decoder = reusedDecoder ?: StreamingStringDecoder()
 
-        // Match websocket's decodeAndFree exactly: decode then free
-        fun decodeAndFree(chunk: ReadBuffer) {
-            if (chunk.position() != 0) chunk.position(0)
-            if (chunk.remaining() > 0) decoder.decode(chunk, sb)
-            chunk.freeIfNeeded()
+        decompressor.decompressScoped(stripped) {
+            if (position() != 0) position(0)
+            if (remaining() > 0) decoder.decode(this, sb)
         }
-
-        decompressor.decompress(stripped) { decodeAndFree(it) }
         syncFlushMarker.position(0)
-        decompressor.decompress(syncFlushMarker) { decodeAndFree(it) }
-        decompressor.flush { decodeAndFree(it) }
+        decompressor.decompressScoped(syncFlushMarker) {
+            if (position() != 0) position(0)
+            if (remaining() > 0) decoder.decode(this, sb)
+        }
+        decompressor.flushScoped {
+            if (position() != 0) position(0)
+            if (remaining() > 0) decoder.decode(this, sb)
+        }
         decoder.finish(sb)
         decoder.reset()
 
         return sb.toString()
-    }
-
-    private fun combineAll(chunks: List<ReadBuffer>): ReadBuffer {
-        if (chunks.size == 1) {
-            val c = chunks[0]
-            c.position(0)
-            return c
-        }
-        val total = chunks.sumOf { it.remaining() }
-        val buf = factory.allocate(total)
-        for (c in chunks) {
-            c.position(0)
-            buf.write(c)
-        }
-        buf.resetForRead()
-        return buf
     }
 
     private fun stripSyncFlushMarker(buf: ReadBuffer): ReadBuffer {

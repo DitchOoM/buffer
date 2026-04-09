@@ -14,6 +14,7 @@ actual val supportsStatefulFlush: Boolean = true
 /**
  * JVM/Android implementation delegating to streaming compression.
  */
+@Suppress("DEPRECATION")
 actual fun compress(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm,
@@ -49,6 +50,7 @@ actual fun compress(
         CompressionResult.Failure("Compression failed: ${e.message}", e)
     }
 
+@Suppress("DEPRECATION")
 actual fun decompress(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm,

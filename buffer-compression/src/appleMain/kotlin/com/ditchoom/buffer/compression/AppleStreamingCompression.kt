@@ -73,6 +73,7 @@ private const val WINDOW_BITS_GZIP = 31
  * Zero-copy: writes directly to output buffers via native pointers.
  * Supports all buffer factory types including heap-allocated buffers.
  */
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 @OptIn(ExperimentalForeignApi::class)
 private class AppleZlibStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
@@ -260,6 +261,7 @@ private class AppleZlibStreamingCompressor(
  * Apple streaming decompressor using zlib z_stream for true incremental decompression.
  * Zero-copy: writes directly to output buffers.
  */
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 @OptIn(ExperimentalForeignApi::class)
 private class AppleZlibStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,

@@ -160,6 +160,7 @@ expect val supportsStatefulFlush: Boolean
  * @param factory The buffer factory for the output buffer
  * @return The compressed data as a single buffer (position=0, limit=compressed size)
  */
+@Suppress("DEPRECATION")
 suspend fun compressAsync(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Gzip,
@@ -192,6 +193,7 @@ suspend fun compressAsync(
  *   if unknown. Providing a good estimate reduces memory allocations.
  * @return The decompressed data as a single buffer (position=0, limit=decompressed size)
  */
+@Suppress("DEPRECATION")
 suspend fun decompressAsync(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Gzip,
@@ -219,6 +221,7 @@ suspend fun decompressAsync(
  * Decompresses directly to a pre-allocated buffer, growing if needed.
  * Returns a buffer sliced to exact size (no wasted capacity).
  */
+@Suppress("DEPRECATION")
 private suspend fun decompressToBuffer(
     decompressor: SuspendingStreamingDecompressor,
     input: ReadBuffer,
@@ -372,6 +375,7 @@ fun ReadBuffer.stripSyncFlushMarker(): ReadBuffer {
  * @param factory The buffer factory for the output buffer.
  * @return Compressed data with the sync marker stripped.
  */
+@Suppress("DEPRECATION")
 suspend fun compressWithSyncFlush(
     buffer: ReadBuffer,
     level: CompressionLevel = CompressionLevel.Default,
@@ -399,6 +403,7 @@ suspend fun compressWithSyncFlush(
  * @param factory The buffer factory for the output buffer.
  * @return The decompressed data.
  */
+@Suppress("DEPRECATION")
 suspend fun decompressWithSyncFlush(
     buffer: ReadBuffer,
     factory: BufferFactory = BufferFactory.Default,

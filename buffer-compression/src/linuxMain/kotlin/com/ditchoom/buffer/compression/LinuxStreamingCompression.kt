@@ -122,6 +122,7 @@ private fun BufferFactory.allocateOutputBuffer(size: Int): OutputBuffer {
  * Linux streaming compressor using zlib z_stream for true incremental compression.
  * Reuses output buffers across iterations to avoid per-iteration malloc/free (matches JVM pattern).
  */
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 @OptIn(ExperimentalForeignApi::class)
 private class LinuxZlibStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
@@ -354,6 +355,7 @@ private class LinuxZlibStreamingCompressor(
  * Linux streaming decompressor using zlib z_stream for true incremental decompression.
  * Reuses output buffers across iterations to avoid per-iteration malloc/free (matches JVM pattern).
  */
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 @OptIn(ExperimentalForeignApi::class)
 private class LinuxZlibStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,

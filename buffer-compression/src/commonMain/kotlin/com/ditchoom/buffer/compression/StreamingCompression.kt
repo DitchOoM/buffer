@@ -2,6 +2,7 @@ package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 
 /**
@@ -39,6 +40,10 @@ interface StreamingCompressor : AutoCloseable {
      * @param input The input buffer to compress. Position is advanced.
      * @param onOutput Called with each compressed output chunk.
      */
+    @Deprecated(
+        "Use compressScoped — output buffers are not auto-released, risking pool leaks",
+        ReplaceWith("compressScoped(input) { }"),
+    )
     fun compress(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
@@ -54,6 +59,10 @@ interface StreamingCompressor : AutoCloseable {
      *
      * @param onOutput Called with flushed compressed data.
      */
+    @Deprecated(
+        "Use flushScoped — output buffers are not auto-released, risking pool leaks",
+        ReplaceWith("flushScoped { }"),
+    )
     fun flush(onOutput: (ReadBuffer) -> Unit)
 
     /**
@@ -62,6 +71,10 @@ interface StreamingCompressor : AutoCloseable {
      *
      * @param onOutput Called with remaining compressed data.
      */
+    @Deprecated(
+        "Use finishScoped — output buffers are not auto-released, risking pool leaks",
+        ReplaceWith("finishScoped { }"),
+    )
     fun finish(onOutput: (ReadBuffer) -> Unit)
 
     /**
@@ -88,6 +101,10 @@ interface StreamingDecompressor : AutoCloseable {
      * @param input The compressed input buffer. Position is advanced.
      * @param onOutput Called with each decompressed output chunk.
      */
+    @Deprecated(
+        "Use decompressScoped — output buffers are not auto-released, risking pool leaks",
+        ReplaceWith("decompressScoped(input) { }"),
+    )
     fun decompress(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
@@ -99,6 +116,10 @@ interface StreamingDecompressor : AutoCloseable {
      * @param onOutput Called with any remaining decompressed data.
      * @throws CompressionException if the stream is incomplete or invalid.
      */
+    @Deprecated(
+        "Use finishScoped — output buffers are not auto-released, risking pool leaks",
+        ReplaceWith("finishScoped { }"),
+    )
     fun finish(onOutput: (ReadBuffer) -> Unit)
 
     /**
@@ -111,8 +132,13 @@ interface StreamingDecompressor : AutoCloseable {
      *
      * @param onOutput Called with any buffered decompressed data.
      */
+    @Deprecated(
+        "Use flushScoped — output buffers are not auto-released, risking pool leaks",
+        ReplaceWith("flushScoped { }"),
+    )
     fun flush(onOutput: (ReadBuffer) -> Unit) {
         // Default implementation delegates to finish for backward compatibility.
+        @Suppress("DEPRECATION")
         finish(onOutput)
     }
 
@@ -122,6 +148,182 @@ interface StreamingDecompressor : AutoCloseable {
     fun reset()
 
     companion object
+}
+
+// ============================================================================
+// Scoped extensions — auto-release output buffers after the lambda
+// ============================================================================
+
+/**
+ * Compresses input, calling [block] for each output chunk as a receiver.
+ * The chunk is automatically freed when [block] returns.
+ * Zero-copy: [block] reads directly from the buffer zlib wrote into.
+ */
+inline fun StreamingCompressor.compressScoped(
+    input: ReadBuffer,
+    crossinline block: ReadBuffer.() -> Unit,
+) {
+    @Suppress("DEPRECATION")
+    compress(input) { chunk ->
+        try {
+            chunk.block()
+        } finally {
+            (chunk as? PlatformBuffer)?.freeNativeMemory()
+        }
+    }
+}
+
+/**
+ * Flushes buffered data (Z_SYNC_FLUSH), calling [block] for each output chunk.
+ * The chunk is automatically freed when [block] returns.
+ */
+inline fun StreamingCompressor.flushScoped(crossinline block: ReadBuffer.() -> Unit) {
+    @Suppress("DEPRECATION")
+    flush { chunk ->
+        try {
+            chunk.block()
+        } finally {
+            (chunk as? PlatformBuffer)?.freeNativeMemory()
+        }
+    }
+}
+
+/**
+ * Finishes compression, calling [block] for each remaining output chunk.
+ * The chunk is automatically freed when [block] returns.
+ */
+inline fun StreamingCompressor.finishScoped(crossinline block: ReadBuffer.() -> Unit) {
+    @Suppress("DEPRECATION")
+    finish { chunk ->
+        try {
+            chunk.block()
+        } finally {
+            (chunk as? PlatformBuffer)?.freeNativeMemory()
+        }
+    }
+}
+
+/**
+ * Decompresses input, calling [block] for each output chunk as a receiver.
+ * The chunk is automatically freed when [block] returns.
+ * Zero-copy: [block] reads directly from the buffer zlib wrote into.
+ */
+inline fun StreamingDecompressor.decompressScoped(
+    input: ReadBuffer,
+    crossinline block: ReadBuffer.() -> Unit,
+) {
+    @Suppress("DEPRECATION")
+    decompress(input) { chunk ->
+        try {
+            chunk.block()
+        } finally {
+            (chunk as? PlatformBuffer)?.freeNativeMemory()
+        }
+    }
+}
+
+/**
+ * Finishes decompression, calling [block] for each remaining output chunk.
+ * The chunk is automatically freed when [block] returns.
+ */
+inline fun StreamingDecompressor.finishScoped(crossinline block: ReadBuffer.() -> Unit) {
+    @Suppress("DEPRECATION")
+    finish { chunk ->
+        try {
+            chunk.block()
+        } finally {
+            (chunk as? PlatformBuffer)?.freeNativeMemory()
+        }
+    }
+}
+
+/**
+ * Flushes partial output without finalizing, calling [block] for each chunk.
+ * The chunk is automatically freed when [block] returns.
+ */
+inline fun StreamingDecompressor.flushScoped(crossinline block: ReadBuffer.() -> Unit) {
+    @Suppress("DEPRECATION")
+    flush { chunk ->
+        try {
+            chunk.block()
+        } finally {
+            (chunk as? PlatformBuffer)?.freeNativeMemory()
+        }
+    }
+}
+
+// Suspending scoped variants
+
+suspend inline fun SuspendingStreamingCompressor.compressScoped(
+    input: ReadBuffer,
+    block: ReadBuffer.() -> Unit,
+) {
+    @Suppress("DEPRECATION")
+    for (chunk in compress(input)) {
+        try {
+            chunk.block()
+        } finally {
+            (chunk as? PlatformBuffer)?.freeNativeMemory()
+        }
+    }
+}
+
+suspend inline fun SuspendingStreamingCompressor.flushScoped(block: ReadBuffer.() -> Unit) {
+    @Suppress("DEPRECATION")
+    for (chunk in flush()) {
+        try {
+            chunk.block()
+        } finally {
+            (chunk as? PlatformBuffer)?.freeNativeMemory()
+        }
+    }
+}
+
+suspend inline fun SuspendingStreamingCompressor.finishScoped(block: ReadBuffer.() -> Unit) {
+    @Suppress("DEPRECATION")
+    for (chunk in finish()) {
+        try {
+            chunk.block()
+        } finally {
+            (chunk as? PlatformBuffer)?.freeNativeMemory()
+        }
+    }
+}
+
+suspend inline fun SuspendingStreamingDecompressor.decompressScoped(
+    input: ReadBuffer,
+    block: ReadBuffer.() -> Unit,
+) {
+    @Suppress("DEPRECATION")
+    for (chunk in decompress(input)) {
+        try {
+            chunk.block()
+        } finally {
+            (chunk as? PlatformBuffer)?.freeNativeMemory()
+        }
+    }
+}
+
+suspend inline fun SuspendingStreamingDecompressor.finishScoped(block: ReadBuffer.() -> Unit) {
+    @Suppress("DEPRECATION")
+    for (chunk in finish()) {
+        try {
+            chunk.block()
+        } finally {
+            (chunk as? PlatformBuffer)?.freeNativeMemory()
+        }
+    }
+}
+
+suspend inline fun SuspendingStreamingDecompressor.flushScoped(block: ReadBuffer.() -> Unit) {
+    @Suppress("DEPRECATION")
+    for (chunk in flush()) {
+        try {
+            chunk.block()
+        } finally {
+            (chunk as? PlatformBuffer)?.freeNativeMemory()
+        }
+    }
 }
 
 /**
@@ -137,6 +339,7 @@ interface StreamingDecompressor : AutoCloseable {
  * }
  * ```
  */
+@Suppress("DEPRECATION")
 inline fun <R> StreamingCompressor.use(
     noinline onOutput: (ReadBuffer) -> Unit,
     block: (compress: (ReadBuffer) -> Unit) -> R,
@@ -152,6 +355,7 @@ inline fun <R> StreamingCompressor.use(
 /**
  * Convenience function that handles decompress, finish, and close automatically.
  */
+@Suppress("DEPRECATION")
 inline fun <R> StreamingDecompressor.use(
     noinline onOutput: (ReadBuffer) -> Unit,
     block: (decompress: (ReadBuffer) -> Unit) -> R,
@@ -178,6 +382,7 @@ inline fun <R> StreamingDecompressor.use(
  * }
  * ```
  */
+@Suppress("DEPRECATION")
 suspend inline fun <R> StreamingCompressor.useSuspending(
     noinline onOutput: (ReadBuffer) -> Unit,
     block: suspend (compress: (ReadBuffer) -> Unit) -> R,
@@ -193,6 +398,7 @@ suspend inline fun <R> StreamingCompressor.useSuspending(
 /**
  * Suspending version of [use] for use with suspending I/O.
  */
+@Suppress("DEPRECATION")
 suspend inline fun <R> StreamingDecompressor.useSuspending(
     noinline onOutput: (ReadBuffer) -> Unit,
     block: suspend (decompress: (ReadBuffer) -> Unit) -> R,
@@ -297,6 +503,7 @@ interface SuspendingStreamingCompressor : AutoCloseable {
      * Compresses input data, returning output chunks.
      * May return empty list if data is buffered.
      */
+    @Deprecated("Use compressScoped — returned buffers are not auto-released")
     suspend fun compress(input: ReadBuffer): List<ReadBuffer>
 
     /**
@@ -306,11 +513,13 @@ interface SuspendingStreamingCompressor : AutoCloseable {
      * The output ends with the sync marker `00 00 FF FF` and can be immediately
      * decompressed without waiting for more data.
      */
+    @Deprecated("Use flushScoped — returned buffers are not auto-released")
     suspend fun flush(): List<ReadBuffer>
 
     /**
      * Finishes compression, returning any remaining data.
      */
+    @Deprecated("Use finishScoped — returned buffers are not auto-released")
     suspend fun finish(): List<ReadBuffer>
 
     /**
@@ -330,18 +539,24 @@ interface SuspendingStreamingDecompressor : AutoCloseable {
     /**
      * Decompresses input data, returning output chunks.
      */
+    @Deprecated("Use decompressScoped — returned buffers are not auto-released")
     suspend fun decompress(input: ReadBuffer): List<ReadBuffer>
 
     /**
      * Finishes decompression, returning any remaining data.
      */
+    @Deprecated("Use finishScoped — returned buffers are not auto-released")
     suspend fun finish(): List<ReadBuffer>
 
     /**
      * Emits any buffered partial output without finalizing the stream.
      * See [StreamingDecompressor.flush] for details.
      */
-    suspend fun flush(): List<ReadBuffer> = finish()
+    @Deprecated("Use flushScoped — returned buffers are not auto-released")
+    suspend fun flush(): List<ReadBuffer> {
+        @Suppress("DEPRECATION")
+        return finish()
+    }
 
     /**
      * Resets the decompressor for reuse.
@@ -364,6 +579,7 @@ interface SuspendingStreamingDecompressor : AutoCloseable {
  * }
  * ```
  */
+@Suppress("DEPRECATION")
 suspend inline fun <R> SuspendingStreamingCompressor.use(block: (compress: suspend (ReadBuffer) -> List<ReadBuffer>) -> R): R {
     try {
         return block { input -> compress(input) }
@@ -376,6 +592,7 @@ suspend inline fun <R> SuspendingStreamingCompressor.use(block: (compress: suspe
 /**
  * Convenience function that handles decompress, finish, and close automatically.
  */
+@Suppress("DEPRECATION")
 suspend inline fun <R> SuspendingStreamingDecompressor.use(block: (decompress: suspend (ReadBuffer) -> List<ReadBuffer>) -> R): R {
     try {
         return block { input -> decompress(input) }
@@ -411,6 +628,7 @@ expect fun SuspendingStreamingDecompressor.Companion.create(
  * Wraps a synchronous [StreamingCompressor] to implement [SuspendingStreamingCompressor].
  * Used by platforms that have efficient sync compression (JVM, Android, Apple, Node.js).
  */
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 internal class SyncWrappingSuspendingCompressor(
     private val delegate: StreamingCompressor,
 ) : SuspendingStreamingCompressor {
@@ -443,6 +661,7 @@ internal class SyncWrappingSuspendingCompressor(
  * Wraps a synchronous [StreamingDecompressor] to implement [SuspendingStreamingDecompressor].
  * Used by platforms that have efficient sync decompression (JVM, Android, Apple, Node.js).
  */
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 internal class SyncWrappingSuspendingDecompressor(
     private val delegate: StreamingDecompressor,
 ) : SuspendingStreamingDecompressor {
