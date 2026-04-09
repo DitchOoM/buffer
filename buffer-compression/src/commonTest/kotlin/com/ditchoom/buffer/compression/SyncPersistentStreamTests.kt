@@ -309,16 +309,17 @@ class SyncPersistentStreamTests {
 
         try {
             val text = "Gzip round-trip test with 64KB payload: " + "G".repeat(65000)
-            val compressedChunks = mutableListOf<ReadBuffer>()
+            val compressedOutput = BufferFactory.managed().allocate(text.length + 1024)
             val input = textToBuffer(text)
-            compressor.compress(input) { compressedChunks.add(it) }
-            compressor.finish { compressedChunks.add(it) }
+            compressor.compressScoped(input) { compressedOutput.write(this) }
+            compressor.finishScoped { compressedOutput.write(this) }
+            compressedOutput.resetForRead()
 
-            val compressed = combineChunks(compressedChunks)
-            val decompressedChunks = mutableListOf<ReadBuffer>()
-            decompressor.decompress(compressed) { decompressedChunks.add(it) }
-            decompressor.finish { decompressedChunks.add(it) }
-            val result = combineAndReadString(decompressedChunks)
+            val decompressedOutput = BufferFactory.managed().allocate(text.length + 1024)
+            decompressor.decompressScoped(compressedOutput) { decompressedOutput.write(this) }
+            decompressor.finishScoped { decompressedOutput.write(this) }
+            decompressedOutput.resetForRead()
+            val result = decompressedOutput.readString(decompressedOutput.remaining(), Charset.UTF8)
             assertEquals(text, result, "Gzip 64KB round-trip")
         } finally {
             compressor.close()
@@ -380,82 +381,87 @@ class SyncPersistentStreamTests {
         compressor: StreamingCompressor,
     ): ReadBuffer {
         val input = textToBuffer(text)
-        val chunks = mutableListOf<ReadBuffer>()
-        compressor.compress(input) { chunks.add(it) }
-        compressor.flush { chunks.add(it) }
+        // Allocate generously; incompressible data can expand slightly
+        val output = BufferFactory.managed().allocate(maxOf(text.length + 1024, 4096))
+        compressor.compressScoped(input) { output.write(this) }
+        compressor.flushScoped { output.write(this) }
+        output.resetForRead()
 
-        if (chunks.isEmpty()) return BufferFactory.Default.allocate(0)
+        if (output.remaining() == 0) return BufferFactory.Default.allocate(0)
 
-        val lastChunk = chunks.last()
-        if (lastChunk.remaining() >= 4) {
-            val pos = lastChunk.position()
-            val endPos = pos + lastChunk.remaining()
-            lastChunk.position(endPos - 4)
-            val m = lastChunk.readInt()
+        // Strip sync flush marker from end if present
+        val size = output.remaining()
+        if (size >= 4) {
+            val pos = output.position()
+            output.position(pos + size - 4)
+            val m = output.readInt()
+            output.position(pos)
             if (m == SYNC_FLUSH_MARKER) {
-                lastChunk.position(pos)
-                lastChunk.setLimit(endPos - 4)
-                if (lastChunk.remaining() == 0) chunks.removeLast()
-            } else {
-                lastChunk.position(pos)
+                output.setLimit(output.limit() - 4)
             }
         }
 
-        return combineChunks(chunks)
+        return output
     }
 
     private fun decompressWithFlush(
         buffer: ReadBuffer,
         decompressor: StreamingDecompressor,
     ): String {
-        val chunks = mutableListOf<ReadBuffer>()
+        val estimatedSize = maxOf(buffer.remaining() * 20, 65536 + 1024)
+        val output = BufferFactory.managed().allocate(estimatedSize)
 
-        decompressor.decompress(buffer) { chunk ->
-            if (chunk.position() != 0) chunk.position(0)
-            if (chunk.remaining() > 0) chunks.add(chunk)
+        decompressor.decompressScoped(buffer) {
+            if (position() != 0) position(0)
+            if (remaining() > 0) output.write(this)
         }
 
         val marker = BufferFactory.Default.allocate(4)
         marker.writeInt(SYNC_FLUSH_MARKER)
         marker.resetForRead()
-        decompressor.decompress(marker) { chunk ->
-            if (chunk.position() != 0) chunk.position(0)
-            if (chunk.remaining() > 0) chunks.add(chunk)
+        decompressor.decompressScoped(marker) {
+            if (position() != 0) position(0)
+            if (remaining() > 0) output.write(this)
         }
 
-        decompressor.flush { chunk ->
-            if (chunk.position() != 0) chunk.position(0)
-            if (chunk.remaining() > 0) chunks.add(chunk)
+        decompressor.flushScoped {
+            if (position() != 0) position(0)
+            if (remaining() > 0) output.write(this)
         }
 
-        return combineAndReadString(chunks)
+        output.resetForRead()
+        if (output.remaining() == 0) return ""
+        return output.readString(output.remaining(), Charset.UTF8)
     }
 
     private fun decompressToStringViaFinish(
         buffer: ReadBuffer,
         decompressor: StreamingDecompressor,
     ): String {
-        val chunks = mutableListOf<ReadBuffer>()
+        val estimatedSize = maxOf(buffer.remaining() * 20, 65536 + 1024)
+        val output = BufferFactory.managed().allocate(estimatedSize)
 
-        decompressor.decompress(buffer) { chunk ->
-            if (chunk.position() != 0) chunk.position(0)
-            if (chunk.remaining() > 0) chunks.add(chunk)
+        decompressor.decompressScoped(buffer) {
+            if (position() != 0) position(0)
+            if (remaining() > 0) output.write(this)
         }
 
         val marker = BufferFactory.Default.allocate(4)
         marker.writeInt(SYNC_FLUSH_MARKER)
         marker.resetForRead()
-        decompressor.decompress(marker) { chunk ->
-            if (chunk.position() != 0) chunk.position(0)
-            if (chunk.remaining() > 0) chunks.add(chunk)
+        decompressor.decompressScoped(marker) {
+            if (position() != 0) position(0)
+            if (remaining() > 0) output.write(this)
         }
 
-        decompressor.finish { chunk ->
-            if (chunk.position() != 0) chunk.position(0)
-            if (chunk.remaining() > 0) chunks.add(chunk)
+        decompressor.finishScoped {
+            if (position() != 0) position(0)
+            if (remaining() > 0) output.write(this)
         }
 
-        return combineAndReadString(chunks)
+        output.resetForRead()
+        if (output.remaining() == 0) return ""
+        return output.readString(output.remaining(), Charset.UTF8)
     }
 
     private fun combineChunks(chunks: List<ReadBuffer>): ReadBuffer {
@@ -501,10 +507,11 @@ class SyncPersistentStreamTests {
             // First message: compress, decompress via finish
             val msg1 = "first message"
             val compressed1 = compressAndStripMarker(msg1, compressor)
-            val chunks1 = mutableListOf<ReadBuffer>()
-            decompressor.decompress(compressed1) { chunks1.add(it) }
-            decompressor.finish { chunks1.add(it) }
-            assertEquals(msg1, combineAndReadString(chunks1))
+            val output1 = BufferFactory.managed().allocate(1024)
+            decompressor.decompressScoped(compressed1) { output1.write(this) }
+            decompressor.finishScoped { output1.write(this) }
+            output1.resetForRead()
+            assertEquals(msg1, output1.readString(output1.remaining(), Charset.UTF8))
 
             // After finish(), stream is destroyed — reset() must recreate it
             decompressor.reset()
@@ -531,8 +538,8 @@ class SyncPersistentStreamTests {
         val msgBuf = BufferFactory.managed().allocate(msg.length)
         msgBuf.writeString(msg, Charset.UTF8)
         msgBuf.resetForRead()
-        compressor.compress(msgBuf) {}
-        compressor.flush {}
+        compressor.compressScoped(msgBuf) {}
+        compressor.flushScoped {}
 
         // close() after normal use must not throw
         compressor.close()

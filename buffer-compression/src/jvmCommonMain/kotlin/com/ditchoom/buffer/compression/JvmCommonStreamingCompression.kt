@@ -251,6 +251,7 @@ private inline fun drainDeflaterSyncFlush(
 // Compressors
 // =============================================================================
 
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class JvmDeflateStreamingCompressor(
     level: CompressionLevel,
     nowrap: Boolean,
@@ -341,6 +342,7 @@ private class JvmDeflateStreamingCompressor(
     }
 }
 
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class JvmGzipStreamingCompressor(
     level: CompressionLevel,
     override val bufferFactory: BufferFactory,
@@ -458,6 +460,7 @@ private class JvmGzipStreamingCompressor(
 // Decompressors
 // =============================================================================
 
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class JvmInflateStreamingDecompressor(
     nowrap: Boolean,
     override val bufferFactory: BufferFactory,
@@ -560,6 +563,7 @@ actual fun SuspendingStreamingDecompressor.Companion.create(
         StreamingDecompressor.create(algorithm, bufferFactory),
     )
 
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class JvmGzipStreamingDecompressor(
     override val bufferFactory: BufferFactory,
     outputBufferSize: Int,

@@ -4,6 +4,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.toReadBuffer
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -350,32 +351,26 @@ class StreamingCompressionTests {
 
         try {
             // First compression
-            val compressed1 = mutableListOf<ReadBuffer>()
-            compressor.compress(text1.toReadBuffer()) { chunk ->
-                compressed1.add(chunk)
-            }
-            compressor.finish { chunk ->
-                compressed1.add(chunk)
-            }
+            val compressed1 = BufferFactory.managed().allocate(1024)
+            compressor.compressScoped(text1.toReadBuffer()) { compressed1.write(this) }
+            compressor.finishScoped { compressed1.write(this) }
+            compressed1.resetForRead()
 
             // Reset and compress again
             compressor.reset()
 
-            val compressed2 = mutableListOf<ReadBuffer>()
-            compressor.compress(text2.toReadBuffer()) { chunk ->
-                compressed2.add(chunk)
-            }
-            compressor.finish { chunk ->
-                compressed2.add(chunk)
-            }
+            val compressed2 = BufferFactory.managed().allocate(1024)
+            compressor.compressScoped(text2.toReadBuffer()) { compressed2.write(this) }
+            compressor.finishScoped { compressed2.write(this) }
+            compressed2.resetForRead()
 
             // Verify both compressions work
-            assertTrue(compressed1.isNotEmpty())
-            assertTrue(compressed2.isNotEmpty())
+            assertTrue(compressed1.remaining() > 0)
+            assertTrue(compressed2.remaining() > 0)
 
             // Verify decompression of both using streaming
-            assertEquals(text1, streamDecompress(compressed1))
-            assertEquals(text2, streamDecompress(compressed2))
+            assertEquals(text1, streamDecompress(listOf(compressed1)))
+            assertEquals(text2, streamDecompress(listOf(compressed2)))
         } finally {
             compressor.close()
         }
@@ -541,22 +536,22 @@ class StreamingCompressionTests {
         if (!supportsSyncCompression) return
 
         val compressor = StreamingCompressor.create(algorithm = CompressionAlgorithm.Raw)
-        val flushedChunks = mutableListOf<ReadBuffer>()
+        val flushedOutput = BufferFactory.managed().allocate(1024)
 
         try {
-            compressor.compress("Hello".toReadBuffer()) {}
-            compressor.flush { flushedChunks.add(it) }
+            compressor.compressScoped("Hello".toReadBuffer()) {}
+            compressor.flushScoped { flushedOutput.write(this) }
+            flushedOutput.resetForRead()
 
             // The flushed output should be immediately decompressible
-            val flushed = combineBuffers(flushedChunks)
-            assertTrue(flushed.remaining() > 0, "Flush should produce output")
+            assertTrue(flushedOutput.remaining() > 0, "Flush should produce output")
 
             // Decompress the flushed data
             val decompressedChunks = mutableListOf<ReadBuffer>()
             StreamingDecompressor.create(algorithm = CompressionAlgorithm.Raw).use(
                 onOutput = { decompressedChunks.add(it) },
             ) { decompress ->
-                decompress(flushed)
+                decompress(flushedOutput)
             }
 
             val decompressed = combineBuffers(decompressedChunks)
@@ -571,24 +566,24 @@ class StreamingCompressionTests {
         if (!supportsSyncCompression) return
 
         val compressor = StreamingCompressor.create(algorithm = CompressionAlgorithm.Raw)
-        val allChunks = mutableListOf<ReadBuffer>()
+        val allOutput = BufferFactory.managed().allocate(4096)
 
         try {
             // First message
-            compressor.compress("Hello".toReadBuffer()) { allChunks.add(it) }
-            compressor.flush { allChunks.add(it) }
+            compressor.compressScoped("Hello".toReadBuffer()) { allOutput.write(this) }
+            compressor.flushScoped { allOutput.write(this) }
 
             // Second message - compressor should still work
-            compressor.compress(" World".toReadBuffer()) { allChunks.add(it) }
-            compressor.finish { allChunks.add(it) }
+            compressor.compressScoped(" World".toReadBuffer()) { allOutput.write(this) }
+            compressor.finishScoped { allOutput.write(this) }
+            allOutput.resetForRead()
 
             // Decompress all data
-            val combined = combineBuffers(allChunks)
             val decompressedChunks = mutableListOf<ReadBuffer>()
             StreamingDecompressor.create(algorithm = CompressionAlgorithm.Raw).use(
                 onOutput = { decompressedChunks.add(it) },
             ) { decompress ->
-                decompress(combined)
+                decompress(allOutput)
             }
 
             val decompressed = combineBuffers(decompressedChunks)
@@ -603,22 +598,22 @@ class StreamingCompressionTests {
         if (!supportsSyncCompression) return
 
         val compressor = StreamingCompressor.create(algorithm = CompressionAlgorithm.Raw)
-        val flushedChunks = mutableListOf<ReadBuffer>()
+        val flushedOutput = BufferFactory.managed().allocate(4096)
 
         try {
-            compressor.compress("Test data for sync flush".toReadBuffer()) {}
-            compressor.flush { flushedChunks.add(it) }
+            compressor.compressScoped("Test data for sync flush".toReadBuffer()) {}
+            compressor.flushScoped { flushedOutput.write(this) }
+            flushedOutput.resetForRead()
 
-            val flushed = combineBuffers(flushedChunks)
-            val size = flushed.remaining()
+            val size = flushedOutput.remaining()
             assertTrue(size >= 4, "Flushed output should be at least 4 bytes")
 
             // Check for sync marker at the end: 00 00 FF FF
-            flushed.position(size - 4)
-            val b1 = flushed.readByte().toInt() and 0xFF
-            val b2 = flushed.readByte().toInt() and 0xFF
-            val b3 = flushed.readByte().toInt() and 0xFF
-            val b4 = flushed.readByte().toInt() and 0xFF
+            flushedOutput.position(size - 4)
+            val b1 = flushedOutput.readByte().toInt() and 0xFF
+            val b2 = flushedOutput.readByte().toInt() and 0xFF
+            val b3 = flushedOutput.readByte().toInt() and 0xFF
+            val b4 = flushedOutput.readByte().toInt() and 0xFF
 
             assertEquals(0x00, b1, "Sync marker byte 1 should be 0x00")
             assertEquals(0x00, b2, "Sync marker byte 2 should be 0x00")
@@ -637,18 +632,19 @@ class StreamingCompressionTests {
             val compressor = SuspendingStreamingCompressor.create(algorithm = CompressionAlgorithm.Raw)
 
             try {
-                compressor.compress("Hello".toReadBuffer())
-                val flushedChunks = compressor.flush()
+                val flushedOutput = BufferFactory.managed().allocate(1024)
+                compressor.compressScoped("Hello".toReadBuffer()) {}
+                compressor.flushScoped { flushedOutput.write(this) }
+                flushedOutput.resetForRead()
 
-                assertTrue(flushedChunks.isNotEmpty(), "Flush should produce output")
+                assertTrue(flushedOutput.remaining() > 0, "Flush should produce output")
 
                 // Decompress the flushed data
-                val flushed = combineBuffers(flushedChunks)
                 val decompressedChunks = mutableListOf<ReadBuffer>()
                 StreamingDecompressor.create(algorithm = CompressionAlgorithm.Raw).use(
                     onOutput = { decompressedChunks.add(it) },
                 ) { decompress ->
-                    decompress(flushed)
+                    decompress(flushedOutput)
                 }
 
                 val decompressed = combineBuffers(decompressedChunks)
@@ -664,24 +660,24 @@ class StreamingCompressionTests {
             if (!supportsSyncCompression) return@runTest
 
             val compressor = SuspendingStreamingCompressor.create(algorithm = CompressionAlgorithm.Raw)
-            val allChunks = mutableListOf<ReadBuffer>()
+            val allOutput = BufferFactory.managed().allocate(4096)
 
             try {
                 // First message
-                allChunks += compressor.compress("Hello".toReadBuffer())
-                allChunks += compressor.flush()
+                compressor.compressScoped("Hello".toReadBuffer()) { allOutput.write(this) }
+                compressor.flushScoped { allOutput.write(this) }
 
                 // Second message - compressor should still work with preserved dictionary
-                allChunks += compressor.compress(" World".toReadBuffer())
-                allChunks += compressor.finish()
+                compressor.compressScoped(" World".toReadBuffer()) { allOutput.write(this) }
+                compressor.finishScoped { allOutput.write(this) }
+                allOutput.resetForRead()
 
                 // Decompress all data
-                val combined = combineBuffers(allChunks)
                 val decompressedChunks = mutableListOf<ReadBuffer>()
                 StreamingDecompressor.create(algorithm = CompressionAlgorithm.Raw).use(
                     onOutput = { decompressedChunks.add(it) },
                 ) { decompress ->
-                    decompress(combined)
+                    decompress(allOutput)
                 }
 
                 val decompressed = combineBuffers(decompressedChunks)
@@ -698,22 +694,22 @@ class StreamingCompressionTests {
         if (!supportsStatefulFlush) return
 
         val compressor = StreamingCompressor.create(algorithm = CompressionAlgorithm.Gzip)
-        val flushedChunks = mutableListOf<ReadBuffer>()
+        val output = BufferFactory.managed().allocate(4096)
 
         try {
-            compressor.compress("Hello Gzip".toReadBuffer()) { flushedChunks.add(it) }
-            compressor.flush { flushedChunks.add(it) }
-            compressor.finish { flushedChunks.add(it) }
+            compressor.compressScoped("Hello Gzip".toReadBuffer()) { output.write(this) }
+            compressor.flushScoped { output.write(this) }
+            compressor.finishScoped { output.write(this) }
+            output.resetForRead()
 
             // Decompress the flushed data
-            val combined = combineBuffers(flushedChunks)
-            assertTrue(combined.remaining() > 0, "Gzip flush should produce output")
+            assertTrue(output.remaining() > 0, "Gzip flush should produce output")
 
             val decompressedChunks = mutableListOf<ReadBuffer>()
             StreamingDecompressor.create(algorithm = CompressionAlgorithm.Gzip).use(
                 onOutput = { decompressedChunks.add(it) },
             ) { decompress ->
-                decompress(combined)
+                decompress(output)
             }
 
             val decompressed = combineBuffers(decompressedChunks)
@@ -730,22 +726,22 @@ class StreamingCompressionTests {
         if (!supportsStatefulFlush) return
 
         val compressor = StreamingCompressor.create(algorithm = CompressionAlgorithm.Deflate)
-        val flushedChunks = mutableListOf<ReadBuffer>()
+        val output = BufferFactory.managed().allocate(4096)
 
         try {
-            compressor.compress("Hello Deflate".toReadBuffer()) { flushedChunks.add(it) }
-            compressor.flush { flushedChunks.add(it) }
-            compressor.finish { flushedChunks.add(it) }
+            compressor.compressScoped("Hello Deflate".toReadBuffer()) { output.write(this) }
+            compressor.flushScoped { output.write(this) }
+            compressor.finishScoped { output.write(this) }
+            output.resetForRead()
 
             // Decompress the flushed data
-            val combined = combineBuffers(flushedChunks)
-            assertTrue(combined.remaining() > 0, "Deflate flush should produce output")
+            assertTrue(output.remaining() > 0, "Deflate flush should produce output")
 
             val decompressedChunks = mutableListOf<ReadBuffer>()
             StreamingDecompressor.create(algorithm = CompressionAlgorithm.Deflate).use(
                 onOutput = { decompressedChunks.add(it) },
             ) { decompress ->
-                decompress(combined)
+                decompress(output)
             }
 
             val decompressed = combineBuffers(decompressedChunks)
@@ -760,22 +756,22 @@ class StreamingCompressionTests {
         if (!supportsSyncCompression) return
 
         val compressor = StreamingCompressor.create(algorithm = CompressionAlgorithm.Raw)
-        val flushedChunks = mutableListOf<ReadBuffer>()
+        val flushedOutput = BufferFactory.managed().allocate(1024)
 
         try {
             // Flush without any prior compress calls
-            compressor.flush { flushedChunks.add(it) }
+            compressor.flushScoped { flushedOutput.write(this) }
+            flushedOutput.resetForRead()
 
             // Should produce at least the sync marker (empty deflate block)
-            val flushed = combineBuffers(flushedChunks)
-            assertTrue(flushed.remaining() >= 4, "Empty flush should produce at least sync marker")
+            assertTrue(flushedOutput.remaining() >= 4, "Empty flush should produce at least sync marker")
 
             // The output should be decompressible (to empty)
             val decompressedChunks = mutableListOf<ReadBuffer>()
             StreamingDecompressor.create(algorithm = CompressionAlgorithm.Raw).use(
                 onOutput = { decompressedChunks.add(it) },
             ) { decompress ->
-                decompress(flushed)
+                decompress(flushedOutput)
             }
 
             val decompressed = combineBuffers(decompressedChunks)

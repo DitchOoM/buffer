@@ -77,6 +77,7 @@ actual fun SuspendingStreamingDecompressor.Companion.create(
  * - After close(): closed=true — all methods throw
  * - After reset(): fresh stream created, back to Created state
  */
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class JsNodeStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
     private val level: CompressionLevel,
@@ -169,6 +170,7 @@ private class JsNodeStreamingCompressor(
  *
  * Same state machine as [JsNodeStreamingCompressor].
  */
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class JsNodeStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
     override val bufferFactory: BufferFactory,
@@ -257,6 +259,7 @@ private class JsNodeStreamingDecompressor(
 // Browser CompressionStream/DecompressionStream (async)
 // ============================================================================
 
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class BrowserStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
     override val bufferFactory: BufferFactory,
@@ -305,6 +308,7 @@ private class BrowserStreamingCompressor(
     }
 }
 
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class BrowserStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
     override val bufferFactory: BufferFactory,
@@ -348,6 +352,7 @@ private class BrowserStreamingDecompressor(
 // Node.js Transform stream (async, stateful flush)
 // ============================================================================
 
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class NodeTransformStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
     private val level: CompressionLevel,
@@ -407,6 +412,7 @@ private class NodeTransformStreamingCompressor(
     }
 }
 
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class NodeTransformStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
     override val bufferFactory: BufferFactory,
