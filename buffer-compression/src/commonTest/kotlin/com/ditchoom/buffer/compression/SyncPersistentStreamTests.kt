@@ -501,8 +501,8 @@ class SyncPersistentStreamTests {
             // First message: compress, decompress via finish
             val msg1 = "first message"
             val compressed1 = compressAndStripMarker(msg1, compressor)
-            decompressor.decompress(compressed1) {}
             val chunks1 = mutableListOf<ReadBuffer>()
+            decompressor.decompress(compressed1) { chunks1.add(it) }
             decompressor.finish { chunks1.add(it) }
             assertEquals(msg1, combineAndReadString(chunks1))
 
