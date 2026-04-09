@@ -1199,16 +1199,16 @@ class StreamingCompressionTests {
 
     @Test
     fun scopedCompressFinishRoundTrip() {
-        // Baseline: compressScoped + finishScoped without empty buffer
+        // Baseline: compressScoped + finishScoped — captures ALL output
         if (!supportsSyncCompression) return
 
         val compressor = StreamingCompressor.create()
         try {
+            val output = BufferFactory.managed().allocate(4096)
             val input = "Hello after empty".toReadBuffer()
-            compressor.compressScoped(input) {}
+            compressor.compressScoped(input) { output.write(this) }
             assertEquals(0, input.remaining(), "Input should be consumed")
 
-            val output = BufferFactory.managed().allocate(4096)
             compressor.finishScoped { output.write(this) }
             output.resetForRead()
             assertTrue(output.remaining() > 0, "Should produce compressed output")
@@ -1233,12 +1233,12 @@ class StreamingCompressionTests {
             // Empty compress — should be a no-op
             compressor.compressScoped(empty) {}
 
-            // Non-empty compress — should still work
+            // Non-empty compress — capture output from BOTH compress and finish
+            val output = BufferFactory.managed().allocate(4096)
             val input = "Hello after empty".toReadBuffer()
-            compressor.compressScoped(input) {}
+            compressor.compressScoped(input) { output.write(this) }
             assertEquals(0, input.remaining(), "Input should be consumed after non-empty compress")
 
-            val output = BufferFactory.managed().allocate(4096)
             compressor.finishScoped { output.write(this) }
             output.resetForRead()
             assertTrue(output.remaining() > 0, "Should produce compressed output")
