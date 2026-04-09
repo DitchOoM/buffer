@@ -6,7 +6,6 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.managedMemoryAccess
 import com.ditchoom.buffer.nativeMemoryAccess
 import com.ditchoom.buffer.pool.BufferPool
-import com.ditchoom.buffer.pool.asBufferFactory
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
@@ -28,11 +27,11 @@ class BufferAllocatorAssumptionTests {
     @Test
     fun poolFactoryOutputHasMemoryAccess() {
         val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 4)
-        val factory = pool.asBufferFactory()
+        val factory = pool
         val buffer = factory.allocate(64)
         val readBuf = buffer as ReadBuffer
         val hasAccess = readBuf.nativeMemoryAccess != null || readBuf.managedMemoryAccess != null
-        assertTrue(hasAccess, "pool.asBufferFactory() should produce buffers with nativeMemoryAccess or managedMemoryAccess")
+        assertTrue(hasAccess, "pool should produce buffers with nativeMemoryAccess or managedMemoryAccess")
         pool.release(buffer)
         pool.clear()
     }

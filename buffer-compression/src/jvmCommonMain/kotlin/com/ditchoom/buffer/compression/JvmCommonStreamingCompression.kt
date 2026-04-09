@@ -2,8 +2,8 @@ package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.BaseJvmBuffer
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.unwrapFully
 import java.nio.Buffer
 import java.nio.ByteBuffer
@@ -12,7 +12,7 @@ import java.util.zip.Deflater
 import java.util.zip.Inflater
 
 // Helper to unwrap PooledBuffer/TrackedSlice and access the underlying ByteBuffer.
-private fun ReadWriteBuffer.jvmByteBuffer(): ByteBuffer = ((this as ReadBuffer).unwrapFully() as BaseJvmBuffer).byteBuffer
+private fun PlatformBuffer.jvmByteBuffer(): ByteBuffer = ((this as ReadBuffer).unwrapFully() as BaseJvmBuffer).byteBuffer
 
 private fun ReadBuffer.jvmByteBufferOrNull(): ByteBuffer? = (unwrapFully() as? BaseJvmBuffer)?.byteBuffer
 
@@ -201,7 +201,7 @@ private fun CRC32.updateFrom(buffer: ReadBuffer): Int {
  * Emits a partial buffer if it has data.
  */
 private inline fun emitPartialBuffer(
-    output: ReadWriteBuffer?,
+    output: PlatformBuffer?,
     onOutput: (ReadBuffer) -> Unit,
 ): Boolean {
     if (output == null) return false
@@ -222,9 +222,9 @@ private inline fun drainDeflaterSyncFlush(
     deflater: Deflater,
     bufferFactory: BufferFactory,
     outputBufferSize: Int,
-    currentOutput: ReadWriteBuffer?,
+    currentOutput: PlatformBuffer?,
     onOutput: (ReadBuffer) -> Unit,
-): ReadWriteBuffer? {
+): PlatformBuffer? {
     var output = currentOutput
     while (true) {
         if (output == null) {
@@ -258,7 +258,7 @@ private class JvmDeflateStreamingCompressor(
     private val outputBufferSize: Int,
 ) : StreamingCompressor {
     private val deflater = Deflater(level.value, nowrap)
-    private var currentOutput: ReadWriteBuffer? = null
+    private var currentOutput: PlatformBuffer? = null
     private var closed = false
 
     override fun compress(
@@ -348,7 +348,7 @@ private class JvmGzipStreamingCompressor(
 ) : StreamingCompressor {
     private val deflater = Deflater(level.value, true)
     private val crc = CRC32()
-    private var currentOutput: ReadWriteBuffer? = null
+    private var currentOutput: PlatformBuffer? = null
     private var totalInputBytes = 0L
     private var headerWritten = false
     private var closed = false
@@ -466,7 +466,7 @@ private class JvmInflateStreamingDecompressor(
 ) : StreamingDecompressor {
     private val inflater = Inflater(nowrap)
     private val effectiveBufferSize = if (expectedSize > 0) minOf(expectedSize, outputBufferSize) else outputBufferSize
-    private var currentOutput: ReadWriteBuffer? = null
+    private var currentOutput: PlatformBuffer? = null
     private var closed = false
 
     override fun decompress(
@@ -567,7 +567,7 @@ private class JvmGzipStreamingDecompressor(
 ) : StreamingDecompressor {
     private val inflater = Inflater(true)
     private val effectiveBufferSize = if (expectedSize > 0) minOf(expectedSize, outputBufferSize) else outputBufferSize
-    private var currentOutput: ReadWriteBuffer? = null
+    private var currentOutput: PlatformBuffer? = null
     private var headerParsed = false
     private val headerBytes = ByteArray(12)
     private var headerPos = 0

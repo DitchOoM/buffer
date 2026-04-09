@@ -4,7 +4,6 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteArrayBuffer
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.managedMemoryAccess
 import com.ditchoom.buffer.nativeMemoryAccess
 import kotlinx.cinterop.ByteVar
@@ -77,13 +76,13 @@ private const val WINDOW_BITS_GZIP = 31
  */
 @OptIn(ExperimentalForeignApi::class)
 private class OutputBuffer(
-    val buffer: ReadWriteBuffer,
+    val buffer: PlatformBuffer,
     val address: Long,
     private val pinnedArray: kotlinx.cinterop.Pinned<ByteArray>? = null,
 ) {
     fun release() {
         pinnedArray?.unpin()
-        (buffer as? PlatformBuffer)?.freeNativeMemory()
+        buffer.freeNativeMemory()
     }
 }
 

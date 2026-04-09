@@ -193,7 +193,7 @@ class FillMaskEdgeCaseTests {
 
     @Test
     fun xorMaskSingleByte() {
-        val buf = BufferFactory.Default.allocate(1) as ReadWriteBuffer
+        val buf = BufferFactory.Default.allocate(1)
         buf.writeByte(0x00)
         buf.resetForRead()
         buf.xorMask(0x12345678)
@@ -203,7 +203,7 @@ class FillMaskEdgeCaseTests {
 
     @Test
     fun xorMaskEmptyBuffer() {
-        val buf = BufferFactory.Default.allocate(4) as ReadWriteBuffer
+        val buf = BufferFactory.Default.allocate(4)
         buf.writeInt(0)
         buf.resetForRead()
         buf.position(buf.limit()) // remaining = 0
@@ -214,7 +214,7 @@ class FillMaskEdgeCaseTests {
     @Test
     fun xorMaskNotDivisibleBy4() {
         // 5 bytes — mask cycles: 0,1,2,3,0
-        val buf = BufferFactory.Default.allocate(5) as ReadWriteBuffer
+        val buf = BufferFactory.Default.allocate(5)
         for (i in 0 until 5) buf.writeByte(0x00)
         buf.resetForRead()
         buf.xorMask(0x12345678)
@@ -227,7 +227,7 @@ class FillMaskEdgeCaseTests {
 
     @Test
     fun xorMaskZeroIsNoOp() {
-        val buf = BufferFactory.Default.allocate(4) as ReadWriteBuffer
+        val buf = BufferFactory.Default.allocate(4)
         buf.writeBytes(byteArrayOf(1, 2, 3, 4))
         buf.resetForRead()
         buf.xorMask(0)
@@ -240,7 +240,7 @@ class FillMaskEdgeCaseTests {
     @Test
     fun xorMaskDoubleApplyRestoresOriginal() {
         val original = byteArrayOf(0x11, 0x22, 0x33, 0x44, 0x55)
-        val buf = BufferFactory.Default.allocate(5) as ReadWriteBuffer
+        val buf = BufferFactory.Default.allocate(5)
         buf.writeBytes(original)
         buf.resetForRead()
         val mask = 0xAABBCCDD.toInt()
@@ -253,7 +253,7 @@ class FillMaskEdgeCaseTests {
 
     @Test
     fun xorMaskPreservesPositionAndLimit() {
-        val buf = BufferFactory.Default.allocate(8) as ReadWriteBuffer
+        val buf = BufferFactory.Default.allocate(8)
         for (i in 0 until 8) buf.writeByte(0)
         buf.resetForRead()
         buf.position(2)
@@ -273,7 +273,7 @@ class FillMaskEdgeCaseTests {
     fun xorMaskCopyEmptySource() {
         val src = BufferFactory.Default.allocate(0)
         src.resetForRead()
-        val dst = BufferFactory.Default.allocate(4) as ReadWriteBuffer
+        val dst = BufferFactory.Default.allocate(4)
         val posBefore = dst.position()
         dst.xorMaskCopy(src, 0x12345678)
         assertEquals(posBefore, dst.position()) // No change
@@ -283,7 +283,7 @@ class FillMaskEdgeCaseTests {
     fun xorMaskCopyWithZeroMaskIsCopy() {
         val data = byteArrayOf(1, 2, 3, 4)
         val src = BufferFactory.Default.wrap(data)
-        val dst = BufferFactory.Default.allocate(4) as ReadWriteBuffer
+        val dst = BufferFactory.Default.allocate(4)
         dst.xorMaskCopy(src, 0)
         dst.resetForRead()
         for (i in data.indices) {
@@ -308,7 +308,7 @@ class FillMaskEdgeCaseTests {
     @Test
     fun xorMaskWorksOnManagedBuffer() {
         val mask = 0xAABBCCDD.toInt()
-        val buf = BufferFactory.managed().allocate(4) as ReadWriteBuffer
+        val buf = BufferFactory.managed().allocate(4)
         buf.writeBytes(byteArrayOf(0, 0, 0, 0))
         buf.resetForRead()
         buf.xorMask(mask)
