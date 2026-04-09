@@ -1221,7 +1221,15 @@ class StreamingCompressionTests {
             assertTrue(output.remaining() > 0, "Should produce compressed output")
 
             // Verify round-trip via streaming decompress
-            assertEquals("Hello after empty", streamDecompress(listOf(output)))
+            try {
+                assertEquals("Hello after empty", streamDecompress(listOf(output)))
+            } catch (e: CompressionException) {
+                throw AssertionError(
+                    "Streaming decompress failed: ${e.message}, " +
+                        "compressed size=${output.remaining()}, pos=${output.position()}",
+                    e,
+                )
+            }
         } finally {
             compressor.close()
         }
