@@ -504,10 +504,12 @@ class SyncPersistentStreamTests {
             println("[DEBUG] compressed1: ${compressed1.remaining()} bytes, pos=${compressed1.position()}")
             val decompChunks1 = mutableListOf<ReadBuffer>()
             decompressor.decompress(compressed1) { decompChunks1.add(it) }
-            println("[DEBUG] decompress(compressed1) produced ${decompChunks1.size} chunks, total=${decompChunks1.sumOf { it.remaining() }} bytes")
+            val dc1Total = decompChunks1.sumOf { it.remaining() }
+            println("[DEBUG] decompress(compressed1) ${decompChunks1.size} chunks, $dc1Total bytes")
             val finishChunks1 = mutableListOf<ReadBuffer>()
             decompressor.finish { finishChunks1.add(it) }
-            println("[DEBUG] finish() produced ${finishChunks1.size} chunks, total=${finishChunks1.sumOf { it.remaining() }} bytes")
+            val fc1Total = finishChunks1.sumOf { it.remaining() }
+            println("[DEBUG] finish() ${finishChunks1.size} chunks, $fc1Total bytes")
             val allChunks1 = decompChunks1 + finishChunks1
             val result1 = combineAndReadString(allChunks1)
             println("[DEBUG] msg1 result: '$result1' (expected '$msg1')")
@@ -530,7 +532,8 @@ class SyncPersistentStreamTests {
                 if (chunk.position() != 0) chunk.position(0)
                 if (chunk.remaining() > 0) decompChunks2.add(chunk)
             }
-            println("[DEBUG] decompress(compressed2) produced ${decompChunks2.size} chunks, total=${decompChunks2.sumOf { it.remaining() }} bytes")
+            val dc2Total = decompChunks2.sumOf { it.remaining() }
+            println("[DEBUG] decompress(compressed2) ${decompChunks2.size} chunks, $dc2Total bytes")
 
             val marker = BufferFactory.Default.allocate(4)
             marker.writeInt(SYNC_FLUSH_MARKER)
@@ -539,13 +542,15 @@ class SyncPersistentStreamTests {
                 if (chunk.position() != 0) chunk.position(0)
                 if (chunk.remaining() > 0) decompChunks2.add(chunk)
             }
-            println("[DEBUG] decompress(marker) total chunks now=${decompChunks2.size}, total=${decompChunks2.sumOf { it.remaining() }} bytes")
+            val dmTotal = decompChunks2.sumOf { it.remaining() }
+            println("[DEBUG] after marker: ${decompChunks2.size} chunks, $dmTotal bytes")
 
             decompressor.flush { chunk ->
                 if (chunk.position() != 0) chunk.position(0)
                 if (chunk.remaining() > 0) decompChunks2.add(chunk)
             }
-            println("[DEBUG] flush() total chunks now=${decompChunks2.size}, total=${decompChunks2.sumOf { it.remaining() }} bytes")
+            val flTotal = decompChunks2.sumOf { it.remaining() }
+            println("[DEBUG] after flush: ${decompChunks2.size} chunks, $flTotal bytes")
 
             val result2 = combineAndReadString(decompChunks2)
             println("[DEBUG] msg2 result: '$result2' (expected '$msg2')")
