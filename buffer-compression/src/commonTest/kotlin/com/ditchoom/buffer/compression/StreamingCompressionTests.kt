@@ -1220,15 +1220,26 @@ class StreamingCompressionTests {
             output.resetForRead()
             assertTrue(output.remaining() > 0, "Should produce compressed output")
 
-            // Verify round-trip via streaming decompress
+            // Step 1: verify one-shot decompress works (validates the compressed data)
+            val oneShotResult = decompress(output)
+            assertTrue(oneShotResult is CompressionResult.Success, "One-shot decompress should work")
+            assertEquals("Hello after empty", oneShotResult.buffer.readString(oneShotResult.buffer.remaining()))
+
+            // Step 2: verify streaming decompress works
+            output.position(0)
+            val decompressedChunks = mutableListOf<ReadBuffer>()
+            val decompressor = StreamingDecompressor.create()
             try {
-                assertEquals("Hello after empty", streamDecompress(listOf(output)))
-            } catch (e: Exception) {
-                val msg = "DIAGNOSTIC: Streaming decompress failed: ${e::class.simpleName}: ${e.message}, " +
-                    "compressed size=${output.remaining()}, pos=${output.position()}"
-                println(msg)
-                throw AssertionError(msg, e)
+                decompressor.decompressScoped(output) { decompressedChunks.add(this) }
+                assertEquals(0, output.remaining(), "Compressed input should be fully consumed")
+                decompressor.finishScoped {
+                    if (remaining() > 0) decompressedChunks.add(this)
+                }
+            } finally {
+                decompressor.close()
             }
+            val decompressed = combineBuffers(decompressedChunks)
+            assertEquals("Hello after empty", decompressed.readString(decompressed.remaining()))
         } finally {
             compressor.close()
         }
