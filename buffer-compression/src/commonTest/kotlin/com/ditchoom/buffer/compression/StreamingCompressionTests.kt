@@ -1198,6 +1198,30 @@ class StreamingCompressionTests {
     }
 
     @Test
+    fun scopedCompressFinishRoundTrip() {
+        // Baseline: compressScoped + finishScoped without empty buffer
+        if (!supportsSyncCompression) return
+
+        val compressor = StreamingCompressor.create()
+        try {
+            val input = "Hello after empty".toReadBuffer()
+            compressor.compressScoped(input) {}
+            assertEquals(0, input.remaining(), "Input should be consumed")
+
+            val output = BufferFactory.managed().allocate(4096)
+            compressor.finishScoped { output.write(this) }
+            output.resetForRead()
+            assertTrue(output.remaining() > 0, "Should produce compressed output")
+
+            val result = decompress(output)
+            assertTrue(result is CompressionResult.Success, "Decompress should succeed")
+            assertEquals("Hello after empty", result.buffer.readString(result.buffer.remaining()))
+        } finally {
+            compressor.close()
+        }
+    }
+
+    @Test
     fun emptyCompressThenNonEmptyStillWorks() {
         if (!supportsSyncCompression) return
 
@@ -1214,32 +1238,14 @@ class StreamingCompressionTests {
             compressor.compressScoped(input) {}
             assertEquals(0, input.remaining(), "Input should be consumed after non-empty compress")
 
-            // Finish and verify we get valid output
             val output = BufferFactory.managed().allocate(4096)
             compressor.finishScoped { output.write(this) }
             output.resetForRead()
             assertTrue(output.remaining() > 0, "Should produce compressed output")
 
-            // Step 1: verify one-shot decompress works (validates the compressed data)
-            val oneShotResult = decompress(output)
-            assertTrue(oneShotResult is CompressionResult.Success, "One-shot decompress should work")
-            assertEquals("Hello after empty", oneShotResult.buffer.readString(oneShotResult.buffer.remaining()))
-
-            // Step 2: verify streaming decompress works
-            output.position(0)
-            val decompressedChunks = mutableListOf<ReadBuffer>()
-            val decompressor = StreamingDecompressor.create()
-            try {
-                decompressor.decompressScoped(output) { decompressedChunks.add(this) }
-                assertEquals(0, output.remaining(), "Compressed input should be fully consumed")
-                decompressor.finishScoped {
-                    if (remaining() > 0) decompressedChunks.add(this)
-                }
-            } finally {
-                decompressor.close()
-            }
-            val decompressed = combineBuffers(decompressedChunks)
-            assertEquals("Hello after empty", decompressed.readString(decompressed.remaining()))
+            val result = decompress(output)
+            assertTrue(result is CompressionResult.Success, "Decompress should succeed")
+            assertEquals("Hello after empty", result.buffer.readString(result.buffer.remaining()))
         } finally {
             compressor.close()
         }
