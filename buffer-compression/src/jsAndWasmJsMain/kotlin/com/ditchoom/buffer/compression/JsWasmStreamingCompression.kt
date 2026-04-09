@@ -77,7 +77,6 @@ actual fun SuspendingStreamingDecompressor.Companion.create(
  * - After close(): closed=true — all methods throw
  * - After reset(): fresh stream created, back to Created state
  */
-@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class JsNodeStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
     private val level: CompressionLevel,
@@ -89,7 +88,7 @@ private class JsNodeStreamingCompressor(
     private var totalBytes = 0
     private var closed = false
 
-    override fun compress(
+    override fun compressUnsafe(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
@@ -101,7 +100,7 @@ private class JsNodeStreamingCompressor(
         }
     }
 
-    override fun flush(onOutput: (ReadBuffer) -> Unit) {
+    override fun flushUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         val s = stream ?: return
         val input = if (totalBytes == 0) emptyJsByteArray() else combineJsByteArrays(accumulatedChunks, totalBytes)
@@ -123,7 +122,7 @@ private class JsNodeStreamingCompressor(
         }
     }
 
-    override fun finish(onOutput: (ReadBuffer) -> Unit) {
+    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         val s = stream ?: return
         val input = if (totalBytes == 0) emptyJsByteArray() else combineJsByteArrays(accumulatedChunks, totalBytes)
@@ -170,7 +169,6 @@ private class JsNodeStreamingCompressor(
  *
  * Same state machine as [JsNodeStreamingCompressor].
  */
-@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class JsNodeStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
     override val bufferFactory: BufferFactory,
@@ -180,7 +178,7 @@ private class JsNodeStreamingDecompressor(
     private var totalBytes = 0
     private var closed = false
 
-    override fun decompress(
+    override fun decompressUnsafe(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
@@ -192,7 +190,7 @@ private class JsNodeStreamingDecompressor(
         }
     }
 
-    override fun flush(onOutput: (ReadBuffer) -> Unit) {
+    override fun flushUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
         val s = stream ?: return
         if (totalBytes == 0) return
@@ -213,7 +211,7 @@ private class JsNodeStreamingDecompressor(
         }
     }
 
-    override fun finish(onOutput: (ReadBuffer) -> Unit) {
+    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
         val s = stream ?: return
         if (totalBytes == 0) return
@@ -259,7 +257,6 @@ private class JsNodeStreamingDecompressor(
 // Browser CompressionStream/DecompressionStream (async)
 // ============================================================================
 
-@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class BrowserStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
     override val bufferFactory: BufferFactory,
@@ -268,7 +265,7 @@ private class BrowserStreamingCompressor(
     private var totalBytes = 0
     private var closed = false
 
-    override suspend fun compress(input: ReadBuffer): List<ReadBuffer> {
+    override suspend fun compressUnsafe(input: ReadBuffer): List<ReadBuffer> {
         check(!closed) { "Compressor is closed" }
         val remaining = input.remaining()
         if (remaining > 0) {
@@ -278,12 +275,12 @@ private class BrowserStreamingCompressor(
         return emptyList()
     }
 
-    override suspend fun flush(): List<ReadBuffer> =
+    override suspend fun flushUnsafe(): List<ReadBuffer> =
         throw UnsupportedOperationException(
-            "flush() not supported in browser. Browser CompressionStream does not support flush modes.",
+            "flushUnsafe() not supported in browser. Browser CompressionStream does not support flush modes.",
         )
 
-    override suspend fun finish(): List<ReadBuffer> {
+    override suspend fun finishUnsafe(): List<ReadBuffer> {
         check(!closed) { "Compressor is closed" }
         val input =
             if (totalBytes == 0) {
@@ -308,7 +305,6 @@ private class BrowserStreamingCompressor(
     }
 }
 
-@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class BrowserStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
     override val bufferFactory: BufferFactory,
@@ -317,7 +313,7 @@ private class BrowserStreamingDecompressor(
     private var totalBytes = 0
     private var closed = false
 
-    override suspend fun decompress(input: ReadBuffer): List<ReadBuffer> {
+    override suspend fun decompressUnsafe(input: ReadBuffer): List<ReadBuffer> {
         check(!closed) { "Decompressor is closed" }
         val remaining = input.remaining()
         if (remaining > 0) {
@@ -327,7 +323,7 @@ private class BrowserStreamingDecompressor(
         return emptyList()
     }
 
-    override suspend fun finish(): List<ReadBuffer> {
+    override suspend fun finishUnsafe(): List<ReadBuffer> {
         check(!closed) { "Decompressor is closed" }
         if (totalBytes == 0) return emptyList()
         val combined = combineJsByteArrays(accumulatedChunks, totalBytes)
@@ -352,7 +348,6 @@ private class BrowserStreamingDecompressor(
 // Node.js Transform stream (async, stateful flush)
 // ============================================================================
 
-@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class NodeTransformStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
     private val level: CompressionLevel,
@@ -370,14 +365,14 @@ private class NodeTransformStreamingCompressor(
         stream = createCompressStream(algorithm, level)
     }
 
-    override suspend fun compress(input: ReadBuffer): List<ReadBuffer> {
+    override suspend fun compressUnsafe(input: ReadBuffer): List<ReadBuffer> {
         check(!closed) { "Compressor is closed" }
         if (input.remaining() == 0) return emptyList()
         pendingChunks.add(input.toJsByteArray())
         return emptyList()
     }
 
-    override suspend fun flush(): List<ReadBuffer> {
+    override suspend fun flushUnsafe(): List<ReadBuffer> {
         check(!closed) { "Compressor is closed" }
         val s = stream ?: return emptyList()
         val chunks = pendingChunks.toList()
@@ -386,7 +381,7 @@ private class NodeTransformStreamingCompressor(
         return output.map { it.toPlatformBuffer(bufferFactory) }
     }
 
-    override suspend fun finish(): List<ReadBuffer> {
+    override suspend fun finishUnsafe(): List<ReadBuffer> {
         check(!closed) { "Compressor is closed" }
         val s = stream ?: return emptyList()
         val chunks = pendingChunks.toList()
@@ -412,7 +407,6 @@ private class NodeTransformStreamingCompressor(
     }
 }
 
-@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class NodeTransformStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
     override val bufferFactory: BufferFactory,
@@ -420,14 +414,14 @@ private class NodeTransformStreamingDecompressor(
     private var closed = false
     private val pendingChunks = mutableListOf<JsByteArray>()
 
-    override suspend fun decompress(input: ReadBuffer): List<ReadBuffer> {
+    override suspend fun decompressUnsafe(input: ReadBuffer): List<ReadBuffer> {
         check(!closed) { "Decompressor is closed" }
         if (input.remaining() == 0) return emptyList()
         pendingChunks.add(input.toJsByteArray())
         return emptyList()
     }
 
-    override suspend fun finish(): List<ReadBuffer> {
+    override suspend fun finishUnsafe(): List<ReadBuffer> {
         check(!closed) { "Decompressor is closed" }
         if (pendingChunks.isEmpty()) return emptyList()
         val chunks = pendingChunks.toList()

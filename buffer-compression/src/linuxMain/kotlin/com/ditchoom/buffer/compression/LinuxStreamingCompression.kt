@@ -122,7 +122,6 @@ private fun BufferFactory.allocateOutputBuffer(size: Int): OutputBuffer {
  * Linux streaming compressor using zlib z_stream for true incremental compression.
  * Reuses output buffers across iterations to avoid per-iteration malloc/free (matches JVM pattern).
  */
-@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 @OptIn(ExperimentalForeignApi::class)
 private class LinuxZlibStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
@@ -210,7 +209,7 @@ private class LinuxZlibStreamingCompressor(
         currentOutput = null
     }
 
-    override fun compress(
+    override fun compressUnsafe(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
@@ -257,7 +256,7 @@ private class LinuxZlibStreamingCompressor(
         input.position(inputPosition + remaining)
     }
 
-    override fun flush(onOutput: (ReadBuffer) -> Unit) {
+    override fun flushUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         val s = streamPtr ?: throw CompressionException("Stream not initialized")
 
@@ -289,7 +288,7 @@ private class LinuxZlibStreamingCompressor(
         emitPartialOutput(onOutput)
     }
 
-    override fun finish(onOutput: (ReadBuffer) -> Unit) {
+    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         val s = streamPtr ?: throw CompressionException("Stream not initialized")
 
@@ -355,7 +354,6 @@ private class LinuxZlibStreamingCompressor(
  * Linux streaming decompressor using zlib z_stream for true incremental decompression.
  * Reuses output buffers across iterations to avoid per-iteration malloc/free (matches JVM pattern).
  */
-@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 @OptIn(ExperimentalForeignApi::class)
 private class LinuxZlibStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
@@ -429,7 +427,7 @@ private class LinuxZlibStreamingDecompressor(
         currentOutput = null
     }
 
-    override fun decompress(
+    override fun decompressUnsafe(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
@@ -483,12 +481,12 @@ private class LinuxZlibStreamingDecompressor(
         input.position(inputPosition + consumed)
     }
 
-    override fun flush(onOutput: (ReadBuffer) -> Unit) {
+    override fun flushUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
         emitPartialOutput(onOutput)
     }
 
-    override fun finish(onOutput: (ReadBuffer) -> Unit) {
+    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
         if (streamEnded) {
             emitPartialOutput(onOutput)

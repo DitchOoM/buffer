@@ -73,10 +73,9 @@ internal class DecompressingStreamProcessor(
         )
     private var finished = false
 
-    @Suppress("DEPRECATION")
     override fun append(chunk: ReadBuffer) {
         require(!finished) { "Cannot append after finish()" }
-        decompressor.decompress(chunk) { decompressedChunk ->
+        decompressor.decompressUnsafe(chunk) { decompressedChunk ->
             inner.append(decompressedChunk)
         }
     }
@@ -90,10 +89,9 @@ internal class DecompressingStreamProcessor(
         finish()
     }
 
-    @Suppress("DEPRECATION")
     override fun finish() {
         if (!finished) {
-            decompressor.finish { decompressedChunk ->
+            decompressor.finishUnsafe { decompressedChunk ->
                 inner.append(decompressedChunk)
             }
             finished = true
@@ -132,10 +130,9 @@ internal class SuspendingDecompressingStreamProcessor(
         )
     private var finished = false
 
-    @Suppress("DEPRECATION")
     override suspend fun append(chunk: ReadBuffer) {
         require(!finished) { "Cannot append after finish()" }
-        val decompressedChunks = decompressor.decompress(chunk)
+        val decompressedChunks = decompressor.decompressUnsafe(chunk)
         for (decompressed in decompressedChunks) {
             inner.append(decompressed)
         }
@@ -150,10 +147,9 @@ internal class SuspendingDecompressingStreamProcessor(
         finish()
     }
 
-    @Suppress("DEPRECATION")
     override suspend fun finish() {
         if (!finished) {
-            val finalChunks = decompressor.finish()
+            val finalChunks = decompressor.finishUnsafe()
             for (chunk in finalChunks) {
                 inner.append(chunk)
             }

@@ -14,7 +14,6 @@ actual val supportsStatefulFlush: Boolean = true
 /**
  * JVM/Android implementation delegating to streaming compression.
  */
-@Suppress("DEPRECATION")
 actual fun compress(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm,
@@ -26,11 +25,11 @@ actual fun compress(
         var totalSize = 0
 
         try {
-            compressor.compress(buffer) { chunk ->
+            compressor.compressUnsafe(buffer) { chunk ->
                 totalSize += chunk.remaining()
                 outputChunks.add(chunk)
             }
-            compressor.finish { chunk ->
+            compressor.finishUnsafe { chunk ->
                 totalSize += chunk.remaining()
                 outputChunks.add(chunk)
             }
@@ -50,7 +49,6 @@ actual fun compress(
         CompressionResult.Failure("Compression failed: ${e.message}", e)
     }
 
-@Suppress("DEPRECATION")
 actual fun decompress(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm,
@@ -61,11 +59,11 @@ actual fun decompress(
         var totalSize = 0
 
         try {
-            decompressor.decompress(buffer) { chunk ->
+            decompressor.decompressUnsafe(buffer) { chunk ->
                 totalSize += chunk.remaining()
                 outputChunks.add(chunk)
             }
-            decompressor.finish { chunk ->
+            decompressor.finishUnsafe { chunk ->
                 totalSize += chunk.remaining()
                 outputChunks.add(chunk)
             }

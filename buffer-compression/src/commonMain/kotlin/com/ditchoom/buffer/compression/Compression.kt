@@ -160,7 +160,6 @@ expect val supportsStatefulFlush: Boolean
  * @param factory The buffer factory for the output buffer
  * @return The compressed data as a single buffer (position=0, limit=compressed size)
  */
-@Suppress("DEPRECATION")
 suspend fun compressAsync(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Gzip,
@@ -170,8 +169,8 @@ suspend fun compressAsync(
     val compressor = SuspendingStreamingCompressor.create(algorithm, level)
     return try {
         val output = mutableListOf<ReadBuffer>()
-        output += compressor.compress(buffer)
-        output += compressor.finish()
+        output += compressor.compressUnsafe(buffer)
+        output += compressor.finishUnsafe()
         combineBuffers(output, factory)
     } finally {
         compressor.close()
@@ -193,7 +192,6 @@ suspend fun compressAsync(
  *   if unknown. Providing a good estimate reduces memory allocations.
  * @return The decompressed data as a single buffer (position=0, limit=decompressed size)
  */
-@Suppress("DEPRECATION")
 suspend fun decompressAsync(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Gzip,
@@ -208,8 +206,8 @@ suspend fun decompressAsync(
         } else {
             // Default path: collect chunks then combine
             val output = mutableListOf<ReadBuffer>()
-            output += decompressor.decompress(buffer)
-            output += decompressor.finish()
+            output += decompressor.decompressUnsafe(buffer)
+            output += decompressor.finishUnsafe()
             combineBuffers(output, factory)
         }
     } finally {
@@ -221,7 +219,6 @@ suspend fun decompressAsync(
  * Decompresses directly to a pre-allocated buffer, growing if needed.
  * Returns a buffer sliced to exact size (no wasted capacity).
  */
-@Suppress("DEPRECATION")
 private suspend fun decompressToBuffer(
     decompressor: SuspendingStreamingDecompressor,
     input: ReadBuffer,
@@ -232,14 +229,14 @@ private suspend fun decompressToBuffer(
     var capacity = expectedSize // Track capacity since it's not exposed in API
 
     // Process decompression chunks
-    for (chunk in decompressor.decompress(input)) {
+    for (chunk in decompressor.decompressUnsafe(input)) {
         val result = ensureCapacityAndWrite(output, capacity, chunk, factory)
         output = result.first
         capacity = result.second
     }
 
     // Process finish chunks
-    for (chunk in decompressor.finish()) {
+    for (chunk in decompressor.finishUnsafe()) {
         val result = ensureCapacityAndWrite(output, capacity, chunk, factory)
         output = result.first
         capacity = result.second
@@ -375,7 +372,6 @@ fun ReadBuffer.stripSyncFlushMarker(): ReadBuffer {
  * @param factory The buffer factory for the output buffer.
  * @return Compressed data with the sync marker stripped.
  */
-@Suppress("DEPRECATION")
 suspend fun compressWithSyncFlush(
     buffer: ReadBuffer,
     level: CompressionLevel = CompressionLevel.Default,
@@ -384,8 +380,8 @@ suspend fun compressWithSyncFlush(
     val compressor = SuspendingStreamingCompressor.create(CompressionAlgorithm.Raw, level)
     val chunks = mutableListOf<ReadBuffer>()
     try {
-        chunks.addAll(compressor.compress(buffer))
-        chunks.addAll(compressor.flush())
+        chunks.addAll(compressor.compressUnsafe(buffer))
+        chunks.addAll(compressor.flushUnsafe())
     } finally {
         compressor.close()
     }
@@ -403,7 +399,6 @@ suspend fun compressWithSyncFlush(
  * @param factory The buffer factory for the output buffer.
  * @return The decompressed data.
  */
-@Suppress("DEPRECATION")
 suspend fun decompressWithSyncFlush(
     buffer: ReadBuffer,
     factory: BufferFactory = BufferFactory.Default,
@@ -411,13 +406,13 @@ suspend fun decompressWithSyncFlush(
     val decompressor = SuspendingStreamingDecompressor.create(CompressionAlgorithm.Raw)
     return try {
         val output = mutableListOf<ReadBuffer>()
-        output += decompressor.decompress(buffer)
+        output += decompressor.decompressUnsafe(buffer)
         // Write just the 4-byte marker without copying the input buffer
         val marker = factory.allocate(4)
         marker.writeInt(DeflateFormat.SYNC_FLUSH_MARKER)
         marker.resetForRead()
-        output += decompressor.decompress(marker)
-        output += decompressor.finish()
+        output += decompressor.decompressUnsafe(marker)
+        output += decompressor.finishUnsafe()
         combineBuffers(output, factory)
     } finally {
         decompressor.close()
