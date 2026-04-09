@@ -1223,12 +1223,11 @@ class StreamingCompressionTests {
             // Verify round-trip via streaming decompress
             try {
                 assertEquals("Hello after empty", streamDecompress(listOf(output)))
-            } catch (e: CompressionException) {
-                throw AssertionError(
-                    "Streaming decompress failed: ${e.message}, " +
-                        "compressed size=${output.remaining()}, pos=${output.position()}",
-                    e,
-                )
+            } catch (e: Exception) {
+                val msg = "DIAGNOSTIC: Streaming decompress failed: ${e::class.simpleName}: ${e.message}, " +
+                    "compressed size=${output.remaining()}, pos=${output.position()}"
+                println(msg)
+                throw AssertionError(msg, e)
             }
         } finally {
             compressor.close()
