@@ -251,7 +251,6 @@ private inline fun drainDeflaterSyncFlush(
 // Compressors
 // =============================================================================
 
-@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class JvmDeflateStreamingCompressor(
     level: CompressionLevel,
     nowrap: Boolean,
@@ -262,7 +261,7 @@ private class JvmDeflateStreamingCompressor(
     private var currentOutput: PlatformBuffer? = null
     private var closed = false
 
-    override fun compress(
+    override fun compressUnsafe(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
@@ -271,12 +270,12 @@ private class JvmDeflateStreamingCompressor(
         drainDeflater(onOutput)
     }
 
-    override fun flush(onOutput: (ReadBuffer) -> Unit) {
+    override fun flushUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         currentOutput = drainDeflaterSyncFlush(deflater, bufferFactory, outputBufferSize, currentOutput, onOutput)
     }
 
-    override fun finish(onOutput: (ReadBuffer) -> Unit) {
+    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         deflater.finish()
         drainDeflaterFinishing(onOutput)
@@ -342,7 +341,6 @@ private class JvmDeflateStreamingCompressor(
     }
 }
 
-@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class JvmGzipStreamingCompressor(
     level: CompressionLevel,
     override val bufferFactory: BufferFactory,
@@ -355,7 +353,7 @@ private class JvmGzipStreamingCompressor(
     private var headerWritten = false
     private var closed = false
 
-    override fun compress(
+    override fun compressUnsafe(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
@@ -371,12 +369,12 @@ private class JvmGzipStreamingCompressor(
         drainDeflater(onOutput)
     }
 
-    override fun flush(onOutput: (ReadBuffer) -> Unit) {
+    override fun flushUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         currentOutput = drainDeflaterSyncFlush(deflater, bufferFactory, outputBufferSize, currentOutput, onOutput)
     }
 
-    override fun finish(onOutput: (ReadBuffer) -> Unit) {
+    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
 
         if (!headerWritten) {
@@ -460,7 +458,6 @@ private class JvmGzipStreamingCompressor(
 // Decompressors
 // =============================================================================
 
-@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class JvmInflateStreamingDecompressor(
     nowrap: Boolean,
     override val bufferFactory: BufferFactory,
@@ -472,7 +469,7 @@ private class JvmInflateStreamingDecompressor(
     private var currentOutput: PlatformBuffer? = null
     private var closed = false
 
-    override fun decompress(
+    override fun decompressUnsafe(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
@@ -481,7 +478,7 @@ private class JvmInflateStreamingDecompressor(
         drainInflater(onOutput)
     }
 
-    override fun finish(onOutput: (ReadBuffer) -> Unit) {
+    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
         drainInflater(onOutput)
         emitPartialBuffer(currentOutput, onOutput)
@@ -492,7 +489,7 @@ private class JvmInflateStreamingDecompressor(
         }
     }
 
-    override fun flush(onOutput: (ReadBuffer) -> Unit) {
+    override fun flushUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
         // Drain any remaining output the inflater can produce from previously
         // consumed input (e.g., after processing the sync marker).
@@ -563,7 +560,6 @@ actual fun SuspendingStreamingDecompressor.Companion.create(
         StreamingDecompressor.create(algorithm, bufferFactory),
     )
 
-@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 private class JvmGzipStreamingDecompressor(
     override val bufferFactory: BufferFactory,
     outputBufferSize: Int,
@@ -578,7 +574,7 @@ private class JvmGzipStreamingDecompressor(
     private var headerFlags = -1 // -1 = fixed header not yet parsed
     private var closed = false
 
-    override fun decompress(
+    override fun decompressUnsafe(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
@@ -593,7 +589,7 @@ private class JvmGzipStreamingDecompressor(
         drainInflater(onOutput)
     }
 
-    override fun finish(onOutput: (ReadBuffer) -> Unit) {
+    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
         drainInflater(onOutput)
         emitPartialBuffer(currentOutput, onOutput)

@@ -73,7 +73,6 @@ private const val WINDOW_BITS_GZIP = 31
  * Zero-copy: writes directly to output buffers via native pointers.
  * Supports all buffer factory types including heap-allocated buffers.
  */
-@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 @OptIn(ExperimentalForeignApi::class)
 private class AppleZlibStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
@@ -129,7 +128,7 @@ private class AppleZlibStreamingCompressor(
         streamPtr = s.ptr
     }
 
-    override fun compress(
+    override fun compressUnsafe(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
@@ -169,7 +168,7 @@ private class AppleZlibStreamingCompressor(
         input.position(inputPosition + remaining)
     }
 
-    override fun flush(onOutput: (ReadBuffer) -> Unit) {
+    override fun flushUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         val s = streamPtr ?: throw CompressionException("Stream not initialized")
 
@@ -203,7 +202,7 @@ private class AppleZlibStreamingCompressor(
         }
     }
 
-    override fun finish(onOutput: (ReadBuffer) -> Unit) {
+    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         val s = streamPtr ?: throw CompressionException("Stream not initialized")
 
@@ -261,7 +260,6 @@ private class AppleZlibStreamingCompressor(
  * Apple streaming decompressor using zlib z_stream for true incremental decompression.
  * Zero-copy: writes directly to output buffers.
  */
-@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 @OptIn(ExperimentalForeignApi::class)
 private class AppleZlibStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
@@ -304,7 +302,7 @@ private class AppleZlibStreamingDecompressor(
         streamEnded = false
     }
 
-    override fun decompress(
+    override fun decompressUnsafe(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
@@ -351,12 +349,12 @@ private class AppleZlibStreamingDecompressor(
         input.position(inputPosition + consumed)
     }
 
-    override fun flush(onOutput: (ReadBuffer) -> Unit) {
-        // No-op: Apple decompressor emits output eagerly in decompress(),
+    override fun flushUnsafe(onOutput: (ReadBuffer) -> Unit) {
+        // No-op: Apple decompressor emits output eagerly in decompressUnsafe(),
         // no partial buffering that needs flushing.
     }
 
-    override fun finish(onOutput: (ReadBuffer) -> Unit) {
+    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
         if (streamEnded) return
 
