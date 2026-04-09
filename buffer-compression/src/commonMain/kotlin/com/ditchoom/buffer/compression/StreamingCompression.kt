@@ -204,15 +204,43 @@ suspend inline fun <R> StreamingDecompressor.useSuspending(
 }
 
 /**
+ * Resolves the effective zlib windowBits for deflateInit2/inflateInit2 from a
+ * caller-provided absolute window size (8–15) and the compression algorithm.
+ *
+ * zlib encodes the format in the sign/offset of windowBits:
+ * - Deflate (zlib format): positive (8–15)
+ * - Raw deflate: negative (-8 to -15)
+ * - Gzip: positive + 16 (24–31)
+ *
+ * Callers may pass either the absolute size (e.g. 9) or an already-encoded
+ * value (e.g. -9 for Raw). Using [kotlin.math.abs] makes both equivalent.
+ *
+ * @return 0 when [customWindowBits] is 0 (use platform default), otherwise the
+ *   algorithm-encoded value suitable for deflateInit2/inflateInit2.
+ */
+internal fun resolveWindowBits(
+    algorithm: CompressionAlgorithm,
+    customWindowBits: Int,
+): Int {
+    if (customWindowBits == 0) return 0
+    val abs = kotlin.math.abs(customWindowBits)
+    return when (algorithm) {
+        CompressionAlgorithm.Deflate -> abs
+        CompressionAlgorithm.Raw -> -abs
+        CompressionAlgorithm.Gzip -> abs + 16
+    }
+}
+
+/**
  * Creates a streaming compressor.
  *
  * @param algorithm The compression algorithm to use.
  * @param level The compression level.
  * @param allocator Strategy for allocating output buffers.
  * @param outputBufferSize Size of output buffers (default 32KB).
- * @param windowBits The zlib window size (log2 of the LZ77 window size).
- *   When 0 (the default), uses the algorithm's default: 15 for Deflate/Zlib, -15 for Raw, 31 for Gzip.
- *   When non-zero, the value is passed directly to deflateInit2(). Valid range depends on the algorithm.
+ * @param windowBits The window size (8–15, log2 of the LZ77 window).
+ *   When 0 (the default), uses the algorithm's default (15).
+ *   The algorithm-specific encoding (sign for Raw, +16 for Gzip) is applied automatically.
  *   Note: JVM's java.util.zip.Deflater does not support custom window sizes; this parameter is ignored on JVM.
  */
 expect fun StreamingCompressor.Companion.create(
