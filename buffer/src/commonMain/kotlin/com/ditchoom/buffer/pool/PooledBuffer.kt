@@ -85,7 +85,7 @@ internal class PooledBuffer(
     }
 
     // ========================================================================
-    // ReadWriteBuffer
+    // PlatformBuffer
     // ========================================================================
 
     override val capacity: Int get() = inner.capacity
@@ -309,7 +309,7 @@ internal class PooledBuffer(
     }
 
     // ========================================================================
-    // ReadWriteBuffer — masking
+    // PlatformBuffer — masking
     // ========================================================================
 
     override fun xorMask(

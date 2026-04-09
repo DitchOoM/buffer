@@ -4,7 +4,6 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
 
@@ -261,7 +260,7 @@ internal class DefaultStreamProcessor(
 
     // Coalescing state: small appends are copied into a tail buffer that is NOT in chunks.
     // Invariant: totalAvailable == sum(chunks[i].remaining()) + coalesceWritten
-    private var coalesceTail: ReadWriteBuffer? = null
+    private var coalesceTail: PlatformBuffer? = null
     private var coalesceWritten = 0
 
     // Peek cache: remembers the last peekByte scan position so sequential peeks

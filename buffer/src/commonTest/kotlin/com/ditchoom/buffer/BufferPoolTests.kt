@@ -596,7 +596,7 @@ class BufferPoolTests {
         // Acquire buffers and free them via freeNativeMemory (the PooledBuffer path)
         // This triggers releaseRef() -> pool.release(inner), adding buffers back to pool
         val buffers = (1..4).map { pool.acquire(512) }
-        buffers.forEach { (it as PlatformBuffer).freeNativeMemory() }
+        buffers.forEach { it.freeNativeMemory() }
 
         // Pool should have received the buffers back via releaseRef
         assertTrue(pool.stats().currentPoolSize > 0)
@@ -618,9 +618,9 @@ class BufferPoolTests {
 
         // Release some via pool.release(), others via freeNativeMemory()
         pool.release(buf1)
-        (buf2 as PlatformBuffer).freeNativeMemory()
+        buf2.freeNativeMemory()
         pool.release(buf3)
-        (buf4 as PlatformBuffer).freeNativeMemory()
+        buf4.freeNativeMemory()
 
         // All 4 should be back in the pool
         assertEquals(4, pool.stats().currentPoolSize)
@@ -1468,7 +1468,7 @@ class BufferPoolTests {
         assertEquals(0xCAFEBABE.toInt(), first)
 
         // Free via freeNativeMemory (the PooledBuffer path)
-        (buffer as PlatformBuffer).freeNativeMemory()
+        buffer.freeNativeMemory()
 
         // Further access must throw
         assertFailsWith<IllegalStateException> {

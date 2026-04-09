@@ -280,7 +280,6 @@ class FieldAnalyzer(
         setOf(
             "com.ditchoom.buffer.ReadBuffer",
             "com.ditchoom.buffer.WriteBuffer",
-            "com.ditchoom.buffer.ReadWriteBuffer",
             "com.ditchoom.buffer.PlatformBuffer",
             "kotlin.ByteArray",
         )

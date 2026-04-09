@@ -2,7 +2,6 @@ package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.pool.asBufferFactory
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.StreamProcessorBuilder
 import com.ditchoom.buffer.stream.SuspendingStreamProcessor
@@ -27,7 +26,7 @@ import com.ditchoom.buffer.stream.TransformSpec
  */
 fun StreamProcessorBuilder.decompress(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Gzip,
-    bufferFactory: BufferFactory = pool.asBufferFactory(),
+    bufferFactory: BufferFactory = pool,
 ): StreamProcessorBuilder = addTransform(DecompressionSpec(algorithm, bufferFactory))
 
 /**

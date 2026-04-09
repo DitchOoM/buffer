@@ -362,8 +362,8 @@ internal class PoolingFactory(
         byteOrder: ByteOrder,
     ): PlatformBuffer {
         val buffer = pool.acquire(size)
-        if (buffer is PlatformBuffer && buffer.byteOrder == byteOrder) return buffer
-        // Byte order mismatch or not a PlatformBuffer — release back and allocate fresh
+        if (buffer.byteOrder == byteOrder) return buffer
+        // Byte order mismatch — release back and allocate fresh
         pool.release(buffer)
         return delegate.allocate(size, byteOrder)
     }

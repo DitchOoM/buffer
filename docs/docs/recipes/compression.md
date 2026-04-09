@@ -461,7 +461,7 @@ SuspendingStreamingCompressor.create(
 val pool = BufferPool(defaultBufferSize = 32768)
 SuspendingStreamingCompressor.create(
     algorithm = CompressionAlgorithm.Gzip,
-    bufferFactory = pool.asBufferFactory()
+    bufferFactory = pool
 )
 ```
 

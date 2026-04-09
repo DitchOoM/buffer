@@ -4,7 +4,7 @@ package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.ReadWriteBuffer
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.managedMemoryAccess
 import com.ditchoom.buffer.nativeMemoryAccess
 import kotlinx.cinterop.ByteVar
@@ -449,10 +449,10 @@ private inline fun <R> withInputPointer(
  */
 @OptIn(ExperimentalForeignApi::class)
 private inline fun <R> withOutputPointer(
-    buffer: ReadWriteBuffer,
+    buffer: PlatformBuffer,
     block: (CPointer<ByteVar>) -> R,
 ): R {
-    // Cast to ReadBuffer to resolve extension ambiguity (ReadWriteBuffer extends both ReadBuffer and WriteBuffer)
+    // Cast to ReadBuffer to resolve extension ambiguity (PlatformBuffer extends both ReadBuffer and WriteBuffer)
     val buf = buffer as ReadBuffer
     val nativeAccess = buf.nativeMemoryAccess
     if (nativeAccess != null) {

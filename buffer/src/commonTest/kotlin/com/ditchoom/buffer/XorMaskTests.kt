@@ -471,13 +471,13 @@ class XorMaskTests {
             for (i in 0 until size) src2.writeByte((i * 7).toByte())
             src2.resetForRead()
 
-            val ref = factory.allocate(size) as ReadWriteBuffer
+            val ref = factory.allocate(size)
             ref.write(src2)
             ref.resetForRead()
             ref.xorMask(mask)
 
             // Test: xorMaskCopy
-            val dst = factory.allocate(size) as ReadWriteBuffer
+            val dst = factory.allocate(size)
             dst.xorMaskCopy(src, mask)
             dst.resetForRead()
 
@@ -495,13 +495,13 @@ class XorMaskTests {
             val data = ByteArray(totalSize) { it.toByte() }
 
             // Contiguous reference
-            val contiguous = factory.allocate(totalSize) as ReadWriteBuffer
+            val contiguous = factory.allocate(totalSize)
             contiguous.writeBytes(data)
             contiguous.resetForRead()
             contiguous.xorMask(mask)
 
             // Chunked xorMaskCopy with offset tracking
-            val dst = factory.allocate(totalSize) as ReadWriteBuffer
+            val dst = factory.allocate(totalSize)
             val chunkSizes = intArrayOf(7, 6, 7)
             var offset = 0
             var dataPos = 0
@@ -528,7 +528,7 @@ class XorMaskTests {
             for (i in 0 until 8) src.writeByte(i.toByte())
             src.resetForRead()
 
-            val dst = factory.allocate(16) as ReadWriteBuffer
+            val dst = factory.allocate(16)
             dst.xorMaskCopy(src, 0x12345678)
 
             assertEquals(8, src.position(), "Source position should advance")
@@ -543,7 +543,7 @@ class XorMaskTests {
             for (i in 0 until 8) src.writeByte(i.toByte())
             src.resetForRead()
 
-            val dst = factory.allocate(8) as ReadWriteBuffer
+            val dst = factory.allocate(8)
             dst.xorMaskCopy(src, 0)
             dst.resetForRead()
 
@@ -559,7 +559,7 @@ class XorMaskTests {
             val src = factory.allocate(8)
             src.resetForRead() // position=0, limit=0
 
-            val dst = factory.allocate(8) as ReadWriteBuffer
+            val dst = factory.allocate(8)
             dst.xorMaskCopy(src, 0x12345678)
             assertEquals(0, dst.position(), "Dest position should not move")
         }
