@@ -22,6 +22,7 @@ import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.usePinned
 import platform.zlib.Z_BUF_ERROR
+import platform.zlib.Z_DATA_ERROR
 import platform.zlib.Z_DEFLATED
 import platform.zlib.Z_FINISH
 import platform.zlib.Z_NO_FLUSH

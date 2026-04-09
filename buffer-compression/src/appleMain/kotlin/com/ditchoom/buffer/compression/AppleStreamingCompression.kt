@@ -331,7 +331,10 @@ private class AppleZlibStreamingDecompressor(
                         when (result) {
                             Z_OK -> {}
                             Z_STREAM_END -> streamEnded = true
-                            else -> throw CompressionException("inflate failed with code: $result")
+                            else -> throw CompressionException(
+                                "inflate(Z_SYNC_FLUSH) failed: code=$result, " +
+                                    "avail_in=${s.pointed.avail_in}, avail_out=${s.pointed.avail_out}",
+                            )
                         }
 
                         val produced = outputBufferSize - s.pointed.avail_out.toInt()
@@ -388,7 +391,10 @@ private class AppleZlibStreamingDecompressor(
                             // Since no more input will be provided, treat as stream end.
                             streamEnded = true
                         }
-                        else -> throw CompressionException("inflate finish failed with code: $result")
+                        else -> throw CompressionException(
+                            "inflate(Z_FINISH) failed: code=$result, " +
+                                "avail_in=${s.pointed.avail_in}, avail_out=${s.pointed.avail_out}",
+                        )
                     }
 
                     val produced = outputBufferSize - s.pointed.avail_out.toInt()
