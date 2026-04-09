@@ -1220,19 +1220,8 @@ class StreamingCompressionTests {
             output.resetForRead()
             assertTrue(output.remaining() > 0, "Should produce compressed output")
 
-            // Verify round-trip
-            val decompressor = StreamingDecompressor.create()
-            val decompressed = BufferFactory.managed().allocate(4096)
-            try {
-                decompressor.decompressScoped(output) { decompressed.write(this) }
-                decompressor.finishScoped {
-                    if (remaining() > 0) decompressed.write(this)
-                }
-            } finally {
-                decompressor.close()
-            }
-            decompressed.resetForRead()
-            assertEquals("Hello after empty", decompressed.readString(decompressed.remaining()))
+            // Verify round-trip using the use() extension which handles finish internally
+            assertEquals("Hello after empty", streamDecompress(listOf(output)))
         } finally {
             compressor.close()
         }
