@@ -39,6 +39,7 @@ class WebSocketContextTakeoverTest {
 
     @Test
     fun twoMessagesWithContextTakeover() {
+        if (!supportsSyncCompression) return
         val compressor =
             StreamingCompressor.create(
                 CompressionAlgorithm.Raw,
@@ -73,6 +74,7 @@ class WebSocketContextTakeoverTest {
 
     @Test
     fun twoMessagesWithContextTakeover_windowBits9() {
+        if (!supportsSyncCompression) return
         val compressor =
             StreamingCompressor.create(
                 CompressionAlgorithm.Raw,
@@ -101,6 +103,7 @@ class WebSocketContextTakeoverTest {
 
     @Test
     fun tenMessagesWithContextTakeover() {
+        if (!supportsSyncCompression) return
         val compressor =
             StreamingCompressor.create(
                 CompressionAlgorithm.Raw,

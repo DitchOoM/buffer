@@ -501,20 +501,55 @@ class SyncPersistentStreamTests {
             // First message: compress, decompress via finish
             val msg1 = "first message"
             val compressed1 = compressAndStripMarker(msg1, compressor)
-            decompressor.decompress(compressed1) {}
-            val chunks1 = mutableListOf<ReadBuffer>()
-            decompressor.finish { chunks1.add(it) }
-            assertEquals(msg1, combineAndReadString(chunks1))
+            println("[DEBUG] compressed1: ${compressed1.remaining()} bytes, pos=${compressed1.position()}")
+            val decompChunks1 = mutableListOf<ReadBuffer>()
+            decompressor.decompress(compressed1) { decompChunks1.add(it) }
+            println("[DEBUG] decompress(compressed1) produced ${decompChunks1.size} chunks, total=${decompChunks1.sumOf { it.remaining() }} bytes")
+            val finishChunks1 = mutableListOf<ReadBuffer>()
+            decompressor.finish { finishChunks1.add(it) }
+            println("[DEBUG] finish() produced ${finishChunks1.size} chunks, total=${finishChunks1.sumOf { it.remaining() }} bytes")
+            val allChunks1 = decompChunks1 + finishChunks1
+            val result1 = combineAndReadString(allChunks1)
+            println("[DEBUG] msg1 result: '$result1' (expected '$msg1')")
+            assertEquals(msg1, result1)
 
             // After finish(), stream is destroyed — reset() must recreate it
+            println("[DEBUG] calling decompressor.reset()")
             decompressor.reset()
+            println("[DEBUG] calling compressor.reset()")
             compressor.reset()
 
             // Second message must work on the fresh stream
             val msg2 = "second after reset"
             val compressed2 = compressAndStripMarker(msg2, compressor)
-            val result2 = decompressWithFlush(compressed2, decompressor)
-            assertEquals(msg2, result2)
+            println("[DEBUG] compressed2: ${compressed2.remaining()} bytes, pos=${compressed2.position()}")
+
+            // Inline decompressWithFlush to capture each step
+            val decompChunks2 = mutableListOf<ReadBuffer>()
+            decompressor.decompress(compressed2) { chunk ->
+                if (chunk.position() != 0) chunk.position(0)
+                if (chunk.remaining() > 0) decompChunks2.add(chunk)
+            }
+            println("[DEBUG] decompress(compressed2) produced ${decompChunks2.size} chunks, total=${decompChunks2.sumOf { it.remaining() }} bytes")
+
+            val marker = BufferFactory.Default.allocate(4)
+            marker.writeInt(SYNC_FLUSH_MARKER)
+            marker.resetForRead()
+            decompressor.decompress(marker) { chunk ->
+                if (chunk.position() != 0) chunk.position(0)
+                if (chunk.remaining() > 0) decompChunks2.add(chunk)
+            }
+            println("[DEBUG] decompress(marker) total chunks now=${decompChunks2.size}, total=${decompChunks2.sumOf { it.remaining() }} bytes")
+
+            decompressor.flush { chunk ->
+                if (chunk.position() != 0) chunk.position(0)
+                if (chunk.remaining() > 0) decompChunks2.add(chunk)
+            }
+            println("[DEBUG] flush() total chunks now=${decompChunks2.size}, total=${decompChunks2.sumOf { it.remaining() }} bytes")
+
+            val result2 = combineAndReadString(decompChunks2)
+            println("[DEBUG] msg2 result: '$result2' (expected '$msg2')")
+            assertEquals(msg2, result2, "After reset: expected='$msg2' actual='$result2'")
         } finally {
             compressor.close()
             decompressor.close()
