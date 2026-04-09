@@ -214,10 +214,15 @@ class CodecGenerator(
         val typeVariables = payloadTypeParams.map { TypeVariableName(it) }
 
         // Build decode function
+        val hasDiscriminatorField = fields.any { it.strategy is FieldReadStrategy.DiscriminatorField }
         val decodeBuilder =
             FunSpec
                 .builder("decode")
                 .addParameter("buffer", READ_BUFFER)
+
+        if (hasDiscriminatorField) {
+            decodeBuilder.addParameter("context", DECODE_CONTEXT)
+        }
 
         for (tv in typeVariables) {
             decodeBuilder.addTypeVariable(tv)
@@ -422,10 +427,12 @@ class CodecGenerator(
             )
             lambdaArgs.add(localVar)
         }
-        ctxDecodeBody.addStatement(
-            "return decode(buffer, %L)",
-            lambdaArgs.joinToString(", "),
-        )
+        val ctxDecodeArgs = if (hasDiscriminatorField) {
+            "buffer, context, ${lambdaArgs.joinToString(", ")}"
+        } else {
+            "buffer, ${lambdaArgs.joinToString(", ")}"
+        }
+        ctxDecodeBody.addStatement("return decode(%L)", ctxDecodeArgs)
 
         val starReturnType = classTypeName.parameterizedBy(payloadFields.map { com.squareup.kotlinpoet.STAR })
         objectBuilder.addFunction(
