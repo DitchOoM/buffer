@@ -1220,8 +1220,10 @@ class StreamingCompressionTests {
             output.resetForRead()
             assertTrue(output.remaining() > 0, "Should produce compressed output")
 
-            // Verify round-trip using the use() extension which handles finish internally
-            assertEquals("Hello after empty", streamDecompress(listOf(output)))
+            // Verify round-trip via one-shot decompress
+            val result = decompress(output)
+            assertTrue(result is CompressionResult.Success)
+            assertEquals("Hello after empty", result.buffer.readString(result.buffer.remaining()))
         } finally {
             compressor.close()
         }
