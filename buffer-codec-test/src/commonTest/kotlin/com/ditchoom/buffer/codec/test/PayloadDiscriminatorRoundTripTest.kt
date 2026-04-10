@@ -7,7 +7,6 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.test.protocols.DispatchedFrame
 import com.ditchoom.buffer.codec.test.protocols.DispatchedFrameCodec
-import com.ditchoom.buffer.codec.test.protocols.DispatchedFrameControlCodec
 import com.ditchoom.buffer.codec.test.protocols.DispatchedFrameDataCodec
 import com.ditchoom.buffer.codec.test.protocols.FrameHeader
 import kotlin.test.Test
@@ -31,9 +30,10 @@ class PayloadDiscriminatorRoundTripTest {
         buf.writeString("Hello")
         buf.resetForRead()
 
-        val frame = DispatchedFrameCodec.decode<String>(buf) { pr ->
-            pr.readString(pr.remaining())
-        }
+        val frame =
+            DispatchedFrameCodec.decode<String>(buf) { pr ->
+                pr.readString(pr.remaining())
+            }
 
         assertIs<DispatchedFrame.Data<*>>(frame)
         assertEquals(0x01.toUByte(), frame.header.byte1)
@@ -49,9 +49,10 @@ class PayloadDiscriminatorRoundTripTest {
         buf.writeString("ping")
         buf.resetForRead()
 
-        val frame = DispatchedFrameCodec.decode<String>(buf) { pr ->
-            pr.readString(pr.remaining())
-        }
+        val frame =
+            DispatchedFrameCodec.decode<String>(buf) { pr ->
+                pr.readString(pr.remaining())
+            }
 
         assertIs<DispatchedFrame.Control>(frame)
         assertEquals(0x02.toUByte(), frame.header.byte1)
@@ -67,10 +68,11 @@ class PayloadDiscriminatorRoundTripTest {
         buf.writeString("World")
         buf.resetForRead()
 
-        val ctx = DecodeContext.Empty
-            .with(DispatchedFrameDataCodec.PayloadDecodeKey) { pr ->
-                pr.readString(pr.remaining())
-            }
+        val ctx =
+            DecodeContext.Empty
+                .with(DispatchedFrameDataCodec.PayloadDecodeKey) { pr ->
+                    pr.readString(pr.remaining())
+                }
 
         val frame = DispatchedFrameCodec.decode(buf, ctx)
 
@@ -80,10 +82,11 @@ class PayloadDiscriminatorRoundTripTest {
 
     @Test
     fun dataVariantEncodeRoundTrip() {
-        val original = DispatchedFrame.Data(
-            header = FrameHeader(0x01u, 0x00u),
-            payload = "Hello",
-        )
+        val original =
+            DispatchedFrame.Data(
+                header = FrameHeader(0x01u, 0x00u),
+                payload = "Hello",
+            )
 
         // Encode
         val buf = BufferFactory.Default.allocate(32, ByteOrder.BIG_ENDIAN)
@@ -93,9 +96,10 @@ class PayloadDiscriminatorRoundTripTest {
         buf.resetForRead()
 
         // Decode
-        val decoded = DispatchedFrameCodec.decode<String>(buf) { pr ->
-            pr.readString(pr.remaining())
-        }
+        val decoded =
+            DispatchedFrameCodec.decode<String>(buf) { pr ->
+                pr.readString(pr.remaining())
+            }
 
         assertIs<DispatchedFrame.Data<*>>(decoded)
         assertEquals(original.header, decoded.header)
@@ -104,10 +108,11 @@ class PayloadDiscriminatorRoundTripTest {
 
     @Test
     fun controlVariantEncodeRoundTrip() {
-        val original = DispatchedFrame.Control(
-            header = FrameHeader(0x02u, 0xFFu),
-            message = "pong",
-        )
+        val original =
+            DispatchedFrame.Control(
+                header = FrameHeader(0x02u, 0xFFu),
+                message = "pong",
+            )
 
         // Encode
         val buf = BufferFactory.Default.allocate(32, ByteOrder.BIG_ENDIAN)
@@ -115,9 +120,10 @@ class PayloadDiscriminatorRoundTripTest {
         buf.resetForRead()
 
         // Decode
-        val decoded = DispatchedFrameCodec.decode<String>(buf) { pr ->
-            pr.readString(pr.remaining())
-        }
+        val decoded =
+            DispatchedFrameCodec.decode<String>(buf) { pr ->
+                pr.readString(pr.remaining())
+            }
 
         assertIs<DispatchedFrame.Control>(decoded)
         assertEquals(original.header, decoded.header)
@@ -126,20 +132,23 @@ class PayloadDiscriminatorRoundTripTest {
 
     @Test
     fun contextBasedEncodeDecodeRoundTrip() {
-        val original = DispatchedFrame.Data(
-            header = FrameHeader(0x01u, 0x42u),
-            payload = "context-trip",
-        )
+        val original =
+            DispatchedFrame.Data(
+                header = FrameHeader(0x01u, 0x42u),
+                payload = "context-trip",
+            )
 
-        val encodeCtx = EncodeContext.Empty
-            .with(DispatchedFrameDataCodec.PayloadEncodeKey) { writer, value ->
-                writer.writeString(value as String)
-            }
+        val encodeCtx =
+            EncodeContext.Empty
+                .with(DispatchedFrameDataCodec.PayloadEncodeKey) { writer, value ->
+                    writer.writeString(value as String)
+                }
 
-        val decodeCtx = DecodeContext.Empty
-            .with(DispatchedFrameDataCodec.PayloadDecodeKey) { pr ->
-                pr.readString(pr.remaining())
-            }
+        val decodeCtx =
+            DecodeContext.Empty
+                .with(DispatchedFrameDataCodec.PayloadDecodeKey) { pr ->
+                    pr.readString(pr.remaining())
+                }
 
         // Encode via context
         val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
