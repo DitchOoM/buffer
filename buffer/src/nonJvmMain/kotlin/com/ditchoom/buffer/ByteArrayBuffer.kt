@@ -120,6 +120,7 @@ class ByteArrayBuffer(
     }
 
     override fun writeByte(byte: Byte): WriteBuffer {
+        checkWriteBounds(1)
         data[positionValue++] = byte
         return this
     }
@@ -128,11 +129,13 @@ class ByteArrayBuffer(
         index: Int,
         byte: Byte,
     ): WriteBuffer {
+        checkIndexBounds(index, 1)
         data[index] = byte
         return this
     }
 
     override fun writeShort(short: Short): WriteBuffer {
+        checkWriteBounds(2)
         set(positionValue, short)
         positionValue += Short.SIZE_BYTES
         return this
@@ -142,6 +145,7 @@ class ByteArrayBuffer(
         index: Int,
         short: Short,
     ): WriteBuffer {
+        checkIndexBounds(index, 2)
         val v = short.toInt()
         if (littleEndian) {
             data[index] = v.toByte()
@@ -154,6 +158,7 @@ class ByteArrayBuffer(
     }
 
     override fun writeInt(int: Int): WriteBuffer {
+        checkWriteBounds(4)
         set(positionValue, int)
         positionValue += Int.SIZE_BYTES
         return this
@@ -163,6 +168,7 @@ class ByteArrayBuffer(
         index: Int,
         int: Int,
     ): WriteBuffer {
+        checkIndexBounds(index, 4)
         if (littleEndian) {
             data[index] = int.toByte()
             data[index + 1] = (int shr 8).toByte()
@@ -178,6 +184,7 @@ class ByteArrayBuffer(
     }
 
     override fun writeLong(long: Long): WriteBuffer {
+        checkWriteBounds(8)
         set(positionValue, long)
         positionValue += Long.SIZE_BYTES
         return this
@@ -187,6 +194,7 @@ class ByteArrayBuffer(
         index: Int,
         long: Long,
     ): WriteBuffer {
+        checkIndexBounds(index, 8)
         if (littleEndian) {
             set(index, long.toInt())
             set(index + 4, (long shr 32).toInt())
@@ -202,6 +210,7 @@ class ByteArrayBuffer(
         offset: Int,
         length: Int,
     ): WriteBuffer {
+        checkWriteBounds(length)
         bytes.copyInto(data, positionValue, offset, offset + length)
         positionValue += length
         return this
@@ -209,6 +218,8 @@ class ByteArrayBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
+        if (size == 0) return
+        checkWriteBounds(size)
         val actual = buffer.unwrapFully()
         if (actual is ByteArrayBuffer) {
             actual.data.copyInto(data, positionValue, actual.positionValue, actual.positionValue + size)

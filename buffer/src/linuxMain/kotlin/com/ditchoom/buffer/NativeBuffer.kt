@@ -208,6 +208,7 @@ class NativeBuffer private constructor(
 
     override fun writeByte(byte: Byte): WriteBuffer {
         checkOpen()
+        checkWriteBounds(1)
         ptr[positionValue++] = byte
         return this
     }
@@ -217,12 +218,14 @@ class NativeBuffer private constructor(
         byte: Byte,
     ): WriteBuffer {
         checkOpen()
+        checkIndexBounds(index, 1)
         ptr[index] = byte
         return this
     }
 
     override fun writeShort(short: Short): WriteBuffer {
         checkOpen()
+        checkWriteBounds(2)
         set(positionValue, short)
         positionValue += 2
         return this
@@ -233,6 +236,7 @@ class NativeBuffer private constructor(
         short: Short,
     ): WriteBuffer {
         checkOpen()
+        checkIndexBounds(index, 2)
         val value = if (littleEndian == nativeIsLittleEndian) short else short.reverseBytes()
         UnsafeMemory.putShort(nativeAddress + index, value)
         return this
@@ -240,6 +244,7 @@ class NativeBuffer private constructor(
 
     override fun writeInt(int: Int): WriteBuffer {
         checkOpen()
+        checkWriteBounds(4)
         set(positionValue, int)
         positionValue += 4
         return this
@@ -250,6 +255,7 @@ class NativeBuffer private constructor(
         int: Int,
     ): WriteBuffer {
         checkOpen()
+        checkIndexBounds(index, 4)
         val value = if (littleEndian == nativeIsLittleEndian) int else int.reverseBytes()
         UnsafeMemory.putInt(nativeAddress + index, value)
         return this
@@ -257,6 +263,7 @@ class NativeBuffer private constructor(
 
     override fun writeLong(long: Long): WriteBuffer {
         checkOpen()
+        checkWriteBounds(8)
         set(positionValue, long)
         positionValue += 8
         return this
@@ -267,6 +274,7 @@ class NativeBuffer private constructor(
         long: Long,
     ): WriteBuffer {
         checkOpen()
+        checkIndexBounds(index, 8)
         val value = if (littleEndian == nativeIsLittleEndian) long else long.reverseBytes()
         UnsafeMemory.putLong(nativeAddress + index, value)
         return this
@@ -278,6 +286,7 @@ class NativeBuffer private constructor(
         length: Int,
     ): WriteBuffer {
         checkOpen()
+        checkWriteBounds(length)
         UnsafeMemory.copyMemoryFromArray(bytes, offset, nativeAddress + positionValue, length)
         positionValue += length
         return this
@@ -286,6 +295,8 @@ class NativeBuffer private constructor(
     override fun write(buffer: ReadBuffer) {
         checkOpen()
         val size = buffer.remaining()
+        if (size == 0) return
+        checkWriteBounds(size)
 
         // Zero-copy path: check if source has native memory access
         val srcNative = buffer.nativeMemoryAccess
@@ -329,6 +340,7 @@ class NativeBuffer private constructor(
         val str = text.toString()
         val len = str.length
         if (len == 0) return this
+        checkWriteBounds(len) // minimum bytes (ASCII); actual UTF-8 may need more
         // SIMD-accelerated UTF-16->UTF-8 conversion via simdutf.
         // toCharArray() copies the String's chars, then simdutf converts directly into native memory.
         // ~28x faster than the per-character loop for large strings (518ms -> 18ms at 16MB).
