@@ -573,13 +573,15 @@ private class LinuxZlibStreamingDecompressor(
 /**
  * Execute a block with a pointer to the buffer's data.
  * Handles pinning for ByteArrayBuffer to ensure the pointer remains valid.
+ *
+ * NOT inline — workaround for Kotlin/Native 2.3.0 AutoboxingTransformer crash
+ * (LINUX_NATIVE_COMPILER_BUG.md). The bug triggers when an inline function with
+ * generic return R calls another inline function (usePinned) that also returns R.
+ * The K/N autoboxing lowering pass expects an IrTypeOperatorCall but gets a raw
+ * IrGetValueImpl. Removing `inline` prevents the nested inlining that triggers it.
  */
-// Workaround for Kotlin/Native AutoboxingTransformer crash (LINUX_NATIVE_COMPILER_BUG.md):
-// Using if/else with early returns and explicit local variables instead of a `when` expression
-// avoids the compiler bug where mixed direct returns and inline-lambda-wrapped returns of
-// generic R in a when expression produce an IrGetValueImpl where a type operator is expected.
 @OptIn(ExperimentalForeignApi::class)
-private inline fun <R> withInputPointer(
+private fun <R> withInputPointer(
     buffer: ReadBuffer,
     block: (CPointer<ByteVar>) -> R,
 ): R {
@@ -589,14 +591,12 @@ private inline fun <R> withInputPointer(
     if (buffer is ByteArrayBuffer) {
         val array = buffer.backingArray
         if (array.isEmpty()) throw CompressionException("Cannot get pointer to empty buffer")
-        val result: R = array.usePinned { pinned -> block(pinned.addressOf(0)) }
-        return result
+        return array.usePinned { pinned -> block(pinned.addressOf(0)) }
     }
     if (buffer.managedMemoryAccess != null) {
         val array = buffer.managedMemoryAccess!!.backingArray
         if (array.isEmpty()) throw CompressionException("Cannot get pointer to empty buffer")
-        val result: R = array.usePinned { pinned -> block(pinned.addressOf(0)) }
-        return result
+        return array.usePinned { pinned -> block(pinned.addressOf(0)) }
     }
     throw CompressionException(
         "Buffer must have NativeMemoryAccess or ManagedMemoryAccess, got ${buffer::class.simpleName}",
