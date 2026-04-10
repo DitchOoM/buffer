@@ -99,14 +99,20 @@ class BufferFactoryTests {
     // Zero-Byte Allocation Tests — all factories must handle allocate(0) correctly
     // ============================================================================
 
-    private fun assertZeroByteAllocateWorks(factory: BufferFactory, name: String) {
+    private fun assertZeroByteAllocateWorks(
+        factory: BufferFactory,
+        name: String,
+    ) {
         val buffer = factory.allocate(0)
         assertEquals(0, buffer.remaining(), "$name: remaining should be 0 after allocate(0)")
         buffer.resetForRead()
         assertEquals(0, buffer.remaining(), "$name: remaining should be 0 after resetForRead")
     }
 
-    private fun assertZeroByteWriteWorks(factory: BufferFactory, name: String) {
+    private fun assertZeroByteWriteWorks(
+        factory: BufferFactory,
+        name: String,
+    ) {
         val src = factory.allocate(0)
         src.resetForRead()
         val dst = factory.allocate(0)
@@ -115,7 +121,10 @@ class BufferFactoryTests {
         assertEquals(0, dst.remaining(), "$name: write(emptyBuffer) should leave remaining at 0")
     }
 
-    private fun assertZeroByteReadStringWorks(factory: BufferFactory, name: String) {
+    private fun assertZeroByteReadStringWorks(
+        factory: BufferFactory,
+        name: String,
+    ) {
         val buffer = factory.allocate(0)
         buffer.resetForRead()
         assertEquals("", buffer.readString(0), "$name: readString(0) should return empty string")
