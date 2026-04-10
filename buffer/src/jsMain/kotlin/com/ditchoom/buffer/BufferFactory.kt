@@ -41,6 +41,7 @@ internal actual val sharedBufferFactory: BufferFactory =
             size: Int,
             byteOrder: ByteOrder,
         ): PlatformBuffer {
+            if (size == 0) return JsBuffer(Int8Array(0), byteOrder)
             val sharedArrayBuffer =
                 try {
                     SharedArrayBuffer(size)
