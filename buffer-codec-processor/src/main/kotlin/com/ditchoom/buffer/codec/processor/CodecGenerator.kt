@@ -420,11 +420,12 @@ class CodecGenerator(
             )
             lambdaArgs.add(localVar)
         }
-        val ctxDecodeArgs = if (hasDiscriminatorField) {
-            "buffer, context, ${lambdaArgs.joinToString(", ")}"
-        } else {
-            "buffer, ${lambdaArgs.joinToString(", ")}"
-        }
+        val ctxDecodeArgs =
+            if (hasDiscriminatorField) {
+                "buffer, context, ${lambdaArgs.joinToString(", ")}"
+            } else {
+                "buffer, ${lambdaArgs.joinToString(", ")}"
+            }
         ctxDecodeBody.addStatement("return decode(%L)", ctxDecodeArgs)
 
         val starReturnType = classTypeName.parameterizedBy(payloadFields.map { com.squareup.kotlinpoet.STAR })
