@@ -416,11 +416,15 @@ class SealedDispatchGenerator(
                     info.payloadFields.joinToString(", ") { pf ->
                         "decode${v.subclass.simpleName.asString()}${capitalizeFirst(pf.fieldName)}"
                     }
-                val variantHasDiscriminatorField = dispatchOnInfo != null &&
-                    v.subclass.primaryConstructor?.parameters?.any { param ->
-                        param.type.resolve().declaration.qualifiedName?.asString() ==
-                            dispatchOnInfo.poetClassName.canonicalName
-                    } == true
+                val variantHasDiscriminatorField =
+                    dispatchOnInfo != null &&
+                        v.subclass.primaryConstructor?.parameters?.any { param ->
+                            param.type
+                                .resolve()
+                                .declaration.qualifiedName
+                                ?.asString() ==
+                                dispatchOnInfo.poetClassName.canonicalName
+                        } == true
                 val payloadCtxArg = if (variantHasDiscriminatorField) ", _ctx" else ""
                 decodeBody.addStatement("${v.value} -> $subCodecName.decode(buffer$payloadCtxArg, $lambdaArgs)")
             } else {
