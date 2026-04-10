@@ -226,7 +226,8 @@ class NativeBuffer private constructor(
     override fun writeShort(short: Short): WriteBuffer {
         checkOpen()
         checkWriteBounds(2)
-        set(positionValue, short)
+        val value = if (littleEndian == nativeIsLittleEndian) short else short.reverseBytes()
+        UnsafeMemory.putShort(nativeAddress + positionValue, value)
         positionValue += 2
         return this
     }
@@ -245,7 +246,8 @@ class NativeBuffer private constructor(
     override fun writeInt(int: Int): WriteBuffer {
         checkOpen()
         checkWriteBounds(4)
-        set(positionValue, int)
+        val value = if (littleEndian == nativeIsLittleEndian) int else int.reverseBytes()
+        UnsafeMemory.putInt(nativeAddress + positionValue, value)
         positionValue += 4
         return this
     }
@@ -264,7 +266,8 @@ class NativeBuffer private constructor(
     override fun writeLong(long: Long): WriteBuffer {
         checkOpen()
         checkWriteBounds(8)
-        set(positionValue, long)
+        val value = if (littleEndian == nativeIsLittleEndian) long else long.reverseBytes()
+        UnsafeMemory.putLong(nativeAddress + positionValue, value)
         positionValue += 8
         return this
     }
