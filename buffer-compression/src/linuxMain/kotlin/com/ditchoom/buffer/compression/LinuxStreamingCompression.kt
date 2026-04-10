@@ -574,35 +574,34 @@ private class LinuxZlibStreamingDecompressor(
  * Execute a block with a pointer to the buffer's data.
  * Handles pinning for ByteArrayBuffer to ensure the pointer remains valid.
  */
+// Workaround for Kotlin/Native AutoboxingTransformer crash (LINUX_NATIVE_COMPILER_BUG.md):
+// Using if/else with early returns and explicit local variables instead of a `when` expression
+// avoids the compiler bug where mixed direct returns and inline-lambda-wrapped returns of
+// generic R in a when expression produce an IrGetValueImpl where a type operator is expected.
 @OptIn(ExperimentalForeignApi::class)
 private inline fun <R> withInputPointer(
     buffer: ReadBuffer,
     block: (CPointer<ByteVar>) -> R,
-): R =
-    when {
-        buffer.nativeMemoryAccess != null -> block(buffer.nativeMemoryAccess!!.nativeAddress.toCPointer<ByteVar>()!!)
-        buffer is ByteArrayBuffer -> {
-            val array = buffer.backingArray
-            if (array.isEmpty()) {
-                throw CompressionException("Cannot get pointer to empty buffer")
-            }
-            array.usePinned { pinned ->
-                block(pinned.addressOf(0))
-            }
-        }
-        buffer.managedMemoryAccess != null -> {
-            val array = buffer.managedMemoryAccess!!.backingArray
-            if (array.isEmpty()) {
-                throw CompressionException("Cannot get pointer to empty buffer")
-            }
-            array.usePinned { pinned ->
-                block(pinned.addressOf(0))
-            }
-        }
-        else -> throw CompressionException(
-            "Buffer must have NativeMemoryAccess or ManagedMemoryAccess, got ${buffer::class.simpleName}",
-        )
+): R {
+    if (buffer.nativeMemoryAccess != null) {
+        return block(buffer.nativeMemoryAccess!!.nativeAddress.toCPointer<ByteVar>()!!)
     }
+    if (buffer is ByteArrayBuffer) {
+        val array = buffer.backingArray
+        if (array.isEmpty()) throw CompressionException("Cannot get pointer to empty buffer")
+        val result: R = array.usePinned { pinned -> block(pinned.addressOf(0)) }
+        return result
+    }
+    if (buffer.managedMemoryAccess != null) {
+        val array = buffer.managedMemoryAccess!!.backingArray
+        if (array.isEmpty()) throw CompressionException("Cannot get pointer to empty buffer")
+        val result: R = array.usePinned { pinned -> block(pinned.addressOf(0)) }
+        return result
+    }
+    throw CompressionException(
+        "Buffer must have NativeMemoryAccess or ManagedMemoryAccess, got ${buffer::class.simpleName}",
+    )
+}
 
 // =============================================================================
 // Suspending Variants (wrap sync implementations)
