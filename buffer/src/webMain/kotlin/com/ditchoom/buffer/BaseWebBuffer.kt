@@ -100,6 +100,7 @@ abstract class BaseWebBuffer(
 
     // WriteBuffer implementation using abstract store methods
     override fun writeByte(byte: Byte): WriteBuffer {
+        checkWriteBounds(1)
         storeByte(positionValue, byte)
         positionValue++
         return this
@@ -109,11 +110,13 @@ abstract class BaseWebBuffer(
         index: Int,
         byte: Byte,
     ): WriteBuffer {
+        checkIndexBounds(index, 1)
         storeByte(index, byte)
         return this
     }
 
     override fun writeShort(short: Short): WriteBuffer {
+        checkWriteBounds(2)
         storeShort(positionValue, short)
         positionValue += Short.SIZE_BYTES
         return this
@@ -123,11 +126,13 @@ abstract class BaseWebBuffer(
         index: Int,
         short: Short,
     ): WriteBuffer {
+        checkIndexBounds(index, 2)
         storeShort(index, short)
         return this
     }
 
     override fun writeInt(int: Int): WriteBuffer {
+        checkWriteBounds(4)
         storeInt(positionValue, int)
         positionValue += Int.SIZE_BYTES
         return this
@@ -137,11 +142,13 @@ abstract class BaseWebBuffer(
         index: Int,
         int: Int,
     ): WriteBuffer {
+        checkIndexBounds(index, 4)
         storeInt(index, int)
         return this
     }
 
     override fun writeLong(long: Long): WriteBuffer {
+        checkWriteBounds(8)
         storeLong(positionValue, long)
         positionValue += Long.SIZE_BYTES
         return this
@@ -151,6 +158,7 @@ abstract class BaseWebBuffer(
         index: Int,
         long: Long,
     ): WriteBuffer {
+        checkIndexBounds(index, 8)
         storeLong(index, long)
         return this
     }

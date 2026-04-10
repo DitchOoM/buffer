@@ -63,7 +63,14 @@ abstract class BaseJvmBuffer(
     override fun getDouble(index: Int): Double = byteBuffer.getDouble(index)
 
     override fun writeFloat(float: Float): WriteBuffer {
-        byteBuffer.putFloat(float)
+        try {
+            byteBuffer.putFloat(float)
+        } catch (e: java.nio.BufferOverflowException) {
+            throw BufferOverflowException(
+                "Buffer overflow: cannot write 4 byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
         return this
     }
 
@@ -71,12 +78,25 @@ abstract class BaseJvmBuffer(
         index: Int,
         float: Float,
     ): WriteBuffer {
-        byteBuffer.putFloat(index, float)
+        try {
+            byteBuffer.putFloat(index, float)
+        } catch (e: IndexOutOfBoundsException) {
+            throw BufferOverflowException(
+                "Index out of bounds: cannot write 4 byte(s) at index $index (limit=${limit()})",
+            )
+        }
         return this
     }
 
     override fun writeDouble(double: Double): WriteBuffer {
-        byteBuffer.putDouble(double)
+        try {
+            byteBuffer.putDouble(double)
+        } catch (e: java.nio.BufferOverflowException) {
+            throw BufferOverflowException(
+                "Buffer overflow: cannot write 8 byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
         return this
     }
 
@@ -84,7 +104,13 @@ abstract class BaseJvmBuffer(
         index: Int,
         double: Double,
     ): WriteBuffer {
-        byteBuffer.putDouble(index, double)
+        try {
+            byteBuffer.putDouble(index, double)
+        } catch (e: IndexOutOfBoundsException) {
+            throw BufferOverflowException(
+                "Index out of bounds: cannot write 8 byte(s) at index $index (limit=${limit()})",
+            )
+        }
         return this
     }
 
@@ -118,7 +144,14 @@ abstract class BaseJvmBuffer(
     }
 
     override fun writeByte(byte: Byte): WriteBuffer {
-        byteBuffer.put(byte)
+        try {
+            byteBuffer.put(byte)
+        } catch (e: java.nio.BufferOverflowException) {
+            throw BufferOverflowException(
+                "Buffer overflow: cannot write 1 byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
         return this
     }
 
@@ -126,7 +159,13 @@ abstract class BaseJvmBuffer(
         index: Int,
         byte: Byte,
     ): WriteBuffer {
-        byteBuffer.put(index, byte)
+        try {
+            byteBuffer.put(index, byte)
+        } catch (e: IndexOutOfBoundsException) {
+            throw BufferOverflowException(
+                "Index out of bounds: cannot write 1 byte(s) at index $index (limit=${limit()})",
+            )
+        }
         return this
     }
 
@@ -135,12 +174,26 @@ abstract class BaseJvmBuffer(
         offset: Int,
         length: Int,
     ): WriteBuffer {
-        byteBuffer.put(bytes, offset, length)
+        try {
+            byteBuffer.put(bytes, offset, length)
+        } catch (e: java.nio.BufferOverflowException) {
+            throw BufferOverflowException(
+                "Buffer overflow: cannot write $length byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
         return this
     }
 
     override fun writeShort(short: Short): WriteBuffer {
-        byteBuffer.putShort(short)
+        try {
+            byteBuffer.putShort(short)
+        } catch (e: java.nio.BufferOverflowException) {
+            throw BufferOverflowException(
+                "Buffer overflow: cannot write 2 byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
         return this
     }
 
@@ -148,12 +201,25 @@ abstract class BaseJvmBuffer(
         index: Int,
         short: Short,
     ): WriteBuffer {
-        byteBuffer.putShort(index, short)
+        try {
+            byteBuffer.putShort(index, short)
+        } catch (e: IndexOutOfBoundsException) {
+            throw BufferOverflowException(
+                "Index out of bounds: cannot write 2 byte(s) at index $index (limit=${limit()})",
+            )
+        }
         return this
     }
 
     override fun writeInt(int: Int): WriteBuffer {
-        byteBuffer.putInt(int)
+        try {
+            byteBuffer.putInt(int)
+        } catch (e: java.nio.BufferOverflowException) {
+            throw BufferOverflowException(
+                "Buffer overflow: cannot write 4 byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
         return this
     }
 
@@ -161,12 +227,25 @@ abstract class BaseJvmBuffer(
         index: Int,
         int: Int,
     ): WriteBuffer {
-        byteBuffer.putInt(index, int)
+        try {
+            byteBuffer.putInt(index, int)
+        } catch (e: IndexOutOfBoundsException) {
+            throw BufferOverflowException(
+                "Index out of bounds: cannot write 4 byte(s) at index $index (limit=${limit()})",
+            )
+        }
         return this
     }
 
     override fun writeLong(long: Long): WriteBuffer {
-        byteBuffer.putLong(long)
+        try {
+            byteBuffer.putLong(long)
+        } catch (e: java.nio.BufferOverflowException) {
+            throw BufferOverflowException(
+                "Buffer overflow: cannot write 8 byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
         return this
     }
 
@@ -174,7 +253,13 @@ abstract class BaseJvmBuffer(
         index: Int,
         long: Long,
     ): WriteBuffer {
-        byteBuffer.putLong(index, long)
+        try {
+            byteBuffer.putLong(index, long)
+        } catch (e: IndexOutOfBoundsException) {
+            throw BufferOverflowException(
+                "Index out of bounds: cannot write 8 byte(s) at index $index (limit=${limit()})",
+            )
+        }
         return this
     }
 
@@ -190,10 +275,17 @@ abstract class BaseJvmBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val actual = buffer.unwrapFully()
-        if (actual is BaseJvmBuffer) {
-            byteBuffer.put(actual.byteBuffer)
-        } else {
-            byteBuffer.put(buffer.readByteArray(buffer.remaining()))
+        try {
+            if (actual is BaseJvmBuffer) {
+                byteBuffer.put(actual.byteBuffer)
+            } else {
+                byteBuffer.put(buffer.readByteArray(buffer.remaining()))
+            }
+        } catch (e: java.nio.BufferOverflowException) {
+            throw BufferOverflowException(
+                "Buffer overflow: cannot write ${buffer.remaining()} byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
         }
     }
 

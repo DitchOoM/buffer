@@ -146,6 +146,7 @@ interface WriteBuffer : PositionBuffer {
      * - LITTLE_ENDIAN: `0x1234` → bytes `[0x34, 0x12]`
      */
     fun writeShort(short: Short): WriteBuffer {
+        checkWriteBounds(2)
         val value = short.toInt()
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
             writeByte((value shr 8).toByte())
@@ -162,6 +163,7 @@ interface WriteBuffer : PositionBuffer {
         index: Int,
         short: Short,
     ): WriteBuffer {
+        checkIndexBounds(index, 2)
         val value = short.toInt()
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
             set(index, (value shr 8).toByte())
@@ -200,6 +202,7 @@ interface WriteBuffer : PositionBuffer {
      * Byte order is determined by [byteOrder].
      */
     fun writeInt(int: Int): WriteBuffer {
+        checkWriteBounds(4)
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
             writeShort((int shr 16).toShort())
             writeShort(int.toShort())
@@ -215,6 +218,7 @@ interface WriteBuffer : PositionBuffer {
         index: Int,
         int: Int,
     ): WriteBuffer {
+        checkIndexBounds(index, 4)
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
             set(index, (int shr 16).toShort())
             set(index + 2, int.toShort())
@@ -252,6 +256,7 @@ interface WriteBuffer : PositionBuffer {
      * Byte order is determined by [byteOrder].
      */
     fun writeLong(long: Long): WriteBuffer {
+        checkWriteBounds(8)
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
             writeInt((long shr 32).toInt())
             writeInt(long.toInt())
@@ -267,6 +272,7 @@ interface WriteBuffer : PositionBuffer {
         index: Int,
         long: Long,
     ): WriteBuffer {
+        checkIndexBounds(index, 8)
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
             set(index, (long shr 32).toInt())
             set(index + 4, long.toInt())
@@ -292,6 +298,7 @@ interface WriteBuffer : PositionBuffer {
         byteSize: Int,
     ): WriteBuffer {
         check(byteSize in 1..8) { "byte size out of range" }
+        checkWriteBounds(byteSize)
         val byteSizeRange =
             when (byteOrder) {
                 ByteOrder.LITTLE_ENDIAN -> 0 until byteSize
@@ -559,6 +566,7 @@ interface WriteBuffer : PositionBuffer {
         offset: Int,
         length: Int,
     ): WriteBuffer {
+        checkWriteBounds(length * 2)
         for (i in offset until offset + length) {
             writeShort(shorts[i])
         }
@@ -590,6 +598,7 @@ interface WriteBuffer : PositionBuffer {
         offset: Int,
         length: Int,
     ): WriteBuffer {
+        checkWriteBounds(length * 4)
         for (i in offset until offset + length) {
             writeInt(ints[i])
         }
@@ -619,6 +628,7 @@ interface WriteBuffer : PositionBuffer {
         offset: Int,
         length: Int,
     ): WriteBuffer {
+        checkWriteBounds(length * 8)
         for (i in offset until offset + length) {
             writeLong(longs[i])
         }
@@ -646,6 +656,7 @@ interface WriteBuffer : PositionBuffer {
         offset: Int,
         length: Int,
     ): WriteBuffer {
+        checkWriteBounds(length * 4)
         for (i in offset until offset + length) {
             writeFloat(floats[i])
         }
@@ -673,6 +684,7 @@ interface WriteBuffer : PositionBuffer {
         offset: Int,
         length: Int,
     ): WriteBuffer {
+        checkWriteBounds(length * 8)
         for (i in offset until offset + length) {
             writeDouble(doubles[i])
         }
