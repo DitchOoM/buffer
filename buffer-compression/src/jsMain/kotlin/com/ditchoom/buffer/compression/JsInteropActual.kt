@@ -355,17 +355,22 @@ private fun processSyncPersistent(
             offset += have
             nread += have
         }
-        // For Z_SYNC_FLUSH: all output is guaranteed flushed when input is consumed.
-        // Break immediately to avoid hitting Node.js v24+ Z_STREAM_END assertion
-        // (v24 sets closed_ inside writeSync when inflate reaches Z_STREAM_END).
-        if (availInAfter <= 0) break
-        if (availOutAfter == 0) {
-            availOutBefore = chunkSize
-            offset = 0
-            buffer = js("Buffer").allocUnsafe(chunkSize)
+        // Node.js v24+: inflate may close the C++ handle during writeSync when it
+        // hits Z_STREAM_END. Output from this call is captured above; stop iterating.
+        if (stream._handle == null) break
+        // Output buffer has space → zlib has drained all pending output
+        if (availOutAfter != 0) break
+        // Output buffer full — allocate new one to continue draining
+        availOutBefore = chunkSize
+        offset = 0
+        buffer = js("Buffer").allocUnsafe(chunkSize)
+        if (availInAfter > 0) {
+            inOff += availInBefore - availInAfter
+            availInBefore = availInAfter
+        } else {
+            // All input consumed but output buffer was full — drain with empty input
+            availInBefore = 0
         }
-        inOff += availInBefore - availInAfter
-        availInBefore = availInAfter
     }
     stream._outBuffer = js("Buffer").allocUnsafe(chunkSize)
     stream._outOffset = 0

@@ -495,6 +495,201 @@ class SyncPersistentStreamTests {
     }
 
     // =========================================================================
+    // Regression: output draining when input consumed but output buffer full
+    // =========================================================================
+    // The processSyncPersistent loop must continue draining zlib output even after
+    // all input is consumed (availInAfter == 0) if the output buffer is full
+    // (availOutAfter == 0). Before the fix, the loop broke on availInAfter <= 0
+    // BEFORE checking availOutAfter, silently truncating output.
+
+    /**
+     * High compression ratio: small compressed input decompresses to many times the
+     * 16KB chunkSize. All compressed bytes are consumed in the first writeSync call,
+     * but decompressed output needs multiple buffer rotations to drain.
+     *
+     * Before fix: output truncated to first chunkSize worth of data.
+     * After fix:  full output returned via drain-with-empty-input iterations.
+     */
+    @Test
+    fun highCompressionRatio_outputExceedsChunkSizeAfterInputConsumed() {
+        if (!supportsSyncCompression) return
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Gzip)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Gzip)
+
+        try {
+            // Single repeated byte = extreme compression ratio.
+            // 128KB decompressed from a few hundred compressed bytes.
+            // Decompressor consumes all input in one call, then must drain 8x chunkSize
+            // of output across multiple loop iterations with empty input.
+            val size = 128 * 1024
+            val large = "A".repeat(size)
+            val compressedOutput = BufferFactory.managed().allocate(size + 1024)
+            val input = textToBuffer(large)
+            compressor.compressScoped(input) { compressedOutput.write(this) }
+            compressor.finishScoped { compressedOutput.write(this) }
+            compressedOutput.resetForRead()
+
+            // Compressed size should be tiny relative to decompressed
+            assertTrue(
+                compressedOutput.remaining() < size / 10,
+                "Expected high compression ratio, got ${compressedOutput.remaining()} bytes from $size",
+            )
+
+            val decompressedOutput = BufferFactory.managed().allocate(size + 1024)
+            decompressor.decompressScoped(compressedOutput) { decompressedOutput.write(this) }
+            decompressor.finishScoped { decompressedOutput.write(this) }
+            decompressedOutput.resetForRead()
+
+            assertEquals(
+                size,
+                decompressedOutput.remaining(),
+                "High compression ratio decompression truncated: expected $size bytes, " +
+                    "got ${decompressedOutput.remaining()} (likely broke loop on input consumed)",
+            )
+            assertEquals(large, decompressedOutput.readString(decompressedOutput.remaining(), Charset.UTF8))
+        } finally {
+            compressor.close()
+            decompressor.close()
+        }
+    }
+
+    /**
+     * Same high-ratio scenario but via the streaming flush path (context takeover).
+     * This exercises processSyncPersistent directly rather than the one-shot path.
+     */
+    @Test
+    fun highCompressionRatio_streamingFlushDrainsAllOutput() {
+        if (!supportsStatefulFlush) return
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
+
+        try {
+            // 128KB of repeating pattern — compresses to a few hundred bytes.
+            // On decompression, input is consumed in one writeSync call but
+            // output needs multiple buffer rotations.
+            // 64KB of repeating pattern — compresses to a few hundred bytes.
+            // On decompression, input is consumed in one writeSync call but
+            // output needs multiple buffer rotations.
+            val size = 64 * 1024
+            val large = "ABCD".repeat(size / 4)
+            val compressed = compressAndStripMarker(large, compressor)
+
+            assertTrue(
+                compressed.remaining() < size / 10,
+                "Expected high compression ratio for flush path test",
+            )
+
+            val result = decompressWithFlush(compressed, decompressor)
+            assertEquals(
+                size,
+                result.length,
+                "Flush path: expected $size chars, got ${result.length} (output drain incomplete)",
+            )
+            assertEquals(large, result)
+        } finally {
+            compressor.close()
+            decompressor.close()
+        }
+    }
+
+    /**
+     * Decompressed output is an exact multiple of chunkSize (16384 bytes).
+     * Tests the boundary where availOutAfter == 0 on the last buffer rotation
+     * but there's no more data — the loop must not over-read or hang.
+     */
+    @Test
+    fun exactChunkSizeMultiple_outputDrainStopsCleanly() {
+        if (!supportsStatefulFlush) return
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
+
+        try {
+            // 3 * 16384 = 49152 bytes — exactly fills 3 output buffers
+            val size = 16384 * 3
+            val msg = "X".repeat(size)
+            val compressed = compressAndStripMarker(msg, compressor)
+            val result = decompressWithFlush(compressed, decompressor)
+            assertEquals(size, result.length, "Exact 3x chunkSize boundary")
+            assertEquals(msg, result)
+        } finally {
+            compressor.close()
+            decompressor.close()
+        }
+    }
+
+    /**
+     * Incompressible data: random-ish pattern that barely compresses. The compressed
+     * output is approximately the same size as input, so both input and output buffers
+     * fill during compression. Tests the input-remaining vs output-full interplay.
+     */
+    @Test
+    fun incompressibleData_roundTripsCorrectly() {
+        if (!supportsStatefulFlush) return
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
+
+        try {
+            // Build pseudo-random data using all printable ASCII to defeat compression.
+            // 48KB = 3x chunkSize ensures multiple buffer rotations on both compress and decompress.
+            val size = 48 * 1024
+            val sb = StringBuilder(size)
+            for (i in 0 until size) {
+                sb.append((33 + (i * 7 + i / 256 * 13) % 94).toChar()) // printable ASCII cycle
+            }
+            val msg = sb.toString()
+
+            val compressed = compressAndStripMarker(msg, compressor)
+            val result = decompressWithFlush(compressed, decompressor)
+            assertEquals(size, result.length, "Incompressible data: length mismatch")
+            assertEquals(msg, result)
+        } finally {
+            compressor.close()
+            decompressor.close()
+        }
+    }
+
+    /**
+     * Sequences of alternating high-ratio and incompressible messages with context
+     * takeover. This stresses the output drain logic under varying conditions within
+     * a single stream lifetime.
+     */
+    @Test
+    fun alternatingCompressionRatios_contextTakeover() {
+        if (!supportsStatefulFlush) return
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
+
+        try {
+            val messages = listOf(
+                "A".repeat(32768),                          // high ratio, 2x chunkSize
+                buildString {                                // incompressible, ~20KB
+                    for (i in 0 until 20480) append((33 + (i * 7 + i / 256 * 13) % 94).toChar())
+                },
+                "B".repeat(65536),                          // high ratio, 4x chunkSize
+                "Short message",                            // tiny
+                buildString {                                // incompressible, ~48KB
+                    for (i in 0 until 49152) append((33 + (i * 11 + i / 128 * 17) % 94).toChar())
+                },
+                "C".repeat(16384),                          // high ratio, exactly chunkSize
+            )
+
+            for ((i, msg) in messages.withIndex()) {
+                val compressed = compressAndStripMarker(msg, compressor)
+                val result = decompressWithFlush(compressed, decompressor)
+                assertEquals(
+                    msg.length,
+                    result.length,
+                    "Alternating ratios message $i (len=${msg.length}): got ${result.length}",
+                )
+                assertEquals(msg, result, "Alternating ratios message $i content")
+            }
+        } finally {
+            compressor.close()
+            decompressor.close()
+        }
+    }
+
+    // =========================================================================
     // Error handling: lifecycle transitions must be safe
     // =========================================================================
 
