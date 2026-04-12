@@ -700,4 +700,155 @@ class CompressionTests {
             assertEquals(text.length, decompressed.remaining())
             assertEquals(text, decompressed.readString(decompressed.remaining()))
         }
+
+    // =========================================================================
+    // Output truncation regression: high compression ratio data
+    // =========================================================================
+    // When decompressed output is much larger than compressed input, the internal
+    // zlib loop must continue draining output after all input bytes are consumed.
+    // A broken loop that exits on "input consumed" before checking "output full"
+    // silently truncates the result. These tests catch that on every platform.
+
+    @Test
+    fun syncHighCompressionRatio_gzipRoundTrip() {
+        if (!supportsSyncCompression) return
+
+        // 128KB of repeated bytes — compresses to a few hundred bytes.
+        // Decompressor consumes all input immediately, then must drain
+        // multiple internal buffer rotations of output.
+        val size = 128 * 1024
+        val text = "A".repeat(size)
+        val compressed = compress(text.toReadBuffer(), CompressionAlgorithm.Gzip)
+        assertIs<CompressionResult.Success>(compressed)
+        assertTrue(
+            compressed.buffer.remaining() < size / 50,
+            "Expected very high compression ratio, got ${compressed.buffer.remaining()} from $size bytes",
+        )
+
+        val decompressed = decompress(compressed.buffer, CompressionAlgorithm.Gzip)
+        assertIs<CompressionResult.Success>(decompressed)
+        assertEquals(
+            size,
+            decompressed.buffer.remaining(),
+            "Decompressed output truncated: expected $size, got ${decompressed.buffer.remaining()}",
+        )
+        assertEquals(text, decompressed.buffer.readString(decompressed.buffer.remaining()))
+    }
+
+    @Test
+    fun syncHighCompressionRatio_deflateRoundTrip() {
+        if (!supportsSyncCompression) return
+
+        val size = 128 * 1024
+        val text = "B".repeat(size)
+        val compressed = compress(text.toReadBuffer(), CompressionAlgorithm.Deflate)
+        assertIs<CompressionResult.Success>(compressed)
+
+        val decompressed = decompress(compressed.buffer, CompressionAlgorithm.Deflate)
+        assertIs<CompressionResult.Success>(decompressed)
+        assertEquals(size, decompressed.buffer.remaining(), "Deflate 128KB round-trip truncated")
+        assertEquals(text, decompressed.buffer.readString(decompressed.buffer.remaining()))
+    }
+
+    @Test
+    fun syncHighCompressionRatio_rawRoundTrip() {
+        if (!supportsRawDeflate) return
+
+        val size = 128 * 1024
+        val text = "C".repeat(size)
+        val compressed = compress(text.toReadBuffer(), CompressionAlgorithm.Raw)
+        assertIs<CompressionResult.Success>(compressed)
+
+        val decompressed = decompress(compressed.buffer, CompressionAlgorithm.Raw)
+        assertIs<CompressionResult.Success>(decompressed)
+        assertEquals(size, decompressed.buffer.remaining(), "Raw deflate 128KB round-trip truncated")
+        assertEquals(text, decompressed.buffer.readString(decompressed.buffer.remaining()))
+    }
+
+    @Test
+    fun asyncHighCompressionRatio_gzipRoundTrip() =
+        runTest {
+            val size = 128 * 1024
+            val text = "D".repeat(size)
+            val compressed = compressAsync(text.toReadBuffer(), CompressionAlgorithm.Gzip)
+            assertTrue(
+                compressed.remaining() < size / 50,
+                "Expected very high compression ratio for async test",
+            )
+
+            val decompressed = decompressAsync(compressed, CompressionAlgorithm.Gzip)
+            assertEquals(
+                size,
+                decompressed.remaining(),
+                "Async decompressed output truncated: expected $size, got ${decompressed.remaining()}",
+            )
+            assertEquals(text, decompressed.readString(decompressed.remaining()))
+        }
+
+    @Test
+    fun asyncHighCompressionRatio_withUnderestimatedExpectedSize() =
+        runTest {
+            // Underestimated expectedOutputSize forces the internal GrowableWriteBuffer
+            // to resize multiple times during decompression — tests that growth logic
+            // doesn't lose data.
+            val size = 128 * 1024
+            val text = "E".repeat(size)
+            val compressed = compressAsync(text.toReadBuffer(), CompressionAlgorithm.Gzip)
+
+            val decompressed = decompressAsync(
+                compressed,
+                CompressionAlgorithm.Gzip,
+                expectedOutputSize = 256, // deliberately tiny
+            )
+            assertEquals(size, decompressed.remaining(), "Underestimated size must not truncate")
+            assertEquals(text, decompressed.readString(decompressed.remaining()))
+        }
+
+    @Test
+    fun syncVaryingHighRatioSizes_allAlgorithms() {
+        if (!supportsSyncCompression) return
+
+        // Sizes chosen around internal buffer boundaries (typically 16KB chunks).
+        // Each must round-trip without truncation.
+        val sizes = listOf(16384, 16385, 32768, 49152, 65536, 131072)
+        val algorithms = buildList {
+            add(CompressionAlgorithm.Gzip)
+            add(CompressionAlgorithm.Deflate)
+            if (supportsRawDeflate) add(CompressionAlgorithm.Raw)
+        }
+
+        for (algorithm in algorithms) {
+            for (size in sizes) {
+                val text = "X".repeat(size)
+                val compressed = compress(text.toReadBuffer(), algorithm)
+                assertIs<CompressionResult.Success>(compressed, "$algorithm $size compress failed")
+
+                val decompressed = decompress(compressed.buffer, algorithm)
+                assertIs<CompressionResult.Success>(decompressed, "$algorithm $size decompress failed")
+                assertEquals(
+                    size,
+                    decompressed.buffer.remaining(),
+                    "$algorithm: $size-byte high-ratio round-trip truncated to ${decompressed.buffer.remaining()}",
+                )
+            }
+        }
+    }
+
+    @Test
+    fun asyncIncompressibleData_roundTripsCorrectly() =
+        runTest {
+            // Pseudo-random data that barely compresses. Tests that the output path
+            // handles cases where compressed ≈ uncompressed size.
+            val size = 48 * 1024
+            val sb = StringBuilder(size)
+            for (i in 0 until size) {
+                sb.append((33 + (i * 7 + i / 256 * 13) % 94).toChar())
+            }
+            val text = sb.toString()
+
+            val compressed = compressAsync(text.toReadBuffer(), CompressionAlgorithm.Gzip)
+            val decompressed = decompressAsync(compressed, CompressionAlgorithm.Gzip)
+            assertEquals(size, decompressed.remaining(), "Incompressible async round-trip truncated")
+            assertEquals(text, decompressed.readString(decompressed.remaining()))
+        }
 }
