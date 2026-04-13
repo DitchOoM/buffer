@@ -22,6 +22,7 @@ class ManagedBufferCompressionTests {
 
     @Test
     fun compressWithManagedInputBuffer() {
+        if (!supportsStatefulFlush) return
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         try {
             val input = BufferFactory.managed().allocate(256)
@@ -42,6 +43,7 @@ class ManagedBufferCompressionTests {
 
     @Test
     fun decompressWithManagedInputBuffer() {
+        if (!supportsStatefulFlush) return
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
         try {
@@ -77,6 +79,7 @@ class ManagedBufferCompressionTests {
 
     @Test
     fun roundTripWithAllManagedBuffers() {
+        if (!supportsStatefulFlush) return
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
         try {
@@ -106,6 +109,7 @@ class ManagedBufferCompressionTests {
 
     @Test
     fun roundTripWithDefaultBuffers() {
+        if (!supportsStatefulFlush) return
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
         try {
@@ -139,6 +143,7 @@ class ManagedBufferCompressionTests {
 
     @Test
     fun crossMemoryTypeRoundTrip() {
+        if (!supportsStatefulFlush) return
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
         try {
@@ -178,6 +183,7 @@ class ManagedBufferCompressionTests {
 
     @Test
     fun finishWithManagedBuffers() {
+        if (!supportsSyncCompression) return
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
         try {
