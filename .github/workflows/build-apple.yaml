@@ -37,6 +37,9 @@ jobs:
           key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: konan-macos-
 
+      - name: Accept Android NDK license
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+
       - name: Get version
         id: version
         run: echo "version=$(./gradlew -q nextVersion ${{ inputs.gradle-args }})" >> $GITHUB_OUTPUT
