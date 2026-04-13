@@ -37,11 +37,17 @@ class AndroidDeterministicUnsafeJvmBuffer private constructor(
             try {
                 UnsafeMemory.setMemory(address, size.toLong(), 0)
                 val byteBuffer =
-                    UnsafeMemory.tryWrapAsDirectByteBuffer(address, size)
-                        ?: throw UnsupportedOperationException(
-                            "Cannot create DeterministicUnsafeJvmBuffer: " +
-                                "DirectByteBuffer reflection is not available on this Android version.",
-                        )
+                    try {
+                        NativeBufferHelper.newDirectByteBuffer(address, size)
+                    } catch (e: Throwable) {
+                        // Fall back to reflection for older build environments without the JNI lib
+                        UnsafeMemory.tryWrapAsDirectByteBuffer(address, size)
+                            ?: throw UnsupportedOperationException(
+                                "Cannot create DeterministicUnsafeJvmBuffer: " +
+                                    "neither JNI NewDirectByteBuffer nor DirectByteBuffer reflection is available.",
+                                e,
+                            )
+                    }
                 byteBuffer.order(byteOrder.toJava())
                 return AndroidDeterministicUnsafeJvmBuffer(byteBuffer, address)
             } catch (e: Throwable) {

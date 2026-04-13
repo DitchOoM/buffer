@@ -13,9 +13,18 @@ internal object AndroidBufferHelper {
         }
     }
 
-    fun getDirectBufferAddress(buffer: ByteBuffer): Long =
-        addressField?.getLong(buffer)
+    fun getDirectBufferAddress(buffer: ByteBuffer): Long {
+        // Try JNI GetDirectBufferAddress first (officially supported, no blocklist)
+        try {
+            val addr = NativeBufferHelper.getDirectBufferAddress(buffer)
+            if (addr != 0L) return addr
+        } catch (_: Throwable) {
+            // JNI lib not loaded — fall through to reflection
+        }
+        // Fall back to reflection
+        return addressField?.getLong(buffer)
             ?: throw UnsupportedOperationException(
                 "Cannot access native address on this Android version.",
             )
+    }
 }

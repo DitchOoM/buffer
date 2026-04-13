@@ -6,6 +6,7 @@ import androidx.benchmark.junit4.BenchmarkRule
 import androidx.benchmark.junit4.measureRepeated
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.LargeTest
+import androidx.test.filters.RequiresDevice
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -25,6 +26,7 @@ import org.junit.runner.RunWith
 @OptIn(ExperimentalBlackHoleApi::class)
 @RunWith(AndroidJUnit4::class)
 @LargeTest
+@RequiresDevice
 class AndroidBufferBenchmark {
     @get:Rule
     val benchmarkRule = BenchmarkRule()
