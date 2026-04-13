@@ -345,6 +345,21 @@ android {
         minSdk = 19
         testInstrumentationRunner = "androidx.benchmark.junit4.AndroidBenchmarkRunner"
         testInstrumentationRunnerArguments["androidx.benchmark.output.enable"] = "true"
+        ndk {
+            // Only build for active ABIs — keeps AAR small
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+        }
+        externalNativeBuild {
+            cmake {
+                // No C++ runtime needed — pure C JNI for minimal .so size
+                arguments += "-DANDROID_STL=none"
+            }
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("src/androidMain/jni/CMakeLists.txt")
+        }
     }
     namespace = "com.ditchoom.buffer"
 

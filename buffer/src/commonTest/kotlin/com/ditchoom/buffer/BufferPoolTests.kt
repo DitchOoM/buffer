@@ -2008,4 +2008,50 @@ class BufferPoolTests {
                 }
             }
         }
+
+    // ============================================================================
+    // PooledBuffer as CloseableBuffer
+    // ============================================================================
+
+    @Test
+    fun pooledBufferIsCloseableBuffer() =
+        withPool(defaultBufferSize = 64) { pool ->
+            val buffer = pool.acquire(8)
+            assertIs<CloseableBuffer>(buffer, "PooledBuffer must implement CloseableBuffer")
+            buffer.freeNativeMemory()
+        }
+
+    @Test
+    fun pooledBufferIsFreedTracksFreeState() =
+        withPool(defaultBufferSize = 64) { pool ->
+            val buffer = pool.acquire(8)
+            val closeable = buffer as CloseableBuffer
+            assertFalse(closeable.isFreed, "isFreed must be false before free")
+            buffer.freeNativeMemory()
+            assertTrue(closeable.isFreed, "isFreed must be true after free")
+        }
+
+    @Test
+    fun pooledBufferUseBlockCallsFreeAndReturnsToPool() =
+        withPool(defaultBufferSize = 64) { pool ->
+            val buffer = pool.acquire(8)
+            assertEquals(0, pool.stats().currentPoolSize, "Pool should be empty after acquire")
+
+            buffer.use { buf ->
+                buf.writeInt(42)
+            }
+            // use {} calls freeNativeMemory on CloseableBuffer, which returns to pool
+            assertEquals(1, pool.stats().currentPoolSize, "Buffer should be returned to pool after use {}")
+        }
+
+    @Test
+    fun pooledBufferDoubleFreeIsSafe() =
+        withPool(defaultBufferSize = 64) { pool ->
+            val buffer = pool.acquire(8)
+            buffer.freeNativeMemory()
+            buffer.freeNativeMemory() // second call must not throw or double-return
+            assertTrue((buffer as CloseableBuffer).isFreed)
+            // Pool should have exactly 1 buffer (not 2)
+            assertEquals(1, pool.stats().currentPoolSize)
+        }
 }
