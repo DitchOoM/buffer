@@ -795,11 +795,12 @@ class CompressionTests {
             val text = "E".repeat(size)
             val compressed = compressAsync(text.toReadBuffer(), CompressionAlgorithm.Gzip)
 
-            val decompressed = decompressAsync(
-                compressed,
-                CompressionAlgorithm.Gzip,
-                expectedOutputSize = 256, // deliberately tiny
-            )
+            val decompressed =
+                decompressAsync(
+                    compressed,
+                    CompressionAlgorithm.Gzip,
+                    expectedOutputSize = 256, // deliberately tiny
+                )
             assertEquals(size, decompressed.remaining(), "Underestimated size must not truncate")
             assertEquals(text, decompressed.readString(decompressed.remaining()))
         }
@@ -811,11 +812,12 @@ class CompressionTests {
         // Sizes chosen around internal buffer boundaries (typically 16KB chunks).
         // Each must round-trip without truncation.
         val sizes = listOf(16384, 16385, 32768, 49152, 65536, 131072)
-        val algorithms = buildList {
-            add(CompressionAlgorithm.Gzip)
-            add(CompressionAlgorithm.Deflate)
-            if (supportsRawDeflate) add(CompressionAlgorithm.Raw)
-        }
+        val algorithms =
+            buildList {
+                add(CompressionAlgorithm.Gzip)
+                add(CompressionAlgorithm.Deflate)
+                if (supportsRawDeflate) add(CompressionAlgorithm.Raw)
+            }
 
         for (algorithm in algorithms) {
             for (size in sizes) {

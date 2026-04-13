@@ -660,18 +660,21 @@ class SyncPersistentStreamTests {
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
 
         try {
-            val messages = listOf(
-                "A".repeat(32768),                          // high ratio, 2x chunkSize
-                buildString {                                // incompressible, ~20KB
-                    for (i in 0 until 20480) append((33 + (i * 7 + i / 256 * 13) % 94).toChar())
-                },
-                "B".repeat(65536),                          // high ratio, 4x chunkSize
-                "Short message",                            // tiny
-                buildString {                                // incompressible, ~48KB
-                    for (i in 0 until 49152) append((33 + (i * 11 + i / 128 * 17) % 94).toChar())
-                },
-                "C".repeat(16384),                          // high ratio, exactly chunkSize
-            )
+            val messages =
+                listOf(
+                    "A".repeat(32768), // high ratio, 2x chunkSize
+                    buildString {
+                        // incompressible, ~20KB
+                        for (i in 0 until 20480) append((33 + (i * 7 + i / 256 * 13) % 94).toChar())
+                    },
+                    "B".repeat(65536), // high ratio, 4x chunkSize
+                    "Short message", // tiny
+                    buildString {
+                        // incompressible, ~48KB
+                        for (i in 0 until 49152) append((33 + (i * 11 + i / 128 * 17) % 94).toChar())
+                    },
+                    "C".repeat(16384), // high ratio, exactly chunkSize
+                )
 
             for ((i, msg) in messages.withIndex()) {
                 val compressed = compressAndStripMarker(msg, compressor)
