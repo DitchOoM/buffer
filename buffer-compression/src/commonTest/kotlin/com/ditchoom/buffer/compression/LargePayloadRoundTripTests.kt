@@ -26,38 +26,68 @@ class LargePayloadRoundTripTests {
     // =========================================================================
 
     @Test
-    fun roundTrip1KB() = assertRoundTrip(1024)
+    fun roundTrip1KB() {
+        if (!supportsStatefulFlush) return
+        assertRoundTrip(1024)
+    }
 
     @Test
-    fun roundTrip4KB() = assertRoundTrip(4096)
+    fun roundTrip4KB() {
+        if (!supportsStatefulFlush) return
+        assertRoundTrip(4096)
+    }
 
     @Test
-    fun roundTrip8KB() = assertRoundTrip(8192)
+    fun roundTrip8KB() {
+        if (!supportsStatefulFlush) return
+        assertRoundTrip(8192)
+    }
 
     @Test
-    fun roundTrip16KB() = assertRoundTrip(16384)
+    fun roundTrip16KB() {
+        if (!supportsStatefulFlush) return
+        assertRoundTrip(16384)
+    }
 
     @Test
-    fun roundTrip32KB() = assertRoundTrip(32768)
+    fun roundTrip32KB() {
+        if (!supportsStatefulFlush) return
+        assertRoundTrip(32768)
+    }
 
     @Test
-    fun roundTrip64KB() = assertRoundTrip(65536)
+    fun roundTrip64KB() {
+        if (!supportsStatefulFlush) return
+        assertRoundTrip(65536)
+    }
 
     @Test
-    fun roundTrip128KB() = assertRoundTrip(131072)
+    fun roundTrip128KB() {
+        if (!supportsStatefulFlush) return
+        assertRoundTrip(131072)
+    }
 
     // =========================================================================
     // WebSocket-style round-trip at large sizes
     // =========================================================================
 
     @Test
-    fun websocketRoundTrip32KB() = assertWebSocketRoundTrip(32768)
+    fun websocketRoundTrip32KB() {
+        if (!supportsStatefulFlush) return
+        assertWebSocketRoundTrip(32768)
+    }
 
     @Test
-    fun websocketRoundTrip64KB() = assertWebSocketRoundTrip(65536)
+    fun websocketRoundTrip64KB() {
+        if (!supportsStatefulFlush) return
+        assertWebSocketRoundTrip(65536)
+    }
 
     @Test
-    fun websocketRoundTrip128KB() = assertWebSocketRoundTrip(131072)
+    fun websocketRoundTrip128KB() {
+        if (!supportsStatefulFlush) return
+        assertWebSocketRoundTrip(131072)
+    }
 
     // =========================================================================
     // Sequential messages (simulates Autobahn 1000-message echo)
@@ -65,6 +95,7 @@ class LargePayloadRoundTripTests {
 
     @Test
     fun sequential100Messages32KB() {
+        if (!supportsStatefulFlush) return
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
         val messageSize = 32768
@@ -91,10 +122,16 @@ class LargePayloadRoundTripTests {
     // =========================================================================
 
     @Test
-    fun finishRoundTrip32KB() = assertFinishRoundTrip(32768)
+    fun finishRoundTrip32KB() {
+        if (!supportsSyncCompression) return
+        assertFinishRoundTrip(32768)
+    }
 
     @Test
-    fun finishRoundTrip64KB() = assertFinishRoundTrip(65536)
+    fun finishRoundTrip64KB() {
+        if (!supportsSyncCompression) return
+        assertFinishRoundTrip(65536)
+    }
 
     // =========================================================================
     // Helpers
