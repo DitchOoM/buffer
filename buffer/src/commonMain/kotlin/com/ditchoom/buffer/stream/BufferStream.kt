@@ -234,10 +234,18 @@ interface StreamProcessor {
     fun release()
 
     companion object {
+        /**
+         * Creates a StreamProcessor backed by [factory].
+         *
+         * Pass a [BufferPool] as [factory] to get pool-recycled chunk allocation
+         * (recommended for high-throughput workloads); any [BufferFactory] works,
+         * but non-pool factories do a fresh allocation on every internal buffer
+         * request, so sustained loads will churn more memory.
+         */
         fun create(
-            pool: BufferPool,
+            factory: BufferFactory,
             byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-        ): StreamProcessor = DefaultStreamProcessor(pool, byteOrder)
+        ): StreamProcessor = DefaultStreamProcessor(factory, byteOrder)
     }
 }
 
@@ -250,7 +258,7 @@ interface StreamProcessor {
  * of 16,384). Large appends bypass coalescing entirely (zero-copy).
  */
 internal class DefaultStreamProcessor(
-    private val pool: BufferPool,
+    private val factory: BufferFactory,
     private val byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
     private val coalesceThreshold: Int = DEFAULT_COALESCE_THRESHOLD,
     private val coalesceMinChunks: Int = DEFAULT_COALESCE_MIN_CHUNKS,
@@ -328,7 +336,7 @@ internal class DefaultStreamProcessor(
             var tail = coalesceTail
             if (tail == null || (tail.capacity - coalesceWritten) < size) {
                 sealCoalesceBuffer()
-                tail = pool.acquire(maxOf(coalesceThreshold, size))
+                tail = factory.allocate(maxOf(coalesceThreshold, size))
                 coalesceTail = tail
                 coalesceWritten = 0
             }
@@ -656,8 +664,9 @@ internal class DefaultStreamProcessor(
 
         val chunk = chunks.firstOrNull()
         if (chunk == null || size == 0) {
-            // Empty read — use a managed allocation instead of pool.acquire to avoid
-            // leaking a pooled buffer that the caller will never return to the pool.
+            // Empty read — use a managed allocation instead of factory.allocate to avoid
+            // leaking a pooled buffer (when factory is a pool) that the caller will never
+            // return to the pool.
             val empty = BufferFactory.managed().allocate(0)
             empty.resetForRead()
             return empty
@@ -685,7 +694,7 @@ internal class DefaultStreamProcessor(
         }
 
         // Data spans multiple chunks, need to copy
-        val merged = pool.acquire(size)
+        val merged = factory.allocate(size)
         var remaining = size
         while (remaining > 0 && chunks.isNotEmpty()) {
             val currentChunk = chunks.first()
@@ -716,7 +725,7 @@ internal class DefaultStreamProcessor(
 
         val chunk = chunks.firstOrNull()
         if (chunk == null || size == 0) {
-            val empty = pool.acquire(0)
+            val empty = factory.allocate(0)
             empty.resetForRead()
             return try {
                 block(empty)
@@ -746,7 +755,7 @@ internal class DefaultStreamProcessor(
         }
 
         // Multi-chunk: copy into pooled buffer, pass to block, then free
-        val merged = pool.acquire(size)
+        val merged = factory.allocate(size)
         var remaining = size
         while (remaining > 0 && chunks.isNotEmpty()) {
             val currentChunk = chunks.first()
