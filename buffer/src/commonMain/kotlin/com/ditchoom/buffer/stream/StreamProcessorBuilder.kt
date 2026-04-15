@@ -1,7 +1,7 @@
 package com.ditchoom.buffer.stream
 
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
-import com.ditchoom.buffer.pool.BufferPool
 
 /**
  * Builder for creating StreamProcessors with composable transforms.
@@ -28,9 +28,10 @@ import com.ditchoom.buffer.pool.BufferPool
  * ```
  */
 class StreamProcessorBuilder(
-    val pool: BufferPool,
+    val factory: BufferFactory,
     val byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
 ) {
+
     private val transforms = mutableListOf<TransformSpec>()
 
     /**
@@ -50,7 +51,7 @@ class StreamProcessorBuilder(
      * @throws UnsupportedOperationException if any transform is async-only
      */
     fun build(): StreamProcessor {
-        var processor = StreamProcessor.create(pool, byteOrder)
+        var processor = StreamProcessor.create(factory, byteOrder)
 
         // Apply transforms in order (first added = outermost)
         for (spec in transforms) {
@@ -66,7 +67,7 @@ class StreamProcessorBuilder(
      */
     fun buildSuspending(): SuspendingStreamProcessor {
         var processor: SuspendingStreamProcessor =
-            SyncToSuspendingProcessor(StreamProcessor.create(pool, byteOrder))
+            SyncToSuspendingProcessor(StreamProcessor.create(factory, byteOrder))
 
         // Apply transforms in order (first added = outermost)
         for (spec in transforms) {
@@ -105,8 +106,12 @@ class StreamProcessorBuilder(
 
 /**
  * Creates a StreamProcessorBuilder for composing transforms.
+ *
+ * [factory] is used for internal chunk allocations. Pass a [BufferPool] as
+ * [factory] to get pool-recycled chunks (recommended for sustained workloads);
+ * any [BufferFactory] works.
  */
 fun StreamProcessor.Companion.builder(
-    pool: BufferPool,
+    factory: BufferFactory,
     byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-): StreamProcessorBuilder = StreamProcessorBuilder(pool, byteOrder)
+): StreamProcessorBuilder = StreamProcessorBuilder(factory, byteOrder)
