@@ -26,7 +26,7 @@ import com.ditchoom.buffer.stream.TransformSpec
  */
 fun StreamProcessorBuilder.decompress(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Gzip,
-    bufferFactory: BufferFactory = pool,
+    bufferFactory: BufferFactory = factory,
 ): StreamProcessorBuilder = addTransform(DecompressionSpec(algorithm, bufferFactory))
 
 /**
