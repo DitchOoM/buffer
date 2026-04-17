@@ -45,7 +45,12 @@ internal fun readExpression(
                 "run { val _len = $lenExpr; buffer.readString(_len) }"
             }
         }
-        is FieldReadStrategy.RemainingBytesStringField -> "buffer.readString(buffer.remaining())"
+        is FieldReadStrategy.RemainingBytesStringField ->
+            if (strategy.trailingBytes > 0) {
+                "buffer.readString(buffer.remaining() - ${strategy.trailingBytes})"
+            } else {
+                "buffer.readString(buffer.remaining())"
+            }
         is FieldReadStrategy.LengthFromStringField -> "buffer.readString(${strategy.field}.toInt())"
         is FieldReadStrategy.ValueClassField -> {
             val inner = readExpression(strategy.innerStrategy, withContext, byteOrderOverride)
@@ -55,6 +60,7 @@ internal fun readExpression(
             val ctxArg = if (withContext) ", context" else ""
             "${strategy.codecName}.decode(buffer$ctxArg)"
         }
+        is FieldReadStrategy.NestedMessageWithLengthField -> readNestedWithLengthExpression(strategy, withContext)
         is FieldReadStrategy.UseCodecField -> readUseCodecExpression(strategy, withContext)
         is FieldReadStrategy.CollectionField -> readCollectionExpression(strategy, withContext)
         is FieldReadStrategy.DiscriminatorField -> {
@@ -124,6 +130,8 @@ internal fun writeExpression(
             val ctxArg = if (withContext) ", context" else ""
             "${strategy.codecName}.encode(buffer, $valueExpr$ctxArg)"
         }
+        is FieldReadStrategy.NestedMessageWithLengthField ->
+            writeNestedWithLengthExpression(strategy, valueExpr, withContext)
         is FieldReadStrategy.UseCodecField -> writeUseCodecExpression(strategy, valueExpr, withContext)
         is FieldReadStrategy.CollectionField -> writeCollectionExpression(strategy, valueExpr, withContext)
         is FieldReadStrategy.DiscriminatorField -> {
@@ -149,8 +157,10 @@ private fun readCollectionExpression(
     return when (val lk = strategy.lengthKind) {
         is LengthKind.FromField ->
             "buildList { repeat(${lk.field}.toInt()) { add($codecName.decode(buffer$ctxArg)) } }"
-        is LengthKind.Remaining ->
-            "buildList { while (buffer.remaining() > 0) { add($codecName.decode(buffer$ctxArg)) } }"
+        is LengthKind.Remaining -> {
+            val threshold = lk.trailingBytes
+            "buildList { while (buffer.remaining() > $threshold) { add($codecName.decode(buffer$ctxArg)) } }"
+        }
         is LengthKind.Prefixed -> {
             val cfg = prefixConfig(lk.prefix)
             "run { val _n = ${cfg.readExpr}; buildList { repeat(_n) { add($codecName.decode(buffer$ctxArg)) } } }"
@@ -189,10 +199,54 @@ private fun readUseCodecExpression(
             val lenExpr = prefixConfig(lk.prefix).readExpr
             "run { val _len = $lenExpr; $codec.decode(buffer.readBytes(_len)$ctxArg) }"
         }
-        is LengthKind.Remaining ->
-            "$codec.decode(buffer.readBytes(buffer.remaining())$ctxArg)"
+        is LengthKind.Remaining -> {
+            val bound = if (lk.trailingBytes > 0) "buffer.remaining() - ${lk.trailingBytes}" else "buffer.remaining()"
+            "$codec.decode(buffer.readBytes($bound)$ctxArg)"
+        }
         is LengthKind.FromField ->
             "$codec.decode(buffer.readBytes(${lk.field}.toInt())$ctxArg)"
+    }
+}
+
+private fun readNestedWithLengthExpression(
+    strategy: FieldReadStrategy.NestedMessageWithLengthField,
+    withContext: Boolean = false,
+): String {
+    val codec = strategy.codecName
+    val ctxArg = if (withContext) ", context" else ""
+    return when (val lk = strategy.lengthKind) {
+        is LengthKind.Prefixed -> {
+            val lenExpr = prefixConfig(lk.prefix).readExpr
+            "run { val _len = $lenExpr; $codec.decode(buffer.readBytes(_len)$ctxArg) }"
+        }
+        is LengthKind.Remaining -> {
+            val bound = if (lk.trailingBytes > 0) "buffer.remaining() - ${lk.trailingBytes}" else "buffer.remaining()"
+            "$codec.decode(buffer.readBytes($bound)$ctxArg)"
+        }
+        is LengthKind.FromField ->
+            "$codec.decode(buffer.readBytes(${lk.field}.toInt())$ctxArg)"
+    }
+}
+
+private fun writeNestedWithLengthExpression(
+    strategy: FieldReadStrategy.NestedMessageWithLengthField,
+    valueExpr: String,
+    withContext: Boolean = false,
+): String {
+    val codec = strategy.codecName
+    val ctxArg = if (withContext) ", context" else ""
+    return when (val lk = strategy.lengthKind) {
+        is LengthKind.Prefixed -> {
+            val cfg = prefixConfig(lk.prefix)
+            "run { val _pos = buffer.position(); ${cfg.writePlaceholder}; " +
+                "$codec.encode(buffer, $valueExpr$ctxArg); " +
+                "val _end = buffer.position(); val _len = _end - _pos - ${cfg.byteCount}; " +
+                "buffer.position(_pos); ${cfg.writeExpr("_len")}; buffer.position(_end) }"
+        }
+        is LengthKind.Remaining,
+        is LengthKind.FromField,
+        ->
+            "$codec.encode(buffer, $valueExpr$ctxArg)"
     }
 }
 

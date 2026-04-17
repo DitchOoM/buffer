@@ -5,6 +5,7 @@ import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.processing.SymbolProcessor
+import com.google.devtools.ksp.symbol.ClassKind
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSType
@@ -37,6 +38,7 @@ class ProtocolMessageProcessor(
 
             when {
                 Modifier.SEALED in symbol.modifiers -> processSealedInterface(symbol, resolver)
+                symbol.classKind == ClassKind.OBJECT -> processObject(symbol)
                 else -> {
                     val constructor = symbol.primaryConstructor
                     if (constructor == null) {
@@ -49,7 +51,8 @@ class ProtocolMessageProcessor(
                     } else if (constructor.parameters.isEmpty()) {
                         logger.error(
                             "@ProtocolMessage class '${symbol.simpleName.asString()}' must have at least one val parameter " +
-                                "in its primary constructor.",
+                                "in its primary constructor. For a type-only message (no wire bytes), declare it as " +
+                                "'object ${symbol.simpleName.asString()}' or 'data object ${symbol.simpleName.asString()}' instead.",
                             symbol,
                         )
                     } else {
@@ -80,6 +83,37 @@ class ProtocolMessageProcessor(
         if (hasPayload) {
             PayloadContextGenerator(codeGenerator, logger).generate(classDeclaration, fields)
         }
+    }
+
+    /**
+     * Generates a codec for a `@ProtocolMessage` `object` (or `data object`).
+     * Wire format is zero bytes — decode returns the singleton, encode writes nothing,
+     * sizeOf is 0. Type-only sealed variants (e.g., protocol commands with no payload)
+     * are the primary use case.
+     */
+    private fun processObject(classDeclaration: KSClassDeclaration) {
+        if (classDeclaration.typeParameters.isNotEmpty()) {
+            logger.error(
+                "@ProtocolMessage object '${classDeclaration.simpleName.asString()}' cannot have type parameters. " +
+                    "If you need @Payload, use a data class instead.",
+                classDeclaration,
+            )
+            return
+        }
+        val dispatchOnAnnotation =
+            classDeclaration.annotations.find {
+                it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.DispatchOn"
+            }
+        if (dispatchOnAnnotation != null) {
+            logger.error(
+                "@DispatchOn is not valid on an object. @DispatchOn annotates a sealed interface that holds " +
+                    "variants distinguished by a discriminator.",
+                classDeclaration,
+            )
+            return
+        }
+        val generator = CodecGenerator(codeGenerator, logger)
+        generator.generate(classDeclaration, fields = emptyList(), batches = emptyList(), hasPayload = false)
     }
 
     private fun processSealedInterface(
@@ -119,29 +153,40 @@ class ProtocolMessageProcessor(
             if (qualifiedName in processed) continue
             processed.add(qualifiedName)
 
-            val constructor = subclass.primaryConstructor
-            if (constructor == null) {
-                logger.error(
-                    "Sealed variant '${subclass.simpleName.asString()}' of " +
-                        "'${classDeclaration.simpleName.asString()}' must have a primary constructor " +
-                        "with val parameters.",
-                    subclass,
-                )
-                continue
-            }
-            if (constructor.parameters.isEmpty()) {
-                logger.error(
-                    "Sealed variant '${subclass.simpleName.asString()}' of " +
-                        "'${classDeclaration.simpleName.asString()}' must have at least one val parameter " +
-                        "in its primary constructor.",
-                    subclass,
-                )
-                continue
+            val isObjectVariant = subclass.classKind == ClassKind.OBJECT
+            if (!isObjectVariant) {
+                val constructor = subclass.primaryConstructor
+                if (constructor == null) {
+                    logger.error(
+                        "Sealed variant '${subclass.simpleName.asString()}' of " +
+                            "'${classDeclaration.simpleName.asString()}' must have a primary constructor " +
+                            "with val parameters.",
+                        subclass,
+                    )
+                    continue
+                }
+                if (constructor.parameters.isEmpty()) {
+                    logger.error(
+                        "Sealed variant '${subclass.simpleName.asString()}' of " +
+                            "'${classDeclaration.simpleName.asString()}' must have at least one val parameter " +
+                            "in its primary constructor. For a type-only variant (no payload), " +
+                            "declare it as 'object ${subclass.simpleName.asString()}' or " +
+                            "'data object ${subclass.simpleName.asString()}'.",
+                        subclass,
+                    )
+                    continue
+                }
             }
 
-            // Analyze fields to detect @Payload and discriminator fields
-            val fieldAnalyzer = FieldAnalyzer(logger, customProviders)
-            val fields = fieldAnalyzer.analyze(subclass, dispatchOnInfo, sealedWireOrder) ?: continue
+            // Analyze fields to detect @Payload and discriminator fields.
+            // Object variants skip analysis (no constructor params) and produce an empty field list.
+            val fields =
+                if (isObjectVariant) {
+                    emptyList()
+                } else {
+                    val fieldAnalyzer = FieldAnalyzer(logger, customProviders)
+                    fieldAnalyzer.analyze(subclass, dispatchOnInfo, sealedWireOrder) ?: continue
+                }
 
             if (fields.any { it.strategy is FieldReadStrategy.DiscriminatorField }) {
                 anyVariantHasDiscriminatorField = true
