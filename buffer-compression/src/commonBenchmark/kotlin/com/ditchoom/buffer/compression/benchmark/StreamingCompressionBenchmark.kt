@@ -4,13 +4,16 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.StreamingDecompressor
+import com.ditchoom.buffer.compression.compressScoped
 import com.ditchoom.buffer.compression.create
+import com.ditchoom.buffer.compression.decompressScoped
+import com.ditchoom.buffer.compression.finishScoped
+import com.ditchoom.buffer.compression.flushScoped
+import com.ditchoom.buffer.managed
 import kotlinx.benchmark.Benchmark
 import kotlinx.benchmark.BenchmarkMode
 import kotlinx.benchmark.BenchmarkTimeUnit
@@ -55,9 +58,8 @@ open class StreamingCompressionBenchmark {
 
     @Setup
     fun setup() {
-        val allocator = BufferAllocator.Direct
-        compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, allocator)
-        decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, allocator)
+        compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, BufferFactory.Default)
+        decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferFactory.Default)
 
         // Generate compressible text data (simulates WebSocket text messages)
         val text16B = "Hello, WebSocket!" // ~16 bytes
@@ -90,8 +92,8 @@ open class StreamingCompressionBenchmark {
     fun compressAndFlush16B(): Int {
         input16B.position(0)
         var totalBytes = 0
-        compressor.compress(input16B) { totalBytes += it.remaining() }
-        compressor.flush { totalBytes += it.remaining() }
+        compressor.compressScoped(input16B) { totalBytes += remaining() }
+        compressor.flushScoped { totalBytes += remaining() }
         compressor.reset()
         return totalBytes
     }
@@ -100,8 +102,8 @@ open class StreamingCompressionBenchmark {
     fun compressAndFlush4KB(): Int {
         input4KB.position(0)
         var totalBytes = 0
-        compressor.compress(input4KB) { totalBytes += it.remaining() }
-        compressor.flush { totalBytes += it.remaining() }
+        compressor.compressScoped(input4KB) { totalBytes += remaining() }
+        compressor.flushScoped { totalBytes += remaining() }
         compressor.reset()
         return totalBytes
     }
@@ -110,8 +112,8 @@ open class StreamingCompressionBenchmark {
     fun compressAndFlush64KB(): Int {
         input64KB.position(0)
         var totalBytes = 0
-        compressor.compress(input64KB) { totalBytes += it.remaining() }
-        compressor.flush { totalBytes += it.remaining() }
+        compressor.compressScoped(input64KB) { totalBytes += remaining() }
+        compressor.flushScoped { totalBytes += remaining() }
         compressor.reset()
         return totalBytes
     }
@@ -122,8 +124,8 @@ open class StreamingCompressionBenchmark {
     fun decompressAndFinish16B(): Int {
         compressed16B.position(0)
         var totalBytes = 0
-        decompressor.decompress(compressed16B) { totalBytes += it.remaining() }
-        decompressor.finish { totalBytes += it.remaining() }
+        decompressor.decompressScoped(compressed16B) { totalBytes += remaining() }
+        decompressor.finishScoped { totalBytes += remaining() }
         decompressor.reset()
         return totalBytes
     }
@@ -132,8 +134,8 @@ open class StreamingCompressionBenchmark {
     fun decompressAndFinish4KB(): Int {
         compressed4KB.position(0)
         var totalBytes = 0
-        decompressor.decompress(compressed4KB) { totalBytes += it.remaining() }
-        decompressor.finish { totalBytes += it.remaining() }
+        decompressor.decompressScoped(compressed4KB) { totalBytes += remaining() }
+        decompressor.finishScoped { totalBytes += remaining() }
         decompressor.reset()
         return totalBytes
     }
@@ -142,8 +144,8 @@ open class StreamingCompressionBenchmark {
     fun decompressAndFinish64KB(): Int {
         compressed64KB.position(0)
         var totalBytes = 0
-        decompressor.decompress(compressed64KB) { totalBytes += it.remaining() }
-        decompressor.finish { totalBytes += it.remaining() }
+        decompressor.decompressScoped(compressed64KB) { totalBytes += remaining() }
+        decompressor.finishScoped { totalBytes += remaining() }
         decompressor.reset()
         return totalBytes
     }
@@ -154,26 +156,24 @@ open class StreamingCompressionBenchmark {
     fun roundTripWithStringDecode4KB(): Int {
         // Compress
         input4KB.position(0)
-        val compressedChunks = mutableListOf<ReadBuffer>()
-        compressor.compress(input4KB) { compressedChunks.add(it) }
-        compressor.flush { compressedChunks.add(it) }
+        val compressedOutput = BufferFactory.managed().allocate(4 * 1024 + 256)
+        compressor.compressScoped(input4KB) { compressedOutput.write(this) }
+        compressor.flushScoped { compressedOutput.write(this) }
         compressor.reset()
+        compressedOutput.resetForRead()
 
-        // Decompress
-        val decompressedChunks = mutableListOf<ReadBuffer>()
-        for (chunk in compressedChunks) {
-            chunk.position(0)
-            decompressor.decompress(chunk) { decompressedChunks.add(it) }
+        // Decompress + String decode
+        var totalChars = 0
+        decompressor.decompressScoped(compressedOutput) {
+            position(0)
+            totalChars += readString(remaining(), Charset.UTF8).length
         }
-        decompressor.finish { decompressedChunks.add(it) }
+        decompressor.finishScoped {
+            position(0)
+            totalChars += readString(remaining(), Charset.UTF8).length
+        }
         decompressor.reset()
 
-        // String decode
-        var totalChars = 0
-        for (chunk in decompressedChunks) {
-            chunk.position(0)
-            totalChars += chunk.readString(chunk.remaining(), Charset.UTF8).length
-        }
         return totalChars
     }
 
@@ -181,26 +181,24 @@ open class StreamingCompressionBenchmark {
     fun roundTripWithStringDecode64KB(): Int {
         // Compress
         input64KB.position(0)
-        val compressedChunks = mutableListOf<ReadBuffer>()
-        compressor.compress(input64KB) { compressedChunks.add(it) }
-        compressor.flush { compressedChunks.add(it) }
+        val compressedOutput = BufferFactory.managed().allocate(64 * 1024 + 256)
+        compressor.compressScoped(input64KB) { compressedOutput.write(this) }
+        compressor.flushScoped { compressedOutput.write(this) }
         compressor.reset()
+        compressedOutput.resetForRead()
 
-        // Decompress
-        val decompressedChunks = mutableListOf<ReadBuffer>()
-        for (chunk in compressedChunks) {
-            chunk.position(0)
-            decompressor.decompress(chunk) { decompressedChunks.add(it) }
+        // Decompress + String decode
+        var totalChars = 0
+        decompressor.decompressScoped(compressedOutput) {
+            position(0)
+            totalChars += readString(remaining(), Charset.UTF8).length
         }
-        decompressor.finish { decompressedChunks.add(it) }
+        decompressor.finishScoped {
+            position(0)
+            totalChars += readString(remaining(), Charset.UTF8).length
+        }
         decompressor.reset()
 
-        // String decode
-        var totalChars = 0
-        for (chunk in decompressedChunks) {
-            chunk.position(0)
-            totalChars += chunk.readString(chunk.remaining(), Charset.UTF8).length
-        }
         return totalChars
     }
 
@@ -278,34 +276,20 @@ open class StreamingCompressionBenchmark {
 
     private fun compressForBenchmark(input: PlatformBuffer): PlatformBuffer {
         input.position(0)
-        val chunks = mutableListOf<ReadBuffer>()
-        compressor.compress(input) { chunks.add(it) }
-        compressor.flush { chunks.add(it) }
+        val result = BufferFactory.managed().allocate(input.capacity + 256)
+        compressor.compressScoped(input) { result.write(this) }
+        compressor.flushScoped { result.write(this) }
         compressor.reset()
-
-        val totalSize = chunks.sumOf { it.remaining() }
-        val result = BufferFactory.Default.allocate(totalSize)
-        for (chunk in chunks) {
-            chunk.position(0)
-            result.write(chunk)
-        }
         result.resetForRead()
         return result
     }
 
     private fun decompressForBenchmark(compressed: PlatformBuffer): PlatformBuffer {
         compressed.position(0)
-        val chunks = mutableListOf<ReadBuffer>()
-        decompressor.decompress(compressed) { chunks.add(it) }
-        decompressor.finish { chunks.add(it) }
+        val result = BufferFactory.managed().allocate(compressed.capacity * 10)
+        decompressor.decompressScoped(compressed) { result.write(this) }
+        decompressor.finishScoped { result.write(this) }
         decompressor.reset()
-
-        val totalSize = chunks.sumOf { it.remaining() }
-        val result = BufferFactory.Default.allocate(totalSize)
-        for (chunk in chunks) {
-            chunk.position(0)
-            result.write(chunk)
-        }
         result.resetForRead()
         return result
     }

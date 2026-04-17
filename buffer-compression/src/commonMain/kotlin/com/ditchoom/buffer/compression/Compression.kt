@@ -169,8 +169,8 @@ suspend fun compressAsync(
     val compressor = SuspendingStreamingCompressor.create(algorithm, level)
     return try {
         val output = mutableListOf<ReadBuffer>()
-        output += compressor.compress(buffer)
-        output += compressor.finish()
+        output += compressor.compressUnsafe(buffer)
+        output += compressor.finishUnsafe()
         combineBuffers(output, factory)
     } finally {
         compressor.close()
@@ -206,8 +206,8 @@ suspend fun decompressAsync(
         } else {
             // Default path: collect chunks then combine
             val output = mutableListOf<ReadBuffer>()
-            output += decompressor.decompress(buffer)
-            output += decompressor.finish()
+            output += decompressor.decompressUnsafe(buffer)
+            output += decompressor.finishUnsafe()
             combineBuffers(output, factory)
         }
     } finally {
@@ -229,14 +229,14 @@ private suspend fun decompressToBuffer(
     var capacity = expectedSize // Track capacity since it's not exposed in API
 
     // Process decompression chunks
-    for (chunk in decompressor.decompress(input)) {
+    for (chunk in decompressor.decompressUnsafe(input)) {
         val result = ensureCapacityAndWrite(output, capacity, chunk, factory)
         output = result.first
         capacity = result.second
     }
 
     // Process finish chunks
-    for (chunk in decompressor.finish()) {
+    for (chunk in decompressor.finishUnsafe()) {
         val result = ensureCapacityAndWrite(output, capacity, chunk, factory)
         output = result.first
         capacity = result.second
@@ -380,8 +380,8 @@ suspend fun compressWithSyncFlush(
     val compressor = SuspendingStreamingCompressor.create(CompressionAlgorithm.Raw, level)
     val chunks = mutableListOf<ReadBuffer>()
     try {
-        chunks.addAll(compressor.compress(buffer))
-        chunks.addAll(compressor.flush())
+        chunks.addAll(compressor.compressUnsafe(buffer))
+        chunks.addAll(compressor.flushUnsafe())
     } finally {
         compressor.close()
     }
@@ -406,13 +406,13 @@ suspend fun decompressWithSyncFlush(
     val decompressor = SuspendingStreamingDecompressor.create(CompressionAlgorithm.Raw)
     return try {
         val output = mutableListOf<ReadBuffer>()
-        output += decompressor.decompress(buffer)
+        output += decompressor.decompressUnsafe(buffer)
         // Write just the 4-byte marker without copying the input buffer
         val marker = factory.allocate(4)
         marker.writeInt(DeflateFormat.SYNC_FLUSH_MARKER)
         marker.resetForRead()
-        output += decompressor.decompress(marker)
-        output += decompressor.finish()
+        output += decompressor.decompressUnsafe(marker)
+        output += decompressor.finishUnsafe()
         combineBuffers(output, factory)
     } finally {
         decompressor.close()

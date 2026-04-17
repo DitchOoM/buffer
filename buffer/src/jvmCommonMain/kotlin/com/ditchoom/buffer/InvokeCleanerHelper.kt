@@ -19,3 +19,21 @@ internal val invokeCleanerFn: ((ByteBuffer) -> Unit)? by lazy(LazyThreadSafetyMo
         null
     }
 }
+
+/**
+ * Shared deterministic allocation strategy for JVM and Android.
+ *
+ * Tries invokeCleaner (JVM 9+ / Android host-JVM tests) first.
+ * Falls back to Unsafe.allocateMemory on JVM 8 and Android ART.
+ */
+internal inline fun allocateDeterministicBuffer(
+    size: Int,
+    byteOrder: ByteOrder,
+    directCreator: (ByteBuffer) -> PlatformBuffer,
+    unsafeCreator: (Int, ByteOrder) -> PlatformBuffer,
+): PlatformBuffer {
+    if (invokeCleanerFn != null) {
+        return directCreator(ByteBuffer.allocateDirect(size).order(byteOrder.toJava()))
+    }
+    return unsafeCreator(size, byteOrder)
+}

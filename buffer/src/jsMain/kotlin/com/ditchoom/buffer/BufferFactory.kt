@@ -41,6 +41,7 @@ internal actual val sharedBufferFactory: BufferFactory =
             size: Int,
             byteOrder: ByteOrder,
         ): PlatformBuffer {
+            if (size == 0) return ReadBuffer.EMPTY_BUFFER
             val sharedArrayBuffer =
                 try {
                     SharedArrayBuffer(size)

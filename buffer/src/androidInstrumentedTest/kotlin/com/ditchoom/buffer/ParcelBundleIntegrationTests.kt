@@ -138,7 +138,8 @@ class ParcelBundleIntegrationTests {
 
     @Test
     fun mixedTypesPreservedThroughParcel() {
-        val buf = BufferFactory.Default.allocate(23) as JvmBuffer
+        // 1 + 2 + 4 + 8 + 4 + 8 = 27 bytes
+        val buf = BufferFactory.Default.allocate(27) as JvmBuffer
         buf.writeByte(0x42)
         buf.writeShort(0x1234.toShort())
         buf.writeInt(0xDEADBEEF.toInt())
@@ -152,7 +153,7 @@ class ParcelBundleIntegrationTests {
             buf.writeToParcel(parcel, 0)
             parcel.setDataPosition(0)
             val restored = JvmBuffer.CREATOR.createFromParcel(parcel)
-            restored.resetForRead()
+            // Buffer state is restored exactly — already in read mode
 
             assertEquals(0x42.toByte(), restored.readByte())
             assertEquals(0x1234.toShort(), restored.readShort())
@@ -198,7 +199,7 @@ class ParcelBundleIntegrationTests {
             parcel.setDataPosition(0)
 
             val restored = JvmBuffer.CREATOR.createFromParcel(parcel)
-            restored.resetForRead()
+            // Buffer state is restored exactly as before writeToParcel (position=0, limit=size)
             assertEquals(size, restored.remaining(), "Size mismatch for $size-byte buffer")
 
             val readBack = ByteArray(size)
@@ -233,7 +234,7 @@ class ParcelBundleIntegrationTests {
 
             @Suppress("DEPRECATION")
             val restored = restoredBundle.getParcelable<JvmBuffer>("buffer")!!
-            restored.resetForRead()
+            // Buffer state is restored exactly as before writeToParcel
             assertEquals(size, restored.remaining(), "Bundle size mismatch for $size-byte buffer")
 
             val readBack = ByteArray(size)

@@ -11,6 +11,17 @@ import com.google.devtools.ksp.symbol.KSTypeParameter
 import com.google.devtools.ksp.symbol.KSValueParameter
 import com.google.devtools.ksp.symbol.Modifier
 
+/**
+ * Direction capability of a codec: bidirectional, decode-only, or encode-only.
+ * Inferred from the interfaces a `@UseCodec` target implements, then cascaded
+ * through the parent message's generated codec.
+ */
+enum class CodecDirection {
+    Bidirectional,
+    DecodeOnly,
+    EncodeOnly,
+}
+
 internal fun KSAnnotation.qualifiedName(): String? =
     annotationType
         .resolve()
@@ -41,6 +52,10 @@ data class FieldInfo(
 sealed class FieldCondition {
     data class WhenTrue(
         val expression: String,
+    ) : FieldCondition()
+
+    data class WhenRemaining(
+        val minBytes: Int,
     ) : FieldCondition()
 }
 
@@ -185,6 +200,7 @@ sealed class FieldReadStrategy {
 
     data class NestedMessageField(
         val codecName: String,
+        val direction: CodecDirection = CodecDirection.Bidirectional,
     ) : FieldReadStrategy()
 
     data class PayloadField(
@@ -195,11 +211,15 @@ sealed class FieldReadStrategy {
     data class CollectionField(
         val lengthKind: LengthKind,
         val elementCodecName: String,
+        val direction: CodecDirection = CodecDirection.Bidirectional,
     ) : FieldReadStrategy()
 
     data class UseCodecField(
         val codecName: String,
         val lengthKind: LengthKind?,
+        val direction: CodecDirection = CodecDirection.Bidirectional,
+        /** True when the codec implements `Codec<T>` (with context-aware decode/encode overloads). */
+        val hasContextOverloads: Boolean = true,
     ) : FieldReadStrategy()
 
     data class Custom(
@@ -227,6 +247,16 @@ sealed class FieldReadStrategy {
                 else -> -1
             }
 
+    /** The codec direction of this field strategy. */
+    fun direction(): CodecDirection =
+        when (this) {
+            is UseCodecField -> direction
+            is NestedMessageField -> direction
+            is CollectionField -> direction
+            is ValueClassField -> innerStrategy.direction()
+            else -> CodecDirection.Bidirectional
+        }
+
     companion object {
         val ByteField = PrimitiveField(Primitive.BYTE)
         val UByteField = PrimitiveField(Primitive.UBYTE)
@@ -250,7 +280,6 @@ class FieldAnalyzer(
         setOf(
             "com.ditchoom.buffer.ReadBuffer",
             "com.ditchoom.buffer.WriteBuffer",
-            "com.ditchoom.buffer.ReadWriteBuffer",
             "com.ditchoom.buffer.PlatformBuffer",
             "kotlin.ByteArray",
         )
@@ -472,6 +501,10 @@ class FieldAnalyzer(
                 val expr = annotation.arguments.first().value as String
                 return FieldCondition.WhenTrue(expr)
             }
+            if (annotName == "com.ditchoom.buffer.codec.annotations.WhenRemaining") {
+                val minBytes = annotation.arguments.first().value as Int
+                return FieldCondition.WhenRemaining(minBytes)
+            }
         }
         return null
     }
@@ -573,6 +606,9 @@ class FieldAnalyzer(
             return null
         }
 
+        // Determine direction and context overload support from codec supertypes
+        val codecInfo = resolveCodecInfo(codecDecl, fieldName, param) ?: return null
+
         // Optionally combine with a length annotation (not required)
         val hasLengthAnnotation =
             annotations.any {
@@ -588,7 +624,64 @@ class FieldAnalyzer(
                 null // No length annotation: codec reads directly from buffer
             }
 
-        return FieldReadStrategy.UseCodecField(codecName, lengthKind)
+        return FieldReadStrategy.UseCodecField(codecName, lengthKind, codecInfo.direction, codecInfo.hasContextOverloads)
+    }
+
+    private data class CodecInfo(
+        val direction: CodecDirection,
+        val hasContextOverloads: Boolean,
+    )
+
+    /**
+     * Inspects the supertypes of a `@UseCodec` target class to determine whether it
+     * supports decode, encode, or both, and whether it has context-aware overloads.
+     */
+    private fun resolveCodecInfo(
+        codecDecl: KSClassDeclaration,
+        fieldName: String,
+        param: KSValueParameter,
+    ): CodecInfo? {
+        // Collect direct supertypes + one level transitive (covers Codec extending Encoder+Decoder)
+        val allSupertypes =
+            buildSet {
+                for (superRef in codecDecl.superTypes) {
+                    val decl = superRef.resolve().declaration
+                    val name = decl.qualifiedName?.asString() ?: continue
+                    add(name)
+                    if (decl is KSClassDeclaration) {
+                        for (transitive in decl.superTypes) {
+                            transitive
+                                .resolve()
+                                .declaration.qualifiedName
+                                ?.asString()
+                                ?.let { add(it) }
+                        }
+                    }
+                }
+            }
+
+        val hasCodec = "com.ditchoom.buffer.codec.Codec" in allSupertypes
+        val hasDecoder = "com.ditchoom.buffer.codec.Decoder" in allSupertypes
+        val hasEncoder = "com.ditchoom.buffer.codec.Encoder" in allSupertypes
+
+        return when {
+            hasCodec -> CodecInfo(CodecDirection.Bidirectional, hasContextOverloads = true)
+            hasDecoder && hasEncoder -> CodecInfo(CodecDirection.Bidirectional, hasContextOverloads = false)
+            hasDecoder -> CodecInfo(CodecDirection.DecodeOnly, hasContextOverloads = false)
+            hasEncoder -> CodecInfo(CodecDirection.EncodeOnly, hasContextOverloads = false)
+            else -> {
+                val codecShort = codecDecl.simpleName.asString()
+                logger.error(
+                    "@UseCodec on field '$fieldName': '$codecShort' does not implement " +
+                        "Codec<T>, Decoder<T>, or Encoder<T>. To fix, make it implement one of:\n" +
+                        "  • Codec<T> — for bidirectional encode/decode\n" +
+                        "  • Decoder<T> — for decode-only (e.g., display without re-encoding)\n" +
+                        "  • Encoder<T> — for encode-only (e.g., write-only serialization)",
+                    param,
+                )
+                null
+            }
+        }
     }
 
     private fun resolveStringStrategy(
@@ -678,7 +771,8 @@ class FieldAnalyzer(
                     dispatchInfo.sealedCodecSimpleName,
                 )
             }
-            return FieldReadStrategy.NestedMessageField(codecName)
+            val nestedDirection = extractExplicitDirection(typeDecl)
+            return FieldReadStrategy.NestedMessageField(codecName, nestedDirection)
         }
 
         val shortType = typeName.substringAfterLast(".")
@@ -777,7 +871,8 @@ class FieldAnalyzer(
         val lk = resolveLengthKind(param, annotations, fieldName, "List") ?: return null
 
         val codecName = elementDecl.codecName()
-        return FieldReadStrategy.CollectionField(lk, codecName)
+        val elementDirection = extractExplicitDirection(elementDecl)
+        return FieldReadStrategy.CollectionField(lk, codecName, elementDirection)
     }
 
     private fun extractWireBytes(
@@ -936,5 +1031,27 @@ class FieldAnalyzer(
             "Little" -> WireOrderOverride.Little
             else -> null
         }
+    }
+
+    /**
+     * Reads the explicit `direction` parameter from a `@ProtocolMessage` annotation.
+     * Returns [CodecDirection.Bidirectional] for `Infer` or absent annotation (the default
+     * for the independent cascading model — each message controls its own direction).
+     */
+    private fun extractExplicitDirection(classDecl: KSClassDeclaration): CodecDirection {
+        val ann =
+            classDecl.annotations.find {
+                it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.ProtocolMessage"
+            } ?: return CodecDirection.Bidirectional
+        val dirArg = ann.arguments.find { it.name?.asString() == "direction" }?.value
+        if (dirArg is KSType) {
+            return when (dirArg.declaration.simpleName.asString()) {
+                "DecodeOnly" -> CodecDirection.DecodeOnly
+                "EncodeOnly" -> CodecDirection.EncodeOnly
+                "Codec" -> CodecDirection.Bidirectional
+                else -> CodecDirection.Bidirectional // Infer or unknown
+            }
+        }
+        return CodecDirection.Bidirectional
     }
 }

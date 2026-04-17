@@ -2,6 +2,7 @@ package com.ditchoom.buffer.pool
 
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Charset
+import com.ditchoom.buffer.CloseableBuffer
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
@@ -23,8 +24,10 @@ import com.ditchoom.buffer.bufferHashCode
 internal class PooledBuffer(
     internal val inner: PlatformBuffer,
     internal val pool: BufferPool,
-) : PlatformBuffer by inner {
+) : PlatformBuffer by inner,
+    CloseableBuffer {
     private var freed = false
+    override val isFreed: Boolean get() = freed
     private var refCount = 1 // 1 for the chunk reference in StreamProcessor
 
     private fun checkNotFreed() {
@@ -85,7 +88,7 @@ internal class PooledBuffer(
     }
 
     // ========================================================================
-    // ReadWriteBuffer
+    // PlatformBuffer
     // ========================================================================
 
     override val capacity: Int get() = inner.capacity
@@ -309,7 +312,7 @@ internal class PooledBuffer(
     }
 
     // ========================================================================
-    // ReadWriteBuffer — masking
+    // PlatformBuffer — masking
     // ========================================================================
 
     override fun xorMask(

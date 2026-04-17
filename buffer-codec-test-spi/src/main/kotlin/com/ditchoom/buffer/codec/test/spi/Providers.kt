@@ -16,7 +16,6 @@ class VariableByteIntegerProvider : CodecFieldProvider {
             readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
             writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
             fixedSize = -1,
-            sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
         )
     }
 }
@@ -29,6 +28,5 @@ class PropertyBagProvider : CodecFieldProvider {
             readFunction = FunctionRef("com.ditchoom.buffer.codec.test.functions", "readPropertyBag"),
             writeFunction = FunctionRef("com.ditchoom.buffer.codec.test.functions", "writePropertyBag"),
             fixedSize = -1,
-            sizeOfFunction = null,
         )
 }

@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.JsBuffer
 import com.ditchoom.buffer.ReadBuffer
 import kotlinx.coroutines.await
@@ -59,18 +61,19 @@ internal actual fun combineJsByteArrays(
 
 internal actual fun emptyJsByteArray(): JsByteArray = JsByteArray(Int8Array(0))
 
-internal actual fun JsByteArray.toPlatformBuffer(allocator: BufferAllocator): ReadBuffer {
+internal actual fun JsByteArray.toPlatformBuffer(bufferFactory: BufferFactory): ReadBuffer {
     val length = array.length
-    if (length == 0) return allocator.allocate(0)
-    // For pool allocators, copy into the pool buffer. For default/heap, wrap directly.
-    return if (allocator is BufferAllocator.FromPool) {
-        val buf = allocator.allocate(length)
+    if (length == 0) return bufferFactory.allocate(0)
+    // For non-default factories (e.g. pool-backed), copy into the factory's buffer.
+    // For the default factory, wrap directly for zero-copy.
+    return if (bufferFactory === BufferFactory.Default) {
+        JsBuffer(array)
+    } else {
+        val buf = bufferFactory.allocate(length)
         val src = JsBuffer(array)
         buf.write(src)
         buf.resetForRead()
         buf
-    } else {
-        JsBuffer(array)
     }
 }
 
@@ -218,10 +221,16 @@ internal actual class NodeTransformHandle(
 internal actual fun createCompressStream(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
+    windowBits: Int,
 ): NodeTransformHandle {
     val zlib = getNodeZlib()
     val options = js("{}")
     options["level"] = level.value
+    if (windowBits != 0) {
+        // C zlib uses negative windowBits for raw deflate; Node.js createDeflateRaw
+        // already implies raw, so windowBits must be positive (8-15).
+        options["windowBits"] = if (windowBits < 0) -windowBits else windowBits
+    }
     val stream: dynamic =
         when (algorithm) {
             CompressionAlgorithm.Gzip -> zlib.createGzip(options)
@@ -231,11 +240,17 @@ internal actual fun createCompressStream(
     return NodeTransformHandle(stream)
 }
 
-internal actual fun createDecompressStream(algorithm: CompressionAlgorithm): NodeTransformHandle {
+internal actual fun createDecompressStream(
+    algorithm: CompressionAlgorithm,
+    windowBits: Int,
+): NodeTransformHandle {
     val zlib = getNodeZlib()
     val options = js("{}")
     if (algorithm == CompressionAlgorithm.Raw) {
         options["finishFlush"] = zlib.constants.Z_SYNC_FLUSH
+    }
+    if (windowBits != 0) {
+        options["windowBits"] = if (windowBits < 0) -windowBits else windowBits
     }
     val stream: dynamic =
         when (algorithm) {
@@ -299,6 +314,90 @@ internal actual suspend fun NodeTransformHandle.writeAndEnd(inputs: List<JsByteA
 
 internal actual fun NodeTransformHandle.destroy() {
     stream.destroy()
+}
+
+internal actual fun NodeTransformHandle.processSync(
+    input: JsByteArray,
+    flushFlag: Int,
+): JsByteArray {
+    val result = processSyncPersistent(stream, input.toUint8Array(), flushFlag)
+    return (result as Uint8Array).toJsByteArray()
+}
+
+/**
+ * Synchronously processes data through a persistent zlib stream using the C++ handle's
+ * writeSync() method directly. This replicates Node.js's internal processChunkSync() but
+ * WITHOUT closing the handle afterwards, preserving the LZ77 sliding window for context takeover.
+ */
+private fun processSyncPersistent(
+    stream: dynamic,
+    chunk: Uint8Array,
+    flushFlag: Int,
+): Uint8Array {
+    val handle = stream._handle ?: throw IllegalStateException("zlib handle is null — stream was closed or finished")
+    val chunkSize: Int = stream._chunkSize as Int
+    val state = stream._writeState
+    val buffers = js("[]")
+    var nread = 0
+    var availInBefore = chunk.length
+    var inOff = 0
+    var buffer = stream._outBuffer
+    var offset: Int = stream._outOffset as Int
+    var availOutBefore = chunkSize - offset
+
+    while (true) {
+        handle.writeSync(flushFlag, chunk, inOff, availInBefore, buffer, offset, availOutBefore)
+        val availOutAfter: Int = state[0] as Int
+        val availInAfter: Int = state[1] as Int
+        val have = availOutBefore - availOutAfter
+        if (have > 0) {
+            buffers.push(buffer.slice(offset, offset + have))
+            offset += have
+            nread += have
+        }
+        // Node.js v24+: inflate may close the C++ handle during writeSync when it
+        // hits Z_STREAM_END. Output from this call is captured above; stop iterating.
+        if (stream._handle == null) break
+        // Output buffer has space → zlib has drained all pending output
+        if (availOutAfter != 0) break
+        // Output buffer full — allocate new one to continue draining
+        availOutBefore = chunkSize
+        offset = 0
+        buffer = js("Buffer").allocUnsafe(chunkSize)
+        if (availInAfter > 0) {
+            inOff += availInBefore - availInAfter
+            availInBefore = availInAfter
+        } else {
+            // All input consumed but output buffer was full — drain with empty input
+            availInBefore = 0
+        }
+    }
+    stream._outBuffer = js("Buffer").allocUnsafe(chunkSize)
+    stream._outOffset = 0
+
+    if (nread == 0) return Uint8Array(0)
+    val result = js("Buffer").concat(buffers, nread)
+    return Uint8Array(result.buffer, result.byteOffset, result.length)
+}
+
+internal actual fun NodeTransformHandle.processSyncOneShot(
+    input: JsByteArray,
+    flushFlag: Int,
+): JsByteArray {
+    // _processChunk without callback is synchronous. It handles the writeSync loop
+    // internally and calls _close() at the end, destroying the C++ handle.
+    val result = stream._processChunk(input.toUint8Array(), flushFlag)
+    return (result as Uint8Array).toJsByteArray()
+}
+
+internal actual fun zlibSyncFlushFlag(): Int {
+    val zlib = getNodeZlib()
+    return zlib.constants.Z_SYNC_FLUSH as Int
+}
+
+internal actual fun zlibFinishFlag(): Int {
+    val zlib = getNodeZlib()
+    return zlib.constants.Z_FINISH as Int
 }
 
 // ============================================================================

@@ -63,6 +63,118 @@ class BufferFactoryTests {
         assertEquals(0x123456789ABCDEF0L, buffer.readLong())
     }
 
+    @Test
+    fun sharedFactoryReadStringAscii() {
+        val text = "Hello, World!"
+        val buffer = BufferFactory.shared().allocate(64)
+        buffer.writeString(text, Charset.UTF8)
+        buffer.resetForRead()
+        assertEquals(text, buffer.readString(text.length, Charset.UTF8))
+    }
+
+    @Test
+    fun sharedFactoryReadStringMultibyte() {
+        val text = "你好世界🌍"
+        val length = text.utf8Length()
+        val buffer = BufferFactory.shared().allocate(length)
+        buffer.writeString(text, Charset.UTF8)
+        buffer.resetForRead()
+        assertEquals(text, buffer.readString(length, Charset.UTF8))
+    }
+
+    @Test
+    fun sharedFactoryStreamingStringDecoder() {
+        val decoder = StreamingStringDecoder()
+        val result = StringBuilder()
+        val text = "Hello, 世界! 🌍"
+        val buffer = BufferFactory.shared().allocate(text.utf8Length())
+        buffer.writeString(text, Charset.UTF8)
+        buffer.resetForRead()
+        decoder.decode(buffer, result)
+        decoder.finish(result)
+        assertEquals(text, result.toString())
+    }
+
+    // ============================================================================
+    // Zero-Byte Allocation Tests — all factories must handle allocate(0) correctly
+    // ============================================================================
+
+    private fun assertZeroByteAllocateWorks(
+        factory: BufferFactory,
+        name: String,
+    ) {
+        val buffer = factory.allocate(0)
+        assertEquals(0, buffer.remaining(), "$name: remaining should be 0 after allocate(0)")
+        buffer.resetForRead()
+        assertEquals(0, buffer.remaining(), "$name: remaining should be 0 after resetForRead")
+    }
+
+    private fun assertZeroByteWriteWorks(
+        factory: BufferFactory,
+        name: String,
+    ) {
+        val src = factory.allocate(0)
+        src.resetForRead()
+        val dst = factory.allocate(0)
+        dst.write(src)
+        dst.resetForRead()
+        assertEquals(0, dst.remaining(), "$name: write(emptyBuffer) should leave remaining at 0")
+    }
+
+    private fun assertZeroByteReadStringWorks(
+        factory: BufferFactory,
+        name: String,
+    ) {
+        val buffer = factory.allocate(0)
+        buffer.resetForRead()
+        assertEquals("", buffer.readString(0), "$name: readString(0) should return empty string")
+    }
+
+    @Test
+    fun defaultFactoryZeroByteAllocate() {
+        assertZeroByteAllocateWorks(BufferFactory.Default, "Default")
+    }
+
+    @Test
+    fun managedFactoryZeroByteAllocate() {
+        assertZeroByteAllocateWorks(BufferFactory.managed(), "managed")
+    }
+
+    @Test
+    fun sharedFactoryZeroByteAllocate() {
+        assertZeroByteAllocateWorks(BufferFactory.shared(), "shared")
+    }
+
+    @Test
+    fun defaultFactoryZeroByteWrite() {
+        assertZeroByteWriteWorks(BufferFactory.Default, "Default")
+    }
+
+    @Test
+    fun managedFactoryZeroByteWrite() {
+        assertZeroByteWriteWorks(BufferFactory.managed(), "managed")
+    }
+
+    @Test
+    fun sharedFactoryZeroByteWrite() {
+        assertZeroByteWriteWorks(BufferFactory.shared(), "shared")
+    }
+
+    @Test
+    fun defaultFactoryZeroByteReadString() {
+        assertZeroByteReadStringWorks(BufferFactory.Default, "Default")
+    }
+
+    @Test
+    fun managedFactoryZeroByteReadString() {
+        assertZeroByteReadStringWorks(BufferFactory.managed(), "managed")
+    }
+
+    @Test
+    fun sharedFactoryZeroByteReadString() {
+        assertZeroByteReadStringWorks(BufferFactory.shared(), "shared")
+    }
+
     // ============================================================================
     // Deterministic Factory Tests
     // ============================================================================

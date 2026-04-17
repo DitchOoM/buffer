@@ -4,22 +4,29 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 
+fun <T> Encoder<T>.encodeToBuffer(
+    value: T,
+    factory: BufferFactory = BufferFactory.Default,
+    context: EncodeContext = EncodeContext.Empty,
+): ReadBuffer {
+    val growable = GrowableWriteBuffer(factory, initialSize = wireSizeHint)
+    if (this is Codec<*>) {
+        @Suppress("UNCHECKED_CAST")
+        (this as Codec<T>).encode(growable, value, context)
+    } else {
+        encode(growable, value)
+    }
+    return growable.toReadBuffer()
+}
+
 fun <T> Codec<T>.encodeToBuffer(
     value: T,
     factory: BufferFactory = BufferFactory.Default,
     context: EncodeContext = EncodeContext.Empty,
 ): ReadBuffer {
-    val bufferSize =
-        when (val estimate = sizeOf(value)) {
-            is SizeEstimate.Exact -> estimate.bytes
-            SizeEstimate.UnableToPrecalculate -> 1024
-        }
-    val buffer = factory.allocate(bufferSize)
-    encode(buffer, value, context)
-    val bytesWritten = buffer.position()
-    buffer.setLimit(bytesWritten)
-    buffer.position(0)
-    return buffer
+    val growable = GrowableWriteBuffer(factory, initialSize = wireSizeHint)
+    encode(growable, value, context)
+    return growable.toReadBuffer()
 }
 
 /**

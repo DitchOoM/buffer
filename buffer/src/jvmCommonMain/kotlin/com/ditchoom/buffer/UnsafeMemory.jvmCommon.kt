@@ -105,7 +105,11 @@ actual object UnsafeMemory {
         destOffset: Int,
         length: Int,
     ) {
+        if (length == 0) return
         checkSupported()
+        // Note: the 5-param copyMemory(Object, long, Object, long, long) is available
+        // on HotSpot JVM but NOT on Android ART. This is acceptable because no Android
+        // production code calls this function — DirectByteBuffer.get(byte[]) is used instead.
         unsafe!!.copyMemory(
             null,
             srcAddress,
@@ -121,7 +125,9 @@ actual object UnsafeMemory {
         dstAddress: Long,
         length: Int,
     ) {
+        if (length == 0) return
         checkSupported()
+        // Note: see copyMemoryToArray — same Android limitation applies.
         unsafe!!.copyMemory(
             src,
             BYTE_ARRAY_BASE_OFFSET + srcOffset,

@@ -11,16 +11,9 @@ ByteBuffer is a Kotlin Multiplatform library providing platform-agnostic byte bu
 ## Build Commands
 
 ```bash
-# Build for all platforms
-./gradlew build
-
-# Run tests
-./gradlew allTests                # Run tests for all platforms (aggregated report)
-./gradlew check                   # Run all checks (tests + linting)
-./gradlew test                    # Common/JVM tests
-./gradlew connectedCheck          # Android instrumented tests (requires emulator)
-
-# Linting
+./gradlew build                   # Build all platforms
+./gradlew allTests                # Run tests for all platforms
+./gradlew check                   # All checks (tests + linting)
 ./gradlew ktlintCheck             # Check code style
 ./gradlew ktlintFormat            # Auto-format code
 
@@ -28,357 +21,162 @@ ByteBuffer is a Kotlin Multiplatform library providing platform-agnostic byte bu
 ./gradlew :jvmTest --tests "com.ditchoom.buffer.BufferTests"
 ./gradlew :jsNodeTest --tests "com.ditchoom.buffer.BufferTests"
 
-# Codec processor tests (KSP compile-time validation)
-./gradlew :buffer-codec-processor:test
-
-# Codec integration tests (protocol round-trips: TLS, PNG, RIFF, WebSocket, MQTT)
-./gradlew :buffer-codec-test:jvmTest
+# Codec tests
+./gradlew :buffer-codec-processor:test   # KSP compile-time validation
+./gradlew :buffer-codec-test:jvmTest     # Integration tests (TLS, PNG, RIFF, WebSocket, MQTT)
 ```
 
 ## Architecture
 
 ### Kotlin Multiplatform Structure
 
-The project uses the expect/actual pattern with platform-specific implementations:
+The project uses the expect/actual pattern:
 
 ```
 src/
 ├── commonMain/          # Shared interfaces (PlatformBuffer, ReadBuffer, WriteBuffer)
-├── commonTest/          # Shared tests run on all platforms
-├── jvmCommonMain/       # Shared JVM/Android: BaseJvmBuffer, CharsetEncoderHelper
-├── jvmMain/             # JVM: HeapJvmBuffer, DirectJvmBuffer, JvmBuffer
+├── jvmCommonMain/       # Shared JVM/Android
+├── jvmMain/             # JVM: HeapJvmBuffer, DirectJvmBuffer
 ├── androidMain/         # Android: extends JVM + SharedMemory/Parcelable IPC
 ├── appleMain/           # iOS/macOS/watchOS/tvOS: MutableDataBuffer (NSMutableData)
-├── jsMain/              # Browser/Node.js: JsBuffer (Int8Array, SharedArrayBuffer support)
+├── jsMain/              # Browser/Node.js: JsBuffer (Int8Array)
 ├── wasmJsMain/          # WASM: LinearBuffer (native memory) + ByteArrayBuffer (heap)
-├── nonJvmMain/          # Shared native/WASM: ByteArrayBuffer
-└── nativeMain/          # Linux/Apple native: uses nonJvmMain
-```
-
-### Buffer Types by Platform
-
-| Platform | Heap (wrap/Heap zone) | Direct (allocate) | Shared Memory |
-|----------|----------------------|-------------------|---------------|
-| JVM | `HeapJvmBuffer` | `DirectJvmBuffer` | Falls back to Direct |
-| Android | `HeapJvmBuffer` | `DirectJvmBuffer` | `ParcelableSharedMemoryBuffer` |
-| Apple | `ByteArrayBuffer` | `MutableDataBuffer` | Falls back to Direct |
-| JS | `JsBuffer` | `JsBuffer` | `JsBuffer` (SharedArrayBuffer) |
-| WASM | `ByteArrayBuffer` | `LinearBuffer` | Falls back to Direct |
-| Linux | `ByteArrayBuffer` | `ByteArrayBuffer` | Falls back to Direct |
-
-### Memory Access Interfaces
-
-- `NativeMemoryAccess` - Direct native memory pointer (DirectJvmBuffer, MutableDataBuffer, LinearBuffer, JsBuffer, NativeBuffer)
-- `ManagedMemoryAccess` - Kotlin ByteArray backing (HeapJvmBuffer, ByteArrayBuffer, JsBuffer)
-- `SharedMemoryAccess` - Cross-process shared memory (ParcelableSharedMemoryBuffer, JsBuffer with SharedArrayBuffer)
-
-### Native Data Conversions
-
-Convert buffers to platform-native types for interop with platform APIs:
-
-```kotlin
-// Get native memory handle (returns NativeData wrapper)
-val nativeData: NativeData = buffer.toNativeData()
-
-// Get mutable native memory handle (returns MutableNativeData wrapper)
-val mutableData: MutableNativeData = buffer.toMutableNativeData()
-
-// Get managed memory (guarantees ManagedMemoryAccess)
-val bytes = buffer.toByteArray()
-```
-
-**Accessing platform-specific types:**
-
-```kotlin
-// JVM/Android
-val byteBuffer: ByteBuffer = buffer.toNativeData().byteBuffer
-
-// Apple
-val nsData: NSData = buffer.toNativeData().nsData
-
-// JS
-val arrayBuffer: ArrayBuffer = buffer.toNativeData().arrayBuffer
-val int8Array: Int8Array = buffer.toMutableNativeData().int8Array
-
-// WASM
-val linearBuffer: LinearBuffer = buffer.toNativeData().linearBuffer
-
-// Linux
-val nativeBuffer: NativeBuffer = buffer.toNativeData().nativeBuffer
-```
-
-**Mental model:**
-- `toNativeData()` / `toMutableNativeData()` → guarantees native memory (direct ByteBuffer, NSData, NativeBuffer, etc.)
-- `toByteArray()` → guarantees managed memory (Kotlin ByteArray)
-
-**Zero-copy vs Copy:**
-- Zero-copy when source already matches target type (e.g., direct buffer → direct ByteBuffer)
-- Copies when conversion is needed (e.g., heap buffer → direct ByteBuffer)
-
-**Platform wrapper contents:**
-
-| Platform | `NativeData` contains | `MutableNativeData` contains | `toByteArray()` |
-|----------|----------------------|------------------------------|-----------------|
-| JVM | `ByteBuffer` (direct, read-only) | `ByteBuffer` (direct) | `ByteArray` |
-| Android | `ByteBuffer` (direct, read-only) | `ByteBuffer` (direct) | `ByteArray` |
-| Apple | `NSData` | `NSMutableData` | `ByteArray` |
-| JS | `ArrayBuffer` | `Int8Array` | `ByteArray` |
-| WASM | `LinearBuffer` | `LinearBuffer` | `ByteArray` |
-| Linux | `NativeBuffer` | `NativeBuffer` | `ByteArray` |
-
-**Apple-specific helpers:**
-
-```kotlin
-// Convert ByteArray to NSData/NSMutableData
-val nsData = byteArray.toNSData()
-val nsMutableData = byteArray.toNSMutableData()
+└── nativeMain/          # Linux/Apple native
 ```
 
 ### Key Interfaces
 
-- `PlatformBuffer` - Main buffer interface combining read/write operations
-- `ReadBuffer` - Read operations (relative and absolute)
-- `WriteBuffer` - Write operations (relative and absolute)
-- `BufferFactory` - Memory allocation strategy: `Default` (native), `managed()` (heap), `shared()` (IPC), `deterministic()` (explicit cleanup)
+- `ReadBuffer` / `WriteBuffer` — Read and write operations
+- `PlatformBuffer` — Main buffer interface combining both
+- `BufferFactory` — Memory allocation: `Default` (native), `managed()` (heap), `shared()` (IPC), `deterministic()` (explicit cleanup)
+- `NativeMemoryAccess` / `ManagedMemoryAccess` / `SharedMemoryAccess` — Memory type markers
 
-### Scoped Buffers (`com.ditchoom.buffer`)
+### Modules
 
-High-performance buffers with deterministic memory management for performance-critical code:
+| Module | Purpose |
+|--------|---------|
+| `buffer` | Core buffer interfaces, pool, stream processor, scoped buffers |
+| `buffer-codec` | Codec interfaces (`Encoder`, `Decoder`, `Codec`), annotations, context |
+| `buffer-codec-processor` | KSP code generator for `@ProtocolMessage` |
+| `buffer-codec-test` | Protocol round-trip integration tests |
+| `buffer-compression` | Streaming compression (zlib, gzip, raw deflate) |
+| `buffer-flow` | Typed stream abstractions (`Connection`, `Sender`, `Receiver`, `StreamMux`) |
 
-- `BufferScope` - Manages lifetime of scoped buffers; all buffers freed when scope closes
-- `ScopedBuffer` - Buffer with guaranteed native memory access and explicit cleanup
-- `withScope { }` - Recommended entry point; creates scope and ensures cleanup
+## Rules — Read These First
 
-```kotlin
-withScope { scope ->
-    val buffer = scope.allocate(8192)
-    buffer.writeInt(42)
-    buffer.resetForRead()
-    val value = buffer.readInt()
+### Never Use ByteArray
 
-    // Native address for FFI/JNI
-    val address = buffer.nativeAddress
-} // All buffers freed here
-```
+ByteArray guarantees a memory copy. This library exists to avoid that.
 
-**Platform Implementations:**
-
-| Platform | Implementation | Allocation |
-|----------|---------------|------------|
-| JVM 21+  | `FfmBufferScope` | FFM Arena + MemorySegment |
-| JVM < 21 | `UnsafeBufferScope` | Unsafe.allocateMemory |
-| Android  | `UnsafeBufferScope` | Unsafe.allocateMemory |
-| Native   | `NativeBufferScope` | malloc/free |
-| WASM     | `WasmBufferScope` | LinearMemory |
-| JS       | `JsBufferScope` | GC-managed ArrayBuffer |
-
-**When to use ScopedBuffer vs PlatformBuffer:**
-- Use `ScopedBuffer` for: FFI/JNI interop, zero-copy I/O, avoiding GC pressure
-- Use `PlatformBuffer` for: General-purpose buffering, long-lived buffers
-
-### Buffer Comparison & Search Methods
-
-ReadBuffer provides optimized search and comparison operations:
+- **Never accept `ByteArray` in function signatures** — use `ReadBuffer` / `WriteBuffer`
+- **Never return `ByteArray`** — return `ReadBuffer` or a buffer slice
+- **Never suggest `ByteArray` as an intermediary** — use `slice()`, `readBytes()`, or `writeString()` directly
+- **If you must interop with a ByteArray API**, use `BufferFactory.Default.wrap(byteArray)` to wrap it zero-copy, don't copy into a new buffer
+- **In tests**, use typed values (String, Int, Long) and buffer interfaces, not ByteArray
 
 ```kotlin
-// Content comparison (SIMD-accelerated on native, optimized on JVM 11+)
-buffer1.contentEquals(buffer2)  // true if remaining bytes are identical
-buffer1.mismatch(buffer2)       // index of first difference, or -1
+// WRONG
+val bytes = buffer.readByteArray(length)
+processBytes(bytes)
 
-// Search for values (uses bulk Long comparisons, XOR zero-detection)
-buffer.indexOf(0x42.toByte())           // find byte
-buffer.indexOf(0x1234.toShort())        // find Short (respects byte order)
-buffer.indexOf(0x12345678)              // find Int
-buffer.indexOf(0x123456789ABCDEF0L)     // find Long
-buffer.indexOf("Hello")                 // find string (UTF-8 default)
-buffer.indexOf(otherBuffer)             // find byte sequence
-
-// Aligned search (SIMD auto-vectorized on native platforms)
-// Only checks naturally-aligned positions - use when data was written with writeShort/Int/Long
-buffer.indexOf(0x1234.toShort(), aligned = true)  // 2-byte aligned positions only
-buffer.indexOf(0x12345678, aligned = true)        // 4-byte aligned positions only
-buffer.indexOf(0x123456789ABCDEF0L, aligned = true) // 8-byte aligned positions only
+// CORRECT
+val slice = buffer.readBytes(length)  // zero-copy slice
+processBuffer(slice)
 ```
-
-### Buffer Fill & Masking Methods
-
-WriteBuffer provides optimized fill and masking operations:
-
-```kotlin
-// Fill remaining space with value (writes 8 bytes at a time internally)
-buffer.fill(0x00.toByte())      // zero-fill
-buffer.fill(0x1234.toShort())   // fill with Short pattern
-buffer.fill(0x12345678)         // fill with Int pattern
-buffer.fill(0x123456789ABCDEF0L) // fill with Long pattern
-
-// XOR mask (SIMD-accelerated on native, used for WebSocket frame masking)
-buffer.xorMask(0x12345678)      // XOR remaining bytes with repeating 4-byte mask
-```
-
-### Buffer Pool (`com.ditchoom.buffer.pool`)
-
-High-performance buffer pooling for minimizing allocations:
-
-- `BufferPool` - Main pool interface with `SingleThreaded` and `MultiThreaded` modes
-- `PooledBuffer` - Buffer acquired from pool, must call `release()` when done
-- `withBuffer { }` - Recommended: auto-acquires and releases buffer
-- `withPool { }` - Creates pool, runs block, clears pool on exit
-
-```kotlin
-// Preferred usage pattern
-withPool(defaultBufferSize = 8192) { pool ->
-    pool.withBuffer(1024) { buffer ->
-        buffer.writeInt(42)
-    }
-}
-```
-
-### Buffer Stream (`com.ditchoom.buffer.stream`)
-
-Chunked processing for large buffers and streaming data:
-
-- `BufferStream` - Iterates over a buffer in fixed-size chunks
-- `StreamProcessor` - Handles fragmented data (e.g., network packets) with peek/read operations
-
-```kotlin
-val processor = StreamProcessor.create(pool)
-processor.append(networkData)
-val length = processor.readInt()
-
-// Preferred: readBufferScoped auto-releases the buffer back to the pool
-val message = processor.readBufferScoped(length) {
-    MyMessage(readInt(), readString(remaining()))
-}
-
-// Alternative: readBuffer returns a buffer you must manage yourself
-// Note: the returned buffer is NOT released back to the pool automatically
-val payload = processor.readBuffer(length)
-```
-
-### Wrapper Transparency
-
-Buffer wrappers (PooledBuffer, TrackedSlice) delegate to an underlying PlatformBuffer. Code that consumes buffers must work transparently through these wrappers.
-
-**Correct pattern — interface-based dispatch:**
-```kotlin
-val nma = buffer.nativeMemoryAccess   // returns NativeMemoryAccess? via extension
-val mma = buffer.managedMemoryAccess  // returns ManagedMemoryAccess? via extension
-```
-
-**Correct pattern — unwrap for platform-specific fast paths:**
-```kotlin
-val actual = buffer.unwrapFully()     // strips all wrapper layers
-if (actual is JsBuffer) { /* fast path */ }
-```
-
-**Anti-pattern — NEVER do this:**
-```kotlin
-(buffer as? PlatformBuffer)?.unwrap() ?: buffer  // breaks on PooledBuffer/TrackedSlice
-```
-
-All new buffer-consuming code must be tested with wrapper types (see `WrapperTransparencyTests`).
-
-### Factory Pattern
-
-**Always use `BufferFactory` to create buffers** — never use `PlatformBuffer.allocate()` or `PlatformBuffer.wrap()` directly:
-```kotlin
-BufferFactory.Default.allocate(size)                    // Native memory (platform-optimal)
-BufferFactory.Default.wrap(byteArray)                   // Wrap existing ByteArray (zero-copy)
-BufferFactory.managed().allocate(size)                  // Heap memory (ByteArray-backed)
-BufferFactory.shared().allocate(size)                   // Shared memory (Android IPC)
-BufferFactory.deterministic().allocate(size)             // Explicit cleanup via .use {}
-```
-
-Library code should accept `BufferFactory` as a parameter so callers control allocation:
-```kotlin
-class MyProtocol(private val factory: BufferFactory = BufferFactory.Default) {
-    fun encode(data: MyData): PlatformBuffer {
-        val buffer = factory.allocate(data.sizeOf())
-        // ...
-    }
-}
-```
-
-## Best Practices for Using This Library
 
 ### Always Use `BufferFactory`, Not `PlatformBuffer`
 
-`BufferFactory` is the correct entry point for all buffer creation. Do NOT use `PlatformBuffer.allocate()` or `PlatformBuffer.wrap()` — these are legacy shortcuts that bypass factory composition (pooling, monitoring, deterministic cleanup).
+```kotlin
+// CORRECT
+BufferFactory.Default.allocate(size)
+BufferFactory.Default.wrap(byteArray)    // zero-copy wrap if you receive a ByteArray
+BufferFactory.managed().allocate(size)   // heap
+BufferFactory.shared().allocate(size)    // Android IPC
+
+// WRONG — bypasses factory composition (pooling, monitoring, cleanup)
+PlatformBuffer.allocate(size)
+PlatformBuffer.wrap(byteArray)
+```
+
+Library code should accept `BufferFactory` as a parameter so callers control allocation.
+
+### Wrapper Transparency
+
+Buffer wrappers (PooledBuffer, TrackedSlice) delegate to an underlying PlatformBuffer. Code must work through wrappers:
 
 ```kotlin
 // CORRECT
-val buffer = BufferFactory.Default.allocate(1024)
-val wrapped = BufferFactory.Default.wrap(byteArray)
+val nma = buffer.nativeMemoryAccess
+val actual = buffer.unwrapFully()
 
-// WRONG — do not use these
-val buffer = PlatformBuffer.allocate(1024)
-val wrapped = PlatformBuffer.wrap(byteArray)
+// WRONG — breaks on PooledBuffer/TrackedSlice
+(buffer as? PlatformBuffer)?.unwrap() ?: buffer
 ```
 
-### Use Protocol Codecs for Structured Data
+### Avoid Unnecessary Memory Copies
 
-For any structured binary data, use `buffer-codec` with `@ProtocolMessage` annotations instead of hand-writing `readInt()`/`writeInt()` sequences. Hand-written encode/decode is error-prone and doesn't guarantee round-trip correctness.
+- Use `slice()` / `readBytes()` instead of `readByteArray()` + `wrap()`
+- Use `toNativeData()` / `toMutableNativeData()` for platform interop
+- Use `writeString()` directly instead of `encodeToByteArray()` + `writeBytes()`
+- Use `BufferPool` in hot paths to reuse buffers
+- Accept `ReadBuffer`/`WriteBuffer` in function signatures, not `ByteArray`
+
+## Codec System (`buffer-codec`)
+
+### Directional Codecs
+
+Three interface levels:
+
+- `Encoder<in T>` — encode only. Has `encode(buffer, value)` and `wireSizeHint`.
+- `Decoder<out T>` — decode only. Has `decode(buffer): T`. Fun interface for SAM.
+- `Codec<T>` — bidirectional. Extends both + `FrameDetector`. Adds context-aware overloads.
+
+`encodeToBuffer()` auto-sizes via an internal `GrowableWriteBuffer` (2x doubling). Generated codecs set `wireSizeHint` to the sum of fixed-size fields. Defaults to 16 for hand-written codecs.
+
+### Use `@ProtocolMessage` for Structured Data
 
 ```kotlin
-// WRONG — manual field-by-field serialization
-fun encode(buffer: WriteBuffer, msg: MyMessage) {
-    buffer.writeInt(msg.id)
-    buffer.writeShort(msg.type)
-    buffer.writeLengthPrefixedUtf8String(msg.payload)
-}
-
-// CORRECT — annotated data class, codec is generated
 @ProtocolMessage
 data class MyMessage(
     val id: Int,
     val type: Short,
     @LengthPrefixed val payload: String,
 )
-// MyMessageCodec.encode(buffer, msg) — generated, type-safe, batch-optimized
+// Generated: MyMessageCodec.encode(buffer, msg) / MyMessageCodec.decode(buffer)
 ```
 
-### Sealed Interface Dispatch with `@PacketType` and `@DispatchOn`
+Use `@ProtocolMessage(direction = Direction.DecodeOnly)` or `EncodeOnly` for unidirectional codecs. `@UseCodec` accepts `Decoder<T>`, `Encoder<T>`, or `Codec<T>` — direction validated at compile time.
 
-For protocols with a type discriminator, use sealed interfaces with `@PacketType`:
+### Sealed Dispatch
 
 ```kotlin
-// Simple dispatch — reads one byte, matches against value
 @ProtocolMessage
 sealed interface Command {
     @ProtocolMessage @PacketType(0x01)
     data class Ping(val timestamp: Long) : Command
-
     @ProtocolMessage @PacketType(0x02)
     data class Echo(@LengthPrefixed val message: String) : Command
 }
 ```
 
-For bit-packed headers, multi-byte discriminators, or prefix-before-type formats, use `@DispatchOn` + `@DispatchValue`:
+For multi-byte or bit-packed discriminators, use `@DispatchOn` + `@DispatchValue`. `wire` values validated at compile time. Duplicate `@PacketType` values are compile errors.
+
+### `@WhenRemaining` — Optional Trailing Fields
 
 ```kotlin
-// Custom discriminator — extracts dispatch value from a value class
-@JvmInline
 @ProtocolMessage
-value class MqttFixedHeader(val raw: UByte) {
-    @DispatchValue
-    val packetType: Int get() = raw.toUInt().shr(4).toInt()
-}
-
-@DispatchOn(MqttFixedHeader::class)
-@ProtocolMessage
-sealed interface MqttPacket {
-    @ProtocolMessage @PacketType(value = 1, wire = 0x10)
-    data class Connect(val header: MqttFixedHeader, ...) : MqttPacket
-}
+data class AckV5(
+    val packetId: UShort,
+    @WhenRemaining(1) val reasonCode: UByte? = null,
+    @WhenRemaining(1) val properties: Collection<Property>? = null,
+)
 ```
 
-Key rules: `@DispatchValue` must return `Int`. `wire` values are validated at compile time against the discriminator's inner type range (e.g., UByte 0-255). Duplicate `@PacketType` values are compile errors.
+Fields must be nullable with default `null`, contiguous, at constructor tail. Cascading null checks on encode prevent impossible wire states.
 
-For protocols that mix byte orders within a single message, use `@WireOrder(Endianness.Big)` or `@WireOrder(Endianness.Little)` on individual fields. This overrides the message-level `@ProtocolMessage(wireOrder = ...)`. Combines with `@WireBytes` for custom-width little-endian fields (e.g., BLE ATT 3-byte LE lengths).
+### `peekFrameSize` — Stream Framing
 
-### `peekFrameSize` — Generated Stream Framing
-
-Every codec automatically generates `peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): Int?` when the frame size is determinable from the wire format. This peeks at a stream to determine the total bytes needed for decode, without consuming data. Eliminates manual peek offset math in streaming loops:
+Generated when frame size is determinable from wire format:
 
 ```kotlin
 while (stream.available() >= PacketCodec.MIN_HEADER_BYTES) {
@@ -388,126 +186,45 @@ while (stream.available() >= PacketCodec.MIN_HEADER_BYTES) {
 }
 ```
 
-Handles `@LengthPrefixed`, `@LengthFrom`, `@WhenTrue` (including value class property conditions), `@WireBytes`, sealed dispatch, `@DispatchOn` (value class and data class discriminators), nested messages, and multiple variable-length fields.
-
-### CodecContext — Typed Runtime Configuration
+### CodecContext
 
 Pass typed configuration through codec chains without global state:
 
 ```kotlin
-val ctx = DecodeContext.Empty
-    .with(MyCodec.AllocatorKey, hardwareAllocator)
-    .with(MyCodec.MaxSizeKey, 1_000_000)
+val ctx = DecodeContext.Empty.with(MyCodec.AllocatorKey, hardwareAllocator)
 val result = TopLevelCodec.decode(buffer, ctx)
 // context flows automatically through sealed dispatch → @UseCodec → nested codecs
 ```
 
-Context is forwarded automatically by generated code through sealed dispatch, `@UseCodec` fields, and nested `@ProtocolMessage` fields.
+## Stream Processing (`buffer.stream`)
 
-### Avoid Unnecessary Memory Copies
-
-- **Use `slice()` or `readBytes()`** instead of `readByteArray()` + `wrap()` for zero-copy views
-- **Use `toNativeData()`/`toMutableNativeData()`** for platform interop instead of converting to ByteArray first
-- **Use `BufferFactory.wrapNativeAddress()`** to write directly into externally-owned memory (HardwareBuffer, mmap, Skia surface) instead of copying through an intermediate buffer
-- **Use `writeString()` directly** instead of `payload.encodeToByteArray()` + `writeBytes()`
-- **Use `BufferPool`** in hot paths to reuse buffers instead of allocating per request
-- **Accept `ReadBuffer`/`WriteBuffer`** in function signatures, not `ByteArray`
+- `StreamProcessor` — Handles fragmented network data with peek/read. NOT thread-safe.
+- `FrameDetector` — Peeks at stream to determine frame boundaries without consuming data.
+- Adaptive coalescing: small chunks (< 256 bytes) auto-coalesced when ≥ 8 accumulate.
 
 ```kotlin
-// WRONG — unnecessary copies
-val bytes = buffer.readByteArray(length)  // copy to ByteArray
-val newBuffer = BufferFactory.Default.wrap(bytes)  // wrap again
-processBytes(bytes)  // works on ByteArray instead of buffer
-
-// CORRECT — zero-copy
-val slice = buffer.readBytes(length)  // zero-copy slice
-processBuffer(slice)  // works directly on buffer
+val processor = StreamProcessor.create(pool)
+processor.append(networkData)
+val message = processor.readBufferScoped(length) { decode(this) }
 ```
 
-### Accept Factory as a Parameter in Library Code
+## Flow Abstractions (`buffer-flow`)
 
-Library code should accept `BufferFactory` as a constructor parameter so callers control allocation strategy:
-
-```kotlin
-class ProtocolConnection(
-    private val factory: BufferFactory = BufferFactory.Default,
-) {
-    fun send(packet: Packet) {
-        factory.allocate(packet.sizeOf()).use { buffer ->
-            packet.writeTo(buffer)
-        }
-    }
-}
-```
+- `Sender<T>` / `Receiver<T>` — Unidirectional typed streams
+- `Connection<T>` — Bidirectional (Sender + Receiver + `close()`). NOT thread-safe.
+- `StreamMux<T>` — Multiplexed streams (QUIC, HTTP/2). NOT thread-safe.
+- `map()` / `contramap()` / `mapNotNull()` — Type-safe protocol layering
 
 ## Platform Notes
 
-- **JVM/Android:** Direct ByteBuffers (`DirectJvmBuffer`) used by default; `HeapJvmBuffer` for `wrap()` and `BufferFactory.managed()`
-- **Android SharedMemory:** Use `BufferFactory.shared()` for zero-copy IPC via Parcelable (API 27+)
-- **Apple:** `MutableDataBuffer` wraps NSMutableData (native memory); `wrap(ByteArray)` returns `ByteArrayBuffer`
-- **Apple NSData interop:** Use `BufferFactory.Default.wrap(nsData)` or `BufferFactory.Default.wrap(nsMutableData)` for zero-copy Apple API interop
-- **JS SharedArrayBuffer:** Requires CORS headers (`Cross-Origin-Opener-Policy`, `Cross-Origin-Embedder-Policy`)
-- **WASM:** `LinearBuffer` (Direct) uses native WASM memory for JS interop; `ByteArrayBuffer` (Heap) for compute workloads
-- **Linux:** `NativeBuffer` (Direct) uses malloc/free for zero-copy io_uring I/O; `ByteArrayBuffer` (Heap) for managed memory
-
-## Benchmarking
-
-### Running Benchmarks
-
-```bash
-# All platforms (kotlinx-benchmark)
-./gradlew benchmark
-
-# Platform-specific
-./gradlew jvmBenchmarkBenchmark
-./gradlew jsBenchmarkBenchmark
-./gradlew wasmJsBenchmarkBenchmark
-./gradlew macosArm64BenchmarkBenchmark
-
-# Quick validation (single iteration)
-./gradlew quickBenchmark
-
-# Android (requires device/emulator)
-./gradlew connectedBenchmarkAndroidTest
-```
-
-### Benchmark Source Locations
-
-- `src/commonBenchmark/kotlin/` - Shared benchmarks for JVM, JS, WasmJS, Native
-- `src/androidInstrumentedTest/kotlin/` - AndroidX Benchmark tests
-
-## Performance Optimization Guidelines
-
-When optimizing buffer operations, follow these principles:
-
-### Apple/Native Platform
-1. **Avoid object allocation in hot paths** - Kotlin/Native GC can't keep up with millions of allocations/sec
-2. **Use pointer arithmetic** - `CPointer + offset` compiles to single CPU instruction, zero allocation
-3. **Use `reinterpret<>()` for multi-byte reads** - Avoids byte-by-byte assembly
-4. **Prefer `memcpy` over intermediate arrays** - Direct memory-to-memory copy
-5. **Avoid `subdataWithRange()`** - Creates new NSData objects, causes GC pressure
-
-### JVM/Android
-1. **Direct ByteBuffers** are best for I/O (avoid extra copy)
-2. **Heap allocation is faster** (7.6M vs 1.3M ops/s) but Direct is better for I/O
-3. **Bulk operations are extremely fast** (46-56M ops/s)
-
-### JavaScript
-1. **Batch operations** - Primitive read/write is slow (36K ops/s)
-2. **Use bulk operations** when possible (10M ops/s)
-3. Heap and Direct are equivalent (both use Uint8Array)
-
-### WasmJS
-1. **LinearBuffer (Direct)** - Uses native WASM Pointer ops, 25% faster than ByteArrayBuffer
-2. **ByteArrayBuffer (Heap)** - Use for high-frequency allocations (no memory limit)
-3. **Bulk operations are 2x faster** than single operations on LinearBuffer
-4. **256MB pre-allocated** - LinearBuffer uses bump allocator due to optimizer bug workaround
-5. **Use Direct for JS interop** - Zero-copy sharing with JavaScript via `wasmMemory.buffer`
-
-See `PERFORMANCE.md` for detailed benchmark results.
+- **JVM/Android:** Direct ByteBuffers by default; `HeapJvmBuffer` for `wrap()` and `managed()`
+- **Android SharedMemory:** `BufferFactory.shared()` for zero-copy IPC (API 27+)
+- **Apple:** `MutableDataBuffer` wraps NSMutableData; use `wrap(nsData)` for zero-copy interop
+- **JS:** `SharedArrayBuffer` requires CORS headers
+- **WASM:** `LinearBuffer` for JS interop; `ByteArrayBuffer` for compute
 
 ## CI/CD
 
-- Builds run on macOS with JDK 21
+- Builds on macOS with JDK 21
 - PR labels control version bumping: `major`, `minor`, or patch (default)
-- Publishing to Maven Central happens automatically on PR merge to main
+- Publishing to Maven Central on merge to main

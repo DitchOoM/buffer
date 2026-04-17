@@ -135,9 +135,18 @@ class JsBuffer(
 
         @Suppress("UNCHECKED_CAST_TO_EXTERNAL_INTERFACE")
         val textDecoder = TextDecoder(encoding, js("{fatal: true}") as TextDecoderOptions)
+        val subarray = buffer.subarray(positionValue, positionValue + length)
+        // TextDecoder.decode() rejects SharedArrayBuffer-backed views in Chrome.
+        // Copy to a regular ArrayBuffer when the backing store is shared.
+        val view =
+            if (sharedArrayBuffer != null) {
+                Int8Array(length).also { it.set(subarray) }
+            } else {
+                subarray
+            }
         val result =
             textDecoder.decode(
-                buffer.subarray(positionValue, positionValue + length).unsafeCast<BufferSource>(),
+                view.unsafeCast<BufferSource>(),
             )
         position(positionValue + length)
         return result
@@ -148,6 +157,7 @@ class JsBuffer(
         offset: Int,
         length: Int,
     ): WriteBuffer {
+        checkWriteBounds(length)
         val int8Array = bytes.unsafeCast<Int8Array>().subarray(offset, offset + length)
         this.buffer.set(int8Array, positionValue)
         positionValue += int8Array.length
@@ -156,6 +166,8 @@ class JsBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
+        if (size == 0) return
+        checkWriteBounds(size)
         val actual = buffer.unwrapFully()
         if (actual is JsBuffer) {
             // Zero-copy: copy only the remaining portion using subarray
@@ -179,10 +191,22 @@ class JsBuffer(
             Charset.UTF8 -> {
                 val str = text.toString()
                 if (str.isEmpty()) return this
-                // Zero-alloc: TextEncoder.encodeInto() writes UTF-8 directly into the buffer
-                val target = Uint8Array(buffer.buffer, buffer.byteOffset + positionValue, capacity - positionValue)
-                val result = textEncoder.asDynamic().encodeInto(str, target)
-                positionValue += (result.written as Int)
+                checkWriteBounds(str.length) // minimum bytes needed (ASCII); actual UTF-8 may need more
+                val remaining = capacity - positionValue
+                if (sharedArrayBuffer != null) {
+                    // TextEncoder.encodeInto() rejects SharedArrayBuffer-backed views in Chrome.
+                    // Encode into a temporary regular ArrayBuffer then copy back.
+                    val temp = Uint8Array(remaining)
+                    val result = textEncoder.asDynamic().encodeInto(str, temp)
+                    val written = result.written as Int
+                    buffer.set(Int8Array(temp.buffer, 0, written), positionValue)
+                    positionValue += written
+                } else {
+                    // Zero-alloc: TextEncoder.encodeInto() writes UTF-8 directly into the buffer
+                    val target = Uint8Array(buffer.buffer, buffer.byteOffset + positionValue, remaining)
+                    val result = textEncoder.asDynamic().encodeInto(str, target)
+                    positionValue += (result.written as Int)
+                }
             }
             else -> throw UnsupportedOperationException("Unable to encode in $charset. Must use Charset.UTF8")
         }

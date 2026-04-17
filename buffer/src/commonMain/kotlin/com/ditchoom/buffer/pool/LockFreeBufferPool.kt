@@ -2,7 +2,6 @@ package com.ditchoom.buffer.pool
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.ReadWriteBuffer
 import kotlinx.atomicfu.atomic
 
 /**
@@ -36,7 +35,7 @@ internal class LockFreeBufferPool(
     private val poolMisses = atomic(0L)
     private val peakPoolSize = atomic(0)
 
-    override fun acquire(minSize: Int): ReadWriteBuffer {
+    override fun acquire(minSize: Int): PlatformBuffer {
         totalAllocations.incrementAndGet()
         val size = maxOf(minSize, defaultBufferSize)
 
@@ -55,7 +54,7 @@ internal class LockFreeBufferPool(
         return PooledBuffer(raw, this)
     }
 
-    override fun release(buffer: ReadWriteBuffer) {
+    override fun release(buffer: PlatformBuffer) {
         val raw =
             when (buffer) {
                 is PooledBuffer -> {

@@ -33,9 +33,9 @@ internal object PeekFrameSizeEmitter {
                 strategy is FieldReadStrategy.UseCodecField && strategy.lengthKind is LengthKind.FromField ->
                     lengthFromTargets.add(strategy.lengthKind.field)
             }
-            if (field.condition is FieldCondition.WhenTrue) {
-                val expr = (field.condition as FieldCondition.WhenTrue).expression
-                conditionTargets.add(expr.split(".")[0])
+            val cond = field.condition
+            if (cond is FieldCondition.WhenTrue) {
+                conditionTargets.add(cond.expression.split(".")[0])
             }
         }
 
@@ -69,6 +69,9 @@ internal object PeekFrameSizeEmitter {
                     else -> return null // unsupported condition target type
                 }
             }
+
+            // @WhenRemaining fields make exact frame size calculation impossible
+            if (field.condition is FieldCondition.WhenRemaining) return null
 
             // Handle @WhenTrue conditional fields
             if (field.condition != null) {

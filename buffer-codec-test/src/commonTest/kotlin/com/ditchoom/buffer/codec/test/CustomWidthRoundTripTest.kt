@@ -3,7 +3,7 @@ package com.ditchoom.buffer.codec.test
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.codec.SizeEstimate
+import com.ditchoom.buffer.codec.encodeToBuffer
 import com.ditchoom.buffer.codec.test.protocols.CustomWidthMessage
 import com.ditchoom.buffer.codec.test.protocols.CustomWidthMessageCodec
 import kotlin.test.Test
@@ -100,6 +100,7 @@ class CustomWidthRoundTripTest {
                 unsignedValue = 0u,
                 trailer = 0u,
             )
-        assertEquals(SizeEstimate.Exact(8), CustomWidthMessageCodec.sizeOf(msg))
+        val encoded = CustomWidthMessageCodec.encodeToBuffer(msg)
+        assertEquals(8, encoded.remaining())
     }
 }

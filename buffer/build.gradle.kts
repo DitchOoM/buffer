@@ -169,6 +169,7 @@ kotlin {
             }
         } else if (HostManager.hostIsLinux) {
             linuxX64()
+            linuxArm64()
         }
     }
     targets.withType<org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget>().configureEach {
@@ -336,6 +337,7 @@ kotlin {
 }
 
 android {
+    ndkVersion = "28.2.13676358"
     buildFeatures {
         aidl = true
     }
@@ -344,6 +346,21 @@ android {
         minSdk = 19
         testInstrumentationRunner = "androidx.benchmark.junit4.AndroidBenchmarkRunner"
         testInstrumentationRunnerArguments["androidx.benchmark.output.enable"] = "true"
+        ndk {
+            // Only build for active ABIs — keeps AAR small
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+        }
+        externalNativeBuild {
+            cmake {
+                // No C++ runtime needed — pure C JNI for minimal .so size
+                arguments += "-DANDROID_STL=none"
+            }
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("src/androidMain/jni/CMakeLists.txt")
+        }
     }
     namespace = "com.ditchoom.buffer"
 
@@ -494,6 +511,13 @@ benchmark {
             iterationTime = 1000
             iterationTimeUnit = "ms"
             include("StreamingStringDecoder")
+        }
+        register("streamProcessor") {
+            warmups = 3
+            iterations = 5
+            iterationTime = 1000
+            iterationTimeUnit = "ms"
+            include("StreamProcessor")
         }
         // Fast configuration for WASM - runs only key benchmarks to avoid long run times
         register("wasmFast") {

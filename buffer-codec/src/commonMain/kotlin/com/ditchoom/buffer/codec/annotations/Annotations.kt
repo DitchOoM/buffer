@@ -10,7 +10,7 @@ package com.ditchoom.buffer.codec.annotations
  *     val sensorId: UShort,  // 2 bytes
  *     val temperature: Int,  // 4 bytes
  * )
- * // Generates SensorReadingCodec with decode(), encode(), and sizeOf()
+ * // Generates SensorReadingCodec with decode() and encode()
  * ```
  *
  * **Note:** Generated code appears after compilation (`./gradlew build`).
@@ -27,6 +27,16 @@ annotation class ProtocolMessage(
      * Individual fields can further override with [WireOrder].
      */
     val wireOrder: Endianness = Endianness.Default,
+    /**
+     * Controls whether the generated codec supports encode, decode, or both.
+     *
+     * - [Direction.Infer] (default): automatically inferred from fields.
+     *   If any field uses a decode-only `@UseCodec`, the codec becomes decode-only.
+     * - [Direction.Codec]: asserts bidirectional — compile error if any field is unidirectional.
+     * - [Direction.DecodeOnly]: generates only `decode()` — compile error if any field is encode-only.
+     * - [Direction.EncodeOnly]: generates only `encode()` — compile error if any field is decode-only.
+     */
+    val direction: Direction = Direction.Infer,
 )
 
 /**
@@ -195,6 +205,28 @@ enum class Endianness {
 }
 
 /**
+ * Controls whether a `@ProtocolMessage` generates encode, decode, or both.
+ *
+ * Used with [ProtocolMessage.direction] to explicitly control or assert the
+ * directionality of the generated codec. Direction is inferred from fields by default:
+ * if any field uses a decode-only `@UseCodec` (one that only implements `Decoder<T>`),
+ * the generated codec becomes decode-only automatically.
+ */
+enum class Direction {
+    /** Infer from fields: decode-only if any field is decode-only, etc. (default, non-breaking). */
+    Infer,
+
+    /** Assert bidirectional — compile error if any field is unidirectional. */
+    Codec,
+
+    /** Force decode-only — compile error if any field is encode-only. */
+    DecodeOnly,
+
+    /** Force encode-only — compile error if any field is decode-only. */
+    EncodeOnly,
+}
+
+/**
  * Overrides the byte order for a single field, taking precedence over
  * [ProtocolMessage.wireOrder]. Use when a protocol mixes byte orders
  * within a single message (e.g., big-endian magic + little-endian lengths).
@@ -240,6 +272,34 @@ annotation class WireOrder(
 @Retention(AnnotationRetention.BINARY)
 annotation class WhenTrue(
     val expression: String,
+)
+
+/**
+ * Conditional field: only present on the wire when at least [minBytes] remain
+ * in the buffer after reading all preceding fields.
+ *
+ * The field must be nullable with a default value of `null`.
+ * All `@WhenRemaining` fields must be contiguous and at the tail of the constructor.
+ *
+ * On encode, fields are written with cascading null checks: if an earlier
+ * `@WhenRemaining` field is null, all subsequent ones are skipped — preventing
+ * an impossible wire state where a trailing field is present without its predecessor.
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * data class AckV5(
+ *     val packetId: UShort,
+ *     @WhenRemaining(1) val reasonCode: UByte? = null,
+ *     @WhenRemaining(1) val properties: Collection<Property>? = null,
+ * )
+ * ```
+ *
+ * @param minBytes Minimum bytes remaining in buffer for this field to be present.
+ */
+@Target(AnnotationTarget.VALUE_PARAMETER)
+@Retention(AnnotationRetention.BINARY)
+annotation class WhenRemaining(
+    val minBytes: Int,
 )
 
 /**

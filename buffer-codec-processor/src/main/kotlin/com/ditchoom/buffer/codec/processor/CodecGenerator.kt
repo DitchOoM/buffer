@@ -24,6 +24,7 @@ class CodecGenerator(
         fields: List<FieldInfo>,
         batches: List<CodegenItem>,
         hasPayload: Boolean,
+        direction: CodecDirection = CodecDirection.Bidirectional,
     ) {
         val className = classDeclaration.simpleName.asString()
         val packageName = classDeclaration.packageName.asString()
@@ -40,9 +41,9 @@ class CodecGenerator(
 
         val fileSpec =
             if (hasPayload) {
-                buildPayloadCodecFile(packageName, classTypeName, codecName, fields, batches)
+                buildPayloadCodecFile(packageName, classTypeName, codecName, fields, batches, direction)
             } else {
-                buildCodecFile(packageName, classTypeName, codecName, fields, batches)
+                buildCodecFile(packageName, classTypeName, codecName, fields, batches, direction)
             }
 
         fileSpec.writeTo(codeGenerator, dependencies)
@@ -56,69 +57,127 @@ class CodecGenerator(
         codecName: String,
         fields: List<FieldInfo>,
         batches: List<CodegenItem>,
+        direction: CodecDirection = CodecDirection.Bidirectional,
     ): FileSpec {
-        val objectBuilder =
-            TypeSpec
-                .objectBuilder(codecName)
-                .addSuperinterface(CODEC.parameterizedBy(classTypeName))
+        val isBidirectional = direction == CodecDirection.Bidirectional
+        val canDecode = direction != CodecDirection.EncodeOnly
+        val canEncode = direction != CodecDirection.DecodeOnly
 
-        // decode(buffer, context) — Codec<T> abstract method
-        val decodeBody = CodeBlock.builder()
-        var batchIndex = 0
-        for (item in batches) {
-            when (item) {
-                is CodegenItem.Batched -> {
-                    addBatchRead(decodeBody, item.group, batchIndex)
-                    batchIndex++
-                }
-                is CodegenItem.Single -> {
-                    addFieldRead(decodeBody, item.field, withContext = true)
+        val objectBuilder = TypeSpec.objectBuilder(codecName)
+
+        // Superinterface depends on direction
+        when (direction) {
+            CodecDirection.Bidirectional ->
+                objectBuilder.addSuperinterface(CODEC.parameterizedBy(classTypeName))
+            CodecDirection.DecodeOnly ->
+                objectBuilder.addSuperinterface(DECODER.parameterizedBy(classTypeName))
+            CodecDirection.EncodeOnly ->
+                objectBuilder.addSuperinterface(ENCODER.parameterizedBy(classTypeName))
+        }
+
+        // decode(buffer, context) — context-aware decode
+        if (canDecode) {
+            val decodeBody = CodeBlock.builder()
+            var batchIndex = 0
+            for (item in batches) {
+                when (item) {
+                    is CodegenItem.Batched -> {
+                        addBatchRead(decodeBody, item.group, batchIndex)
+                        batchIndex++
+                    }
+                    is CodegenItem.Single -> {
+                        addFieldRead(decodeBody, item.field, withContext = true)
+                    }
                 }
             }
-        }
-        val fieldNames = fields.joinToString(", ") { it.name }
-        decodeBody.addStatement("return %T(%L)", classTypeName, fieldNames)
+            val fieldNames = fields.joinToString(", ") { it.name }
+            decodeBody.addStatement("return %T(%L)", classTypeName, fieldNames)
 
-        objectBuilder.addFunction(
-            FunSpec
-                .builder("decode")
-                .addModifiers(KModifier.OVERRIDE)
-                .addParameter("buffer", READ_BUFFER)
-                .addParameter("context", DECODE_CONTEXT)
-                .returns(classTypeName)
-                .addCode(decodeBody.build())
-                .build(),
-        )
+            val decodeCtxBuilder =
+                FunSpec
+                    .builder("decode")
+                    .addParameter("buffer", READ_BUFFER)
+                    .addParameter("context", DECODE_CONTEXT)
+                    .returns(classTypeName)
+                    .addCode(decodeBody.build())
+            if (isBidirectional) decodeCtxBuilder.addModifiers(KModifier.OVERRIDE)
+            objectBuilder.addFunction(decodeCtxBuilder.build())
 
-        // encode(buffer, value, context) — Codec<T> abstract method
-        val encodeBody = CodeBlock.builder()
-        for (field in fields) {
-            addFieldWrite(encodeBody, field, "value.${field.name}", withContext = true)
-        }
-
-        objectBuilder.addFunction(
-            FunSpec
-                .builder("encode")
-                .addModifiers(KModifier.OVERRIDE)
-                .addParameter("buffer", WRITE_BUFFER)
-                .addParameter("value", classTypeName)
-                .addParameter("context", ENCODE_CONTEXT)
-                .addCode(encodeBody.build())
-                .build(),
-        )
-
-        // Generate sizeOf if possible
-        val sizeOfFun = generateSizeOf(fields, classTypeName)
-        if (sizeOfFun != null) {
-            objectBuilder.addFunction(sizeOfFun)
+            // For DecodeOnly: override Decoder<T>.decode(buffer) to delegate to context version
+            if (direction == CodecDirection.DecodeOnly) {
+                objectBuilder.addFunction(
+                    FunSpec
+                        .builder("decode")
+                        .addModifiers(KModifier.OVERRIDE)
+                        .addParameter("buffer", READ_BUFFER)
+                        .returns(classTypeName)
+                        .addStatement("return decode(buffer, %T.Empty)", DECODE_CONTEXT)
+                        .build(),
+                )
+            }
         }
 
-        // Generate peekFrameSize if possible
-        val peekResult = PeekFrameSizeEmitter.generate(fields)
-        if (peekResult != null) {
-            objectBuilder.addProperty(PeekFrameSizeEmitter.buildMinHeaderProperty(peekResult))
-            for (fn in PeekFrameSizeEmitter.buildFunctions(peekResult)) {
-                objectBuilder.addFunction(fn)
+        // encode(buffer, value, context) — context-aware encode
+        if (canEncode) {
+            val encodeBody = CodeBlock.builder()
+            val whenRemainingTail = mutableListOf<FieldInfo>()
+            for (field in fields) {
+                if (field.condition is FieldCondition.WhenRemaining) {
+                    whenRemainingTail.add(field)
+                } else {
+                    addFieldWrite(encodeBody, field, "value.${field.name}", withContext = true)
+                }
+            }
+            if (whenRemainingTail.isNotEmpty()) {
+                emitWhenRemainingEncode(encodeBody, whenRemainingTail, withContext = true)
+            }
+
+            val encodeCtxBuilder =
+                FunSpec
+                    .builder("encode")
+                    .addParameter("buffer", WRITE_BUFFER)
+                    .addParameter("value", classTypeName)
+                    .addParameter("context", ENCODE_CONTEXT)
+                    .addCode(encodeBody.build())
+            if (isBidirectional) encodeCtxBuilder.addModifiers(KModifier.OVERRIDE)
+            objectBuilder.addFunction(encodeCtxBuilder.build())
+
+            // For EncodeOnly: override Encoder<T>.encode(buffer, value) to delegate to context version
+            if (direction == CodecDirection.EncodeOnly) {
+                objectBuilder.addFunction(
+                    FunSpec
+                        .builder("encode")
+                        .addModifiers(KModifier.OVERRIDE)
+                        .addParameter("buffer", WRITE_BUFFER)
+                        .addParameter("value", classTypeName)
+                        .addStatement("encode(buffer, value, %T.Empty)", ENCODE_CONTEXT)
+                        .build(),
+                )
+            }
+        }
+
+        // Generate wireSizeHint (sum of fixed-size fields, variable fields contribute 0)
+        if (canEncode) {
+            val hint = fields.sumOf { it.strategy.fixedSize.coerceAtLeast(0) }
+            if (hint > 0) {
+                objectBuilder.addProperty(
+                    com.squareup.kotlinpoet.PropertySpec
+                        .builder("wireSizeHint", Int::class)
+                        .addModifiers(KModifier.OVERRIDE)
+                        .initializer("%L", hint)
+                        .build(),
+                )
+            }
+        }
+
+        // Generate peekFrameSize if possible (only for decode-capable codecs)
+        if (canDecode) {
+            val peekResult = PeekFrameSizeEmitter.generate(fields)
+            if (peekResult != null) {
+                objectBuilder.addProperty(PeekFrameSizeEmitter.buildMinHeaderProperty(peekResult))
+                for (fn in PeekFrameSizeEmitter.buildFunctions(peekResult, implementsCodec = isBidirectional)) {
+                    objectBuilder.addFunction(fn)
+                }
             }
         }
 
@@ -137,6 +196,7 @@ class CodecGenerator(
         codecName: String,
         fields: List<FieldInfo>,
         batches: List<CodegenItem>,
+        direction: CodecDirection = CodecDirection.Bidirectional,
     ): FileSpec {
         val className = classTypeName.simpleName
         val payloadFields = fields.filter { it.strategy is FieldReadStrategy.PayloadField }
@@ -147,10 +207,15 @@ class CodecGenerator(
         val typeVariables = payloadTypeParams.map { TypeVariableName(it) }
 
         // Build decode function
+        val hasDiscriminatorField = fields.any { it.strategy is FieldReadStrategy.DiscriminatorField }
         val decodeBuilder =
             FunSpec
                 .builder("decode")
                 .addParameter("buffer", READ_BUFFER)
+
+        if (hasDiscriminatorField) {
+            decodeBuilder.addParameter("context", DECODE_CONTEXT)
+        }
 
         for (tv in typeVariables) {
             decodeBuilder.addTypeVariable(tv)
@@ -270,13 +335,21 @@ class CodecGenerator(
         }
 
         val encodeBody = CodeBlock.builder()
+        val payloadWhenRemainingTail = mutableListOf<FieldInfo>()
         for (field in fields) {
-            val strategy = field.strategy
-            if (strategy is FieldReadStrategy.PayloadField) {
-                addPayloadWrite(encodeBody, field)
+            if (field.condition is FieldCondition.WhenRemaining) {
+                payloadWhenRemainingTail.add(field)
             } else {
-                addFieldWrite(encodeBody, field, "value.${field.name}")
+                val strategy = field.strategy
+                if (strategy is FieldReadStrategy.PayloadField) {
+                    addPayloadWrite(encodeBody, field)
+                } else {
+                    addFieldWrite(encodeBody, field, "value.${field.name}")
+                }
             }
+        }
+        if (payloadWhenRemainingTail.isNotEmpty()) {
+            emitWhenRemainingEncode(encodeBody, payloadWhenRemainingTail)
         }
         encodeBuilder.addCode(encodeBody.build())
 
@@ -347,10 +420,13 @@ class CodecGenerator(
             )
             lambdaArgs.add(localVar)
         }
-        ctxDecodeBody.addStatement(
-            "return decode(buffer, %L)",
-            lambdaArgs.joinToString(", "),
-        )
+        val ctxDecodeArgs =
+            if (hasDiscriminatorField) {
+                "buffer, context, ${lambdaArgs.joinToString(", ")}"
+            } else {
+                "buffer, ${lambdaArgs.joinToString(", ")}"
+            }
+        ctxDecodeBody.addStatement("return decode(%L)", ctxDecodeArgs)
 
         val starReturnType = classTypeName.parameterizedBy(payloadFields.map { com.squareup.kotlinpoet.STAR })
         objectBuilder.addFunction(
@@ -414,60 +490,6 @@ class CodecGenerator(
         return fileBuilder.build()
     }
 
-    // ──────────────────────── sizeOf generation ────────────────────────
-
-    private fun generateSizeOf(
-        fields: List<FieldInfo>,
-        classTypeName: ClassName,
-    ): FunSpec? {
-        // Skip if any field has a condition (can't compute size statically)
-        if (fields.any { it.condition != null }) return null
-
-        var fixedTotal = 0
-        val runtimeExprs = mutableListOf<String>()
-        var canGenerate = true
-
-        for (field in fields) {
-            val strategy = field.strategy
-            val size = strategy.fixedSize
-            if (size >= 0) {
-                fixedTotal += size
-            } else if (strategy is FieldReadStrategy.Custom) {
-                val sizeOfFn = strategy.descriptor.sizeOfFunction
-                if (sizeOfFn != null) {
-                    runtimeExprs.add("${sizeOfFn.functionName}(value.${field.name})")
-                } else {
-                    canGenerate = false
-                    break
-                }
-            } else {
-                canGenerate = false
-                break
-            }
-        }
-
-        if (!canGenerate) return null
-
-        val builder =
-            FunSpec
-                .builder("sizeOf")
-                .addModifiers(KModifier.OVERRIDE)
-                .addParameter("value", classTypeName)
-                .returns(SIZE_ESTIMATE)
-
-        if (runtimeExprs.isEmpty()) {
-            builder.addStatement("return %T.Exact(%L)", SIZE_ESTIMATE, fixedTotal)
-        } else {
-            builder.addStatement("var size = %L", fixedTotal)
-            for (expr in runtimeExprs) {
-                builder.addStatement("size += %L", expr)
-            }
-            builder.addStatement("return %T.Exact(size)", SIZE_ESTIMATE)
-        }
-
-        return builder.build()
-    }
-
     // ──────────────────────── Utility ────────────────────────
 
     private fun needsLengthPrefixedImports(fields: List<FieldInfo>): Boolean = fields.any { needsLengthPrefixedImport(it.strategy) }
@@ -496,7 +518,6 @@ class CodecGenerator(
                 val d = strategy.descriptor
                 fileBuilder.addImport(d.readFunction.packageName, d.readFunction.functionName)
                 fileBuilder.addImport(d.writeFunction.packageName, d.writeFunction.functionName)
-                d.sizeOfFunction?.let { fileBuilder.addImport(it.packageName, it.functionName) }
             }
         }
     }

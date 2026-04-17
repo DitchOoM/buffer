@@ -105,15 +105,14 @@ class RawDeflateTests {
 
             val decompressor = SuspendingStreamingDecompressor.create(CompressionAlgorithm.Raw)
             try {
-                val output = mutableListOf<ByteArray>()
-                for (chunk in decompressor.decompress(buffer)) {
-                    output.add(chunk.readByteArray(chunk.remaining()))
+                val sb = StringBuilder()
+                decompressor.decompressScoped(buffer) {
+                    if (remaining() > 0) sb.append(readString(remaining()))
                 }
-                for (chunk in decompressor.finish()) {
-                    output.add(chunk.readByteArray(chunk.remaining()))
+                decompressor.finishScoped {
+                    if (remaining() > 0) sb.append(readString(remaining()))
                 }
-                val result = output.fold(byteArrayOf()) { acc, arr -> acc + arr }
-                assertEquals("Hello", result.decodeToString())
+                assertEquals("Hello", sb.toString())
             } finally {
                 decompressor.close()
             }
@@ -162,30 +161,29 @@ class RawDeflateTests {
 
             val decompressor = SuspendingStreamingDecompressor.create(CompressionAlgorithm.Raw)
             try {
-                val output = mutableListOf<ByteArray>()
+                val sb = StringBuilder()
 
                 // Feed first fragment
                 val buf1 = BufferFactory.Default.allocate(fragment1.size)
                 buf1.writeBytes(fragment1)
                 buf1.resetForRead()
-                for (chunk in decompressor.decompress(buf1)) {
-                    output.add(chunk.readByteArray(chunk.remaining()))
+                decompressor.decompressScoped(buf1) {
+                    if (remaining() > 0) sb.append(readString(remaining()))
                 }
 
                 // Feed second fragment (includes terminator)
                 val buf2 = BufferFactory.Default.allocate(fragment2.size)
                 buf2.writeBytes(fragment2)
                 buf2.resetForRead()
-                for (chunk in decompressor.decompress(buf2)) {
-                    output.add(chunk.readByteArray(chunk.remaining()))
+                decompressor.decompressScoped(buf2) {
+                    if (remaining() > 0) sb.append(readString(remaining()))
                 }
 
-                for (chunk in decompressor.finish()) {
-                    output.add(chunk.readByteArray(chunk.remaining()))
+                decompressor.finishScoped {
+                    if (remaining() > 0) sb.append(readString(remaining()))
                 }
 
-                val result = output.fold(byteArrayOf()) { acc, arr -> acc + arr }
-                assertEquals("Hello", result.decodeToString())
+                assertEquals("Hello", sb.toString())
             } finally {
                 decompressor.close()
             }
@@ -358,19 +356,16 @@ class RawDeflateTests {
                 for (msg in messages) {
                     // Compress with sync flush (simulates per-message compression)
                     val input = msg.toReadBuffer()
-                    val compressedChunks = compressor.compress(input)
-
-                    // Feed compressed chunks to decompressor
-                    val decompressedParts = mutableListOf<ByteArray>()
-                    for (chunk in compressedChunks) {
-                        for (out in decompressor.decompress(chunk)) {
-                            decompressedParts.add(out.readByteArray(out.remaining()))
+                    val sb = StringBuilder()
+                    compressor.compressScoped(input) {
+                        // Feed compressed chunk directly to decompressor
+                        decompressor.decompressScoped(this) {
+                            if (remaining() > 0) sb.append(readString(remaining()))
                         }
                     }
 
-                    if (decompressedParts.isNotEmpty()) {
-                        val result = decompressedParts.fold(byteArrayOf()) { acc, arr -> acc + arr }
-                        assertEquals(msg, result.decodeToString())
+                    if (sb.isNotEmpty()) {
+                        assertEquals(msg, sb.toString())
                     }
                 }
             } finally {

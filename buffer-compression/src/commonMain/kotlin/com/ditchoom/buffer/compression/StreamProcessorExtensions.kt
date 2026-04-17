@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.StreamProcessorBuilder
@@ -21,24 +22,24 @@ import com.ditchoom.buffer.stream.TransformSpec
  * ```
  *
  * @param algorithm The compression algorithm to decompress (default: Gzip)
- * @param allocator Buffer allocation strategy (default: Direct)
+ * @param bufferFactory Buffer allocation strategy (default: pool-backed factory)
  */
 fun StreamProcessorBuilder.decompress(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Gzip,
-    allocator: BufferAllocator = BufferAllocator.FromPool(pool),
-): StreamProcessorBuilder = addTransform(DecompressionSpec(algorithm, allocator))
+    bufferFactory: BufferFactory = factory,
+): StreamProcessorBuilder = addTransform(DecompressionSpec(algorithm, bufferFactory))
 
 /**
  * TransformSpec implementation for decompression.
  */
 internal class DecompressionSpec(
     private val algorithm: CompressionAlgorithm,
-    private val allocator: BufferAllocator,
+    private val bufferFactory: BufferFactory,
 ) : TransformSpec {
-    override fun wrapSync(inner: StreamProcessor): StreamProcessor = DecompressingStreamProcessor(inner, algorithm, allocator)
+    override fun wrapSync(inner: StreamProcessor): StreamProcessor = DecompressingStreamProcessor(inner, algorithm, bufferFactory)
 
     override fun wrapSuspending(inner: SuspendingStreamProcessor): SuspendingStreamProcessor =
-        SuspendingDecompressingStreamProcessor(inner, algorithm, allocator)
+        SuspendingDecompressingStreamProcessor(inner, algorithm, bufferFactory)
 }
 
 /**
@@ -63,18 +64,18 @@ internal class DecompressionSpec(
 internal class DecompressingStreamProcessor(
     private val inner: StreamProcessor,
     algorithm: CompressionAlgorithm,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
 ) : StreamProcessor by inner {
     private val decompressor =
         StreamingDecompressor.create(
             algorithm = algorithm,
-            allocator = allocator,
+            bufferFactory = bufferFactory,
         )
     private var finished = false
 
     override fun append(chunk: ReadBuffer) {
         require(!finished) { "Cannot append after finish()" }
-        decompressor.decompress(chunk) { decompressedChunk ->
+        decompressor.decompressUnsafe(chunk) { decompressedChunk ->
             inner.append(decompressedChunk)
         }
     }
@@ -90,7 +91,7 @@ internal class DecompressingStreamProcessor(
 
     override fun finish() {
         if (!finished) {
-            decompressor.finish { decompressedChunk ->
+            decompressor.finishUnsafe { decompressedChunk ->
                 inner.append(decompressedChunk)
             }
             finished = true
@@ -120,18 +121,18 @@ internal class DecompressingStreamProcessor(
 internal class SuspendingDecompressingStreamProcessor(
     private val inner: SuspendingStreamProcessor,
     algorithm: CompressionAlgorithm,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
 ) : SuspendingStreamProcessor {
     private val decompressor =
         SuspendingStreamingDecompressor.create(
             algorithm = algorithm,
-            allocator = allocator,
+            bufferFactory = bufferFactory,
         )
     private var finished = false
 
     override suspend fun append(chunk: ReadBuffer) {
         require(!finished) { "Cannot append after finish()" }
-        val decompressedChunks = decompressor.decompress(chunk)
+        val decompressedChunks = decompressor.decompressUnsafe(chunk)
         for (decompressed in decompressedChunks) {
             inner.append(decompressed)
         }
@@ -148,7 +149,7 @@ internal class SuspendingDecompressingStreamProcessor(
 
     override suspend fun finish() {
         if (!finished) {
-            val finalChunks = decompressor.finish()
+            val finalChunks = decompressor.finishUnsafe()
             for (chunk in finalChunks) {
                 inner.append(chunk)
             }

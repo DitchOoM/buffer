@@ -6,10 +6,11 @@ import com.squareup.kotlinpoet.CodeBlock
 internal val READ_BUFFER = ClassName("com.ditchoom.buffer", "ReadBuffer")
 internal val WRITE_BUFFER = ClassName("com.ditchoom.buffer", "WriteBuffer")
 internal val CODEC = ClassName("com.ditchoom.buffer.codec", "Codec")
+internal val DECODER = ClassName("com.ditchoom.buffer.codec", "Decoder")
+internal val ENCODER = ClassName("com.ditchoom.buffer.codec", "Encoder")
 internal val DECODE_CONTEXT = ClassName("com.ditchoom.buffer.codec", "DecodeContext")
 internal val ENCODE_CONTEXT = ClassName("com.ditchoom.buffer.codec", "EncodeContext")
 internal val CODEC_CONTEXT_KEY = ClassName("com.ditchoom.buffer.codec", "CodecContext", "Key")
-internal val SIZE_ESTIMATE = ClassName("com.ditchoom.buffer.codec", "SizeEstimate")
 internal val PAYLOAD_READER = ClassName("com.ditchoom.buffer.codec.payload", "PayloadReader")
 internal val READ_BUFFER_PAYLOAD_READER = ClassName("com.ditchoom.buffer.codec.payload", "ReadBufferPayloadReader")
 internal val UNIT = ClassName("kotlin", "Unit")
@@ -53,9 +54,14 @@ internal fun addPayloadRawRead(
     val rawVar = "_raw_${field.name}"
     val condition = field.condition
 
-    if (condition != null) {
-        val condExpr = (condition as FieldCondition.WhenTrue).expression
-        code.beginControlFlow("val %L: %T? = if (%L)", rawVar, READ_BUFFER, condExpr)
+    if (condition is FieldCondition.WhenTrue) {
+        code.beginControlFlow("val %L: %T? = if (%L)", rawVar, READ_BUFFER, condition.expression)
+        addPayloadRawReadBody(code, strategy)
+        code.nextControlFlow("else")
+        code.addStatement("null")
+        code.endControlFlow()
+    } else if (condition is FieldCondition.WhenRemaining) {
+        code.beginControlFlow("val %L: %T? = if (buffer.remaining() >= %L)", rawVar, READ_BUFFER, condition.minBytes)
         addPayloadRawReadBody(code, strategy)
         code.nextControlFlow("else")
         code.addStatement("null")
@@ -97,11 +103,14 @@ internal fun addPayloadWrite(
     val strategy = field.strategy as FieldReadStrategy.PayloadField
     val condition = field.condition
 
-    if (condition != null) {
-        val condExpr = (condition as FieldCondition.WhenTrue).expression.replace(Regex("^([^.]+)"), "value.$1")
+    if (condition is FieldCondition.WhenTrue) {
+        val condExpr = condition.expression.replace(Regex("^([^.]+)"), "value.$1")
         code.beginControlFlow("if (%L)", condExpr)
         addPayloadEncodeBody(code, strategy, field)
         code.endControlFlow()
+    } else if (condition is FieldCondition.WhenRemaining) {
+        // Individual null check — cascading handled by CodecGenerator
+        addPayloadEncodeBody(code, strategy, field)
     } else {
         addPayloadEncodeBody(code, strategy, field)
     }

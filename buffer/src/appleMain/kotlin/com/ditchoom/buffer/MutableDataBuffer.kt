@@ -194,6 +194,7 @@ class MutableDataBuffer private constructor(
     }
 
     override fun writeByte(byte: Byte): WriteBuffer {
+        checkWriteBounds(1)
         bytePointer[position++] = byte
         return this
     }
@@ -202,11 +203,13 @@ class MutableDataBuffer private constructor(
         index: Int,
         byte: Byte,
     ): WriteBuffer {
+        checkIndexBounds(index, 1)
         bytePointer[index] = byte
         return this
     }
 
     override fun writeShort(short: Short): WriteBuffer {
+        checkWriteBounds(2)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) short.reverseBytes() else short
         (bytePointer + position)!!.reinterpret<ShortVar>()[0] = value
         position += 2
@@ -217,12 +220,14 @@ class MutableDataBuffer private constructor(
         index: Int,
         short: Short,
     ): WriteBuffer {
+        checkIndexBounds(index, 2)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) short.reverseBytes() else short
         (bytePointer + index)!!.reinterpret<ShortVar>()[0] = value
         return this
     }
 
     override fun writeInt(int: Int): WriteBuffer {
+        checkWriteBounds(4)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) int.reverseBytes() else int
         (bytePointer + position)!!.reinterpret<IntVar>()[0] = value
         position += 4
@@ -233,12 +238,14 @@ class MutableDataBuffer private constructor(
         index: Int,
         int: Int,
     ): WriteBuffer {
+        checkIndexBounds(index, 4)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) int.reverseBytes() else int
         (bytePointer + index)!!.reinterpret<IntVar>()[0] = value
         return this
     }
 
     override fun writeLong(long: Long): WriteBuffer {
+        checkWriteBounds(8)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) long.reverseBytes() else long
         (bytePointer + position)!!.reinterpret<LongVar>()[0] = value
         position += 8
@@ -249,6 +256,7 @@ class MutableDataBuffer private constructor(
         index: Int,
         long: Long,
     ): WriteBuffer {
+        checkIndexBounds(index, 8)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) long.reverseBytes() else long
         (bytePointer + index)!!.reinterpret<LongVar>()[0] = value
         return this
@@ -262,6 +270,7 @@ class MutableDataBuffer private constructor(
         if (length < 1) {
             return this
         }
+        checkWriteBounds(length)
         if (ownsData) {
             val range = NSMakeRange(position.convert(), length.convert())
             bytes.usePinned { pin ->
@@ -279,6 +288,7 @@ class MutableDataBuffer private constructor(
     override fun write(buffer: ReadBuffer) {
         val bytesToCopy = buffer.remaining()
         if (bytesToCopy == 0) return
+        checkWriteBounds(bytesToCopy)
         val srcNative = buffer.nativeMemoryAccess
         if (srcNative != null) {
             val srcPtr = srcNative.nativeAddress.toCPointer<ByteVar>()!! + buffer.position()
@@ -317,6 +327,7 @@ class MutableDataBuffer private constructor(
         @Suppress("UNCHECKED_CAST")
         val stringBytes = stringData.bytes as CPointer<ByteVar>
         val stringLength = stringData.length.toInt()
+        checkWriteBounds(stringLength)
 
         memcpy(bytePointer + position, stringBytes, stringLength.convert())
         position += stringLength

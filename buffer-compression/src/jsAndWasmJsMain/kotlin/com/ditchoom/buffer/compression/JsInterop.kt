@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 
 // ============================================================================
@@ -44,7 +46,7 @@ internal expect fun combineJsByteArrays(
 internal expect fun emptyJsByteArray(): JsByteArray
 
 /** Convert a [JsByteArray] to a [ReadBuffer] ready for reading (position=0, limit=length). */
-internal expect fun JsByteArray.toPlatformBuffer(allocator: BufferAllocator = BufferAllocator.Default): ReadBuffer
+internal expect fun JsByteArray.toPlatformBuffer(bufferFactory: BufferFactory = BufferFactory.Default): ReadBuffer
 
 // ============================================================================
 // Node.js sync zlib operations
@@ -97,10 +99,14 @@ internal expect class NodeTransformHandle
 internal expect fun createCompressStream(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
+    windowBits: Int = 0,
 ): NodeTransformHandle
 
 /** Create a decompression Transform stream. */
-internal expect fun createDecompressStream(algorithm: CompressionAlgorithm): NodeTransformHandle
+internal expect fun createDecompressStream(
+    algorithm: CompressionAlgorithm,
+    windowBits: Int = 0,
+): NodeTransformHandle
 
 /** Write chunks and flush with Z_SYNC_FLUSH. Returns output chunks. */
 internal expect suspend fun NodeTransformHandle.writeAndFlush(inputs: List<JsByteArray>): List<JsByteArray>
@@ -110,6 +116,35 @@ internal expect suspend fun NodeTransformHandle.writeAndEnd(inputs: List<JsByteA
 
 /** Destroy the Transform stream. */
 internal expect fun NodeTransformHandle.destroy()
+
+/**
+ * Synchronously process data through a persistent Node.js zlib stream.
+ * Uses the C++ handle's writeSync() method directly to maintain the LZ77
+ * sliding window state across calls (context takeover).
+ *
+ * Only use with [zlibSyncFlushFlag] — Z_SYNC_FLUSH guarantees all output
+ * is produced when input is consumed, allowing a safe loop exit.
+ */
+internal expect fun NodeTransformHandle.processSync(
+    input: JsByteArray,
+    flushFlag: Int,
+): JsByteArray
+
+/**
+ * One-shot synchronous processing via Node.js's _processChunk().
+ * Unlike [processSync], this DESTROYS the C++ handle after completing —
+ * use only for finish() where the stream won't be reused.
+ */
+internal expect fun NodeTransformHandle.processSyncOneShot(
+    input: JsByteArray,
+    flushFlag: Int,
+): JsByteArray
+
+/** Node.js zlib Z_SYNC_FLUSH constant. */
+internal expect fun zlibSyncFlushFlag(): Int
+
+/** Node.js zlib Z_FINISH constant. */
+internal expect fun zlibFinishFlag(): Int
 
 // ============================================================================
 // One-shot async Transform stream (stateless — creates and destroys stream)

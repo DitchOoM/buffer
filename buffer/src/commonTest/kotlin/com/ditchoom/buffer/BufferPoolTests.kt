@@ -596,7 +596,7 @@ class BufferPoolTests {
         // Acquire buffers and free them via freeNativeMemory (the PooledBuffer path)
         // This triggers releaseRef() -> pool.release(inner), adding buffers back to pool
         val buffers = (1..4).map { pool.acquire(512) }
-        buffers.forEach { (it as PlatformBuffer).freeNativeMemory() }
+        buffers.forEach { it.freeNativeMemory() }
 
         // Pool should have received the buffers back via releaseRef
         assertTrue(pool.stats().currentPoolSize > 0)
@@ -618,9 +618,9 @@ class BufferPoolTests {
 
         // Release some via pool.release(), others via freeNativeMemory()
         pool.release(buf1)
-        (buf2 as PlatformBuffer).freeNativeMemory()
+        buf2.freeNativeMemory()
         pool.release(buf3)
-        (buf4 as PlatformBuffer).freeNativeMemory()
+        buf4.freeNativeMemory()
 
         // All 4 should be back in the pool
         assertEquals(4, pool.stats().currentPoolSize)
@@ -1468,7 +1468,7 @@ class BufferPoolTests {
         assertEquals(0xCAFEBABE.toInt(), first)
 
         // Free via freeNativeMemory (the PooledBuffer path)
-        (buffer as PlatformBuffer).freeNativeMemory()
+        buffer.freeNativeMemory()
 
         // Further access must throw
         assertFailsWith<IllegalStateException> {
@@ -2007,5 +2007,51 @@ class BufferPoolTests {
                     assertEquals(-1, a.mismatch(b), "Identical data should return -1")
                 }
             }
+        }
+
+    // ============================================================================
+    // PooledBuffer as CloseableBuffer
+    // ============================================================================
+
+    @Test
+    fun pooledBufferIsCloseableBuffer() =
+        withPool(defaultBufferSize = 64) { pool ->
+            val buffer = pool.acquire(8)
+            assertIs<CloseableBuffer>(buffer, "PooledBuffer must implement CloseableBuffer")
+            buffer.freeNativeMemory()
+        }
+
+    @Test
+    fun pooledBufferIsFreedTracksFreeState() =
+        withPool(defaultBufferSize = 64) { pool ->
+            val buffer = pool.acquire(8)
+            val closeable = buffer as CloseableBuffer
+            assertFalse(closeable.isFreed, "isFreed must be false before free")
+            buffer.freeNativeMemory()
+            assertTrue(closeable.isFreed, "isFreed must be true after free")
+        }
+
+    @Test
+    fun pooledBufferUseBlockCallsFreeAndReturnsToPool() =
+        withPool(defaultBufferSize = 64) { pool ->
+            val buffer = pool.acquire(8)
+            assertEquals(0, pool.stats().currentPoolSize, "Pool should be empty after acquire")
+
+            buffer.use { buf ->
+                buf.writeInt(42)
+            }
+            // use {} calls freeNativeMemory on CloseableBuffer, which returns to pool
+            assertEquals(1, pool.stats().currentPoolSize, "Buffer should be returned to pool after use {}")
+        }
+
+    @Test
+    fun pooledBufferDoubleFreeIsSafe() =
+        withPool(defaultBufferSize = 64) { pool ->
+            val buffer = pool.acquire(8)
+            buffer.freeNativeMemory()
+            buffer.freeNativeMemory() // second call must not throw or double-return
+            assertTrue((buffer as CloseableBuffer).isFreed)
+            // Pool should have exactly 1 buffer (not 2)
+            assertEquals(1, pool.stats().currentPoolSize)
         }
 }

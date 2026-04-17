@@ -25,9 +25,14 @@ private val annotationSource =
 
     enum class Endianness { Default, Big, Little }
 
+    enum class Direction { Infer, Codec, DecodeOnly, EncodeOnly }
+
     @Target(AnnotationTarget.CLASS)
     @Retention(AnnotationRetention.BINARY)
-    annotation class ProtocolMessage(val wireOrder: Endianness = Endianness.Default)
+    annotation class ProtocolMessage(
+        val wireOrder: Endianness = Endianness.Default,
+        val direction: Direction = Direction.Infer,
+    )
 
     @Target(AnnotationTarget.CLASS)
     @Retention(AnnotationRetention.BINARY)
@@ -69,11 +74,19 @@ private val annotationSource =
     @Retention(AnnotationRetention.BINARY)
     annotation class WhenTrue(val expression: String)
 
+    @Target(AnnotationTarget.VALUE_PARAMETER)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class WhenRemaining(val minBytes: Int)
+
     // Endianness enum already defined above with ProtocolMessage
 
     @Target(AnnotationTarget.VALUE_PARAMETER)
     @Retention(AnnotationRetention.BINARY)
     annotation class WireOrder(val order: Endianness)
+
+    @Target(AnnotationTarget.VALUE_PARAMETER)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class UseCodec(val codec: kotlin.reflect.KClass<*>)
 
     """,
     )
@@ -195,23 +208,18 @@ private val codecStubs =
             }
         }
     }
-    sealed interface SizeEstimate {
-        @JvmInline value class Exact(val bytes: Int) : SizeEstimate
-        data object UnableToPrecalculate : SizeEstimate
-    }
     fun interface Decoder<out T> {
         fun decode(buffer: ReadBuffer): T
     }
     interface Encoder<in T> {
         fun encode(buffer: WriteBuffer, value: T)
-        fun sizeOf(value: T): SizeEstimate = SizeEstimate.UnableToPrecalculate
+        val wireSizeHint: Int get() = 16
     }
     interface Codec<T> : Encoder<T>, Decoder<T> {
         fun decode(buffer: ReadBuffer, context: DecodeContext): T
         fun encode(buffer: WriteBuffer, value: T, context: EncodeContext)
         override fun decode(buffer: ReadBuffer): T = decode(buffer, DecodeContext.Empty)
         override fun encode(buffer: WriteBuffer, value: T) = encode(buffer, value, EncodeContext.Empty)
-        override fun sizeOf(value: T): SizeEstimate = SizeEstimate.UnableToPrecalculate
         fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NeedsMoreData
     }
     """,
