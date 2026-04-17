@@ -31,7 +31,6 @@ class StreamProcessorBuilder(
     val factory: BufferFactory,
     val byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
 ) {
-
     private val transforms = mutableListOf<TransformSpec>()
 
     /**
