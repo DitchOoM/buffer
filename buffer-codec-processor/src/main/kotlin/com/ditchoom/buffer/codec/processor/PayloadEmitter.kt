@@ -82,7 +82,11 @@ internal fun addPayloadRawReadBody(
             code.addStatement("buffer.readBytes(_len)")
         }
         is LengthKind.Remaining -> {
-            code.addStatement("buffer.readBytes(buffer.remaining())")
+            if (lk.trailingBytes > 0) {
+                code.addStatement("buffer.readBytes(buffer.remaining() - %L)", lk.trailingBytes)
+            } else {
+                code.addStatement("buffer.readBytes(buffer.remaining())")
+            }
         }
         is LengthKind.FromField -> {
             code.addStatement("buffer.readBytes(%L.toInt())", lk.field)
