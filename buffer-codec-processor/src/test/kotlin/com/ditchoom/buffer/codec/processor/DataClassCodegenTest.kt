@@ -175,7 +175,9 @@ class DataClassCodegenTest {
     }
 
     @Test
-    fun `remaining bytes on non-last field causes error`() {
+    fun `remaining bytes followed by fixed-size trailer auto-reserves bytes`() {
+        // @RemainingBytes is no longer required to be the last field when the trailing fields have
+        // a fixed wire size. The processor infers the trailer size and emits a reservation.
         val source =
             SourceFile.kotlin(
                 "Test.kt",
@@ -185,14 +187,33 @@ class DataClassCodegenTest {
             import com.ditchoom.buffer.codec.annotations.RemainingBytes
 
             @ProtocolMessage
-            data class BadMsg(@RemainingBytes val data: String, val id: UByte)
+            data class TrailerMsg(@RemainingBytes val data: String, val crc: UByte)
+            """,
+            )
+        val result = compileWithKsp(source)
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    @Test
+    fun `remaining bytes followed by variable-size trailer causes error`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.RemainingBytes
+            import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+
+            @ProtocolMessage
+            data class BadMsg(@RemainingBytes val data: String, @LengthPrefixed val trailer: String)
             """,
             )
         val result = compileWithKsp(source)
         val hasError =
             result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
-                result.messages.contains("@RemainingBytes can only be used on the last")
-        assertTrue(hasError, "Expected error for @RemainingBytes on non-last field but got: ${result.exitCode}\n${result.messages}")
+                result.messages.contains("variable wire size", ignoreCase = true)
+        assertTrue(hasError, "Expected error for variable-size trailer but got: ${result.exitCode}\n${result.messages}")
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.ditchoom.buffer.codec.processor
 import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.Dependencies
 import com.google.devtools.ksp.processing.KSPLogger
+import com.google.devtools.ksp.symbol.ClassKind
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
@@ -38,11 +39,12 @@ class CodecGenerator(
                 Dependencies(aggregating = false)
             }
 
+        val isObject = classDeclaration.classKind == ClassKind.OBJECT
         val fileSpec =
             if (hasPayload) {
                 buildPayloadCodecFile(packageName, classTypeName, codecName, fields, batches)
             } else {
-                buildCodecFile(packageName, classTypeName, codecName, fields, batches)
+                buildCodecFile(packageName, classTypeName, codecName, fields, batches, isObject)
             }
 
         fileSpec.writeTo(codeGenerator, dependencies)
@@ -56,6 +58,7 @@ class CodecGenerator(
         codecName: String,
         fields: List<FieldInfo>,
         batches: List<CodegenItem>,
+        isObject: Boolean = false,
     ): FileSpec {
         val objectBuilder =
             TypeSpec
@@ -76,8 +79,12 @@ class CodecGenerator(
                 }
             }
         }
-        val fieldNames = fields.joinToString(", ") { it.name }
-        decodeBody.addStatement("return %T(%L)", classTypeName, fieldNames)
+        if (isObject) {
+            decodeBody.addStatement("return %T", classTypeName)
+        } else {
+            val fieldNames = fields.joinToString(", ") { it.name }
+            decodeBody.addStatement("return %T(%L)", classTypeName, fieldNames)
+        }
 
         objectBuilder.addFunction(
             FunSpec

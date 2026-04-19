@@ -245,7 +245,13 @@ annotation class WhenTrue(
 /**
  * Delegates field decoding/encoding to an existing [Codec][com.ditchoom.buffer.codec.Codec] object.
  *
- * Use this instead of writing a full SPI module when you need a custom field type.
+ * **Use this only for custom, hand-written codecs** (for example, variable-byte-integer encoders
+ * or image-bitmap parsers). If the field's type is itself annotated with [@ProtocolMessage],
+ * declare the field with that type directly instead — the processor generates the codec by
+ * convention and wires it up automatically, including sealed dispatch and forward references
+ * to codecs generated in the same compilation round. `@UseCodec` cannot forward-reference a
+ * KSP-generated codec class.
+ *
  * The referenced [codec] must be a Kotlin `object` implementing `Codec<T>`.
  *
  * **Without a length annotation** — the codec reads directly from the buffer:
@@ -265,6 +271,16 @@ annotation class WhenTrue(
  *     @UseCodec(PngBitmapCodec::class) @LengthFrom("bitmapLength") val bitmap: ImageBitmap,
  * )
  * // Generated: val _slice = buffer.readBytes(bitmapLength); val bitmap = PngBitmapCodec.decode(_slice)
+ * ```
+ *
+ * **For nested @ProtocolMessage types, skip @UseCodec entirely.** Length annotations attach
+ * directly to the nested field:
+ * ```kotlin
+ * @ProtocolMessage
+ * data class Frame(
+ *     val length: UShort,
+ *     @LengthFrom("length") val body: BodyMessage,  // BodyMessage has @ProtocolMessage — no @UseCodec
+ * )
  * ```
  *
  * Composes with [@LengthPrefixed], [@RemainingBytes], and [@LengthFrom].

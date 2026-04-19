@@ -32,6 +32,8 @@ internal object PeekFrameSizeEmitter {
                     lengthFromTargets.add(strategy.lengthKind.field)
                 strategy is FieldReadStrategy.UseCodecField && strategy.lengthKind is LengthKind.FromField ->
                     lengthFromTargets.add(strategy.lengthKind.field)
+                strategy is FieldReadStrategy.NestedMessageWithLengthField && strategy.lengthKind is LengthKind.FromField ->
+                    lengthFromTargets.add(strategy.lengthKind.field)
             }
             if (field.condition is FieldCondition.WhenTrue) {
                 val expr = (field.condition as FieldCondition.WhenTrue).expression
@@ -208,6 +210,27 @@ internal object PeekFrameSizeEmitter {
                 steps.add(PeekStep.FlushFixed(accum))
                 accum = 0
                 steps.add(PeekStep.DelegateNested(strategy.codecName))
+            }
+
+            strategy is FieldReadStrategy.NestedMessageWithLengthField -> {
+                when (val lk = strategy.lengthKind) {
+                    is LengthKind.Prefixed -> {
+                        steps.add(PeekStep.FlushFixed(accum))
+                        accum = 0
+                        val prefixBytes = prefixByteCount(lk.prefix)
+                        val varName = "_${field.name}Len"
+                        steps.add(PeekStep.PeekPrefix(varName, prefixBytes))
+                        accum += prefixBytes
+                        steps.add(PeekStep.AddVariable(varName))
+                    }
+                    is LengthKind.FromField -> {
+                        steps.add(PeekStep.FlushFixed(accum))
+                        accum = 0
+                        val varName = capturedLengths[lk.field] ?: return null
+                        steps.add(PeekStep.AddVariable(varName))
+                    }
+                    is LengthKind.Remaining -> return null
+                }
             }
 
             strategy is FieldReadStrategy.RemainingBytesStringField -> return null

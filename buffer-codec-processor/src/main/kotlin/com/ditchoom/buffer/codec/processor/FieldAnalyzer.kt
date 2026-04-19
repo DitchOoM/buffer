@@ -49,7 +49,14 @@ sealed class LengthKind {
         val prefix: String,
     ) : LengthKind()
 
-    data object Remaining : LengthKind()
+    /**
+     * Consume remaining bytes for this field, reserving [trailingBytes] at the end for fields
+     * that follow. The processor sets [trailingBytes] automatically when fixed-size trailing
+     * fields follow a @RemainingBytes field; users don't specify it directly.
+     */
+    data class Remaining(
+        val trailingBytes: Int = 0,
+    ) : LengthKind()
 
     data class FromField(
         val field: String,
@@ -171,7 +178,9 @@ sealed class FieldReadStrategy {
         val prefix: String,
     ) : FieldReadStrategy()
 
-    data object RemainingBytesStringField : FieldReadStrategy()
+    data class RemainingBytesStringField(
+        val trailingBytes: Int = 0,
+    ) : FieldReadStrategy()
 
     data class LengthFromStringField(
         val field: String,
@@ -185,6 +194,17 @@ sealed class FieldReadStrategy {
 
     data class NestedMessageField(
         val codecName: String,
+    ) : FieldReadStrategy()
+
+    /**
+     * Nested @ProtocolMessage field bounded by a length annotation. Decoding slices the buffer
+     * to the length before invoking the nested codec, so a variable-size payload can be wrapped
+     * inside a framed region that also carries trailing fields (e.g., checksum) in a separate
+     * @ProtocolMessage wrapper.
+     */
+    data class NestedMessageWithLengthField(
+        val codecName: String,
+        val lengthKind: LengthKind,
     ) : FieldReadStrategy()
 
     data class PayloadField(
@@ -340,7 +360,8 @@ class FieldAnalyzer(
             fields.filter {
                 it.strategy is FieldReadStrategy.RemainingBytesStringField ||
                     (it.strategy is FieldReadStrategy.PayloadField && it.strategy.lengthKind is LengthKind.Remaining) ||
-                    (it.strategy is FieldReadStrategy.CollectionField && it.strategy.lengthKind is LengthKind.Remaining)
+                    (it.strategy is FieldReadStrategy.CollectionField && it.strategy.lengthKind is LengthKind.Remaining) ||
+                    (it.strategy is FieldReadStrategy.NestedMessageWithLengthField && it.strategy.lengthKind is LengthKind.Remaining)
             }
         if (remainingBytesFields.size > 1) {
             val names = remainingBytesFields.joinToString(", ") { "'${it.name}'" }
@@ -356,14 +377,39 @@ class FieldAnalyzer(
         if (remainingBytesFields.size == 1) {
             val rbField = remainingBytesFields.first()
             if (rbField != nonConditionalFields.lastOrNull()) {
-                val lastField = nonConditionalFields.lastOrNull()?.name ?: "the last field"
-                logger.error(
-                    "@RemainingBytes on '${rbField.name}' is invalid — it must be the last non-conditional field. " +
-                        "Currently '$lastField' comes after it. " +
-                        "Move '${rbField.name}' to the end, or use @LengthPrefixed instead.",
-                    rbField.parameter,
-                )
-                return null
+                // Allow trailing fields if each has a fixed wire size. Sum the trailer and
+                // rewrite the @RemainingBytes strategy to reserve those bytes on decode.
+                val rbIndex = fields.indexOf(rbField)
+                val trailingFields = fields.subList(rbIndex + 1, fields.size)
+                var trailingSize = 0
+                for (t in trailingFields) {
+                    if (t.condition != null) {
+                        logger.error(
+                            "@RemainingBytes on '${rbField.name}' is followed by conditional field '${t.name}'. " +
+                                "Conditional fields have variable wire size — they cannot be reserved automatically. " +
+                                "Move '${t.name}' before the @RemainingBytes field, " +
+                                "or wrap the payload in a length-prefixed @ProtocolMessage.",
+                            rbField.parameter,
+                        )
+                        return null
+                    }
+                    val size = fixedWireSize(t.strategy)
+                    if (size == null) {
+                        logger.error(
+                            "@RemainingBytes on '${rbField.name}' is followed by '${t.name}', which has a variable " +
+                                "wire size. Only fields with a fixed wire size (primitives, value classes wrapping " +
+                                "primitives, fixed custom fields) may follow @RemainingBytes. " +
+                                "Move '${t.name}' before the @RemainingBytes field, " +
+                                "or wrap the payload in a length-prefixed @ProtocolMessage.",
+                            rbField.parameter,
+                        )
+                        return null
+                    }
+                    trailingSize += size
+                }
+                val updated = rewriteRemainingStrategy(rbField.strategy, trailingSize)
+                val idx = fields.indexOf(rbField)
+                fields[idx] = rbField.copy(strategy = updated)
             }
         }
 
@@ -378,6 +424,10 @@ class FieldAnalyzer(
                         if (lk is LengthKind.FromField) lk.field else null
                     }
                     is FieldReadStrategy.CollectionField -> {
+                        val lk = strategy.lengthKind
+                        if (lk is LengthKind.FromField) lk.field else null
+                    }
+                    is FieldReadStrategy.NestedMessageWithLengthField -> {
                         val lk = strategy.lengthKind
                         if (lk is LengthKind.FromField) lk.field else null
                     }
@@ -464,6 +514,38 @@ class FieldAnalyzer(
 
     private fun isNumericStrategy(strategy: FieldReadStrategy): Boolean =
         strategy is FieldReadStrategy.PrimitiveField && strategy.primitive.isNumeric
+
+    /**
+     * Returns the fixed wire size in bytes, or null if the strategy's size is not statically
+     * known. Used to validate trailing fields after a @RemainingBytes field and sum the
+     * reservation.
+     */
+    private fun fixedWireSize(strategy: FieldReadStrategy): Int? =
+        when (strategy) {
+            is FieldReadStrategy.PrimitiveField -> strategy.wireBytes
+            is FieldReadStrategy.ValueClassField -> fixedWireSize(strategy.innerStrategy)
+            is FieldReadStrategy.Custom ->
+                strategy.descriptor.fixedSize.takeIf { it >= 0 }
+            else -> null
+        }
+
+    private fun rewriteRemainingStrategy(
+        strategy: FieldReadStrategy,
+        trailingBytes: Int,
+    ): FieldReadStrategy =
+        when (strategy) {
+            is FieldReadStrategy.RemainingBytesStringField ->
+                FieldReadStrategy.RemainingBytesStringField(trailingBytes)
+            is FieldReadStrategy.PayloadField ->
+                strategy.copy(lengthKind = LengthKind.Remaining(trailingBytes))
+            is FieldReadStrategy.CollectionField ->
+                strategy.copy(lengthKind = LengthKind.Remaining(trailingBytes))
+            is FieldReadStrategy.NestedMessageWithLengthField ->
+                strategy.copy(lengthKind = LengthKind.Remaining(trailingBytes))
+            is FieldReadStrategy.UseCodecField ->
+                strategy.copy(lengthKind = LengthKind.Remaining(trailingBytes))
+            else -> strategy
+        }
 
     private fun extractCondition(param: KSValueParameter): FieldCondition? {
         for (annotation in param.annotations) {
@@ -601,7 +683,7 @@ class FieldAnalyzer(
                 ?: return null
         return when (lk) {
             is LengthKind.Prefixed -> FieldReadStrategy.LengthPrefixedStringField(lk.prefix)
-            is LengthKind.Remaining -> FieldReadStrategy.RemainingBytesStringField
+            is LengthKind.Remaining -> FieldReadStrategy.RemainingBytesStringField()
             is LengthKind.FromField -> FieldReadStrategy.LengthFromStringField(lk.field)
         }
     }
@@ -672,11 +754,43 @@ class FieldAnalyzer(
             val qualifiedName = typeDecl.qualifiedName?.asString()
             val dispatchInfo = currentDispatchOnInfo
             if (dispatchInfo != null && qualifiedName != null && qualifiedName == dispatchInfo.typeName) {
+                // Reject length annotations on discriminator fields — they don't consume wire bytes here.
+                val annotations = param.annotations.toList()
+                val lengthAnn =
+                    annotations.find {
+                        val fqn = it.qualifiedName()
+                        fqn == "com.ditchoom.buffer.codec.annotations.LengthFrom" ||
+                            fqn == "com.ditchoom.buffer.codec.annotations.LengthPrefixed" ||
+                            fqn == "com.ditchoom.buffer.codec.annotations.RemainingBytes"
+                    }
+                if (lengthAnn != null) {
+                    val annShort = lengthAnn.qualifiedName()?.substringAfterLast(".") ?: "length annotation"
+                    logger.error(
+                        "@$annShort is not valid on field '$fieldName': this field is the @DispatchOn " +
+                            "discriminator and is populated from decode context, not read from the wire.",
+                        param,
+                    )
+                    return null
+                }
                 return FieldReadStrategy.DiscriminatorField(
                     codecName,
                     dispatchInfo.sealedPackage,
                     dispatchInfo.sealedCodecSimpleName,
                 )
+            }
+
+            // If a length annotation is present, bound the nested decode to that byte count.
+            val annotations = param.annotations.toList()
+            val hasLengthAnnotation =
+                annotations.any {
+                    val fqn = it.qualifiedName()
+                    fqn == "com.ditchoom.buffer.codec.annotations.LengthFrom" ||
+                        fqn == "com.ditchoom.buffer.codec.annotations.LengthPrefixed" ||
+                        fqn == "com.ditchoom.buffer.codec.annotations.RemainingBytes"
+                }
+            if (hasLengthAnnotation) {
+                val lk = resolveLengthKind(param, annotations, fieldName, "Nested @ProtocolMessage") ?: return null
+                return FieldReadStrategy.NestedMessageWithLengthField(codecName, lk)
             }
             return FieldReadStrategy.NestedMessageField(codecName)
         }
@@ -863,7 +977,7 @@ class FieldAnalyzer(
         }
 
         if (remainingBytes != null) {
-            return LengthKind.Remaining
+            return LengthKind.Remaining()
         }
 
         if (lengthFrom != null) {
