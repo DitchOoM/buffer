@@ -510,7 +510,7 @@ class WhenRemainingTest {
                 field(
                     "data",
                     "kotlin.String",
-                    FieldReadStrategy.RemainingBytesStringField,
+                    FieldReadStrategy.RemainingBytesStringField(),
                     nullable = true,
                     condition = FieldCondition.WhenRemaining(1),
                 ),
