@@ -1923,14 +1923,14 @@ class BufferPoolTests {
             }
         }
 
-    @Suppress("DEPRECATION")
     @Test
-    fun unwrapReturnsInnerPlatformBuffer() =
+    fun unwrapFullyReturnsInnerPlatformBuffer() =
         withPool(defaultBufferSize = 1024) { pool ->
             val buffer = pool.acquire(512)
             assertIs<PooledBuffer>(buffer, "Pool should return PooledBuffer")
-            val unwrapped = buffer.unwrap()
-            assertFalse(unwrapped is PooledBuffer, "unwrap() should not return a PooledBuffer")
+            val unwrapped = buffer.unwrapFully()
+            assertFalse(unwrapped is PooledBuffer, "unwrapFully() should not return a PooledBuffer")
+            assertIs<PlatformBuffer>(unwrapped, "Unwrapped buffer should be a PlatformBuffer")
             assertTrue(unwrapped.capacity >= 512, "Unwrapped buffer should have correct capacity")
             pool.release(buffer)
         }

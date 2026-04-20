@@ -64,7 +64,8 @@ class NativeBuffer private constructor(
     CloseableBuffer {
     private var positionValue: Int = 0
     private var limitValue: Int = capacity
-    private var closed: Boolean = false
+    override var isFreed: Boolean = false
+        private set
 
     override val nativeAddress: Long get() = ptr.toLong()
     override val nativeSize: Long get() = capacity.toLong()
@@ -102,7 +103,7 @@ class NativeBuffer private constructor(
         }
     }
 
-    private fun checkOpen() = check(!closed) { "Buffer closed" }
+    private fun checkOpen() = check(!isFreed) { "Buffer closed" }
 
     override fun position(): Int = positionValue
 
@@ -577,11 +578,9 @@ class NativeBuffer private constructor(
         ).toInt()
     }
 
-    override val isFreed: Boolean get() = closed
-
     override fun freeNativeMemory() {
-        if (!closed) {
-            closed = true
+        if (!isFreed) {
+            isFreed = true
             if (ownsMemory) {
                 free(ptr)
             }
@@ -589,8 +588,6 @@ class NativeBuffer private constructor(
     }
 
     fun close() = freeNativeMemory()
-
-    fun isClosed(): Boolean = closed
 
     override fun equals(other: Any?): Boolean = bufferEquals(this, other)
 
@@ -621,7 +618,7 @@ private class NativeBufferSlice(
     // This would need updating if a big-endian target (e.g. s390x) is ever added.
     private val nativeIsLittleEndian = true
 
-    private fun checkOpen() = check(!parent.isClosed()) { "Parent buffer closed" }
+    private fun checkOpen() = check(!parent.isFreed) { "Parent buffer closed" }
 
     override fun position(): Int = positionValue
 

@@ -133,14 +133,5 @@ interface PlatformBuffer :
      */
     fun freeNativeMemory() {}
 
-    @Deprecated(
-        "unwrap() only peels one layer and requires callers to cast to PlatformBuffer first, " +
-            "which breaks on TrackedSlice and other non-PlatformBuffer wrappers. " +
-            "Use ReadBuffer.unwrapFully() for concrete type access, or " +
-            "nativeMemoryAccess/managedMemoryAccess extensions for interface-based dispatch.",
-        ReplaceWith("(this as ReadBuffer).unwrapFully()", "com.ditchoom.buffer.unwrapFully"),
-    )
-    fun unwrap(): PlatformBuffer = this
-
     companion object
 }

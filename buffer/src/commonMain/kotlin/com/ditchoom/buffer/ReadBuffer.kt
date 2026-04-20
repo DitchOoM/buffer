@@ -861,18 +861,19 @@ interface ReadBuffer : PositionBuffer {
  * Recursively unwraps all wrapper types (PooledBuffer, TrackedSlice) to reach the
  * underlying concrete buffer implementation.
  *
- * Use this instead of `(buffer as? PlatformBuffer)?.unwrap() ?: buffer` to correctly
- * handle TrackedSlice, which implements ReadBuffer but NOT PlatformBuffer.
+ * Throws [IllegalStateException] if a [com.ditchoom.buffer.pool.PooledBuffer] in the
+ * wrapper chain has been freed — reaching through to its inner buffer after free
+ * would expose memory the pool has handed to another caller.
  */
-@Suppress("DEPRECATION")
-fun ReadBuffer.unwrapFully(): ReadBuffer {
-    if (this is PlatformBuffer) {
-        val unwrapped = unwrap()
-        return if (unwrapped !== this) unwrapped.unwrapFully() else this
+fun ReadBuffer.unwrapFully(): ReadBuffer =
+    when (this) {
+        is com.ditchoom.buffer.pool.PooledBuffer -> {
+            if (isFreed) throw IllegalStateException("Buffer has been freed and returned to pool")
+            inner.unwrapFully()
+        }
+        is com.ditchoom.buffer.pool.TrackedSlice -> inner.unwrapFully()
+        else -> this
     }
-    if (this is com.ditchoom.buffer.pool.TrackedSlice) return inner.unwrapFully()
-    return this
-}
 
 /**
  * Content-based equality for buffer implementations.
