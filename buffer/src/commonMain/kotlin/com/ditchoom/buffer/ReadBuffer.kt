@@ -872,6 +872,7 @@ fun ReadBuffer.unwrapFully(): ReadBuffer =
             inner.unwrapFully()
         }
         is com.ditchoom.buffer.pool.TrackedSlice -> inner.unwrapFully()
+        is LeakTrackingBuffer -> inner.unwrapFully()
         else -> this
     }
 
