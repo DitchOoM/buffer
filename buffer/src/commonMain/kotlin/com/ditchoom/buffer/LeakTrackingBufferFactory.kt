@@ -163,8 +163,11 @@ internal class LeakTrackingBuffer(
     internal val inner: PlatformBuffer,
     private val factory: LeakTrackingBufferFactory,
     private val id: Int,
-) : PlatformBuffer by inner {
+) : PlatformBuffer by inner,
+    BufferWrapper {
     private var freed: Boolean = false
+
+    override fun unwrapOnce(): ReadBuffer = inner
 
     override fun freeNativeMemory() {
         if (freed) return

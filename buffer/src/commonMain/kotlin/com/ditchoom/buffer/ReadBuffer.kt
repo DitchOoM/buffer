@@ -865,16 +865,35 @@ interface ReadBuffer : PositionBuffer {
  * wrapper chain has been freed — reaching through to its inner buffer after free
  * would expose memory the pool has handed to another caller.
  */
-fun ReadBuffer.unwrapFully(): ReadBuffer =
-    when (this) {
-        is com.ditchoom.buffer.pool.PooledBuffer -> {
-            if (isFreed) throw IllegalStateException("Buffer has been freed and returned to pool")
-            inner.unwrapFully()
-        }
-        is com.ditchoom.buffer.pool.TrackedSlice -> inner.unwrapFully()
-        is LeakTrackingBuffer -> inner.unwrapFully()
-        else -> this
+fun ReadBuffer.unwrapFully(): ReadBuffer {
+    var current: ReadBuffer = this
+    while (current is BufferWrapper) {
+        current = current.unwrapOnce()
     }
+    return current
+}
+
+/**
+ * Marker interface for a [ReadBuffer] that delegates to an underlying
+ * buffer. Implementing this lets [unwrapFully] traverse arbitrary wrapper
+ * chains — consumers can add their own decorator types without touching
+ * `unwrapFully`.
+ *
+ * Implementations wired internally today: `PooledBuffer`, `TrackedSlice`,
+ * `LeakTrackingBuffer`.
+ */
+interface BufferWrapper : ReadBuffer {
+    /**
+     * Returns the next buffer in the wrapper chain. Called by
+     * [unwrapFully]; most callers should invoke [unwrapFully] directly
+     * rather than walking wrappers step-by-step.
+     *
+     * Implementations may throw [IllegalStateException] to reject
+     * unwrapping when their invariants forbid it — e.g. a pool-returned
+     * buffer whose memory has already been handed to another caller.
+     */
+    fun unwrapOnce(): ReadBuffer
+}
 
 /**
  * Content-based equality for buffer implementations.

@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.pool
 
+import com.ditchoom.buffer.BufferWrapper
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.CloseableBuffer
@@ -26,6 +27,7 @@ internal class PooledBuffer(
     internal val inner: PlatformBuffer,
     internal val pool: BufferPool,
 ) : PlatformBuffer,
+    BufferWrapper,
     CloseableBuffer,
     Parcelable by inner {
     override var isFreed: Boolean = false
@@ -34,6 +36,11 @@ internal class PooledBuffer(
 
     private fun checkNotFreed() {
         if (isFreed) throw IllegalStateException("Buffer has been freed and returned to pool")
+    }
+
+    override fun unwrapOnce(): ReadBuffer {
+        checkNotFreed()
+        return inner
     }
 
     internal fun addRef() {
