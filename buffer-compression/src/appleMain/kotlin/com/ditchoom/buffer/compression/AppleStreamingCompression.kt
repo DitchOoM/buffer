@@ -3,8 +3,8 @@
 package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.managedMemoryAccess
 import com.ditchoom.buffer.nativeMemoryAccess
 import kotlinx.cinterop.ByteVar
