@@ -131,6 +131,13 @@ class NSDataBuffer(
         charset: Charset,
     ): String {
         if (length == 0) return ""
+        checkReadBounds(length)
+        val dataLength = data.length.toInt()
+        if (position + length > dataLength) {
+            throw BufferUnderflowException(
+                "readString of $length byte(s) at position $position exceeds underlying NSData length $dataLength",
+            )
+        }
         val subdata =
             data.subdataWithRange(
                 NSMakeRange(position.convert(), length.convert()),
@@ -307,6 +314,14 @@ internal class NSDataBufferSlice(
         charset: Charset,
     ): String {
         if (length == 0) return ""
+        checkReadBounds(length)
+        val parentDataLength = parent.data.length.toInt()
+        if (sliceOffset + position + length > parentDataLength) {
+            throw BufferUnderflowException(
+                "Slice read of $length byte(s) at slice position $position " +
+                    "(sliceOffset=$sliceOffset) exceeds parent NSData length $parentDataLength",
+            )
+        }
         val subdata =
             parent.data.subdataWithRange(
                 NSMakeRange((sliceOffset + position).convert(), length.convert()),

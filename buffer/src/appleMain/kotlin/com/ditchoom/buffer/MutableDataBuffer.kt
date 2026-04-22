@@ -169,10 +169,17 @@ class MutableDataBuffer private constructor(
         charset: Charset,
     ): String {
         if (length == 0) return ""
+        checkReadBounds(length)
         if (!ownsData) {
             val bytes = (bytePointer + position)!!.readBytes(length)
             position += length
             return bytes.decodeToString()
+        }
+        val dataLength = data.length.toInt()
+        if (position + length > dataLength) {
+            throw BufferUnderflowException(
+                "readString of $length byte(s) at position $position exceeds underlying NSData length $dataLength",
+            )
         }
         val subdata = data.subdataWithRange(NSMakeRange(position.convert(), length.convert()))
         val stringEncoding = charset.toEncoding()
@@ -671,12 +678,24 @@ class MutableDataBufferSlice(
         charset: Charset,
     ): String {
         if (length == 0) return ""
+        checkReadBounds(length)
         val parentData = parent.data
         if (!parent.ownsData) {
             // External pointer: no NSData available, use byte decoding
             val bytes = (bytePointer + position)!!.readBytes(length)
             position += length
             return bytes.decodeToString()
+        }
+        // Slice bounds (remaining) can exceed the parent NSData's actual length when
+        // callers setLimit() past the underlying data (e.g. MQTT sets limit by wire
+        // remaining-length before the body bytes have arrived). subdataWithRange:
+        // throws an uncatchable NSRangeException in that case, so validate here.
+        val parentDataLength = parentData.length.toInt()
+        if (sliceOffset + position + length > parentDataLength) {
+            throw BufferUnderflowException(
+                "Slice read of $length byte(s) at slice position $position " +
+                    "(sliceOffset=$sliceOffset) exceeds parent NSData length $parentDataLength",
+            )
         }
         val subdata =
             parentData.subdataWithRange(
