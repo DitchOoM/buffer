@@ -196,7 +196,7 @@ afterEvaluate {
                 }
             }
         }
-        if (HostManager.hostIsMac) {
+        if (HostManager.hostIsMac && System.getenv("LOCAL_SINGLE_HOST_PUBLISH") != "true") {
             tasks
                 .matching {
                     it.name.startsWith("publishKotlinMultiplatformPublication")
