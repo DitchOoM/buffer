@@ -10,7 +10,20 @@ import com.tschuchort.compiletesting.configureKsp
 data class CompileResult(
     val exitCode: KotlinCompilation.ExitCode,
     val messages: String,
+    val generatedSources: List<String> = emptyList(),
 )
+
+/**
+ * Reads every `.kt` file KSP wrote into the compilation working directory and returns
+ * their contents. Enables tests to assert on the exact shape of generated code
+ * (e.g. "no `value.X!!` inside a cascading null-check block").
+ */
+internal fun KotlinCompilation.readGeneratedSources(): List<String> =
+    workingDir
+        .walkTopDown()
+        .filter { it.isFile && it.name.endsWith(".kt") && it.path.contains("/ksp/") }
+        .map { it.readText() }
+        .toList()
 
 /**
  * Annotation source included directly in test compilations so KSP can resolve
@@ -266,7 +279,7 @@ fun compileWithKsp(vararg sources: SourceFile): CompileResult {
             kotlincArguments = listOf("-Xskip-metadata-version-check")
         }
     val result = compilation.compile()
-    return CompileResult(result.exitCode, result.messages)
+    return CompileResult(result.exitCode, result.messages, compilation.readGeneratedSources())
 }
 
 fun compileWithKspAndBufferStubs(vararg sources: SourceFile): CompileResult {

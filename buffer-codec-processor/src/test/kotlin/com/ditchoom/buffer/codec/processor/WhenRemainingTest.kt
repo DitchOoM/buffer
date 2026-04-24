@@ -120,6 +120,39 @@ class WhenRemainingTest {
     }
 
     @Test
+    fun `WhenRemaining encode does not emit redundant non-null assertion`() {
+        // Regression: the encode emitter used to produce `value.x!!` inside
+        // `if (value.x != null)` blocks. For final-class properties Kotlin
+        // smart-casts `value.x` after the null check, so the `!!` is
+        // unnecessary and trips UNNECESSARY_NOT_NULL_ASSERTION. Fix captures
+        // a local `val` before the check and references it at the use site.
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.WhenRemaining
+
+            @ProtocolMessage
+            data class TailOptionals(
+                val packetId: UShort,
+                @WhenRemaining(1) val reasonCode: UByte? = null,
+                @WhenRemaining(2) val extra: UShort? = null,
+            )
+            """,
+            )
+        val result = compileWithKsp(source)
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+        val codec = result.generatedSources.singleOrNull { it.contains("object TailOptionalsCodec") }
+            ?: error("Expected TailOptionalsCodec in generated sources:\n${result.generatedSources}")
+        assertFalse(
+            codec.contains("value.reasonCode!!") || codec.contains("value.extra!!"),
+            "WhenRemaining encode should not emit `value.X!!` (smart-cast via local val). Generated:\n$codec",
+        )
+    }
+
+    @Test
     fun `all fields are WhenRemaining compiles`() {
         val source =
             SourceFile.kotlin(

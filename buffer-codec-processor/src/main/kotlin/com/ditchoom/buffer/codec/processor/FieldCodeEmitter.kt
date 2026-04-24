@@ -112,6 +112,13 @@ internal fun addFieldWrite(
 /**
  * Emits cascading null-check encode blocks for @WhenRemaining fields.
  * If field N is null, all subsequent fields are skipped — preventing impossible wire states.
+ *
+ * Binds each property to a local `val` before the null check so the compiler's smart-cast
+ * applies to the use site — avoids `value.name!!` (which triggers
+ * `UNNECESSARY_NOT_NULL_ASSERTION` on final-class properties since smart-cast already
+ * narrowed `value.name` inside the `if`) while still compiling correctly for interface
+ * properties (where smart-cast on `value.name` wouldn't apply, but smart-cast on a local
+ * `val` always does).
  */
 internal fun emitWhenRemainingEncode(
     code: CodeBlock.Builder,
@@ -119,10 +126,11 @@ internal fun emitWhenRemainingEncode(
     withContext: Boolean = false,
 ) {
     for (field in fields) {
-        code.beginControlFlow("if (value.%L != null)", field.name)
+        code.addStatement("val %L = value.%L", field.name, field.name)
+        code.beginControlFlow("if (%L != null)", field.name)
         code.addStatement(
             "%L",
-            writeExpression(field.strategy, "value.${field.name}!!", withContext, field.byteOrderOverride),
+            writeExpression(field.strategy, field.name, withContext, field.byteOrderOverride),
         )
     }
     repeat(fields.size) { code.endControlFlow() }
