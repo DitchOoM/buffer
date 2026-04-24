@@ -144,8 +144,9 @@ class WhenRemainingTest {
             )
         val result = compileWithKsp(source)
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
-        val codec = result.generatedSources.singleOrNull { it.contains("object TailOptionalsCodec") }
-            ?: error("Expected TailOptionalsCodec in generated sources:\n${result.generatedSources}")
+        val codec =
+            result.generatedSources.singleOrNull { it.contains("object TailOptionalsCodec") }
+                ?: error("Expected TailOptionalsCodec in generated sources:\n${result.generatedSources}")
         assertFalse(
             codec.contains("value.reasonCode!!") || codec.contains("value.extra!!"),
             "WhenRemaining encode should not emit `value.X!!` (smart-cast via local val). Generated:\n$codec",
