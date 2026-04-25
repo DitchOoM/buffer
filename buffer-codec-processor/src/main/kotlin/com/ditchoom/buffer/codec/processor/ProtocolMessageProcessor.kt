@@ -150,7 +150,7 @@ class ProtocolMessageProcessor(
 
         // Phase 1: Analyze and generate sub-codecs, collecting payload and direction metadata
         val variantPayloadInfos = mutableListOf<SealedVariantPayloadInfo>()
-        var anyVariantHasDiscriminatorField = false
+        val variantsHandlingDiscriminator = mutableSetOf<String>()
         val variantsSupportingPeek = mutableSetOf<String>()
         val variantDirections = mutableListOf<Pair<KSClassDeclaration, CodecDirection>>()
         for (subclass in sealedSubclasses) {
@@ -199,7 +199,7 @@ class ProtocolMessageProcessor(
             variantDirections.add(subclass to variantDirection)
 
             if (fields.any { it.strategy is FieldReadStrategy.DiscriminatorField }) {
-                anyVariantHasDiscriminatorField = true
+                variantsHandlingDiscriminator.add(qualifiedName)
             }
             val payloadFields = fields.filter { it.strategy is FieldReadStrategy.PayloadField }
             val payloadInfos =
@@ -238,7 +238,7 @@ class ProtocolMessageProcessor(
             sealedSubclasses,
             variantPayloadInfos,
             dispatchOnInfo,
-            variantsHandleDiscriminator = anyVariantHasDiscriminatorField,
+            variantsHandlingDiscriminator = variantsHandlingDiscriminator,
             variantsSupportingPeek = variantsSupportingPeek,
             direction = sealedDirection,
         )

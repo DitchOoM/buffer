@@ -805,6 +805,51 @@ class FieldAnalyzer(
                 return null
             }
 
+        // Discriminator detection runs BEFORE the value-class / nested-message branches:
+        // a @DispatchOn discriminator type is frequently itself a @JvmInline value class,
+        // and those fields must be populated from decode context rather than read from the
+        // buffer (the dispatcher has already consumed the wire bytes).
+        run {
+            val qualifiedName = typeDecl.qualifiedName?.asString()
+            val dispatchInfo = currentDispatchOnInfo
+            if (dispatchInfo != null && qualifiedName != null && qualifiedName == dispatchInfo.typeName) {
+                val hasProtocolMessage =
+                    typeDecl.annotations.any {
+                        it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.ProtocolMessage"
+                    }
+                if (!hasProtocolMessage) {
+                    logger.error(
+                        "Field '$fieldName' is typed as the @DispatchOn discriminator " +
+                            "$qualifiedName but that type is not annotated with @ProtocolMessage.",
+                        param,
+                    )
+                    return null
+                }
+                val annotations = param.annotations.toList()
+                val lengthAnn =
+                    annotations.find {
+                        val fqn = it.qualifiedName()
+                        fqn == "com.ditchoom.buffer.codec.annotations.LengthFrom" ||
+                            fqn == "com.ditchoom.buffer.codec.annotations.LengthPrefixed" ||
+                            fqn == "com.ditchoom.buffer.codec.annotations.RemainingBytes"
+                    }
+                if (lengthAnn != null) {
+                    val annShort = lengthAnn.qualifiedName()?.substringAfterLast(".") ?: "length annotation"
+                    logger.error(
+                        "@$annShort is not valid on field '$fieldName': this field is the @DispatchOn " +
+                            "discriminator and is populated from decode context, not read from the wire.",
+                        param,
+                    )
+                    return null
+                }
+                return FieldReadStrategy.DiscriminatorField(
+                    typeDecl.codecName(),
+                    dispatchInfo.sealedPackage,
+                    dispatchInfo.sealedCodecSimpleName,
+                )
+            }
+        }
+
         // Check if it's a value class
         if (Modifier.VALUE in typeDecl.modifiers || Modifier.INLINE in typeDecl.modifiers) {
             val innerParam =
@@ -842,35 +887,9 @@ class FieldAnalyzer(
             }
         if (hasProtocolMessage) {
             val codecName = typeDecl.codecName()
-            // If this field's type matches the @DispatchOn discriminator type,
-            // it should be populated from context during decode (not read from buffer)
-            val qualifiedName = typeDecl.qualifiedName?.asString()
-            val dispatchInfo = currentDispatchOnInfo
-            if (dispatchInfo != null && qualifiedName != null && qualifiedName == dispatchInfo.typeName) {
-                // Reject length annotations on discriminator fields — they don't consume wire bytes here.
-                val annotations = param.annotations.toList()
-                val lengthAnn =
-                    annotations.find {
-                        val fqn = it.qualifiedName()
-                        fqn == "com.ditchoom.buffer.codec.annotations.LengthFrom" ||
-                            fqn == "com.ditchoom.buffer.codec.annotations.LengthPrefixed" ||
-                            fqn == "com.ditchoom.buffer.codec.annotations.RemainingBytes"
-                    }
-                if (lengthAnn != null) {
-                    val annShort = lengthAnn.qualifiedName()?.substringAfterLast(".") ?: "length annotation"
-                    logger.error(
-                        "@$annShort is not valid on field '$fieldName': this field is the @DispatchOn " +
-                            "discriminator and is populated from decode context, not read from the wire.",
-                        param,
-                    )
-                    return null
-                }
-                return FieldReadStrategy.DiscriminatorField(
-                    codecName,
-                    dispatchInfo.sealedPackage,
-                    dispatchInfo.sealedCodecSimpleName,
-                )
-            }
+            // Discriminator detection is handled earlier (before the value-class branch)
+            // so both value-class and data-class discriminator types are routed through
+            // context during decode.
 
             // If a length annotation is present, bound the nested decode to that byte count.
             val annotations = param.annotations.toList()

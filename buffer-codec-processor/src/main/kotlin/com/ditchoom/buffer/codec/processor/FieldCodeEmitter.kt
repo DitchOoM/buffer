@@ -73,8 +73,10 @@ internal fun readExpression(
         is FieldReadStrategy.UseCodecField -> readUseCodecExpression(strategy, withContext)
         is FieldReadStrategy.CollectionField -> readCollectionExpression(strategy, withContext)
         is FieldReadStrategy.DiscriminatorField -> {
-            // Read from dispatch context instead of buffer
-            "${strategy.dispatchPackage}.${strategy.dispatchCodecSimpleName}.DiscriminatorKey" +
+            // Read from dispatch context instead of buffer. The dispatcher codec lives in the
+            // same package as every variant codec, so an unqualified reference is unambiguous
+            // and stays correct even when the package is empty (root-package test sources).
+            "${strategy.dispatchCodecSimpleName}.DiscriminatorKey" +
                 ".let { key -> context[key] ?: error(\"Missing discriminator in context. \" + " +
                 "\"Decode via ${strategy.dispatchCodecSimpleName}.decode() to populate it.\") }"
         }

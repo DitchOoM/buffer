@@ -1065,6 +1065,31 @@ class DataClassCodegenTest {
     }
 
     @Test
+    fun `list of value class wrapping primitive compiles`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.RemainingBytes
+
+            @JvmInline
+            @ProtocolMessage
+            value class SubAckReturnCode(val raw: UByte)
+
+            @ProtocolMessage
+            data class SubAck(
+                val packetIdentifier: UShort,
+                @RemainingBytes val returnCodes: List<SubAckReturnCode>,
+            )
+            """,
+            )
+        val result = compileWithKsp(source)
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    @Test
     fun `length from zero count produces empty list`() {
         val source =
             SourceFile.kotlin(

@@ -89,7 +89,7 @@ class SealedDispatchGenerator(
         subclasses: List<KSClassDeclaration>,
         variantPayloadInfos: List<SealedVariantPayloadInfo> = emptyList(),
         dispatchOnInfo: DispatchOnInfo? = null,
-        variantsHandleDiscriminator: Boolean = false,
+        variantsHandlingDiscriminator: Set<String> = emptySet(),
         variantsSupportingPeek: Set<String> = emptySet(),
         direction: CodecDirection = CodecDirection.Bidirectional,
     ) {
@@ -171,7 +171,6 @@ class SealedDispatchGenerator(
         val canDecode = direction != CodecDirection.EncodeOnly
         val canEncode = direction != CodecDirection.DecodeOnly
 
-        val skipWireWrite = variantsHandleDiscriminator
         val result =
             if (hasAnyPayload) {
                 buildPayloadDispatch(
@@ -180,11 +179,11 @@ class SealedDispatchGenerator(
                     variants,
                     variantPayloadInfos,
                     dispatchOnInfo,
-                    skipWireWrite,
+                    variantsHandlingDiscriminator,
                     direction,
                 )
             } else {
-                buildSimpleDispatch(interfaceTypeName, variants, dispatchOnInfo, skipWireWrite, direction)
+                buildSimpleDispatch(interfaceTypeName, variants, dispatchOnInfo, variantsHandlingDiscriminator, direction)
             }
 
         val objectBuilder = TypeSpec.objectBuilder(codecName)
@@ -237,12 +236,19 @@ class SealedDispatchGenerator(
         fileSpec.writeTo(codeGenerator, dependencies)
     }
 
+    private fun PacketTypeInfo.selfEncodesDiscriminator(
+        variantsHandlingDiscriminator: Set<String>,
+    ): Boolean {
+        val qn = subclass.qualifiedName?.asString() ?: return false
+        return qn in variantsHandlingDiscriminator
+    }
+
     /** No payload variants — generates a standard Codec<T> implementation with context forwarding. */
     private fun buildSimpleDispatch(
         interfaceTypeName: ClassName,
         variants: List<PacketTypeInfo>,
         dispatchOnInfo: DispatchOnInfo? = null,
-        skipWireWrite: Boolean = false,
+        variantsHandlingDiscriminator: Set<String> = emptySet(),
         direction: CodecDirection = CodecDirection.Bidirectional,
     ): DispatchResult {
         val isBidirectional = direction == CodecDirection.Bidirectional
@@ -306,7 +312,7 @@ class SealedDispatchGenerator(
             val encodeCtxBody = CodeBlock.builder().beginControlFlow("when (value)")
             for (v in variants) {
                 encodeCtxBody.beginControlFlow("is %T ->", v.subclass.toPoetClassName())
-                if (!skipWireWrite) {
+                if (!v.selfEncodesDiscriminator(variantsHandlingDiscriminator)) {
                     addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
                 }
                 encodeCtxBody.addStatement("${v.subclass.codecName()}.encode(buffer, value, context)")
@@ -351,7 +357,7 @@ class SealedDispatchGenerator(
         variants: List<PacketTypeInfo>,
         variantPayloadInfos: List<SealedVariantPayloadInfo>,
         dispatchOnInfo: DispatchOnInfo? = null,
-        skipWireWrite: Boolean = false,
+        variantsHandlingDiscriminator: Set<String> = emptySet(),
         direction: CodecDirection = CodecDirection.Bidirectional,
     ): DispatchResult {
         // Collect all distinct type params from all payload variants
@@ -473,11 +479,12 @@ class SealedDispatchGenerator(
             val subTypeName = v.subclass.toPoetClassName()
             val subCodecName = v.subclass.codecName()
 
+            val skipForVariant = v.selfEncodesDiscriminator(variantsHandlingDiscriminator)
             if (info != null && info.payloadFields.isNotEmpty()) {
                 // Star-projected match for generic variant
                 val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
                 encodeBody.beginControlFlow("is %T ->", starType)
-                if (!skipWireWrite) addWireWrite(encodeBody, v.wire, dispatchOnInfo)
+                if (!skipForVariant) addWireWrite(encodeBody, v.wire, dispatchOnInfo)
                 // Unchecked cast to typed variant
                 val castTypeParams = info.payloadFields.map { TypeVariableName(it.typeParamName) }
                 val castType = subTypeName.parameterizedBy(castTypeParams)
@@ -493,7 +500,7 @@ class SealedDispatchGenerator(
             } else {
                 // Non-payload variant: simple dispatch
                 encodeBody.beginControlFlow("is %T ->", subTypeName)
-                if (!skipWireWrite) addWireWrite(encodeBody, v.wire, dispatchOnInfo)
+                if (!skipForVariant) addWireWrite(encodeBody, v.wire, dispatchOnInfo)
                 if (dispatchOnInfo != null) {
                     encodeBody.addStatement("$subCodecName.encode(buffer, value, %T.Empty)", ENCODE_CONTEXT)
                 } else {
@@ -573,15 +580,16 @@ class SealedDispatchGenerator(
                 val subTypeName = v.subclass.toPoetClassName()
                 val subCodecName = v.subclass.codecName()
 
+                val skipForVariant = v.selfEncodesDiscriminator(variantsHandlingDiscriminator)
                 if (info != null && info.payloadFields.isNotEmpty()) {
                     val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
                     encodeCtxBody.beginControlFlow("is %T ->", starType)
-                    if (!skipWireWrite) addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
+                    if (!skipForVariant) addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
                     encodeCtxBody.addStatement("$subCodecName.encodeFromContext(buffer, value, context)")
                     encodeCtxBody.endControlFlow()
                 } else {
                     encodeCtxBody.beginControlFlow("is %T ->", subTypeName)
-                    if (!skipWireWrite) addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
+                    if (!skipForVariant) addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
                     encodeCtxBody.addStatement("$subCodecName.encode(buffer, value, context)")
                     encodeCtxBody.endControlFlow()
                 }
