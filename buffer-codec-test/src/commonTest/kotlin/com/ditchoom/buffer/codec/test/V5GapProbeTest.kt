@@ -183,6 +183,96 @@ class V5GapProbeTest {
         assertEquals(1, decodedFull.bag!!.items.size)
     }
 
+    /**
+     * Probe 5: `@WhenTrue` composes with an SPI-driven custom strategy (`@PropertyBag`).
+     * Round-trips both branches:
+     *  - willFlag = false → willProperties is absent on the wire and decodes back as null.
+     *  - willFlag = true  → willProperties is encoded and decoded via the SPI extension fns.
+     *
+     * If both branches round-trip, the v5 CONNECT migration can declare will properties as
+     * `@WhenTrue("flags.willFlag") @MqttProperties Collection<MqttProperty>? = null` directly
+     * — no processor change required.
+     */
+    @Test
+    fun whenTrueComposesWithMqttPropertiesProvider() {
+        val codec = com.ditchoom.buffer.codec.test.protocols.ProbeConnectWithWillPropsCodec
+
+        // willFlag = false — willProperties absent on wire
+        val noWill =
+            com.ditchoom.buffer.codec.test.protocols.ProbeConnectWithWillProps(
+                flags = com.ditchoom.buffer.codec.test.protocols.ProbeConnectFlags(0x00u),
+                properties = mapOf(1 to 42),
+                willProperties = null,
+            )
+        var buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        codec.encode(buf, noWill)
+        val sizeNoWill = buf.position()
+        buf.resetForRead()
+        val decodedNoWill = codec.decode(buf)
+        assertEquals(noWill, decodedNoWill)
+
+        // willFlag = true — willProperties present on wire
+        val withWill =
+            com.ditchoom.buffer.codec.test.protocols.ProbeConnectWithWillProps(
+                flags = com.ditchoom.buffer.codec.test.protocols.ProbeConnectFlags(0x04u),
+                properties = mapOf(1 to 42),
+                willProperties = mapOf(2 to 7, 3 to 99),
+            )
+        buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        codec.encode(buf, withWill)
+        val sizeWithWill = buf.position()
+        buf.resetForRead()
+        val decodedWithWill = codec.decode(buf)
+        assertEquals(withWill, decodedWithWill)
+
+        // The will-properties bag should contribute strictly more bytes when present.
+        assertTrue(sizeWithWill > sizeNoWill)
+    }
+
+    /**
+     * Probe 6: stacking `@LengthPrefixed` on top of an SPI custom strategy (`@PropertyBag`)
+     * is silently ignored by the processor — the SPI branch in `FieldAnalyzer.resolveStrategy`
+     * returns before any length-prefix inspection happens. The wire bytes from a plain
+     * `@PropertyBag` field and a `@LengthPrefixed @PropertyBag` field are identical.
+     *
+     * Implication for the v5 migration: the SPI is self-bounded (the property bag carries
+     * its own VBI length prefix internally), and combining it with external length annotations
+     * is meaningless. The recommendation is to never combine them; this probe documents that
+     * the processor currently allows but does not honor the combination — a future processor
+     * change should make the combination a hard error to remove the footgun.
+     */
+    @Test
+    fun mqttPropertiesWithExternalLengthPrefixIsIgnored() {
+        val plain =
+            com.ditchoom.buffer.codec.test.protocols.ProbePropBagPlain(
+                packetId = 1u,
+                properties = mapOf(1 to 42, 2 to 7),
+            )
+        val withPrefix =
+            com.ditchoom.buffer.codec.test.protocols.ProbePropBagWithRedundantPrefix(
+                packetId = 1u,
+                properties = mapOf(1 to 42, 2 to 7),
+            )
+
+        val plainBuf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        com.ditchoom.buffer.codec.test.protocols.ProbePropBagPlainCodec.encode(plainBuf, plain)
+        val plainSize = plainBuf.position()
+
+        val prefBuf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        com.ditchoom.buffer.codec.test.protocols.ProbePropBagWithRedundantPrefixCodec
+            .encode(prefBuf, withPrefix)
+        val prefSize = prefBuf.position()
+
+        // Identical wire size — `@LengthPrefixed` was silently dropped by the SPI branch.
+        assertEquals(plainSize, prefSize)
+
+        plainBuf.resetForRead()
+        prefBuf.resetForRead()
+        repeat(plainSize) {
+            assertEquals(plainBuf.readByte(), prefBuf.readByte())
+        }
+    }
+
     /** Gap probe 2: does the generator produce boolean-property validation (must be 0 or 1)? */
     @Test
     fun booleanPropertyAcceptsOutOfSpecValue() {
@@ -203,5 +293,81 @@ class V5GapProbeTest {
         assertTrue(decoded is ProbeProp.BoolProp)
         // No validation error — generator does NOT enforce 0/1.
         assertEquals(0x02u.toUByte(), decoded.raw)
+    }
+
+    /**
+     * Probe 7 — regression test for B-6: the codec processor must emit `@WhenTrue` if-blocks
+     * for non-payload conditional fields in a sealed `@PacketType` variant that ALSO carries
+     * a `<@Payload P>` type parameter.
+     *
+     * Background: while migrating MQTT v5 CONNECT to a sealed-tree variant, an apparent bug
+     * surfaced where the generated codec read/wrote will-* fields unconditionally instead
+     * of guarding them with `if (flags.willFlag) { ... }`. Investigation showed the bug was
+     * a stale-cache artifact — fresh KSP run produces correct code. This probe locks the
+     * correct shape in so any future processor regression that loses condition emission for
+     * sealed-variant + @Payload + @WhenTrue is caught.
+     *
+     * Round-trip exercises both branches:
+     *   willFlag=false → optional fields absent on wire, decoded as null
+     *   willFlag=true  → optional fields present on wire, decoded back identically
+     */
+    @Test
+    fun whenTrueComposesInsideSealedPayloadVariant() {
+        // Round-trip via the @DispatchOn dispatcher so the discriminator byte is consumed
+        // properly: dispatcher reads flags into context, then variant decode reads body.
+
+        // willFlag=false branch — optional fields absent on wire, decoded as null
+        val noWill = com.ditchoom.buffer.codec.test.protocols.ProbeWillTree.ConnectLike<String?>(
+            flags = com.ditchoom.buffer.codec.test.protocols.ProbeWillFlags(0x10u), // packetType=1, willFlag=0
+            properties = mapOf(1 to 42),
+            clientId = "client",
+            willProperties = null,
+            willTopic = null,
+            willPayload = null,
+            willTrace = null,
+        )
+        var buf = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
+        com.ditchoom.buffer.codec.test.protocols.ProbeWillTreeCodec.encode<String?>(
+            buffer = buf,
+            value = noWill,
+            encodeConnectLikeWillPayload = { wbuf, v -> if (v != null) wbuf.writeString(v) },
+        )
+        buf.resetForRead()
+        val decodedNoWill = com.ditchoom.buffer.codec.test.protocols.ProbeWillTreeCodec.decode<String?>(buf) { reader ->
+            if (reader.remaining() > 0) reader.copyToBuffer().run { readString(remaining()) } else null
+        }
+        assertTrue(decodedNoWill is com.ditchoom.buffer.codec.test.protocols.ProbeWillTree.ConnectLike<*>)
+        assertEquals("client", decodedNoWill.clientId)
+        assertEquals(null, decodedNoWill.willTopic)
+        assertEquals(null, decodedNoWill.willPayload)
+        assertEquals(null, decodedNoWill.willTrace)
+        assertEquals(null, decodedNoWill.willProperties)
+
+        // willFlag=true branch — all conditional fields populated
+        val withWill = com.ditchoom.buffer.codec.test.protocols.ProbeWillTree.ConnectLike<String?>(
+            flags = com.ditchoom.buffer.codec.test.protocols.ProbeWillFlags(0x14u), // packetType=1, willFlag=1
+            properties = mapOf(1 to 42),
+            clientId = "client",
+            willProperties = mapOf(2 to 7),
+            willTopic = "will/topic",
+            willPayload = "payload",
+            willTrace = "trace",
+        )
+        buf = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
+        com.ditchoom.buffer.codec.test.protocols.ProbeWillTreeCodec.encode<String?>(
+            buffer = buf,
+            value = withWill,
+            encodeConnectLikeWillPayload = { wbuf, v -> if (v != null) wbuf.writeString(v) },
+        )
+        buf.resetForRead()
+        val decodedWithWill = com.ditchoom.buffer.codec.test.protocols.ProbeWillTreeCodec.decode<String?>(buf) { reader ->
+            if (reader.remaining() > 0) reader.copyToBuffer().run { readString(remaining()) } else null
+        }
+        assertTrue(decodedWithWill is com.ditchoom.buffer.codec.test.protocols.ProbeWillTree.ConnectLike<*>)
+        assertEquals("client", decodedWithWill.clientId)
+        assertEquals("will/topic", decodedWithWill.willTopic)
+        assertEquals("payload", decodedWithWill.willPayload)
+        assertEquals("trace", decodedWithWill.willTrace)
+        assertEquals(mapOf(2 to 7), decodedWithWill.willProperties)
     }
 }
