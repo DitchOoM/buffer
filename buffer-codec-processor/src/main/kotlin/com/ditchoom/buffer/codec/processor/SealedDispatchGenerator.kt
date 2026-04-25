@@ -213,13 +213,19 @@ class SealedDispatchGenerator(
             objectBuilder.addFunction(fn)
         }
 
-        // Generate peekFrameSize for sealed dispatch (only if ALL variants support it and direction allows decode)
+        // Generate peekFrameSize for sealed dispatch.
+        // - With bodyLength framing, total frame size derives from the length prefix alone,
+        //   so per-variant peek delegation is not required.
+        // - Without bodyLength, ALL variants must support peek — otherwise we can't compute
+        //   the full frame size without consuming bytes.
         if (canDecode) {
+            val needsVariantPeek = dispatchOnInfo?.hasBodyLength != true
             val allVariantsSupportPeek =
-                variants.all { v ->
-                    val name = v.subclass.qualifiedName?.asString() ?: v.subclass.simpleName.asString()
-                    name in variantsSupportingPeek
-                }
+                !needsVariantPeek ||
+                    variants.all { v ->
+                        val name = v.subclass.qualifiedName?.asString() ?: v.subclass.simpleName.asString()
+                        name in variantsSupportingPeek
+                    }
             val sealedPeek = if (allVariantsSupportPeek) buildSealedPeekFrameSize(variants, dispatchOnInfo) else null
             if (sealedPeek != null) {
                 objectBuilder.addProperty(sealedPeek.minHeaderProperty)
@@ -228,17 +234,17 @@ class SealedDispatchGenerator(
             }
         }
 
-        val fileSpec =
-            fileSpecBuilder(packageName, codecName)
-                .addType(objectBuilder.build())
-                .build()
-
-        fileSpec.writeTo(codeGenerator, dependencies)
+        val fileBuilder = fileSpecBuilder(packageName, codecName).addType(objectBuilder.build())
+        // Varint body framing emits calls into buffer extensions — import them on the
+        // generated dispatcher file so the call sites resolve.
+        if (dispatchOnInfo?.bodyFraming is BodyFraming.WithLength) {
+            fileBuilder.addImport("com.ditchoom.buffer", "readVariableByteInteger")
+            fileBuilder.addImport("com.ditchoom.buffer", "writeVariableByteIntegerLengthPrefixed")
+        }
+        fileBuilder.build().writeTo(codeGenerator, dependencies)
     }
 
-    private fun PacketTypeInfo.selfEncodesDiscriminator(
-        variantsHandlingDiscriminator: Set<String>,
-    ): Boolean {
+    private fun PacketTypeInfo.selfEncodesDiscriminator(variantsHandlingDiscriminator: Set<String>): Boolean {
         val qn = subclass.qualifiedName?.asString() ?: return false
         return qn in variantsHandlingDiscriminator
     }
@@ -274,14 +280,25 @@ class SealedDispatchGenerator(
             } else {
                 decodeCtxBody.addStatement("val type = buffer.readByte().toInt() and 0xFF")
             }
+            emitBodyLengthDecodePrelude(decodeCtxBody, dispatchOnInfo, "context")
+            val bodyVar = bodyVarName(dispatchOnInfo)
             val ctxVar = if (dispatchOnInfo != null) "_ctx" else "context"
-            decodeCtxBody.beginControlFlow("return when (type)")
+            val framed = dispatchOnInfo?.hasBodyLength == true
+            if (framed) {
+                decodeCtxBody.beginControlFlow("val _result = when (type)")
+            } else {
+                decodeCtxBody.beginControlFlow("return when (type)")
+            }
             for (v in variants) {
-                decodeCtxBody.addStatement("${v.value} -> ${v.subclass.codecName()}.decode(buffer, $ctxVar)")
+                decodeCtxBody.addStatement("${v.value} -> ${v.subclass.codecName()}.decode($bodyVar, $ctxVar)")
             }
             decodeCtxBody
                 .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
                 .endControlFlow()
+            if (framed) {
+                emitBodyLengthOverrunCheck(decodeCtxBody)
+                decodeCtxBody.addStatement("return _result")
+            }
 
             val decodeCtxBuilder =
                 FunSpec
@@ -315,7 +332,11 @@ class SealedDispatchGenerator(
                 if (!v.selfEncodesDiscriminator(variantsHandlingDiscriminator)) {
                     addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
                 }
-                encodeCtxBody.addStatement("${v.subclass.codecName()}.encode(buffer, value, context)")
+                emitBodyLengthEncodeWrap(
+                    code = encodeCtxBody,
+                    info = dispatchOnInfo,
+                    encodeStmt = "${v.subclass.codecName()}.encode(buffer, value, context)",
+                )
                 encodeCtxBody.endControlFlow()
             }
             encodeCtxBody.endControlFlow()
@@ -411,8 +432,21 @@ class SealedDispatchGenerator(
         } else {
             decodeBody.addStatement("val type = buffer.readByte().toInt() and 0xFF")
         }
+        // The non-context decode entrypoint cannot publish to a BodyLengthSink because no
+        // caller-supplied context is available. Read the body length and slice; the sink
+        // only fires through the `decode(buffer, context)` overload.
+        (dispatchOnInfo?.bodyFraming as? BodyFraming.WithLength)?.let { framing ->
+            decodeBody.addStatement("val _bodyLen = %L", readLengthExpr(framing.kind))
+            decodeBody.addStatement("val _bodySlice = buffer.readBytes(_bodyLen)")
+        }
+        val bodyVar = bodyVarName(dispatchOnInfo)
         val conv1CtxArg = if (dispatchOnInfo != null) ", _ctx" else ""
-        decodeBody.beginControlFlow("return when (type)")
+        val framed = dispatchOnInfo?.hasBodyLength == true
+        if (framed) {
+            decodeBody.beginControlFlow("val _result = when (type)")
+        } else {
+            decodeBody.beginControlFlow("return when (type)")
+        }
 
         for (v in variants) {
             val info = payloadBySubclass[v.subclass.qualifiedName?.asString()]
@@ -432,14 +466,18 @@ class SealedDispatchGenerator(
                                 dispatchOnInfo.poetClassName.canonicalName
                         } == true
                 val payloadCtxArg = if (variantHasDiscriminatorField) ", _ctx" else ""
-                decodeBody.addStatement("${v.value} -> $subCodecName.decode(buffer$payloadCtxArg, $lambdaArgs)")
+                decodeBody.addStatement("${v.value} -> $subCodecName.decode($bodyVar$payloadCtxArg, $lambdaArgs)")
             } else {
-                decodeBody.addStatement("${v.value} -> $subCodecName.decode(buffer$conv1CtxArg)")
+                decodeBody.addStatement("${v.value} -> $subCodecName.decode($bodyVar$conv1CtxArg)")
             }
         }
         decodeBody
             .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
             .endControlFlow()
+        if (framed) {
+            emitBodyLengthOverrunCheck(decodeBody)
+            decodeBody.addStatement("return _result")
+        }
 
         decodeBuilder.addCode(decodeBody.build())
 
@@ -492,20 +530,40 @@ class SealedDispatchGenerator(
                     info.payloadFields.joinToString(", ") { pf ->
                         "encode${v.subclass.simpleName.asString()}${capitalizeFirst(pf.fieldName)}"
                     }
-                encodeBody.addStatement(
-                    "@Suppress(\"UNCHECKED_CAST\") $subCodecName.encode(buffer, value as %T, $lambdaArgs)",
-                    castType,
-                )
+                val payloadFraming = dispatchOnInfo?.bodyFraming as? BodyFraming.WithLength
+                if (payloadFraming != null && payloadFraming.kind is LengthPrefixKind.Varint) {
+                    encodeBody.addStatement(
+                        "@Suppress(\"UNCHECKED_CAST\") buffer.writeVariableByteIntegerLengthPrefixed(maxBytes = %L, fieldName = %S) " +
+                            "{ buffer -> $subCodecName.encode(buffer, value as %T, $lambdaArgs) }",
+                        payloadFraming.kind.maxBytes,
+                        "body",
+                        castType,
+                    )
+                } else {
+                    // Non-Varint framing for payload variants is not currently exercised; if a
+                    // future protocol asks for fixed-width body framing on a generic dispatcher,
+                    // emit the placeholder/patch pattern here.
+                    encodeBody.addStatement(
+                        "@Suppress(\"UNCHECKED_CAST\") $subCodecName.encode(buffer, value as %T, $lambdaArgs)",
+                        castType,
+                    )
+                }
                 encodeBody.endControlFlow()
             } else {
                 // Non-payload variant: simple dispatch
                 encodeBody.beginControlFlow("is %T ->", subTypeName)
                 if (!skipForVariant) addWireWrite(encodeBody, v.wire, dispatchOnInfo)
-                if (dispatchOnInfo != null) {
-                    encodeBody.addStatement("$subCodecName.encode(buffer, value, %T.Empty)", ENCODE_CONTEXT)
-                } else {
-                    encodeBody.addStatement("$subCodecName.encode(buffer, value)")
-                }
+                val variantEncodeStmt =
+                    if (dispatchOnInfo != null) {
+                        "$subCodecName.encode(buffer, value, ${ENCODE_CONTEXT.canonicalName}.Empty)"
+                    } else {
+                        "$subCodecName.encode(buffer, value)"
+                    }
+                emitBodyLengthEncodeWrap(
+                    code = encodeBody,
+                    info = dispatchOnInfo,
+                    encodeStmt = variantEncodeStmt,
+                )
                 encodeBody.endControlFlow()
             }
         }
@@ -532,21 +590,32 @@ class SealedDispatchGenerator(
             } else {
                 decodeCtxBody.addStatement("val type = buffer.readByte().toInt() and 0xFF")
             }
+            emitBodyLengthDecodePrelude(decodeCtxBody, dispatchOnInfo, "context")
+            val bodyVar = bodyVarName(dispatchOnInfo)
             val payloadCtxVar = if (dispatchOnInfo != null) "_ctx" else "context"
-            decodeCtxBody.beginControlFlow("return when (type)")
+            val framed = dispatchOnInfo?.hasBodyLength == true
+            if (framed) {
+                decodeCtxBody.beginControlFlow("val _result = when (type)")
+            } else {
+                decodeCtxBody.beginControlFlow("return when (type)")
+            }
 
             for (v in variants) {
                 val info = payloadBySubclass[v.subclass.qualifiedName?.asString()]
                 val subCodecName = v.subclass.codecName()
                 if (info != null && info.payloadFields.isNotEmpty()) {
-                    decodeCtxBody.addStatement("${v.value} -> $subCodecName.decodeFromContext(buffer, $payloadCtxVar)")
+                    decodeCtxBody.addStatement("${v.value} -> $subCodecName.decodeFromContext($bodyVar, $payloadCtxVar)")
                 } else {
-                    decodeCtxBody.addStatement("${v.value} -> $subCodecName.decode(buffer, $payloadCtxVar)")
+                    decodeCtxBody.addStatement("${v.value} -> $subCodecName.decode($bodyVar, $payloadCtxVar)")
                 }
             }
             decodeCtxBody
                 .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
                 .endControlFlow()
+            if (framed) {
+                emitBodyLengthOverrunCheck(decodeCtxBody)
+                decodeCtxBody.addStatement("return _result")
+            }
 
             val decodeCtxBuilder =
                 FunSpec
@@ -585,12 +654,20 @@ class SealedDispatchGenerator(
                     val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
                     encodeCtxBody.beginControlFlow("is %T ->", starType)
                     if (!skipForVariant) addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
-                    encodeCtxBody.addStatement("$subCodecName.encodeFromContext(buffer, value, context)")
+                    emitBodyLengthEncodeWrap(
+                        code = encodeCtxBody,
+                        info = dispatchOnInfo,
+                        encodeStmt = "$subCodecName.encodeFromContext(buffer, value, context)",
+                    )
                     encodeCtxBody.endControlFlow()
                 } else {
                     encodeCtxBody.beginControlFlow("is %T ->", subTypeName)
                     if (!skipForVariant) addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
-                    encodeCtxBody.addStatement("$subCodecName.encode(buffer, value, context)")
+                    emitBodyLengthEncodeWrap(
+                        code = encodeCtxBody,
+                        info = dispatchOnInfo,
+                        encodeStmt = "$subCodecName.encode(buffer, value, context)",
+                    )
                     encodeCtxBody.endControlFlow()
                 }
             }
@@ -641,6 +718,10 @@ class SealedDispatchGenerator(
     /**
      * Generates peekFrameSize for a sealed dispatch codec.
      * Peeks the discriminator, branches per variant, delegates to each variant's peekFrameSize.
+     *
+     * When `dispatchOnInfo.hasBodyLength` is true, the framing collapses to
+     * `[discriminator][lengthPrefix(bodyLength)][body]` — total frame size is determined
+     * by the length prefix alone and we do not need per-variant peek delegation.
      */
     private fun buildSealedPeekFrameSize(
         variants: List<PacketTypeInfo>,
@@ -654,7 +735,12 @@ class SealedDispatchGenerator(
                 1 // default: single byte
             }
 
-        val minHeaderBytes = discriminatorSize
+        // For body-framed dispatch the minimum header is discriminator + the prefix's
+        // minimum-known wire bytes (Varint = 1; Byte/Short/Int = full width).
+        val minHeaderBytes =
+            (dispatchOnInfo?.bodyFraming as? BodyFraming.WithLength)
+                ?.let { discriminatorSize + it.kind.minWireBytes }
+                ?: discriminatorSize
 
         val minHeaderProp =
             PropertySpec
@@ -698,6 +784,62 @@ class SealedDispatchGenerator(
 
         val code = CodeBlock.builder()
         code.addStatement("if (stream.available() < baseOffset + %L) return %T.NeedsMoreData", discriminatorSize, PEEK_RESULT)
+
+        val framing = dispatchOnInfo?.bodyFraming as? BodyFraming.WithLength
+        if (framing != null) {
+            when (val kind = framing.kind) {
+                is LengthPrefixKind.Varint -> {
+                    // Walk the VBI canonical encoding byte-by-byte: continuation bit set means more bytes.
+                    code.addStatement("val _vbiStart = baseOffset + %L", discriminatorSize)
+                    code.addStatement("var _vbiWidth = 0")
+                    code.addStatement("var _len = 0")
+                    code.addStatement("var _multiplier = 1")
+                    code.addStatement("var _continue = true")
+                    code.beginControlFlow("while (_continue && _vbiWidth < %L)", kind.maxBytes)
+                    code.addStatement(
+                        "if (stream.available() < _vbiStart + _vbiWidth + 1) return %T.NeedsMoreData",
+                        PEEK_RESULT,
+                    )
+                    code.addStatement("val _byte = stream.peekByte(_vbiStart + _vbiWidth).toInt() and 0xFF")
+                    code.addStatement("_len += (_byte and 0x7F) * _multiplier")
+                    code.addStatement("_multiplier *= 128")
+                    code.addStatement("_vbiWidth += 1")
+                    code.addStatement("_continue = (_byte and 0x80) != 0")
+                    code.endControlFlow()
+                    code.addStatement("if (_continue) return %T.NeedsMoreData", PEEK_RESULT)
+                    code.addStatement(
+                        "return %T.Size(%L + _vbiWidth + _len)",
+                        PEEK_RESULT,
+                        discriminatorSize,
+                    )
+                }
+                else -> {
+                    val cfg = fixedPrefixConfigOrError(kind)
+                    val prefixOffset = "baseOffset + $discriminatorSize"
+                    val readExpr =
+                        when (kind) {
+                            is LengthPrefixKind.Byte -> "stream.peekByte($prefixOffset).toInt() and 0xFF"
+                            is LengthPrefixKind.Short -> "stream.peekShort($prefixOffset).toInt() and 0xFFFF"
+                            is LengthPrefixKind.Int -> "stream.peekInt($prefixOffset)"
+                            is LengthPrefixKind.Varint -> error("unreachable: handled above")
+                        }
+                    code.addStatement(
+                        "if (stream.available() < baseOffset + %L) return %T.NeedsMoreData",
+                        discriminatorSize + cfg.byteCount,
+                        PEEK_RESULT,
+                    )
+                    code.addStatement("val _len = %L", readExpr)
+                    code.addStatement(
+                        "return %T.Size(%L + %L + _len)",
+                        PEEK_RESULT,
+                        discriminatorSize,
+                        cfg.byteCount,
+                    )
+                }
+            }
+            builder.addCode(code.build())
+            return builder.build()
+        }
 
         // Peek and extract the dispatch value
         if (dispatchOnInfo != null) {
@@ -781,4 +923,80 @@ class SealedDispatchGenerator(
             "Long" -> "$stream.peekLong($offset)"
             else -> "$stream.peekByte($offset).toUByte()" // fallback
         }
+
+    /** Variable name used by variant-decode call sites: `"_bodySlice"` when bodyLength
+     * framing is in effect, `"buffer"` otherwise. */
+    internal fun bodyVarName(info: DispatchOnInfo?): String = if (info?.hasBodyLength == true) "_bodySlice" else "buffer"
+
+    /**
+     * Emits a post-dispatch assertion that the body slice was fully consumed by the
+     * variant decoder. Catches malformed wires where the VBI claims more bytes than
+     * the variant actually reads — without this, those trailing bytes would silently
+     * leak into the next frame.
+     */
+    internal fun emitBodyLengthOverrunCheck(code: CodeBlock.Builder) {
+        code.addStatement(
+            "require(_bodySlice.remaining() == 0) { %P }",
+            "Variant decoder consumed \${_bodyLen - _bodySlice.remaining()} of \$_bodyLen body bytes; " +
+                "\${_bodySlice.remaining()} unread. Wire is malformed or variant codec is buggy.",
+        )
+    }
+
+    /**
+     * Emits the decode-side prelude for body-length framing: read the length, optionally
+     * publish to a `BodyLengthSink` registered on the context, and slice the body.
+     *
+     * No-op when [info] is null or has no body framing — preserves existing dispatch
+     * behavior unchanged for callers that don't opt in.
+     */
+    internal fun emitBodyLengthDecodePrelude(
+        code: CodeBlock.Builder,
+        info: DispatchOnInfo?,
+        contextVarName: String,
+    ) {
+        val framing = info?.bodyFraming as? BodyFraming.WithLength ?: return
+        code.addStatement("val _bodyLen = %L", readLengthExpr(framing.kind))
+        code.addStatement(
+            "%L[%T]?.value = _bodyLen",
+            contextVarName,
+            ClassName("com.ditchoom.buffer.codec", "BodyLengthKey"),
+        )
+        code.addStatement("val _bodySlice = buffer.readBytes(_bodyLen)")
+    }
+
+    /**
+     * Wraps an encode statement in the body-length framing helper when [info] requests it.
+     * For non-framed dispatch (or when [info] is null), emits [encodeStmt] verbatim.
+     */
+    internal fun emitBodyLengthEncodeWrap(
+        code: CodeBlock.Builder,
+        info: DispatchOnInfo?,
+        encodeStmt: String,
+    ) {
+        val framing = info?.bodyFraming as? BodyFraming.WithLength
+        if (framing == null) {
+            code.addStatement(encodeStmt)
+            return
+        }
+        when (val kind = framing.kind) {
+            is LengthPrefixKind.Varint ->
+                code.addStatement(
+                    "buffer.writeVariableByteIntegerLengthPrefixed(maxBytes = %L, fieldName = %S) { buffer -> %L }",
+                    kind.maxBytes,
+                    "body",
+                    encodeStmt,
+                )
+            else -> {
+                val cfg = fixedPrefixConfigOrError(kind)
+                code.addStatement("val _pos_body = buffer.position()")
+                code.addStatement(cfg.writePlaceholder)
+                code.addStatement(encodeStmt)
+                code.addStatement("val _end_body = buffer.position()")
+                code.addStatement("val _len_body = _end_body - _pos_body - %L", cfg.byteCount)
+                code.addStatement("buffer.position(_pos_body)")
+                code.addStatement(cfg.writeExpr("_len_body"))
+                code.addStatement("buffer.position(_end_body)")
+            }
+        }
+    }
 }

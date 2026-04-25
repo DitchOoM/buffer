@@ -1,13 +1,11 @@
 package com.ditchoom.buffer.codec.test.protocols
 
 import com.ditchoom.buffer.codec.annotations.DispatchOn
-import com.ditchoom.buffer.codec.annotations.DispatchValue
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import com.ditchoom.buffer.codec.annotations.WhenTrue
-import kotlin.jvm.JvmInline
 
 /**
  * Reuses FixedHeaderByte (top nibble = packet type, bottom nibble = flags) to exercise

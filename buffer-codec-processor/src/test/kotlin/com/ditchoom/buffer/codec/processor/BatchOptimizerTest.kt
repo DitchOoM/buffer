@@ -65,7 +65,7 @@ class BatchOptimizerTest {
         val fields =
             listOf(
                 field("a", FieldReadStrategy.UByteField),
-                field("b", FieldReadStrategy.LengthPrefixedStringField("Short")),
+                field("b", FieldReadStrategy.LengthPrefixedStringField(LengthPrefixKind.Short)),
                 field("c", FieldReadStrategy.UByteField),
             )
         val result = optimizer.optimize(fields)

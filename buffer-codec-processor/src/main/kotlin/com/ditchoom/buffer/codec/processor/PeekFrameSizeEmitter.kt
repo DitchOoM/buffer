@@ -150,9 +150,9 @@ internal object PeekFrameSizeEmitter {
             }
 
             strategy is FieldReadStrategy.LengthPrefixedStringField -> {
+                val prefixBytes = prefixByteCount(strategy.kind) ?: return null
                 steps.add(PeekStep.FlushFixed(accum))
                 accum = 0
-                val prefixBytes = prefixByteCount(strategy.prefix)
                 val varName = "_${field.name}Len"
                 steps.add(PeekStep.PeekPrefix(varName, prefixBytes))
                 accum += prefixBytes
@@ -169,9 +169,9 @@ internal object PeekFrameSizeEmitter {
             strategy is FieldReadStrategy.PayloadField -> {
                 when (val lk = strategy.lengthKind) {
                     is LengthKind.Prefixed -> {
+                        val prefixBytes = prefixByteCount(lk.kind) ?: return null
                         steps.add(PeekStep.FlushFixed(accum))
                         accum = 0
-                        val prefixBytes = prefixByteCount(lk.prefix)
                         val varName = "_${field.name}Len"
                         steps.add(PeekStep.PeekPrefix(varName, prefixBytes))
                         accum += prefixBytes
@@ -191,9 +191,9 @@ internal object PeekFrameSizeEmitter {
                 val lk = strategy.lengthKind ?: return null
                 when (lk) {
                     is LengthKind.Prefixed -> {
+                        val prefixBytes = prefixByteCount(lk.kind) ?: return null
                         steps.add(PeekStep.FlushFixed(accum))
                         accum = 0
-                        val prefixBytes = prefixByteCount(lk.prefix)
                         val varName = "_${field.name}Len"
                         steps.add(PeekStep.PeekPrefix(varName, prefixBytes))
                         accum += prefixBytes
@@ -218,9 +218,9 @@ internal object PeekFrameSizeEmitter {
             strategy is FieldReadStrategy.NestedMessageWithLengthField -> {
                 when (val lk = strategy.lengthKind) {
                     is LengthKind.Prefixed -> {
+                        val prefixBytes = prefixByteCount(lk.kind) ?: return null
                         steps.add(PeekStep.FlushFixed(accum))
                         accum = 0
-                        val prefixBytes = prefixByteCount(lk.prefix)
                         val varName = "_${field.name}Len"
                         steps.add(PeekStep.PeekPrefix(varName, prefixBytes))
                         accum += prefixBytes
@@ -505,12 +505,15 @@ internal object PeekFrameSizeEmitter {
         }
     }
 
-    private fun prefixByteCount(prefix: String): Int =
-        when (prefix) {
-            "Byte" -> 1
-            "Short" -> 2
-            "Int" -> 4
-            else -> 2
+    /** Fixed-width byte count for a peek-friendly prefix. Returns `null` for Varint —
+     * variable-width peeks aren't supported at the field level today; messages with
+     * Varint prefixes simply opt out of generated peek. */
+    private fun prefixByteCount(kind: LengthPrefixKind): Int? =
+        when (kind) {
+            is LengthPrefixKind.Byte -> 1
+            is LengthPrefixKind.Short -> 2
+            is LengthPrefixKind.Int -> 4
+            is LengthPrefixKind.Varint -> null
         }
 }
 

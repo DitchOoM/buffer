@@ -3,10 +3,12 @@ package com.ditchoom.buffer.codec.test.protocols
 import com.ditchoom.buffer.codec.annotations.DispatchOn
 import com.ditchoom.buffer.codec.annotations.DispatchValue
 import com.ditchoom.buffer.codec.annotations.LengthFrom
+import com.ditchoom.buffer.codec.annotations.LengthPrefix
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.Payload
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import com.ditchoom.buffer.codec.annotations.WhenTrue
 import com.ditchoom.buffer.codec.test.annotations.PropertyBag
 import kotlin.jvm.JvmInline
@@ -41,7 +43,9 @@ sealed interface ProbeProp {
     @PacketType(value = 0x01, wire = 0x01)
     @ProtocolMessage
     @JvmInline
-    value class BoolProp(val raw: UByte) : ProbeProp
+    value class BoolProp(
+        val raw: UByte,
+    ) : ProbeProp
 
     @PacketType(value = 0x09, wire = 0x09)
     @ProtocolMessage
@@ -60,7 +64,9 @@ sealed interface ProbeProp {
     @PacketType(value = 0x21, wire = 0x21)
     @ProtocolMessage
     @JvmInline
-    value class UShortProp(val value: UShort) : ProbeProp
+    value class UShortProp(
+        val value: UShort,
+    ) : ProbeProp
 
     @PacketType(value = 0x26, wire = 0x26)
     @ProtocolMessage
@@ -241,3 +247,152 @@ data class ProbeTopLevelConnectLike<@Payload WP>(
     @WhenTrue("flags.willFlag") @LengthPrefixed val willPayload: WP? = null,
     @WhenTrue("flags.willFlag") @LengthPrefixed val willTrace: String? = null,
 )
+
+// =====================================================================================
+// Phase 1 probes — `LengthPrefix.Varint` + `@DispatchOn(bodyLength = ...)`.
+//
+// The Probe[1..7] block above audited what the codec processor *can* generate today.
+// The 1.0 phase below adds 9 probes that audit what it *cannot* yet generate — the
+// missing primitives that force ~700 lines of hand-written orchestration in mqtt
+// models-v5. Each probe must fail to compile or fail at runtime until Phase 1.1 lands.
+//
+// Boundary intent (probes 8/9): exercise every VBI byte-width transition so the
+// patch-up logic is constrained to be correct at 1↔2, 2↔3, 3↔4, 4-byte-overflow.
+//   1-byte VBI  → bodyLen ≤ 127           (0x7F)
+//   2-byte VBI  → 128 ≤ bodyLen ≤ 16383   (0x3FFF)
+//   3-byte VBI  → 16384 ≤ bodyLen ≤ 2097151 (0x1FFFFF)
+//   4-byte VBI  → 2097152 ≤ bodyLen ≤ 268435455 (0xFFFFFFF)
+// =====================================================================================
+
+/**
+ * Probe 8 — VBI byte-length-prefixed nested @ProtocolMessage. Mirrors the v5 MQTT
+ * property-bag wire shape: outer reads VBI byte length, slices, nested decodes from
+ * slice via @RemainingBytes. The hand-written `MqttPropertyCodecExt.kt` exists today
+ * solely because no `LengthPrefix.Varint` enum value was available.
+ *
+ * Test [V5GapProbeTest.varintNestedRoundTripsAtAllVbiBoundaries] round-trips at
+ * each VBI byte-width boundary (0, 127, 128, 16383, 16384, 2097151, 2097152, 268435455).
+ */
+@ProtocolMessage
+data class ProbeVarLenBody(
+    @RemainingBytes val data: String,
+)
+
+@ProtocolMessage
+data class ProbeVarintNested(
+    val packetId: UShort,
+    @LengthPrefixed(LengthPrefix.Varint, maxBytes = 4) val body: ProbeVarLenBody,
+)
+
+/**
+ * Probe 9 — `maxBytes = 2` caps the VBI prefix to a 2-byte width. A body that needs
+ * 3-byte VBI must throw `IllegalArgumentException` at encode-time with a message that
+ * names the field and the offending length. This is the spec-cap path: MQTT uses
+ * `maxBytes = 4`; protocols with tighter caps (HTTP/2 SETTINGS, gRPC stream IDs) want
+ * the same shape with smaller caps.
+ *
+ * Test [V5GapProbeTest.varintMaxBytesOverflowThrowsAtEncode] constructs a 16384-byte
+ * body and asserts the encode throws with the expected message shape.
+ */
+@ProtocolMessage
+data class ProbeVarintMaxBytesOverflow(
+    val packetId: UShort,
+    @LengthPrefixed(LengthPrefix.Varint, maxBytes = 2) val body: ProbeVarLenBody,
+)
+
+/**
+ * Probe 10 — VBI byte-length prefix on a nested message that holds a `List<ProbeProp>`.
+ * Demonstrates that varint composes with the existing `@RemainingBytes List<T>` slicing
+ * path (probe 2 in the audit block above already validated that path with `Short` prefix).
+ * If probes 2 and 10 round-trip with identical decoded values across the same items,
+ * the only difference is the prefix encoding — confirming the missing primitive is
+ * isolated to `LengthPrefix.Varint` and not the byte-slicing infrastructure.
+ */
+@ProtocolMessage
+data class ProbeVarintListBag(
+    @RemainingBytes val items: List<ProbeProp>,
+)
+
+@ProtocolMessage
+data class ProbeVarintCollection(
+    val packetId: UShort,
+    @LengthPrefixed(LengthPrefix.Varint, maxBytes = 4) val bag: ProbeVarintListBag,
+)
+
+/**
+ * Probe 11 — VBI byte-length prefix on a String. Same shape as `@LengthPrefixed val
+ * name: String` (default `Short` prefix) but with a varint prefix instead. Confirms
+ * the codec processor can emit varint patch-up for primitive String fields, not just
+ * nested @ProtocolMessage fields.
+ */
+@ProtocolMessage
+data class ProbeVarintString(
+    @LengthPrefixed(LengthPrefix.Varint, maxBytes = 4) val name: String,
+)
+
+/**
+ * Probe 12 — sealed dispatch with `bodyLength = LengthPrefix.Varint` on `@DispatchOn`.
+ * The dispatcher must:
+ *   - encode: write discriminator byte, reserve VBI placeholder, encode body, patch VBI
+ *   - decode: read discriminator, read VBI bodyLen, slice body, dispatch on slice
+ * Together these lift the `[byte1][VBI(remainingLength)][body]` framing out of every
+ * MQTT call site (deletes ~80 lines of `serialize()`/`encodeBody()`/`fixedHeader()`
+ * from `ControlPacket.kt` plus 116 lines of `ControlPacketV5.fromTyped()`).
+ */
+@JvmInline
+@ProtocolMessage
+value class ProbeFramedTag(
+    val raw: UByte,
+) {
+    @DispatchValue
+    val typeId: Int get() = raw.toInt()
+}
+
+@DispatchOn(ProbeFramedTag::class, bodyLength = LengthPrefix.Varint, bodyLengthMaxBytes = 4)
+@ProtocolMessage
+sealed interface ProbeFramedDispatchSimple {
+    @PacketType(value = 1, wire = 0x01)
+    @ProtocolMessage
+    data class Alpha(
+        val x: UShort,
+    ) : ProbeFramedDispatchSimple
+
+    @PacketType(value = 2, wire = 0x02)
+    @ProtocolMessage
+    data class Beta(
+        val y: UInt,
+        val z: UByte,
+    ) : ProbeFramedDispatchSimple
+
+    @PacketType(value = 3, wire = 0x03)
+    @ProtocolMessage
+    data class Gamma(
+        @LengthPrefixed val message: String,
+    ) : ProbeFramedDispatchSimple
+}
+
+/**
+ * Probe 13 — sealed dispatch with `bodyLength = LengthPrefix.Varint` plus a
+ * `<@Payload P>` variant. This is the shape needed by MQTT v5 PUBLISH, where the
+ * payload is application-typed but framed by the same VBI body length as every other
+ * V5 packet. Validates that the VBI patch-up emit code interacts correctly with
+ * payload reader/writer scope: the patch position is captured *outside* the payload
+ * encode lambda but the body length must include payload bytes.
+ */
+@DispatchOn(ProbeFramedTag::class, bodyLength = LengthPrefix.Varint, bodyLengthMaxBytes = 4)
+@ProtocolMessage
+sealed interface ProbeFramedDispatchWithPayload {
+    @PacketType(value = 1, wire = 0x01)
+    @ProtocolMessage
+    data class WithBytes<@Payload P>(
+        val header: UByte,
+        @LengthPrefixed val topic: String,
+        @RemainingBytes val payload: P,
+    ) : ProbeFramedDispatchWithPayload
+
+    @PacketType(value = 2, wire = 0x02)
+    @ProtocolMessage
+    data class Plain(
+        val x: UShort,
+    ) : ProbeFramedDispatchWithPayload
+}

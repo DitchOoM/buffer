@@ -22,29 +22,63 @@ internal data class PrefixConfig(
     val writeExpr: (String) -> String,
 )
 
-internal val prefixConfigs =
-    mapOf(
-        "Byte" to
-            PrefixConfig(
-                1,
-                "buffer.readByte().toInt() and 0xFF",
-                "buffer.writeByte(0.toByte())",
-            ) { "buffer.writeByte($it.toByte())" },
-        "Short" to
-            PrefixConfig(
-                2,
-                "buffer.readUnsignedShort().toInt()",
-                "buffer.writeShort(0.toShort())",
-            ) { "buffer.writeShort($it.toShort())" },
-        "Int" to
-            PrefixConfig(
-                4,
-                "buffer.readInt()",
-                "buffer.writeInt(0)",
-            ) { "buffer.writeInt($it)" },
+private val FIXED_PREFIX_BYTE =
+    PrefixConfig(1, "buffer.readByte().toInt() and 0xFF", "buffer.writeByte(0.toByte())") {
+        "buffer.writeByte($it.toByte())"
+    }
+
+private val FIXED_PREFIX_SHORT =
+    PrefixConfig(2, "buffer.readUnsignedShort().toInt()", "buffer.writeShort(0.toShort())") {
+        "buffer.writeShort($it.toShort())"
+    }
+
+private val FIXED_PREFIX_INT =
+    PrefixConfig(4, "buffer.readInt()", "buffer.writeInt(0)") { "buffer.writeInt($it)" }
+
+/** Per-kind fixed-width prefix configuration. Returns null for [LengthPrefixKind.Varint]
+ * because Varint requires the reserve-encode-shift helper rather than a fixed config. */
+internal fun fixedPrefixConfig(kind: LengthPrefixKind): PrefixConfig? =
+    when (kind) {
+        is LengthPrefixKind.Byte -> FIXED_PREFIX_BYTE
+        is LengthPrefixKind.Short -> FIXED_PREFIX_SHORT
+        is LengthPrefixKind.Int -> FIXED_PREFIX_INT
+        is LengthPrefixKind.Varint -> null
+    }
+
+/** Strict accessor for fixed-width prefix configuration. Throws on [LengthPrefixKind.Varint]
+ * to fail fast if a caller forgets to handle the variable-width path. */
+internal fun fixedPrefixConfigOrError(kind: LengthPrefixKind): PrefixConfig =
+    fixedPrefixConfig(kind) ?: error(
+        "fixedPrefixConfig called with $kind. Varint requires emitVarintLengthPrefixedWrite " +
+            "for the encode side and VARINT_READ_EXPR for the decode side.",
     )
 
-internal fun prefixConfig(prefix: String): PrefixConfig = prefixConfigs[prefix] ?: error("Unknown LengthPrefix: $prefix")
+/** Read expression for a `LengthPrefix.Varint`-prefixed length value. */
+internal const val VARINT_READ_EXPR: String = "buffer.readVariableByteInteger()"
+
+/** Read expression for any [LengthPrefixKind] — uniform regardless of fixed vs variable width. */
+internal fun readLengthExpr(kind: LengthPrefixKind): String =
+    when (kind) {
+        is LengthPrefixKind.Varint -> VARINT_READ_EXPR
+        else -> fixedPrefixConfigOrError(kind).readExpr
+    }
+
+/**
+ * Emits a write expression for a `LengthPrefix.Varint`-prefixed body via the runtime
+ * helper [com.ditchoom.buffer.writeVariableByteIntegerLengthPrefixed]. The helper does
+ * the reserve-encode-measure-shift dance with zero allocation on the hot path.
+ *
+ * The lambda parameter is named `buffer` so [encodeBody] expressions can use the same
+ * `buffer.foo(...)` shape as encode code emitted at any other call site — the inner
+ * `buffer` shadows the outer one and points to the same underlying buffer.
+ */
+internal fun emitVarintLengthPrefixedWrite(
+    kind: LengthPrefixKind.Varint,
+    fieldName: String,
+    encodeBody: String,
+): String =
+    "buffer.writeVariableByteIntegerLengthPrefixed(maxBytes = ${kind.maxBytes}, fieldName = \"$fieldName\") " +
+        "{ buffer -> $encodeBody }"
 
 internal fun addPayloadRawRead(
     code: CodeBlock.Builder,
@@ -83,8 +117,7 @@ internal fun addPayloadRawReadBody(
 ) {
     when (val lk = strategy.lengthKind) {
         is LengthKind.Prefixed -> {
-            val lenExpr = prefixConfig(lk.prefix).readExpr
-            code.addStatement("val _len = %L", lenExpr)
+            code.addStatement("val _len = %L", readLengthExpr(lk.kind))
             code.addStatement("buffer.readBytes(_len)")
         }
         is LengthKind.Remaining -> {
@@ -130,17 +163,29 @@ internal fun addPayloadEncodeBody(
     val suffix = "_${field.name}"
 
     when (val lk = strategy.lengthKind) {
-        is LengthKind.Prefixed -> {
-            val cfg = prefixConfig(lk.prefix)
-            code.addStatement("val _pos%L = buffer.position()", suffix)
-            code.addStatement("%L", cfg.writePlaceholder)
-            code.addStatement("%L(buffer, %L)", encodeFn, valueExpr)
-            code.addStatement("val _end%L = buffer.position()", suffix)
-            code.addStatement("val _len%L = _end%L - _pos%L - %L", suffix, suffix, suffix, cfg.byteCount)
-            code.addStatement("buffer.position(_pos%L)", suffix)
-            code.addStatement("%L", cfg.writeExpr("_len$suffix"))
-            code.addStatement("buffer.position(_end%L)", suffix)
-        }
+        is LengthKind.Prefixed ->
+            when (val kind = lk.kind) {
+                is LengthPrefixKind.Varint ->
+                    code.addStatement(
+                        "%L",
+                        emitVarintLengthPrefixedWrite(
+                            kind = kind,
+                            fieldName = field.name,
+                            encodeBody = "$encodeFn(buffer, $valueExpr)",
+                        ),
+                    )
+                else -> {
+                    val cfg = fixedPrefixConfigOrError(kind)
+                    code.addStatement("val _pos%L = buffer.position()", suffix)
+                    code.addStatement("%L", cfg.writePlaceholder)
+                    code.addStatement("%L(buffer, %L)", encodeFn, valueExpr)
+                    code.addStatement("val _end%L = buffer.position()", suffix)
+                    code.addStatement("val _len%L = _end%L - _pos%L - %L", suffix, suffix, suffix, cfg.byteCount)
+                    code.addStatement("buffer.position(_pos%L)", suffix)
+                    code.addStatement("%L", cfg.writeExpr("_len$suffix"))
+                    code.addStatement("buffer.position(_end%L)", suffix)
+                }
+            }
         is LengthKind.Remaining -> {
             code.addStatement("%L(buffer, %L)", encodeFn, valueExpr)
         }

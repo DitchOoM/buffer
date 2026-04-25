@@ -3,11 +3,33 @@ package com.ditchoom.buffer.codec.test
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.codec.DecodeContext
+import com.ditchoom.buffer.codec.test.protocols.ProbeFramedDispatchSimple
+import com.ditchoom.buffer.codec.test.protocols.ProbeFramedDispatchSimpleCodec
+import com.ditchoom.buffer.codec.test.protocols.ProbeFramedDispatchWithPayload
+import com.ditchoom.buffer.codec.test.protocols.ProbeFramedDispatchWithPayloadCodec
 import com.ditchoom.buffer.codec.test.protocols.ProbeProp
 import com.ditchoom.buffer.codec.test.protocols.ProbePropCodec
+import com.ditchoom.buffer.codec.test.protocols.ProbeVarLenBody
+import com.ditchoom.buffer.codec.test.protocols.ProbeVarintCollection
+import com.ditchoom.buffer.codec.test.protocols.ProbeVarintCollectionCodec
+import com.ditchoom.buffer.codec.test.protocols.ProbeVarintListBag
+import com.ditchoom.buffer.codec.test.protocols.ProbeVarintMaxBytesOverflow
+import com.ditchoom.buffer.codec.test.protocols.ProbeVarintMaxBytesOverflowCodec
+import com.ditchoom.buffer.codec.test.protocols.ProbeVarintNested
+import com.ditchoom.buffer.codec.test.protocols.ProbeVarintNestedCodec
+import com.ditchoom.buffer.codec.test.protocols.ProbeVarintString
+import com.ditchoom.buffer.codec.test.protocols.ProbeVarintStringCodec
+import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.readVariableByteInteger
+import com.ditchoom.buffer.stream.PeekResult
+import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
 /**
  * Empirical investigation of the gaps that force `MqttPropertyCodecExt.kt`'s 265 lines
@@ -111,9 +133,12 @@ class V5GapProbeTest {
                     ),
             )
         val buffer = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
-        com.ditchoom.buffer.codec.test.protocols.ProbeAckShortPrefixedCodec.encode(buffer, original)
+        com.ditchoom.buffer.codec.test.protocols.ProbeAckShortPrefixedCodec
+            .encode(buffer, original)
         buffer.resetForRead()
-        val decoded = com.ditchoom.buffer.codec.test.protocols.ProbeAckShortPrefixedCodec.decode(buffer)
+        val decoded =
+            com.ditchoom.buffer.codec.test.protocols.ProbeAckShortPrefixedCodec
+                .decode(buffer)
         assertEquals(7u.toUShort(), decoded.packetId)
         assertEquals(3, decoded.bag.items.size)
         assertEquals(0x1234u.toUShort(), (decoded.bag.items[0] as ProbeProp.UShortProp).value)
@@ -129,12 +154,17 @@ class V5GapProbeTest {
         val original =
             com.ditchoom.buffer.codec.test.protocols.ProbeAckShortPrefixed(
                 packetId = 1u,
-                bag = com.ditchoom.buffer.codec.test.protocols.ProbePropertyBag(items = emptyList()),
+                bag =
+                    com.ditchoom.buffer.codec.test.protocols
+                        .ProbePropertyBag(items = emptyList()),
             )
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
-        com.ditchoom.buffer.codec.test.protocols.ProbeAckShortPrefixedCodec.encode(buffer, original)
+        com.ditchoom.buffer.codec.test.protocols.ProbeAckShortPrefixedCodec
+            .encode(buffer, original)
         buffer.resetForRead()
-        val decoded = com.ditchoom.buffer.codec.test.protocols.ProbeAckShortPrefixedCodec.decode(buffer)
+        val decoded =
+            com.ditchoom.buffer.codec.test.protocols.ProbeAckShortPrefixedCodec
+                .decode(buffer)
         assertEquals(1u.toUShort(), decoded.packetId)
         assertEquals(0, decoded.bag.items.size)
     }
@@ -147,22 +177,33 @@ class V5GapProbeTest {
     @Test
     fun whenRemainingCascadeWithLengthPrefixedBagRoundTrip() {
         // Minimal — only packetId
-        val minimal = com.ditchoom.buffer.codec.test.protocols.ProbeAckOptional(packetId = 1u)
+        val minimal =
+            com.ditchoom.buffer.codec.test.protocols
+                .ProbeAckOptional(packetId = 1u)
         var buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec.encode(buf, minimal)
+        com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec
+            .encode(buf, minimal)
         assertEquals(2, buf.position())
         buf.resetForRead()
-        val decodedMin = com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec.decode(buf)
+        val decodedMin =
+            com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec
+                .decode(buf)
         assertEquals(minimal, decodedMin)
 
         // Reason code only
         val reasonOnly =
-            com.ditchoom.buffer.codec.test.protocols.ProbeAckOptional(packetId = 2u, reasonCode = 0x10u)
+            com.ditchoom.buffer.codec.test.protocols
+                .ProbeAckOptional(packetId = 2u, reasonCode = 0x10u)
         buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec.encode(buf, reasonOnly)
+        com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec
+            .encode(buf, reasonOnly)
         assertEquals(3, buf.position())
         buf.resetForRead()
-        assertEquals(reasonOnly, com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec.decode(buf))
+        assertEquals(
+            reasonOnly,
+            com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec
+                .decode(buf),
+        )
 
         // Reason code + bag
         val full =
@@ -175,9 +216,12 @@ class V5GapProbeTest {
                     ),
             )
         buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec.encode(buf, full)
+        com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec
+            .encode(buf, full)
         buf.resetForRead()
-        val decodedFull = com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec.decode(buf)
+        val decodedFull =
+            com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec
+                .decode(buf)
         assertEquals(3u.toUShort(), decodedFull.packetId)
         assertEquals(0x80u.toUByte(), decodedFull.reasonCode)
         assertEquals(1, decodedFull.bag!!.items.size)
@@ -200,7 +244,9 @@ class V5GapProbeTest {
         // willFlag = false — willProperties absent on wire
         val noWill =
             com.ditchoom.buffer.codec.test.protocols.ProbeConnectWithWillProps(
-                flags = com.ditchoom.buffer.codec.test.protocols.ProbeConnectFlags(0x00u),
+                flags =
+                    com.ditchoom.buffer.codec.test.protocols
+                        .ProbeConnectFlags(0x00u),
                 properties = mapOf(1 to 42),
                 willProperties = null,
             )
@@ -214,7 +260,9 @@ class V5GapProbeTest {
         // willFlag = true — willProperties present on wire
         val withWill =
             com.ditchoom.buffer.codec.test.protocols.ProbeConnectWithWillProps(
-                flags = com.ditchoom.buffer.codec.test.protocols.ProbeConnectFlags(0x04u),
+                flags =
+                    com.ditchoom.buffer.codec.test.protocols
+                        .ProbeConnectFlags(0x04u),
                 properties = mapOf(1 to 42),
                 willProperties = mapOf(2 to 7, 3 to 99),
             )
@@ -255,7 +303,8 @@ class V5GapProbeTest {
             )
 
         val plainBuf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        com.ditchoom.buffer.codec.test.protocols.ProbePropBagPlainCodec.encode(plainBuf, plain)
+        com.ditchoom.buffer.codec.test.protocols.ProbePropBagPlainCodec
+            .encode(plainBuf, plain)
         val plainSize = plainBuf.position()
 
         val prefBuf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
@@ -317,15 +366,19 @@ class V5GapProbeTest {
         // properly: dispatcher reads flags into context, then variant decode reads body.
 
         // willFlag=false branch — optional fields absent on wire, decoded as null
-        val noWill = com.ditchoom.buffer.codec.test.protocols.ProbeWillTree.ConnectLike<String?>(
-            flags = com.ditchoom.buffer.codec.test.protocols.ProbeWillFlags(0x10u), // packetType=1, willFlag=0
-            properties = mapOf(1 to 42),
-            clientId = "client",
-            willProperties = null,
-            willTopic = null,
-            willPayload = null,
-            willTrace = null,
-        )
+        val noWill =
+            com.ditchoom.buffer.codec.test.protocols.ProbeWillTree.ConnectLike<String?>(
+                flags =
+                    com.ditchoom.buffer.codec.test.protocols
+                        .ProbeWillFlags(0x10u),
+                // packetType=1, willFlag=0
+                properties = mapOf(1 to 42),
+                clientId = "client",
+                willProperties = null,
+                willTopic = null,
+                willPayload = null,
+                willTrace = null,
+            )
         var buf = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
         com.ditchoom.buffer.codec.test.protocols.ProbeWillTreeCodec.encode<String?>(
             buffer = buf,
@@ -333,9 +386,10 @@ class V5GapProbeTest {
             encodeConnectLikeWillPayload = { wbuf, v -> if (v != null) wbuf.writeString(v) },
         )
         buf.resetForRead()
-        val decodedNoWill = com.ditchoom.buffer.codec.test.protocols.ProbeWillTreeCodec.decode<String?>(buf) { reader ->
-            if (reader.remaining() > 0) reader.copyToBuffer().run { readString(remaining()) } else null
-        }
+        val decodedNoWill =
+            com.ditchoom.buffer.codec.test.protocols.ProbeWillTreeCodec.decode<String?>(buf) { reader ->
+                if (reader.remaining() > 0) reader.copyToBuffer().run { readString(remaining()) } else null
+            }
         assertTrue(decodedNoWill is com.ditchoom.buffer.codec.test.protocols.ProbeWillTree.ConnectLike<*>)
         assertEquals("client", decodedNoWill.clientId)
         assertEquals(null, decodedNoWill.willTopic)
@@ -344,15 +398,19 @@ class V5GapProbeTest {
         assertEquals(null, decodedNoWill.willProperties)
 
         // willFlag=true branch — all conditional fields populated
-        val withWill = com.ditchoom.buffer.codec.test.protocols.ProbeWillTree.ConnectLike<String?>(
-            flags = com.ditchoom.buffer.codec.test.protocols.ProbeWillFlags(0x14u), // packetType=1, willFlag=1
-            properties = mapOf(1 to 42),
-            clientId = "client",
-            willProperties = mapOf(2 to 7),
-            willTopic = "will/topic",
-            willPayload = "payload",
-            willTrace = "trace",
-        )
+        val withWill =
+            com.ditchoom.buffer.codec.test.protocols.ProbeWillTree.ConnectLike<String?>(
+                flags =
+                    com.ditchoom.buffer.codec.test.protocols
+                        .ProbeWillFlags(0x14u),
+                // packetType=1, willFlag=1
+                properties = mapOf(1 to 42),
+                clientId = "client",
+                willProperties = mapOf(2 to 7),
+                willTopic = "will/topic",
+                willPayload = "payload",
+                willTrace = "trace",
+            )
         buf = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
         com.ditchoom.buffer.codec.test.protocols.ProbeWillTreeCodec.encode<String?>(
             buffer = buf,
@@ -360,14 +418,334 @@ class V5GapProbeTest {
             encodeConnectLikeWillPayload = { wbuf, v -> if (v != null) wbuf.writeString(v) },
         )
         buf.resetForRead()
-        val decodedWithWill = com.ditchoom.buffer.codec.test.protocols.ProbeWillTreeCodec.decode<String?>(buf) { reader ->
-            if (reader.remaining() > 0) reader.copyToBuffer().run { readString(remaining()) } else null
-        }
+        val decodedWithWill =
+            com.ditchoom.buffer.codec.test.protocols.ProbeWillTreeCodec.decode<String?>(buf) { reader ->
+                if (reader.remaining() > 0) reader.copyToBuffer().run { readString(remaining()) } else null
+            }
         assertTrue(decodedWithWill is com.ditchoom.buffer.codec.test.protocols.ProbeWillTree.ConnectLike<*>)
         assertEquals("client", decodedWithWill.clientId)
         assertEquals("will/topic", decodedWithWill.willTopic)
         assertEquals("payload", decodedWithWill.willPayload)
         assertEquals("trace", decodedWithWill.willTrace)
         assertEquals(mapOf(2 to 7), decodedWithWill.willProperties)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────────
+    // Phase 1 probes — these should FAIL until Phase 1.1 lands the primitives.
+    //
+    // Compile-error failure modes (Phase 1.0): the probes in V5GapProbe.kt reference
+    //   • LengthPrefix.Varint                       — enum value not yet defined
+    //   • @LengthPrefixed(prefix, maxBytes = N)     — second parameter not yet defined
+    //   • @DispatchOn(type, bodyLength = …, …)      — bodyLength* parameters not yet defined
+    //
+    // Runtime failure modes (Phase 1.0, after compilation lands but before processor
+    // emission lands): the codec dispatcher writes a 0-byte body length / no patch-up,
+    // breaking round-trip equality.
+    //
+    // After Phase 1.1 all 9 probe tests below must pass.
+    // ─────────────────────────────────────────────────────────────────────────────────
+
+    /** ProbeVarintNested — round-trip at every VBI byte-width boundary. */
+    @Test
+    fun varintNestedRoundTripsAtAllVbiBoundaries() {
+        // Body lengths chosen at every transition + max:
+        //   0       → 1-byte VBI (0x00)
+        //   127     → 1-byte VBI (0x7F)
+        //   128     → 2-byte VBI (0x80 0x01)
+        //   16383   → 2-byte VBI (0xFF 0x7F)
+        //   16384   → 3-byte VBI (0x80 0x80 0x01)
+        //   2097151 → 3-byte VBI (0xFF 0xFF 0x7F)
+        //   2097152 → 4-byte VBI (0x80 0x80 0x80 0x01)
+        // 268435455 (max) skipped — would allocate ~256 MiB; covered by overflow probe instead.
+        val sizes = listOf(0, 127, 128, 16383, 16384, 2097151)
+        for (size in sizes) {
+            val body = ProbeVarLenBody(data = "a".repeat(size))
+            val original = ProbeVarintNested(packetId = 0xBEEFu, body = body)
+            val buffer = BufferFactory.Default.allocate(size + 16, ByteOrder.BIG_ENDIAN)
+            ProbeVarintNestedCodec.encode(buffer, original)
+            val written = buffer.position()
+            buffer.resetForRead()
+            val decoded = ProbeVarintNestedCodec.decode(buffer)
+            assertEquals(original, decoded, "round-trip failed at body size=$size")
+
+            // VBI byte width check via wire size:
+            //   total = 2 (packetId) + vbiWidth + size
+            val expectedVbiWidth =
+                when {
+                    size <= 127 -> 1
+                    size <= 16383 -> 2
+                    size <= 2097151 -> 3
+                    else -> 4
+                }
+            assertEquals(2 + expectedVbiWidth + size, written, "wire size at body size=$size")
+        }
+    }
+
+    /** ProbeVarintMaxBytesOverflow — encoding a body that needs > maxBytes throws. */
+    @Test
+    fun varintMaxBytesOverflowThrowsAtEncode() {
+        // maxBytes=2 caps prefix to 2-byte VBI (max value 16383). A 16384-byte body needs
+        // 3-byte VBI, which exceeds the cap → IllegalArgumentException at encode-time.
+        val tooLarge =
+            ProbeVarintMaxBytesOverflow(
+                packetId = 1u,
+                body = ProbeVarLenBody(data = "x".repeat(16384)),
+            )
+        val buffer = BufferFactory.Default.allocate(20_000, ByteOrder.BIG_ENDIAN)
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                ProbeVarintMaxBytesOverflowCodec.encode(buffer, tooLarge)
+            }
+        // Message must include the field name and the offending length so MQTT users
+        // can diagnose `MalformedPacketException`-shaped errors at the source.
+        val msg = ex.message.orEmpty()
+        assertTrue("body" in msg, "expected field name in error: $msg")
+        assertTrue("16384" in msg, "expected offending length in error: $msg")
+
+        // The 16383-byte body should still encode — that's the inclusive upper bound for 2-byte VBI.
+        val justFits =
+            ProbeVarintMaxBytesOverflow(
+                packetId = 2u,
+                body = ProbeVarLenBody(data = "x".repeat(16383)),
+            )
+        val ok = BufferFactory.Default.allocate(20_000, ByteOrder.BIG_ENDIAN)
+        ProbeVarintMaxBytesOverflowCodec.encode(ok, justFits)
+        ok.resetForRead()
+        assertEquals(justFits, ProbeVarintMaxBytesOverflowCodec.decode(ok))
+    }
+
+    /** ProbeVarintCollection — VBI byte-length-prefixed list-bearing nested message. */
+    @Test
+    fun varintCollectionRoundTrip() {
+        val original =
+            ProbeVarintCollection(
+                packetId = 7u,
+                bag =
+                    ProbeVarintListBag(
+                        items =
+                            listOf(
+                                ProbeProp.UShortProp(0x1234u),
+                                ProbeProp.StringPair("k", "v"),
+                                ProbeProp.BoolProp(0x01u),
+                            ),
+                    ),
+            )
+        val buffer = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
+        ProbeVarintCollectionCodec.encode(buffer, original)
+        buffer.resetForRead()
+        val decoded = ProbeVarintCollectionCodec.decode(buffer)
+        assertEquals(7u.toUShort(), decoded.packetId)
+        assertEquals(3, decoded.bag.items.size)
+        assertEquals(0x1234u.toUShort(), (decoded.bag.items[0] as ProbeProp.UShortProp).value)
+        val pair = decoded.bag.items[1] as ProbeProp.StringPair
+        assertEquals("k", pair.key)
+        assertEquals("v", pair.value)
+        assertEquals(0x01u.toUByte(), (decoded.bag.items[2] as ProbeProp.BoolProp).raw)
+    }
+
+    /** ProbeVarintString — VBI byte-length prefix on a String. */
+    @Test
+    fun varintStringRoundTrip() {
+        // Round-trip across multiple sizes so the patch-up logic is exercised at each VBI width.
+        for (size in listOf(0, 1, 127, 128, 1000)) {
+            val original = ProbeVarintString(name = "n".repeat(size))
+            val buffer = BufferFactory.Default.allocate(size + 8, ByteOrder.BIG_ENDIAN)
+            ProbeVarintStringCodec.encode(buffer, original)
+            val written = buffer.position()
+            buffer.resetForRead()
+            assertEquals(original, ProbeVarintStringCodec.decode(buffer))
+            val expectedVbiWidth =
+                if (size <= 127) {
+                    1
+                } else if (size <= 16383) {
+                    2
+                } else {
+                    3
+                }
+            assertEquals(expectedVbiWidth + size, written, "wire size at string size=$size")
+        }
+    }
+
+    /** ProbeFramedDispatchSimple — sealed dispatch with VBI-bounded body. */
+    @Test
+    fun framedDispatchSimpleRoundTrip() {
+        for (variant in listOf<ProbeFramedDispatchSimple>(
+            ProbeFramedDispatchSimple.Alpha(x = 0xCAFEu),
+            ProbeFramedDispatchSimple.Beta(y = 0xDEADBEEFu, z = 0x42u),
+            ProbeFramedDispatchSimple.Gamma(message = "hello world"),
+        )) {
+            val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+            ProbeFramedDispatchSimpleCodec.encode(buffer, variant)
+            val written = buffer.position()
+            buffer.resetForRead()
+            assertEquals(variant, ProbeFramedDispatchSimpleCodec.decode(buffer))
+
+            // Wire format must be [discriminator(1)][VBI(bodyLen)][body].
+            // Verify exact byte 0 = discriminator and byte 1 = VBI start.
+            buffer.resetForRead()
+            val disc = buffer.readByte().toInt() and 0xFF
+            val expectedDisc =
+                when (variant) {
+                    is ProbeFramedDispatchSimple.Alpha -> 0x01
+                    is ProbeFramedDispatchSimple.Beta -> 0x02
+                    is ProbeFramedDispatchSimple.Gamma -> 0x03
+                }
+            assertEquals(expectedDisc, disc, "discriminator byte for $variant")
+            val bodyLen = buffer.readVariableByteInteger()
+            // Total written = 1 (disc) + vbiWidth + bodyLen
+            val vbiWidth =
+                if (bodyLen <= 127) {
+                    1
+                } else if (bodyLen <= 16383) {
+                    2
+                } else {
+                    3
+                }
+            assertEquals(1 + vbiWidth + bodyLen, written)
+        }
+    }
+
+    /** ProbeFramedDispatchWithPayload — VBI-bounded dispatch + a `<@Payload P>` variant. */
+    @Test
+    fun framedDispatchWithPayloadRoundTrip() {
+        val withBytes =
+            ProbeFramedDispatchWithPayload.WithBytes<String>(
+                header = 0xAAu,
+                topic = "t/x",
+                payload = "the-payload",
+            )
+        val buffer = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
+        ProbeFramedDispatchWithPayloadCodec.encode<String>(
+            buffer = buffer,
+            value = withBytes,
+            encodeWithBytesPayload = { wbuf, p -> wbuf.writeString(p) },
+        )
+        buffer.resetForRead()
+        val decoded =
+            ProbeFramedDispatchWithPayloadCodec.decode<String>(buffer) { reader ->
+                reader.copyToBuffer().run { readString(remaining()) }
+            }
+        assertTrue(decoded is ProbeFramedDispatchWithPayload.WithBytes<*>)
+        assertEquals(0xAAu.toUByte(), decoded.header)
+        assertEquals("t/x", decoded.topic)
+        assertEquals("the-payload", decoded.payload)
+
+        // Sibling non-payload variant must round-trip too — proves VBI patch-up doesn't
+        // depend on the presence of a payload reader/writer scope.
+        val plain: ProbeFramedDispatchWithPayload = ProbeFramedDispatchWithPayload.Plain(x = 0x1234u)
+        val buf2 = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        ProbeFramedDispatchWithPayloadCodec.encode<String>(
+            buffer = buf2,
+            value = plain,
+            encodeWithBytesPayload = { _, _ -> fail("payload encoder must not be invoked for Plain") },
+        )
+        buf2.resetForRead()
+        val decodedPlain =
+            ProbeFramedDispatchWithPayloadCodec.decode<String>(buf2) { _ ->
+                fail("payload decoder must not be invoked for Plain")
+            }
+        assertEquals(plain, decodedPlain)
+    }
+
+    /** ProbeFramedDispatchPeek — peekFrameSize must report total = 1 + vbiWidth + bodyLen. */
+    @Test
+    fun framedDispatchPeekFrameSize() {
+        val pool = BufferPool()
+        val stream = StreamProcessor.create(pool)
+        try {
+            val variant: ProbeFramedDispatchSimple =
+                ProbeFramedDispatchSimple.Gamma(
+                    message = "x".repeat(200), // forces 2-byte VBI on body length (~203 bytes)
+                )
+            val buffer = BufferFactory.Default.allocate(512, ByteOrder.BIG_ENDIAN)
+            ProbeFramedDispatchSimpleCodec.encode(buffer, variant)
+            val wireSize = buffer.position()
+            buffer.resetForRead()
+
+            // Partial: only the discriminator byte present → NeedsMoreData
+            val first1 = BufferFactory.Default.allocate(1, ByteOrder.BIG_ENDIAN)
+            first1.writeByte(buffer.readByte())
+            first1.resetForRead()
+            stream.append(first1)
+            assertEquals(PeekResult.NeedsMoreData, ProbeFramedDispatchSimpleCodec.peekFrameSize(stream, 0))
+
+            // Append the rest — peek should now resolve to full wire size.
+            val rest = BufferFactory.Default.allocate(wireSize - 1, ByteOrder.BIG_ENDIAN)
+            while (buffer.remaining() > 0) rest.writeByte(buffer.readByte())
+            rest.resetForRead()
+            stream.append(rest)
+            val peeked = ProbeFramedDispatchSimpleCodec.peekFrameSize(stream, 0)
+            assertTrue(peeked is PeekResult.Size, "expected Size, got $peeked")
+            assertEquals(wireSize, peeked.bytes)
+        } finally {
+            stream.release()
+            pool.clear()
+        }
+    }
+
+    /** ProbeFramedDispatchUnderrunOverrun — malformed wire (VBI length mismatches body) throws. */
+    @Test
+    fun framedDispatchUnderrunOverrunThrows() {
+        // VBI claims 5 bytes but Alpha (UShort) only consumes 2 → variant decoder leaves 3
+        // unconsumed bytes inside the slice. Dispatcher must detect this and throw.
+        val malformedOverrun = BufferFactory.Default.allocate(8, ByteOrder.BIG_ENDIAN)
+        malformedOverrun.writeByte(0x01) // discriminator: Alpha
+        malformedOverrun.writeByte(0x05) // VBI = 5 (1-byte VBI)
+        malformedOverrun.writeShort(0x1234.toShort()) // 2 bytes — only fills 2 of the 5
+        malformedOverrun.writeByte(0xAA.toByte())
+        malformedOverrun.writeByte(0xBB.toByte())
+        malformedOverrun.writeByte(0xCC.toByte())
+        malformedOverrun.resetForRead()
+        val ex1 =
+            assertFailsWith<IllegalArgumentException> {
+                ProbeFramedDispatchSimpleCodec.decode(malformedOverrun)
+            }
+        assertNotNull(ex1.message)
+
+        // VBI claims 1 byte but Alpha needs 2 (UShort) → variant decoder underruns.
+        val malformedUnderrun = BufferFactory.Default.allocate(8, ByteOrder.BIG_ENDIAN)
+        malformedUnderrun.writeByte(0x01) // discriminator: Alpha
+        malformedUnderrun.writeByte(0x01) // VBI = 1
+        malformedUnderrun.writeByte(0x12) // only 1 byte, but Alpha decodes 2
+        malformedUnderrun.resetForRead()
+        assertFailsWith<Throwable> {
+            ProbeFramedDispatchSimpleCodec.decode(malformedUnderrun)
+        }
+    }
+
+    /**
+     * ProbeBodyLengthContextExposure — opting in via `BodyLengthSink` on the decode
+     * context exposes the VBI body length the dispatcher saw on the wire. The codec
+     * pays no context allocation cost when the sink is absent.
+     *
+     * The contract: register a `BodyLengthSink` under `BodyLengthKey`; after `decode`
+     * returns, `sink.value` holds the VBI body length the dispatcher consumed. With
+     * no sink registered, the dispatcher silently ignores the diagnostic concern.
+     *
+     * Why this shape: an immutable `DecodeContext` cannot be mutated by the dispatcher
+     * to expose a runtime-decoded value back to the caller. A caller-supplied mutable
+     * holder is the smallest API that preserves both immutability and observability.
+     */
+    @Test
+    fun bodyLengthExposedOnlyWhenCallerOptsIn() {
+        val variant: ProbeFramedDispatchSimple = ProbeFramedDispatchSimple.Beta(y = 0x11111111u, z = 0x22u)
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        ProbeFramedDispatchSimpleCodec.encode(buffer, variant)
+        buffer.resetForRead()
+
+        // Without opt-in: dispatcher must run normally; `decode(buffer)` returns the value.
+        val decoded = ProbeFramedDispatchSimpleCodec.decode(buffer)
+        assertEquals(variant, decoded)
+
+        buffer.resetForRead()
+        // With opt-in: dispatcher writes the body length into the sink.
+        // Beta body = UInt(4) + UByte(1) = 5 bytes.
+        val sink =
+            com.ditchoom.buffer.codec
+                .BodyLengthSink()
+        val ctx = DecodeContext.Empty.with(com.ditchoom.buffer.codec.BodyLengthKey, sink)
+        val decodedWithSink = ProbeFramedDispatchSimpleCodec.decode(buffer, ctx)
+        assertEquals(variant, decodedWithSink)
+        assertEquals(5, sink.value)
     }
 }

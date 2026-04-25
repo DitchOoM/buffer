@@ -87,3 +87,62 @@ fun variableByteSize(value: Int): Byte {
     } while (remaining > 0 && numBytes < 4)
     return numBytes
 }
+
+/**
+ * Maximum body length encodable with a VBI capped at [maxBytes] bytes (1..4).
+ *   maxBytes=1 → 127           (0x7F)
+ *   maxBytes=2 → 16383         (0x3FFF)
+ *   maxBytes=3 → 2097151       (0x1FFFFF)
+ *   maxBytes=4 → 268435455     (0xFFFFFFF, [VARIABLE_BYTE_INT_MAX])
+ */
+fun variableByteMax(maxBytes: Int): Int {
+    require(maxBytes in 1..4) { "maxBytes must be 1..4, got $maxBytes" }
+    return (1 shl (maxBytes * 7)) - 1
+}
+
+/**
+ * Writes a variable-byte-integer length prefix followed by [encode]'s output, with
+ * zero-allocation patch-up: reserves [maxBytes] bytes, encodes the body, measures the
+ * actual length, writes the canonical (smallest-width) VBI prefix, and shifts the body
+ * left if the canonical width is shorter than the reservation.
+ *
+ * `0` for [maxBytes] is treated as `4` (the spec cap on VBI).
+ *
+ * @throws IllegalArgumentException if the encoded body length exceeds the cap implied
+ *   by [maxBytes]. The message includes [fieldName] and the offending length.
+ */
+fun WriteBuffer.writeVariableByteIntegerLengthPrefixed(
+    maxBytes: Int = 4,
+    fieldName: String = "",
+    encode: (buffer: WriteBuffer) -> Unit,
+) {
+    val cap = if (maxBytes == 0) 4 else maxBytes
+    require(cap in 1..4) { "maxBytes must be 0..4, got $maxBytes" }
+    // The buffer must be readable (PlatformBuffer) to support the in-place shift.
+    val pb =
+        this as? PlatformBuffer
+            ?: error(
+                "writeVariableByteIntegerLengthPrefixed requires a PlatformBuffer (read+write). " +
+                    "Got ${this::class.simpleName}.",
+            )
+    val pos = pb.position()
+    repeat(cap) { pb.writeByte(0.toByte()) }
+    encode(pb)
+    val end = pb.position()
+    val len = end - pos - cap
+    val maxVal = variableByteMax(cap)
+    require(len in 0..maxVal) {
+        val field = if (fieldName.isEmpty()) "" else "field '$fieldName' "
+        "${field}encoded length $len exceeds maxBytes=$cap (max value $maxVal)"
+    }
+    val vbi = variableByteSize(len).toInt()
+    if (vbi < cap) {
+        // Shift body left to close the gap left by the reservation.
+        for (i in 0 until len) {
+            pb[pos + vbi + i] = pb[pos + cap + i]
+        }
+    }
+    pb.position(pos)
+    pb.writeVariableByteInteger(len)
+    pb.position(pos + vbi + len)
+}

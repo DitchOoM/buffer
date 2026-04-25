@@ -346,6 +346,55 @@ class ProtocolMessageProcessor(
                 )
             }
 
+        // Extract bodyLength + bodyLengthMaxBytes from @DispatchOn, then translate to a
+        // typed BodyFraming. The flat (enum, Int) form is required at the annotation
+        // boundary because Kotlin annotations can't carry sealed types — but it lives
+        // for exactly this read-site.
+        val bodyLengthArg = dispatchOnAnnotation.arguments.find { it.name?.asString() == "bodyLength" }?.value
+        val bodyLengthName =
+            run {
+                val raw = bodyLengthArg
+                when {
+                    raw == null -> "None"
+                    raw is com.google.devtools.ksp.symbol.KSType -> {
+                        val name = raw.declaration.simpleName.asString()
+                        if (name in setOf("None", "Byte", "Short", "Int", "Varint")) name else "None"
+                    }
+                    else ->
+                        raw.toString().substringAfterLast(".").let {
+                            if (it in setOf("None", "Byte", "Short", "Int", "Varint")) it else "None"
+                        }
+                }
+            }
+        val bodyLengthMaxBytes =
+            (dispatchOnAnnotation.arguments.find { it.name?.asString() == "bodyLengthMaxBytes" }?.value as? Int) ?: 0
+        if (bodyLengthName == "Varint" && bodyLengthMaxBytes !in 0..4) {
+            logger.error(
+                "@DispatchOn(bodyLength = LengthPrefix.Varint, bodyLengthMaxBytes = $bodyLengthMaxBytes) on " +
+                    "'${classDeclaration.simpleName.asString()}' is out of range. " +
+                    "bodyLengthMaxBytes must be 0..4 (0 = default 4-byte cap).",
+                classDeclaration,
+            )
+            return null
+        }
+        if (bodyLengthName != "None" && bodyLengthName != "Varint" && bodyLengthMaxBytes != 0) {
+            logger.error(
+                "@DispatchOn(bodyLengthMaxBytes = $bodyLengthMaxBytes) on '${classDeclaration.simpleName.asString()}' " +
+                    "has no effect: bodyLengthMaxBytes only applies to LengthPrefix.Varint.",
+                classDeclaration,
+            )
+            return null
+        }
+        val bodyFraming: BodyFraming =
+            when (bodyLengthName) {
+                "None" -> BodyFraming.None
+                "Byte" -> BodyFraming.WithLength(LengthPrefixKind.Byte)
+                "Short" -> BodyFraming.WithLength(LengthPrefixKind.Short)
+                "Int" -> BodyFraming.WithLength(LengthPrefixKind.Int)
+                "Varint" -> BodyFraming.WithLength(LengthPrefixKind.Varint(if (bodyLengthMaxBytes == 0) 4 else bodyLengthMaxBytes))
+                else -> error("unreachable: $bodyLengthName")
+            }
+
         return DispatchOnInfo(
             typeName = discriminatorClass.qualifiedName?.asString() ?: discriminatorClass.simpleName.asString(),
             codecName = codecName,
@@ -354,6 +403,7 @@ class ProtocolMessageProcessor(
             innerTypeName = innerTypeName,
             isValueClass = isValueClass,
             constructorParams = discriminatorParams,
+            bodyFraming = bodyFraming,
         )
     }
 

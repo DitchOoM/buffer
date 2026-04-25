@@ -59,9 +59,59 @@ sealed class FieldCondition {
     ) : FieldCondition()
 }
 
+/**
+ * The wire-form of a length prefix. Only `Varint` carries a cap; fixed-width prefixes
+ * have no spec-cap concept, so the cap can't be misconfigured against them.
+ *
+ * The `kotlin.Int`-qualified types throughout this hierarchy are necessary because the
+ * member `Int` (the 4-byte fixed prefix) shadows `kotlin.Int` inside the interface body.
+ */
+sealed interface LengthPrefixKind {
+    /** Wire byte width for the canonical `MIN_HEADER_BYTES` peek path. For Varint this
+     * is the *minimum* possible width (1) — the actual width is data-dependent. */
+    val minWireBytes: kotlin.Int
+
+    /** Maximum reservable bytes (used for placeholder reservation on encode). */
+    val maxWireBytes: kotlin.Int
+
+    object Byte : LengthPrefixKind {
+        override val minWireBytes: kotlin.Int = 1
+        override val maxWireBytes: kotlin.Int = 1
+    }
+
+    object Short : LengthPrefixKind {
+        override val minWireBytes: kotlin.Int = 2
+        override val maxWireBytes: kotlin.Int = 2
+    }
+
+    object Int : LengthPrefixKind {
+        override val minWireBytes: kotlin.Int = 4
+        override val maxWireBytes: kotlin.Int = 4
+    }
+
+    /**
+     * Variable-byte integer length prefix capped at [maxBytes] bytes (1–4). MQTT v5 uses
+     * `maxBytes = 4`; tighter caps apply when a protocol restricts the range further.
+     */
+    data class Varint(
+        val maxBytes: kotlin.Int = 4,
+    ) : LengthPrefixKind {
+        init {
+            require(maxBytes in 1..4) { "Varint maxBytes must be 1..4, got $maxBytes" }
+        }
+
+        override val minWireBytes: kotlin.Int = 1
+        override val maxWireBytes: kotlin.Int = maxBytes
+    }
+}
+
 sealed class LengthKind {
+    /**
+     * Length-prefixed: a [kind]-encoded length followed by content data. The
+     * [kind] type carries any prefix-specific configuration (e.g. Varint's cap).
+     */
     data class Prefixed(
-        val prefix: String,
+        val kind: LengthPrefixKind,
     ) : LengthKind()
 
     /**
@@ -190,7 +240,7 @@ sealed class FieldReadStrategy {
     ) : FieldReadStrategy()
 
     data class LengthPrefixedStringField(
-        val prefix: String,
+        val kind: LengthPrefixKind,
     ) : FieldReadStrategy()
 
     data class RemainingBytesStringField(
@@ -505,11 +555,24 @@ class FieldAnalyzer(
         return fields
     }
 
+    /**
+     * Extracts the [LengthPrefix][com.ditchoom.buffer.codec.annotations.LengthPrefix]
+     * enum name from an annotation argument. Returns null on error (after logging).
+     *
+     * If [allowNone] is true, accepts `None` (used as the absent-marker on
+     * `@DispatchOn.bodyLength`). Always rejects `None` on `@LengthPrefixed.prefix`.
+     */
     private fun extractEnumName(
         value: Any?,
         fieldName: String,
+        allowNone: Boolean = false,
     ): String? {
-        val validNames = setOf("Byte", "Short", "Int")
+        val validNames =
+            if (allowNone) {
+                setOf("None", "Byte", "Short", "Int", "Varint")
+            } else {
+                setOf("Byte", "Short", "Int", "Varint")
+            }
         if (value == null) return "Short"
         // KSP represents enum values as KSType; extract the simple name from the declaration
         if (value is KSType) {
@@ -517,13 +580,7 @@ class FieldAnalyzer(
             // KSErrorType returns "<ERROR TYPE>" or similar
             if (!name.startsWith("<")) {
                 if (name in validNames) return name
-                logger.error(
-                    "Unrecognized LengthPrefix value '$name' on field '$fieldName'. " +
-                        "Valid values: LengthPrefix.Byte (1-byte prefix, max 255), " +
-                        "LengthPrefix.Short (2-byte prefix, max 65535, default), " +
-                        "LengthPrefix.Int (4-byte prefix, max ~2 billion).",
-                    null,
-                )
+                logger.error(unknownLengthPrefixMessage(name, fieldName, allowNone), null)
                 return null
             }
         }
@@ -531,14 +588,21 @@ class FieldAnalyzer(
         val str = value.toString()
         val afterDot = str.substringAfterLast(".")
         if (afterDot in validNames) return afterDot
-        logger.error(
-            "Unrecognized LengthPrefix value '$afterDot' on field '$fieldName'. " +
-                "Valid values: LengthPrefix.Byte (1-byte prefix, max 255), " +
-                "LengthPrefix.Short (2-byte prefix, max 65535, default), " +
-                "LengthPrefix.Int (4-byte prefix, max ~2 billion).",
-            null,
-        )
+        logger.error(unknownLengthPrefixMessage(afterDot, fieldName, allowNone), null)
         return null
+    }
+
+    private fun unknownLengthPrefixMessage(
+        name: String,
+        fieldName: String,
+        allowNone: Boolean,
+    ): String {
+        val noneLine = if (allowNone) "LengthPrefix.None (sentinel — body framing disabled), " else ""
+        return "Unrecognized LengthPrefix value '$name' on field '$fieldName'. " +
+            "Valid values: ${noneLine}LengthPrefix.Byte (1-byte prefix, max 255), " +
+            "LengthPrefix.Short (2-byte prefix, max 65535, default), " +
+            "LengthPrefix.Int (4-byte prefix, max ~2 billion), " +
+            "LengthPrefix.Varint (VBI, 1–4 bytes; pair with maxBytes for spec cap)."
     }
 
     private fun isNumericStrategy(strategy: FieldReadStrategy): Boolean =
@@ -775,7 +839,7 @@ class FieldAnalyzer(
             resolveLengthKind(param, annotations, fieldName, "String")
                 ?: return null
         return when (lk) {
-            is LengthKind.Prefixed -> FieldReadStrategy.LengthPrefixedStringField(lk.prefix)
+            is LengthKind.Prefixed -> FieldReadStrategy.LengthPrefixedStringField(lk.kind)
             is LengthKind.Remaining -> FieldReadStrategy.RemainingBytesStringField()
             is LengthKind.FromField -> FieldReadStrategy.LengthFromStringField(lk.field)
         }
@@ -1087,7 +1151,41 @@ class FieldAnalyzer(
         if (lengthPrefixed != null) {
             val prefixArg = lengthPrefixed.arguments.find { it.name?.asString() == "prefix" }?.value
             val prefix = extractEnumName(prefixArg, fieldName) ?: return null
-            return LengthKind.Prefixed(prefix)
+            if (prefix == "None") {
+                logger.error(
+                    "@LengthPrefixed(LengthPrefix.None) on field '$fieldName' is not allowed. " +
+                        "LengthPrefix.None is reserved as a sentinel for @DispatchOn.bodyLength.",
+                    param,
+                )
+                return null
+            }
+            val maxBytesArg = lengthPrefixed.arguments.find { it.name?.asString() == "maxBytes" }?.value as? Int ?: 0
+            if (prefix != "Varint" && maxBytesArg != 0) {
+                logger.error(
+                    "@LengthPrefixed(maxBytes = $maxBytesArg) on field '$fieldName' has no effect: " +
+                        "maxBytes only applies to LengthPrefix.Varint. Either remove maxBytes or " +
+                        "switch the prefix to LengthPrefix.Varint.",
+                    param,
+                )
+                return null
+            }
+            if (prefix == "Varint" && maxBytesArg !in 0..4) {
+                logger.error(
+                    "@LengthPrefixed(LengthPrefix.Varint, maxBytes = $maxBytesArg) on field '$fieldName' " +
+                        "is out of range. maxBytes must be 0..4 (0 = default 4-byte cap).",
+                    param,
+                )
+                return null
+            }
+            val kind: LengthPrefixKind =
+                when (prefix) {
+                    "Byte" -> LengthPrefixKind.Byte
+                    "Short" -> LengthPrefixKind.Short
+                    "Int" -> LengthPrefixKind.Int
+                    "Varint" -> LengthPrefixKind.Varint(if (maxBytesArg == 0) 4 else maxBytesArg)
+                    else -> error("unreachable: extractEnumName already validated $prefix")
+                }
+            return LengthKind.Prefixed(kind)
         }
 
         if (remainingBytes != null) {

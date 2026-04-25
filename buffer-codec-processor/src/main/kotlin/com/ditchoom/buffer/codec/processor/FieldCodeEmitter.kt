@@ -46,14 +46,11 @@ internal fun readExpression(
                 customWidthReadExpr(strategy, byteOrderOverride)
             }
         }
-        is FieldReadStrategy.LengthPrefixedStringField -> {
-            if (strategy.prefix == "Short") {
-                "buffer.readLengthPrefixedUtf8String().second"
-            } else {
-                val lenExpr = prefixConfig(strategy.prefix).readExpr
-                "run { val _len = $lenExpr; buffer.readString(_len) }"
+        is FieldReadStrategy.LengthPrefixedStringField ->
+            when (strategy.kind) {
+                is LengthPrefixKind.Short -> "buffer.readLengthPrefixedUtf8String().second"
+                else -> "run { val _len = ${readLengthExpr(strategy.kind)}; buffer.readString(_len) }"
             }
-        }
         is FieldReadStrategy.RemainingBytesStringField ->
             if (strategy.trailingBytes > 0) {
                 "buffer.readString(buffer.remaining() - ${strategy.trailingBytes})"
@@ -98,15 +95,24 @@ internal fun addFieldWrite(
         is FieldCondition.WhenTrue -> {
             val condExpr = condition.expression.replace(Regex("^([^.]+)"), "value.$1")
             code.beginControlFlow("if (%L)", condExpr)
-            code.addStatement("%L", writeExpression(field.strategy, "$valueExpr!!", withContext, field.byteOrderOverride))
+            code.addStatement(
+                "%L",
+                writeExpression(field.strategy, "$valueExpr!!", withContext, field.byteOrderOverride, field.name),
+            )
             code.endControlFlow()
         }
         is FieldCondition.WhenRemaining -> {
             // Individual null check — cascading is handled by CodecGenerator
-            code.addStatement("%L", writeExpression(field.strategy, "$valueExpr!!", withContext, field.byteOrderOverride))
+            code.addStatement(
+                "%L",
+                writeExpression(field.strategy, "$valueExpr!!", withContext, field.byteOrderOverride, field.name),
+            )
         }
         null -> {
-            code.addStatement("%L", writeExpression(field.strategy, valueExpr, withContext, field.byteOrderOverride))
+            code.addStatement(
+                "%L",
+                writeExpression(field.strategy, valueExpr, withContext, field.byteOrderOverride, field.name),
+            )
         }
     }
 }
@@ -143,6 +149,7 @@ internal fun writeExpression(
     valueExpr: String,
     withContext: Boolean = false,
     byteOrderOverride: WireOrderOverride? = null,
+    fieldName: String = "",
 ): String =
     when (strategy) {
         is FieldReadStrategy.PrimitiveField -> {
@@ -153,17 +160,23 @@ internal fun writeExpression(
                 customWidthWriteExpr(strategy, valueExpr, byteOrderOverride)
             }
         }
-        is FieldReadStrategy.LengthPrefixedStringField -> {
-            if (strategy.prefix == "Short") {
-                "buffer.writeLengthPrefixedUtf8String($valueExpr)"
-            } else {
-                val cfg = prefixConfig(strategy.prefix)
-                val writeLenExpr = cfg.writeExpr("_len")
-                "run { val _pos = buffer.position(); ${cfg.writePlaceholder}; buffer.writeString($valueExpr); " +
-                    "val _end = buffer.position(); val _len = _end - _pos - ${cfg.byteCount}; " +
-                    "buffer.position(_pos); $writeLenExpr; buffer.position(_end) }"
+        is FieldReadStrategy.LengthPrefixedStringField ->
+            when (val kind = strategy.kind) {
+                is LengthPrefixKind.Short -> "buffer.writeLengthPrefixedUtf8String($valueExpr)"
+                is LengthPrefixKind.Varint ->
+                    emitVarintLengthPrefixedWrite(
+                        kind = kind,
+                        fieldName = fieldName,
+                        encodeBody = "buffer.writeString($valueExpr)",
+                    )
+                else -> {
+                    val cfg = fixedPrefixConfigOrError(kind)
+                    val writeLenExpr = cfg.writeExpr("_len")
+                    "run { val _pos = buffer.position(); ${cfg.writePlaceholder}; buffer.writeString($valueExpr); " +
+                        "val _end = buffer.position(); val _len = _end - _pos - ${cfg.byteCount}; " +
+                        "buffer.position(_pos); $writeLenExpr; buffer.position(_end) }"
+                }
             }
-        }
         is FieldReadStrategy.RemainingBytesStringField -> "buffer.writeString($valueExpr)"
         is FieldReadStrategy.LengthFromStringField -> "buffer.writeString($valueExpr)"
         is FieldReadStrategy.ValueClassField -> {
@@ -175,8 +188,8 @@ internal fun writeExpression(
             "${strategy.codecName}.encode(buffer, $valueExpr$ctxArg)"
         }
         is FieldReadStrategy.NestedMessageWithLengthField ->
-            writeNestedWithLengthExpression(strategy, valueExpr, withContext)
-        is FieldReadStrategy.UseCodecField -> writeUseCodecExpression(strategy, valueExpr, withContext)
+            writeNestedWithLengthExpression(strategy, valueExpr, withContext, fieldName)
+        is FieldReadStrategy.UseCodecField -> writeUseCodecExpression(strategy, valueExpr, withContext, fieldName)
         is FieldReadStrategy.CollectionField -> writeCollectionExpression(strategy, valueExpr, withContext)
         is FieldReadStrategy.DiscriminatorField -> {
             // Write normally via the discriminator codec during encode
@@ -205,10 +218,9 @@ private fun readCollectionExpression(
             val threshold = lk.trailingBytes
             "buildList { while (buffer.remaining() > $threshold) { add($codecName.decode(buffer$ctxArg)) } }"
         }
-        is LengthKind.Prefixed -> {
-            val cfg = prefixConfig(lk.prefix)
-            "run { val _n = ${cfg.readExpr}; buildList { repeat(_n) { add($codecName.decode(buffer$ctxArg)) } } }"
-        }
+        is LengthKind.Prefixed ->
+            "run { val _n = ${readLengthExpr(lk.kind)}; " +
+                "buildList { repeat(_n) { add($codecName.decode(buffer$ctxArg)) } } }"
     }
 }
 
@@ -224,10 +236,18 @@ private fun writeCollectionExpression(
             "$valueExpr.forEach { $codecName.encode(buffer, it$ctxArg) }"
         is LengthKind.Remaining ->
             "$valueExpr.forEach { $codecName.encode(buffer, it$ctxArg) }"
-        is LengthKind.Prefixed -> {
-            val cfg = prefixConfig(lk.prefix)
-            "run { ${cfg.writeExpr("$valueExpr.size")}; $valueExpr.forEach { $codecName.encode(buffer, it$ctxArg) } }"
-        }
+        is LengthKind.Prefixed ->
+            when (val kind = lk.kind) {
+                is LengthPrefixKind.Varint ->
+                    // Count is known up-front — write VBI directly, no patch-up needed.
+                    "run { buffer.writeVariableByteInteger($valueExpr.size); " +
+                        "$valueExpr.forEach { $codecName.encode(buffer, it$ctxArg) } }"
+                else -> {
+                    val cfg = fixedPrefixConfigOrError(kind)
+                    "run { ${cfg.writeExpr("$valueExpr.size")}; " +
+                        "$valueExpr.forEach { $codecName.encode(buffer, it$ctxArg) } }"
+                }
+            }
     }
 }
 
@@ -240,10 +260,8 @@ private fun readUseCodecExpression(
     val ctxArg = if (withContext && strategy.hasContextOverloads) ", context" else ""
     val lk = strategy.lengthKind ?: return "$codec.decode(buffer$ctxArg)"
     return when (lk) {
-        is LengthKind.Prefixed -> {
-            val lenExpr = prefixConfig(lk.prefix).readExpr
-            "run { val _len = $lenExpr; $codec.decode(buffer.readBytes(_len)$ctxArg) }"
-        }
+        is LengthKind.Prefixed ->
+            "run { val _len = ${readLengthExpr(lk.kind)}; $codec.decode(buffer.readBytes(_len)$ctxArg) }"
         is LengthKind.Remaining -> {
             val bound = if (lk.trailingBytes > 0) "buffer.remaining() - ${lk.trailingBytes}" else "buffer.remaining()"
             "$codec.decode(buffer.readBytes($bound)$ctxArg)"
@@ -260,10 +278,8 @@ private fun readNestedWithLengthExpression(
     val codec = strategy.codecName
     val ctxArg = if (withContext) ", context" else ""
     return when (val lk = strategy.lengthKind) {
-        is LengthKind.Prefixed -> {
-            val lenExpr = prefixConfig(lk.prefix).readExpr
-            "run { val _len = $lenExpr; $codec.decode(buffer.readBytes(_len)$ctxArg) }"
-        }
+        is LengthKind.Prefixed ->
+            "run { val _len = ${readLengthExpr(lk.kind)}; $codec.decode(buffer.readBytes(_len)$ctxArg) }"
         is LengthKind.Remaining -> {
             val bound = if (lk.trailingBytes > 0) "buffer.remaining() - ${lk.trailingBytes}" else "buffer.remaining()"
             "$codec.decode(buffer.readBytes($bound)$ctxArg)"
@@ -273,21 +289,39 @@ private fun readNestedWithLengthExpression(
     }
 }
 
+/** Wraps a fixed-width length-prefixed encode call: position + placeholder + encode + patch. */
+private fun fixedLengthPrefixedEncodeRun(
+    cfg: PrefixConfig,
+    encodeStmt: String,
+): String =
+    "run { val _pos = buffer.position(); ${cfg.writePlaceholder}; " +
+        "$encodeStmt; " +
+        "val _end = buffer.position(); val _len = _end - _pos - ${cfg.byteCount}; " +
+        "buffer.position(_pos); ${cfg.writeExpr("_len")}; buffer.position(_end) }"
+
 private fun writeNestedWithLengthExpression(
     strategy: FieldReadStrategy.NestedMessageWithLengthField,
     valueExpr: String,
     withContext: Boolean = false,
+    fieldName: String = "",
 ): String {
     val codec = strategy.codecName
     val ctxArg = if (withContext) ", context" else ""
     return when (val lk = strategy.lengthKind) {
-        is LengthKind.Prefixed -> {
-            val cfg = prefixConfig(lk.prefix)
-            "run { val _pos = buffer.position(); ${cfg.writePlaceholder}; " +
-                "$codec.encode(buffer, $valueExpr$ctxArg); " +
-                "val _end = buffer.position(); val _len = _end - _pos - ${cfg.byteCount}; " +
-                "buffer.position(_pos); ${cfg.writeExpr("_len")}; buffer.position(_end) }"
-        }
+        is LengthKind.Prefixed ->
+            when (val kind = lk.kind) {
+                is LengthPrefixKind.Varint ->
+                    emitVarintLengthPrefixedWrite(
+                        kind = kind,
+                        fieldName = fieldName,
+                        encodeBody = "$codec.encode(buffer, $valueExpr$ctxArg)",
+                    )
+                else ->
+                    fixedLengthPrefixedEncodeRun(
+                        cfg = fixedPrefixConfigOrError(kind),
+                        encodeStmt = "$codec.encode(buffer, $valueExpr$ctxArg)",
+                    )
+            }
         is LengthKind.Remaining,
         is LengthKind.FromField,
         ->
@@ -299,20 +333,27 @@ private fun writeUseCodecExpression(
     strategy: FieldReadStrategy.UseCodecField,
     valueExpr: String,
     withContext: Boolean = false,
+    fieldName: String = "",
 ): String {
     val codec = strategy.codecName
     // Only pass context to codecs with context overloads (Codec<T> has them; Decoder<T>/Encoder<T> do not)
     val ctxArg = if (withContext && strategy.hasContextOverloads) ", context" else ""
     val lk = strategy.lengthKind ?: return "$codec.encode(buffer, $valueExpr$ctxArg)"
-    // With a length prefix: write placeholder, encode, then fill in the length
     return when (lk) {
-        is LengthKind.Prefixed -> {
-            val cfg = prefixConfig(lk.prefix)
-            "run { val _pos = buffer.position(); ${cfg.writePlaceholder}; " +
-                "$codec.encode(buffer, $valueExpr$ctxArg); " +
-                "val _end = buffer.position(); val _len = _end - _pos - ${cfg.byteCount}; " +
-                "buffer.position(_pos); ${cfg.writeExpr("_len")}; buffer.position(_end) }"
-        }
+        is LengthKind.Prefixed ->
+            when (val kind = lk.kind) {
+                is LengthPrefixKind.Varint ->
+                    emitVarintLengthPrefixedWrite(
+                        kind = kind,
+                        fieldName = fieldName,
+                        encodeBody = "$codec.encode(buffer, $valueExpr$ctxArg)",
+                    )
+                else ->
+                    fixedLengthPrefixedEncodeRun(
+                        cfg = fixedPrefixConfigOrError(kind),
+                        encodeStmt = "$codec.encode(buffer, $valueExpr$ctxArg)",
+                    )
+            }
         is LengthKind.Remaining ->
             "$codec.encode(buffer, $valueExpr$ctxArg)"
         is LengthKind.FromField ->

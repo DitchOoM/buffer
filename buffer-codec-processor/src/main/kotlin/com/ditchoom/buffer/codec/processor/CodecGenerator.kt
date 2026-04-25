@@ -503,7 +503,7 @@ class CodecGenerator(
 
     private fun needsLengthPrefixedImport(strategy: FieldReadStrategy): Boolean =
         when (strategy) {
-            is FieldReadStrategy.LengthPrefixedStringField -> strategy.prefix == "Short"
+            is FieldReadStrategy.LengthPrefixedStringField -> strategy.kind is LengthPrefixKind.Short
             is FieldReadStrategy.ValueClassField -> needsLengthPrefixedImport(strategy.innerStrategy)
             else -> false
         }
@@ -515,6 +515,11 @@ class CodecGenerator(
         if (needsLengthPrefixedImports(fields)) {
             fileBuilder.addImport("com.ditchoom.buffer", "readLengthPrefixedUtf8String")
             fileBuilder.addImport("com.ditchoom.buffer", "writeLengthPrefixedUtf8String")
+        }
+        if (needsVarintImports(fields)) {
+            fileBuilder.addImport("com.ditchoom.buffer", "readVariableByteInteger")
+            fileBuilder.addImport("com.ditchoom.buffer", "writeVariableByteInteger")
+            fileBuilder.addImport("com.ditchoom.buffer", "writeVariableByteIntegerLengthPrefixed")
         }
         if (fields.any { it.byteOrderOverride != null }) {
             fileBuilder.addImport("com.ditchoom.buffer", "reverseBytes")
@@ -528,4 +533,21 @@ class CodecGenerator(
             }
         }
     }
+
+    private fun needsVarintImports(fields: List<FieldInfo>): Boolean = fields.any { needsVarintImport(it.strategy) }
+
+    private fun needsVarintImport(strategy: FieldReadStrategy): Boolean =
+        when (strategy) {
+            is FieldReadStrategy.LengthPrefixedStringField -> strategy.kind is LengthPrefixKind.Varint
+            is FieldReadStrategy.NestedMessageWithLengthField ->
+                (strategy.lengthKind as? LengthKind.Prefixed)?.kind is LengthPrefixKind.Varint
+            is FieldReadStrategy.UseCodecField ->
+                (strategy.lengthKind as? LengthKind.Prefixed)?.kind is LengthPrefixKind.Varint
+            is FieldReadStrategy.CollectionField ->
+                (strategy.lengthKind as? LengthKind.Prefixed)?.kind is LengthPrefixKind.Varint
+            is FieldReadStrategy.PayloadField ->
+                (strategy.lengthKind as? LengthKind.Prefixed)?.kind is LengthPrefixKind.Varint
+            is FieldReadStrategy.ValueClassField -> needsVarintImport(strategy.innerStrategy)
+            else -> false
+        }
 }

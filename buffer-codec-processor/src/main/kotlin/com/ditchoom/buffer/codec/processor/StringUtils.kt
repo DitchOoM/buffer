@@ -87,6 +87,20 @@ data class DiscriminatorParam(
     val wireBytes: Int,
 )
 
+/**
+ * Body-framing strategy for a sealed dispatch codec. Either there is no framing
+ * ([None]) or there is a length-prefixed body ([WithLength]) carrying a
+ * [LengthPrefixKind] that already encapsulates any prefix-specific configuration
+ * (e.g. Varint's cap). Two states, neither representing an impossible combination.
+ */
+sealed interface BodyFraming {
+    data object None : BodyFraming
+
+    data class WithLength(
+        val kind: LengthPrefixKind,
+    ) : BodyFraming
+}
+
 data class DispatchOnInfo(
     val typeName: String,
     val codecName: String,
@@ -101,7 +115,12 @@ data class DispatchOnInfo(
     val sealedCodecSimpleName: String = "",
     /** Package of the sealed interface. */
     val sealedPackage: String = "",
+    /** Body-framing strategy — `None` means no length prefix between discriminator and body. */
+    val bodyFraming: BodyFraming = BodyFraming.None,
 ) {
     /** Total wire bytes for the discriminator type. */
     val totalWireBytes: Int get() = constructorParams.sumOf { it.wireBytes }
+
+    /** True when the dispatcher writes a length prefix between discriminator and body bytes. */
+    val hasBodyLength: Boolean get() = bodyFraming is BodyFraming.WithLength
 }

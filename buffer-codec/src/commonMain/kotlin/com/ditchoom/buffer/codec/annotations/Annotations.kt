@@ -100,36 +100,58 @@ annotation class Payload
 
 /**
  * Length prefix encoding for [LengthPrefixed] fields.
- * All variants use big-endian (network) byte order.
+ * All fixed-width variants use big-endian (network) byte order.
  */
 enum class LengthPrefix {
-    /** 1 byte unsigned (max 255) */
+    /** Sentinel — no length prefix. Used as a default marker on [DispatchOn.bodyLength]
+     * to signal that body framing is opt-in. Invalid on [LengthPrefixed.prefix]. */
+    None,
+
+    /** 1 byte unsigned (max 255). */
     Byte,
 
-    /** 2 bytes big-endian (default) */
+    /** 2 bytes big-endian (default for [LengthPrefixed]). */
     Short,
 
-    /** 4 bytes big-endian */
+    /** 4 bytes big-endian. */
     Int,
+
+    /** Variable-byte integer (LEB128 / canonical 7-bit continuation). 1–4 bytes,
+     * carrying 0..[com.ditchoom.buffer.VARIABLE_BYTE_INT_MAX].
+     *
+     * Used by MQTT v5 control packets, Protobuf, gRPC stream IDs, DWARF/WASM LEB128,
+     * MIDI variable-length quantities, and CBOR bignums. The encoder reserves the
+     * configured cap (`maxBytes`), measures the actual encoded length, writes the
+     * canonical VBI, and shifts body bytes left when the canonical width is shorter
+     * than the reservation — zero-allocation on the hot path. */
+    Varint,
 }
 
 /**
- * Marks a String or payload field as length-prefixed: prefix bytes followed by UTF-8 data.
- * Default is 2-byte big-endian (`UShort`) prefix.
+ * Marks a String, collection, or nested-message field as length-prefixed: prefix bytes
+ * followed by content data.
  *
  * ```kotlin
  * @ProtocolMessage
  * data class GreetingMessage(
- *     @LengthPrefixed val name: String,                         // 2-byte prefix (default)
- *     @LengthPrefixed(LengthPrefix.Byte) val nickname: String,  // 1-byte prefix (max 255)
- *     @LengthPrefixed(LengthPrefix.Int) val bio: String,        // 4-byte prefix
+ *     @LengthPrefixed val name: String,                                          // 2-byte prefix (default)
+ *     @LengthPrefixed(LengthPrefix.Byte) val nickname: String,                   // 1-byte prefix (max 255)
+ *     @LengthPrefixed(LengthPrefix.Int) val bio: String,                         // 4-byte prefix
+ *     @LengthPrefixed(LengthPrefix.Varint, maxBytes = 4) val notes: String,      // VBI, 1-4 bytes
  * )
  * ```
+ *
+ * @param prefix Width / encoding of the prefix. [LengthPrefix.None] is invalid here —
+ *   it is reserved as a sentinel for [DispatchOn.bodyLength].
+ * @param maxBytes Spec cap for [LengthPrefix.Varint] (1–4). `0` (default) means use 4
+ *   when `prefix == Varint`, ignored for fixed-width prefixes. Encoding a body that
+ *   requires a wider VBI than `maxBytes` throws [IllegalArgumentException].
  */
 @Target(AnnotationTarget.VALUE_PARAMETER)
 @Retention(AnnotationRetention.BINARY)
 annotation class LengthPrefixed(
     val prefix: LengthPrefix = LengthPrefix.Short,
+    val maxBytes: Int = 0,
 )
 
 /**
@@ -381,13 +403,38 @@ annotation class UseCodec(
  * }
  * ```
  *
+ * # Body framing (`bodyLength`)
+ *
+ * When [bodyLength] is non-[LengthPrefix.None], the dispatcher writes a length prefix
+ * after the discriminator and slices the body to that length on decode. This collapses
+ * the `[discriminator][lengthPrefix(bodyLength)][body]` framing pattern (used by MQTT v5,
+ * AMQP, and most TLV protocols) into a generated dispatcher — eliminating per-variant
+ * `remainingLength()` overrides and hand-written framing code at every call site.
+ *
+ * ```kotlin
+ * @DispatchOn(MqttFixedHeader::class, bodyLength = LengthPrefix.Varint, bodyLengthMaxBytes = 4)
+ * sealed interface MqttControlPacket { ... }
+ * // Wire shape per variant: [byte1][VBI(remainingLength)][body]
+ * ```
+ *
+ * Optional debug surface: register a [com.ditchoom.buffer.codec.BodyLengthSink] under
+ * [com.ditchoom.buffer.codec.BodyLengthKey] in the decode context to capture the body
+ * length the dispatcher consumed. Useful for diagnosing malformed wires.
+ *
  * @param type A `KClass` referencing a `@ProtocolMessage` type (typically a value class)
  *   that contains a `@DispatchValue`-annotated property.
+ * @param bodyLength Length-prefix encoding for the body that follows the discriminator.
+ *   [LengthPrefix.None] (default) means no body framing — discriminator is followed
+ *   directly by the variant body, as before.
+ * @param bodyLengthMaxBytes Spec cap for [LengthPrefix.Varint] body length (1–4). `0`
+ *   (default) uses 4 when `bodyLength == Varint`, ignored otherwise.
  */
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.BINARY)
 annotation class DispatchOn(
     val type: kotlin.reflect.KClass<*>,
+    val bodyLength: LengthPrefix = LengthPrefix.None,
+    val bodyLengthMaxBytes: Int = 0,
 )
 
 /**
