@@ -213,16 +213,20 @@ class CodecGenerator(
         val contextName = "${classTypeName.simpleNames.joinToString("")}Context"
         val typeVariables = payloadTypeParams.map { TypeVariableName(it) }
 
-        // Build decode function
-        val hasDiscriminatorField = fields.any { it.strategy is FieldReadStrategy.DiscriminatorField }
+        // Build decode function. `context` is always accepted (default `DecodeContext.Empty`)
+        // so non-payload field reads can thread context through nested codec calls — the
+        // dispatcher relies on this for sealed @Payload variants whose properties carry
+        // their own context-keyed lambdas (e.g. CorrelationData).
         val decodeBuilder =
             FunSpec
                 .builder("decode")
                 .addParameter("buffer", READ_BUFFER)
-
-        if (hasDiscriminatorField) {
-            decodeBuilder.addParameter("context", DECODE_CONTEXT)
-        }
+                .addParameter(
+                    com.squareup.kotlinpoet.ParameterSpec
+                        .builder("context", DECODE_CONTEXT)
+                        .defaultValue("%T.Empty", DECODE_CONTEXT)
+                        .build(),
+                )
 
         for (tv in typeVariables) {
             decodeBuilder.addTypeVariable(tv)
@@ -263,7 +267,7 @@ class CodecGenerator(
                     if (strategy is FieldReadStrategy.PayloadField) {
                         addPayloadRawRead(decodeBody, item.field)
                     } else {
-                        addFieldRead(decodeBody, item.field)
+                        addFieldRead(decodeBody, item.field, withContext = true)
                     }
                 }
             }
@@ -313,12 +317,19 @@ class CodecGenerator(
 
         decodeBuilder.addCode(decodeBody.build())
 
-        // Build encode function
+        // Build encode function. `context` is always accepted (default `EncodeContext.Empty`)
+        // so non-payload field writes can thread context into nested codec calls.
         val encodeBuilder =
             FunSpec
                 .builder("encode")
                 .addParameter("buffer", WRITE_BUFFER)
                 .addParameter("value", returnType)
+                .addParameter(
+                    com.squareup.kotlinpoet.ParameterSpec
+                        .builder("context", ENCODE_CONTEXT)
+                        .defaultValue("%T.Empty", ENCODE_CONTEXT)
+                        .build(),
+                )
 
         for (tv in typeVariables) {
             encodeBuilder.addTypeVariable(tv)
@@ -351,12 +362,12 @@ class CodecGenerator(
                 if (strategy is FieldReadStrategy.PayloadField) {
                     addPayloadWrite(encodeBody, field)
                 } else {
-                    addFieldWrite(encodeBody, field, "value.${field.name}")
+                    addFieldWrite(encodeBody, field, "value.${field.name}", withContext = true)
                 }
             }
         }
         if (payloadWhenRemainingTail.isNotEmpty()) {
-            emitWhenRemainingEncode(encodeBody, payloadWhenRemainingTail)
+            emitWhenRemainingEncode(encodeBody, payloadWhenRemainingTail, withContext = true)
         }
         encodeBuilder.addCode(encodeBody.build())
 
@@ -427,13 +438,10 @@ class CodecGenerator(
             )
             lambdaArgs.add(localVar)
         }
-        val ctxDecodeArgs =
-            if (hasDiscriminatorField) {
-                "buffer, context, ${lambdaArgs.joinToString(", ")}"
-            } else {
-                "buffer, ${lambdaArgs.joinToString(", ")}"
-            }
-        ctxDecodeBody.addStatement("return decode(%L)", ctxDecodeArgs)
+        ctxDecodeBody.addStatement(
+            "return decode(buffer, context, %L)",
+            lambdaArgs.joinToString(", "),
+        )
 
         val starReturnType = classTypeName.parameterizedBy(payloadFields.map { com.squareup.kotlinpoet.STAR })
         objectBuilder.addFunction(
@@ -462,7 +470,7 @@ class CodecGenerator(
             encodeLambdaArgs.add(localVar)
         }
         ctxEncodeBody.addStatement(
-            "encode(buffer, value, %L)",
+            "encode(buffer, value, context, %L)",
             encodeLambdaArgs.joinToString(", "),
         )
 

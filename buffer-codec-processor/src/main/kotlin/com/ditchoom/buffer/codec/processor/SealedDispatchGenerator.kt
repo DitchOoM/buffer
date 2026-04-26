@@ -465,8 +465,12 @@ class SealedDispatchGenerator(
                                 ?.asString() ==
                                 dispatchOnInfo.poetClassName.canonicalName
                         } == true
-                val payloadCtxArg = if (variantHasDiscriminatorField) ", _ctx" else ""
-                decodeBody.addStatement("${v.value} -> $subCodecName.decode($bodyVar$payloadCtxArg, $lambdaArgs)")
+                // Variant typed-lambda decode now always accepts `context` positionally
+                // (default `DecodeContext.Empty`); when this dispatcher built a `_ctx`
+                // carrying DiscriminatorKey, thread it so DiscriminatorField reads resolve.
+                val payloadCtxArg =
+                    if (dispatchOnInfo != null) "_ctx" else "${DECODE_CONTEXT.canonicalName}.Empty"
+                decodeBody.addStatement("${v.value} -> $subCodecName.decode($bodyVar, $payloadCtxArg, $lambdaArgs)")
             } else {
                 decodeBody.addStatement("${v.value} -> $subCodecName.decode($bodyVar$conv1CtxArg)")
             }
@@ -531,10 +535,14 @@ class SealedDispatchGenerator(
                         "encode${v.subclass.simpleName.asString()}${capitalizeFirst(pf.fieldName)}"
                     }
                 val payloadFraming = dispatchOnInfo?.bodyFraming as? BodyFraming.WithLength
+                // Variant typed-lambda encode now always accepts `context` positionally
+                // (default `EncodeContext.Empty`); the typed-lambda dispatcher entrypoint
+                // doesn't have a caller context, so pass Empty.
+                val emptyEncodeCtx = "${ENCODE_CONTEXT.canonicalName}.Empty"
                 if (payloadFraming != null && payloadFraming.kind is LengthPrefixKind.Varint) {
                     encodeBody.addStatement(
                         "@Suppress(\"UNCHECKED_CAST\") buffer.writeVariableByteIntegerLengthPrefixed(maxBytes = %L, fieldName = %S) " +
-                            "{ buffer -> $subCodecName.encode(buffer, value as %T, $lambdaArgs) }",
+                            "{ buffer -> $subCodecName.encode(buffer, value as %T, $emptyEncodeCtx, $lambdaArgs) }",
                         payloadFraming.kind.maxBytes,
                         "body",
                         castType,
@@ -544,7 +552,7 @@ class SealedDispatchGenerator(
                     // future protocol asks for fixed-width body framing on a generic dispatcher,
                     // emit the placeholder/patch pattern here.
                     encodeBody.addStatement(
-                        "@Suppress(\"UNCHECKED_CAST\") $subCodecName.encode(buffer, value as %T, $lambdaArgs)",
+                        "@Suppress(\"UNCHECKED_CAST\") $subCodecName.encode(buffer, value as %T, $emptyEncodeCtx, $lambdaArgs)",
                         castType,
                     )
                 }
