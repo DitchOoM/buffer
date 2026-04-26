@@ -281,6 +281,7 @@ sealed class FieldReadStrategy {
     data class CollectionField(
         val lengthKind: LengthKind,
         val elementCodecName: String,
+        val elementCodecPackage: String,
         val direction: CodecDirection = CodecDirection.Bidirectional,
     ) : FieldReadStrategy()
 
@@ -1068,8 +1069,9 @@ class FieldAnalyzer(
         val lk = resolveLengthKind(param, annotations, fieldName, "List") ?: return null
 
         val codecName = elementDecl.codecName()
+        val codecPackage = elementDecl.packageName.asString()
         val elementDirection = extractExplicitDirection(elementDecl)
-        return FieldReadStrategy.CollectionField(lk, codecName, elementDirection)
+        return FieldReadStrategy.CollectionField(lk, codecName, codecPackage, elementDirection)
     }
 
     private fun extractWireBytes(

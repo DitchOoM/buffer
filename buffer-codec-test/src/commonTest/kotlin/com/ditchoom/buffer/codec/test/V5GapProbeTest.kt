@@ -8,6 +8,9 @@ import com.ditchoom.buffer.codec.test.protocols.ProbeByteSizedBytePrefixCollecti
 import com.ditchoom.buffer.codec.test.protocols.ProbeByteSizedBytePrefixCollectionCodec
 import com.ditchoom.buffer.codec.test.protocols.ProbeByteSizedVarintCollection
 import com.ditchoom.buffer.codec.test.protocols.ProbeByteSizedVarintCollectionCodec
+import com.ditchoom.buffer.codec.test.protocols.ProbeCrossPackageCollectionHost
+import com.ditchoom.buffer.codec.test.protocols.ProbeCrossPackageCollectionHostCodec
+import com.ditchoom.buffer.codec.test.protocols.crosspkg.CrossPkgEntry
 import com.ditchoom.buffer.codec.test.protocols.ProbeFramedDispatchSimple
 import com.ditchoom.buffer.codec.test.protocols.ProbeFramedDispatchSimpleCodec
 import com.ditchoom.buffer.codec.test.protocols.ProbeFramedDispatchWithPayload
@@ -871,5 +874,28 @@ class V5GapProbeTest {
         assertEquals(0x0007u.toUShort(), decoded.packetId)
         assertEquals(1, decoded.items.size)
         assertEquals(0xFEu.toUByte(), (decoded.items[0] as ProbeProp.BoolProp).raw)
+    }
+
+    /**
+     * Probe 19 — cross-package element codec must be imported into the host codec file.
+     * Round-trip is the regression signal — if the import is missing, this test won't
+     * compile.
+     */
+    @Test
+    fun crossPackageCollectionElementImports() {
+        val original =
+            ProbeCrossPackageCollectionHost(
+                tag = 0x0Au,
+                items =
+                    listOf(
+                        CrossPkgEntry(0x01u, "alpha"),
+                        CrossPkgEntry(0x02u, "beta"),
+                    ),
+            )
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        ProbeCrossPackageCollectionHostCodec.encode(buffer, original)
+        buffer.resetForRead()
+        val decoded = ProbeCrossPackageCollectionHostCodec.decode(buffer)
+        assertEquals(original, decoded)
     }
 }

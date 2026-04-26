@@ -436,3 +436,19 @@ data class ProbeByteSizedBytePrefixCollection(
     val packetId: UShort,
     @LengthPrefixed(LengthPrefix.Byte) val items: List<ProbeProp>,
 )
+
+/**
+ * Probe 19 — element codec lives in a sibling package (`protocols.crosspkg.CrossPkgEntry`).
+ * The generated codec for this host class must add an import for `CrossPkgEntryCodec` so
+ * the unqualified reference in the generated `forEach { CrossPkgEntryCodec.encode(...) }`
+ * resolves. Without the import, KSP emits the codec but kotlinc fails to compile it.
+ *
+ * Round-trip is enough to lock in the import — if the import is missing the test won't
+ * compile, which is the regression signal we want.
+ */
+@ProtocolMessage
+data class ProbeCrossPackageCollectionHost(
+    val tag: UByte,
+    @LengthPrefixed(LengthPrefix.Varint, maxBytes = 4)
+    val items: List<com.ditchoom.buffer.codec.test.protocols.crosspkg.CrossPkgEntry>,
+)

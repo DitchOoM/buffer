@@ -191,7 +191,7 @@ class CodecGenerator(
         val fileBuilder =
             fileSpecBuilder(packageName, codecName)
                 .addType(objectBuilder.build())
-        addExtensionImports(fileBuilder, fields)
+        addExtensionImports(fileBuilder, fields, packageName)
         return fileBuilder.build()
     }
 
@@ -493,7 +493,7 @@ class CodecGenerator(
         val fileBuilder =
             fileSpecBuilder(packageName, codecName)
                 .addType(objectBuilder.build())
-        addExtensionImports(fileBuilder, fields)
+        addExtensionImports(fileBuilder, fields, packageName)
         return fileBuilder.build()
     }
 
@@ -511,6 +511,7 @@ class CodecGenerator(
     private fun addExtensionImports(
         fileBuilder: FileSpec.Builder,
         fields: List<FieldInfo>,
+        currentPackage: String,
     ) {
         if (needsLengthPrefixedImports(fields)) {
             fileBuilder.addImport("com.ditchoom.buffer", "readLengthPrefixedUtf8String")
@@ -524,13 +525,25 @@ class CodecGenerator(
         if (fields.any { it.byteOrderOverride != null }) {
             fileBuilder.addImport("com.ditchoom.buffer", "reverseBytes")
         }
+        // De-duplicate cross-package codec imports so the same symbol is only added once.
+        val crossPackageCodecImports = mutableSetOf<Pair<String, String>>()
         for (field in fields) {
-            val strategy = field.strategy
-            if (strategy is FieldReadStrategy.Custom) {
-                val d = strategy.descriptor
-                fileBuilder.addImport(d.readFunction.packageName, d.readFunction.functionName)
-                fileBuilder.addImport(d.writeFunction.packageName, d.writeFunction.functionName)
+            when (val strategy = field.strategy) {
+                is FieldReadStrategy.Custom -> {
+                    val d = strategy.descriptor
+                    fileBuilder.addImport(d.readFunction.packageName, d.readFunction.functionName)
+                    fileBuilder.addImport(d.writeFunction.packageName, d.writeFunction.functionName)
+                }
+                is FieldReadStrategy.CollectionField -> {
+                    if (strategy.elementCodecPackage.isNotEmpty() && strategy.elementCodecPackage != currentPackage) {
+                        crossPackageCodecImports += strategy.elementCodecPackage to strategy.elementCodecName
+                    }
+                }
+                else -> {}
             }
+        }
+        for ((pkg, name) in crossPackageCodecImports) {
+            fileBuilder.addImport(pkg, name)
         }
     }
 
