@@ -4,6 +4,10 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
+import com.ditchoom.buffer.codec.test.protocols.ProbeByteSizedBytePrefixCollection
+import com.ditchoom.buffer.codec.test.protocols.ProbeByteSizedBytePrefixCollectionCodec
+import com.ditchoom.buffer.codec.test.protocols.ProbeByteSizedVarintCollection
+import com.ditchoom.buffer.codec.test.protocols.ProbeByteSizedVarintCollectionCodec
 import com.ditchoom.buffer.codec.test.protocols.ProbeFramedDispatchSimple
 import com.ditchoom.buffer.codec.test.protocols.ProbeFramedDispatchSimpleCodec
 import com.ditchoom.buffer.codec.test.protocols.ProbeFramedDispatchWithPayload
@@ -747,5 +751,125 @@ class V5GapProbeTest {
         val decodedWithSink = ProbeFramedDispatchSimpleCodec.decode(buffer, ctx)
         assertEquals(variant, decodedWithSink)
         assertEquals(5, sink.value)
+    }
+
+    /**
+     * Probe 17 — VBI byte-length prefix on a `Collection<X>` directly.
+     * Wire shape: `[VBI(byteSize)][element bytes...]`. Locks in the byte-size + slice
+     * semantic — the decoder reads VBI bytes of body, then loops elementCodec.decode
+     * until the slice is empty. Round-trip + exact wire bytes for one variant.
+     */
+    @Test
+    fun byteSizedVarintCollectionExactWireBytes() {
+        // packetId(2) + VBI(1)=0x05 + BoolProp(2) + UShortProp(3) = 8 bytes total.
+        val original =
+            ProbeByteSizedVarintCollection(
+                packetId = 0x0007u,
+                items =
+                    listOf(
+                        ProbeProp.BoolProp(0xFEu),
+                        ProbeProp.UShortProp(0x1234u),
+                    ),
+            )
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        ProbeByteSizedVarintCollectionCodec.encode(buffer, original)
+        val written = buffer.position()
+        assertEquals(8, written, "wire length: 2 packetId + 1 VBI + 2 BoolProp + 3 UShortProp")
+
+        // Verify exact wire bytes.
+        buffer.resetForRead()
+        assertEquals(0x00u.toUByte(), buffer.readUnsignedByte())
+        assertEquals(0x07u.toUByte(), buffer.readUnsignedByte())
+        assertEquals(0x05u.toUByte(), buffer.readUnsignedByte(), "VBI byte-size = 5")
+        assertEquals(0x01u.toUByte(), buffer.readUnsignedByte())
+        assertEquals(0xFEu.toUByte(), buffer.readUnsignedByte())
+        assertEquals(0x21u.toUByte(), buffer.readUnsignedByte())
+        assertEquals(0x12u.toUByte(), buffer.readUnsignedByte())
+        assertEquals(0x34u.toUByte(), buffer.readUnsignedByte())
+
+        // Round-trip.
+        buffer.resetForRead()
+        val decoded = ProbeByteSizedVarintCollectionCodec.decode(buffer)
+        assertEquals(original.packetId, decoded.packetId)
+        assertEquals(2, decoded.items.size)
+        assertEquals(0xFEu.toUByte(), (decoded.items[0] as ProbeProp.BoolProp).raw)
+        assertEquals(0x1234u.toUShort(), (decoded.items[1] as ProbeProp.UShortProp).value)
+    }
+
+    /**
+     * Probe 17b — empty list: VBI(0) = 0x00 single byte. Decoder reads the 0-length
+     * slice and produces emptyList() without invoking elementCodec.decode.
+     */
+    @Test
+    fun byteSizedVarintCollectionEmpty() {
+        val original = ProbeByteSizedVarintCollection(packetId = 0x0007u, items = emptyList())
+        val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
+        ProbeByteSizedVarintCollectionCodec.encode(buffer, original)
+        val written = buffer.position()
+        assertEquals(3, written, "wire: 2 packetId + 1 VBI(0)")
+
+        buffer.resetForRead()
+        assertEquals(0x00u.toUByte(), buffer.readUnsignedByte())
+        assertEquals(0x07u.toUByte(), buffer.readUnsignedByte())
+        assertEquals(0x00u.toUByte(), buffer.readUnsignedByte())
+
+        buffer.resetForRead()
+        val decoded = ProbeByteSizedVarintCollectionCodec.decode(buffer)
+        assertEquals(0x0007u.toUShort(), decoded.packetId)
+        assertEquals(0, decoded.items.size)
+    }
+
+    /**
+     * Probe 17c — round-trip across VBI byte-width transitions (1→2 byte boundary at
+     * body size 128). Constructs a list of BoolProp items (2 bytes each on the wire)
+     * sized to land just under and just over the boundary.
+     */
+    @Test
+    fun byteSizedVarintCollectionVbiBoundaries() {
+        // 63 BoolProp items = 126 wire bytes → 1-byte VBI(126) = 0x7E
+        // 64 BoolProp items = 128 wire bytes → 2-byte VBI(128) = 0x80 0x01
+        for ((count, expectedVbiWidth) in listOf(63 to 1, 64 to 2)) {
+            val items = List(count) { ProbeProp.BoolProp(it.toUByte()) }
+            val original = ProbeByteSizedVarintCollection(packetId = 0u, items = items)
+            val buffer = BufferFactory.Default.allocate(512, ByteOrder.BIG_ENDIAN)
+            ProbeByteSizedVarintCollectionCodec.encode(buffer, original)
+            val written = buffer.position()
+            assertEquals(2 + expectedVbiWidth + count * 2, written, "wire size at count=$count")
+            buffer.resetForRead()
+            val decoded = ProbeByteSizedVarintCollectionCodec.decode(buffer)
+            assertEquals(count, decoded.items.size, "decoded item count at count=$count")
+        }
+    }
+
+    /**
+     * Probe 18 — same byte-size semantic for a fixed-width Byte prefix. Confirms the
+     * unified semantic across prefix widths: `@LengthPrefixed(Byte) Collection<X>` is
+     * also byte-size + slice. Locks in exact wire bytes so any regression is caught.
+     */
+    @Test
+    fun byteSizedBytePrefixCollectionExactWireBytes() {
+        // packetId(2) + Byte-prefix(1)=0x02 + BoolProp(2) = 5 bytes total.
+        val original =
+            ProbeByteSizedBytePrefixCollection(
+                packetId = 0x0007u,
+                items = listOf(ProbeProp.BoolProp(0xFEu)),
+            )
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        ProbeByteSizedBytePrefixCollectionCodec.encode(buffer, original)
+        val written = buffer.position()
+        assertEquals(5, written, "wire: 2 packetId + 1 Byte-prefix + 2 BoolProp")
+
+        buffer.resetForRead()
+        assertEquals(0x00u.toUByte(), buffer.readUnsignedByte())
+        assertEquals(0x07u.toUByte(), buffer.readUnsignedByte())
+        assertEquals(0x02u.toUByte(), buffer.readUnsignedByte(), "Byte prefix = 2 bytes (NOT count=1)")
+        assertEquals(0x01u.toUByte(), buffer.readUnsignedByte())
+        assertEquals(0xFEu.toUByte(), buffer.readUnsignedByte())
+
+        buffer.resetForRead()
+        val decoded = ProbeByteSizedBytePrefixCollectionCodec.decode(buffer)
+        assertEquals(0x0007u.toUShort(), decoded.packetId)
+        assertEquals(1, decoded.items.size)
+        assertEquals(0xFEu.toUByte(), (decoded.items[0] as ProbeProp.BoolProp).raw)
     }
 }

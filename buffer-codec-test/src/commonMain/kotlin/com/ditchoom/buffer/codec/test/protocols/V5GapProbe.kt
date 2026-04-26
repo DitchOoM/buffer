@@ -396,3 +396,43 @@ sealed interface ProbeFramedDispatchWithPayload {
         val x: UShort,
     ) : ProbeFramedDispatchWithPayload
 }
+
+// =====================================================================================
+// Phase 1.1.1 probes — `@LengthPrefixed Collection<X>` is byte-size + slice (NOT count).
+//
+// Locks in the unified semantic across all prefix widths (Byte, Short, Int, Varint):
+// the prefix is the *byte length* of the encoded collection body, and decode reads until
+// the slice is empty. This matches MQTT v5 properties, AMQP frames, gRPC, TLS, HTTP/2,
+// and most binary RPC protocols. Count-prefix semantics are still available via the
+// existing `@LengthFrom("count")` primitive, which is orthogonal.
+//
+// Probes 17/18 fail before the FieldCodeEmitter switch; pass after.
+// =====================================================================================
+
+/**
+ * Probe 17 — VBI byte-length prefix directly on a `Collection<X>` field (no wrapper struct).
+ * Wire shape: `[VBI(byteSize)][element bytes...]`. Decoder reads VBI, slices to that
+ * byte budget, then loops elementCodec.decode until the slice is empty.
+ *
+ * This is the shape MQTT v5 needs for property sections. Round-trip + exact wire-byte
+ * assertions cover: empty list (1-byte VBI 0x00), small list (1-byte VBI), boundary at
+ * VBI width transitions.
+ */
+@ProtocolMessage
+data class ProbeByteSizedVarintCollection(
+    val packetId: UShort,
+    @LengthPrefixed(LengthPrefix.Varint, maxBytes = 4) val items: List<ProbeProp>,
+)
+
+/**
+ * Probe 18 — same byte-size semantic with a fixed-width Byte prefix. Confirms the
+ * unified semantic is not Varint-specific: `@LengthPrefixed(Byte) val items: List<X>`
+ * also writes byte-size and decodes until slice empty. The previous count-prefix
+ * behavior on `PrefixedEntries` was an incidental implementation choice; this probe
+ * locks in the new semantic with exact wire bytes so any regression is caught.
+ */
+@ProtocolMessage
+data class ProbeByteSizedBytePrefixCollection(
+    val packetId: UShort,
+    @LengthPrefixed(LengthPrefix.Byte) val items: List<ProbeProp>,
+)

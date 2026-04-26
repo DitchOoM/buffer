@@ -128,8 +128,16 @@ enum class LengthPrefix {
 }
 
 /**
- * Marks a String, collection, or nested-message field as length-prefixed: prefix bytes
- * followed by content data.
+ * Marks a String, collection, or nested-message field as length-prefixed: a byte-size
+ * prefix followed by the encoded content.
+ *
+ * **The prefix encodes the byte length of the content**, not the count of items. On
+ * decode the field reads the prefix, slices that many bytes from the buffer, and
+ * decodes the content from the slice. For collections this means the element codec
+ * is invoked repeatedly until the slice is empty — matching MQTT v5 properties,
+ * AMQP frames, gRPC, TLS records, HTTP/2, and most binary RPC protocols. If you
+ * want a count-prefix instead (e.g. a separate `count: UByte` field that holds the
+ * number of elements), use [LengthFrom].
  *
  * ```kotlin
  * @ProtocolMessage
@@ -138,6 +146,7 @@ enum class LengthPrefix {
  *     @LengthPrefixed(LengthPrefix.Byte) val nickname: String,                   // 1-byte prefix (max 255)
  *     @LengthPrefixed(LengthPrefix.Int) val bio: String,                         // 4-byte prefix
  *     @LengthPrefixed(LengthPrefix.Varint, maxBytes = 4) val notes: String,      // VBI, 1-4 bytes
+ *     @LengthPrefixed(LengthPrefix.Varint, maxBytes = 4) val tags: List<Tag>,    // VBI byte-size + tags until slice empty
  * )
  * ```
  *

@@ -190,7 +190,7 @@ internal fun writeExpression(
         is FieldReadStrategy.NestedMessageWithLengthField ->
             writeNestedWithLengthExpression(strategy, valueExpr, withContext, fieldName)
         is FieldReadStrategy.UseCodecField -> writeUseCodecExpression(strategy, valueExpr, withContext, fieldName)
-        is FieldReadStrategy.CollectionField -> writeCollectionExpression(strategy, valueExpr, withContext)
+        is FieldReadStrategy.CollectionField -> writeCollectionExpression(strategy, valueExpr, withContext, fieldName)
         is FieldReadStrategy.DiscriminatorField -> {
             // Write normally via the discriminator codec during encode
             val ctxArg = if (withContext) ", context" else ""
@@ -219,8 +219,12 @@ private fun readCollectionExpression(
             "buildList { while (buffer.remaining() > $threshold) { add($codecName.decode(buffer$ctxArg)) } }"
         }
         is LengthKind.Prefixed ->
-            "run { val _n = ${readLengthExpr(lk.kind)}; " +
-                "buildList { repeat(_n) { add($codecName.decode(buffer$ctxArg)) } } }"
+            // Byte-size + slice: prefix is the encoded byte length of the collection body;
+            // decode loops elementCodec.decode until the slice is empty. Symmetric across
+            // Byte/Short/Int/Varint widths. Count-prefix semantics use @LengthFrom instead.
+            "run { val _len = ${readLengthExpr(lk.kind)}; " +
+                "val _slice = buffer.readBytes(_len); " +
+                "buildList { while (_slice.remaining() > 0) { add($codecName.decode(_slice$ctxArg)) } } }"
     }
 }
 
@@ -228,6 +232,7 @@ private fun writeCollectionExpression(
     strategy: FieldReadStrategy.CollectionField,
     valueExpr: String,
     withContext: Boolean = false,
+    fieldName: String = "",
 ): String {
     val codecName = strategy.elementCodecName
     val ctxArg = if (withContext) ", context" else ""
@@ -236,18 +241,26 @@ private fun writeCollectionExpression(
             "$valueExpr.forEach { $codecName.encode(buffer, it$ctxArg) }"
         is LengthKind.Remaining ->
             "$valueExpr.forEach { $codecName.encode(buffer, it$ctxArg) }"
-        is LengthKind.Prefixed ->
+        is LengthKind.Prefixed -> {
+            // Byte-size patch-up: reserve placeholder, encode body, measure byte length,
+            // patch the prefix. Mirrors the nested-message length-prefix path so the
+            // "@LengthPrefixed Collection<X>" semantic is unified with @LengthPrefixed
+            // on a wrapper @ProtocolMessage struct.
+            val encodeBody = "$valueExpr.forEach { $codecName.encode(buffer, it$ctxArg) }"
             when (val kind = lk.kind) {
                 is LengthPrefixKind.Varint ->
-                    // Count is known up-front — write VBI directly, no patch-up needed.
-                    "run { buffer.writeVariableByteInteger($valueExpr.size); " +
-                        "$valueExpr.forEach { $codecName.encode(buffer, it$ctxArg) } }"
-                else -> {
-                    val cfg = fixedPrefixConfigOrError(kind)
-                    "run { ${cfg.writeExpr("$valueExpr.size")}; " +
-                        "$valueExpr.forEach { $codecName.encode(buffer, it$ctxArg) } }"
-                }
+                    emitVarintLengthPrefixedWrite(
+                        kind = kind,
+                        fieldName = fieldName,
+                        encodeBody = encodeBody,
+                    )
+                else ->
+                    fixedLengthPrefixedEncodeRun(
+                        cfg = fixedPrefixConfigOrError(kind),
+                        encodeStmt = encodeBody,
+                    )
             }
+        }
     }
 }
 
