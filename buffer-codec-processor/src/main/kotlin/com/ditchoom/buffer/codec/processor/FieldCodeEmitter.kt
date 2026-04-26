@@ -253,7 +253,7 @@ private fun writeCollectionExpression(
                 is LengthPrefixKind.Varint ->
                     emitInlineVarintLengthPrefixed(
                         fieldName = fieldName,
-                        bodySizeExpr = "$valueExpr.sumOf { $codecName.wireSize(it) }",
+                        bodySizeExpr = "$valueExpr.sumOf { $codecName.wireSize(it$ctxArg) }",
                         encodeBody = encodeBody,
                         maxBytes = kind.maxBytes,
                     )
@@ -329,7 +329,7 @@ private fun writeNestedWithLengthExpression(
                 is LengthPrefixKind.Varint ->
                     emitInlineVarintLengthPrefixed(
                         fieldName = fieldName,
-                        bodySizeExpr = "$codec.wireSize($valueExpr)",
+                        bodySizeExpr = "$codec.wireSize($valueExpr$ctxArg)",
                         encodeBody = "$codec.encode(buffer, $valueExpr$ctxArg)",
                         maxBytes = kind.maxBytes,
                     )
@@ -362,7 +362,7 @@ private fun writeUseCodecExpression(
                 is LengthPrefixKind.Varint ->
                     emitInlineVarintLengthPrefixed(
                         fieldName = fieldName,
-                        bodySizeExpr = "$codec.wireSize($valueExpr)",
+                        bodySizeExpr = "$codec.wireSize($valueExpr$ctxArg)",
                         encodeBody = "$codec.encode(buffer, $valueExpr$ctxArg)",
                         maxBytes = kind.maxBytes,
                     )
