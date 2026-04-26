@@ -586,6 +586,7 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
                         writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
                         fixedSize = -1,
+                        wireSizeFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
@@ -622,6 +623,7 @@ class DataClassCodegenTest {
                         writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writeRepeatedShorts"),
                         fixedSize = -1,
                         contextFields = listOf(countField),
+                        wireSizeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "repeatedShortsSize"),
                     )
                 }
             }
@@ -655,6 +657,7 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer.codec.test", "readPropertyBag"),
                         writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writePropertyBag"),
                         fixedSize = -1,
+                        wireSizeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "propertyBagSize"),
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(propBagProvider))
@@ -804,6 +807,7 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
                         writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
                         fixedSize = -1,
+                        wireSizeFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
@@ -842,6 +846,7 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
                         writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
                         fixedSize = -1,
+                        wireSizeFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
@@ -878,6 +883,7 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
                         writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
                         fixedSize = -1,
+                        wireSizeFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
@@ -914,6 +920,7 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
                         writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
                         fixedSize = -1,
+                        wireSizeFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
                     )
             }
         val propBagProvider =
@@ -925,6 +932,7 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer.codec.test", "readPropertyBag"),
                         writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writePropertyBag"),
                         fixedSize = -1,
+                        wireSizeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "propertyBagSize"),
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider, propBagProvider))

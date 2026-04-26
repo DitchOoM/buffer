@@ -19,6 +19,7 @@ class SimpleProtocolRoundTripTest {
             )
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         SimpleHeaderCodec.encode(buffer, original)
+        assertEquals(buffer.position(), SimpleHeaderCodec.wireSize(original), "wireSize must match encoded byte count")
         buffer.resetForRead()
         val decoded = SimpleHeaderCodec.decode(buffer)
         assertEquals(original, decoded)

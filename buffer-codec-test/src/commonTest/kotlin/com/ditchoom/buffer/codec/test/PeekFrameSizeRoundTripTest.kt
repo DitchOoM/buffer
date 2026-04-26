@@ -65,8 +65,10 @@ class PeekFrameSizeRoundTripTest {
     fun `fixed-size message returns constant`() {
         // DnsHeader: 6 fields × 2 bytes = 12 bytes, always fixed
         withStream { stream ->
+            val header = DnsHeader(0x1234u, DnsFlags(0u), 1u, 0u, 0u, 0u)
             val buffer = BufferFactory.Default.allocate(12, ByteOrder.BIG_ENDIAN)
-            DnsHeaderCodec.encode(buffer, DnsHeader(0x1234u, DnsFlags(0u), 1u, 0u, 0u, 0u))
+            DnsHeaderCodec.encode(buffer, header)
+            assertEquals(buffer.position(), DnsHeaderCodec.wireSize(header), "wireSize must match encoded byte count")
             buffer.resetForRead()
             stream.append(buffer)
 

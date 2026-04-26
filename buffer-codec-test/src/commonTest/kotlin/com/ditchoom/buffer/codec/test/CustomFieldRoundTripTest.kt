@@ -26,7 +26,11 @@ import kotlin.test.assertEquals
 class CustomFieldRoundTripTest {
     @Test
     fun vbiRoundTripSingleByte() {
-        roundTripVbi(VbiPacket(0x01u, 0, 0x7F.toByte()))
+        val representative = VbiPacket(0x01u, 0, 0x7F.toByte())
+        val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
+        VbiPacketCodec.encode(buffer, representative)
+        assertEquals(buffer.position(), VbiPacketCodec.wireSize(representative), "wireSize must match encoded byte count")
+        roundTripVbi(representative)
         roundTripVbi(VbiPacket(0xFFu, 127, 0x00.toByte()))
     }
 

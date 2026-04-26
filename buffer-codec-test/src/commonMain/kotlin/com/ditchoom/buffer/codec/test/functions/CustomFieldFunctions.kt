@@ -18,12 +18,7 @@ fun ReadBuffer.readPropertyBag(): Map<Int, Int> {
 }
 
 fun WriteBuffer.writePropertyBag(props: Map<Int, Int>) {
-    // Calculate body size first
-    var bodyLen = 0
-    props.forEach { (k, v) ->
-        bodyLen += 1 // tag byte
-        bodyLen += com.ditchoom.buffer.variableByteSizeInt(v)
-    }
+    val bodyLen = propertyBagBodySize(props)
     // Write length prefix as VBI
     writeVariableByteInteger(bodyLen)
     // Write entries
@@ -31,4 +26,18 @@ fun WriteBuffer.writePropertyBag(props: Map<Int, Int>) {
         writeByte(k.toByte())
         writeVariableByteInteger(v)
     }
+}
+
+private fun propertyBagBodySize(props: Map<Int, Int>): Int {
+    var bodyLen = 0
+    props.forEach { (_, v) ->
+        bodyLen += 1 // tag byte
+        bodyLen += com.ditchoom.buffer.variableByteSizeInt(v)
+    }
+    return bodyLen
+}
+
+fun propertyBagSize(props: Map<Int, Int>): Int {
+    val bodyLen = propertyBagBodySize(props)
+    return com.ditchoom.buffer.variableByteSizeInt(bodyLen) + bodyLen
 }

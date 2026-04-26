@@ -9,6 +9,7 @@ import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
 import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
+import com.squareup.kotlinpoet.INT
 import com.squareup.kotlinpoet.KModifier
 import com.squareup.kotlinpoet.LambdaTypeName
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
@@ -175,6 +176,35 @@ class CodecGenerator(
                         .build(),
                 )
             }
+        }
+
+        // Generate wireSize(value): exact byte count, mirrors encode(buffer, value, context)
+        // body so encodeToBuffer can allocate an exact-size buffer up front.
+        if (canEncode) {
+            val wireSizeBody = CodeBlock.builder()
+            wireSizeBody.addStatement("var _size = 0")
+            val wireSizeWhenRemainingTail = mutableListOf<FieldInfo>()
+            for (field in fields) {
+                if (field.condition is FieldCondition.WhenRemaining) {
+                    wireSizeWhenRemainingTail.add(field)
+                } else {
+                    addFieldWireSize(wireSizeBody, field, "value.${field.name}")
+                }
+            }
+            if (wireSizeWhenRemainingTail.isNotEmpty()) {
+                emitWhenRemainingWireSize(wireSizeBody, wireSizeWhenRemainingTail)
+            }
+            wireSizeBody.addStatement("return _size")
+
+            objectBuilder.addFunction(
+                FunSpec
+                    .builder("wireSize")
+                    .addModifiers(KModifier.OVERRIDE)
+                    .addParameter("value", classTypeName)
+                    .returns(Int::class)
+                    .addCode(wireSizeBody.build())
+                    .build(),
+            )
         }
 
         // Generate peekFrameSize if possible (only for decode-capable codecs)
@@ -373,11 +403,62 @@ class CodecGenerator(
         }
         encodeBuilder.addCode(encodeBody.build())
 
+        // Build wireSize<P>(value, payloadSize: (P) -> Int) — Convention 1 sizing.
+        // Mirrors encode field-by-field; payload field contributes via the payloadSize
+        // lambda the caller supplies (and the matching length-prefix overhead).
+        val wireSizeBuilder =
+            FunSpec
+                .builder("wireSize")
+                .addParameter("value", returnType)
+                .returns(Int::class)
+
+        for (tv in typeVariables) {
+            wireSizeBuilder.addTypeVariable(tv)
+        }
+
+        for (pf in payloadFields) {
+            val strategy = pf.strategy as FieldReadStrategy.PayloadField
+            val tpName = TypeVariableName(strategy.typeParamName)
+            val sizeLambdaType =
+                LambdaTypeName.get(
+                    parameters =
+                        listOf(
+                            com.squareup.kotlinpoet.ParameterSpec
+                                .unnamed(tpName),
+                        ),
+                    returnType = INT,
+                )
+            wireSizeBuilder.addParameter("size${capitalizeFirst(pf.name)}", sizeLambdaType)
+        }
+
+        val wireSizeBody = CodeBlock.builder()
+        wireSizeBody.addStatement("var _size = 0")
+        val wireSizePayloadWhenRemainingTail = mutableListOf<FieldInfo>()
+        for (field in fields) {
+            if (field.condition is FieldCondition.WhenRemaining) {
+                wireSizePayloadWhenRemainingTail.add(field)
+            } else if (field.strategy is FieldReadStrategy.PayloadField) {
+                addPayloadFieldWireSize(wireSizeBody, field)
+            } else {
+                addFieldWireSize(wireSizeBody, field, "value.${field.name}")
+            }
+        }
+        if (wireSizePayloadWhenRemainingTail.isNotEmpty()) {
+            // For now, payload @WhenRemaining fields aren't expected — fall back to
+            // standard cascading null check using the non-payload helper, which assumes
+            // each tail field has a wireSizeExpression. Payload fields in the tail would
+            // need their own cascading helper; not exercised today.
+            emitWhenRemainingWireSize(wireSizeBody, wireSizePayloadWhenRemainingTail)
+        }
+        wireSizeBody.addStatement("return _size")
+        wireSizeBuilder.addCode(wireSizeBody.build())
+
         val objectBuilder =
             TypeSpec
                 .objectBuilder(codecName)
                 .addFunction(decodeBuilder.build())
                 .addFunction(encodeBuilder.build())
+                .addFunction(wireSizeBuilder.build())
 
         // Generate context keys and context-based decode/encode for each payload field.
         // These enable the codec to be used as a nested field via Codec.decode(buffer, context).
@@ -531,6 +612,10 @@ class CodecGenerator(
             fileBuilder.addImport("com.ditchoom.buffer", "readVariableByteInteger")
             fileBuilder.addImport("com.ditchoom.buffer", "writeVariableByteInteger")
             fileBuilder.addImport("com.ditchoom.buffer", "writeVariableByteIntegerLengthPrefixed")
+            fileBuilder.addImport("com.ditchoom.buffer", "variableByteSizeInt")
+        }
+        if (needsUtf8LengthImport(fields)) {
+            fileBuilder.addImport("com.ditchoom.buffer", "utf8Length")
         }
         if (fields.any { it.byteOrderOverride != null }) {
             fileBuilder.addImport("com.ditchoom.buffer", "reverseBytes")
@@ -543,6 +628,7 @@ class CodecGenerator(
                     val d = strategy.descriptor
                     fileBuilder.addImport(d.readFunction.packageName, d.readFunction.functionName)
                     fileBuilder.addImport(d.writeFunction.packageName, d.writeFunction.functionName)
+                    d.wireSizeFunction?.let { fileBuilder.addImport(it.packageName, it.functionName) }
                 }
                 is FieldReadStrategy.CollectionField -> {
                     if (strategy.elementCodecPackage.isNotEmpty() && strategy.elementCodecPackage != currentPackage) {
@@ -562,6 +648,17 @@ class CodecGenerator(
             fileBuilder.addImport(pkg, name)
         }
     }
+
+    private fun needsUtf8LengthImport(fields: List<FieldInfo>): Boolean = fields.any { needsUtf8LengthImport(it.strategy) }
+
+    private fun needsUtf8LengthImport(strategy: FieldReadStrategy): Boolean =
+        when (strategy) {
+            is FieldReadStrategy.LengthPrefixedStringField -> true
+            is FieldReadStrategy.RemainingBytesStringField -> true
+            is FieldReadStrategy.LengthFromStringField -> true
+            is FieldReadStrategy.ValueClassField -> needsUtf8LengthImport(strategy.innerStrategy)
+            else -> false
+        }
 
     private fun needsVarintImports(fields: List<FieldInfo>): Boolean = fields.any { needsVarintImport(it.strategy) }
 

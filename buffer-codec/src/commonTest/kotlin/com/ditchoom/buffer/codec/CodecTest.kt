@@ -6,6 +6,8 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.readLengthPrefixedUtf8String
 import com.ditchoom.buffer.readVariableByteInteger
+import com.ditchoom.buffer.utf8Length
+import com.ditchoom.buffer.variableByteSizeInt
 import com.ditchoom.buffer.writeLengthPrefixedUtf8String
 import com.ditchoom.buffer.writeVariableByteInteger
 import kotlin.test.Test
@@ -31,6 +33,8 @@ object SimpleStructCodec : Codec<SimpleStruct> {
         buffer.writeUShort(value.id)
         buffer.writeInt(value.value)
     }
+
+    override fun wireSize(value: SimpleStruct): Int = 6
 }
 
 // Struct with a variable-length integer field (hand-written, simulating @VariableLength)
@@ -53,6 +57,8 @@ object VariableLengthStructCodec : Codec<VariableLengthStruct> {
         buffer.writeByte(value.tag)
         buffer.writeVariableByteInteger(value.length)
     }
+
+    override fun wireSize(value: VariableLengthStruct): Int = 1 + variableByteSizeInt(value.length)
 }
 
 // Struct with a length-prefixed string (hand-written, simulating @LengthPrefixed)
@@ -75,6 +81,8 @@ object LengthPrefixedStructCodec : Codec<LengthPrefixedStruct> {
         buffer.writeUByte(value.type)
         buffer.writeLengthPrefixedUtf8String(value.name)
     }
+
+    override fun wireSize(value: LengthPrefixedStruct): Int = 1 + 2 + value.name.utf8Length()
 }
 
 class CodecTest {

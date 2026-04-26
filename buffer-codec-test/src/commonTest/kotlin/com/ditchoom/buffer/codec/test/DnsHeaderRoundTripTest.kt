@@ -23,6 +23,7 @@ class DnsHeaderRoundTripTest {
             )
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         DnsHeaderCodec.encode(buffer, original)
+        assertEquals(buffer.position(), DnsHeaderCodec.wireSize(original), "wireSize must match encoded byte count")
         buffer.resetForRead()
         val decoded = DnsHeaderCodec.decode(buffer)
         assertEquals(original, decoded)

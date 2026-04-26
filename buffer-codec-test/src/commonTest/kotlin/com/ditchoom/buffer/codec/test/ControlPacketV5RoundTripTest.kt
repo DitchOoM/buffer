@@ -44,6 +44,17 @@ class ControlPacketV5RoundTripTest {
     @Test
     fun pubAckMinimalRoundTrip() {
         val original = ControlPacketV5.PubAck(packetIdentifier = 7u)
+        val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
+        ControlPacketV5Codec.encode<String>(
+            buffer,
+            original,
+            encodePublishPayload = { _, _ -> },
+        )
+        assertEquals(
+            buffer.position(),
+            ControlPacketV5Codec.wireSize(original),
+            "wireSize must match encoded byte count",
+        )
         val decoded = roundTrip(original)
         assertEquals(original, decoded)
         assertTrue(decoded is ControlPacketV5.PubAck)

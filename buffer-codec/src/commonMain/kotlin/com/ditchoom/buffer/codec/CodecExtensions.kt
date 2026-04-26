@@ -41,6 +41,10 @@ fun <T> Codec<T>.testRoundTrip(
     encodeContext: EncodeContext = EncodeContext.Empty,
 ): T {
     val encoded = encodeToBuffer(value, factory, encodeContext)
+    val expectedWireSize = wireSize(value)
+    check(expectedWireSize == encoded.remaining()) {
+        "wireSize must match encoded byte count: wireSize=$expectedWireSize, encoded=${encoded.remaining()}"
+    }
     if (expectedBytes != null) {
         val actualBytes = encoded.readByteArray(encoded.remaining())
         check(actualBytes.contentEquals(expectedBytes)) {

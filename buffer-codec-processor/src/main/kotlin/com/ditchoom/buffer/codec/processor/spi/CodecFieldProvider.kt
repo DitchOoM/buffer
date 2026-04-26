@@ -36,6 +36,12 @@ data class CustomFieldDescriptor(
     val fixedSize: Int = -1,
     /** Previously decoded field names to pass as extra arguments to read/write functions */
     val contextFields: List<String> = emptyList(),
+    /**
+     * Top-level function to call for `wireSize(value)`. Receives the field value as the
+     * first argument followed by [contextFields]. When null, the generator uses
+     * [fixedSize] as a literal size (and errors at codegen time if [fixedSize] is -1).
+     */
+    val wireSizeFunction: FunctionRef? = null,
 )
 
 data class FunctionRef(

@@ -152,7 +152,9 @@ private val bufferStubs =
     fun WriteBuffer.writeLengthPrefixedUtf8String(value: String): WriteBuffer = TODO()
     fun ReadBuffer.readVariableByteInteger(): Int = TODO()
     fun WriteBuffer.writeVariableByteInteger(value: Int): WriteBuffer = TODO()
+    fun WriteBuffer.writeVariableByteIntegerLengthPrefixed(maxBytes: Int = 4, fieldName: String = "", encode: (WriteBuffer) -> Unit): Unit = TODO()
     fun variableByteSizeInt(value: Int): Int = TODO()
+    fun CharSequence.utf8Length(): Int = TODO()
     """,
     )
 
@@ -226,6 +228,7 @@ private val codecStubs =
     }
     interface Encoder<in T> {
         fun encode(buffer: WriteBuffer, value: T)
+        fun wireSize(value: T): Int = throw NotImplementedError("wireSize")
         val wireSizeHint: Int get() = 16
     }
     interface Codec<T> : Encoder<T>, Decoder<T> {
@@ -276,10 +279,11 @@ private val customFunctionStubs =
 
     fun ReadBuffer.readRepeatedShorts(count: UByte): List<Short> = TODO()
     fun WriteBuffer.writeRepeatedShorts(items: List<Short>, count: UByte): Unit = TODO()
-    fun repeatedShortsSize(items: List<Short>): Int = TODO()
+    fun repeatedShortsSize(items: List<Short>, count: UByte): Int = TODO()
 
     fun ReadBuffer.readPropertyBag(): Map<Int, Int> = TODO()
     fun WriteBuffer.writePropertyBag(props: Map<Int, Int>): Unit = TODO()
+    fun propertyBagSize(props: Map<Int, Int>): Int = TODO()
 
     fun ReadBuffer.readFixedInt(): Int = TODO()
     fun WriteBuffer.writeFixedInt(value: Int): Unit = TODO()

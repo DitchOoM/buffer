@@ -46,6 +46,17 @@ class ControlPacketV4RoundTripTest {
 
     @Test
     fun reservedRoundTrip() {
+        val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
+        ControlPacketV4Codec.encode<String>(
+            buffer,
+            ControlPacketV4.Reserved,
+            encodePublishPayload = { _, _ -> },
+        )
+        assertEquals(
+            buffer.position(),
+            ControlPacketV4Codec.wireSize(ControlPacketV4.Reserved),
+            "wireSize must match encoded byte count",
+        )
         val decoded = roundTrip(ControlPacketV4.Reserved)
         assertSame(ControlPacketV4.Reserved, decoded)
     }

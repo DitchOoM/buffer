@@ -18,6 +18,23 @@ interface Encoder<in T> {
     )
 
     /**
+     * Returns the exact number of bytes [encode] would write for [value].
+     *
+     * Generated codecs override this with a sum of per-field size formulas, so
+     * [encodeToBuffer] can allocate an exact-size buffer up front and avoid the
+     * grow-and-copy cost of a [GrowableWriteBuffer].
+     *
+     * Hand-written encoders that don't need [encodeToBuffer]'s exact-size path
+     * may leave the throwing default; the throw fires only if a caller asks
+     * for a size the encoder doesn't know how to compute.
+     */
+    fun wireSize(value: T): Int =
+        throw NotImplementedError(
+            "wireSize(value) not implemented for ${this::class.simpleName}. " +
+                "Generated codecs override this; hand-written encoders must as well to use encodeToBuffer.",
+        )
+
+    /**
      * Hint for initial buffer allocation in [encodeToBuffer].
      *
      * Generated codecs override this with the sum of their fixed-size fields,

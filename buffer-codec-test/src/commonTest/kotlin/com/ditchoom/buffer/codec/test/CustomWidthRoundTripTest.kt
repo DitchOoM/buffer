@@ -21,6 +21,11 @@ class CustomWidthRoundTripTest {
             )
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         CustomWidthMessageCodec.encode(buffer, original)
+        assertEquals(
+            buffer.position(),
+            CustomWidthMessageCodec.wireSize(original),
+            "wireSize must match encoded byte count",
+        )
         buffer.resetForRead()
         val decoded = CustomWidthMessageCodec.decode(buffer)
         assertEquals(original, decoded)

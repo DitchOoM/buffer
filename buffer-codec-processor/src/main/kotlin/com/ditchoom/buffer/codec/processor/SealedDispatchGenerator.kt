@@ -72,6 +72,41 @@ class SealedDispatchGenerator(
             else -> "$wire.toUByte()" // fallback
         }
 
+    /**
+     * Returns a Kotlin Int expression for the discriminator's wire byte count.
+     * Without @DispatchOn: literal `1` (single discriminator byte).
+     * With @DispatchOn: defers to the discriminator codec's `wireSize` so codegen
+     * stays correct even if the discriminator type's wire width ever changes.
+     */
+    private fun discriminatorWireSizeExpr(
+        wire: Int,
+        dispatchOnInfo: DispatchOnInfo?,
+    ): String {
+        if (dispatchOnInfo == null) return "1"
+        val conversion = wireConversion(dispatchOnInfo.innerTypeName, wire)
+        val codecRef = "${dispatchOnInfo.codecName}"
+        val typeRef = dispatchOnInfo.poetClassName.simpleName
+        return "$codecRef.wireSize($typeRef($conversion))"
+    }
+
+    /**
+     * Wraps a body-size expression with framing overhead, mirroring
+     * [emitBodyLengthEncodeWrap]. Returns just [bodyExpr] when no body framing.
+     * Evaluates [bodyExpr] once via a `run { val _b = ...; ... }` block when the
+     * frame requires both the body size and a variable-width prefix derived from it.
+     */
+    private fun wrapBodyLengthSizeExpr(
+        bodyExpr: String,
+        dispatchOnInfo: DispatchOnInfo?,
+    ): String {
+        val framing = dispatchOnInfo?.bodyFraming as? BodyFraming.WithLength ?: return bodyExpr
+        return when (val kind = framing.kind) {
+            is LengthPrefixKind.Varint ->
+                "run { val _b = $bodyExpr; com.ditchoom.buffer.variableByteSizeInt(_b) + _b }"
+            else -> "(${kind.maxWireBytes} + $bodyExpr)"
+        }
+    }
+
     /** Returns the valid range for a wire value given the discriminator's inner type, or null if any Int fits. */
     private fun wireRange(innerTypeName: String): LongRange? =
         when (innerTypeName) {
@@ -363,6 +398,28 @@ class SealedDispatchGenerator(
                         .build(),
                 )
             }
+
+            // wireSize(value): exact byte count, mirroring encode's discriminator + body shape
+            val wireSizeBody = CodeBlock.builder().beginControlFlow("return when (value)")
+            for (v in variants) {
+                val subTypeName = v.subclass.toPoetClassName()
+                val subCodecName = v.subclass.codecName()
+                val discSize = discriminatorWireSizeExpr(v.wire, dispatchOnInfo)
+                val variantBody = "$subCodecName.wireSize(value)"
+                val wrapped = wrapBodyLengthSizeExpr(variantBody, dispatchOnInfo)
+                val term = if (v.selfEncodesDiscriminator(variantsHandlingDiscriminator)) wrapped else "$discSize + $wrapped"
+                wireSizeBody.addStatement("is %T -> %L", subTypeName, term)
+            }
+            wireSizeBody.endControlFlow()
+            functions.add(
+                FunSpec
+                    .builder("wireSize")
+                    .addModifiers(KModifier.OVERRIDE)
+                    .addParameter("value", interfaceTypeName)
+                    .returns(INT)
+                    .addCode(wireSizeBody.build())
+                    .build(),
+            )
         }
 
         return DispatchResult(functions, true)
@@ -703,6 +760,44 @@ class SealedDispatchGenerator(
                         .build(),
                 )
             }
+
+            // wireSize(value): exact byte count for non-payload variants. Payload variants
+            // require a payloadSize lambda the dispatcher can't supply; the variant itself
+            // (e.g. Publish<P>) must override its own serialize/wireSize.
+            val wireSizeBody = CodeBlock.builder().beginControlFlow("return when (value)")
+            for (v in variants) {
+                val info = payloadBySubclass[v.subclass.qualifiedName?.asString()]
+                val subTypeName = v.subclass.toPoetClassName()
+                val subCodecName = v.subclass.codecName()
+                val discSize = discriminatorWireSizeExpr(v.wire, dispatchOnInfo)
+                val skipDisc = v.selfEncodesDiscriminator(variantsHandlingDiscriminator)
+                if (info != null && info.payloadFields.isNotEmpty()) {
+                    val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
+                    val variantSimple = v.subclass.simpleName.asString()
+                    wireSizeBody.addStatement(
+                        "is %T -> error(%S)",
+                        starType,
+                        "$variantSimple.wireSize requires a payloadSize lambda; " +
+                            "the variant must compute its own size via serialize() or " +
+                            "$subCodecName.wireSize(value, payloadSize).",
+                    )
+                } else {
+                    val variantBody = "$subCodecName.wireSize(value)"
+                    val wrapped = wrapBodyLengthSizeExpr(variantBody, dispatchOnInfo)
+                    val term = if (skipDisc) wrapped else "$discSize + $wrapped"
+                    wireSizeBody.addStatement("is %T -> %L", subTypeName, term)
+                }
+            }
+            wireSizeBody.endControlFlow()
+            contextFunctions.add(
+                FunSpec
+                    .builder("wireSize")
+                    .addModifiers(KModifier.OVERRIDE)
+                    .addParameter("value", interfaceTypeName)
+                    .returns(INT)
+                    .addCode(wireSizeBody.build())
+                    .build(),
+            )
         }
 
         val allFunctions =

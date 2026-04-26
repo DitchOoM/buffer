@@ -11,6 +11,7 @@ class VariableByteIntegerProvider : CodecFieldProvider {
             readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
             writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
             fixedSize = -1,
+            wireSizeFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
         )
     }
 }
@@ -27,6 +28,7 @@ class RepeatedProvider : CodecFieldProvider {
             writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writeRepeatedShorts"),
             fixedSize = -1,
             contextFields = listOf(countField),
+            wireSizeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "repeatedShortsSize"),
         )
     }
 }
@@ -39,6 +41,7 @@ class PropertyBagProvider : CodecFieldProvider {
             readFunction = FunctionRef("com.ditchoom.buffer.codec.test", "readPropertyBag"),
             writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writePropertyBag"),
             fixedSize = -1,
+            wireSizeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "propertyBagSize"),
         )
 }
 

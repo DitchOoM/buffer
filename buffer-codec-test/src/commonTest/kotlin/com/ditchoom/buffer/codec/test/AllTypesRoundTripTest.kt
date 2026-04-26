@@ -28,6 +28,7 @@ class AllTypesRoundTripTest {
             )
         val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
         AllTypesMessageCodec.encode(buffer, original)
+        assertEquals(buffer.position(), AllTypesMessageCodec.wireSize(original), "wireSize must match encoded byte count")
         buffer.resetForRead()
         val decoded = AllTypesMessageCodec.decode(buffer)
         assertAllTypesEqual(original, decoded)

@@ -35,6 +35,8 @@ object RgbCodec : Codec<Rgb> {
         buffer.writeUByte(value.g)
         buffer.writeUByte(value.b)
     }
+
+    override fun wireSize(value: Rgb): Int = 3
 }
 
 /** @UseCodec without a length annotation — codec reads directly from buffer. */
@@ -100,6 +102,8 @@ object ContextAwareRgbCodec : Codec<Rgb> {
         buffer.writeUByte((value.g.toInt() - offset).toUByte())
         buffer.writeUByte((value.b.toInt() - offset).toUByte())
     }
+
+    override fun wireSize(value: Rgb): Int = 3
 }
 
 /** Uses the context-aware codec — context must flow through for correct round-trip. */
@@ -127,6 +131,8 @@ object RgbEncoder : com.ditchoom.buffer.codec.Encoder<Rgb> {
         buffer.writeUByte(value.g)
         buffer.writeUByte(value.b)
     }
+
+    override fun wireSize(value: Rgb): Int = 3
 }
 
 /** Inferred decode-only: RgbDecoder only implements Decoder. */

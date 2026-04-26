@@ -151,6 +151,54 @@ internal fun addPayloadWrite(
     }
 }
 
+/**
+ * Appends `_size += <expr>` for a payload [field], using the caller-supplied
+ * `size${capitalizeFirst(field.name)}` lambda to size the opaque payload value.
+ * Mirrors [addPayloadWrite]'s conditional handling.
+ */
+internal fun addPayloadFieldWireSize(
+    code: CodeBlock.Builder,
+    field: FieldInfo,
+) {
+    val strategy = field.strategy as FieldReadStrategy.PayloadField
+    val condition = field.condition
+    val valueExpr = if (field.isNullable && condition != null) "value.${field.name}!!" else "value.${field.name}"
+    val sizeFn = "size${capitalizeFirst(field.name)}"
+    val payloadSizeExpr = payloadFieldWireSizeExpr(strategy, "$sizeFn($valueExpr)")
+    if (condition is FieldCondition.WhenTrue) {
+        val condExpr = condition.expression.replace(Regex("^([^.]+)"), "value.$1")
+        code.beginControlFlow("if (%L)", condExpr)
+        code.addStatement("_size += %L", payloadSizeExpr)
+        code.endControlFlow()
+    } else if (condition is FieldCondition.WhenRemaining) {
+        // Cascading null check is the caller's job; we just emit the per-field size add.
+        code.addStatement("_size += %L", payloadSizeExpr)
+    } else {
+        code.addStatement("_size += %L", payloadSizeExpr)
+    }
+}
+
+/**
+ * Returns an Int expression for a payload field's wire size, given an expression
+ * [bodySizeExpr] that evaluates to the opaque payload's byte count. Mirrors the
+ * length-prefix branches in [addPayloadEncodeBody] so wireSize and encode stay
+ * byte-perfect.
+ */
+private fun payloadFieldWireSizeExpr(
+    strategy: FieldReadStrategy.PayloadField,
+    bodySizeExpr: String,
+): String =
+    when (val lk = strategy.lengthKind) {
+        is LengthKind.Prefixed ->
+            when (val kind = lk.kind) {
+                is LengthPrefixKind.Varint ->
+                    "run { val _l = $bodySizeExpr; com.ditchoom.buffer.variableByteSizeInt(_l) + _l }"
+                else -> "(${kind.maxWireBytes} + $bodySizeExpr)"
+            }
+        is LengthKind.Remaining -> bodySizeExpr
+        is LengthKind.FromField -> bodySizeExpr
+    }
+
 internal fun addPayloadEncodeBody(
     code: CodeBlock.Builder,
     strategy: FieldReadStrategy.PayloadField,
