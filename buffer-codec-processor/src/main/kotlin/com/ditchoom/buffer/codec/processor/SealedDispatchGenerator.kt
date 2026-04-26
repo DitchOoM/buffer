@@ -726,6 +726,7 @@ class SealedDispatchGenerator(
                         code = encodeCtxBody,
                         info = dispatchOnInfo,
                         encodeStmt = "$subCodecName.encodeFromContext(buffer, value, context)",
+                        bodySizeExpr = "$subCodecName.wireSizeFromContext(value, context)",
                     )
                     encodeCtxBody.endControlFlow()
                 } else {

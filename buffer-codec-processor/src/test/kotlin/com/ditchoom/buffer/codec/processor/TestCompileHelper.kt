@@ -57,14 +57,18 @@ private val annotationSource =
 
     @Target(AnnotationTarget.CLASS)
     @Retention(AnnotationRetention.BINARY)
-    annotation class DispatchOn(val type: kotlin.reflect.KClass<*>)
+    annotation class DispatchOn(
+        val type: kotlin.reflect.KClass<*>,
+        val bodyLength: LengthPrefix = LengthPrefix.None,
+        val bodyLengthMaxBytes: Int = 0,
+    )
 
     @Target(AnnotationTarget.PROPERTY)
     @Retention(AnnotationRetention.BINARY)
     annotation class DispatchValue
 
     enum class LengthPrefix {
-        Byte, Short, Int,
+        None, Byte, Short, Int, Varint,
     }
 
     @Target(AnnotationTarget.PROPERTY, AnnotationTarget.VALUE_PARAMETER)
@@ -237,6 +241,8 @@ private val codecStubs =
         override fun encode(buffer: WriteBuffer, value: T) = encode(buffer, value, EncodeContext.Empty)
         fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NeedsMoreData
     }
+    class BodyLengthSink { var value: Int = 0 }
+    data object BodyLengthKey : CodecContext.Key<BodyLengthSink>()
     """,
     )
 

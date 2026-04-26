@@ -160,6 +160,109 @@ class WireSizeCodegenTest {
     }
 
     @Test
+    fun `payload codec emits SizeKey and wireSizeFromContext alongside encodeFromContext`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.Payload
+            import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+
+            @ProtocolMessage
+            data class CtxPayloadMsg<@Payload P>(
+                val id: UShort,
+                @LengthPrefixed val data: P,
+            )
+            """,
+            )
+        val result = compileWithKsp(source)
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+        val codec =
+            result.generatedSources.singleOrNull { it.contains("object CtxPayloadMsgCodec") }
+                ?: error("Expected CtxPayloadMsgCodec in generated sources:\n${result.generatedSources}")
+        // SizeKey: data object alongside DecodeKey/EncodeKey, of type (Any?) -> Int
+        assertTrue(
+            codec.contains("data object DataSizeKey"),
+            "Expected `data object DataSizeKey` per-payload-field SizeKey. Generated:\n$codec",
+        )
+        // wireSizeFromContext: reads SizeKey from context, delegates to wireSize(value, lambda)
+        assertTrue(
+            codec.contains("public fun wireSizeFromContext(") ||
+                codec.contains("fun wireSizeFromContext("),
+            "Expected `wireSizeFromContext(value, context): Int`. Generated:\n$codec",
+        )
+        assertTrue(
+            codec.contains("CtxPayloadMsgCodec.DataSizeKey") ||
+                codec.contains("DataSizeKey]"),
+            "Expected wireSizeFromContext body to read DataSizeKey. Generated:\n$codec",
+        )
+        assertTrue(
+            codec.contains("return wireSize(value,"),
+            "Expected wireSizeFromContext to delegate `return wireSize(value, ...)`. Generated:\n$codec",
+        )
+    }
+
+    @Test
+    fun `sealed dispatcher encodeFromContext uses inline-prefix via wireSizeFromContext for payload variants`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.*
+
+            @JvmInline
+            @ProtocolMessage
+            value class FramedTag(val raw: UByte) {
+                @DispatchValue
+                val typeId: Int get() = raw.toInt()
+            }
+
+            @DispatchOn(FramedTag::class, bodyLength = LengthPrefix.Varint, bodyLengthMaxBytes = 4)
+            @ProtocolMessage
+            sealed interface Framed {
+                @PacketType(value = 1, wire = 0x01)
+                @ProtocolMessage
+                data class WithPayload<@Payload P>(
+                    val len: UShort,
+                    @LengthFrom("len") val data: P,
+                ) : Framed
+            }
+            """,
+            )
+        val result = compileWithKsp(source)
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+        val codec =
+            result.generatedSources.singleOrNull { it.contains("object FramedCodec") }
+                ?: error("Expected FramedCodec in generated sources:\n${result.generatedSources}")
+        // The encodeFromContext path for payload variants should use inline-prefix (val
+        // _len_body = ... ; writeVariableByteInteger), NOT the scratch-buffer helper.
+        // We assert by checking the wireSizeFromContext call is woven into the encode
+        // statement chain — its presence proves the inline-prefix path took over from
+        // writeVariableByteIntegerLengthPrefixed at this site.
+        assertTrue(
+            codec.contains("FramedWithPayloadCodec.wireSizeFromContext(value, context)"),
+            "Expected sealed dispatcher's encodeFromContext payload variant to call " +
+                "`wireSizeFromContext(value, context)` for inline-prefix sizing. Generated:\n$codec",
+        )
+        // The generated dispatcher should NOT call the scratch helper for the
+        // encodeFromContext payload-variant path. Count actual call sites — the trailing
+        // `(` distinguishes a call from the `import com.ditchoom.buffer.write…Prefixed`
+        // line, which also contains the substring `buffer.writeVariableByteIntegerLengthPrefixed`.
+        // The typed-lambda dispatcher entrypoint still uses scratch since size lambdas
+        // aren't available there, so allow at most 1 call site.
+        val scratchCallSites = "buffer\\.writeVariableByteIntegerLengthPrefixed\\(".toRegex().findAll(codec).count()
+        assertTrue(
+            scratchCallSites <= 1,
+            "Expected encodeFromContext payload variant to bypass scratch helper; found " +
+                "$scratchCallSites `buffer.writeVariableByteIntegerLengthPrefixed(` call sites " +
+                "(max 1 allowed for the typed-lambda entrypoint). Generated:\n$codec",
+        )
+    }
+
+    @Test
     fun `custom variable-size field without wireSizeFunction reports clean KSP error at field`() {
         val source =
             SourceFile.kotlin(

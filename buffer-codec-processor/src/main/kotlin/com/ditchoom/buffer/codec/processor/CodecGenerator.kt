@@ -490,6 +490,27 @@ class CodecGenerator(
                     .superclass(CODEC_CONTEXT_KEY.parameterizedBy(encodeLambdaType))
                     .build(),
             )
+
+            // Size key: a (P) -> Int lambda for the wireSizeFromContext path. Pairs with
+            // EncodeKey so callers that register an encode lambda can also register a
+            // matching size lambda, letting nested-dispatch sites compute exact wire size
+            // without a scratch-buffer measure-and-copy.
+            val sizeLambdaType =
+                LambdaTypeName.get(
+                    parameters =
+                        listOf(
+                            com.squareup.kotlinpoet.ParameterSpec
+                                .unnamed(ClassName("kotlin", "Any").copy(nullable = true)),
+                        ),
+                    returnType = INT,
+                )
+            objectBuilder.addType(
+                TypeSpec
+                    .objectBuilder("${fieldCapitalized}SizeKey")
+                    .addModifiers(KModifier.DATA)
+                    .superclass(CODEC_CONTEXT_KEY.parameterizedBy(sizeLambdaType))
+                    .build(),
+            )
         }
 
         // Context-based decode: reads lambdas from DecodeContext, delegates to Convention 1
@@ -555,6 +576,41 @@ class CodecGenerator(
                         .addMember("%S", "UNCHECKED_CAST")
                         .build(),
                 ).addCode(ctxEncodeBody.build())
+                .build(),
+        )
+
+        // Context-based wireSize: reads size lambdas from EncodeContext, delegates to wireSize
+        val ctxWireSizeBody = CodeBlock.builder()
+        val sizeLambdaArgs = mutableListOf<String>()
+        for (pf in payloadFields) {
+            val fieldCapitalized = capitalizeFirst(pf.name)
+            val localVar = "_size$fieldCapitalized"
+            ctxWireSizeBody.addStatement(
+                "val %L = context[%L] ?: error(%S)",
+                localVar,
+                "${fieldCapitalized}SizeKey",
+                "EncodeContext missing $codecName.${fieldCapitalized}SizeKey. " +
+                    "Register: ctx.with($codecName.${fieldCapitalized}SizeKey) { v -> ... }",
+            )
+            sizeLambdaArgs.add(localVar)
+        }
+        ctxWireSizeBody.addStatement(
+            "return wireSize(value, %L)",
+            sizeLambdaArgs.joinToString(", "),
+        )
+
+        objectBuilder.addFunction(
+            FunSpec
+                .builder("wireSizeFromContext")
+                .addParameter("value", starReturnType)
+                .addParameter("context", ENCODE_CONTEXT)
+                .returns(INT)
+                .addAnnotation(
+                    com.squareup.kotlinpoet.AnnotationSpec
+                        .builder(Suppress::class)
+                        .addMember("%S", "UNCHECKED_CAST")
+                        .build(),
+                ).addCode(ctxWireSizeBody.build())
                 .build(),
         )
 
