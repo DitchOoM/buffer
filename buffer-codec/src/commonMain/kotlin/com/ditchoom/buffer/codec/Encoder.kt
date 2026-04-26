@@ -35,4 +35,19 @@ interface Encoder<in T> {
                 "Generated codecs override this; hand-written encoders may override " +
                 "to enable exact-size allocation in encodeToBuffer.",
         )
+
+    /**
+     * Context-aware wireSize. Generated codecs override this and thread [context]
+     * into nested `wireSize(...)` calls so sealed dispatchers with payload variants
+     * (e.g. MQTT v5 properties carrying user-supplied binary data) can read
+     * registered size lambdas from the context — mirroring how `encode(buffer,
+     * value, context)` flows the same context through the encode path.
+     *
+     * The default delegates to the context-free [wireSize] so hand-written
+     * encoders that ignore context need only override one method.
+     */
+    fun wireSize(
+        value: T,
+        context: EncodeContext,
+    ): Int = wireSize(value)
 }

@@ -12,11 +12,17 @@ import com.squareup.kotlinpoet.CodeBlock
  *
  * Mirrors [addFieldWrite]: skips fields under @WhenRemaining (caller handles the
  * cascade via [emitWhenRemainingWireSize]), wraps @WhenTrue fields in `if (cond)`.
+ *
+ * When [withContext] is true, nested `wireSize(...)` calls are emitted as
+ * `wireSize(value, context)` so a `context: EncodeContext` in scope flows into
+ * payload-aware sealed dispatchers (mirrors the [withContext] plumbing in
+ * [addFieldWrite]).
  */
 internal fun addFieldWireSize(
     code: CodeBlock.Builder,
     field: FieldInfo,
     valueExpr: String,
+    withContext: Boolean = false,
 ) {
     when (val condition = field.condition) {
         is FieldCondition.WhenTrue -> {
@@ -24,7 +30,7 @@ internal fun addFieldWireSize(
             code.beginControlFlow("if (%L)", condExpr)
             code.addStatement(
                 "_size += %L",
-                wireSizeExpression(field.strategy, "$valueExpr!!", field.byteOrderOverride, field.name),
+                wireSizeExpression(field.strategy, "$valueExpr!!", field.byteOrderOverride, field.name, withContext),
             )
             code.endControlFlow()
         }
@@ -35,13 +41,13 @@ internal fun addFieldWireSize(
             // WhenRemaining tail fields through emitWhenRemainingWireSize instead.
             code.addStatement(
                 "_size += %L",
-                wireSizeExpression(field.strategy, "$valueExpr!!", field.byteOrderOverride, field.name),
+                wireSizeExpression(field.strategy, "$valueExpr!!", field.byteOrderOverride, field.name, withContext),
             )
         }
         null -> {
             code.addStatement(
                 "_size += %L",
-                wireSizeExpression(field.strategy, valueExpr, field.byteOrderOverride, field.name),
+                wireSizeExpression(field.strategy, valueExpr, field.byteOrderOverride, field.name, withContext),
             )
         }
     }
@@ -56,13 +62,14 @@ internal fun addFieldWireSize(
 internal fun emitWhenRemainingWireSize(
     code: CodeBlock.Builder,
     fields: List<FieldInfo>,
+    withContext: Boolean = false,
 ) {
     for (field in fields) {
         code.addStatement("val %L = value.%L", field.name, field.name)
         code.beginControlFlow("if (%L != null)", field.name)
         code.addStatement(
             "_size += %L",
-            wireSizeExpression(field.strategy, field.name, field.byteOrderOverride),
+            wireSizeExpression(field.strategy, field.name, field.byteOrderOverride, withContext = withContext),
         )
     }
     repeat(fields.size) { code.endControlFlow() }
@@ -77,18 +84,24 @@ internal fun emitWhenRemainingWireSize(
  *  - LengthPrefixedString: prefix bytes + UTF-8 byte count of value
  *  - RemainingBytes/LengthFromString: UTF-8 byte count (no prefix)
  *  - ValueClass: recurse with `value.<innerProperty>`
- *  - NestedMessage / DiscriminatorField / UseCodec: `Codec.wireSize(value)`
+ *  - NestedMessage / DiscriminatorField / UseCodec: `Codec.wireSize(value[, context])`
  *  - NestedMessageWithLength / Collection / UseCodec(prefixed): prefix + body
  *  - Custom: `descriptor.fixedSize` literal, or `buffer.<wireSizeFn>(value, ...)`
  *  - Payload: error — payload codecs use a separate wireSize<P>(value, payloadSize) signature
+ *
+ * When [withContext] is true, nested codec calls receive a trailing `, context`
+ * argument so a caller-scope `context: EncodeContext` flows through. Caller MUST
+ * have `context` in scope when passing `withContext = true`.
  */
 internal fun wireSizeExpression(
     strategy: FieldReadStrategy,
     valueExpr: String,
     byteOrderOverride: WireOrderOverride? = null,
     fieldName: String = "",
-): String =
-    when (strategy) {
+    withContext: Boolean = false,
+): String {
+    val ctxArg = if (withContext) ", context" else ""
+    return when (strategy) {
         is FieldReadStrategy.PrimitiveField -> "${strategy.wireBytes}"
 
         is FieldReadStrategy.LengthPrefixedStringField ->
@@ -107,29 +120,30 @@ internal fun wireSizeExpression(
                 "$valueExpr.${strategy.innerPropertyName}",
                 byteOrderOverride,
                 fieldName,
+                withContext,
             )
 
-        is FieldReadStrategy.NestedMessageField -> "${strategy.codecName}.wireSize($valueExpr)"
+        is FieldReadStrategy.NestedMessageField -> "${strategy.codecName}.wireSize($valueExpr$ctxArg)"
 
         is FieldReadStrategy.NestedMessageWithLengthField ->
             wireSizeWithLength(
-                bodyExpr = "${strategy.codecName}.wireSize($valueExpr)",
+                bodyExpr = "${strategy.codecName}.wireSize($valueExpr$ctxArg)",
                 lengthKind = strategy.lengthKind,
             )
 
         is FieldReadStrategy.UseCodecField ->
             wireSizeWithLength(
-                bodyExpr = "${strategy.codecName}.wireSize($valueExpr)",
+                bodyExpr = "${strategy.codecName}.wireSize($valueExpr$ctxArg)",
                 lengthKind = strategy.lengthKind,
             )
 
         is FieldReadStrategy.CollectionField ->
             wireSizeWithLength(
-                bodyExpr = "$valueExpr.sumOf { ${strategy.elementCodecName}.wireSize(it) }",
+                bodyExpr = "$valueExpr.sumOf { ${strategy.elementCodecName}.wireSize(it$ctxArg) }",
                 lengthKind = strategy.lengthKind,
             )
 
-        is FieldReadStrategy.DiscriminatorField -> "${strategy.codecName}.wireSize($valueExpr)"
+        is FieldReadStrategy.DiscriminatorField -> "${strategy.codecName}.wireSize($valueExpr$ctxArg)"
 
         is FieldReadStrategy.PayloadField ->
             error("PayloadField wireSize is emitted via the payload codec entry-point path")
@@ -151,6 +165,7 @@ internal fun wireSizeExpression(
             }
         }
     }
+}
 
 /**
  * Size formula for a body framed by an optional length prefix. Mirrors the

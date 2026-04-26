@@ -233,6 +233,7 @@ private val codecStubs =
     interface Encoder<in T> {
         fun encode(buffer: WriteBuffer, value: T)
         fun wireSize(value: T): Int = throw NotImplementedError("wireSize")
+        fun wireSize(value: T, context: EncodeContext): Int = wireSize(value)
     }
     interface Codec<T> : Encoder<T>, Decoder<T> {
         fun decode(buffer: ReadBuffer, context: DecodeContext): T

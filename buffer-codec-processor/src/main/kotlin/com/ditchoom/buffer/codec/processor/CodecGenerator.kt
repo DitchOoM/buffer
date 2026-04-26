@@ -200,8 +200,10 @@ class CodecGenerator(
             }
         }
 
-        // Generate wireSize(value): exact byte count, mirrors encode(buffer, value, context)
-        // body so encodeToBuffer can allocate an exact-size buffer up front.
+        // Generate wireSize(value, context) + wireSize(value) delegate. The context-aware
+        // overload is the work function so nested `Codec.wireSize(nested, context)` calls
+        // can flow context through to payload-bearing sealed dispatchers (e.g. MqttPropertyCodec
+        // with CorrelationData<D> variants reading SizeKey lambdas from the context).
         if (canEncode) {
             val wireSizeBody = CodeBlock.builder()
             wireSizeBody.addStatement("var _size = 0")
@@ -210,17 +212,19 @@ class CodecGenerator(
                 if (field.condition is FieldCondition.WhenRemaining) {
                     wireSizeWhenRemainingTail.add(field)
                 } else {
-                    addFieldWireSize(wireSizeBody, field, "value.${field.name}")
+                    addFieldWireSize(wireSizeBody, field, "value.${field.name}", withContext = true)
                 }
             }
             if (wireSizeWhenRemainingTail.isNotEmpty()) {
-                emitWhenRemainingWireSize(wireSizeBody, wireSizeWhenRemainingTail)
+                emitWhenRemainingWireSize(wireSizeBody, wireSizeWhenRemainingTail, withContext = true)
             }
             wireSizeBody.addStatement("return _size")
 
-            // Sibling `wireSizeBody(value)` excludes the discriminator from the sum.
-            // Pairs with encodeBody — both skip the discriminator field for callers
-            // that write the discriminator (and any framing) themselves.
+            // Sibling `wireSizeBody(value, context)` excludes the discriminator from the sum.
+            // Pairs with encodeBody — both skip the discriminator field for callers that
+            // write the discriminator (and any framing) themselves. `context` defaults to
+            // EncodeContext.Empty so callers without payload-bearing nested codecs need not
+            // construct a context.
             val hasDiscriminatorField = fields.any { it.strategy is FieldReadStrategy.DiscriminatorField }
             if (hasDiscriminatorField) {
                 val nonDiscriminatorFields = fields.filter { it.strategy !is FieldReadStrategy.DiscriminatorField }
@@ -231,18 +235,23 @@ class CodecGenerator(
                     if (field.condition is FieldCondition.WhenRemaining) {
                         bodyWireSizeWhenRemainingTail.add(field)
                     } else {
-                        addFieldWireSize(bodyWireSizeCode, field, "value.${field.name}")
+                        addFieldWireSize(bodyWireSizeCode, field, "value.${field.name}", withContext = true)
                     }
                 }
                 if (bodyWireSizeWhenRemainingTail.isNotEmpty()) {
-                    emitWhenRemainingWireSize(bodyWireSizeCode, bodyWireSizeWhenRemainingTail)
+                    emitWhenRemainingWireSize(bodyWireSizeCode, bodyWireSizeWhenRemainingTail, withContext = true)
                 }
                 bodyWireSizeCode.addStatement("return _size")
                 objectBuilder.addFunction(
                     FunSpec
                         .builder("wireSizeBody")
                         .addParameter("value", classTypeName)
-                        .returns(INT)
+                        .addParameter(
+                            com.squareup.kotlinpoet.ParameterSpec
+                                .builder("context", ENCODE_CONTEXT)
+                                .defaultValue("%T.Empty", ENCODE_CONTEXT)
+                                .build(),
+                        ).returns(INT)
                         .addCode(bodyWireSizeCode.build())
                         .build(),
                 )
@@ -253,8 +262,20 @@ class CodecGenerator(
                     .builder("wireSize")
                     .addModifiers(KModifier.OVERRIDE)
                     .addParameter("value", classTypeName)
+                    .addParameter("context", ENCODE_CONTEXT)
                     .returns(Int::class)
                     .addCode(wireSizeBody.build())
+                    .build(),
+            )
+            // Delegate the context-free Encoder.wireSize(value) to the context-aware variant
+            // with EncodeContext.Empty so encodeToBuffer (which has no context) still works.
+            objectBuilder.addFunction(
+                FunSpec
+                    .builder("wireSize")
+                    .addModifiers(KModifier.OVERRIDE)
+                    .addParameter("value", classTypeName)
+                    .returns(Int::class)
+                    .addStatement("return wireSize(value, %T.Empty)", ENCODE_CONTEXT)
                     .build(),
             )
         }
@@ -455,14 +476,22 @@ class CodecGenerator(
         }
         encodeBuilder.addCode(encodeBody.build())
 
-        // Build wireSize<P>(value, payloadSize: (P) -> Int) — Convention 1 sizing.
+        // Build wireSize<P>(value, context, payloadSize: (P) -> Int) — Convention 1 sizing.
         // Mirrors encode field-by-field; payload field contributes via the payloadSize
-        // lambda the caller supplies (and the matching length-prefix overhead).
+        // lambda the caller supplies (and the matching length-prefix overhead). Context
+        // defaults to EncodeContext.Empty and is threaded into nested codec calls so
+        // payload-bearing sealed dispatchers (e.g. MqttPropertyCodec) can read their
+        // SizeKey lambdas from the same context the caller built for encode.
         val wireSizeBuilder =
             FunSpec
                 .builder("wireSize")
                 .addParameter("value", returnType)
-                .returns(Int::class)
+                .addParameter(
+                    com.squareup.kotlinpoet.ParameterSpec
+                        .builder("context", ENCODE_CONTEXT)
+                        .defaultValue("%T.Empty", ENCODE_CONTEXT)
+                        .build(),
+                ).returns(Int::class)
 
         for (tv in typeVariables) {
             wireSizeBuilder.addTypeVariable(tv)
@@ -492,7 +521,7 @@ class CodecGenerator(
             } else if (field.strategy is FieldReadStrategy.PayloadField) {
                 addPayloadFieldWireSize(wireSizeBody, field)
             } else {
-                addFieldWireSize(wireSizeBody, field, "value.${field.name}")
+                addFieldWireSize(wireSizeBody, field, "value.${field.name}", withContext = true)
             }
         }
         if (wireSizePayloadWhenRemainingTail.isNotEmpty()) {
@@ -500,7 +529,7 @@ class CodecGenerator(
             // standard cascading null check using the non-payload helper, which assumes
             // each tail field has a wireSizeExpression. Payload fields in the tail would
             // need their own cascading helper; not exercised today.
-            emitWhenRemainingWireSize(wireSizeBody, wireSizePayloadWhenRemainingTail)
+            emitWhenRemainingWireSize(wireSizeBody, wireSizePayloadWhenRemainingTail, withContext = true)
         }
         wireSizeBody.addStatement("return _size")
         wireSizeBuilder.addCode(wireSizeBody.build())
@@ -569,7 +598,12 @@ class CodecGenerator(
                 FunSpec
                     .builder("wireSizeBody")
                     .addParameter("value", returnType)
-                    .returns(INT)
+                    .addParameter(
+                        com.squareup.kotlinpoet.ParameterSpec
+                            .builder("context", ENCODE_CONTEXT)
+                            .defaultValue("%T.Empty", ENCODE_CONTEXT)
+                            .build(),
+                    ).returns(INT)
             for (tv in typeVariables) bodyWireSizeBuilder.addTypeVariable(tv)
             for (pf in payloadFields) {
                 val strategy = pf.strategy as FieldReadStrategy.PayloadField
@@ -590,11 +624,11 @@ class CodecGenerator(
                 } else if (field.strategy is FieldReadStrategy.PayloadField) {
                     addPayloadFieldWireSize(bodyWireSizeCode, field)
                 } else {
-                    addFieldWireSize(bodyWireSizeCode, field, "value.${field.name}")
+                    addFieldWireSize(bodyWireSizeCode, field, "value.${field.name}", withContext = true)
                 }
             }
             if (bodyWireSizeWhenRemainingTail.isNotEmpty()) {
-                emitWhenRemainingWireSize(bodyWireSizeCode, bodyWireSizeWhenRemainingTail)
+                emitWhenRemainingWireSize(bodyWireSizeCode, bodyWireSizeWhenRemainingTail, withContext = true)
             }
             bodyWireSizeCode.addStatement("return _size")
             bodyWireSizeBuilder.addCode(bodyWireSizeCode.build())
@@ -750,7 +784,7 @@ class CodecGenerator(
             sizeLambdaArgs.add(localVar)
         }
         ctxWireSizeBody.addStatement(
-            "return wireSize(value, %L)",
+            "return wireSize(value, context, %L)",
             sizeLambdaArgs.joinToString(", "),
         )
 

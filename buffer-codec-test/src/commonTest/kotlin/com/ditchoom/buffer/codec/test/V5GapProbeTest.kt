@@ -1197,8 +1197,10 @@ class V5GapProbeTest {
     }
 
     /**
-     * Sealed-dispatcher payload-variant wireSize must error with a message naming the
-     * variant codec and the `wireSize(value, payloadSize)` overload to call instead.
+     * Sealed-dispatcher payload-variant wireSize without context must error pointing at
+     * the missing SizeKey. The dispatcher delegates payload variants to
+     * `wireSizeFromContext`, which fails when the caller hasn't registered the size
+     * lambda — the error message names the variant codec and the SizeKey to register.
      * Uses [com.ditchoom.buffer.codec.test.protocols.DispatchedFrameCodec], which has a
      * `Data<*>` payload-bearing variant and a non-payload `Control` sibling.
      */
@@ -1221,8 +1223,8 @@ class V5GapProbeTest {
             "expected variant codec name in error: $msg",
         )
         assertTrue(
-            "wireSize(value, payloadSize)" in msg,
-            "expected payload-overload reference in error: $msg",
+            "SizeKey" in msg,
+            "expected SizeKey reference in error so caller knows what to register: $msg",
         )
     }
 }

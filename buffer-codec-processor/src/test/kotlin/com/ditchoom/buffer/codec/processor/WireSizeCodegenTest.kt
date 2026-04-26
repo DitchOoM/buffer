@@ -97,7 +97,7 @@ class WireSizeCodegenTest {
     }
 
     @Test
-    fun `sealed dispatcher emits when-branch wireSize with error for payload variants`() {
+    fun `sealed dispatcher emits when-branch wireSize that delegates payload variants to wireSizeFromContext`() {
         val source =
             SourceFile.kotlin(
                 "Test.kt",
@@ -134,28 +134,29 @@ class WireSizeCodegenTest {
             result.generatedSources.singleOrNull { it.contains("object FrameCodec") }
                 ?: error("Expected FrameCodec dispatcher in generated sources:\n${result.generatedSources}")
 
-        // Dispatcher emits a `when (value) { is X -> ... }` wireSize body.
+        // Dispatcher emits a `when (value) { is X -> ... }` wireSize body. The work
+        // function takes a `context: EncodeContext` so payload-bearing nested codecs can
+        // resolve SizeKey lambdas; a sibling delegate handles `wireSize(value)`.
         assertTrue(
-            codec.contains("override fun wireSize(`value`: Frame): Int = when (value) {") ||
-                codec.contains("override fun wireSize(value: Frame): Int = when (value) {"),
-            "Expected `override fun wireSize(value: Frame): Int = when (value) {`. Generated:\n$codec",
+            codec.contains("override fun wireSize(`value`: Frame, context: EncodeContext): Int = when (value) {") ||
+                codec.contains("override fun wireSize(value: Frame, context: EncodeContext): Int = when (value) {"),
+            "Expected `override fun wireSize(value: Frame, context: EncodeContext): Int = when (value) {`. Generated:\n$codec",
         )
-        // Non-payload variant delegates to the variant codec's wireSize. The dispatcher
-        // also adds the discriminator's own wireSize, so the line shape is
-        // `is Frame.Plain -> <DiscCodec>.wireSize(...) + FramePlainCodec.wireSize(value)`.
+        // Non-payload variant delegates to the variant codec's wireSize(value, context).
+        // The dispatcher also adds the discriminator's own wireSize, so the line shape is
+        // `is Frame.Plain -> <DiscCodec>.wireSize(...) + FramePlainCodec.wireSize(value, context)`.
         assertTrue(
             codec.contains("is Frame.Plain ->") &&
-                codec.contains("FramePlainCodec.wireSize(value)"),
-            "Expected non-payload variant `is Frame.Plain -> ... FramePlainCodec.wireSize(value)`. Generated:\n$codec",
+                codec.contains("FramePlainCodec.wireSize(value, context)"),
+            "Expected non-payload variant `is Frame.Plain -> ... FramePlainCodec.wireSize(value, context)`. Generated:\n$codec",
         )
-        // Payload variant emits an error pointing at the payload-overload.
+        // Payload variant delegates to wireSizeFromContext, which reads SizeKey from
+        // the supplied context. Payload variants no longer throw — context flow lets
+        // the dispatcher size them without the caller hand-rolling the variant size.
         assertTrue(
-            codec.contains("is Frame.WithPayload<*> -> error("),
-            "Expected `is Frame.WithPayload<*> -> error(...)` branch. Generated:\n$codec",
-        )
-        assertTrue(
-            codec.contains("FrameWithPayloadCodec.wireSize(value, payloadSize)"),
-            "Expected error message to reference `FrameWithPayloadCodec.wireSize(value, payloadSize)`. Generated:\n$codec",
+            codec.contains("is Frame.WithPayload<*> ->") &&
+                codec.contains("FrameWithPayloadCodec.wireSizeFromContext(value, context)"),
+            "Expected `is Frame.WithPayload<*> -> ... wireSizeFromContext(value, context)` branch. Generated:\n$codec",
         )
     }
 
@@ -303,7 +304,7 @@ class WireSizeCodegenTest {
             "Standard encode must write the discriminator field. Generated:\n$codec",
         )
         assertTrue(
-            codec.contains("TagCodec.wireSize(value.header)"),
+            codec.contains("TagCodec.wireSize(value.header, context)"),
             "Standard wireSize must include the discriminator size. Generated:\n$codec",
         )
 
@@ -331,7 +332,7 @@ class WireSizeCodegenTest {
                 .min()
         val bodySlice = afterDecl.substring(0, bodyEnd)
         assertTrue(
-            "TagCodec.wireSize(value.header)" !in bodySlice,
+            "TagCodec.wireSize(value.header, context)" !in bodySlice,
             "wireSizeBody must skip the discriminator field. Body slice:\n$bodySlice",
         )
     }

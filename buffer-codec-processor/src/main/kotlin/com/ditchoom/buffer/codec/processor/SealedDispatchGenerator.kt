@@ -372,7 +372,7 @@ class SealedDispatchGenerator(
                     code = encodeCtxBody,
                     info = dispatchOnInfo,
                     encodeStmt = "${v.subclass.codecName()}.encode(buffer, value, context)",
-                    bodySizeExpr = "${v.subclass.codecName()}.wireSize(value)",
+                    bodySizeExpr = "${v.subclass.codecName()}.wireSize(value, context)",
                 )
                 encodeCtxBody.endControlFlow()
             }
@@ -401,13 +401,15 @@ class SealedDispatchGenerator(
                 )
             }
 
-            // wireSize(value): exact byte count, mirroring encode's discriminator + body shape
+            // wireSize(value, context): exact byte count, mirroring encode's discriminator + body
+            // shape. Context flows into each variant's wireSize so nested payload-bearing codecs
+            // can resolve SizeKey lambdas from it. wireSize(value) delegates with EncodeContext.Empty.
             val wireSizeBody = CodeBlock.builder().beginControlFlow("return when (value)")
             for (v in variants) {
                 val subTypeName = v.subclass.toPoetClassName()
                 val subCodecName = v.subclass.codecName()
                 val discSize = discriminatorWireSizeExpr(v.wire, dispatchOnInfo)
-                val variantBody = "$subCodecName.wireSize(value)"
+                val variantBody = "$subCodecName.wireSize(value, context)"
                 val wrapped = wrapBodyLengthSizeExpr(variantBody, dispatchOnInfo)
                 val term = if (v.selfEncodesDiscriminator(variantsHandlingDiscriminator)) wrapped else "$discSize + $wrapped"
                 wireSizeBody.addStatement("is %T -> %L", subTypeName, term)
@@ -418,8 +420,18 @@ class SealedDispatchGenerator(
                     .builder("wireSize")
                     .addModifiers(KModifier.OVERRIDE)
                     .addParameter("value", interfaceTypeName)
+                    .addParameter("context", ENCODE_CONTEXT)
                     .returns(INT)
                     .addCode(wireSizeBody.build())
+                    .build(),
+            )
+            functions.add(
+                FunSpec
+                    .builder("wireSize")
+                    .addModifiers(KModifier.OVERRIDE)
+                    .addParameter("value", interfaceTypeName)
+                    .returns(INT)
+                    .addStatement("return wireSize(value, %T.Empty)", ENCODE_CONTEXT)
                     .build(),
             )
         }
@@ -736,7 +748,7 @@ class SealedDispatchGenerator(
                         code = encodeCtxBody,
                         info = dispatchOnInfo,
                         encodeStmt = "$subCodecName.encode(buffer, value, context)",
-                        bodySizeExpr = "$subCodecName.wireSize(value)",
+                        bodySizeExpr = "$subCodecName.wireSize(value, context)",
                     )
                     encodeCtxBody.endControlFlow()
                 }
@@ -766,9 +778,13 @@ class SealedDispatchGenerator(
                 )
             }
 
-            // wireSize(value): exact byte count for non-payload variants. Payload variants
-            // require a payloadSize lambda the dispatcher can't supply; the variant itself
-            // (e.g. Publish<P>) must override its own serialize/wireSize.
+            // wireSize(value, context): exact byte count. Non-payload variants delegate to
+            // their codec's wireSize(value, context). Payload variants delegate to
+            // wireSizeFromContext, which reads each payload field's SizeKey lambda from the
+            // provided context — making dispatcher-level size computation work for variants
+            // like CorrelationData<D> without the caller hand-rolling the variant size.
+            // wireSize(value) delegates with EncodeContext.Empty; payload variants will
+            // throw inside wireSizeFromContext if their SizeKey isn't registered.
             val wireSizeBody = CodeBlock.builder().beginControlFlow("return when (value)")
             for (v in variants) {
                 val info = payloadBySubclass[v.subclass.qualifiedName?.asString()]
@@ -778,16 +794,12 @@ class SealedDispatchGenerator(
                 val skipDisc = v.selfEncodesDiscriminator(variantsHandlingDiscriminator)
                 if (info != null && info.payloadFields.isNotEmpty()) {
                     val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
-                    val variantSimple = v.subclass.simpleName.asString()
-                    wireSizeBody.addStatement(
-                        "is %T -> error(%S)",
-                        starType,
-                        "$variantSimple.wireSize requires a payloadSize lambda; " +
-                            "the variant must compute its own size via serialize() or " +
-                            "$subCodecName.wireSize(value, payloadSize).",
-                    )
+                    val variantBody = "$subCodecName.wireSizeFromContext(value, context)"
+                    val wrapped = wrapBodyLengthSizeExpr(variantBody, dispatchOnInfo)
+                    val term = if (skipDisc) wrapped else "$discSize + $wrapped"
+                    wireSizeBody.addStatement("is %T -> %L", starType, term)
                 } else {
-                    val variantBody = "$subCodecName.wireSize(value)"
+                    val variantBody = "$subCodecName.wireSize(value, context)"
                     val wrapped = wrapBodyLengthSizeExpr(variantBody, dispatchOnInfo)
                     val term = if (skipDisc) wrapped else "$discSize + $wrapped"
                     wireSizeBody.addStatement("is %T -> %L", subTypeName, term)
@@ -799,8 +811,18 @@ class SealedDispatchGenerator(
                     .builder("wireSize")
                     .addModifiers(KModifier.OVERRIDE)
                     .addParameter("value", interfaceTypeName)
+                    .addParameter("context", ENCODE_CONTEXT)
                     .returns(INT)
                     .addCode(wireSizeBody.build())
+                    .build(),
+            )
+            contextFunctions.add(
+                FunSpec
+                    .builder("wireSize")
+                    .addModifiers(KModifier.OVERRIDE)
+                    .addParameter("value", interfaceTypeName)
+                    .returns(INT)
+                    .addStatement("return wireSize(value, %T.Empty)", ENCODE_CONTEXT)
                     .build(),
             )
         }
