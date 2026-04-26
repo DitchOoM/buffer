@@ -101,10 +101,19 @@ fun variableByteMax(maxBytes: Int): Int {
 }
 
 /**
- * Writes a variable-byte-integer length prefix followed by [encode]'s output, with
- * zero-allocation patch-up: reserves [maxBytes] bytes, encodes the body, measures the
- * actual length, writes the canonical (smallest-width) VBI prefix, and shifts the body
- * left if the canonical width is shorter than the reservation.
+ * Writes a variable-byte-integer length prefix followed by [encode]'s output.
+ *
+ * Encodes the body into a scratch buffer first, then writes the canonical VBI prefix
+ * and copies the scratch contents into the host buffer. The scratch sizing follows the
+ * host's remaining bytes (with a small floor) — the host's remaining bytes equal
+ * `actualVbiWidth + bodyLen` for tightly-sized callers like mqtt's `packetSize()`-based
+ * serialize, so body always fits in `remaining` bytes.
+ *
+ * The scratch indirection avoids the otherwise-tempting "reserve [maxBytes] in place,
+ * encode body, shift" optimization, which would require the host buffer to have
+ * `maxBytes + bodyLen` free instead of `actualVbiWidth + bodyLen`. That extra `maxBytes
+ * - actualVbiWidth` overhead conflicts with callers that size buffers to exact wire
+ * length.
  *
  * `0` for [maxBytes] is treated as `4` (the spec cap on VBI).
  *
@@ -118,31 +127,16 @@ fun WriteBuffer.writeVariableByteIntegerLengthPrefixed(
 ) {
     val cap = if (maxBytes == 0) 4 else maxBytes
     require(cap in 1..4) { "maxBytes must be 0..4, got $maxBytes" }
-    // The buffer must be readable (PlatformBuffer) to support the in-place shift.
-    val pb =
-        this as? PlatformBuffer
-            ?: error(
-                "writeVariableByteIntegerLengthPrefixed requires a PlatformBuffer (read+write). " +
-                    "Got ${this::class.simpleName}.",
-            )
-    val pos = pb.position()
-    repeat(cap) { pb.writeByte(0.toByte()) }
-    encode(pb)
-    val end = pb.position()
-    val len = end - pos - cap
+    val scratchSize = remaining().coerceAtLeast(16)
+    val scratch = BufferFactory.Default.allocate(scratchSize, byteOrder)
+    encode(scratch)
+    scratch.resetForRead()
+    val len = scratch.remaining()
     val maxVal = variableByteMax(cap)
     require(len in 0..maxVal) {
         val field = if (fieldName.isEmpty()) "" else "field '$fieldName' "
         "${field}encoded length $len exceeds maxBytes=$cap (max value $maxVal)"
     }
-    val vbi = variableByteSize(len).toInt()
-    if (vbi < cap) {
-        // Shift body left to close the gap left by the reservation.
-        for (i in 0 until len) {
-            pb[pos + vbi + i] = pb[pos + cap + i]
-        }
-    }
-    pb.position(pos)
-    pb.writeVariableByteInteger(len)
-    pb.position(pos + vbi + len)
+    writeVariableByteInteger(len)
+    if (len > 0) write(scratch)
 }
