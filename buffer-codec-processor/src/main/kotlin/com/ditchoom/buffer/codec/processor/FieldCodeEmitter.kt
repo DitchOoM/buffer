@@ -164,10 +164,11 @@ internal fun writeExpression(
             when (val kind = strategy.kind) {
                 is LengthPrefixKind.Short -> "buffer.writeLengthPrefixedUtf8String($valueExpr)"
                 is LengthPrefixKind.Varint ->
-                    emitVarintLengthPrefixedWrite(
-                        kind = kind,
+                    emitInlineVarintLengthPrefixed(
                         fieldName = fieldName,
+                        bodySizeExpr = "$valueExpr.utf8Length()",
                         encodeBody = "buffer.writeString($valueExpr)",
+                        maxBytes = kind.maxBytes,
                     )
                 else -> {
                     val cfg = fixedPrefixConfigOrError(kind)
@@ -250,10 +251,11 @@ private fun writeCollectionExpression(
             val encodeBody = "$valueExpr.forEach { $codecName.encode(buffer, it$ctxArg) }"
             when (val kind = lk.kind) {
                 is LengthPrefixKind.Varint ->
-                    emitVarintLengthPrefixedWrite(
-                        kind = kind,
+                    emitInlineVarintLengthPrefixed(
                         fieldName = fieldName,
+                        bodySizeExpr = "$valueExpr.sumOf { $codecName.wireSize(it) }",
                         encodeBody = encodeBody,
+                        maxBytes = kind.maxBytes,
                     )
                 else ->
                     fixedLengthPrefixedEncodeRun(
@@ -325,10 +327,11 @@ private fun writeNestedWithLengthExpression(
         is LengthKind.Prefixed ->
             when (val kind = lk.kind) {
                 is LengthPrefixKind.Varint ->
-                    emitVarintLengthPrefixedWrite(
-                        kind = kind,
+                    emitInlineVarintLengthPrefixed(
                         fieldName = fieldName,
+                        bodySizeExpr = "$codec.wireSize($valueExpr)",
                         encodeBody = "$codec.encode(buffer, $valueExpr$ctxArg)",
+                        maxBytes = kind.maxBytes,
                     )
                 else ->
                     fixedLengthPrefixedEncodeRun(
@@ -357,10 +360,11 @@ private fun writeUseCodecExpression(
         is LengthKind.Prefixed ->
             when (val kind = lk.kind) {
                 is LengthPrefixKind.Varint ->
-                    emitVarintLengthPrefixedWrite(
-                        kind = kind,
+                    emitInlineVarintLengthPrefixed(
                         fieldName = fieldName,
+                        bodySizeExpr = "$codec.wireSize($valueExpr)",
                         encodeBody = "$codec.encode(buffer, $valueExpr$ctxArg)",
+                        maxBytes = kind.maxBytes,
                     )
                 else ->
                     fixedLengthPrefixedEncodeRun(

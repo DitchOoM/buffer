@@ -274,6 +274,7 @@ class SealedDispatchGenerator(
         // generated dispatcher file so the call sites resolve.
         if (dispatchOnInfo?.bodyFraming is BodyFraming.WithLength) {
             fileBuilder.addImport("com.ditchoom.buffer", "readVariableByteInteger")
+            fileBuilder.addImport("com.ditchoom.buffer", "writeVariableByteInteger")
             fileBuilder.addImport("com.ditchoom.buffer", "writeVariableByteIntegerLengthPrefixed")
         }
         fileBuilder.build().writeTo(codeGenerator, dependencies)
@@ -371,6 +372,7 @@ class SealedDispatchGenerator(
                     code = encodeCtxBody,
                     info = dispatchOnInfo,
                     encodeStmt = "${v.subclass.codecName()}.encode(buffer, value, context)",
+                    bodySizeExpr = "${v.subclass.codecName()}.wireSize(value)",
                 )
                 encodeCtxBody.endControlFlow()
             }
@@ -628,6 +630,7 @@ class SealedDispatchGenerator(
                     code = encodeBody,
                     info = dispatchOnInfo,
                     encodeStmt = variantEncodeStmt,
+                    bodySizeExpr = "$subCodecName.wireSize(value)",
                 )
                 encodeBody.endControlFlow()
             }
@@ -732,6 +735,7 @@ class SealedDispatchGenerator(
                         code = encodeCtxBody,
                         info = dispatchOnInfo,
                         encodeStmt = "$subCodecName.encode(buffer, value, context)",
+                        bodySizeExpr = "$subCodecName.wireSize(value)",
                     )
                     encodeCtxBody.endControlFlow()
                 }
@@ -1070,11 +1074,17 @@ class SealedDispatchGenerator(
     /**
      * Wraps an encode statement in the body-length framing helper when [info] requests it.
      * For non-framed dispatch (or when [info] is null), emits [encodeStmt] verbatim.
+     *
+     * When [bodySizeExpr] is provided AND the framing is Varint, emits the inline-prefix
+     * path (compute size, write VBI, encode body directly) — skips the scratch buffer.
+     * When null (e.g. typed-lambda payload variants where size lambdas aren't available),
+     * falls back to the scratch-buffer helper.
      */
     internal fun emitBodyLengthEncodeWrap(
         code: CodeBlock.Builder,
         info: DispatchOnInfo?,
         encodeStmt: String,
+        bodySizeExpr: String? = null,
     ) {
         val framing = info?.bodyFraming as? BodyFraming.WithLength
         if (framing == null) {
@@ -1083,12 +1093,28 @@ class SealedDispatchGenerator(
         }
         when (val kind = framing.kind) {
             is LengthPrefixKind.Varint ->
-                code.addStatement(
-                    "buffer.writeVariableByteIntegerLengthPrefixed(maxBytes = %L, fieldName = %S) { buffer -> %L }",
-                    kind.maxBytes,
-                    "body",
-                    encodeStmt,
-                )
+                if (bodySizeExpr != null) {
+                    code.addStatement("val _len_body = %L", bodySizeExpr)
+                    if (kind.maxBytes < 4) {
+                        code.addStatement(
+                            "require(_len_body in 0..com.ditchoom.buffer.variableByteMax(%L)) " +
+                                "{ %P }",
+                            kind.maxBytes,
+                            "field 'body' encoded length \$_len_body exceeds " +
+                                "maxBytes=${kind.maxBytes} (max value " +
+                                "\${com.ditchoom.buffer.variableByteMax(${kind.maxBytes})})",
+                        )
+                    }
+                    code.addStatement("buffer.writeVariableByteInteger(_len_body)")
+                    code.addStatement(encodeStmt)
+                } else {
+                    code.addStatement(
+                        "buffer.writeVariableByteIntegerLengthPrefixed(maxBytes = %L, fieldName = %S) { buffer -> %L }",
+                        kind.maxBytes,
+                        "body",
+                        encodeStmt,
+                    )
+                }
             else -> {
                 val cfg = fixedPrefixConfigOrError(kind)
                 code.addStatement("val _pos_body = buffer.position()")

@@ -78,6 +78,41 @@ internal fun emitVarintLengthPrefixedWrite(
     "buffer.writeVariableByteIntegerLengthPrefixed(maxBytes = ${kind.maxBytes}, fieldName = \"$fieldName\") " +
         "{ buffer -> $encodeBody }"
 
+/**
+ * Emits a Varint-length-prefixed write where the body size is known up front via
+ * [bodySizeExpr]. Skips the scratch-buffer dance of [emitVarintLengthPrefixedWrite]:
+ * computes the size, validates the maxBytes cap, writes the VBI prefix, then
+ * encodes the body directly into the host buffer.
+ *
+ * Returns a `run { ... }` block as a single expression so call sites can keep
+ * using `addStatement("%L", ...)`. The `_l_<fieldName>` local name is suffixed
+ * with the field name to avoid collisions when multiple inline-varint blocks
+ * appear in the same enclosing scope.
+ *
+ * The `require` check preserves the maxBytes cap behavior of the scratch-buffer
+ * helper (e.g. MQTT v5 property-length sections cap at 4-byte VBIs; tighter caps
+ * apply when a protocol restricts the range further). Without this check, a body
+ * exceeding the cap would silently encode as a wider VBI on the wire.
+ */
+internal fun emitInlineVarintLengthPrefixed(
+    fieldName: String,
+    bodySizeExpr: String,
+    encodeBody: String,
+    maxBytes: Int = 4,
+): String {
+    val suffix = if (fieldName.isEmpty()) "" else "_$fieldName"
+    val cap = if (maxBytes == 0) 4 else maxBytes
+    val capCheck =
+        if (cap < 4) {
+            "require(_l$suffix in 0..com.ditchoom.buffer.variableByteMax($cap)) { " +
+                "\"field '$fieldName' encoded length \$_l$suffix exceeds maxBytes=$cap " +
+                "(max value \${com.ditchoom.buffer.variableByteMax($cap)})\" }; "
+        } else {
+            ""
+        }
+    return "run { val _l$suffix = $bodySizeExpr; ${capCheck}buffer.writeVariableByteInteger(_l$suffix); $encodeBody }"
+}
+
 internal fun addPayloadRawRead(
     code: CodeBlock.Builder,
     field: FieldInfo,
@@ -206,20 +241,27 @@ internal fun addPayloadEncodeBody(
 ) {
     val valueExpr = if (field.isNullable && field.condition != null) "value.${field.name}!!" else "value.${field.name}"
     val encodeFn = "encode${capitalizeFirst(field.name)}"
+    val sizeFn = "size${capitalizeFirst(field.name)}"
     val suffix = "_${field.name}"
 
     when (val lk = strategy.lengthKind) {
         is LengthKind.Prefixed ->
             when (val kind = lk.kind) {
-                is LengthPrefixKind.Varint ->
-                    code.addStatement(
-                        "%L",
-                        emitVarintLengthPrefixedWrite(
-                            kind = kind,
-                            fieldName = field.name,
-                            encodeBody = "$encodeFn(buffer, $valueExpr)",
-                        ),
-                    )
+                is LengthPrefixKind.Varint -> {
+                    code.addStatement("val _l$suffix = %L($valueExpr)", sizeFn)
+                    if (kind.maxBytes < 4) {
+                        code.addStatement(
+                            "require(_l$suffix in 0..com.ditchoom.buffer.variableByteMax(%L)) " +
+                                "{ %P }",
+                            kind.maxBytes,
+                            "field '${field.name}' encoded length \$_l$suffix exceeds " +
+                                "maxBytes=${kind.maxBytes} (max value " +
+                                "\${com.ditchoom.buffer.variableByteMax(${kind.maxBytes})})",
+                        )
+                    }
+                    code.addStatement("buffer.writeVariableByteInteger(_l$suffix)")
+                    code.addStatement("%L(buffer, %L)", encodeFn, valueExpr)
+                }
                 else -> {
                     val cfg = fixedPrefixConfigOrError(kind)
                     code.addStatement("val _pos%L = buffer.position()", suffix)
