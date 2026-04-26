@@ -144,11 +144,10 @@ internal fun wireSizeExpression(
                     "${sizeFn.functionName}($allArgs)"
                 }
                 d.fixedSize >= 0 -> "${d.fixedSize}"
-                else ->
-                    error(
-                        "Custom field '$fieldName' has variable wire size but no wireSizeFunction. " +
-                            "Set CustomFieldDescriptor.wireSizeFunction or .fixedSize.",
-                    )
+                // Unreachable: FieldAnalyzer rejects this combination via KSPLogger.error
+                // before code generation runs. The branch exists so wireSizeExpression's
+                // when remains exhaustive for future strategy additions.
+                else -> "0 /* unreachable: variable Custom requires wireSizeFunction */"
             }
         }
     }

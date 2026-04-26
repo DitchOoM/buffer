@@ -693,15 +693,29 @@ class FieldAnalyzer(
             if (provider != null) {
                 val args = annotation.arguments.associate { it.name!!.asString() to it.value }
                 val ctx = FieldContext(fieldName, typeName, args)
-                return try {
-                    FieldReadStrategy.Custom(provider.describe(ctx))
-                } catch (e: Exception) {
+                val descriptor =
+                    try {
+                        provider.describe(ctx)
+                    } catch (e: Exception) {
+                        logger.error(
+                            "SPI provider for @${fqn.substringAfterLast('.')} failed on field '$fieldName': ${e.message}",
+                            param,
+                        )
+                        return null
+                    }
+                if (descriptor.fixedSize < 0 && descriptor.wireSizeFunction == null) {
                     logger.error(
-                        "SPI provider for @${fqn.substringAfterLast('.')} failed on field '$fieldName': ${e.message}",
+                        "Custom field '$fieldName' (@${fqn.substringAfterLast('.')}) has variable wire size " +
+                            "but no wireSizeFunction. The codec processor needs one of: " +
+                            "(a) CustomFieldDescriptor.wireSizeFunction = FunctionRef(\"pkg\", \"sizeOfFoo\") " +
+                            "pointing at a top-level fun sizeOfFoo(value, ...contextFields): Int, or " +
+                            "(b) CustomFieldDescriptor.fixedSize = N for a constant byte width. " +
+                            "Without one, the generated Encoder.wireSize cannot size this field.",
                         param,
                     )
-                    null
+                    return null
                 }
+                return FieldReadStrategy.Custom(descriptor)
             }
         }
 

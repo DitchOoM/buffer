@@ -31,9 +31,24 @@ import com.ditchoom.buffer.codec.test.protocols.ProbeVarintNested
 import com.ditchoom.buffer.codec.test.protocols.ProbeVarintNestedCodec
 import com.ditchoom.buffer.codec.test.protocols.ProbeVarintString
 import com.ditchoom.buffer.codec.test.protocols.ProbeVarintStringCodec
+import com.ditchoom.buffer.codec.test.protocols.ProbeBytePrefixedPayload
+import com.ditchoom.buffer.codec.test.protocols.ProbeBytePrefixedPayloadCodec
+import com.ditchoom.buffer.codec.test.protocols.ProbeIntPrefixedCollection
+import com.ditchoom.buffer.codec.test.protocols.ProbeIntPrefixedCollectionCodec
+import com.ditchoom.buffer.codec.test.protocols.ProbeIntPrefixedNested
+import com.ditchoom.buffer.codec.test.protocols.ProbeIntPrefixedNestedCodec
+import com.ditchoom.buffer.codec.test.protocols.ProbeIntPrefixedPayload
+import com.ditchoom.buffer.codec.test.protocols.ProbeIntPrefixedPayloadCodec
+import com.ditchoom.buffer.codec.test.protocols.ProbeLengthFromString
+import com.ditchoom.buffer.codec.test.protocols.ProbeLengthFromStringCodec
+import com.ditchoom.buffer.codec.test.protocols.ProbeVarintMax1Overflow
+import com.ditchoom.buffer.codec.test.protocols.ProbeVarintMax1OverflowCodec
+import com.ditchoom.buffer.codec.test.protocols.ProbeVarintMax3Overflow
+import com.ditchoom.buffer.codec.test.protocols.ProbeVarintMax3OverflowCodec
 import com.ditchoom.buffer.codec.test.protocols.ProbeZeroCopyEncode
 import com.ditchoom.buffer.codec.test.protocols.ProbeZeroCopyEncodeCodec
 import com.ditchoom.buffer.codec.test.protocols.crosspkg.CrossPkgEntry
+import com.ditchoom.buffer.codec.testRoundTrip
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.readVariableByteInteger
 import com.ditchoom.buffer.stream.PeekResult
@@ -1026,5 +1041,188 @@ class V5GapProbeTest {
         retained.resetForRead()
         assertEquals(0x55AA55AA, retained.readInt())
         assertEquals(-0x55aa55ab, retained.readInt())
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────────
+    // wireSize codegen coverage tests — exercises gaps in the wireSize emit path.
+    //
+    // testRoundTrip(...) calls assertEquals(wireSize(value), encoded.remaining()), so
+    // round-tripping any fixture through it doubles as a wireSize correctness check.
+    // ─────────────────────────────────────────────────────────────────────────────────
+
+    /** Varint maxBytes=1 cap-overflow — 128-byte body throws, 127-byte body encodes. */
+    @Test
+    fun varintMax1OverflowThrowsAtEncode() {
+        val tooLarge =
+            ProbeVarintMax1Overflow(
+                packetId = 1u,
+                body = ProbeVarLenBody(data = "x".repeat(128)),
+            )
+        val buffer = BufferFactory.Default.allocate(512, ByteOrder.BIG_ENDIAN)
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                ProbeVarintMax1OverflowCodec.encode(buffer, tooLarge)
+            }
+        val msg = ex.message.orEmpty()
+        assertTrue("body" in msg, "expected field name in error: $msg")
+        assertTrue("128" in msg, "expected offending length in error: $msg")
+
+        // 127-byte body fits in 1-byte VBI cap.
+        val justFits =
+            ProbeVarintMax1Overflow(
+                packetId = 2u,
+                body = ProbeVarLenBody(data = "x".repeat(127)),
+            )
+        val ok = BufferFactory.Default.allocate(512, ByteOrder.BIG_ENDIAN)
+        ProbeVarintMax1OverflowCodec.encode(ok, justFits)
+        ok.resetForRead()
+        assertEquals(justFits, ProbeVarintMax1OverflowCodec.decode(ok))
+    }
+
+    /** Varint maxBytes=3 cap-overflow — 2097152-byte body throws, 2097151-byte body encodes. */
+    @Test
+    fun varintMax3OverflowThrowsAtEncode() {
+        val tooLarge =
+            ProbeVarintMax3Overflow(
+                packetId = 1u,
+                body = ProbeVarLenBody(data = CharArray(2097152) { 'x' }.concatToString()),
+            )
+        val buffer = BufferFactory.Default.allocate(2_500_000, ByteOrder.BIG_ENDIAN)
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                ProbeVarintMax3OverflowCodec.encode(buffer, tooLarge)
+            }
+        val msg = ex.message.orEmpty()
+        assertTrue("body" in msg, "expected field name in error: $msg")
+        assertTrue("2097152" in msg, "expected offending length in error: $msg")
+
+        // 2097151-byte body fits in 3-byte VBI cap.
+        val justFits =
+            ProbeVarintMax3Overflow(
+                packetId = 2u,
+                body = ProbeVarLenBody(data = CharArray(2097151) { 'x' }.concatToString()),
+            )
+        val ok = BufferFactory.Default.allocate(2_500_000, ByteOrder.BIG_ENDIAN)
+        ProbeVarintMax3OverflowCodec.encode(ok, justFits)
+        ok.resetForRead()
+        assertEquals(justFits, ProbeVarintMax3OverflowCodec.decode(ok))
+    }
+
+    /** `@LengthPrefixed(LengthPrefix.Int)` fixed 4-byte prefix on a NestedWithLength field. */
+    @Test
+    fun intPrefixedNestedRoundTrip() {
+        val original =
+            ProbeIntPrefixedNested(
+                packetId = 0xBEEFu,
+                body = ProbeVarLenBody(data = "the-body"),
+            )
+        val decoded = ProbeIntPrefixedNestedCodec.testRoundTrip(original)
+        assertEquals(original, decoded)
+    }
+
+    /** `@LengthPrefixed(LengthPrefix.Int)` fixed 4-byte prefix on a Collection-bearing nested message. */
+    @Test
+    fun intPrefixedCollectionRoundTrip() {
+        val original =
+            ProbeIntPrefixedCollection(
+                packetId = 0x1234u,
+                bag =
+                    com.ditchoom.buffer.codec.test.protocols.ProbeVarintListBag(
+                        items =
+                            listOf(
+                                ProbeProp.UShortProp(0xAAAAu),
+                                ProbeProp.BoolProp(0x01u),
+                            ),
+                    ),
+            )
+        val decoded = ProbeIntPrefixedCollectionCodec.testRoundTrip(original)
+        assertEquals(original.packetId, decoded.packetId)
+        assertEquals(2, decoded.bag.items.size)
+        assertEquals(0xAAAAu.toUShort(), (decoded.bag.items[0] as ProbeProp.UShortProp).value)
+        assertEquals(0x01u.toUByte(), (decoded.bag.items[1] as ProbeProp.BoolProp).raw)
+    }
+
+    /** `@Payload P` field with Byte-prefixed length — wireSize formula: tag(1) + 1 + sizePayload(payload). */
+    @Test
+    fun bytePrefixedPayloadRoundTrip() {
+        val original = ProbeBytePrefixedPayload<String>(tag = 0xAAu, payload = "hi")
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        ProbeBytePrefixedPayloadCodec.encode<String>(
+            buffer,
+            original,
+            encodePayload = { buf, s -> buf.writeString(s) },
+        )
+        val written = buffer.position()
+        val sized = ProbeBytePrefixedPayloadCodec.wireSize<String>(original) { it.length }
+        assertEquals(written, sized, "wireSize must match encoded byte count")
+        buffer.resetForRead()
+        val decoded =
+            ProbeBytePrefixedPayloadCodec.decode<String>(
+                buffer,
+                decodePayload = { reader -> reader.readString(reader.remaining()) },
+            )
+        assertEquals(original.tag, decoded.tag)
+        assertEquals(original.payload, decoded.payload)
+    }
+
+    /** `@Payload P` field with Int-prefixed length — wireSize formula: tag(1) + 4 + sizePayload(payload). */
+    @Test
+    fun intPrefixedPayloadRoundTrip() {
+        val original = ProbeIntPrefixedPayload<String>(tag = 0x55u, payload = "intpayload")
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        ProbeIntPrefixedPayloadCodec.encode<String>(
+            buffer,
+            original,
+            encodePayload = { buf, s -> buf.writeString(s) },
+        )
+        val written = buffer.position()
+        val sized = ProbeIntPrefixedPayloadCodec.wireSize<String>(original) { it.length }
+        assertEquals(written, sized, "wireSize must match encoded byte count")
+        buffer.resetForRead()
+        val decoded =
+            ProbeIntPrefixedPayloadCodec.decode<String>(
+                buffer,
+                decodePayload = { reader -> reader.readString(reader.remaining()) },
+            )
+        assertEquals(original.tag, decoded.tag)
+        assertEquals(original.payload, decoded.payload)
+    }
+
+    /** `@LengthFrom("nameLen")` on a String field. */
+    @Test
+    fun lengthFromStringRoundTrip() {
+        val original = ProbeLengthFromString(nameLen = 5u, name = "hello")
+        val decoded = ProbeLengthFromStringCodec.testRoundTrip(original)
+        assertEquals(original, decoded)
+    }
+
+    /**
+     * Sealed-dispatcher payload-variant wireSize must error with a message naming the
+     * variant codec and the `wireSize(value, payloadSize)` overload to call instead.
+     * Uses [com.ditchoom.buffer.codec.test.protocols.DispatchedFrameCodec], which has a
+     * `Data<*>` payload-bearing variant and a non-payload `Control` sibling.
+     */
+    @Test
+    fun sealedDispatcherPayloadVariantWireSizeErrors() {
+        val payloadVariant: com.ditchoom.buffer.codec.test.protocols.DispatchedFrame =
+            com.ditchoom.buffer.codec.test.protocols.DispatchedFrame.Data(
+                header =
+                    com.ditchoom.buffer.codec.test.protocols
+                        .FrameHeader(0x01u, 0x00u),
+                payload = "hello",
+            )
+        val ex =
+            assertFailsWith<IllegalStateException> {
+                com.ditchoom.buffer.codec.test.protocols.DispatchedFrameCodec.wireSize(payloadVariant)
+            }
+        val msg = ex.message.orEmpty()
+        assertTrue(
+            "DispatchedFrameDataCodec" in msg,
+            "expected variant codec name in error: $msg",
+        )
+        assertTrue(
+            "wireSize(value, payloadSize)" in msg,
+            "expected payload-overload reference in error: $msg",
+        )
     }
 }

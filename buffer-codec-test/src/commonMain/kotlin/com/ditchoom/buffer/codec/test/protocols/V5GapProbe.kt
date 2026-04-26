@@ -507,3 +507,61 @@ data class ProbePayloadSlicePostCallback<@Payload P>(
     val tag: UByte,
     @com.ditchoom.buffer.codec.annotations.RemainingBytes val payload: P,
 )
+
+// =====================================================================================
+// wireSize codegen coverage probes — exercises gaps in the wireSize emit path.
+//
+// These probes exist to cover combinations of (length-prefix variant) × (target type)
+// that are otherwise un-exercised by the rest of the protocol fixture suite. Every
+// roundTrip test that uses `testRoundTrip(...)` doubles as a wireSize check because
+// the helper asserts `wireSize(value) == encoded.remaining()`.
+// =====================================================================================
+
+/** wireSize gap — varint maxBytes=1 cap-overflow (cap = 127). */
+@ProtocolMessage
+data class ProbeVarintMax1Overflow(
+    val packetId: UShort,
+    @LengthPrefixed(LengthPrefix.Varint, maxBytes = 1) val body: ProbeVarLenBody,
+)
+
+/** wireSize gap — varint maxBytes=3 cap-overflow (cap = 2097151). */
+@ProtocolMessage
+data class ProbeVarintMax3Overflow(
+    val packetId: UShort,
+    @LengthPrefixed(LengthPrefix.Varint, maxBytes = 3) val body: ProbeVarLenBody,
+)
+
+/** wireSize gap — `@LengthPrefixed(LengthPrefix.Int)` 4-byte fixed prefix on a nested message. */
+@ProtocolMessage
+data class ProbeIntPrefixedNested(
+    val packetId: UShort,
+    @LengthPrefixed(LengthPrefix.Int) val body: ProbeVarLenBody,
+)
+
+/** wireSize gap — `@LengthPrefixed(LengthPrefix.Int)` on a nested-message-wrapping collection. */
+@ProtocolMessage
+data class ProbeIntPrefixedCollection(
+    val packetId: UShort,
+    @LengthPrefixed(LengthPrefix.Int) val bag: ProbeVarintListBag,
+)
+
+/** wireSize gap — `@LengthPrefixed(LengthPrefix.Byte)` on a `@Payload P` field. */
+@ProtocolMessage
+data class ProbeBytePrefixedPayload<@Payload P>(
+    val tag: UByte,
+    @LengthPrefixed(LengthPrefix.Byte) val payload: P,
+)
+
+/** wireSize gap — `@LengthPrefixed(LengthPrefix.Int)` on a `@Payload P` field. */
+@ProtocolMessage
+data class ProbeIntPrefixedPayload<@Payload P>(
+    val tag: UByte,
+    @LengthPrefixed(LengthPrefix.Int) val payload: P,
+)
+
+/** wireSize gap — `@LengthFrom("nameLen")` on a String field. */
+@ProtocolMessage
+data class ProbeLengthFromString(
+    val nameLen: UByte,
+    @LengthFrom("nameLen") val name: String,
+)
