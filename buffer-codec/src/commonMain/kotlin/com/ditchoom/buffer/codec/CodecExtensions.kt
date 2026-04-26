@@ -3,6 +3,7 @@ package com.ditchoom.buffer.codec
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.WriteBuffer
 
 /**
  * Encodes [value] into a fresh [ReadBuffer] sized via [Encoder.wireSize]. Generated
@@ -51,6 +52,26 @@ fun <T> Codec<T>.encodeToBuffer(
     factory: BufferFactory = BufferFactory.Default,
     context: EncodeContext = EncodeContext.Empty,
 ): ReadBuffer = (this as Encoder<T>).encodeToBuffer(value, factory, context)
+
+/**
+ * Encodes a value of unknown wire size by handing the caller a growable [WriteBuffer]
+ * and returning the resulting [ReadBuffer]. The buffer doubles on overflow, so callers
+ * that don't know the size in advance — e.g. wrappers around user-supplied
+ * `WriteBuffer.(P) -> Unit` lambdas in mqtt's `eagerEncode` helpers — get the same
+ * behavior without ceremony around an `Encoder<P>` adapter.
+ *
+ * For codec-driven encoding where the size IS known, prefer [Encoder.encodeToBuffer]
+ * which allocates the exact size up front via [Encoder.wireSize].
+ */
+fun encodeWithGrowth(
+    factory: BufferFactory = BufferFactory.Default,
+    initialSize: Int = 256,
+    write: (WriteBuffer) -> Unit,
+): ReadBuffer {
+    val growable = GrowableWriteBuffer(factory, initialSize = initialSize)
+    write(growable)
+    return growable.toReadBuffer()
+}
 
 /**
  * Testing utility: encodes [value], optionally verifies the wire bytes match [expectedBytes],
