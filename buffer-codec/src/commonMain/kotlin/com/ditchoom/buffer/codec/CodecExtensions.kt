@@ -4,30 +4,53 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 
+/**
+ * Encodes [value] into a fresh [ReadBuffer] sized via [Encoder.wireSize]. Generated
+ * codecs override `wireSize` with an exact byte-count formula so allocation is
+ * one-shot, no grow-and-copy.
+ *
+ * For hand-written encoders that don't override `wireSize` (the throwing default),
+ * falls back to a growable buffer that doubles on overflow. Mqtt's lambda-wrapping
+ * `Encoder<P>` adapters in `eagerEncode` rely on this fallback.
+ */
 fun <T> Encoder<T>.encodeToBuffer(
     value: T,
     factory: BufferFactory = BufferFactory.Default,
     context: EncodeContext = EncodeContext.Empty,
 ): ReadBuffer {
-    val growable = GrowableWriteBuffer(factory, initialSize = wireSizeHint)
-    if (this is Codec<*>) {
-        @Suppress("UNCHECKED_CAST")
-        (this as Codec<T>).encode(growable, value, context)
+    val knownSize =
+        try {
+            wireSize(value)
+        } catch (_: NotImplementedError) {
+            -1
+        }
+    return if (knownSize >= 0) {
+        val buf = factory.allocate(knownSize)
+        if (this is Codec<*>) {
+            @Suppress("UNCHECKED_CAST")
+            (this as Codec<T>).encode(buf, value, context)
+        } else {
+            encode(buf, value)
+        }
+        buf.resetForRead()
+        buf
     } else {
-        encode(growable, value)
+        val growable = GrowableWriteBuffer(factory)
+        if (this is Codec<*>) {
+            @Suppress("UNCHECKED_CAST")
+            (this as Codec<T>).encode(growable, value, context)
+        } else {
+            encode(growable, value)
+        }
+        growable.toReadBuffer()
     }
-    return growable.toReadBuffer()
 }
 
 fun <T> Codec<T>.encodeToBuffer(
     value: T,
     factory: BufferFactory = BufferFactory.Default,
     context: EncodeContext = EncodeContext.Empty,
-): ReadBuffer {
-    val growable = GrowableWriteBuffer(factory, initialSize = wireSizeHint)
-    encode(growable, value, context)
-    return growable.toReadBuffer()
-}
+): ReadBuffer = (this as Encoder<T>).encodeToBuffer(value, factory, context)
 
 /**
  * Testing utility: encodes [value], optionally verifies the wire bytes match [expectedBytes],

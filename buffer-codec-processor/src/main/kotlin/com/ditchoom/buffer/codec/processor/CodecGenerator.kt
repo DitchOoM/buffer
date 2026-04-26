@@ -164,20 +164,6 @@ class CodecGenerator(
             }
         }
 
-        // Generate wireSizeHint (sum of fixed-size fields, variable fields contribute 0)
-        if (canEncode) {
-            val hint = fields.sumOf { it.strategy.fixedSize.coerceAtLeast(0) }
-            if (hint > 0) {
-                objectBuilder.addProperty(
-                    com.squareup.kotlinpoet.PropertySpec
-                        .builder("wireSizeHint", Int::class)
-                        .addModifiers(KModifier.OVERRIDE)
-                        .initializer("%L", hint)
-                        .build(),
-                )
-            }
-        }
-
         // Generate wireSize(value): exact byte count, mirrors encode(buffer, value, context)
         // body so encodeToBuffer can allocate an exact-size buffer up front.
         if (canEncode) {
