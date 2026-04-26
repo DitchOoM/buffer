@@ -5,22 +5,6 @@ import com.ditchoom.buffer.codec.processor.spi.CustomFieldDescriptor
 import com.ditchoom.buffer.codec.processor.spi.FieldContext
 import com.ditchoom.buffer.codec.processor.spi.FunctionRef
 
-class VariableByteIntegerProvider : CodecFieldProvider {
-    override val annotationFqn = "com.ditchoom.buffer.codec.test.annotations.VariableByteInteger"
-
-    override fun describe(context: FieldContext): CustomFieldDescriptor {
-        require(context.typeName == "kotlin.Int") {
-            "@VariableByteInteger can only be applied to Int fields, found: ${context.typeName}"
-        }
-        return CustomFieldDescriptor(
-            readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
-            writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
-            fixedSize = -1,
-            wireSizeFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
-        )
-    }
-}
-
 class PropertyBagProvider : CodecFieldProvider {
     override val annotationFqn = "com.ditchoom.buffer.codec.test.annotations.PropertyBag"
 

@@ -5,8 +5,8 @@ import com.ditchoom.buffer.codec.annotations.LengthPrefix
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
+import com.ditchoom.buffer.codec.annotations.VariableByteInteger
 import com.ditchoom.buffer.codec.test.annotations.PropertyBag
-import com.ditchoom.buffer.codec.test.annotations.VariableByteInteger
 
 @ProtocolMessage
 data class VbiPacket(

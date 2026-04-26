@@ -171,6 +171,30 @@ annotation class LengthPrefixed(
 )
 
 /**
+ * Marks an `Int` field as a variable-byte integer (VBI / LEB128 / canonical 7-bit
+ * continuation). 1–4 bytes carry values 0..[com.ditchoom.buffer.VARIABLE_BYTE_INT_MAX].
+ *
+ * The field is read via `ReadBuffer.readVariableByteInteger()`, written via
+ * `WriteBuffer.writeVariableByteInteger(value)`, and sized via `variableByteSizeInt(value)`.
+ * Used by MQTT v5 control packets, Protobuf, gRPC stream IDs, DWARF/WASM LEB128, MIDI
+ * variable-length quantities, and CBOR bignums.
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * data class FrameHeader(
+ *     val packetType: UByte,
+ *     @VariableByteInteger val remainingLength: Int,
+ * )
+ * ```
+ *
+ * Cannot be combined with [@WireBytes][WireBytes], [@WireOrder][WireOrder], or any
+ * length annotation — VBI is its own self-delimiting wire form.
+ */
+@Target(AnnotationTarget.VALUE_PARAMETER)
+@Retention(AnnotationRetention.BINARY)
+annotation class VariableByteInteger
+
+/**
  * Marks a String field to consume all remaining bytes as UTF-8.
  * Must be the last non-conditional field in the constructor.
  *
