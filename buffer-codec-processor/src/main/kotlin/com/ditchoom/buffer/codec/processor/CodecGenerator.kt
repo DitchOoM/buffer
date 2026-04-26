@@ -537,6 +537,12 @@ class CodecGenerator(
                 is FieldReadStrategy.CollectionField -> {
                     if (strategy.elementCodecPackage.isNotEmpty() && strategy.elementCodecPackage != currentPackage) {
                         crossPackageCodecImports += strategy.elementCodecPackage to strategy.elementCodecName
+                        // Element type is in the same package as its generated codec; the
+                        // generated `buildList<T>` references the element type directly,
+                        // so it needs its own import. Use the outermost enclosing simple
+                        // name so a `Foo.Bar` nested type imports `Foo`.
+                        val outerSimple = strategy.elementTypeSimpleName.substringBefore('.')
+                        crossPackageCodecImports += strategy.elementCodecPackage to outerSimple
                     }
                 }
                 else -> {}

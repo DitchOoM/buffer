@@ -210,13 +210,14 @@ private fun readCollectionExpression(
     withContext: Boolean = false,
 ): String {
     val codecName = strategy.elementCodecName
+    val typeName = strategy.elementTypeSimpleName
     val ctxArg = if (withContext) ", context" else ""
     return when (val lk = strategy.lengthKind) {
         is LengthKind.FromField ->
-            "buildList { repeat(${lk.field}.toInt()) { add($codecName.decode(buffer$ctxArg)) } }"
+            "buildList<$typeName> { repeat(${lk.field}.toInt()) { add($codecName.decode(buffer$ctxArg)) } }"
         is LengthKind.Remaining -> {
             val threshold = lk.trailingBytes
-            "buildList { while (buffer.remaining() > $threshold) { add($codecName.decode(buffer$ctxArg)) } }"
+            "buildList<$typeName> { while (buffer.remaining() > $threshold) { add($codecName.decode(buffer$ctxArg)) } }"
         }
         is LengthKind.Prefixed ->
             // Byte-size + slice: prefix is the encoded byte length of the collection body;
@@ -224,7 +225,7 @@ private fun readCollectionExpression(
             // Byte/Short/Int/Varint widths. Count-prefix semantics use @LengthFrom instead.
             "run { val _len = ${readLengthExpr(lk.kind)}; " +
                 "val _slice = buffer.readBytes(_len); " +
-                "buildList { while (_slice.remaining() > 0) { add($codecName.decode(_slice$ctxArg)) } } }"
+                "buildList<$typeName> { while (_slice.remaining() > 0) { add($codecName.decode(_slice$ctxArg)) } } }"
     }
 }
 

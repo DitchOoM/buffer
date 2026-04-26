@@ -282,6 +282,14 @@ sealed class FieldReadStrategy {
         val lengthKind: LengthKind,
         val elementCodecName: String,
         val elementCodecPackage: String,
+        /**
+         * Simple name of the element type (e.g. "MqttProperty"). Emitted as the explicit
+         * type parameter on `buildList<T>` so kotlinc doesn't need to infer E across
+         * builder lambda boundaries — necessary when the element codec carries
+         * additional generic overloads (e.g. `<AD, CD> decode(...)` for @Payload variants)
+         * that confuse single-arg inference.
+         */
+        val elementTypeSimpleName: String,
         val direction: CodecDirection = CodecDirection.Bidirectional,
     ) : FieldReadStrategy()
 
@@ -1070,8 +1078,9 @@ class FieldAnalyzer(
 
         val codecName = elementDecl.codecName()
         val codecPackage = elementDecl.packageName.asString()
+        val elementSimpleName = elementDecl.enclosingSimpleNames().joinToString(".")
         val elementDirection = extractExplicitDirection(elementDecl)
-        return FieldReadStrategy.CollectionField(lk, codecName, codecPackage, elementDirection)
+        return FieldReadStrategy.CollectionField(lk, codecName, codecPackage, elementSimpleName, elementDirection)
     }
 
     private fun extractWireBytes(
