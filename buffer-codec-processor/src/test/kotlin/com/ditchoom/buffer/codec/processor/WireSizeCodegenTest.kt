@@ -263,6 +263,80 @@ class WireSizeCodegenTest {
     }
 
     @Test
+    fun `variant codec with DiscriminatorField emits encodeBody and wireSizeBody that skip the discriminator`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.*
+
+            @JvmInline
+            @ProtocolMessage
+            value class Tag(val raw: UByte) {
+                @DispatchValue
+                val typeId: Int get() = (raw.toInt() shr 4) and 0x0F
+            }
+
+            @DispatchOn(Tag::class)
+            @ProtocolMessage
+            sealed interface Frame {
+                @PacketType(value = 1, wire = 0x10)
+                @ProtocolMessage
+                data class WithHeader(
+                    val header: Tag,
+                    @LengthPrefixed val name: String,
+                ) : Frame
+            }
+            """,
+            )
+        val result = compileWithKsp(source)
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+        val codec =
+            result.generatedSources.singleOrNull { it.contains("object FrameWithHeaderCodec") }
+                ?: error("Expected FrameWithHeaderCodec in generated sources:\n${result.generatedSources}")
+
+        // Standard encode + wireSize INCLUDE the discriminator (header) field
+        // — the dispatcher hands them off when the variant self-encodes.
+        assertTrue(
+            codec.contains("TagCodec.encode(buffer, value.header"),
+            "Standard encode must write the discriminator field. Generated:\n$codec",
+        )
+        assertTrue(
+            codec.contains("TagCodec.wireSize(value.header)"),
+            "Standard wireSize must include the discriminator size. Generated:\n$codec",
+        )
+
+        // encodeBody / wireSizeBody EXCLUDE the discriminator — they let the
+        // caller (the wrapping ControlPacket) write byte1 + length-prefix itself.
+        assertTrue(
+            codec.contains("public fun encodeBody(") || codec.contains("fun encodeBody("),
+            "Expected encodeBody(buffer, value, context) entry point. Generated:\n$codec",
+        )
+        assertTrue(
+            codec.contains("public fun wireSizeBody(") || codec.contains("fun wireSizeBody("),
+            "Expected wireSizeBody(value): Int entry point. Generated:\n$codec",
+        )
+        // The body variants must NOT touch the header field. Slice the wireSizeBody
+        // function body only — bounded by the next top-level `fun `/`override fun `
+        // so we don't bleed into the sibling wireSize that DOES include header.
+        val bodyDeclStart = codec.indexOf("fun wireSizeBody(")
+        check(bodyDeclStart >= 0)
+        val afterDecl = codec.substring(bodyDeclStart)
+        val nextFunIdx = afterDecl.indexOf("\n    fun ", startIndex = 1)
+        val nextOverrideIdx = afterDecl.indexOf("\n    override fun ", startIndex = 1)
+        val bodyEnd =
+            listOf(nextFunIdx, nextOverrideIdx, afterDecl.length)
+                .filter { it > 0 }
+                .min()
+        val bodySlice = afterDecl.substring(0, bodyEnd)
+        assertTrue(
+            "TagCodec.wireSize(value.header)" !in bodySlice,
+            "wireSizeBody must skip the discriminator field. Body slice:\n$bodySlice",
+        )
+    }
+
+    @Test
     fun `custom variable-size field without wireSizeFunction reports clean KSP error at field`() {
         val source =
             SourceFile.kotlin(

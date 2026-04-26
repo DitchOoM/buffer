@@ -162,6 +162,42 @@ class CodecGenerator(
                         .build(),
                 )
             }
+
+            // When the variant carries its discriminator as a normal field
+            // (e.g. ControlPacketV5.Publish has `header: MqttFixedHeader` matching
+            // its @DispatchOn type), emit a sibling `encodeBody(...)` that writes
+            // every field EXCEPT the discriminator. Lets callers write byte1 +
+            // length-prefix themselves and delegate the body to the codec, instead
+            // of hand-rolling the body to avoid double-writing the discriminator.
+            val hasDiscriminatorField = fields.any { it.strategy is FieldReadStrategy.DiscriminatorField }
+            if (hasDiscriminatorField) {
+                val nonDiscriminatorFields = fields.filter { it.strategy !is FieldReadStrategy.DiscriminatorField }
+                val bodyEncodeCode = CodeBlock.builder()
+                val bodyWhenRemainingTail = mutableListOf<FieldInfo>()
+                for (field in nonDiscriminatorFields) {
+                    if (field.condition is FieldCondition.WhenRemaining) {
+                        bodyWhenRemainingTail.add(field)
+                    } else {
+                        addFieldWrite(bodyEncodeCode, field, "value.${field.name}", withContext = true)
+                    }
+                }
+                if (bodyWhenRemainingTail.isNotEmpty()) {
+                    emitWhenRemainingEncode(bodyEncodeCode, bodyWhenRemainingTail, withContext = true)
+                }
+                objectBuilder.addFunction(
+                    FunSpec
+                        .builder("encodeBody")
+                        .addParameter("buffer", WRITE_BUFFER)
+                        .addParameter("value", classTypeName)
+                        .addParameter(
+                            com.squareup.kotlinpoet.ParameterSpec
+                                .builder("context", ENCODE_CONTEXT)
+                                .defaultValue("%T.Empty", ENCODE_CONTEXT)
+                                .build(),
+                        ).addCode(bodyEncodeCode.build())
+                        .build(),
+                )
+            }
         }
 
         // Generate wireSize(value): exact byte count, mirrors encode(buffer, value, context)
@@ -181,6 +217,36 @@ class CodecGenerator(
                 emitWhenRemainingWireSize(wireSizeBody, wireSizeWhenRemainingTail)
             }
             wireSizeBody.addStatement("return _size")
+
+            // Sibling `wireSizeBody(value)` excludes the discriminator from the sum.
+            // Pairs with encodeBody — both skip the discriminator field for callers
+            // that write the discriminator (and any framing) themselves.
+            val hasDiscriminatorField = fields.any { it.strategy is FieldReadStrategy.DiscriminatorField }
+            if (hasDiscriminatorField) {
+                val nonDiscriminatorFields = fields.filter { it.strategy !is FieldReadStrategy.DiscriminatorField }
+                val bodyWireSizeCode = CodeBlock.builder()
+                bodyWireSizeCode.addStatement("var _size = 0")
+                val bodyWireSizeWhenRemainingTail = mutableListOf<FieldInfo>()
+                for (field in nonDiscriminatorFields) {
+                    if (field.condition is FieldCondition.WhenRemaining) {
+                        bodyWireSizeWhenRemainingTail.add(field)
+                    } else {
+                        addFieldWireSize(bodyWireSizeCode, field, "value.${field.name}")
+                    }
+                }
+                if (bodyWireSizeWhenRemainingTail.isNotEmpty()) {
+                    emitWhenRemainingWireSize(bodyWireSizeCode, bodyWireSizeWhenRemainingTail)
+                }
+                bodyWireSizeCode.addStatement("return _size")
+                objectBuilder.addFunction(
+                    FunSpec
+                        .builder("wireSizeBody")
+                        .addParameter("value", classTypeName)
+                        .returns(INT)
+                        .addCode(bodyWireSizeCode.build())
+                        .build(),
+                )
+            }
 
             objectBuilder.addFunction(
                 FunSpec
@@ -439,12 +505,101 @@ class CodecGenerator(
         wireSizeBody.addStatement("return _size")
         wireSizeBuilder.addCode(wireSizeBody.build())
 
+        // When the variant carries its discriminator as a normal field, also emit
+        // encodeBody / wireSizeBody that skip the discriminator. Same rationale as
+        // the standard-codec path — lets callers (e.g. ControlPacketV5.Publish)
+        // delegate body encoding to the codec while writing byte1 + length-prefix
+        // themselves, instead of hand-rolling the body.
+        val payloadCodecHasDiscriminator =
+            fields.any { it.strategy is FieldReadStrategy.DiscriminatorField }
         val objectBuilder =
             TypeSpec
                 .objectBuilder(codecName)
                 .addFunction(decodeBuilder.build())
                 .addFunction(encodeBuilder.build())
                 .addFunction(wireSizeBuilder.build())
+
+        if (payloadCodecHasDiscriminator) {
+            val nonDiscriminatorFields = fields.filter { it.strategy !is FieldReadStrategy.DiscriminatorField }
+
+            val bodyEncodeBuilder =
+                FunSpec
+                    .builder("encodeBody")
+                    .addParameter("buffer", WRITE_BUFFER)
+                    .addParameter("value", returnType)
+                    .addParameter(
+                        com.squareup.kotlinpoet.ParameterSpec
+                            .builder("context", ENCODE_CONTEXT)
+                            .defaultValue("%T.Empty", ENCODE_CONTEXT)
+                            .build(),
+                    )
+            for (tv in typeVariables) bodyEncodeBuilder.addTypeVariable(tv)
+            for (pf in payloadFields) {
+                val strategy = pf.strategy as FieldReadStrategy.PayloadField
+                val tpName = TypeVariableName(strategy.typeParamName)
+                val encodeLambdaType =
+                    LambdaTypeName.get(
+                        parameters =
+                            listOf(
+                                com.squareup.kotlinpoet.ParameterSpec.unnamed(WRITE_BUFFER),
+                                com.squareup.kotlinpoet.ParameterSpec.unnamed(tpName),
+                            ),
+                        returnType = UNIT,
+                    )
+                bodyEncodeBuilder.addParameter("encode${capitalizeFirst(pf.name)}", encodeLambdaType)
+            }
+            val bodyEncodeCode = CodeBlock.builder()
+            val bodyEncodeWhenRemainingTail = mutableListOf<FieldInfo>()
+            for (field in nonDiscriminatorFields) {
+                if (field.condition is FieldCondition.WhenRemaining) {
+                    bodyEncodeWhenRemainingTail.add(field)
+                } else if (field.strategy is FieldReadStrategy.PayloadField) {
+                    addPayloadWrite(bodyEncodeCode, field)
+                } else {
+                    addFieldWrite(bodyEncodeCode, field, "value.${field.name}", withContext = true)
+                }
+            }
+            if (bodyEncodeWhenRemainingTail.isNotEmpty()) {
+                emitWhenRemainingEncode(bodyEncodeCode, bodyEncodeWhenRemainingTail, withContext = true)
+            }
+            bodyEncodeBuilder.addCode(bodyEncodeCode.build())
+            objectBuilder.addFunction(bodyEncodeBuilder.build())
+
+            val bodyWireSizeBuilder =
+                FunSpec
+                    .builder("wireSizeBody")
+                    .addParameter("value", returnType)
+                    .returns(INT)
+            for (tv in typeVariables) bodyWireSizeBuilder.addTypeVariable(tv)
+            for (pf in payloadFields) {
+                val strategy = pf.strategy as FieldReadStrategy.PayloadField
+                val tpName = TypeVariableName(strategy.typeParamName)
+                val sizeLambdaType =
+                    LambdaTypeName.get(
+                        parameters = listOf(com.squareup.kotlinpoet.ParameterSpec.unnamed(tpName)),
+                        returnType = INT,
+                    )
+                bodyWireSizeBuilder.addParameter("size${capitalizeFirst(pf.name)}", sizeLambdaType)
+            }
+            val bodyWireSizeCode = CodeBlock.builder()
+            bodyWireSizeCode.addStatement("var _size = 0")
+            val bodyWireSizeWhenRemainingTail = mutableListOf<FieldInfo>()
+            for (field in nonDiscriminatorFields) {
+                if (field.condition is FieldCondition.WhenRemaining) {
+                    bodyWireSizeWhenRemainingTail.add(field)
+                } else if (field.strategy is FieldReadStrategy.PayloadField) {
+                    addPayloadFieldWireSize(bodyWireSizeCode, field)
+                } else {
+                    addFieldWireSize(bodyWireSizeCode, field, "value.${field.name}")
+                }
+            }
+            if (bodyWireSizeWhenRemainingTail.isNotEmpty()) {
+                emitWhenRemainingWireSize(bodyWireSizeCode, bodyWireSizeWhenRemainingTail)
+            }
+            bodyWireSizeCode.addStatement("return _size")
+            bodyWireSizeBuilder.addCode(bodyWireSizeCode.build())
+            objectBuilder.addFunction(bodyWireSizeBuilder.build())
+        }
 
         // Generate context keys and context-based decode/encode for each payload field.
         // These enable the codec to be used as a nested field via Codec.decode(buffer, context).
