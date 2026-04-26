@@ -11,8 +11,6 @@ internal val ENCODER = ClassName("com.ditchoom.buffer.codec", "Encoder")
 internal val DECODE_CONTEXT = ClassName("com.ditchoom.buffer.codec", "DecodeContext")
 internal val ENCODE_CONTEXT = ClassName("com.ditchoom.buffer.codec", "EncodeContext")
 internal val CODEC_CONTEXT_KEY = ClassName("com.ditchoom.buffer.codec", "CodecContext", "Key")
-internal val PAYLOAD_READER = ClassName("com.ditchoom.buffer.codec.payload", "PayloadReader")
-internal val READ_BUFFER_PAYLOAD_READER = ClassName("com.ditchoom.buffer.codec.payload", "ReadBufferPayloadReader")
 internal val UNIT = ClassName("kotlin", "Unit")
 
 internal data class PrefixConfig(

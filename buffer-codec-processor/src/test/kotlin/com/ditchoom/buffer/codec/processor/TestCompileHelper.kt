@@ -238,36 +238,6 @@ private val codecStubs =
     """,
     )
 
-private val payloadStubs =
-    SourceFile.kotlin(
-        "PayloadStubs.kt",
-        """
-    package com.ditchoom.buffer.codec.payload
-    import com.ditchoom.buffer.ReadBuffer
-    interface PayloadReader {
-        fun readByte(): Byte
-        fun readShort(): Short
-        fun readInt(): Int
-        fun readLong(): Long
-        fun readFloat(): Float
-        fun readDouble(): Double
-        fun readString(length: Int): String
-        fun remaining(): Int
-    }
-    class ReadBufferPayloadReader(private val buffer: ReadBuffer) : PayloadReader {
-        override fun readByte(): Byte = TODO()
-        override fun readShort(): Short = TODO()
-        override fun readInt(): Int = TODO()
-        override fun readLong(): Long = TODO()
-        override fun readFloat(): Float = TODO()
-        override fun readDouble(): Double = TODO()
-        override fun readString(length: Int): String = TODO()
-        override fun remaining(): Int = TODO()
-        fun release() {}
-    }
-    """,
-    )
-
 fun compileWithKsp(vararg sources: SourceFile): CompileResult {
     val allSources = listOf(annotationSource, codecStubs, bufferStubs, streamStubs) + sources.toList()
     val compilation =
@@ -284,20 +254,6 @@ fun compileWithKsp(vararg sources: SourceFile): CompileResult {
 
 fun compileWithKspAndBufferStubs(vararg sources: SourceFile): CompileResult {
     val allSources = listOf(annotationSource, codecStubs, bufferStubs, streamStubs) + sources.toList()
-    val compilation =
-        KotlinCompilation().apply {
-            this.sources = allSources
-            configureKsp(useKsp2 = true) {
-                symbolProcessorProviders += ProtocolMessageProcessorProvider()
-            }
-            kotlincArguments = listOf("-Xskip-metadata-version-check")
-        }
-    val result = compilation.compile()
-    return CompileResult(result.exitCode, result.messages)
-}
-
-fun compileWithKspAndPayloadStubs(vararg sources: SourceFile): CompileResult {
-    val allSources = listOf(annotationSource, codecStubs, bufferStubs, streamStubs, payloadStubs) + sources.toList()
     val compilation =
         KotlinCompilation().apply {
             this.sources = allSources

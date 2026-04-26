@@ -83,7 +83,13 @@ annotation class PacketType(
 
 /**
  * Marks a type parameter as the application payload.
- * The generated codec will provide a scoped `PayloadReader` for decoding.
+ *
+ * The generated codec hands the user a `ReadBuffer` slice of the payload bytes for
+ * decoding and a `(WriteBuffer, P) -> Unit` writer for encoding. The slice is valid for
+ * the duration of the decode lambda; if the source buffer is backed by a `BufferPool`
+ * (e.g. via `StreamProcessor.readBufferScoped`), the pool may recycle the source after
+ * the scope returns. Callers that need to retain payload bytes past the callback must
+ * copy the slice into a caller-owned buffer explicitly inside the lambda.
  *
  * ```kotlin
  * @ProtocolMessage
@@ -91,7 +97,8 @@ annotation class PacketType(
  *     val version: UByte,
  *     @LengthPrefixed val payload: P,
  * )
- * // Generates PacketCodec with a PayloadReader context for decoding P
+ * // Generates PacketCodec.decode(buffer, decodePayload = { slice -> ... })
+ * // and        PacketCodec.encode(buffer, value, encodePayload = { buf, p -> ... })
  * ```
  */
 @Target(AnnotationTarget.TYPE_PARAMETER)

@@ -252,7 +252,7 @@ class DataClassCodegenTest {
             )
             """,
             )
-        val result = compileWithKspAndPayloadStubs(source)
+        val result = compileWithKsp(source)
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
     }
 
@@ -275,7 +275,7 @@ class DataClassCodegenTest {
             )
             """,
             )
-        val result = compileWithKspAndPayloadStubs(source)
+        val result = compileWithKsp(source)
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
     }
 
@@ -296,7 +296,7 @@ class DataClassCodegenTest {
             )
             """,
             )
-        val result = compileWithKspAndPayloadStubs(source)
+        val result = compileWithKsp(source)
         val hasError =
             result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
                 result.messages.contains("requires a length annotation")
@@ -321,7 +321,7 @@ class DataClassCodegenTest {
             )
             """,
             )
-        val result = compileWithKspAndPayloadStubs(source)
+        val result = compileWithKsp(source)
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
     }
 
@@ -344,7 +344,7 @@ class DataClassCodegenTest {
             )
             """,
             )
-        val result = compileWithKspAndPayloadStubs(source)
+        val result = compileWithKsp(source)
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
     }
 
@@ -1129,7 +1129,7 @@ class DataClassCodegenTest {
             )
             """,
             )
-        val result = compileWithKspAndPayloadStubs(source)
+        val result = compileWithKsp(source)
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
     }
 
@@ -1166,7 +1166,7 @@ class DataClassCodegenTest {
             }
             """,
             )
-        val result = compileWithKspAndPayloadStubs(source)
+        val result = compileWithKsp(source)
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
     }
 }

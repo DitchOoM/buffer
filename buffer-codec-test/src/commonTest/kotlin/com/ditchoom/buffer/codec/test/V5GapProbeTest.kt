@@ -10,6 +10,13 @@ import com.ditchoom.buffer.codec.test.protocols.ProbeByteSizedVarintCollection
 import com.ditchoom.buffer.codec.test.protocols.ProbeByteSizedVarintCollectionCodec
 import com.ditchoom.buffer.codec.test.protocols.ProbeCrossPackageCollectionHost
 import com.ditchoom.buffer.codec.test.protocols.ProbeCrossPackageCollectionHostCodec
+import com.ditchoom.buffer.codec.test.protocols.ProbePayloadSliceLifetime
+import com.ditchoom.buffer.codec.test.protocols.ProbePayloadSliceLifetimeCodec
+import com.ditchoom.buffer.codec.test.protocols.ProbePayloadSlicePostCallback
+import com.ditchoom.buffer.codec.test.protocols.ProbePayloadSlicePostCallbackCodec
+import com.ditchoom.buffer.codec.test.protocols.ProbeZeroCopyEncode
+import com.ditchoom.buffer.codec.test.protocols.ProbeZeroCopyEncodeCodec
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.test.protocols.crosspkg.CrossPkgEntry
 import com.ditchoom.buffer.codec.test.protocols.ProbeFramedDispatchSimple
 import com.ditchoom.buffer.codec.test.protocols.ProbeFramedDispatchSimpleCodec
@@ -395,7 +402,7 @@ class V5GapProbeTest {
         buf.resetForRead()
         val decodedNoWill =
             com.ditchoom.buffer.codec.test.protocols.ProbeWillTreeCodec.decode<String?>(buf) { reader ->
-                if (reader.remaining() > 0) reader.copyToBuffer().run { readString(remaining()) } else null
+                if (reader.remaining() > 0) reader.readString(reader.remaining()) else null
             }
         assertTrue(decodedNoWill is com.ditchoom.buffer.codec.test.protocols.ProbeWillTree.ConnectLike<*>)
         assertEquals("client", decodedNoWill.clientId)
@@ -427,7 +434,7 @@ class V5GapProbeTest {
         buf.resetForRead()
         val decodedWithWill =
             com.ditchoom.buffer.codec.test.protocols.ProbeWillTreeCodec.decode<String?>(buf) { reader ->
-                if (reader.remaining() > 0) reader.copyToBuffer().run { readString(remaining()) } else null
+                if (reader.remaining() > 0) reader.readString(reader.remaining()) else null
             }
         assertTrue(decodedWithWill is com.ditchoom.buffer.codec.test.protocols.ProbeWillTree.ConnectLike<*>)
         assertEquals("client", decodedWithWill.clientId)
@@ -630,7 +637,7 @@ class V5GapProbeTest {
         buffer.resetForRead()
         val decoded =
             ProbeFramedDispatchWithPayloadCodec.decode<String>(buffer) { reader ->
-                reader.copyToBuffer().run { readString(remaining()) }
+                reader.readString(reader.remaining())
             }
         assertTrue(decoded is ProbeFramedDispatchWithPayload.WithBytes<*>)
         assertEquals(0xAAu.toUByte(), decoded.header)
@@ -897,5 +904,127 @@ class V5GapProbeTest {
         buffer.resetForRead()
         val decoded = ProbeCrossPackageCollectionHostCodec.decode(buffer)
         assertEquals(original, decoded)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────────
+    // Phase 3.0 probes — `@Payload P` decode lambda receives a `ReadBuffer` slice.
+    //
+    // Pre-Phase-3.1 the generated lambda parameter type is `PayloadReader`; these tests
+    // pass `(ReadBuffer) -> P` lambdas, which fail to compile against the pre-3.1
+    // signature. After Phase 3.1 deletes `PayloadReader` and re-types the lambdas, all
+    // three pass.
+    // ─────────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Probe 20 — decode lambda receives a `ReadBuffer` slice; bytes match input exactly
+     * with no intermediate codec-internal allocation.
+     */
+    @Test
+    fun payloadDecodeLambdaReceivesReadBufferSlice() {
+        val payload = BufferFactory.Default.allocate(8, ByteOrder.BIG_ENDIAN)
+        payload.writeInt(0xDEADBEEF.toInt())
+        payload.writeInt(0xCAFEBABE.toInt())
+        payload.resetForRead()
+
+        val original = ProbePayloadSliceLifetime<ReadBuffer>(tag = 0xABu, payload = payload)
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        ProbePayloadSliceLifetimeCodec.encode<ReadBuffer>(
+            buffer,
+            original,
+            encodePayload = { buf, p -> buf.write(p) },
+        )
+        buffer.resetForRead()
+
+        var observedRemaining = -1
+        val decoded =
+            ProbePayloadSliceLifetimeCodec.decode<ReadBuffer>(
+                buffer,
+                decodePayload = { slice ->
+                    observedRemaining = slice.remaining()
+                    slice.readBytes(slice.remaining())
+                },
+            )
+        assertEquals(0xABu.toUByte(), decoded.tag)
+        assertEquals(8, observedRemaining)
+
+        // The slice returned by `readBytes(...)` is already positioned for reading
+        // (position=0, limit=size); no `resetForRead` flip is needed.
+        assertEquals(0xDEADBEEF.toInt(), decoded.payload.readInt())
+        assertEquals(0xCAFEBABE.toInt(), decoded.payload.readInt())
+    }
+
+    /**
+     * Probe 21 — encode lambda forwards a `ReadBuffer` payload via a single
+     * `buf.write(slice)` call. Round-trips end-to-end with no intermediate copy on the
+     * encode side beyond the irreducible slice → wire memcpy.
+     */
+    @Test
+    fun payloadEncodeLambdaWritesSliceDirectly() {
+        val payload = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
+        payload.writeLong(0x0123456789ABCDEFL)
+        payload.writeLong(-0x123456789abcdf0L) // 0xFEDCBA9876543210 as signed Long
+        payload.resetForRead()
+
+        val original = ProbeZeroCopyEncode<ReadBuffer>(tag = 0x42u, payload = payload)
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        ProbeZeroCopyEncodeCodec.encode<ReadBuffer>(
+            buffer,
+            original,
+            encodePayload = { buf, slice -> buf.write(slice) },
+        )
+
+        buffer.resetForRead()
+        val decoded =
+            ProbeZeroCopyEncodeCodec.decode<ReadBuffer>(
+                buffer,
+                decodePayload = { slice -> slice.readBytes(slice.remaining()) },
+            )
+        assertEquals(0x42u.toUByte(), decoded.tag)
+
+        assertEquals(0x0123456789ABCDEFL, decoded.payload.readLong())
+        assertEquals(-0x123456789abcdf0L, decoded.payload.readLong())
+    }
+
+    /**
+     * Probe 22 — caller retains the slice past the callback scope. With a non-pooled
+     * source buffer (allocated via `BufferFactory.Default`), the slice's underlying
+     * memory remains alive after the lambda returns. Reading from the retained slice
+     * yields the original bytes.
+     */
+    @Test
+    fun payloadSliceRemainsReadableAfterCallbackForNonPooledSource() {
+        val payload = BufferFactory.Default.allocate(8, ByteOrder.BIG_ENDIAN)
+        payload.writeInt(0x55AA55AA)
+        payload.writeInt(-0x55aa55ab) // 0xAA55AA55 as signed Int
+        payload.resetForRead()
+
+        val original = ProbePayloadSlicePostCallback<ReadBuffer>(tag = 0x99u, payload = payload)
+        val source = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        ProbePayloadSlicePostCallbackCodec.encode<ReadBuffer>(
+            source,
+            original,
+            encodePayload = { buf, p -> buf.write(p) },
+        )
+        source.resetForRead()
+
+        var retainedSlice: ReadBuffer? = null
+        val decoded =
+            ProbePayloadSlicePostCallbackCodec.decode<ReadBuffer>(
+                source,
+                decodePayload = { slice ->
+                    retainedSlice = slice
+                    slice.readBytes(slice.remaining())
+                },
+            )
+        assertEquals(0x99u.toUByte(), decoded.tag)
+
+        // The retained slice still points into live memory because the source buffer is
+        // alive. The slice's own position has been advanced by `slice.readBytes(...)`
+        // inside the callback; resetting it for read confirms the underlying bytes are
+        // still readable.
+        val retained = assertNotNull(retainedSlice)
+        retained.resetForRead()
+        assertEquals(0x55AA55AA, retained.readInt())
+        assertEquals(-0x55aa55ab, retained.readInt())
     }
 }

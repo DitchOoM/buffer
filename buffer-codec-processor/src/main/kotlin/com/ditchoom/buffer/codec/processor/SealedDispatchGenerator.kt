@@ -414,7 +414,7 @@ class SealedDispatchGenerator(
                 val lambdaType =
                     LambdaTypeName.get(
                         receiver = contextType,
-                        parameters = listOf(ParameterSpec.unnamed(PAYLOAD_READER)),
+                        parameters = listOf(ParameterSpec.unnamed(READ_BUFFER)),
                         returnType = tpName,
                     )
                 decodeBuilder.addParameter(paramName, lambdaType)

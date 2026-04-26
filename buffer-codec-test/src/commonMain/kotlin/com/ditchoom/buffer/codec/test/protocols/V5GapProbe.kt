@@ -452,3 +452,58 @@ data class ProbeCrossPackageCollectionHost(
     @LengthPrefixed(LengthPrefix.Varint, maxBytes = 4)
     val items: List<com.ditchoom.buffer.codec.test.protocols.crosspkg.CrossPkgEntry>,
 )
+
+// =====================================================================================
+// Phase 3.0 probes — drop `PayloadReader`, lambdas receive a `ReadBuffer` slice directly.
+//
+// Until Phase 3.1 lands, the generated `decode<P>` lambda parameter type is
+// `PayloadReader`. The probe tests below pass `(ReadBuffer) -> P` lambdas — pre-3.1
+// they fail to compile (parameter type mismatch); post-3.1 they pass. Locking the
+// lifetime contract empirically on round-trip plus pool-stat assertions.
+// =====================================================================================
+
+/**
+ * Probe 20 — `@Payload P` decode lambda receives a `ReadBuffer` slice valid only inside
+ * the callback. The slice's bytes match the input exactly without any intermediate
+ * allocation (pre-3.1, the codec wraps the slice in a `ReadBufferPayloadReader` object;
+ * post-3.1, the slice is handed in directly, no wrapper).
+ */
+@ProtocolMessage
+data class ProbePayloadSliceLifetime<@Payload P>(
+    val tag: UByte,
+    @com.ditchoom.buffer.codec.annotations.RemainingBytes val payload: P,
+)
+
+/**
+ * Probe 21 — `@Payload P` encode lambda receives `(WriteBuffer, P) -> Unit`. When the
+ * user writes a `ReadBuffer` payload via `buf.write(slice)`, the only userspace copy is
+ * the irreducible slice → wire memcpy — no intermediate buffer allocation. Pairs with
+ * probe 20: a slice taken from decode can be re-written in encode with one memcpy.
+ */
+@ProtocolMessage
+data class ProbeZeroCopyEncode<@Payload P>(
+    val tag: UByte,
+    @LengthPrefixed val payload: P,
+)
+
+/**
+ * Probe 22 — caller retains the slice past the callback scope.
+ *
+ * Contract:
+ *  - For sources allocated via `BufferFactory.Default` (non-pooled), the slice is a
+ *    view into the source's underlying memory. The slice remains readable for as long
+ *    as the source buffer is alive.
+ *  - For sources fed through a `StreamProcessor` over a `BufferPool`, the slice is
+ *    valid only inside the `readBufferScoped` block — the pool may recycle the source
+ *    after the scope returns, at which point reading the slice is undefined behavior.
+ *    Callers wanting to retain bytes across pool recycle must `slice.copyTo(factory)`
+ *    explicitly inside the callback.
+ *
+ * This probe locks the simpler non-pool case empirically; the pool case is enforced by
+ * `StreamProcessor`'s scope invariant.
+ */
+@ProtocolMessage
+data class ProbePayloadSlicePostCallback<@Payload P>(
+    val tag: UByte,
+    @com.ditchoom.buffer.codec.annotations.RemainingBytes val payload: P,
+)

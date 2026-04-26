@@ -242,7 +242,7 @@ class CodecGenerator(
                     parameters =
                         listOf(
                             com.squareup.kotlinpoet.ParameterSpec
-                                .unnamed(PAYLOAD_READER),
+                                .unnamed(READ_BUFFER),
                         ),
                     returnType = tpName,
                 )
@@ -286,28 +286,30 @@ class CodecGenerator(
             )
         }
 
-        // Phase 3: decode payload fields using stored bytes + lambdas
+        // Phase 3: decode payload fields using stored slice + lambdas. The lambda receives
+        // the slice directly — no `PayloadReader` wrapping or release ceremony. Slice
+        // lifetime is the user's callback scope; for sources backed by a `BufferPool`
+        // (StreamProcessor), that scope is locked by `readBufferScoped`.
         for (pf in payloadFields) {
             val rawVar = "_raw_${pf.name}"
             val condition = pf.condition
             if (condition != null || pf.isNullable) {
                 decodeBody.beginControlFlow("val %L = if (%L != null)", pf.name, rawVar)
-                decodeBody.addStatement("val _pr = %T(%L)", READ_BUFFER_PAYLOAD_READER, rawVar)
                 decodeBody.addStatement(
-                    "try { _ctx.decode%L(_pr) } finally { _pr.release() }",
+                    "_ctx.decode%L(%L)",
                     capitalizeFirst(pf.name),
+                    rawVar,
                 )
                 decodeBody.nextControlFlow("else")
                 decodeBody.addStatement("null")
                 decodeBody.endControlFlow()
             } else {
-                decodeBody.beginControlFlow("val %L = run", pf.name)
-                decodeBody.addStatement("val _pr = %T(%L)", READ_BUFFER_PAYLOAD_READER, rawVar)
                 decodeBody.addStatement(
-                    "try { _ctx.decode%L(_pr) } finally { _pr.release() }",
+                    "val %L = _ctx.decode%L(%L)",
+                    pf.name,
                     capitalizeFirst(pf.name),
+                    rawVar,
                 )
-                decodeBody.endControlFlow()
             }
         }
 
@@ -390,7 +392,7 @@ class CodecGenerator(
                     parameters =
                         listOf(
                             com.squareup.kotlinpoet.ParameterSpec
-                                .unnamed(PAYLOAD_READER),
+                                .unnamed(READ_BUFFER),
                         ),
                     returnType = ClassName("kotlin", "Any").copy(nullable = true),
                 )
