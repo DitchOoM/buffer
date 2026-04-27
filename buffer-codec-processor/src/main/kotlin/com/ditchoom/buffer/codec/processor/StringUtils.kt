@@ -88,31 +88,13 @@ data class DiscriminatorParam(
 )
 
 /**
- * Whether the framer is peek-only or carries an explicit body-length prefix.
- *
- * - [Peek] — framer implements `DispatchFraming<D>` only. Generator emits unframed
- *   decode/encode/wireSize (variant reads body in place); only `peekFrameSize` is
- *   delegated to the framer. Fits HTTP/2, TLS, AMQP 1.0, RIFF/PNG/MP4 — protocols
- *   whose header self-describes total size but doesn't expose a single body-length
- *   field.
- *
- * - [BodyLength] — framer implements `BodyLengthFraming<D>`. Generator emits framed
- *   decode (read body length → slice → variant on slice → body-overrun guard), framed
- *   encode (compute body wireSize → write body length → encode body), exact wireSize
- *   via `bodyLengthSize`, and `peekFrameSize` delegation. Fits MQTT.
- */
-enum class FramingKind { Peek, BodyLength }
-
-/**
  * Resolved framing for a sealed dispatch codec. Carries the FQN of the user-supplied
- * `object` implementing `DispatchFraming<D>` (or its `BodyLengthFraming<D>` subtype)
- * plus the discriminator's wire byte count (used by `peekFrameSize` to decide
- * minimum-buffered bytes).
+ * `object` implementing `DispatchFraming<D>` and the discriminator's wire byte count
+ * (used by `peekFrameSize` to decide minimum-buffered bytes).
  */
 data class DispatchFramingInfo(
     val framerFqn: String,
     val discriminatorBytes: Int,
-    val kind: FramingKind,
 )
 
 data class DispatchOnInfo(
@@ -145,13 +127,6 @@ data class DispatchOnInfo(
     /** Total wire bytes for the discriminator type. */
     val totalWireBytes: Int get() = constructorParams.sumOf { it.wireBytes }
 
-    /**
-     * True when the dispatcher reads/writes an explicit body-length prefix and slices
-     * the body — the `BodyLengthFraming` codepath. Peek-only framers and unframed
-     * dispatch both report `false`.
-     */
-    val hasBodyLength: Boolean get() = framing?.kind == FramingKind.BodyLength
-
-    /** True when a framer (peek-only or body-length) is in effect. */
-    val hasFramer: Boolean get() = framing != null
+    /** True when the dispatcher delegates body framing to a `DispatchFraming` object. */
+    val hasBodyLength: Boolean get() = framing != null
 }

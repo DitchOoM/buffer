@@ -190,7 +190,7 @@ class PacketTypeRangeValidationTest {
             package test
             import com.ditchoom.buffer.ReadBuffer
             import com.ditchoom.buffer.WriteBuffer
-            import com.ditchoom.buffer.codec.BodyLengthFraming
+            import com.ditchoom.buffer.codec.DispatchFraming
             import com.ditchoom.buffer.codec.annotations.*
             import com.ditchoom.buffer.readVariableByteInteger
             import com.ditchoom.buffer.stream.PeekResult
@@ -206,7 +206,7 @@ class PacketTypeRangeValidationTest {
                 @DispatchValue
                 val typeId: Int get() = raw.toInt()
 
-                companion object : BodyLengthFraming<FramedTag> {
+                companion object : DispatchFraming<FramedTag> {
                     override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult =
                         PeekResult.NeedsMoreData
                     override fun readBodyLength(buffer: ReadBuffer): Int = buffer.readVariableByteInteger()
