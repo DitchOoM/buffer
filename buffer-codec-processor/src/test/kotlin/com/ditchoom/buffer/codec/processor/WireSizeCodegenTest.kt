@@ -206,22 +206,38 @@ class WireSizeCodegenTest {
     }
 
     @Test
-    fun `sealed dispatcher encodeFromContext uses inline-prefix via wireSizeFromContext for payload variants`() {
+    fun `sealed dispatcher delegates body framing to discriminator companion DispatchFraming`() {
         val source =
             SourceFile.kotlin(
                 "Test.kt",
                 """
             package test
+            import com.ditchoom.buffer.ReadBuffer
+            import com.ditchoom.buffer.WriteBuffer
+            import com.ditchoom.buffer.codec.DispatchFraming
             import com.ditchoom.buffer.codec.annotations.*
+            import com.ditchoom.buffer.readVariableByteInteger
+            import com.ditchoom.buffer.stream.PeekResult
+            import com.ditchoom.buffer.stream.StreamProcessor
+            import com.ditchoom.buffer.variableByteSizeInt
+            import com.ditchoom.buffer.writeVariableByteInteger
 
             @JvmInline
             @ProtocolMessage
             value class FramedTag(val raw: UByte) {
                 @DispatchValue
                 val typeId: Int get() = raw.toInt()
+
+                companion object : DispatchFraming<FramedTag> {
+                    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult =
+                        PeekResult.NeedsMoreData
+                    override fun readBodyLength(buffer: ReadBuffer): Int = buffer.readVariableByteInteger()
+                    override fun writeBodyLength(buffer: WriteBuffer, n: Int) { buffer.writeVariableByteInteger(n) }
+                    override fun bodyLengthSize(n: Int): Int = variableByteSizeInt(n)
+                }
             }
 
-            @DispatchOn(FramedTag::class, bodyLength = LengthPrefix.Varint, bodyLengthMaxBytes = 4)
+            @DispatchOn(FramedTag::class)
             @ProtocolMessage
             sealed interface Framed {
                 @PacketType(wire = 1)
@@ -238,28 +254,15 @@ class WireSizeCodegenTest {
         val codec =
             result.generatedSources.singleOrNull { it.contains("object FramedCodec") }
                 ?: error("Expected FramedCodec in generated sources:\n${result.generatedSources}")
-        // The encodeFromContext path for payload variants should use inline-prefix (val
-        // _len_body = ... ; writeVariableByteInteger), NOT the scratch-buffer helper.
-        // We assert by checking the wireSizeFromContext call is woven into the encode
-        // statement chain — its presence proves the inline-prefix path took over from
-        // writeVariableByteIntegerLengthPrefixed at this site.
+        // The framed dispatcher routes body length through the discriminator's companion-discovered
+        // DispatchFraming, not through hand-emitted VBI write helpers.
         assertTrue(
-            codec.contains("FramedWithPayloadCodec.wireSizeFromContext(value, context)"),
-            "Expected sealed dispatcher's encodeFromContext payload variant to call " +
-                "`wireSizeFromContext(value, context)` for inline-prefix sizing. Generated:\n$codec",
+            codec.contains("FramedTag.readBodyLength(buffer)"),
+            "Expected dispatcher to read body length via `FramedTag.readBodyLength(buffer)`. Generated:\n$codec",
         )
-        // The generated dispatcher should NOT call the scratch helper for the
-        // encodeFromContext payload-variant path. Count actual call sites — the trailing
-        // `(` distinguishes a call from the `import com.ditchoom.buffer.write…Prefixed`
-        // line, which also contains the substring `buffer.writeVariableByteIntegerLengthPrefixed`.
-        // The typed-lambda dispatcher entrypoint still uses scratch since size lambdas
-        // aren't available there, so allow at most 1 call site.
-        val scratchCallSites = "buffer\\.writeVariableByteIntegerLengthPrefixed\\(".toRegex().findAll(codec).count()
         assertTrue(
-            scratchCallSites <= 1,
-            "Expected encodeFromContext payload variant to bypass scratch helper; found " +
-                "$scratchCallSites `buffer.writeVariableByteIntegerLengthPrefixed(` call sites " +
-                "(max 1 allowed for the typed-lambda entrypoint). Generated:\n$codec",
+            codec.contains("FramedTag.writeBodyLength(buffer,"),
+            "Expected dispatcher to write body length via `FramedTag.writeBodyLength(buffer, …)`. Generated:\n$codec",
         )
     }
 

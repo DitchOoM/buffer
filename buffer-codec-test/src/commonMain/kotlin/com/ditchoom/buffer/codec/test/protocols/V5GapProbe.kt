@@ -1,5 +1,8 @@
 package com.ditchoom.buffer.codec.test.protocols
 
+import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.WriteBuffer
+import com.ditchoom.buffer.codec.DispatchFraming
 import com.ditchoom.buffer.codec.annotations.DispatchOn
 import com.ditchoom.buffer.codec.annotations.DispatchValue
 import com.ditchoom.buffer.codec.annotations.LengthFrom
@@ -11,6 +14,11 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import com.ditchoom.buffer.codec.annotations.WhenTrue
 import com.ditchoom.buffer.codec.test.annotations.PropertyBag
+import com.ditchoom.buffer.readVariableByteInteger
+import com.ditchoom.buffer.stream.PeekResult
+import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.variableByteSizeInt
+import com.ditchoom.buffer.writeVariableByteInteger
 import kotlin.jvm.JvmInline
 
 /**
@@ -348,9 +356,52 @@ value class ProbeFramedTag(
 ) {
     @DispatchValue
     val typeId: Int get() = raw.toInt()
+
+    companion object : DispatchFraming<ProbeFramedTag> {
+        override fun peekFrameSize(
+            stream: StreamProcessor,
+            baseOffset: Int,
+        ): PeekResult = peekUByteDiscriminatorPlusVbiBody(stream, baseOffset)
+
+        override fun readBodyLength(buffer: ReadBuffer): Int = buffer.readVariableByteInteger()
+
+        override fun writeBodyLength(
+            buffer: WriteBuffer,
+            n: Int,
+        ) {
+            buffer.writeVariableByteInteger(n)
+        }
+
+        override fun bodyLengthSize(n: Int): Int = variableByteSizeInt(n)
+    }
 }
 
-@DispatchOn(ProbeFramedTag::class, bodyLength = LengthPrefix.Varint, bodyLengthMaxBytes = 4)
+/**
+ * Shared peek implementation for `[1-byte discriminator][VBI body length][body]` framings.
+ * Walks the VBI canonical encoding byte by byte without consuming the stream; returns
+ * [PeekResult.NeedsMoreData] until both the discriminator and a complete VBI prefix are
+ * buffered.
+ */
+internal fun peekUByteDiscriminatorPlusVbiBody(
+    stream: StreamProcessor,
+    baseOffset: Int,
+): PeekResult {
+    if (stream.available() < baseOffset + 1) return PeekResult.NeedsMoreData
+    var width = 0
+    var len = 0
+    var multiplier = 1
+    while (width < 4) {
+        if (stream.available() < baseOffset + 1 + width + 1) return PeekResult.NeedsMoreData
+        val byte = stream.peekByte(baseOffset + 1 + width).toInt() and 0xFF
+        len += (byte and 0x7F) * multiplier
+        multiplier *= 128
+        width += 1
+        if ((byte and 0x80) == 0) return PeekResult.Size(1 + width + len)
+    }
+    return PeekResult.NeedsMoreData
+}
+
+@DispatchOn(ProbeFramedTag::class)
 @ProtocolMessage
 sealed interface ProbeFramedDispatchSimple {
     @PacketType(wire = 0x01)
@@ -381,7 +432,7 @@ sealed interface ProbeFramedDispatchSimple {
  * payload reader/writer scope: the patch position is captured *outside* the payload
  * encode lambda but the body length must include payload bytes.
  */
-@DispatchOn(ProbeFramedTag::class, bodyLength = LengthPrefix.Varint, bodyLengthMaxBytes = 4)
+@DispatchOn(ProbeFramedTag::class)
 @ProtocolMessage
 sealed interface ProbeFramedDispatchWithPayload {
     @PacketType(wire = 0x01)

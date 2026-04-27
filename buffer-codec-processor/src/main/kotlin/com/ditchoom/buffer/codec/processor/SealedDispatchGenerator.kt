@@ -119,21 +119,16 @@ class SealedDispatchGenerator(
     }
 
     /**
-     * Wraps a body-size expression with framing overhead, mirroring
-     * [emitBodyLengthEncodeWrap]. Returns just [bodyExpr] when no body framing.
-     * Evaluates [bodyExpr] once via a `run { val _b = ...; ... }` block when the
-     * frame requires both the body size and a variable-width prefix derived from it.
+     * Wraps a body-size expression with framing overhead, asking the framer at runtime
+     * for its prefix wire size via `bodyLengthSize(n)`. Returns just [bodyExpr] when no
+     * body framing. Evaluates [bodyExpr] once via a `run { val _b = ...; ... }` block.
      */
     private fun wrapBodyLengthSizeExpr(
         bodyExpr: String,
         dispatchOnInfo: DispatchOnInfo?,
     ): String {
-        val framing = dispatchOnInfo?.bodyFraming as? BodyFraming.WithLength ?: return bodyExpr
-        return when (val kind = framing.kind) {
-            is LengthPrefixKind.Varint ->
-                "run { val _b = $bodyExpr; com.ditchoom.buffer.variableByteSizeInt(_b) + _b }"
-            else -> "(${kind.maxWireBytes} + $bodyExpr)"
-        }
+        val framing = dispatchOnInfo?.framing ?: return bodyExpr
+        return "run { val _b = $bodyExpr; ${framing.framerFqn}.bodyLengthSize(_b) + _b }"
     }
 
     /** Returns the valid range for a wire value given the discriminator's inner type, or null if any Int fits. */
@@ -440,17 +435,16 @@ class SealedDispatchGenerator(
             if (sealedPeek != null) {
                 objectBuilder.addProperty(sealedPeek.minHeaderProperty)
                 objectBuilder.addFunction(sealedPeek.syncFun)
-                objectBuilder.addFunction(sealedPeek.suspendFun)
+                sealedPeek.suspendFun?.let { objectBuilder.addFunction(it) }
             }
         }
 
         val fileBuilder = fileSpecBuilder(packageName, codecName).addType(objectBuilder.build())
-        // Varint body framing emits calls into buffer extensions — import them on the
-        // generated dispatcher file so the call sites resolve.
-        if (dispatchOnInfo?.bodyFraming is BodyFraming.WithLength) {
-            fileBuilder.addImport("com.ditchoom.buffer", "readVariableByteInteger")
-            fileBuilder.addImport("com.ditchoom.buffer", "writeVariableByteInteger")
-            fileBuilder.addImport("com.ditchoom.buffer", "writeVariableByteIntegerLengthPrefixed")
+        // Framed dispatchers with payload variants emit a scratch-buffer fallback that
+        // calls `BufferFactory.Default.allocate(...)`. `Default` is an extension property
+        // on `BufferFactory.Companion`, so it must be imported by name.
+        if (dispatchOnInfo?.framing != null && hasAnyPayload) {
+            fileBuilder.addImport("com.ditchoom.buffer", "Default")
         }
         fileBuilder.build().writeTo(codeGenerator, dependencies)
     }
@@ -766,11 +760,10 @@ class SealedDispatchGenerator(
         } else {
             decodeBody.addStatement("val type = buffer.readByte().toInt() and 0xFF")
         }
-        // The non-context decode entrypoint cannot publish to a BodyLengthSink because no
-        // caller-supplied context is available. Read the body length and slice; the sink
-        // only fires through the `decode(buffer, context)` overload.
-        (dispatchOnInfo?.bodyFraming as? BodyFraming.WithLength)?.let { framing ->
-            decodeBody.addStatement("val _bodyLen = %L", readLengthExpr(framing.kind))
+        // Non-context decode entrypoint: delegate the body-length read to the framer
+        // (the discriminator-aware companion or explicit `DispatchFraming` object).
+        dispatchOnInfo?.framing?.let { framing ->
+            decodeBody.addStatement("val _bodyLen = %L.readBodyLength(buffer)", framing.framerFqn)
             decodeBody.addStatement("val _bodySlice = buffer.readBytes(_bodyLen)")
         }
         val bodyVar = bodyVarName(dispatchOnInfo)
@@ -870,23 +863,28 @@ class SealedDispatchGenerator(
                     info.payloadFields.joinToString(", ") { pf ->
                         "encode${v.subclass.simpleName.asString()}${capitalizeFirst(pf.fieldName)}"
                     }
-                val payloadFraming = dispatchOnInfo?.bodyFraming as? BodyFraming.WithLength
+                val payloadFraming = dispatchOnInfo?.framing
                 // Variant typed-lambda encode now always accepts `context` positionally
                 // (default `EncodeContext.Empty`); the typed-lambda dispatcher entrypoint
                 // doesn't have a caller context, so pass Empty.
                 val emptyEncodeCtx = "${ENCODE_CONTEXT.canonicalName}.Empty"
-                if (payloadFraming != null && payloadFraming.kind is LengthPrefixKind.Varint) {
+                if (payloadFraming != null) {
+                    // Scratch-buffer fallback: encode into a scratch, then prefix via the framer.
                     encodeBody.addStatement(
-                        "@Suppress(\"UNCHECKED_CAST\") buffer.writeVariableByteIntegerLengthPrefixed(maxBytes = %L, fieldName = %S) " +
-                            "{ buffer -> $subCodecName.encode(buffer, value as %T, $emptyEncodeCtx, $lambdaArgs) }",
-                        payloadFraming.kind.maxBytes,
-                        "body",
+                        "val _scratch = %T.Default.allocate(buffer.remaining().coerceAtLeast(16), buffer.byteOrder)",
+                        ClassName("com.ditchoom.buffer", "BufferFactory"),
+                    )
+                    encodeBody.addStatement(
+                        "@Suppress(\"UNCHECKED_CAST\") $subCodecName.encode(_scratch, value as %T, $emptyEncodeCtx, $lambdaArgs)",
                         castType,
                     )
+                    encodeBody.addStatement("_scratch.resetForRead()")
+                    encodeBody.addStatement(
+                        "%L.writeBodyLength(buffer, _scratch.remaining())",
+                        payloadFraming.framerFqn,
+                    )
+                    encodeBody.addStatement("buffer.write(_scratch)")
                 } else {
-                    // Non-Varint framing for payload variants is not currently exercised; if a
-                    // future protocol asks for fixed-width body framing on a generic dispatcher,
-                    // emit the placeholder/patch pattern here.
                     encodeBody.addStatement(
                         "@Suppress(\"UNCHECKED_CAST\") $subCodecName.encode(buffer, value as %T, $emptyEncodeCtx, $lambdaArgs)",
                         castType,
@@ -1124,7 +1122,8 @@ class SealedDispatchGenerator(
     private data class SealedPeekResult(
         val minHeaderProperty: PropertySpec,
         val syncFun: FunSpec,
-        val suspendFun: FunSpec,
+        /** `null` when the framing path is sync-only (DispatchFraming has no suspend variant). */
+        val suspendFun: FunSpec?,
     )
 
     /**
@@ -1147,12 +1146,11 @@ class SealedDispatchGenerator(
                 1 // default: single byte
             }
 
-        // For body-framed dispatch the minimum header is discriminator + the prefix's
-        // minimum-known wire bytes (Varint = 1; Byte/Short/Int = full width).
+        // For body-framed dispatch the minimum header is discriminator + 1. The framer's
+        // `peekFrameSize` consults the actual prefix bytes to decide NeedsMoreData; we
+        // only need a conservative floor here to gate "is it worth peeking yet?".
         val minHeaderBytes =
-            (dispatchOnInfo?.bodyFraming as? BodyFraming.WithLength)
-                ?.let { discriminatorSize + it.kind.minWireBytes }
-                ?: discriminatorSize
+            if (dispatchOnInfo?.framing != null) discriminatorSize + 1 else discriminatorSize
 
         val minHeaderProp =
             PropertySpec
@@ -1164,7 +1162,13 @@ class SealedDispatchGenerator(
         return SealedPeekResult(
             minHeaderProperty = minHeaderProp,
             syncFun = buildSealedPeekFun(variants, dispatchOnInfo, discriminatorSize, suspending = false),
-            suspendFun = buildSealedPeekFun(variants, dispatchOnInfo, discriminatorSize, suspending = true),
+            // Framer interface is sync-only; skip the suspending overload entirely when framed.
+            suspendFun =
+                if (dispatchOnInfo?.framing != null) {
+                    null
+                } else {
+                    buildSealedPeekFun(variants, dispatchOnInfo, discriminatorSize, suspending = true)
+                },
         )
     }
 
@@ -1197,58 +1201,11 @@ class SealedDispatchGenerator(
         val code = CodeBlock.builder()
         code.addStatement("if (stream.available() < baseOffset + %L) return %T.NeedsMoreData", discriminatorSize, PEEK_RESULT)
 
-        val framing = dispatchOnInfo?.bodyFraming as? BodyFraming.WithLength
+        val framing = dispatchOnInfo?.framing
         if (framing != null) {
-            when (val kind = framing.kind) {
-                is LengthPrefixKind.Varint -> {
-                    // Walk the VBI canonical encoding byte-by-byte: continuation bit set means more bytes.
-                    code.addStatement("val _vbiStart = baseOffset + %L", discriminatorSize)
-                    code.addStatement("var _vbiWidth = 0")
-                    code.addStatement("var _len = 0")
-                    code.addStatement("var _multiplier = 1")
-                    code.addStatement("var _continue = true")
-                    code.beginControlFlow("while (_continue && _vbiWidth < %L)", kind.maxBytes)
-                    code.addStatement(
-                        "if (stream.available() < _vbiStart + _vbiWidth + 1) return %T.NeedsMoreData",
-                        PEEK_RESULT,
-                    )
-                    code.addStatement("val _byte = stream.peekByte(_vbiStart + _vbiWidth).toInt() and 0xFF")
-                    code.addStatement("_len += (_byte and 0x7F) * _multiplier")
-                    code.addStatement("_multiplier *= 128")
-                    code.addStatement("_vbiWidth += 1")
-                    code.addStatement("_continue = (_byte and 0x80) != 0")
-                    code.endControlFlow()
-                    code.addStatement("if (_continue) return %T.NeedsMoreData", PEEK_RESULT)
-                    code.addStatement(
-                        "return %T.Size(%L + _vbiWidth + _len)",
-                        PEEK_RESULT,
-                        discriminatorSize,
-                    )
-                }
-                else -> {
-                    val cfg = fixedPrefixConfigOrError(kind)
-                    val prefixOffset = "baseOffset + $discriminatorSize"
-                    val readExpr =
-                        when (kind) {
-                            is LengthPrefixKind.Byte -> "stream.peekByte($prefixOffset).toInt() and 0xFF"
-                            is LengthPrefixKind.Short -> "stream.peekShort($prefixOffset).toInt() and 0xFFFF"
-                            is LengthPrefixKind.Int -> "stream.peekInt($prefixOffset)"
-                            is LengthPrefixKind.Varint -> error("unreachable: handled above")
-                        }
-                    code.addStatement(
-                        "if (stream.available() < baseOffset + %L) return %T.NeedsMoreData",
-                        discriminatorSize + cfg.byteCount,
-                        PEEK_RESULT,
-                    )
-                    code.addStatement("val _len = %L", readExpr)
-                    code.addStatement(
-                        "return %T.Size(%L + %L + _len)",
-                        PEEK_RESULT,
-                        discriminatorSize,
-                        cfg.byteCount,
-                    )
-                }
-            }
+            // Delegate the entire frame-size computation to the user-supplied framer.
+            // The framer's peekFrameSize must include the discriminator bytes in its result.
+            code.addStatement("return %L.peekFrameSize(stream, baseOffset)", framing.framerFqn)
             builder.addCode(code.build())
             return builder.build()
         }
@@ -1375,24 +1332,17 @@ class SealedDispatchGenerator(
     }
 
     /**
-     * Emits the decode-side prelude for body-length framing: read the length, optionally
-     * publish to a `BodyLengthSink` registered on the context, and slice the body.
-     *
-     * No-op when [info] is null or has no body framing — preserves existing dispatch
-     * behavior unchanged for callers that don't opt in.
+     * Emits the decode-side prelude for body-length framing: delegates to the framer's
+     * `readBodyLength(buffer)` and slices the body. No-op when [info] is null or has no
+     * framer — preserves unframed dispatch behavior.
      */
     internal fun emitBodyLengthDecodePrelude(
         code: CodeBlock.Builder,
         info: DispatchOnInfo?,
-        contextVarName: String,
+        @Suppress("UNUSED_PARAMETER") contextVarName: String,
     ) {
-        val framing = info?.bodyFraming as? BodyFraming.WithLength ?: return
-        code.addStatement("val _bodyLen = %L", readLengthExpr(framing.kind))
-        code.addStatement(
-            "%L[%T]?.value = _bodyLen",
-            contextVarName,
-            ClassName("com.ditchoom.buffer.codec", "BodyLengthKey"),
-        )
+        val framing = info?.framing ?: return
+        code.addStatement("val _bodyLen = %L.readBodyLength(buffer)", framing.framerFqn)
         code.addStatement("val _bodySlice = buffer.readBytes(_bodyLen)")
     }
 
@@ -1400,10 +1350,13 @@ class SealedDispatchGenerator(
      * Wraps an encode statement in the body-length framing helper when [info] requests it.
      * For non-framed dispatch (or when [info] is null), emits [encodeStmt] verbatim.
      *
-     * When [bodySizeExpr] is provided AND the framing is Varint, emits the inline-prefix
-     * path (compute size, write VBI, encode body directly) — skips the scratch buffer.
-     * When null (e.g. typed-lambda payload variants where size lambdas aren't available),
-     * falls back to the scratch-buffer helper.
+     * When [bodySizeExpr] is provided, emits the inline-prefix path: compute body size,
+     * call `framer.writeBodyLength(buffer, size)`, then run the encode statement.
+     *
+     * When null (e.g. typed-lambda payload variants where size lambdas aren't available
+     * because each `<@Payload P>` lambda's wire size depends on a runtime callback), uses
+     * a scratch buffer to encode the body, then writes the framer's prefix sized to that
+     * scratch's resulting bytes.
      */
     internal fun emitBodyLengthEncodeWrap(
         code: CodeBlock.Builder,
@@ -1411,46 +1364,36 @@ class SealedDispatchGenerator(
         encodeStmt: String,
         bodySizeExpr: String? = null,
     ) {
-        val framing = info?.bodyFraming as? BodyFraming.WithLength
+        val framing = info?.framing
         if (framing == null) {
             code.addStatement(encodeStmt)
             return
         }
-        when (val kind = framing.kind) {
-            is LengthPrefixKind.Varint ->
-                if (bodySizeExpr != null) {
-                    code.addStatement("val _len_body = %L", bodySizeExpr)
-                    if (kind.maxBytes < 4) {
-                        code.addStatement(
-                            "require(_len_body in 0..com.ditchoom.buffer.variableByteMax(%L)) " +
-                                "{ %P }",
-                            kind.maxBytes,
-                            "field 'body' encoded length \$_len_body exceeds " +
-                                "maxBytes=${kind.maxBytes} (max value " +
-                                "\${com.ditchoom.buffer.variableByteMax(${kind.maxBytes})})",
-                        )
-                    }
-                    code.addStatement("buffer.writeVariableByteInteger(_len_body)")
-                    code.addStatement(encodeStmt)
-                } else {
-                    code.addStatement(
-                        "buffer.writeVariableByteIntegerLengthPrefixed(maxBytes = %L, fieldName = %S) { buffer -> %L }",
-                        kind.maxBytes,
-                        "body",
-                        encodeStmt,
-                    )
-                }
-            else -> {
-                val cfg = fixedPrefixConfigOrError(kind)
-                code.addStatement("val _pos_body = buffer.position()")
-                code.addStatement(cfg.writePlaceholder)
-                code.addStatement(encodeStmt)
-                code.addStatement("val _end_body = buffer.position()")
-                code.addStatement("val _len_body = _end_body - _pos_body - %L", cfg.byteCount)
-                code.addStatement("buffer.position(_pos_body)")
-                code.addStatement(cfg.writeExpr("_len_body"))
-                code.addStatement("buffer.position(_end_body)")
-            }
+        if (bodySizeExpr != null) {
+            code.addStatement("val _len_body = %L", bodySizeExpr)
+            code.addStatement("%L.writeBodyLength(buffer, _len_body)", framing.framerFqn)
+            code.addStatement(encodeStmt)
+        } else {
+            // Scratch-buffer fallback for typed-lambda payload variants where the body
+            // size isn't computable up-front. Encode into the scratch, then frame the
+            // result. The scratch is allocated through BufferFactory.Default so the
+            // generated code stays platform-agnostic.
+            code.addStatement(
+                "val _scratch = %T.Default.allocate(buffer.remaining().coerceAtLeast(16), buffer.byteOrder)",
+                ClassName("com.ditchoom.buffer", "BufferFactory"),
+            )
+            // Substitute the user-passed `buffer` identifier inside encodeStmt with `_scratch`.
+            // The substring patterns we know the dispatcher emits: "buffer," / "buffer)" /
+            // "buffer ".
+            val scratchEncodeStmt =
+                encodeStmt
+                    .replace("buffer,", "_scratch,")
+                    .replace("buffer)", "_scratch)")
+                    .replace("buffer ", "_scratch ")
+            code.addStatement(scratchEncodeStmt)
+            code.addStatement("_scratch.resetForRead()")
+            code.addStatement("%L.writeBodyLength(buffer, _scratch.remaining())", framing.framerFqn)
+            code.addStatement("buffer.write(_scratch)")
         }
     }
 }

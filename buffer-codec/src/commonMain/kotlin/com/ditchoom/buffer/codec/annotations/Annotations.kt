@@ -150,10 +150,6 @@ annotation class Payload
  * All fixed-width variants use big-endian (network) byte order.
  */
 enum class LengthPrefix {
-    /** Sentinel — no length prefix. Used as a default marker on [DispatchOn.bodyLength]
-     * to signal that body framing is opt-in. Invalid on [LengthPrefixed.prefix]. */
-    None,
-
     /** 1 byte unsigned (max 255). */
     Byte,
 
@@ -197,8 +193,7 @@ enum class LengthPrefix {
  * )
  * ```
  *
- * @param prefix Width / encoding of the prefix. [LengthPrefix.None] is invalid here —
- *   it is reserved as a sentinel for [DispatchOn.bodyLength].
+ * @param prefix Width / encoding of the prefix.
  * @param maxBytes Spec cap for [LengthPrefix.Varint] (1–4). `0` (default) means use 4
  *   when `prefix == Varint`, ignored for fixed-width prefixes. Encoding a body that
  *   requires a wider VBI than `maxBytes` throws [IllegalArgumentException].
@@ -483,38 +478,51 @@ annotation class UseCodec(
  * }
  * ```
  *
- * # Body framing (`bodyLength`)
+ * # Body framing (`framing`)
  *
- * When [bodyLength] is non-[LengthPrefix.None], the dispatcher writes a length prefix
- * after the discriminator and slices the body to that length on decode. This collapses
- * the `[discriminator][lengthPrefix(bodyLength)][body]` framing pattern (used by MQTT v5,
- * AMQP, and most TLV protocols) into a generated dispatcher — eliminating per-variant
- * `remainingLength()` overrides and hand-written framing code at every call site.
+ * Body-length-prefixed dispatch — the wire shape `[discriminator][bodyLength][body]`
+ * used by MQTT, AMQP, HTTP/2, and most TLV protocols — is expressed via a
+ * [com.ditchoom.buffer.codec.DispatchFraming] strategy.
+ *
+ * The processor auto-discovers framing by checking whether the discriminator class's
+ * companion object implements `DispatchFraming<D>`. When found, the generated codec
+ * emits calls to `peekFrameSize` / `readBodyLength` / `writeBodyLength` around variant
+ * decode/encode and slices the body. When absent (and no explicit [framing] is set),
+ * dispatch is unframed — the variant body consumes the rest of the buffer.
  *
  * ```kotlin
- * @DispatchOn(MqttFixedHeader::class, bodyLength = LengthPrefix.Varint, bodyLengthMaxBytes = 4)
+ * @JvmInline
+ * value class MqttFixedHeader(val raw: UByte) {
+ *     @DispatchValue val packetType: Int get() = (raw.toInt() shr 4) and 0x0F
+ *     companion object : DispatchFraming<MqttFixedHeader> {
+ *         override fun readBodyLength(buffer: ReadBuffer): Int =
+ *             buffer.readVariableByteInteger()
+ *         override fun writeBodyLength(buffer: WriteBuffer, n: Int) {
+ *             buffer.writeVariableByteInteger(n)
+ *         }
+ *         override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult { ... }
+ *     }
+ * }
+ *
+ * @DispatchOn(MqttFixedHeader::class)
  * sealed interface MqttControlPacket { ... }
  * // Wire shape per variant: [byte1][VBI(remainingLength)][body]
  * ```
  *
- * Optional debug surface: register a [com.ditchoom.buffer.codec.BodyLengthSink] under
- * [com.ditchoom.buffer.codec.BodyLengthKey] in the decode context to capture the body
- * length the dispatcher consumed. Useful for diagnosing malformed wires.
- *
  * @param type A `KClass` referencing a `@ProtocolMessage` type (typically a value class)
  *   that contains a `@DispatchValue`-annotated property.
- * @param bodyLength Length-prefix encoding for the body that follows the discriminator.
- *   [LengthPrefix.None] (default) means no body framing — discriminator is followed
- *   directly by the variant body, as before.
- * @param bodyLengthMaxBytes Spec cap for [LengthPrefix.Varint] body length (1–4). `0`
- *   (default) uses 4 when `bodyLength == Varint`, ignored otherwise.
+ * @param framing Custom [com.ditchoom.buffer.codec.DispatchFraming] strategy. The default
+ *   sentinel [com.ditchoom.buffer.codec.DispatchFraming.Inherit] enables companion-object
+ *   discovery on [type]; an explicit framer wins over a discovered companion. The
+ *   referenced class must be a Kotlin `object` (companion or named) implementing
+ *   `DispatchFraming<D>` where `D` is [type] — KSP errors otherwise.
  */
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.BINARY)
 annotation class DispatchOn(
     val type: kotlin.reflect.KClass<*>,
-    val bodyLength: LengthPrefix = LengthPrefix.None,
-    val bodyLengthMaxBytes: Int = 0,
+    val framing: kotlin.reflect.KClass<out com.ditchoom.buffer.codec.DispatchFraming<*>> =
+        com.ditchoom.buffer.codec.DispatchFraming.Inherit::class,
 )
 
 /**

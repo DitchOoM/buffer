@@ -88,18 +88,14 @@ data class DiscriminatorParam(
 )
 
 /**
- * Body-framing strategy for a sealed dispatch codec. Either there is no framing
- * ([None]) or there is a length-prefixed body ([WithLength]) carrying a
- * [LengthPrefixKind] that already encapsulates any prefix-specific configuration
- * (e.g. Varint's cap). Two states, neither representing an impossible combination.
+ * Resolved framing for a sealed dispatch codec. Carries the FQN of the user-supplied
+ * `object` implementing `DispatchFraming<D>` and the discriminator's wire byte count
+ * (used by `peekFrameSize` to decide minimum-buffered bytes).
  */
-sealed interface BodyFraming {
-    data object None : BodyFraming
-
-    data class WithLength(
-        val kind: LengthPrefixKind,
-    ) : BodyFraming
-}
+data class DispatchFramingInfo(
+    val framerFqn: String,
+    val discriminatorBytes: Int,
+)
 
 data class DispatchOnInfo(
     val typeName: String,
@@ -121,12 +117,16 @@ data class DispatchOnInfo(
     val sealedCodecSimpleName: String = "",
     /** Package of the sealed interface. */
     val sealedPackage: String = "",
-    /** Body-framing strategy — `None` means no length prefix between discriminator and body. */
-    val bodyFraming: BodyFraming = BodyFraming.None,
+    /**
+     * Resolved [DispatchFraming] info. `null` means today's unframed dispatch — variant
+     * body consumes the rest of the buffer. Non-null means the dispatcher delegates body
+     * length read/write/peek/wireSize to [DispatchFramingInfo.framerFqn].
+     */
+    val framing: DispatchFramingInfo? = null,
 ) {
     /** Total wire bytes for the discriminator type. */
     val totalWireBytes: Int get() = constructorParams.sumOf { it.wireBytes }
 
-    /** True when the dispatcher writes a length prefix between discriminator and body bytes. */
-    val hasBodyLength: Boolean get() = bodyFraming is BodyFraming.WithLength
+    /** True when the dispatcher delegates body framing to a `DispatchFraming` object. */
+    val hasBodyLength: Boolean get() = framing != null
 }

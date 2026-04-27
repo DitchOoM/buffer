@@ -4,7 +4,6 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.test.protocols.ProbeByteSizedBytePrefixCollection
 import com.ditchoom.buffer.codec.test.protocols.ProbeByteSizedBytePrefixCollectionCodec
 import com.ditchoom.buffer.codec.test.protocols.ProbeByteSizedVarintCollection
@@ -460,18 +459,9 @@ class V5GapProbeTest {
     }
 
     // ─────────────────────────────────────────────────────────────────────────────────
-    // Phase 1 probes — these should FAIL until Phase 1.1 lands the primitives.
-    //
-    // Compile-error failure modes (Phase 1.0): the probes in V5GapProbe.kt reference
-    //   • LengthPrefix.Varint                       — enum value not yet defined
-    //   • @LengthPrefixed(prefix, maxBytes = N)     — second parameter not yet defined
-    //   • @DispatchOn(type, bodyLength = …, …)      — bodyLength* parameters not yet defined
-    //
-    // Runtime failure modes (Phase 1.0, after compilation lands but before processor
-    // emission lands): the codec dispatcher writes a 0-byte body length / no patch-up,
-    // breaking round-trip equality.
-    //
-    // After Phase 1.1 all 9 probe tests below must pass.
+    // Phase 1 probes — exercise `LengthPrefix.Varint` length prefixes and `@DispatchOn`
+    // body framing via a [DispatchFraming] companion on the discriminator. All probe
+    // tests in this section must pass.
     // ─────────────────────────────────────────────────────────────────────────────────
 
     /** ProbeVarintNested — round-trip at every VBI byte-width boundary. */
@@ -740,42 +730,6 @@ class V5GapProbeTest {
         assertFailsWith<Throwable> {
             ProbeFramedDispatchSimpleCodec.decode(malformedUnderrun)
         }
-    }
-
-    /**
-     * ProbeBodyLengthContextExposure — opting in via `BodyLengthSink` on the decode
-     * context exposes the VBI body length the dispatcher saw on the wire. The codec
-     * pays no context allocation cost when the sink is absent.
-     *
-     * The contract: register a `BodyLengthSink` under `BodyLengthKey`; after `decode`
-     * returns, `sink.value` holds the VBI body length the dispatcher consumed. With
-     * no sink registered, the dispatcher silently ignores the diagnostic concern.
-     *
-     * Why this shape: an immutable `DecodeContext` cannot be mutated by the dispatcher
-     * to expose a runtime-decoded value back to the caller. A caller-supplied mutable
-     * holder is the smallest API that preserves both immutability and observability.
-     */
-    @Test
-    fun bodyLengthExposedOnlyWhenCallerOptsIn() {
-        val variant: ProbeFramedDispatchSimple = ProbeFramedDispatchSimple.Beta(y = 0x11111111u, z = 0x22u)
-        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        ProbeFramedDispatchSimpleCodec.encode(buffer, variant)
-        buffer.resetForRead()
-
-        // Without opt-in: dispatcher must run normally; `decode(buffer)` returns the value.
-        val decoded = ProbeFramedDispatchSimpleCodec.decode(buffer)
-        assertEquals(variant, decoded)
-
-        buffer.resetForRead()
-        // With opt-in: dispatcher writes the body length into the sink.
-        // Beta body = UInt(4) + UByte(1) = 5 bytes.
-        val sink =
-            com.ditchoom.buffer.codec
-                .BodyLengthSink()
-        val ctx = DecodeContext.Empty.with(com.ditchoom.buffer.codec.BodyLengthKey, sink)
-        val decodedWithSink = ProbeFramedDispatchSimpleCodec.decode(buffer, ctx)
-        assertEquals(variant, decodedWithSink)
-        assertEquals(5, sink.value)
     }
 
     /**

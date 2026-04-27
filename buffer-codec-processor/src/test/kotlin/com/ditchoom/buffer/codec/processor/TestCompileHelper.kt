@@ -64,8 +64,8 @@ private val annotationSource =
     @Retention(AnnotationRetention.BINARY)
     annotation class DispatchOn(
         val type: kotlin.reflect.KClass<*>,
-        val bodyLength: LengthPrefix = LengthPrefix.None,
-        val bodyLengthMaxBytes: Int = 0,
+        val framing: kotlin.reflect.KClass<out com.ditchoom.buffer.codec.DispatchFraming<*>> =
+            com.ditchoom.buffer.codec.DispatchFraming.Inherit::class,
     )
 
     @Target(AnnotationTarget.PROPERTY)
@@ -73,7 +73,7 @@ private val annotationSource =
     annotation class DispatchValue
 
     enum class LengthPrefix {
-        None, Byte, Short, Int, Varint,
+        Byte, Short, Int, Varint,
     }
 
     @Target(AnnotationTarget.PROPERTY, AnnotationTarget.VALUE_PARAMETER)
@@ -121,7 +121,9 @@ private val bufferStubs =
         "BufferStubs.kt",
         """
     package com.ditchoom.buffer
+    enum class ByteOrder { BIG_ENDIAN, LITTLE_ENDIAN }
     interface ReadBuffer {
+        val byteOrder: ByteOrder
         fun readByte(): Byte
         fun readUnsignedByte(): UByte
         fun readShort(): Short
@@ -137,8 +139,10 @@ private val bufferStubs =
         fun remaining(): Int
         fun position(): Int
         fun position(newPosition: Int)
+        fun resetForRead()
     }
     interface WriteBuffer {
+        val byteOrder: ByteOrder
         fun writeByte(value: Byte): WriteBuffer
         fun writeUByte(value: UByte): WriteBuffer
         fun writeShort(value: Short): WriteBuffer
@@ -150,10 +154,17 @@ private val bufferStubs =
         fun writeFloat(value: Float): WriteBuffer
         fun writeDouble(value: Double): WriteBuffer
         fun writeString(text: CharSequence): WriteBuffer
+        fun write(source: ReadBuffer)
+        fun remaining(): Int
         fun position(): Int
         fun position(newPosition: Int)
     }
-    enum class ByteOrder { BIG_ENDIAN, LITTLE_ENDIAN }
+    interface PlatformBuffer : ReadBuffer, WriteBuffer
+    interface BufferFactory {
+        fun allocate(size: Int, byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN): PlatformBuffer
+        companion object
+    }
+    val BufferFactory.Companion.Default: BufferFactory get() = TODO()
     fun Short.reverseBytes(): Short = TODO()
     fun Int.reverseBytes(): Int = TODO()
     fun Long.reverseBytes(): Long = TODO()
@@ -247,8 +258,18 @@ private val codecStubs =
         override fun encode(buffer: WriteBuffer, value: T) = encode(buffer, value, EncodeContext.Empty)
         fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NeedsMoreData
     }
-    class BodyLengthSink { var value: Int = 0 }
-    data object BodyLengthKey : CodecContext.Key<BodyLengthSink>()
+    interface DispatchFraming<D : Any> {
+        fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult
+        fun readBodyLength(buffer: ReadBuffer): Int
+        fun writeBodyLength(buffer: WriteBuffer, n: Int)
+        fun bodyLengthSize(n: Int): Int
+        object Inherit : DispatchFraming<Any> {
+            override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = error("sentinel")
+            override fun readBodyLength(buffer: ReadBuffer): Int = error("sentinel")
+            override fun writeBodyLength(buffer: WriteBuffer, n: Int) { error("sentinel") }
+            override fun bodyLengthSize(n: Int): Int = error("sentinel")
+        }
+    }
     """,
     )
 

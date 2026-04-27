@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.codec.processor
 
 import com.ditchoom.buffer.codec.processor.spi.CodecFieldProvider
+import com.google.devtools.ksp.getAllSuperTypes
 import com.google.devtools.ksp.getConstructors
 import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.KSPLogger
@@ -400,53 +401,73 @@ class ProtocolMessageProcessor(
                 )
             }
 
-        // Extract bodyLength + bodyLengthMaxBytes from @DispatchOn, then translate to a
-        // typed BodyFraming. The flat (enum, Int) form is required at the annotation
-        // boundary because Kotlin annotations can't carry sealed types — but it lives
-        // for exactly this read-site.
-        val bodyLengthArg = dispatchOnAnnotation.arguments.find { it.name?.asString() == "bodyLength" }?.value
-        val bodyLengthName =
-            run {
-                val raw = bodyLengthArg
-                when {
-                    raw == null -> "None"
-                    raw is com.google.devtools.ksp.symbol.KSType -> {
-                        val name = raw.declaration.simpleName.asString()
-                        if (name in setOf("None", "Byte", "Short", "Int", "Varint")) name else "None"
-                    }
-                    else ->
-                        raw.toString().substringAfterLast(".").let {
-                            if (it in setOf("None", "Byte", "Short", "Int", "Varint")) it else "None"
-                        }
+        // Resolve the framing strategy:
+        //   - `framing = DispatchFraming.Inherit::class` (default) → check the discriminator's
+        //     companion object; if it implements DispatchFraming<D>, capture its FQN.
+        //   - explicit framer class → require it to be a Kotlin `object` implementing
+        //     DispatchFraming<D>; capture its FQN.
+        //   - no framer discovered (sentinel + no companion framer) → unframed dispatch.
+        val framingTypeArg =
+            dispatchOnAnnotation.arguments.find { it.name?.asString() == "framing" }?.value as? KSType
+        val framingClass = framingTypeArg?.declaration as? KSClassDeclaration
+        val framingClassFqn = framingClass?.qualifiedName?.asString()
+        val isInheritSentinel =
+            framingClass == null ||
+                framingClassFqn == "com.ditchoom.buffer.codec.DispatchFraming.Inherit"
+
+        val resolvedFramerFqn: String? =
+            if (isInheritSentinel) {
+                // Walk the discriminator's companion (if any) and check if it implements
+                // DispatchFraming<DiscriminatorType>. When found, emit calls via the
+                // enclosing class name (Kotlin auto-routes to the companion) so generated
+                // code reads `MyTag.readBodyLength(...)` rather than `MyTag.Companion.readBodyLength(...)`.
+                val companion =
+                    discriminatorClass.declarations
+                        .filterIsInstance<KSClassDeclaration>()
+                        .firstOrNull { it.isCompanionObject }
+                if (companion != null && implementsDispatchFraming(companion, discriminatorClass)) {
+                    discriminatorClass.qualifiedName?.asString()
+                } else {
+                    null
                 }
+            } else {
+                // Explicit framer must be a Kotlin `object` implementing DispatchFraming<D>.
+                // `isInheritSentinel` was false → framingClass is non-null by construction.
+                val explicit = framingClass!!
+                if (explicit.classKind != ClassKind.OBJECT) {
+                    logger.error(
+                        "@DispatchOn(framing = ${explicit.simpleName.asString()}::class) on " +
+                            "'${classDeclaration.simpleName.asString()}' must reference a Kotlin `object` " +
+                            "(companion or named) implementing " +
+                            "DispatchFraming<${discriminatorClass.simpleName.asString()}>. " +
+                            "${explicit.simpleName.asString()} is not an object.",
+                        classDeclaration,
+                    )
+                    return null
+                }
+                if (!implementsDispatchFraming(explicit, discriminatorClass)) {
+                    logger.error(
+                        "@DispatchOn(framing = ${explicit.simpleName.asString()}::class) on " +
+                            "'${classDeclaration.simpleName.asString()}' must implement " +
+                            "DispatchFraming<${discriminatorClass.simpleName.asString()}>. " +
+                            "Found framer that does not match the discriminator type.",
+                        classDeclaration,
+                    )
+                    return null
+                }
+                framingClassFqn
             }
-        val bodyLengthMaxBytes =
-            (dispatchOnAnnotation.arguments.find { it.name?.asString() == "bodyLengthMaxBytes" }?.value as? Int) ?: 0
-        if (bodyLengthName == "Varint" && bodyLengthMaxBytes !in 0..4) {
-            logger.error(
-                "@DispatchOn(bodyLength = LengthPrefix.Varint, bodyLengthMaxBytes = $bodyLengthMaxBytes) on " +
-                    "'${classDeclaration.simpleName.asString()}' is out of range. " +
-                    "bodyLengthMaxBytes must be 0..4 (0 = default 4-byte cap).",
-                classDeclaration,
-            )
-            return null
-        }
-        if (bodyLengthName != "None" && bodyLengthName != "Varint" && bodyLengthMaxBytes != 0) {
-            logger.error(
-                "@DispatchOn(bodyLengthMaxBytes = $bodyLengthMaxBytes) on '${classDeclaration.simpleName.asString()}' " +
-                    "has no effect: bodyLengthMaxBytes only applies to LengthPrefix.Varint.",
-                classDeclaration,
-            )
-            return null
-        }
-        val bodyFraming: BodyFraming =
-            when (bodyLengthName) {
-                "None" -> BodyFraming.None
-                "Byte" -> BodyFraming.WithLength(LengthPrefixKind.Byte)
-                "Short" -> BodyFraming.WithLength(LengthPrefixKind.Short)
-                "Int" -> BodyFraming.WithLength(LengthPrefixKind.Int)
-                "Varint" -> BodyFraming.WithLength(LengthPrefixKind.Varint(if (bodyLengthMaxBytes == 0) 4 else bodyLengthMaxBytes))
-                else -> error("unreachable: $bodyLengthName")
+
+        // Compute discriminator wire bytes (used for peek minimum-bytes math in framed paths).
+        val discriminatorBytes =
+            if (discriminatorParams.isNotEmpty()) {
+                discriminatorParams.sumOf { it.wireBytes }
+            } else {
+                Primitive.fromTypeName("kotlin.$innerTypeName")?.defaultWireBytes ?: 1
+            }
+        val framingInfo =
+            resolvedFramerFqn?.let {
+                DispatchFramingInfo(framerFqn = it, discriminatorBytes = discriminatorBytes)
             }
 
         return DispatchOnInfo(
@@ -458,8 +479,30 @@ class ProtocolMessageProcessor(
             innerPropertyName = innerPropertyName,
             isValueClass = isValueClass,
             constructorParams = discriminatorParams,
-            bodyFraming = bodyFraming,
+            framing = framingInfo,
         )
+    }
+
+    /**
+     * Returns true if [candidate] declares a supertype `DispatchFraming<D>` where `D` is
+     * [discriminator]. Walks all super types so a transitive parent counts (rare in
+     * practice but cheap to support).
+     */
+    private fun implementsDispatchFraming(
+        candidate: KSClassDeclaration,
+        discriminator: KSClassDeclaration,
+    ): Boolean {
+        val discriminatorFqn = discriminator.qualifiedName?.asString() ?: return false
+        return candidate.getAllSuperTypes().any { superType ->
+            val decl = superType.declaration as? KSClassDeclaration ?: return@any false
+            if (decl.qualifiedName?.asString() != "com.ditchoom.buffer.codec.DispatchFraming") {
+                return@any false
+            }
+            val firstArg = superType.arguments.firstOrNull()?.type?.resolve() ?: return@any false
+            val argFqn =
+                (firstArg.declaration as? KSClassDeclaration)?.qualifiedName?.asString()
+            argFqn == discriminatorFqn
+        }
     }
 
     // ──────────────────────── Sealed direction cascading ────────────────────────
