@@ -308,11 +308,15 @@ sealed class FieldReadStrategy {
     /**
      * Field populated from @DispatchOn context during decode, written normally during encode.
      * @param codecName the generated codec name for the discriminator type (e.g., "PngChunkHeaderCodec")
+     * @param codecPackage the package of the discriminator's generated codec; lets cross-module
+     *        relocations (discriminator declared outside the sealed tree's module) emit a correct
+     *        import even though the simple name appears unqualified in the generated body.
      * @param dispatchPackage the package of the sealed dispatch codec
      * @param dispatchCodecSimpleName the simple name of the dispatch codec (e.g., "PngChunkCodec")
      */
     data class DiscriminatorField(
         val codecName: String,
+        val codecPackage: String,
         val dispatchPackage: String,
         val dispatchCodecSimpleName: String,
     ) : FieldReadStrategy()
@@ -931,6 +935,7 @@ class FieldAnalyzer(
                 }
                 return FieldReadStrategy.DiscriminatorField(
                     typeDecl.codecName(),
+                    typeDecl.packageName.asString(),
                     dispatchInfo.sealedPackage,
                     dispatchInfo.sealedCodecSimpleName,
                 )

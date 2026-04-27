@@ -377,7 +377,7 @@ class ProtocolMessageProcessor(
                 ?.asString() ?: "UByte"
         val isValueClass =
             constructorKsParams.size == 1 &&
-                discriminatorClass.modifiers.contains(com.google.devtools.ksp.symbol.Modifier.VALUE)
+                ValueClassAnalyzer.isValueClass(discriminatorClass)
         // innerPropertyName is only meaningful for value-class discriminators; for data-class
         // discriminators it stays null and range emission (which would need it) is rejected by
         // KSP earlier.

@@ -872,6 +872,16 @@ class CodecGenerator(
                         crossPackageCodecImports += strategy.elementCodecPackage to outerSimple
                     }
                 }
+                is FieldReadStrategy.DiscriminatorField -> {
+                    // The discriminator type may live outside the sealed-tree's module (e.g.
+                    // MqttFixedHeader in models-base, dispatched on by ControlPacketV5 in
+                    // models-v5). Emit an import for its generated codec when it's not
+                    // already in this file's package; otherwise the generated body's bare
+                    // reference to `${codecName}` won't resolve.
+                    if (strategy.codecPackage.isNotEmpty() && strategy.codecPackage != currentPackage) {
+                        crossPackageCodecImports += strategy.codecPackage to strategy.codecName
+                    }
+                }
                 else -> {}
             }
         }
