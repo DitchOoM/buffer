@@ -415,7 +415,8 @@ class ProtocolMessageProcessor(
             framingClass == null ||
                 framingClassFqn == "com.ditchoom.buffer.codec.DispatchFraming.Inherit"
 
-        val resolvedFramerFqn: String? =
+        // Resolve the framer's FQN AND kind (Peek-only vs BodyLength).
+        val resolved: Pair<String, FramingKind>? =
             if (isInheritSentinel) {
                 // Walk the discriminator's companion (if any) and check if it implements
                 // DispatchFraming<DiscriminatorType>. When found, emit calls via the
@@ -426,13 +427,19 @@ class ProtocolMessageProcessor(
                         .filterIsInstance<KSClassDeclaration>()
                         .firstOrNull { it.isCompanionObject }
                 if (companion != null && implementsDispatchFraming(companion, discriminatorClass)) {
-                    discriminatorClass.qualifiedName?.asString()
+                    val kind =
+                        if (implementsBodyLengthFraming(companion, discriminatorClass)) {
+                            FramingKind.BodyLength
+                        } else {
+                            FramingKind.Peek
+                        }
+                    discriminatorClass.qualifiedName?.asString()!! to kind
                 } else {
                     null
                 }
             } else {
-                // Explicit framer must be a Kotlin `object` implementing DispatchFraming<D>.
-                // `isInheritSentinel` was false → framingClass is non-null by construction.
+                // Explicit framer must be a Kotlin `object` implementing DispatchFraming<D>
+                // (or its BodyLengthFraming<D> subtype).
                 val explicit = framingClass!!
                 if (explicit.classKind != ClassKind.OBJECT) {
                     logger.error(
@@ -455,7 +462,13 @@ class ProtocolMessageProcessor(
                     )
                     return null
                 }
-                framingClassFqn
+                val kind =
+                    if (implementsBodyLengthFraming(explicit, discriminatorClass)) {
+                        FramingKind.BodyLength
+                    } else {
+                        FramingKind.Peek
+                    }
+                framingClassFqn!! to kind
             }
 
         // Compute discriminator wire bytes (used for peek minimum-bytes math in framed paths).
@@ -466,8 +479,8 @@ class ProtocolMessageProcessor(
                 Primitive.fromTypeName("kotlin.$innerTypeName")?.defaultWireBytes ?: 1
             }
         val framingInfo =
-            resolvedFramerFqn?.let {
-                DispatchFramingInfo(framerFqn = it, discriminatorBytes = discriminatorBytes)
+            resolved?.let { (fqn, kind) ->
+                DispatchFramingInfo(framerFqn = fqn, discriminatorBytes = discriminatorBytes, kind = kind)
             }
 
         return DispatchOnInfo(
@@ -485,19 +498,35 @@ class ProtocolMessageProcessor(
 
     /**
      * Returns true if [candidate] declares a supertype `DispatchFraming<D>` where `D` is
-     * [discriminator]. Walks all super types so a transitive parent counts (rare in
-     * practice but cheap to support).
+     * [discriminator]. Both `BodyLengthFraming<D>` (which extends `DispatchFraming<D>`)
+     * and plain `DispatchFraming<D>` qualify — `getAllSuperTypes()` walks the transitive
+     * supertype chain.
      */
     private fun implementsDispatchFraming(
         candidate: KSClassDeclaration,
         discriminator: KSClassDeclaration,
+    ): Boolean = hasFramingSupertype(candidate, discriminator, "com.ditchoom.buffer.codec.DispatchFraming")
+
+    /**
+     * Returns true if [candidate] declares a supertype `BodyLengthFraming<D>` where `D` is
+     * [discriminator]. The dispatcher emits the framed-with-slicing codepath only for
+     * implementors of this stricter interface.
+     */
+    private fun implementsBodyLengthFraming(
+        candidate: KSClassDeclaration,
+        discriminator: KSClassDeclaration,
+    ): Boolean = hasFramingSupertype(candidate, discriminator, "com.ditchoom.buffer.codec.BodyLengthFraming")
+
+    /** Walks `candidate`'s transitive supertypes for [supertypeFqn] parameterized by [discriminator]. */
+    private fun hasFramingSupertype(
+        candidate: KSClassDeclaration,
+        discriminator: KSClassDeclaration,
+        supertypeFqn: String,
     ): Boolean {
         val discriminatorFqn = discriminator.qualifiedName?.asString() ?: return false
         return candidate.getAllSuperTypes().any { superType ->
             val decl = superType.declaration as? KSClassDeclaration ?: return@any false
-            if (decl.qualifiedName?.asString() != "com.ditchoom.buffer.codec.DispatchFraming") {
-                return@any false
-            }
+            if (decl.qualifiedName?.asString() != supertypeFqn) return@any false
             val firstArg = superType.arguments.firstOrNull()?.type?.resolve() ?: return@any false
             val argFqn =
                 (firstArg.declaration as? KSClassDeclaration)?.qualifiedName?.asString()

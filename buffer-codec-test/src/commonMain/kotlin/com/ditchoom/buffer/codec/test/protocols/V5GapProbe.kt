@@ -2,7 +2,7 @@ package com.ditchoom.buffer.codec.test.protocols
 
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
-import com.ditchoom.buffer.codec.DispatchFraming
+import com.ditchoom.buffer.codec.BodyLengthFraming
 import com.ditchoom.buffer.codec.annotations.DispatchOn
 import com.ditchoom.buffer.codec.annotations.DispatchValue
 import com.ditchoom.buffer.codec.annotations.LengthFrom
@@ -357,7 +357,7 @@ value class ProbeFramedTag(
     @DispatchValue
     val typeId: Int get() = raw.toInt()
 
-    companion object : DispatchFraming<ProbeFramedTag> {
+    companion object : BodyLengthFraming<ProbeFramedTag> {
         override fun peekFrameSize(
             stream: StreamProcessor,
             baseOffset: Int,
