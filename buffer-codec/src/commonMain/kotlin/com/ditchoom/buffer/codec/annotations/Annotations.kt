@@ -37,15 +37,31 @@ annotation class ProtocolMessage(
      * - [Direction.EncodeOnly]: generates only `encode()` — compile error if any field is decode-only.
      */
     val direction: Direction = Direction.Infer,
+    /**
+     * Fully-qualified name of an exception class with a single-`String` constructor that the
+     * generated sealed dispatcher throws when the wire discriminator matches no variant. Empty
+     * string (default) means [IllegalArgumentException].
+     *
+     * Resolved and validated at KSP time:
+     * - The FQN must resolve in the compilation classpath visible to this `@ProtocolMessage`.
+     * - The class must declare a `(String)` constructor.
+     *
+     * Only meaningful on a sealed root carrying [PacketType] / [PacketTypeRange] variants;
+     * ignored on leaf messages.
+     */
+    val onUnknownDiscriminator: String = "",
 )
 
 /**
- * Specifies the discriminator value for a variant of a `@ProtocolMessage` sealed interface.
+ * Variant of a `@ProtocolMessage` sealed interface that claims a single discriminator value.
  *
- * The generated dispatch codec reads one byte, matches it against each variant's [value],
- * and delegates to the correct variant codec. On encode, [wire] is written as the type byte.
+ * - **No `@DispatchOn`**: matches when the raw discriminator byte equals [wire].
+ * - **With `@DispatchOn`**: matches when the discriminator type's `@DispatchValue` extraction
+ *   equals [wire]. Encoding still needs a wire byte; if the variant carries a
+ *   `@DiscriminatorField` (e.g. an `MqttFixedHeader` value class encoding both type and flags),
+ *   the dispatcher delegates discriminator-byte encoding to that field. Otherwise it writes
+ *   [wire] as the discriminator byte.
  *
- * **Simple dispatch** (no `@DispatchOn`): [value] is both the match value and the wire byte.
  * ```kotlin
  * @ProtocolMessage
  * sealed interface Command {
@@ -57,28 +73,52 @@ annotation class ProtocolMessage(
  * }
  * ```
  *
- * **Bit-packed dispatch** (with `@DispatchOn`): [value] is the extracted dispatch value,
- * [wire] is the raw byte written on encode.
- * ```kotlin
- * @DispatchOn(MqttFixedHeader::class)
- * sealed interface MqttPacket {
- *     @PacketType(value = 1, wire = 0x10)  // type=1, raw byte=0x10
- *     data class Connect(...) : MqttPacket
+ * For dispatch where the type bits are the **high-order** bits and the variant claims a
+ * contiguous range of wire bytes (e.g. MQTT PUBLISH 0x30..0x3F), use [PacketTypeRange] instead.
  *
- *     @PacketType(value = 6, wire = 0x62)  // type=6, raw byte=0x62 (flags=0x02)
- *     data class PubRel(...) : MqttPacket
- * }
- * ```
- *
- * @param value The discriminator value to match during decode (0-255).
- * @param wire The raw byte to write during encode. Defaults to -1, meaning use [value].
- *   Required when `@DispatchOn` extracts a different value than the raw wire byte.
+ * @param wire The discriminator value matched during decode (0-255). With `@DispatchOn` this
+ *   matches the value-class extraction; without `@DispatchOn` it matches the raw byte.
  */
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.BINARY)
 annotation class PacketType(
-    val value: Int,
-    val wire: Int = -1,
+    val wire: Int,
+)
+
+/**
+ * Variant of a `@ProtocolMessage` sealed interface that claims a contiguous range of wire-byte
+ * discriminator values. Use when the LOW bits of the discriminator carry per-instance data
+ * (flags, sizes, inline values) rather than type identity, AND the type bits are the
+ * HIGH-order bits, so all instances of the variant occupy a contiguous wire-byte range.
+ *
+ * Examples:
+ * - MQTT v5 PUBLISH: 0x30..0x3F (low 4 bits = DUP/QoS/RETAIN).
+ * - MessagePack PositiveFixInt: 0x00..0x7F (low 7 bits = value).
+ * - CBOR major-type 0x00..0x1F (low 5 bits = additional info).
+ *
+ * The variant **must** carry the discriminator byte itself in a `@DiscriminatorField` (typically
+ * a value class that composes the wire byte from its data fields). KSP validates this — a
+ * ranged variant cannot delegate discriminator-encoding to the dispatcher because the byte
+ * depends on the variant's data.
+ *
+ * For non-contiguous bit-packed dispatch where instances of one type are scattered across
+ * the byte space (e.g. WebSocket where opcode is the LOW nibble and FIN/RSV occupy HIGH bits,
+ * so each opcode's wire bytes are scattered across {0x_1, 0x_2, ...}), this annotation does
+ * not apply — use `@DispatchOn` with a value class extracting the type bits, plus [PacketType]
+ * matching the extraction.
+ *
+ * Ranges across all variants of a sealed root must be disjoint (KSP-validated). Mixing
+ * [PacketType] singletons with [PacketTypeRange] variants is allowed; their union must remain
+ * disjoint.
+ *
+ * @param from Inclusive low byte of the range (0-255).
+ * @param to Inclusive high byte of the range (0-255), must be ≥ [from].
+ */
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.BINARY)
+annotation class PacketTypeRange(
+    val from: Int,
+    val to: Int,
 )
 
 /**

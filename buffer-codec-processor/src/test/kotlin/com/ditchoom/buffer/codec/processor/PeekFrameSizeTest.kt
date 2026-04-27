@@ -285,10 +285,10 @@ class PeekFrameSizeTest {
             @DispatchOn(Header::class)
             @ProtocolMessage
             sealed interface Packet {
-                @ProtocolMessage @PacketType(value = 1, wire = 0x10)
+                @ProtocolMessage @PacketType(wire = 1)
                 data class TypeA(val header: Header, val data: UShort) : Packet
 
-                @ProtocolMessage @PacketType(value = 2, wire = 0x20)
+                @ProtocolMessage @PacketType(wire = 2)
                 data class TypeB(val header: Header, val flags: UByte) : Packet
             }
             """,

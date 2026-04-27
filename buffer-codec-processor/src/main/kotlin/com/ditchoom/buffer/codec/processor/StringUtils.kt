@@ -107,6 +107,12 @@ data class DispatchOnInfo(
     val dispatchProperty: String,
     val poetClassName: ClassName,
     val innerTypeName: String,
+    /** Name of the discriminator value class's inner constructor parameter (e.g., `"raw"` for
+     * `MqttFixedHeader(val raw: UByte)`). Only meaningful when the discriminator is a value
+     * class — `null` for data-class discriminators. Range dispatch requires this to read the
+     * raw byte; KSP rejects ranges on data-class discriminators earlier, so emission code that
+     * touches it can rely on it being non-null whenever it's actually used. */
+    val innerPropertyName: String? = null,
     /** True if the discriminator is a value class (single constructor parameter). */
     val isValueClass: Boolean = true,
     /** All constructor parameters with their wire sizes (for data class discriminators). */

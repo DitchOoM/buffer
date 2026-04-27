@@ -40,35 +40,35 @@ value class ProbePropId(
 @DispatchOn(ProbePropId::class)
 @ProtocolMessage
 sealed interface ProbeProp {
-    @PacketType(value = 0x01, wire = 0x01)
+    @PacketType(wire = 0x01)
     @ProtocolMessage
     @JvmInline
     value class BoolProp(
         val raw: UByte,
     ) : ProbeProp
 
-    @PacketType(value = 0x09, wire = 0x09)
+    @PacketType(wire = 0x09)
     @ProtocolMessage
     data class CorrelationProbe<@Payload CD>(
         val length: UShort,
         @LengthFrom("length") val data: CD,
     ) : ProbeProp
 
-    @PacketType(value = 0x16, wire = 0x16)
+    @PacketType(wire = 0x16)
     @ProtocolMessage
     data class AuthDataProbe<@Payload AD>(
         val length: UShort,
         @LengthFrom("length") val data: AD,
     ) : ProbeProp
 
-    @PacketType(value = 0x21, wire = 0x21)
+    @PacketType(wire = 0x21)
     @ProtocolMessage
     @JvmInline
     value class UShortProp(
         val value: UShort,
     ) : ProbeProp
 
-    @PacketType(value = 0x26, wire = 0x26)
+    @PacketType(wire = 0x26)
     @ProtocolMessage
     data class StringPair(
         @LengthPrefixed val key: String,
@@ -210,7 +210,7 @@ sealed interface ProbeWillTree {
      * strategy plus three @WhenTrue conditional fields including a `@WhenTrue @PropertyBag`.
      * Reproduces B-6 as a sealed-variant.
      */
-    @PacketType(value = 1, wire = 0x10)
+    @PacketType(wire = 1)
     @ProtocolMessage
     data class ConnectLike<@Payload WP>(
         val flags: ProbeWillFlags,
@@ -226,9 +226,11 @@ sealed interface ProbeWillTree {
      * Sibling non-payload variant — proves the failure is specific to the payload variant,
      * not the sealed dispatch itself.
      */
-    @PacketType(value = 2, wire = 0x20)
+    @PacketType(wire = 2)
     @ProtocolMessage
-    data object Marker : ProbeWillTree
+    data class Marker(
+        val flags: ProbeWillFlags = ProbeWillFlags(0x20u),
+    ) : ProbeWillTree
 }
 
 /**
@@ -351,20 +353,20 @@ value class ProbeFramedTag(
 @DispatchOn(ProbeFramedTag::class, bodyLength = LengthPrefix.Varint, bodyLengthMaxBytes = 4)
 @ProtocolMessage
 sealed interface ProbeFramedDispatchSimple {
-    @PacketType(value = 1, wire = 0x01)
+    @PacketType(wire = 0x01)
     @ProtocolMessage
     data class Alpha(
         val x: UShort,
     ) : ProbeFramedDispatchSimple
 
-    @PacketType(value = 2, wire = 0x02)
+    @PacketType(wire = 0x02)
     @ProtocolMessage
     data class Beta(
         val y: UInt,
         val z: UByte,
     ) : ProbeFramedDispatchSimple
 
-    @PacketType(value = 3, wire = 0x03)
+    @PacketType(wire = 0x03)
     @ProtocolMessage
     data class Gamma(
         @LengthPrefixed val message: String,
@@ -382,7 +384,7 @@ sealed interface ProbeFramedDispatchSimple {
 @DispatchOn(ProbeFramedTag::class, bodyLength = LengthPrefix.Varint, bodyLengthMaxBytes = 4)
 @ProtocolMessage
 sealed interface ProbeFramedDispatchWithPayload {
-    @PacketType(value = 1, wire = 0x01)
+    @PacketType(wire = 0x01)
     @ProtocolMessage
     data class WithBytes<@Payload P>(
         val header: UByte,
@@ -390,7 +392,7 @@ sealed interface ProbeFramedDispatchWithPayload {
         @RemainingBytes val payload: P,
     ) : ProbeFramedDispatchWithPayload
 
-    @PacketType(value = 2, wire = 0x02)
+    @PacketType(wire = 0x02)
     @ProtocolMessage
     data class Plain(
         val x: UShort,

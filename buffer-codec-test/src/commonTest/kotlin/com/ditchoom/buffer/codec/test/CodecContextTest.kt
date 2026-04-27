@@ -179,7 +179,7 @@ class CodecContextTest {
 
     @Test
     fun dispatchOnDecodeIdenticalWithAndWithoutContext() {
-        val original: DispatchOnPacket = DispatchOnPacket.TypeConnect(4u, 60u)
+        val original: DispatchOnPacket = DispatchOnPacket.TypeConnect(protocolLevel = 4u, keepAlive = 60u)
 
         val buf1 = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         DispatchOnPacketCodec.encode(buf1, original)
@@ -229,7 +229,7 @@ class CodecContextTest {
 
     @Test
     fun dispatchOnEncodeIdenticalWithAndWithoutContext() {
-        val original: DispatchOnPacket = DispatchOnPacket.TypePubAck(999u)
+        val original: DispatchOnPacket = DispatchOnPacket.TypePubAck(packetId = 999u)
 
         val buf1 = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         DispatchOnPacketCodec.encode(buf1, original)

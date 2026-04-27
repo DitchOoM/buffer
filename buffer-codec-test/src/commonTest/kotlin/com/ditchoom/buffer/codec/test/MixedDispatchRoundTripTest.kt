@@ -20,7 +20,7 @@ import kotlin.test.assertTrue
 class MixedDispatchRoundTripTest {
     @Test
     fun connectWithoutDiscriminatorFieldRoundTrip() {
-        val original: MixedDispatchPacket = MixedDispatchPacket.MixedConnect(4u, 60u)
+        val original: MixedDispatchPacket = MixedDispatchPacket.MixedConnect(protocolLevel = 4u, keepAlive = 60u)
         val decoded = MixedDispatchPacketCodec.testRoundTrip(original)
         assertTrue(decoded is MixedDispatchPacket.MixedConnect)
         assertEquals(original, decoded)
@@ -29,7 +29,7 @@ class MixedDispatchRoundTripTest {
     @Test
     fun connectEncodeWritesLiteralWireByte() {
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
-        MixedDispatchPacketCodec.encode(buffer, MixedDispatchPacket.MixedConnect(4u, 60u))
+        MixedDispatchPacketCodec.encode(buffer, MixedDispatchPacket.MixedConnect(protocolLevel = 4u, keepAlive = 60u))
         assertEquals(0x10.toByte(), buffer[0])
     }
 

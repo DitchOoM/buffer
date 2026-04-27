@@ -27,12 +27,41 @@ class SealedDispatchGenerator(
         val implementsCodec: Boolean,
     )
 
-    /** @PacketType metadata: [value] for decode match, [wire] for encode byte. */
-    private data class PacketTypeInfo(
-        val value: Int,
-        val wire: Int,
-        val subclass: KSClassDeclaration,
-    )
+    /**
+     * Discriminator-match metadata for one sealed variant. Sealed so adding a future kind (e.g. a
+     * bit-mask claim) is a compile error at every emission site. The two kinds carry exactly the
+     * fields they need — no `low`/`high`/`isRange` flag to keep in sync.
+     *
+     * - [Point]: claims a single match value. Without `@DispatchOn` it matches the raw byte;
+     *   with `@DispatchOn` it matches the `@DispatchValue` extraction.
+     * - [Range]: claims a contiguous raw-byte span (`from..to`, both inclusive, `from <= to`
+     *   enforced at construction). The variant must self-encode via a `DiscriminatorField`.
+     */
+    private sealed interface WireMatch {
+        val subclass: KSClassDeclaration
+
+        /** The smallest match value claimed — used for stable emission ordering only. */
+        val low: Int
+
+        data class Point(
+            override val subclass: KSClassDeclaration,
+            val wire: Int,
+        ) : WireMatch {
+            override val low: Int get() = wire
+        }
+
+        data class Range(
+            override val subclass: KSClassDeclaration,
+            val from: Int,
+            val to: Int,
+        ) : WireMatch {
+            init {
+                require(from <= to) { "Range from=$from must be <= to=$to" }
+            }
+
+            override val low: Int get() = from
+        }
+    }
 
     /**
      * Generates the encode statement for writing the discriminator byte(s).
@@ -127,68 +156,206 @@ class SealedDispatchGenerator(
         variantsHandlingDiscriminator: Set<String> = emptySet(),
         variantsSupportingPeek: Set<String> = emptySet(),
         direction: CodecDirection = CodecDirection.Bidirectional,
+        onUnknownDiscriminator: String = "kotlin.IllegalArgumentException",
     ) {
         val interfaceName = sealedInterface.simpleName.asString()
         val packageName = sealedInterface.packageName.asString()
         val codecName = "${interfaceName}Codec"
         val interfaceTypeName = ClassName(packageName, interfaceName)
 
-        // Collect @PacketType values
-        val variants = mutableListOf<PacketTypeInfo>()
+        // Collect @PacketType / @PacketTypeRange variants
+        val variants = mutableListOf<WireMatch>()
         for (subclass in subclasses) {
             val packetType =
                 subclass.annotations.find {
                     it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.PacketType"
                 }
-            if (packetType == null) {
+            val packetRange =
+                subclass.annotations.find {
+                    it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.PacketTypeRange"
+                }
+
+            if (packetType == null && packetRange == null) {
                 logger.error(
-                    "Sealed subclass '${subclass.simpleName.asString()}' is missing @PacketType. " +
-                        "Each subclass of sealed @ProtocolMessage '$interfaceName' needs " +
-                        "@PacketType(N) to specify its 1-byte type discriminator (0-255).",
+                    "Sealed subclass '${subclass.simpleName.asString()}' is missing @PacketType or " +
+                        "@PacketTypeRange. Each subclass of sealed @ProtocolMessage '$interfaceName' " +
+                        "needs @PacketType(wire = N) for a single-byte claim or " +
+                        "@PacketTypeRange(from = F, to = T) for a contiguous wire-byte span.",
                     subclass,
                 )
                 return
             }
-            val value = packetType.arguments.first().value as Int
-            val wireArg = packetType.arguments.getOrNull(1)?.value as? Int ?: -1
-            val wire = if (wireArg == -1) value else wireArg
-            // Without @DispatchOn, dispatch reads/writes a single byte (0-255)
-            // With @DispatchOn, the discriminator type defines the width — validate wire fits
-            if (dispatchOnInfo == null) {
-                if (value < 0 || value > 255) {
-                    logger.error(
-                        "@PacketType($value) on '${subclass.simpleName.asString()}' is out of range. " +
-                            "The type discriminator is encoded as a single byte, so valid values are 0-255. " +
-                            "Use @DispatchOn for multi-byte discriminators.",
-                        subclass,
-                    )
-                    return
-                }
-            } else {
-                val wireRange = wireRange(dispatchOnInfo.innerTypeName)
-                if (wireRange != null && wire.toLong() !in wireRange) {
-                    logger.error(
-                        "@PacketType(wire=$wire) on '${subclass.simpleName.asString()}' overflows " +
-                            "the discriminator's ${dispatchOnInfo.innerTypeName} type (valid range: " +
-                            "${wireRange.first}..${wireRange.last}). The wire value is converted to " +
-                            "${dispatchOnInfo.innerTypeName} during encode, so values outside this range " +
-                            "silently wrap and will not round-trip correctly.",
-                        subclass,
-                    )
-                    return
-                }
+            if (packetType != null && packetRange != null) {
+                logger.error(
+                    "Sealed subclass '${subclass.simpleName.asString()}' has both @PacketType and " +
+                        "@PacketTypeRange. Use exactly one: @PacketType(wire = N) for a single-byte " +
+                        "discriminator, or @PacketTypeRange(from = F, to = T) for a contiguous span.",
+                    subclass,
+                )
+                return
             }
-            val existing = variants.find { it.value == value }
+
+            val match: WireMatch =
+                if (packetType != null) {
+                    val wireArg = packetType.arguments.find { it.name?.asString() == "wire" }?.value as? Int
+                        ?: packetType.arguments.firstOrNull()?.value as? Int
+                    if (wireArg == null) {
+                        logger.error(
+                            "@PacketType on '${subclass.simpleName.asString()}' must specify `wire`. " +
+                                "Use @PacketType(wire = N) or positional @PacketType(N).",
+                            subclass,
+                        )
+                        return
+                    }
+                    val wire = wireArg
+                    if (dispatchOnInfo == null) {
+                        if (wire < 0 || wire > 255) {
+                            logger.error(
+                                "@PacketType(wire = $wire) on '${subclass.simpleName.asString()}' is out of range. " +
+                                    "The type discriminator is a single byte, so valid values are 0-255. " +
+                                    "Use @DispatchOn for multi-byte discriminators.",
+                                subclass,
+                            )
+                            return
+                        }
+                    } else {
+                        val wireRange = wireRange(dispatchOnInfo.innerTypeName)
+                        if (wireRange != null && wire.toLong() !in wireRange) {
+                            logger.error(
+                                "@PacketType(wire = $wire) on '${subclass.simpleName.asString()}' overflows " +
+                                    "the discriminator's ${dispatchOnInfo.innerTypeName} type (valid range: " +
+                                    "${wireRange.first}..${wireRange.last}). The wire value is converted to " +
+                                    "${dispatchOnInfo.innerTypeName} during encode, so values outside this range " +
+                                    "silently wrap and will not round-trip correctly.",
+                                subclass,
+                            )
+                            return
+                        }
+                    }
+                    WireMatch.Point(subclass = subclass, wire = wire)
+                } else {
+                    // packetRange != null
+                    val from = packetRange!!.arguments.find { it.name?.asString() == "from" }?.value as? Int
+                        ?: (packetRange.arguments.getOrNull(0)?.value as? Int)
+                    val to = packetRange.arguments.find { it.name?.asString() == "to" }?.value as? Int
+                        ?: (packetRange.arguments.getOrNull(1)?.value as? Int)
+                    if (from == null || to == null) {
+                        logger.error(
+                            "@PacketTypeRange on '${subclass.simpleName.asString()}' must specify `from` and `to`.",
+                            subclass,
+                        )
+                        return
+                    }
+                    if (to < from) {
+                        logger.error(
+                            "@PacketTypeRange(from = $from, to = $to) on '${subclass.simpleName.asString()}' " +
+                                "is invalid: `to` must be >= `from`.",
+                            subclass,
+                        )
+                        return
+                    }
+                    if (dispatchOnInfo == null) {
+                        if (from < 0 || from > 255 || to < 0 || to > 255) {
+                            logger.error(
+                                "@PacketTypeRange(from = $from, to = $to) on " +
+                                    "'${subclass.simpleName.asString()}' is out of range. The type discriminator " +
+                                    "is a single byte; both bounds must be 0-255.",
+                                subclass,
+                            )
+                            return
+                        }
+                    } else {
+                        if (!dispatchOnInfo.isValueClass ||
+                            (dispatchOnInfo.innerTypeName != "UByte" && dispatchOnInfo.innerTypeName != "Byte")
+                        ) {
+                            logger.error(
+                                "@PacketTypeRange on '${subclass.simpleName.asString()}' requires either no " +
+                                    "@DispatchOn or a @DispatchOn whose discriminator is a single-byte value class " +
+                                    "(UByte or Byte). The current discriminator " +
+                                    "(${dispatchOnInfo.innerTypeName}, value-class=${dispatchOnInfo.isValueClass}) " +
+                                    "cannot be addressed by a raw-byte range.",
+                                subclass,
+                            )
+                            return
+                        }
+                        if (from < 0 || from > 255 || to < 0 || to > 255) {
+                            logger.error(
+                                "@PacketTypeRange(from = $from, to = $to) on " +
+                                    "'${subclass.simpleName.asString()}' must lie within 0-255 (single byte).",
+                                subclass,
+                            )
+                            return
+                        }
+                    }
+                    val qn = subclass.qualifiedName?.asString() ?: subclass.simpleName.asString()
+                    if (qn !in variantsHandlingDiscriminator) {
+                        logger.error(
+                            "@PacketTypeRange on '${subclass.simpleName.asString()}' requires the variant to " +
+                                "carry the discriminator byte itself in a discriminator field (a constructor " +
+                                "parameter typed as the @DispatchOn discriminator class, with a default value). " +
+                                "Without one, the dispatcher has no way to encode the per-instance bytes that " +
+                                "make this a range rather than a single value.",
+                            subclass,
+                        )
+                        return
+                    }
+                    WireMatch.Range(subclass = subclass, from = from, to = to)
+                }
+
+            variants.add(match)
+        }
+
+        // Disjoint validation. Range claims must not overlap each other in raw-byte space.
+        // Point claims must not collide on their match key (raw byte without @DispatchOn,
+        // extraction value with @DispatchOn).
+        val rangeVariants = variants.filterIsInstance<WireMatch.Range>().sortedBy { it.from }
+        for (i in 1 until rangeVariants.size) {
+            val prev = rangeVariants[i - 1]
+            val cur = rangeVariants[i]
+            if (cur.from <= prev.to) {
+                logger.error(
+                    "@PacketTypeRange spans overlap on sealed root '$interfaceName': " +
+                        "'${prev.subclass.simpleName.asString()}' " +
+                        "(0x${prev.from.toString(16)}..0x${prev.to.toString(16)}) and " +
+                        "'${cur.subclass.simpleName.asString()}' " +
+                        "(0x${cur.from.toString(16)}..0x${cur.to.toString(16)}) collide on " +
+                        "byte 0x${cur.from.toString(16)}. Each raw byte must route to at most one variant.",
+                    cur.subclass,
+                )
+                return
+            }
+        }
+        val pointVariants = variants.filterIsInstance<WireMatch.Point>()
+        val pointSeen = mutableMapOf<Int, KSClassDeclaration>()
+        for (p in pointVariants) {
+            val existing = pointSeen[p.wire]
             if (existing != null) {
                 logger.error(
-                    "@PacketType($value) is used by both '${existing.subclass.simpleName.asString()}' " +
-                        "and '${subclass.simpleName.asString()}'. " +
+                    "@PacketType(wire = ${p.wire}) is used by both " +
+                        "'${existing.simpleName.asString()}' and '${p.subclass.simpleName.asString()}'. " +
                         "Each subclass needs a unique discriminator so the codec can identify which type to decode.",
-                    subclass,
+                    p.subclass,
                 )
                 return
             }
-            variants.add(PacketTypeInfo(value, wire, subclass))
+            pointSeen[p.wire] = p.subclass
+        }
+        if (dispatchOnInfo == null) {
+            // Without @DispatchOn we dispatch on raw byte everywhere — points and ranges share the
+            // same domain, so a point inside any range is also a collision.
+            for (p in pointVariants) {
+                val containing = rangeVariants.firstOrNull { p.wire in it.from..it.to }
+                if (containing != null) {
+                    logger.error(
+                        "@PacketType(wire = ${p.wire}) on '${p.subclass.simpleName.asString()}' falls " +
+                            "inside @PacketTypeRange on '${containing.subclass.simpleName.asString()}' " +
+                            "(0x${containing.from.toString(16)}..0x${containing.to.toString(16)}). " +
+                            "Raw byte 0x${p.wire.toString(16)} must route to at most one variant.",
+                        p.subclass,
+                    )
+                    return
+                }
+            }
         }
 
         // Sealed dispatch is aggregating: it depends on the sealed interface AND all subclass files
@@ -216,9 +383,17 @@ class SealedDispatchGenerator(
                     dispatchOnInfo,
                     variantsHandlingDiscriminator,
                     direction,
+                    onUnknownDiscriminator,
                 )
             } else {
-                buildSimpleDispatch(interfaceTypeName, variants, dispatchOnInfo, variantsHandlingDiscriminator, direction)
+                buildSimpleDispatch(
+                    interfaceTypeName,
+                    variants,
+                    dispatchOnInfo,
+                    variantsHandlingDiscriminator,
+                    direction,
+                    onUnknownDiscriminator,
+                )
             }
 
         val objectBuilder = TypeSpec.objectBuilder(codecName)
@@ -280,23 +455,80 @@ class SealedDispatchGenerator(
         fileBuilder.build().writeTo(codeGenerator, dependencies)
     }
 
-    private fun PacketTypeInfo.selfEncodesDiscriminator(variantsHandlingDiscriminator: Set<String>): Boolean {
-        val qn = subclass.qualifiedName?.asString() ?: return false
-        return qn in variantsHandlingDiscriminator
+    private fun WireMatch.selfEncodesDiscriminator(variantsHandlingDiscriminator: Set<String>): Boolean =
+        when (this) {
+            // Range variants always delegate discriminator-encode to their @DiscriminatorField; KSP
+            // already enforced this earlier.
+            is WireMatch.Range -> true
+            // Point variants opt in via DiscriminatorField presence (auto-detected by type).
+            is WireMatch.Point -> {
+                val qn = subclass.qualifiedName?.asString()
+                qn != null && qn in variantsHandlingDiscriminator
+            }
+        }
+
+    /** Returns the call expression for `throw <configured>("$message")`. Defaults to
+     * `IllegalArgumentException` when [fqn] is empty or the placeholder `kotlin.IllegalArgumentException`. */
+    private fun unknownExceptionClassName(fqn: String): ClassName {
+        val resolved = fqn.ifEmpty { "kotlin.IllegalArgumentException" }
+        val pkg = resolved.substringBeforeLast('.')
+        val simple = resolved.substringAfterLast('.')
+        return ClassName(pkg, simple)
     }
+
+    /** Emits a single `when`-arm condition for a [WireMatch]. Range arms emit `in from..to`,
+     * point arms emit the bare integer. */
+    private fun whenArmKey(match: WireMatch): String =
+        when (match) {
+            is WireMatch.Range -> "in ${match.from}..${match.to}"
+            is WireMatch.Point -> match.wire.toString()
+        }
+
+    /** Emits a `when {}` predicate that mixes raw-byte ranges with extraction-value points
+     * under `@DispatchOn`. The dispatcher reads both `rawByte` and `type` so each kind compares
+     * against the right domain. */
+    private fun whenBlockArmKey(match: WireMatch): String =
+        when (match) {
+            is WireMatch.Range -> "rawByte in ${match.from}..${match.to}"
+            is WireMatch.Point -> "type == ${match.wire}"
+        }
+
+    /** The wire value used by `addWireWrite` and `discriminatorWireSizeExpr` for a point claim
+     * — these helpers only run for non-self-encoding point variants. Calling for a [WireMatch.Range]
+     * is a programming error. */
+    private fun WireMatch.Point.encodeWire(): Int = wire
+
+    /** Returns the discriminator value class's inner-property name, or fails loudly. Range dispatch
+     * needs this to read the raw byte; KSP rejects ranges on data-class discriminators earlier so
+     * any null at emission time is a processor bug, not user error. */
+    private fun DispatchOnInfo.requireInnerPropertyName(): String =
+        innerPropertyName
+            ?: error(
+                "Range dispatch on '$typeName' requires its inner-property name, but the @DispatchOn " +
+                    "target is not a value class. KSP should have rejected the @PacketTypeRange earlier; " +
+                    "this is a processor bug.",
+            )
 
     /** No payload variants — generates a standard Codec<T> implementation with context forwarding. */
     private fun buildSimpleDispatch(
         interfaceTypeName: ClassName,
-        variants: List<PacketTypeInfo>,
+        variants: List<WireMatch>,
         dispatchOnInfo: DispatchOnInfo? = null,
         variantsHandlingDiscriminator: Set<String> = emptySet(),
         direction: CodecDirection = CodecDirection.Bidirectional,
+        onUnknownDiscriminator: String = "",
     ): DispatchResult {
         val isBidirectional = direction == CodecDirection.Bidirectional
         val canDecode = direction != CodecDirection.EncodeOnly
         val canEncode = direction != CodecDirection.DecodeOnly
         val functions = mutableListOf<FunSpec>()
+        val unknownException = unknownExceptionClassName(onUnknownDiscriminator)
+        val hasRanges = variants.any { it is WireMatch.Range }
+        // Sort emission order: ranges first (in low order), then points (in low order). Within
+        // each group, ordering is purely cosmetic — disjoint validation guarantees no overlap.
+        val orderedVariants =
+            variants.filterIsInstance<WireMatch.Range>().sortedBy { it.from } +
+                variants.filterIsInstance<WireMatch.Point>().sortedBy { it.wire }
 
         // decode(buffer, context) — context-aware decode
         if (canDecode) {
@@ -310,6 +542,12 @@ class SealedDispatchGenerator(
                     "val type = _discriminator.%L",
                     dispatchOnInfo.dispatchProperty,
                 )
+                if (hasRanges) {
+                    decodeCtxBody.addStatement(
+                        "val rawByte = _discriminator.%L.toInt() and 0xFF",
+                        dispatchOnInfo.requireInnerPropertyName(),
+                    )
+                }
                 decodeCtxBody.addStatement(
                     "val _ctx = context.with(DiscriminatorKey, _discriminator)",
                 )
@@ -320,19 +558,32 @@ class SealedDispatchGenerator(
             val bodyVar = bodyVarName(dispatchOnInfo)
             val ctxVar = if (dispatchOnInfo != null) "_ctx" else "context"
             val framed = dispatchOnInfo?.hasBodyLength == true
+            // With @DispatchOn AND ranges, ranges match raw byte while points match extraction —
+            // need a multi-condition `when {}`. Otherwise stick with `when (type)` for cleanliness.
+            val useWhenBlock = dispatchOnInfo != null && hasRanges
             if (framed) {
-                decodeCtxBody.beginControlFlow("val _result = when (type)")
+                if (useWhenBlock) decodeCtxBody.beginControlFlow("val _result = when") else decodeCtxBody.beginControlFlow("val _result = when (type)")
             } else {
-                decodeCtxBody.beginControlFlow("return when (type)")
+                if (useWhenBlock) decodeCtxBody.beginControlFlow("return when") else decodeCtxBody.beginControlFlow("return when (type)")
             }
-            for (v in variants) {
-                decodeCtxBody.addStatement("${v.value} -> ${v.subclass.codecName()}.decode($bodyVar, $ctxVar)")
+            for (v in orderedVariants) {
+                val arm =
+                    if (useWhenBlock) {
+                        whenBlockArmKey(v)
+                    } else {
+                        whenArmKey(v)
+                    }
+                decodeCtxBody.addStatement("$arm -> ${v.subclass.codecName()}.decode($bodyVar, $ctxVar)")
             }
             decodeCtxBody
-                .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
+                .addStatement(
+                    "else -> throw %T(%P)",
+                    unknownException,
+                    if (useWhenBlock) "Unknown discriminator: 0x\${rawByte.toString(16)}" else "Unknown packet type: \$type",
+                )
                 .endControlFlow()
             if (framed) {
-                emitBodyLengthOverrunCheck(decodeCtxBody)
+                emitBodyLengthOverrunCheck(decodeCtxBody, unknownException)
                 decodeCtxBody.addStatement("return _result")
             }
 
@@ -366,7 +617,7 @@ class SealedDispatchGenerator(
             for (v in variants) {
                 encodeCtxBody.beginControlFlow("is %T ->", v.subclass.toPoetClassName())
                 if (!v.selfEncodesDiscriminator(variantsHandlingDiscriminator)) {
-                    addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
+                    addWireWrite(encodeCtxBody, v.low, dispatchOnInfo)
                 }
                 emitBodyLengthEncodeWrap(
                     code = encodeCtxBody,
@@ -408,7 +659,7 @@ class SealedDispatchGenerator(
             for (v in variants) {
                 val subTypeName = v.subclass.toPoetClassName()
                 val subCodecName = v.subclass.codecName()
-                val discSize = discriminatorWireSizeExpr(v.wire, dispatchOnInfo)
+                val discSize = discriminatorWireSizeExpr(v.low, dispatchOnInfo)
                 val variantBody = "$subCodecName.wireSize(value, context)"
                 val wrapped = wrapBodyLengthSizeExpr(variantBody, dispatchOnInfo)
                 val term = if (v.selfEncodesDiscriminator(variantsHandlingDiscriminator)) wrapped else "$discSize + $wrapped"
@@ -446,12 +697,18 @@ class SealedDispatchGenerator(
     private fun buildPayloadDispatch(
         packageName: String,
         interfaceTypeName: ClassName,
-        variants: List<PacketTypeInfo>,
+        variants: List<WireMatch>,
         variantPayloadInfos: List<SealedVariantPayloadInfo>,
         dispatchOnInfo: DispatchOnInfo? = null,
         variantsHandlingDiscriminator: Set<String> = emptySet(),
         direction: CodecDirection = CodecDirection.Bidirectional,
+        onUnknownDiscriminator: String = "",
     ): DispatchResult {
+        val unknownException = unknownExceptionClassName(onUnknownDiscriminator)
+        val hasRanges = variants.any { it is WireMatch.Range }
+        val orderedVariants =
+            variants.filterIsInstance<WireMatch.Range>().sortedBy { it.from } +
+                variants.filterIsInstance<WireMatch.Point>().sortedBy { it.wire }
         // Collect all distinct type params from all payload variants
         val allTypeParams =
             variantPayloadInfos
@@ -499,6 +756,12 @@ class SealedDispatchGenerator(
                 ClassName(dispatchOnInfo.poetClassName.packageName, dispatchOnInfo.codecName),
             )
             decodeBody.addStatement("val type = _discriminator.%L", dispatchOnInfo.dispatchProperty)
+            if (hasRanges) {
+                decodeBody.addStatement(
+                    "val rawByte = _discriminator.%L.toInt() and 0xFF",
+                    dispatchOnInfo.requireInnerPropertyName(),
+                )
+            }
             decodeBody.addStatement("val _ctx = %T.Empty.with(DiscriminatorKey, _discriminator)", DECODE_CONTEXT)
         } else {
             decodeBody.addStatement("val type = buffer.readByte().toInt() and 0xFF")
@@ -513,44 +776,46 @@ class SealedDispatchGenerator(
         val bodyVar = bodyVarName(dispatchOnInfo)
         val conv1CtxArg = if (dispatchOnInfo != null) ", _ctx" else ""
         val framed = dispatchOnInfo?.hasBodyLength == true
+        val useWhenBlock = dispatchOnInfo != null && hasRanges
         if (framed) {
-            decodeBody.beginControlFlow("val _result = when (type)")
+            if (useWhenBlock) decodeBody.beginControlFlow("val _result = when") else decodeBody.beginControlFlow("val _result = when (type)")
         } else {
-            decodeBody.beginControlFlow("return when (type)")
+            if (useWhenBlock) decodeBody.beginControlFlow("return when") else decodeBody.beginControlFlow("return when (type)")
         }
 
-        for (v in variants) {
+        for (v in orderedVariants) {
             val info = payloadBySubclass[v.subclass.qualifiedName?.asString()]
             val subCodecName = v.subclass.codecName()
+            val arm =
+                if (useWhenBlock) {
+                    whenBlockArmKey(v)
+                } else {
+                    whenArmKey(v)
+                }
             if (info != null && info.payloadFields.isNotEmpty()) {
                 val lambdaArgs =
                     info.payloadFields.joinToString(", ") { pf ->
                         "decode${v.subclass.simpleName.asString()}${capitalizeFirst(pf.fieldName)}"
                     }
-                val variantHasDiscriminatorField =
-                    dispatchOnInfo != null &&
-                        v.subclass.primaryConstructor?.parameters?.any { param ->
-                            param.type
-                                .resolve()
-                                .declaration.qualifiedName
-                                ?.asString() ==
-                                dispatchOnInfo.poetClassName.canonicalName
-                        } == true
                 // Variant typed-lambda decode now always accepts `context` positionally
                 // (default `DecodeContext.Empty`); when this dispatcher built a `_ctx`
                 // carrying DiscriminatorKey, thread it so DiscriminatorField reads resolve.
                 val payloadCtxArg =
                     if (dispatchOnInfo != null) "_ctx" else "${DECODE_CONTEXT.canonicalName}.Empty"
-                decodeBody.addStatement("${v.value} -> $subCodecName.decode($bodyVar, $payloadCtxArg, $lambdaArgs)")
+                decodeBody.addStatement("$arm -> $subCodecName.decode($bodyVar, $payloadCtxArg, $lambdaArgs)")
             } else {
-                decodeBody.addStatement("${v.value} -> $subCodecName.decode($bodyVar$conv1CtxArg)")
+                decodeBody.addStatement("$arm -> $subCodecName.decode($bodyVar$conv1CtxArg)")
             }
         }
         decodeBody
-            .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
+            .addStatement(
+                "else -> throw %T(%P)",
+                unknownException,
+                if (useWhenBlock) "Unknown discriminator: 0x\${rawByte.toString(16)}" else "Unknown packet type: \$type",
+            )
             .endControlFlow()
         if (framed) {
-            emitBodyLengthOverrunCheck(decodeBody)
+            emitBodyLengthOverrunCheck(decodeBody, unknownException)
             decodeBody.addStatement("return _result")
         }
 
@@ -597,7 +862,7 @@ class SealedDispatchGenerator(
                 // Star-projected match for generic variant
                 val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
                 encodeBody.beginControlFlow("is %T ->", starType)
-                if (!skipForVariant) addWireWrite(encodeBody, v.wire, dispatchOnInfo)
+                if (!skipForVariant) addWireWrite(encodeBody, v.low, dispatchOnInfo)
                 // Unchecked cast to typed variant
                 val castTypeParams = info.payloadFields.map { TypeVariableName(it.typeParamName) }
                 val castType = subTypeName.parameterizedBy(castTypeParams)
@@ -631,7 +896,7 @@ class SealedDispatchGenerator(
             } else {
                 // Non-payload variant: simple dispatch
                 encodeBody.beginControlFlow("is %T ->", subTypeName)
-                if (!skipForVariant) addWireWrite(encodeBody, v.wire, dispatchOnInfo)
+                if (!skipForVariant) addWireWrite(encodeBody, v.low, dispatchOnInfo)
                 val variantEncodeStmt =
                     if (dispatchOnInfo != null) {
                         "$subCodecName.encode(buffer, value, ${ENCODE_CONTEXT.canonicalName}.Empty)"
@@ -666,6 +931,12 @@ class SealedDispatchGenerator(
                     ClassName(dispatchOnInfo.poetClassName.packageName, dispatchOnInfo.codecName),
                 )
                 decodeCtxBody.addStatement("val type = _discriminator.%L", dispatchOnInfo.dispatchProperty)
+                if (hasRanges) {
+                    decodeCtxBody.addStatement(
+                        "val rawByte = _discriminator.%L.toInt() and 0xFF",
+                        dispatchOnInfo.requireInnerPropertyName(),
+                    )
+                }
                 decodeCtxBody.addStatement("val _ctx = context.with(DiscriminatorKey, _discriminator)")
             } else {
                 decodeCtxBody.addStatement("val type = buffer.readByte().toInt() and 0xFF")
@@ -674,26 +945,37 @@ class SealedDispatchGenerator(
             val bodyVar = bodyVarName(dispatchOnInfo)
             val payloadCtxVar = if (dispatchOnInfo != null) "_ctx" else "context"
             val framed = dispatchOnInfo?.hasBodyLength == true
+            val useWhenBlock = dispatchOnInfo != null && hasRanges
             if (framed) {
-                decodeCtxBody.beginControlFlow("val _result = when (type)")
+                if (useWhenBlock) decodeCtxBody.beginControlFlow("val _result = when") else decodeCtxBody.beginControlFlow("val _result = when (type)")
             } else {
-                decodeCtxBody.beginControlFlow("return when (type)")
+                if (useWhenBlock) decodeCtxBody.beginControlFlow("return when") else decodeCtxBody.beginControlFlow("return when (type)")
             }
 
-            for (v in variants) {
+            for (v in orderedVariants) {
                 val info = payloadBySubclass[v.subclass.qualifiedName?.asString()]
                 val subCodecName = v.subclass.codecName()
+                val arm =
+                    if (useWhenBlock) {
+                        whenBlockArmKey(v)
+                    } else {
+                        whenArmKey(v)
+                    }
                 if (info != null && info.payloadFields.isNotEmpty()) {
-                    decodeCtxBody.addStatement("${v.value} -> $subCodecName.decodeFromContext($bodyVar, $payloadCtxVar)")
+                    decodeCtxBody.addStatement("$arm -> $subCodecName.decodeFromContext($bodyVar, $payloadCtxVar)")
                 } else {
-                    decodeCtxBody.addStatement("${v.value} -> $subCodecName.decode($bodyVar, $payloadCtxVar)")
+                    decodeCtxBody.addStatement("$arm -> $subCodecName.decode($bodyVar, $payloadCtxVar)")
                 }
             }
             decodeCtxBody
-                .addStatement("else -> throw IllegalArgumentException(%P)", "Unknown packet type: \$type")
+                .addStatement(
+                    "else -> throw %T(%P)",
+                    unknownException,
+                    if (useWhenBlock) "Unknown discriminator: 0x\${rawByte.toString(16)}" else "Unknown packet type: \$type",
+                )
                 .endControlFlow()
             if (framed) {
-                emitBodyLengthOverrunCheck(decodeCtxBody)
+                emitBodyLengthOverrunCheck(decodeCtxBody, unknownException)
                 decodeCtxBody.addStatement("return _result")
             }
 
@@ -733,7 +1015,7 @@ class SealedDispatchGenerator(
                 if (info != null && info.payloadFields.isNotEmpty()) {
                     val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
                     encodeCtxBody.beginControlFlow("is %T ->", starType)
-                    if (!skipForVariant) addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
+                    if (!skipForVariant) addWireWrite(encodeCtxBody, v.low, dispatchOnInfo)
                     emitBodyLengthEncodeWrap(
                         code = encodeCtxBody,
                         info = dispatchOnInfo,
@@ -743,7 +1025,7 @@ class SealedDispatchGenerator(
                     encodeCtxBody.endControlFlow()
                 } else {
                     encodeCtxBody.beginControlFlow("is %T ->", subTypeName)
-                    if (!skipForVariant) addWireWrite(encodeCtxBody, v.wire, dispatchOnInfo)
+                    if (!skipForVariant) addWireWrite(encodeCtxBody, v.low, dispatchOnInfo)
                     emitBodyLengthEncodeWrap(
                         code = encodeCtxBody,
                         info = dispatchOnInfo,
@@ -790,7 +1072,7 @@ class SealedDispatchGenerator(
                 val info = payloadBySubclass[v.subclass.qualifiedName?.asString()]
                 val subTypeName = v.subclass.toPoetClassName()
                 val subCodecName = v.subclass.codecName()
-                val discSize = discriminatorWireSizeExpr(v.wire, dispatchOnInfo)
+                val discSize = discriminatorWireSizeExpr(v.low, dispatchOnInfo)
                 val skipDisc = v.selfEncodesDiscriminator(variantsHandlingDiscriminator)
                 if (info != null && info.payloadFields.isNotEmpty()) {
                     val starType = subTypeName.parameterizedBy(info.payloadFields.map { STAR })
@@ -854,7 +1136,7 @@ class SealedDispatchGenerator(
      * by the length prefix alone and we do not need per-variant peek delegation.
      */
     private fun buildSealedPeekFrameSize(
-        variants: List<PacketTypeInfo>,
+        variants: List<WireMatch>,
         dispatchOnInfo: DispatchOnInfo?,
     ): SealedPeekResult? {
         val discriminatorSize =
@@ -887,7 +1169,7 @@ class SealedDispatchGenerator(
     }
 
     private fun buildSealedPeekFun(
-        variants: List<PacketTypeInfo>,
+        variants: List<WireMatch>,
         dispatchOnInfo: DispatchOnInfo?,
         discriminatorSize: Int,
         suspending: Boolean,
@@ -972,6 +1254,7 @@ class SealedDispatchGenerator(
         }
 
         // Peek and extract the dispatch value
+        val hasRanges = variants.any { it is WireMatch.Range }
         if (dispatchOnInfo != null) {
             if (dispatchOnInfo.isValueClass) {
                 // Value class: peek inner type, wrap in constructor
@@ -982,6 +1265,9 @@ class SealedDispatchGenerator(
                     dispatchOnInfo.poetClassName,
                     dispatchOnInfo.dispatchProperty,
                 )
+                if (hasRanges) {
+                    code.addStatement("val rawByte = _raw.toInt() and 0xFF")
+                }
             } else {
                 // Data class: peek each constructor parameter, build the object
                 var paramOffset = 0
@@ -1003,12 +1289,22 @@ class SealedDispatchGenerator(
         }
 
         // Branch per variant, delegate to variant's peekFrameSize
-        code.beginControlFlow("return when (type)")
-        for (v in variants) {
+        val orderedVariants =
+            variants.filterIsInstance<WireMatch.Range>().sortedBy { it.from } +
+                variants.filterIsInstance<WireMatch.Point>().sortedBy { it.wire }
+        val useWhenBlock = dispatchOnInfo != null && hasRanges
+        if (useWhenBlock) code.beginControlFlow("return when") else code.beginControlFlow("return when (type)")
+        for (v in orderedVariants) {
             val variantCodecName = v.subclass.codecName()
+            val arm =
+                if (useWhenBlock) {
+                    whenBlockArmKey(v)
+                } else {
+                    whenArmKey(v)
+                }
             code.addStatement(
                 "%L -> when (val r = %L.peekFrameSize(stream, baseOffset + %L)) { is %T.Size -> %T.Size(r.bytes + %L); else -> r }",
-                v.value,
+                arm,
                 variantCodecName,
                 discriminatorSize,
                 PEEK_RESULT,
@@ -1064,12 +1360,18 @@ class SealedDispatchGenerator(
      * the variant actually reads — without this, those trailing bytes would silently
      * leak into the next frame.
      */
-    internal fun emitBodyLengthOverrunCheck(code: CodeBlock.Builder) {
+    internal fun emitBodyLengthOverrunCheck(
+        code: CodeBlock.Builder,
+        unknownException: ClassName,
+    ) {
+        code.beginControlFlow("if (_bodySlice.remaining() != 0)")
         code.addStatement(
-            "require(_bodySlice.remaining() == 0) { %P }",
+            "throw %T(%P)",
+            unknownException,
             "Variant decoder consumed \${_bodyLen - _bodySlice.remaining()} of \$_bodyLen body bytes; " +
                 "\${_bodySlice.remaining()} unread. Wire is malformed or variant codec is buggy.",
         )
+        code.endControlFlow()
     }
 
     /**

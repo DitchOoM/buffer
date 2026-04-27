@@ -137,15 +137,18 @@ class ControlPacketV4RoundTripTest {
 
     @Test
     fun pubAckRoundTrip() {
-        val original = ControlPacketV4.PubAck(1234u)
+        val original = ControlPacketV4.PubAck(packetIdentifier = 1234u)
         assertEquals(original, roundTrip(original))
     }
 
     @Test
     fun pubRecPubRelPubCompChain() {
-        assertEquals(ControlPacketV4.PubRec(7u), roundTrip(ControlPacketV4.PubRec(7u)))
-        assertEquals(ControlPacketV4.PubRel(7u), roundTrip(ControlPacketV4.PubRel(7u)))
-        assertEquals(ControlPacketV4.PubComp(7u), roundTrip(ControlPacketV4.PubComp(7u)))
+        val rec = ControlPacketV4.PubRec(packetIdentifier = 7u)
+        val rel = ControlPacketV4.PubRel(packetIdentifier = 7u)
+        val comp = ControlPacketV4.PubComp(packetIdentifier = 7u)
+        assertEquals(rec, roundTrip(rec))
+        assertEquals(rel, roundTrip(rel))
+        assertEquals(comp, roundTrip(comp))
     }
 
     @Test
@@ -153,7 +156,7 @@ class ControlPacketV4RoundTripTest {
         val buffer = BufferFactory.Default.allocate(8, ByteOrder.BIG_ENDIAN)
         ControlPacketV4Codec.encode<String>(
             buffer,
-            ControlPacketV4.PubRel(99u),
+            ControlPacketV4.PubRel(packetIdentifier = 99u),
             encodePublishPayload = { _, _ -> },
         )
         // First byte must be 0x62 — top nibble 6 = PUBREL, low nibble 2 = MQTT-mandated reserved bits.
@@ -204,26 +207,26 @@ class ControlPacketV4RoundTripTest {
 
     @Test
     fun unsubAckRoundTrip() {
-        val original = ControlPacketV4.UnsubAck(8u)
+        val original = ControlPacketV4.UnsubAck(packetIdentifier = 8u)
         assertEquals(original, roundTrip(original))
     }
 
     @Test
-    fun pingReqRoundTripIsSingleton() {
-        val decoded = roundTrip(ControlPacketV4.PingReq)
-        assertSame(ControlPacketV4.PingReq, decoded)
+    fun pingReqRoundTrip() {
+        val original = ControlPacketV4.PingReq()
+        assertEquals(original, roundTrip(original))
     }
 
     @Test
-    fun pingRespRoundTripIsSingleton() {
-        val decoded = roundTrip(ControlPacketV4.PingResp)
-        assertSame(ControlPacketV4.PingResp, decoded)
+    fun pingRespRoundTrip() {
+        val original = ControlPacketV4.PingResp()
+        assertEquals(original, roundTrip(original))
     }
 
     @Test
-    fun disconnectRoundTripIsSingleton() {
-        val decoded = roundTrip(ControlPacketV4.Disconnect)
-        assertSame(ControlPacketV4.Disconnect, decoded)
+    fun disconnectRoundTrip() {
+        val original = ControlPacketV4.Disconnect()
+        assertEquals(original, roundTrip(original))
     }
 
     @Test
@@ -231,7 +234,7 @@ class ControlPacketV4RoundTripTest {
         val buffer = BufferFactory.Default.allocate(8, ByteOrder.BIG_ENDIAN)
         ControlPacketV4Codec.encode<String>(
             buffer,
-            ControlPacketV4.PubAck(0x1234u),
+            ControlPacketV4.PubAck(packetIdentifier = 0x1234u),
             encodePublishPayload = { _, _ -> },
         )
         assertEquals(3, buffer.position())

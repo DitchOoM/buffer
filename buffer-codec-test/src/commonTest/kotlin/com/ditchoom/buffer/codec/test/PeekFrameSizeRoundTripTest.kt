@@ -101,7 +101,7 @@ class PeekFrameSizeRoundTripTest {
         withStream { stream ->
             val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
             // TypeConnect: header(1) + protocolLevel(1) + keepAlive(2) = 4 bytes
-            DispatchOnPacketCodec.encode(buffer, DispatchOnPacket.TypeConnect(4u, 60u))
+            DispatchOnPacketCodec.encode(buffer, DispatchOnPacket.TypeConnect(protocolLevel = 4u, keepAlive = 60u))
             buffer.resetForRead()
             stream.append(buffer)
 
@@ -116,7 +116,7 @@ class PeekFrameSizeRoundTripTest {
         withStream { stream ->
             val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
             // TypeConnAck: header(1) + sessionPresent(1) + returnCode(1) = 3 bytes
-            DispatchOnPacketCodec.encode(buffer, DispatchOnPacket.TypeConnAck(0u, 0u))
+            DispatchOnPacketCodec.encode(buffer, DispatchOnPacket.TypeConnAck(sessionPresent = 0u, returnCode = 0u))
             buffer.resetForRead()
             stream.append(buffer)
 
@@ -131,7 +131,7 @@ class PeekFrameSizeRoundTripTest {
         withStream { stream ->
             val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
             // TypePubAck: header(1) + packetId(2) = 3 bytes
-            DispatchOnPacketCodec.encode(buffer, DispatchOnPacket.TypePubAck(42u))
+            DispatchOnPacketCodec.encode(buffer, DispatchOnPacket.TypePubAck(packetId = 42u))
             buffer.resetForRead()
             stream.append(buffer)
 
@@ -172,7 +172,7 @@ class PeekFrameSizeRoundTripTest {
     fun `full loop - peekFrameSize then decode`() {
         withStream { stream ->
             // Encode a ConnAck message
-            val original = DispatchOnPacket.TypeConnAck(1u, 0u)
+            val original = DispatchOnPacket.TypeConnAck(sessionPresent = 1u, returnCode = 0u)
             val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
             DispatchOnPacketCodec.encode(buffer, original)
             buffer.resetForRead()
@@ -197,9 +197,9 @@ class PeekFrameSizeRoundTripTest {
     @Test
     fun `full loop - multiple messages decoded sequentially`() {
         withStream { stream ->
-            val msg1 = DispatchOnPacket.TypeConnect(4u, 120u)
-            val msg2 = DispatchOnPacket.TypePubAck(999u)
-            val msg3 = DispatchOnPacket.TypeConnAck(0u, 2u)
+            val msg1 = DispatchOnPacket.TypeConnect(protocolLevel = 4u, keepAlive = 120u)
+            val msg2 = DispatchOnPacket.TypePubAck(packetId = 999u)
+            val msg3 = DispatchOnPacket.TypeConnAck(sessionPresent = 0u, returnCode = 2u)
 
             // Encode all three into a single buffer
             val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)

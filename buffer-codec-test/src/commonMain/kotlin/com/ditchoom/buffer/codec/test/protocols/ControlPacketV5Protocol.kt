@@ -3,6 +3,7 @@ package com.ditchoom.buffer.codec.test.protocols
 import com.ditchoom.buffer.codec.annotations.DispatchOn
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
+import com.ditchoom.buffer.codec.annotations.PacketTypeRange
 import com.ditchoom.buffer.codec.annotations.Payload
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
@@ -60,69 +61,80 @@ value class V5ReasonCode(
 @DispatchOn(MqttFixedHeader::class)
 @ProtocolMessage
 sealed interface ControlPacketV5 {
-    @PacketType(value = 4, wire = 0x40)
+    @PacketType(wire = 4)
     @ProtocolMessage
     data class PubAck(
-        val packetIdentifier: UShort,
+        val header: MqttFixedHeader = MqttFixedHeader(0x40u),
+        val packetIdentifier: UShort = 0u,
         @WhenRemaining(1) val reasonCode: V5ReasonCode? = null,
         @WhenRemaining(1) @PropertyBag val properties: Map<Int, Int>? = null,
     ) : ControlPacketV5
 
-    @PacketType(value = 5, wire = 0x50)
+    @PacketType(wire = 5)
     @ProtocolMessage
     data class PubRec(
-        val packetIdentifier: UShort,
+        val header: MqttFixedHeader = MqttFixedHeader(0x50u),
+        val packetIdentifier: UShort = 0u,
         @WhenRemaining(1) val reasonCode: V5ReasonCode? = null,
         @WhenRemaining(1) @PropertyBag val properties: Map<Int, Int>? = null,
     ) : ControlPacketV5
 
-    @PacketType(value = 6, wire = 0x62)
+    @PacketType(wire = 6)
     @ProtocolMessage
     data class PubRel(
-        val packetIdentifier: UShort,
+        val header: MqttFixedHeader = MqttFixedHeader(0x62u),
+        val packetIdentifier: UShort = 0u,
         @WhenRemaining(1) val reasonCode: V5ReasonCode? = null,
         @WhenRemaining(1) @PropertyBag val properties: Map<Int, Int>? = null,
     ) : ControlPacketV5
 
-    @PacketType(value = 7, wire = 0x70)
+    @PacketType(wire = 7)
     @ProtocolMessage
     data class PubComp(
-        val packetIdentifier: UShort,
+        val header: MqttFixedHeader = MqttFixedHeader(0x70u),
+        val packetIdentifier: UShort = 0u,
         @WhenRemaining(1) val reasonCode: V5ReasonCode? = null,
         @WhenRemaining(1) @PropertyBag val properties: Map<Int, Int>? = null,
     ) : ControlPacketV5
 
-    @PacketType(value = 11, wire = 0xB0)
+    @PacketType(wire = 11)
     @ProtocolMessage
     data class UnsubAck(
-        val packetIdentifier: UShort,
+        val header: MqttFixedHeader = MqttFixedHeader(0xB0u),
+        val packetIdentifier: UShort = 0u,
         @WhenRemaining(1) val reasonCode: V5ReasonCode? = null,
         @WhenRemaining(1) @PropertyBag val properties: Map<Int, Int>? = null,
     ) : ControlPacketV5
 
-    @PacketType(value = 12, wire = 0xC0)
+    @PacketType(wire = 12)
     @ProtocolMessage
-    data object PingReq : ControlPacketV5
+    data class PingReq(
+        val header: MqttFixedHeader = MqttFixedHeader(0xC0u),
+    ) : ControlPacketV5
 
-    @PacketType(value = 13, wire = 0xD0)
+    @PacketType(wire = 13)
     @ProtocolMessage
-    data object PingResp : ControlPacketV5
+    data class PingResp(
+        val header: MqttFixedHeader = MqttFixedHeader(0xD0u),
+    ) : ControlPacketV5
 
-    @PacketType(value = 14, wire = 0xE0)
+    @PacketType(wire = 14)
     @ProtocolMessage
     data class Disconnect(
+        val header: MqttFixedHeader = MqttFixedHeader(0xE0u),
         @WhenRemaining(1) val reasonCode: V5ReasonCode? = null,
         @WhenRemaining(1) @PropertyBag val properties: Map<Int, Int>? = null,
     ) : ControlPacketV5
 
-    @PacketType(value = 15, wire = 0xF0)
+    @PacketType(wire = 15)
     @ProtocolMessage
     data class Auth(
+        val header: MqttFixedHeader = MqttFixedHeader(0xF0u),
         @WhenRemaining(1) val reasonCode: V5ReasonCode? = null,
         @WhenRemaining(1) @PropertyBag val properties: Map<Int, Int>? = null,
     ) : ControlPacketV5
 
-    @PacketType(value = 3)
+    @PacketTypeRange(0x30, 0x3F)
     @ProtocolMessage
     data class Publish<@Payload P>(
         val header: MqttFixedHeader,

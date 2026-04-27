@@ -45,11 +45,16 @@ private val annotationSource =
     annotation class ProtocolMessage(
         val wireOrder: Endianness = Endianness.Default,
         val direction: Direction = Direction.Infer,
+        val onUnknownDiscriminator: String = "",
     )
 
     @Target(AnnotationTarget.CLASS)
     @Retention(AnnotationRetention.BINARY)
-    annotation class PacketType(val value: Int, val wire: Int = -1)
+    annotation class PacketType(val wire: Int)
+
+    @Target(AnnotationTarget.CLASS)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class PacketTypeRange(val from: Int, val to: Int)
 
     @Target(AnnotationTarget.TYPE_PARAMETER)
     @Retention(AnnotationRetention.BINARY)

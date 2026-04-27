@@ -514,17 +514,17 @@ SuspendingStreamingCompressor.create(
 
 ### Output Buffer Size
 
-Tune the output chunk size for your use case:
+Tune the output chunk size for your use case (available on synchronous `StreamingCompressor` and `StreamingDecompressor`):
 
 ```kotlin
 // Smaller chunks - lower latency, more overhead
-SuspendingStreamingCompressor.create(
+StreamingCompressor.create(
     algorithm = CompressionAlgorithm.Gzip,
     outputBufferSize = 4096
 )
 
 // Larger chunks - higher throughput, more memory
-SuspendingStreamingCompressor.create(
+StreamingCompressor.create(
     algorithm = CompressionAlgorithm.Gzip,
     outputBufferSize = 65536
 )

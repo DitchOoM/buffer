@@ -52,7 +52,7 @@ data class DeviceReport(
 )
 ```
 
-That's it. The KSP processor generates `DeviceReportCodec` with `decode`, `encode`, and `sizeOf` — all type-safe and batch-optimized:
+That's it. The KSP processor generates `DeviceReportCodec` with `decode`, `encode`, and `encodeToBuffer` — all type-safe and batch-optimized:
 
 ```kotlin
 val buffer = DeviceReportCodec.encodeToBuffer(report)
@@ -93,11 +93,6 @@ object DeviceReportCodec : Codec<DeviceReport> {
         buffer.writeUByte(value.batteryLevel)
         buffer.writeShort(value.signalStrength)
         buffer.writeLengthPrefixedUtf8String(value.deviceName)
-    }
-
-    override fun sizeOf(value: DeviceReport): Int {
-        val nameBytes = value.deviceName.encodeToByteArray().size
-        return 1 + 2 + 4 + 8 + 8 + 8 + 4 + 1 + 2 + 2 + nameBytes
     }
 }
 ```
@@ -249,7 +244,7 @@ object RgbCodec : Codec<Rgb> {
     override fun encode(buffer: WriteBuffer, value: Rgb) {
         buffer.writeUByte(value.r); buffer.writeUByte(value.g); buffer.writeUByte(value.b)
     }
-    override fun sizeOf(value: Rgb) = 3
+    override val wireSizeHint: Int get() = 3
 }
 
 @ProtocolMessage
@@ -510,7 +505,7 @@ When the built-in annotations don't cover your protocol's encoding (e.g., variab
 
 The SPI lets you:
 - Define your own annotation (e.g., `@VariableByteInteger`)
-- Write the read/write/sizeOf functions in plain Kotlin
+- Write the read/write functions in plain Kotlin
 - Register a `CodecFieldProvider` that maps the annotation to those functions
 - The generated codec calls your functions — type-safe, debuggable, no string templates
 
@@ -534,7 +529,6 @@ import com.ditchoom.buffer.WriteBuffer
 
 fun ReadBuffer.readVariableByteInteger(): Int { /* ... */ }
 fun WriteBuffer.writeVariableByteInteger(value: Int) { /* ... */ }
-fun variableByteSizeInt(value: Int): Int { /* ... */ }
 ```
 
 ### Step 3: Create a CodecFieldProvider
@@ -554,7 +548,6 @@ class VariableByteIntegerProvider : CodecFieldProvider {
         return CustomFieldDescriptor(
             readFunction = FunctionRef("com.example.myprotocol.codec", "readVariableByteInteger"),
             writeFunction = FunctionRef("com.example.myprotocol.codec", "writeVariableByteInteger"),
-            sizeOfFunction = FunctionRef("com.example.myprotocol.codec", "variableByteSizeInt"),
         )
     }
 }
@@ -681,12 +674,14 @@ Context is forwarded automatically by generated code:
 - **Nested `@ProtocolMessage` fields** forward context to the nested codec
 - **`@Payload` lambdas** access context via closure capture (no generated plumbing)
 
-Codecs that don't read from context ignore it — the `Codec` interface defaults call the context-free overload:
+Codecs that don't read from context ignore it — the `Codec` interface defaults delegate to the context-free overloads:
 
 ```kotlin
-interface Codec<T> {
-    fun decode(buffer: ReadBuffer): T
-    fun decode(buffer: ReadBuffer, context: DecodeContext): T = decode(buffer)  // default ignores
+interface Codec<T> : Encoder<T>, Decoder<T>, FrameDetector {
+    fun decode(buffer: ReadBuffer, context: DecodeContext): T
+    fun encode(buffer: WriteBuffer, value: T, context: EncodeContext)
+    override fun decode(buffer: ReadBuffer): T = decode(buffer, DecodeContext.Empty)
+    override fun encode(buffer: WriteBuffer, value: T) = encode(buffer, value, EncodeContext.Empty)
 }
 ```
 
@@ -718,18 +713,27 @@ When you need full control — custom encoding logic, protocol-level optimizatio
 ### The Codec Interface
 
 ```kotlin
-interface Codec<T> {
-    fun decode(buffer: ReadBuffer): T
+interface Encoder<in T> {
     fun encode(buffer: WriteBuffer, value: T)
-    fun sizeOf(value: T): Int? = null
+    val wireSizeHint: Int get() = 16  // initial allocation hint for encodeToBuffer()
+}
+
+fun interface Decoder<out T> {
+    fun decode(buffer: ReadBuffer): T
+}
+
+interface Codec<T> : Encoder<T>, Decoder<T>, FrameDetector {
+    fun decode(buffer: ReadBuffer, context: DecodeContext): T
+    fun encode(buffer: WriteBuffer, value: T, context: EncodeContext)
 }
 ```
 
-- **`decode`** reads fields from a `ReadBuffer` and constructs the value
-- **`encode`** writes fields to a `WriteBuffer`
-- **`sizeOf`** returns the encoded byte size if known, or `null` for variable-length encodings
+- **`Encoder<T>`** — encode only; use for send-only streams
+- **`Decoder<T>`** — decode only (fun interface for SAM); use for receive-only streams
+- **`Codec<T>`** — bidirectional; extends both plus `FrameDetector`
+- **`wireSizeHint`** — initial buffer size for `encodeToBuffer()`. Generated codecs set this to the sum of fixed-size fields. Defaults to 16 for hand-written codecs.
 
-Generated and manual codecs implement the same interface — they compose freely.
+Generated and manual codecs implement the same interfaces — they compose freely.
 
 ### Simple Example
 
@@ -745,7 +749,7 @@ object SensorReadingCodec : Codec<SensorReading> {
         buffer.writeInt(value.temperature)
     }
 
-    override fun sizeOf(value: SensorReading) = 6
+    override val wireSizeHint: Int get() = 6
 }
 ```
 
@@ -807,10 +811,7 @@ object EnvelopeCodec : Codec<Envelope> {
         SensorReadingCodec.encode(buffer, value.sensor)
     }
 
-    override fun sizeOf(value: Envelope): Int? {
-        val sensorSize = SensorReadingCodec.sizeOf(value.sensor) ?: return null
-        return 1 + sensorSize
-    }
+    override val wireSizeHint: Int get() = 1 + SensorReadingCodec.wireSizeHint
 }
 ```
 
@@ -1102,7 +1103,8 @@ Java_com_example_NativeRenderer_unlockHardwareBuffer(JNIEnv *env, jclass clazz, 
 
 ```kotlin
 fun encodeRiffImage(metadata: ImageMetadata, pixels: ReadBuffer): PlatformBuffer {
-    val metadataSize = ImageMetadataCodec.sizeOf(metadata)!!
+    val metadataEncoded = ImageMetadataCodec.encodeToBuffer(metadata)
+    val metadataSize = metadataEncoded.remaining()
     val pixelSize = pixels.remaining()
     val totalSize = 4 + 8 + metadataSize + 8 + pixelSize  // format + 2 chunk headers + data
 
@@ -1117,7 +1119,7 @@ fun encodeRiffImage(metadata: ImageMetadata, pixels: ReadBuffer): PlatformBuffer
 
     // Metadata chunk
     ChunkHeaderCodec.encode(buffer, ChunkHeader(0x6D657461, metadataSize.toUInt()))
-    ImageMetadataCodec.encode(buffer, metadata)
+    buffer.write(metadataEncoded)
 
     // Pixel data chunk — bulk copy from source buffer
     ChunkHeaderCodec.encode(buffer, ChunkHeader(0x70786C73, pixelSize.toUInt()))

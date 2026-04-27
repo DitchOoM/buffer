@@ -121,7 +121,7 @@ class DispatchOnRoundTripTest {
 
     @Test
     fun connectDispatchRoundTrip() {
-        val original: DispatchOnPacket = DispatchOnPacket.TypeConnect(4u, 60u)
+        val original: DispatchOnPacket = DispatchOnPacket.TypeConnect(protocolLevel = 4u, keepAlive = 60u)
         val decoded = DispatchOnPacketCodec.testRoundTrip(original)
         assertTrue(decoded is DispatchOnPacket.TypeConnect)
         assertEquals(original, decoded)
@@ -129,7 +129,7 @@ class DispatchOnRoundTripTest {
 
     @Test
     fun connAckDispatchRoundTrip() {
-        val original: DispatchOnPacket = DispatchOnPacket.TypeConnAck(1u, 0u)
+        val original: DispatchOnPacket = DispatchOnPacket.TypeConnAck(sessionPresent = 1u, returnCode = 0u)
         val decoded = DispatchOnPacketCodec.testRoundTrip(original)
         assertTrue(decoded is DispatchOnPacket.TypeConnAck)
         assertEquals(original, decoded)
@@ -137,7 +137,7 @@ class DispatchOnRoundTripTest {
 
     @Test
     fun pubAckDispatchRoundTrip() {
-        val original: DispatchOnPacket = DispatchOnPacket.TypePubAck(1000u)
+        val original: DispatchOnPacket = DispatchOnPacket.TypePubAck(packetId = 1000u)
         val decoded = DispatchOnPacketCodec.testRoundTrip(original)
         assertTrue(decoded is DispatchOnPacket.TypePubAck)
         assertEquals(original, decoded)
@@ -147,7 +147,7 @@ class DispatchOnRoundTripTest {
     fun encodeWritesCorrectWireByte() {
         // Verify encode writes 0x10 (wire), not 0x01 (value)
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
-        DispatchOnPacketCodec.encode(buffer, DispatchOnPacket.TypeConnect(4u, 60u))
+        DispatchOnPacketCodec.encode(buffer, DispatchOnPacket.TypeConnect(protocolLevel = 4u, keepAlive = 60u))
         assertEquals(0x10.toByte(), buffer[0]) // wire byte, not extracted value
     }
 
@@ -155,21 +155,21 @@ class DispatchOnRoundTripTest {
 
     @Test
     fun typeConnectSubCodecRoundTrip() {
-        val original = DispatchOnPacket.TypeConnect(4u, 60u)
+        val original = DispatchOnPacket.TypeConnect(protocolLevel = 4u, keepAlive = 60u)
         val decoded = DispatchOnPacketTypeConnectCodec.testRoundTrip(original)
         assertEquals(original, decoded)
     }
 
     @Test
     fun typeConnAckSubCodecRoundTrip() {
-        val original = DispatchOnPacket.TypeConnAck(0u, 0u)
+        val original = DispatchOnPacket.TypeConnAck(sessionPresent = 0u, returnCode = 0u)
         val decoded = DispatchOnPacketTypeConnAckCodec.testRoundTrip(original)
         assertEquals(original, decoded)
     }
 
     @Test
     fun typePubAckSubCodecRoundTrip() {
-        val original = DispatchOnPacket.TypePubAck(1000u)
+        val original = DispatchOnPacket.TypePubAck(packetId = 1000u)
         val decoded = DispatchOnPacketTypePubAckCodec.testRoundTrip(original)
         assertEquals(original, decoded)
     }

@@ -10,7 +10,6 @@ import com.ditchoom.buffer.codec.test.protocols.V5ReasonCode
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
-import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -159,12 +158,12 @@ class ControlPacketV5RoundTripTest {
 
     @Test
     fun pingReqRoundTripIsSingleton() {
-        assertSame(ControlPacketV5.PingReq, roundTrip(ControlPacketV5.PingReq))
+        assertEquals(ControlPacketV5.PingReq(), roundTrip(ControlPacketV5.PingReq()))
     }
 
     @Test
     fun pingRespRoundTripIsSingleton() {
-        assertSame(ControlPacketV5.PingResp, roundTrip(ControlPacketV5.PingResp))
+        assertEquals(ControlPacketV5.PingResp(), roundTrip(ControlPacketV5.PingResp()))
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.codec.processor
 
 import com.ditchoom.buffer.codec.processor.spi.CodecFieldProvider
+import com.google.devtools.ksp.getConstructors
 import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.processing.Resolver
@@ -231,6 +232,45 @@ class ProtocolMessageProcessor(
         // Compute sealed interface direction from variants
         val sealedDirection = computeSealedDirection(classDeclaration, variantDirections) ?: return
 
+        // Resolve the configured unknown-discriminator exception (FQN must exist + have (String) ctor).
+        val onUnknownFqn = extractOnUnknownDiscriminator(classDeclaration)
+        val resolvedUnknownException =
+            if (onUnknownFqn.isEmpty()) {
+                "kotlin.IllegalArgumentException"
+            } else {
+                val cls = resolver.getClassDeclarationByName(resolver.getKSNameFromString(onUnknownFqn))
+                if (cls == null) {
+                    logger.error(
+                        "@ProtocolMessage(onUnknownDiscriminator = \"$onUnknownFqn\") on " +
+                            "'${classDeclaration.simpleName.asString()}' did not resolve to a class on the " +
+                            "compilation classpath. Provide a fully-qualified name visible to this module.",
+                        classDeclaration,
+                    )
+                    return
+                }
+                val hasStringCtor =
+                    cls.getConstructors().any { ctor ->
+                        ctor.parameters.size == 1 &&
+                            ctor.parameters
+                                .first()
+                                .type
+                                .resolve()
+                                .declaration.qualifiedName
+                                ?.asString() == "kotlin.String"
+                    }
+                if (!hasStringCtor) {
+                    logger.error(
+                        "@ProtocolMessage(onUnknownDiscriminator = \"$onUnknownFqn\") on " +
+                            "'${classDeclaration.simpleName.asString()}' resolves but the class does not declare " +
+                            "a single-`String` constructor. The generated dispatcher passes a message string, so " +
+                            "the exception class must accept it: `class ${cls.simpleName.asString()}(message: String)`.",
+                        classDeclaration,
+                    )
+                    return
+                }
+                onUnknownFqn
+            }
+
         // Phase 2: Generate the dispatch codec with payload awareness
         val generator = SealedDispatchGenerator(codeGenerator, logger)
         generator.generate(
@@ -241,7 +281,17 @@ class ProtocolMessageProcessor(
             variantsHandlingDiscriminator = variantsHandlingDiscriminator,
             variantsSupportingPeek = variantsSupportingPeek,
             direction = sealedDirection,
+            onUnknownDiscriminator = resolvedUnknownException,
         )
+    }
+
+    /** Reads the `onUnknownDiscriminator` FQN from `@ProtocolMessage`, or `""` if unset/default. */
+    private fun extractOnUnknownDiscriminator(classDecl: KSClassDeclaration): String {
+        val ann =
+            classDecl.annotations.find {
+                it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.ProtocolMessage"
+            } ?: return ""
+        return ann.arguments.find { it.name?.asString() == "onUnknownDiscriminator" }?.value as? String ?: ""
     }
 
     /**
@@ -328,6 +378,10 @@ class ProtocolMessageProcessor(
         val isValueClass =
             constructorKsParams.size == 1 &&
                 discriminatorClass.modifiers.contains(com.google.devtools.ksp.symbol.Modifier.VALUE)
+        // innerPropertyName is only meaningful for value-class discriminators; for data-class
+        // discriminators it stays null and range emission (which would need it) is rejected by
+        // KSP earlier.
+        val innerPropertyName = if (isValueClass) innerType?.name?.asString() else null
 
         // Build constructor parameter metadata for data class discriminator peeking
         val discriminatorParams =
@@ -401,6 +455,7 @@ class ProtocolMessageProcessor(
             dispatchProperty = dispatchProp.simpleName.asString(),
             poetClassName = poetClassName,
             innerTypeName = innerTypeName,
+            innerPropertyName = innerPropertyName,
             isValueClass = isValueClass,
             constructorParams = discriminatorParams,
             bodyFraming = bodyFraming,

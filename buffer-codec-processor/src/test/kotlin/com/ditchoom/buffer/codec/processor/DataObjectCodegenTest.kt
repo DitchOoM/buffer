@@ -87,11 +87,11 @@ class DataObjectCodegenTest {
             @DispatchOn(Header::class)
             @ProtocolMessage
             sealed interface Frame {
-                @PacketType(value = 1, wire = 0x01)
+                @PacketType(wire = 1)
                 @ProtocolMessage
                 data class WithValue(val header: Header, val value: UByte) : Frame
 
-                @PacketType(value = 2, wire = 0x02)
+                @PacketType(wire = 2)
                 @ProtocolMessage
                 data object Empty : Frame
             }

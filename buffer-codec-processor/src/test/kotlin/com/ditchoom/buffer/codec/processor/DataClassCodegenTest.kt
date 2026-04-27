@@ -1160,12 +1160,12 @@ class DataClassCodegenTest {
             @DispatchOn(MyHeader::class)
             @ProtocolMessage
             sealed interface MyProtocol {
-                @PacketType(value = 1, wire = 0x01)
+                @PacketType(wire = 1)
                 @ProtocolMessage
                 @JvmInline
                 value class Simple(val x: UInt) : MyProtocol
 
-                @PacketType(value = 2, wire = 0x02)
+                @PacketType(wire = 2)
                 @ProtocolMessage
                 data class WithPayload<@Payload D>(
                     val len: UShort,

@@ -115,11 +115,11 @@ class WireSizeCodegenTest {
             @DispatchOn(HeaderTag::class)
             @ProtocolMessage
             sealed interface Frame {
-                @PacketType(value = 1, wire = 0x01)
+                @PacketType(wire = 1)
                 @ProtocolMessage
                 data class Plain(val x: UShort) : Frame
 
-                @PacketType(value = 2, wire = 0x02)
+                @PacketType(wire = 2)
                 @ProtocolMessage
                 data class WithPayload<@Payload P>(
                     val len: UShort,
@@ -224,7 +224,7 @@ class WireSizeCodegenTest {
             @DispatchOn(FramedTag::class, bodyLength = LengthPrefix.Varint, bodyLengthMaxBytes = 4)
             @ProtocolMessage
             sealed interface Framed {
-                @PacketType(value = 1, wire = 0x01)
+                @PacketType(wire = 1)
                 @ProtocolMessage
                 data class WithPayload<@Payload P>(
                     val len: UShort,
@@ -282,7 +282,7 @@ class WireSizeCodegenTest {
             @DispatchOn(Tag::class)
             @ProtocolMessage
             sealed interface Frame {
-                @PacketType(value = 1, wire = 0x10)
+                @PacketType(wire = 1)
                 @ProtocolMessage
                 data class WithHeader(
                     val header: Tag,

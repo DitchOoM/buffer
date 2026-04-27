@@ -48,7 +48,7 @@ value class RiffChunkId(
 @ProtocolMessage(wireOrder = Endianness.Little)
 sealed interface RiffChunk {
     /** "fmt " chunk — WAV audio format descriptor (16-byte PCM). */
-    @PacketType(value = 0x666D7420, wire = 0x666D7420)
+    @PacketType(wire = 0x666D7420)
     @ProtocolMessage
     data class Fmt(
         val chunkSize: UInt,
@@ -61,7 +61,7 @@ sealed interface RiffChunk {
     ) : RiffChunk
 
     /** "fact" chunk — sample count for compressed formats. */
-    @PacketType(value = 0x66616374, wire = 0x66616374)
+    @PacketType(wire = 0x66616374)
     @ProtocolMessage
     data class Fact(
         val chunkSize: UInt,
@@ -69,7 +69,7 @@ sealed interface RiffChunk {
     ) : RiffChunk
 
     /** "data" chunk — raw audio samples. */
-    @PacketType(value = 0x64617461, wire = 0x64617461)
+    @PacketType(wire = 0x64617461)
     @ProtocolMessage
     data class Data<@Payload P>(
         val chunkSize: UInt,

@@ -4,6 +4,7 @@ import com.ditchoom.buffer.codec.annotations.DispatchOn
 import com.ditchoom.buffer.codec.annotations.DispatchValue
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
+import com.ditchoom.buffer.codec.annotations.PacketTypeRange
 import com.ditchoom.buffer.codec.annotations.Payload
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
@@ -111,13 +112,14 @@ data class V4TopicFilter(
 @DispatchOn(MqttFixedHeader::class)
 @ProtocolMessage
 sealed interface ControlPacketV4 {
-    @PacketType(value = 0, wire = 0x00)
+    @PacketType(wire = 0)
     @ProtocolMessage
     data object Reserved : ControlPacketV4
 
-    @PacketType(value = 1, wire = 0x10)
+    @PacketType(wire = 1)
     @ProtocolMessage
     data class Connect(
+        val header: MqttFixedHeader = MqttFixedHeader(0x10u),
         @LengthPrefixed val protocolName: String,
         val protocolLevel: UByte,
         val flags: V4ConnectFlags,
@@ -129,14 +131,15 @@ sealed interface ControlPacketV4 {
         @WhenTrue("flags.hasPassword") @LengthPrefixed val password: String? = null,
     ) : ControlPacketV4
 
-    @PacketType(value = 2, wire = 0x20)
+    @PacketType(wire = 2)
     @ProtocolMessage
     data class ConnAck(
+        val header: MqttFixedHeader = MqttFixedHeader(0x20u),
         val flags: V4ConnAckFlags,
         val returnCode: V4ConnectReturnCode,
     ) : ControlPacketV4
 
-    @PacketType(value = 3)
+    @PacketTypeRange(0x30, 0x3F)
     @ProtocolMessage
     data class Publish<@Payload P>(
         val header: MqttFixedHeader,
@@ -145,71 +148,80 @@ sealed interface ControlPacketV4 {
         @RemainingBytes val payload: P,
     ) : ControlPacketV4
 
-    @PacketType(value = 4, wire = 0x40)
+    @PacketType(wire = 4)
     @ProtocolMessage
-    @JvmInline
-    value class PubAck(
+    data class PubAck(
+        val header: MqttFixedHeader = MqttFixedHeader(0x40u),
         val packetIdentifier: UShort,
     ) : ControlPacketV4
 
-    @PacketType(value = 5, wire = 0x50)
+    @PacketType(wire = 5)
     @ProtocolMessage
-    @JvmInline
-    value class PubRec(
+    data class PubRec(
+        val header: MqttFixedHeader = MqttFixedHeader(0x50u),
         val packetIdentifier: UShort,
     ) : ControlPacketV4
 
-    @PacketType(value = 6, wire = 0x62)
+    @PacketType(wire = 6)
     @ProtocolMessage
-    @JvmInline
-    value class PubRel(
+    data class PubRel(
+        val header: MqttFixedHeader = MqttFixedHeader(0x62u),
         val packetIdentifier: UShort,
     ) : ControlPacketV4
 
-    @PacketType(value = 7, wire = 0x70)
+    @PacketType(wire = 7)
     @ProtocolMessage
-    @JvmInline
-    value class PubComp(
+    data class PubComp(
+        val header: MqttFixedHeader = MqttFixedHeader(0x70u),
         val packetIdentifier: UShort,
     ) : ControlPacketV4
 
-    @PacketType(value = 8, wire = 0x82)
+    @PacketType(wire = 8)
     @ProtocolMessage
     data class Subscribe(
-        val packetIdentifier: UShort,
-        @RemainingBytes val subscriptions: List<V4Subscription>,
+        val header: MqttFixedHeader = MqttFixedHeader(0x82u),
+        val packetIdentifier: UShort = 0u,
+        @RemainingBytes val subscriptions: List<V4Subscription> = emptyList(),
     ) : ControlPacketV4
 
-    @PacketType(value = 9, wire = 0x90)
+    @PacketType(wire = 9)
     @ProtocolMessage
     data class SubAck(
-        val packetIdentifier: UShort,
-        @RemainingBytes val returnCodes: List<V4SubAckReturnCode>,
+        val header: MqttFixedHeader = MqttFixedHeader(0x90u),
+        val packetIdentifier: UShort = 0u,
+        @RemainingBytes val returnCodes: List<V4SubAckReturnCode> = emptyList(),
     ) : ControlPacketV4
 
-    @PacketType(value = 10, wire = 0xA2)
+    @PacketType(wire = 10)
     @ProtocolMessage
     data class Unsubscribe(
-        val packetIdentifier: UShort,
-        @RemainingBytes val topicFilters: List<V4TopicFilter>,
+        val header: MqttFixedHeader = MqttFixedHeader(0xA2u),
+        val packetIdentifier: UShort = 0u,
+        @RemainingBytes val topicFilters: List<V4TopicFilter> = emptyList(),
     ) : ControlPacketV4
 
-    @PacketType(value = 11, wire = 0xB0)
+    @PacketType(wire = 11)
     @ProtocolMessage
-    @JvmInline
-    value class UnsubAck(
+    data class UnsubAck(
+        val header: MqttFixedHeader = MqttFixedHeader(0xB0u),
         val packetIdentifier: UShort,
     ) : ControlPacketV4
 
-    @PacketType(value = 12, wire = 0xC0)
+    @PacketType(wire = 12)
     @ProtocolMessage
-    data object PingReq : ControlPacketV4
+    data class PingReq(
+        val header: MqttFixedHeader = MqttFixedHeader(0xC0u),
+    ) : ControlPacketV4
 
-    @PacketType(value = 13, wire = 0xD0)
+    @PacketType(wire = 13)
     @ProtocolMessage
-    data object PingResp : ControlPacketV4
+    data class PingResp(
+        val header: MqttFixedHeader = MqttFixedHeader(0xD0u),
+    ) : ControlPacketV4
 
-    @PacketType(value = 14, wire = 0xE0)
+    @PacketType(wire = 14)
     @ProtocolMessage
-    data object Disconnect : ControlPacketV4
+    data class Disconnect(
+        val header: MqttFixedHeader = MqttFixedHeader(0xE0u),
+    ) : ControlPacketV4
 }

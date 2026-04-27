@@ -58,7 +58,7 @@ data class DnsHeader(
 
 **That's the entire DNS header implementation.** 18 lines. The generated `DnsHeaderCodec` gives you:
 - `encode` / `decode` — batch-optimized, reads all 12 bytes in grouped operations
-- `sizeOf` — returns `SizeEstimate.Exact(12)`, always
+- `wireSizeHint` — returns `12`, used for optimal buffer pre-allocation
 - `peekFrameSize` — returns `PeekResult.Size(12)`, always (fixed-size)
 - `testRoundTrip` — one-call verification that encode → decode produces the original value
 
@@ -338,7 +338,7 @@ data class Http2FrameHeader(
 
 `@WireBytes(3)` reads exactly 3 bytes and assembles them into an `Int` — matching the RFC's 24-bit length field. The reserved bit in the stream identifier is handled by `Http2StreamId` — the codec reads 4 bytes, the `id` property masks off the MSB. Both value classes inline to their primitive type at runtime.
 
-The generated `Http2FrameHeaderCodec` gives you `sizeOf` → `SizeEstimate.Exact(9)`, batch-optimized read/write, and `peekFrameSize` → `PeekResult.Size(9)`. Frame type dispatch on the payload can use `@DispatchOn` with a data class discriminator (like the PNG example) or a simple `when (header.type)` — your choice based on how many frame types you need.
+The generated `Http2FrameHeaderCodec` gives you `wireSizeHint = 9` for optimal allocation, batch-optimized read/write, and `peekFrameSize` → `PeekResult.Size(9)`. Frame type dispatch on the payload can use `@DispatchOn` with a data class discriminator (like the PNG example) or a simple `when (header.type)` — your choice based on how many frame types you need.
 
 ---
 
@@ -634,7 +634,7 @@ Every `@ProtocolMessage` data class above generates all of this at compile time 
 | Generated | What it does |
 |---|---|
 | `encode` / `decode` | Batch-optimized read/write — consecutive fixed-size fields grouped into bulk operations |
-| `sizeOf` → `SizeEstimate.Exact(n)` | Precise buffer pre-allocation, zero wasted bytes |
+| `wireSizeHint = n` | Precise initial buffer allocation via `encodeToBuffer()`, minimal resizing |
 | `peekFrameSize` → `PeekResult.Size(n)` | Frame detection by peeking a stream without consuming bytes |
 | `testRoundTrip` | One-call encode → decode → assert equality |
 | Sealed dispatch | Exhaustive `when` — compiler catches missing packet types |
