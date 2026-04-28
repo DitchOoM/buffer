@@ -1,15 +1,18 @@
 package com.ditchoom.buffer.codec.processor.codenode
 
 import com.ditchoom.buffer.codec.processor.codenode.CodeNode.BinOp
+import com.ditchoom.buffer.codec.processor.codenode.CodeNode.CtorCall
 import com.ditchoom.buffer.codec.processor.codenode.CodeNode.FieldRef
 import com.ditchoom.buffer.codec.processor.codenode.CodeNode.IfElse
 import com.ditchoom.buffer.codec.processor.codenode.CodeNode.IntLit
 import com.ditchoom.buffer.codec.processor.codenode.CodeNode.Local
 import com.ditchoom.buffer.codec.processor.codenode.CodeNode.LocalDecl
 import com.ditchoom.buffer.codec.processor.codenode.CodeNode.MethodCall
+import com.ditchoom.buffer.codec.processor.codenode.CodeNode.Raw
 import com.ditchoom.buffer.codec.processor.codenode.CodeNode.Return_
 import com.ditchoom.buffer.codec.processor.codenode.CodeNode.Sequence
 import com.ditchoom.buffer.codec.processor.codenode.CodeNode.StaticCall
+import com.ditchoom.buffer.codec.processor.codenode.CodeNode.StringLit
 import com.ditchoom.buffer.codec.processor.codenode.CodeNode.WhenExpr
 
 /**
@@ -41,6 +44,8 @@ import com.ditchoom.buffer.codec.processor.codenode.CodeNode.WhenExpr
 fun lower(node: CodeNode): CodeNode =
     when (node) {
         is IntLit -> node
+        is StringLit -> node
+        is Raw -> node
         is Local -> node
         is FieldRef -> FieldRef(lower(node.target), node.field)
         is MethodCall ->
@@ -51,6 +56,7 @@ fun lower(node: CodeNode): CodeNode =
                 typeArgs = node.typeArgs,
             )
         is StaticCall -> StaticCall(node.target, node.name, node.args.map(::lower))
+        is CtorCall -> CtorCall(node.type, node.args.map(::lower))
         is BinOp -> lowerBinOp(BinOp(node.op, lower(node.l), lower(node.r)))
         is LocalDecl -> LocalDecl(node.name, node.type, lower(node.init), node.mutable)
         is WhenExpr ->
@@ -68,10 +74,12 @@ private fun lowerBinOp(b: BinOp): CodeNode {
     val l = b.l
     val r = b.r
     if (l is IntLit && r is IntLit) {
-        return when (b.op) {
-            BinOpKind.Plus -> IntLit(l.value + r.value)
-            BinOpKind.Minus -> IntLit(l.value - r.value)
-            BinOpKind.Times -> IntLit(l.value * r.value)
+        when (b.op) {
+            BinOpKind.Plus -> return IntLit(l.value + r.value)
+            BinOpKind.Minus -> return IntLit(l.value - r.value)
+            BinOpKind.Times -> return IntLit(l.value * r.value)
+            // Comparisons / logicals: no const-fold; emitter rarely produces literal-vs-literal for these.
+            else -> Unit
         }
     }
     return b
@@ -116,8 +124,12 @@ private fun tryInlineOneLocal(seq: Sequence): Sequence? {
 private fun isReferentiallyTransparent(node: CodeNode): Boolean =
     when (node) {
         is IntLit -> true
+        is StringLit -> true
         is Local -> true
         is FieldRef -> isReferentiallyTransparent(node.target)
+        // Raw / CtorCall are treated as opaque (potentially side-effecting).
+        is Raw -> false
+        is CtorCall -> false
         is MethodCall, is StaticCall, is BinOp, is LocalDecl, is WhenExpr, is IfElse,
         is Sequence, is Return_,
         -> false
@@ -129,12 +141,15 @@ private fun countLocalUses(
 ): Int =
     when (node) {
         is IntLit -> 0
+        is StringLit -> 0
+        is Raw -> 0
         is Local -> if (node.name == name) 1 else 0
         is FieldRef -> countLocalUses(node.target, name)
         is MethodCall ->
             (node.target?.let { countLocalUses(it, name) } ?: 0) +
                 node.args.sumOf { countLocalUses(it, name) }
         is StaticCall -> node.args.sumOf { countLocalUses(it, name) }
+        is CtorCall -> node.args.sumOf { countLocalUses(it, name) }
         is BinOp -> countLocalUses(node.l, name) + countLocalUses(node.r, name)
         is LocalDecl -> countLocalUses(node.init, name)
         is WhenExpr ->
@@ -158,6 +173,8 @@ private fun substituteLocal(
 ): CodeNode =
     when (node) {
         is IntLit -> node
+        is StringLit -> node
+        is Raw -> node
         is Local -> if (node.name == name) replacement else node
         is FieldRef -> FieldRef(substituteLocal(node.target, name, replacement), node.field)
         is MethodCall ->
@@ -169,6 +186,8 @@ private fun substituteLocal(
             )
         is StaticCall ->
             StaticCall(node.target, node.name, node.args.map { substituteLocal(it, name, replacement) })
+        is CtorCall ->
+            CtorCall(node.type, node.args.map { substituteLocal(it, name, replacement) })
         is BinOp ->
             BinOp(
                 op = node.op,

@@ -25,9 +25,50 @@ sealed interface CodeNode {
         val value: Int,
     ) : CodeNode
 
+    /**
+     * String literal — rendered as a Kotlin double-quoted string.
+     *
+     * Phase 7 addition: needed to emit error messages such as
+     * `throw IllegalArgumentException("Unknown discriminator: ...")`. The renderer
+     * passes the value through KotlinPoet's `%S` format specifier so escape
+     * handling stays correct without us re-implementing string escaping.
+     */
+    data class StringLit(
+        val value: String,
+    ) : CodeNode
+
     /** Reference to a previously-declared local. */
     data class Local(
         val name: LocalId,
+    ) : CodeNode
+
+    /**
+     * Free-form text escape — rendered verbatim into the output `CodeBlock`.
+     *
+     * Phase 7 addition: a small escape hatch for fragments the structured IR does
+     * not yet model (e.g. `"0x${rawByte.toString(16)}"` interpolated string
+     * fragments) without requiring a new node per case. The lowering pass treats
+     * `Raw` as opaque — a [Raw] is **not** referentially transparent, so a
+     * once-used local initialised by `Raw(...)` is never auto-inlined. Use only
+     * when the structured nodes can't carry the intent.
+     */
+    data class Raw(
+        val text: String,
+    ) : CodeNode
+
+    /**
+     * Constructor invocation: `Type(arg0, arg1, …)`.
+     *
+     * Phase 7 addition: distinct from [StaticCall] because constructors render
+     * without a member-access dot (`MqttFixedHeader(raw)` not `MqttFixedHeader.MqttFixedHeader(raw)`)
+     * and because validation of constructor argument count is meaningful enough
+     * to deserve its own node. The lowering pass treats a `CtorCall` as
+     * non-transparent — a constructor may allocate, so a once-used local whose
+     * init is a `CtorCall` is never auto-inlined.
+     */
+    data class CtorCall(
+        val type: ClassName,
+        val args: List<CodeNode>,
     ) : CodeNode
 
     /** Property access on [target], i.e. `target.field`. */
@@ -127,11 +168,27 @@ value class LocalId(
     override fun toString(): String = name
 }
 
-/** Binary-operator opcodes the IR supports. Extend by adding a new entry. */
+/**
+ * Binary-operator opcodes the IR supports.
+ *
+ * Phase 6 introduced [Plus], [Minus], [Times] for size arithmetic + const-fold.
+ * Phase 7 added the comparison and logical opcodes used by emitted `when`-arm
+ * conditions (`type == 4`, `rawByte in 48..63`, `buffer.remaining() >= 1`).
+ * Const-folding is only defined for arithmetic at present; the renderer
+ * formats comparison/logical opcodes positionally without folding.
+ */
 enum class BinOpKind {
     Plus,
     Minus,
     Times,
+    Eq,
+    NotEq,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+    And,
+    Or,
 }
 
 /**
