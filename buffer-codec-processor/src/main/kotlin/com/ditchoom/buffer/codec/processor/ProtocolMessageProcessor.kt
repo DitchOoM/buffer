@@ -96,7 +96,7 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Phase 9 Slice 3: returns `true` when [plan] falls inside the slice's whitelist.
+     * Phase 9 Slice 4: returns `true` when [plan] falls inside the slice's whitelist.
      *
      * Currently active whitelist:
      *  * [Plan.Object_] — zero-byte singletons (e.g. MqttPingResponse, WsContinuation).
@@ -107,8 +107,18 @@ class ProtocolMessageProcessor(
      *    `Endianness.Little` which the LeafEmitter handles via
      *    [com.ditchoom.buffer.codec.processor.emitter.FieldOps.readExpr] /
      *    [com.ditchoom.buffer.codec.processor.emitter.FieldOps.writeExpr].
-     *
-     * [Plan.Sealed_] is reserved for Slice 4+ and explicitly excluded.
+     *  * [Plan.Sealed_] when:
+     *     - Every variant is [com.ditchoom.buffer.codec.processor.ir.VariantPlan.NoPayload]
+     *       (typed-`@Payload` lambdas remain on Slice 5).
+     *     - Every variant's fields fit Slice 3's strategy whitelist.
+     *     - Dispatch is `RawByte`, or `TypedDiscriminator` with a value-class
+     *       discriminator. Data-class discriminators with non-self-encoding
+     *       variants need multi-arg constructor projection that ships in Slice 5/6.
+     *     - Framing is `Unframed`, `PeekOnly`, or `BodyLength`.
+     *     - For data-class discriminators (special case): only when ALL variants
+     *       self-encode the discriminator (Range arms or `@DiscriminatorField`-typed
+     *       variant fields). The dispatcher then never writes the discriminator
+     *       itself, so the multi-arg ctor projection is moot.
      */
     private fun coverable(plan: Plan): Boolean =
         when (plan) {
@@ -118,7 +128,61 @@ class ProtocolMessageProcessor(
                     plan.fields.all { f ->
                         coverableConditionality(f.conditionality) && coverableStrategy(f.strategy)
                     }
-            is Plan.Sealed_ -> false
+            is Plan.Sealed_ -> coverableSealed(plan)
+        }
+
+    /**
+     * Returns `true` when a sealed root falls inside Slice 4's whitelist (see
+     * [coverable] doc for the rule list).
+     *
+     * Rationale for each gate:
+     *  - WithPayload variants ship in Slice 5 with the typed-lambda fan-out. Their
+     *    `decode(P)` / `encode(P)` lambdas, `decodeFromContext` overload, and
+     *    `<P>` star-projection cast are not yet emitted by the new pipeline.
+     *  - Data-class discriminators with non-self-encoding variants need the
+     *    dispatcher to project each variant's `@DiscriminatorField`-marked
+     *    constructor params into the discriminator's ctor — that projection is
+     *    non-trivial and ships in Slice 5 alongside the Payload work.
+     *  - Variant fields are routed through [LeafEmitter] in Slice 4 only after
+     *    each variant separately satisfies the leaf whitelist (Slice 3 strategy
+     *    set + conditionality).
+     */
+    private fun coverableSealed(plan: Plan.Sealed_): Boolean {
+        if (plan.variants.any { it is com.ditchoom.buffer.codec.processor.ir.VariantPlan.WithPayload }) return false
+        for (variant in plan.variants) {
+            if (variant.fields.any { f ->
+                    !(coverableConditionality(f.conditionality) && coverableStrategyForVariant(f.strategy))
+                }
+            ) return false
+        }
+        return when (val d = plan.dispatch) {
+            is com.ditchoom.buffer.codec.processor.ir.DispatchShape.RawByte -> true
+            is com.ditchoom.buffer.codec.processor.ir.DispatchShape.TypedDiscriminator ->
+                when (d.disc) {
+                    is com.ditchoom.buffer.codec.processor.ir.DiscriminatorShape.ValueClass -> true
+                    is com.ditchoom.buffer.codec.processor.ir.DiscriminatorShape.DataClass -> {
+                        // Only safe when every variant self-encodes — otherwise
+                        // the dispatcher needs multi-arg ctor projection.
+                        plan.variants.all { v ->
+                            v.selfEncodes ||
+                                v.fields.any { it.strategy is FieldStrategy.DiscriminatorOwned }
+                        }
+                    }
+                }
+        }
+    }
+
+    /**
+     * Strategy whitelist for variant constructor parameters. Identical to
+     * [coverableStrategy] but accepts `FieldStrategy.DiscriminatorOwned` and
+     * `FieldStrategy.NestedMessage` because variants frequently carry the
+     * discriminator value as a typed `val header: Disc` parameter (auto-detected
+     * to `DiscriminatorOwned` in legacy; explicit annotation in the new IR).
+     */
+    private fun coverableStrategyForVariant(strategy: FieldStrategy): Boolean =
+        when (strategy) {
+            is FieldStrategy.DiscriminatorOwned -> true
+            else -> coverableStrategy(strategy)
         }
 
     /**
@@ -583,6 +647,13 @@ class ProtocolMessageProcessor(
                 }
                 onUnknownFqn
             }
+
+        // Slice 4: when the sealed root's plan is coverable, route the dispatcher
+        // through the new pipeline. Variant codecs always continue to come from
+        // the legacy emitter (they're already emitted above) — this slice only
+        // moves the dispatcher itself, with variant codec signatures held stable
+        // by both emitters.
+        if (tryPipeline(classDeclaration, resolver)) return
 
         // Phase 2: Generate the dispatch codec with payload awareness
         val generator = SealedDispatchGenerator(codeGenerator, logger)

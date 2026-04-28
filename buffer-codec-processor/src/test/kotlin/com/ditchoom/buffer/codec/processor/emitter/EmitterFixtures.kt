@@ -557,6 +557,164 @@ object EmitterFixtures {
             dir = Direction.Bidirectional,
         )
 
+    /**
+     * Slice 4 fixture — `Plan.Sealed_` Unframed (RIFF chunk-shaped) with only
+     * `VariantPlan.NoPayload` variants. The `Data` payload variant is dropped so
+     * the dispatcher fits Slice 4's coverable() whitelist (no `WithPayload`).
+     */
+    fun riffChunkSlice4(): Plan.Sealed_ {
+        val discType = fqn("RiffChunkId")
+        val discCodec = codecCn("RiffChunkId")
+        return Plan.Sealed_(
+            decl = fqn("RiffChunkSlice4"),
+            variants =
+                listOf(
+                    VariantPlan.NoPayload(
+                        decl = fqn("RiffChunkSlice4.Fact"),
+                        codec = codecCn("RiffChunkSlice4Fact"),
+                        wire = WireMatch.Point(fqn("RiffChunkSlice4.Fact"), 1717658484),
+                        selfEncodes = false,
+                        dir = Direction.Bidirectional,
+                        fields = emptyList(),
+                    ),
+                    VariantPlan.NoPayload(
+                        decl = fqn("RiffChunkSlice4.Fmt"),
+                        codec = codecCn("RiffChunkSlice4Fmt"),
+                        wire = WireMatch.Point(fqn("RiffChunkSlice4.Fmt"), 1718449184),
+                        selfEncodes = false,
+                        dir = Direction.Bidirectional,
+                        fields = emptyList(),
+                    ),
+                ),
+            dispatch =
+                DispatchShape.TypedDiscriminator(
+                    disc =
+                        DiscriminatorShape.ValueClass(
+                            discriminatorType = discType,
+                            inner = PrimitiveKind.UInt,
+                            innerProp = "raw",
+                            codec = discCodec,
+                            dispatchProp = "id",
+                            wireRange = 0..Int.MAX_VALUE,
+                        ),
+                    framing = FramingMode.Unframed,
+                ),
+            dir = Direction.Bidirectional,
+            onUnknown = TypeFqn("kotlin.IllegalArgumentException"),
+        )
+    }
+
+    /**
+     * Slice 4 fixture — `Plan.Sealed_` BodyLength (MQTT FixedHeader-shaped) with
+     * only `VariantPlan.NoPayload` variants. Two flavours of variant:
+     *  - `PingReq` — point arm, no DiscriminatorOwned: dispatcher writes the disc.
+     *  - `PubAck` — point arm with a DiscriminatorOwned field: variant self-encodes.
+     */
+    fun controlPacketV5Slice4(): Plan.Sealed_ {
+        val discType = fqn("MqttFixedHeader")
+        val discCodec = codecCn("MqttFixedHeader")
+        return Plan.Sealed_(
+            decl = fqn("ControlPacketV5Slice4"),
+            variants =
+                listOf(
+                    VariantPlan.NoPayload(
+                        decl = fqn("ControlPacketV5Slice4.PubAck"),
+                        codec = codecCn("ControlPacketV5Slice4PubAck"),
+                        wire = WireMatch.Point(fqn("ControlPacketV5Slice4.PubAck"), 4),
+                        selfEncodes = false,
+                        dir = Direction.Bidirectional,
+                        fields =
+                            listOf(
+                                FieldPlan(
+                                    "header",
+                                    discType,
+                                    FieldStrategy.DiscriminatorOwned(parentDispatchOn = discType),
+                                ),
+                            ),
+                    ),
+                    VariantPlan.NoPayload(
+                        decl = fqn("ControlPacketV5Slice4.PingReq"),
+                        codec = codecCn("ControlPacketV5Slice4PingReq"),
+                        wire = WireMatch.Point(fqn("ControlPacketV5Slice4.PingReq"), 12),
+                        selfEncodes = false,
+                        dir = Direction.Bidirectional,
+                        fields = emptyList(),
+                    ),
+                ),
+            dispatch =
+                DispatchShape.TypedDiscriminator(
+                    disc =
+                        DiscriminatorShape.ValueClass(
+                            discriminatorType = discType,
+                            inner = PrimitiveKind.UByte,
+                            innerProp = "raw",
+                            codec = discCodec,
+                            dispatchProp = "packetType",
+                            wireRange = 0..255,
+                        ),
+                    framing =
+                        FramingMode.BodyLength(
+                            framerFqn = ClassName("com.ditchoom.codec.test", "MqttFixedHeader"),
+                            discriminatorBytes = 1,
+                        ),
+                ),
+            dir = Direction.Bidirectional,
+            onUnknown = TypeFqn("kotlin.IllegalArgumentException"),
+        )
+    }
+
+    /**
+     * Slice 4 fixture — `Plan.Sealed_` PeekOnly with a value-class discriminator
+     * and only `VariantPlan.NoPayload` variants. Mirrors the WebSocket frame
+     * shape (peek-only framing) but uses a single-byte value-class disc instead
+     * of a multi-byte data-class disc so the dispatcher's discriminator-write
+     * fits the Slice 4 covered set.
+     */
+    fun wsFrameSlice4(): Plan.Sealed_ {
+        val discType = fqn("WsOpcodeByte")
+        val discCodec = codecCn("WsOpcodeByte")
+        return Plan.Sealed_(
+            decl = fqn("WsFrameSlice4"),
+            variants =
+                listOf(
+                    VariantPlan.NoPayload(
+                        decl = fqn("WsFrameSlice4.Text"),
+                        codec = codecCn("WsFrameSlice4Text"),
+                        wire = WireMatch.Point(fqn("WsFrameSlice4.Text"), 0x01),
+                        selfEncodes = false,
+                        dir = Direction.Bidirectional,
+                        fields = emptyList(),
+                    ),
+                    VariantPlan.NoPayload(
+                        decl = fqn("WsFrameSlice4.Close"),
+                        codec = codecCn("WsFrameSlice4Close"),
+                        wire = WireMatch.Point(fqn("WsFrameSlice4.Close"), 0x08),
+                        selfEncodes = false,
+                        dir = Direction.Bidirectional,
+                        fields = emptyList(),
+                    ),
+                ),
+            dispatch =
+                DispatchShape.TypedDiscriminator(
+                    disc =
+                        DiscriminatorShape.ValueClass(
+                            discriminatorType = discType,
+                            inner = PrimitiveKind.UByte,
+                            innerProp = "raw",
+                            codec = discCodec,
+                            dispatchProp = "opcode",
+                            wireRange = 0..255,
+                        ),
+                    framing =
+                        FramingMode.PeekOnly(
+                            framerFqn = ClassName("com.ditchoom.codec.test", "WsFraming"),
+                        ),
+                ),
+            dir = Direction.Bidirectional,
+            onUnknown = TypeFqn("kotlin.IllegalArgumentException"),
+        )
+    }
+
     fun standardRegistry(): TypeRegistry =
         TypeRegistry(
             mapOf(
@@ -593,6 +751,16 @@ object EmitterFixtures {
                 fqn("TlsRecord.Handshake") to cn("TlsRecord").nestedClass("Handshake"),
                 fqn("TlsRecord.ApplicationData") to cn("TlsRecord").nestedClass("ApplicationData"),
                 fqn("TlsContentType") to cn("TlsContentType"),
+                fqn("RiffChunkSlice4") to cn("RiffChunkSlice4"),
+                fqn("RiffChunkSlice4.Fact") to cn("RiffChunkSlice4").nestedClass("Fact"),
+                fqn("RiffChunkSlice4.Fmt") to cn("RiffChunkSlice4").nestedClass("Fmt"),
+                fqn("ControlPacketV5Slice4") to cn("ControlPacketV5Slice4"),
+                fqn("ControlPacketV5Slice4.PubAck") to cn("ControlPacketV5Slice4").nestedClass("PubAck"),
+                fqn("ControlPacketV5Slice4.PingReq") to cn("ControlPacketV5Slice4").nestedClass("PingReq"),
+                fqn("WsFrameSlice4") to cn("WsFrameSlice4"),
+                fqn("WsFrameSlice4.Text") to cn("WsFrameSlice4").nestedClass("Text"),
+                fqn("WsFrameSlice4.Close") to cn("WsFrameSlice4").nestedClass("Close"),
+                fqn("WsOpcodeByte") to cn("WsOpcodeByte"),
                 TypeFqn("kotlin.IllegalArgumentException") to ClassName("kotlin", "IllegalArgumentException"),
             ),
         )

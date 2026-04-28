@@ -94,6 +94,36 @@ class PinnedSnapshotTest {
         )
     }
 
+    /** Slice 4 hard-bar: `Plan.Sealed_` Unframed (RIFF chunk) emits the pinned text. */
+    @Test
+    fun `RiffChunkSlice4 emits the pinned snapshot`() {
+        val emitted = emitText(EmitterFixtures.riffChunkSlice4(), EmitterFixtures.cn("RiffChunkSlice4"))
+        assertEquals(
+            CapturedSnapshots.normalise(CapturedSnapshots.RiffChunkSlice4),
+            CapturedSnapshots.normalise(emitted),
+        )
+    }
+
+    /** Slice 4 hard-bar: `Plan.Sealed_` BodyLength (MQTT FixedHeader) emits the pinned text. */
+    @Test
+    fun `ControlPacketV5Slice4 emits the pinned snapshot`() {
+        val emitted = emitText(EmitterFixtures.controlPacketV5Slice4(), EmitterFixtures.cn("ControlPacketV5Slice4"))
+        assertEquals(
+            CapturedSnapshots.normalise(CapturedSnapshots.ControlPacketV5Slice4),
+            CapturedSnapshots.normalise(emitted),
+        )
+    }
+
+    /** Slice 4 hard-bar: `Plan.Sealed_` PeekOnly (WsFrame-shape) emits the pinned text. */
+    @Test
+    fun `WsFrameSlice4 emits the pinned snapshot`() {
+        val emitted = emitText(EmitterFixtures.wsFrameSlice4(), EmitterFixtures.cn("WsFrameSlice4"))
+        assertEquals(
+            CapturedSnapshots.normalise(CapturedSnapshots.WsFrameSlice4),
+            CapturedSnapshots.normalise(emitted),
+        )
+    }
+
     /** Banned-pattern: per the rearchitecture plan, fixed-width wireSize must
      * not emit `var _size = 0; _size += 1; return _size`. */
     @Test

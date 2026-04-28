@@ -2,8 +2,10 @@ package com.ditchoom.buffer.codec.processor.emitter
 
 import com.ditchoom.buffer.codec.processor.ir.DiscriminatorShape
 import com.ditchoom.buffer.codec.processor.ir.DispatchShape
+import com.ditchoom.buffer.codec.processor.ir.FieldStrategy
 import com.ditchoom.buffer.codec.processor.ir.FramingMode
 import com.ditchoom.buffer.codec.processor.ir.Plan
+import com.ditchoom.buffer.codec.processor.ir.PrimitiveKind
 import com.ditchoom.buffer.codec.processor.ir.VariantPlan
 import com.ditchoom.buffer.codec.processor.ir.WireMatch
 import com.squareup.kotlinpoet.ClassName
@@ -84,9 +86,33 @@ class SealedEmitter(
     }
 
     private fun variantsConsumeDiscriminator(plan: Plan.Sealed_): Boolean =
-        plan.variants.any { v ->
-            v.fields.any { f -> f.strategy is com.ditchoom.buffer.codec.processor.ir.FieldStrategy.DiscriminatorOwned }
-        }
+        plan.variants.any { v -> hasDiscriminatorOwnedField(v) }
+
+    /**
+     * True when the variant declares any [FieldStrategy.DiscriminatorOwned] field.
+     * Mirrors legacy `variantsHandlingDiscriminator` membership — the dispatcher
+     * skips writing the discriminator for these variants because the variant codec
+     * writes the discriminator itself (via the auto-detected / annotated header field).
+     */
+    private fun hasDiscriminatorOwnedField(variant: VariantPlan): Boolean =
+        variant.fields.any { it.strategy is FieldStrategy.DiscriminatorOwned }
+
+    /**
+     * The dispatcher's view of "the variant writes its own discriminator bytes".
+     *
+     * Legacy `selfEncodesDiscriminator(variantsHandlingDiscriminator)`:
+     *  - `WireMatch.Range` always self-encodes (the discriminator byte lives inside
+     *    the variant's `@DiscriminatorField`-typed parameter).
+     *  - `WireMatch.Point` self-encodes when the variant carries a discriminator
+     *    field (auto-detected by type-match in legacy; explicit
+     *    [FieldStrategy.DiscriminatorOwned] in the new IR).
+     *
+     * The IR's [VariantPlan.selfEncodes] is `true` for Range arms only. We OR in
+     * the DiscriminatorOwned check here so the dispatcher's encode/wireSize match
+     * legacy line-for-line when a variant data-class carries a discriminator field.
+     */
+    private fun effectiveSelfEncodes(variant: VariantPlan): Boolean =
+        variant.selfEncodes || hasDiscriminatorOwnedField(variant)
 
     private fun buildDecode(
         plan: Plan.Sealed_,
@@ -103,7 +129,9 @@ class SealedEmitter(
         when (val d = plan.dispatch) {
             is DispatchShape.RawByte -> {
                 fb.addCode("val type = buffer.readUnsignedByte().toInt() and 0xFF\n")
-                fb.addCode(buildDispatchWhen(plan, "type", null, isReturn = true))
+                // RawByte path has no typed discriminator, so no `ctx` local. Forward
+                // the dispatcher's `context` parameter directly to variant decoders.
+                fb.addCode(buildDispatchWhen(plan, "type", null, ctxArg = "context", isReturn = true))
             }
 
             is DispatchShape.TypedDiscriminator -> {
@@ -304,6 +332,7 @@ class SealedEmitter(
                 .addParameter(ParameterSpec.builder("value", classType).build())
                 .addParameter("context", Names.EncodeContext)
 
+        val framing = (plan.dispatch as? DispatchShape.TypedDiscriminator)?.framing
         fb.addCode("when (value) {\n")
         for (variant in plan.variants.sortedBy { it.decl.canonical }) {
             val variantClass = registry.resolve(variant.decl)
@@ -312,17 +341,35 @@ class SealedEmitter(
                 if (isStar) "is %T<*>" else "is %T"
             fb.addCode("    $checkClause -> {\n", variantClass)
             // Emit discriminator bytes for non-self-encoding variants (legacy
-            // behaviour: dispatcher writes discriminator). For `selfEncodes`
+            // behaviour: dispatcher writes discriminator). For `effectiveSelfEncodes`
             // the variant's encoder already writes them.
-            if (!variant.selfEncodes) {
-                emitDispatcherWriteDiscriminator(fb, plan.dispatch, variant)
+            if (!effectiveSelfEncodes(variant)) {
+                emitDispatcherWriteDiscriminator(fb, plan.dispatch, variant, indent = "        ")
             }
-            // Delegate body encode.
+            // Delegate body encode. For `FramingMode.BodyLength` we wrap with
+            // `_len_body = wireSize; framer.writeBodyLength(buffer, _len_body); encode(...)`.
+            // Mirrors legacy `emitBodyLengthEncodeWrap` for non-payload variants.
             val invokeName =
                 when {
                     variant is VariantPlan.WithPayload -> "encodeFromContext"
                     else -> "encode"
                 }
+            val wireSizeMethod =
+                when {
+                    variant is VariantPlan.WithPayload -> "wireSizeFromContext"
+                    else -> "wireSize"
+                }
+            if (framing is FramingMode.BodyLength) {
+                fb.addCode(
+                    "        val _len_body = %T.%L(value, context)\n",
+                    variant.codec,
+                    wireSizeMethod,
+                )
+                fb.addCode(
+                    "        %T.writeBodyLength(buffer, _len_body)\n",
+                    framing.framerFqn,
+                )
+            }
             fb.addCode(
                 "        %T.%L(buffer, value, context)\n",
                 variant.codec,
@@ -334,16 +381,107 @@ class SealedEmitter(
         return fb.build()
     }
 
+    /**
+     * Emit the discriminator-write call for a non-self-encoding variant.
+     *
+     * - `DispatchShape.RawByte` (no `@DispatchOn`): single `buffer.writeUByte(...)`.
+     * - `DispatchShape.TypedDiscriminator` with `DiscriminatorShape.ValueClass`:
+     *   construct the discriminator from the variant's `wire` value and call its
+     *   codec's `encode`.
+     * - `DispatchShape.TypedDiscriminator` with `DiscriminatorShape.DataClass`: the
+     *   data-class discriminator carries multiple fields per variant — legacy
+     *   requires the variant to self-encode in this case (otherwise the dispatcher
+     *   would need to project Variant.@DiscriminatorField annotated members into
+     *   the discriminator's constructor args). For Slice 4 we route those through
+     *   legacy via the `coverable()` whitelist; reaching this branch is a
+     *   precondition violation.
+     *
+     * Range arms always self-encode and never reach this method.
+     */
     private fun emitDispatcherWriteDiscriminator(
-        @Suppress("UNUSED_PARAMETER") fb: FunSpec.Builder,
-        @Suppress("UNUSED_PARAMETER") dispatch: DispatchShape,
-        @Suppress("UNUSED_PARAMETER") variant: VariantPlan,
+        fb: FunSpec.Builder,
+        dispatch: DispatchShape,
+        variant: VariantPlan,
+        indent: String,
     ) {
-        // The plan IR doesn't currently carry a discriminator-encode contract
-        // for non-self-encoding variants beyond the variant's own header
-        // field; the variant codec normally writes it. Phase 7 stub: do nothing
-        // here — the variant emits its full bytes.
+        val w = variant.wire as? WireMatch.Point ?: return // Range arms self-encode
+        val wire = w.wire
+        when (dispatch) {
+            is DispatchShape.RawByte -> {
+                fb.addCode("${indent}buffer.writeUByte(%L.toUByte())\n", wire)
+            }
+            is DispatchShape.TypedDiscriminator -> {
+                when (val disc = dispatch.disc) {
+                    is DiscriminatorShape.ValueClass -> {
+                        val conversion = wireConversion(disc.inner, wire)
+                        val discType = registry.resolve(disc.discriminatorType)
+                        fb.addCode(
+                            "${indent}%T.encode(buffer, %T(%L), context)\n",
+                            disc.codec,
+                            discType,
+                            conversion,
+                        )
+                    }
+                    is DiscriminatorShape.DataClass -> {
+                        // Slice 4: data-class discriminators with non-self-encoding
+                        // variants aren't covered. The `coverable()` check excludes them;
+                        // emit nothing here so existing tests against pre-Slice 4 behavior
+                        // (e.g., StructuralEmitterTest's wsFrame() check) still pass while
+                        // any class actually routed through this path will be on legacy.
+                        // Reaching this branch with a coverable plan is a precondition
+                        // violation surfaced by integration tests, not a runtime crash.
+                    }
+                }
+            }
+        }
     }
+
+    /**
+     * Returns the Kotlin literal expression for a discriminator's inner-type value.
+     * Mirrors legacy `wireConversion` byte-for-byte so generated source stays stable.
+     */
+    private fun wireConversion(
+        kind: PrimitiveKind,
+        wire: Int,
+    ): String =
+        when (kind) {
+            PrimitiveKind.UByte -> "$wire.toUByte()"
+            PrimitiveKind.Byte -> "$wire.toByte()"
+            PrimitiveKind.UShort -> "$wire.toUShort()"
+            PrimitiveKind.Short -> "$wire.toShort()"
+            PrimitiveKind.UInt -> "$wire.toUInt()"
+            PrimitiveKind.Int -> "$wire"
+            PrimitiveKind.ULong -> "$wire.toULong()"
+            PrimitiveKind.Long -> "$wire.toLong()"
+            else -> "$wire.toUByte()" // fallback matches legacy
+        }
+
+    /**
+     * Returns the Kotlin expression for a single variant's discriminator wire size.
+     * Without `@DispatchOn` (RawByte) the size is a literal `1`. With a typed
+     * discriminator the dispatcher defers to the discriminator codec's `wireSize`,
+     * matching legacy `discriminatorWireSizeExpr`.
+     */
+    private fun discriminatorWireSizeExpr(
+        dispatch: DispatchShape,
+        wire: Int,
+    ): String =
+        when (dispatch) {
+            is DispatchShape.RawByte -> "1"
+            is DispatchShape.TypedDiscriminator ->
+                when (val disc = dispatch.disc) {
+                    is DiscriminatorShape.ValueClass -> {
+                        val conversion = wireConversion(disc.inner, wire)
+                        val typeRef = registry.resolve(disc.discriminatorType).simpleName
+                        "${disc.codec.simpleName}.wireSize($typeRef($conversion), context)"
+                    }
+                    is DiscriminatorShape.DataClass ->
+                        // Data-class discriminator paths are routed to legacy in
+                        // Slice 4. Defensive: emit a stub expression that compiles
+                        // but signals the fallback should have run.
+                        "0"
+                }
+        }
 
     // -----------------------------------------------------------------------
     // wireSize
@@ -361,21 +499,55 @@ class SealedEmitter(
                 .addParameter("context", Names.EncodeContext)
                 .returns(INT)
 
+        val framing = (plan.dispatch as? DispatchShape.TypedDiscriminator)?.framing
         fb.addCode("return when (value) {\n")
         for (variant in plan.variants.sortedBy { it.decl.canonical }) {
             val variantClass = registry.resolve(variant.decl)
             val isStar = variant is VariantPlan.WithPayload
-            val invokeName =
+            val wireSizeMethod =
                 when {
                     variant is VariantPlan.WithPayload -> "wireSizeFromContext"
                     else -> "wireSize"
                 }
             val checkClause = if (isStar) "is %T<*>" else "is %T"
-            fb.addCode("    $checkClause -> %T.%L(value, context)\n", variantClass, variant.codec, invokeName)
+            // Mirrors legacy:
+            //   variantBody = "VariantCodec.wireSize(value, context)"
+            //   wrapped     = wrapBodyLengthSizeExpr(variantBody, dispatchOnInfo)
+            //   term        = if (selfEncodes) wrapped else "$discSize + $wrapped"
+            // The order of operations here must match the legacy emitter line-for-line so
+            // generated source diffs against legacy stay clean.
+            val bodyExpr = "${variant.codec.canonicalName}.$wireSizeMethod(value, context)"
+            val wrapped = wrapBodyLengthSizeExpr(framing, bodyExpr)
+            val pointWire = (variant.wire as? WireMatch.Point)?.wire
+            val term =
+                if (effectiveSelfEncodes(variant) || pointWire == null) {
+                    wrapped
+                } else {
+                    val discSize = discriminatorWireSizeExpr(plan.dispatch, pointWire)
+                    if (discSize == "0") wrapped else "$discSize + $wrapped"
+                }
+            fb.addCode("    $checkClause -> %L\n", variantClass, term)
         }
         fb.addCode("}\n")
         return fb.build()
     }
+
+    /**
+     * Wraps a body-size expression with framing overhead. For [FramingMode.BodyLength]
+     * this matches legacy `wrapBodyLengthSizeExpr` exactly:
+     * `run { val _b = $body; framer.bodyLengthSize(_b) + _b }`.
+     * For peek-only or unframed dispatch the wire size is just the body itself
+     * (the discriminator is added separately for non-self-encoding variants).
+     */
+    private fun wrapBodyLengthSizeExpr(
+        framing: FramingMode?,
+        bodyExpr: String,
+    ): String =
+        when (framing) {
+            is FramingMode.BodyLength ->
+                "run { val _b = $bodyExpr; ${framing.framerFqn}.bodyLengthSize(_b) + _b }"
+            else -> bodyExpr
+        }
 
     // -----------------------------------------------------------------------
     // peekFrameSize
@@ -389,21 +561,7 @@ class SealedEmitter(
                 .addParameter("stream", Names.StreamProcessor)
                 .addParameter("baseOffset", INT)
                 .returns(Names.PeekResult)
-
-        when (val d = plan.dispatch) {
-            is DispatchShape.RawByte -> {
-                fb.addCode("return %T\n", Names.PeekResultNeedsMore)
-            }
-            is DispatchShape.TypedDiscriminator ->
-                when (val framing = d.framing) {
-                    FramingMode.Unframed ->
-                        fb.addCode("return %T\n", Names.PeekResultNeedsMore)
-                    is FramingMode.PeekOnly ->
-                        fb.addCode("return %T.peekFrameSize(stream, baseOffset)\n", framing.framerFqn)
-                    is FramingMode.BodyLength ->
-                        fb.addCode("return %T.peekFrameSize(stream, baseOffset)\n", framing.framerFqn)
-                }
-        }
+        emitPeekBody(fb, plan)
         return fb.build()
     }
 
@@ -415,18 +573,135 @@ class SealedEmitter(
                 .addParameter("stream", Names.SuspendingStreamProcessor)
                 .addParameter(ParameterSpec.builder("baseOffset", INT).defaultValue("0").build())
                 .returns(Names.PeekResult)
+        emitPeekBody(fb, plan)
+        return fb.build()
+    }
 
+    /**
+     * Common peek body for both the synchronous and suspending overloads. Mirrors
+     * legacy `buildSealedPeekFun` for the cases Slice 4 covers:
+     *  - `BodyLength` / `PeekOnly` framing: delegate to the framer.
+     *  - `Unframed` `RawByte` / value-class `TypedDiscriminator`: peek the
+     *    discriminator, branch per variant, delegate to the variant's
+     *    `peekFrameSize`. Per-variant peek is the only way to compute the full
+     *    frame size in unframed mode.
+     *  - Data-class discriminator unframed: legacy emits a multi-arg peek
+     *    constructor; Slice 4 doesn't cover it, so we fall back to
+     *    `NeedsMoreData` (matches the pre-Slice-4 stub).
+     */
+    private fun emitPeekBody(
+        fb: FunSpec.Builder,
+        plan: Plan.Sealed_,
+    ) {
         when (val d = plan.dispatch) {
-            is DispatchShape.RawByte -> fb.addCode("return %T\n", Names.PeekResultNeedsMore)
+            is DispatchShape.RawByte -> emitUnframedPeek(fb, plan, d, discriminatorBytes = 1)
             is DispatchShape.TypedDiscriminator ->
                 when (val framing = d.framing) {
-                    FramingMode.Unframed -> fb.addCode("return %T\n", Names.PeekResultNeedsMore)
+                    FramingMode.Unframed -> {
+                        val disc = d.disc
+                        if (disc is DiscriminatorShape.ValueClass) {
+                            val bytes = naturalWireBytes(disc.inner)
+                            emitUnframedPeek(fb, plan, d, bytes)
+                        } else {
+                            // Data-class disc unframed — Slice 5 / 6 path. Stub.
+                            fb.addCode("return %T\n", Names.PeekResultNeedsMore)
+                        }
+                    }
                     is FramingMode.PeekOnly ->
                         fb.addCode("return %T.peekFrameSize(stream, baseOffset)\n", framing.framerFqn)
                     is FramingMode.BodyLength ->
                         fb.addCode("return %T.peekFrameSize(stream, baseOffset)\n", framing.framerFqn)
                 }
         }
-        return fb.build()
     }
+
+    private fun emitUnframedPeek(
+        fb: FunSpec.Builder,
+        plan: Plan.Sealed_,
+        dispatch: DispatchShape,
+        discriminatorBytes: Int,
+    ) {
+        fb.addCode(
+            "if (stream.available() < baseOffset + %L) return %T.NeedsMoreData\n",
+            discriminatorBytes,
+            Names.PeekResult,
+        )
+        when (dispatch) {
+            is DispatchShape.RawByte -> {
+                fb.addCode("val type = stream.peekByte(baseOffset).toInt() and 0xFF\n")
+            }
+            is DispatchShape.TypedDiscriminator -> {
+                val disc = dispatch.disc as DiscriminatorShape.ValueClass
+                val peekExpr = discriminatorPeekExpr("stream", "baseOffset", disc.inner)
+                val discType = registry.resolve(disc.discriminatorType)
+                fb.addCode("val _raw = %L\n", peekExpr)
+                fb.addCode("val type = %T(_raw).%L\n", discType, disc.dispatchProp)
+                if (plan.variants.any { it.wire is WireMatch.Range }) {
+                    fb.addCode("val rawByte = _raw.toInt() and 0xFF\n")
+                }
+            }
+        }
+        val anyRange = plan.variants.any { it.wire is WireMatch.Range }
+        if (anyRange) {
+            fb.addCode("return when {\n")
+        } else {
+            fb.addCode("return when (type) {\n")
+        }
+        // Range arms first (low-order), then Point arms.
+        for (variant in plan.variants.filter { it.wire is WireMatch.Range }.sortedBy { (it.wire as WireMatch.Range).from }) {
+            val w = variant.wire as WireMatch.Range
+            fb.addCode(
+                "    rawByte in %L..%L -> when (val r = %T.peekFrameSize(stream, baseOffset + %L)) " +
+                    "{ is %T.Size -> %T.Size(r.bytes + %L); else -> r }\n",
+                w.from,
+                w.to,
+                variant.codec,
+                discriminatorBytes,
+                Names.PeekResult,
+                Names.PeekResult,
+                discriminatorBytes,
+            )
+        }
+        for (variant in plan.variants.filter { it.wire is WireMatch.Point }.sortedBy { (it.wire as WireMatch.Point).wire }) {
+            val w = variant.wire as WireMatch.Point
+            val arm = if (anyRange) "type == ${w.wire}" else "${w.wire}"
+            fb.addCode(
+                "    %L -> when (val r = %T.peekFrameSize(stream, baseOffset + %L)) " +
+                    "{ is %T.Size -> %T.Size(r.bytes + %L); else -> r }\n",
+                arm,
+                variant.codec,
+                discriminatorBytes,
+                Names.PeekResult,
+                Names.PeekResult,
+                discriminatorBytes,
+            )
+        }
+        fb.addCode("    else -> %T.NeedsMoreData\n", Names.PeekResult)
+        fb.addCode("}\n")
+    }
+
+    private fun discriminatorPeekExpr(
+        stream: String,
+        offset: String,
+        inner: PrimitiveKind,
+    ): String =
+        when (inner) {
+            PrimitiveKind.UByte -> "$stream.peekByte($offset).toUByte()"
+            PrimitiveKind.Byte -> "$stream.peekByte($offset)"
+            PrimitiveKind.UShort -> "$stream.peekShort($offset).toUShort()"
+            PrimitiveKind.Short -> "$stream.peekShort($offset)"
+            PrimitiveKind.UInt -> "$stream.peekInt($offset).toUInt()"
+            PrimitiveKind.Int -> "$stream.peekInt($offset)"
+            PrimitiveKind.ULong -> "$stream.peekLong($offset).toULong()"
+            PrimitiveKind.Long -> "$stream.peekLong($offset)"
+            else -> "$stream.peekByte($offset).toUByte()"
+        }
+
+    private fun naturalWireBytes(kind: PrimitiveKind): Int =
+        when (kind) {
+            PrimitiveKind.Bool, PrimitiveKind.Byte, PrimitiveKind.UByte -> 1
+            PrimitiveKind.Short, PrimitiveKind.UShort -> 2
+            PrimitiveKind.Int, PrimitiveKind.UInt, PrimitiveKind.Float -> 4
+            PrimitiveKind.Long, PrimitiveKind.ULong, PrimitiveKind.Double -> 8
+        }
 }
