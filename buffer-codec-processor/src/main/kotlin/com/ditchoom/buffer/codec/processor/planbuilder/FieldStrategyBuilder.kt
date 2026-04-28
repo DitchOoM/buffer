@@ -144,7 +144,19 @@ internal class FieldStrategyBuilder(
             return buildPayloadSlot(param, conditionality, errors, site)
         }
 
-        if (hasDiscriminatorField) {
+        // Slice 5a: auto-detect DiscriminatorField. When the enclosing class is a
+        // sealed-root variant whose parent declares `@DispatchOn(D::class)`, any
+        // constructor parameter declared with type `D` is treated as
+        // `DiscriminatorOwned` even without an explicit `@DiscriminatorField`
+        // annotation. Mirrors legacy `FieldAnalyzer` lines 922-965 — variants like
+        // `MqttControlPacketV5.Publish(val header: MqttFixedHeader, ...)` get the
+        // discriminator from decode context rather than reading wire bytes.
+        val parentDispFqn = parentDispatchType?.canonical
+        val isAutoDiscriminator =
+            !hasDiscriminatorField &&
+                parentDispFqn != null &&
+                param.typeRef.fqn == parentDispFqn
+        if (hasDiscriminatorField || isAutoDiscriminator) {
             return buildDiscriminatorOwned(param, conditionality, errors, site)
         }
 

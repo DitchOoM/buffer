@@ -148,7 +148,20 @@ class ProtocolMessageProcessor(
      *    set + conditionality).
      */
     private fun coverableSealed(plan: Plan.Sealed_): Boolean {
-        if (plan.variants.any { it is com.ditchoom.buffer.codec.processor.ir.VariantPlan.WithPayload }) return false
+        // Slice 5a: WithPayload variants are now covered. Per-variant codec emission
+        // (including the typed-lambda overloads + DecodeKey/EncodeKey/SizeKey context keys)
+        // continues to come from the legacy `CodecGenerator`; the dispatcher emitted by
+        // `SealedEmitter` only references each variant codec via `decode` /
+        // `decodeFromContext` / `wireSizeFromContext` etc. — all stable across emitters.
+        //
+        // We still gate on variant strategy coverage because variants whose fields have
+        // strategies the new pipeline doesn't yet infer direction from (e.g. `External`
+        // / `@UseCodec` referencing a `Decoder`-only codec) make the sealed root's
+        // direction inference under-precise — PlanBuilder's `DirectionResolver.resolve`
+        // only consults the class-level `@Decode` / `@Encode` markers, not field
+        // strategies. Letting those classes through would emit a `Codec<T>` dispatcher
+        // for what should be a `Decoder<T>`. Slice 6 ports field-level direction
+        // inference into PhaseB; until then the whitelist excludes them.
         for (variant in plan.variants) {
             if (variant.fields.any { f ->
                     !(coverableConditionality(f.conditionality) && coverableStrategyForVariant(f.strategy))
@@ -182,6 +195,17 @@ class ProtocolMessageProcessor(
     private fun coverableStrategyForVariant(strategy: FieldStrategy): Boolean =
         when (strategy) {
             is FieldStrategy.DiscriminatorOwned -> true
+            // Slice 5a: variants with @Payload type parameters carry `PayloadSlot` fields
+            // whose decode/encode is owned by the legacy variant codec emitter (typed-lambda
+            // overloads). The dispatcher only invokes them via `decodeFromContext` /
+            // `encodeFromContext` / `wireSizeFromContext`, so the dispatcher itself doesn't
+            // need to lower PayloadSlot — but the field has to be coverable for the variant
+            // overall to flow through.
+            is FieldStrategy.PayloadSlot -> true
+            // Slice 5a: nested @ProtocolMessage fields on variants are coverable. The variant
+            // codec is legacy-emitted and resolves them; the dispatcher only invokes the
+            // variant codec's `decode` / `encode` overloads.
+            is FieldStrategy.NestedMessage -> true
             else -> coverableStrategy(strategy)
         }
 
@@ -215,14 +239,14 @@ class ProtocolMessageProcessor(
             is FieldStrategy.StringField -> true
             is FieldStrategy.Collection_ -> true
             is FieldStrategy.Spi -> {
-                // Slice 3 emits SPI fields when the descriptor's `raw` payload is non-blank
-                // (the validator already rejects fixedSize=-1 + blank raw). Variable-size
-                // SPI fields with a runtime size hint (descriptor.fixedSize=-1, raw set)
-                // are not yet covered — the new pipeline would need to lower the size
-                // hint expression that the legacy emitter resolves via
-                // `FieldReadStrategy.Custom.descriptor.wireSizeFunction`. Bail out for
-                // those until Slice 5 lands the size-hint plumbing.
-                strategy.descriptor.raw.isNotBlank() && strategy.descriptor.fixedSize >= 0
+                // Slice 3 emits SPI fields with a fixed wire size (descriptor.fixedSize >= 0).
+                // Slice 5a expands coverage to variable-size SPI: when fixedSize == -1, the
+                // descriptor must carry a non-blank `wireSizeRaw` so LeafEmitter can substitute
+                // a runtime size expression (mirrors legacy
+                // `FieldReadStrategy.Custom.descriptor.wireSizeFunction`). The validator also
+                // requires `raw` to be non-blank when `fixedSize == -1`.
+                strategy.descriptor.raw.isNotBlank() &&
+                    (strategy.descriptor.fixedSize >= 0 || strategy.descriptor.wireSizeRaw.isNotBlank())
             }
             else -> false
         }
@@ -241,6 +265,17 @@ class ProtocolMessageProcessor(
      *    [PlanBuilder] would silently classify the field as a primitive.
      */
     private fun pipelineEligible(symbol: com.ditchoom.buffer.codec.processor.discovery.RawSymbol): Boolean {
+        // Slice 5a: `@DispatchOn` on a non-sealed symbol — legacy emits the tailored
+        // "@DispatchOn is not valid on an object" error; let it speak.
+        // Sealed-root `@DispatchOn` is conditionally allowed: only when the discriminator's
+        // dispatch property matches its single inner property (i.e. PhaseB's
+        // `dispatchProp = innerProp` synthesis is correct). PhaseB doesn't yet resolve
+        // `@DispatchValue` on derived getters (see `DiscriminatorBuilder.buildValueClass`
+        // line 82-83 — "PhaseC-level @DispatchValue resolution can refine"). Routing
+        // sealed roots whose `@DispatchValue` lives on a derived getter through the new
+        // pipeline produces `val type = discriminator.raw` where the variant arms are
+        // `Int` literals, mismatching the `UByte` type. Slice 6 ports `@DispatchValue`
+        // resolution into PhaseA/B; until then, route those through legacy.
         if (symbol.annotations.any { it.fqn == "com.ditchoom.buffer.codec.annotations.DispatchOn" }) {
             return false
         }

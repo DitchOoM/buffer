@@ -124,6 +124,33 @@ class PinnedSnapshotTest {
         )
     }
 
+    /**
+     * Slice 5a hard-bar: `Plan.Sealed_` BodyLength with a `VariantPlan.WithPayload`
+     * variant — pinned dispatcher routes to `*FromContext` overloads with `is X<*>`
+     * star projection.
+     */
+    @Test
+    fun `ControlPacketV5Slice5a emits the pinned snapshot`() {
+        val emitted = emitText(EmitterFixtures.controlPacketV5Slice5a(), EmitterFixtures.cn("ControlPacketV5Slice5a"))
+        assertEquals(
+            CapturedSnapshots.normalise(CapturedSnapshots.ControlPacketV5Slice5a),
+            CapturedSnapshots.normalise(emitted),
+        )
+    }
+
+    /**
+     * Slice 5a hard-bar: `Plan.Leaf` with a variable-size SPI field — pinned
+     * `wireSize` substitutes `descriptor.wireSizeRaw` for `fixedSize == -1`.
+     */
+    @Test
+    fun `VariableSizeSpiLeaf emits the pinned snapshot`() {
+        val emitted = emitText(EmitterFixtures.variableSizeSpiLeaf(), EmitterFixtures.cn("VariableSizeSpiLeaf"))
+        assertEquals(
+            CapturedSnapshots.normalise(CapturedSnapshots.VariableSizeSpiLeaf),
+            CapturedSnapshots.normalise(emitted),
+        )
+    }
+
     /** Banned-pattern: per the rearchitecture plan, fixed-width wireSize must
      * not emit `var _size = 0; _size += 1; return _size`. */
     @Test

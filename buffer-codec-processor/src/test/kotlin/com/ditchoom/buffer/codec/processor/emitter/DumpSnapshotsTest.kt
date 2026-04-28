@@ -33,6 +33,8 @@ class DumpSnapshotsTest {
             "RiffChunkSlice4" to EmitterFixtures.riffChunkSlice4(),
             "ControlPacketV5Slice4" to EmitterFixtures.controlPacketV5Slice4(),
             "WsFrameSlice4" to EmitterFixtures.wsFrameSlice4(),
+            "ControlPacketV5Slice5a" to EmitterFixtures.controlPacketV5Slice5a(),
+            "VariableSizeSpiLeaf" to EmitterFixtures.variableSizeSpiLeaf(),
         ).forEach { (simple, plan) ->
             val cn = EmitterFixtures.cn(simple)
             val text = emitter.emit(plan, cn).toString()

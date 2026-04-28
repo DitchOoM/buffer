@@ -48,16 +48,33 @@ class SealedEmitter(
         classType: ClassName,
     ): FileSpec {
         val codecName = ClassName(classType.packageName, classType.simpleNames.joinToString("") + "Codec")
+        // Slice 5a: direction-aware superinterface. `Codec<T>` for bidirectional;
+        // `Decoder<T>` for decode-only; `Encoder<T>` for encode-only. Mirrors legacy
+        // `SealedDispatchGenerator.generateInternal` interface selection.
+        val superIface =
+            when (plan.dir) {
+                com.ditchoom.buffer.codec.processor.ir.Direction.Bidirectional -> Names.Codec
+                com.ditchoom.buffer.codec.processor.ir.Direction.DecodeOnly -> Names.Decoder
+                com.ditchoom.buffer.codec.processor.ir.Direction.EncodeOnly -> Names.Encoder
+            }
         val type =
             TypeSpec
                 .objectBuilder(codecName)
-                .addSuperinterface(Names.Codec.parameterizedBy(classType))
+                .addSuperinterface(superIface.parameterizedBy(classType))
 
-        type.addFunction(buildDecode(plan, classType))
-        type.addFunction(buildEncode(plan, classType))
-        type.addFunction(buildWireSize(plan, classType))
-        type.addFunction(buildPeekFrame(plan))
-        type.addFunction(buildSuspendingPeekFrame(plan))
+        val canDecode = plan.dir != com.ditchoom.buffer.codec.processor.ir.Direction.EncodeOnly
+        val canEncode = plan.dir != com.ditchoom.buffer.codec.processor.ir.Direction.DecodeOnly
+
+        if (canDecode) type.addFunction(buildDecode(plan, classType))
+        if (canEncode) type.addFunction(buildEncode(plan, classType))
+        if (canEncode) type.addFunction(buildWireSize(plan, classType))
+        // peek belongs to FrameDetector / Codec<T>. For Decoder<T> we emit it as a
+        // public fun (matching legacy `PeekFrameSizeEmitter.buildPeekFun(implementsCodec = false)`).
+        if (canDecode) {
+            val implementsCodec = plan.dir == com.ditchoom.buffer.codec.processor.ir.Direction.Bidirectional
+            type.addFunction(buildPeekFrame(plan, implementsCodec))
+            type.addFunction(buildSuspendingPeekFrame(plan))
+        }
 
         // DiscriminatorKey nested data object — only emitted when at least one
         // variant has a DiscriminatorOwned field.
@@ -336,9 +353,7 @@ class SealedEmitter(
         fb.addCode("when (value) {\n")
         for (variant in plan.variants.sortedBy { it.decl.canonical }) {
             val variantClass = registry.resolve(variant.decl)
-            val isStar = variant is VariantPlan.WithPayload
-            val checkClause =
-                if (isStar) "is %T<*>" else "is %T"
+            val checkClause = variantCheckClause(variant)
             fb.addCode("    $checkClause -> {\n", variantClass)
             // Emit discriminator bytes for non-self-encoding variants (legacy
             // behaviour: dispatcher writes discriminator). For `effectiveSelfEncodes`
@@ -503,13 +518,12 @@ class SealedEmitter(
         fb.addCode("return when (value) {\n")
         for (variant in plan.variants.sortedBy { it.decl.canonical }) {
             val variantClass = registry.resolve(variant.decl)
-            val isStar = variant is VariantPlan.WithPayload
             val wireSizeMethod =
                 when {
                     variant is VariantPlan.WithPayload -> "wireSizeFromContext"
                     else -> "wireSize"
                 }
-            val checkClause = if (isStar) "is %T<*>" else "is %T"
+            val checkClause = variantCheckClause(variant)
             // Mirrors legacy:
             //   variantBody = "VariantCodec.wireSize(value, context)"
             //   wrapped     = wrapBodyLengthSizeExpr(variantBody, dispatchOnInfo)
@@ -553,14 +567,21 @@ class SealedEmitter(
     // peekFrameSize
     // -----------------------------------------------------------------------
 
-    private fun buildPeekFrame(plan: Plan.Sealed_): FunSpec {
+    private fun buildPeekFrame(
+        plan: Plan.Sealed_,
+        implementsCodec: Boolean = true,
+    ): FunSpec {
         val fb =
             FunSpec
                 .builder("peekFrameSize")
-                .addModifiers(KModifier.OVERRIDE)
                 .addParameter("stream", Names.StreamProcessor)
-                .addParameter("baseOffset", INT)
-                .returns(Names.PeekResult)
+        if (implementsCodec) {
+            fb.addModifiers(KModifier.OVERRIDE)
+            fb.addParameter("baseOffset", INT)
+        } else {
+            fb.addParameter(ParameterSpec.builder("baseOffset", INT).defaultValue("0").build())
+        }
+        fb.returns(Names.PeekResult)
         emitPeekBody(fb, plan)
         return fb.build()
     }
@@ -695,6 +716,20 @@ class SealedEmitter(
             PrimitiveKind.ULong -> "$stream.peekLong($offset).toULong()"
             PrimitiveKind.Long -> "$stream.peekLong($offset)"
             else -> "$stream.peekByte($offset).toUByte()"
+        }
+
+    /**
+     * Returns the `is X` / `is X<*, *, ...>` check clause for a variant. Mirrors the
+     * legacy emitter's `subTypeName.parameterizedBy(info.payloadFields.map { STAR })`
+     * shape — one `*` per `@Payload` type parameter.
+     */
+    private fun variantCheckClause(variant: VariantPlan): String =
+        when (variant) {
+            is VariantPlan.WithPayload -> {
+                val stars = List(variant.typeParams.size) { "*" }.joinToString(", ")
+                "is %T<$stars>"
+            }
+            is VariantPlan.NoPayload -> "is %T"
         }
 
     private fun naturalWireBytes(kind: PrimitiveKind): Int =

@@ -484,4 +484,127 @@ object CapturedSnapshots {
           public suspend fun peekFrameSize(stream: SuspendingStreamProcessor, baseOffset: Int = 0): PeekResult = PeekResult.Size(2)
         }
         """.trimIndent()
+
+    /**
+     * Slice 5a hard-bar fixture — `Plan.Sealed_` BodyLength with a `VariantPlan.WithPayload`
+     * variant alongside `NoPayload` siblings. Pins the dispatcher's `*FromContext`
+     * routing for typed-lambda variants and the `is X<*>` star projection.
+     */
+    val ControlPacketV5Slice5a =
+        """
+        package com.ditchoom.codec.test
+
+        import com.ditchoom.buffer.ReadBuffer
+        import com.ditchoom.buffer.WriteBuffer
+        import com.ditchoom.buffer.codec.Codec
+        import com.ditchoom.buffer.codec.CodecContext
+        import com.ditchoom.buffer.codec.DecodeContext
+        import com.ditchoom.buffer.codec.EncodeContext
+        import com.ditchoom.buffer.stream.PeekResult
+        import com.ditchoom.buffer.stream.StreamProcessor
+        import com.ditchoom.buffer.stream.SuspendingStreamProcessor
+        import kotlin.IllegalArgumentException
+        import kotlin.IllegalStateException
+        import kotlin.Int
+
+        public object ControlPacketV5Slice5aCodec : Codec<ControlPacketV5Slice5a> {
+          override fun decode(buffer: ReadBuffer, context: DecodeContext): ControlPacketV5Slice5a {
+            val discriminator = MqttFixedHeaderCodec.decode(buffer, context)
+            val ctx = context.with(DiscriminatorKey, discriminator)
+            val bodyLength = MqttFixedHeader.readBodyLength(buffer)
+            val body = buffer.readBytes(bodyLength)
+            val type = discriminator.packetType
+            val result = when (type) {
+              3 -> com.ditchoom.codec.test.ControlPacketV5Slice5aPublishCodec.decodeFromContext(body, ctx)
+              12 -> com.ditchoom.codec.test.ControlPacketV5Slice5aPingReqCodec.decode(body, ctx)
+              else -> throw IllegalArgumentException("Unknown discriminator: ${'$'}type")
+            }
+            if (body.remaining() != 0) {
+                throw IllegalStateException("Variant decoder did not fully consume body bytes; ${'$'}{body.remaining()} unread.")
+            }
+            return result
+          }
+
+          override fun encode(
+            buffer: WriteBuffer,
+            `value`: ControlPacketV5Slice5a,
+            context: EncodeContext,
+          ) {
+            when (value) {
+                is ControlPacketV5Slice5a.PingReq -> {
+                    MqttFixedHeaderCodec.encode(buffer, MqttFixedHeader(12.toUByte()), context)
+                    val _len_body = ControlPacketV5Slice5aPingReqCodec.wireSize(value, context)
+                    MqttFixedHeader.writeBodyLength(buffer, _len_body)
+                    ControlPacketV5Slice5aPingReqCodec.encode(buffer, value, context)
+                }
+                is ControlPacketV5Slice5a.Publish<*> -> {
+                    val _len_body = ControlPacketV5Slice5aPublishCodec.wireSizeFromContext(value, context)
+                    MqttFixedHeader.writeBodyLength(buffer, _len_body)
+                    ControlPacketV5Slice5aPublishCodec.encodeFromContext(buffer, value, context)
+                }
+            }
+          }
+
+          override fun wireSize(`value`: ControlPacketV5Slice5a, context: EncodeContext): Int = when (value) {
+              is ControlPacketV5Slice5a.PingReq -> MqttFixedHeaderCodec.wireSize(MqttFixedHeader(12.toUByte()), context) + run { val _b = com.ditchoom.codec.test.ControlPacketV5Slice5aPingReqCodec.wireSize(value, context); com.ditchoom.codec.test.MqttFixedHeader.bodyLengthSize(_b) + _b }
+              is ControlPacketV5Slice5a.Publish<*> -> run { val _b = com.ditchoom.codec.test.ControlPacketV5Slice5aPublishCodec.wireSizeFromContext(value, context); com.ditchoom.codec.test.MqttFixedHeader.bodyLengthSize(_b) + _b }
+          }
+
+          override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = MqttFixedHeader.peekFrameSize(stream, baseOffset)
+
+          public suspend fun peekFrameSize(stream: SuspendingStreamProcessor, baseOffset: Int = 0): PeekResult = MqttFixedHeader.peekFrameSize(stream, baseOffset)
+
+          public data object DiscriminatorKey : CodecContext.Key<MqttFixedHeader>()
+        }
+        """.trimIndent()
+
+    /**
+     * Slice 5a hard-bar fixture — `Plan.Leaf` with a variable-size SPI field
+     * (descriptor.fixedSize == -1, descriptor.wireSizeRaw set). Pins the
+     * substitution into `wireSize` (`+ VarSizePayloadCodec.wireSize(value.value)`).
+     *
+     * Note: the SPI strategy's `descriptor.raw` is used at both decode and encode
+     * call-sites in the current IR. The `encode` body shows the same expression
+     * as decode — this is a pre-existing limitation tracked for Slice 6 (split
+     * raw-decode / raw-encode strings).
+     */
+    val VariableSizeSpiLeaf =
+        """
+        package com.ditchoom.codec.test
+
+        import com.ditchoom.buffer.ReadBuffer
+        import com.ditchoom.buffer.WriteBuffer
+        import com.ditchoom.buffer.codec.Codec
+        import com.ditchoom.buffer.codec.DecodeContext
+        import com.ditchoom.buffer.codec.EncodeContext
+        import com.ditchoom.buffer.stream.PeekResult
+        import com.ditchoom.buffer.stream.StreamProcessor
+        import com.ditchoom.buffer.stream.SuspendingStreamProcessor
+        import kotlin.Int
+
+        public object VariableSizeSpiLeafCodec : Codec<VariableSizeSpiLeaf> {
+          public const val MIN_HEADER_BYTES: Int = 1
+
+          override fun decode(buffer: ReadBuffer, context: DecodeContext): VariableSizeSpiLeaf {
+            val kind = buffer.readUnsignedByte()
+            val value = VarSizePayloadCodec.decode(buffer, context)
+            return VariableSizeSpiLeaf(kind = kind, value = value)
+          }
+
+          override fun encode(
+            buffer: WriteBuffer,
+            `value`: VariableSizeSpiLeaf,
+            context: EncodeContext,
+          ) {
+            buffer.writeUByte(value.kind)
+            VarSizePayloadCodec.decode(buffer, context)
+          }
+
+          override fun wireSize(`value`: VariableSizeSpiLeaf, context: EncodeContext): Int = 1 + VarSizePayloadCodec.wireSize(value.value)
+
+          override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.Size(1)
+
+          public suspend fun peekFrameSize(stream: SuspendingStreamProcessor, baseOffset: Int = 0): PeekResult = PeekResult.Size(1)
+        }
+        """.trimIndent()
 }

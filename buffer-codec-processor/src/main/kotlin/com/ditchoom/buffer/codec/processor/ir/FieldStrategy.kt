@@ -139,8 +139,17 @@ value class ProviderId(
     }
 }
 
-/** Provider-specific descriptor produced by a `CodecFieldProvider` for a single field. */
+/** Provider-specific descriptor produced by a `CodecFieldProvider` for a single field.
+ *
+ * - [raw] is the inline read/write expression text (e.g. `MyCodec.decode(buffer, context)` or
+ *   `MyCodec.encode(buffer, value.field, context)`).
+ * - [fixedSize] is the constant wire size in bytes; `-1` means variable-size and requires
+ *   [wireSizeRaw] to be non-blank so the emitter can substitute a runtime size expression
+ *   (mirrors legacy `CustomFieldDescriptor.wireSizeFunction` lowering — typically
+ *   `MyCodec.wireSize(value.field)`).
+ */
 data class SpiDescriptor(
     val raw: String,
     val fixedSize: Int = -1,
+    val wireSizeRaw: String = "",
 )

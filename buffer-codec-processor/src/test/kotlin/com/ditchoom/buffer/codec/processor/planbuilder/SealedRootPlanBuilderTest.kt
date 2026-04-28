@@ -226,6 +226,48 @@ class SealedRootPlanBuilderTest {
         )
     }
 
+    /**
+     * Slice 5a — auto-detect rule: a variant constructor parameter whose type FQN
+     * matches the parent's `@DispatchOn(D::class)` discriminator type is treated as
+     * `FieldStrategy.DiscriminatorOwned` even when the parameter does NOT carry an
+     * explicit `@DiscriminatorField` annotation. Mirrors legacy `FieldAnalyzer` rule.
+     */
+    @Test
+    fun `Variant with header field typed as parent dispatch type auto-detects DiscriminatorOwned`() {
+        val header =
+            Fixtures.dataLike(
+                fqn = "test.Hdr",
+                ctorParameters = listOf(Fixtures.param("raw", Fixtures.primitiveTypeRef("kotlin.UByte"))),
+                kind = com.ditchoom.buffer.codec.processor.discovery.DataLikeKind.ValueClass,
+            )
+        val variant =
+            Fixtures.dataLike(
+                fqn = "test.Cmd.Pub",
+                ctorParameters =
+                    listOf(
+                        Fixtures.param(
+                            "header",
+                            Fixtures.nestedMessageRef("test.Hdr"),
+                            // No @DiscriminatorField annotation — relies on the auto-detect rule.
+                            annotations = emptyList(),
+                        ),
+                    ),
+                annotations = listOf(Fixtures.protocolMessageAnnotation(), Fixtures.packetType(0x30)),
+            )
+        val root =
+            Fixtures.sealedRoot(
+                fqn = "test.Cmd",
+                subclassFqns = listOf(variant.fqn),
+                annotations = listOf(Fixtures.protocolMessageAnnotation(), Fixtures.dispatchOn("test.Hdr")),
+            )
+        val scope = mapOf(root.fqn to root as RawSymbol, variant.fqn to variant as RawSymbol, header.fqn to header as RawSymbol)
+        val plan = PlanBuilder.build(root, scope).expectRight() as Plan.Sealed_
+        val pub = plan.variants.single() as VariantPlan.NoPayload
+        val headerField = pub.fields.single()
+        val strat = headerField.strategy as FieldStrategy.DiscriminatorOwned
+        assertEquals("test.Hdr", strat.parentDispatchOn.canonical)
+    }
+
     @Test
     fun `Variant with @DiscriminatorField field matching parent discriminator builds with DiscriminatorOwned strategy`() {
         val header =

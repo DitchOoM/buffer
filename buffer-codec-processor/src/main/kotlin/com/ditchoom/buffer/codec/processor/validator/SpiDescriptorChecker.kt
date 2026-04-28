@@ -11,8 +11,9 @@ import com.ditchoom.buffer.codec.processor.planbuilder.KspError
  *
  * A descriptor is ambiguous when PhaseD has no way to compute the field's wire size:
  * the descriptor's [com.ditchoom.buffer.codec.processor.ir.SpiDescriptor.fixedSize] is
- * `-1` (variable-size) and the inline payload [raw] is blank — there is neither a
- * fixed-size literal to embed nor a hint the emitter can substitute.
+ * `-1` (variable-size), the inline payload [raw] is blank, AND [wireSizeRaw] is blank —
+ * there is neither a fixed-size literal to embed nor a runtime size expression for the
+ * emitter to substitute.
  *
  * This is the PhaseC-time replacement for the legacy generator's deferred runtime
  * crash ("processor bug: descriptor wireSize unknown"). Catching it at validation time
@@ -40,7 +41,7 @@ internal object SpiDescriptorChecker {
         for (f in fields) {
             val spi = f.strategy as? FieldStrategy.Spi ?: continue
             val descriptor = spi.descriptor
-            if (descriptor.fixedSize == -1 && descriptor.raw.isBlank()) {
+            if (descriptor.fixedSize == -1 && descriptor.raw.isBlank() && descriptor.wireSizeRaw.isBlank()) {
                 errors +=
                     KspError(
                         message =

@@ -715,6 +715,108 @@ object EmitterFixtures {
         )
     }
 
+    /**
+     * Slice 5a fixture — `Plan.Sealed_` BodyLength (MQTT v5 control packet shape) with
+     * a `VariantPlan.WithPayload` variant alongside `NoPayload` siblings. Pins the
+     * dispatcher's emit text for the typed-lambda + scratch-buffer-fallback paths
+     * routed through `*FromContext` overloads.
+     */
+    fun controlPacketV5Slice5a(): Plan.Sealed_ {
+        val discType = fqn("MqttFixedHeader")
+        val discCodec = codecCn("MqttFixedHeader")
+        return Plan.Sealed_(
+            decl = fqn("ControlPacketV5Slice5a"),
+            variants =
+                listOf(
+                    VariantPlan.WithPayload(
+                        decl = fqn("ControlPacketV5Slice5a.Publish"),
+                        codec = codecCn("ControlPacketV5Slice5aPublish"),
+                        wire = WireMatch.Point(fqn("ControlPacketV5Slice5a.Publish"), 3),
+                        selfEncodes = false,
+                        dir = Direction.Bidirectional,
+                        fields =
+                            listOf(
+                                FieldPlan(
+                                    "header",
+                                    discType,
+                                    FieldStrategy.DiscriminatorOwned(parentDispatchOn = discType),
+                                ),
+                            ),
+                        typeParams =
+                            listOf(
+                                com.ditchoom.buffer.codec.processor.ir
+                                    .PayloadTypeParam("P", null),
+                            ),
+                        payloadFields =
+                            listOf(
+                                com.ditchoom.buffer.codec.processor.ir
+                                    .PayloadFieldRef(fieldName = "payload", typeParamName = "P"),
+                            ),
+                    ),
+                    VariantPlan.NoPayload(
+                        decl = fqn("ControlPacketV5Slice5a.PingReq"),
+                        codec = codecCn("ControlPacketV5Slice5aPingReq"),
+                        wire = WireMatch.Point(fqn("ControlPacketV5Slice5a.PingReq"), 12),
+                        selfEncodes = false,
+                        dir = Direction.Bidirectional,
+                        fields = emptyList(),
+                    ),
+                ),
+            dispatch =
+                DispatchShape.TypedDiscriminator(
+                    disc =
+                        DiscriminatorShape.ValueClass(
+                            discriminatorType = discType,
+                            inner = PrimitiveKind.UByte,
+                            innerProp = "raw",
+                            codec = discCodec,
+                            dispatchProp = "packetType",
+                            wireRange = 0..255,
+                        ),
+                    framing =
+                        FramingMode.BodyLength(
+                            framerFqn = ClassName("com.ditchoom.codec.test", "MqttFixedHeader"),
+                            discriminatorBytes = 1,
+                        ),
+                ),
+            dir = Direction.Bidirectional,
+            onUnknown = TypeFqn("kotlin.IllegalArgumentException"),
+        )
+    }
+
+    /**
+     * Slice 5a fixture — `Plan.Leaf` with a variable-size SPI field. Pins the
+     * `wireSize` accumulator that substitutes `descriptor.wireSizeRaw` (e.g.
+     * `MyCodec.wireSize(value.field)`) when `fixedSize == -1`.
+     */
+    fun variableSizeSpiLeaf(): Plan.Leaf =
+        Plan.Leaf(
+            decl = fqn("VariableSizeSpiLeaf"),
+            fields =
+                listOf(
+                    FieldPlan(
+                        "kind",
+                        TypeFqn("kotlin.UByte"),
+                        FieldStrategy.Primitive(PrimitiveKind.UByte, 1, Endianness.Big),
+                    ),
+                    FieldPlan(
+                        "value",
+                        fqn("VarSizePayload"),
+                        FieldStrategy.Spi(
+                            provider = com.ditchoom.buffer.codec.processor.ir.ProviderId("var-size-payload"),
+                            descriptor =
+                                com.ditchoom.buffer.codec.processor.ir.SpiDescriptor(
+                                    raw = "VarSizePayloadCodec.decode(buffer, context)",
+                                    fixedSize = -1,
+                                    wireSizeRaw = "VarSizePayloadCodec.wireSize(value.value)",
+                                ),
+                        ),
+                    ),
+                ),
+            batches = emptyList(),
+            dir = Direction.Bidirectional,
+        )
+
     fun standardRegistry(): TypeRegistry =
         TypeRegistry(
             mapOf(
@@ -761,6 +863,11 @@ object EmitterFixtures {
                 fqn("WsFrameSlice4.Text") to cn("WsFrameSlice4").nestedClass("Text"),
                 fqn("WsFrameSlice4.Close") to cn("WsFrameSlice4").nestedClass("Close"),
                 fqn("WsOpcodeByte") to cn("WsOpcodeByte"),
+                fqn("ControlPacketV5Slice5a") to cn("ControlPacketV5Slice5a"),
+                fqn("ControlPacketV5Slice5a.Publish") to cn("ControlPacketV5Slice5a").nestedClass("Publish"),
+                fqn("ControlPacketV5Slice5a.PingReq") to cn("ControlPacketV5Slice5a").nestedClass("PingReq"),
+                fqn("VariableSizeSpiLeaf") to cn("VariableSizeSpiLeaf"),
+                fqn("VarSizePayload") to cn("VarSizePayload"),
                 TypeFqn("kotlin.IllegalArgumentException") to ClassName("kotlin", "IllegalArgumentException"),
             ),
         )

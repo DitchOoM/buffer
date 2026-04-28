@@ -819,8 +819,15 @@ class LeafEmitter(
                 is FieldStrategy.Spi -> {
                     if (s.descriptor.fixedSize >= 0) {
                         CodeBlock.of("%L", s.descriptor.fixedSize)
+                    } else if (s.descriptor.wireSizeRaw.isNotBlank()) {
+                        // Slice 5a: variable-size SPI — emit the descriptor's `wireSizeRaw`
+                        // verbatim. Mirrors legacy `WireSizeEmitter.wireSizeExpression` /
+                        // `Custom` branch which emits `${sizeFn.functionName}($valueExpr, $contextArgs)`
+                        // (typically `MyCodec.wireSize(value.fieldName)`). The provider produces
+                        // the call site's text directly and the emitter substitutes it.
+                        CodeBlock.of("%L", s.descriptor.wireSizeRaw)
                     } else {
-                        // SPI variable-size: validator forbids fixedSize=-1 with a blank raw
+                        // SPI variable-size with no wireSizeRaw: validator rejects this combination
                         // (SpiDescriptorChecker), so this branch shouldn't fire when the
                         // pipeline routes a class through. Defensive: emit 0 to keep emit safe.
                         CodeBlock.of("0")

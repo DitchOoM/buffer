@@ -243,14 +243,42 @@ object PlanBuilder {
         if (errors.isNotEmpty()) {
             return Nel.fromList(errors).left()
         }
+        // Slice 5a: when the sealed root has no explicit direction marker
+        // (`RawDirection.Default` → `Bidirectional`), refine its direction from the
+        // variants. Mirrors legacy `computeSealedDirection` in ProtocolMessageProcessor —
+        // variants carry per-field direction inference (e.g. `@UseCodec(SomeDecoder)`
+        // makes a variant DecodeOnly), and the sealed root's direction must agree.
+        // Without this refinement the dispatcher would emit `Codec<T>` while the
+        // variants are emitted as `Decoder<T>` — producing references to `encode` /
+        // `wireSize` overloads the variants don't expose.
+        val refinedDir =
+            if (symbol.direction == com.ditchoom.buffer.codec.processor.discovery.RawDirection.Default) {
+                deriveSealedDirection(variants, dirOrErrors)
+            } else {
+                dirOrErrors
+            }
         return Plan
             .Sealed_(
                 decl = TypeFqn(symbol.fqn),
                 variants = variants.toList(),
                 dispatch = dispatch,
-                dir = dirOrErrors,
+                dir = refinedDir,
                 onUnknown = TypeFqn(onUnknownFqn),
             ).right()
+    }
+
+    private fun deriveSealedDirection(
+        variants: List<com.ditchoom.buffer.codec.processor.ir.VariantPlan>,
+        defaultDir: Direction,
+    ): Direction {
+        val hasDecodeOnly = variants.any { it.dir == Direction.DecodeOnly }
+        val hasEncodeOnly = variants.any { it.dir == Direction.EncodeOnly }
+        return when {
+            hasDecodeOnly && hasEncodeOnly -> defaultDir // PhaseC will surface the conflict
+            hasDecodeOnly -> Direction.DecodeOnly
+            hasEncodeOnly -> Direction.EncodeOnly
+            else -> defaultDir
+        }
     }
 
     /**
