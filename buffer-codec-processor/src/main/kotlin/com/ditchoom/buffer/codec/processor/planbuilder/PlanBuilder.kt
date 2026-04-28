@@ -11,6 +11,8 @@ import com.ditchoom.buffer.codec.processor.ir.DispatchShape
 import com.ditchoom.buffer.codec.processor.ir.Endianness
 import com.ditchoom.buffer.codec.processor.ir.FieldPlan
 import com.ditchoom.buffer.codec.processor.ir.FramingMode
+import com.ditchoom.buffer.codec.processor.ir.PayloadFieldRef
+import com.ditchoom.buffer.codec.processor.ir.PayloadTypeParam
 import com.ditchoom.buffer.codec.processor.ir.Plan
 import com.ditchoom.buffer.codec.processor.ir.TypeFqn
 import com.ditchoom.buffer.codec.processor.planbuilder.Annotations.classRefArg
@@ -148,8 +150,9 @@ object PlanBuilder {
         val payloadTypeParams =
             symbol.typeParameters
                 .filter { tp -> tp.annotations.any { it.fqn == AnnotationFqns.Payload } }
-                .map { it.name }
-                .toSet()
+                .map { PayloadTypeParam(name = it.name, upperBound = it.upperBoundFqn?.let(::TypeFqn)) }
+        val payloadTypeParamNames = payloadTypeParams.map { it.name }.toSet()
+        val payloadFieldRefs = mutableListOf<PayloadFieldRef>()
         val protocolMessageScope = scope.values.map { it.fqn }.toSet()
         val accumulated = mutableListOf<FieldPlan>()
         val errors = mutableListOf<KspError>()
@@ -161,13 +164,19 @@ object PlanBuilder {
                     precedingFields = accumulated.toList(),
                     totalFieldCount = symbol.constructorParameters.size,
                     isLastField = idx == symbol.constructorParameters.size - 1,
-                    payloadTypeParams = payloadTypeParams,
+                    payloadTypeParams = payloadTypeParamNames,
                     parentDispatchType = parentDispatchType,
                     protocolMessageScope = protocolMessageScope,
                 )
             when (val res = builder.build(p)) {
                 is Either.Left -> errors += res.value.all
-                is Either.Right -> accumulated += res.value
+                is Either.Right -> {
+                    accumulated += res.value
+                    if (p.typeRef.isTypeParameter && p.typeRef.name in payloadTypeParamNames) {
+                        payloadFieldRefs +=
+                            PayloadFieldRef(fieldName = p.name, typeParamName = p.typeRef.name)
+                    }
+                }
             }
         }
         val explicitDir =
@@ -208,6 +217,8 @@ object PlanBuilder {
                 fields = accumulated.toList(),
                 batches = emptyList(),
                 dir = dirOrErrors,
+                payloadTypeParams = payloadTypeParams,
+                payloadFields = payloadFieldRefs.toList(),
             ).right()
     }
 

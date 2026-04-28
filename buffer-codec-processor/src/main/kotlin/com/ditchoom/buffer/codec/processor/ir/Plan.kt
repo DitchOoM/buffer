@@ -11,12 +11,22 @@ sealed interface Plan {
     val decl: TypeFqn
     val dir: Direction
 
-    /** Non-sealed, non-singleton message — fixed/variable-width fields decoded into a primary ctor. */
+    /**
+     * Non-sealed, non-singleton message — fixed/variable-width fields decoded into a primary ctor.
+     *
+     * [payloadTypeParams] / [payloadFields] mirror the shape on
+     * [com.ditchoom.buffer.codec.processor.ir.VariantPlan.WithPayload]: when non-empty,
+     * the leaf declares one or more `@Payload`-annotated type parameters and the fields
+     * that consume them. Emitters use these to fan out typed-lambda overloads (Cap 2).
+     * Defaulted to empty so non-payload classes don't need to opt in.
+     */
     data class Leaf(
         override val decl: TypeFqn,
         val fields: List<FieldPlan>,
         val batches: List<Batch>,
         override val dir: Direction,
+        val payloadTypeParams: List<PayloadTypeParam> = emptyList(),
+        val payloadFields: List<PayloadFieldRef> = emptyList(),
     ) : Plan
 
     /** Singleton — `object` / `data object`. No fields, no variants by construction. */
