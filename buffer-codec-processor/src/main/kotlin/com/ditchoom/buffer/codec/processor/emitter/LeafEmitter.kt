@@ -289,19 +289,25 @@ class LeafEmitter(
     private fun decodeFieldInline(field: FieldPlan): CodeBlock? {
         if (field.conditionality !is Conditionality.Always) return null
         return when (val s = field.strategy) {
-            is FieldStrategy.Primitive -> CodeBlock.of("%L", primitiveReadExpr(s.kind, s.order))
+            is FieldStrategy.Primitive -> CodeBlock.of("%L", primitiveReadExpr(s.kind, s.order, s.wireBytes))
             else -> null
         }
     }
 
-    /** Read expression for a primitive — Boolean lowers to `byte != 0.toByte()`. */
+    /**
+     * Read expression for a primitive — Boolean lowers to `byte != 0.toByte()`.
+     * Cap 4: when `wireBytes` differs from the natural width for the kind, the
+     * call delegates to [FieldOps.readExpr] with the custom-width overload
+     * (shift-and-mask sequence).
+     */
     private fun primitiveReadExpr(
         kind: PrimitiveKind,
         order: Endianness = Endianness.Big,
+        wireBytes: Int = FieldOps.naturalWireBytes(kind),
     ): String =
         when (kind) {
             PrimitiveKind.Bool -> "buffer.readByte() != 0.toByte()"
-            else -> FieldOps.readExpr(kind, order)
+            else -> FieldOps.readExpr(kind, order, wireBytes)
         }
 
     /** Write statement for a primitive — Boolean lowers to a conditional `writeByte`. */
@@ -309,17 +315,18 @@ class LeafEmitter(
         kind: PrimitiveKind,
         valueExpr: String,
         order: Endianness = Endianness.Big,
+        wireBytes: Int = FieldOps.naturalWireBytes(kind),
     ): String =
         when (kind) {
             PrimitiveKind.Bool ->
                 "buffer.writeByte(if ($valueExpr) 1.toByte() else 0.toByte())"
-            else -> FieldOps.writeExpr(kind, order, valueExpr)
+            else -> FieldOps.writeExpr(kind, order, wireBytes, valueExpr)
         }
 
     private fun decodeStatement(field: FieldPlan): CodeBlock? =
         when (val s = field.strategy) {
             is FieldStrategy.Primitive -> {
-                val read = primitiveReadExpr(s.kind, s.order)
+                val read = primitiveReadExpr(s.kind, s.order, s.wireBytes)
                 wrapConditional(field, "val ${field.name} = $read\n")
             }
 
@@ -616,7 +623,7 @@ class LeafEmitter(
             is FieldStrategy.Primitive -> {
                 val ref =
                     if (isNullableConditional(field)) field.name else "value.${field.name}"
-                CodeBlock.of("%L\n", primitiveWriteExpr(s.kind, ref, s.order))
+                CodeBlock.of("%L\n", primitiveWriteExpr(s.kind, ref, s.order, s.wireBytes))
             }
 
             is FieldStrategy.PayloadSlot ->

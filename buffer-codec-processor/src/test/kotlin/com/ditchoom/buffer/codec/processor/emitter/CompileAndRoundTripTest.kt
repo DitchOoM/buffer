@@ -368,46 +368,49 @@ class CompileAndRoundTripTest {
 
     // ---- Capability 4 — @WireBytes non-natural width --------------------
     //
-    // Legacy `CustomWidthEmitter` emitted shift-and-mask sequences for
-    // `@WireBytes(3)` / 5 / 6 / 7 — values that don't map to a single
-    // `readByte`/`readShort`/`readInt`/`readLong`.
+    // Phase C Cap 4 ported `CustomWidthEmitter` shift-and-mask sequences to
+    // [FieldOps.readExpr] / [FieldOps.writeExpr] (wireBytes-aware overloads).
+    // A `Plan.Leaf` with `Primitive(Int, wireBytes=3)` now emits a 3-byte
+    // chunked read/write that round-trips through the codec.
     //
-    // Today the emitter uses [FieldOps.readExpr] / [FieldOps.writeExpr]
-    // which always read the natural width for the [PrimitiveKind]; the
-    // [FieldStrategy.Primitive.wireBytes] field is parsed but ignored at
-    // emit. So a `Plan.Leaf` with `Primitive(Int, wireBytes=3)` produces
-    // `buffer.readInt()` (4 bytes) instead of a 3-byte read.
-    //
-    // Test fixture: `Plan.Leaf` with a single `Primitive(Int, wireBytes=3)`
-    // field. Asserts the emitted decode reads `readInt()` (the bug) — Phase
-    // C Cap 4 will replace this with a 3-byte shift-and-mask sequence.
+    // Round-trip assertion: encode 0x123456 (24-bit value) and verify the
+    // codec produces 3 bytes on the wire and decodes back to the same Int.
     @Test
-    fun `cap4 Primitive wireBytes 3 emits natural-width read at HEAD`() {
+    fun `cap4 Primitive wireBytes 3 round-trips through 3-byte shift-and-mask`() {
         val plan = wireBytesThreeFixture()
         val classType = EmitterFixtures.cn("ThreeByteInt")
-        val emitted = emitText(plan, classType)
+        val codecSource = emitText(plan, classType)
 
-        // Today: full Int read (4 bytes), ignoring wireBytes=3.
-        assertTrue(
-            emitted.contains("buffer.readInt()"),
-            "expected natural-width Int read at HEAD; got:\n$emitted",
-        )
+        val userTypeSource =
+            """
+            package com.ditchoom.codec.test
 
-        // The gap: no 3-byte shift-and-mask read pattern.
-        // Legacy shape we expect Phase C Cap 4 to emit (BE):
-        //
-        //     val b0 = buffer.readUnsignedByte().toInt()
-        //     val b1 = buffer.readUnsignedByte().toInt()
-        //     val b2 = buffer.readUnsignedByte().toInt()
-        //     val value = (b0 shl 16) or (b1 shl 8) or b2
-        val shiftAndMaskPattern = Regex("""shl\s+16\)\s+or\s+\(""")
-        assertNoMatch(
-            shiftAndMaskPattern,
-            emitted,
-            "FAIL → Phase C Cap 4 has landed (shift-and-mask 3-byte read emitted). " +
-                "Flip this test: round-trip a value of 0x123456 through the codec and " +
-                "assert wire size is 3.",
-        )
+            data class ThreeByteInt(val value: Int)
+            """.trimIndent()
+
+        val (codec, _) =
+            compileAndLoadCodec(
+                codecSource = codecSource,
+                userTypes = userTypeSource,
+                codecFqn = "com.ditchoom.codec.test.ThreeByteIntCodec",
+            )
+
+        val cls = codec::class.java.classLoader.loadClass("com.ditchoom.codec.test.ThreeByteInt")
+        val ctor = cls.getDeclaredConstructor(Int::class.javaPrimitiveType)
+        ctor.isAccessible = true
+        val expected = 0x123456
+        val value = ctor.newInstance(expected)
+
+        val buffer: PlatformBuffer = BufferFactory.Default.allocate(16)
+        invokeEncode(codec, buffer, value)
+        assertEquals(3, buffer.position(), "encode(ThreeByteInt) should write exactly 3 bytes")
+        buffer.resetForRead()
+        val decoded = invokeDecode(codec, buffer)
+
+        assertEquals(value, decoded, "ThreeByteInt(0x123456) not preserved across round-trip")
+
+        val ws = invokeWireSize(codec, value)
+        assertEquals(3, ws, "wireSize(ThreeByteInt) should be 3")
     }
 
     // ---- Capability 5 — ConditionalValidator rules in PhaseB ------------
