@@ -85,6 +85,7 @@ internal object VariantPlanBuilder {
                 parentDispatchType = parentDispatchType,
                 scope = scope,
                 classWireOrder = classWireOrder,
+                externalClasses = externalClasses,
             )
         errors += fieldErrors
 
@@ -247,6 +248,7 @@ internal object VariantPlanBuilder {
         parentDispatchType: TypeFqn?,
         scope: Map<String, RawSymbol>,
         classWireOrder: Endianness,
+        externalClasses: Map<String, RawClassMetadata> = emptyMap(),
     ): VariantFieldsResult =
         when (variantSymbol) {
             is RawSymbol.ObjectSymbol -> VariantFieldsResult(emptyList(), emptyList(), emptyList(), emptyList())
@@ -287,6 +289,7 @@ internal object VariantPlanBuilder {
                             payloadTypeParams = payloadTypeParamNames,
                             parentDispatchType = parentDispatchType,
                             protocolMessageScope = protocolMessageScope,
+                            externalClasses = externalClasses,
                         )
                     when (val res = builder.build(p)) {
                         is Either.Left -> errors += res.value.all

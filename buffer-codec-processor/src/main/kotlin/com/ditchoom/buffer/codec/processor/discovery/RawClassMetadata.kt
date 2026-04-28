@@ -26,6 +26,7 @@ data class RawClassMetadata(
     val fqn: String,
     val directlyDeclaredSupertypes: List<RawTypeRef>,
     val dispatchValueProperty: RawDispatchValueProperty? = null,
+    val valueClassInfo: RawValueClassInfo? = null,
 )
 
 /**
@@ -40,4 +41,27 @@ data class RawClassMetadata(
 data class RawDispatchValueProperty(
     val name: String,
     val returnTypeFqn: String,
+)
+
+/**
+ * Phase 9 Step 3 — value-class auto-detection metadata captured by Discovery.
+ *
+ * Set on [RawClassMetadata.valueClassInfo] when the referenced external class is a
+ * `@JvmInline value class` (or `inline class`) wrapping a single primitive constructor
+ * parameter. PhaseB's `FieldStrategyBuilder` consults this when an unrecognized field
+ * type surfaces — if the type matches a known value class with a primitive inner
+ * property, the builder synthesises a [com.ditchoom.buffer.codec.processor.ir.FieldStrategy.ValueClass]
+ * around the inner-primitive read/write strategy. Mirrors legacy
+ * `FieldAnalyzer.ValueClassField` auto-detection (lines 968-996), threaded through
+ * the KSP-decoupled IR pipeline.
+ *
+ * - [innerTypeFqn] — fully-qualified name of the wrapped primitive (e.g. `kotlin.UByte`,
+ *   `kotlin.UInt`). PhaseB uses this to look up the matching `PrimitiveKind`.
+ * - [innerPropertyName] — name of the value class's single ctor parameter (e.g. `raw`,
+ *   `value`). The encode site reads `value.<fieldName>.<innerPropertyName>` to get the
+ *   inner primitive; the decode site wraps the inner read in `<valueClassFqn>(innerValue)`.
+ */
+data class RawValueClassInfo(
+    val innerTypeFqn: String,
+    val innerPropertyName: String,
 )

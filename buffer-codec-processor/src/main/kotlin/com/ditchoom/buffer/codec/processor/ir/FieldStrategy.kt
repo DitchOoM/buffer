@@ -108,6 +108,30 @@ sealed interface FieldStrategy {
         val provider: ProviderId,
         val descriptor: SpiDescriptor,
     ) : FieldStrategy
+
+    /**
+     * Phase 9 Step 3 — value-class auto-detect.
+     *
+     * Synthesised by `FieldStrategyBuilder` when a constructor parameter's type is a
+     * `@JvmInline value class` wrapping a single primitive. The emitter unwraps on
+     * encode (read `value.<fieldName>.<innerPropertyName>`) and wraps on decode
+     * (`<valueClassFqn>(innerPrimitive)`). Mirrors legacy
+     * `FieldReadStrategy.ValueClassField` (FieldAnalyzer.kt line 254).
+     *
+     * - [inner] is the wrapped primitive's strategy (typically a [Primitive] possibly
+     *   carrying a `@WireBytes`/`@WireOrder` override). Other inner strategies are
+     *   structurally permitted but not currently produced by the builder.
+     * - [valueClassFqn] is the wrapper class's FQN; the decode site emits
+     *   `<valueClassFqn>(<innerExpr>)` to reconstruct the wrapper.
+     * - [innerPropertyName] is the wrapper's single ctor-parameter name (e.g. `raw`).
+     *   The encode site reads `value.<fieldName>.<innerPropertyName>` to extract
+     *   the primitive before delegating to the inner strategy's write.
+     */
+    data class ValueClass(
+        val inner: FieldStrategy,
+        val valueClassFqn: TypeFqn,
+        val innerPropertyName: String,
+    ) : FieldStrategy
 }
 
 /** Where a length-prefixed / framed field reads its length from. */

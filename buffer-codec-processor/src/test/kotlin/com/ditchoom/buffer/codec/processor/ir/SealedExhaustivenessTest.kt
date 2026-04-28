@@ -132,6 +132,7 @@ class SealedExhaustivenessTest {
             is FieldStrategy.DiscriminatorOwned -> "DiscriminatorOwned"
             is FieldStrategy.PayloadSlot -> "PayloadSlot"
             is FieldStrategy.Spi -> "Spi"
+            is FieldStrategy.ValueClass -> "ValueClass"
         }
 
     @Suppress("unused")

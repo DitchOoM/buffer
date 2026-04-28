@@ -1177,4 +1177,46 @@ class DataClassCodegenTest {
         val result = compileWithKsp(source)
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
     }
+
+    /**
+     * Phase 9 Step 3 — value-class auto-detect on a field whose type is a `@JvmInline
+     * value class` wrapping a single primitive. The wrapper itself is NOT annotated
+     * with `@ProtocolMessage` and the field has no `@UseCodec`. Mirrors the consumer
+     * shape in `Topic`, `Opcode`, `MaskingKey` etc. Phase 9 Step 3 wires up
+     * `RawClassMetadata.valueClassInfo` + the `FieldStrategy.ValueClass` plan/emit
+     * pair so this compiles.
+     */
+    @Test
+    fun `field typed as external value class auto-detects without UseCodec`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+            @JvmInline
+            value class Topic(val raw: UInt)
+
+            @ProtocolMessage
+            data class FrameHeader(
+                val seq: UShort,
+                val topic: Topic,
+            )
+            """,
+            )
+        val result = compileWithKsp(source)
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+        // Phase 9 Step 3 — the generated codec should reference Topic at the encode
+        // site via the inner property and reconstruct it on decode.
+        val generated = result.generatedSources.joinToString("\n")
+        assertTrue(
+            "value.topic.raw" in generated || "topic.raw" in generated,
+            "expected encode site to read .raw off the value-class wrapper; got:\n$generated",
+        )
+        assertTrue(
+            "Topic(" in generated,
+            "expected decode site to invoke the value-class constructor; got:\n$generated",
+        )
+    }
 }

@@ -120,20 +120,62 @@ object Discovery {
                 }
             }
         }
+        // Phase 9 Step 3: track every external class FQN referenced from a constructor
+        // parameter's `typeRef` — these are the candidate value-class wrappers we may need
+        // to auto-detect. Without this, only `@DispatchOn` / `@UseCodec` referents pass
+        // through the metadata gate, and value-class fields like
+        // `val size: ImageSize` would never have their wrapper info captured.
+        for (s in symbols) {
+            if (s !is RawSymbol.DataLike) continue
+            for (p in s.constructorParameters) {
+                val fqn = p.typeRef.fqn
+                if (fqn.isBlank()) continue
+                if (fqn.startsWith("kotlin.")) continue
+                // Skip @ProtocolMessage scope — those are nested-message fields, not external value classes.
+                if (symbols.any { it.fqn == fqn }) continue
+                candidateFqns += fqn
+            }
+        }
         if (candidateFqns.isEmpty()) return emptyMap()
         val out = mutableMapOf<String, RawClassMetadata>()
         for (fqn in candidateFqns) {
             val decl = resolveCompanionAware(resolver, fqn) ?: continue
             val dispatchValueProperty =
                 if (fqn in discriminatorTypeFqns) findDispatchValueProperty(decl) else null
+            val valueClassInfo = findValueClassInfo(decl)
             out[fqn] =
                 RawClassMetadata(
                     fqn = fqn,
                     directlyDeclaredSupertypes = decl.superTypes.toList().map(::toRawTypeRef),
                     dispatchValueProperty = dispatchValueProperty,
+                    valueClassInfo = valueClassInfo,
                 )
         }
         return out.toMap()
+    }
+
+    /**
+     * Phase 9 Step 3 — auto-detect value-class wrappers.
+     *
+     * When [decl] is a `@JvmInline value class` (or legacy `inline class`) declared with a
+     * single primary-constructor parameter, capture the parameter's name + the inner
+     * type's FQN so PhaseB's [com.ditchoom.buffer.codec.processor.planbuilder.FieldStrategyBuilder]
+     * can synthesise a [com.ditchoom.buffer.codec.processor.ir.FieldStrategy.ValueClass]
+     * for fields whose type is this wrapper. Mirrors the 4-line
+     * [com.ditchoom.buffer.codec.processor.ValueClassAnalyzer] check inline because
+     * cross-module visibility makes direct reuse fragile.
+     */
+    private fun findValueClassInfo(decl: KSClassDeclaration): RawValueClassInfo? {
+        if (Modifier.VALUE !in decl.modifiers && Modifier.INLINE !in decl.modifiers) return null
+        val innerParam = decl.primaryConstructor?.parameters?.firstOrNull() ?: return null
+        val innerTypeFqn =
+            innerParam.type
+                .resolve()
+                .declaration
+                .qualifiedName
+                ?.asString() ?: return null
+        val innerName = innerParam.name?.asString() ?: "value"
+        return RawValueClassInfo(innerTypeFqn = innerTypeFqn, innerPropertyName = innerName)
     }
 
     /**

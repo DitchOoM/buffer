@@ -97,6 +97,13 @@ internal object WireSizeEmitter {
                     is LengthSource.Remaining -> -1
                 }
             is FieldStrategy.Spi -> if (s.descriptor.fixedSize >= 0) s.descriptor.fixedSize else -1
+            // Phase 9 Step 3: a value-class field's fixed size mirrors the inner
+            // strategy's fixed size — for primitives, that's `wireBytes`. The wrapper
+            // adds zero overhead on the wire.
+            is FieldStrategy.ValueClass -> {
+                val inner = s.inner
+                if (inner is FieldStrategy.Primitive) inner.wireBytes else -1
+            }
         }
     }
 }

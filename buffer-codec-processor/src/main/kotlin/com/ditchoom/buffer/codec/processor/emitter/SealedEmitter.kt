@@ -206,6 +206,12 @@ class SealedEmitter(
                 is FieldStrategy.Primitive -> Unit
                 is FieldStrategy.DiscriminatorOwned -> Unit
                 is FieldStrategy.NestedMessage -> Unit
+                // Phase 9 Step 3: a value class wraps a fixed-width primitive on the
+                // wire — peek treats it like the inner primitive.
+                is FieldStrategy.ValueClass -> {
+                    val inner = s.inner
+                    if (inner !is FieldStrategy.Primitive) return false
+                }
                 is FieldStrategy.StringField -> {
                     // Inline length-prefixed strings are peekable (Byte/Short/Int prefix);
                     // Varint and Remaining are not. Mirrors `LeafEmitter.computePeekPlan`.

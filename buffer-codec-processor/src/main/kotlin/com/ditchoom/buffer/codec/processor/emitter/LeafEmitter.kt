@@ -290,6 +290,17 @@ class LeafEmitter(
         if (field.conditionality !is Conditionality.Always) return null
         return when (val s = field.strategy) {
             is FieldStrategy.Primitive -> CodeBlock.of("%L", primitiveReadExpr(s.kind, s.order, s.wireBytes))
+            // Phase 9 Step 3: value-class auto-detected field — read the inner primitive
+            // and wrap with the value-class constructor.
+            is FieldStrategy.ValueClass -> {
+                val inner = s.inner
+                if (inner is FieldStrategy.Primitive) {
+                    val read = primitiveReadExpr(inner.kind, inner.order, inner.wireBytes)
+                    CodeBlock.of("%L(%L)", s.valueClassFqn.canonical, read)
+                } else {
+                    null
+                }
+            }
             else -> null
         }
     }
@@ -375,6 +386,18 @@ class LeafEmitter(
                 wrapConditional(field, "val ${field.name} = ${stringDecodeExpr(s.length)}\n")
             is FieldStrategy.Collection_ ->
                 wrapConditional(field, "val ${field.name} = ${collectionDecodeExpr(s)}\n")
+
+            // Phase 9 Step 3: value-class auto-detected — read inner primitive and
+            // wrap in the value-class constructor.
+            is FieldStrategy.ValueClass -> {
+                val inner = s.inner
+                if (inner is FieldStrategy.Primitive) {
+                    val read = primitiveReadExpr(inner.kind, inner.order, inner.wireBytes)
+                    wrapConditional(field, "val ${field.name} = ${s.valueClassFqn.canonical}($read)\n")
+                } else {
+                    wrapConditional(field, "// TODO: non-primitive inner strategy on ValueClass not implemented\n")
+                }
+            }
         }
 
     /**
@@ -793,6 +816,22 @@ class LeafEmitter(
                     if (isNullableConditional(field)) field.name else "value.${field.name}"
                 CodeBlock.of("%L\n", collectionEncodeExpr(s, ref))
             }
+
+            // Phase 9 Step 3: value-class auto-detected — read inner property off the
+            // wrapper, then emit the inner-primitive's write. For nullable conditional
+            // fields, the smart-cast local already holds the wrapper so we still walk
+            // through `<local>.<innerPropertyName>`.
+            is FieldStrategy.ValueClass -> {
+                val inner = s.inner
+                val baseRef =
+                    if (isNullableConditional(field)) field.name else "value.${field.name}"
+                val innerRef = "$baseRef.${s.innerPropertyName}"
+                if (inner is FieldStrategy.Primitive) {
+                    CodeBlock.of("%L\n", primitiveWriteExpr(inner.kind, innerRef, inner.order, inner.wireBytes))
+                } else {
+                    CodeBlock.of("// TODO: non-primitive inner strategy on ValueClass not implemented\n")
+                }
+            }
         }
 
     /**
@@ -975,6 +1014,16 @@ class LeafEmitter(
                         // SPI variable-size with no wireSizeRaw: validator rejects this combination
                         // (SpiDescriptorChecker), so this branch shouldn't fire when the
                         // pipeline routes a class through. Defensive: emit 0 to keep emit safe.
+                        CodeBlock.of("0")
+                    }
+                }
+                // Phase 9 Step 3: value-class wraps a primitive on the wire — its size is
+                // the inner primitive's `wireBytes`.
+                is FieldStrategy.ValueClass -> {
+                    val inner = s.inner
+                    if (inner is FieldStrategy.Primitive) {
+                        CodeBlock.of("%L", inner.wireBytes)
+                    } else {
                         CodeBlock.of("0")
                     }
                 }
@@ -1187,6 +1236,16 @@ class LeafEmitter(
                             steps.add(PeekStep.AddCapturedLen(cap))
                         }
                         is LengthSource.Remaining -> return null // legacy omits peek
+                    }
+                }
+                // Phase 9 Step 3: value-class wraps a primitive — peek treats it as
+                // the inner primitive's fixed wire width.
+                is FieldStrategy.ValueClass -> {
+                    val inner = s.inner
+                    if (inner is FieldStrategy.Primitive) {
+                        fixedAccum += inner.wireBytes
+                    } else {
+                        return null
                     }
                 }
                 is FieldStrategy.PayloadSlot,

@@ -167,6 +167,7 @@ object PlanBuilder {
                     payloadTypeParams = payloadTypeParamNames,
                     parentDispatchType = parentDispatchType,
                     protocolMessageScope = protocolMessageScope,
+                    externalClasses = externalClasses,
                 )
             when (val res = builder.build(p)) {
                 is Either.Left -> errors += res.value.all

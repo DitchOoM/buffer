@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.codec.processor.planbuilder
 
 import com.ditchoom.buffer.codec.processor.discovery.RawAnnotation
+import com.ditchoom.buffer.codec.processor.discovery.RawClassMetadata
 import com.ditchoom.buffer.codec.processor.discovery.RawCtorParameter
 import com.ditchoom.buffer.codec.processor.discovery.RawSymbol
 import com.ditchoom.buffer.codec.processor.discovery.RawTypeRef
@@ -47,6 +48,7 @@ internal class FieldStrategyBuilder(
     private val payloadTypeParams: Set<String>,
     private val parentDispatchType: TypeFqn?,
     private val protocolMessageScope: Set<String>,
+    private val externalClasses: Map<String, RawClassMetadata> = emptyMap(),
 ) {
     fun build(param: RawCtorParameter): Either<Nel<KspError>, FieldPlan> {
         val errors = mutableListOf<KspError>()
@@ -200,6 +202,16 @@ internal class FieldStrategyBuilder(
             return buildNestedMessage(param, conditionality, lengthSourceOrError, errors, site)
         }
 
+        // Phase 9 Step 3: value-class auto-detect. When the field's type isn't directly
+        // recognized but Discovery captured `valueClassInfo` for it (i.e. the type is a
+        // `@JvmInline value class` wrapping a single primitive ctor parameter), build the
+        // inner-primitive strategy and wrap it in `FieldStrategy.ValueClass`. Mirrors
+        // legacy `FieldAnalyzer` lines 968-996.
+        val vcMetadata = externalClasses[param.typeRef.fqn]?.valueClassInfo
+        if (vcMetadata != null) {
+            return buildValueClass(param, conditionality, vcMetadata, errors, site)
+        }
+
         errors +=
             KspError(
                 message =
@@ -210,6 +222,86 @@ internal class FieldStrategyBuilder(
                 sourceFqn = site,
             )
         return errorsToLeft(errors)!!
+    }
+
+    /**
+     * Phase 9 Step 3 — synthesise a `FieldStrategy.ValueClass` for an auto-detected
+     * value-class field.
+     *
+     * The inner type FQN is looked up against [PrimitiveTypes]. If it isn't a recognised
+     * primitive, fall through to the original "not a recognized type" error so the diagnostic
+     * stays accurate (mirrors legacy behaviour where a value class wrapping e.g. another
+     * value class falls into the unsupported branch).
+     *
+     * `@WireBytes` / `@WireOrder` annotations on the field are honoured by the inner
+     * primitive strategy — the decode path reads `wireBytes` of the primitive, then
+     * wraps with the value-class constructor; the encode path reads the inner property
+     * and writes those bytes.
+     */
+    private fun buildValueClass(
+        param: RawCtorParameter,
+        conditionality: Conditionality,
+        info: com.ditchoom.buffer.codec.processor.discovery.RawValueClassInfo,
+        errors: MutableList<KspError>,
+        site: String,
+    ): Either<Nel<KspError>, FieldPlan> {
+        val innerKind =
+            PrimitiveTypes.classify(
+                RawTypeRef(
+                    fqn = info.innerTypeFqn,
+                    name = info.innerTypeFqn.substringAfterLast('.'),
+                    typeArguments = emptyList(),
+                    isNullable = false,
+                    isTypeParameter = false,
+                    resolved = true,
+                ),
+            )
+        if (innerKind == null) {
+            errors +=
+                KspError(
+                    message =
+                        "Field '${param.name}: ${param.typeRef.fqn}' is a value class wrapping " +
+                            "'${info.innerTypeFqn}', which is not a supported primitive. " +
+                            "Mark it with @UseCodec(SomeCodec::class) to delegate encoding/decoding " +
+                            "to a custom codec.",
+                    sourceFqn = site,
+                )
+            return errorsToLeft(errors)!!
+        }
+        // Reuse `buildPrimitive` semantics for `@WireBytes` / `@WireOrder` resolution:
+        // construct a synthetic param with the primitive type, run it through the same
+        // path, and unwrap the resulting strategy. This keeps the validation rules
+        // (e.g. "@WireBytes 1..8", "no @WireOrder on single-byte") identical to direct
+        // primitive fields.
+        val primitiveParam =
+            param.copy(
+                typeRef =
+                    RawTypeRef(
+                        fqn = info.innerTypeFqn,
+                        name = info.innerTypeFqn.substringAfterLast('.'),
+                        typeArguments = emptyList(),
+                        isNullable = false,
+                        isTypeParameter = false,
+                        resolved = true,
+                    ),
+            )
+        return when (val inner = buildPrimitive(primitiveParam, Conditionality.Always, innerKind, errors, site)) {
+            is Either.Left -> Either.Left(inner.value)
+            is Either.Right -> {
+                val innerStrategy = inner.value.strategy
+                FieldPlan(
+                    name = param.name,
+                    type = TypeFqn(param.typeRef.fqn),
+                    strategy =
+                        FieldStrategy.ValueClass(
+                            inner = innerStrategy,
+                            valueClassFqn = TypeFqn(param.typeRef.fqn),
+                            innerPropertyName = info.innerPropertyName,
+                        ),
+                    conditionality = conditionality,
+                ).right()
+            }
+        }
     }
 
     private fun buildConditionality(
