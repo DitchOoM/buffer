@@ -165,10 +165,16 @@ class ProtocolMessageProcessor(
             // Slice 5b: top-level data classes carrying `@Payload` type parameters
             // need the typed-lambda fan-out (`decode<P>(buf, lambda)` /
             // `encode<P>(buf, value, lambda)` / `wireSize<P>(value, sizeOf)`) plus
-            // a generic `Codec<T<*>>` superinterface. The new LeafEmitter does not
-            // yet emit these for non-sealed classes — sealed-root WithPayload variants
-            // are handled by SealedEmitter (Slice 5a). Defer top-level `@Payload`
-            // data classes to legacy until the fan-out is ported.
+            // a generic `Codec<T<*>>` superinterface. Phase 9 Step 4 Cap 2 ported
+            // the typed-lambda emit (bare `(ReadBuffer) -> P` lambdas, no
+            // synthesized `*Context` receiver), but the new PlanBuilder does not
+            // yet enforce the legacy rule that `@Payload` fields require a length
+            // annotation — `FieldStrategyBuilder.buildPayloadSlot` silently falls
+            // back to `LengthSource.Remaining`. Until that rule is ported in
+            // Step 5 (alongside variant-emission migration that lets sealed
+            // payload variants speak the same bare-lambda calling convention),
+            // defer top-level `@Payload` data classes to legacy so its
+            // diagnostics surface.
             val hasPayloadTypeParam =
                 symbol.typeParameters.any { tp ->
                     tp.annotations.any { it.fqn == "com.ditchoom.buffer.codec.annotations.Payload" }
@@ -225,20 +231,23 @@ class ProtocolMessageProcessor(
             // AND the class violates a preflight check the legacy emitter relies on.
             if (!conditionalShapeOk(symbol)) return false
         }
-        // Slice 5b: sealed roots with `@Payload` variants need the typed-lambda
-        // dispatcher fan-out (`<P> decode<P>(buffer, payloadDecoder)` /
-        // `<P> encode<P>(buffer, value, payloadEncoder)`). The new SealedEmitter
-        // does NOT yet emit these overloads — it emits only the standard
-        // `decode(buffer, ctx)` override (which routes WithPayload variants
-        // through `decodeFromContext`). buffer-codec-test fixtures call the
-        // typed-lambda form directly and depend on it.
+        // Phase 9 Step 4 — Cap 1 escalation: sealed roots with `@Payload` variants
+        // continue to defer to legacy. The new SealedEmitter Cap 1 typed-lambda
+        // dispatcher fan-out is in place (bare-lambda shape matching Cap 2's
+        // top-level emit), but variant codecs are still emitted by legacy
+        // `CodecGenerator` (called from `processSealedInterface`) with the
+        // receiver-shape lambda `*Context.(ReadBuffer) -> P`. Routing the
+        // dispatcher through the new pipeline while variants stay on legacy
+        // produces a signature mismatch at compile time:
         //
-        // Real-world MQTT and websocket consumers happen to call the standard
-        // `decode(buffer, ctx)` form (registering payload encoders/decoders via
-        // context keys). They would cross cleanly. But the typed-lambda overload
-        // is part of the new pipeline's public surface; until SealedEmitter emits
-        // both the typed-lambda + the override, defer all sealed roots that have
-        // any `@Payload`-typed variant to legacy.
+        //     dispatcher: callee `(ReadBuffer) -> P`     (Cap 1 bare)
+        //     variant:    declared `*Context.(ReadBuffer) -> P` (legacy receiver)
+        //
+        // Step 5/6 ports sealed variant codec emission to the new pipeline
+        // (bringing `processSealedInterface` to call `tryPipeline` for each
+        // variant). Until then this defer keeps both dispatcher and variants
+        // on legacy together, matching the receiver-shape calling convention
+        // end-to-end.
         if (symbol is com.ditchoom.buffer.codec.processor.discovery.RawSymbol.SealedRoot) {
             val discovery = cachedDiscovery
             if (discovery != null) {

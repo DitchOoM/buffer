@@ -205,13 +205,13 @@ class CompileAndRoundTripTest {
     // ---------------------------------------------------------------------
 
     @Test
-    fun `Sealed_ WithPayload variant emits no typed-lambda overload at HEAD 5a0a1bc`() {
+    fun `Sealed_ WithPayload variant emits typed-lambda overload alongside context bridge`() {
         val plan = EmitterFixtures.controlPacketV5Slice5a()
         val classType = EmitterFixtures.cn("ControlPacketV5Slice5a")
         val emitted = emitText(plan, classType)
 
-        // Sanity: dispatcher emits the context-overload path (this is what
-        // exists today).
+        // Context-bridge overloads still emitted (used by the standard
+        // `decode(buffer, ctx)` path).
         assertTrue(
             emitted.contains("decodeFromContext(_bodySlice, ctx)"),
             "expected context-overload decode delegation to be emitted; got:\n$emitted",
@@ -221,34 +221,22 @@ class CompileAndRoundTripTest {
             "expected context-overload encode delegation to be emitted; got:\n$emitted",
         )
 
-        // The gap: no typed-lambda fan-out emitted. Step 3 must flip this.
-        //
-        // The legacy shape we expect Step 3 to emit (from
-        // SealedDispatchGenerator.kt buildPayloadDispatch, lines 666-1070) is:
-        //
-        //     public fun <P> decode(
-        //         buffer: ReadBuffer,
-        //         payloadDecoder: PublishContext.(ReadBuffer) -> P,
-        //     ): ControlPacketV5Slice5a { ... }
-        //
-        // Match on the type-parameter declaration `<P>` on a `decode` overload
-        // followed by a `payloadDecoder` lambda parameter. (Match against the
-        // raw FileSpec text; KotlinPoet's emitter pretty-prints `fun <P> decode`.)
-        val typedLambdaSignature = Regex("""\bfun\s*<\s*P\s*>\s*decode\s*\(""")
-        assertNoMatch(
-            typedLambdaSignature,
-            emitted,
-            "FAIL → Step 3 capability has landed. Flip this test: assert the typed-lambda " +
-                "overload IS present and round-trip a value through it. See the comment " +
-                "above this test for the migration steps.",
+        // Phase 9 Step 4 Cap 1 — typed-lambda dispatcher fan-out is now
+        // emitted. The dispatcher exposes `<P> fun decode(buffer, context, lambdas...)`
+        // alongside the standard `Codec<T>` interface methods. Per-variant
+        // lambda parameter naming follows legacy: `decode<VariantSimpleName><FieldName>`.
+        val typedLambdaDecodeSig = Regex("""\bfun\s*<\s*P\s*>\s*decode\s*\(""")
+        assertTrue(
+            typedLambdaDecodeSig.containsMatchIn(emitted),
+            "expected `<P> fun decode(...)` typed-lambda overload to be emitted; got:\n$emitted",
         )
-
-        val payloadDecoderParam = Regex("""\bpayloadDecoder\s*:""")
-        assertNoMatch(
-            payloadDecoderParam,
-            emitted,
-            "FAIL → Step 3 capability has landed (payloadDecoder lambda param emitted). " +
-                "Flip this test: round-trip via the typed-lambda overload.",
+        // Cap 2's PayloadSlot fan-out emits a `decodePayload` parameter on the
+        // variant codec; Cap 1 forwards to it from the dispatcher. The fixture's
+        // sole WithPayload variant is `Publish` with one @Payload field `payload`.
+        val variantLambdaParam = Regex("""\bdecodePublishPayload\s*:""")
+        assertTrue(
+            variantLambdaParam.containsMatchIn(emitted),
+            "expected dispatcher to declare per-variant `decodePublishPayload` lambda parameter; got:\n$emitted",
         )
     }
 

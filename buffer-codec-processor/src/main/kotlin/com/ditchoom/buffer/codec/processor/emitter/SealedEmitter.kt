@@ -14,9 +14,13 @@ import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
 import com.squareup.kotlinpoet.INT
 import com.squareup.kotlinpoet.KModifier
+import com.squareup.kotlinpoet.LambdaTypeName
 import com.squareup.kotlinpoet.ParameterSpec
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
+import com.squareup.kotlinpoet.STAR
 import com.squareup.kotlinpoet.TypeSpec
+import com.squareup.kotlinpoet.TypeVariableName
+import com.squareup.kotlinpoet.UNIT
 
 /**
  * Phase 7 emitter for [Plan.Sealed_] — sealed-root dispatchers.
@@ -65,9 +69,24 @@ class SealedEmitter(
         val canDecode = plan.dir != com.ditchoom.buffer.codec.processor.ir.Direction.EncodeOnly
         val canEncode = plan.dir != com.ditchoom.buffer.codec.processor.ir.Direction.DecodeOnly
 
+        // Phase 9 Step 4 — Cap 1: typed-lambda fan-out for sealed roots with
+        // any `VariantPlan.WithPayload` arm. Emits an additional pair of
+        // `<P1, P2, ...> fun decode/encode(buffer, ..., lambdas...)` overloads
+        // alongside the standard `Codec<T>` interface methods. The standard
+        // `decode(buffer, ctx)` continues to delegate via `decodeFromContext`
+        // for WithPayload variants (the existing Slice 5a path).
+        val anyWithPayload = plan.variants.any { it is VariantPlan.WithPayload }
+
         if (canDecode) type.addFunction(buildDecode(plan, classType))
         if (canEncode) type.addFunction(buildEncode(plan, classType))
         if (canEncode) type.addFunction(buildWireSize(plan, classType))
+        if (anyWithPayload) {
+            if (canDecode) type.addFunction(buildTypedLambdaDecode(plan, classType))
+            if (canEncode) {
+                type.addFunction(buildTypedLambdaEncode(plan, classType))
+                type.addFunction(buildTypedLambdaWireSize(plan, classType))
+            }
+        }
         // peek belongs to FrameDetector / Codec<T>. For Decoder<T> we emit it as a
         // public fun (matching legacy `PeekFrameSizeEmitter.buildPeekFun(implementsCodec = false)`).
         if (canDecode) {
@@ -867,4 +886,410 @@ class SealedEmitter(
             PrimitiveKind.Int, PrimitiveKind.UInt, PrimitiveKind.Float -> 4
             PrimitiveKind.Long, PrimitiveKind.ULong, PrimitiveKind.Double -> 8
         }
+
+    // -----------------------------------------------------------------------
+    // Phase 9 Step 4 — Cap 1: typed-lambda dispatcher fan-out
+    // -----------------------------------------------------------------------
+
+    /**
+     * Returns the per-variant lambda-parameter base name for a `WithPayload`
+     * variant's `@Payload` field. Mirrors legacy
+     * `decode${variantName}${capitalizeFirst(fieldName)}` etc.
+     */
+    private fun variantPayloadParamName(
+        prefix: String,
+        variant: VariantPlan.WithPayload,
+        fieldName: String,
+    ): String = "$prefix${variant.decl.canonical.substringAfterLast('.')}${capitalizeFirst(fieldName)}"
+
+    /**
+     * Collects the distinct payload type-parameter names across all
+     * `WithPayload` variants. Each name becomes one type variable on the
+     * dispatcher's typed-lambda overloads. Multiple variants may share a
+     * type-param name (e.g. `WP` reused across `ConnectionRequest` and
+     * `Disconnect`); legacy collapses them.
+     */
+    private fun distinctPayloadTypeParams(plan: Plan.Sealed_): List<String> =
+        plan.variants
+            .filterIsInstance<VariantPlan.WithPayload>()
+            .flatMap { it.typeParams }
+            .map { it.name }
+            .distinct()
+
+    private fun buildTypedLambdaDecode(
+        plan: Plan.Sealed_,
+        classType: ClassName,
+    ): FunSpec {
+        val fb =
+            FunSpec
+                .builder("decode")
+                .addParameter("buffer", Names.ReadBuffer)
+                .addParameter(
+                    ParameterSpec
+                        .builder("context", Names.DecodeContext)
+                        .defaultValue("%T.Empty", Names.DecodeContext)
+                        .build(),
+                )
+                .returns(classType)
+        for (tpName in distinctPayloadTypeParams(plan)) {
+            fb.addTypeVariable(TypeVariableName(tpName))
+        }
+        // Per-variant lambda parameters.
+        for (v in plan.variants.filterIsInstance<VariantPlan.WithPayload>()) {
+            for (pf in v.payloadFields) {
+                val tp = TypeVariableName(pf.typeParamName)
+                val lambdaType =
+                    LambdaTypeName.get(
+                        parameters = listOf(ParameterSpec.unnamed(Names.ReadBuffer)),
+                        returnType = tp,
+                    )
+                fb.addParameter(variantPayloadParamName("decode", v, pf.fieldName), lambdaType)
+            }
+        }
+        // Body: read discriminator + dispatch arms — mirrors `buildDecode`
+        // shape but routes WithPayload variants through their typed-lambda
+        // decode overload (Cap 2) instead of `decodeFromContext`.
+        emitTypedLambdaDecodeBody(fb, plan)
+        return fb.build()
+    }
+
+    private fun emitTypedLambdaDecodeBody(
+        fb: FunSpec.Builder,
+        plan: Plan.Sealed_,
+    ) {
+        when (val d = plan.dispatch) {
+            is DispatchShape.RawByte -> {
+                fb.addCode("val type = buffer.readUnsignedByte().toInt() and 0xFF\n")
+                fb.addCode(buildTypedLambdaDispatchWhen(plan, "type", null, ctxArg = "context", isReturn = true))
+            }
+            is DispatchShape.TypedDiscriminator -> {
+                val discCodec = discCodecOf(d.disc)
+                fb.addCode("val discriminator = %T.decode(buffer, context)\n", discCodec)
+                if (variantsConsumeDiscriminator(plan)) {
+                    fb.addCode("val ctx = context.with(DiscriminatorKey, discriminator)\n")
+                }
+                emitFramingDecodeSetup(fb, d.framing)
+                val (subjectExpr, rawByteExpr) = decodeSubjectExpressions(d.disc)
+                fb.addCode("val type = %L\n", subjectExpr)
+                val needsRawByte = rawByteExpr != null && plan.variants.any { it.wire is WireMatch.Range }
+                if (needsRawByte) {
+                    @Suppress("UNNECESSARY_NOT_NULL_ASSERTION")
+                    fb.addCode("val rawByte = %L\n", rawByteExpr!!)
+                }
+                val ctxArg = if (variantsConsumeDiscriminator(plan)) "ctx" else "context"
+                val bodyArg =
+                    when (d.framing) {
+                        is FramingMode.BodyLength -> "_bodySlice"
+                        else -> "buffer"
+                    }
+                if (d.framing is FramingMode.BodyLength) {
+                    fb.addCode("val _result = ")
+                    fb.addCode(
+                        buildTypedLambdaDispatchWhen(
+                            plan,
+                            "type",
+                            if (needsRawByte) "rawByte" else null,
+                            bodyArg = bodyArg,
+                            ctxArg = ctxArg,
+                            isReturn = false,
+                        ),
+                    )
+                    fb.addCode("if (_bodySlice.remaining() != 0) {\n")
+                    fb.addCode(
+                        "    throw %T(\"Variant decoder consumed \${_bodyLen - _bodySlice.remaining()} of \" +\n" +
+                            "        \"\$_bodyLen body bytes; \${_bodySlice.remaining()} unread. \" +\n" +
+                            "        \"Wire is malformed or variant codec is buggy.\")\n",
+                        registry.resolve(plan.onUnknown),
+                    )
+                    fb.addCode("}\n")
+                    fb.addCode("return _result\n")
+                } else {
+                    fb.addCode(
+                        buildTypedLambdaDispatchWhen(
+                            plan,
+                            "type",
+                            if (needsRawByte) "rawByte" else null,
+                            bodyArg = bodyArg,
+                            ctxArg = ctxArg,
+                            isReturn = true,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun buildTypedLambdaDispatchWhen(
+        plan: Plan.Sealed_,
+        subjectName: String,
+        rawByteName: String?,
+        bodyArg: String = "buffer",
+        ctxArg: String = "ctx",
+        isReturn: Boolean = true,
+    ): CodeBlock {
+        val anyRange = plan.variants.any { it.wire is WireMatch.Range }
+        val cb = CodeBlock.builder()
+        if (isReturn) cb.add("return ")
+        cb.add("when ")
+        if (!anyRange) {
+            cb.add("(%L) {\n", subjectName)
+        } else {
+            cb.add("{\n")
+        }
+        cb.indent()
+        val ranges = plan.variants.filter { it.wire is WireMatch.Range }
+        val points = plan.variants.filter { it.wire is WireMatch.Point }
+        for (variant in ranges) {
+            val w = variant.wire as WireMatch.Range
+            val raw = rawByteName ?: error("Range arm requires a rawByte expression")
+            cb.add(
+                "%L in %L..%L -> %L\n",
+                raw, w.from, w.to,
+                typedLambdaVariantDispatchCall(variant, bodyArg, ctxArg, isDecode = true),
+            )
+        }
+        for (variant in points) {
+            val w = variant.wire as WireMatch.Point
+            if (anyRange) {
+                cb.add(
+                    "%L == %L -> %L\n",
+                    subjectName, w.wire,
+                    typedLambdaVariantDispatchCall(variant, bodyArg, ctxArg, isDecode = true),
+                )
+            } else {
+                cb.add(
+                    "%L -> %L\n",
+                    w.wire,
+                    typedLambdaVariantDispatchCall(variant, bodyArg, ctxArg, isDecode = true),
+                )
+            }
+        }
+        val defaultMessage =
+            if (rawByteName != null) {
+                "\"Unknown discriminator: 0x\${rawByte.toString(16)}\""
+            } else {
+                "\"Unknown discriminator: \$$subjectName\""
+            }
+        cb.add(
+            "else -> throw %T(%L)\n",
+            registry.resolve(plan.onUnknown),
+            defaultMessage,
+        )
+        cb.unindent()
+        cb.add("}\n")
+        return cb.build()
+    }
+
+    /**
+     * Emit a per-variant decode call for the typed-lambda dispatcher. WithPayload
+     * variants forward the per-field lambdas; NoPayload variants fall through to
+     * the standard `decode(buffer, ctx)` overload.
+     */
+    private fun typedLambdaVariantDispatchCall(
+        variant: VariantPlan,
+        bodyArg: String,
+        ctxArg: String,
+        isDecode: Boolean,
+    ): String {
+        val name = variant.codec.canonicalName
+        return when (variant) {
+            is VariantPlan.WithPayload -> {
+                val prefix = if (isDecode) "decode" else "encode"
+                val lambdaArgs =
+                    variant.payloadFields.joinToString(", ") { pf ->
+                        variantPayloadParamName(prefix, variant, pf.fieldName)
+                    }
+                if (isDecode) {
+                    "$name.decode($bodyArg, $ctxArg, $lambdaArgs)"
+                } else {
+                    // encode site is built in buildTypedLambdaEncode, not via this helper.
+                    "$name.encode($bodyArg, value, $ctxArg, $lambdaArgs)"
+                }
+            }
+            is VariantPlan.NoPayload -> {
+                if (isDecode) "$name.decode($bodyArg, $ctxArg)" else "$name.encode($bodyArg, value, $ctxArg)"
+            }
+        }
+    }
+
+    private fun buildTypedLambdaEncode(
+        plan: Plan.Sealed_,
+        classType: ClassName,
+    ): FunSpec {
+        val fb =
+            FunSpec
+                .builder("encode")
+                .addParameter("buffer", Names.WriteBuffer)
+                .addParameter(ParameterSpec.builder("value", classType).build())
+                .addParameter(
+                    ParameterSpec
+                        .builder("context", Names.EncodeContext)
+                        .defaultValue("%T.Empty", Names.EncodeContext)
+                        .build(),
+                )
+        for (tpName in distinctPayloadTypeParams(plan)) {
+            fb.addTypeVariable(TypeVariableName(tpName))
+        }
+        // Encode lambdas — one per WithPayload variant per @Payload field.
+        for (v in plan.variants.filterIsInstance<VariantPlan.WithPayload>()) {
+            for (pf in v.payloadFields) {
+                val tp = TypeVariableName(pf.typeParamName)
+                val lambdaType =
+                    LambdaTypeName.get(
+                        parameters =
+                            listOf(
+                                ParameterSpec.unnamed(Names.WriteBuffer),
+                                ParameterSpec.unnamed(tp),
+                            ),
+                        returnType = UNIT,
+                    )
+                fb.addParameter(variantPayloadParamName("encode", v, pf.fieldName), lambdaType)
+            }
+        }
+
+        val framing = (plan.dispatch as? DispatchShape.TypedDiscriminator)?.framing
+        fb.addCode("when (value) {\n")
+        for (variant in plan.variants.sortedBy { it.decl.canonical }) {
+            val variantClass = registry.resolve(variant.decl)
+            val checkClause = variantCheckClause(variant)
+            fb.addCode("    $checkClause -> {\n", variantClass)
+            if (!effectiveSelfEncodes(variant)) {
+                emitDispatcherWriteDiscriminator(fb, plan.dispatch, variant, indent = "        ")
+            }
+            when (variant) {
+                is VariantPlan.WithPayload -> {
+                    val starType = registry.resolve(variant.decl).parameterizedBy(variant.typeParams.map { STAR })
+                    val typedTypeArgs = variant.typeParams.map { TypeVariableName(it.name) }
+                    val typedType = registry.resolve(variant.decl).parameterizedBy(typedTypeArgs)
+                    val lambdaArgs =
+                        variant.payloadFields.joinToString(", ") { pf ->
+                            variantPayloadParamName("encode", variant, pf.fieldName)
+                        }
+                    if (framing is FramingMode.BodyLength) {
+                        // Scratch-buffer fallback: the typed-lambda overload doesn't have a
+                        // wireSize lambda counterpart, so we encode into a scratch buffer
+                        // first to determine the body length, then prefix via the framer.
+                        // Mirrors legacy `SealedDispatchGenerator.buildPayloadDispatch`'s
+                        // payloadFraming branch.
+                        fb.addCode(
+                            "        val _scratch = %T.Default.allocate(buffer.remaining().coerceAtLeast(16), buffer.byteOrder)\n",
+                            ClassName("com.ditchoom.buffer", "BufferFactory"),
+                        )
+                        fb.addCode(
+                            "        @Suppress(\"UNCHECKED_CAST\") %T.encode(_scratch, value as %T, context, %L)\n",
+                            variant.codec, typedType, lambdaArgs,
+                        )
+                        fb.addCode("        _scratch.resetForRead()\n")
+                        fb.addCode(
+                            "        %T.writeBodyLength(buffer, _scratch.remaining())\n",
+                            framing.framerFqn,
+                        )
+                        fb.addCode("        buffer.write(_scratch)\n")
+                    } else {
+                        fb.addCode(
+                            "        @Suppress(\"UNCHECKED_CAST\") %T.encode(buffer, value as %T, context, %L)\n",
+                            variant.codec, typedType, lambdaArgs,
+                        )
+                    }
+                }
+                is VariantPlan.NoPayload -> {
+                    if (framing is FramingMode.BodyLength) {
+                        fb.addCode(
+                            "        val _len_body = %T.wireSize(value, context)\n",
+                            variant.codec,
+                        )
+                        fb.addCode(
+                            "        %T.writeBodyLength(buffer, _len_body)\n",
+                            framing.framerFqn,
+                        )
+                    }
+                    fb.addCode(
+                        "        %T.encode(buffer, value, context)\n",
+                        variant.codec,
+                    )
+                }
+            }
+            fb.addCode("    }\n")
+        }
+        fb.addCode("}\n")
+        return fb.build()
+    }
+
+    private fun buildTypedLambdaWireSize(
+        plan: Plan.Sealed_,
+        classType: ClassName,
+    ): FunSpec {
+        val fb =
+            FunSpec
+                .builder("wireSize")
+                .addParameter(ParameterSpec.builder("value", classType).build())
+                .addParameter(
+                    ParameterSpec
+                        .builder("context", Names.EncodeContext)
+                        .defaultValue("%T.Empty", Names.EncodeContext)
+                        .build(),
+                )
+                .returns(INT)
+        for (tpName in distinctPayloadTypeParams(plan)) {
+            fb.addTypeVariable(TypeVariableName(tpName))
+        }
+        // Size lambdas — one per WithPayload variant per @Payload field.
+        for (v in plan.variants.filterIsInstance<VariantPlan.WithPayload>()) {
+            for (pf in v.payloadFields) {
+                val tp = TypeVariableName(pf.typeParamName)
+                val lambdaType =
+                    LambdaTypeName.get(
+                        parameters = listOf(ParameterSpec.unnamed(tp)),
+                        returnType = INT,
+                    )
+                fb.addParameter(variantPayloadParamName("size", v, pf.fieldName), lambdaType)
+            }
+        }
+        val framing = (plan.dispatch as? DispatchShape.TypedDiscriminator)?.framing
+        fb.addCode("return when (value) {\n")
+        for (variant in plan.variants.sortedBy { it.decl.canonical }) {
+            val variantClass = registry.resolve(variant.decl)
+            val checkClause = variantCheckClause(variant)
+            val pointWire = (variant.wire as? WireMatch.Point)?.wire
+            val skipDisc = effectiveSelfEncodes(variant) || pointWire == null
+            val bodyExpr =
+                when (variant) {
+                    is VariantPlan.WithPayload -> {
+                        val typedType =
+                            registry
+                                .resolve(variant.decl)
+                                .parameterizedBy(variant.typeParams.map { TypeVariableName(it.name) })
+                        val lambdaArgs =
+                            variant.payloadFields.joinToString(", ") { pf ->
+                                variantPayloadParamName("size", variant, pf.fieldName)
+                            }
+                        // value is already smart-cast to `is Foo<*, ...>` inside the arm,
+                        // but we need the typed `Foo<P, ...>` to call the typed wireSize.
+                        // The unchecked cast mirrors the encode path.
+                        "@Suppress(\"UNCHECKED_CAST\") ${variant.codec.canonicalName}.wireSize(value as ${typedType}, context, $lambdaArgs)"
+                    }
+                    is VariantPlan.NoPayload -> "${variant.codec.canonicalName}.wireSize(value, context)"
+                }
+            // Apply BodyLength framing wrapper (matches legacy wrapBodyLengthSizeExpr).
+            val wrapped =
+                when (framing) {
+                    is FramingMode.BodyLength ->
+                        "run { val _b = $bodyExpr; ${framing.framerFqn}.bodyLengthSize(_b) + _b }"
+                    else -> bodyExpr
+                }
+            val term =
+                if (skipDisc || pointWire == null) {
+                    wrapped
+                } else {
+                    val discSize = discriminatorWireSizeExpr(plan.dispatch, pointWire)
+                    if (discSize == "0") wrapped else "$discSize + $wrapped"
+                }
+            fb.addCode("    $checkClause -> %L\n", variantClass, term)
+        }
+        fb.addCode("}\n")
+        return fb.build()
+    }
+
+    private fun capitalizeFirst(s: String): String =
+        if (s.isEmpty()) s else s[0].uppercaseChar() + s.substring(1)
 }

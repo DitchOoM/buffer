@@ -495,6 +495,7 @@ object CapturedSnapshots {
         """
         package com.ditchoom.codec.test
 
+        import com.ditchoom.buffer.BufferFactory
         import com.ditchoom.buffer.ReadBuffer
         import com.ditchoom.buffer.WriteBuffer
         import com.ditchoom.buffer.codec.Codec
@@ -505,6 +506,7 @@ object CapturedSnapshots {
         import com.ditchoom.buffer.stream.StreamProcessor
         import kotlin.IllegalArgumentException
         import kotlin.Int
+        import kotlin.Unit
 
         public object ControlPacketV5Slice5aCodec : Codec<ControlPacketV5Slice5a> {
           public const val MIN_HEADER_BYTES: Int = 2
@@ -551,6 +553,61 @@ object CapturedSnapshots {
           override fun wireSize(`value`: ControlPacketV5Slice5a, context: EncodeContext): Int = when (value) {
               is ControlPacketV5Slice5a.PingReq -> MqttFixedHeaderCodec.wireSize(MqttFixedHeader(12.toUByte()), context) + run { val _b = com.ditchoom.codec.test.ControlPacketV5Slice5aPingReqCodec.wireSize(value, context); com.ditchoom.codec.test.MqttFixedHeader.bodyLengthSize(_b) + _b }
               is ControlPacketV5Slice5a.Publish<*> -> run { val _b = com.ditchoom.codec.test.ControlPacketV5Slice5aPublishCodec.wireSizeFromContext(value, context); com.ditchoom.codec.test.MqttFixedHeader.bodyLengthSize(_b) + _b }
+          }
+
+          public fun <P> decode(
+            buffer: ReadBuffer,
+            context: DecodeContext = DecodeContext.Empty,
+            decodePublishPayload: (ReadBuffer) -> P,
+          ): ControlPacketV5Slice5a {
+            val discriminator = MqttFixedHeaderCodec.decode(buffer, context)
+            val ctx = context.with(DiscriminatorKey, discriminator)
+            val _bodyLen = MqttFixedHeader.readBodyLength(buffer)
+            val _bodySlice = buffer.readBytes(_bodyLen)
+            val type = discriminator.packetType
+            val _result = when (type) {
+              3 -> com.ditchoom.codec.test.ControlPacketV5Slice5aPublishCodec.decode(_bodySlice, ctx, decodePublishPayload)
+              12 -> com.ditchoom.codec.test.ControlPacketV5Slice5aPingReqCodec.decode(_bodySlice, ctx)
+              else -> throw IllegalArgumentException("Unknown discriminator: ${'$'}type")
+            }
+            if (_bodySlice.remaining() != 0) {
+                throw IllegalArgumentException("Variant decoder consumed ${'$'}{_bodyLen - _bodySlice.remaining()} of " +
+                    "${'$'}_bodyLen body bytes; ${'$'}{_bodySlice.remaining()} unread. " +
+                    "Wire is malformed or variant codec is buggy.")
+            }
+            return _result
+          }
+
+          public fun <P> encode(
+            buffer: WriteBuffer,
+            `value`: ControlPacketV5Slice5a,
+            context: EncodeContext = EncodeContext.Empty,
+            encodePublishPayload: (WriteBuffer, P) -> Unit,
+          ) {
+            when (value) {
+                is ControlPacketV5Slice5a.PingReq -> {
+                    MqttFixedHeaderCodec.encode(buffer, MqttFixedHeader(12.toUByte()), context)
+                    val _len_body = ControlPacketV5Slice5aPingReqCodec.wireSize(value, context)
+                    MqttFixedHeader.writeBodyLength(buffer, _len_body)
+                    ControlPacketV5Slice5aPingReqCodec.encode(buffer, value, context)
+                }
+                is ControlPacketV5Slice5a.Publish<*> -> {
+                    val _scratch = BufferFactory.Default.allocate(buffer.remaining().coerceAtLeast(16), buffer.byteOrder)
+                    @Suppress("UNCHECKED_CAST") ControlPacketV5Slice5aPublishCodec.encode(_scratch, value as ControlPacketV5Slice5a.Publish<P>, context, encodePublishPayload)
+                    _scratch.resetForRead()
+                    MqttFixedHeader.writeBodyLength(buffer, _scratch.remaining())
+                    buffer.write(_scratch)
+                }
+            }
+          }
+
+          public fun <P> wireSize(
+            `value`: ControlPacketV5Slice5a,
+            context: EncodeContext = EncodeContext.Empty,
+            sizePublishPayload: (P) -> Int,
+          ): Int = when (value) {
+              is ControlPacketV5Slice5a.PingReq -> MqttFixedHeaderCodec.wireSize(MqttFixedHeader(12.toUByte()), context) + run { val _b = com.ditchoom.codec.test.ControlPacketV5Slice5aPingReqCodec.wireSize(value, context); com.ditchoom.codec.test.MqttFixedHeader.bodyLengthSize(_b) + _b }
+              is ControlPacketV5Slice5a.Publish<*> -> run { val _b = @Suppress("UNCHECKED_CAST") com.ditchoom.codec.test.ControlPacketV5Slice5aPublishCodec.wireSize(value as com.ditchoom.codec.test.ControlPacketV5Slice5a.Publish<P>, context, sizePublishPayload); com.ditchoom.codec.test.MqttFixedHeader.bodyLengthSize(_b) + _b }
           }
 
           override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = MqttFixedHeader.peekFrameSize(stream, baseOffset)
