@@ -235,6 +235,7 @@ class PlanBuilderRuleTest {
                             "extra",
                             Fixtures.nullablePrimitiveTypeRef("kotlin.Int"),
                             annotations = listOf(Fixtures.whenAnnotation("hasExtra")),
+                            hasDefault = true,
                         ),
                     ),
             )
@@ -255,6 +256,7 @@ class PlanBuilderRuleTest {
                             "reasonCode",
                             Fixtures.nullablePrimitiveTypeRef("kotlin.UByte"),
                             annotations = listOf(Fixtures.whenRemaining(1)),
+                            hasDefault = true,
                         ),
                     ),
             )

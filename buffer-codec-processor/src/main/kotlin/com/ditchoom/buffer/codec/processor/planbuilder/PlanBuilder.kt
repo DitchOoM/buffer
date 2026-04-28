@@ -4,6 +4,7 @@ import com.ditchoom.buffer.codec.processor.discovery.DiscoveryResult
 import com.ditchoom.buffer.codec.processor.discovery.RawAnnotationValue
 import com.ditchoom.buffer.codec.processor.discovery.RawClassMetadata
 import com.ditchoom.buffer.codec.processor.discovery.RawSymbol
+import com.ditchoom.buffer.codec.processor.ir.Conditionality
 import com.ditchoom.buffer.codec.processor.ir.Direction
 import com.ditchoom.buffer.codec.processor.ir.DiscriminatorShape
 import com.ditchoom.buffer.codec.processor.ir.DispatchShape
@@ -194,6 +195,10 @@ object PlanBuilder {
                 ownerFqn = symbol.fqn,
                 errors = errors,
             )
+        // Cap 5: WhenRemaining fields must be contiguous and at the constructor
+        // tail. Mirrors legacy `ConditionalValidator.validateWhenRemaining` —
+        // the cascade-on-encode logic depends on this invariant.
+        validateWhenRemainingTailContiguity(symbol.fqn, accumulated, errors)
         if (errors.isNotEmpty()) {
             return Nel.fromList(errors).left()
         }
@@ -204,6 +209,47 @@ object PlanBuilder {
                 batches = emptyList(),
                 dir = dirOrErrors,
             ).right()
+    }
+
+    /**
+     * Cap 5 — `@WhenRemaining` fields must form a contiguous suffix at the
+     * tail of the constructor. The encode cascade (each field guards the
+     * remainder via a null check) depends on this invariant; out-of-order
+     * @WhenRemaining fields would generate impossible wire shapes.
+     *
+     * Detects the first `WhenRemaining`-style conditional (lowered to
+     * `BooleanExpression.RemainingGte` in the IR) and ensures every field
+     * from that index onwards also carries a `RemainingGte` conditionality.
+     */
+    private fun validateWhenRemainingTailContiguity(
+        ownerFqn: String,
+        fields: List<FieldPlan>,
+        errors: MutableList<KspError>,
+    ) {
+        val firstIdx =
+            fields.indexOfFirst { f ->
+                val c = f.conditionality
+                c is Conditionality.WhenExpr &&
+                    c.expr is com.ditchoom.buffer.codec.processor.ir.BooleanExpression.RemainingGte
+            }
+        if (firstIdx < 0) return
+        for (i in firstIdx until fields.size) {
+            val c = fields[i].conditionality
+            val isWhenRemaining =
+                c is Conditionality.WhenExpr &&
+                    c.expr is com.ditchoom.buffer.codec.processor.ir.BooleanExpression.RemainingGte
+            if (!isWhenRemaining) {
+                errors +=
+                    KspError(
+                        message =
+                            "@WhenRemaining fields must be contiguous and at the tail of the constructor. " +
+                                "Non-@WhenRemaining field '${fields[i].name}' on '$ownerFqn' appears after " +
+                                "@WhenRemaining field '${fields[firstIdx].name}'.",
+                        sourceFqn = "$ownerFqn.${fields[i].name}",
+                    )
+                return
+            }
+        }
     }
 
     private fun buildSealedRoot(

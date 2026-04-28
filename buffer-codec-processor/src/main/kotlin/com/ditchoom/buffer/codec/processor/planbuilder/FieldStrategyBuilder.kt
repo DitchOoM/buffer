@@ -134,6 +134,7 @@ internal class FieldStrategyBuilder(
             buildConditionality(
                 site = site,
                 paramName = param.name,
+                param = param,
                 whenAnnotations = whenAnnotations,
                 whenTrueAnnotations = whenTrueAnnotations,
                 whenRemainingAnnotations = whenRemainingAnnotations,
@@ -214,6 +215,7 @@ internal class FieldStrategyBuilder(
     private fun buildConditionality(
         site: String,
         paramName: String,
+        param: RawCtorParameter,
         whenAnnotations: List<RawAnnotation>,
         whenTrueAnnotations: List<RawAnnotation>,
         whenRemainingAnnotations: List<RawAnnotation>,
@@ -230,6 +232,11 @@ internal class FieldStrategyBuilder(
                     )
                 return Conditionality.Always
             }
+            // Cap 5: every conditional field must be nullable and have a default
+            // value of null, mirroring legacy ConditionalValidator. When the
+            // condition is false the codec returns null for the field, so the
+            // declaration must accept null at runtime.
+            validateConditionalShape(paramName, param, errors, site)
             return when (val parsed = BooleanExpressionParser.parse(expression)) {
                 is BooleanParseResult.Success -> Conditionality.WhenExpr(parsed.expression)
                 is BooleanParseResult.Failure -> {
@@ -254,20 +261,56 @@ internal class FieldStrategyBuilder(
                     )
                 return Conditionality.Always
             }
-            if (minBytes < 0) {
+            // Cap 5: legacy required minBytes > 0 (zero never triggers — better
+            // surface as @When always-true than silent-no-op). Surface the
+            // legacy error message so downstream tests assert against it.
+            if (minBytes <= 0) {
                 errors +=
                     KspError(
-                        message = "@WhenRemaining($minBytes) on field '$paramName' must be non-negative.",
+                        message =
+                            "@WhenRemaining($minBytes) on field '$paramName': minBytes must be greater than 0.",
                         sourceFqn = site,
                     )
                 return Conditionality.Always
             }
+            validateConditionalShape(paramName, param, errors, site)
             return Conditionality.WhenExpr(
                 com.ditchoom.buffer.codec.processor.ir.BooleanExpression
                     .RemainingGte(minBytes),
             )
         }
         return Conditionality.Always
+    }
+
+    /**
+     * Cap 5: assert the conditional field's declaration shape — must be
+     * nullable + must have a default value. Mirrors legacy
+     * `ConditionalValidator.validateConditionalFieldShape` byte-for-byte.
+     */
+    private fun validateConditionalShape(
+        paramName: String,
+        param: RawCtorParameter,
+        errors: MutableList<KspError>,
+        site: String,
+    ) {
+        if (!param.typeRef.isNullable) {
+            errors +=
+                KspError(
+                    message =
+                        "Conditional field '$paramName' must be nullable. " +
+                            "When the condition is false, the codec returns null for this field.",
+                    sourceFqn = site,
+                )
+        }
+        if (!param.hasDefault) {
+            errors +=
+                KspError(
+                    message =
+                        "Conditional field '$paramName' must have a default value of null. " +
+                            "When the condition is false, the codec skips this field and uses the default.",
+                    sourceFqn = site,
+                )
+        }
     }
 
     private fun buildPayloadSlot(
