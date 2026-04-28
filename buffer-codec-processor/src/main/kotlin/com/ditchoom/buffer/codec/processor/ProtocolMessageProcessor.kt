@@ -1,9 +1,21 @@
 package com.ditchoom.buffer.codec.processor
 
+import com.ditchoom.buffer.codec.processor.discovery.Discovery
+import com.ditchoom.buffer.codec.processor.discovery.DiscoveryResult
+import com.ditchoom.buffer.codec.processor.emitter.CodecEmitter
+import com.ditchoom.buffer.codec.processor.emitter.TypeRegistry
+import com.ditchoom.buffer.codec.processor.ir.Conditionality
+import com.ditchoom.buffer.codec.processor.ir.FieldStrategy
+import com.ditchoom.buffer.codec.processor.ir.Plan
+import com.ditchoom.buffer.codec.processor.ir.TypeFqn
+import com.ditchoom.buffer.codec.processor.planbuilder.Either
+import com.ditchoom.buffer.codec.processor.planbuilder.PlanBuilder
 import com.ditchoom.buffer.codec.processor.spi.CodecFieldProvider
+import com.ditchoom.buffer.codec.processor.validator.Validator
 import com.google.devtools.ksp.getAllSuperTypes
 import com.google.devtools.ksp.getConstructors
 import com.google.devtools.ksp.processing.CodeGenerator
+import com.google.devtools.ksp.processing.Dependencies
 import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.processing.SymbolProcessor
@@ -12,6 +24,9 @@ import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.symbol.Modifier
+import com.squareup.kotlinpoet.AnnotationSpec
+import com.squareup.kotlinpoet.FileSpec
+import com.squareup.kotlinpoet.ksp.writeTo
 
 class ProtocolMessageProcessor(
     private val codeGenerator: CodeGenerator,
@@ -20,7 +35,18 @@ class ProtocolMessageProcessor(
 ) : SymbolProcessor {
     private val processed = mutableSetOf<String>()
 
+    /**
+     * Phase 9 Slice 1: Discovery output cached for the lifetime of one [process] round.
+     * Discovery walks the entire resolver, so doing it once per `@ProtocolMessage` symbol
+     * would multiply KSP work by N. Cleared at the start of [process] so subsequent rounds
+     * see fresh `KSClassDeclaration`s.
+     */
+    private var cachedDiscovery: DiscoveryResult? = null
+
     override fun process(resolver: Resolver): List<KSAnnotated> {
+        // Slice 1: clear the per-round cache so Discovery re-runs against the fresh resolver.
+        cachedDiscovery = null
+
         val annotationName = "com.ditchoom.buffer.codec.annotations.ProtocolMessage"
         val symbols = resolver.getSymbolsWithAnnotation(annotationName)
         val symbolList = symbols.toList()
@@ -40,7 +66,10 @@ class ProtocolMessageProcessor(
 
             when {
                 Modifier.SEALED in symbol.modifiers -> processSealedInterface(symbol, resolver)
-                symbol.classKind == ClassKind.OBJECT -> processObject(symbol)
+                symbol.classKind == ClassKind.OBJECT -> {
+                    if (tryPipeline(symbol, resolver)) continue
+                    processObject(symbol)
+                }
                 else -> {
                     val constructor = symbol.primaryConstructor
                     if (constructor == null) {
@@ -58,6 +87,7 @@ class ProtocolMessageProcessor(
                             symbol,
                         )
                     } else {
+                        if (tryPipeline(symbol, resolver)) continue
                         processDataClass(symbol, resolver)
                     }
                 }
@@ -65,6 +95,203 @@ class ProtocolMessageProcessor(
         }
         return emptyList()
     }
+
+    /**
+     * Phase 9 Slice 1: returns `true` when [plan] falls inside the slice's whitelist.
+     *
+     * Currently active whitelist:
+     *  * [Plan.Object_] — zero-byte singletons (e.g. MqttPingResponse, WsContinuation).
+     *
+     * Staged for Slice 2 (kept in code so the predicate stays a single-source change):
+     *  * [Plan.Leaf] with no batches and every field a [FieldStrategy.Primitive] +
+     *    [Conditionality.Always]. Currently disabled because the new
+     *    [com.ditchoom.buffer.codec.processor.emitter.LeafEmitter] emits a different
+     *    `wireSize` shape (constant-fold `return N`) than the legacy emitter's
+     *    `var _size = 0; ...; return _size` accumulator that several
+     *    `:buffer-codec-processor:test` cases assert against. Slice 2 will flip the
+     *    `enableLeaf` constant and update the affected legacy-shape assertions.
+     *
+     * [Plan.Sealed_] is reserved for Slice 4+ and explicitly excluded.
+     */
+    private fun coverable(plan: Plan): Boolean {
+        @Suppress("KotlinConstantConditions")
+        val enableLeaf = false
+        return when (plan) {
+            is Plan.Object_ -> true
+            is Plan.Leaf ->
+                enableLeaf &&
+                    plan.batches.isEmpty() &&
+                    plan.fields.all { f ->
+                        f.strategy is FieldStrategy.Primitive && f.conditionality is Conditionality.Always
+                    }
+            is Plan.Sealed_ -> false
+        }
+    }
+
+    /**
+     * Phase 9 Slice 1: extra eligibility filter applied **before** the new pipeline runs.
+     *
+     * Catches conditions that the legacy emitter rejects/handles but [PlanBuilder] silently
+     * accepts — letting the legacy path speak so its diagnostic stays the user-visible one:
+     *
+     *  * `@DispatchOn` on a `data object` — legacy rejects with a tailored error message
+     *    that references the annotation by name; the new pipeline currently treats the
+     *    object as a no-op zero-byte codec. Reserved for Slice 4 reconciliation.
+     *  * Constructor parameters carrying a custom-provider annotation FQN — the legacy
+     *    SPI dispatch path is the only one that knows how to lower them; the new
+     *    [PlanBuilder] would silently classify the field as a primitive.
+     */
+    private fun pipelineEligible(symbol: com.ditchoom.buffer.codec.processor.discovery.RawSymbol): Boolean {
+        if (symbol.annotations.any { it.fqn == "com.ditchoom.buffer.codec.annotations.DispatchOn" }) {
+            return false
+        }
+        if (symbol is com.ditchoom.buffer.codec.processor.discovery.RawSymbol.DataLike) {
+            for (p in symbol.constructorParameters) {
+                for (ann in p.annotations) {
+                    if (ann.fqn in customProviders.keys) return false
+                }
+            }
+        }
+        return true
+    }
+
+    /**
+     * Phase 9 Slice 1 pipeline driver.
+     *
+     * Routes a single [classDecl] through Discovery → PlanBuilder → Validator →
+     * [CodecEmitter] when the resulting [Plan] is `coverable`. Returns:
+     *  * `true` — the new pipeline owns this symbol; caller MUST skip the legacy path.
+     *    Either the file was emitted successfully, OR the plan was coverable but a
+     *    Validator error was surfaced (legacy would emit the same error).
+     *  * `false` — fall through to the legacy emitter. Either the symbol isn't
+     *    coverable, the symbol wasn't found in Discovery output, the registry could
+     *    not resolve a referenced type, or PhaseB failed (the user-facing diagnostic
+     *    is already on the legacy path; we let it speak).
+     */
+    private fun tryPipeline(
+        classDecl: KSClassDeclaration,
+        resolver: Resolver,
+    ): Boolean {
+        val fqn = classDecl.qualifiedName?.asString() ?: return false
+        val discovery = cachedDiscovery ?: Discovery.run(resolver).also { cachedDiscovery = it }
+        val symbol = discovery.symbols.firstOrNull { it.fqn == fqn } ?: return false
+        if (!pipelineEligible(symbol)) return false
+        val scope = discovery.symbols.associateBy { it.fqn }
+
+        val planResult =
+            PlanBuilder.build(
+                symbol = symbol,
+                scope = scope,
+                externalClasses = discovery.externalClasses,
+            )
+        val plan =
+            when (planResult) {
+                is Either.Left ->
+                    // Plan-builder errors. The legacy emitter will surface the same conditions
+                    // through its own diagnostics; let it speak so we don't silently mask
+                    // problems. Diagnostic duplication is acceptable in Slice 1; deduped in Slice 5.
+                    return false
+                is Either.Right -> planResult.value
+            }
+
+        if (!coverable(plan)) return false
+
+        // Whole-program validation — Slice 1 runs it on the single-plan map. Validator
+        // accumulates errors instead of failing fast, so duplicate diagnostics during the
+        // gradual cutover are bounded.
+        val validation =
+            Validator.validate(
+                plans = mapOf(TypeFqn(symbol.fqn) to plan),
+                externalClasses = discovery.externalClasses,
+            )
+        when (validation) {
+            is Either.Left -> {
+                for (err in validation.value.all) {
+                    logger.error(err.message, classDecl)
+                }
+                // The pipeline owns this symbol; legacy would re-run the same checks. We
+                // signal "skip legacy" via `true` so the build fails on a single error path
+                // rather than two.
+                return true
+            }
+            is Either.Right -> Unit
+        }
+
+        // Build a TypeRegistry from the discovered symbols + external metadata so the
+        // emitter can resolve every TypeFqn it references. Slice 1's whitelist (Object_
+        // + Primitive Leaf) only references the user-declared class itself plus
+        // `kotlin.*` primitives, all of which the default fallback resolves correctly.
+        val registry = buildRegistry(discovery)
+        val classType = registry.resolve(TypeFqn(symbol.fqn))
+        val fileSpec =
+            try {
+                CodecEmitter(registry).emit(plan, classType)
+            } catch (t: Throwable) {
+                // Defensive guard: if the emitter throws (e.g. Slice 1 hits a strategy
+                // path that raises), fall through to legacy rather than crash the round.
+                logger.warn(
+                    "Slice 1 pipeline failed to emit '${classDecl.simpleName.asString()}' (${t.message}); " +
+                        "falling back to legacy emitter.",
+                    classDecl,
+                )
+                return false
+            }
+
+        // Match the legacy file-header conventions (4-space indent + `@file:Suppress("ktlint")`)
+        // so generated source remains byte-for-byte stable through the cutover.
+        val rebuiltFileSpec = withLegacyFileHeader(fileSpec)
+
+        val containingFile = classDecl.containingFile
+        val deps =
+            if (containingFile != null) {
+                Dependencies(aggregating = false, sources = arrayOf(containingFile))
+            } else {
+                Dependencies(aggregating = false)
+            }
+        rebuiltFileSpec.writeTo(codeGenerator, deps)
+        return true
+    }
+
+    private fun buildRegistry(discovery: DiscoveryResult): TypeRegistry {
+        val explicit = mutableMapOf<TypeFqn, com.squareup.kotlinpoet.ClassName>()
+        for (s in discovery.symbols) {
+            val pkg = s.packageName
+            val parts = s.enclosingNames
+            val cn =
+                if (parts.isEmpty()) {
+                    com.squareup.kotlinpoet.ClassName(pkg, s.simpleName)
+                } else {
+                    com.squareup.kotlinpoet.ClassName(pkg, *parts.toTypedArray())
+                }
+            explicit[TypeFqn(s.fqn)] = cn
+        }
+        return TypeRegistry(explicit)
+    }
+
+    /**
+     * Re-emit [original] with the legacy emitter's file-header conventions:
+     * `@file:Suppress("ktlint")` and 4-space indent. KotlinPoet `FileSpec` is immutable
+     * so we drop down to the toBuilder() API and re-apply.
+     */
+    private fun withLegacyFileHeader(original: FileSpec): FileSpec =
+        original
+            .toBuilder()
+            .indent("    ")
+            .also { b ->
+                val alreadyHasSuppress =
+                    b.annotations.any { ann ->
+                        ann.typeName.toString().endsWith("kotlin.Suppress")
+                    }
+                if (!alreadyHasSuppress) {
+                    b.addAnnotation(
+                        AnnotationSpec
+                            .builder(Suppress::class)
+                            .useSiteTarget(AnnotationSpec.UseSiteTarget.FILE)
+                            .addMember("%S", "ktlint")
+                            .build(),
+                    )
+                }
+            }.build()
 
     private fun processDataClass(
         classDeclaration: KSClassDeclaration,

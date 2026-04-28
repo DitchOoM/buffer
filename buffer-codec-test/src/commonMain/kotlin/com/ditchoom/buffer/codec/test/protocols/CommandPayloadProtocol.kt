@@ -38,6 +38,14 @@ data class DeviceState(
     val connection: ConnectionStatus,
 )
 
+/**
+ * Top-level `@ProtocolMessage data object` — exercises the Phase 9 Slice 1 cutover where
+ * `Plan.Object_` flows through the new Discovery → PlanBuilder → Validator → CodecEmitter
+ * pipeline instead of the legacy emitter.
+ */
+@ProtocolMessage
+data object KeepAliveTick
+
 /** A state-machine-style sealed interface with mixed data class / data object variants. */
 @ProtocolMessage(wireOrder = Endianness.Little)
 sealed interface ConnectionStatus {
