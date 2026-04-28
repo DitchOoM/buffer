@@ -11,16 +11,21 @@ import com.ditchoom.buffer.codec.processor.ir.LengthEncoding
 import com.ditchoom.buffer.codec.processor.ir.LengthSource
 import com.ditchoom.buffer.codec.processor.ir.Plan
 import com.ditchoom.buffer.codec.processor.ir.PrimitiveKind
+import com.squareup.kotlinpoet.ANY
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
 import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
 import com.squareup.kotlinpoet.INT
 import com.squareup.kotlinpoet.KModifier
+import com.squareup.kotlinpoet.LambdaTypeName
 import com.squareup.kotlinpoet.ParameterSpec
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 import com.squareup.kotlinpoet.PropertySpec
+import com.squareup.kotlinpoet.STAR
 import com.squareup.kotlinpoet.TypeSpec
+import com.squareup.kotlinpoet.TypeVariableName
+import com.squareup.kotlinpoet.UNIT
 
 /**
  * Phase 7 emitter for [Plan.Leaf] — plain protocol messages with a primary
@@ -46,6 +51,19 @@ class LeafEmitter(
         classType: ClassName,
         contextDecodes: List<ContextDecode> = emptyList(),
     ): FileSpec {
+        // Phase 9 Step 4 — Cap 2: top-level `@Payload` data class fan-out.
+        // When the leaf declares one or more `@Payload` type parameters, the
+        // standard `Codec<T>` interface can't be implemented (the unbound type
+        // parameter has no type argument). Instead we emit a dedicated codec
+        // object with `<P> decode<P>(buffer, context, payloadDecoder)` /
+        // `<P> encode<P>(buffer, value, context, payloadEncoder)` /
+        // `<P> wireSize<P>(value, context, payloadSize)` overloads, plus
+        // `decodeFromContext` / `encodeFromContext` / `wireSizeFromContext`
+        // bridges that read the lambdas from `Context.Key` objects emitted
+        // alongside the codec. Mirrors legacy `CodecGenerator.buildPayloadCodecFile`.
+        if (plan.payloadTypeParams.isNotEmpty()) {
+            return emitPayloadCodec(plan, classType)
+        }
         val codecName = ClassName(classType.packageName, classType.simpleNames.joinToString("") + "Codec")
         val type = TypeSpec.objectBuilder(codecName)
 
@@ -1331,6 +1349,512 @@ class LeafEmitter(
 
     /** All fields except those replaced by a batched bit-extraction read. */
     private fun effectiveFields(plan: Plan.Leaf): List<FieldPlan> = plan.fields
+
+    // -----------------------------------------------------------------------
+    // Phase 9 Step 4 — Cap 2: top-level @Payload data class fan-out
+    // -----------------------------------------------------------------------
+
+    /**
+     * Phase 9 Step 4 — Cap 2 emitter for `Plan.Leaf` with one or more
+     * `@Payload` type parameters. Mirrors legacy
+     * `CodecGenerator.buildPayloadCodecFile` for the shapes the new pipeline
+     * exercises:
+     *
+     *  - Skips the `Codec<T>` superinterface (the unbound type parameter `P`
+     *    has no instantiable type at object level).
+     *  - Emits typed-lambda `<P> decode(buffer, context, payloadDecoder)`
+     *    `<P> encode(buffer, value, context, payloadEncoder)` and
+     *    `<P> wireSize(value, context, payloadSize)` overloads. Multi-payload
+     *    classes get one lambda per `@Payload` type-parameter (legacy convention:
+     *    parameter named `decode<FieldName>` / `encode<FieldName>` / `size<FieldName>`).
+     *  - Emits per-payload-field `<FieldName>DecodeKey`, `<FieldName>EncodeKey`,
+     *    `<FieldName>SizeKey` data objects extending `CodecContext.Key`.
+     *  - Emits `decodeFromContext`, `encodeFromContext`, `wireSizeFromContext`
+     *    bridges that read the lambdas off the context and delegate.
+     *
+     * Simplification vs legacy: lambda receiver is bare `(ReadBuffer) -> P`
+     * rather than legacy's `*Context.(ReadBuffer) -> P`. Legacy synthesizes a
+     * sibling `*Context` data class via `PayloadContextGenerator`; we omit that
+     * here. Consumer mqtt v4/v5 dispatchers interact via `decodeFromContext`
+     * (Context.Key path) and consumer round-trip tests pass bare lambdas
+     * `{ slice -> slice }` to `decode(buffer, ctx, ...)` — both shapes accept
+     * a no-receiver lambda from the call-site, so the simplification is
+     * source-compatible with consumer code.
+     */
+    private fun emitPayloadCodec(
+        plan: Plan.Leaf,
+        classType: ClassName,
+    ): FileSpec {
+        val codecName = ClassName(classType.packageName, classType.simpleNames.joinToString("") + "Codec")
+        val type = TypeSpec.objectBuilder(codecName)
+        val canDecode = plan.dir != Direction.EncodeOnly
+        val canEncode = plan.dir != Direction.DecodeOnly
+
+        // Build lookup from field name → typeParam name for PayloadSlot binding.
+        val fieldNameToTypeParam =
+            plan.payloadFields.associate { it.fieldName to it.typeParamName }
+
+        if (canDecode) type.addFunction(buildPayloadDecodeFun(plan, classType, fieldNameToTypeParam))
+        if (canEncode) {
+            type.addFunction(buildPayloadEncodeFun(plan, classType, fieldNameToTypeParam))
+            type.addFunction(buildPayloadWireSizeFun(plan, classType, fieldNameToTypeParam))
+        }
+
+        // Per-payload-field DecodeKey / EncodeKey / SizeKey data objects.
+        for (pf in plan.payloadFields) {
+            type.addType(buildPayloadDecodeKey(pf.fieldName))
+            type.addType(buildPayloadEncodeKey(pf.fieldName))
+            type.addType(buildPayloadSizeKey(pf.fieldName))
+        }
+
+        // Context-bridge overloads. Star-projected return / value types so the
+        // dispatcher can call them through the `Codec<T<*>>` interface.
+        if (canDecode) type.addFunction(buildPayloadDecodeFromContextFun(plan, classType))
+        if (canEncode) {
+            type.addFunction(buildPayloadEncodeFromContextFun(plan, classType))
+            type.addFunction(buildPayloadWireSizeFromContextFun(plan, classType))
+        }
+
+        val fileBuilder =
+            FileSpec
+                .builder(codecName.packageName, codecName.simpleName)
+                .addType(type.build())
+        addExtensionImports(fileBuilder, plan)
+        return fileBuilder.build()
+    }
+
+    private fun starReturnType(
+        classType: ClassName,
+        plan: Plan.Leaf,
+    ) = classType.parameterizedBy(plan.payloadTypeParams.map { STAR })
+
+    private fun typedReturnType(
+        classType: ClassName,
+        plan: Plan.Leaf,
+    ) = classType.parameterizedBy(plan.payloadTypeParams.map { TypeVariableName(it.name) })
+
+    private fun buildPayloadDecodeFun(
+        plan: Plan.Leaf,
+        classType: ClassName,
+        fieldNameToTypeParam: Map<String, String>,
+    ): FunSpec {
+        val fb =
+            FunSpec
+                .builder("decode")
+                .addParameter("buffer", Names.ReadBuffer)
+                .addParameter(
+                    ParameterSpec
+                        .builder("context", Names.DecodeContext)
+                        .defaultValue("%T.Empty", Names.DecodeContext)
+                        .build(),
+                )
+        for (tp in plan.payloadTypeParams) {
+            fb.addTypeVariable(TypeVariableName(tp.name))
+        }
+        for (pf in plan.payloadFields) {
+            val tp = TypeVariableName(pf.typeParamName)
+            val lambdaType =
+                LambdaTypeName.get(
+                    parameters = listOf(ParameterSpec.unnamed(Names.ReadBuffer)),
+                    returnType = tp,
+                )
+            fb.addParameter(payloadDecodeParamName(pf.fieldName), lambdaType)
+        }
+        fb.returns(typedReturnType(classType, plan))
+
+        // Phase 1: read raw bytes / non-payload fields in declaration order.
+        val cb = CodeBlock.builder()
+        for (f in plan.fields) {
+            val s = f.strategy
+            if (s is FieldStrategy.PayloadSlot) {
+                emitPayloadRawRead(cb, f, s)
+            } else {
+                val stmt = decodeStatement(f) ?: continue
+                cb.add(stmt)
+            }
+        }
+        // Phase 2: invoke each payload decoder lambda on its raw slice to produce typed `P`.
+        for (pf in plan.payloadFields) {
+            val rawVar = "_raw_${pf.fieldName}"
+            val paramName = payloadDecodeParamName(pf.fieldName)
+            cb.addStatement("val %L = %L(%L)", pf.fieldName, paramName, rawVar)
+        }
+        // Phase 3: constructor call.
+        val ctorArgs = plan.fields.joinToString(", ") { "${it.name} = ${it.name}" }
+        cb.addStatement("return %T(%L)", classType, ctorArgs)
+        fb.addCode(cb.build())
+        return fb.build()
+    }
+
+    /**
+     * Reads the raw payload bytes into `_raw_<fieldName>` (a `ReadBuffer` slice).
+     * Mirrors legacy `addPayloadRawRead` for the length sources Cap 2 supports.
+     */
+    private fun emitPayloadRawRead(
+        cb: CodeBlock.Builder,
+        field: FieldPlan,
+        strategy: FieldStrategy.PayloadSlot,
+    ) {
+        val rawVar = "_raw_${field.name}"
+        val readBody =
+            when (val l = strategy.length) {
+                is LengthSource.Remaining ->
+                    if (l.trailingBytes > 0) {
+                        "buffer.readBytes(buffer.remaining() - ${l.trailingBytes})"
+                    } else {
+                        "buffer.readBytes(buffer.remaining())"
+                    }
+                is LengthSource.FromField -> "buffer.readBytes(${l.name}.toInt())"
+                is LengthSource.Inline -> {
+                    val readLen =
+                        when (l.encoding) {
+                            LengthEncoding.Byte -> "buffer.readByte().toInt() and 0xFF"
+                            LengthEncoding.Short -> "buffer.readUnsignedShort().toInt()"
+                            LengthEncoding.Int -> "buffer.readInt()"
+                            LengthEncoding.Varint -> "buffer.readVariableByteInteger()"
+                        }
+                    "run { val _len = $readLen; buffer.readBytes(_len) }"
+                }
+            }
+        cb.addStatement("val %L: %T = %L", rawVar, Names.ReadBuffer, readBody)
+    }
+
+    private fun buildPayloadEncodeFun(
+        plan: Plan.Leaf,
+        classType: ClassName,
+        fieldNameToTypeParam: Map<String, String>,
+    ): FunSpec {
+        val returnType = typedReturnType(classType, plan)
+        val fb =
+            FunSpec
+                .builder("encode")
+                .addParameter("buffer", Names.WriteBuffer)
+                .addParameter(ParameterSpec.builder("value", returnType).build())
+                .addParameter(
+                    ParameterSpec
+                        .builder("context", Names.EncodeContext)
+                        .defaultValue("%T.Empty", Names.EncodeContext)
+                        .build(),
+                )
+        for (tp in plan.payloadTypeParams) {
+            fb.addTypeVariable(TypeVariableName(tp.name))
+        }
+        for (pf in plan.payloadFields) {
+            val tp = TypeVariableName(pf.typeParamName)
+            val lambdaType =
+                LambdaTypeName.get(
+                    parameters =
+                        listOf(
+                            ParameterSpec.unnamed(Names.WriteBuffer),
+                            ParameterSpec.unnamed(tp),
+                        ),
+                    returnType = UNIT,
+                )
+            fb.addParameter(payloadEncodeParamName(pf.fieldName), lambdaType)
+        }
+        val cb = CodeBlock.builder()
+        for (f in plan.fields) {
+            val s = f.strategy
+            if (s is FieldStrategy.PayloadSlot) {
+                emitPayloadEncode(cb, f, s)
+            } else {
+                val stmt = encodeStatement(f) ?: continue
+                cb.add(stmt)
+            }
+        }
+        fb.addCode(cb.build())
+        return fb.build()
+    }
+
+    /**
+     * Mirrors legacy `addPayloadEncodeBody`: writes the length prefix (if
+     * applicable) then invokes the user-supplied `encode<FieldName>` lambda
+     * with `buffer` and `value.<fieldName>` so the lambda writes typed payload
+     * bytes directly into the host buffer.
+     */
+    private fun emitPayloadEncode(
+        cb: CodeBlock.Builder,
+        field: FieldPlan,
+        strategy: FieldStrategy.PayloadSlot,
+    ) {
+        val encodeFn = payloadEncodeParamName(field.name)
+        val sizeFn = payloadSizeParamName(field.name)
+        val valueExpr = "value.${field.name}"
+        val suffix = "_${field.name}"
+        when (val l = strategy.length) {
+            is LengthSource.Remaining,
+            is LengthSource.FromField,
+            -> cb.addStatement("%L(buffer, %L)", encodeFn, valueExpr)
+            is LengthSource.Inline ->
+                when (l.encoding) {
+                    LengthEncoding.Varint -> {
+                        cb.addStatement("val _l%L = %L(%L)", suffix, sizeFn, valueExpr)
+                        if (l.maxBytes in 1..3) {
+                            cb.addStatement(
+                                "require(_l%L in 0..com.ditchoom.buffer.variableByteMax(%L)) { %P }",
+                                suffix,
+                                l.maxBytes,
+                                "field '${field.name}' encoded length \$_l$suffix exceeds " +
+                                    "maxBytes=${l.maxBytes} (max value " +
+                                    "\${com.ditchoom.buffer.variableByteMax(${l.maxBytes})})",
+                            )
+                        }
+                        cb.addStatement("buffer.writeVariableByteInteger(_l%L)", suffix)
+                        cb.addStatement("%L(buffer, %L)", encodeFn, valueExpr)
+                    }
+                    LengthEncoding.Byte -> {
+                        cb.addStatement("val _pos%L = buffer.position()", suffix)
+                        cb.addStatement("buffer.writeByte(0.toByte())")
+                        cb.addStatement("%L(buffer, %L)", encodeFn, valueExpr)
+                        cb.addStatement("val _end%L = buffer.position()", suffix)
+                        cb.addStatement("val _len%L = _end%L - _pos%L - 1", suffix, suffix, suffix)
+                        cb.addStatement("buffer.position(_pos%L)", suffix)
+                        cb.addStatement("buffer.writeByte(_len%L.toByte())", suffix)
+                        cb.addStatement("buffer.position(_end%L)", suffix)
+                    }
+                    LengthEncoding.Short -> {
+                        cb.addStatement("val _pos%L = buffer.position()", suffix)
+                        cb.addStatement("buffer.writeShort(0.toShort())")
+                        cb.addStatement("%L(buffer, %L)", encodeFn, valueExpr)
+                        cb.addStatement("val _end%L = buffer.position()", suffix)
+                        cb.addStatement("val _len%L = _end%L - _pos%L - 2", suffix, suffix, suffix)
+                        cb.addStatement("buffer.position(_pos%L)", suffix)
+                        cb.addStatement("buffer.writeShort(_len%L.toShort())", suffix)
+                        cb.addStatement("buffer.position(_end%L)", suffix)
+                    }
+                    LengthEncoding.Int -> {
+                        cb.addStatement("val _pos%L = buffer.position()", suffix)
+                        cb.addStatement("buffer.writeInt(0)")
+                        cb.addStatement("%L(buffer, %L)", encodeFn, valueExpr)
+                        cb.addStatement("val _end%L = buffer.position()", suffix)
+                        cb.addStatement("val _len%L = _end%L - _pos%L - 4", suffix, suffix, suffix)
+                        cb.addStatement("buffer.position(_pos%L)", suffix)
+                        cb.addStatement("buffer.writeInt(_len%L)", suffix)
+                        cb.addStatement("buffer.position(_end%L)", suffix)
+                    }
+                }
+        }
+    }
+
+    private fun buildPayloadWireSizeFun(
+        plan: Plan.Leaf,
+        classType: ClassName,
+        fieldNameToTypeParam: Map<String, String>,
+    ): FunSpec {
+        val returnType = typedReturnType(classType, plan)
+        val fb =
+            FunSpec
+                .builder("wireSize")
+                .addParameter(ParameterSpec.builder("value", returnType).build())
+                .addParameter(
+                    ParameterSpec
+                        .builder("context", Names.EncodeContext)
+                        .defaultValue("%T.Empty", Names.EncodeContext)
+                        .build(),
+                )
+                .returns(INT)
+        for (tp in plan.payloadTypeParams) {
+            fb.addTypeVariable(TypeVariableName(tp.name))
+        }
+        for (pf in plan.payloadFields) {
+            val tp = TypeVariableName(pf.typeParamName)
+            val lambdaType =
+                LambdaTypeName.get(
+                    parameters = listOf(ParameterSpec.unnamed(tp)),
+                    returnType = INT,
+                )
+            fb.addParameter(payloadSizeParamName(pf.fieldName), lambdaType)
+        }
+        val cb = CodeBlock.builder()
+        cb.addStatement("var _size = 0")
+        for (f in plan.fields) {
+            val s = f.strategy
+            if (s is FieldStrategy.PayloadSlot) {
+                cb.addStatement("_size += %L", payloadFieldWireSizeExpr(f, s))
+            } else {
+                cb.addStatement("_size += %L", sizeContribution(f))
+            }
+        }
+        cb.addStatement("return _size")
+        fb.addCode(cb.build())
+        return fb.build()
+    }
+
+    /**
+     * Returns the wire-size expression for a payload field. Mirrors legacy
+     * `payloadFieldWireSizeExpr`: prefix bytes (if any) + `size<FieldName>(value.<field>)`.
+     */
+    private fun payloadFieldWireSizeExpr(
+        field: FieldPlan,
+        strategy: FieldStrategy.PayloadSlot,
+    ): String {
+        val sizeFn = payloadSizeParamName(field.name)
+        val bodySize = "$sizeFn(value.${field.name})"
+        return when (val l = strategy.length) {
+            is LengthSource.Remaining,
+            is LengthSource.FromField,
+            -> bodySize
+            is LengthSource.Inline ->
+                when (l.encoding) {
+                    LengthEncoding.Byte -> "(1 + $bodySize)"
+                    LengthEncoding.Short -> "(2 + $bodySize)"
+                    LengthEncoding.Int -> "(4 + $bodySize)"
+                    LengthEncoding.Varint ->
+                        "run { val _l = $bodySize; com.ditchoom.buffer.variableByteSizeInt(_l) + _l }"
+                }
+        }
+    }
+
+    private fun buildPayloadDecodeKey(fieldName: String): TypeSpec {
+        // `(ReadBuffer) -> Any?` — context-keyed lambda type. The typed
+        // signature is reconstructed by `decodeFromContext`'s call to `decode<P>`.
+        val lambdaType =
+            LambdaTypeName.get(
+                parameters = listOf(ParameterSpec.unnamed(Names.ReadBuffer)),
+                returnType = ANY.copy(nullable = true),
+            )
+        return TypeSpec
+            .objectBuilder("${capitalizeFirst(fieldName)}DecodeKey")
+            .addModifiers(KModifier.PUBLIC, KModifier.DATA)
+            .superclass(Names.CodecContext.nestedClass("Key").parameterizedBy(lambdaType))
+            .build()
+    }
+
+    private fun buildPayloadEncodeKey(fieldName: String): TypeSpec {
+        val lambdaType =
+            LambdaTypeName.get(
+                parameters =
+                    listOf(
+                        ParameterSpec.unnamed(Names.WriteBuffer),
+                        ParameterSpec.unnamed(ANY.copy(nullable = true)),
+                    ),
+                returnType = UNIT,
+            )
+        return TypeSpec
+            .objectBuilder("${capitalizeFirst(fieldName)}EncodeKey")
+            .addModifiers(KModifier.PUBLIC, KModifier.DATA)
+            .superclass(Names.CodecContext.nestedClass("Key").parameterizedBy(lambdaType))
+            .build()
+    }
+
+    private fun buildPayloadSizeKey(fieldName: String): TypeSpec {
+        val lambdaType =
+            LambdaTypeName.get(
+                parameters = listOf(ParameterSpec.unnamed(ANY.copy(nullable = true))),
+                returnType = INT,
+            )
+        return TypeSpec
+            .objectBuilder("${capitalizeFirst(fieldName)}SizeKey")
+            .addModifiers(KModifier.PUBLIC, KModifier.DATA)
+            .superclass(Names.CodecContext.nestedClass("Key").parameterizedBy(lambdaType))
+            .build()
+    }
+
+    private fun buildPayloadDecodeFromContextFun(
+        plan: Plan.Leaf,
+        classType: ClassName,
+    ): FunSpec {
+        val cb = CodeBlock.builder()
+        val args = mutableListOf<String>()
+        for (pf in plan.payloadFields) {
+            val cap = capitalizeFirst(pf.fieldName)
+            val local = "_decode$cap"
+            cb.addStatement(
+                "val %L = context[%LDecodeKey] ?: error(%S)",
+                local,
+                cap,
+                "DecodeContext missing ${classType.simpleNames.joinToString("")}Codec.${cap}DecodeKey. " +
+                    "Register: ctx.with(${classType.simpleNames.joinToString("")}Codec.${cap}DecodeKey) { pr -> ... }",
+            )
+            args += local
+        }
+        cb.addStatement("return decode(buffer, context, %L)", args.joinToString(", "))
+        return FunSpec
+            .builder("decodeFromContext")
+            .addParameter("buffer", Names.ReadBuffer)
+            .addParameter("context", Names.DecodeContext)
+            .returns(starReturnType(classType, plan))
+            .addCode(cb.build())
+            .build()
+    }
+
+    private fun buildPayloadEncodeFromContextFun(
+        plan: Plan.Leaf,
+        classType: ClassName,
+    ): FunSpec {
+        val cb = CodeBlock.builder()
+        val args = mutableListOf<String>()
+        for (pf in plan.payloadFields) {
+            val cap = capitalizeFirst(pf.fieldName)
+            val local = "_encode$cap"
+            cb.addStatement(
+                "val %L = context[%LEncodeKey] ?: error(%S)",
+                local,
+                cap,
+                "EncodeContext missing ${classType.simpleNames.joinToString("")}Codec.${cap}EncodeKey. " +
+                    "Register: ctx.with(${classType.simpleNames.joinToString("")}Codec.${cap}EncodeKey) { buf, v -> ... }",
+            )
+            args += local
+        }
+        cb.addStatement("encode(buffer, value, context, %L)", args.joinToString(", "))
+        return FunSpec
+            .builder("encodeFromContext")
+            .addAnnotation(
+                com.squareup.kotlinpoet.AnnotationSpec
+                    .builder(Suppress::class)
+                    .addMember("%S", "UNCHECKED_CAST")
+                    .build(),
+            )
+            .addParameter("buffer", Names.WriteBuffer)
+            .addParameter("value", starReturnType(classType, plan))
+            .addParameter("context", Names.EncodeContext)
+            .addCode(cb.build())
+            .build()
+    }
+
+    private fun buildPayloadWireSizeFromContextFun(
+        plan: Plan.Leaf,
+        classType: ClassName,
+    ): FunSpec {
+        val cb = CodeBlock.builder()
+        val args = mutableListOf<String>()
+        for (pf in plan.payloadFields) {
+            val cap = capitalizeFirst(pf.fieldName)
+            val local = "_size$cap"
+            cb.addStatement(
+                "val %L = context[%LSizeKey] ?: error(%S)",
+                local,
+                cap,
+                "EncodeContext missing ${classType.simpleNames.joinToString("")}Codec.${cap}SizeKey. " +
+                    "Register: ctx.with(${classType.simpleNames.joinToString("")}Codec.${cap}SizeKey) { v -> ... }",
+            )
+            args += local
+        }
+        cb.addStatement("return wireSize(value, context, %L)", args.joinToString(", "))
+        return FunSpec
+            .builder("wireSizeFromContext")
+            .addAnnotation(
+                com.squareup.kotlinpoet.AnnotationSpec
+                    .builder(Suppress::class)
+                    .addMember("%S", "UNCHECKED_CAST")
+                    .build(),
+            )
+            .addParameter("value", starReturnType(classType, plan))
+            .addParameter("context", Names.EncodeContext)
+            .returns(INT)
+            .addCode(cb.build())
+            .build()
+    }
+
+    // Lambda parameter-name helpers — mirror legacy `decode${capitalize(name)}` etc.
+    private fun payloadDecodeParamName(fieldName: String): String = "decode${capitalizeFirst(fieldName)}"
+
+    private fun payloadEncodeParamName(fieldName: String): String = "encode${capitalizeFirst(fieldName)}"
+
+    private fun payloadSizeParamName(fieldName: String): String = "size${capitalizeFirst(fieldName)}"
+
+    private fun capitalizeFirst(s: String): String =
+        if (s.isEmpty()) s else s[0].uppercaseChar() + s.substring(1)
 }
 
 private inline fun FunSpec.Builder.indent(block: () -> Unit) {
