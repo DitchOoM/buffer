@@ -902,6 +902,12 @@ object EmitterFixtures {
                 fqn("VariableSizeSpiLeaf") to cn("VariableSizeSpiLeaf"),
                 fqn("VarSizePayload") to cn("VarSizePayload"),
                 fqn("AsymmetricSpiLeaf") to cn("AsymmetricSpiLeaf"),
+                // Phase 9 Step 3 Phase B — capability fixtures.
+                fqn("PayloadOnlyLeaf") to cn("PayloadOnlyLeaf"),
+                fqn("NestedMessageLeaf") to cn("NestedMessageLeaf"),
+                fqn("InnerMessage") to cn("InnerMessage"),
+                fqn("ThreeByteInt") to cn("ThreeByteInt"),
+                TypeFqn("kotlin.P") to ClassName("kotlin", "Any"),
                 TypeFqn("kotlin.IllegalArgumentException") to ClassName("kotlin", "IllegalArgumentException"),
             ),
         )

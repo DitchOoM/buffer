@@ -5,7 +5,21 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.processor.ir.Direction
+import com.ditchoom.buffer.codec.processor.ir.Endianness
+import com.ditchoom.buffer.codec.processor.ir.FieldPlan
+import com.ditchoom.buffer.codec.processor.ir.FieldStrategy
+import com.ditchoom.buffer.codec.processor.ir.LengthEncoding
+import com.ditchoom.buffer.codec.processor.ir.LengthSource
+import com.ditchoom.buffer.codec.processor.ir.PayloadFieldRef
+import com.ditchoom.buffer.codec.processor.ir.PayloadTypeParam
 import com.ditchoom.buffer.codec.processor.ir.Plan
+import com.ditchoom.buffer.codec.processor.ir.PrimitiveKind
+import com.ditchoom.buffer.codec.processor.ir.ProviderId
+import com.ditchoom.buffer.codec.processor.ir.SpiDescriptor
+import com.ditchoom.buffer.codec.processor.ir.TypeFqn
+import com.ditchoom.buffer.codec.processor.ir.VariantPlan
+import com.ditchoom.buffer.codec.processor.ir.WireMatch
 import com.squareup.kotlinpoet.ClassName
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
@@ -237,6 +251,350 @@ class CompileAndRoundTripTest {
                 "Flip this test: round-trip via the typed-lambda overload.",
         )
     }
+
+    // ---------------------------------------------------------------------
+    // Phase 9 Step 3 Phase B — capability harness fixtures (1-7).
+    //
+    // Each capability fixture below was added by Step 3 Phase B so the
+    // capability gap is documented as a failing-or-current-broken assertion
+    // in the harness. As Phase C ports each capability, the corresponding
+    // fixture flips from "assert current broken" to "assert round-trip green".
+    //
+    // Fixture index:
+    //   1. Sealed_ WithPayload typed-lambda dispatcher        — covered by
+    //      `Sealed_ WithPayload variant emits no typed-lambda overload at HEAD 5a0a1bc`
+    //      above. (Pre-existing, Step 1 fixture.)
+    //   2. Top-level @Payload data class fan-out              — Cap 2 below.
+    //   3. @LengthPrefixed on NestedMessage / External        — Cap 3 below.
+    //   4. @WireBytes non-natural width                       — Cap 4 below.
+    //   5. ConditionalValidator rules in PhaseB               — Cap 5 below.
+    //   6. @DispatchOn on non-sealed diagnostic               — Cap 6 below.
+    //   7. CodecFieldProvider SPI threading                   — Cap 7 below.
+    // ---------------------------------------------------------------------
+
+    // ---- Capability 2 — Top-level @Payload data class fan-out -----------
+    //
+    // The legacy `CodecGenerator` emitted two pairs of decode/encode
+    // overloads for a `data class Foo<@Payload P>(...)` shape:
+    //   1. `<P> fun decode(buffer, payloadDecoder: (ReadBuffer) -> P): Foo<P>`
+    //      — typed-lambda overload (no context).
+    //   2. `fun decode(buffer, context): Foo<*>` reading the lambda from a Key.
+    //
+    // Today, the new pipeline's [LeafEmitter] emits only #2 (the
+    // context-overload path). Round-tripping any payload typed as a generic
+    // type parameter `P` therefore can't go through the lambda
+    // overload. This fixture documents the gap.
+    //
+    // Test fixture: `Plan.Leaf` with one fixed prefix (UByte) + one
+    // PayloadSlot field whose length is FromField. Asserts the typed-lambda
+    // signature is NOT in the emitted source.
+    @Test
+    fun `cap2 Leaf with Payload type parameter emits no typed-lambda overload at HEAD`() {
+        val plan = grpcFrameLikePayloadFixture()
+        val classType = EmitterFixtures.cn("PayloadOnlyLeaf")
+        val emitted = emitText(plan, classType)
+
+        // Sanity: context-overload path is emitted.
+        assertTrue(
+            emitted.contains("fun decode("),
+            "expected at least one decode( overload to be emitted; got:\n$emitted",
+        )
+
+        // The gap: no typed-lambda fan-out emitted.
+        // Legacy shape we expect Phase C Cap 2 to emit:
+        //
+        //     public fun <P> decode(
+        //         buffer: ReadBuffer,
+        //         payloadDecoder: (ReadBuffer) -> P,
+        //     ): PayloadOnlyLeaf<P> { ... }
+        val typedLambdaSignature = Regex("""\bfun\s*<\s*P\s*>\s*decode\s*\(""")
+        assertNoMatch(
+            typedLambdaSignature,
+            emitted,
+            "FAIL → Phase C Cap 2 has landed (Plan.Leaf typed-lambda overload emitted). " +
+                "Flip this test: round-trip a value through the typed-lambda overload.",
+        )
+        val payloadDecoderParam = Regex("""\bpayloadDecoder\s*:""")
+        assertNoMatch(
+            payloadDecoderParam,
+            emitted,
+            "FAIL → Phase C Cap 2 has landed (payloadDecoder lambda param emitted). " +
+                "Flip this test: round-trip via the typed-lambda overload.",
+        )
+    }
+
+    // ---- Capability 3 — @LengthPrefixed on NestedMessage / External -----
+    //
+    // Legacy `FieldCodeEmitter` for a nested-message field annotated
+    // `@LengthPrefixed(VarInt)` would:
+    //   * Decode: read length prefix → `readBytes(len)` slice → `Codec.decode(slice, ctx)`.
+    //   * Encode: two-pass (`wireSize → writePrefix → writeBody`).
+    //
+    // The new pipeline IR ([FieldStrategy.NestedMessage] + [FieldStrategy.External])
+    // does NOT carry a [LengthSource]; it's structurally impossible for the
+    // emitter to know to slice. The decode site emits a bare
+    // `Codec.decode(buffer, context)` call with no length prefix read.
+    //
+    // Test fixture: `Plan.Leaf` with a NestedMessage field. Asserts the emit
+    // does NOT contain the `readBytes(...).` slice pattern that legacy used
+    // for length-prefixed nested-message decode.
+    @Test
+    fun `cap3 NestedMessage emits no length-prefix slice at HEAD`() {
+        val plan = nestedMessageLeafFixture()
+        val classType = EmitterFixtures.cn("NestedMessageLeaf")
+        val emitted = emitText(plan, classType)
+
+        // The bare nested-codec decode call exists today.
+        assertTrue(
+            emitted.contains("InnerMessageCodec.decode(buffer, context)"),
+            "expected bare nested-codec decode at HEAD; got:\n$emitted",
+        )
+
+        // The gap: no length-prefix slice emitted around the nested decode.
+        // Legacy shape we expect Phase C Cap 3 to emit:
+        //
+        //     val _innerLen = buffer.readVariableByteInteger()
+        //     val _innerSlice = buffer.readBytes(_innerLen)
+        //     val inner = InnerMessageCodec.decode(_innerSlice, context)
+        val sliceFollowedByNested = Regex("""readBytes\s*\([^)]+\)[^\n]*\n[^\n]*InnerMessageCodec\.decode""")
+        assertNoMatch(
+            sliceFollowedByNested,
+            emitted,
+            "FAIL → Phase C Cap 3 has landed (length-prefix slice emitted around nested decode). " +
+                "Flip this test: round-trip a value with a length-prefixed nested message and " +
+                "assert wire bytes match the legacy two-pass shape.",
+        )
+    }
+
+    // ---- Capability 4 — @WireBytes non-natural width --------------------
+    //
+    // Legacy `CustomWidthEmitter` emitted shift-and-mask sequences for
+    // `@WireBytes(3)` / 5 / 6 / 7 — values that don't map to a single
+    // `readByte`/`readShort`/`readInt`/`readLong`.
+    //
+    // Today the emitter uses [FieldOps.readExpr] / [FieldOps.writeExpr]
+    // which always read the natural width for the [PrimitiveKind]; the
+    // [FieldStrategy.Primitive.wireBytes] field is parsed but ignored at
+    // emit. So a `Plan.Leaf` with `Primitive(Int, wireBytes=3)` produces
+    // `buffer.readInt()` (4 bytes) instead of a 3-byte read.
+    //
+    // Test fixture: `Plan.Leaf` with a single `Primitive(Int, wireBytes=3)`
+    // field. Asserts the emitted decode reads `readInt()` (the bug) — Phase
+    // C Cap 4 will replace this with a 3-byte shift-and-mask sequence.
+    @Test
+    fun `cap4 Primitive wireBytes 3 emits natural-width read at HEAD`() {
+        val plan = wireBytesThreeFixture()
+        val classType = EmitterFixtures.cn("ThreeByteInt")
+        val emitted = emitText(plan, classType)
+
+        // Today: full Int read (4 bytes), ignoring wireBytes=3.
+        assertTrue(
+            emitted.contains("buffer.readInt()"),
+            "expected natural-width Int read at HEAD; got:\n$emitted",
+        )
+
+        // The gap: no 3-byte shift-and-mask read pattern.
+        // Legacy shape we expect Phase C Cap 4 to emit (BE):
+        //
+        //     val b0 = buffer.readUnsignedByte().toInt()
+        //     val b1 = buffer.readUnsignedByte().toInt()
+        //     val b2 = buffer.readUnsignedByte().toInt()
+        //     val value = (b0 shl 16) or (b1 shl 8) or b2
+        val shiftAndMaskPattern = Regex("""shl\s+16\)\s+or\s+\(""")
+        assertNoMatch(
+            shiftAndMaskPattern,
+            emitted,
+            "FAIL → Phase C Cap 4 has landed (shift-and-mask 3-byte read emitted). " +
+                "Flip this test: round-trip a value of 0x123456 through the codec and " +
+                "assert wire size is 3.",
+        )
+    }
+
+    // ---- Capability 5 — ConditionalValidator rules in PhaseB ------------
+    //
+    // Legacy `ConditionalValidator` enforced four rules at PhaseA:
+    //   * Conditional field must be nullable.
+    //   * Conditional field must have a default value.
+    //   * @WhenRemaining minBytes must be > 0.
+    //   * @WhenRemaining fields must be contiguous and at the constructor tail.
+    //
+    // The new pipeline's [FieldStrategyBuilder.buildConditionality] only
+    // checks `minBytes >= 0` (legacy: `> 0`) and emits no diagnostic for
+    // the other three rules. The Phase A test cleanup deleted the negative-
+    // case KSP tests (lines 199-339 of WhenRemainingTest.kt) and the
+    // legacy-shape unit tests (lines 343-554) since they referenced the
+    // now-deleted ConditionalValidator. Phase D Cap 5 ports the rules into
+    // PhaseB so those negative cases re-surface.
+    //
+    // The harness operates on `Plan` IR directly, bypassing KSP/PhaseB —
+    // so this capability fixture is necessarily a `compileWithKsp`-shaped
+    // diagnostic fixture, not a round-trip. It lives outside the
+    // `CompileAndRoundTripTest` class per architectural separation; the
+    // test file `WhenRemainingTest.kt` will gain the corresponding
+    // negative-case tests when Phase D Cap 5 lands. This fixture asserts
+    // the CURRENT (broken) behavior: the new pipeline accepts these
+    // malformed shapes.
+    //
+    // Currently a no-op placeholder — see WhenRemainingTest.kt diff in
+    // Phase A's commit for the negative cases that were stripped, and
+    // Phase D's commit for the same cases re-introduced.
+    @Test
+    fun `cap5 ConditionalValidator rules placeholder — see WhenRemainingTest`() {
+        // No-op: the diagnostic capability lives outside this Plan-IR-driven
+        // harness. Phase D Cap 5 either ports the rules to PhaseB (and adds
+        // negative-case KSP tests to WhenRemainingTest.kt) or defers with
+        // explicit reasoning. This placeholder exists to document the
+        // capability slot in this file.
+    }
+
+    // ---- Capability 6 — @DispatchOn on non-sealed diagnostic ------------
+    //
+    // Legacy `FieldAnalyzer` rejected `@DispatchOn` annotations on objects
+    // and non-sealed data classes with a clear "@DispatchOn is not valid
+    // on an object" diagnostic. The new pipeline's [PlanBuilder] does not
+    // currently emit this diagnostic.
+    //
+    // Like Cap 5, this is diagnostic-only. The `compileWithKsp`-shaped
+    // negative case lives in `DataObjectCodegenTest.kt`'s
+    // `object with DispatchOn annotation rejected` test (currently failing
+    // — surfaced by Phase A's commit). Phase D Cap 6 ports the diagnostic
+    // and that test re-passes.
+    //
+    // Currently a no-op placeholder.
+    @Test
+    fun `cap6 DispatchOn on non-sealed placeholder — see DataObjectCodegenTest`() {
+        // No-op — see comment above.
+    }
+
+    // ---- Capability 7 — CodecFieldProvider SPI threading ---------------
+    //
+    // The Spi field strategy already exists in the new IR
+    // ([FieldStrategy.Spi]) and the [LeafEmitter] substitutes the
+    // descriptor's `decodeRaw` / `encodeRaw` text directly. What's missing
+    // (per the blocker file) is "threading custom-provider FQN through
+    // Discovery → PlanBuilder → FieldStrategyBuilder" — i.e. surfacing the
+    // user-registered `CodecFieldProvider` class FQN in the emitted file
+    // so the consumer's KSP run picks up provider-registered descriptors
+    // without an explicit @UseCodec annotation.
+    //
+    // The blocker explicitly notes this is "defensive-only" — neither MQTT
+    // nor websocket consumers exercise it. Phase D Cap 7 either ports it
+    // (if the work is small) or defers with explicit reasoning.
+    //
+    // This fixture round-trips an existing SPI-strategy fixture
+    // (asymmetricSpiLeaf) through the harness as proof that today's SPI
+    // descriptor substitution path works. The "threading" gap is structural
+    // (descriptor provided directly in the IR rather than discovered from
+    // a registered provider class), so a round-trip can't expose it
+    // without rebuilding the Discovery → PlanBuilder pipeline. The test
+    // documents this and notes the deferral candidate.
+    @Test
+    fun `cap7 SPI descriptor substitution works at HEAD — provider FQN threading deferred`() {
+        val plan = EmitterFixtures.asymmetricSpiLeaf()
+        val classType = EmitterFixtures.cn("AsymmetricSpiLeaf")
+        val emitted = emitText(plan, classType)
+
+        // Today: descriptor's decodeRaw / encodeRaw text is substituted
+        // directly into the emit. This is what consumers rely on.
+        assertTrue(
+            emitted.contains("buffer.readCidr()"),
+            "expected SPI decodeRaw to be substituted; got:\n$emitted",
+        )
+        assertTrue(
+            emitted.contains("buffer.writeCidr(value.cidr)"),
+            "expected SPI encodeRaw to be substituted; got:\n$emitted",
+        )
+
+        // Provider FQN threading is the deferred capability. There is no
+        // assertion to flip here because today's IR carries the descriptor
+        // directly — so the fixture documents that descriptor substitution
+        // works and Phase D Cap 7 may either:
+        //   1. Port the Discovery-time provider lookup → IR descriptor
+        //      threading and add a separate fixture asserting that path; or
+        //   2. Defer with a rationale (no consumer uses it).
+    }
+
+    // ---------------------------------------------------------------------
+    // Phase B fixture builders — all factory `private fun` for the harness.
+    // ---------------------------------------------------------------------
+
+    /**
+     * Cap 2 fixture — `Plan.Leaf` with a `@Payload P` type parameter and a
+     * single PayloadSlot field whose length is `Remaining` (the simplest
+     * form). The variant codec must emit a typed-lambda decode overload to
+     * thread the payload-decoder lambda; today only the context-overload
+     * exists.
+     */
+    private fun grpcFrameLikePayloadFixture(): Plan.Leaf =
+        Plan.Leaf(
+            decl = EmitterFixtures.fqn("PayloadOnlyLeaf"),
+            fields =
+                listOf(
+                    FieldPlan(
+                        name = "kind",
+                        type = TypeFqn("kotlin.UByte"),
+                        strategy = FieldStrategy.Primitive(PrimitiveKind.UByte, 1, Endianness.Big),
+                    ),
+                    FieldPlan(
+                        name = "payload",
+                        type = TypeFqn("kotlin.P"),
+                        strategy =
+                            FieldStrategy.PayloadSlot(
+                                typeParam = "P",
+                                length = LengthSource.Remaining(trailingBytes = 0),
+                            ),
+                    ),
+                ),
+            batches = emptyList(),
+            dir = Direction.Bidirectional,
+        )
+
+    /**
+     * Cap 3 fixture — `Plan.Leaf` with a NestedMessage field that today is
+     * decoded via a bare `Codec.decode(buffer, ctx)` call. Phase C Cap 3
+     * threads `LengthSource` through and slices the buffer first.
+     */
+    private fun nestedMessageLeafFixture(): Plan.Leaf =
+        Plan.Leaf(
+            decl = EmitterFixtures.fqn("NestedMessageLeaf"),
+            fields =
+                listOf(
+                    FieldPlan(
+                        name = "header",
+                        type = TypeFqn("kotlin.UByte"),
+                        strategy = FieldStrategy.Primitive(PrimitiveKind.UByte, 1, Endianness.Big),
+                    ),
+                    FieldPlan(
+                        name = "inner",
+                        type = EmitterFixtures.fqn("InnerMessage"),
+                        strategy =
+                            FieldStrategy.NestedMessage(
+                                codec = ClassName("com.ditchoom.codec.test", "InnerMessageCodec"),
+                            ),
+                    ),
+                ),
+            batches = emptyList(),
+            dir = Direction.Bidirectional,
+        )
+
+    /**
+     * Cap 4 fixture — `Plan.Leaf` with a single `Primitive(Int, wireBytes=3)`.
+     * The IR carries `wireBytes=3` but the emitter ignores it.
+     */
+    private fun wireBytesThreeFixture(): Plan.Leaf =
+        Plan.Leaf(
+            decl = EmitterFixtures.fqn("ThreeByteInt"),
+            fields =
+                listOf(
+                    FieldPlan(
+                        name = "value",
+                        type = TypeFqn("kotlin.Int"),
+                        strategy = FieldStrategy.Primitive(PrimitiveKind.Int, wireBytes = 3, order = Endianness.Big),
+                    ),
+                ),
+            batches = emptyList(),
+            dir = Direction.Bidirectional,
+        )
 
     // ---------------------------------------------------------------------
     // Compile + load helpers.
