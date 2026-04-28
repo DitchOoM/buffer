@@ -29,6 +29,7 @@ class DumpSnapshotsTest {
             "ControlPacketV5" to EmitterFixtures.controlPacketV5(),
             "MessagePackFormatByte" to EmitterFixtures.messagePackFormatByte(),
             "TlsRecord" to EmitterFixtures.tlsRecord(),
+            "MqttPropertyShape" to EmitterFixtures.mqttPropertyShape(),
         ).forEach { (simple, plan) ->
             val cn = EmitterFixtures.cn(simple)
             val text = emitter.emit(plan, cn).toString()

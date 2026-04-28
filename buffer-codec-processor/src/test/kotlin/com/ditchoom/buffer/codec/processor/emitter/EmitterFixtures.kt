@@ -489,6 +489,41 @@ object EmitterFixtures {
         )
 
     /**
+     * Slice 3 fixture — `Plan.Leaf` exercising `FieldStrategy.Collection_` with
+     * `LengthSource.Inline.Varint` (the MQTT v5 properties shape).
+     *
+     * Models an `MqttPropertyShape(@LengthPrefixed(LengthPrefix.Varint) val properties: List<MqttProperty>)`.
+     * Pinning this snapshot locks the Slice 3 collection-with-varint emit text
+     * against drift.
+     */
+    fun mqttPropertyShape(): Plan.Leaf =
+        Plan.Leaf(
+            decl = fqn("MqttPropertyShape"),
+            fields =
+                listOf(
+                    FieldPlan(
+                        name = "properties",
+                        type = TypeFqn("kotlin.collections.List"),
+                        strategy =
+                            FieldStrategy.Collection_(
+                                elementCodec =
+                                    com.ditchoom.buffer.codec.processor.ir.ElementCodecRef(
+                                        codec = codecCn("MqttProperty"),
+                                        elementType = fqn("MqttProperty"),
+                                    ),
+                                length =
+                                    com.ditchoom.buffer.codec.processor.ir.LengthSource.Inline(
+                                        encoding = com.ditchoom.buffer.codec.processor.ir.LengthEncoding.Varint,
+                                        maxBytes = 4,
+                                    ),
+                            ),
+                    ),
+                ),
+            batches = emptyList(),
+            dir = Direction.Bidirectional,
+        )
+
+    /**
      * Slice 2 fixture — `Plan.Leaf` exercising both `FieldStrategy.VarInt` and
      * `FieldStrategy.StringField` (LengthPrefixed UShort).
      *
@@ -530,6 +565,8 @@ object EmitterFixtures {
                 fqn("MqttConnectFlags") to cn("MqttConnectFlags"),
                 fqn("PingResponse") to cn("PingResponse"),
                 fqn("StringHeader") to cn("StringHeader"),
+                fqn("MqttPropertyShape") to cn("MqttPropertyShape"),
+                fqn("MqttProperty") to cn("MqttProperty"),
                 fqn("RiffChunk") to cn("RiffChunk"),
                 fqn("RiffChunk.Data") to cn("RiffChunk").nestedClass("Data"),
                 fqn("RiffChunk.Fact") to cn("RiffChunk").nestedClass("Fact"),

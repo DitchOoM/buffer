@@ -96,19 +96,17 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Phase 9 Slice 1: returns `true` when [plan] falls inside the slice's whitelist.
+     * Phase 9 Slice 3: returns `true` when [plan] falls inside the slice's whitelist.
      *
      * Currently active whitelist:
      *  * [Plan.Object_] — zero-byte singletons (e.g. MqttPingResponse, WsContinuation).
-     *
-     * Staged for Slice 2 (kept in code so the predicate stays a single-source change):
-     *  * [Plan.Leaf] with no batches and every field a [FieldStrategy.Primitive] +
-     *    [Conditionality.Always]. Currently disabled because the new
-     *    [com.ditchoom.buffer.codec.processor.emitter.LeafEmitter] emits a different
-     *    `wireSize` shape (constant-fold `return N`) than the legacy emitter's
-     *    `var _size = 0; ...; return _size` accumulator that several
-     *    `:buffer-codec-processor:test` cases assert against. Slice 2 will flip the
-     *    `enableLeaf` constant and update the affected legacy-shape assertions.
+     *  * [Plan.Leaf] with no batches and every field's strategy in
+     *    `{Primitive, VarInt, StringField, Collection_, Spi}` and conditionality in
+     *    `{Always, WhenExpr}`. Direction may be any of `{Bidirectional, DecodeOnly,
+     *    EncodeOnly}`. Class-level `@WireOrder(LittleEndian)` lowers to per-Primitive
+     *    `Endianness.Little` which the LeafEmitter handles via
+     *    [com.ditchoom.buffer.codec.processor.emitter.FieldOps.readExpr] /
+     *    [com.ditchoom.buffer.codec.processor.emitter.FieldOps.writeExpr].
      *
      * [Plan.Sealed_] is reserved for Slice 4+ and explicitly excluded.
      */
@@ -118,16 +116,28 @@ class ProtocolMessageProcessor(
             is Plan.Leaf ->
                 plan.batches.isEmpty() &&
                     plan.fields.all { f ->
-                        f.conditionality is Conditionality.Always && coverableStrategy(f.strategy)
+                        coverableConditionality(f.conditionality) && coverableStrategy(f.strategy)
                     }
             is Plan.Sealed_ -> false
         }
 
     /**
-     * Slice 2 covers Primitive (natural width + big-endian only — custom width / WireOrder
-     * stay on the legacy path), VarInt, and StringField. Wire-order overrides and custom
-     * `@WireBytes` widths require the legacy `customWidthReadExpr` / `swappedReadExpr`
-     * helpers which the new emitter has not yet ported.
+     * Slice 3 covers `Always` and `WhenExpr` conditionality. PhaseB lowers all
+     * surface annotations (`@When` path/remaining/expr, `@WhenRemaining`,
+     * `@WhenTrue`) into a single [Conditionality.WhenExpr] AST.
+     */
+    private fun coverableConditionality(c: Conditionality): Boolean =
+        when (c) {
+            is Conditionality.Always -> true
+            is Conditionality.WhenExpr -> true
+        }
+
+    /**
+     * Slice 3 covers Primitive (natural width — custom `@WireBytes` widths stay on
+     * the legacy path), VarInt, StringField, Collection_, and Spi. `Endianness` is
+     * threaded through the LeafEmitter via FieldOps; both Big and Little are
+     * supported (LE lowers to `.reverseBytes()` swaps, mirroring legacy
+     * `Primitive.swappedReadExpr` / `swappedWriteExpr`).
      */
     private fun coverableStrategy(strategy: FieldStrategy): Boolean =
         when (strategy) {
@@ -135,11 +145,21 @@ class ProtocolMessageProcessor(
                 val natural =
                     com.ditchoom.buffer.codec.processor.planbuilder.PrimitiveTypes
                         .naturalWireBytes(strategy.kind)
-                strategy.order == com.ditchoom.buffer.codec.processor.ir.Endianness.Big &&
-                    strategy.wireBytes == natural
+                strategy.wireBytes == natural
             }
             is FieldStrategy.VarInt -> true
             is FieldStrategy.StringField -> true
+            is FieldStrategy.Collection_ -> true
+            is FieldStrategy.Spi -> {
+                // Slice 3 emits SPI fields when the descriptor's `raw` payload is non-blank
+                // (the validator already rejects fixedSize=-1 + blank raw). Variable-size
+                // SPI fields with a runtime size hint (descriptor.fixedSize=-1, raw set)
+                // are not yet covered — the new pipeline would need to lower the size
+                // hint expression that the legacy emitter resolves via
+                // `FieldReadStrategy.Custom.descriptor.wireSizeFunction`. Bail out for
+                // those until Slice 5 lands the size-hint plumbing.
+                strategy.descriptor.raw.isNotBlank() && strategy.descriptor.fixedSize >= 0
+            }
             else -> false
         }
 
@@ -165,6 +185,56 @@ class ProtocolMessageProcessor(
                 for (ann in p.annotations) {
                     if (ann.fqn in customProviders.keys) return false
                 }
+            }
+            // Slice 3: conditional-field rule enforcement is owned by the legacy
+            // [com.ditchoom.buffer.codec.processor.ConditionalValidator] (default-value
+            // requirement, contiguous-tail constraint, minBytes > 0). Surface those
+            // diagnostics through the legacy path until the rules are ported into
+            // PhaseB/C — defer to legacy when any conditional annotation is present
+            // AND the class violates a preflight check the legacy emitter relies on.
+            if (!conditionalShapeOk(symbol)) return false
+        }
+        return true
+    }
+
+    /**
+     * Cheap pre-flight that mirrors a subset of legacy `ConditionalValidator`'s rules
+     * without re-running PhaseB / FieldAnalyzer. Returns `false` when the class would
+     * trip one of the legacy errors below; the caller then routes the symbol through
+     * the legacy emitter so its diagnostic surfaces unchanged:
+     *
+     *  * Conditional field is non-nullable (`@WhenTrue`/`@WhenRemaining`/`@When` requires `T?`).
+     *  * Conditional field has no default value (forces a `null` default for cascade null-checks).
+     *  * `@WhenRemaining(minBytes <= 0)` (legacy requires strictly positive).
+     *  * `@WhenRemaining` field followed by a non-conditional field (must be a tail group).
+     */
+    private fun conditionalShapeOk(symbol: com.ditchoom.buffer.codec.processor.discovery.RawSymbol.DataLike): Boolean {
+        val whenAnnotations =
+            setOf(
+                "com.ditchoom.buffer.codec.annotations.When",
+                "com.ditchoom.buffer.codec.annotations.WhenTrue",
+                "com.ditchoom.buffer.codec.annotations.WhenRemaining",
+            )
+        var seenWhenRemaining = false
+        for (p in symbol.constructorParameters) {
+            val condAnns = p.annotations.filter { it.fqn in whenAnnotations }
+            val isWhenRemaining = condAnns.any { it.fqn.endsWith("WhenRemaining") }
+            if (condAnns.isEmpty()) {
+                if (seenWhenRemaining) return false // tail-position violation
+                continue
+            }
+            // Conditional field must be nullable
+            if (!p.typeRef.isNullable) return false
+            // Conditional field must have a default value
+            if (!p.hasDefault) return false
+            if (isWhenRemaining) {
+                seenWhenRemaining = true
+                val ann = condAnns.first { it.fqn.endsWith("WhenRemaining") }
+                val minVal =
+                    ann.arguments["minBytes"] as?
+                        com.ditchoom.buffer.codec.processor.discovery.RawAnnotationValue.IntVal
+                val v = minVal?.value ?: 0
+                if (v <= 0) return false
             }
         }
         return true

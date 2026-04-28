@@ -186,6 +186,53 @@ object CapturedSnapshots {
         }
         """.trimIndent()
 
+    /**
+     * Slice 3 fixture — `Plan.Leaf` with `FieldStrategy.Collection_` whose length
+     * source is `LengthSource.Inline.Varint` (the MQTT v5 properties shape).
+     * Pins the byte-for-byte expected emit text.
+     */
+    val MqttPropertyShape =
+        """
+        package com.ditchoom.codec.test
+
+        import com.ditchoom.buffer.ReadBuffer
+        import com.ditchoom.buffer.WriteBuffer
+        import com.ditchoom.buffer.codec.Codec
+        import com.ditchoom.buffer.codec.DecodeContext
+        import com.ditchoom.buffer.codec.EncodeContext
+        import com.ditchoom.buffer.readVariableByteInteger
+        import com.ditchoom.buffer.stream.PeekResult
+        import com.ditchoom.buffer.stream.StreamProcessor
+        import com.ditchoom.buffer.stream.SuspendingStreamProcessor
+        import com.ditchoom.buffer.variableByteSizeInt
+        import com.ditchoom.buffer.writeVariableByteInteger
+        import com.ditchoom.buffer.writeVariableByteIntegerLengthPrefixed
+        import kotlin.Int
+
+        public object MqttPropertyShapeCodec : Codec<MqttPropertyShape> {
+          public const val MIN_HEADER_BYTES: Int = 0
+
+          override fun decode(buffer: ReadBuffer, context: DecodeContext): MqttPropertyShape {
+            val properties = run { val _len = buffer.readVariableByteInteger(); val _slice = buffer.readBytes(_len); buildList<MqttProperty> { while (_slice.remaining() > 0) { add(com.ditchoom.codec.test.MqttPropertyCodec.decode(_slice, context)) } } }
+            return MqttPropertyShape(properties = properties)
+          }
+
+          override fun encode(
+            buffer: WriteBuffer,
+            `value`: MqttPropertyShape,
+            context: EncodeContext,
+          ) {
+            run { val _l = value.properties.sumOf { com.ditchoom.codec.test.MqttPropertyCodec.wireSize(it, context) }; buffer.writeVariableByteInteger(_l); value.properties.forEach { com.ditchoom.codec.test.MqttPropertyCodec.encode(buffer, it, context) } }
+          }
+
+          override fun wireSize(`value`: MqttPropertyShape, context: EncodeContext): Int = run { val _b = value.properties.sumOf { com.ditchoom.codec.test.MqttPropertyCodec.wireSize(it, context) }; variableByteSizeInt(_b) + _b }
+
+          override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.Size(0)
+
+          public suspend fun peekFrameSize(stream: SuspendingStreamProcessor, baseOffset: Int = 0): PeekResult = PeekResult.Size(0)
+        }
+        """.trimIndent()
+
     val WsFrameHeader =
         """
         package com.ditchoom.codec.test

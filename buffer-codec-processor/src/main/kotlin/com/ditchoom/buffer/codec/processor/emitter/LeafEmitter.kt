@@ -1,12 +1,16 @@
 package com.ditchoom.buffer.codec.processor.emitter
 
 import com.ditchoom.buffer.codec.processor.ir.Batch
+import com.ditchoom.buffer.codec.processor.ir.BooleanExpression
 import com.ditchoom.buffer.codec.processor.ir.Conditionality
+import com.ditchoom.buffer.codec.processor.ir.Direction
+import com.ditchoom.buffer.codec.processor.ir.Endianness
 import com.ditchoom.buffer.codec.processor.ir.FieldPlan
 import com.ditchoom.buffer.codec.processor.ir.FieldStrategy
 import com.ditchoom.buffer.codec.processor.ir.LengthEncoding
 import com.ditchoom.buffer.codec.processor.ir.LengthSource
 import com.ditchoom.buffer.codec.processor.ir.Plan
+import com.ditchoom.buffer.codec.processor.ir.PrimitiveKind
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
 import com.squareup.kotlinpoet.FileSpec
@@ -43,10 +47,21 @@ class LeafEmitter(
         contextDecodes: List<ContextDecode> = emptyList(),
     ): FileSpec {
         val codecName = ClassName(classType.packageName, classType.simpleNames.joinToString("") + "Codec")
-        val type =
-            TypeSpec
-                .objectBuilder(codecName)
-                .addSuperinterface(Names.Codec.parameterizedBy(classType))
+        val type = TypeSpec.objectBuilder(codecName)
+
+        // Slice 3: direction-aware superinterface. `Codec<T>` for bidirectional;
+        // `Decoder<T>` for decode-only; `Encoder<T>` for encode-only. Mirrors
+        // legacy `CodecGenerator.buildCodecFile` selection logic exactly.
+        val superIface =
+            when (plan.dir) {
+                Direction.Bidirectional -> Names.Codec
+                Direction.DecodeOnly -> Names.Decoder
+                Direction.EncodeOnly -> Names.Encoder
+            }
+        type.addSuperinterface(superIface.parameterizedBy(classType))
+
+        val canDecode = plan.dir != Direction.EncodeOnly
+        val canEncode = plan.dir != Direction.DecodeOnly
 
         // MIN_HEADER_BYTES — sum of fixed-width prefix bytes up to the first
         // variable / conditional field. For all-fixed messages, that's the full
@@ -60,18 +75,21 @@ class LeafEmitter(
                 .build(),
         )
 
-        type.addFunction(buildDecodeFun(plan, classType))
-        type.addFunction(buildEncodeFun(plan, classType))
-        type.addFunction(buildWireSizeFun(plan, classType))
-        // Peek emission: when the wire is peekable we emit step-based peek; when
-        // it isn't (VarInt, Varint-prefixed string, remaining-bytes, conditional),
-        // we still emit constant `PeekResult.Size(minHeader)` for callers — the
-        // legacy emitter omitted peek entirely in this case but the Slice 2 plan
-        // accepts the simpler constant (the inherited `Codec.peekFrameSize`
-        // default returns `NeedsMoreData`; emitting `Size(minHeader)` is at least
-        // as informative for the all-fixed prefix portion).
-        type.addFunction(buildPeekFrameSizeFun(peekPlan, minHeader))
-        type.addFunction(buildSuspendingPeekFrameSizeFun(peekPlan, minHeader))
+        if (canDecode) type.addFunction(buildDecodeFun(plan, classType))
+        if (canEncode) type.addFunction(buildEncodeFun(plan, classType))
+        if (canEncode) type.addFunction(buildWireSizeFun(plan, classType))
+        // Peek emission: peek belongs to FrameDetector which is part of `Codec<T>`
+        // (and conceptually decoding). Emit the override only when the codec is
+        // decode-capable. The non-suspending overload is `override fun` for
+        // bidirectional Codec<T> (FrameDetector contract); for DecodeOnly the
+        // superinterface is `Decoder<T>` which has no `peekFrameSize`, so we emit
+        // a `public fun` with a `baseOffset = 0` default instead — matching legacy
+        // `PeekFrameSizeEmitter.buildPeekFun(implementsCodec = false)`.
+        if (canDecode) {
+            val implementsCodec = plan.dir == Direction.Bidirectional
+            type.addFunction(buildPeekFrameSizeFun(peekPlan, minHeader, implementsCodec))
+            type.addFunction(buildSuspendingPeekFrameSizeFun(peekPlan, minHeader))
+        }
 
         // ContextDecode contracts (e.g. variants whose discriminator field comes
         // from `context[Key]` rather than the buffer).
@@ -107,12 +125,23 @@ class LeafEmitter(
             fileBuilder.addImport("com.ditchoom.buffer", "readLengthPrefixedUtf8String")
             fileBuilder.addImport("com.ditchoom.buffer", "writeLengthPrefixedUtf8String")
         }
+        // Slice 3: a Collection_ field with `LengthSource.Inline.Varint` (the
+        // MQTT v5 properties shape) needs the variable-byte helpers AND the
+        // *LengthPrefixed write helper for byte-prefixed slice writes.
+        val collectionVarint =
+            fields.any { f ->
+                val s = f.strategy
+                s is FieldStrategy.Collection_ &&
+                    s.length is LengthSource.Inline &&
+                    s.length.encoding == LengthEncoding.Varint
+            }
         val needsVarint =
             fields.any { f ->
                 val s = f.strategy
                 s is FieldStrategy.VarInt ||
                     (s is FieldStrategy.StringField && s.length is LengthSource.Inline && s.length.encoding == LengthEncoding.Varint)
-            }
+            } ||
+                collectionVarint
         if (needsVarint) {
             fileBuilder.addImport("com.ditchoom.buffer", "readVariableByteInteger")
             fileBuilder.addImport("com.ditchoom.buffer", "writeVariableByteInteger")
@@ -122,6 +151,37 @@ class LeafEmitter(
         val needsUtf8Length = fields.any { it.strategy is FieldStrategy.StringField }
         if (needsUtf8Length) {
             fileBuilder.addImport("com.ditchoom.buffer", "utf8Length")
+        }
+        // Slice 3: any multi-byte primitive marked Little-endian lowers to a
+        // `Short.reverseBytes()` / `Int.reverseBytes()` / `Long.reverseBytes()` call,
+        // mirroring legacy `Primitive.swappedReadExpr` / `swappedWriteExpr`. Add
+        // the matching extension import. Single-byte kinds skip the swap and add
+        // no import.
+        val needsReverseBytes =
+            fields.any { f ->
+                val s = f.strategy
+                s is FieldStrategy.Primitive &&
+                    s.order == com.ditchoom.buffer.codec.processor.ir.Endianness.Little &&
+                    !FieldOps.isSingleByte(s.kind)
+            }
+        if (needsReverseBytes) {
+            fileBuilder.addImport("com.ditchoom.buffer", "reverseBytes")
+        }
+        // Slice 3: when a Collection_ field's element type lives in a different
+        // package than the host codec, add an import for the element type's
+        // simple name so `buildList<Element>` resolves. Mirrors legacy
+        // `CodecGenerator.addExtensionImports` cross-package handling.
+        val currentPackage = fileBuilder.packageName
+        for (f in fields) {
+            val s = f.strategy
+            if (s is FieldStrategy.Collection_) {
+                val elementFqn = s.elementCodec.elementType.canonical
+                val elementPkg = elementFqn.substringBeforeLast('.', missingDelimiterValue = "")
+                val elementSimple = elementFqn.substringAfterLast('.').substringBefore('$')
+                if (elementPkg.isNotBlank() && elementPkg != currentPackage) {
+                    fileBuilder.addImport(elementPkg, elementSimple)
+                }
+            }
         }
     }
 
@@ -229,33 +289,37 @@ class LeafEmitter(
     private fun decodeFieldInline(field: FieldPlan): CodeBlock? {
         if (field.conditionality !is Conditionality.Always) return null
         return when (val s = field.strategy) {
-            is FieldStrategy.Primitive -> CodeBlock.of("%L", primitiveReadExpr(s.kind))
+            is FieldStrategy.Primitive -> CodeBlock.of("%L", primitiveReadExpr(s.kind, s.order))
             else -> null
         }
     }
 
     /** Read expression for a primitive — Boolean lowers to `byte != 0.toByte()`. */
-    private fun primitiveReadExpr(kind: com.ditchoom.buffer.codec.processor.ir.PrimitiveKind): String =
+    private fun primitiveReadExpr(
+        kind: PrimitiveKind,
+        order: Endianness = Endianness.Big,
+    ): String =
         when (kind) {
-            com.ditchoom.buffer.codec.processor.ir.PrimitiveKind.Bool -> "buffer.readByte() != 0.toByte()"
-            else -> "buffer.${FieldOps.readCall(kind)}()"
+            PrimitiveKind.Bool -> "buffer.readByte() != 0.toByte()"
+            else -> FieldOps.readExpr(kind, order)
         }
 
     /** Write statement for a primitive — Boolean lowers to a conditional `writeByte`. */
     private fun primitiveWriteExpr(
-        kind: com.ditchoom.buffer.codec.processor.ir.PrimitiveKind,
+        kind: PrimitiveKind,
         valueExpr: String,
+        order: Endianness = Endianness.Big,
     ): String =
         when (kind) {
-            com.ditchoom.buffer.codec.processor.ir.PrimitiveKind.Bool ->
+            PrimitiveKind.Bool ->
                 "buffer.writeByte(if ($valueExpr) 1.toByte() else 0.toByte())"
-            else -> "buffer.${FieldOps.writeCall(kind)}($valueExpr)"
+            else -> FieldOps.writeExpr(kind, order, valueExpr)
         }
 
     private fun decodeStatement(field: FieldPlan): CodeBlock? =
         when (val s = field.strategy) {
             is FieldStrategy.Primitive -> {
-                val read = primitiveReadExpr(s.kind)
+                val read = primitiveReadExpr(s.kind, s.order)
                 wrapConditional(field, "val ${field.name} = $read\n")
             }
 
@@ -285,13 +349,57 @@ class LeafEmitter(
                     registry.codecOf(s.parentDispatchOn),
                 )
 
-            is FieldStrategy.Spi -> wrapConditional(field, "// TODO: SPI strategy not yet emitted\n")
+            // SPI: descriptor.raw is the inline read expression (e.g. `MyCodec.decode(buffer, context)`).
+            // Mirrors legacy `FieldReadStrategy.Custom` lowering — the provider produces the call site's
+            // text directly and the emitter substitutes it.
+            is FieldStrategy.Spi ->
+                wrapConditional(field, "val ${field.name} = ${s.descriptor.raw}\n")
             is FieldStrategy.VarInt ->
                 wrapConditional(field, "val ${field.name} = buffer.readVariableByteInteger()\n")
             is FieldStrategy.StringField ->
                 wrapConditional(field, "val ${field.name} = ${stringDecodeExpr(s.length)}\n")
-            is FieldStrategy.Collection_ -> wrapConditional(field, "// TODO: Collection strategy not yet emitted\n")
+            is FieldStrategy.Collection_ ->
+                wrapConditional(field, "val ${field.name} = ${collectionDecodeExpr(s)}\n")
         }
+
+    /**
+     * Mirrors legacy `FieldCodeEmitter.readCollectionExpression` byte-for-byte for the
+     * length sources the new pipeline supports:
+     *
+     *  - [LengthSource.Inline] — the MQTT v5 properties shape (Varint byte-count prefix +
+     *    slice). Also Byte/Short/Int prefix variants.
+     *  - [LengthSource.FromField] — count prefix from a sibling field (e.g. SubscribeByCount).
+     *  - [LengthSource.Remaining] — loop until the buffer slice is empty (e.g. SubscribeRequest).
+     */
+    private fun collectionDecodeExpr(s: FieldStrategy.Collection_): String {
+        val codec = s.elementCodec.codec.canonicalName
+        val typeSimple =
+            s.elementCodec.elementType.canonical
+                .substringAfterLast('.')
+        return when (val l = s.length) {
+            is LengthSource.FromField ->
+                "buildList<$typeSimple> { repeat(${l.name}.toInt()) { add($codec.decode(buffer, context)) } }"
+            is LengthSource.Remaining ->
+                if (l.trailingBytes > 0) {
+                    "buildList<$typeSimple> { while (buffer.remaining() > ${l.trailingBytes}) " +
+                        "{ add($codec.decode(buffer, context)) } }"
+                } else {
+                    "buildList<$typeSimple> { while (buffer.remaining() > 0) { add($codec.decode(buffer, context)) } }"
+                }
+            is LengthSource.Inline -> {
+                val readLen =
+                    when (l.encoding) {
+                        LengthEncoding.Byte -> "buffer.readByte().toInt() and 0xFF"
+                        LengthEncoding.Short -> "buffer.readUnsignedShort().toInt()"
+                        LengthEncoding.Int -> "buffer.readInt()"
+                        LengthEncoding.Varint -> "buffer.readVariableByteInteger()"
+                    }
+                "run { val _len = $readLen; val _slice = buffer.readBytes(_len); " +
+                    "buildList<$typeSimple> { while (_slice.remaining() > 0) " +
+                    "{ add($codec.decode(_slice, context)) } } }"
+            }
+        }
+    }
 
     /** Mirrors legacy `FieldCodeEmitter.readExpression` for `LengthPrefixedStringField` and friends. */
     private fun stringDecodeExpr(length: LengthSource): String =
@@ -320,8 +428,10 @@ class LeafEmitter(
         innerText: String,
     ): CodeBlock {
         val cb = CodeBlock.builder()
-        if (field.conditionality is Conditionality.WhenExpr) {
-            cb.add("val %L = if (buffer.remaining() >= 1) {\n", field.name)
+        val cond = field.conditionality
+        if (cond is Conditionality.WhenExpr) {
+            val expr = lowerBoolExprDecode(cond.expr)
+            cb.add("val %L = if (%L) {\n", field.name, expr)
             // Strip leading `val name = ` and trailing newline from inner.
             val stripped = innerText.substringAfter(" = ").trimEnd()
             cb.indent()
@@ -337,6 +447,55 @@ class LeafEmitter(
         }
         return cb.build()
     }
+
+    /**
+     * Lower [BooleanExpression] to a Kotlin expression suitable for the **decode**
+     * site, where `RemainingGte` resolves against `buffer.remaining()` and
+     * `FieldRef` paths resolve against locals already-declared earlier in the
+     * decode body (PhaseB ensures forward references aren't possible at
+     * decode-time, since fields decode in declaration order).
+     */
+    private fun lowerBoolExprDecode(expr: BooleanExpression): String =
+        when (expr) {
+            is BooleanExpression.RemainingGte -> "buffer.remaining() >= ${expr.min}"
+            is BooleanExpression.FieldRef -> expr.path.joinToString(".")
+            is BooleanExpression.Eq ->
+                "${lowerBoolExprDecode(expr.lhs)} == ${expr.rhs}"
+            is BooleanExpression.Gt ->
+                "${lowerBoolExprDecode(expr.lhs)} > ${expr.rhs}"
+        }
+
+    /**
+     * Lower [BooleanExpression] to a Kotlin expression suitable for the
+     * **encode** / **wireSize** site, where `FieldRef` paths walk from
+     * `value.<head>.<rest>...`.
+     */
+    private fun lowerBoolExprEncode(expr: BooleanExpression): String =
+        when (expr) {
+            is BooleanExpression.RemainingGte ->
+                // Encode side has no `remaining()` semantics; cascading WhenRemaining
+                // tails encode via the smart-cast local pattern (see buildEncodeFun).
+                // This branch is retained for completeness — it can only arise in
+                // an emit path that doesn't go through buildEncodeFun (none today).
+                "true"
+            is BooleanExpression.FieldRef -> "value.${expr.path.joinToString(".")}"
+            is BooleanExpression.Eq ->
+                "${lowerBoolExprEncode(expr.lhs)} == ${expr.rhs}"
+            is BooleanExpression.Gt ->
+                "${lowerBoolExprEncode(expr.lhs)} > ${expr.rhs}"
+        }
+
+    /**
+     * True when the field's `WhenExpr` conditionality lowers the field to a
+     * **nullable** local — i.e. the field truly couldn't be present on the wire
+     * and the constructor argument is nullable. `RemainingGte` is the canonical
+     * trailing-tail conditional (MQTT v5 PubAck reasonCode); `FieldRef` plus
+     * `Eq`/`Gt` paths share the same nullable-tail semantics.
+     *
+     * The encode side smart-casts on a `value.field` local; the decode side
+     * already returns `null` from the `else` branch.
+     */
+    private fun isNullableConditional(field: FieldPlan): Boolean = field.conditionality is Conditionality.WhenExpr
 
     // -----------------------------------------------------------------------
     // encode
@@ -391,26 +550,61 @@ class LeafEmitter(
             fb.addCode("buffer.%L((%L)%L)\n", writeName, parts, cast)
         }
 
-        // Conditional-cascade encoding: smart-cast on a temporary local at each
-        // depth. We open and close depths around contiguous conditional blocks.
-        var depth = 0
-        for (field in effectiveFields(plan)) {
-            if (field.name in batchedFieldNames) continue
-            if (field.conditionality is Conditionality.WhenExpr) {
-                fb.addCode(
-                    "val %L = value.%L\n",
-                    field.name,
-                    field.name,
-                )
-                fb.addCode("if (%L != null) {\n", field.name)
-                fb.indent { /* indent applied via add */ }
-                depth++
+        // Conditional encoding has two modes (mirrors legacy CodecGenerator's split):
+        //
+        //  * `WhenExpr.RemainingGte` (lowered from `@WhenRemaining`) — cascades.
+        //    The trailing tail of fields is gated by a chain of nested `if (X != null)`
+        //    blocks: when an earlier tail field is null, every following one also
+        //    skips. Mirrors `emitWhenRemainingEncode` byte-for-byte. The legacy
+        //    grammar is "cascade applies only to a contiguous tail of WhenRemaining
+        //    fields"; PhaseB's `WhenRemaining not at tail` validation already
+        //    rejects interleaved cases.
+        //
+        //  * Other `WhenExpr` (path-based `FieldRef`, `Eq`, `Gt`) — independent
+        //    blocks. Each conditional opens and closes its own `if (local != null) { ... }`
+        //    around the field's encode call. The unconditional fields between two
+        //    conditionals encode at depth 0.
+        //
+        // The split lets path-based conditionals interleave with unconditional
+        // fields (e.g. `ConditionalBatchTestMessage` has `cond1`, `cond2`,
+        // `trailer` where `trailer` is unconditional and must always write).
+        val effective = effectiveFields(plan).filter { it.name !in batchedFieldNames }
+        val whenRemainingTail = mutableListOf<FieldPlan>()
+        // Walk back from the tail collecting contiguous WhenRemaining fields.
+        for (i in effective.indices.reversed()) {
+            val f = effective[i]
+            val cond = f.conditionality
+            if (cond is Conditionality.WhenExpr && cond.expr is BooleanExpression.RemainingGte) {
+                whenRemainingTail.add(0, f)
+            } else {
+                break
             }
-            val stmt = encodeStatement(field) ?: continue
-            fb.addCode(stmt)
         }
-        repeat(depth) {
-            fb.addCode("}\n")
+        val whenRemainingNames = whenRemainingTail.map { it.name }.toSet()
+        for (field in effective) {
+            if (field.name in whenRemainingNames) continue
+            val cond = field.conditionality
+            if (cond is Conditionality.WhenExpr) {
+                // Independent block: bind a smart-cast local, null-check, encode.
+                fb.addCode("val %L = value.%L\n", field.name, field.name)
+                fb.addCode("if (%L != null) {\n", field.name)
+                val stmt = encodeStatement(field)
+                if (stmt != null) fb.addCode(stmt)
+                fb.addCode("}\n")
+            } else {
+                val stmt = encodeStatement(field) ?: continue
+                fb.addCode(stmt)
+            }
+        }
+        // Tail cascade for `RemainingGte` chain.
+        if (whenRemainingTail.isNotEmpty()) {
+            for (f in whenRemainingTail) {
+                fb.addCode("val %L = value.%L\n", f.name, f.name)
+                fb.addCode("if (%L != null) {\n", f.name)
+                val stmt = encodeStatement(f)
+                if (stmt != null) fb.addCode(stmt)
+            }
+            repeat(whenRemainingTail.size) { fb.addCode("}\n") }
         }
         return fb.build()
     }
@@ -419,8 +613,8 @@ class LeafEmitter(
         when (val s = field.strategy) {
             is FieldStrategy.Primitive -> {
                 val ref =
-                    if (field.conditionality is Conditionality.WhenExpr) field.name else "value.${field.name}"
-                CodeBlock.of("%L\n", primitiveWriteExpr(s.kind, ref))
+                    if (isNullableConditional(field)) field.name else "value.${field.name}"
+                CodeBlock.of("%L\n", primitiveWriteExpr(s.kind, ref, s.order))
             }
 
             is FieldStrategy.PayloadSlot ->
@@ -439,19 +633,79 @@ class LeafEmitter(
                 CodeBlock.of("%T.encode(buffer, value.%L, context)\n", s.codec, field.name)
 
             is FieldStrategy.DiscriminatorOwned -> null // dispatcher already wrote the bytes
-            is FieldStrategy.Spi -> CodeBlock.of("// TODO: SPI strategy\n")
+            is FieldStrategy.Spi -> {
+                // SPI write descriptors are also embedded as `descriptor.raw`. The
+                // PlanBuilder ensures `raw` carries the encode call with the correct
+                // value reference (e.g. `MyCodec.encode(buffer, value.field, context)`).
+                CodeBlock.of("%L\n", s.descriptor.raw)
+            }
             is FieldStrategy.VarInt -> {
                 val ref =
-                    if (field.conditionality is Conditionality.WhenExpr) field.name else "value.${field.name}"
+                    if (isNullableConditional(field)) field.name else "value.${field.name}"
                 CodeBlock.of("buffer.writeVariableByteInteger(%L)\n", ref)
             }
             is FieldStrategy.StringField -> {
                 val ref =
-                    if (field.conditionality is Conditionality.WhenExpr) field.name else "value.${field.name}"
+                    if (isNullableConditional(field)) field.name else "value.${field.name}"
                 CodeBlock.of("%L\n", stringEncodeExpr(s.length, ref, field.name))
             }
-            is FieldStrategy.Collection_ -> CodeBlock.of("// TODO: Collection strategy\n")
+            is FieldStrategy.Collection_ -> {
+                val ref =
+                    if (isNullableConditional(field)) field.name else "value.${field.name}"
+                CodeBlock.of("%L\n", collectionEncodeExpr(s, ref))
+            }
         }
+
+    /**
+     * Mirrors legacy `FieldCodeEmitter.writeCollectionExpression` byte-for-byte for
+     * the supported length sources.
+     */
+    private fun collectionEncodeExpr(
+        s: FieldStrategy.Collection_,
+        valueExpr: String,
+    ): String {
+        val codec = s.elementCodec.codec.canonicalName
+        return when (val l = s.length) {
+            is LengthSource.FromField,
+            is LengthSource.Remaining,
+            -> "$valueExpr.forEach { $codec.encode(buffer, it, context) }"
+
+            is LengthSource.Inline -> {
+                val encodeBody = "$valueExpr.forEach { $codec.encode(buffer, it, context) }"
+                when (l.encoding) {
+                    LengthEncoding.Varint -> {
+                        // `_l` short-name matches the legacy `emitInlineVarintLengthPrefixed` shape
+                        // with empty fieldName suffix. The legacy emitter passes `fieldName` so the
+                        // suffix becomes `_$fieldName`; for collections the legacy site uses
+                        // the field name too — match that exactly.
+                        val maxBytes = l.maxBytes.takeIf { it in 1..3 } ?: 0
+                        val capCheck =
+                            if (maxBytes in 1..3) {
+                                "require(_l in 0..com.ditchoom.buffer.variableByteMax($maxBytes)) { " +
+                                    "\"field '' encoded length \$_l exceeds maxBytes=$maxBytes " +
+                                    "(max value \${com.ditchoom.buffer.variableByteMax($maxBytes)})\" }; "
+                            } else {
+                                ""
+                            }
+                        "run { val _l = $valueExpr.sumOf { $codec.wireSize(it, context) }; " +
+                            "${capCheck}buffer.writeVariableByteInteger(_l); $encodeBody }"
+                    }
+                    LengthEncoding.Byte ->
+                        "run { val _pos = buffer.position(); buffer.writeByte(0.toByte()); $encodeBody; " +
+                            "val _end = buffer.position(); val _len = _end - _pos - 1; " +
+                            "buffer.position(_pos); buffer.writeByte(_len.toByte()); buffer.position(_end) }"
+                    LengthEncoding.Short ->
+                        "run { val _pos = buffer.position(); buffer.writeShort(0.toShort()); $encodeBody; " +
+                            "val _end = buffer.position(); val _len = _end - _pos - 2; " +
+                            "buffer.position(_pos); buffer.writeShort(_len.toShort()); buffer.position(_end) }"
+                    LengthEncoding.Int ->
+                        "run { val _pos = buffer.position(); buffer.writeInt(0); $encodeBody; " +
+                            "val _end = buffer.position(); val _len = _end - _pos - 4; " +
+                            "buffer.position(_pos); buffer.writeInt(_len); buffer.position(_end) }"
+                }
+            }
+        }
+    }
 
     /** Mirrors legacy `FieldCodeEmitter.writeExpression` string branches. */
     private fun stringEncodeExpr(
@@ -560,12 +814,48 @@ class LeafEmitter(
                 is FieldStrategy.VarInt -> CodeBlock.of("variableByteSizeInt(value.%L)", field.name)
                 is FieldStrategy.StringField ->
                     CodeBlock.of("%L", stringSizeExpr(s.length, "value.${field.name}"))
-                else -> CodeBlock.of("/* TODO size of %L */ 0", field.name)
+                is FieldStrategy.Collection_ ->
+                    CodeBlock.of("%L", collectionSizeExpr(s, "value.${field.name}"))
+                is FieldStrategy.Spi -> {
+                    if (s.descriptor.fixedSize >= 0) {
+                        CodeBlock.of("%L", s.descriptor.fixedSize)
+                    } else {
+                        // SPI variable-size: validator forbids fixedSize=-1 with a blank raw
+                        // (SpiDescriptorChecker), so this branch shouldn't fire when the
+                        // pipeline routes a class through. Defensive: emit 0 to keep emit safe.
+                        CodeBlock.of("0")
+                    }
+                }
             }
         return if (field.conditionality is Conditionality.WhenExpr) {
             CodeBlock.of("(if (value.%L != null) %L else 0)", field.name, raw)
         } else {
             raw
+        }
+    }
+
+    /**
+     * Mirrors legacy `WireSizeEmitter.wireSizeExpression` for `CollectionField` —
+     * sum of element wireSize plus the prefix bytes when the length is inline.
+     */
+    private fun collectionSizeExpr(
+        s: FieldStrategy.Collection_,
+        valueExpr: String,
+    ): String {
+        val codec = s.elementCodec.codec.canonicalName
+        val sumExpr = "$valueExpr.sumOf { $codec.wireSize(it, context) }"
+        return when (val l = s.length) {
+            is LengthSource.FromField,
+            is LengthSource.Remaining,
+            -> sumExpr
+            is LengthSource.Inline ->
+                when (l.encoding) {
+                    LengthEncoding.Byte -> "(1 + $sumExpr)"
+                    LengthEncoding.Short -> "(2 + $sumExpr)"
+                    LengthEncoding.Int -> "(4 + $sumExpr)"
+                    LengthEncoding.Varint ->
+                        "run { val _b = $sumExpr; variableByteSizeInt(_b) + _b }"
+                }
         }
     }
 
@@ -594,14 +884,19 @@ class LeafEmitter(
     private fun buildPeekFrameSizeFun(
         plan: PeekPlan?,
         minHeader: Int,
+        implementsCodec: Boolean = true,
     ): FunSpec {
         val fb =
             FunSpec
                 .builder("peekFrameSize")
-                .addModifiers(KModifier.OVERRIDE)
                 .addParameter("stream", Names.StreamProcessor)
-                .addParameter("baseOffset", INT)
-                .returns(Names.PeekResult)
+        if (implementsCodec) {
+            fb.addModifiers(KModifier.OVERRIDE)
+            fb.addParameter("baseOffset", INT)
+        } else {
+            fb.addParameter(ParameterSpec.builder("baseOffset", INT).defaultValue("0").build())
+        }
+        fb.returns(Names.PeekResult)
         emitPeekBody(fb, plan, minHeader)
         return fb.build()
     }

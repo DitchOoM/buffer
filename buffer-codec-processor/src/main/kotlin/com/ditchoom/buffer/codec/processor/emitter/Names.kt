@@ -10,6 +10,8 @@ internal object Names {
     val ReadBuffer = ClassName("com.ditchoom.buffer", "ReadBuffer")
     val WriteBuffer = ClassName("com.ditchoom.buffer", "WriteBuffer")
     val Codec = ClassName("com.ditchoom.buffer.codec", "Codec")
+    val Decoder = ClassName("com.ditchoom.buffer.codec", "Decoder")
+    val Encoder = ClassName("com.ditchoom.buffer.codec", "Encoder")
     val CodecContext = ClassName("com.ditchoom.buffer.codec", "CodecContext")
     val DecodeContext = ClassName("com.ditchoom.buffer.codec", "DecodeContext")
     val EncodeContext = ClassName("com.ditchoom.buffer.codec", "EncodeContext")

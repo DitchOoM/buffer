@@ -81,6 +81,19 @@ class PinnedSnapshotTest {
         )
     }
 
+    /**
+     * Slice 3 hard-bar: `Collection_` strategy with `LengthSource.Inline.Varint`
+     * (MQTT v5 properties shape) emits the pinned text.
+     */
+    @Test
+    fun `MqttPropertyShape emits the pinned snapshot`() {
+        val emitted = emitText(EmitterFixtures.mqttPropertyShape(), EmitterFixtures.cn("MqttPropertyShape"))
+        assertEquals(
+            CapturedSnapshots.normalise(CapturedSnapshots.MqttPropertyShape),
+            CapturedSnapshots.normalise(emitted),
+        )
+    }
+
     /** Banned-pattern: per the rearchitecture plan, fixed-width wireSize must
      * not emit `var _size = 0; _size += 1; return _size`. */
     @Test
