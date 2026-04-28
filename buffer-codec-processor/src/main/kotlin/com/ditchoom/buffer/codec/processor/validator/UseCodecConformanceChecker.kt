@@ -75,12 +75,18 @@ internal object UseCodecConformanceChecker {
             val match =
                 metadata.directlyDeclaredSupertypes.firstOrNull { it.fqn in CODEC_SHAPED_FQNS }
             if (match == null) {
+                // Wording mirrors legacy `FieldAnalyzer`'s diagnostic so the existing
+                // test assertions (`contains("does not implement")` +
+                // `contains("Codec<T>")` etc.) keep matching after the gate flip.
+                val codecShort = codecFqn.substringAfterLast('.')
                 errors +=
                     KspError(
                         message =
-                            "@UseCodec(codec = $codecFqn::class) on '${owner.canonical}.${f.name}' " +
-                                "must directly extend Codec<T>, Encoder<T>, or Decoder<T>. Got " +
-                                "directly-declared supertypes: ${describeSupertypes(metadata.directlyDeclaredSupertypes)}.",
+                            "@UseCodec on field '${f.name}': '$codecShort' does not implement " +
+                                "Codec<T>, Decoder<T>, or Encoder<T>. To fix, make it implement one of:\n" +
+                                "  • Codec<T> — for bidirectional encode/decode\n" +
+                                "  • Decoder<T> — for decode-only (e.g., display without re-encoding)\n" +
+                                "  • Encoder<T> — for encode-only (e.g., write-only serialization)",
                         sourceFqn = "${owner.canonical}.${f.name}",
                     )
             }

@@ -812,7 +812,7 @@ class LeafEmitter(
                 is FieldStrategy.NestedMessage ->
                     CodeBlock.of("%T.wireSize(value.%L, context)", s.codec, field.name)
                 is FieldStrategy.External ->
-                    CodeBlock.of("%T.wireSize(value.%L)", s.codec, field.name)
+                    CodeBlock.of("%T.wireSize(value.%L, context)", s.codec, field.name)
                 is FieldStrategy.DiscriminatorOwned -> CodeBlock.of("0")
                 is FieldStrategy.VarInt -> CodeBlock.of("variableByteSizeInt(value.%L)", field.name)
                 is FieldStrategy.StringField ->

@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.processor.planbuilder
 
+import com.ditchoom.buffer.codec.processor.discovery.RawClassMetadata
 import com.ditchoom.buffer.codec.processor.discovery.RawSymbol
 import com.ditchoom.buffer.codec.processor.ir.Direction
 import com.ditchoom.buffer.codec.processor.ir.DiscriminatorShape
@@ -36,6 +37,7 @@ internal object VariantPlanBuilder {
         parentDispatch: DispatchShape,
         scope: Map<String, RawSymbol>,
         classWireOrder: Endianness,
+        externalClasses: Map<String, RawClassMetadata> = emptyMap(),
     ): Either<Nel<KspError>, VariantPlan> {
         val errors = mutableListOf<KspError>()
         val packetType = variantSymbol.annotations.find(AnnotationFqns.PacketType)
@@ -75,7 +77,7 @@ internal object VariantPlanBuilder {
 
         val selfEncodes = packetRange != null
 
-        val direction = resolveVariantDirection(variantSymbol, parentRoot)
+        val baseDirection = resolveVariantDirection(variantSymbol, parentRoot)
 
         val (fields, payloadTypeParams, payloadFieldRefs, fieldErrors) =
             buildVariantFields(
@@ -85,6 +87,26 @@ internal object VariantPlanBuilder {
                 classWireOrder = classWireOrder,
             )
         errors += fieldErrors
+
+        // Slice 5b: refine variant direction from field strategies. Mirrors the
+        // `buildDataLike` refinement so a variant whose `@UseCodec` field references
+        // a `Decoder`-only class (or whose nested `@ProtocolMessage` field is decode-only)
+        // surfaces as `Direction.DecodeOnly`. Without this the sealed-root reconciler
+        // sees `Bidirectional` and emits a `Codec<T>` dispatcher referencing variant
+        // overloads that don't exist.
+        val variantExplicit = DirectionResolver.classDirection(variantSymbol)
+        val parentExplicit = DirectionResolver.classDirection(parentRoot)
+        val explicitForRefine = variantExplicit ?: parentExplicit
+        val direction =
+            FieldDirectionInference.refine(
+                fields = fields,
+                explicit = explicitForRefine,
+                fallback = baseDirection,
+                scope = scope,
+                externalClasses = externalClasses,
+                ownerFqn = variantSymbol.fqn,
+                errors = errors,
+            )
 
         // @PacketTypeRange requires @DiscriminatorField on a variant constructor parameter
         if (packetRange != null) {

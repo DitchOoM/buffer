@@ -52,6 +52,7 @@ object PlanBuilder {
                     classWireOrder = classWireOrder,
                     scope = effectiveScope,
                     parentDispatchType = parentDispatchTypeFor(symbol, effectiveScope),
+                    externalClasses = externalClasses,
                 )
             is RawSymbol.SealedRoot ->
                 buildSealedRoot(
@@ -122,6 +123,7 @@ object PlanBuilder {
         classWireOrder: Endianness,
         scope: Map<String, RawSymbol>,
         parentDispatchType: TypeFqn?,
+        externalClasses: Map<String, RawClassMetadata>,
     ): Either<Nel<KspError>, Plan> {
         val payloadTypeParams =
             symbol.typeParameters
@@ -148,7 +150,7 @@ object PlanBuilder {
                 is Either.Right -> accumulated += res.value
             }
         }
-        val dirOrErrors =
+        val explicitDir =
             when (direction) {
                 is Either.Left -> {
                     errors += direction.value.all
@@ -156,6 +158,23 @@ object PlanBuilder {
                 }
                 is Either.Right -> direction.value
             }
+        // Slice 5b: refine direction from field strategies. When the class has no
+        // explicit `@Decode`/`@Encode`/`direction = ...` marker (RawDirection.Default
+        // mapped to Bidirectional), narrow the direction by inspecting field-level
+        // codec interfaces: a field whose `@UseCodec` references a `Decoder`-only
+        // class makes the whole class decode-only; same for encode-only. Mirrors
+        // legacy `inferDirection` + `validateDirection`.
+        val classExplicit = DirectionResolver.classDirection(symbol)
+        val dirOrErrors =
+            FieldDirectionInference.refine(
+                fields = accumulated,
+                explicit = classExplicit,
+                fallback = explicitDir,
+                scope = scope,
+                externalClasses = externalClasses,
+                ownerFqn = symbol.fqn,
+                errors = errors,
+            )
         if (errors.isNotEmpty()) {
             return Nel.fromList(errors).left()
         }
@@ -227,7 +246,7 @@ object PlanBuilder {
                     )
                 continue
             }
-            when (val v = VariantPlanBuilder.build(child, symbol, dispatch, scope, classWireOrder)) {
+            when (val v = VariantPlanBuilder.build(child, symbol, dispatch, scope, classWireOrder, externalClasses)) {
                 is Either.Left -> errors += v.value.all
                 is Either.Right -> variants += v.value
             }

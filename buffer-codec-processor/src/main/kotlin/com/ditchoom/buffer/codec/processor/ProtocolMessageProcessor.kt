@@ -4,8 +4,6 @@ import com.ditchoom.buffer.codec.processor.discovery.Discovery
 import com.ditchoom.buffer.codec.processor.discovery.DiscoveryResult
 import com.ditchoom.buffer.codec.processor.emitter.CodecEmitter
 import com.ditchoom.buffer.codec.processor.emitter.TypeRegistry
-import com.ditchoom.buffer.codec.processor.ir.Conditionality
-import com.ditchoom.buffer.codec.processor.ir.FieldStrategy
 import com.ditchoom.buffer.codec.processor.ir.Plan
 import com.ditchoom.buffer.codec.processor.ir.TypeFqn
 import com.ditchoom.buffer.codec.processor.planbuilder.Either
@@ -96,190 +94,47 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Phase 9 Slice 4: returns `true` when [plan] falls inside the slice's whitelist.
+     * Phase 9 Slice 5b: gate flipped — every Plan flows through the new pipeline.
      *
-     * Currently active whitelist:
-     *  * [Plan.Object_] — zero-byte singletons (e.g. MqttPingResponse, WsContinuation).
-     *  * [Plan.Leaf] with no batches and every field's strategy in
-     *    `{Primitive, VarInt, StringField, Collection_, Spi}` and conditionality in
-     *    `{Always, WhenExpr}`. Direction may be any of `{Bidirectional, DecodeOnly,
-     *    EncodeOnly}`. Class-level `@WireOrder(LittleEndian)` lowers to per-Primitive
-     *    `Endianness.Little` which the LeafEmitter handles via
-     *    [com.ditchoom.buffer.codec.processor.emitter.FieldOps.readExpr] /
-     *    [com.ditchoom.buffer.codec.processor.emitter.FieldOps.writeExpr].
-     *  * [Plan.Sealed_] when:
-     *     - Every variant is [com.ditchoom.buffer.codec.processor.ir.VariantPlan.NoPayload]
-     *       (typed-`@Payload` lambdas remain on Slice 5).
-     *     - Every variant's fields fit Slice 3's strategy whitelist.
-     *     - Dispatch is `RawByte`, or `TypedDiscriminator` with a value-class
-     *       discriminator. Data-class discriminators with non-self-encoding
-     *       variants need multi-arg constructor projection that ships in Slice 5/6.
-     *     - Framing is `Unframed`, `PeekOnly`, or `BodyLength`.
-     *     - For data-class discriminators (special case): only when ALL variants
-     *       self-encode the discriminator (Range arms or `@DiscriminatorField`-typed
-     *       variant fields). The dispatcher then never writes the discriminator
-     *       itself, so the multi-arg ctor projection is moot.
-     */
-    private fun coverable(plan: Plan): Boolean =
-        when (plan) {
-            is Plan.Object_ -> true
-            is Plan.Leaf ->
-                plan.batches.isEmpty() &&
-                    plan.fields.all { f ->
-                        coverableConditionality(f.conditionality) && coverableStrategy(f.strategy)
-                    }
-            is Plan.Sealed_ -> coverableSealed(plan)
-        }
-
-    /**
-     * Returns `true` when a sealed root falls inside Slice 4's whitelist (see
-     * [coverable] doc for the rule list).
+     * The Discovery → PlanBuilder → Validator → CodecEmitter pipeline is now the
+     * sole emitter. The previous per-strategy whitelist (Slices 1-5a) accumulated
+     * each branch as the pipeline learned to emit it; with Slice 5.5's PhaseA/B
+     * port (`@DispatchValue` derived-getter resolution, sealed-root direction
+     * inference, asymmetric SPI), every Plan variant is fully coverable.
      *
-     * Rationale for each gate:
-     *  - WithPayload variants ship in Slice 5 with the typed-lambda fan-out. Their
-     *    `decode(P)` / `encode(P)` lambdas, `decodeFromContext` overload, and
-     *    `<P>` star-projection cast are not yet emitted by the new pipeline.
-     *  - Data-class discriminators with non-self-encoding variants need the
-     *    dispatcher to project each variant's `@DiscriminatorField`-marked
-     *    constructor params into the discriminator's ctor — that projection is
-     *    non-trivial and ships in Slice 5 alongside the Payload work.
-     *  - Variant fields are routed through [LeafEmitter] in Slice 4 only after
-     *    each variant separately satisfies the leaf whitelist (Slice 3 strategy
-     *    set + conditionality).
+     * The function is preserved (rather than inlined into `tryPipeline`) so the
+     * codepath stays uniform with prior slices and any regression bisect can
+     * temporarily revert the body. Slice 6 deletes the legacy emitter entirely.
      */
-    private fun coverableSealed(plan: Plan.Sealed_): Boolean {
-        // Slice 5a: WithPayload variants are now covered. Per-variant codec emission
-        // (including the typed-lambda overloads + DecodeKey/EncodeKey/SizeKey context keys)
-        // continues to come from the legacy `CodecGenerator`; the dispatcher emitted by
-        // `SealedEmitter` only references each variant codec via `decode` /
-        // `decodeFromContext` / `wireSizeFromContext` etc. — all stable across emitters.
-        //
-        // We still gate on variant strategy coverage because variants whose fields have
-        // strategies the new pipeline doesn't yet infer direction from (e.g. `External`
-        // / `@UseCodec` referencing a `Decoder`-only codec) make the sealed root's
-        // direction inference under-precise — PlanBuilder's `DirectionResolver.resolve`
-        // only consults the class-level `@Decode` / `@Encode` markers, not field
-        // strategies. Letting those classes through would emit a `Codec<T>` dispatcher
-        // for what should be a `Decoder<T>`. Slice 6 ports field-level direction
-        // inference into PhaseB; until then the whitelist excludes them.
-        for (variant in plan.variants) {
-            if (variant.fields.any { f ->
-                    !(coverableConditionality(f.conditionality) && coverableStrategyForVariant(f.strategy))
-                }
-            ) {
-                return false
-            }
-        }
-        // Slice 5.5: sealed dispatchers with WithPayload variants need the typed-lambda
-        // overloads (`decode<P>(buf, lambda)` / `encode<P>(buf, value, lambda)` /
-        // `wireSize<P>(value, sizeOf)`) which the new SealedEmitter doesn't yet emit.
-        // The legacy `SealedDispatchGenerator` does. Until the typed-lambda fan-out
-        // ships in Slice 6, refuse coverage for such dispatchers and let legacy own
-        // them. The standard `decode(buf, ctx)` shape the new emitter does emit is
-        // not enough for consumers that call the typed-lambda overload directly
-        // (e.g. `DispatchedFrameCodec.decode<String>(buf) { pr -> ... }`).
-        if (plan.variants.any { it is com.ditchoom.buffer.codec.processor.ir.VariantPlan.WithPayload }) {
-            return false
-        }
-        return when (val d = plan.dispatch) {
-            is com.ditchoom.buffer.codec.processor.ir.DispatchShape.RawByte -> true
-            is com.ditchoom.buffer.codec.processor.ir.DispatchShape.TypedDiscriminator ->
-                when (d.disc) {
-                    is com.ditchoom.buffer.codec.processor.ir.DiscriminatorShape.ValueClass -> true
-                    is com.ditchoom.buffer.codec.processor.ir.DiscriminatorShape.DataClass -> {
-                        // Only safe when every variant self-encodes — otherwise
-                        // the dispatcher needs multi-arg ctor projection.
-                        plan.variants.all { v ->
-                            v.selfEncodes ||
-                                v.fields.any { it.strategy is FieldStrategy.DiscriminatorOwned }
-                        }
-                    }
-                }
-        }
-    }
+    @Suppress("UNUSED_PARAMETER")
+    private fun coverable(plan: Plan): Boolean = true
 
     /**
-     * Strategy whitelist for variant constructor parameters. Identical to
-     * [coverableStrategy] but accepts `FieldStrategy.DiscriminatorOwned` and
-     * `FieldStrategy.NestedMessage` because variants frequently carry the
-     * discriminator value as a typed `val header: Disc` parameter (auto-detected
-     * to `DiscriminatorOwned` in legacy; explicit annotation in the new IR).
-     */
-    private fun coverableStrategyForVariant(strategy: FieldStrategy): Boolean =
-        when (strategy) {
-            is FieldStrategy.DiscriminatorOwned -> true
-            // Slice 5a: variants with @Payload type parameters carry `PayloadSlot` fields
-            // whose decode/encode is owned by the legacy variant codec emitter (typed-lambda
-            // overloads). The dispatcher only invokes them via `decodeFromContext` /
-            // `encodeFromContext` / `wireSizeFromContext`, so the dispatcher itself doesn't
-            // need to lower PayloadSlot — but the field has to be coverable for the variant
-            // overall to flow through.
-            is FieldStrategy.PayloadSlot -> true
-            // Slice 5a: nested @ProtocolMessage fields on variants are coverable. The variant
-            // codec is legacy-emitted and resolves them; the dispatcher only invokes the
-            // variant codec's `decode` / `encode` overloads.
-            is FieldStrategy.NestedMessage -> true
-            else -> coverableStrategy(strategy)
-        }
-
-    /**
-     * Slice 3 covers `Always` and `WhenExpr` conditionality. PhaseB lowers all
-     * surface annotations (`@When` path/remaining/expr, `@WhenRemaining`,
-     * `@WhenTrue`) into a single [Conditionality.WhenExpr] AST.
-     */
-    private fun coverableConditionality(c: Conditionality): Boolean =
-        when (c) {
-            is Conditionality.Always -> true
-            is Conditionality.WhenExpr -> true
-        }
-
-    /**
-     * Slice 3 covers Primitive (natural width — custom `@WireBytes` widths stay on
-     * the legacy path), VarInt, StringField, Collection_, and Spi. `Endianness` is
-     * threaded through the LeafEmitter via FieldOps; both Big and Little are
-     * supported (LE lowers to `.reverseBytes()` swaps, mirroring legacy
-     * `Primitive.swappedReadExpr` / `swappedWriteExpr`).
-     */
-    private fun coverableStrategy(strategy: FieldStrategy): Boolean =
-        when (strategy) {
-            is FieldStrategy.Primitive -> {
-                val natural =
-                    com.ditchoom.buffer.codec.processor.planbuilder.PrimitiveTypes
-                        .naturalWireBytes(strategy.kind)
-                strategy.wireBytes == natural
-            }
-            is FieldStrategy.VarInt -> true
-            is FieldStrategy.StringField -> true
-            is FieldStrategy.Collection_ -> true
-            is FieldStrategy.Spi -> {
-                // Slice 3 emits SPI fields with a fixed wire size (descriptor.fixedSize >= 0).
-                // Slice 5a expands coverage to variable-size SPI: when fixedSize == -1, the
-                // descriptor must carry a non-blank `wireSizeRaw` so LeafEmitter can substitute
-                // a runtime size expression (mirrors legacy
-                // `FieldReadStrategy.Custom.descriptor.wireSizeFunction`). Slice 5.5 splits
-                // `raw` into `decodeRaw` / `encodeRaw`; we accept the descriptor when EITHER
-                // side has a non-blank expression so asymmetric SPI providers cross the gate.
-                val hasInline =
-                    strategy.descriptor.decodeRaw.isNotBlank() ||
-                        strategy.descriptor.encodeRaw.isNotBlank()
-                hasInline &&
-                    (strategy.descriptor.fixedSize >= 0 || strategy.descriptor.wireSizeRaw.isNotBlank())
-            }
-            else -> false
-        }
-
-    /**
-     * Phase 9 Slice 1: extra eligibility filter applied **before** the new pipeline runs.
+     * Phase 9 Slice 5b: residual eligibility filter for legacy-only diagnostics.
      *
-     * Catches conditions that the legacy emitter rejects/handles but [PlanBuilder] silently
-     * accepts — letting the legacy path speak so its diagnostic stays the user-visible one:
+     * The `coverable()` gate is now unconditionally true — every coverable Plan
+     * flows through the new pipeline. This filter remains because three classes
+     * of input still rely on legacy diagnostics that PhaseB / Validator do not
+     * yet emit:
      *
-     *  * `@DispatchOn` on a `data object` — legacy rejects with a tailored error message
-     *    that references the annotation by name; the new pipeline currently treats the
-     *    object as a no-op zero-byte codec. Reserved for Slice 4 reconciliation.
-     *  * Constructor parameters carrying a custom-provider annotation FQN — the legacy
-     *    SPI dispatch path is the only one that knows how to lower them; the new
-     *    [PlanBuilder] would silently classify the field as a primitive.
+     *  * `@DispatchOn` on a non-sealed symbol (object / data class) — legacy
+     *    emits a tailored "@DispatchOn is not valid on an object" error that
+     *    references the annotation by name. PhaseB does not look at `@DispatchOn`
+     *    on non-sealed symbols at all (silently treated as a no-op zero-byte
+     *    codec). Slice 6+ would port the diagnostic; until then defer to legacy.
+     *
+     *  * Constructor parameters carrying a custom-provider annotation FQN
+     *    (`CodecFieldProvider` SPI) — the new [PlanBuilder] does not consume
+     *    `customProviders` and would silently misclassify the field. Production
+     *    consumers (mqtt, websocket) do not register any custom providers, so
+     *    this branch is a defensive guard for downstream users who do.
+     *
+     *  * Malformed conditional fields — legacy `ConditionalValidator` enforces
+     *    nullability, default-value presence, tail-position, and `minBytes > 0`
+     *    on conditional fields. The new pipeline does not yet enforce these
+     *    (PhaseB happily accepts a non-nullable conditional field). Defer to
+     *    legacy via [conditionalShapeOk] preflight so the user sees the legacy
+     *    diagnostic rather than a downstream NPE in the generated codec.
      */
     private fun pipelineEligible(symbol: com.ditchoom.buffer.codec.processor.discovery.RawSymbol): Boolean {
         // Slice 5.5: `@DispatchOn` on a sealed root is now eligible to cross the
@@ -307,6 +162,61 @@ class ProtocolMessageProcessor(
                     if (ann.fqn in customProviders.keys) return false
                 }
             }
+            // Slice 5b: top-level data classes carrying `@Payload` type parameters
+            // need the typed-lambda fan-out (`decode<P>(buf, lambda)` /
+            // `encode<P>(buf, value, lambda)` / `wireSize<P>(value, sizeOf)`) plus
+            // a generic `Codec<T<*>>` superinterface. The new LeafEmitter does not
+            // yet emit these for non-sealed classes — sealed-root WithPayload variants
+            // are handled by SealedEmitter (Slice 5a). Defer top-level `@Payload`
+            // data classes to legacy until the fan-out is ported.
+            val hasPayloadTypeParam =
+                symbol.typeParameters.any { tp ->
+                    tp.annotations.any { it.fqn == "com.ditchoom.buffer.codec.annotations.Payload" }
+                }
+            if (hasPayloadTypeParam) return false
+            // Slice 5b: defer to legacy when a constructor parameter combines
+            // `@LengthPrefixed` / `@LengthFrom` with a NestedMessage or External
+            // (UseCodec) field type. The new pipeline's `FieldStrategyBuilder.buildNestedMessage`
+            // and `buildExternal` ignore the resolved length source — the codec
+            // should emit a length prefix (and slice the body for decode) before
+            // delegating, but currently it just calls `NestedCodec.encode/decode`.
+            // The legacy `FieldCodeEmitter` handles this correctly for varint /
+            // short / int / byte prefixes. Defer until the IR + emitter port lands.
+            //
+            // Mqtt + websocket consumer suites do not exercise this combination
+            // (their `@LengthPrefixed` fields are all String / Collection / @Payload-typed).
+            //
+            // Detection: any param with `@LengthPrefixed` whose declared type is not
+            // a built-in primitive / String / Collection — i.e. references another
+            // `@ProtocolMessage` class (NestedMessage) or has `@UseCodec` (External).
+            val protocolMessageScope = cachedDiscovery?.symbols?.map { it.fqn }?.toSet().orEmpty()
+            for (p in symbol.constructorParameters) {
+                val hasLengthPrefixed =
+                    p.annotations.any { it.fqn == "com.ditchoom.buffer.codec.annotations.LengthPrefixed" }
+                if (!hasLengthPrefixed) continue
+                val typeFqn = p.typeRef.fqn
+                val isString = typeFqn == "kotlin.String"
+                val isCollection =
+                    typeFqn == "kotlin.collections.List" ||
+                        typeFqn == "kotlin.collections.Collection" ||
+                        typeFqn == "kotlin.collections.Set"
+                val hasUseCodec =
+                    p.annotations.any { it.fqn == "com.ditchoom.buffer.codec.annotations.UseCodec" }
+                val isNested = typeFqn in protocolMessageScope
+                if ((hasUseCodec || isNested) && !isString && !isCollection) return false
+            }
+            // Slice 5b: defer to legacy when any param carries `@WireBytes` with a
+            // non-natural width (e.g. `@WireBytes(3)` on a `UInt`). The new
+            // `FieldStrategyBuilder.buildPrimitive` accepts the field but `LeafEmitter`
+            // emits the natural width unconditionally. Legacy `CustomWidthEmitter`
+            // handles 3-byte and similar widths via shift-and-mask sequences.
+            for (p in symbol.constructorParameters) {
+                val wb =
+                    p.annotations.find { it.fqn == "com.ditchoom.buffer.codec.annotations.WireBytes" }
+                if (wb == null) continue
+                // Any explicit @WireBytes is a custom-width annotation; bail.
+                return false
+            }
             // Slice 3: conditional-field rule enforcement is owned by the legacy
             // [com.ditchoom.buffer.codec.processor.ConditionalValidator] (default-value
             // requirement, contiguous-tail constraint, minBytes > 0). Surface those
@@ -314,6 +224,36 @@ class ProtocolMessageProcessor(
             // PhaseB/C — defer to legacy when any conditional annotation is present
             // AND the class violates a preflight check the legacy emitter relies on.
             if (!conditionalShapeOk(symbol)) return false
+        }
+        // Slice 5b: sealed roots with `@Payload` variants need the typed-lambda
+        // dispatcher fan-out (`<P> decode<P>(buffer, payloadDecoder)` /
+        // `<P> encode<P>(buffer, value, payloadEncoder)`). The new SealedEmitter
+        // does NOT yet emit these overloads — it emits only the standard
+        // `decode(buffer, ctx)` override (which routes WithPayload variants
+        // through `decodeFromContext`). buffer-codec-test fixtures call the
+        // typed-lambda form directly and depend on it.
+        //
+        // Real-world MQTT and websocket consumers happen to call the standard
+        // `decode(buffer, ctx)` form (registering payload encoders/decoders via
+        // context keys). They would cross cleanly. But the typed-lambda overload
+        // is part of the new pipeline's public surface; until SealedEmitter emits
+        // both the typed-lambda + the override, defer all sealed roots that have
+        // any `@Payload`-typed variant to legacy.
+        if (symbol is com.ditchoom.buffer.codec.processor.discovery.RawSymbol.SealedRoot) {
+            val discovery = cachedDiscovery
+            if (discovery != null) {
+                val anyVariantHasPayloadTp =
+                    symbol.subclassFqns.any { childFqn ->
+                        val child =
+                            discovery.symbols.firstOrNull { it.fqn == childFqn }
+                                as? com.ditchoom.buffer.codec.processor.discovery.RawSymbol.DataLike
+                                ?: return@any false
+                        child.typeParameters.any { tp ->
+                            tp.annotations.any { it.fqn == "com.ditchoom.buffer.codec.annotations.Payload" }
+                        }
+                    }
+                if (anyVariantHasPayloadTp) return false
+            }
         }
         return true
     }
