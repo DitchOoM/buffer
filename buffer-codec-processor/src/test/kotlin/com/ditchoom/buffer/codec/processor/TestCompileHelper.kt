@@ -271,15 +271,14 @@ private val codecStubs =
     }
     interface DispatchFraming<D : Any> {
         fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult
+        object Inherit : DispatchFraming<Any> {
+            override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = error("sentinel")
+        }
+    }
+    interface BodyLengthFraming<D : Any> : DispatchFraming<D> {
         fun readBodyLength(buffer: ReadBuffer): Int
         fun writeBodyLength(buffer: WriteBuffer, n: Int)
         fun bodyLengthSize(n: Int): Int
-        object Inherit : DispatchFraming<Any> {
-            override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = error("sentinel")
-            override fun readBodyLength(buffer: ReadBuffer): Int = error("sentinel")
-            override fun writeBodyLength(buffer: WriteBuffer, n: Int) { error("sentinel") }
-            override fun bodyLengthSize(n: Int): Int = error("sentinel")
-        }
     }
     """,
     )

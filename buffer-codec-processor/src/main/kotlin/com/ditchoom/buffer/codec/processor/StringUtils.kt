@@ -91,10 +91,17 @@ data class DiscriminatorParam(
  * Resolved framing for a sealed dispatch codec. Carries the FQN of the user-supplied
  * `object` implementing `DispatchFraming<D>` and the discriminator's wire byte count
  * (used by `peekFrameSize` to decide minimum-buffered bytes).
+ *
+ * [isBodyLength] distinguishes the two SPI shapes: when true the framer extends
+ * `BodyLengthFraming<D>` and the dispatcher slices the body via `readBodyLength` /
+ * `writeBodyLength` / `bodyLengthSize`; when false the framer is plain `DispatchFraming<D>`
+ * (peek-only) and the dispatcher hands the post-discriminator buffer slice directly to the
+ * variant codec — used by WebSocket where payload length lives inside the header.
  */
 data class DispatchFramingInfo(
     val framerFqn: String,
     val discriminatorBytes: Int,
+    val isBodyLength: Boolean = true,
 )
 
 data class DispatchOnInfo(
@@ -127,6 +134,10 @@ data class DispatchOnInfo(
     /** Total wire bytes for the discriminator type. */
     val totalWireBytes: Int get() = constructorParams.sumOf { it.wireBytes }
 
-    /** True when the dispatcher delegates body framing to a `DispatchFraming` object. */
-    val hasBodyLength: Boolean get() = framing != null
+    /**
+     * True when the dispatcher slices a body via `BodyLengthFraming.readBodyLength`. False
+     * when [framing] is null *or* when the framer is peek-only `DispatchFraming<D>` — both
+     * cases hand the original (post-discriminator) buffer to the variant codec.
+     */
+    val hasBodyLength: Boolean get() = framing?.isBodyLength == true
 }

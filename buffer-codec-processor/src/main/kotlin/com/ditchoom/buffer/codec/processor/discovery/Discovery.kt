@@ -63,10 +63,13 @@ object Discovery {
 
     /**
      * Collect directly-declared supertype metadata for every class FQN referenced from
-     * `@DispatchOn(framing = X::class)` (sealed-root annotations) and `@UseCodec(codec = X::class)`
-     * (constructor-parameter annotations). PhaseC consumes this map to validate framer /
-     * codec conformance without reaching back into the KSP resolver — the only file that
-     * imports KSP remains this one.
+     * `@DispatchOn(framing = X::class)` (sealed-root annotations), `@UseCodec(codec = X::class)`
+     * (constructor-parameter annotations), and the **companion object** of every
+     * `@DispatchOn(type = D::class)` discriminator. PhaseC consumes this map to validate
+     * framer / codec conformance without reaching back into the KSP resolver — the only file
+     * that imports KSP remains this one. PhaseB consumes the same map to auto-discover a
+     * companion-object framer when `@DispatchOn(framing = ...)` is left at its `Inherit`
+     * default, which is the path MQTT relies on (`MqttFixedHeader.Companion : BodyLengthFraming`).
      *
      * Only direct supertypes are captured. Transitive parents would require
      * `KSClassDeclaration.getAllSuperTypes()`, which returns unresolved type variables on
@@ -81,8 +84,17 @@ object Discovery {
         for (s in symbols) {
             for (ann in s.annotations) {
                 if (ann.fqn == DISPATCH_ON_FQN) {
-                    val ref = ann.arguments["framing"] as? RawAnnotationValue.ClassRef ?: continue
-                    if (ref.resolved && ref.fqn.isNotBlank()) candidateFqns += ref.fqn
+                    val framingRef = ann.arguments["framing"] as? RawAnnotationValue.ClassRef
+                    if (framingRef != null && framingRef.resolved && framingRef.fqn.isNotBlank()) {
+                        candidateFqns += framingRef.fqn
+                    }
+                    val typeRef = ann.arguments["type"] as? RawAnnotationValue.ClassRef
+                    if (typeRef != null && typeRef.resolved && typeRef.fqn.isNotBlank()) {
+                        // Companion-object framer auto-discovery target. The companion may
+                        // not exist (then resolution returns null below) or may not implement
+                        // DispatchFraming (then PhaseB falls through to Unframed).
+                        candidateFqns += "${typeRef.fqn}.Companion"
+                    }
                 }
             }
             if (s is RawSymbol.DataLike) {
@@ -98,8 +110,7 @@ object Discovery {
         if (candidateFqns.isEmpty()) return emptyMap()
         val out = mutableMapOf<String, RawClassMetadata>()
         for (fqn in candidateFqns) {
-            val ksName = resolver.getKSNameFromString(fqn)
-            val decl = resolver.getClassDeclarationByName(ksName) ?: continue
+            val decl = resolveCompanionAware(resolver, fqn) ?: continue
             out[fqn] =
                 RawClassMetadata(
                     fqn = fqn,
@@ -107,6 +118,30 @@ object Discovery {
                 )
         }
         return out.toMap()
+    }
+
+    /**
+     * Resolve a class FQN, falling back for nested `Companion` references where KSP
+     * needs the companion's actual simple name (which may be omitted in source). The
+     * convention `${EnclosingFqn}.Companion` is what `@DispatchOn` callers see at the
+     * annotation surface; KSP's `getClassDeclarationByName` accepts the same string when
+     * the companion is named `Companion`. For named companions (rare in protocol code)
+     * we fall through to the enclosing-class scan.
+     */
+    private fun resolveCompanionAware(
+        resolver: Resolver,
+        fqn: String,
+    ): KSClassDeclaration? {
+        val direct = resolver.getClassDeclarationByName(resolver.getKSNameFromString(fqn))
+        if (direct != null) return direct
+        if (!fqn.endsWith(".Companion")) return null
+        val enclosingFqn = fqn.removeSuffix(".Companion")
+        val enclosing =
+            resolver.getClassDeclarationByName(resolver.getKSNameFromString(enclosingFqn))
+                ?: return null
+        return enclosing.declarations
+            .filterIsInstance<KSClassDeclaration>()
+            .firstOrNull { it.isCompanionObject }
     }
 
     private fun visit(

@@ -415,7 +415,7 @@ class ProtocolMessageProcessor(
             framingClass == null ||
                 framingClassFqn == "com.ditchoom.buffer.codec.DispatchFraming.Inherit"
 
-        val resolvedFramerFqn: String? =
+        val resolvedFramer: ResolvedFramer? =
             if (isInheritSentinel) {
                 // Walk the discriminator's companion (if any) and check if it implements
                 // DispatchFraming<DiscriminatorType>. When found, emit calls via the
@@ -425,15 +425,22 @@ class ProtocolMessageProcessor(
                     discriminatorClass.declarations
                         .filterIsInstance<KSClassDeclaration>()
                         .firstOrNull { it.isCompanionObject }
-                if (companion != null && implementsDispatchFraming(companion, discriminatorClass)) {
-                    discriminatorClass.qualifiedName?.asString()
+                val kind = companion?.let { detectFramingKind(it, discriminatorClass) }
+                if (companion != null && kind != null) {
+                    ResolvedFramer(
+                        fqn = discriminatorClass.qualifiedName?.asString() ?: return null,
+                        isBodyLength = kind.isBodyLength,
+                    )
                 } else {
                     null
                 }
             } else {
                 // Explicit framer must be a Kotlin `object` implementing DispatchFraming<D>.
-                // `isInheritSentinel` was false → framingClass is non-null by construction.
-                val explicit = framingClass!!
+                // `isInheritSentinel == false` proves `framingClass != null`. The class's FQN
+                // can still be null if KSP couldn't resolve the reference (user-side compile
+                // error); bail rather than NPE.
+                val explicit = framingClass
+                val explicitFqn = explicit.qualifiedName?.asString() ?: return null
                 if (explicit.classKind != ClassKind.OBJECT) {
                     logger.error(
                         "@DispatchOn(framing = ${explicit.simpleName.asString()}::class) on " +
@@ -445,17 +452,19 @@ class ProtocolMessageProcessor(
                     )
                     return null
                 }
-                if (!implementsDispatchFraming(explicit, discriminatorClass)) {
+                val kind = detectFramingKind(explicit, discriminatorClass)
+                if (kind == null) {
                     logger.error(
                         "@DispatchOn(framing = ${explicit.simpleName.asString()}::class) on " +
                             "'${classDeclaration.simpleName.asString()}' must implement " +
-                            "DispatchFraming<${discriminatorClass.simpleName.asString()}>. " +
+                            "DispatchFraming<${discriminatorClass.simpleName.asString()}> or " +
+                            "BodyLengthFraming<${discriminatorClass.simpleName.asString()}>. " +
                             "Found framer that does not match the discriminator type.",
                         classDeclaration,
                     )
                     return null
                 }
-                framingClassFqn
+                ResolvedFramer(fqn = explicitFqn, isBodyLength = kind.isBodyLength)
             }
 
         // Compute discriminator wire bytes (used for peek minimum-bytes math in framed paths).
@@ -466,8 +475,12 @@ class ProtocolMessageProcessor(
                 Primitive.fromTypeName("kotlin.$innerTypeName")?.defaultWireBytes ?: 1
             }
         val framingInfo =
-            resolvedFramerFqn?.let {
-                DispatchFramingInfo(framerFqn = it, discriminatorBytes = discriminatorBytes)
+            resolvedFramer?.let {
+                DispatchFramingInfo(
+                    framerFqn = it.fqn,
+                    discriminatorBytes = discriminatorBytes,
+                    isBodyLength = it.isBodyLength,
+                )
             }
 
         return DispatchOnInfo(
@@ -484,26 +497,54 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Returns true if [candidate] declares a supertype `DispatchFraming<D>` where `D` is
-     * [discriminator]. Walks all super types so a transitive parent counts (rare in
-     * practice but cheap to support).
+     * Inspects [candidate]'s **directly-declared** supertypes for a framer interface
+     * parameterized over [discriminator]. Returns:
+     *
+     *  * [FramingKind.BodyLength] when `BodyLengthFraming<D>` is in the directly-declared list.
+     *  * [FramingKind.PeekOnly] when only `DispatchFraming<D>` is in the list (no body slicing).
+     *  * `null` when neither matches the discriminator type.
+     *
+     * Walks only directly-declared supertypes — never `getAllSuperTypes()` — because KSP's
+     * transitive walker returns unresolved type variables on inherited generic supertypes
+     * (the bug that broke commits `ada9796` on buffer + `cd245818` on mqtt, both reverted).
      */
-    private fun implementsDispatchFraming(
+    private fun detectFramingKind(
         candidate: KSClassDeclaration,
         discriminator: KSClassDeclaration,
-    ): Boolean {
-        val discriminatorFqn = discriminator.qualifiedName?.asString() ?: return false
-        return candidate.getAllSuperTypes().any { superType ->
-            val decl = superType.declaration as? KSClassDeclaration ?: return@any false
-            if (decl.qualifiedName?.asString() != "com.ditchoom.buffer.codec.DispatchFraming") {
-                return@any false
+    ): FramingKind? {
+        val discriminatorFqn = discriminator.qualifiedName?.asString() ?: return null
+        var sawBodyLength = false
+        var sawPeekOnly = false
+        for (superTypeRef in candidate.superTypes) {
+            val superType = superTypeRef.resolve()
+            val decl = superType.declaration as? KSClassDeclaration ?: continue
+            val superFqn = decl.qualifiedName?.asString() ?: continue
+            val firstArg = superType.arguments.firstOrNull()?.type?.resolve() ?: continue
+            val argFqn = (firstArg.declaration as? KSClassDeclaration)?.qualifiedName?.asString() ?: continue
+            if (argFqn != discriminatorFqn) continue
+            when (superFqn) {
+                "com.ditchoom.buffer.codec.BodyLengthFraming" -> sawBodyLength = true
+                "com.ditchoom.buffer.codec.DispatchFraming" -> sawPeekOnly = true
             }
-            val firstArg = superType.arguments.firstOrNull()?.type?.resolve() ?: return@any false
-            val argFqn =
-                (firstArg.declaration as? KSClassDeclaration)?.qualifiedName?.asString()
-            argFqn == discriminatorFqn
+        }
+        return when {
+            sawBodyLength -> FramingKind.BodyLength
+            sawPeekOnly -> FramingKind.PeekOnly
+            else -> null
         }
     }
+
+    private enum class FramingKind(
+        val isBodyLength: Boolean,
+    ) {
+        PeekOnly(false),
+        BodyLength(true),
+    }
+
+    private data class ResolvedFramer(
+        val fqn: String,
+        val isBodyLength: Boolean,
+    )
 
     // ──────────────────────── Sealed direction cascading ────────────────────────
 

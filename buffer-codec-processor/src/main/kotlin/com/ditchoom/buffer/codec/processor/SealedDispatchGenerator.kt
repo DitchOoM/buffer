@@ -122,14 +122,16 @@ class SealedDispatchGenerator(
 
     /**
      * Wraps a body-size expression with framing overhead, asking the framer at runtime
-     * for its prefix wire size via `bodyLengthSize(n)`. Returns just [bodyExpr] when no
-     * body framing. Evaluates [bodyExpr] once via a `run { val _b = ...; ... }` block.
+     * for its prefix wire size via `bodyLengthSize(n)`. Returns just [bodyExpr] when there
+     * is no body framing or when the framer is peek-only (no separate length prefix on
+     * the wire). Evaluates [bodyExpr] once via a `run { val _b = ...; ... }` block.
      */
     private fun wrapBodyLengthSizeExpr(
         bodyExpr: String,
         dispatchOnInfo: DispatchOnInfo?,
     ): String {
-        val framing = dispatchOnInfo?.framing ?: return bodyExpr
+        if (dispatchOnInfo?.hasBodyLength != true) return bodyExpr
+        val framing = dispatchOnInfo.framing ?: return bodyExpr
         return "run { val _b = $bodyExpr; ${framing.framerFqn}.bodyLengthSize(_b) + _b }"
     }
 
@@ -440,10 +442,11 @@ class SealedDispatchGenerator(
         }
 
         val fileBuilder = fileSpecBuilder(packageName, codecName).addType(objectBuilder.build())
-        // Framed dispatchers with payload variants emit a scratch-buffer fallback that
-        // calls `BufferFactory.Default.allocate(...)`. `Default` is an extension property
-        // on `BufferFactory.Companion`, so it must be imported by name.
-        if (dispatchOnInfo?.framing != null && hasAnyPayload) {
+        // Body-length-framed dispatchers with payload variants emit a scratch-buffer fallback
+        // that calls `BufferFactory.Default.allocate(...)`. `Default` is an extension property
+        // on `BufferFactory.Companion`, so it must be imported by name. Peek-only framers
+        // never emit the scratch fallback (no length prefix to write).
+        if (dispatchOnInfo?.hasBodyLength == true && hasAnyPayload) {
             fileBuilder.addImport("com.ditchoom.buffer", "Default")
         }
         fileBuilder.build().writeTo(codeGenerator, dependencies)
@@ -725,9 +728,13 @@ class SealedDispatchGenerator(
         } else {
             decodeBody.addStatement("val type = buffer.readByte().toInt() and 0xFF")
         }
-        // Non-context decode entrypoint: delegate the body-length read to the framer
-        // (the discriminator-aware companion or explicit `DispatchFraming` object).
-        dispatchOnInfo?.framing?.let { framing ->
+        // Non-context decode entrypoint: delegate the body-length read to the framer when
+        // the framer extends `BodyLengthFraming<D>`. Peek-only `DispatchFraming<D>` framers
+        // (WebSocket) carry the payload length inside the discriminator/header bytes, so
+        // there is no separate length prefix to consume — the variant codec reads its
+        // payload via `@RemainingBytes`.
+        if (dispatchOnInfo?.hasBodyLength == true) {
+            val framing = dispatchOnInfo.framing!!
             decodeBody.addStatement("val _bodyLen = %L.readBodyLength(buffer)", framing.framerFqn)
             decodeBody.addStatement("val _bodySlice = buffer.readBytes(_bodyLen)")
         }
@@ -831,11 +838,11 @@ class SealedDispatchGenerator(
                     info.payloadFields.joinToString(", ") { pf ->
                         "encode${v.subclass.simpleName.asString()}${capitalizeFirst(pf.fieldName)}"
                     }
-                val payloadFraming = dispatchOnInfo?.framing
                 // Variant typed-lambda encode now always accepts `context` positionally
                 // (default `EncodeContext.Empty`); the typed-lambda dispatcher entrypoint
                 // doesn't have a caller context, so pass Empty.
                 val emptyEncodeCtx = "${ENCODE_CONTEXT.canonicalName}.Empty"
+                val payloadFraming = dispatchOnInfo?.framing.takeIf { dispatchOnInfo?.hasBodyLength == true }
                 if (payloadFraming != null) {
                     // Scratch-buffer fallback: encode into a scratch, then prefix via the framer.
                     encodeBody.addStatement(
@@ -1260,15 +1267,17 @@ class SealedDispatchGenerator(
 
     /**
      * Emits the decode-side prelude for body-length framing: delegates to the framer's
-     * `readBodyLength(buffer)` and slices the body. No-op when [info] is null or has no
-     * framer — preserves unframed dispatch behavior.
+     * `readBodyLength(buffer)` and slices the body. No-op when [info] is null, has no
+     * framer, or carries a peek-only framer — peek-only framers don't have a separate
+     * length prefix on the wire (WebSocket carries the payload length inside the header).
      */
     internal fun emitBodyLengthDecodePrelude(
         code: CodeBlock.Builder,
         info: DispatchOnInfo?,
         @Suppress("UNUSED_PARAMETER") contextVarName: String,
     ) {
-        val framing = info?.framing ?: return
+        if (info?.hasBodyLength != true) return
+        val framing = info.framing ?: return
         code.addStatement("val _bodyLen = %L.readBodyLength(buffer)", framing.framerFqn)
         code.addStatement("val _bodySlice = buffer.readBytes(_bodyLen)")
     }
@@ -1291,8 +1300,15 @@ class SealedDispatchGenerator(
         encodeStmt: String,
         bodySizeExpr: String? = null,
     ) {
-        val framing = info?.framing
-        if (framing == null) {
+        // Peek-only framing carries the payload length inside the discriminator/header
+        // bytes themselves (WebSocket), so there is no separate length prefix to write —
+        // emit the body verbatim and skip the framer's writeBodyLength call (which doesn't
+        // exist on `DispatchFraming`, only on `BodyLengthFraming`).
+        if (info?.hasBodyLength != true) {
+            code.addStatement(encodeStmt)
+            return
+        }
+        val framing = info.framing ?: run {
             code.addStatement(encodeStmt)
             return
         }
