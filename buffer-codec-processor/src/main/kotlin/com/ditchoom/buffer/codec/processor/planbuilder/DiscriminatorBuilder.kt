@@ -5,6 +5,7 @@ import com.ditchoom.buffer.codec.processor.discovery.RawAnnotationValue
 import com.ditchoom.buffer.codec.processor.discovery.RawSymbol
 import com.ditchoom.buffer.codec.processor.ir.DiscParam
 import com.ditchoom.buffer.codec.processor.ir.DiscriminatorShape
+import com.ditchoom.buffer.codec.processor.ir.TypeFqn
 import com.ditchoom.buffer.codec.processor.planbuilder.Annotations.find
 import com.ditchoom.buffer.codec.processor.planbuilder.Annotations.has
 
@@ -86,6 +87,7 @@ internal object DiscriminatorBuilder {
         }
         return DiscriminatorShape
             .ValueClass(
+                discriminatorType = TypeFqn(data.fqn),
                 inner = innerKind!!,
                 innerProp = innerProp,
                 codec = CodecNaming.forSymbol(data),
@@ -133,6 +135,7 @@ internal object DiscriminatorBuilder {
         }
         return DiscriminatorShape
             .DataClass(
+                discriminatorType = TypeFqn(data.fqn),
                 params = params,
                 codec = CodecNaming.forSymbol(data),
                 dispatchProp = dispatchProps.firstOrNull()?.name ?: data.constructorParameters.first().name,

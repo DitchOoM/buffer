@@ -33,6 +33,8 @@ object Discovery {
     private const val PROTOCOL_MESSAGE_FQN = "com.ditchoom.buffer.codec.annotations.ProtocolMessage"
     private const val DECODE_FQN = "com.ditchoom.buffer.codec.annotations.Decode"
     private const val ENCODE_FQN = "com.ditchoom.buffer.codec.annotations.Encode"
+    private const val DISPATCH_ON_FQN = "com.ditchoom.buffer.codec.annotations.DispatchOn"
+    private const val USE_CODEC_FQN = "com.ditchoom.buffer.codec.annotations.UseCodec"
 
     fun run(resolver: Resolver): DiscoveryResult {
         val diagnostics = mutableListOf<DiscoveryDiagnostic>()
@@ -54,7 +56,57 @@ object Discovery {
             visit(annotated, visited, symbols, diagnostics)
         }
 
-        return DiscoveryResult(symbols.toList(), diagnostics.toList())
+        val externalClasses = collectExternalClasses(resolver, symbols)
+
+        return DiscoveryResult(symbols.toList(), diagnostics.toList(), externalClasses)
+    }
+
+    /**
+     * Collect directly-declared supertype metadata for every class FQN referenced from
+     * `@DispatchOn(framing = X::class)` (sealed-root annotations) and `@UseCodec(codec = X::class)`
+     * (constructor-parameter annotations). PhaseC consumes this map to validate framer /
+     * codec conformance without reaching back into the KSP resolver — the only file that
+     * imports KSP remains this one.
+     *
+     * Only direct supertypes are captured. Transitive parents would require
+     * `KSClassDeclaration.getAllSuperTypes()`, which returns unresolved type variables on
+     * inherited generic supertypes — the bug that broke the previous BodyLengthFraming
+     * attempt.
+     */
+    private fun collectExternalClasses(
+        resolver: Resolver,
+        symbols: List<RawSymbol>,
+    ): Map<String, RawClassMetadata> {
+        val candidateFqns = mutableSetOf<String>()
+        for (s in symbols) {
+            for (ann in s.annotations) {
+                if (ann.fqn == DISPATCH_ON_FQN) {
+                    val ref = ann.arguments["framing"] as? RawAnnotationValue.ClassRef ?: continue
+                    if (ref.resolved && ref.fqn.isNotBlank()) candidateFqns += ref.fqn
+                }
+            }
+            if (s is RawSymbol.DataLike) {
+                for (p in s.constructorParameters) {
+                    for (ann in p.annotations) {
+                        if (ann.fqn != USE_CODEC_FQN) continue
+                        val ref = ann.arguments["codec"] as? RawAnnotationValue.ClassRef ?: continue
+                        if (ref.resolved && ref.fqn.isNotBlank()) candidateFqns += ref.fqn
+                    }
+                }
+            }
+        }
+        if (candidateFqns.isEmpty()) return emptyMap()
+        val out = mutableMapOf<String, RawClassMetadata>()
+        for (fqn in candidateFqns) {
+            val ksName = resolver.getKSNameFromString(fqn)
+            val decl = resolver.getClassDeclarationByName(ksName) ?: continue
+            out[fqn] =
+                RawClassMetadata(
+                    fqn = fqn,
+                    directlyDeclaredSupertypes = decl.superTypes.toList().map(::toRawTypeRef),
+                )
+        }
+        return out.toMap()
     }
 
     private fun visit(

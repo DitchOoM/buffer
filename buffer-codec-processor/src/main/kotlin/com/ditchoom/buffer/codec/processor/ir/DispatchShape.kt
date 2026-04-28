@@ -16,8 +16,12 @@ sealed interface DispatchShape {
 
 /** Shape of the discriminator type used by `DispatchShape.TypedDiscriminator`. */
 sealed interface DiscriminatorShape {
+    /** Fully-qualified name of the user-declared discriminator class. */
+    val discriminatorType: TypeFqn
+
     /** Discriminator is a `value class` wrapping a primitive (e.g., `MqttFixedHeader(raw: UByte)`). */
     data class ValueClass(
+        override val discriminatorType: TypeFqn,
         val inner: PrimitiveKind,
         val innerProp: String,
         val codec: ClassName,
@@ -27,6 +31,7 @@ sealed interface DiscriminatorShape {
 
     /** Discriminator is a `data class` with multiple fields used during dispatch. */
     data class DataClass(
+        override val discriminatorType: TypeFqn,
         val params: List<DiscParam>,
         val codec: ClassName,
         val dispatchProp: String,
