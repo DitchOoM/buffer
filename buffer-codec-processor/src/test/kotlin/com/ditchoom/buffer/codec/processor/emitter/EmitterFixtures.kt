@@ -905,6 +905,7 @@ object EmitterFixtures {
                 // Phase 9 Step 3 Phase B — capability fixtures.
                 fqn("PayloadOnlyLeaf") to cn("PayloadOnlyLeaf"),
                 fqn("NestedMessageLeaf") to cn("NestedMessageLeaf"),
+                fqn("NestedLengthPrefixedLeaf") to cn("NestedLengthPrefixedLeaf"),
                 fqn("InnerMessage") to cn("InnerMessage"),
                 fqn("ThreeByteInt") to cn("ThreeByteInt"),
                 TypeFqn("kotlin.P") to ClassName("kotlin", "Any"),

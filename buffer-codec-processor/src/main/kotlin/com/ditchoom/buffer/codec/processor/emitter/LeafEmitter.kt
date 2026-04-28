@@ -344,10 +344,16 @@ class LeafEmitter(
                 }
 
             is FieldStrategy.NestedMessage ->
-                wrapConditional(field, "val ${field.name} = ${s.codec.canonicalName}.decode(buffer, context)\n")
+                wrapConditional(
+                    field,
+                    "val ${field.name} = ${nestedDecodeExpr(s.codec.canonicalName, s.length)}\n",
+                )
 
             is FieldStrategy.External ->
-                wrapConditional(field, "val ${field.name} = ${s.codec.canonicalName}.decode(buffer, context)\n")
+                wrapConditional(
+                    field,
+                    "val ${field.name} = ${nestedDecodeExpr(s.codec.canonicalName, s.length)}\n",
+                )
 
             is FieldStrategy.DiscriminatorOwned ->
                 CodeBlock.of(
@@ -407,6 +413,123 @@ class LeafEmitter(
                     "buildList<$typeSimple> { while (_slice.remaining() > 0) " +
                     "{ add($codec.decode(_slice, context)) } } }"
             }
+        }
+    }
+
+    /**
+     * Cap 3 — `@LengthPrefixed` / `@LengthFrom` / `@RemainingBytes` on
+     * NestedMessage / External. Mirrors legacy
+     * `FieldCodeEmitter.readNestedWithLengthExpression` byte-for-byte.
+     *
+     * When [length] is null, defers to the nested codec's own framing
+     * (the existing "bare" decode shape).
+     */
+    private fun nestedDecodeExpr(
+        codec: String,
+        length: LengthSource?,
+    ): String {
+        if (length == null) return "$codec.decode(buffer, context)"
+        return when (length) {
+            is LengthSource.Inline -> {
+                val readLen =
+                    when (length.encoding) {
+                        LengthEncoding.Byte -> "buffer.readByte().toInt() and 0xFF"
+                        LengthEncoding.Short -> "buffer.readShort().toInt() and 0xFFFF"
+                        LengthEncoding.Int -> "buffer.readInt()"
+                        LengthEncoding.Varint -> "buffer.readVariableByteInteger()"
+                    }
+                "run { val _len = $readLen; $codec.decode(buffer.readBytes(_len), context) }"
+            }
+            is LengthSource.FromField ->
+                "$codec.decode(buffer.readBytes(${length.name}.toInt()), context)"
+            is LengthSource.Remaining ->
+                if (length.trailingBytes > 0) {
+                    "$codec.decode(buffer.readBytes(buffer.remaining() - ${length.trailingBytes}), context)"
+                } else {
+                    "$codec.decode(buffer.readBytes(buffer.remaining()), context)"
+                }
+        }
+    }
+
+    /**
+     * Cap 3 — encode side: two-pass (`wireSize → writePrefix → writeBody`)
+     * for fixed-width prefixes; for varint the legacy
+     * `emitInlineVarintLengthPrefixed` shape is used.
+     */
+    private fun nestedEncodeExpr(
+        codec: String,
+        length: LengthSource?,
+        valueExpr: String,
+        fieldName: String,
+    ): String {
+        if (length == null) return "$codec.encode(buffer, $valueExpr, context)"
+        val encodeBody = "$codec.encode(buffer, $valueExpr, context)"
+        return when (length) {
+            is LengthSource.Inline -> {
+                when (length.encoding) {
+                    LengthEncoding.Byte ->
+                        "run { val _pos = buffer.position(); buffer.writeByte(0.toByte()); " +
+                            "$encodeBody; val _end = buffer.position(); val _len = _end - _pos - 1; " +
+                            "buffer.position(_pos); buffer.writeByte(_len.toByte()); buffer.position(_end) }"
+                    LengthEncoding.Short ->
+                        "run { val _pos = buffer.position(); buffer.writeShort(0.toShort()); " +
+                            "$encodeBody; val _end = buffer.position(); val _len = _end - _pos - 2; " +
+                            "buffer.position(_pos); buffer.writeShort(_len.toShort()); buffer.position(_end) }"
+                    LengthEncoding.Int ->
+                        "run { val _pos = buffer.position(); buffer.writeInt(0); " +
+                            "$encodeBody; val _end = buffer.position(); val _len = _end - _pos - 4; " +
+                            "buffer.position(_pos); buffer.writeInt(_len); buffer.position(_end) }"
+                    LengthEncoding.Varint -> {
+                        val suffix = if (fieldName.isEmpty()) "" else "_$fieldName"
+                        val maxBytes = length.maxBytes.takeIf { it in 1..3 } ?: 0
+                        val capCheck =
+                            if (maxBytes in 1..3) {
+                                "require(_l$suffix in 0..com.ditchoom.buffer.variableByteMax($maxBytes)) { " +
+                                    "\"field '$fieldName' encoded length \$_l$suffix exceeds maxBytes=$maxBytes " +
+                                    "(max value \${com.ditchoom.buffer.variableByteMax($maxBytes)})\" }; "
+                            } else {
+                                ""
+                            }
+                        "run { val _l$suffix = $codec.wireSize($valueExpr, context); " +
+                            "${capCheck}buffer.writeVariableByteInteger(_l$suffix); $encodeBody }"
+                    }
+                }
+            }
+            // FromField + Remaining encode without writing a prefix — the length
+            // is already on the wire via the sibling field or is implicit.
+            is LengthSource.FromField,
+            is LengthSource.Remaining,
+            -> encodeBody
+        }
+    }
+
+    /**
+     * Cap 3 — wireSize site: a length-framed nested field contributes the
+     * prefix bytes plus the nested wireSize. Bare nested (no length) just
+     * contributes the nested wireSize.
+     */
+    private fun nestedSizeExpr(
+        codec: String,
+        length: LengthSource?,
+        valueExpr: String,
+    ): String {
+        val nestedSize = "$codec.wireSize($valueExpr, context)"
+        if (length == null) return nestedSize
+        return when (length) {
+            is LengthSource.Inline -> {
+                when (length.encoding) {
+                    LengthEncoding.Byte -> "(1 + $nestedSize)"
+                    LengthEncoding.Short -> "(2 + $nestedSize)"
+                    LengthEncoding.Int -> "(4 + $nestedSize)"
+                    LengthEncoding.Varint -> {
+                        // Varint prefix size depends on the nested wireSize itself.
+                        "run { val _b = $nestedSize; variableByteSizeInt(_b) + _b }"
+                    }
+                }
+            }
+            is LengthSource.FromField,
+            is LengthSource.Remaining,
+            -> nestedSize
         }
     }
 
@@ -636,10 +759,16 @@ class LeafEmitter(
                 }
 
             is FieldStrategy.NestedMessage ->
-                CodeBlock.of("%T.encode(buffer, value.%L, context)\n", s.codec, field.name)
+                CodeBlock.of(
+                    "%L\n",
+                    nestedEncodeExpr(s.codec.canonicalName, s.length, "value.${field.name}", field.name),
+                )
 
             is FieldStrategy.External ->
-                CodeBlock.of("%T.encode(buffer, value.%L, context)\n", s.codec, field.name)
+                CodeBlock.of(
+                    "%L\n",
+                    nestedEncodeExpr(s.codec.canonicalName, s.length, "value.${field.name}", field.name),
+                )
 
             is FieldStrategy.DiscriminatorOwned -> null // dispatcher already wrote the bytes
             is FieldStrategy.Spi -> {
@@ -817,9 +946,15 @@ class LeafEmitter(
                 is FieldStrategy.Primitive -> CodeBlock.of("%L", s.wireBytes)
                 is FieldStrategy.PayloadSlot -> CodeBlock.of("value.%L.remaining()", field.name)
                 is FieldStrategy.NestedMessage ->
-                    CodeBlock.of("%T.wireSize(value.%L, context)", s.codec, field.name)
+                    CodeBlock.of(
+                        "%L",
+                        nestedSizeExpr(s.codec.canonicalName, s.length, "value.${field.name}"),
+                    )
                 is FieldStrategy.External ->
-                    CodeBlock.of("%T.wireSize(value.%L, context)", s.codec, field.name)
+                    CodeBlock.of(
+                        "%L",
+                        nestedSizeExpr(s.codec.canonicalName, s.length, "value.${field.name}"),
+                    )
                 is FieldStrategy.DiscriminatorOwned -> CodeBlock.of("0")
                 is FieldStrategy.VarInt -> CodeBlock.of("variableByteSizeInt(value.%L)", field.name)
                 is FieldStrategy.StringField ->

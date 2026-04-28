@@ -325,45 +325,96 @@ class CompileAndRoundTripTest {
 
     // ---- Capability 3 — @LengthPrefixed on NestedMessage / External -----
     //
-    // Legacy `FieldCodeEmitter` for a nested-message field annotated
-    // `@LengthPrefixed(VarInt)` would:
-    //   * Decode: read length prefix → `readBytes(len)` slice → `Codec.decode(slice, ctx)`.
-    //   * Encode: two-pass (`wireSize → writePrefix → writeBody`).
+    // Phase C Cap 3 extended [FieldStrategy.NestedMessage] and
+    // [FieldStrategy.External] with an optional [LengthSource], threaded
+    // through `FieldStrategyBuilder.buildNestedMessage` /
+    // `buildExternal`. The emitter now wraps the nested decode in a
+    // length-framed read/write that mirrors legacy
+    // `FieldCodeEmitter.readNestedWithLengthExpression`:
     //
-    // The new pipeline IR ([FieldStrategy.NestedMessage] + [FieldStrategy.External])
-    // does NOT carry a [LengthSource]; it's structurally impossible for the
-    // emitter to know to slice. The decode site emits a bare
-    // `Codec.decode(buffer, context)` call with no length prefix read.
+    //   * Decode: read length prefix → `readBytes(len)` slice →
+    //     `Codec.decode(slice, ctx)`.
+    //   * Encode: two-pass (`wireSize → writePrefix → writeBody`) for fixed
+    //     prefixes; varint uses `wireSize`-then-write.
     //
-    // Test fixture: `Plan.Leaf` with a NestedMessage field. Asserts the emit
-    // does NOT contain the `readBytes(...).` slice pattern that legacy used
-    // for length-prefixed nested-message decode.
+    // The bare-nested fixture (no length) still emits the original
+    // `Codec.decode(buffer, context)` shape. This fixture exercises a
+    // length-framed nested message round-trip end-to-end.
     @Test
-    fun `cap3 NestedMessage emits no length-prefix slice at HEAD`() {
-        val plan = nestedMessageLeafFixture()
-        val classType = EmitterFixtures.cn("NestedMessageLeaf")
-        val emitted = emitText(plan, classType)
+    fun `cap3 NestedMessage with byte-length prefix round-trips`() {
+        val plan = nestedMessageLeafFixtureWithBytePrefix()
+        val classType = EmitterFixtures.cn("NestedLengthPrefixedLeaf")
+        val codecSource = emitText(plan, classType)
 
-        // The bare nested-codec decode call exists today.
-        assertTrue(
-            emitted.contains("InnerMessageCodec.decode(buffer, context)"),
-            "expected bare nested-codec decode at HEAD; got:\n$emitted",
-        )
+        val userTypeSource =
+            """
+            package com.ditchoom.codec.test
 
-        // The gap: no length-prefix slice emitted around the nested decode.
-        // Legacy shape we expect Phase C Cap 3 to emit:
-        //
-        //     val _innerLen = buffer.readVariableByteInteger()
-        //     val _innerSlice = buffer.readBytes(_innerLen)
-        //     val inner = InnerMessageCodec.decode(_innerSlice, context)
-        val sliceFollowedByNested = Regex("""readBytes\s*\([^)]+\)[^\n]*\n[^\n]*InnerMessageCodec\.decode""")
-        assertNoMatch(
-            sliceFollowedByNested,
-            emitted,
-            "FAIL → Phase C Cap 3 has landed (length-prefix slice emitted around nested decode). " +
-                "Flip this test: round-trip a value with a length-prefixed nested message and " +
-                "assert wire bytes match the legacy two-pass shape.",
+            import com.ditchoom.buffer.ReadBuffer
+            import com.ditchoom.buffer.WriteBuffer
+            import com.ditchoom.buffer.codec.Codec
+            import com.ditchoom.buffer.codec.DecodeContext
+            import com.ditchoom.buffer.codec.EncodeContext
+            import com.ditchoom.buffer.stream.PeekResult
+            import com.ditchoom.buffer.stream.StreamProcessor
+
+            data class InnerMessage(val a: Byte, val b: Byte)
+            data class NestedLengthPrefixedLeaf(val header: UByte, val inner: InnerMessage)
+
+            object InnerMessageCodec : Codec<InnerMessage> {
+                override fun decode(buffer: ReadBuffer, context: DecodeContext): InnerMessage =
+                    InnerMessage(buffer.readByte(), buffer.readByte())
+
+                override fun encode(buffer: WriteBuffer, value: InnerMessage, context: EncodeContext) {
+                    buffer.writeByte(value.a)
+                    buffer.writeByte(value.b)
+                }
+
+                override fun wireSize(value: InnerMessage, context: EncodeContext): Int = 2
+                override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult =
+                    PeekResult.Size(2)
+            }
+            """.trimIndent()
+
+        val (codec, _) =
+            compileAndLoadCodec(
+                codecSource = codecSource,
+                userTypes = userTypeSource,
+                codecFqn = "com.ditchoom.codec.test.NestedLengthPrefixedLeafCodec",
+            )
+
+        val cls = codec::class.java.classLoader.loadClass(
+            "com.ditchoom.codec.test.NestedLengthPrefixedLeaf",
         )
+        val innerCls = codec::class.java.classLoader.loadClass(
+            "com.ditchoom.codec.test.InnerMessage",
+        )
+        val innerCtor = innerCls.getDeclaredConstructor(
+            Byte::class.javaPrimitiveType,
+            Byte::class.javaPrimitiveType,
+        )
+        innerCtor.isAccessible = true
+        val inner = innerCtor.newInstance(0x12.toByte(), 0x34.toByte())
+        val outerCtor = cls.declaredConstructors.first { it.parameterCount == 2 }
+        outerCtor.isAccessible = true
+        val outer = outerCtor.newInstance(0x9E.toByte(), inner)
+
+        val buffer: PlatformBuffer = BufferFactory.Default.allocate(64)
+        invokeEncode(codec, buffer, outer)
+        // Expected wire layout:
+        //   header (1 byte)
+        //   length prefix (1 byte) = 2
+        //   inner.a (1 byte) = 0x12
+        //   inner.b (1 byte) = 0x34
+        // Total = 4 bytes.
+        assertEquals(4, buffer.position(), "encode(NestedLengthPrefixedLeaf) wire size")
+        buffer.resetForRead()
+        val decoded = invokeDecode(codec, buffer)
+
+        assertEquals(outer, decoded, "NestedLengthPrefixedLeaf not preserved across round-trip")
+
+        val ws = invokeWireSize(codec, outer)
+        assertEquals(4, ws, "wireSize should equal observed wire size")
     }
 
     // ---- Capability 4 — @WireBytes non-natural width --------------------
@@ -553,13 +604,15 @@ class CompileAndRoundTripTest {
         )
 
     /**
-     * Cap 3 fixture — `Plan.Leaf` with a NestedMessage field that today is
-     * decoded via a bare `Codec.decode(buffer, ctx)` call. Phase C Cap 3
-     * threads `LengthSource` through and slices the buffer first.
+     * Cap 3 fixture — `Plan.Leaf` with a NestedMessage field that carries
+     * a `LengthSource.Inline(Byte)` length prefix. Phase C Cap 3 emits a
+     * length-framed read/write around the nested decode call.
+     *
+     * Wire layout: `header (1B) | innerLen (1B) | inner.a (1B) | inner.b (1B)`.
      */
-    private fun nestedMessageLeafFixture(): Plan.Leaf =
+    private fun nestedMessageLeafFixtureWithBytePrefix(): Plan.Leaf =
         Plan.Leaf(
-            decl = EmitterFixtures.fqn("NestedMessageLeaf"),
+            decl = EmitterFixtures.fqn("NestedLengthPrefixedLeaf"),
             fields =
                 listOf(
                     FieldPlan(
@@ -573,6 +626,11 @@ class CompileAndRoundTripTest {
                         strategy =
                             FieldStrategy.NestedMessage(
                                 codec = ClassName("com.ditchoom.codec.test", "InnerMessageCodec"),
+                                length =
+                                    LengthSource.Inline(
+                                        encoding = LengthEncoding.Byte,
+                                        maxBytes = 1,
+                                    ),
                             ),
                     ),
                 ),

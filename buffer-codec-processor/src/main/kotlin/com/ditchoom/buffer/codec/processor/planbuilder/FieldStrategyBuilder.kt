@@ -360,7 +360,9 @@ internal class FieldStrategyBuilder(
             return errorsToLeft(errors)!!
         }
         // resolve length-source if present (composes with @UseCodec)
-        resolveLengthSource(param, errors, site)
+        // Cap 3: thread the resolved length-source so the emitter wraps the
+        // external codec call with length-framed read/write.
+        val length = resolveLengthSource(param, errors, site)
         errorsToLeft(errors)?.let { return it }
         val codecClassName = classRefToClassName(classRef.fqn)
         return FieldPlan(
@@ -370,6 +372,7 @@ internal class FieldStrategyBuilder(
                 FieldStrategy.External(
                     codec = codecClassName,
                     contextualOverloads = false,
+                    length = length,
                 ),
             conditionality = conditionality,
         ).right()
@@ -554,7 +557,7 @@ internal class FieldStrategyBuilder(
     private fun buildNestedMessage(
         param: RawCtorParameter,
         conditionality: Conditionality,
-        @Suppress("UNUSED_PARAMETER") lengthSourceOrError: LengthSource?,
+        lengthSourceOrError: LengthSource?,
         errors: MutableList<KspError>,
         @Suppress("UNUSED_PARAMETER") site: String,
     ): Either<Nel<KspError>, FieldPlan> {
@@ -567,7 +570,9 @@ internal class FieldStrategyBuilder(
         return FieldPlan(
             name = param.name,
             type = TypeFqn(param.typeRef.fqn),
-            strategy = FieldStrategy.NestedMessage(codec = codec),
+            // Cap 3: thread @LengthPrefixed / @LengthFrom / @RemainingBytes resolution through
+            // to the emitter so it can emit length-framed read/write around the nested decode.
+            strategy = FieldStrategy.NestedMessage(codec = codec, length = lengthSourceOrError),
             conditionality = conditionality,
         ).right()
     }

@@ -61,15 +61,31 @@ sealed interface FieldStrategy {
         val length: LengthSource,
     ) : FieldStrategy
 
-    /** Nested `@ProtocolMessage` field — delegates to the nested type's generated codec. */
+    /**
+     * Nested `@ProtocolMessage` field — delegates to the nested type's generated codec.
+     *
+     * When [length] is non-null the emitter performs a length-framed read/write:
+     *   * Decode: read the length prefix → `readBytes(len)` slice → `Codec.decode(slice, ctx)`.
+     *   * Encode: two-pass placeholder for fixed-width prefixes
+     *     (position+placeholder+encode+patch) or `wireSize`-then-write for varints.
+     * When [length] is null the emit defers to the nested codec's own framing
+     * (matching today's "bare" decode shape).
+     */
     data class NestedMessage(
         val codec: ClassName,
+        val length: LengthSource? = null,
     ) : FieldStrategy
 
-    /** Field handled by an external `@UseCodec` codec class. */
+    /**
+     * Field handled by an external `@UseCodec` codec class.
+     *
+     * [length] semantics match [NestedMessage]; when non-null the emitter
+     * performs the length-framed read/write around the external codec call.
+     */
     data class External(
         val codec: ClassName,
         val contextualOverloads: Boolean,
+        val length: LengthSource? = null,
     ) : FieldStrategy
 
     /**
