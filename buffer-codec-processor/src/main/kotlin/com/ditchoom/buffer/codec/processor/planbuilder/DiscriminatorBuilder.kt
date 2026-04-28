@@ -2,6 +2,7 @@ package com.ditchoom.buffer.codec.processor.planbuilder
 
 import com.ditchoom.buffer.codec.processor.discovery.DataLikeKind
 import com.ditchoom.buffer.codec.processor.discovery.RawAnnotationValue
+import com.ditchoom.buffer.codec.processor.discovery.RawClassMetadata
 import com.ditchoom.buffer.codec.processor.discovery.RawSymbol
 import com.ditchoom.buffer.codec.processor.ir.DiscParam
 import com.ditchoom.buffer.codec.processor.ir.DiscriminatorShape
@@ -23,6 +24,7 @@ internal object DiscriminatorBuilder {
         rootFqn: String,
         discriminatorFqn: String,
         scope: Map<String, RawSymbol>,
+        externalClasses: Map<String, RawClassMetadata> = emptyMap(),
     ): Either<Nel<KspError>, DiscriminatorShape> {
         val symbol = scope[discriminatorFqn]
         if (symbol == null) {
@@ -47,15 +49,17 @@ internal object DiscriminatorBuilder {
                             sourceFqn = rootFqn,
                         ),
                     ).left()
+        val externalDispatchValue = externalClasses[discriminatorFqn]?.dispatchValueProperty
         return when (data.classKind) {
-            DataLikeKind.ValueClass -> buildValueClass(rootFqn, data)
-            DataLikeKind.DataClass, DataLikeKind.RegularClass -> buildDataClass(rootFqn, data)
+            DataLikeKind.ValueClass -> buildValueClass(rootFqn, data, externalDispatchValue)
+            DataLikeKind.DataClass, DataLikeKind.RegularClass -> buildDataClass(rootFqn, data, externalDispatchValue)
         }
     }
 
     private fun buildValueClass(
         rootFqn: String,
         data: RawSymbol.DataLike,
+        dispatchValueProperty: com.ditchoom.buffer.codec.processor.discovery.RawDispatchValueProperty?,
     ): Either<Nel<KspError>, DiscriminatorShape.ValueClass> {
         val errors = mutableListOf<KspError>()
         if (data.constructorParameters.size != 1) {
@@ -78,27 +82,64 @@ internal object DiscriminatorBuilder {
                     sourceFqn = data.fqn,
                 )
         }
-        // dispatch property — there is no per-property RawSymbol model in PhaseA, so we
-        // synthesize a "dispatchProp = innerProp" entry. PhaseC-level @DispatchValue
-        // resolution can refine when accessing the source declaration directly.
         val innerProp = inner?.name ?: ""
+        // Slice 5.5: prefer a `@DispatchValue`-annotated property captured by PhaseA off
+        // the discriminator class declarations. Real-world MQTT uses
+        // `@JvmInline value class MqttFixedHeader(val raw: UByte)` with
+        // `@DispatchValue val packetType: Int get() = (raw.toInt() shr 4) and 0x0F` —
+        // the new pipeline used to synthesise `dispatchProp = "raw"` (a UByte) which
+        // mismatched the variant arms (Int literals) and produced compile errors.
+        // Legacy `resolveDispatchOn` enforces the property's type is `Int`; mirror that
+        // check here. When the captured property is non-Int we fall back to `innerProp`
+        // and let PhaseC's `WireRangeCheck` surface the type-domain mismatch.
+        val dispatchProp =
+            if (dispatchValueProperty != null && dispatchValueProperty.returnTypeFqn == "kotlin.Int") {
+                dispatchValueProperty.name
+            } else {
+                if (dispatchValueProperty != null) {
+                    errors +=
+                        KspError(
+                            message =
+                                "@DispatchValue property '${dispatchValueProperty.name}' on " +
+                                    "'${data.fqn}' must return Int, but returns " +
+                                    "${dispatchValueProperty.returnTypeFqn}. Mirror legacy " +
+                                    "`resolveDispatchOn` requires Int because variant @PacketType / " +
+                                    "@PacketTypeRange arms are Int literals.",
+                            sourceFqn = data.fqn,
+                        )
+                }
+                innerProp
+            }
         if (errors.isNotEmpty()) {
             return Nel.fromList(errors).left()
         }
+        // Wire range: when the dispatch property is a derived getter producing Int,
+        // the value range is no longer constrained by the inner primitive's natural
+        // range. Use the full Int domain (legacy doesn't bound-check against the
+        // inner type when @DispatchValue overrides the dispatch). When the dispatch
+        // property is the inner property itself, retain the unsigned-max-value bound.
+        val isDerivedDispatch = dispatchValueProperty != null && dispatchProp != innerProp
+        val wireRange =
+            if (isDerivedDispatch) {
+                Int.MIN_VALUE..Int.MAX_VALUE
+            } else {
+                0..PrimitiveTypes.maxUnsignedValue(innerKind!!).toInt().let { it.coerceAtMost(0xFFFF) }
+            }
         return DiscriminatorShape
             .ValueClass(
                 discriminatorType = TypeFqn(data.fqn),
                 inner = innerKind!!,
                 innerProp = innerProp,
                 codec = CodecNaming.forSymbol(data),
-                dispatchProp = innerProp,
-                wireRange = 0..PrimitiveTypes.maxUnsignedValue(innerKind).toInt().let { it.coerceAtMost(0xFFFF) },
+                dispatchProp = dispatchProp,
+                wireRange = wireRange,
             ).right()
     }
 
     private fun buildDataClass(
         rootFqn: String,
         data: RawSymbol.DataLike,
+        dispatchValueProperty: com.ditchoom.buffer.codec.processor.discovery.RawDispatchValueProperty?,
     ): Either<Nel<KspError>, DiscriminatorShape.DataClass> {
         val errors = mutableListOf<KspError>()
         val params = mutableListOf<DiscParam>()
@@ -130,6 +171,30 @@ internal object DiscriminatorBuilder {
                     sourceFqn = data.fqn,
                 )
         }
+        // Slice 5.5: prefer the captured property-declaration `@DispatchValue` (works for
+        // derived getters that aren't constructor parameters). Mirrors legacy
+        // `resolveDispatchOn`. When the property's return type is not Int, fall back to
+        // the constructor-param dispatch so the existing legacy diagnostic surface stays
+        // intact (PhaseC's wire-range check does the type-domain enforcement separately).
+        val dispatchProp =
+            when {
+                dispatchValueProperty != null && dispatchValueProperty.returnTypeFqn == "kotlin.Int" ->
+                    dispatchValueProperty.name
+                dispatchValueProperty != null -> {
+                    errors +=
+                        KspError(
+                            message =
+                                "@DispatchValue property '${dispatchValueProperty.name}' on " +
+                                    "'${data.fqn}' must return Int, but returns " +
+                                    "${dispatchValueProperty.returnTypeFqn}. Mirror legacy " +
+                                    "`resolveDispatchOn` requires Int because variant @PacketType / " +
+                                    "@PacketTypeRange arms are Int literals.",
+                            sourceFqn = data.fqn,
+                        )
+                    dispatchProps.firstOrNull()?.name ?: data.constructorParameters.first().name
+                }
+                else -> dispatchProps.firstOrNull()?.name ?: data.constructorParameters.first().name
+            }
         if (errors.isNotEmpty()) {
             return Nel.fromList(errors).left()
         }
@@ -138,7 +203,7 @@ internal object DiscriminatorBuilder {
                 discriminatorType = TypeFqn(data.fqn),
                 params = params,
                 codec = CodecNaming.forSymbol(data),
-                dispatchProp = dispatchProps.firstOrNull()?.name ?: data.constructorParameters.first().name,
+                dispatchProp = dispatchProp,
             ).right()
     }
 }

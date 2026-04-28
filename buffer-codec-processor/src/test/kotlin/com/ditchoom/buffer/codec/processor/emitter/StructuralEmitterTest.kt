@@ -146,8 +146,10 @@ class StructuralEmitterTest {
     fun `Shape8 body-length sealed slices body and guards trailing bytes`() {
         val s = emit(EmitterFixtures.controlPacketV5(), "ControlPacketV5")
         assertTrue(s.contains("MqttFixedHeader.readBodyLength(buffer)"))
-        assertTrue(s.contains("buffer.readBytes(bodyLength)"))
-        assertTrue(s.contains("body.remaining() != 0"))
+        // Slice 5.5: body-length locals renamed to legacy convention `_bodyLen` /
+        // `_bodySlice` so the body-overrun guard reads identically to legacy.
+        assertTrue(s.contains("buffer.readBytes(_bodyLen)"))
+        assertTrue(s.contains("_bodySlice.remaining() != 0"))
         assertTrue(s.contains("CodecContext.Key<MqttFixedHeader>"))
     }
 
@@ -167,7 +169,8 @@ class StructuralEmitterTest {
     @Test
     fun `Shape9 WithPayload variant routes to decodeFromContext`() {
         val s = emit(EmitterFixtures.controlPacketV5(), "ControlPacketV5")
-        assertTrue(s.contains("ControlPacketV5PublishCodec.decodeFromContext(body, ctx)"))
+        // Slice 5.5: body-length locals renamed to legacy convention `_bodySlice`.
+        assertTrue(s.contains("ControlPacketV5PublishCodec.decodeFromContext(_bodySlice, ctx)"))
         // Encode also goes via encodeFromContext for WithPayload variants.
         assertTrue(s.contains("ControlPacketV5PublishCodec.encodeFromContext"))
         assertTrue(s.contains("wireSizeFromContext"))

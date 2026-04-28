@@ -322,4 +322,185 @@ class SealedRootPlanBuilderTest {
         val plan = PlanBuilder.build(root, scope).expectRight() as Plan.Sealed_
         assertEquals("ext.MyError", plan.onUnknown.canonical)
     }
+
+    /**
+     * Slice 5.5 — Item A: when the discriminator class declares a derived getter
+     * annotated `@DispatchValue`, PhaseB picks it up via PhaseA's
+     * `RawClassMetadata.dispatchValueProperty` and uses its name as
+     * `DiscriminatorShape.ValueClass.dispatchProp`. Without this fix PhaseB falls
+     * back to the inner-property name (`raw`) and the dispatcher emits
+     * `discriminator.raw` (UByte) compared against `Int` literal arms — compile
+     * error.
+     */
+    @Test
+    fun `Value-class discriminator with DispatchValue derived getter resolves dispatchProp`() {
+        val header =
+            Fixtures.dataLike(
+                fqn = "test.MqttFixedHeader",
+                ctorParameters = listOf(Fixtures.param("raw", Fixtures.primitiveTypeRef("kotlin.UByte"))),
+                kind = com.ditchoom.buffer.codec.processor.discovery.DataLikeKind.ValueClass,
+            )
+        val variant =
+            Fixtures.dataLike(
+                fqn = "test.Mqtt.PubAck",
+                ctorParameters = listOf(Fixtures.param("v", Fixtures.primitiveTypeRef("kotlin.Int"))),
+                annotations = listOf(Fixtures.protocolMessageAnnotation(), Fixtures.packetType(4)),
+            )
+        val root =
+            Fixtures.sealedRoot(
+                fqn = "test.Mqtt",
+                subclassFqns = listOf(variant.fqn),
+                annotations = listOf(Fixtures.protocolMessageAnnotation(), Fixtures.dispatchOn("test.MqttFixedHeader")),
+            )
+        val scope = mapOf(root.fqn to root as RawSymbol, variant.fqn to variant as RawSymbol, header.fqn to header as RawSymbol)
+        val externalClasses =
+            mapOf(
+                "test.MqttFixedHeader" to
+                    com.ditchoom.buffer.codec.processor.discovery.RawClassMetadata(
+                        fqn = "test.MqttFixedHeader",
+                        directlyDeclaredSupertypes = emptyList(),
+                        dispatchValueProperty =
+                            com.ditchoom.buffer.codec.processor.discovery.RawDispatchValueProperty(
+                                name = "packetType",
+                                returnTypeFqn = "kotlin.Int",
+                            ),
+                    ),
+            )
+        val plan = PlanBuilder.build(root, scope, externalClasses).expectRight() as Plan.Sealed_
+        val td = plan.dispatch as DispatchShape.TypedDiscriminator
+        val vc = td.disc as DiscriminatorShape.ValueClass
+        assertEquals("packetType", vc.dispatchProp, "dispatchProp should resolve to the derived @DispatchValue getter")
+        assertEquals("raw", vc.innerProp, "innerProp stays at the inner ctor param name for value-class wrapping")
+    }
+
+    /**
+     * Slice 5.5 — Item A negative case: a `@DispatchValue` property whose return
+     * type is not Int produces an error mirroring legacy `resolveDispatchOn`.
+     */
+    @Test
+    fun `Value-class discriminator with non-Int DispatchValue returns rejected`() {
+        val header =
+            Fixtures.dataLike(
+                fqn = "test.Hdr",
+                ctorParameters = listOf(Fixtures.param("raw", Fixtures.primitiveTypeRef("kotlin.UByte"))),
+                kind = com.ditchoom.buffer.codec.processor.discovery.DataLikeKind.ValueClass,
+            )
+        val variant =
+            Fixtures.dataLike(
+                fqn = "test.Cmd.A",
+                ctorParameters = listOf(Fixtures.param("v", Fixtures.primitiveTypeRef("kotlin.Int"))),
+                annotations = listOf(Fixtures.protocolMessageAnnotation(), Fixtures.packetType(1)),
+            )
+        val root =
+            Fixtures.sealedRoot(
+                fqn = "test.Cmd",
+                subclassFqns = listOf(variant.fqn),
+                annotations = listOf(Fixtures.protocolMessageAnnotation(), Fixtures.dispatchOn("test.Hdr")),
+            )
+        val scope = mapOf(root.fqn to root as RawSymbol, variant.fqn to variant as RawSymbol, header.fqn to header as RawSymbol)
+        val externalClasses =
+            mapOf(
+                "test.Hdr" to
+                    com.ditchoom.buffer.codec.processor.discovery.RawClassMetadata(
+                        fqn = "test.Hdr",
+                        directlyDeclaredSupertypes = emptyList(),
+                        dispatchValueProperty =
+                            com.ditchoom.buffer.codec.processor.discovery.RawDispatchValueProperty(
+                                name = "label",
+                                returnTypeFqn = "kotlin.String",
+                            ),
+                    ),
+            )
+        val errors = PlanBuilder.build(root, scope, externalClasses).expectLeft()
+        assertTrue(
+            errors.all.any { "must return Int" in it.message },
+            "expected non-Int @DispatchValue diagnostic; got ${errors.all.map { it.message }}",
+        )
+    }
+
+    /**
+     * Slice 5.5 — Item B: when a sealed root has no explicit direction marker
+     * and its variants infer to `DecodeOnly` (e.g. via `@UseCodec` referencing
+     * a `Decoder<T>`-only codec), the sealed root's direction is propagated as
+     * `DecodeOnly`. Mirrors legacy `computeSealedDirection`.
+     */
+    @Test
+    fun `Sealed root with all DecodeOnly variants is propagated as DecodeOnly`() {
+        val variant =
+            Fixtures.dataLike(
+                fqn = "test.Cmd.A",
+                ctorParameters = listOf(Fixtures.param("v", Fixtures.primitiveTypeRef("kotlin.Int"))),
+                annotations =
+                    listOf(
+                        Fixtures.protocolMessageAnnotation(),
+                        Fixtures.decode(),
+                        Fixtures.packetType(1),
+                    ),
+                direction = com.ditchoom.buffer.codec.processor.discovery.RawDirection.DecodeOnly,
+            )
+        val root =
+            Fixtures.sealedRoot(
+                fqn = "test.Cmd",
+                subclassFqns = listOf(variant.fqn),
+                annotations = listOf(Fixtures.protocolMessageAnnotation()),
+            )
+        val scope = mapOf(root.fqn to root as RawSymbol, variant.fqn to variant as RawSymbol)
+        val plan = PlanBuilder.build(root, scope).expectRight() as Plan.Sealed_
+        assertEquals(
+            com.ditchoom.buffer.codec.processor.ir.Direction.DecodeOnly,
+            plan.dir,
+            "DecodeOnly variants should propagate to the sealed root's direction",
+        )
+    }
+
+    /**
+     * Slice 5.5 — Item B negative case: a sealed root with a `@Decode` marker
+     * whose variants include an `@Encode`-marked variant produces a conflict
+     * error. Mirrors legacy `computeSealedDirection`.
+     */
+    @Test
+    fun `Sealed root explicit DecodeOnly with EncodeOnly variant rejected`() {
+        val decodeVariant =
+            Fixtures.dataLike(
+                fqn = "test.Cmd.D",
+                ctorParameters = listOf(Fixtures.param("v", Fixtures.primitiveTypeRef("kotlin.Int"))),
+                annotations =
+                    listOf(
+                        Fixtures.protocolMessageAnnotation(),
+                        Fixtures.decode(),
+                        Fixtures.packetType(1),
+                    ),
+                direction = com.ditchoom.buffer.codec.processor.discovery.RawDirection.DecodeOnly,
+            )
+        val encodeVariant =
+            Fixtures.dataLike(
+                fqn = "test.Cmd.E",
+                ctorParameters = listOf(Fixtures.param("v", Fixtures.primitiveTypeRef("kotlin.Int"))),
+                annotations =
+                    listOf(
+                        Fixtures.protocolMessageAnnotation(),
+                        Fixtures.encode(),
+                        Fixtures.packetType(2),
+                    ),
+                direction = com.ditchoom.buffer.codec.processor.discovery.RawDirection.EncodeOnly,
+            )
+        val root =
+            Fixtures.sealedRoot(
+                fqn = "test.Cmd",
+                subclassFqns = listOf(decodeVariant.fqn, encodeVariant.fqn),
+                annotations = listOf(Fixtures.protocolMessageAnnotation(), Fixtures.decode()),
+                direction = com.ditchoom.buffer.codec.processor.discovery.RawDirection.DecodeOnly,
+            )
+        val scope =
+            mapOf(
+                root.fqn to root as RawSymbol,
+                decodeVariant.fqn to decodeVariant as RawSymbol,
+                encodeVariant.fqn to encodeVariant as RawSymbol,
+            )
+        val errors = PlanBuilder.build(root, scope).expectLeft()
+        assertTrue(
+            errors.all.any { "encode-only" in it.message },
+            "expected DecodeOnly-vs-encode-only conflict diagnostic; got ${errors.all.map { it.message }}",
+        )
+    }
 }

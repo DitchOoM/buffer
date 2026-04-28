@@ -200,7 +200,7 @@ object PlanBuilder {
                         )
                     DispatchShape.RawByte
                 } else {
-                    when (val disc = DiscriminatorBuilder.build(symbol.fqn, typeArg.fqn, scope)) {
+                    when (val disc = DiscriminatorBuilder.build(symbol.fqn, typeArg.fqn, scope, externalClasses)) {
                         is Either.Left -> {
                             errors += disc.value.all
                             DispatchShape.RawByte
@@ -240,23 +240,22 @@ object PlanBuilder {
                 ?.takeIf { it.isNotBlank() }
                 ?: "java.lang.IllegalArgumentException"
 
+        // Slice 5.5: reconcile the sealed root's explicit direction (if any) against the
+        // variants' inferred directions. Mirrors legacy `computeSealedDirection` in
+        // ProtocolMessageProcessor:
+        //  * Conflict (some DecodeOnly + some EncodeOnly): error.
+        //  * Sealed-explicit `Codec` (Bidirectional) but any variant is unidirectional:
+        //    error — a bidirectional dispatcher cannot reference variants that lack
+        //    `encode` / `wireSize` (Decoder-only) or `decode` (Encoder-only) overloads.
+        //  * Sealed-explicit `DecodeOnly` and any variant is `EncodeOnly`: error.
+        //  * Sealed-explicit `EncodeOnly` and any variant is `DecodeOnly`: error.
+        //  * Otherwise: when sealed is `Default`, infer the most-restrictive direction
+        //    from variants; when sealed is explicit, use it as-is.
+        val rawDir = symbol.direction
+        val refinedDir = computeSealedDirection(symbol, variants, rawDir, dirOrErrors, errors)
         if (errors.isNotEmpty()) {
             return Nel.fromList(errors).left()
         }
-        // Slice 5a: when the sealed root has no explicit direction marker
-        // (`RawDirection.Default` → `Bidirectional`), refine its direction from the
-        // variants. Mirrors legacy `computeSealedDirection` in ProtocolMessageProcessor —
-        // variants carry per-field direction inference (e.g. `@UseCodec(SomeDecoder)`
-        // makes a variant DecodeOnly), and the sealed root's direction must agree.
-        // Without this refinement the dispatcher would emit `Codec<T>` while the
-        // variants are emitted as `Decoder<T>` — producing references to `encode` /
-        // `wireSize` overloads the variants don't expose.
-        val refinedDir =
-            if (symbol.direction == com.ditchoom.buffer.codec.processor.discovery.RawDirection.Default) {
-                deriveSealedDirection(variants, dirOrErrors)
-            } else {
-                dirOrErrors
-            }
         return Plan
             .Sealed_(
                 decl = TypeFqn(symbol.fqn),
@@ -267,17 +266,99 @@ object PlanBuilder {
             ).right()
     }
 
-    private fun deriveSealedDirection(
+    /**
+     * Mirror of legacy `ProtocolMessageProcessor.computeSealedDirection`. Reconciles the
+     * sealed root's explicit direction against the variants' inferred directions.
+     *
+     * Without this refinement: a sealed root with all-DecodeOnly variants would emit
+     * `Codec<T>` superinterface while the variants' codecs only implement `Decoder<T>` —
+     * the dispatcher would reference `Variant.encode` and `Variant.wireSize` overloads
+     * the variants don't expose, producing a hard compile error.
+     *
+     * The legacy resolver runs against `KSClassDeclaration` and walks fields to compute
+     * variant direction. PhaseB pre-runs the same per-variant inference inside
+     * [VariantPlanBuilder] so by the time we reach this method, every variant carries
+     * its inferred [Direction] in `VariantPlan.dir`.
+     */
+    private fun computeSealedDirection(
+        symbol: RawSymbol.SealedRoot,
         variants: List<com.ditchoom.buffer.codec.processor.ir.VariantPlan>,
+        rawDir: com.ditchoom.buffer.codec.processor.discovery.RawDirection,
         defaultDir: Direction,
+        errors: MutableList<KspError>,
     ): Direction {
-        val hasDecodeOnly = variants.any { it.dir == Direction.DecodeOnly }
-        val hasEncodeOnly = variants.any { it.dir == Direction.EncodeOnly }
-        return when {
-            hasDecodeOnly && hasEncodeOnly -> defaultDir // PhaseC will surface the conflict
-            hasDecodeOnly -> Direction.DecodeOnly
-            hasEncodeOnly -> Direction.EncodeOnly
-            else -> defaultDir
+        val decodeOnly = variants.filter { it.dir == Direction.DecodeOnly }
+        val encodeOnly = variants.filter { it.dir == Direction.EncodeOnly }
+        if (decodeOnly.isNotEmpty() && encodeOnly.isNotEmpty()) {
+            errors +=
+                KspError(
+                    message =
+                        "Sealed root '${symbol.fqn}' has both decode-only variants " +
+                            "[${decodeOnly.joinToString(", ") { "'${it.decl.canonical}'" }}] " +
+                            "and encode-only variants " +
+                            "[${encodeOnly.joinToString(", ") { "'${it.decl.canonical}'" }}]. " +
+                            "These are incompatible. Either make all variant codecs bidirectional " +
+                            "or split into separate sealed roots per direction.",
+                    sourceFqn = symbol.fqn,
+                )
+            return defaultDir
+        }
+        val inferred =
+            when {
+                decodeOnly.isNotEmpty() -> Direction.DecodeOnly
+                encodeOnly.isNotEmpty() -> Direction.EncodeOnly
+                else -> Direction.Bidirectional
+            }
+        return when (rawDir) {
+            com.ditchoom.buffer.codec.processor.discovery.RawDirection.Default -> {
+                // No explicit class-level signal — use whatever the variants imply.
+                if (defaultDir == Direction.Bidirectional) inferred else defaultDir
+            }
+            com.ditchoom.buffer.codec.processor.discovery.RawDirection.Codec -> {
+                val unidirectional = decodeOnly + encodeOnly
+                if (unidirectional.isNotEmpty()) {
+                    errors +=
+                        KspError(
+                            message =
+                                "@ProtocolMessage(direction = Codec) on sealed root '${symbol.fqn}' " +
+                                    "requires all variants to be bidirectional, but these are not: " +
+                                    unidirectional.joinToString(", ") { "'${it.decl.canonical}' (${it.dir})" } +
+                                    ". Make those variants bidirectional or change the sealed direction " +
+                                    "to DecodeOnly / EncodeOnly.",
+                            sourceFqn = symbol.fqn,
+                        )
+                }
+                Direction.Bidirectional
+            }
+            com.ditchoom.buffer.codec.processor.discovery.RawDirection.DecodeOnly -> {
+                if (encodeOnly.isNotEmpty()) {
+                    errors +=
+                        KspError(
+                            message =
+                                "@Decode (or @ProtocolMessage(direction = DecodeOnly)) on sealed root " +
+                                    "'${symbol.fqn}' conflicts with encode-only variants: " +
+                                    encodeOnly.joinToString(", ") { "'${it.decl.canonical}'" } +
+                                    ". Make those variants bidirectional or remove the encode-only constraint.",
+                            sourceFqn = symbol.fqn,
+                        )
+                }
+                Direction.DecodeOnly
+            }
+            com.ditchoom.buffer.codec.processor.discovery.RawDirection.EncodeOnly -> {
+                if (decodeOnly.isNotEmpty()) {
+                    errors +=
+                        KspError(
+                            message =
+                                "@Encode (or @ProtocolMessage(direction = EncodeOnly)) on sealed root " +
+                                    "'${symbol.fqn}' conflicts with decode-only variants: " +
+                                    decodeOnly.joinToString(", ") { "'${it.decl.canonical}'" } +
+                                    ". Make those variants bidirectional or remove the decode-only constraint.",
+                            sourceFqn = symbol.fqn,
+                        )
+                }
+                Direction.EncodeOnly
+            }
+            com.ditchoom.buffer.codec.processor.discovery.RawDirection.Conflict -> defaultDir
         }
     }
 
@@ -333,10 +414,20 @@ object PlanBuilder {
     ): FramingMode {
         val companionFqn = "${discriminator.discriminatorType.canonical}.Companion"
         val metadata = externalClasses[companionFqn] ?: return FramingMode.Unframed
+        // When the framer is the discriminator's companion object, emit calls via
+        // the enclosing class name (Kotlin auto-routes to the companion) so generated
+        // source reads `MyTag.readBodyLength(...)` rather than the longer
+        // `MyTag.Companion.readBodyLength(...)`. Mirrors legacy
+        // `ResolvedFramer(fqn = discriminatorClass.qualifiedName)`. Slice 5.5: pass
+        // the companion FQN as the **lookup key** for FramerTypeMatcher (so the
+        // validator inspects the companion's supertypes, not the discriminator's),
+        // but emit the **discriminator class name** so the generated source matches
+        // legacy.
         return frameModeFromMetadata(
             framerFqn = companionFqn,
             metadata = metadata,
             discriminator = discriminator,
+            emitClassNameOverride = fqnToClassName(discriminator.discriminatorType.canonical),
         )
     }
 
@@ -344,8 +435,15 @@ object PlanBuilder {
         framerFqn: String,
         metadata: RawClassMetadata?,
         discriminator: DiscriminatorShape,
+        emitClassNameOverride: ClassName? = null,
     ): FramingMode {
-        val framerClassName = fqnToClassName(framerFqn)
+        // `framerClassName` is what the dispatcher emits at decode/encode call sites.
+        // For the inherit-companion path Slice 5.5 overrides this to the **discriminator
+        // class name** so generated source reads `MyTag.readBodyLength(...)` (Kotlin
+        // auto-routes to the companion). FramerTypeMatcher continues to look up by
+        // FQN, which here is the companion FQN — that is what the metadata was
+        // captured for.
+        val framerClassName = emitClassNameOverride ?: fqnToClassName(framerFqn)
         // Without metadata (framer FQN was named explicitly but didn't resolve at PhaseA)
         // we still emit PeekOnly so PhaseC's FramerTypeMatcher gets a chance to surface
         // the resolution error against the same framerFqn.

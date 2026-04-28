@@ -72,8 +72,45 @@ class SealedEmitter(
         // public fun (matching legacy `PeekFrameSizeEmitter.buildPeekFun(implementsCodec = false)`).
         if (canDecode) {
             val implementsCodec = plan.dir == com.ditchoom.buffer.codec.processor.ir.Direction.Bidirectional
-            type.addFunction(buildPeekFrame(plan, implementsCodec))
-            type.addFunction(buildSuspendingPeekFrame(plan))
+            // Slice 5.5: legacy omits the entire dispatcher peek when the dispatch is
+            // unframed AND any variant's fields disqualify peek emission (e.g. a
+            // `@RemainingBytes` String at variable position). Without this check the
+            // dispatcher emits per-variant peek delegations that reference a
+            // `peekFrameSize` overload the variant doesn't have. Mirrors legacy
+            // `allVariantsSupportPeek` gate in `SealedDispatchGenerator.generate`.
+            val emitPeek =
+                isFramed(plan) || plan.variants.all { v -> variantSupportsPeek(v) }
+            if (emitPeek) {
+                // MIN_HEADER_BYTES — sized to the discriminator (+1 for body-length
+                // framing's length-prefix floor). Mirrors legacy
+                // `SealedDispatchGenerator.buildSealedPeekResult`.
+                val discriminatorBytes = sealedDiscriminatorBytes(plan)
+                val minHeaderBytes =
+                    if (isFramed(plan) &&
+                        plan.dispatch is DispatchShape.TypedDiscriminator &&
+                        (plan.dispatch as DispatchShape.TypedDiscriminator).framing is FramingMode.BodyLength
+                    ) {
+                        discriminatorBytes + 1
+                    } else {
+                        discriminatorBytes
+                    }
+                type.addProperty(
+                    com.squareup.kotlinpoet.PropertySpec
+                        .builder("MIN_HEADER_BYTES", INT, KModifier.PUBLIC, KModifier.CONST)
+                        .initializer("%L", minHeaderBytes)
+                        .build(),
+                )
+                type.addFunction(buildPeekFrame(plan, implementsCodec))
+                // Framer interfaces (`DispatchFraming` / `BodyLengthFraming`) are sync-only
+                // — their `peekFrameSize` accepts a `StreamProcessor`, not a
+                // `SuspendingStreamProcessor`. Emitting a suspending overload that calls
+                // `framerFqn.peekFrameSize(stream, baseOffset)` produces a type-mismatch
+                // compile error. Mirrors legacy skipping the suspend overload when
+                // `dispatchOnInfo.framing != null`.
+                if (!isFramed(plan)) {
+                    type.addFunction(buildSuspendingPeekFrame(plan))
+                }
+            }
         }
 
         // DiscriminatorKey nested data object — only emitted when at least one
@@ -102,8 +139,7 @@ class SealedEmitter(
             .build()
     }
 
-    private fun variantsConsumeDiscriminator(plan: Plan.Sealed_): Boolean =
-        plan.variants.any { v -> hasDiscriminatorOwnedField(v) }
+    private fun variantsConsumeDiscriminator(plan: Plan.Sealed_): Boolean = plan.variants.any { v -> hasDiscriminatorOwnedField(v) }
 
     /**
      * True when the variant declares any [FieldStrategy.DiscriminatorOwned] field.
@@ -128,8 +164,84 @@ class SealedEmitter(
      * the DiscriminatorOwned check here so the dispatcher's encode/wireSize match
      * legacy line-for-line when a variant data-class carries a discriminator field.
      */
-    private fun effectiveSelfEncodes(variant: VariantPlan): Boolean =
-        variant.selfEncodes || hasDiscriminatorOwnedField(variant)
+    private fun effectiveSelfEncodes(variant: VariantPlan): Boolean = variant.selfEncodes || hasDiscriminatorOwnedField(variant)
+
+    /**
+     * Wire byte count of the dispatch discriminator. For `RawByte` always 1; for
+     * `TypedDiscriminator` the natural width of the discriminator's primitive
+     * shape.
+     */
+    private fun sealedDiscriminatorBytes(plan: Plan.Sealed_): Int =
+        when (val d = plan.dispatch) {
+            is DispatchShape.RawByte -> 1
+            is DispatchShape.TypedDiscriminator ->
+                when (val disc = d.disc) {
+                    is DiscriminatorShape.ValueClass -> naturalWireBytes(disc.inner)
+                    is DiscriminatorShape.DataClass -> disc.params.sumOf { it.wireBytes }.coerceAtLeast(1)
+                }
+        }
+
+    /**
+     * True when a non-payload variant's fields support the legacy
+     * `PeekFrameSizeEmitter.generate` shape — i.e. fixed-width primitives + length-prefixed
+     * fields with peekable prefixes. Conservative for Slice 5.5: we only return `true`
+     * for variants whose fields are entirely Primitive / NestedMessage / DiscriminatorOwned
+     * (no `@RemainingBytes` String, no `Collection_`, no `Spi`, no payload slot).
+     *
+     * The legacy resolver (in `ProtocolMessageProcessor`) tracks `variantsSupportingPeek`
+     * by re-running `PeekFrameSizeEmitter.generate(fields)` and checking it didn't return
+     * null. We approximate via field-strategy whitelist — if any variant disqualifies,
+     * the dispatcher's whole peek overload is omitted (matches legacy
+     * `allVariantsSupportPeek` gate in `SealedDispatchGenerator.generate`).
+     */
+    private fun variantSupportsPeek(variant: VariantPlan): Boolean {
+        if (variant !is VariantPlan.NoPayload) {
+            // WithPayload variants carry a `PayloadSlot` whose length comes from
+            // `@LengthFrom` or `@RemainingBytes` — not peekable inline.
+            return false
+        }
+        for (f in variant.fields) {
+            if (f.conditionality !is com.ditchoom.buffer.codec.processor.ir.Conditionality.Always) return false
+            when (val s = f.strategy) {
+                is FieldStrategy.Primitive -> Unit
+                is FieldStrategy.DiscriminatorOwned -> Unit
+                is FieldStrategy.NestedMessage -> Unit
+                is FieldStrategy.StringField -> {
+                    // Inline length-prefixed strings are peekable (Byte/Short/Int prefix);
+                    // Varint and Remaining are not. Mirrors `LeafEmitter.computePeekPlan`.
+                    val length = s.length
+                    if (length is com.ditchoom.buffer.codec.processor.ir.LengthSource.Inline) {
+                        when (length.encoding) {
+                            com.ditchoom.buffer.codec.processor.ir.LengthEncoding.Varint -> return false
+                            else -> Unit
+                        }
+                    } else {
+                        return false
+                    }
+                }
+                else -> return false
+            }
+        }
+        return true
+    }
+
+    /**
+     * True when the sealed root carries a `BodyLengthFraming` / `DispatchFraming`
+     * framer (vs. unframed dispatch). Framers' `peekFrameSize` are declared on
+     * sync-only interfaces, so the dispatcher cannot delegate to the framer from
+     * a suspending overload — the suspending overload is skipped entirely in
+     * that case (mirrors legacy).
+     */
+    private fun isFramed(plan: Plan.Sealed_): Boolean {
+        val d = plan.dispatch
+        if (d !is DispatchShape.TypedDiscriminator) return false
+        return when (d.framing) {
+            FramingMode.Unframed -> false
+            is FramingMode.PeekOnly,
+            is FramingMode.BodyLength,
+            -> true
+        }
+    }
 
     private fun buildDecode(
         plan: Plan.Sealed_,
@@ -170,14 +282,17 @@ class SealedEmitter(
                 val ctxArg = if (variantsConsumeDiscriminator(plan)) "ctx" else "context"
                 val bodyArg =
                     when (d.framing) {
-                        is FramingMode.BodyLength -> "body"
+                        is FramingMode.BodyLength -> "_bodySlice"
                         else -> "buffer"
                     }
                 if (d.framing is FramingMode.BodyLength) {
-                    // Need to capture the result before the body-remaining
-                    // guard fires. The legacy emitter does this via a `_result`
-                    // local.
-                    fb.addCode("val result = ")
+                    // Slice 5.5: rename body-length locals to legacy convention `_bodyLen` /
+                    // `_bodySlice` so the body-overrun guard reads identically to legacy
+                    // generated source. Bare-name locals are an acceptable difference per
+                    // the slice constraints, but rebuilding the legacy diagnostic shape
+                    // (the configured `onUnknownDiscriminator` exception, the body-byte-count
+                    // error message) requires referencing those locals from the guard.
+                    fb.addCode("val _result = ")
                     fb.addCode(
                         buildDispatchWhen(
                             plan,
@@ -188,13 +303,15 @@ class SealedEmitter(
                             isReturn = false,
                         ),
                     )
-                    fb.addCode("if (body.remaining() != 0) {\n")
+                    fb.addCode("if (_bodySlice.remaining() != 0) {\n")
                     fb.addCode(
-                        "    throw %T(\"Variant decoder did not fully consume body bytes; \${body.remaining()} unread.\")\n",
-                        ClassName("kotlin", "IllegalStateException"),
+                        "    throw %T(\"Variant decoder consumed \${_bodyLen - _bodySlice.remaining()} of \" +\n" +
+                            "        \"\$_bodyLen body bytes; \${_bodySlice.remaining()} unread. \" +\n" +
+                            "        \"Wire is malformed or variant codec is buggy.\")\n",
+                        registry.resolve(plan.onUnknown),
                     )
                     fb.addCode("}\n")
-                    fb.addCode("return result\n")
+                    fb.addCode("return _result\n")
                 } else {
                     fb.addCode(
                         buildDispatchWhen(
@@ -220,11 +337,16 @@ class SealedEmitter(
             FramingMode.Unframed -> Unit
             is FramingMode.PeekOnly -> Unit
             is FramingMode.BodyLength -> {
+                // Slice 5.5: legacy convention names the locals `_bodyLen` / `_bodySlice`;
+                // matching them keeps the body-overrun diagnostic message identical
+                // (referenced by `_bodyLen - _bodySlice.remaining()`) and tracks the
+                // legacy regression test `body-overrun check throws configured
+                // onUnknownDiscriminator exception`.
                 fb.addCode(
-                    "val bodyLength = %T.readBodyLength(buffer)\n",
+                    "val _bodyLen = %T.readBodyLength(buffer)\n",
                     framing.framerFqn,
                 )
-                fb.addCode("val body = buffer.readBytes(bodyLength)\n")
+                fb.addCode("val _bodySlice = buffer.readBytes(_bodyLen)\n")
             }
         }
     }
@@ -431,7 +553,7 @@ class SealedEmitter(
                         val conversion = wireConversion(disc.inner, wire)
                         val discType = registry.resolve(disc.discriminatorType)
                         fb.addCode(
-                            "${indent}%T.encode(buffer, %T(%L), context)\n",
+                            "$indent%T.encode(buffer, %T(%L), context)\n",
                             disc.codec,
                             discType,
                             conversion,

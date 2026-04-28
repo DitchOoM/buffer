@@ -254,7 +254,8 @@ class MatrixEmitterTest {
         assertSensibleEmit(plan, "B·N·P")
         val s = emitText(plan)
         assertTrue(s.contains("Framer.readBodyLength"))
-        assertTrue(s.contains("body.remaining() != 0"))
+        // Slice 5.5: body-length locals renamed to legacy convention `_bodySlice`.
+        assertTrue(s.contains("_bodySlice.remaining() != 0"))
     }
 
     @Test
@@ -279,7 +280,8 @@ class MatrixEmitterTest {
             )
         assertSensibleEmit(plan, "B·W·P")
         val s = emitText(plan)
-        assertTrue(s.contains("RootAlphaCodec.decodeFromContext(body, "))
+        // Slice 5.5: body-length locals renamed to legacy convention `_bodySlice`.
+        assertTrue(s.contains("RootAlphaCodec.decodeFromContext(_bodySlice, "))
     }
 
     @Test
@@ -292,7 +294,8 @@ class MatrixEmitterTest {
         assertSensibleEmit(plan, "B·W·R")
         val s = emitText(plan)
         assertTrue(s.contains("rawByte in 48..63"))
-        assertTrue(s.contains("RootAlphaCodec.decodeFromContext(body, "))
+        // Slice 5.5: body-length locals renamed to legacy convention `_bodySlice`.
+        assertTrue(s.contains("RootAlphaCodec.decodeFromContext(_bodySlice, "))
     }
 
     /**

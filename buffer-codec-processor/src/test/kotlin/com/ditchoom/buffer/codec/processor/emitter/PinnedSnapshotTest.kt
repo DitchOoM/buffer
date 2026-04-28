@@ -151,6 +151,35 @@ class PinnedSnapshotTest {
         )
     }
 
+    /**
+     * Slice 5.5 hard-bar — Item C: `Plan.Leaf` with an asymmetric SPI descriptor
+     * (different `decodeRaw` and `encodeRaw` strings). Asserts decode emits the
+     * decode expression and encode emits the encode expression — never swapped.
+     * Mirrors legacy `CustomFieldDescriptor` with separate read/write FunctionRefs.
+     */
+    @Test
+    fun `Asymmetric SPI descriptor emits decodeRaw on decode and encodeRaw on encode`() {
+        val emitted = emitText(EmitterFixtures.asymmetricSpiLeaf(), EmitterFixtures.cn("AsymmetricSpiLeaf"))
+        // Decode side reads the decodeRaw expression.
+        assert(emitted.contains("val cidr = buffer.readCidr()")) {
+            "Asymmetric SPI: decode side should call buffer.readCidr() — got:\n$emitted"
+        }
+        // Encode side calls the encodeRaw expression.
+        assert(emitted.contains("buffer.writeCidr(value.cidr)")) {
+            "Asymmetric SPI: encode side should call buffer.writeCidr(value.cidr) — got:\n$emitted"
+        }
+        // The decode expression must not appear on the encode side and vice-versa.
+        // The encode body is the block following `fun encode(... ) {`.
+        val encodeBody = emitted.substringAfter("fun encode(").substringAfter("{").substringBefore("\n  override")
+        assert(!encodeBody.contains("buffer.readCidr()")) {
+            "Asymmetric SPI: encode body must not contain decodeRaw expression — got:\n$encodeBody"
+        }
+        val decodeBody = emitted.substringAfter("fun decode(").substringAfter("{").substringBefore("\n  override")
+        assert(!decodeBody.contains("buffer.writeCidr")) {
+            "Asymmetric SPI: decode body must not contain encodeRaw expression — got:\n$decodeBody"
+        }
+    }
+
     /** Banned-pattern: per the rearchitecture plan, fixed-width wireSize must
      * not emit `var _size = 0; _size += 1; return _size`. */
     @Test

@@ -34,6 +34,7 @@ object Discovery {
     private const val DECODE_FQN = "com.ditchoom.buffer.codec.annotations.Decode"
     private const val ENCODE_FQN = "com.ditchoom.buffer.codec.annotations.Encode"
     private const val DISPATCH_ON_FQN = "com.ditchoom.buffer.codec.annotations.DispatchOn"
+    private const val DISPATCH_VALUE_FQN = "com.ditchoom.buffer.codec.annotations.DispatchValue"
     private const val USE_CODEC_FQN = "com.ditchoom.buffer.codec.annotations.UseCodec"
 
     fun run(resolver: Resolver): DiscoveryResult {
@@ -81,6 +82,13 @@ object Discovery {
         symbols: List<RawSymbol>,
     ): Map<String, RawClassMetadata> {
         val candidateFqns = mutableSetOf<String>()
+        // Slice 5.5: track which candidate FQNs are `@DispatchOn(type = D::class)`
+        // discriminators so the metadata pass walks their properties for
+        // `@DispatchValue` (which lives on a property declaration, not on a
+        // constructor parameter — a derived getter cannot exist as a value-class
+        // ctor parameter, so the legacy `getAllProperties()` walk is the only
+        // surface that picks it up).
+        val discriminatorTypeFqns = mutableSetOf<String>()
         for (s in symbols) {
             for (ann in s.annotations) {
                 if (ann.fqn == DISPATCH_ON_FQN) {
@@ -94,6 +102,11 @@ object Discovery {
                         // not exist (then resolution returns null below) or may not implement
                         // DispatchFraming (then PhaseB falls through to Unframed).
                         candidateFqns += "${typeRef.fqn}.Companion"
+                        // Slice 5.5: track the discriminator FQN itself so PhaseA can walk
+                        // its properties for `@DispatchValue` (covers derived getters that
+                        // never appear as constructor parameters).
+                        candidateFqns += typeRef.fqn
+                        discriminatorTypeFqns += typeRef.fqn
                     }
                 }
             }
@@ -111,13 +124,46 @@ object Discovery {
         val out = mutableMapOf<String, RawClassMetadata>()
         for (fqn in candidateFqns) {
             val decl = resolveCompanionAware(resolver, fqn) ?: continue
+            val dispatchValueProperty =
+                if (fqn in discriminatorTypeFqns) findDispatchValueProperty(decl) else null
             out[fqn] =
                 RawClassMetadata(
                     fqn = fqn,
                     directlyDeclaredSupertypes = decl.superTypes.toList().map(::toRawTypeRef),
+                    dispatchValueProperty = dispatchValueProperty,
                 )
         }
         return out.toMap()
+    }
+
+    /**
+     * Walk a discriminator class's declared properties looking for one annotated
+     * `@DispatchValue`. Mirrors legacy `ProtocolMessageProcessor.resolveDispatchOn`
+     * which uses `getAllProperties().filter { it.annotations.any { ... } }`.
+     *
+     * Returns `null` when no annotated property is found OR when more than one is
+     * found (PhaseB surfaces the conflict via its existing `dispatchProps.size > 1`
+     * check).
+     */
+    private fun findDispatchValueProperty(decl: KSClassDeclaration): RawDispatchValueProperty? {
+        val matches =
+            decl
+                .getAllProperties()
+                .filter { prop ->
+                    prop.annotations.any { ann ->
+                        ann.annotationFqnOrNull() == DISPATCH_VALUE_FQN
+                    }
+                }.toList()
+        if (matches.size != 1) return null
+        val prop = matches.first()
+        val resolvedType = prop.type.resolve()
+        val typeFqn =
+            resolvedType.declaration.qualifiedName?.asString()
+                ?: "kotlin.${resolvedType.declaration.simpleName.asString()}"
+        return RawDispatchValueProperty(
+            name = prop.simpleName.asString(),
+            returnTypeFqn = typeFqn,
+        )
     }
 
     /**

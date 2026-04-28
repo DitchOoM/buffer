@@ -166,7 +166,20 @@ class ProtocolMessageProcessor(
             if (variant.fields.any { f ->
                     !(coverableConditionality(f.conditionality) && coverableStrategyForVariant(f.strategy))
                 }
-            ) return false
+            ) {
+                return false
+            }
+        }
+        // Slice 5.5: sealed dispatchers with WithPayload variants need the typed-lambda
+        // overloads (`decode<P>(buf, lambda)` / `encode<P>(buf, value, lambda)` /
+        // `wireSize<P>(value, sizeOf)`) which the new SealedEmitter doesn't yet emit.
+        // The legacy `SealedDispatchGenerator` does. Until the typed-lambda fan-out
+        // ships in Slice 6, refuse coverage for such dispatchers and let legacy own
+        // them. The standard `decode(buf, ctx)` shape the new emitter does emit is
+        // not enough for consumers that call the typed-lambda overload directly
+        // (e.g. `DispatchedFrameCodec.decode<String>(buf) { pr -> ... }`).
+        if (plan.variants.any { it is com.ditchoom.buffer.codec.processor.ir.VariantPlan.WithPayload }) {
+            return false
         }
         return when (val d = plan.dispatch) {
             is com.ditchoom.buffer.codec.processor.ir.DispatchShape.RawByte -> true
@@ -243,9 +256,13 @@ class ProtocolMessageProcessor(
                 // Slice 5a expands coverage to variable-size SPI: when fixedSize == -1, the
                 // descriptor must carry a non-blank `wireSizeRaw` so LeafEmitter can substitute
                 // a runtime size expression (mirrors legacy
-                // `FieldReadStrategy.Custom.descriptor.wireSizeFunction`). The validator also
-                // requires `raw` to be non-blank when `fixedSize == -1`.
-                strategy.descriptor.raw.isNotBlank() &&
+                // `FieldReadStrategy.Custom.descriptor.wireSizeFunction`). Slice 5.5 splits
+                // `raw` into `decodeRaw` / `encodeRaw`; we accept the descriptor when EITHER
+                // side has a non-blank expression so asymmetric SPI providers cross the gate.
+                val hasInline =
+                    strategy.descriptor.decodeRaw.isNotBlank() ||
+                        strategy.descriptor.encodeRaw.isNotBlank()
+                hasInline &&
                     (strategy.descriptor.fixedSize >= 0 || strategy.descriptor.wireSizeRaw.isNotBlank())
             }
             else -> false
@@ -265,18 +282,23 @@ class ProtocolMessageProcessor(
      *    [PlanBuilder] would silently classify the field as a primitive.
      */
     private fun pipelineEligible(symbol: com.ditchoom.buffer.codec.processor.discovery.RawSymbol): Boolean {
-        // Slice 5a: `@DispatchOn` on a non-sealed symbol — legacy emits the tailored
-        // "@DispatchOn is not valid on an object" error; let it speak.
-        // Sealed-root `@DispatchOn` is conditionally allowed: only when the discriminator's
-        // dispatch property matches its single inner property (i.e. PhaseB's
-        // `dispatchProp = innerProp` synthesis is correct). PhaseB doesn't yet resolve
-        // `@DispatchValue` on derived getters (see `DiscriminatorBuilder.buildValueClass`
-        // line 82-83 — "PhaseC-level @DispatchValue resolution can refine"). Routing
-        // sealed roots whose `@DispatchValue` lives on a derived getter through the new
-        // pipeline produces `val type = discriminator.raw` where the variant arms are
-        // `Int` literals, mismatching the `UByte` type. Slice 6 ports `@DispatchValue`
-        // resolution into PhaseA/B; until then, route those through legacy.
-        if (symbol.annotations.any { it.fqn == "com.ditchoom.buffer.codec.annotations.DispatchOn" }) {
+        // Slice 5.5: `@DispatchOn` on a sealed root is now eligible to cross the
+        // pipeline. PhaseA captures `@DispatchValue` properties off the discriminator
+        // class (including derived getters such as `MqttFixedHeader.packetType`),
+        // and PhaseB's `DiscriminatorBuilder` consumes the captured property name
+        // when building `DiscriminatorShape.ValueClass.dispatchProp`. The remaining
+        // `coverable()` whitelist is what gates routing — non-coverable shapes still
+        // fall through to legacy.
+        //
+        // `@DispatchOn` on a non-sealed symbol (object / data class) still falls
+        // through here: legacy emits the tailored "@DispatchOn is not valid on an
+        // object" error and PhaseB has no analog, so the legacy diagnostic remains
+        // the user-visible source. The check below applies only to non-sealed
+        // symbols.
+        val isSealedRoot = symbol is com.ditchoom.buffer.codec.processor.discovery.RawSymbol.SealedRoot
+        if (!isSealedRoot &&
+            symbol.annotations.any { it.fqn == "com.ditchoom.buffer.codec.annotations.DispatchOn" }
+        ) {
             return false
         }
         if (symbol is com.ditchoom.buffer.codec.processor.discovery.RawSymbol.DataLike) {

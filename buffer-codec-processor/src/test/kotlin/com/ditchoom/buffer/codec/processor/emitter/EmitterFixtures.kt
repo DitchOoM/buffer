@@ -803,12 +803,45 @@ object EmitterFixtures {
                         "value",
                         fqn("VarSizePayload"),
                         FieldStrategy.Spi(
-                            provider = com.ditchoom.buffer.codec.processor.ir.ProviderId("var-size-payload"),
+                            provider =
+                                com.ditchoom.buffer.codec.processor.ir
+                                    .ProviderId("var-size-payload"),
                             descriptor =
                                 com.ditchoom.buffer.codec.processor.ir.SpiDescriptor(
                                     raw = "VarSizePayloadCodec.decode(buffer, context)",
                                     fixedSize = -1,
                                     wireSizeRaw = "VarSizePayloadCodec.wireSize(value.value)",
+                                ),
+                        ),
+                    ),
+                ),
+            batches = emptyList(),
+            dir = Direction.Bidirectional,
+        )
+
+    /**
+     * Slice 5.5 fixture — `Plan.Leaf` with an SPI field whose `decodeRaw` and
+     * `encodeRaw` differ. Mirrors legacy `CustomFieldDescriptor` with separate
+     * `readFunction` (`buffer.readCidr()`) and `writeFunction`
+     * (`buffer.writeCidr(value.cidr)`).
+     */
+    fun asymmetricSpiLeaf(): Plan.Leaf =
+        Plan.Leaf(
+            decl = fqn("AsymmetricSpiLeaf"),
+            fields =
+                listOf(
+                    FieldPlan(
+                        "cidr",
+                        TypeFqn("kotlin.Int"),
+                        FieldStrategy.Spi(
+                            provider =
+                                com.ditchoom.buffer.codec.processor.ir
+                                    .ProviderId("cidr"),
+                            descriptor =
+                                com.ditchoom.buffer.codec.processor.ir.SpiDescriptor(
+                                    fixedSize = 5,
+                                    decodeRaw = "buffer.readCidr()",
+                                    encodeRaw = "buffer.writeCidr(value.cidr)",
                                 ),
                         ),
                     ),
@@ -868,6 +901,7 @@ object EmitterFixtures {
                 fqn("ControlPacketV5Slice5a.PingReq") to cn("ControlPacketV5Slice5a").nestedClass("PingReq"),
                 fqn("VariableSizeSpiLeaf") to cn("VariableSizeSpiLeaf"),
                 fqn("VarSizePayload") to cn("VarSizePayload"),
+                fqn("AsymmetricSpiLeaf") to cn("AsymmetricSpiLeaf"),
                 TypeFqn("kotlin.IllegalArgumentException") to ClassName("kotlin", "IllegalArgumentException"),
             ),
         )

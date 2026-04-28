@@ -141,15 +141,30 @@ value class ProviderId(
 
 /** Provider-specific descriptor produced by a `CodecFieldProvider` for a single field.
  *
- * - [raw] is the inline read/write expression text (e.g. `MyCodec.decode(buffer, context)` or
- *   `MyCodec.encode(buffer, value.field, context)`).
+ * - [raw] is the legacy single-string inline expression (kept for backward compatibility
+ *   with fixtures that don't yet split decode vs encode). When non-blank it backs both
+ *   [decodeRaw] and [encodeRaw] unless the caller passes asymmetric overrides.
+ * - [decodeRaw] is the inline **decode** expression text the LeafEmitter substitutes on
+ *   the decode site, e.g. `buffer.readFoo()` or `MyCodec.decode(buffer, context)`. When
+ *   blank in the constructor, falls back to [raw] at access time.
+ * - [encodeRaw] is the inline **encode** expression text the LeafEmitter substitutes on
+ *   the encode site, e.g. `buffer.writeFoo(value.field)` or
+ *   `MyCodec.encode(buffer, value.field, context)`. When blank in the constructor,
+ *   falls back to [raw] at access time.
  * - [fixedSize] is the constant wire size in bytes; `-1` means variable-size and requires
  *   [wireSizeRaw] to be non-blank so the emitter can substitute a runtime size expression
  *   (mirrors legacy `CustomFieldDescriptor.wireSizeFunction` lowering — typically
  *   `MyCodec.wireSize(value.field)`).
+ *
+ * Asymmetric SPI providers (legacy `CustomFieldDescriptor` with separate
+ * `readFunction` / `writeFunction` `FunctionRef`s) construct a descriptor where
+ * [decodeRaw] and [encodeRaw] differ — Slice 5.5 splits them so the emitter can
+ * route each to the correct call site.
  */
 data class SpiDescriptor(
-    val raw: String,
+    val raw: String = "",
     val fixedSize: Int = -1,
     val wireSizeRaw: String = "",
+    val decodeRaw: String = raw,
+    val encodeRaw: String = raw,
 )

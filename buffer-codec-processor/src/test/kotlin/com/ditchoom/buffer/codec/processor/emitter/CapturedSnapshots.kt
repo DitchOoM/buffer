@@ -255,6 +255,8 @@ object CapturedSnapshots {
         import kotlin.Int
 
         public object RiffChunkSlice4Codec : Codec<RiffChunkSlice4> {
+          public const val MIN_HEADER_BYTES: Int = 4
+
           override fun decode(buffer: ReadBuffer, context: DecodeContext): RiffChunkSlice4 {
             val discriminator = RiffChunkIdCodec.decode(buffer, context)
             val type = discriminator.id
@@ -329,27 +331,29 @@ object CapturedSnapshots {
         import com.ditchoom.buffer.codec.EncodeContext
         import com.ditchoom.buffer.stream.PeekResult
         import com.ditchoom.buffer.stream.StreamProcessor
-        import com.ditchoom.buffer.stream.SuspendingStreamProcessor
         import kotlin.IllegalArgumentException
-        import kotlin.IllegalStateException
         import kotlin.Int
 
         public object ControlPacketV5Slice4Codec : Codec<ControlPacketV5Slice4> {
+          public const val MIN_HEADER_BYTES: Int = 2
+
           override fun decode(buffer: ReadBuffer, context: DecodeContext): ControlPacketV5Slice4 {
             val discriminator = MqttFixedHeaderCodec.decode(buffer, context)
             val ctx = context.with(DiscriminatorKey, discriminator)
-            val bodyLength = MqttFixedHeader.readBodyLength(buffer)
-            val body = buffer.readBytes(bodyLength)
+            val _bodyLen = MqttFixedHeader.readBodyLength(buffer)
+            val _bodySlice = buffer.readBytes(_bodyLen)
             val type = discriminator.packetType
-            val result = when (type) {
-              4 -> com.ditchoom.codec.test.ControlPacketV5Slice4PubAckCodec.decode(body, ctx)
-              12 -> com.ditchoom.codec.test.ControlPacketV5Slice4PingReqCodec.decode(body, ctx)
+            val _result = when (type) {
+              4 -> com.ditchoom.codec.test.ControlPacketV5Slice4PubAckCodec.decode(_bodySlice, ctx)
+              12 -> com.ditchoom.codec.test.ControlPacketV5Slice4PingReqCodec.decode(_bodySlice, ctx)
               else -> throw IllegalArgumentException("Unknown discriminator: ${'$'}type")
             }
-            if (body.remaining() != 0) {
-                throw IllegalStateException("Variant decoder did not fully consume body bytes; ${'$'}{body.remaining()} unread.")
+            if (_bodySlice.remaining() != 0) {
+                throw IllegalArgumentException("Variant decoder consumed ${'$'}{_bodyLen - _bodySlice.remaining()} of " +
+                    "${'$'}_bodyLen body bytes; ${'$'}{_bodySlice.remaining()} unread. " +
+                    "Wire is malformed or variant codec is buggy.")
             }
-            return result
+            return _result
           }
 
           override fun encode(
@@ -379,8 +383,6 @@ object CapturedSnapshots {
 
           override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = MqttFixedHeader.peekFrameSize(stream, baseOffset)
 
-          public suspend fun peekFrameSize(stream: SuspendingStreamProcessor, baseOffset: Int = 0): PeekResult = MqttFixedHeader.peekFrameSize(stream, baseOffset)
-
           public data object DiscriminatorKey : CodecContext.Key<MqttFixedHeader>()
         }
         """.trimIndent()
@@ -402,11 +404,12 @@ object CapturedSnapshots {
         import com.ditchoom.buffer.codec.EncodeContext
         import com.ditchoom.buffer.stream.PeekResult
         import com.ditchoom.buffer.stream.StreamProcessor
-        import com.ditchoom.buffer.stream.SuspendingStreamProcessor
         import kotlin.IllegalArgumentException
         import kotlin.Int
 
         public object WsFrameSlice4Codec : Codec<WsFrameSlice4> {
+          public const val MIN_HEADER_BYTES: Int = 1
+
           override fun decode(buffer: ReadBuffer, context: DecodeContext): WsFrameSlice4 {
             val discriminator = WsOpcodeByteCodec.decode(buffer, context)
             val type = discriminator.opcode
@@ -440,8 +443,6 @@ object CapturedSnapshots {
           }
 
           override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = WsFraming.peekFrameSize(stream, baseOffset)
-
-          public suspend fun peekFrameSize(stream: SuspendingStreamProcessor, baseOffset: Int = 0): PeekResult = WsFraming.peekFrameSize(stream, baseOffset)
         }
         """.trimIndent()
 
@@ -502,27 +503,29 @@ object CapturedSnapshots {
         import com.ditchoom.buffer.codec.EncodeContext
         import com.ditchoom.buffer.stream.PeekResult
         import com.ditchoom.buffer.stream.StreamProcessor
-        import com.ditchoom.buffer.stream.SuspendingStreamProcessor
         import kotlin.IllegalArgumentException
-        import kotlin.IllegalStateException
         import kotlin.Int
 
         public object ControlPacketV5Slice5aCodec : Codec<ControlPacketV5Slice5a> {
+          public const val MIN_HEADER_BYTES: Int = 2
+
           override fun decode(buffer: ReadBuffer, context: DecodeContext): ControlPacketV5Slice5a {
             val discriminator = MqttFixedHeaderCodec.decode(buffer, context)
             val ctx = context.with(DiscriminatorKey, discriminator)
-            val bodyLength = MqttFixedHeader.readBodyLength(buffer)
-            val body = buffer.readBytes(bodyLength)
+            val _bodyLen = MqttFixedHeader.readBodyLength(buffer)
+            val _bodySlice = buffer.readBytes(_bodyLen)
             val type = discriminator.packetType
-            val result = when (type) {
-              3 -> com.ditchoom.codec.test.ControlPacketV5Slice5aPublishCodec.decodeFromContext(body, ctx)
-              12 -> com.ditchoom.codec.test.ControlPacketV5Slice5aPingReqCodec.decode(body, ctx)
+            val _result = when (type) {
+              3 -> com.ditchoom.codec.test.ControlPacketV5Slice5aPublishCodec.decodeFromContext(_bodySlice, ctx)
+              12 -> com.ditchoom.codec.test.ControlPacketV5Slice5aPingReqCodec.decode(_bodySlice, ctx)
               else -> throw IllegalArgumentException("Unknown discriminator: ${'$'}type")
             }
-            if (body.remaining() != 0) {
-                throw IllegalStateException("Variant decoder did not fully consume body bytes; ${'$'}{body.remaining()} unread.")
+            if (_bodySlice.remaining() != 0) {
+                throw IllegalArgumentException("Variant decoder consumed ${'$'}{_bodyLen - _bodySlice.remaining()} of " +
+                    "${'$'}_bodyLen body bytes; ${'$'}{_bodySlice.remaining()} unread. " +
+                    "Wire is malformed or variant codec is buggy.")
             }
-            return result
+            return _result
           }
 
           override fun encode(
@@ -551,8 +554,6 @@ object CapturedSnapshots {
           }
 
           override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = MqttFixedHeader.peekFrameSize(stream, baseOffset)
-
-          public suspend fun peekFrameSize(stream: SuspendingStreamProcessor, baseOffset: Int = 0): PeekResult = MqttFixedHeader.peekFrameSize(stream, baseOffset)
 
           public data object DiscriminatorKey : CodecContext.Key<MqttFixedHeader>()
         }

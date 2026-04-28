@@ -349,11 +349,13 @@ class LeafEmitter(
                     registry.codecOf(s.parentDispatchOn),
                 )
 
-            // SPI: descriptor.raw is the inline read expression (e.g. `MyCodec.decode(buffer, context)`).
-            // Mirrors legacy `FieldReadStrategy.Custom` lowering — the provider produces the call site's
-            // text directly and the emitter substitutes it.
+            // SPI: `descriptor.decodeRaw` is the inline read expression (e.g.
+            // `MyCodec.decode(buffer, context)`). For legacy single-string descriptors,
+            // `decodeRaw` falls back to `raw` so existing fixtures keep working without
+            // changes. Mirrors legacy `FieldReadStrategy.Custom` lowering — the provider
+            // produces the call site's text directly and the emitter substitutes it.
             is FieldStrategy.Spi ->
-                wrapConditional(field, "val ${field.name} = ${s.descriptor.raw}\n")
+                wrapConditional(field, "val ${field.name} = ${s.descriptor.decodeRaw}\n")
             is FieldStrategy.VarInt ->
                 wrapConditional(field, "val ${field.name} = buffer.readVariableByteInteger()\n")
             is FieldStrategy.StringField ->
@@ -634,10 +636,11 @@ class LeafEmitter(
 
             is FieldStrategy.DiscriminatorOwned -> null // dispatcher already wrote the bytes
             is FieldStrategy.Spi -> {
-                // SPI write descriptors are also embedded as `descriptor.raw`. The
-                // PlanBuilder ensures `raw` carries the encode call with the correct
-                // value reference (e.g. `MyCodec.encode(buffer, value.field, context)`).
-                CodeBlock.of("%L\n", s.descriptor.raw)
+                // SPI write descriptors lower from `descriptor.encodeRaw`. Asymmetric
+                // SPI providers (decode side calls a `read*` extension, encode side a
+                // `write*` extension) supply distinct decode/encode strings; legacy
+                // single-string descriptors back both via `raw`.
+                CodeBlock.of("%L\n", s.descriptor.encodeRaw)
             }
             is FieldStrategy.VarInt -> {
                 val ref =

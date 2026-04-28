@@ -56,7 +56,25 @@ internal object FramerTypeMatcher {
         errors: MutableList<KspError>,
     ) {
         val framerFqn = expected.framerFqn.toFqn()
-        val metadata = externalClasses[framerFqn]
+        // Slice 5.5: the inherit-companion path emits the dispatcher's framer
+        // ClassName as the discriminator class (Kotlin auto-routes `MyTag.method()`
+        // to the companion). PhaseA captures metadata under the companion's FQN —
+        // when the named class FQN doesn't have metadata, fall back to its
+        // `${fqn}.Companion` entry. This is also the path that fires when the
+        // discriminator class itself is captured (Slice 5.5 added that for
+        // `@DispatchValue` property walking) — we want to inspect the framer
+        // companion's supertypes, not the discriminator's.
+        val metadata =
+            externalClasses[framerFqn]
+                ?.takeIf { md ->
+                    // If the metadata describes a class that doesn't extend any framer
+                    // interface and a `.Companion` entry exists, prefer the companion.
+                    val supers = md.directlyDeclaredSupertypes.map { it.fqn }.toSet()
+                    DISPATCH_FRAMING_FQN in supers ||
+                        BODY_LENGTH_FRAMING_FQN in supers ||
+                        externalClasses["$framerFqn.Companion"] == null
+                }
+                ?: externalClasses["$framerFqn.Companion"]
         if (metadata == null) {
             errors +=
                 KspError(
