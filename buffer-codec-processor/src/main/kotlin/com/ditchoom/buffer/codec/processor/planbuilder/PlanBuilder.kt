@@ -44,7 +44,26 @@ object PlanBuilder {
         val classWireOrder = readWireOrder(symbol)
         val direction = DirectionResolver.resolve(symbol)
         return when (symbol) {
-            is RawSymbol.ObjectSymbol -> direction.map { dir -> Plan.Object_(decl = TypeFqn(symbol.fqn), dir = dir) }
+            is RawSymbol.ObjectSymbol -> {
+                // Cap 6: @DispatchOn is only valid on sealed roots. Reject it on
+                // a singleton object — the legacy emitter's diagnostic was
+                // "@DispatchOn is not valid on an object".
+                val errors = mutableListOf<KspError>()
+                if (symbol.annotations.find(AnnotationFqns.DispatchOn) != null) {
+                    errors +=
+                        KspError(
+                            message =
+                                "@DispatchOn is not valid on an object — '${symbol.fqn}' is a singleton " +
+                                    "with no variants to dispatch to. Move the annotation to a sealed root.",
+                            sourceFqn = symbol.fqn,
+                        )
+                }
+                if (errors.isNotEmpty()) {
+                    Nel.fromList(errors).left()
+                } else {
+                    direction.map { dir -> Plan.Object_(decl = TypeFqn(symbol.fqn), dir = dir) }
+                }
+            }
             is RawSymbol.DataLike ->
                 buildDataLike(
                     symbol = symbol,
