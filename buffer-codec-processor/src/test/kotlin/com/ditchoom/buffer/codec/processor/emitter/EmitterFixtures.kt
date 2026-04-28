@@ -488,6 +488,40 @@ object EmitterFixtures {
             dir = Direction.Bidirectional,
         )
 
+    /**
+     * Slice 2 fixture — `Plan.Leaf` exercising both `FieldStrategy.VarInt` and
+     * `FieldStrategy.StringField` (LengthPrefixed UShort).
+     *
+     * Models an `MqttPropertyHeader(@LengthPrefixed val topic: String, @VariableByteInteger val packetId: Int)`.
+     */
+    fun stringHeader(): Plan.Leaf =
+        Plan.Leaf(
+            decl = fqn("StringHeader"),
+            fields =
+                listOf(
+                    FieldPlan(
+                        name = "topic",
+                        type = TypeFqn("kotlin.String"),
+                        strategy =
+                            FieldStrategy.StringField(
+                                length =
+                                    com.ditchoom.buffer.codec.processor.ir.LengthSource.Inline(
+                                        encoding =
+                                            com.ditchoom.buffer.codec.processor.ir.LengthEncoding.Short,
+                                        maxBytes = 2,
+                                    ),
+                            ),
+                    ),
+                    FieldPlan(
+                        name = "packetId",
+                        type = TypeFqn("kotlin.Int"),
+                        strategy = FieldStrategy.VarInt(maxBytes = 4),
+                    ),
+                ),
+            batches = emptyList(),
+            dir = Direction.Bidirectional,
+        )
+
     fun standardRegistry(): TypeRegistry =
         TypeRegistry(
             mapOf(
@@ -495,6 +529,7 @@ object EmitterFixtures {
                 fqn("GrpcFrame") to cn("GrpcFrame"),
                 fqn("MqttConnectFlags") to cn("MqttConnectFlags"),
                 fqn("PingResponse") to cn("PingResponse"),
+                fqn("StringHeader") to cn("StringHeader"),
                 fqn("RiffChunk") to cn("RiffChunk"),
                 fqn("RiffChunk.Data") to cn("RiffChunk").nestedClass("Data"),
                 fqn("RiffChunk.Fact") to cn("RiffChunk").nestedClass("Fact"),

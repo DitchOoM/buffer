@@ -82,6 +82,21 @@ class ObjectEmitter {
                 .build(),
         )
 
+        // Suspending overload — required for parity with the legacy emitter so the
+        // stream-processor reader call sites that take a `SuspendingStreamProcessor`
+        // (e.g. mqtt + websocket clients) keep the same shape after this codec
+        // moves through the new pipeline.
+        type.addFunction(
+            FunSpec
+                .builder("peekFrameSize")
+                .addModifiers(KModifier.PUBLIC, KModifier.SUSPEND)
+                .addParameter("stream", Names.SuspendingStreamProcessor)
+                .addParameter(ParameterSpec.builder("baseOffset", INT).defaultValue("0").build())
+                .returns(Names.PeekResult)
+                .addCode("return %T(0)\n", Names.PeekResultSize)
+                .build(),
+        )
+
         return FileSpec
             .builder(codecName.packageName, codecName.simpleName)
             .addType(type.build())

@@ -12,7 +12,6 @@ import com.ditchoom.buffer.codec.processor.planbuilder.Either
 import com.ditchoom.buffer.codec.processor.planbuilder.PlanBuilder
 import com.ditchoom.buffer.codec.processor.spi.CodecFieldProvider
 import com.ditchoom.buffer.codec.processor.validator.Validator
-import com.google.devtools.ksp.getAllSuperTypes
 import com.google.devtools.ksp.getConstructors
 import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.Dependencies
@@ -113,20 +112,36 @@ class ProtocolMessageProcessor(
      *
      * [Plan.Sealed_] is reserved for Slice 4+ and explicitly excluded.
      */
-    private fun coverable(plan: Plan): Boolean {
-        @Suppress("KotlinConstantConditions")
-        val enableLeaf = false
-        return when (plan) {
+    private fun coverable(plan: Plan): Boolean =
+        when (plan) {
             is Plan.Object_ -> true
             is Plan.Leaf ->
-                enableLeaf &&
-                    plan.batches.isEmpty() &&
+                plan.batches.isEmpty() &&
                     plan.fields.all { f ->
-                        f.strategy is FieldStrategy.Primitive && f.conditionality is Conditionality.Always
+                        f.conditionality is Conditionality.Always && coverableStrategy(f.strategy)
                     }
             is Plan.Sealed_ -> false
         }
-    }
+
+    /**
+     * Slice 2 covers Primitive (natural width + big-endian only — custom width / WireOrder
+     * stay on the legacy path), VarInt, and StringField. Wire-order overrides and custom
+     * `@WireBytes` widths require the legacy `customWidthReadExpr` / `swappedReadExpr`
+     * helpers which the new emitter has not yet ported.
+     */
+    private fun coverableStrategy(strategy: FieldStrategy): Boolean =
+        when (strategy) {
+            is FieldStrategy.Primitive -> {
+                val natural =
+                    com.ditchoom.buffer.codec.processor.planbuilder.PrimitiveTypes
+                        .naturalWireBytes(strategy.kind)
+                strategy.order == com.ditchoom.buffer.codec.processor.ir.Endianness.Big &&
+                    strategy.wireBytes == natural
+            }
+            is FieldStrategy.VarInt -> true
+            is FieldStrategy.StringField -> true
+            else -> false
+        }
 
     /**
      * Phase 9 Slice 1: extra eligibility filter applied **before** the new pipeline runs.
@@ -746,7 +761,11 @@ class ProtocolMessageProcessor(
             val superType = superTypeRef.resolve()
             val decl = superType.declaration as? KSClassDeclaration ?: continue
             val superFqn = decl.qualifiedName?.asString() ?: continue
-            val firstArg = superType.arguments.firstOrNull()?.type?.resolve() ?: continue
+            val firstArg =
+                superType.arguments
+                    .firstOrNull()
+                    ?.type
+                    ?.resolve() ?: continue
             val argFqn = (firstArg.declaration as? KSClassDeclaration)?.qualifiedName?.asString() ?: continue
             if (argFqn != discriminatorFqn) continue
             when (superFqn) {

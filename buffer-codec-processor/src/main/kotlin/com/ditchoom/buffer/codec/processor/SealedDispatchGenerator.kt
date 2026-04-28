@@ -196,8 +196,9 @@ class SealedDispatchGenerator(
 
             val match: WireMatch =
                 if (packetType != null) {
-                    val wireArg = packetType.arguments.find { it.name?.asString() == "wire" }?.value as? Int
-                        ?: packetType.arguments.firstOrNull()?.value as? Int
+                    val wireArg =
+                        packetType.arguments.find { it.name?.asString() == "wire" }?.value as? Int
+                            ?: packetType.arguments.firstOrNull()?.value as? Int
                     if (wireArg == null) {
                         logger.error(
                             "@PacketType on '${subclass.simpleName.asString()}' must specify `wire`. " +
@@ -234,10 +235,12 @@ class SealedDispatchGenerator(
                     WireMatch.Point(subclass = subclass, wire = wire)
                 } else {
                     // packetRange != null
-                    val from = packetRange!!.arguments.find { it.name?.asString() == "from" }?.value as? Int
-                        ?: (packetRange.arguments.getOrNull(0)?.value as? Int)
-                    val to = packetRange.arguments.find { it.name?.asString() == "to" }?.value as? Int
-                        ?: (packetRange.arguments.getOrNull(1)?.value as? Int)
+                    val from =
+                        packetRange!!.arguments.find { it.name?.asString() == "from" }?.value as? Int
+                            ?: (packetRange.arguments.getOrNull(0)?.value as? Int)
+                    val to =
+                        packetRange.arguments.find { it.name?.asString() == "to" }?.value as? Int
+                            ?: (packetRange.arguments.getOrNull(1)?.value as? Int)
                     if (from == null || to == null) {
                         logger.error(
                             "@PacketTypeRange on '${subclass.simpleName.asString()}' must specify `from` and `to`.",
@@ -558,7 +561,13 @@ class SealedDispatchGenerator(
             // need a multi-condition `when {}`. Otherwise stick with `when (type)` for cleanliness.
             val useWhenBlock = dispatchOnInfo != null && hasRanges
             if (framed) {
-                if (useWhenBlock) decodeCtxBody.beginControlFlow("val _result = when") else decodeCtxBody.beginControlFlow("val _result = when (type)")
+                if (useWhenBlock) {
+                    decodeCtxBody.beginControlFlow(
+                        "val _result = when",
+                    )
+                } else {
+                    decodeCtxBody.beginControlFlow("val _result = when (type)")
+                }
             } else {
                 if (useWhenBlock) decodeCtxBody.beginControlFlow("return when") else decodeCtxBody.beginControlFlow("return when (type)")
             }
@@ -576,8 +585,7 @@ class SealedDispatchGenerator(
                     "else -> throw %T(%P)",
                     unknownException,
                     if (useWhenBlock) "Unknown discriminator: 0x\${rawByte.toString(16)}" else "Unknown packet type: \$type",
-                )
-                .endControlFlow()
+                ).endControlFlow()
             if (framed) {
                 emitBodyLengthOverrunCheck(decodeCtxBody, unknownException)
                 decodeCtxBody.addStatement("return _result")
@@ -743,7 +751,13 @@ class SealedDispatchGenerator(
         val framed = dispatchOnInfo?.hasBodyLength == true
         val useWhenBlock = dispatchOnInfo != null && hasRanges
         if (framed) {
-            if (useWhenBlock) decodeBody.beginControlFlow("val _result = when") else decodeBody.beginControlFlow("val _result = when (type)")
+            if (useWhenBlock) {
+                decodeBody.beginControlFlow(
+                    "val _result = when",
+                )
+            } else {
+                decodeBody.beginControlFlow("val _result = when (type)")
+            }
         } else {
             if (useWhenBlock) decodeBody.beginControlFlow("return when") else decodeBody.beginControlFlow("return when (type)")
         }
@@ -777,8 +791,7 @@ class SealedDispatchGenerator(
                 "else -> throw %T(%P)",
                 unknownException,
                 if (useWhenBlock) "Unknown discriminator: 0x\${rawByte.toString(16)}" else "Unknown packet type: \$type",
-            )
-            .endControlFlow()
+            ).endControlFlow()
         if (framed) {
             emitBodyLengthOverrunCheck(decodeBody, unknownException)
             decodeBody.addStatement("return _result")
@@ -916,7 +929,13 @@ class SealedDispatchGenerator(
             val framed = dispatchOnInfo?.hasBodyLength == true
             val useWhenBlock = dispatchOnInfo != null && hasRanges
             if (framed) {
-                if (useWhenBlock) decodeCtxBody.beginControlFlow("val _result = when") else decodeCtxBody.beginControlFlow("val _result = when (type)")
+                if (useWhenBlock) {
+                    decodeCtxBody.beginControlFlow(
+                        "val _result = when",
+                    )
+                } else {
+                    decodeCtxBody.beginControlFlow("val _result = when (type)")
+                }
             } else {
                 if (useWhenBlock) decodeCtxBody.beginControlFlow("return when") else decodeCtxBody.beginControlFlow("return when (type)")
             }
@@ -941,8 +960,7 @@ class SealedDispatchGenerator(
                     "else -> throw %T(%P)",
                     unknownException,
                     if (useWhenBlock) "Unknown discriminator: 0x\${rawByte.toString(16)}" else "Unknown packet type: \$type",
-                )
-                .endControlFlow()
+                ).endControlFlow()
             if (framed) {
                 emitBodyLengthOverrunCheck(decodeCtxBody, unknownException)
                 decodeCtxBody.addStatement("return _result")
@@ -1308,10 +1326,11 @@ class SealedDispatchGenerator(
             code.addStatement(encodeStmt)
             return
         }
-        val framing = info.framing ?: run {
-            code.addStatement(encodeStmt)
-            return
-        }
+        val framing =
+            info.framing ?: run {
+                code.addStatement(encodeStmt)
+                return
+            }
         if (bodySizeExpr != null) {
             code.addStatement("val _len_body = %L", bodySizeExpr)
             code.addStatement("%L.writeBodyLength(buffer, _len_body)", framing.framerFqn)

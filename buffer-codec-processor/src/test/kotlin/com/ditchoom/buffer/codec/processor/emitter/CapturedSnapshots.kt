@@ -65,6 +65,7 @@ object CapturedSnapshots {
         import com.ditchoom.buffer.codec.EncodeContext
         import com.ditchoom.buffer.stream.PeekResult
         import com.ditchoom.buffer.stream.StreamProcessor
+        import com.ditchoom.buffer.stream.SuspendingStreamProcessor
         import kotlin.Int
 
         public object PingResponseCodec : Codec<PingResponse> {
@@ -82,6 +83,8 @@ object CapturedSnapshots {
           override fun wireSize(`value`: PingResponse, context: EncodeContext): Int = 0
 
           override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.Size(0)
+
+          public suspend fun peekFrameSize(stream: SuspendingStreamProcessor, baseOffset: Int = 0): PeekResult = PeekResult.Size(0)
         }
         """.trimIndent()
 
@@ -124,6 +127,62 @@ object CapturedSnapshots {
           override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.Size(5)
 
           public suspend fun peekFrameSize(stream: SuspendingStreamProcessor, baseOffset: Int = 0): PeekResult = PeekResult.Size(5)
+        }
+        """.trimIndent()
+
+    /**
+     * Slice 2 fixture — `Plan.Leaf` with `FieldStrategy.StringField` (Inline.Short)
+     * and `FieldStrategy.VarInt`. Captures the byte-for-byte expected emit text.
+     */
+    val StringHeader =
+        """
+        package com.ditchoom.codec.test
+
+        import com.ditchoom.buffer.ReadBuffer
+        import com.ditchoom.buffer.WriteBuffer
+        import com.ditchoom.buffer.codec.Codec
+        import com.ditchoom.buffer.codec.DecodeContext
+        import com.ditchoom.buffer.codec.EncodeContext
+        import com.ditchoom.buffer.readLengthPrefixedUtf8String
+        import com.ditchoom.buffer.readVariableByteInteger
+        import com.ditchoom.buffer.stream.PeekResult
+        import com.ditchoom.buffer.stream.StreamProcessor
+        import com.ditchoom.buffer.stream.SuspendingStreamProcessor
+        import com.ditchoom.buffer.utf8Length
+        import com.ditchoom.buffer.variableByteSizeInt
+        import com.ditchoom.buffer.writeLengthPrefixedUtf8String
+        import com.ditchoom.buffer.writeVariableByteInteger
+        import com.ditchoom.buffer.writeVariableByteIntegerLengthPrefixed
+        import kotlin.Int
+
+        public object StringHeaderCodec : Codec<StringHeader> {
+          public const val MIN_HEADER_BYTES: Int = 0
+
+          override fun decode(buffer: ReadBuffer, context: DecodeContext): StringHeader {
+            val topic = buffer.readLengthPrefixedUtf8String().second
+            val packetId = buffer.readVariableByteInteger()
+            return StringHeader(topic = topic, packetId = packetId)
+          }
+
+          override fun encode(
+            buffer: WriteBuffer,
+            `value`: StringHeader,
+            context: EncodeContext,
+          ) {
+            buffer.writeLengthPrefixedUtf8String(value.topic)
+            buffer.writeVariableByteInteger(value.packetId)
+          }
+
+          override fun wireSize(`value`: StringHeader, context: EncodeContext): Int {
+            var size = 0
+            size += (2 + value.topic.utf8Length())
+            size += variableByteSizeInt(value.packetId)
+            return size
+          }
+
+          override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.Size(0)
+
+          public suspend fun peekFrameSize(stream: SuspendingStreamProcessor, baseOffset: Int = 0): PeekResult = PeekResult.Size(0)
         }
         """.trimIndent()
 

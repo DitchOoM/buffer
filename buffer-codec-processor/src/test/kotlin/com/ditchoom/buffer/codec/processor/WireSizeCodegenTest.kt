@@ -44,14 +44,24 @@ class WireSizeCodegenTest {
         val codec =
             result.generatedSources.singleOrNull { it.contains("object StandardMsgCodec") }
                 ?: error("Expected StandardMsgCodec in generated sources:\n${result.generatedSources}")
+        // Phase 9 Slice 2 widens the new pipeline to cover all-fixed-primitive Plan.Leafs;
+        // the new emitter produces the const-fold form `Int = 3`. Either shape is acceptable
+        // — `var _size = 0; ...; return _size` (legacy) or `Int = N` (constant-fold).
+        val expressionForm =
+            codec.contains("override fun wireSize(`value`: StandardMsg, context: EncodeContext): Int = ") ||
+                codec.contains("override fun wireSize(value: StandardMsg, context: EncodeContext): Int = ")
+        val accumulatorForm =
+            (
+                codec.contains("override fun wireSize(`value`: StandardMsg, context: EncodeContext): Int") ||
+                    codec.contains("override fun wireSize(value: StandardMsg, context: EncodeContext): Int")
+            ) &&
+                codec.contains("var _size = 0") &&
+                codec.contains("_size +=") &&
+                codec.contains("return _size")
         assertTrue(
-            codec.contains("override fun wireSize(`value`: StandardMsg, context: EncodeContext): Int") ||
-                codec.contains("override fun wireSize(value: StandardMsg, context: EncodeContext): Int"),
-            "Standard wireSize override signature missing. Generated:\n$codec",
+            expressionForm || accumulatorForm,
+            "wireSize override should be either the new expression form or the legacy accumulator. Generated:\n$codec",
         )
-        assertTrue(codec.contains("var _size = 0"), "Expected `var _size = 0` accumulator init. Generated:\n$codec")
-        assertTrue(codec.contains("_size +="), "Expected `_size +=` accumulation lines. Generated:\n$codec")
-        assertTrue(codec.contains("return _size"), "Expected `return _size` terminator. Generated:\n$codec")
     }
 
     @Test

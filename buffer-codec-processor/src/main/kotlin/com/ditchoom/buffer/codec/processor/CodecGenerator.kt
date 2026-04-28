@@ -533,8 +533,10 @@ class CodecGenerator(
                     LambdaTypeName.get(
                         parameters =
                             listOf(
-                                com.squareup.kotlinpoet.ParameterSpec.unnamed(WRITE_BUFFER),
-                                com.squareup.kotlinpoet.ParameterSpec.unnamed(tpName),
+                                com.squareup.kotlinpoet.ParameterSpec
+                                    .unnamed(WRITE_BUFFER),
+                                com.squareup.kotlinpoet.ParameterSpec
+                                    .unnamed(tpName),
                             ),
                         returnType = UNIT,
                     )
@@ -573,7 +575,11 @@ class CodecGenerator(
                 val tpName = TypeVariableName(strategy.typeParamName)
                 val sizeLambdaType =
                     LambdaTypeName.get(
-                        parameters = listOf(com.squareup.kotlinpoet.ParameterSpec.unnamed(tpName)),
+                        parameters =
+                            listOf(
+                                com.squareup.kotlinpoet.ParameterSpec
+                                    .unnamed(tpName),
+                            ),
                         returnType = INT,
                     )
                 bodyWireSizeBuilder.addParameter("size${capitalizeFirst(pf.name)}", sizeLambdaType)

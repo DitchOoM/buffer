@@ -71,6 +71,16 @@ class PinnedSnapshotTest {
         )
     }
 
+    /** Slice 2 hard-bar: `StringField` + `VarInt` strategies emit the pinned text. */
+    @Test
+    fun `StringHeader emits the pinned snapshot`() {
+        val emitted = emitText(EmitterFixtures.stringHeader(), EmitterFixtures.cn("StringHeader"))
+        assertEquals(
+            CapturedSnapshots.normalise(CapturedSnapshots.StringHeader),
+            CapturedSnapshots.normalise(emitted),
+        )
+    }
+
     /** Banned-pattern: per the rearchitecture plan, fixed-width wireSize must
      * not emit `var _size = 0; _size += 1; return _size`. */
     @Test
