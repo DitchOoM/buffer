@@ -13,7 +13,7 @@ class CodecExtensionsTest {
         buf.writeInt(123456) // value
         buf.resetForRead()
 
-        val decoded = SimpleStructCodec.decode(buf)
+        val decoded = SimpleStructCodec.decode(buf, DecodeContext.Empty)
         assertEquals(SimpleStruct(42u.toUShort(), 123456), decoded)
     }
 
@@ -21,7 +21,7 @@ class CodecExtensionsTest {
     fun encodeToWriteBuffer() {
         val original = SimpleStruct(42u.toUShort(), 123456)
         val buf = BufferFactory.Default.allocate(6)
-        SimpleStructCodec.encode(buf, original)
+        SimpleStructCodec.encode(buf, original, EncodeContext.Empty)
         buf.resetForRead()
 
         assertEquals(42.toShort(), buf.readShort())
@@ -42,7 +42,7 @@ class CodecExtensionsTest {
     fun encodeToBufferAndDecode() {
         val original = SimpleStruct(42u.toUShort(), 123456)
         val encoded = SimpleStructCodec.encodeToBuffer(original)
-        val decoded = SimpleStructCodec.decode(encoded)
+        val decoded = SimpleStructCodec.decode(encoded, DecodeContext.Empty)
 
         assertEquals(original, decoded)
     }
@@ -88,9 +88,9 @@ class CodecExtensionsTest {
     fun testRoundTripVariableLengthStruct() {
         val original = VariableLengthStruct(0x01, 128)
         val buf = BufferFactory.Default.allocate(16)
-        VariableLengthStructCodec.encode(buf, original)
+        VariableLengthStructCodec.encode(buf, original, EncodeContext.Empty)
         buf.resetForRead()
-        val decoded = VariableLengthStructCodec.decode(buf)
+        val decoded = VariableLengthStructCodec.decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -98,7 +98,7 @@ class CodecExtensionsTest {
     fun testRoundTripLengthPrefixedStruct() {
         val original = LengthPrefixedStruct(0x01u.toUByte(), "Hello")
         val encoded = LengthPrefixedStructCodec.encodeToBuffer(original)
-        val decoded = LengthPrefixedStructCodec.decode(encoded)
+        val decoded = LengthPrefixedStructCodec.decode(encoded, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -106,7 +106,7 @@ class CodecExtensionsTest {
     fun encodeToBufferGrowsAutomatically() {
         val original = VariableLengthStruct(0x01, 0)
         val encoded = VariableLengthStructCodec.encodeToBuffer(original)
-        val decoded = VariableLengthStructCodec.decode(encoded)
+        val decoded = VariableLengthStructCodec.decode(encoded, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -136,8 +136,8 @@ class CodecExtensionsTest {
         buf.writeInt(200)
         buf.resetForRead()
 
-        val first = SimpleStructCodec.decode(buf)
-        val second = SimpleStructCodec.decode(buf)
+        val first = SimpleStructCodec.decode(buf, DecodeContext.Empty)
+        val second = SimpleStructCodec.decode(buf, DecodeContext.Empty)
 
         assertEquals(SimpleStruct(1u.toUShort(), 100), first)
         assertEquals(SimpleStruct(2u.toUShort(), 200), second)

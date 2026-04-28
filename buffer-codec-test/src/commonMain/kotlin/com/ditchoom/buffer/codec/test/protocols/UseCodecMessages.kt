@@ -36,7 +36,10 @@ object RgbCodec : Codec<Rgb> {
         buffer.writeUByte(value.b)
     }
 
-    override fun wireSize(value: Rgb): Int = 3
+    override fun wireSize(
+        value: Rgb,
+        context: EncodeContext,
+    ): Int = 3
 }
 
 /** @UseCodec without a length annotation — codec reads directly from buffer. */
@@ -103,7 +106,10 @@ object ContextAwareRgbCodec : Codec<Rgb> {
         buffer.writeUByte((value.b.toInt() - offset).toUByte())
     }
 
-    override fun wireSize(value: Rgb): Int = 3
+    override fun wireSize(
+        value: Rgb,
+        context: EncodeContext,
+    ): Int = 3
 }
 
 /** Uses the context-aware codec — context must flow through for correct round-trip. */
@@ -118,7 +124,10 @@ data class ContextColoredPoint(
 
 /** Decode-only codec — only implements Decoder<T>. */
 object RgbDecoder : com.ditchoom.buffer.codec.Decoder<Rgb> {
-    override fun decode(buffer: ReadBuffer): Rgb = Rgb(buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte())
+    override fun decode(
+        buffer: ReadBuffer,
+        context: DecodeContext,
+    ): Rgb = Rgb(buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte())
 }
 
 /** Encode-only codec — only implements Encoder<T>. */
@@ -126,13 +135,17 @@ object RgbEncoder : com.ditchoom.buffer.codec.Encoder<Rgb> {
     override fun encode(
         buffer: WriteBuffer,
         value: Rgb,
+        context: EncodeContext,
     ) {
         buffer.writeUByte(value.r)
         buffer.writeUByte(value.g)
         buffer.writeUByte(value.b)
     }
 
-    override fun wireSize(value: Rgb): Int = 3
+    override fun wireSize(
+        value: Rgb,
+        context: EncodeContext,
+    ): Int = 3
 }
 
 /** Inferred decode-only: RgbDecoder only implements Decoder. */

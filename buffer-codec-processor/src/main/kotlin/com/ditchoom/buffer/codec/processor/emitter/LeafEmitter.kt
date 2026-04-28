@@ -207,7 +207,7 @@ class LeafEmitter(
                 wrapConditional(field, "val ${field.name} = ${s.codec.canonicalName}.decode(buffer, context)\n")
 
             is FieldStrategy.External ->
-                wrapConditional(field, "val ${field.name} = ${s.codec.canonicalName}.decode(buffer)\n")
+                wrapConditional(field, "val ${field.name} = ${s.codec.canonicalName}.decode(buffer, context)\n")
 
             is FieldStrategy.DiscriminatorOwned ->
                 CodeBlock.of(
@@ -347,7 +347,7 @@ class LeafEmitter(
                 CodeBlock.of("%T.encode(buffer, value.%L, context)\n", s.codec, field.name)
 
             is FieldStrategy.External ->
-                CodeBlock.of("%T.encode(buffer, value.%L)\n", s.codec, field.name)
+                CodeBlock.of("%T.encode(buffer, value.%L, context)\n", s.codec, field.name)
 
             is FieldStrategy.DiscriminatorOwned -> null // dispatcher already wrote the bytes
             is FieldStrategy.Spi -> CodeBlock.of("// TODO: SPI strategy\n")

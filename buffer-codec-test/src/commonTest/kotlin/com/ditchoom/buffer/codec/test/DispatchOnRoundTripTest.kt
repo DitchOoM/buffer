@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test
 
+import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -59,7 +60,7 @@ class DispatchOnRoundTripTest {
         buffer.writeShort(60.toShort()) // keepAlive
         buffer.resetForRead()
 
-        val decoded = DispatchOnPacketCodec.decode(buffer)
+        val decoded = DispatchOnPacketCodec.decode(buffer, DecodeContext.Empty)
         assertTrue(decoded is DispatchOnPacket.TypeConnect)
         assertEquals(4u.toUByte(), decoded.protocolLevel)
         assertEquals(60u.toUShort(), decoded.keepAlive)
@@ -74,7 +75,7 @@ class DispatchOnRoundTripTest {
         buffer.writeByte(0.toByte()) // returnCode
         buffer.resetForRead()
 
-        val decoded = DispatchOnPacketCodec.decode(buffer)
+        val decoded = DispatchOnPacketCodec.decode(buffer, DecodeContext.Empty)
         assertTrue(decoded is DispatchOnPacket.TypeConnAck)
         assertEquals(1u.toUByte(), decoded.sessionPresent)
         assertEquals(0u.toUByte(), decoded.returnCode)
@@ -88,7 +89,7 @@ class DispatchOnRoundTripTest {
         buffer.writeShort(42.toShort()) // packetId
         buffer.resetForRead()
 
-        val decoded = DispatchOnPacketCodec.decode(buffer)
+        val decoded = DispatchOnPacketCodec.decode(buffer, DecodeContext.Empty)
         assertTrue(decoded is DispatchOnPacket.TypePubAck)
         assertEquals(42u.toUShort(), decoded.packetId)
     }
@@ -101,7 +102,7 @@ class DispatchOnRoundTripTest {
         buffer.writeShort(99.toShort())
         buffer.resetForRead()
 
-        val decoded = DispatchOnPacketCodec.decode(buffer)
+        val decoded = DispatchOnPacketCodec.decode(buffer, DecodeContext.Empty)
         assertTrue(decoded is DispatchOnPacket.TypePubAck)
         assertEquals(99u.toUShort(), decoded.packetId)
     }
@@ -113,7 +114,7 @@ class DispatchOnRoundTripTest {
         buffer.resetForRead()
 
         assertFailsWith<IllegalArgumentException> {
-            DispatchOnPacketCodec.decode(buffer)
+            DispatchOnPacketCodec.decode(buffer, DecodeContext.Empty)
         }
     }
 
@@ -147,7 +148,7 @@ class DispatchOnRoundTripTest {
     fun encodeWritesCorrectWireByte() {
         // Verify encode writes 0x10 (wire), not 0x01 (value)
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
-        DispatchOnPacketCodec.encode(buffer, DispatchOnPacket.TypeConnect(protocolLevel = 4u, keepAlive = 60u))
+        DispatchOnPacketCodec.encode(buffer, DispatchOnPacket.TypeConnect(protocolLevel = 4u, keepAlive = 60u), EncodeContext.Empty)
         assertEquals(0x10.toByte(), buffer[0]) // wire byte, not extracted value
     }
 

@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
+import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -162,11 +164,11 @@ class V5GapProbeTest {
             )
         val buffer = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
         com.ditchoom.buffer.codec.test.protocols.ProbeAckShortPrefixedCodec
-            .encode(buffer, original)
+            .encode(buffer, original, EncodeContext.Empty)
         buffer.resetForRead()
         val decoded =
             com.ditchoom.buffer.codec.test.protocols.ProbeAckShortPrefixedCodec
-                .decode(buffer)
+                .decode(buffer, DecodeContext.Empty)
         assertEquals(7u.toUShort(), decoded.packetId)
         assertEquals(3, decoded.bag.items.size)
         assertEquals(0x1234u.toUShort(), (decoded.bag.items[0] as ProbeProp.UShortProp).value)
@@ -188,11 +190,11 @@ class V5GapProbeTest {
             )
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
         com.ditchoom.buffer.codec.test.protocols.ProbeAckShortPrefixedCodec
-            .encode(buffer, original)
+            .encode(buffer, original, EncodeContext.Empty)
         buffer.resetForRead()
         val decoded =
             com.ditchoom.buffer.codec.test.protocols.ProbeAckShortPrefixedCodec
-                .decode(buffer)
+                .decode(buffer, DecodeContext.Empty)
         assertEquals(1u.toUShort(), decoded.packetId)
         assertEquals(0, decoded.bag.items.size)
     }
@@ -210,12 +212,12 @@ class V5GapProbeTest {
                 .ProbeAckOptional(packetId = 1u)
         var buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec
-            .encode(buf, minimal)
+            .encode(buf, minimal, EncodeContext.Empty)
         assertEquals(2, buf.position())
         buf.resetForRead()
         val decodedMin =
             com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec
-                .decode(buf)
+                .decode(buf, DecodeContext.Empty)
         assertEquals(minimal, decodedMin)
 
         // Reason code only
@@ -224,13 +226,13 @@ class V5GapProbeTest {
                 .ProbeAckOptional(packetId = 2u, reasonCode = 0x10u)
         buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec
-            .encode(buf, reasonOnly)
+            .encode(buf, reasonOnly, EncodeContext.Empty)
         assertEquals(3, buf.position())
         buf.resetForRead()
         assertEquals(
             reasonOnly,
             com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec
-                .decode(buf),
+                .decode(buf, DecodeContext.Empty),
         )
 
         // Reason code + bag
@@ -245,11 +247,11 @@ class V5GapProbeTest {
             )
         buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec
-            .encode(buf, full)
+            .encode(buf, full, EncodeContext.Empty)
         buf.resetForRead()
         val decodedFull =
             com.ditchoom.buffer.codec.test.protocols.ProbeAckOptionalCodec
-                .decode(buf)
+                .decode(buf, DecodeContext.Empty)
         assertEquals(3u.toUShort(), decodedFull.packetId)
         assertEquals(0x80u.toUByte(), decodedFull.reasonCode)
         assertEquals(1, decodedFull.bag!!.items.size)
@@ -279,10 +281,10 @@ class V5GapProbeTest {
                 willProperties = null,
             )
         var buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        codec.encode(buf, noWill)
+        codec.encode(buf, noWill, EncodeContext.Empty)
         val sizeNoWill = buf.position()
         buf.resetForRead()
-        val decodedNoWill = codec.decode(buf)
+        val decodedNoWill = codec.decode(buf, DecodeContext.Empty)
         assertEquals(noWill, decodedNoWill)
 
         // willFlag = true — willProperties present on wire
@@ -295,10 +297,10 @@ class V5GapProbeTest {
                 willProperties = mapOf(2 to 7, 3 to 99),
             )
         buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        codec.encode(buf, withWill)
+        codec.encode(buf, withWill, EncodeContext.Empty)
         val sizeWithWill = buf.position()
         buf.resetForRead()
-        val decodedWithWill = codec.decode(buf)
+        val decodedWithWill = codec.decode(buf, DecodeContext.Empty)
         assertEquals(withWill, decodedWithWill)
 
         // The will-properties bag should contribute strictly more bytes when present.
@@ -332,12 +334,12 @@ class V5GapProbeTest {
 
         val plainBuf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         com.ditchoom.buffer.codec.test.protocols.ProbePropBagPlainCodec
-            .encode(plainBuf, plain)
+            .encode(plainBuf, plain, EncodeContext.Empty)
         val plainSize = plainBuf.position()
 
         val prefBuf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         com.ditchoom.buffer.codec.test.protocols.ProbePropBagWithRedundantPrefixCodec
-            .encode(prefBuf, withPrefix)
+            .encode(prefBuf, withPrefix, EncodeContext.Empty)
         val prefSize = prefBuf.position()
 
         // Identical wire size — `@LengthPrefixed` was silently dropped by the SPI branch.
@@ -481,10 +483,10 @@ class V5GapProbeTest {
             val body = ProbeVarLenBody(data = "a".repeat(size))
             val original = ProbeVarintNested(packetId = 0xBEEFu, body = body)
             val buffer = BufferFactory.Default.allocate(size + 16, ByteOrder.BIG_ENDIAN)
-            ProbeVarintNestedCodec.encode(buffer, original)
+            ProbeVarintNestedCodec.encode(buffer, original, EncodeContext.Empty)
             val written = buffer.position()
             buffer.resetForRead()
-            val decoded = ProbeVarintNestedCodec.decode(buffer)
+            val decoded = ProbeVarintNestedCodec.decode(buffer, DecodeContext.Empty)
             assertEquals(original, decoded, "round-trip failed at body size=$size")
 
             // VBI byte width check via wire size:
@@ -513,7 +515,7 @@ class V5GapProbeTest {
         val buffer = BufferFactory.Default.allocate(20_000, ByteOrder.BIG_ENDIAN)
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                ProbeVarintMaxBytesOverflowCodec.encode(buffer, tooLarge)
+                ProbeVarintMaxBytesOverflowCodec.encode(buffer, tooLarge, EncodeContext.Empty)
             }
         // Message must include the field name and the offending length so MQTT users
         // can diagnose `MalformedPacketException`-shaped errors at the source.
@@ -528,9 +530,9 @@ class V5GapProbeTest {
                 body = ProbeVarLenBody(data = "x".repeat(16383)),
             )
         val ok = BufferFactory.Default.allocate(20_000, ByteOrder.BIG_ENDIAN)
-        ProbeVarintMaxBytesOverflowCodec.encode(ok, justFits)
+        ProbeVarintMaxBytesOverflowCodec.encode(ok, justFits, EncodeContext.Empty)
         ok.resetForRead()
-        assertEquals(justFits, ProbeVarintMaxBytesOverflowCodec.decode(ok))
+        assertEquals(justFits, ProbeVarintMaxBytesOverflowCodec.decode(ok, DecodeContext.Empty))
     }
 
     /** ProbeVarintCollection — VBI byte-length-prefixed list-bearing nested message. */
@@ -550,9 +552,9 @@ class V5GapProbeTest {
                     ),
             )
         val buffer = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
-        ProbeVarintCollectionCodec.encode(buffer, original)
+        ProbeVarintCollectionCodec.encode(buffer, original, EncodeContext.Empty)
         buffer.resetForRead()
-        val decoded = ProbeVarintCollectionCodec.decode(buffer)
+        val decoded = ProbeVarintCollectionCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(7u.toUShort(), decoded.packetId)
         assertEquals(3, decoded.bag.items.size)
         assertEquals(0x1234u.toUShort(), (decoded.bag.items[0] as ProbeProp.UShortProp).value)
@@ -569,10 +571,10 @@ class V5GapProbeTest {
         for (size in listOf(0, 1, 127, 128, 1000)) {
             val original = ProbeVarintString(name = "n".repeat(size))
             val buffer = BufferFactory.Default.allocate(size + 8, ByteOrder.BIG_ENDIAN)
-            ProbeVarintStringCodec.encode(buffer, original)
+            ProbeVarintStringCodec.encode(buffer, original, EncodeContext.Empty)
             val written = buffer.position()
             buffer.resetForRead()
-            assertEquals(original, ProbeVarintStringCodec.decode(buffer))
+            assertEquals(original, ProbeVarintStringCodec.decode(buffer, DecodeContext.Empty))
             val expectedVbiWidth =
                 if (size <= 127) {
                     1
@@ -594,10 +596,10 @@ class V5GapProbeTest {
             ProbeFramedDispatchSimple.Gamma(message = "hello world"),
         )) {
             val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-            ProbeFramedDispatchSimpleCodec.encode(buffer, variant)
+            ProbeFramedDispatchSimpleCodec.encode(buffer, variant, EncodeContext.Empty)
             val written = buffer.position()
             buffer.resetForRead()
-            assertEquals(variant, ProbeFramedDispatchSimpleCodec.decode(buffer))
+            assertEquals(variant, ProbeFramedDispatchSimpleCodec.decode(buffer, DecodeContext.Empty))
 
             // Wire format must be [discriminator(1)][VBI(bodyLen)][body].
             // Verify exact byte 0 = discriminator and byte 1 = VBI start.
@@ -677,7 +679,7 @@ class V5GapProbeTest {
                     message = "x".repeat(200), // forces 2-byte VBI on body length (~203 bytes)
                 )
             val buffer = BufferFactory.Default.allocate(512, ByteOrder.BIG_ENDIAN)
-            ProbeFramedDispatchSimpleCodec.encode(buffer, variant)
+            ProbeFramedDispatchSimpleCodec.encode(buffer, variant, EncodeContext.Empty)
             val wireSize = buffer.position()
             buffer.resetForRead()
 
@@ -717,7 +719,7 @@ class V5GapProbeTest {
         malformedOverrun.resetForRead()
         val ex1 =
             assertFailsWith<IllegalArgumentException> {
-                ProbeFramedDispatchSimpleCodec.decode(malformedOverrun)
+                ProbeFramedDispatchSimpleCodec.decode(malformedOverrun, DecodeContext.Empty)
             }
         assertNotNull(ex1.message)
 
@@ -728,7 +730,7 @@ class V5GapProbeTest {
         malformedUnderrun.writeByte(0x12) // only 1 byte, but Alpha decodes 2
         malformedUnderrun.resetForRead()
         assertFailsWith<Throwable> {
-            ProbeFramedDispatchSimpleCodec.decode(malformedUnderrun)
+            ProbeFramedDispatchSimpleCodec.decode(malformedUnderrun, DecodeContext.Empty)
         }
     }
 
@@ -751,7 +753,7 @@ class V5GapProbeTest {
                     ),
             )
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        ProbeByteSizedVarintCollectionCodec.encode(buffer, original)
+        ProbeByteSizedVarintCollectionCodec.encode(buffer, original, EncodeContext.Empty)
         val written = buffer.position()
         assertEquals(8, written, "wire length: 2 packetId + 1 VBI + 2 BoolProp + 3 UShortProp")
 
@@ -768,7 +770,7 @@ class V5GapProbeTest {
 
         // Round-trip.
         buffer.resetForRead()
-        val decoded = ProbeByteSizedVarintCollectionCodec.decode(buffer)
+        val decoded = ProbeByteSizedVarintCollectionCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(original.packetId, decoded.packetId)
         assertEquals(2, decoded.items.size)
         assertEquals(0xFEu.toUByte(), (decoded.items[0] as ProbeProp.BoolProp).raw)
@@ -783,7 +785,7 @@ class V5GapProbeTest {
     fun byteSizedVarintCollectionEmpty() {
         val original = ProbeByteSizedVarintCollection(packetId = 0x0007u, items = emptyList())
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
-        ProbeByteSizedVarintCollectionCodec.encode(buffer, original)
+        ProbeByteSizedVarintCollectionCodec.encode(buffer, original, EncodeContext.Empty)
         val written = buffer.position()
         assertEquals(3, written, "wire: 2 packetId + 1 VBI(0)")
 
@@ -793,7 +795,7 @@ class V5GapProbeTest {
         assertEquals(0x00u.toUByte(), buffer.readUnsignedByte())
 
         buffer.resetForRead()
-        val decoded = ProbeByteSizedVarintCollectionCodec.decode(buffer)
+        val decoded = ProbeByteSizedVarintCollectionCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(0x0007u.toUShort(), decoded.packetId)
         assertEquals(0, decoded.items.size)
     }
@@ -811,11 +813,11 @@ class V5GapProbeTest {
             val items = List(count) { ProbeProp.BoolProp(it.toUByte()) }
             val original = ProbeByteSizedVarintCollection(packetId = 0u, items = items)
             val buffer = BufferFactory.Default.allocate(512, ByteOrder.BIG_ENDIAN)
-            ProbeByteSizedVarintCollectionCodec.encode(buffer, original)
+            ProbeByteSizedVarintCollectionCodec.encode(buffer, original, EncodeContext.Empty)
             val written = buffer.position()
             assertEquals(2 + expectedVbiWidth + count * 2, written, "wire size at count=$count")
             buffer.resetForRead()
-            val decoded = ProbeByteSizedVarintCollectionCodec.decode(buffer)
+            val decoded = ProbeByteSizedVarintCollectionCodec.decode(buffer, DecodeContext.Empty)
             assertEquals(count, decoded.items.size, "decoded item count at count=$count")
         }
     }
@@ -834,7 +836,7 @@ class V5GapProbeTest {
                 items = listOf(ProbeProp.BoolProp(0xFEu)),
             )
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        ProbeByteSizedBytePrefixCollectionCodec.encode(buffer, original)
+        ProbeByteSizedBytePrefixCollectionCodec.encode(buffer, original, EncodeContext.Empty)
         val written = buffer.position()
         assertEquals(5, written, "wire: 2 packetId + 1 Byte-prefix + 2 BoolProp")
 
@@ -846,7 +848,7 @@ class V5GapProbeTest {
         assertEquals(0xFEu.toUByte(), buffer.readUnsignedByte())
 
         buffer.resetForRead()
-        val decoded = ProbeByteSizedBytePrefixCollectionCodec.decode(buffer)
+        val decoded = ProbeByteSizedBytePrefixCollectionCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(0x0007u.toUShort(), decoded.packetId)
         assertEquals(1, decoded.items.size)
         assertEquals(0xFEu.toUByte(), (decoded.items[0] as ProbeProp.BoolProp).raw)
@@ -869,9 +871,9 @@ class V5GapProbeTest {
                     ),
             )
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        ProbeCrossPackageCollectionHostCodec.encode(buffer, original)
+        ProbeCrossPackageCollectionHostCodec.encode(buffer, original, EncodeContext.Empty)
         buffer.resetForRead()
-        val decoded = ProbeCrossPackageCollectionHostCodec.decode(buffer)
+        val decoded = ProbeCrossPackageCollectionHostCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -1015,7 +1017,7 @@ class V5GapProbeTest {
         val buffer = BufferFactory.Default.allocate(512, ByteOrder.BIG_ENDIAN)
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                ProbeVarintMax1OverflowCodec.encode(buffer, tooLarge)
+                ProbeVarintMax1OverflowCodec.encode(buffer, tooLarge, EncodeContext.Empty)
             }
         val msg = ex.message.orEmpty()
         assertTrue("body" in msg, "expected field name in error: $msg")
@@ -1028,9 +1030,9 @@ class V5GapProbeTest {
                 body = ProbeVarLenBody(data = "x".repeat(127)),
             )
         val ok = BufferFactory.Default.allocate(512, ByteOrder.BIG_ENDIAN)
-        ProbeVarintMax1OverflowCodec.encode(ok, justFits)
+        ProbeVarintMax1OverflowCodec.encode(ok, justFits, EncodeContext.Empty)
         ok.resetForRead()
-        assertEquals(justFits, ProbeVarintMax1OverflowCodec.decode(ok))
+        assertEquals(justFits, ProbeVarintMax1OverflowCodec.decode(ok, DecodeContext.Empty))
     }
 
     /** Varint maxBytes=3 cap-overflow — 2097152-byte body throws, 2097151-byte body encodes. */
@@ -1044,7 +1046,7 @@ class V5GapProbeTest {
         val buffer = BufferFactory.Default.allocate(2_500_000, ByteOrder.BIG_ENDIAN)
         val ex =
             assertFailsWith<IllegalArgumentException> {
-                ProbeVarintMax3OverflowCodec.encode(buffer, tooLarge)
+                ProbeVarintMax3OverflowCodec.encode(buffer, tooLarge, EncodeContext.Empty)
             }
         val msg = ex.message.orEmpty()
         assertTrue("body" in msg, "expected field name in error: $msg")
@@ -1057,9 +1059,9 @@ class V5GapProbeTest {
                 body = ProbeVarLenBody(data = CharArray(2097151) { 'x' }.concatToString()),
             )
         val ok = BufferFactory.Default.allocate(2_500_000, ByteOrder.BIG_ENDIAN)
-        ProbeVarintMax3OverflowCodec.encode(ok, justFits)
+        ProbeVarintMax3OverflowCodec.encode(ok, justFits, EncodeContext.Empty)
         ok.resetForRead()
-        assertEquals(justFits, ProbeVarintMax3OverflowCodec.decode(ok))
+        assertEquals(justFits, ProbeVarintMax3OverflowCodec.decode(ok, DecodeContext.Empty))
     }
 
     /** `@LengthPrefixed(LengthPrefix.Int)` fixed 4-byte prefix on a NestedWithLength field. */
@@ -1169,7 +1171,7 @@ class V5GapProbeTest {
             )
         val ex =
             assertFailsWith<IllegalStateException> {
-                com.ditchoom.buffer.codec.test.protocols.DispatchedFrameCodec.wireSize(payloadVariant)
+                com.ditchoom.buffer.codec.test.protocols.DispatchedFrameCodec.wireSize(payloadVariant, EncodeContext.Empty)
             }
         val msg = ex.message.orEmpty()
         assertTrue(

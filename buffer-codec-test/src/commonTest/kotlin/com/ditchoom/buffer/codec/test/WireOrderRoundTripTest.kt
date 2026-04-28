@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
+import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -57,7 +59,7 @@ class WireOrderRoundTripTest {
                 leLong = 0x0B0C0D0E0F101112L, // LE on wire: 12 11 10 0F 0E 0D 0C 0B
             )
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        WireOrderMessageCodec.encode(buffer, original)
+        WireOrderMessageCodec.encode(buffer, original, EncodeContext.Empty)
 
         // beByte: single byte, no swap
         assertEquals(0xFF.toByte(), buffer[0])
@@ -100,7 +102,7 @@ class WireOrderRoundTripTest {
                 leFlags = 0x0405, // 2-byte LE: 05 04
             )
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
-        WireOrderCustomWidthMessageCodec.encode(buffer, original)
+        WireOrderCustomWidthMessageCodec.encode(buffer, original, EncodeContext.Empty)
 
         // tag: single byte
         assertEquals(0x42.toByte(), buffer[0])
@@ -141,7 +143,7 @@ class WireOrderRoundTripTest {
         buffer.writeByte(0x01) // leLong=0x0102030405060708 as LE
         buffer.resetForRead()
 
-        val decoded = WireOrderMessageCodec.decode(buffer)
+        val decoded = WireOrderMessageCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(0xAAu.toUByte(), decoded.beByte)
         assertEquals(0x1234u.toUShort(), decoded.leShort)
         assertEquals(0x56789ABC.toInt(), decoded.beInt)
@@ -160,7 +162,7 @@ class WireOrderRoundTripTest {
         buffer.writeByte(0x78) // leFlags=0x7890 LE
         buffer.resetForRead()
 
-        val decoded = WireOrderCustomWidthMessageCodec.decode(buffer)
+        val decoded = WireOrderCustomWidthMessageCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(0x42u.toUByte(), decoded.tag)
         assertEquals(0x123456u, decoded.leLength)
         assertEquals(0x7890, decoded.leFlags)

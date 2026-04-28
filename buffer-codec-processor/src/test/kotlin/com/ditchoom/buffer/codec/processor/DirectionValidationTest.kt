@@ -16,6 +16,7 @@ class DirectionValidationTest {
                 "Test.kt",
                 """
             import com.ditchoom.buffer.ReadBuffer
+            import com.ditchoom.buffer.codec.DecodeContext
             import com.ditchoom.buffer.codec.Decoder
             import com.ditchoom.buffer.codec.annotations.ProtocolMessage
             import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -23,7 +24,7 @@ class DirectionValidationTest {
             data class Rgb(val r: UByte, val g: UByte, val b: UByte)
 
             object RgbDecoder : Decoder<Rgb> {
-                override fun decode(buffer: ReadBuffer): Rgb =
+                override fun decode(buffer: ReadBuffer, context: DecodeContext): Rgb =
                     Rgb(buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte())
             }
 
@@ -53,7 +54,7 @@ class DirectionValidationTest {
             data class Rgb(val r: UByte, val g: UByte, val b: UByte)
 
             object RgbEncoder : Encoder<Rgb> {
-                override fun encode(buffer: WriteBuffer, value: Rgb) {
+                override fun encode(buffer: WriteBuffer, value: Rgb, context: com.ditchoom.buffer.codec.EncodeContext) {
                     buffer.writeUByte(value.r); buffer.writeUByte(value.g); buffer.writeUByte(value.b)
                 }
             }
@@ -120,9 +121,9 @@ class DirectionValidationTest {
             data class Rgb(val r: UByte, val g: UByte, val b: UByte)
 
             object RgbBothWays : Decoder<Rgb>, Encoder<Rgb> {
-                override fun decode(buffer: ReadBuffer): Rgb =
+                override fun decode(buffer: ReadBuffer, context: com.ditchoom.buffer.codec.DecodeContext): Rgb =
                     Rgb(buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte())
-                override fun encode(buffer: WriteBuffer, value: Rgb) {
+                override fun encode(buffer: WriteBuffer, value: Rgb, context: com.ditchoom.buffer.codec.EncodeContext) {
                     buffer.writeUByte(value.r); buffer.writeUByte(value.g); buffer.writeUByte(value.b)
                 }
             }
@@ -213,7 +214,7 @@ class DirectionValidationTest {
             data class Rgb(val r: UByte, val g: UByte, val b: UByte)
 
             object RgbDecoder : Decoder<Rgb> {
-                override fun decode(buffer: ReadBuffer): Rgb =
+                override fun decode(buffer: ReadBuffer, context: com.ditchoom.buffer.codec.DecodeContext): Rgb =
                     Rgb(buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte())
             }
 
@@ -248,7 +249,7 @@ class DirectionValidationTest {
             data class Rgb(val r: UByte, val g: UByte, val b: UByte)
 
             object RgbEncoder : Encoder<Rgb> {
-                override fun encode(buffer: WriteBuffer, value: Rgb) {
+                override fun encode(buffer: WriteBuffer, value: Rgb, context: com.ditchoom.buffer.codec.EncodeContext) {
                     buffer.writeUByte(value.r)
                 }
             }
@@ -283,7 +284,7 @@ class DirectionValidationTest {
             data class Rgb(val r: UByte, val g: UByte, val b: UByte)
 
             object RgbEncoder : Encoder<Rgb> {
-                override fun encode(buffer: WriteBuffer, value: Rgb) {
+                override fun encode(buffer: WriteBuffer, value: Rgb, context: com.ditchoom.buffer.codec.EncodeContext) {
                     buffer.writeUByte(value.r)
                 }
             }
@@ -318,7 +319,7 @@ class DirectionValidationTest {
             data class Rgb(val r: UByte, val g: UByte, val b: UByte)
 
             object RgbDecoder : Decoder<Rgb> {
-                override fun decode(buffer: ReadBuffer): Rgb =
+                override fun decode(buffer: ReadBuffer, context: com.ditchoom.buffer.codec.DecodeContext): Rgb =
                     Rgb(buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte())
             }
 
@@ -389,12 +390,12 @@ class DirectionValidationTest {
             data class Rgb(val r: UByte, val g: UByte, val b: UByte)
 
             object RgbDecoder : Decoder<Rgb> {
-                override fun decode(buffer: ReadBuffer): Rgb =
+                override fun decode(buffer: ReadBuffer, context: com.ditchoom.buffer.codec.DecodeContext): Rgb =
                     Rgb(buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte())
             }
 
             object RgbEncoder : Encoder<Rgb> {
-                override fun encode(buffer: WriteBuffer, value: Rgb) {
+                override fun encode(buffer: WriteBuffer, value: Rgb, context: com.ditchoom.buffer.codec.EncodeContext) {
                     buffer.writeUByte(value.r)
                 }
             }
@@ -422,6 +423,7 @@ class DirectionValidationTest {
                 "Test.kt",
                 """
             import com.ditchoom.buffer.ReadBuffer
+            import com.ditchoom.buffer.codec.DecodeContext
             import com.ditchoom.buffer.codec.Decoder
             import com.ditchoom.buffer.codec.annotations.ProtocolMessage
             import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -429,7 +431,7 @@ class DirectionValidationTest {
             data class Rgb(val r: UByte, val g: UByte, val b: UByte)
 
             object RgbDecoder : Decoder<Rgb> {
-                override fun decode(buffer: ReadBuffer): Rgb =
+                override fun decode(buffer: ReadBuffer, context: DecodeContext): Rgb =
                     Rgb(buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte())
             }
 
@@ -485,7 +487,7 @@ class DirectionValidationTest {
             data class Rgb(val r: UByte, val g: UByte, val b: UByte)
 
             object RgbDecoder : Decoder<Rgb> {
-                override fun decode(buffer: ReadBuffer): Rgb =
+                override fun decode(buffer: ReadBuffer, context: com.ditchoom.buffer.codec.DecodeContext): Rgb =
                     Rgb(buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte())
             }
 
@@ -519,7 +521,7 @@ class DirectionValidationTest {
             data class Rgb(val r: UByte, val g: UByte, val b: UByte)
 
             object RgbDecoder : Decoder<Rgb> {
-                override fun decode(buffer: ReadBuffer): Rgb =
+                override fun decode(buffer: ReadBuffer, context: com.ditchoom.buffer.codec.DecodeContext): Rgb =
                     Rgb(buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte())
             }
 

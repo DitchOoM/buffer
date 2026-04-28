@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test
 
+import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -36,21 +37,21 @@ class MessagePackDispatchTest {
 
     @Test
     fun positiveFixIntBoundary0x7FRoutesToPositiveFixInt() {
-        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0x7F))
+        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0x7F), DecodeContext.Empty)
         assertTrue(decoded is MessagePackFormatByte.PositiveFixInt)
         assertEquals(0x7F, decoded.header.positiveFixIntValue)
     }
 
     @Test
     fun fixMapBoundary0x80RoutesToFixMap() {
-        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0x80))
+        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0x80), DecodeContext.Empty)
         assertTrue(decoded is MessagePackFormatByte.FixMap)
         assertEquals(0, decoded.header.fixMapEntryCount)
     }
 
     @Test
     fun fixMapBoundary0x8FRoutesToFixMap() {
-        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0x8F))
+        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0x8F), DecodeContext.Empty)
         assertTrue(decoded is MessagePackFormatByte.FixMap)
         assertEquals(0x0F, decoded.header.fixMapEntryCount)
     }
@@ -60,20 +61,20 @@ class MessagePackDispatchTest {
         // 0x90 is the first byte past the FixMap range (0x80..0x8F) and is intentionally
         // unclaimed in this fixture — must surface as MessagePackMalformedException.
         assertFailsWith<MessagePackMalformedException> {
-            MessagePackFormatByteCodec.decode(bufferOf(0x90))
+            MessagePackFormatByteCodec.decode(bufferOf(0x90), DecodeContext.Empty)
         }
     }
 
     @Test
     fun negativeFixIntBoundary0xE0RoutesToNegativeFixInt() {
-        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0xE0))
+        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0xE0), DecodeContext.Empty)
         assertTrue(decoded is MessagePackFormatByte.NegativeFixInt)
         assertEquals(-32, decoded.header.negativeFixIntValue)
     }
 
     @Test
     fun negativeFixIntBoundary0xFFRoutesToNegativeFixInt() {
-        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0xFF))
+        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0xFF), DecodeContext.Empty)
         assertTrue(decoded is MessagePackFormatByte.NegativeFixInt)
         assertEquals(-1, decoded.header.negativeFixIntValue)
     }
@@ -82,19 +83,19 @@ class MessagePackDispatchTest {
 
     @Test
     fun nilDecodes() {
-        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0xC0))
+        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0xC0), DecodeContext.Empty)
         assertTrue(decoded is MessagePackFormatByte.Nil)
     }
 
     @Test
     fun falseDecodes() {
-        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0xC2))
+        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0xC2), DecodeContext.Empty)
         assertTrue(decoded is MessagePackFormatByte.False)
     }
 
     @Test
     fun trueDecodes() {
-        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0xC3))
+        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0xC3), DecodeContext.Empty)
         assertTrue(decoded is MessagePackFormatByte.True)
     }
 
@@ -103,7 +104,7 @@ class MessagePackDispatchTest {
         // 0xC1 is reserved-but-unused in the MessagePack spec — perfect for asserting
         // that "registered range neighbours don't accidentally swallow a hole".
         assertFailsWith<MessagePackMalformedException> {
-            MessagePackFormatByteCodec.decode(bufferOf(0xC1))
+            MessagePackFormatByteCodec.decode(bufferOf(0xC1), DecodeContext.Empty)
         }
     }
 
@@ -115,7 +116,7 @@ class MessagePackDispatchTest {
             val buf = bufferOf(byte)
             when {
                 byte in 0x00..0x7F -> {
-                    val decoded = MessagePackFormatByteCodec.decode(buf)
+                    val decoded = MessagePackFormatByteCodec.decode(buf, DecodeContext.Empty)
                     assertTrue(
                         decoded is MessagePackFormatByte.PositiveFixInt,
                         "byte ${byte.toString(16)} should decode as PositiveFixInt, got $decoded",
@@ -123,7 +124,7 @@ class MessagePackDispatchTest {
                     assertEquals(byte, decoded.header.positiveFixIntValue)
                 }
                 byte in 0x80..0x8F -> {
-                    val decoded = MessagePackFormatByteCodec.decode(buf)
+                    val decoded = MessagePackFormatByteCodec.decode(buf, DecodeContext.Empty)
                     assertTrue(
                         decoded is MessagePackFormatByte.FixMap,
                         "byte ${byte.toString(16)} should decode as FixMap, got $decoded",
@@ -131,7 +132,7 @@ class MessagePackDispatchTest {
                     assertEquals(byte and 0x0F, decoded.header.fixMapEntryCount)
                 }
                 byte in 0xE0..0xFF -> {
-                    val decoded = MessagePackFormatByteCodec.decode(buf)
+                    val decoded = MessagePackFormatByteCodec.decode(buf, DecodeContext.Empty)
                     assertTrue(
                         decoded is MessagePackFormatByte.NegativeFixInt,
                         "byte ${byte.toString(16)} should decode as NegativeFixInt, got $decoded",
@@ -139,15 +140,15 @@ class MessagePackDispatchTest {
                     assertEquals((byte and 0x1F) - 32, decoded.header.negativeFixIntValue)
                 }
                 byte == 0xC0 -> {
-                    val decoded = MessagePackFormatByteCodec.decode(buf)
+                    val decoded = MessagePackFormatByteCodec.decode(buf, DecodeContext.Empty)
                     assertTrue(decoded is MessagePackFormatByte.Nil)
                 }
                 byte == 0xC2 -> {
-                    val decoded = MessagePackFormatByteCodec.decode(buf)
+                    val decoded = MessagePackFormatByteCodec.decode(buf, DecodeContext.Empty)
                     assertTrue(decoded is MessagePackFormatByte.False)
                 }
                 byte == 0xC3 -> {
-                    val decoded = MessagePackFormatByteCodec.decode(buf)
+                    val decoded = MessagePackFormatByteCodec.decode(buf, DecodeContext.Empty)
                     assertTrue(decoded is MessagePackFormatByte.True)
                 }
                 else -> {
@@ -155,7 +156,7 @@ class MessagePackDispatchTest {
                     assertFailsWith<MessagePackMalformedException>(
                         "byte ${byte.toString(16)} is unclaimed and must throw the configured exception",
                     ) {
-                        MessagePackFormatByteCodec.decode(buf)
+                        MessagePackFormatByteCodec.decode(buf, DecodeContext.Empty)
                     }
                 }
             }
@@ -166,14 +167,14 @@ class MessagePackDispatchTest {
 
     @Test
     fun positiveFixIntExtractsInlineValue() {
-        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0x42))
+        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0x42), DecodeContext.Empty)
         assertTrue(decoded is MessagePackFormatByte.PositiveFixInt)
         assertEquals(0x42, decoded.header.positiveFixIntValue)
     }
 
     @Test
     fun fixMapExtractsEntryCount() {
-        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0x83))
+        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0x83), DecodeContext.Empty)
         assertTrue(decoded is MessagePackFormatByte.FixMap)
         assertEquals(3, decoded.header.fixMapEntryCount)
     }
@@ -181,7 +182,7 @@ class MessagePackDispatchTest {
     @Test
     fun negativeFixIntExtractsSignedValue() {
         // 0xF8 = 0b1111_1000 → low 5 bits 0b11000 = 24, signed = 24 - 32 = -8
-        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0xF8))
+        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0xF8), DecodeContext.Empty)
         assertTrue(decoded is MessagePackFormatByte.NegativeFixInt)
         assertEquals(-8, decoded.header.negativeFixIntValue)
     }
@@ -190,7 +191,7 @@ class MessagePackDispatchTest {
 
     @Test
     fun rawByteIsPreservedInDiscriminatorField() {
-        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0x55))
+        val decoded = MessagePackFormatByteCodec.decode(bufferOf(0x55), DecodeContext.Empty)
         assertTrue(decoded is MessagePackFormatByte.PositiveFixInt)
         assertEquals(MessagePackByte(0x55u), decoded.header)
     }

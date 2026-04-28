@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test
 
+import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -29,7 +30,7 @@ class MixedDispatchRoundTripTest {
     @Test
     fun connectEncodeWritesLiteralWireByte() {
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
-        MixedDispatchPacketCodec.encode(buffer, MixedDispatchPacket.MixedConnect(protocolLevel = 4u, keepAlive = 60u))
+        MixedDispatchPacketCodec.encode(buffer, MixedDispatchPacket.MixedConnect(protocolLevel = 4u, keepAlive = 60u), EncodeContext.Empty)
         assertEquals(0x10.toByte(), buffer[0])
     }
 
@@ -76,7 +77,7 @@ class MixedDispatchRoundTripTest {
                 packetId = null,
                 payload = "x",
             )
-        MixedDispatchPacketCodec.encode(buffer, packet)
+        MixedDispatchPacketCodec.encode(buffer, packet, EncodeContext.Empty)
         val written = buffer.position()
         // Expected bytes: header(1) + topicLen(2) + "t"(1) + payload(1) = 5
         assertEquals(5, written)

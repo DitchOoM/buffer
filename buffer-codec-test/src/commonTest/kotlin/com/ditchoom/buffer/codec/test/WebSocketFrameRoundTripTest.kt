@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
+import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -108,9 +110,9 @@ class WebSocketFrameRoundTripTest {
                 payload = "Hello",
             )
         val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
-        WsMaskedFrameCodec.encode(buffer, original)
+        WsMaskedFrameCodec.encode(buffer, original, EncodeContext.Empty)
         buffer.resetForRead()
-        val decoded = WsMaskedFrameCodec.decode(buffer)
+        val decoded = WsMaskedFrameCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(original, decoded)
         assertEquals(WsMaskingKey(0x37FA213Du), decoded.maskingKey)
     }
@@ -124,9 +126,9 @@ class WebSocketFrameRoundTripTest {
                 payload = "Hello",
             )
         val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
-        WsMaskedFrameCodec.encode(buffer, original)
+        WsMaskedFrameCodec.encode(buffer, original, EncodeContext.Empty)
         buffer.resetForRead()
-        val decoded = WsMaskedFrameCodec.decode(buffer)
+        val decoded = WsMaskedFrameCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(original, decoded)
         assertEquals(null, decoded.maskingKey)
     }

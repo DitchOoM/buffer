@@ -260,18 +260,13 @@ private val codecStubs =
         }
     }
     fun interface Decoder<out T> {
-        fun decode(buffer: ReadBuffer): T
+        fun decode(buffer: ReadBuffer, context: DecodeContext): T
     }
     interface Encoder<in T> {
-        fun encode(buffer: WriteBuffer, value: T)
-        fun wireSize(value: T): Int = throw NotImplementedError("wireSize")
-        fun wireSize(value: T, context: EncodeContext): Int = wireSize(value)
+        fun encode(buffer: WriteBuffer, value: T, context: EncodeContext)
+        fun wireSize(value: T, context: EncodeContext): Int = throw NotImplementedError("wireSize")
     }
     interface Codec<T> : Encoder<T>, Decoder<T> {
-        fun decode(buffer: ReadBuffer, context: DecodeContext): T
-        fun encode(buffer: WriteBuffer, value: T, context: EncodeContext)
-        override fun decode(buffer: ReadBuffer): T = decode(buffer, DecodeContext.Empty)
-        override fun encode(buffer: WriteBuffer, value: T) = encode(buffer, value, EncodeContext.Empty)
         fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NeedsMoreData
     }
     interface DispatchFraming<D : Any> {

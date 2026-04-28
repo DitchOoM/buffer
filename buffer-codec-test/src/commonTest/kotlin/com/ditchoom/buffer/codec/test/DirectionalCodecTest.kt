@@ -32,7 +32,7 @@ class DirectionalCodecTest {
         buffer.writeUByte(0xCCu) // b
         buffer.resetForRead()
 
-        val decoded = DecodeOnlyColoredPointCodec.decode(buffer)
+        val decoded = DecodeOnlyColoredPointCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(DecodeOnlyColoredPoint(42, 99, Rgb(0xAAu, 0xBBu, 0xCCu)), decoded)
     }
 
@@ -60,7 +60,7 @@ class DirectionalCodecTest {
         buffer.writeUByte(3u)
         buffer.resetForRead()
 
-        val decoded = ForcedDecodeOnlyPointCodec.decode(buffer)
+        val decoded = ForcedDecodeOnlyPointCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(ForcedDecodeOnlyPoint(7, 8, Rgb(1u, 2u, 3u)), decoded)
     }
 
@@ -70,7 +70,7 @@ class DirectionalCodecTest {
     fun encodeOnlyPointEncodesCorrectly() {
         val value = EncodeOnlyColoredPoint(42, 99, Rgb(0xAAu, 0xBBu, 0xCCu))
         val buffer = factory.allocate(11, ByteOrder.BIG_ENDIAN)
-        EncodeOnlyColoredPointCodec.encode(buffer, value)
+        EncodeOnlyColoredPointCodec.encode(buffer, value, EncodeContext.Empty)
         buffer.resetForRead()
 
         assertEquals(42, buffer.readInt())
@@ -106,7 +106,7 @@ class DirectionalCodecTest {
         buffer.writeUByte(0x00u) // b
         buffer.resetForRead()
 
-        val decoded = DecodeOnlyPrefixedColorCodec.decode(buffer)
+        val decoded = DecodeOnlyPrefixedColorCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(DecodeOnlyPrefixedColor(0x42u, Rgb(0xFFu, 0x80u, 0x00u)), decoded)
     }
 
@@ -132,7 +132,7 @@ class DirectionalCodecTest {
         buffer.writeByte(30)
         buffer.resetForRead()
 
-        val decoded = DecodeOnlyColoredPointCodec.decode(buffer)
+        val decoded = DecodeOnlyColoredPointCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(1, decoded.x)
         assertEquals(2, decoded.y)
         assertEquals(10u, decoded.color.r)
@@ -144,7 +144,7 @@ class DirectionalCodecTest {
     fun encodeOnlyExactByteLayout() {
         val value = EncodeOnlyColoredPoint(1, 2, Rgb(10u, 20u, 30u))
         val buffer = factory.allocate(11, ByteOrder.BIG_ENDIAN)
-        EncodeOnlyColoredPointCodec.encode(buffer, value)
+        EncodeOnlyColoredPointCodec.encode(buffer, value, EncodeContext.Empty)
         buffer.resetForRead()
 
         // x = 0x00000001

@@ -13,16 +13,16 @@ import kotlin.test.assertTrue
  * `.kt` for the exact textual shape of the wireSize body. The shapes are:
  *
  *  - Standard codec (no `@Payload`):
- *      `override fun wireSize(value: T): Int { var _size = 0 ... return _size }`
+ *      `override fun wireSize(value: T, context: EncodeContext): Int { var _size = 0 ... return _size }`
  *
  *  - Payload-bearing codec (`<@Payload P>`):
- *      `fun <P> wireSize(value: T<P>, sizePayload: (P) -> Int): Int { var _size = 0 ... }`
+ *      `fun <P> wireSize(value: T<P>, context: EncodeContext, sizePayload: (P) -> Int): Int { var _size = 0 ... }`
  *      (no `override`, takes a per-payload size lambda)
  *
  *  - Sealed `@DispatchOn` dispatcher with a payload-bearing variant:
- *      `override fun wireSize(value: Sealed): Int = when (value) {
- *          is NonPayload -> NonPayloadCodec.wireSize(value)
- *          is PayloadVariant<*> -> error("...wireSize(value, payloadSize)...")
+ *      `override fun wireSize(value: Sealed, context: EncodeContext): Int = when (value) {
+ *          is NonPayload -> NonPayloadCodec.wireSize(value, context)
+ *          is PayloadVariant<*> -> PayloadVariantCodec.wireSizeFromContext(value, context)
  *      }`
  */
 class WireSizeCodegenTest {
@@ -45,8 +45,8 @@ class WireSizeCodegenTest {
             result.generatedSources.singleOrNull { it.contains("object StandardMsgCodec") }
                 ?: error("Expected StandardMsgCodec in generated sources:\n${result.generatedSources}")
         assertTrue(
-            codec.contains("override fun wireSize(`value`: StandardMsg): Int") ||
-                codec.contains("override fun wireSize(value: StandardMsg): Int"),
+            codec.contains("override fun wireSize(`value`: StandardMsg, context: EncodeContext): Int") ||
+                codec.contains("override fun wireSize(value: StandardMsg, context: EncodeContext): Int"),
             "Standard wireSize override signature missing. Generated:\n$codec",
         )
         assertTrue(codec.contains("var _size = 0"), "Expected `var _size = 0` accumulator init. Generated:\n$codec")

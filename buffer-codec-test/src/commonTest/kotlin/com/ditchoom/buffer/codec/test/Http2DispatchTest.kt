@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
+import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -106,14 +108,14 @@ class Http2DispatchTest {
     @Test
     fun dataEncodeWritesDiscriminator0x00() {
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
-        Http2FrameCodec.encode(buffer, Http2Frame.Data(streamId = 1u, flags = 0u))
+        Http2FrameCodec.encode(buffer, Http2Frame.Data(streamId = 1u, flags = 0u), EncodeContext.Empty)
         assertEquals(0x00.toByte(), buffer[0])
     }
 
     @Test
     fun continuationEncodeWritesDiscriminator0x09() {
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
-        Http2FrameCodec.encode(buffer, Http2Frame.Continuation(streamId = 17u, flags = 0u))
+        Http2FrameCodec.encode(buffer, Http2Frame.Continuation(streamId = 17u, flags = 0u), EncodeContext.Empty)
         assertEquals(0x09.toByte(), buffer[0])
     }
 
@@ -125,7 +127,7 @@ class Http2DispatchTest {
         buffer.writeByte(0x0A.toByte())
         buffer.resetForRead()
         assertFailsWith<Http2ProtocolException> {
-            Http2FrameCodec.decode(buffer)
+            Http2FrameCodec.decode(buffer, DecodeContext.Empty)
         }
     }
 }

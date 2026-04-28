@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
+import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -79,7 +81,7 @@ class WebSocketDispatchRoundTripTest {
         buffer.writeBytes("OK".encodeToByteArray()) // reason
         buffer.resetForRead()
 
-        val decoded = WsControlFrameCodec.decode(buffer)
+        val decoded = WsControlFrameCodec.decode(buffer, DecodeContext.Empty)
         assertTrue(decoded is WsControlFrame.Close)
         assertEquals(1000u.toUShort(), decoded.statusCode)
         assertEquals("OK", decoded.reason)
@@ -93,7 +95,7 @@ class WebSocketDispatchRoundTripTest {
         buffer.writeBytes("ping".encodeToByteArray())
         buffer.resetForRead()
 
-        val decoded = WsControlFrameCodec.decode(buffer)
+        val decoded = WsControlFrameCodec.decode(buffer, DecodeContext.Empty)
         assertTrue(decoded is WsControlFrame.Ping)
         assertEquals("ping", decoded.data)
     }
@@ -106,7 +108,7 @@ class WebSocketDispatchRoundTripTest {
         buffer.writeBytes("pong".encodeToByteArray())
         buffer.resetForRead()
 
-        val decoded = WsControlFrameCodec.decode(buffer)
+        val decoded = WsControlFrameCodec.decode(buffer, DecodeContext.Empty)
         assertTrue(decoded is WsControlFrame.Pong)
         assertEquals("pong", decoded.data)
     }
@@ -118,7 +120,7 @@ class WebSocketDispatchRoundTripTest {
         buffer.resetForRead()
 
         assertFailsWith<IllegalArgumentException> {
-            WsControlFrameCodec.decode(buffer)
+            WsControlFrameCodec.decode(buffer, DecodeContext.Empty)
         }
     }
 
@@ -151,7 +153,7 @@ class WebSocketDispatchRoundTripTest {
     @Test
     fun encodeWritesCorrectOpcodeWithFin() {
         val buffer = BufferFactory.Default.allocate(32, ByteOrder.BIG_ENDIAN)
-        WsControlFrameCodec.encode(buffer, WsControlFrame.Ping(payloadLength = 0u, data = ""))
+        WsControlFrameCodec.encode(buffer, WsControlFrame.Ping(payloadLength = 0u, data = ""), EncodeContext.Empty)
         // First byte should be 0x89 (FIN=1, opcode=9)
         assertEquals(0x89.toByte(), buffer[0])
     }

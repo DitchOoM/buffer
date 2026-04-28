@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
+import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -20,14 +22,14 @@ class CustomWidthRoundTripTest {
                 trailer = 0xFFu,
             )
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        CustomWidthMessageCodec.encode(buffer, original)
+        CustomWidthMessageCodec.encode(buffer, original, EncodeContext.Empty)
         assertEquals(
             buffer.position(),
-            CustomWidthMessageCodec.wireSize(original),
+            CustomWidthMessageCodec.wireSize(original, EncodeContext.Empty),
             "wireSize must match encoded byte count",
         )
         buffer.resetForRead()
-        val decoded = CustomWidthMessageCodec.decode(buffer)
+        val decoded = CustomWidthMessageCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -41,9 +43,9 @@ class CustomWidthRoundTripTest {
                 trailer = 0x00u,
             )
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        CustomWidthMessageCodec.encode(buffer, original)
+        CustomWidthMessageCodec.encode(buffer, original, EncodeContext.Empty)
         buffer.resetForRead()
-        val decoded = CustomWidthMessageCodec.decode(buffer)
+        val decoded = CustomWidthMessageCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -57,9 +59,9 @@ class CustomWidthRoundTripTest {
                 trailer = 0u,
             )
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        CustomWidthMessageCodec.encode(buffer, original)
+        CustomWidthMessageCodec.encode(buffer, original, EncodeContext.Empty)
         buffer.resetForRead()
-        val decoded = CustomWidthMessageCodec.decode(buffer)
+        val decoded = CustomWidthMessageCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -73,9 +75,9 @@ class CustomWidthRoundTripTest {
                 trailer = 0xFFu,
             )
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        CustomWidthMessageCodec.encode(buffer, original)
+        CustomWidthMessageCodec.encode(buffer, original, EncodeContext.Empty)
         buffer.resetForRead()
-        val decoded = CustomWidthMessageCodec.decode(buffer)
+        val decoded = CustomWidthMessageCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -89,9 +91,9 @@ class CustomWidthRoundTripTest {
                 trailer = 0x42u,
             )
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        CustomWidthMessageCodec.encode(buffer, original)
+        CustomWidthMessageCodec.encode(buffer, original, EncodeContext.Empty)
         buffer.resetForRead()
-        val decoded = CustomWidthMessageCodec.decode(buffer)
+        val decoded = CustomWidthMessageCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 

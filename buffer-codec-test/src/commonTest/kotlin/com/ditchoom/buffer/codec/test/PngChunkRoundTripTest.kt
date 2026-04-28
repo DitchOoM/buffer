@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
+import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -55,7 +57,7 @@ class PngChunkRoundTripTest {
                 interlaceMethod = 0u,
                 crc = 0u,
             )
-        PngChunkCodec.encode(buffer, ihdr)
+        PngChunkCodec.encode(buffer, ihdr, EncodeContext.Empty)
 
         // Length = 13 (0x0000000D)
         assertEquals(0x00.toByte(), buffer[0])
@@ -85,7 +87,7 @@ class PngChunkRoundTripTest {
                 header = PngChunkHeader(0u, PngChunkType.IEND.raw),
                 crc = 0xAE426082u,
             )
-        PngChunkCodec.encode(buffer, iend)
+        PngChunkCodec.encode(buffer, iend, EncodeContext.Empty)
 
         // Length = 0
         assertEquals(0x00.toByte(), buffer[0])
@@ -122,7 +124,7 @@ class PngChunkRoundTripTest {
         buffer.writeInt(0) // CRC
         buffer.resetForRead()
 
-        val decoded = PngChunkCodec.decode(buffer)
+        val decoded = PngChunkCodec.decode(buffer, DecodeContext.Empty)
         assertTrue(decoded is PngChunk.Ihdr)
         assertEquals(13u, decoded.header.length)
         assertEquals(PngChunkType.IHDR.raw, decoded.header.type)
@@ -140,7 +142,7 @@ class PngChunkRoundTripTest {
         buffer.writeInt(0xAE426082.toInt()) // CRC
         buffer.resetForRead()
 
-        val decoded = PngChunkCodec.decode(buffer)
+        val decoded = PngChunkCodec.decode(buffer, DecodeContext.Empty)
         assertTrue(decoded is PngChunk.Iend)
         assertEquals(0u, decoded.header.length)
         assertEquals(PngChunkType.IEND.raw, decoded.header.type)
@@ -154,7 +156,7 @@ class PngChunkRoundTripTest {
         buffer.writeInt(0x58585858) // "XXXX"
         buffer.resetForRead()
         assertFailsWith<IllegalArgumentException> {
-            PngChunkCodec.decode(buffer)
+            PngChunkCodec.decode(buffer, DecodeContext.Empty)
         }
     }
 
@@ -204,7 +206,7 @@ class PngChunkRoundTripTest {
                 crc = 0x12345678u,
             )
         val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
-        PngDataChunkCodec.encode(buffer, original) { buf, s -> buf.writeString(s) }
+        PngDataChunkCodec.encode(buffer, original, EncodeContext.Empty) { buf, s -> buf.writeString(s) }
         buffer.resetForRead()
         val decoded = PngDataChunkCodec.decode<String>(buffer) { pr -> pr.readString(pr.remaining()) }
         assertEquals(text.length.toUInt(), decoded.length)

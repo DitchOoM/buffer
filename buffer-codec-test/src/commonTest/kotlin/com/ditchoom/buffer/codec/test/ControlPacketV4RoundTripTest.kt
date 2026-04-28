@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test
 
+import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -54,7 +55,7 @@ class ControlPacketV4RoundTripTest {
         )
         assertEquals(
             buffer.position(),
-            ControlPacketV4Codec.wireSize(ControlPacketV4.Reserved),
+            ControlPacketV4Codec.wireSize(ControlPacketV4.Reserved, EncodeContext.Empty),
             "wireSize must match encoded byte count",
         )
         val decoded = roundTrip(ControlPacketV4.Reserved)

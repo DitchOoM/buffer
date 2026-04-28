@@ -65,7 +65,7 @@ class TlsRecordRoundTripTest {
     fun handshakeRoundTrip() {
         val original = TlsRecord.Handshake(TlsProtocolVersion.TLS_1_2, 5u, "hello")
         val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
-        TlsRecordHandshakeCodec.encode(buffer, original) { buf, s -> buf.writeString(s) }
+        TlsRecordHandshakeCodec.encode(buffer, original, EncodeContext.Empty) { buf, s -> buf.writeString(s) }
         buffer.resetForRead()
         val decoded = TlsRecordHandshakeCodec.decode<String>(buffer) { pr -> pr.readString(pr.remaining()) }
         assertEquals(original.version, decoded.version)
@@ -79,7 +79,7 @@ class TlsRecordRoundTripTest {
     fun changeCipherSpecExactWireBytes() {
         // RFC 5246 §7.1: 14 03 03 00 01 01
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
-        TlsRecordCodec.encode(buffer, TlsRecord.ChangeCipherSpec(TlsProtocolVersion.TLS_1_2, 1u, 1u))
+        TlsRecordCodec.encode(buffer, TlsRecord.ChangeCipherSpec(TlsProtocolVersion.TLS_1_2, 1u, 1u), EncodeContext.Empty)
         assertEquals(0x14.toByte(), buffer[0]) // content type 20
         assertEquals(0x03.toByte(), buffer[1]) // version major
         assertEquals(0x03.toByte(), buffer[2]) // version minor
@@ -93,7 +93,7 @@ class TlsRecordRoundTripTest {
     fun alertExactWireBytes() {
         // Fatal close_notify: 15 03 03 00 02 02 00
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
-        TlsRecordCodec.encode(buffer, TlsRecord.Alert(TlsProtocolVersion.TLS_1_2, 2u, 2u, 0u))
+        TlsRecordCodec.encode(buffer, TlsRecord.Alert(TlsProtocolVersion.TLS_1_2, 2u, 2u, 0u), EncodeContext.Empty)
         assertEquals(0x15.toByte(), buffer[0]) // content type 21
         assertEquals(0x03.toByte(), buffer[1]) // version major
         assertEquals(0x03.toByte(), buffer[2]) // version minor
@@ -117,7 +117,7 @@ class TlsRecordRoundTripTest {
         buffer.writeByte(0x01) // message = 1
         buffer.resetForRead()
 
-        val decoded = TlsRecordCodec.decode(buffer)
+        val decoded = TlsRecordCodec.decode(buffer, DecodeContext.Empty)
         assertTrue(decoded is TlsRecord.ChangeCipherSpec)
         assertEquals(TlsProtocolVersion.TLS_1_2, decoded.version)
         assertEquals(1u.toUShort(), decoded.length)
@@ -136,7 +136,7 @@ class TlsRecordRoundTripTest {
         buffer.writeByte(0x28) // handshake_failure (40)
         buffer.resetForRead()
 
-        val decoded = TlsRecordCodec.decode(buffer)
+        val decoded = TlsRecordCodec.decode(buffer, DecodeContext.Empty)
         assertTrue(decoded is TlsRecord.Alert)
         assertEquals(2u.toUByte(), decoded.level)
         assertEquals(40u.toUByte(), decoded.description)
@@ -148,7 +148,7 @@ class TlsRecordRoundTripTest {
         buffer.writeByte(99)
         buffer.resetForRead()
         assertFailsWith<IllegalArgumentException> {
-            TlsRecordCodec.decode(buffer)
+            TlsRecordCodec.decode(buffer, DecodeContext.Empty)
         }
     }
 

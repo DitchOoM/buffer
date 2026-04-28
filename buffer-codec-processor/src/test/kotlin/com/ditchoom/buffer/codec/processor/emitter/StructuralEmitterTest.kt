@@ -119,7 +119,7 @@ class StructuralEmitterTest {
     @Test
     fun `Shape6 unframed sealed emits when over discriminator`() {
         val s = emit(EmitterFixtures.riffChunk(), "RiffChunk")
-        assertTrue(s.contains("RiffChunkIdCodec.decode(buffer)"))
+        assertTrue(s.contains("RiffChunkIdCodec.decode(buffer, context)"))
         assertTrue(s.contains("when (type)"))
         assertTrue(s.contains("1_684_108_385")) // RIFF data chunk magic.
         // No DiscriminatorKey emitted — no variant has DiscriminatorOwned field.
@@ -189,7 +189,7 @@ class StructuralEmitterTest {
     fun `TlsRecord emits dispatch over content-type and routes payload variants`() {
         val s = emit(EmitterFixtures.tlsRecord(), "TlsRecord")
         assertTrue(s.contains("public object TlsRecordCodec : Codec<TlsRecord>"))
-        assertTrue(s.contains("TlsContentTypeCodec.decode(buffer)"))
+        assertTrue(s.contains("TlsContentTypeCodec.decode(buffer, context)"))
         assertTrue(s.contains("TlsRecordHandshakeCodec.decodeFromContext"))
         assertTrue(s.contains("TlsRecordApplicationDataCodec.decodeFromContext"))
         assertTrue(s.contains("TlsRecordChangeCipherSpecCodec.decode"))

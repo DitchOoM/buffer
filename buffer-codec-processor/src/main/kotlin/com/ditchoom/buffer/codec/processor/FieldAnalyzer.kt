@@ -862,9 +862,9 @@ class FieldAnalyzer(
 
         return when {
             hasCodec -> CodecInfo(CodecDirection.Bidirectional, hasContextOverloads = true)
-            hasDecoder && hasEncoder -> CodecInfo(CodecDirection.Bidirectional, hasContextOverloads = false)
-            hasDecoder -> CodecInfo(CodecDirection.DecodeOnly, hasContextOverloads = false)
-            hasEncoder -> CodecInfo(CodecDirection.EncodeOnly, hasContextOverloads = false)
+            hasDecoder && hasEncoder -> CodecInfo(CodecDirection.Bidirectional, hasContextOverloads = true)
+            hasDecoder -> CodecInfo(CodecDirection.DecodeOnly, hasContextOverloads = true)
+            hasEncoder -> CodecInfo(CodecDirection.EncodeOnly, hasContextOverloads = true)
             else -> {
                 val codecShort = codecDecl.simpleName.asString()
                 logger.error(

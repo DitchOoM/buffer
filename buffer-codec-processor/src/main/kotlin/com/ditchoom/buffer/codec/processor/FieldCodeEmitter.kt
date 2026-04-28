@@ -77,7 +77,7 @@ internal fun readExpression(
             // codec lives in the same package as every variant codec, so an unqualified reference
             // is unambiguous and stays correct even when the package is empty.
             "${strategy.dispatchCodecSimpleName}.DiscriminatorKey" +
-                ".let { key -> context[key] ?: ${strategy.codecName}.decode(buffer) }"
+                ".let { key -> context[key] ?: ${strategy.codecName}.decode(buffer, context) }"
         }
         is FieldReadStrategy.PayloadField -> error("PayloadField uses writePayloadCodec path")
         is FieldReadStrategy.Custom -> {

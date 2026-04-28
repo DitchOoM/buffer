@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test
 
+import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -32,7 +33,7 @@ class RangeRoundTripTest {
 
             // Encode and check the first byte is the exact composed wire byte.
             val buffer = BufferFactory.Default.allocate(8, ByteOrder.BIG_ENDIAN)
-            RangeFrameCodec.encode(buffer, original)
+            RangeFrameCodec.encode(buffer, original, EncodeContext.Empty)
             assertEquals(
                 wireByte,
                 buffer[0],

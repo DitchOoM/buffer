@@ -21,28 +21,18 @@ fun <T> Encoder<T>.encodeToBuffer(
 ): ReadBuffer {
     val knownSize =
         try {
-            wireSize(value)
+            wireSize(value, context)
         } catch (_: NotImplementedError) {
             -1
         }
     return if (knownSize >= 0) {
         val buf = factory.allocate(knownSize)
-        if (this is Codec<*>) {
-            @Suppress("UNCHECKED_CAST")
-            (this as Codec<T>).encode(buf, value, context)
-        } else {
-            encode(buf, value)
-        }
+        encode(buf, value, context)
         buf.resetForRead()
         buf
     } else {
         val growable = GrowableWriteBuffer(factory)
-        if (this is Codec<*>) {
-            @Suppress("UNCHECKED_CAST")
-            (this as Codec<T>).encode(growable, value, context)
-        } else {
-            encode(growable, value)
-        }
+        encode(growable, value, context)
         growable.toReadBuffer()
     }
 }
@@ -85,7 +75,7 @@ fun <T> Codec<T>.testRoundTrip(
     encodeContext: EncodeContext = EncodeContext.Empty,
 ): T {
     val encoded = encodeToBuffer(value, factory, encodeContext)
-    val expectedWireSize = wireSize(value)
+    val expectedWireSize = wireSize(value, encodeContext)
     check(expectedWireSize == encoded.remaining()) {
         "wireSize must match encoded byte count: wireSize=$expectedWireSize, encoded=${encoded.remaining()}"
     }

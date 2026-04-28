@@ -104,25 +104,12 @@ class CodecGenerator(
             val decodeCtxBuilder =
                 FunSpec
                     .builder("decode")
+                    .addModifiers(KModifier.OVERRIDE)
                     .addParameter("buffer", READ_BUFFER)
                     .addParameter("context", DECODE_CONTEXT)
                     .returns(classTypeName)
                     .addCode(decodeBody.build())
-            if (isBidirectional) decodeCtxBuilder.addModifiers(KModifier.OVERRIDE)
             objectBuilder.addFunction(decodeCtxBuilder.build())
-
-            // For DecodeOnly: override Decoder<T>.decode(buffer) to delegate to context version
-            if (direction == CodecDirection.DecodeOnly) {
-                objectBuilder.addFunction(
-                    FunSpec
-                        .builder("decode")
-                        .addModifiers(KModifier.OVERRIDE)
-                        .addParameter("buffer", READ_BUFFER)
-                        .returns(classTypeName)
-                        .addStatement("return decode(buffer, %T.Empty)", DECODE_CONTEXT)
-                        .build(),
-                )
-            }
         }
 
         // encode(buffer, value, context) — context-aware encode
@@ -143,25 +130,12 @@ class CodecGenerator(
             val encodeCtxBuilder =
                 FunSpec
                     .builder("encode")
+                    .addModifiers(KModifier.OVERRIDE)
                     .addParameter("buffer", WRITE_BUFFER)
                     .addParameter("value", classTypeName)
                     .addParameter("context", ENCODE_CONTEXT)
                     .addCode(encodeBody.build())
-            if (isBidirectional) encodeCtxBuilder.addModifiers(KModifier.OVERRIDE)
             objectBuilder.addFunction(encodeCtxBuilder.build())
-
-            // For EncodeOnly: override Encoder<T>.encode(buffer, value) to delegate to context version
-            if (direction == CodecDirection.EncodeOnly) {
-                objectBuilder.addFunction(
-                    FunSpec
-                        .builder("encode")
-                        .addModifiers(KModifier.OVERRIDE)
-                        .addParameter("buffer", WRITE_BUFFER)
-                        .addParameter("value", classTypeName)
-                        .addStatement("encode(buffer, value, %T.Empty)", ENCODE_CONTEXT)
-                        .build(),
-                )
-            }
 
             // When the variant carries its discriminator as a normal field
             // (e.g. ControlPacketV5.Publish has `header: MqttFixedHeader` matching
@@ -200,10 +174,10 @@ class CodecGenerator(
             }
         }
 
-        // Generate wireSize(value, context) + wireSize(value) delegate. The context-aware
-        // overload is the work function so nested `Codec.wireSize(nested, context)` calls
-        // can flow context through to payload-bearing sealed dispatchers (e.g. MqttPropertyCodec
-        // with CorrelationData<D> variants reading SizeKey lambdas from the context).
+        // Generate wireSize(value, context). Context flows through nested
+        // `Codec.wireSize(nested, context)` calls so payload-bearing sealed dispatchers
+        // (e.g. MqttPropertyCodec with CorrelationData<D> variants) can resolve SizeKey
+        // lambdas from the context.
         if (canEncode) {
             val wireSizeBody = CodeBlock.builder()
             wireSizeBody.addStatement("var _size = 0")
@@ -265,17 +239,6 @@ class CodecGenerator(
                     .addParameter("context", ENCODE_CONTEXT)
                     .returns(Int::class)
                     .addCode(wireSizeBody.build())
-                    .build(),
-            )
-            // Delegate the context-free Encoder.wireSize(value) to the context-aware variant
-            // with EncodeContext.Empty so encodeToBuffer (which has no context) still works.
-            objectBuilder.addFunction(
-                FunSpec
-                    .builder("wireSize")
-                    .addModifiers(KModifier.OVERRIDE)
-                    .addParameter("value", classTypeName)
-                    .returns(Int::class)
-                    .addStatement("return wireSize(value, %T.Empty)", ENCODE_CONTEXT)
                     .build(),
             )
         }

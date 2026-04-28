@@ -34,7 +34,10 @@ object SimpleStructCodec : Codec<SimpleStruct> {
         buffer.writeInt(value.value)
     }
 
-    override fun wireSize(value: SimpleStruct): Int = 6
+    override fun wireSize(
+        value: SimpleStruct,
+        context: EncodeContext,
+    ): Int = 6
 }
 
 // Struct with a variable-length integer field (hand-written, simulating @VariableLength)
@@ -58,7 +61,10 @@ object VariableLengthStructCodec : Codec<VariableLengthStruct> {
         buffer.writeVariableByteInteger(value.length)
     }
 
-    override fun wireSize(value: VariableLengthStruct): Int = 1 + variableByteSizeInt(value.length)
+    override fun wireSize(
+        value: VariableLengthStruct,
+        context: EncodeContext,
+    ): Int = 1 + variableByteSizeInt(value.length)
 }
 
 // Struct with a length-prefixed string (hand-written, simulating @LengthPrefixed)
@@ -82,7 +88,10 @@ object LengthPrefixedStructCodec : Codec<LengthPrefixedStruct> {
         buffer.writeLengthPrefixedUtf8String(value.name)
     }
 
-    override fun wireSize(value: LengthPrefixedStruct): Int = 1 + 2 + value.name.utf8Length()
+    override fun wireSize(
+        value: LengthPrefixedStruct,
+        context: EncodeContext,
+    ): Int = 1 + 2 + value.name.utf8Length()
 }
 
 class CodecTest {
@@ -92,9 +101,9 @@ class CodecTest {
     fun simpleStructRoundTrip() {
         val original = SimpleStruct(42u.toUShort(), 123456)
         val buf = BufferFactory.Default.allocate(6)
-        SimpleStructCodec.encode(buf, original)
+        SimpleStructCodec.encode(buf, original, EncodeContext.Empty)
         buf.resetForRead()
-        val decoded = SimpleStructCodec.decode(buf)
+        val decoded = SimpleStructCodec.decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -102,9 +111,9 @@ class CodecTest {
     fun simpleStructZeroValues() {
         val original = SimpleStruct(0u.toUShort(), 0)
         val buf = BufferFactory.Default.allocate(6)
-        SimpleStructCodec.encode(buf, original)
+        SimpleStructCodec.encode(buf, original, EncodeContext.Empty)
         buf.resetForRead()
-        val decoded = SimpleStructCodec.decode(buf)
+        val decoded = SimpleStructCodec.decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -112,9 +121,9 @@ class CodecTest {
     fun simpleStructMaxValues() {
         val original = SimpleStruct(UShort.MAX_VALUE, Int.MAX_VALUE)
         val buf = BufferFactory.Default.allocate(6)
-        SimpleStructCodec.encode(buf, original)
+        SimpleStructCodec.encode(buf, original, EncodeContext.Empty)
         buf.resetForRead()
-        val decoded = SimpleStructCodec.decode(buf)
+        val decoded = SimpleStructCodec.decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -122,9 +131,9 @@ class CodecTest {
     fun simpleStructNegativeIntValue() {
         val original = SimpleStruct(1u.toUShort(), -1)
         val buf = BufferFactory.Default.allocate(6)
-        SimpleStructCodec.encode(buf, original)
+        SimpleStructCodec.encode(buf, original, EncodeContext.Empty)
         buf.resetForRead()
-        val decoded = SimpleStructCodec.decode(buf)
+        val decoded = SimpleStructCodec.decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -134,9 +143,9 @@ class CodecTest {
     fun variableLengthStructRoundTripOneByte() {
         val original = VariableLengthStruct(0x01, 0)
         val buf = BufferFactory.Default.allocate(8)
-        VariableLengthStructCodec.encode(buf, original)
+        VariableLengthStructCodec.encode(buf, original, EncodeContext.Empty)
         buf.resetForRead()
-        val decoded = VariableLengthStructCodec.decode(buf)
+        val decoded = VariableLengthStructCodec.decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -144,9 +153,9 @@ class CodecTest {
     fun variableLengthStructRoundTripTwoBytes() {
         val original = VariableLengthStruct(0x02, 128)
         val buf = BufferFactory.Default.allocate(8)
-        VariableLengthStructCodec.encode(buf, original)
+        VariableLengthStructCodec.encode(buf, original, EncodeContext.Empty)
         buf.resetForRead()
-        val decoded = VariableLengthStructCodec.decode(buf)
+        val decoded = VariableLengthStructCodec.decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -154,9 +163,9 @@ class CodecTest {
     fun variableLengthStructRoundTripMaxValue() {
         val original = VariableLengthStruct(0x03, 268435455)
         val buf = BufferFactory.Default.allocate(8)
-        VariableLengthStructCodec.encode(buf, original)
+        VariableLengthStructCodec.encode(buf, original, EncodeContext.Empty)
         buf.resetForRead()
-        val decoded = VariableLengthStructCodec.decode(buf)
+        val decoded = VariableLengthStructCodec.decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -164,9 +173,9 @@ class CodecTest {
     fun variableLengthStructRoundTrip127() {
         val original = VariableLengthStruct(0x04, 127)
         val buf = BufferFactory.Default.allocate(8)
-        VariableLengthStructCodec.encode(buf, original)
+        VariableLengthStructCodec.encode(buf, original, EncodeContext.Empty)
         buf.resetForRead()
-        val decoded = VariableLengthStructCodec.decode(buf)
+        val decoded = VariableLengthStructCodec.decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -176,7 +185,7 @@ class CodecTest {
     fun lengthPrefixedStructRoundTrip() {
         val original = LengthPrefixedStruct(0x01u.toUByte(), "Hello")
         val encoded = LengthPrefixedStructCodec.encodeToBuffer(original)
-        val decoded = LengthPrefixedStructCodec.decode(encoded)
+        val decoded = LengthPrefixedStructCodec.decode(encoded, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -184,15 +193,15 @@ class CodecTest {
     fun lengthPrefixedStructEmptyString() {
         val original = LengthPrefixedStruct(0x02u.toUByte(), "")
         val encoded = LengthPrefixedStructCodec.encodeToBuffer(original)
-        val decoded = LengthPrefixedStructCodec.decode(encoded)
+        val decoded = LengthPrefixedStructCodec.decode(encoded, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
     @Test
     fun lengthPrefixedStructUtf8Multibyte() {
-        val original = LengthPrefixedStruct(0x03u.toUByte(), "cafe\u0301")
+        val original = LengthPrefixedStruct(0x03u.toUByte(), "café")
         val encoded = LengthPrefixedStructCodec.encodeToBuffer(original)
-        val decoded = LengthPrefixedStructCodec.decode(encoded)
+        val decoded = LengthPrefixedStructCodec.decode(encoded, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -200,7 +209,7 @@ class CodecTest {
     fun lengthPrefixedStructMaxUByte() {
         val original = LengthPrefixedStruct(UByte.MAX_VALUE, "test")
         val encoded = LengthPrefixedStructCodec.encodeToBuffer(original)
-        val decoded = LengthPrefixedStructCodec.decode(encoded)
+        val decoded = LengthPrefixedStructCodec.decode(encoded, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 }

@@ -14,14 +14,14 @@ class InterfaceSplitTest {
 
     @Test
     fun decoderSamConversion() {
-        val decoder = Decoder<Int> { buffer -> buffer.readInt() }
+        val decoder = Decoder<Int> { buffer, _ -> buffer.readInt() }
         val buf = BufferFactory.Default.allocate(4)
         buf.writeInt(42)
         buf.resetForRead()
-        assertEquals(42, decoder.decode(buf))
+        assertEquals(42, decoder.decode(buf, DecodeContext.Empty))
     }
 
-    // ── Codec: context is THE abstract method ──
+    // ── Codec implements the inherited context-aware methods ──
 
     private object IntCodec : Codec<Int> {
         override fun decode(
@@ -39,19 +39,17 @@ class InterfaceSplitTest {
     }
 
     @Test
-    fun codecContextFreeDecodeDelgatesToContextVersion() {
+    fun codecDecodeReadsWithEmptyContext() {
         val buf = BufferFactory.Default.allocate(4)
         buf.writeInt(99)
         buf.resetForRead()
-        // Calling context-free decode — should delegate to decode(buffer, DecodeContext.Empty)
-        assertEquals(99, IntCodec.decode(buf))
+        assertEquals(99, IntCodec.decode(buf, DecodeContext.Empty))
     }
 
     @Test
-    fun codecContextFreeEncodeDelgatesToContextVersion() {
+    fun codecEncodeWritesWithEmptyContext() {
         val buf = BufferFactory.Default.allocate(4)
-        // Calling context-free encode — should delegate to encode(buffer, value, EncodeContext.Empty)
-        IntCodec.encode(buf, 77)
+        IntCodec.encode(buf, 77, EncodeContext.Empty)
         buf.resetForRead()
         assertEquals(77, buf.readInt())
     }
@@ -67,14 +65,14 @@ class InterfaceSplitTest {
     fun codecPassableAsEncoder() {
         val encoder: Encoder<Int> = IntCodec
         val buf = BufferFactory.Default.allocate(4)
-        encoder.encode(buf, 55)
+        encoder.encode(buf, 55, EncodeContext.Empty)
         buf.resetForRead()
         assertEquals(55, buf.readInt())
     }
 
     @Test
     fun encoderEncodeToBufferWithoutContext() {
-        // Encoder.encodeToBuffer works without context for plain encoders.
+        // Encoder.encodeToBuffer works with the default EncodeContext.Empty.
         val encoder: Encoder<Int> = IntCodec
         val encoded = encoder.encodeToBuffer(77)
         assertEquals(4, encoded.remaining())
@@ -82,9 +80,8 @@ class InterfaceSplitTest {
     }
 
     @Test
-    fun encoderEncodeToBufferForwardsContextWhenCodec() {
-        // When an Encoder reference is actually a Codec at runtime,
-        // encodeToBuffer must forward context to the context-aware encode method.
+    fun encoderEncodeToBufferForwardsContext() {
+        // encodeToBuffer must forward context to the inherited encode/wireSize methods.
         val key = object : CodecContext.Key<String>() {}
         var receivedContext: EncodeContext = EncodeContext.Empty
         val codec =
@@ -103,7 +100,6 @@ class InterfaceSplitTest {
                     buffer.writeInt(value)
                 }
             }
-        // Call through an Encoder reference — context must still arrive
         val encoder: Encoder<Int> = codec
         val ctx = EncodeContext.Empty.with(key, "hello")
         val encoded = encoder.encodeToBuffer(42, context = ctx)
@@ -118,7 +114,7 @@ class InterfaceSplitTest {
         val buf = BufferFactory.Default.allocate(4)
         buf.writeInt(66)
         buf.resetForRead()
-        assertEquals(66, decoder.decode(buf))
+        assertEquals(66, decoder.decode(buf, DecodeContext.Empty))
     }
 
     private fun fakeStreamProcessor(): com.ditchoom.buffer.stream.StreamProcessor =

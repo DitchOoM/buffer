@@ -108,7 +108,7 @@ class SealedEmitter(
 
             is DispatchShape.TypedDiscriminator -> {
                 val discCodec = discCodecOf(d.disc)
-                fb.addCode("val discriminator = %T.decode(buffer)\n", discCodec)
+                fb.addCode("val discriminator = %T.decode(buffer, context)\n", discCodec)
                 if (variantsConsumeDiscriminator(plan)) {
                     fb.addCode(
                         "val ctx = context.with(DiscriminatorKey, discriminator)\n",

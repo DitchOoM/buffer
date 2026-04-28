@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.codec.test
 
+import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -115,10 +117,10 @@ class CodecPerformanceValidationTest {
     fun `buffer position after decode`() {
         val connack = MqttPacketConnAck(ConnAckFlags(0u), ConnectReturnCode(0u))
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
-        MqttPacketConnAckCodec.encode(buffer, connack)
+        MqttPacketConnAckCodec.encode(buffer, connack, EncodeContext.Empty)
         buffer.resetForRead()
         assertEquals(2, buffer.remaining())
-        MqttPacketConnAckCodec.decode(buffer)
+        MqttPacketConnAckCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(0, buffer.remaining())
     }
 
@@ -143,10 +145,10 @@ class CodecPerformanceValidationTest {
         value: T,
     ) {
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
-        codec.encode(buffer, value)
+        codec.encode(buffer, value, EncodeContext.Empty)
         buffer.resetForRead()
         val bytesWritten = buffer.remaining()
-        codec.decode(buffer)
+        codec.decode(buffer, DecodeContext.Empty)
         assertEquals(0, buffer.remaining(), "Not all bytes consumed for ${value::class.simpleName}")
     }
 }
