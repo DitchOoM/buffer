@@ -609,8 +609,25 @@ class ProtocolMessageProcessor(
 
     // ──────────────────────── Direction inference & validation ────────────────────────
 
-    /** Reads the explicit `direction` param from `@ProtocolMessage`, returns the enum name string. */
+    /**
+     * Returns the explicit direction signal as an enum name string ("Codec", "DecodeOnly",
+     * "EncodeOnly") or "Infer" when no class-level signal is present. Class-level
+     * `@Decode` / `@Encode` markers take precedence over the legacy
+     * `@ProtocolMessage(direction = ...)` parameter.
+     */
     private fun extractExplicitDirection(classDecl: KSClassDeclaration): String {
+        val hasDecodeMarker =
+            classDecl.annotations.any {
+                it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.Decode"
+            }
+        val hasEncodeMarker =
+            classDecl.annotations.any {
+                it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.Encode"
+            }
+        if (hasDecodeMarker && hasEncodeMarker) return "Infer" // PhaseB validator surfaces the conflict
+        if (hasDecodeMarker) return "DecodeOnly"
+        if (hasEncodeMarker) return "EncodeOnly"
+
         val ann =
             classDecl.annotations.find {
                 it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.ProtocolMessage"
@@ -618,7 +635,10 @@ class ProtocolMessageProcessor(
         val dirArg = ann.arguments.find { it.name?.asString() == "direction" }?.value ?: return "Infer"
         // KSP represents enum annotation values in different ways depending on the KSP version.
         // Use toString() and extract the enum name, matching the pattern used for wireOrder.
-        return dirArg.toString().substringAfterLast(".")
+        // The `Default` enum value (replacing the dropped `Infer` value) is the "no explicit
+        // signal" sentinel and maps back to "Infer" for the validator's existing branches.
+        val name = dirArg.toString().substringAfterLast(".")
+        return if (name == "Default") "Infer" else name
     }
 
     /** Computes the direction implied by the fields (ignoring explicit annotation). */

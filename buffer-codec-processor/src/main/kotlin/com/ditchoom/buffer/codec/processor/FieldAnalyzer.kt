@@ -664,8 +664,31 @@ class FieldAnalyzer(
                 val minBytes = annotation.arguments.first().value as Int
                 return FieldCondition.WhenRemaining(minBytes)
             }
+            if (annotName == "com.ditchoom.buffer.codec.annotations.When") {
+                val expr = annotation.arguments.first().value as String
+                return parseWhenExpression(expr)
+            }
         }
         return null
+    }
+
+    /**
+     * Parses a Phase 1 `@When(...)` expression DSL into a [FieldCondition].
+     *
+     * Supported forms:
+     * - `"remaining >= N"` → [FieldCondition.WhenRemaining]`(N)`
+     * - `"path"` (identifier or dotted path) → [FieldCondition.WhenTrue]`(path)`
+     *
+     * Phase 4 (PlanBuilder) replaces this with a structural [BooleanExpression] IR.
+     */
+    private fun parseWhenExpression(expression: String): FieldCondition {
+        val trimmed = expression.trim()
+        val remainingMatch = Regex("""^remaining\s*>=\s*(\d+)$""").matchEntire(trimmed)
+        if (remainingMatch != null) {
+            val minBytes = remainingMatch.groupValues[1].toInt()
+            return FieldCondition.WhenRemaining(minBytes)
+        }
+        return FieldCondition.WhenTrue(trimmed)
     }
 
     private fun resolveStrategy(
@@ -1295,11 +1318,27 @@ class FieldAnalyzer(
     }
 
     /**
-     * Reads the explicit `direction` parameter from a `@ProtocolMessage` annotation.
-     * Returns [CodecDirection.Bidirectional] for `Infer` or absent annotation (the default
-     * for the independent cascading model — each message controls its own direction).
+     * Reads the explicit direction signal from a class declaration. Class-level
+     * `@Decode` / `@Encode` markers take precedence over the legacy
+     * `@ProtocolMessage(direction = ...)` parameter. Returns
+     * [CodecDirection.Bidirectional] when no signal is present (each message controls
+     * its own direction in the independent cascading model).
      */
     private fun extractExplicitDirection(classDecl: KSClassDeclaration): CodecDirection {
+        val hasDecodeMarker =
+            classDecl.annotations.any {
+                it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.Decode"
+            }
+        val hasEncodeMarker =
+            classDecl.annotations.any {
+                it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.Encode"
+            }
+        if (hasDecodeMarker && hasEncodeMarker) {
+            return CodecDirection.Bidirectional // PhaseB validator surfaces the conflict
+        }
+        if (hasDecodeMarker) return CodecDirection.DecodeOnly
+        if (hasEncodeMarker) return CodecDirection.EncodeOnly
+
         val ann =
             classDecl.annotations.find {
                 it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.ProtocolMessage"
@@ -1310,7 +1349,7 @@ class FieldAnalyzer(
                 "DecodeOnly" -> CodecDirection.DecodeOnly
                 "EncodeOnly" -> CodecDirection.EncodeOnly
                 "Codec" -> CodecDirection.Bidirectional
-                else -> CodecDirection.Bidirectional // Infer or unknown
+                else -> CodecDirection.Bidirectional // Default sentinel — treat as "no explicit"
             }
         }
         return CodecDirection.Bidirectional

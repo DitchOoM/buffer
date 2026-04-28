@@ -30,13 +30,18 @@ annotation class ProtocolMessage(
     /**
      * Controls whether the generated codec supports encode, decode, or both.
      *
-     * - [Direction.Infer] (default): automatically inferred from fields.
-     *   If any field uses a decode-only `@UseCodec`, the codec becomes decode-only.
-     * - [Direction.Codec]: asserts bidirectional — compile error if any field is unidirectional.
-     * - [Direction.DecodeOnly]: generates only `decode()` — compile error if any field is encode-only.
-     * - [Direction.EncodeOnly]: generates only `encode()` — compile error if any field is decode-only.
+     * **Deprecated.** Prefer the class-level [Decode] / [Encode] markers — the absence
+     * of either marker means "infer from fields" (decode-only if any field is decode-only,
+     * etc.), which is the default behavior. The `direction` parameter remains as a
+     * one-cycle compatibility shim and may be removed in a later release.
+     *
+     * - [Direction.Default] (default): infer from fields (decode-only if any field is
+     *   decode-only, etc.).
+     * - [Direction.Codec]: assert bidirectional — compile error if any field is unidirectional.
+     * - [Direction.DecodeOnly]: generate only `decode()` — compile error if any field is encode-only.
+     * - [Direction.EncodeOnly]: generate only `encode()` — compile error if any field is decode-only.
      */
-    val direction: Direction = Direction.Infer,
+    val direction: Direction = Direction.Default,
     /**
      * Fully-qualified name of an exception class with a single-`String` constructor that the
      * generated sealed dispatcher throws when the wire discriminator matches no variant. Empty
@@ -51,6 +56,43 @@ annotation class ProtocolMessage(
      */
     val onUnknownDiscriminator: String = "",
 )
+
+/**
+ * Marks a `@ProtocolMessage` class as decode-only — the processor generates a `Decoder<T>`
+ * but no `Encoder<T>`. Mutually exclusive with [Encode] (compile error if both are present).
+ *
+ * Replaces `@ProtocolMessage(direction = Direction.DecodeOnly)`. Absence of both markers
+ * means direction is inferred from fields: a class with any decode-only `@UseCodec` becomes
+ * decode-only automatically.
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * @Decode
+ * data class IncomingFrame(@LengthPrefixed val payload: String)
+ * // Generates IncomingFrameCodec with only decode()
+ * ```
+ */
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.BINARY)
+annotation class Decode
+
+/**
+ * Marks a `@ProtocolMessage` class as encode-only — the processor generates an `Encoder<T>`
+ * but no `Decoder<T>`. Mutually exclusive with [Decode] (compile error if both are present).
+ *
+ * Replaces `@ProtocolMessage(direction = Direction.EncodeOnly)`. Absence of both markers
+ * means direction is inferred from fields.
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * @Encode
+ * data class OutgoingFrame(@LengthPrefixed val payload: String)
+ * // Generates OutgoingFrameCodec with only encode()
+ * ```
+ */
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.BINARY)
+annotation class Encode
 
 /**
  * Variant of a `@ProtocolMessage` sealed interface that claims a single discriminator value.
@@ -120,6 +162,39 @@ annotation class PacketTypeRange(
     val from: Int,
     val to: Int,
 )
+
+/**
+ * Marks a constructor parameter as carrying the dispatch discriminator for its sealed-interface
+ * parent. The annotated field's type must match the parent's `@DispatchOn.type`.
+ *
+ * On encode, the dispatcher delegates discriminator-byte writing to this field rather than
+ * writing the variant's `@PacketType.wire` value itself. This is required for `@PacketTypeRange`
+ * variants (the wire byte depends on per-instance data) and useful for `@PacketType` variants
+ * whose discriminator carries flag bits the variant needs to read back on decode.
+ *
+ * ```kotlin
+ * @JvmInline
+ * @ProtocolMessage
+ * value class MqttFixedHeader(val raw: UByte) {
+ *     @DispatchValue val packetType: Int get() = (raw.toInt() shr 4) and 0x0F
+ * }
+ *
+ * @DispatchOn(MqttFixedHeader::class)
+ * sealed interface MqttControlPacket {
+ *     @ProtocolMessage @PacketTypeRange(from = 0x30, to = 0x3F)
+ *     data class Publish(
+ *         @DiscriminatorField val header: MqttFixedHeader,
+ *         val topic: String,
+ *     ) : MqttControlPacket
+ * }
+ * ```
+ *
+ * Without `@DiscriminatorField` on a ranged variant, the processor cannot know which wire byte
+ * to emit — KSP errors with a suggestion to add the marker.
+ */
+@Target(AnnotationTarget.VALUE_PARAMETER)
+@Retention(AnnotationRetention.BINARY)
+annotation class DiscriminatorField
 
 /**
  * Marks a type parameter as the application payload.
@@ -304,14 +379,16 @@ enum class Endianness {
 /**
  * Controls whether a `@ProtocolMessage` generates encode, decode, or both.
  *
- * Used with [ProtocolMessage.direction] to explicitly control or assert the
- * directionality of the generated codec. Direction is inferred from fields by default:
- * if any field uses a decode-only `@UseCodec` (one that only implements `Decoder<T>`),
- * the generated codec becomes decode-only automatically.
+ * **Prefer the class-level [Decode] / [Encode] markers** for new code; this enum
+ * remains as a one-cycle compatibility shim for the [ProtocolMessage.direction]
+ * parameter.
  */
 enum class Direction {
-    /** Infer from fields: decode-only if any field is decode-only, etc. (default, non-breaking). */
-    Infer,
+    /**
+     * Infer from fields — the default. Decode-only if any field is decode-only, etc.
+     * Equivalent to omitting both [Decode] and [Encode] class-level markers.
+     */
+    Default,
 
     /** Assert bidirectional — compile error if any field is unidirectional. */
     Codec,
@@ -345,26 +422,57 @@ annotation class WireOrder(
 )
 
 /**
- * Conditional field: only present on the wire when the referenced expression is `true`.
+ * Conditional field: only present on the wire when [expression] evaluates to `true`.
  * The field must be nullable with a default value of `null`.
+ *
+ * The expression DSL supports two forms in Phase 1:
+ * - Boolean field reference: `"hasExtra"` — the named field must be `Boolean`.
+ * - Dotted property access: `"flags.willFlag"` — accesses a `Boolean` property on a
+ *   value-class field.
+ * - Remaining-bytes test: `"remaining >= N"` — passes when at least `N` bytes are
+ *   left in the buffer after preceding fields, replacing `@WhenRemaining(N)`.
  *
  * ```kotlin
  * @ProtocolMessage
  * data class OptionalPayload(
  *     val hasExtra: Boolean,
- *     @WhenTrue("hasExtra") val extra: Int? = null,  // only read/written when hasExtra == true
+ *     @When("hasExtra") val extra: Int? = null,
+ * )
+ *
+ * @ProtocolMessage
+ * data class AckV5(
+ *     val packetId: UShort,
+ *     @When("remaining >= 1") val reasonCode: UByte? = null,
  * )
  * ```
  *
- * Dotted expressions access properties on value class fields:
+ * Replaces `@WhenTrue` (boolean / dotted property) and `@WhenRemaining(N)`
+ * (`"remaining >= N"`).
+ */
+@Target(AnnotationTarget.VALUE_PARAMETER)
+@Retention(AnnotationRetention.BINARY)
+annotation class When(
+    val expression: String,
+)
+
+/**
+ * **Deprecated.** Use [When] instead. `@WhenTrue("expr")` is equivalent to `@When("expr")`.
  *
- * ```kotlin
- * @WhenTrue("flags.willFlag") val willTopic: String? = null
- * ```
+ * Conditional field: only present on the wire when the referenced expression is `true`.
+ * The field must be nullable with a default value of `null`.
  *
  * @param expression `"fieldName"` for a Boolean field, or `"fieldName.property"` for a
  *   property on a value class field.
  */
+@Deprecated(
+    message = "Use @When instead. The expression syntax is identical.",
+    replaceWith =
+        ReplaceWith(
+            "When(expression)",
+            "com.ditchoom.buffer.codec.annotations.When",
+        ),
+    level = DeprecationLevel.WARNING,
+)
 @Target(AnnotationTarget.VALUE_PARAMETER)
 @Retention(AnnotationRetention.BINARY)
 annotation class WhenTrue(
@@ -372,27 +480,26 @@ annotation class WhenTrue(
 )
 
 /**
+ * **Deprecated.** Use `@When("remaining >= N")` instead. `@WhenRemaining(N)` is
+ * equivalent to `@When("remaining >= N")`.
+ *
  * Conditional field: only present on the wire when at least [minBytes] remain
  * in the buffer after reading all preceding fields.
  *
  * The field must be nullable with a default value of `null`.
  * All `@WhenRemaining` fields must be contiguous and at the tail of the constructor.
  *
- * On encode, fields are written with cascading null checks: if an earlier
- * `@WhenRemaining` field is null, all subsequent ones are skipped — preventing
- * an impossible wire state where a trailing field is present without its predecessor.
- *
- * ```kotlin
- * @ProtocolMessage
- * data class AckV5(
- *     val packetId: UShort,
- *     @WhenRemaining(1) val reasonCode: UByte? = null,
- *     @WhenRemaining(1) val properties: Collection<Property>? = null,
- * )
- * ```
- *
  * @param minBytes Minimum bytes remaining in buffer for this field to be present.
  */
+@Deprecated(
+    message = "Use @When(\"remaining >= N\") instead.",
+    replaceWith =
+        ReplaceWith(
+            "When(\"remaining >= \" + minBytes)",
+            "com.ditchoom.buffer.codec.annotations.When",
+        ),
+    level = DeprecationLevel.WARNING,
+)
 @Target(AnnotationTarget.VALUE_PARAMETER)
 @Retention(AnnotationRetention.BINARY)
 annotation class WhenRemaining(

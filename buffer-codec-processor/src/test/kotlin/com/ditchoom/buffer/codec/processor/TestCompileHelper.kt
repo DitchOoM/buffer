@@ -38,15 +38,23 @@ private val annotationSource =
 
     enum class Endianness { Default, Big, Little }
 
-    enum class Direction { Infer, Codec, DecodeOnly, EncodeOnly }
+    enum class Direction { Default, Codec, DecodeOnly, EncodeOnly }
 
     @Target(AnnotationTarget.CLASS)
     @Retention(AnnotationRetention.BINARY)
     annotation class ProtocolMessage(
         val wireOrder: Endianness = Endianness.Default,
-        val direction: Direction = Direction.Infer,
+        val direction: Direction = Direction.Default,
         val onUnknownDiscriminator: String = "",
     )
+
+    @Target(AnnotationTarget.CLASS)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class Decode
+
+    @Target(AnnotationTarget.CLASS)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class Encode
 
     @Target(AnnotationTarget.CLASS)
     @Retention(AnnotationRetention.BINARY)
@@ -55,6 +63,10 @@ private val annotationSource =
     @Target(AnnotationTarget.CLASS)
     @Retention(AnnotationRetention.BINARY)
     annotation class PacketTypeRange(val from: Int, val to: Int)
+
+    @Target(AnnotationTarget.VALUE_PARAMETER)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class DiscriminatorField
 
     @Target(AnnotationTarget.TYPE_PARAMETER)
     @Retention(AnnotationRetention.BINARY)
@@ -99,6 +111,10 @@ private val annotationSource =
     @Target(AnnotationTarget.VALUE_PARAMETER)
     @Retention(AnnotationRetention.BINARY)
     annotation class WhenRemaining(val minBytes: Int)
+
+    @Target(AnnotationTarget.VALUE_PARAMETER)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class When(val expression: String)
 
     // Endianness enum already defined above with ProtocolMessage
 
