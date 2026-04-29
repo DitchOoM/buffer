@@ -496,6 +496,7 @@ object CapturedSnapshots {
         package com.ditchoom.codec.test
 
         import com.ditchoom.buffer.BufferFactory
+        import com.ditchoom.buffer.Default
         import com.ditchoom.buffer.ReadBuffer
         import com.ditchoom.buffer.WriteBuffer
         import com.ditchoom.buffer.codec.Codec

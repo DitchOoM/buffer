@@ -162,24 +162,10 @@ class ProtocolMessageProcessor(
                     if (ann.fqn in customProviders.keys) return false
                 }
             }
-            // Slice 5b: top-level data classes carrying `@Payload` type parameters
-            // need the typed-lambda fan-out (`decode<P>(buf, lambda)` /
-            // `encode<P>(buf, value, lambda)` / `wireSize<P>(value, sizeOf)`) plus
-            // a generic `Codec<T<*>>` superinterface. Phase 9 Step 4 Cap 2 ported
-            // the typed-lambda emit (bare `(ReadBuffer) -> P` lambdas, no
-            // synthesized `*Context` receiver), but the new PlanBuilder does not
-            // yet enforce the legacy rule that `@Payload` fields require a length
-            // annotation — `FieldStrategyBuilder.buildPayloadSlot` silently falls
-            // back to `LengthSource.Remaining`. Until that rule is ported in
-            // Step 5 (alongside variant-emission migration that lets sealed
-            // payload variants speak the same bare-lambda calling convention),
-            // defer top-level `@Payload` data classes to legacy so its
-            // diagnostics surface.
-            val hasPayloadTypeParam =
-                symbol.typeParameters.any { tp ->
-                    tp.annotations.any { it.fqn == "com.ditchoom.buffer.codec.annotations.Payload" }
-                }
-            if (hasPayloadTypeParam) return false
+            // Phase 9 Step 4-redo C7: Cap 2 defer dropped. Top-level `@Payload`
+            // data classes flow through the new pipeline — the receiver-style
+            // typed-lambda emit (C3) plus length-annotation enforcement (C5)
+            // give the new path feature parity with the legacy diagnostic.
             // Slice 5b: defer to legacy when a constructor parameter combines
             // `@LengthPrefixed` / `@LengthFrom` with a NestedMessage or External
             // (UseCodec) field type. The new pipeline's `FieldStrategyBuilder.buildNestedMessage`
@@ -231,39 +217,13 @@ class ProtocolMessageProcessor(
             // AND the class violates a preflight check the legacy emitter relies on.
             if (!conditionalShapeOk(symbol)) return false
         }
-        // Phase 9 Step 4 — Cap 1 escalation: sealed roots with `@Payload` variants
-        // continue to defer to legacy. The new SealedEmitter Cap 1 typed-lambda
-        // dispatcher fan-out is in place (bare-lambda shape matching Cap 2's
-        // top-level emit), but variant codecs are still emitted by legacy
-        // `CodecGenerator` (called from `processSealedInterface`) with the
-        // receiver-shape lambda `*Context.(ReadBuffer) -> P`. Routing the
-        // dispatcher through the new pipeline while variants stay on legacy
-        // produces a signature mismatch at compile time:
-        //
-        //     dispatcher: callee `(ReadBuffer) -> P`     (Cap 1 bare)
-        //     variant:    declared `*Context.(ReadBuffer) -> P` (legacy receiver)
-        //
-        // Step 5/6 ports sealed variant codec emission to the new pipeline
-        // (bringing `processSealedInterface` to call `tryPipeline` for each
-        // variant). Until then this defer keeps both dispatcher and variants
-        // on legacy together, matching the receiver-shape calling convention
-        // end-to-end.
-        if (symbol is com.ditchoom.buffer.codec.processor.discovery.RawSymbol.SealedRoot) {
-            val discovery = cachedDiscovery
-            if (discovery != null) {
-                val anyVariantHasPayloadTp =
-                    symbol.subclassFqns.any { childFqn ->
-                        val child =
-                            discovery.symbols.firstOrNull { it.fqn == childFqn }
-                                as? com.ditchoom.buffer.codec.processor.discovery.RawSymbol.DataLike
-                                ?: return@any false
-                        child.typeParameters.any { tp ->
-                            tp.annotations.any { it.fqn == "com.ditchoom.buffer.codec.annotations.Payload" }
-                        }
-                    }
-                if (anyVariantHasPayloadTp) return false
-            }
-        }
+        // Phase 9 Step 4-redo C7: Cap 1 defer dropped. Sealed roots with
+        // `@Payload` variants flow through the new pipeline. The
+        // SealedEmitter dispatcher (C4) and the LeafEmitter variant emit (C3)
+        // both speak the same receiver-style calling convention now, so
+        // dispatch through the new pipeline routes through new-pipeline
+        // variant codecs (after C6's tryPipeline-for-variants) without any
+        // signature mismatch.
         // Phase 9 Step 3 conservative defer: classes that depend on the new
         // value-class auto-detect path stay on legacy until Step 5 reconciles
         // sealed-dispatcher peek emission with legacy's `allVariantsSupportPeek`

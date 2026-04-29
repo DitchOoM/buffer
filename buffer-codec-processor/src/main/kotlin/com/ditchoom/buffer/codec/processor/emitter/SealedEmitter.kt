@@ -152,10 +152,24 @@ class SealedEmitter(
             }
         }
 
-        return FileSpec
-            .builder(codecName.packageName, codecName.simpleName)
-            .addType(type.build())
-            .build()
+        // Step 4-redo C7: when the typed-lambda encode falls through to the
+        // BodyLength scratch-buffer path (`BufferFactory.Default.allocate(...)`),
+        // we need the `Default` extension property in scope. KotlinPoet's `%T`
+        // for `BufferFactory` adds the type import but not the package-level
+        // extension. Mirrors legacy `SealedDispatchGenerator`'s emit which
+        // also adds this import.
+        val needsBufferFactoryDefault =
+            anyWithPayload &&
+                canEncode &&
+                (plan.dispatch as? DispatchShape.TypedDiscriminator)?.framing is FramingMode.BodyLength
+        val file =
+            FileSpec
+                .builder(codecName.packageName, codecName.simpleName)
+                .addType(type.build())
+        if (needsBufferFactoryDefault) {
+            file.addImport("com.ditchoom.buffer", "Default")
+        }
+        return file.build()
     }
 
     private fun variantsConsumeDiscriminator(plan: Plan.Sealed_): Boolean = plan.variants.any { v -> hasDiscriminatorOwnedField(v) }

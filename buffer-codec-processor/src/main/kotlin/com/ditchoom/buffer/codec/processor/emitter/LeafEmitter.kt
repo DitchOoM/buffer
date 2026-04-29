@@ -385,13 +385,20 @@ class LeafEmitter(
                 )
 
             is FieldStrategy.DiscriminatorOwned ->
+                // Prefer the dispatcher's pre-parsed discriminator from
+                // context (which the dispatcher populates after consuming
+                // the byte) and fall back to reading from the buffer when
+                // no context is supplied — so a variant codec called
+                // standalone (test fixtures, raw consumer code) round-trips
+                // without requiring the caller to pre-populate the key.
+                // DiscriminatorKey lives on the **sealed root's** dispatcher
+                // codec, not the discriminator-class codec — mirrors legacy
+                // FieldReadStrategy.DiscriminatorField.dispatchCodecSimpleName.
                 CodeBlock.of(
-                    "val %L = context[%T.DiscriminatorKey] ?: error(\"Discriminator missing from context\")\n",
+                    "val %L = context[%T.DiscriminatorKey] ?: %T.decode(buffer, context)\n",
                     field.name,
-                    // DiscriminatorKey lives on the **sealed root's** dispatcher
-                    // codec, not the discriminator-class codec. Mirrors legacy
-                    // FieldReadStrategy.DiscriminatorField.dispatchCodecSimpleName.
                     registry.codecOf(s.sealedRootFqn),
+                    registry.codecOf(s.parentDispatchOn),
                 )
 
             // SPI: `descriptor.decodeRaw` is the inline read expression (e.g.
@@ -1442,6 +1449,29 @@ class LeafEmitter(
         if (canEncode) {
             type.addFunction(buildPayloadEncodeFromContextFun(plan, classType))
             type.addFunction(buildPayloadWireSizeFromContextFun(plan, classType))
+        }
+
+        // Step 4-redo C7: payload codecs emit peek + MIN_HEADER_BYTES too —
+        // mirrors legacy `CodecGenerator.buildPayloadCodecFile` line 776.
+        // Sealed dispatchers reference per-variant `${VariantCodec}.peekFrameSize`
+        // even when the variant is a payload codec; without this emit, dispatchers
+        // that fall back to legacy `SealedDispatchGenerator` (e.g. when the parent
+        // sealed root has value-class variants that defer to legacy) get
+        // unresolved-reference compile errors. Payload codecs are not bound to
+        // a specific `T` so they emit peek as a top-level `public fun` rather
+        // than an `override fun` of the `Codec<T>` interface (matching legacy's
+        // `implementsCodec = false` path).
+        if (canDecode) {
+            val peekPlan = computePeekPlan(plan)
+            val minHeader = peekPlan?.minHeader ?: computeMinHeader(plan)
+            type.addProperty(
+                PropertySpec
+                    .builder("MIN_HEADER_BYTES", INT, KModifier.PUBLIC, KModifier.CONST)
+                    .initializer("%L", minHeader)
+                    .build(),
+            )
+            type.addFunction(buildPeekFrameSizeFun(peekPlan, minHeader, implementsCodec = false))
+            type.addFunction(buildSuspendingPeekFrameSizeFun(peekPlan, minHeader))
         }
 
         val fileBuilder =
