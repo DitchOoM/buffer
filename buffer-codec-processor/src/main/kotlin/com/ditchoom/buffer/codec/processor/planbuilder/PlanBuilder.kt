@@ -18,6 +18,7 @@ import com.ditchoom.buffer.codec.processor.ir.TypeFqn
 import com.ditchoom.buffer.codec.processor.planbuilder.Annotations.classRefArg
 import com.ditchoom.buffer.codec.processor.planbuilder.Annotations.enumArg
 import com.ditchoom.buffer.codec.processor.planbuilder.Annotations.find
+import com.ditchoom.buffer.codec.processor.planbuilder.Annotations.intArg
 import com.ditchoom.buffer.codec.processor.planbuilder.Annotations.stringArg
 import com.squareup.kotlinpoet.ClassName
 
@@ -376,6 +377,12 @@ object PlanBuilder {
                 }
             }
 
+        // Pre-pass: extract @PacketType / @PacketTypeRange wire claims from each child's
+        // annotations and detect overlap. Runs independently of VariantPlanBuilder so the
+        // overlap diagnostic surfaces even when a variant has a separate validation failure
+        // (e.g. missing @DiscriminatorField). Mirrors RangeDisjointnessChecker's wording.
+        errors += detectOverlappingWireClaims(symbol, scope)
+
         val variants = mutableListOf<com.ditchoom.buffer.codec.processor.ir.VariantPlan>()
         for (childFqn in symbol.subclassFqns) {
             val child = scope[childFqn]
@@ -427,6 +434,77 @@ object PlanBuilder {
                 onUnknown = TypeFqn(onUnknownFqn),
             ).right()
     }
+
+    private data class WireClaim(
+        val variantFqn: String,
+        val lo: Int,
+        val hi: Int,
+    )
+
+    private fun detectOverlappingWireClaims(
+        sealed: RawSymbol.SealedRoot,
+        scope: Map<String, RawSymbol>,
+    ): List<KspError> {
+        val claims = mutableListOf<WireClaim>()
+        for (childFqn in sealed.subclassFqns) {
+            val child = scope[childFqn] ?: continue
+            val packetType = child.annotations.find(AnnotationFqns.PacketType)
+            val packetRange = child.annotations.find(AnnotationFqns.PacketTypeRange)
+            val claim =
+                when {
+                    packetType != null -> {
+                        val wire = packetType.intArg("wire") ?: continue
+                        WireClaim(childFqn, wire, wire)
+                    }
+                    packetRange != null -> {
+                        val from = packetRange.intArg("from") ?: continue
+                        val to = packetRange.intArg("to") ?: continue
+                        if (from > to) continue
+                        WireClaim(childFqn, from, to)
+                    }
+                    else -> continue
+                }
+            claims += claim
+        }
+        val errors = mutableListOf<KspError>()
+        val accepted = mutableListOf<WireClaim>()
+        for (claim in claims) {
+            val overlaps = accepted.filter { it.lo <= claim.hi && claim.lo <= it.hi }
+            for (other in overlaps) {
+                errors += KspError(message = overlapMessage(sealed, other, claim), sourceFqn = claim.variantFqn)
+            }
+            accepted += claim
+        }
+        return errors
+    }
+
+    private fun overlapMessage(
+        sealed: RawSymbol.SealedRoot,
+        existing: WireClaim,
+        new: WireClaim,
+    ): String {
+        val collisionLo = maxOf(existing.lo, new.lo)
+        val collisionHi = minOf(existing.hi, new.hi)
+        val collisionStr =
+            if (collisionLo == collisionHi) {
+                "byte 0x${collisionLo.toString(16).uppercase()}"
+            } else {
+                "bytes 0x${collisionLo.toString(16).uppercase()}..0x${collisionHi.toString(16).uppercase()}"
+            }
+        return "Sealed root '${sealed.fqn}' variant spans overlap: " +
+            "'${existing.variantFqn}' (${rangeStr(existing.lo, existing.hi)}) and " +
+            "'${new.variantFqn}' (${rangeStr(new.lo, new.hi)}) both claim $collisionStr."
+    }
+
+    private fun rangeStr(
+        lo: Int,
+        hi: Int,
+    ): String =
+        if (lo == hi) {
+            "0x${lo.toString(16).uppercase()}"
+        } else {
+            "0x${lo.toString(16).uppercase()}..0x${hi.toString(16).uppercase()}"
+        }
 
     /**
      * Mirror of legacy `ProtocolMessageProcessor.computeSealedDirection`. Reconciles the
