@@ -110,12 +110,19 @@ internal object VariantPlanBuilder {
                 errors = errors,
             )
 
-        // @PacketTypeRange requires @DiscriminatorField on a variant constructor parameter
+        // @PacketTypeRange requires @DiscriminatorField on a variant constructor parameter,
+        // OR a constructor parameter typed exactly as the parent's @DispatchOn discriminator.
+        // The latter mirrors `FieldStrategyBuilder.isAutoDiscriminator` (Step 5a) — without
+        // it, variants like `Publish(val header: MqttFixedHeader, ...)` would have to repeat
+        // a `@DiscriminatorField` annotation that the field strategy already infers.
         if (packetRange != null) {
             val variantHasDiscField =
                 when (variantSymbol) {
                     is RawSymbol.DataLike ->
-                        variantSymbol.constructorParameters.any { it.annotations.has(AnnotationFqns.DiscriminatorField) }
+                        variantSymbol.constructorParameters.any { p ->
+                            p.annotations.has(AnnotationFqns.DiscriminatorField) ||
+                                (parentDispatchType != null && p.typeRef.fqn == parentDispatchType.canonical)
+                        }
                     else -> false
                 }
             if (!variantHasDiscField) {
