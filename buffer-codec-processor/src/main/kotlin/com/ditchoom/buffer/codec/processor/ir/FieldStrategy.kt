@@ -92,9 +92,20 @@ sealed interface FieldStrategy {
      * Variant-side field whose value comes from the parent dispatcher's discriminator.
      * The variant decoder reads it from `DecodeContext`; the variant encoder skips writing it
      * (the dispatcher already wrote the discriminator bytes).
+     *
+     * [parentDispatchOn] is the discriminator's type FQN (e.g. `com.example.MqttFixedHeader`)
+     * — used for type assertions and as the field's declared type.
+     *
+     * [sealedRootFqn] is the FQN of the sealed root that owns this variant
+     * (e.g. `com.example.MqttPacket`). The dispatcher's `*Codec` object exposes
+     * the `DiscriminatorKey` nested object that carries the discriminator
+     * through the `DecodeContext`; the variant decode emits
+     * `context[${SealedRootSimpleNames}Codec.DiscriminatorKey] ?: error(...)`.
+     * Mirrors legacy `FieldReadStrategy.DiscriminatorField.dispatchCodecSimpleName`.
      */
     data class DiscriminatorOwned(
         val parentDispatchOn: TypeFqn,
+        val sealedRootFqn: TypeFqn,
     ) : FieldStrategy
 
     /** Field whose declared type is a `@Payload` type parameter — sliced from the body buffer. */

@@ -48,7 +48,11 @@ class DiscriminatorFieldTypeCheckerTest {
                         FieldPlan(
                             name = "header",
                             type = TypeFqn("test.Hdr"),
-                            strategy = FieldStrategy.DiscriminatorOwned(parentDispatchOn = TypeFqn("test.OtherHdr")),
+                            strategy =
+                                FieldStrategy.DiscriminatorOwned(
+                                    parentDispatchOn = TypeFqn("test.OtherHdr"),
+                                    sealedRootFqn = TypeFqn("test.Cmd"),
+                                ),
                         ),
                     ),
             )

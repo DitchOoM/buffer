@@ -83,6 +83,7 @@ internal object VariantPlanBuilder {
             buildVariantFields(
                 variantSymbol = variantSymbol,
                 parentDispatchType = parentDispatchType,
+                parentSealedRootFqn = TypeFqn(parentRoot.fqn),
                 scope = scope,
                 classWireOrder = classWireOrder,
                 externalClasses = externalClasses,
@@ -246,6 +247,7 @@ internal object VariantPlanBuilder {
     private fun buildVariantFields(
         variantSymbol: RawSymbol,
         parentDispatchType: TypeFqn?,
+        parentSealedRootFqn: TypeFqn,
         scope: Map<String, RawSymbol>,
         classWireOrder: Endianness,
         externalClasses: Map<String, RawClassMetadata> = emptyMap(),
@@ -291,6 +293,7 @@ internal object VariantPlanBuilder {
                             parentDispatchType = parentDispatchType,
                             protocolMessageScope = protocolMessageScope,
                             externalClasses = externalClasses,
+                            parentSealedRootFqn = parentSealedRootFqn,
                         )
                     when (val res = builder.build(p)) {
                         is Either.Left -> errors += res.value.all

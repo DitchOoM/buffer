@@ -49,6 +49,14 @@ internal class FieldStrategyBuilder(
     private val parentDispatchType: TypeFqn?,
     private val protocolMessageScope: Set<String>,
     private val externalClasses: Map<String, RawClassMetadata> = emptyMap(),
+    /**
+     * FQN of the sealed root whose variant the builder is processing, when
+     * applicable. The variant's `DiscriminatorOwned` field needs this so the
+     * emitter can reference `${SealedRootCodec}.DiscriminatorKey` (the
+     * dispatcher codec — same pattern legacy `dispatchCodecSimpleName`
+     * tracked). `null` for non-variant data classes (top-level).
+     */
+    private val parentSealedRootFqn: TypeFqn? = null,
 ) {
     fun build(param: RawCtorParameter): Either<Nel<KspError>, FieldPlan> {
         val errors = mutableListOf<KspError>()
@@ -491,6 +499,11 @@ internal class FieldStrategyBuilder(
             strategy =
                 FieldStrategy.DiscriminatorOwned(
                     parentDispatchOn = parentDispatchType ?: TypeFqn(param.typeRef.fqn),
+                    // parentSealedRootFqn is non-null on variants — the validity
+                    // check above requires `parentDispatchType != null` which only
+                    // happens inside a sealed variant, where VariantPlanBuilder
+                    // threads through the parent root.
+                    sealedRootFqn = parentSealedRootFqn ?: TypeFqn(ownerFqn),
                 ),
             conditionality = conditionality,
         ).right()

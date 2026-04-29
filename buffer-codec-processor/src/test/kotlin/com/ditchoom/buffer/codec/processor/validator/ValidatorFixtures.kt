@@ -167,11 +167,16 @@ internal object PhaseCFixtures {
     fun discriminatorOwnedField(
         name: String,
         parentDispatchFqn: String,
+        sealedRootFqn: String = parentDispatchFqn,
     ): FieldPlan =
         FieldPlan(
             name = name,
             type = TypeFqn(parentDispatchFqn),
-            strategy = FieldStrategy.DiscriminatorOwned(parentDispatchOn = TypeFqn(parentDispatchFqn)),
+            strategy =
+                FieldStrategy.DiscriminatorOwned(
+                    parentDispatchOn = TypeFqn(parentDispatchFqn),
+                    sealedRootFqn = TypeFqn(sealedRootFqn),
+                ),
         )
 
     fun whenField(

@@ -388,7 +388,10 @@ class LeafEmitter(
                 CodeBlock.of(
                     "val %L = context[%T.DiscriminatorKey] ?: error(\"Discriminator missing from context\")\n",
                     field.name,
-                    registry.codecOf(s.parentDispatchOn),
+                    // DiscriminatorKey lives on the **sealed root's** dispatcher
+                    // codec, not the discriminator-class codec. Mirrors legacy
+                    // FieldReadStrategy.DiscriminatorField.dispatchCodecSimpleName.
+                    registry.codecOf(s.sealedRootFqn),
                 )
 
             // SPI: `descriptor.decodeRaw` is the inline read expression (e.g.
@@ -811,7 +814,18 @@ class LeafEmitter(
                     nestedEncodeExpr(s.codec.canonicalName, s.length, "value.${field.name}", field.name),
                 )
 
-            is FieldStrategy.DiscriminatorOwned -> null // dispatcher already wrote the bytes
+            is FieldStrategy.DiscriminatorOwned ->
+                // The dispatcher's `effectiveSelfEncodes` skips writing the
+                // discriminator when the variant carries a DiscriminatorOwned
+                // field — the variant is expected to write it from the typed
+                // header value it owns. Mirrors legacy
+                // `FieldCodeEmitter.writeFieldExpression` for `DiscriminatorField`:
+                // write the discriminator's typed value through its codec.
+                CodeBlock.of(
+                    "%T.encode(buffer, value.%L, context)\n",
+                    registry.codecOf(s.parentDispatchOn),
+                    field.name,
+                )
             is FieldStrategy.Spi -> {
                 // SPI write descriptors lower from `descriptor.encodeRaw`. Asymmetric
                 // SPI providers (decode side calls a `read*` extension, encode side a
@@ -1012,7 +1026,11 @@ class LeafEmitter(
                         "%L",
                         nestedSizeExpr(s.codec.canonicalName, s.length, "value.${field.name}"),
                     )
-                is FieldStrategy.DiscriminatorOwned -> CodeBlock.of("0")
+                is FieldStrategy.DiscriminatorOwned ->
+                    // Variant writes the discriminator via its typed codec
+                    // (mirrors the encode path); wireSize must include the
+                    // codec's byte count.
+                    CodeBlock.of("%T.wireSize(value.%L, context)", registry.codecOf(s.parentDispatchOn), field.name)
                 is FieldStrategy.VarInt -> CodeBlock.of("variableByteSizeInt(value.%L)", field.name)
                 is FieldStrategy.StringField ->
                     CodeBlock.of("%L", stringSizeExpr(s.length, "value.${field.name}"))

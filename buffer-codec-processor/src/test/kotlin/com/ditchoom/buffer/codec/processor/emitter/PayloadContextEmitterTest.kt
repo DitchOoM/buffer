@@ -156,6 +156,7 @@ class PayloadContextEmitterTest {
                             EmitterFixtures.fqn("MqttFixedHeader"),
                             FieldStrategy.DiscriminatorOwned(
                                 parentDispatchOn = EmitterFixtures.fqn("MqttFixedHeader"),
+                                sealedRootFqn = EmitterFixtures.fqn("ControlPacketV5"),
                             ),
                         ),
                     ),

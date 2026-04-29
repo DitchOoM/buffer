@@ -89,7 +89,12 @@ internal object WireSizeEmitter {
             is FieldStrategy.Collection_ -> -1
             is FieldStrategy.NestedMessage -> -1
             is FieldStrategy.External -> -1
-            is FieldStrategy.DiscriminatorOwned -> 0
+            // Step 4-redo C6: variant writes the discriminator itself
+            // (mirrors legacy behavior — see LeafEmitter encode site for
+            // DiscriminatorOwned). The emitter expresses the contribution
+            // as `${codec}.wireSize(value.<field>, context)`, so flag it
+            // as variable-size so it flows through `contributionFor`.
+            is FieldStrategy.DiscriminatorOwned -> -1
             is FieldStrategy.PayloadSlot ->
                 when (val l = s.length) {
                     is LengthSource.Inline -> -1

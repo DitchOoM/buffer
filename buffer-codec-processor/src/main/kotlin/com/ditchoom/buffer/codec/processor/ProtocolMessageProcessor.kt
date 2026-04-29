@@ -657,6 +657,27 @@ class ProtocolMessageProcessor(
                 variantsSupportingPeek.add(name)
             }
 
+            // Phase 9 Step 4-redo C6 — try the new pipeline for the variant
+            // codec. When `tryPipeline` succeeds the new emitters write both
+            // the codec and (for `WithPayload` variants) the synthesised
+            // `*Context` companion class via CodecEmitter.emitSupplemental,
+            // matching the receiver-style calling convention legacy already
+            // used. The legacy state tracking above (variantPayloadInfos,
+            // variantsHandlingDiscriminator, variantsSupportingPeek) stays
+            // populated unconditionally so the SealedDispatchGenerator
+            // fallback below still has the data it needs when the parent
+            // dispatcher itself falls back to legacy.
+            //
+            // While the Cap 1 / Cap 2 defers in [pipelineEligible] remain
+            // (dropped in C7), `tryPipeline` returns false for payload
+            // variants and we fall through to the legacy codec emit. After
+            // C7 drops the defers, payload variants flow through the new
+            // pipeline and the legacy variant emit is skipped — at which
+            // point the dispatcher (whether new-pipeline or legacy fallback)
+            // calls into a new-pipeline-emitted variant codec whose
+            // signature matches receiver-style end-to-end.
+            if (tryPipeline(subclass, resolver)) continue
+
             // Generate the sub-codec
             val batches = BatchOptimizer().optimize(fields)
             val hasPayload = payloadFields.isNotEmpty()

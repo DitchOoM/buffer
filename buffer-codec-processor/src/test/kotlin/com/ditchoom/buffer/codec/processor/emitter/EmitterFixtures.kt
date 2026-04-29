@@ -274,7 +274,10 @@ object EmitterFixtures {
                                 FieldPlan(
                                     "header",
                                     discType,
-                                    FieldStrategy.DiscriminatorOwned(parentDispatchOn = fqn("ControlPacketV5")),
+                                    FieldStrategy.DiscriminatorOwned(
+                                        parentDispatchOn = fqn("ControlPacketV5"),
+                                        sealedRootFqn = fqn("ControlPacketV5"),
+                                    ),
                                 ),
                             ),
                     ),
@@ -320,7 +323,10 @@ object EmitterFixtures {
                     FieldPlan(
                         "header",
                         fqn("MqttFixedHeader"),
-                        FieldStrategy.DiscriminatorOwned(parentDispatchOn = fqn("ControlPacketV5")),
+                        FieldStrategy.DiscriminatorOwned(
+                            parentDispatchOn = fqn("ControlPacketV5"),
+                            sealedRootFqn = fqn("ControlPacketV5"),
+                        ),
                     ),
                     FieldPlan(
                         "packetIdentifier",
@@ -628,7 +634,10 @@ object EmitterFixtures {
                                 FieldPlan(
                                     "header",
                                     discType,
-                                    FieldStrategy.DiscriminatorOwned(parentDispatchOn = discType),
+                                    FieldStrategy.DiscriminatorOwned(
+                                        parentDispatchOn = discType,
+                                        sealedRootFqn = fqn("ControlPacketV5Slice4"),
+                                    ),
                                 ),
                             ),
                     ),
@@ -739,7 +748,10 @@ object EmitterFixtures {
                                 FieldPlan(
                                     "header",
                                     discType,
-                                    FieldStrategy.DiscriminatorOwned(parentDispatchOn = discType),
+                                    FieldStrategy.DiscriminatorOwned(
+                                        parentDispatchOn = discType,
+                                        sealedRootFqn = fqn("ControlPacketV5Slice5a"),
+                                    ),
                                 ),
                             ),
                         typeParams =

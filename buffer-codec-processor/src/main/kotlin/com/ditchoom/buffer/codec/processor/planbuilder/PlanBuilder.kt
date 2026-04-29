@@ -44,7 +44,7 @@ object PlanBuilder {
         externalClasses: Map<String, RawClassMetadata> = emptyMap(),
     ): Either<Nel<KspError>, Plan> {
         val effectiveScope = if (symbol.fqn in scope) scope else scope + (symbol.fqn to symbol)
-        val classWireOrder = readWireOrder(symbol)
+        val classWireOrder = effectiveWireOrder(symbol, effectiveScope)
         val direction = DirectionResolver.resolve(symbol)
         return when (symbol) {
             is RawSymbol.ObjectSymbol -> {
@@ -126,6 +126,45 @@ object PlanBuilder {
         return EndiannessMapping.fromAnnotationEnum(name) ?: Endianness.Big
     }
 
+    /**
+     * Returns the variant's explicit `@ProtocolMessage(wireOrder = ...)` if set;
+     * otherwise inherits from the parent sealed root (mirrors legacy
+     * `FieldAnalyzer.extractClassWireOrder` returning `null` and the dispatcher
+     * threading the parent's value into variant analysis).
+     *
+     * Top-level data classes have no parent, so they get the explicit value or
+     * the default (`Big`). Sealed roots use their own wireOrder. Without this
+     * lookup, a variant routed through `tryPipeline` (Step C6) would lose its
+     * parent's `Endianness.Little` (e.g. RIFF chunks), defaulting back to
+     * `Big` and producing wrong-byte-order field reads/writes.
+     */
+    private fun effectiveWireOrder(
+        symbol: RawSymbol,
+        scope: Map<String, RawSymbol>,
+    ): Endianness {
+        val explicit = symbol.annotations.find(AnnotationFqns.ProtocolMessage)?.enumArg("wireOrder")?.name
+        // KSP surfaces the annotation default as "Default" — that is NOT an
+        // explicit user-set value, so treat it the same as `null` (no
+        // override) and fall through to parent inheritance. The legacy
+        // `FieldAnalyzer.extractClassWireOrder` returned `null` for the
+        // default case which produced the same behaviour. Without this
+        // distinction, a sealed variant with `@ProtocolMessage` (no
+        // wireOrder arg) would resolve to `Big` instead of inheriting
+        // `Endianness.Little` from a `@ProtocolMessage(wireOrder = Little)`
+        // sealed root (the load-bearing case for RIFF / WAV chunks).
+        if (explicit != null && explicit != "Default") {
+            return EndiannessMapping.fromAnnotationEnum(explicit) ?: Endianness.Big
+        }
+        if (symbol is RawSymbol.DataLike) {
+            for (s in scope.values) {
+                if (s !is RawSymbol.SealedRoot) continue
+                if (symbol.fqn !in s.subclassFqns) continue
+                return readWireOrder(s)
+            }
+        }
+        return Endianness.Big
+    }
+
     private fun parentDispatchTypeFor(
         variant: RawSymbol.DataLike,
         scope: Map<String, RawSymbol>,
@@ -135,6 +174,26 @@ object PlanBuilder {
             if (variant.fqn !in s.subclassFqns) continue
             val ref = s.dispatchOnType() ?: continue
             if (ref.resolved && ref.fqn.isNotBlank()) return TypeFqn(ref.fqn)
+        }
+        return null
+    }
+
+    /**
+     * Finds the sealed root that lists [variant] as a subclass, if any.
+     * Used by [buildDataLike] to populate `FieldStrategy.DiscriminatorOwned.sealedRootFqn`
+     * when a top-level `tryPipeline(subclass, ...)` call enters via [build] rather than
+     * via [VariantPlanBuilder] (which already threads the root through directly).
+     * Without this lookup, `DiscriminatorOwned.sealedRootFqn` would default to the
+     * variant's own FQN, producing `${VariantCodec}.DiscriminatorKey` (wrong — the
+     * key lives on the dispatcher's codec).
+     */
+    private fun parentSealedRootFor(
+        variant: RawSymbol.DataLike,
+        scope: Map<String, RawSymbol>,
+    ): TypeFqn? {
+        for (s in scope.values) {
+            if (s !is RawSymbol.SealedRoot) continue
+            if (variant.fqn in s.subclassFqns) return TypeFqn(s.fqn)
         }
         return null
     }
@@ -157,6 +216,7 @@ object PlanBuilder {
         val protocolMessageScope = scope.values.map { it.fqn }.toSet()
         val accumulated = mutableListOf<FieldPlan>()
         val errors = mutableListOf<KspError>()
+        val parentSealedRoot = parentSealedRootFor(symbol, scope)
         symbol.constructorParameters.forEachIndexed { idx, p ->
             val builder =
                 FieldStrategyBuilder(
@@ -169,6 +229,7 @@ object PlanBuilder {
                     parentDispatchType = parentDispatchType,
                     protocolMessageScope = protocolMessageScope,
                     externalClasses = externalClasses,
+                    parentSealedRootFqn = parentSealedRoot,
                 )
             when (val res = builder.build(p)) {
                 is Either.Left -> errors += res.value.all
