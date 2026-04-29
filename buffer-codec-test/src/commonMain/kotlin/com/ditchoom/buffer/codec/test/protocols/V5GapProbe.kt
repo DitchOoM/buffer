@@ -12,8 +12,9 @@ import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.Payload
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
+import com.ditchoom.buffer.codec.annotations.UseCodec
 import com.ditchoom.buffer.codec.annotations.WhenTrue
-import com.ditchoom.buffer.codec.test.annotations.PropertyBag
+import com.ditchoom.buffer.codec.test.functions.PropertyBagCodec
 import com.ditchoom.buffer.readVariableByteInteger
 import com.ditchoom.buffer.stream.PeekResult
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -147,8 +148,8 @@ value class ProbeConnectFlags(
 @ProtocolMessage
 data class ProbeConnectWithWillProps(
     val flags: ProbeConnectFlags,
-    @PropertyBag val properties: Map<Int, Int>,
-    @WhenTrue("flags.willFlag") @PropertyBag val willProperties: Map<Int, Int>? = null,
+    @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
+    @WhenTrue("flags.willFlag") @UseCodec(PropertyBagCodec::class) val willProperties: Map<Int, Int>? = null,
 )
 
 /**
@@ -165,13 +166,13 @@ data class ProbeConnectWithWillProps(
 @ProtocolMessage
 data class ProbePropBagPlain(
     val packetId: UShort,
-    @PropertyBag val properties: Map<Int, Int>,
+    @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
 )
 
 @ProtocolMessage
 data class ProbePropBagWithRedundantPrefix(
     val packetId: UShort,
-    @LengthPrefixed @PropertyBag val properties: Map<Int, Int>,
+    @LengthPrefixed @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
 )
 
 /**
@@ -222,9 +223,9 @@ sealed interface ProbeWillTree {
     @ProtocolMessage
     data class ConnectLike<@Payload WP>(
         val flags: ProbeWillFlags,
-        @PropertyBag val properties: Map<Int, Int>,
+        @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
         @LengthPrefixed val clientId: String,
-        @WhenTrue("flags.willFlag") @PropertyBag val willProperties: Map<Int, Int>? = null,
+        @WhenTrue("flags.willFlag") @UseCodec(PropertyBagCodec::class) val willProperties: Map<Int, Int>? = null,
         @WhenTrue("flags.willFlag") @LengthPrefixed val willTopic: String? = null,
         @WhenTrue("flags.willFlag") @LengthPrefixed val willPayload: WP? = null,
         @WhenTrue("flags.willFlag") @LengthPrefixed val willTrace: String? = null,
@@ -250,9 +251,9 @@ sealed interface ProbeWillTree {
 @ProtocolMessage
 data class ProbeTopLevelConnectLike<@Payload WP>(
     val flags: ProbeWillFlags,
-    @PropertyBag val properties: Map<Int, Int>,
+    @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
     @LengthPrefixed val clientId: String,
-    @WhenTrue("flags.willFlag") @PropertyBag val willProperties: Map<Int, Int>? = null,
+    @WhenTrue("flags.willFlag") @UseCodec(PropertyBagCodec::class) val willProperties: Map<Int, Int>? = null,
     @WhenTrue("flags.willFlag") @LengthPrefixed val willTopic: String? = null,
     @WhenTrue("flags.willFlag") @LengthPrefixed val willPayload: WP? = null,
     @WhenTrue("flags.willFlag") @LengthPrefixed val willTrace: String? = null,

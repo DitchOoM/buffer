@@ -308,19 +308,18 @@ class V5GapProbeTest {
     }
 
     /**
-     * Probe 6: stacking `@LengthPrefixed` on top of an SPI custom strategy (`@PropertyBag`)
-     * is silently ignored by the processor — the SPI branch in `FieldAnalyzer.resolveStrategy`
-     * returns before any length-prefix inspection happens. The wire bytes from a plain
-     * `@PropertyBag` field and a `@LengthPrefixed @PropertyBag` field are identical.
+     * Probe 6: `@LengthPrefixed` on top of `@UseCodec(PropertyBagCodec::class)` is honored
+     * by the new pipeline — the External strategy threads the length source through, so
+     * the wire bytes carry an OUTER length prefix on top of the codec's self-bounded body.
      *
-     * Implication for the v5 migration: the SPI is self-bounded (the property bag carries
-     * its own VBI length prefix internally), and combining it with external length annotations
-     * is meaningless. The recommendation is to never combine them; this probe documents that
-     * the processor currently allows but does not honor the combination — a future processor
-     * change should make the combination a hard error to remove the footgun.
+     * Pre-Phase-9 the legacy SPI branch silently dropped the prefix (Map fields used
+     * `@PropertyBag` then; the SPI provider returned before length-prefix inspection
+     * happened). Step 7 migrated `@PropertyBag` → `@UseCodec`; the new path treats
+     * `@LengthPrefixed @UseCodec` exactly like any other length-framed external codec.
+     * The prefix overhead equals the prefix encoding's wire bytes (Short = 2 by default).
      */
     @Test
-    fun mqttPropertiesWithExternalLengthPrefixIsIgnored() {
+    fun mqttPropertiesWithExternalLengthPrefixAddsOuterPrefix() {
         val plain =
             com.ditchoom.buffer.codec.test.protocols.ProbePropBagPlain(
                 packetId = 1u,
@@ -342,14 +341,19 @@ class V5GapProbeTest {
             .encode(prefBuf, withPrefix, EncodeContext.Empty)
         val prefSize = prefBuf.position()
 
-        // Identical wire size — `@LengthPrefixed` was silently dropped by the SPI branch.
-        assertEquals(plainSize, prefSize)
+        // Outer prefix is honored; default LengthPrefix is Short (2 bytes).
+        assertEquals(plainSize + 2, prefSize)
 
+        // Round-trip: both decode to their original values regardless of framing shape.
         plainBuf.resetForRead()
+        val decodedPlain =
+            com.ditchoom.buffer.codec.test.protocols.ProbePropBagPlainCodec.decode(plainBuf, DecodeContext.Empty)
+        assertEquals(plain, decodedPlain)
+
         prefBuf.resetForRead()
-        repeat(plainSize) {
-            assertEquals(plainBuf.readByte(), prefBuf.readByte())
-        }
+        val decodedPref =
+            com.ditchoom.buffer.codec.test.protocols.ProbePropBagWithRedundantPrefixCodec.decode(prefBuf, DecodeContext.Empty)
+        assertEquals(withPrefix, decodedPref)
     }
 
     /** Gap probe 2: does the generator produce boolean-property validation (must be 0 or 1)? */
