@@ -308,52 +308,32 @@ class V5GapProbeTest {
     }
 
     /**
-     * Probe 6: `@LengthPrefixed` on top of `@UseCodec(PropertyBagCodec::class)` is honored
-     * by the new pipeline — the External strategy threads the length source through, so
-     * the wire bytes carry an OUTER length prefix on top of the codec's self-bounded body.
+     * Probe 6: canonical MQTT v5 property-section framing under the inverted Codec contract.
      *
-     * Pre-Phase-9 the legacy SPI branch silently dropped the prefix (Map fields used
-     * `@PropertyBag` then; the SPI provider returned before length-prefix inspection
-     * happened). Step 7 migrated `@PropertyBag` → `@UseCodec`; the new path treats
-     * `@LengthPrefixed @UseCodec` exactly like any other length-framed external codec.
-     * The prefix overhead equals the prefix encoding's wire bytes (Short = 2 by default).
+     * `PropertyBagCodec` writes payload bytes only; the framework writes the VBI length
+     * prefix via `@LengthPrefixed(LengthPrefix.Varint)` on the field. Wire format:
+     * `[packetId(2)][VBI(bodyLen)][body]`. Round-trip plus exact-byte assertion locks the
+     * canonical path in.
      */
     @Test
-    fun mqttPropertiesWithExternalLengthPrefixAddsOuterPrefix() {
-        val plain =
+    fun mqttPropertiesPropBagWithVarintPrefixRoundTrip() {
+        val original =
             com.ditchoom.buffer.codec.test.protocols.ProbePropBagPlain(
                 packetId = 1u,
                 properties = mapOf(1 to 42, 2 to 7),
             )
-        val withPrefix =
-            com.ditchoom.buffer.codec.test.protocols.ProbePropBagWithRedundantPrefix(
-                packetId = 1u,
-                properties = mapOf(1 to 42, 2 to 7),
-            )
 
-        val plainBuf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        // Body bytes: id=1 + VBI(42) (1 byte) + id=2 + VBI(7) (1 byte) = 4 bytes.
+        // Wire: packetId(2) + VBI(4)(1 byte) + body(4) = 7 bytes.
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         com.ditchoom.buffer.codec.test.protocols.ProbePropBagPlainCodec
-            .encode(plainBuf, plain, EncodeContext.Empty)
-        val plainSize = plainBuf.position()
+            .encode(buffer, original, EncodeContext.Empty)
+        assertEquals(7, buffer.position(), "wire = packetId(2) + VBI(4) + body(4) = 7 bytes")
 
-        val prefBuf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        com.ditchoom.buffer.codec.test.protocols.ProbePropBagWithRedundantPrefixCodec
-            .encode(prefBuf, withPrefix, EncodeContext.Empty)
-        val prefSize = prefBuf.position()
-
-        // Outer prefix is honored; default LengthPrefix is Short (2 bytes).
-        assertEquals(plainSize + 2, prefSize)
-
-        // Round-trip: both decode to their original values regardless of framing shape.
-        plainBuf.resetForRead()
-        val decodedPlain =
-            com.ditchoom.buffer.codec.test.protocols.ProbePropBagPlainCodec.decode(plainBuf, DecodeContext.Empty)
-        assertEquals(plain, decodedPlain)
-
-        prefBuf.resetForRead()
-        val decodedPref =
-            com.ditchoom.buffer.codec.test.protocols.ProbePropBagWithRedundantPrefixCodec.decode(prefBuf, DecodeContext.Empty)
-        assertEquals(withPrefix, decodedPref)
+        buffer.resetForRead()
+        val decoded =
+            com.ditchoom.buffer.codec.test.protocols.ProbePropBagPlainCodec.decode(buffer, DecodeContext.Empty)
+        assertEquals(original, decoded)
     }
 
     /** Gap probe 2: does the generator produce boolean-property validation (must be 0 or 1)? */

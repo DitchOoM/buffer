@@ -19,7 +19,7 @@ data class VbiPacket(
 @ProtocolMessage
 data class PropertyBagPacket(
     val version: UByte,
-    @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
+    @LengthPrefixed(LengthPrefix.Varint) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
 )
 
 @ProtocolMessage
@@ -27,7 +27,7 @@ data class MixedPacket(
     val id: UShort,
     @VariableByteInteger val remaining: Int,
     @LengthPrefixed val name: String,
-    @UseCodec(PropertyBagCodec::class) val props: Map<Int, Int>,
+    @LengthPrefixed(LengthPrefix.Varint) @UseCodec(PropertyBagCodec::class) val props: Map<Int, Int>,
 )
 
 // ──────────────────────── List<NestedMessage> test types ────────────────────────

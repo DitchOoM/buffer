@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.codec.test.protocols
 
 import com.ditchoom.buffer.codec.annotations.DispatchOn
+import com.ditchoom.buffer.codec.annotations.LengthPrefix
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.PacketTypeRange
@@ -68,7 +69,7 @@ sealed interface ControlPacketV5 {
         val header: MqttFixedHeader = MqttFixedHeader(0x40u),
         val packetIdentifier: UShort = 0u,
         @WhenRemaining(1) val reasonCode: V5ReasonCode? = null,
-        @WhenRemaining(1) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>? = null,
+        @WhenRemaining(1) @LengthPrefixed(LengthPrefix.Varint) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>? = null,
     ) : ControlPacketV5
 
     @PacketType(wire = 5)
@@ -77,7 +78,7 @@ sealed interface ControlPacketV5 {
         val header: MqttFixedHeader = MqttFixedHeader(0x50u),
         val packetIdentifier: UShort = 0u,
         @WhenRemaining(1) val reasonCode: V5ReasonCode? = null,
-        @WhenRemaining(1) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>? = null,
+        @WhenRemaining(1) @LengthPrefixed(LengthPrefix.Varint) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>? = null,
     ) : ControlPacketV5
 
     @PacketType(wire = 6)
@@ -86,7 +87,7 @@ sealed interface ControlPacketV5 {
         val header: MqttFixedHeader = MqttFixedHeader(0x62u),
         val packetIdentifier: UShort = 0u,
         @WhenRemaining(1) val reasonCode: V5ReasonCode? = null,
-        @WhenRemaining(1) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>? = null,
+        @WhenRemaining(1) @LengthPrefixed(LengthPrefix.Varint) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>? = null,
     ) : ControlPacketV5
 
     @PacketType(wire = 7)
@@ -95,7 +96,7 @@ sealed interface ControlPacketV5 {
         val header: MqttFixedHeader = MqttFixedHeader(0x70u),
         val packetIdentifier: UShort = 0u,
         @WhenRemaining(1) val reasonCode: V5ReasonCode? = null,
-        @WhenRemaining(1) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>? = null,
+        @WhenRemaining(1) @LengthPrefixed(LengthPrefix.Varint) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>? = null,
     ) : ControlPacketV5
 
     @PacketType(wire = 11)
@@ -104,7 +105,7 @@ sealed interface ControlPacketV5 {
         val header: MqttFixedHeader = MqttFixedHeader(0xB0u),
         val packetIdentifier: UShort = 0u,
         @WhenRemaining(1) val reasonCode: V5ReasonCode? = null,
-        @WhenRemaining(1) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>? = null,
+        @WhenRemaining(1) @LengthPrefixed(LengthPrefix.Varint) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>? = null,
     ) : ControlPacketV5
 
     @PacketType(wire = 12)
@@ -124,7 +125,7 @@ sealed interface ControlPacketV5 {
     data class Disconnect(
         val header: MqttFixedHeader = MqttFixedHeader(0xE0u),
         @WhenRemaining(1) val reasonCode: V5ReasonCode? = null,
-        @WhenRemaining(1) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>? = null,
+        @WhenRemaining(1) @LengthPrefixed(LengthPrefix.Varint) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>? = null,
     ) : ControlPacketV5
 
     @PacketType(wire = 15)
@@ -132,7 +133,7 @@ sealed interface ControlPacketV5 {
     data class Auth(
         val header: MqttFixedHeader = MqttFixedHeader(0xF0u),
         @WhenRemaining(1) val reasonCode: V5ReasonCode? = null,
-        @WhenRemaining(1) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>? = null,
+        @WhenRemaining(1) @LengthPrefixed(LengthPrefix.Varint) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>? = null,
     ) : ControlPacketV5
 
     @PacketTypeRange(0x30, 0x3F)
@@ -141,7 +142,7 @@ sealed interface ControlPacketV5 {
         val header: MqttFixedHeader,
         @LengthPrefixed val topicName: String,
         @WhenTrue("header.publishHasPacketIdentifier") val packetIdentifier: UShort? = null,
-        @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
+        @LengthPrefixed(LengthPrefix.Varint) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
         @RemainingBytes val payload: P,
     ) : ControlPacketV5
 }

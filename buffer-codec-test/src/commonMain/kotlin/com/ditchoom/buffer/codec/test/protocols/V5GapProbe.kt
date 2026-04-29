@@ -148,31 +148,28 @@ value class ProbeConnectFlags(
 @ProtocolMessage
 data class ProbeConnectWithWillProps(
     val flags: ProbeConnectFlags,
-    @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
-    @WhenTrue("flags.willFlag") @UseCodec(PropertyBagCodec::class) val willProperties: Map<Int, Int>? = null,
+    @LengthPrefixed(LengthPrefix.Varint) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
+    @WhenTrue("flags.willFlag")
+    @LengthPrefixed(LengthPrefix.Varint)
+    @UseCodec(PropertyBagCodec::class)
+    val willProperties: Map<Int, Int>? = null,
 )
 
 /**
- * Probe 6 — does `@PropertyBag` (an SPI custom strategy) need to combine with `@LengthPrefixed`
- * or `@LengthFrom`?
+ * Probe 6 — canonical MQTT v5 property-section framing under the inverted Codec contract.
  *
- * Looking at `FieldAnalyzer.resolveStrategy`: the SPI custom-annotation branch returns
- * immediately without ever inspecting other length annotations on the same parameter. So
- * `@LengthPrefixed @PropertyBag` and `@PropertyBag` should produce identical wire bytes —
- * the prefix is silently dropped. Probe confirms this empirically; the migration design
- * decision is to keep the SPI self-bounded (the property bag already carries its own VBI
- * length prefix internally) and treat any combination as a processor warning at minimum.
+ * Step 8 inverted the [com.ditchoom.buffer.codec.Codec] contract: `PropertyBagCodec`
+ * encodes / decodes payload bytes only, and the framework writes the outer length prefix
+ * via `@LengthPrefixed(LengthPrefix.Varint)`. Round-trips here lock that path in.
+ *
+ * (The pre-Phase-9 SPI dropped `@LengthPrefixed` silently when paired with `@PropertyBag`;
+ * the Step 7 cleanup flipped that to honour the prefix. Step 8 makes the framework the
+ * sole source of length framing — see `phase-9-step8-design.md`.)
  */
 @ProtocolMessage
 data class ProbePropBagPlain(
     val packetId: UShort,
-    @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
-)
-
-@ProtocolMessage
-data class ProbePropBagWithRedundantPrefix(
-    val packetId: UShort,
-    @LengthPrefixed @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
+    @LengthPrefixed(LengthPrefix.Varint) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
 )
 
 /**
@@ -223,9 +220,12 @@ sealed interface ProbeWillTree {
     @ProtocolMessage
     data class ConnectLike<@Payload WP>(
         val flags: ProbeWillFlags,
-        @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
+        @LengthPrefixed(LengthPrefix.Varint) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
         @LengthPrefixed val clientId: String,
-        @WhenTrue("flags.willFlag") @UseCodec(PropertyBagCodec::class) val willProperties: Map<Int, Int>? = null,
+        @WhenTrue("flags.willFlag")
+        @LengthPrefixed(LengthPrefix.Varint)
+        @UseCodec(PropertyBagCodec::class)
+        val willProperties: Map<Int, Int>? = null,
         @WhenTrue("flags.willFlag") @LengthPrefixed val willTopic: String? = null,
         @WhenTrue("flags.willFlag") @LengthPrefixed val willPayload: WP? = null,
         @WhenTrue("flags.willFlag") @LengthPrefixed val willTrace: String? = null,
@@ -251,9 +251,12 @@ sealed interface ProbeWillTree {
 @ProtocolMessage
 data class ProbeTopLevelConnectLike<@Payload WP>(
     val flags: ProbeWillFlags,
-    @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
+    @LengthPrefixed(LengthPrefix.Varint) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
     @LengthPrefixed val clientId: String,
-    @WhenTrue("flags.willFlag") @UseCodec(PropertyBagCodec::class) val willProperties: Map<Int, Int>? = null,
+    @WhenTrue("flags.willFlag")
+    @LengthPrefixed(LengthPrefix.Varint)
+    @UseCodec(PropertyBagCodec::class)
+    val willProperties: Map<Int, Int>? = null,
     @WhenTrue("flags.willFlag") @LengthPrefixed val willTopic: String? = null,
     @WhenTrue("flags.willFlag") @LengthPrefixed val willPayload: WP? = null,
     @WhenTrue("flags.willFlag") @LengthPrefixed val willTrace: String? = null,
