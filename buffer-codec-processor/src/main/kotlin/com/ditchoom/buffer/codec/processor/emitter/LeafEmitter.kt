@@ -170,7 +170,9 @@ class LeafEmitter(
             fields.any { f ->
                 val s = f.strategy
                 s is FieldStrategy.VarInt ||
-                    (s is FieldStrategy.StringField && s.length is LengthSource.Inline && s.length.encoding == LengthEncoding.Varint)
+                    (s is FieldStrategy.StringField && s.length is LengthSource.Inline && s.length.encoding == LengthEncoding.Varint) ||
+                    (s is FieldStrategy.NestedMessage && s.length is LengthSource.Inline && s.length.encoding == LengthEncoding.Varint) ||
+                    (s is FieldStrategy.External && s.length is LengthSource.Inline && s.length.encoding == LengthEncoding.Varint)
             } ||
                 collectionVarint
         if (needsVarint) {
