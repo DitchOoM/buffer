@@ -81,11 +81,19 @@ sealed interface FieldStrategy {
      *
      * [length] semantics match [NestedMessage]; when non-null the emitter
      * performs the length-framed read/write around the external codec call.
+     *
+     * [typeArguments] preserves the user-declared parameterised-type arguments
+     * (e.g. `Map<Int, Int>` → `[kotlin.Int, kotlin.Int]`). The leaf codec
+     * doesn't need them — KotlinPoet emits `value.propertyName` and the user's
+     * data class declaration carries the type — but [PayloadContextEmitter]
+     * synthesises a fresh class and must restate the parameterised type so
+     * `properties: Map` doesn't fall out as a raw type.
      */
     data class External(
         val codec: ClassName,
         val contextualOverloads: Boolean,
         val length: LengthSource? = null,
+        val typeArguments: List<TypeFqn> = emptyList(),
     ) : FieldStrategy
 
     /**

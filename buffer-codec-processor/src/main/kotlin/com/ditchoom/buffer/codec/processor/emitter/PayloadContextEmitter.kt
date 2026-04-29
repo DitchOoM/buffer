@@ -124,7 +124,14 @@ internal class PayloadContextEmitter(
                     container.parameterizedBy(element)
                 }
                 is FieldStrategy.NestedMessage -> registry.resolve(field.type)
-                is FieldStrategy.External -> registry.resolve(field.type)
+                is FieldStrategy.External -> {
+                    val container = registry.resolve(field.type)
+                    if (s.typeArguments.isEmpty()) {
+                        container
+                    } else {
+                        container.parameterizedBy(*s.typeArguments.map { registry.resolve(it) }.toTypedArray())
+                    }
+                }
                 is FieldStrategy.DiscriminatorOwned -> registry.resolve(field.type)
                 is FieldStrategy.Spi -> registry.resolve(field.type)
                 is FieldStrategy.ValueClass -> registry.resolve(field.type)

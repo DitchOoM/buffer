@@ -553,6 +553,10 @@ internal class FieldStrategyBuilder(
         val length = resolveLengthSource(param, errors, site)
         errorsToLeft(errors)?.let { return it }
         val codecClassName = classRefToClassName(classRef.fqn)
+        val typeArgs =
+            param.typeRef.typeArguments
+                .filter { it.fqn.isNotBlank() }
+                .map { TypeFqn(it.fqn) }
         return FieldPlan(
             name = param.name,
             type = TypeFqn(param.typeRef.fqn.ifBlank { param.typeRef.name }),
@@ -561,6 +565,7 @@ internal class FieldStrategyBuilder(
                     codec = codecClassName,
                     contextualOverloads = false,
                     length = length,
+                    typeArguments = typeArgs,
                 ),
             conditionality = conditionality,
         ).right()
