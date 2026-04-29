@@ -72,23 +72,6 @@ annotation class PacketType(
 )
 
 /**
- * Marks a type parameter as the application payload.
- * The generated codec will provide a scoped `PayloadReader` for decoding.
- *
- * ```kotlin
- * @ProtocolMessage
- * data class Packet<@Payload P>(
- *     val version: UByte,
- *     @LengthPrefixed val payload: P,
- * )
- * // Generates PacketCodec with a PayloadReader context for decoding P
- * ```
- */
-@Target(AnnotationTarget.TYPE_PARAMETER)
-@Retention(AnnotationRetention.BINARY)
-annotation class Payload
-
-/**
  * Length prefix encoding for [LengthPrefixed] fields.
  * All variants use big-endian (network) byte order.
  */
