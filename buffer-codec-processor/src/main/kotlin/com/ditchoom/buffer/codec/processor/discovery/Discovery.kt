@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.processor.discovery
 
+import com.google.devtools.ksp.getConstructors
 import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.symbol.ClassKind
 import com.google.devtools.ksp.symbol.KSAnnotation
@@ -136,6 +137,18 @@ object Discovery {
                 candidateFqns += fqn
             }
         }
+        // Phase 9 Step 6: capture exception classes referenced from
+        // `@ProtocolMessage(onUnknownDiscriminator = "FQN")` so the validator can
+        // verify they resolve and declare a single-`String` constructor.
+        val onUnknownFqns = mutableSetOf<String>()
+        for (s in symbols) {
+            if (s !is RawSymbol.SealedRoot) continue
+            val pm = s.annotations.firstOrNull { it.fqn == PROTOCOL_MESSAGE_FQN } ?: continue
+            val raw = (pm.arguments["onUnknownDiscriminator"] as? RawAnnotationValue.StringVal)?.value ?: continue
+            if (raw.isBlank()) continue
+            candidateFqns += raw
+            onUnknownFqns += raw
+        }
         if (candidateFqns.isEmpty()) return emptyMap()
         val out = mutableMapOf<String, RawClassMetadata>()
         for (fqn in candidateFqns) {
@@ -143,16 +156,29 @@ object Discovery {
             val dispatchValueProperty =
                 if (fqn in discriminatorTypeFqns) findDispatchValueProperty(decl) else null
             val valueClassInfo = findValueClassInfo(decl)
+            val constructorParameterTypes =
+                if (fqn in onUnknownFqns) collectConstructorParameterTypes(decl) else emptyList()
             out[fqn] =
                 RawClassMetadata(
                     fqn = fqn,
                     directlyDeclaredSupertypes = decl.superTypes.toList().map(::toRawTypeRef),
                     dispatchValueProperty = dispatchValueProperty,
                     valueClassInfo = valueClassInfo,
+                    constructorParameterTypes = constructorParameterTypes,
                 )
         }
         return out.toMap()
     }
+
+    private fun collectConstructorParameterTypes(decl: KSClassDeclaration): List<List<String>> =
+        decl.getConstructors().toList().map { ctor ->
+            ctor.parameters.map { p ->
+                p.type
+                    .resolve()
+                    .declaration.qualifiedName
+                    ?.asString() ?: ""
+            }
+        }
 
     /**
      * Phase 9 Step 3 — auto-detect value-class wrappers.

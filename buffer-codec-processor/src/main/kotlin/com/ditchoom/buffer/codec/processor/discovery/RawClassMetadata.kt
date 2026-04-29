@@ -27,6 +27,15 @@ data class RawClassMetadata(
     val directlyDeclaredSupertypes: List<RawTypeRef>,
     val dispatchValueProperty: RawDispatchValueProperty? = null,
     val valueClassInfo: RawValueClassInfo? = null,
+    /**
+     * One inner list per declared constructor; each inner list holds the
+     * parameter type FQNs (in declaration order). Captured for classes
+     * referenced from `@ProtocolMessage(onUnknownDiscriminator = "FQN")` so
+     * the validator can verify the resolved exception class declares a
+     * single-`String` constructor without dropping back into KSP. Empty for
+     * classes captured for other reasons.
+     */
+    val constructorParameterTypes: List<List<String>> = emptyList(),
 )
 
 /**

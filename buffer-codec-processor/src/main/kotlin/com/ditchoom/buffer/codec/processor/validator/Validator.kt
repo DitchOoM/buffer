@@ -33,6 +33,8 @@ import com.ditchoom.buffer.codec.processor.planbuilder.right
  *  - [DiscriminatorFieldTypeChecker] — re-asserts at whole-program scope that every variant's
  *    `@DiscriminatorField` parameter type matches its sealed root's `@DispatchOn` discriminator.
  *  - [SpiDescriptorChecker] — rejects ambiguous SPI descriptors (no fixedSize, no inline raw payload).
+ *  - [OnUnknownDiscriminatorChecker] — every `@ProtocolMessage(onUnknownDiscriminator = "FQN")` resolves
+ *    to a class on the compilation classpath that declares a single-`String` constructor.
  *
  * Errors accumulate; the validator never bails on the first failure. A fixture
  * with N independent violations produces an Either.Left whose [Nel] has at least N entries.
@@ -51,6 +53,7 @@ object Validator {
         errors += UseCodecConformanceChecker.check(plans, externalClasses)
         errors += DiscriminatorFieldTypeChecker.check(plans)
         errors += SpiDescriptorChecker.check(plans)
+        errors += OnUnknownDiscriminatorChecker.check(plans, externalClasses)
         return if (errors.isEmpty()) {
             ValidatedProgram(plans).right()
         } else {
