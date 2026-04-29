@@ -219,6 +219,7 @@ object PlanBuilder {
         val errors = mutableListOf<KspError>()
         val parentSealedRoot = parentSealedRootFor(symbol, scope)
         symbol.constructorParameters.forEachIndexed { idx, p ->
+            val trailingParams = symbol.constructorParameters.drop(idx + 1)
             val builder =
                 FieldStrategyBuilder(
                     ownerFqn = symbol.fqn,
@@ -226,6 +227,7 @@ object PlanBuilder {
                     precedingFields = accumulated.toList(),
                     totalFieldCount = symbol.constructorParameters.size,
                     isLastField = idx == symbol.constructorParameters.size - 1,
+                    trailingFixedSizeBytes = FieldStrategyBuilder.computeTrailingFixedSize(trailingParams),
                     payloadTypeParams = payloadTypeParamNames,
                     parentDispatchType = parentDispatchType,
                     protocolMessageScope = protocolMessageScope,

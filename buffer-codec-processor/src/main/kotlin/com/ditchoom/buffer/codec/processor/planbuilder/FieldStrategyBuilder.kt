@@ -45,6 +45,18 @@ internal class FieldStrategyBuilder(
     private val precedingFields: List<FieldPlan>,
     private val totalFieldCount: Int,
     private val isLastField: Boolean,
+    /**
+     * Sum of natural wire widths of every constructor parameter after the one being
+     * built, when the trailer is composed entirely of fixed-size primitives. `null`
+     * when any trailing parameter is variable-size (length-prefixed, VBI, nested
+     * message, collection, conditional, or non-primitive). When this field is `null`
+     * and the parameter being built carries `@RemainingBytes` and is not the last
+     * parameter, the builder emits the "must appear at the tail" error. When this is
+     * non-null and `@RemainingBytes` is present mid-message, the builder accepts the
+     * field with `LengthSource.Remaining(trailingBytes = trailingFixedSizeBytes)` so
+     * the codec subtracts the trailer at decode time.
+     */
+    private val trailingFixedSizeBytes: Int?,
     private val payloadTypeParams: Set<String>,
     private val parentDispatchType: TypeFqn?,
     private val protocolMessageScope: Set<String>,
@@ -171,7 +183,7 @@ internal class FieldStrategyBuilder(
             return buildDiscriminatorOwned(param, conditionality, errors, site)
         }
 
-        if (hasRemainingBytes && !isLastField) {
+        if (hasRemainingBytes && !isLastField && trailingFixedSizeBytes == null) {
             errors +=
                 KspError(
                     message =
@@ -839,7 +851,7 @@ internal class FieldStrategyBuilder(
             return LengthSource.FromField(name = refName, kind = kind)
         }
         if (param.annotations.has(AnnotationFqns.RemainingBytes)) {
-            return LengthSource.Remaining(trailingBytes = 0)
+            return LengthSource.Remaining(trailingBytes = trailingFixedSizeBytes ?: 0)
         }
         return null
     }
@@ -860,6 +872,35 @@ internal class FieldStrategyBuilder(
         fun packageNameOf(fqn: String): String {
             val idx = fqn.lastIndexOf('.')
             return if (idx <= 0) "" else fqn.substring(0, idx)
+        }
+
+        /**
+         * Returns the sum of natural wire widths for [trailingParams] when every
+         * parameter is a fixed-width primitive without length / conditionality /
+         * @UseCodec annotations; returns `null` otherwise. Mirrors legacy
+         * `FieldAnalyzer`'s "all-fixed-size trailer" detection — used by the
+         * @RemainingBytes auto-reserve feature so a `@RemainingBytes`-annotated
+         * field followed by primitive trailers can subtract the trailer width
+         * from the remaining-bytes count at decode time.
+         */
+        fun computeTrailingFixedSize(trailingParams: List<RawCtorParameter>): Int? {
+            var sum = 0
+            for (p in trailingParams) {
+                val ann = p.annotations
+                val makesVariable =
+                    ann.has(AnnotationFqns.LengthPrefixed) ||
+                        ann.has(AnnotationFqns.LengthFrom) ||
+                        ann.has(AnnotationFqns.RemainingBytes) ||
+                        ann.has(AnnotationFqns.VariableByteInteger) ||
+                        ann.has(AnnotationFqns.WhenRemaining) ||
+                        ann.has(AnnotationFqns.When_) ||
+                        ann.has(AnnotationFqns.WhenTrue) ||
+                        ann.has(AnnotationFqns.UseCodec)
+                if (makesVariable) return null
+                val kind = PrimitiveTypes.classify(p.typeRef) ?: return null
+                sum += PrimitiveTypes.naturalWireBytes(kind)
+            }
+            return sum
         }
 
         fun simpleNameOf(fqn: String): String {

@@ -282,6 +282,7 @@ internal object VariantPlanBuilder {
                 val errors = mutableListOf<KspError>()
                 val params = variantSymbol.constructorParameters
                 params.forEachIndexed { idx, p ->
+                    val trailingParams = params.drop(idx + 1)
                     val builder =
                         FieldStrategyBuilder(
                             ownerFqn = variantSymbol.fqn,
@@ -289,6 +290,7 @@ internal object VariantPlanBuilder {
                             precedingFields = accumulated.toList(),
                             totalFieldCount = params.size,
                             isLastField = idx == params.size - 1,
+                            trailingFixedSizeBytes = FieldStrategyBuilder.computeTrailingFixedSize(trailingParams),
                             payloadTypeParams = payloadTypeParamNames,
                             parentDispatchType = parentDispatchType,
                             protocolMessageScope = protocolMessageScope,
