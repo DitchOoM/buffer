@@ -80,7 +80,18 @@ A single-strategy rewrite with a tighter validation loop:
    `StreamProcessor.peekFrameSize` from day one. Smoke tests cover the
    four protocols end-to-end through `buffer-flow`.
 
-5. **Codec contract: payload-only.** `encode` writes payload bytes only;
+5. **Models bend to the codec, not the other way around.** The MQTT v4
+   / v5 / WebSocket / RIFF wire **specs** are the fixed point. The model
+   *classes* — Kotlin field types, nullability, value-class wrapping,
+   sealed-tree shape, default values, even data-class-vs-data-object —
+   are negotiable in service of letting the processor generate clean,
+   zero-copy code. If a `data object` blocks a clean dispatcher, it
+   becomes a `data class`. If a public API surface needs to change to
+   match what the codec naturally produces, change it. Spec compliance
+   is verified by byte-for-byte vector tests, not by preserving an
+   existing Kotlin shape.
+
+6. **Codec contract: payload-only.** `encode` writes payload bytes only;
    `wireSize` returns payload byte count only; `decode` reads to the
    pre-bounded buffer's natural delimiter. Framing is the framework's
    job, expressed via field annotations on the consumer
