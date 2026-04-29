@@ -123,8 +123,8 @@ internal object VariantPlanBuilder {
                     KspError(
                         message =
                             "@PacketTypeRange variant '${variantSymbol.fqn}' must carry a @DiscriminatorField " +
-                                "constructor parameter — the wire byte depends on per-instance data, so the " +
-                                "dispatcher cannot synthesize it.",
+                                "discriminator field on a constructor parameter — the wire byte depends on " +
+                                "per-instance data, so the dispatcher cannot synthesize it.",
                         sourceFqn = variantSymbol.fqn,
                     )
             }
