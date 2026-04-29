@@ -55,8 +55,28 @@ data class PayloadTypeParam(
     val upperBound: TypeFqn?,
 )
 
-/** A field on a variant whose declared type is a payload type parameter. */
+/**
+ * A field on a variant whose declared type is a payload type parameter.
+ *
+ * [contextClassFqn] is the fully-qualified name of the synthesized companion
+ * `*Context` class that becomes the receiver of the typed-lambda decode
+ * overload (`*Context.(ReadBuffer) -> P`). The class is generated alongside
+ * the codec; emitters resolve it via this FQN. Construction convention
+ * mirrors legacy `PayloadContextGenerator`:
+ *
+ * ```
+ * "${packageName}.${enclosingSimpleNames.joinToString("")}Context"
+ * ```
+ *
+ * For example, a top-level `MqttPublishV5<P>` produces
+ * `com.example.MqttPublishV5Context`; a nested `ControlPacketV5.Publish<P>`
+ * produces `com.example.ControlPacketV5PublishContext`. All [PayloadFieldRef]s
+ * on the same variant share the same context class — the per-field placement
+ * mirrors legacy `SealedVariantPayloadInfo.PayloadFieldInfo` so the emitter
+ * can read it from the field-level IR without an extra lookup.
+ */
 data class PayloadFieldRef(
     val fieldName: String,
     val typeParamName: String,
+    val contextClassFqn: String,
 )

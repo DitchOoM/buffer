@@ -153,6 +153,7 @@ object PlanBuilder {
                 .map { PayloadTypeParam(name = it.name, upperBound = it.upperBoundFqn?.let(::TypeFqn)) }
         val payloadTypeParamNames = payloadTypeParams.map { it.name }.toSet()
         val payloadFieldRefs = mutableListOf<PayloadFieldRef>()
+        val payloadContextFqn = payloadContextFqnFor(symbol)
         val protocolMessageScope = scope.values.map { it.fqn }.toSet()
         val accumulated = mutableListOf<FieldPlan>()
         val errors = mutableListOf<KspError>()
@@ -175,7 +176,11 @@ object PlanBuilder {
                     accumulated += res.value
                     if (p.typeRef.isTypeParameter && p.typeRef.name in payloadTypeParamNames) {
                         payloadFieldRefs +=
-                            PayloadFieldRef(fieldName = p.name, typeParamName = p.typeRef.name)
+                            PayloadFieldRef(
+                                fieldName = p.name,
+                                typeParamName = p.typeRef.name,
+                                contextClassFqn = payloadContextFqn,
+                            )
                     }
                 }
             }
@@ -562,6 +567,24 @@ object PlanBuilder {
             is DiscriminatorShape.ValueClass -> PrimitiveTypes.naturalWireBytes(discriminator.inner)
             is DiscriminatorShape.DataClass -> discriminator.params.sumOf { it.wireBytes }.coerceAtLeast(1)
         }
+
+    /**
+     * Builds the FQN of the synthesized `*Context` companion class for a
+     * variant whose ctor declares one or more `@Payload` type parameters.
+     * Mirrors legacy `PayloadContextGenerator.contextName` exactly:
+     *
+     *   `${packageName}.${enclosingNames.joinToString("")}Context`
+     *
+     * For top-level `MqttPublishV5<P>` → `com.example.MqttPublishV5Context`.
+     * For nested `ControlPacketV5.Publish<P>` → `com.example.ControlPacketV5PublishContext`.
+     * The context class is generated alongside the codec by the new pipeline's
+     * payload-context emitter; this string is what `LeafEmitter` resolves
+     * when emitting the receiver-style typed-lambda overload.
+     */
+    internal fun payloadContextFqnFor(symbol: RawSymbol.DataLike): String {
+        val simple = symbol.enclosingNames.joinToString("") + "Context"
+        return if (symbol.packageName.isBlank()) simple else "${symbol.packageName}.$simple"
+    }
 
     /**
      * Split a FQN into a KotlinPoet [ClassName], treating each capitalized terminal

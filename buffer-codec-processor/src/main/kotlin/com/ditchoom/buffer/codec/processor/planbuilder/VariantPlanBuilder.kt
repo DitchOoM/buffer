@@ -274,6 +274,7 @@ internal object VariantPlanBuilder {
                         .map { PayloadTypeParam(name = it.name, upperBound = it.upperBoundFqn?.let(::TypeFqn)) }
                 val payloadTypeParamNames = payloadTypeParams.map { it.name }.toSet()
                 val payloadFieldRefs = mutableListOf<PayloadFieldRef>()
+                val payloadContextFqn = PlanBuilder.payloadContextFqnFor(variantSymbol)
                 val protocolMessageScope = scope.values.map { it.fqn }.toSet()
                 val accumulated = mutableListOf<FieldPlan>()
                 val errors = mutableListOf<KspError>()
@@ -297,7 +298,11 @@ internal object VariantPlanBuilder {
                             accumulated += res.value
                             if (p.typeRef.isTypeParameter && p.typeRef.name in payloadTypeParamNames) {
                                 payloadFieldRefs +=
-                                    PayloadFieldRef(fieldName = p.name, typeParamName = p.typeRef.name)
+                                    PayloadFieldRef(
+                                        fieldName = p.name,
+                                        typeParamName = p.typeRef.name,
+                                        contextClassFqn = payloadContextFqn,
+                                    )
                             }
                         }
                     }

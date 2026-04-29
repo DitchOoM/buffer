@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.codec.processor.planbuilder
 
 import com.ditchoom.buffer.codec.processor.discovery.RawAnnotation
+import com.ditchoom.buffer.codec.processor.discovery.RawSymbol
 import com.ditchoom.buffer.codec.processor.discovery.RawTypeParameter
 import com.ditchoom.buffer.codec.processor.ir.PayloadFieldRef
 import com.ditchoom.buffer.codec.processor.ir.PayloadTypeParam
@@ -45,9 +46,17 @@ class PlanBuilderPayloadIRTest {
             "payloadTypeParams should carry the @Payload type-param declaration",
         )
         assertEquals(
-            listOf(PayloadFieldRef(fieldName = "payload", typeParamName = "P")),
+            listOf(
+                PayloadFieldRef(
+                    fieldName = "payload",
+                    typeParamName = "P",
+                    contextClassFqn = "test.FooContext",
+                ),
+            ),
             leaf.payloadFields,
-            "payloadFields should reference the ctor val whose type is the @Payload type param",
+            "payloadFields should reference the ctor val whose type is the @Payload type param, " +
+                "and carry the synthesized *Context FQN (legacy convention: " +
+                "${'$'}{packageName}.${'$'}{enclosingSimpleNames.joinToString(\"\")}Context).",
         )
     }
 
@@ -83,11 +92,20 @@ class PlanBuilderPayloadIRTest {
         )
         assertEquals(
             listOf(
-                PayloadFieldRef(fieldName = "a", typeParamName = "P1"),
-                PayloadFieldRef(fieldName = "c", typeParamName = "P2"),
+                PayloadFieldRef(
+                    fieldName = "a",
+                    typeParamName = "P1",
+                    contextClassFqn = "test.MultiContext",
+                ),
+                PayloadFieldRef(
+                    fieldName = "c",
+                    typeParamName = "P2",
+                    contextClassFqn = "test.MultiContext",
+                ),
             ),
             leaf.payloadFields,
-            "payloadFields should preserve constructor-parameter order, skipping non-payload params",
+            "payloadFields should preserve constructor-parameter order, skipping non-payload params. " +
+                "All refs share the variant's single context class FQN.",
         )
     }
 
@@ -106,6 +124,41 @@ class PlanBuilderPayloadIRTest {
         val leaf = plan as? Plan.Leaf ?: fail("expected Leaf, got $plan")
         assertTrue(leaf.payloadTypeParams.isEmpty(), "non-payload class should have no payloadTypeParams")
         assertTrue(leaf.payloadFields.isEmpty(), "non-payload class should have no payloadFields")
+    }
+
+    @Test
+    fun `nested @Payload data class derives context FQN from enclosing simple-name chain`() {
+        // @ProtocolMessage data class ControlPacketV5.Publish<@Payload P>(val payload: P)
+        // The synthesized context class for a nested variant must concatenate
+        // every enclosing simple name (legacy `enclosingSimpleNames().joinToString("")`)
+        // so the receiver type is `ControlPacketV5PublishContext`, not the
+        // bare-name `PublishContext` that would clash with sibling variants.
+        val symbol =
+            RawSymbol.DataLike(
+                fqn = "com.example.ControlPacketV5.Publish",
+                simpleName = "Publish",
+                packageName = "com.example",
+                enclosingNames = listOf("ControlPacketV5", "Publish"),
+                annotations =
+                    listOf(
+                        RawAnnotation(AnnotationFqns.ProtocolMessage, emptyMap()),
+                    ),
+                direction = com.ditchoom.buffer.codec.processor.discovery.RawDirection.Default,
+                classKind = com.ditchoom.buffer.codec.processor.discovery.DataLikeKind.DataClass,
+                typeParameters = listOf(Fixtures.payloadTypeParam("P")),
+                constructorParameters =
+                    listOf(
+                        Fixtures.param("payload", Fixtures.typeParameterRef("P")),
+                    ),
+            )
+        val plan = PlanBuilder.build(symbol).expectRight()
+        val leaf = plan as? Plan.Leaf ?: fail("expected Leaf, got $plan")
+        assertEquals(
+            "com.example.ControlPacketV5PublishContext",
+            leaf.payloadFields.single().contextClassFqn,
+            "nested variant context FQN must concatenate every enclosing simple name " +
+                "(legacy convention) — bare `PublishContext` would clash with siblings.",
+        )
     }
 
     @Test

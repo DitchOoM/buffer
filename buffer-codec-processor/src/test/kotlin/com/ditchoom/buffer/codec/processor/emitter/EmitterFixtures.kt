@@ -750,7 +750,11 @@ object EmitterFixtures {
                         payloadFields =
                             listOf(
                                 com.ditchoom.buffer.codec.processor.ir
-                                    .PayloadFieldRef(fieldName = "payload", typeParamName = "P"),
+                                    .PayloadFieldRef(
+                                        fieldName = "payload",
+                                        typeParamName = "P",
+                                        contextClassFqn = "com.ditchoom.codec.test.ControlPacketV5Slice5aPublishContext",
+                                    ),
                             ),
                     ),
                     VariantPlan.NoPayload(
