@@ -38,7 +38,6 @@ class ProtocolMessageProcessorProvider(
         return ProtocolMessageProcessor(
             codeGenerator = environment.codeGenerator,
             logger = environment.logger,
-            customProviders = seen,
         )
     }
 }

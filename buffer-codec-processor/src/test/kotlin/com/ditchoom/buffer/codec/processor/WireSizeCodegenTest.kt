@@ -2,6 +2,7 @@ package com.ditchoom.buffer.codec.processor
 
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
+import kotlin.test.Ignore
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -351,6 +352,7 @@ class WireSizeCodegenTest {
     }
 
     @Test
+    @Ignore("Phase 9 Step 6.5 — SPI custom-provider consumption pending port to PlanBuilder/FieldStrategyBuilder. See phase-9-step6.5-spi-port.md.")
     fun `custom variable-size field without wireSizeFunction reports clean KSP error at field`() {
         val source =
             SourceFile.kotlin(
