@@ -52,7 +52,8 @@ internal object DiscriminatorBuilder {
         val externalDispatchValue = externalClasses[discriminatorFqn]?.dispatchValueProperty
         return when (data.classKind) {
             DataLikeKind.ValueClass -> buildValueClass(rootFqn, data, externalDispatchValue)
-            DataLikeKind.DataClass, DataLikeKind.RegularClass -> buildDataClass(rootFqn, data, externalDispatchValue)
+            DataLikeKind.DataClass, DataLikeKind.RegularClass ->
+                buildDataClass(rootFqn, data, externalDispatchValue, externalClasses)
         }
     }
 
@@ -140,11 +141,31 @@ internal object DiscriminatorBuilder {
         rootFqn: String,
         data: RawSymbol.DataLike,
         dispatchValueProperty: com.ditchoom.buffer.codec.processor.discovery.RawDispatchValueProperty?,
+        externalClasses: Map<String, RawClassMetadata>,
     ): Either<Nel<KspError>, DiscriminatorShape.DataClass> {
         val errors = mutableListOf<KspError>()
         val params = mutableListOf<DiscParam>()
         for (p in data.constructorParameters) {
-            val kind = PrimitiveTypes.classify(p.typeRef)
+            // Phase 9 Step 7: auto-unwrap single-primitive value-class fields. Mirrors the
+            // value-class auto-detection that Step 3 added to `FieldStrategyBuilder` — a
+            // discriminator like `WsFrameHeader(val byte1: FrameHeaderByte1, ...)` should
+            // be treated as carrying a `UByte` here, so the primitive-only rule below
+            // applies after unwrapping.
+            val directKind = PrimitiveTypes.classify(p.typeRef)
+            val kind =
+                directKind ?: run {
+                    val info = externalClasses[p.typeRef.fqn]?.valueClassInfo ?: return@run null
+                    PrimitiveTypes.classify(
+                        com.ditchoom.buffer.codec.processor.discovery.RawTypeRef(
+                            fqn = info.innerTypeFqn,
+                            name = info.innerTypeFqn.substringAfterLast('.'),
+                            typeArguments = emptyList(),
+                            isNullable = false,
+                            isTypeParameter = false,
+                            resolved = true,
+                        ),
+                    )
+                }
             if (kind == null) {
                 errors +=
                     KspError(
