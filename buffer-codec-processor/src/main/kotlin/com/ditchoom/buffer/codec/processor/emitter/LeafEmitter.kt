@@ -1567,11 +1567,21 @@ class LeafEmitter(
             )
         }
         // Phase 3: invoke each payload-decoder lambda via the receiver so
-        // `this` inside the lambda is the typed context.
+        // `this` inside the lambda is the typed context. Conditional payload
+        // fields lower to `_raw_<field>?.let { _ctx.decode<Field>(it) }` so
+        // a null raw slice (decoded `null` when the field's @When/@WhenTrue
+        // condition was false) propagates straight through to a null typed
+        // payload, matching legacy `addPayloadEncodeBody` cascade.
+        val payloadFieldByName = plan.fields.filter { it.strategy is FieldStrategy.PayloadSlot }.associateBy { it.name }
         for (pf in plan.payloadFields) {
             val rawVar = "_raw_${pf.fieldName}"
             val paramName = payloadDecodeParamName(pf.fieldName)
-            cb.addStatement("val %L = _ctx.%L(%L)", pf.fieldName, paramName, rawVar)
+            val isConditional = payloadFieldByName[pf.fieldName]?.conditionality is Conditionality.WhenExpr
+            if (isConditional) {
+                cb.addStatement("val %L = %L?.let { _ctx.%L(it) }", pf.fieldName, rawVar, paramName)
+            } else {
+                cb.addStatement("val %L = _ctx.%L(%L)", pf.fieldName, paramName, rawVar)
+            }
         }
         // Phase 4: constructor call.
         val ctorArgs = plan.fields.joinToString(", ") { "${it.name} = ${it.name}" }
@@ -1583,6 +1593,9 @@ class LeafEmitter(
     /**
      * Reads the raw payload bytes into `_raw_<fieldName>` (a `ReadBuffer` slice).
      * Mirrors legacy `addPayloadRawRead` for the length sources Cap 2 supports.
+     * For conditional `@Payload` fields, the raw read is gated by the field's
+     * decode-side condition expression and the local is typed `ReadBuffer?`
+     * so a missing payload propagates as `null` through Phase 3's `?.let`.
      */
     private fun emitPayloadRawRead(
         cb: CodeBlock.Builder,
@@ -1610,7 +1623,22 @@ class LeafEmitter(
                     "run { val _len = $readLen; buffer.readBytes(_len) }"
                 }
             }
-        cb.addStatement("val %L: %T = %L", rawVar, Names.ReadBuffer, readBody)
+        val cond = field.conditionality
+        if (cond is Conditionality.WhenExpr) {
+            val condExpr = lowerBoolExprDecode(cond.expr)
+            val nullableRb = Names.ReadBuffer.copy(nullable = true)
+            cb.add("val %L: %T = if (%L) {\n", rawVar, nullableRb, condExpr)
+            cb.indent()
+            cb.add("%L\n", readBody)
+            cb.unindent()
+            cb.add("} else {\n")
+            cb.indent()
+            cb.add("null\n")
+            cb.unindent()
+            cb.add("}\n")
+        } else {
+            cb.addStatement("val %L: %T = %L", rawVar, Names.ReadBuffer, readBody)
+        }
     }
 
     private fun buildPayloadEncodeFun(
@@ -1649,8 +1677,19 @@ class LeafEmitter(
         val cb = CodeBlock.builder()
         for (f in plan.fields) {
             val s = f.strategy
-            if (s is FieldStrategy.PayloadSlot) {
-                emitPayloadEncode(cb, f, s)
+            val isConditional = f.conditionality is Conditionality.WhenExpr
+            if (isConditional) {
+                cb.addStatement("val %L = value.%L", f.name, f.name)
+                cb.beginControlFlow("if (%L != null)", f.name)
+                if (s is FieldStrategy.PayloadSlot) {
+                    emitPayloadEncode(cb, f, s, valueExpr = f.name)
+                } else {
+                    val stmt = encodeStatement(f)
+                    if (stmt != null) cb.add(stmt)
+                }
+                cb.endControlFlow()
+            } else if (s is FieldStrategy.PayloadSlot) {
+                emitPayloadEncode(cb, f, s, valueExpr = "value.${f.name}")
             } else {
                 val stmt = encodeStatement(f) ?: continue
                 cb.add(stmt)
@@ -1663,17 +1702,19 @@ class LeafEmitter(
     /**
      * Mirrors legacy `addPayloadEncodeBody`: writes the length prefix (if
      * applicable) then invokes the user-supplied `encode<FieldName>` lambda
-     * with `buffer` and `value.<fieldName>` so the lambda writes typed payload
-     * bytes directly into the host buffer.
+     * with `buffer` and the typed payload value so the lambda writes typed
+     * payload bytes directly into the host buffer. [valueExpr] is the source
+     * expression for the typed value — `value.<field>` for unconditional
+     * fields, the smart-cast local for conditional `WhenExpr` fields.
      */
     private fun emitPayloadEncode(
         cb: CodeBlock.Builder,
         field: FieldPlan,
         strategy: FieldStrategy.PayloadSlot,
+        valueExpr: String = "value.${field.name}",
     ) {
         val encodeFn = payloadEncodeParamName(field.name)
         val sizeFn = payloadSizeParamName(field.name)
-        val valueExpr = "value.${field.name}"
         val suffix = "_${field.name}"
         when (val l = strategy.length) {
             is LengthSource.Remaining,
@@ -1764,7 +1805,12 @@ class LeafEmitter(
         for (f in plan.fields) {
             val s = f.strategy
             if (s is FieldStrategy.PayloadSlot) {
-                cb.addStatement("_size += %L", payloadFieldWireSizeExpr(f, s))
+                val raw = payloadFieldWireSizeExpr(f, s, valueExpr = "value.${f.name}")
+                if (f.conditionality is Conditionality.WhenExpr) {
+                    cb.addStatement("_size += (if (value.%L != null) %L else 0)", f.name, raw)
+                } else {
+                    cb.addStatement("_size += %L", raw)
+                }
             } else {
                 cb.addStatement("_size += %L", sizeContribution(f))
             }
@@ -1776,14 +1822,19 @@ class LeafEmitter(
 
     /**
      * Returns the wire-size expression for a payload field. Mirrors legacy
-     * `payloadFieldWireSizeExpr`: prefix bytes (if any) + `size<FieldName>(value.<field>)`.
+     * `payloadFieldWireSizeExpr`: prefix bytes (if any) + `size<FieldName>(<valueExpr>)`.
+     * [valueExpr] is `value.<field>` for unconditional fields; for conditional
+     * `WhenExpr` fields the caller wraps the whole expression in
+     * `if (value.<field> != null) ... else 0` so Kotlin smart-casts the
+     * `val`-property reference inside `<valueExpr>`.
      */
     private fun payloadFieldWireSizeExpr(
         field: FieldPlan,
         strategy: FieldStrategy.PayloadSlot,
+        valueExpr: String = "value.${field.name}",
     ): String {
         val sizeFn = payloadSizeParamName(field.name)
-        val bodySize = "$sizeFn(value.${field.name})"
+        val bodySize = "$sizeFn($valueExpr)"
         return when (val l = strategy.length) {
             is LengthSource.Remaining,
             is LengthSource.FromField,
