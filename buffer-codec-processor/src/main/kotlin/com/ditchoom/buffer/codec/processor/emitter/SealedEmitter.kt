@@ -934,12 +934,19 @@ class SealedEmitter(
         for (tpName in distinctPayloadTypeParams(plan)) {
             fb.addTypeVariable(TypeVariableName(tpName))
         }
-        // Per-variant lambda parameters.
+        // Per-variant lambda parameters — receiver-style. The receiver type
+        // is the variant's synthesised `*Context` class (the same FQN the
+        // variant codec's Cap 2 typed-lambda decode accepts), so the
+        // dispatcher's typed-lambda parameters are pass-through compatible
+        // with the variant codec's typed-lambda overload — no wrapping
+        // required at the dispatch call site.
         for (v in plan.variants.filterIsInstance<VariantPlan.WithPayload>()) {
             for (pf in v.payloadFields) {
                 val tp = TypeVariableName(pf.typeParamName)
+                val variantContext = TypeRegistry.splitFqn(pf.contextClassFqn)
                 val lambdaType =
                     LambdaTypeName.get(
+                        receiver = variantContext,
                         parameters = listOf(ParameterSpec.unnamed(Names.ReadBuffer)),
                         returnType = tp,
                     )

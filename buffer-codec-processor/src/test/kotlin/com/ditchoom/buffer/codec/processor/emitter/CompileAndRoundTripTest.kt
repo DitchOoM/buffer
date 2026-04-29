@@ -233,10 +233,19 @@ class CompileAndRoundTripTest {
         // Cap 2's PayloadSlot fan-out emits a `decodePayload` parameter on the
         // variant codec; Cap 1 forwards to it from the dispatcher. The fixture's
         // sole WithPayload variant is `Publish` with one @Payload field `payload`.
-        val variantLambdaParam = Regex("""\bdecodePublishPayload\s*:""")
+        // Phase 9 Step 4-redo C4: receiver-style lambda — the receiver type
+        // is the variant's synthesised `*Context` so the dispatcher's
+        // typed-lambda parameters are pass-through compatible with the
+        // variant codec's Cap 2 typed-lambda overload.
+        val variantLambdaParam =
+            Regex(
+                """\bdecodePublishPayload\s*:\s*ControlPacketV5Slice5aPublishContext\.\(ReadBuffer\)\s*->\s*P""",
+            )
         assertTrue(
             variantLambdaParam.containsMatchIn(emitted),
-            "expected dispatcher to declare per-variant `decodePublishPayload` lambda parameter; got:\n$emitted",
+            "expected dispatcher to declare receiver-style " +
+                "`decodePublishPayload: ControlPacketV5Slice5aPublishContext.(ReadBuffer) -> P` " +
+                "lambda parameter; got:\n$emitted",
         )
     }
 

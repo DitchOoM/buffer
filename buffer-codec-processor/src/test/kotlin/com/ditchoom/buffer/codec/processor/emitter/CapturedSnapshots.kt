@@ -558,7 +558,7 @@ object CapturedSnapshots {
           public fun <P> decode(
             buffer: ReadBuffer,
             context: DecodeContext = DecodeContext.Empty,
-            decodePublishPayload: (ReadBuffer) -> P,
+            decodePublishPayload: ControlPacketV5Slice5aPublishContext.(ReadBuffer) -> P,
           ): ControlPacketV5Slice5a {
             val discriminator = MqttFixedHeaderCodec.decode(buffer, context)
             val ctx = context.with(DiscriminatorKey, discriminator)
