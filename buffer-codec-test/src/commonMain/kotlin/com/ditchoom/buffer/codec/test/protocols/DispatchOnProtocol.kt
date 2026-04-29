@@ -31,32 +31,27 @@ value class FixedHeaderByte(
 @DispatchOn(FixedHeaderByte::class)
 @ProtocolMessage
 sealed interface DispatchOnPacket {
-    /** Packet type 1 (CONNECT): wire byte 0x10. The variant carries the full header so encode
-     * round-trips the exact wire byte (including any flag bits the spec might define here). */
-    @PacketType(wire = 1)
+    /** Packet type 1 (CONNECT): wire byte 0x10 */
+    @PacketType(value = 1, wire = 0x10)
     @ProtocolMessage
     data class TypeConnect(
-        val header: FixedHeaderByte = FixedHeaderByte(0x10u),
         val protocolLevel: UByte,
         val keepAlive: UShort,
     ) : DispatchOnPacket
 
-    /** Packet type 2 (CONNACK): wire byte 0x20. */
-    @PacketType(wire = 2)
+    /** Packet type 2 (CONNACK): wire byte 0x20 */
+    @PacketType(value = 2, wire = 0x20)
     @ProtocolMessage
     data class TypeConnAck(
-        val header: FixedHeaderByte = FixedHeaderByte(0x20u),
         val sessionPresent: UByte,
         val returnCode: UByte,
     ) : DispatchOnPacket
 
-    /** Packet type 4 (PUBACK): wire byte 0x40. Converted from value class to data class to host
-     * the discriminator-field default — value classes can carry only one field and we need both
-     * the payload and the header to round-trip the raw wire byte under bit-packed dispatch. */
-    @PacketType(wire = 4)
+    /** Packet type 4 (PUBACK): wire byte 0x40 */
+    @PacketType(value = 4, wire = 0x40)
     @ProtocolMessage
-    data class TypePubAck(
-        val header: FixedHeaderByte = FixedHeaderByte(0x40u),
+    @JvmInline
+    value class TypePubAck(
         val packetId: UShort,
     ) : DispatchOnPacket
 }

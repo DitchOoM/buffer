@@ -1,48 +1,28 @@
 package com.ditchoom.buffer.codec.processor
 
-import com.ditchoom.buffer.codec.processor.discovery.Discovery
-import com.ditchoom.buffer.codec.processor.discovery.DiscoveryResult
-import com.ditchoom.buffer.codec.processor.emitter.CodecEmitter
-import com.ditchoom.buffer.codec.processor.emitter.TypeRegistry
-import com.ditchoom.buffer.codec.processor.ir.TypeFqn
-import com.ditchoom.buffer.codec.processor.planbuilder.Either
-import com.ditchoom.buffer.codec.processor.planbuilder.PlanBuilder
-import com.ditchoom.buffer.codec.processor.validator.Validator
+import com.ditchoom.buffer.codec.processor.spi.CodecFieldProvider
 import com.google.devtools.ksp.processing.CodeGenerator
-import com.google.devtools.ksp.processing.Dependencies
 import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.processing.SymbolProcessor
-import com.google.devtools.ksp.symbol.ClassKind
 import com.google.devtools.ksp.symbol.KSAnnotated
-import com.google.devtools.ksp.symbol.KSAnnotation
 import com.google.devtools.ksp.symbol.KSClassDeclaration
+import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.symbol.Modifier
-import com.squareup.kotlinpoet.AnnotationSpec
-import com.squareup.kotlinpoet.FileSpec
-import com.squareup.kotlinpoet.ksp.writeTo
 
 class ProtocolMessageProcessor(
     private val codeGenerator: CodeGenerator,
     private val logger: KSPLogger,
+    private val customProviders: Map<String, CodecFieldProvider> = emptyMap(),
 ) : SymbolProcessor {
     private val processed = mutableSetOf<String>()
 
-    /**
-     * Discovery output cached for the lifetime of one [process] round. Discovery walks the
-     * entire resolver, so doing it once per `@ProtocolMessage` symbol would multiply KSP
-     * work by N. Cleared at the start of [process] so subsequent rounds see fresh
-     * `KSClassDeclaration`s.
-     */
-    private var cachedDiscovery: DiscoveryResult? = null
-
     override fun process(resolver: Resolver): List<KSAnnotated> {
-        cachedDiscovery = null
-
         val annotationName = "com.ditchoom.buffer.codec.annotations.ProtocolMessage"
-        val symbols = resolver.getSymbolsWithAnnotation(annotationName).toList()
+        val symbols = resolver.getSymbolsWithAnnotation(annotationName)
+        val symbolList = symbols.toList()
 
-        for (symbol in symbols) {
+        for (symbol in symbolList) {
             if (symbol !is KSClassDeclaration) {
                 logger.error(
                     "@ProtocolMessage can only be applied to classes or sealed interfaces, " +
@@ -57,64 +37,49 @@ class ProtocolMessageProcessor(
 
             when {
                 Modifier.SEALED in symbol.modifiers -> processSealedInterface(symbol, resolver)
-                symbol.classKind == ClassKind.OBJECT -> processObject(symbol, resolver)
-                else -> processDataClass(symbol, resolver)
+                else -> {
+                    val constructor = symbol.primaryConstructor
+                    if (constructor == null) {
+                        logger.error(
+                            "@ProtocolMessage class '${symbol.simpleName.asString()}' must have a primary constructor " +
+                                "with val parameters. " +
+                                "Fix: add a primary constructor (e.g., 'class ${symbol.simpleName.asString()}(val id: Int)').",
+                            symbol,
+                        )
+                    } else if (constructor.parameters.isEmpty()) {
+                        logger.error(
+                            "@ProtocolMessage class '${symbol.simpleName.asString()}' must have at least one val parameter " +
+                                "in its primary constructor.",
+                            symbol,
+                        )
+                    } else {
+                        processDataClass(symbol, resolver)
+                    }
+                }
             }
         }
         return emptyList()
-    }
-
-    private fun processObject(
-        classDeclaration: KSClassDeclaration,
-        resolver: Resolver,
-    ) {
-        if (classDeclaration.typeParameters.isNotEmpty()) {
-            logger.error(
-                "@ProtocolMessage object '${classDeclaration.simpleName.asString()}' cannot have type parameters. " +
-                    "If you need @Payload, use a data class instead.",
-                classDeclaration,
-            )
-            return
-        }
-        val dispatchOnAnnotation =
-            classDeclaration.annotations.find {
-                it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.DispatchOn"
-            }
-        if (dispatchOnAnnotation != null) {
-            logger.error(
-                "@DispatchOn is not valid on an object. @DispatchOn annotates a sealed interface that holds " +
-                    "variants distinguished by a discriminator.",
-                classDeclaration,
-            )
-            return
-        }
-        tryPipeline(classDeclaration, resolver)
     }
 
     private fun processDataClass(
         classDeclaration: KSClassDeclaration,
         resolver: Resolver,
     ) {
-        val constructor = classDeclaration.primaryConstructor
-        if (constructor == null) {
-            logger.error(
-                "@ProtocolMessage class '${classDeclaration.simpleName.asString()}' must have a primary constructor " +
-                    "with val parameters. " +
-                    "Fix: add a primary constructor (e.g., 'class ${classDeclaration.simpleName.asString()}(val id: Int)').",
-                classDeclaration,
-            )
-            return
+        val fieldAnalyzer = FieldAnalyzer(logger, customProviders)
+        val fields = fieldAnalyzer.analyze(classDeclaration)
+        if (fields == null) return // errors already reported
+
+        val batchOptimizer = BatchOptimizer()
+        val batches = batchOptimizer.optimize(fields)
+
+        val hasPayload = fields.any { it.strategy is FieldReadStrategy.PayloadField }
+
+        val generator = CodecGenerator(codeGenerator, logger)
+        generator.generate(classDeclaration, fields, batches, hasPayload)
+
+        if (hasPayload) {
+            PayloadContextGenerator(codeGenerator, logger).generate(classDeclaration, fields)
         }
-        if (constructor.parameters.isEmpty()) {
-            logger.error(
-                "@ProtocolMessage class '${classDeclaration.simpleName.asString()}' must have at least one val parameter " +
-                    "in its primary constructor. For a type-only message (no wire bytes), declare it as " +
-                    "'object ${classDeclaration.simpleName.asString()}' or 'data object ${classDeclaration.simpleName.asString()}' instead.",
-                classDeclaration,
-            )
-            return
-        }
-        tryPipeline(classDeclaration, resolver)
     }
 
     private fun processSealedInterface(
@@ -131,145 +96,205 @@ class ProtocolMessageProcessor(
             return
         }
 
+        // Check for @DispatchOn annotation
+        val dispatchOnInfoRaw = resolveDispatchOn(classDeclaration)
+        val sealedName = classDeclaration.simpleName.asString()
+        val sealedPackage = classDeclaration.packageName.asString()
+        val dispatchOnInfo =
+            dispatchOnInfoRaw?.copy(
+                sealedCodecSimpleName = "${sealedName}Codec",
+                sealedPackage = sealedPackage,
+            )
+
+        // Extract class-level wireOrder from the sealed interface for inheritance
+        val sealedFieldAnalyzer = FieldAnalyzer(logger, customProviders)
+        val sealedWireOrder = sealedFieldAnalyzer.extractClassWireOrderPublic(classDeclaration)
+
+        // Phase 1: Analyze and generate sub-codecs, collecting payload metadata
+        val variantPayloadInfos = mutableListOf<SealedVariantPayloadInfo>()
+        var anyVariantHasDiscriminatorField = false
+        val variantsSupportingPeek = mutableSetOf<String>()
         for (subclass in sealedSubclasses) {
             val qualifiedName = subclass.qualifiedName?.asString() ?: continue
             if (qualifiedName in processed) continue
             processed.add(qualifiedName)
 
-            val isObjectVariant = subclass.classKind == ClassKind.OBJECT
-            if (!isObjectVariant) {
-                val constructor = subclass.primaryConstructor
-                if (constructor == null) {
-                    logger.error(
-                        "Sealed variant '${subclass.simpleName.asString()}' of " +
-                            "'${classDeclaration.simpleName.asString()}' must have a primary constructor " +
-                            "with val parameters.",
-                        subclass,
-                    )
-                    continue
-                }
-                if (constructor.parameters.isEmpty()) {
-                    logger.error(
-                        "Sealed variant '${subclass.simpleName.asString()}' of " +
-                            "'${classDeclaration.simpleName.asString()}' must have at least one val parameter " +
-                            "in its primary constructor. For a type-only variant (no payload), " +
-                            "declare it as 'object ${subclass.simpleName.asString()}' or " +
-                            "'data object ${subclass.simpleName.asString()}'.",
-                        subclass,
-                    )
-                    continue
-                }
+            val constructor = subclass.primaryConstructor
+            if (constructor == null) {
+                logger.error(
+                    "Sealed variant '${subclass.simpleName.asString()}' of " +
+                        "'${classDeclaration.simpleName.asString()}' must have a primary constructor " +
+                        "with val parameters.",
+                    subclass,
+                )
+                continue
             }
-            tryPipeline(subclass, resolver)
+            if (constructor.parameters.isEmpty()) {
+                logger.error(
+                    "Sealed variant '${subclass.simpleName.asString()}' of " +
+                        "'${classDeclaration.simpleName.asString()}' must have at least one val parameter " +
+                        "in its primary constructor.",
+                    subclass,
+                )
+                continue
+            }
+
+            // Analyze fields to detect @Payload and discriminator fields
+            val fieldAnalyzer = FieldAnalyzer(logger, customProviders)
+            val fields = fieldAnalyzer.analyze(subclass, dispatchOnInfo, sealedWireOrder) ?: continue
+
+            if (fields.any { it.strategy is FieldReadStrategy.DiscriminatorField }) {
+                anyVariantHasDiscriminatorField = true
+            }
+            val payloadFields = fields.filter { it.strategy is FieldReadStrategy.PayloadField }
+            val payloadInfos =
+                payloadFields.map { field ->
+                    val strategy = field.strategy as FieldReadStrategy.PayloadField
+                    PayloadFieldInfo(
+                        fieldName = field.name,
+                        typeParamName = strategy.typeParamName,
+                        contextClassName = "${subclass.enclosingSimpleNames().joinToString("")}Context",
+                    )
+                }
+            variantPayloadInfos.add(SealedVariantPayloadInfo(subclass, payloadInfos))
+
+            // Track whether this variant supports peekFrameSize
+            if (PeekFrameSizeEmitter.generate(fields) != null) {
+                val name = subclass.qualifiedName?.asString() ?: subclass.simpleName.asString()
+                variantsSupportingPeek.add(name)
+            }
+
+            // Generate the sub-codec
+            val batches = BatchOptimizer().optimize(fields)
+            val hasPayload = payloadFields.isNotEmpty()
+            CodecGenerator(codeGenerator, logger).generate(subclass, fields, batches, hasPayload)
+            if (hasPayload) {
+                PayloadContextGenerator(codeGenerator, logger).generate(subclass, fields)
+            }
         }
-        tryPipeline(classDeclaration, resolver)
+
+        // Phase 2: Generate the dispatch codec with payload awareness
+        val generator = SealedDispatchGenerator(codeGenerator, logger)
+        generator.generate(
+            classDeclaration,
+            sealedSubclasses,
+            variantPayloadInfos,
+            dispatchOnInfo,
+            variantsHandleDiscriminator = anyVariantHasDiscriminatorField,
+            variantsSupportingPeek = variantsSupportingPeek,
+        )
     }
 
     /**
-     * Routes a single [classDecl] through Discovery → PlanBuilder → Validator → [CodecEmitter].
-     * PlanBuilder and Validator errors surface via [KSPLogger.error]; emitter exceptions
-     * propagate so the build fails loudly rather than silently producing no codec.
+     * Resolves @DispatchOn annotation on a sealed interface.
+     * Finds the discriminator type, validates it has exactly one @DispatchValue property,
+     * and returns the dispatch info.
      */
-    private fun tryPipeline(
-        classDecl: KSClassDeclaration,
-        resolver: Resolver,
-    ) {
-        val fqn = classDecl.qualifiedName?.asString() ?: return
-        val discovery = cachedDiscovery ?: Discovery.run(resolver).also { cachedDiscovery = it }
-        val symbol = discovery.symbols.firstOrNull { it.fqn == fqn } ?: return
-        val scope = discovery.symbols.associateBy { it.fqn }
+    private fun resolveDispatchOn(classDeclaration: KSClassDeclaration): DispatchOnInfo? {
+        val dispatchOnAnnotation =
+            classDeclaration.annotations.find {
+                it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.DispatchOn"
+            } ?: return null
 
-        val planResult =
-            PlanBuilder.build(
-                symbol = symbol,
-                scope = scope,
-                externalClasses = discovery.externalClasses,
+        val typeArg = dispatchOnAnnotation.arguments.first().value as? KSType
+        if (typeArg == null) {
+            logger.error("@DispatchOn requires a type argument.", classDeclaration)
+            return null
+        }
+
+        val discriminatorClass = typeArg.declaration as? KSClassDeclaration
+        if (discriminatorClass == null) {
+            logger.error(
+                "@DispatchOn type must reference a class, got '${typeArg.declaration.simpleName.asString()}'.",
+                classDeclaration,
             )
-        val plan =
-            when (planResult) {
-                is Either.Left -> {
-                    for (err in planResult.value.all) {
-                        logger.error(err.message, classDecl)
-                    }
-                    return
-                }
-                is Either.Right -> planResult.value
-            }
+            return null
+        }
 
-        val validation =
-            Validator.validate(
-                plans = mapOf(TypeFqn(symbol.fqn) to plan),
-                externalClasses = discovery.externalClasses,
+        // Find @DispatchValue property
+        val dispatchValueProps =
+            discriminatorClass
+                .getAllProperties()
+                .filter { prop ->
+                    prop.annotations.any {
+                        it.qualifiedName() == "com.ditchoom.buffer.codec.annotations.DispatchValue"
+                    }
+                }.toList()
+
+        if (dispatchValueProps.isEmpty()) {
+            logger.error(
+                "@DispatchOn(${discriminatorClass.simpleName.asString()}::class) requires exactly one " +
+                    "@DispatchValue property in '${discriminatorClass.simpleName.asString()}', but none was found.",
+                classDeclaration,
             )
-        when (validation) {
-            is Either.Left -> {
-                for (err in validation.value.all) {
-                    logger.error(err.message, classDecl)
-                }
-                return
+            return null
+        }
+        if (dispatchValueProps.size > 1) {
+            logger.error(
+                "@DispatchOn(${discriminatorClass.simpleName.asString()}::class) requires exactly one " +
+                    "@DispatchValue property, but found ${dispatchValueProps.size}: " +
+                    dispatchValueProps.joinToString { it.simpleName.asString() },
+                classDeclaration,
+            )
+            return null
+        }
+
+        val dispatchProp = dispatchValueProps.first()
+        val dispatchPropType =
+            dispatchProp.type
+                .resolve()
+                .declaration.simpleName
+                .asString()
+        if (dispatchPropType != "Int") {
+            logger.error(
+                "@DispatchValue property '${dispatchProp.simpleName.asString()}' must return Int, " +
+                    "but returns $dispatchPropType.",
+                dispatchProp,
+            )
+            return null
+        }
+        val codecName = discriminatorClass.codecName()
+        val poetClassName = discriminatorClass.toPoetClassName()
+
+        // Determine the inner type of the value class for constructing during encode
+        val constructorKsParams = discriminatorClass.primaryConstructor?.parameters ?: emptyList()
+        val innerType = constructorKsParams.firstOrNull()
+        val innerTypeName =
+            innerType
+                ?.type
+                ?.resolve()
+                ?.declaration
+                ?.simpleName
+                ?.asString() ?: "UByte"
+        val isValueClass =
+            constructorKsParams.size == 1 &&
+                discriminatorClass.modifiers.contains(com.google.devtools.ksp.symbol.Modifier.VALUE)
+
+        // Build constructor parameter metadata for data class discriminator peeking
+        val discriminatorParams =
+            constructorKsParams.mapNotNull { param ->
+                val paramTypeName =
+                    param.type
+                        .resolve()
+                        .declaration
+                        .qualifiedName
+                        ?.asString() ?: return@mapNotNull null
+                val primitive = Primitive.fromTypeName(paramTypeName) ?: return@mapNotNull null
+                DiscriminatorParam(
+                    name = param.name?.asString() ?: return@mapNotNull null,
+                    typeName = primitive.typeName,
+                    wireBytes = primitive.defaultWireBytes,
+                )
             }
-            is Either.Right -> Unit
-        }
 
-        val registry = buildRegistry(discovery)
-        val classType = registry.resolve(TypeFqn(symbol.fqn))
-        val emitter = CodecEmitter(registry)
-        val fileSpec = emitter.emit(plan, classType)
-        val supplemental = emitter.emitSupplemental(plan, classType)
-
-        // Match the legacy file-header conventions (4-space indent + `@file:Suppress("ktlint")`)
-        // so generated source remains byte-for-byte stable across the cutover.
-        val rebuiltFileSpec = withLegacyFileHeader(fileSpec)
-
-        val containingFile = classDecl.containingFile
-        val deps =
-            if (containingFile != null) {
-                Dependencies(aggregating = false, sources = arrayOf(containingFile))
-            } else {
-                Dependencies(aggregating = false)
-            }
-        rebuiltFileSpec.writeTo(codeGenerator, deps)
-        for (extra in supplemental) {
-            withLegacyFileHeader(extra).writeTo(codeGenerator, deps)
-        }
+        return DispatchOnInfo(
+            typeName = discriminatorClass.qualifiedName?.asString() ?: discriminatorClass.simpleName.asString(),
+            codecName = codecName,
+            dispatchProperty = dispatchProp.simpleName.asString(),
+            poetClassName = poetClassName,
+            innerTypeName = innerTypeName,
+            isValueClass = isValueClass,
+            constructorParams = discriminatorParams,
+        )
     }
-
-    private fun buildRegistry(discovery: DiscoveryResult): TypeRegistry {
-        val explicit = mutableMapOf<TypeFqn, com.squareup.kotlinpoet.ClassName>()
-        for (s in discovery.symbols) {
-            val pkg = s.packageName
-            val parts = s.enclosingNames
-            val cn =
-                if (parts.isEmpty()) {
-                    com.squareup.kotlinpoet.ClassName(pkg, s.simpleName)
-                } else {
-                    com.squareup.kotlinpoet.ClassName(pkg, *parts.toTypedArray())
-                }
-            explicit[TypeFqn(s.fqn)] = cn
-        }
-        return TypeRegistry(explicit)
-    }
-
-    private fun withLegacyFileHeader(original: FileSpec): FileSpec =
-        original
-            .toBuilder()
-            .indent("    ")
-            .also { b ->
-                val alreadyHasSuppress =
-                    b.annotations.any { ann ->
-                        ann.typeName.toString().endsWith("kotlin.Suppress")
-                    }
-                if (!alreadyHasSuppress) {
-                    b.addAnnotation(
-                        AnnotationSpec
-                            .builder(Suppress::class)
-                            .useSiteTarget(AnnotationSpec.UseSiteTarget.FILE)
-                            .addMember("%S", "ktlint")
-                            .build(),
-                    )
-                }
-            }.build()
 }
-
-private fun KSAnnotation.qualifiedName(): String? =
-    annotationType.resolve().declaration.qualifiedName?.asString()

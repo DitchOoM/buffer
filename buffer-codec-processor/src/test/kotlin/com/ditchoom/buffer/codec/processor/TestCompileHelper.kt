@@ -10,20 +10,7 @@ import com.tschuchort.compiletesting.configureKsp
 data class CompileResult(
     val exitCode: KotlinCompilation.ExitCode,
     val messages: String,
-    val generatedSources: List<String> = emptyList(),
 )
-
-/**
- * Reads every `.kt` file KSP wrote into the compilation working directory and returns
- * their contents. Enables tests to assert on the exact shape of generated code
- * (e.g. "no `value.X!!` inside a cascading null-check block").
- */
-internal fun KotlinCompilation.readGeneratedSources(): List<String> =
-    workingDir
-        .walkTopDown()
-        .filter { it.isFile && it.name.endsWith(".kt") && it.path.contains("/ksp/") }
-        .map { it.readText() }
-        .toList()
 
 /**
  * Annotation source included directly in test compilations so KSP can resolve
@@ -38,35 +25,13 @@ private val annotationSource =
 
     enum class Endianness { Default, Big, Little }
 
-    enum class Direction { Default, Codec, DecodeOnly, EncodeOnly }
+    @Target(AnnotationTarget.CLASS)
+    @Retention(AnnotationRetention.BINARY)
+    annotation class ProtocolMessage(val wireOrder: Endianness = Endianness.Default)
 
     @Target(AnnotationTarget.CLASS)
     @Retention(AnnotationRetention.BINARY)
-    annotation class ProtocolMessage(
-        val wireOrder: Endianness = Endianness.Default,
-        val direction: Direction = Direction.Default,
-        val onUnknownDiscriminator: String = "",
-    )
-
-    @Target(AnnotationTarget.CLASS)
-    @Retention(AnnotationRetention.BINARY)
-    annotation class Decode
-
-    @Target(AnnotationTarget.CLASS)
-    @Retention(AnnotationRetention.BINARY)
-    annotation class Encode
-
-    @Target(AnnotationTarget.CLASS)
-    @Retention(AnnotationRetention.BINARY)
-    annotation class PacketType(val wire: Int)
-
-    @Target(AnnotationTarget.CLASS)
-    @Retention(AnnotationRetention.BINARY)
-    annotation class PacketTypeRange(val from: Int, val to: Int)
-
-    @Target(AnnotationTarget.VALUE_PARAMETER)
-    @Retention(AnnotationRetention.BINARY)
-    annotation class DiscriminatorField
+    annotation class PacketType(val value: Int, val wire: Int = -1)
 
     @Target(AnnotationTarget.TYPE_PARAMETER)
     @Retention(AnnotationRetention.BINARY)
@@ -74,18 +39,14 @@ private val annotationSource =
 
     @Target(AnnotationTarget.CLASS)
     @Retention(AnnotationRetention.BINARY)
-    annotation class DispatchOn(
-        val type: kotlin.reflect.KClass<*>,
-        val framing: kotlin.reflect.KClass<out com.ditchoom.buffer.codec.DispatchFraming<*>> =
-            com.ditchoom.buffer.codec.DispatchFraming.Inherit::class,
-    )
+    annotation class DispatchOn(val type: kotlin.reflect.KClass<*>)
 
     @Target(AnnotationTarget.PROPERTY)
     @Retention(AnnotationRetention.BINARY)
     annotation class DispatchValue
 
     enum class LengthPrefix {
-        Byte, Short, Int, Varint,
+        Byte, Short, Int,
     }
 
     @Target(AnnotationTarget.PROPERTY, AnnotationTarget.VALUE_PARAMETER)
@@ -108,23 +69,11 @@ private val annotationSource =
     @Retention(AnnotationRetention.BINARY)
     annotation class WhenTrue(val expression: String)
 
-    @Target(AnnotationTarget.VALUE_PARAMETER)
-    @Retention(AnnotationRetention.BINARY)
-    annotation class WhenRemaining(val minBytes: Int)
-
-    @Target(AnnotationTarget.VALUE_PARAMETER)
-    @Retention(AnnotationRetention.BINARY)
-    annotation class When(val expression: String)
-
     // Endianness enum already defined above with ProtocolMessage
 
     @Target(AnnotationTarget.VALUE_PARAMETER)
     @Retention(AnnotationRetention.BINARY)
     annotation class WireOrder(val order: Endianness)
-
-    @Target(AnnotationTarget.VALUE_PARAMETER)
-    @Retention(AnnotationRetention.BINARY)
-    annotation class UseCodec(val codec: kotlin.reflect.KClass<*>)
 
     """,
     )
@@ -137,9 +86,7 @@ private val bufferStubs =
         "BufferStubs.kt",
         """
     package com.ditchoom.buffer
-    enum class ByteOrder { BIG_ENDIAN, LITTLE_ENDIAN }
     interface ReadBuffer {
-        val byteOrder: ByteOrder
         fun readByte(): Byte
         fun readUnsignedByte(): UByte
         fun readShort(): Short
@@ -155,10 +102,8 @@ private val bufferStubs =
         fun remaining(): Int
         fun position(): Int
         fun position(newPosition: Int)
-        fun resetForRead()
     }
     interface WriteBuffer {
-        val byteOrder: ByteOrder
         fun writeByte(value: Byte): WriteBuffer
         fun writeUByte(value: UByte): WriteBuffer
         fun writeShort(value: Short): WriteBuffer
@@ -170,17 +115,10 @@ private val bufferStubs =
         fun writeFloat(value: Float): WriteBuffer
         fun writeDouble(value: Double): WriteBuffer
         fun writeString(text: CharSequence): WriteBuffer
-        fun write(source: ReadBuffer)
-        fun remaining(): Int
         fun position(): Int
         fun position(newPosition: Int)
     }
-    interface PlatformBuffer : ReadBuffer, WriteBuffer
-    interface BufferFactory {
-        fun allocate(size: Int, byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN): PlatformBuffer
-        companion object
-    }
-    val BufferFactory.Companion.Default: BufferFactory get() = TODO()
+    enum class ByteOrder { BIG_ENDIAN, LITTLE_ENDIAN }
     fun Short.reverseBytes(): Short = TODO()
     fun Int.reverseBytes(): Int = TODO()
     fun Long.reverseBytes(): Long = TODO()
@@ -188,9 +126,7 @@ private val bufferStubs =
     fun WriteBuffer.writeLengthPrefixedUtf8String(value: String): WriteBuffer = TODO()
     fun ReadBuffer.readVariableByteInteger(): Int = TODO()
     fun WriteBuffer.writeVariableByteInteger(value: Int): WriteBuffer = TODO()
-    fun WriteBuffer.writeVariableByteIntegerLengthPrefixed(maxBytes: Int = 4, fieldName: String = "", encode: (WriteBuffer) -> Unit): Unit = TODO()
     fun variableByteSizeInt(value: Int): Int = TODO()
-    fun CharSequence.utf8Length(): Int = TODO()
     """,
     )
 
@@ -202,11 +138,6 @@ private val streamStubs =
         "StreamStubs.kt",
         """
     package com.ditchoom.buffer.stream
-    import kotlin.jvm.JvmInline
-    sealed interface PeekResult {
-        @JvmInline value class Size(val bytes: Int) : PeekResult
-        data object NeedsMoreData : PeekResult
-    }
     interface StreamProcessor {
         fun available(): Int
         fun peekByte(offset: Int = 0): Byte
@@ -234,9 +165,6 @@ private val codecStubs =
     package com.ditchoom.buffer.codec
     import com.ditchoom.buffer.ReadBuffer
     import com.ditchoom.buffer.WriteBuffer
-    import com.ditchoom.buffer.stream.PeekResult
-    import com.ditchoom.buffer.stream.StreamProcessor
-    import kotlin.jvm.JvmInline
     interface CodecContext {
         operator fun <T : Any> get(key: Key<T>): T?
         abstract class Key<T : Any>
@@ -259,26 +187,42 @@ private val codecStubs =
             }
         }
     }
-    fun interface Decoder<out T> {
-        fun decode(buffer: ReadBuffer, context: DecodeContext): T
+    interface Codec<T> {
+        fun decode(buffer: ReadBuffer): T
+        fun decode(buffer: ReadBuffer, context: DecodeContext): T = decode(buffer)
+        fun encode(buffer: WriteBuffer, value: T)
+        fun encode(buffer: WriteBuffer, value: T, context: EncodeContext) = encode(buffer, value)
+        fun sizeOf(value: T): Int? = null
     }
-    interface Encoder<in T> {
-        fun encode(buffer: WriteBuffer, value: T, context: EncodeContext)
-        fun wireSize(value: T, context: EncodeContext): Int = throw NotImplementedError("wireSize")
+    """,
+    )
+
+private val payloadStubs =
+    SourceFile.kotlin(
+        "PayloadStubs.kt",
+        """
+    package com.ditchoom.buffer.codec.payload
+    import com.ditchoom.buffer.ReadBuffer
+    interface PayloadReader {
+        fun readByte(): Byte
+        fun readShort(): Short
+        fun readInt(): Int
+        fun readLong(): Long
+        fun readFloat(): Float
+        fun readDouble(): Double
+        fun readString(length: Int): String
+        fun remaining(): Int
     }
-    interface Codec<T> : Encoder<T>, Decoder<T> {
-        fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NeedsMoreData
-    }
-    interface DispatchFraming<D : Any> {
-        fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult
-        object Inherit : DispatchFraming<Any> {
-            override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = error("sentinel")
-        }
-    }
-    interface BodyLengthFraming<D : Any> : DispatchFraming<D> {
-        fun readBodyLength(buffer: ReadBuffer): Int
-        fun writeBodyLength(buffer: WriteBuffer, n: Int)
-        fun bodyLengthSize(n: Int): Int
+    class ReadBufferPayloadReader(private val buffer: ReadBuffer) : PayloadReader {
+        override fun readByte(): Byte = TODO()
+        override fun readShort(): Short = TODO()
+        override fun readInt(): Int = TODO()
+        override fun readLong(): Long = TODO()
+        override fun readFloat(): Float = TODO()
+        override fun readDouble(): Double = TODO()
+        override fun readString(length: Int): String = TODO()
+        override fun remaining(): Int = TODO()
+        fun release() {}
     }
     """,
     )
@@ -294,11 +238,25 @@ fun compileWithKsp(vararg sources: SourceFile): CompileResult {
             kotlincArguments = listOf("-Xskip-metadata-version-check")
         }
     val result = compilation.compile()
-    return CompileResult(result.exitCode, result.messages, compilation.readGeneratedSources())
+    return CompileResult(result.exitCode, result.messages)
 }
 
 fun compileWithKspAndBufferStubs(vararg sources: SourceFile): CompileResult {
     val allSources = listOf(annotationSource, codecStubs, bufferStubs, streamStubs) + sources.toList()
+    val compilation =
+        KotlinCompilation().apply {
+            this.sources = allSources
+            configureKsp(useKsp2 = true) {
+                symbolProcessorProviders += ProtocolMessageProcessorProvider()
+            }
+            kotlincArguments = listOf("-Xskip-metadata-version-check")
+        }
+    val result = compilation.compile()
+    return CompileResult(result.exitCode, result.messages)
+}
+
+fun compileWithKspAndPayloadStubs(vararg sources: SourceFile): CompileResult {
+    val allSources = listOf(annotationSource, codecStubs, bufferStubs, streamStubs, payloadStubs) + sources.toList()
     val compilation =
         KotlinCompilation().apply {
             this.sources = allSources
@@ -321,11 +279,10 @@ private val customFunctionStubs =
 
     fun ReadBuffer.readRepeatedShorts(count: UByte): List<Short> = TODO()
     fun WriteBuffer.writeRepeatedShorts(items: List<Short>, count: UByte): Unit = TODO()
-    fun repeatedShortsSize(items: List<Short>, count: UByte): Int = TODO()
+    fun repeatedShortsSize(items: List<Short>): Int = TODO()
 
     fun ReadBuffer.readPropertyBag(): Map<Int, Int> = TODO()
     fun WriteBuffer.writePropertyBag(props: Map<Int, Int>): Unit = TODO()
-    fun propertyBagSize(props: Map<Int, Int>): Int = TODO()
 
     fun ReadBuffer.readFixedInt(): Int = TODO()
     fun WriteBuffer.writeFixedInt(value: Int): Unit = TODO()

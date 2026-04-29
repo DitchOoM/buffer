@@ -1,12 +1,9 @@
 package com.ditchoom.buffer.codec.test
 
-import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.Codec
-import com.ditchoom.buffer.codec.encodeToBuffer
 import com.ditchoom.buffer.codec.test.protocols.AllTypesMessage
 import com.ditchoom.buffer.codec.test.protocols.AllTypesMessageCodec
 import com.ditchoom.buffer.codec.test.protocols.ConnAckFlags
@@ -78,7 +75,7 @@ class CodecPerformanceValidationTest {
     }
 
     @Test
-    fun `dns header wire size is 12`() {
+    fun `dns header sizeOf is 12`() {
         val header =
             DnsHeader(
                 id = 0x1234u,
@@ -88,39 +85,35 @@ class CodecPerformanceValidationTest {
                 nsCount = 0u,
                 arCount = 0u,
             )
-        val encoded = DnsHeaderCodec.encodeToBuffer(header)
-        assertEquals(12, encoded.remaining())
+        assertEquals(12, DnsHeaderCodec.sizeOf(header))
     }
 
     @Test
-    fun `connack wire size is 2`() {
+    fun `connack sizeOf is 2`() {
         val connack = MqttPacketConnAck(ConnAckFlags(0u), ConnectReturnCode(0u))
-        val encoded = MqttPacketConnAckCodec.encodeToBuffer(connack)
-        assertEquals(2, encoded.remaining())
+        assertEquals(2, MqttPacketConnAckCodec.sizeOf(connack))
     }
 
     @Test
-    fun `puback wire size is 2`() {
+    fun `puback sizeOf is 2`() {
         val puback = MqttPacketPubAck(PacketId(1u))
-        val encoded = MqttPacketPubAckCodec.encodeToBuffer(puback)
-        assertEquals(2, encoded.remaining())
+        assertEquals(2, MqttPacketPubAckCodec.sizeOf(puback))
     }
 
     @Test
-    fun `ws frame header wire size is 2`() {
+    fun `ws frame header sizeOf is 2`() {
         val header = WsFrameHeader(WsHeaderByte1(0u), WsHeaderByte2(0u))
-        val encoded = WsFrameHeaderCodec.encodeToBuffer(header)
-        assertEquals(2, encoded.remaining())
+        assertEquals(2, WsFrameHeaderCodec.sizeOf(header))
     }
 
     @Test
     fun `buffer position after decode`() {
         val connack = MqttPacketConnAck(ConnAckFlags(0u), ConnectReturnCode(0u))
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
-        MqttPacketConnAckCodec.encode(buffer, connack, EncodeContext.Empty)
+        MqttPacketConnAckCodec.encode(buffer, connack)
         buffer.resetForRead()
         assertEquals(2, buffer.remaining())
-        MqttPacketConnAckCodec.decode(buffer, DecodeContext.Empty)
+        MqttPacketConnAckCodec.decode(buffer)
         assertEquals(0, buffer.remaining())
     }
 
@@ -145,10 +138,11 @@ class CodecPerformanceValidationTest {
         value: T,
     ) {
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
-        codec.encode(buffer, value, EncodeContext.Empty)
+        codec.encode(buffer, value)
         buffer.resetForRead()
         val bytesWritten = buffer.remaining()
-        codec.decode(buffer, DecodeContext.Empty)
+        codec.decode(buffer)
         assertEquals(0, buffer.remaining(), "Not all bytes consumed for ${value::class.simpleName}")
+        assertEquals(codec.sizeOf(value), bytesWritten, "sizeOf mismatch for ${value::class.simpleName}")
     }
 }

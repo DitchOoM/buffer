@@ -25,11 +25,11 @@ actual fun compress(
         var totalSize = 0
 
         try {
-            compressor.compressUnsafe(buffer) { chunk ->
+            compressor.compress(buffer) { chunk ->
                 totalSize += chunk.remaining()
                 outputChunks.add(chunk)
             }
-            compressor.finishUnsafe { chunk ->
+            compressor.finish { chunk ->
                 totalSize += chunk.remaining()
                 outputChunks.add(chunk)
             }
@@ -59,11 +59,11 @@ actual fun decompress(
         var totalSize = 0
 
         try {
-            decompressor.decompressUnsafe(buffer) { chunk ->
+            decompressor.decompress(buffer) { chunk ->
                 totalSize += chunk.remaining()
                 outputChunks.add(chunk)
             }
-            decompressor.finishUnsafe { chunk ->
+            decompressor.finish { chunk ->
                 totalSize += chunk.remaining()
                 outputChunks.add(chunk)
             }

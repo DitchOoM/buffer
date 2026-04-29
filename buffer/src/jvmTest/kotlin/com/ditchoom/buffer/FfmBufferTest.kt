@@ -154,7 +154,7 @@ class FfmBufferTest {
     fun `writeInt after free throws`() {
         val buffer = createFfmBuffer(64)
         buffer.freeNativeMemory()
-        assertFailsWith<BufferOverflowException> { buffer.writeInt(42) }
+        assertFailsWith<java.nio.BufferOverflowException> { buffer.writeInt(42) }
     }
 
     @Test

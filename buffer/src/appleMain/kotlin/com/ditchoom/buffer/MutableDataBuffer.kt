@@ -169,17 +169,10 @@ class MutableDataBuffer private constructor(
         charset: Charset,
     ): String {
         if (length == 0) return ""
-        checkReadBounds(length)
         if (!ownsData) {
             val bytes = (bytePointer + position)!!.readBytes(length)
             position += length
             return bytes.decodeToString()
-        }
-        val dataLength = data.length.toInt()
-        if (position + length > dataLength) {
-            throw BufferUnderflowException(
-                "readString of $length byte(s) at position $position exceeds underlying NSData length $dataLength",
-            )
         }
         val subdata = data.subdataWithRange(NSMakeRange(position.convert(), length.convert()))
         val stringEncoding = charset.toEncoding()
@@ -201,7 +194,6 @@ class MutableDataBuffer private constructor(
     }
 
     override fun writeByte(byte: Byte): WriteBuffer {
-        checkWriteBounds(1)
         bytePointer[position++] = byte
         return this
     }
@@ -210,13 +202,11 @@ class MutableDataBuffer private constructor(
         index: Int,
         byte: Byte,
     ): WriteBuffer {
-        checkIndexBounds(index, 1)
         bytePointer[index] = byte
         return this
     }
 
     override fun writeShort(short: Short): WriteBuffer {
-        checkWriteBounds(2)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) short.reverseBytes() else short
         (bytePointer + position)!!.reinterpret<ShortVar>()[0] = value
         position += 2
@@ -227,14 +217,12 @@ class MutableDataBuffer private constructor(
         index: Int,
         short: Short,
     ): WriteBuffer {
-        checkIndexBounds(index, 2)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) short.reverseBytes() else short
         (bytePointer + index)!!.reinterpret<ShortVar>()[0] = value
         return this
     }
 
     override fun writeInt(int: Int): WriteBuffer {
-        checkWriteBounds(4)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) int.reverseBytes() else int
         (bytePointer + position)!!.reinterpret<IntVar>()[0] = value
         position += 4
@@ -245,14 +233,12 @@ class MutableDataBuffer private constructor(
         index: Int,
         int: Int,
     ): WriteBuffer {
-        checkIndexBounds(index, 4)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) int.reverseBytes() else int
         (bytePointer + index)!!.reinterpret<IntVar>()[0] = value
         return this
     }
 
     override fun writeLong(long: Long): WriteBuffer {
-        checkWriteBounds(8)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) long.reverseBytes() else long
         (bytePointer + position)!!.reinterpret<LongVar>()[0] = value
         position += 8
@@ -263,7 +249,6 @@ class MutableDataBuffer private constructor(
         index: Int,
         long: Long,
     ): WriteBuffer {
-        checkIndexBounds(index, 8)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) long.reverseBytes() else long
         (bytePointer + index)!!.reinterpret<LongVar>()[0] = value
         return this
@@ -277,7 +262,6 @@ class MutableDataBuffer private constructor(
         if (length < 1) {
             return this
         }
-        checkWriteBounds(length)
         if (ownsData) {
             val range = NSMakeRange(position.convert(), length.convert())
             bytes.usePinned { pin ->
@@ -295,7 +279,6 @@ class MutableDataBuffer private constructor(
     override fun write(buffer: ReadBuffer) {
         val bytesToCopy = buffer.remaining()
         if (bytesToCopy == 0) return
-        checkWriteBounds(bytesToCopy)
         val srcNative = buffer.nativeMemoryAccess
         if (srcNative != null) {
             val srcPtr = srcNative.nativeAddress.toCPointer<ByteVar>()!! + buffer.position()
@@ -334,7 +317,6 @@ class MutableDataBuffer private constructor(
         @Suppress("UNCHECKED_CAST")
         val stringBytes = stringData.bytes as CPointer<ByteVar>
         val stringLength = stringData.length.toInt()
-        checkWriteBounds(stringLength)
 
         memcpy(bytePointer + position, stringBytes, stringLength.convert())
         position += stringLength
@@ -678,24 +660,12 @@ class MutableDataBufferSlice(
         charset: Charset,
     ): String {
         if (length == 0) return ""
-        checkReadBounds(length)
         val parentData = parent.data
         if (!parent.ownsData) {
             // External pointer: no NSData available, use byte decoding
             val bytes = (bytePointer + position)!!.readBytes(length)
             position += length
             return bytes.decodeToString()
-        }
-        // Slice bounds (remaining) can exceed the parent NSData's actual length when
-        // callers setLimit() past the underlying data (e.g. MQTT sets limit by wire
-        // remaining-length before the body bytes have arrived). subdataWithRange:
-        // throws an uncatchable NSRangeException in that case, so validate here.
-        val parentDataLength = parentData.length.toInt()
-        if (sliceOffset + position + length > parentDataLength) {
-            throw BufferUnderflowException(
-                "Slice read of $length byte(s) at slice position $position " +
-                    "(sliceOffset=$sliceOffset) exceeds parent NSData length $parentDataLength",
-            )
         }
         val subdata =
             parentData.subdataWithRange(

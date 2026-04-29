@@ -6,7 +6,6 @@ import com.ditchoom.buffer.codec.processor.spi.FieldContext
 import com.ditchoom.buffer.codec.processor.spi.FunctionRef
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import kotlin.test.Ignore
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -176,9 +175,7 @@ class DataClassCodegenTest {
     }
 
     @Test
-    fun `remaining bytes followed by fixed-size trailer auto-reserves bytes`() {
-        // @RemainingBytes is no longer required to be the last field when the trailing fields have
-        // a fixed wire size. The processor infers the trailer size and emits a reservation.
+    fun `remaining bytes on non-last field causes error`() {
         val source =
             SourceFile.kotlin(
                 "Test.kt",
@@ -188,33 +185,14 @@ class DataClassCodegenTest {
             import com.ditchoom.buffer.codec.annotations.RemainingBytes
 
             @ProtocolMessage
-            data class TrailerMsg(@RemainingBytes val data: String, val crc: UByte)
-            """,
-            )
-        val result = compileWithKsp(source)
-        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
-    }
-
-    @Test
-    fun `remaining bytes followed by variable-size trailer causes error`() {
-        val source =
-            SourceFile.kotlin(
-                "Test.kt",
-                """
-            package test
-            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-            import com.ditchoom.buffer.codec.annotations.RemainingBytes
-            import com.ditchoom.buffer.codec.annotations.LengthPrefixed
-
-            @ProtocolMessage
-            data class BadMsg(@RemainingBytes val data: String, @LengthPrefixed val trailer: String)
+            data class BadMsg(@RemainingBytes val data: String, val id: UByte)
             """,
             )
         val result = compileWithKsp(source)
         val hasError =
             result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
-                result.messages.contains("variable wire size", ignoreCase = true)
-        assertTrue(hasError, "Expected error for variable-size trailer but got: ${result.exitCode}\n${result.messages}")
+                result.messages.contains("@RemainingBytes can only be used on the last")
+        assertTrue(hasError, "Expected error for @RemainingBytes on non-last field but got: ${result.exitCode}\n${result.messages}")
     }
 
     @Test
@@ -253,7 +231,7 @@ class DataClassCodegenTest {
             )
             """,
             )
-        val result = compileWithKsp(source)
+        val result = compileWithKspAndPayloadStubs(source)
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
     }
 
@@ -276,7 +254,7 @@ class DataClassCodegenTest {
             )
             """,
             )
-        val result = compileWithKsp(source)
+        val result = compileWithKspAndPayloadStubs(source)
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
     }
 
@@ -297,7 +275,7 @@ class DataClassCodegenTest {
             )
             """,
             )
-        val result = compileWithKsp(source)
+        val result = compileWithKspAndPayloadStubs(source)
         val hasError =
             result.exitCode == KotlinCompilation.ExitCode.COMPILATION_ERROR ||
                 result.messages.contains("requires a length annotation")
@@ -322,7 +300,7 @@ class DataClassCodegenTest {
             )
             """,
             )
-        val result = compileWithKsp(source)
+        val result = compileWithKspAndPayloadStubs(source)
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
     }
 
@@ -345,7 +323,7 @@ class DataClassCodegenTest {
             )
             """,
             )
-        val result = compileWithKsp(source)
+        val result = compileWithKspAndPayloadStubs(source)
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
     }
 
@@ -587,7 +565,7 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
                         writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
                         fixedSize = -1,
-                        wireSizeFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
+                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
@@ -595,7 +573,6 @@ class DataClassCodegenTest {
     }
 
     @Test
-    @Ignore("Phase 9 Step 6.5 — SPI custom-provider consumption pending port to PlanBuilder/FieldStrategyBuilder. See phase-9-step6.5-spi-port.md.")
     fun `custom annotation repeated compiles`() {
         val source =
             SourceFile.kotlin(
@@ -624,8 +601,8 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer.codec.test", "readRepeatedShorts"),
                         writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writeRepeatedShorts"),
                         fixedSize = -1,
+                        sizeOfFunction = FunctionRef("com.ditchoom.buffer.codec.test", "repeatedShortsSize"),
                         contextFields = listOf(countField),
-                        wireSizeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "repeatedShortsSize"),
                     )
                 }
             }
@@ -634,7 +611,6 @@ class DataClassCodegenTest {
     }
 
     @Test
-    @Ignore("Phase 9 Step 6.5 — SPI custom-provider consumption pending port to PlanBuilder/FieldStrategyBuilder. See phase-9-step6.5-spi-port.md.")
     fun `custom annotation property bag compiles`() {
         val source =
             SourceFile.kotlin(
@@ -660,7 +636,7 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer.codec.test", "readPropertyBag"),
                         writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writePropertyBag"),
                         fixedSize = -1,
-                        wireSizeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "propertyBagSize"),
+                        sizeOfFunction = null,
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(propBagProvider))
@@ -754,7 +730,6 @@ class DataClassCodegenTest {
     }
 
     @Test
-    @Ignore("Phase 9 Step 6.5 — SPI custom-provider consumption pending port to PlanBuilder/FieldStrategyBuilder. See phase-9-step6.5-spi-port.md.")
     fun `provider describe throws propagates as ksp error`() {
         val source =
             SourceFile.kotlin(
@@ -786,7 +761,6 @@ class DataClassCodegenTest {
     }
 
     @Test
-    @Ignore("Phase 9 Step 6.5 — SPI custom-provider consumption pending port to PlanBuilder/FieldStrategyBuilder. See phase-9-step6.5-spi-port.md.")
     fun `custom annotation breaks batch`() {
         val source =
             SourceFile.kotlin(
@@ -812,7 +786,72 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
                         writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
                         fixedSize = -1,
-                        wireSizeFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
+                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
+                    )
+            }
+        val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    @Test
+    fun `custom field with fixed size generates constant sizeOf`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+            @Target(AnnotationTarget.VALUE_PARAMETER)
+            @Retention(AnnotationRetention.BINARY)
+            annotation class CustomFixed
+
+            @ProtocolMessage
+            data class FixedMsg(val header: Byte, @CustomFixed val payload: Int)
+            """,
+            )
+        val fixedProvider =
+            object : CodecFieldProvider {
+                override val annotationFqn = "test.CustomFixed"
+
+                override fun describe(context: FieldContext): CustomFieldDescriptor =
+                    CustomFieldDescriptor(
+                        readFunction = FunctionRef("com.ditchoom.buffer.codec.test", "readFixedInt"),
+                        writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writeFixedInt"),
+                        fixedSize = 4,
+                    )
+            }
+        val result = compileWithKspAndCustomProviders(source, providers = listOf(fixedProvider))
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
+    }
+
+    @Test
+    fun `custom field with sizeOf function generates runtime sizeOf`() {
+        val source =
+            SourceFile.kotlin(
+                "Test.kt",
+                """
+            package test
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+            @Target(AnnotationTarget.VALUE_PARAMETER)
+            @Retention(AnnotationRetention.BINARY)
+            annotation class VariableByteInteger
+
+            @ProtocolMessage
+            data class RuntimeSizeMsg(val header: Byte, @VariableByteInteger val length: Int)
+            """,
+            )
+        val vbiProvider =
+            object : CodecFieldProvider {
+                override val annotationFqn = "test.VariableByteInteger"
+
+                override fun describe(context: FieldContext): CustomFieldDescriptor =
+                    CustomFieldDescriptor(
+                        readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
+                        writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
+                        fixedSize = -1,
+                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
@@ -851,7 +890,7 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
                         writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
                         fixedSize = -1,
-                        wireSizeFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
+                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
@@ -888,7 +927,7 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
                         writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
                         fixedSize = -1,
-                        wireSizeFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
+                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider))
@@ -925,7 +964,7 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer", "readVariableByteInteger"),
                         writeFunction = FunctionRef("com.ditchoom.buffer", "writeVariableByteInteger"),
                         fixedSize = -1,
-                        wireSizeFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
+                        sizeOfFunction = FunctionRef("com.ditchoom.buffer", "variableByteSizeInt"),
                     )
             }
         val propBagProvider =
@@ -937,7 +976,7 @@ class DataClassCodegenTest {
                         readFunction = FunctionRef("com.ditchoom.buffer.codec.test", "readPropertyBag"),
                         writeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "writePropertyBag"),
                         fixedSize = -1,
-                        wireSizeFunction = FunctionRef("com.ditchoom.buffer.codec.test", "propertyBagSize"),
+                        sizeOfFunction = null,
                     )
             }
         val result = compileWithKspAndCustomProviders(source, providers = listOf(vbiProvider, propBagProvider))
@@ -1078,31 +1117,6 @@ class DataClassCodegenTest {
     }
 
     @Test
-    fun `list of value class wrapping primitive compiles`() {
-        val source =
-            SourceFile.kotlin(
-                "Test.kt",
-                """
-            package test
-            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-            import com.ditchoom.buffer.codec.annotations.RemainingBytes
-
-            @JvmInline
-            @ProtocolMessage
-            value class SubAckReturnCode(val raw: UByte)
-
-            @ProtocolMessage
-            data class SubAck(
-                val packetIdentifier: UShort,
-                @RemainingBytes val returnCodes: List<SubAckReturnCode>,
-            )
-            """,
-            )
-        val result = compileWithKsp(source)
-        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
-    }
-
-    @Test
     fun `length from zero count produces empty list`() {
         val source =
             SourceFile.kotlin(
@@ -1121,107 +1135,5 @@ class DataClassCodegenTest {
             )
         val result = compileWithKsp(source)
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
-    }
-
-    // ── Bug fix tests ──
-
-    @Test
-    fun `payload only class generates empty context object and compiles`() {
-        val source =
-            SourceFile.kotlin(
-                "Test.kt",
-                """
-            package test
-            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-            import com.ditchoom.buffer.codec.annotations.Payload
-            import com.ditchoom.buffer.codec.annotations.LengthPrefixed
-
-            @ProtocolMessage
-            data class BinaryData<@Payload D>(
-                @LengthPrefixed val data: D,
-            )
-            """,
-            )
-        val result = compileWithKsp(source)
-        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
-    }
-
-    @Test
-    fun `DispatchOn sealed with mixed payload and non-payload variants compiles`() {
-        val source =
-            SourceFile.kotlin(
-                "Test.kt",
-                """
-            package test
-            import com.ditchoom.buffer.codec.annotations.*
-
-            @JvmInline
-            @ProtocolMessage
-            value class MyHeader(val raw: UByte) {
-                @DispatchValue
-                val packetType: Int get() = raw.toInt() and 0x0F
-            }
-
-            @DispatchOn(MyHeader::class)
-            @ProtocolMessage
-            sealed interface MyProtocol {
-                @PacketType(wire = 1)
-                @ProtocolMessage
-                @JvmInline
-                value class Simple(val x: UInt) : MyProtocol
-
-                @PacketType(wire = 2)
-                @ProtocolMessage
-                data class WithPayload<@Payload D>(
-                    val len: UShort,
-                    @LengthFrom("len") val data: D,
-                ) : MyProtocol
-            }
-            """,
-            )
-        val result = compileWithKsp(source)
-        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
-    }
-
-    /**
-     * Phase 9 Step 3 — value-class auto-detect on a field whose type is a `@JvmInline
-     * value class` wrapping a single primitive. The wrapper itself is NOT annotated
-     * with `@ProtocolMessage` and the field has no `@UseCodec`. Mirrors the consumer
-     * shape in `Topic`, `Opcode`, `MaskingKey` etc. Phase 9 Step 3 wires up
-     * `RawClassMetadata.valueClassInfo` + the `FieldStrategy.ValueClass` plan/emit
-     * pair so this compiles.
-     */
-    @Test
-    fun `field typed as external value class auto-detects without UseCodec`() {
-        val source =
-            SourceFile.kotlin(
-                "Test.kt",
-                """
-            package test
-            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-
-            @JvmInline
-            value class Topic(val raw: UInt)
-
-            @ProtocolMessage
-            data class FrameHeader(
-                val seq: UShort,
-                val topic: Topic,
-            )
-            """,
-            )
-        val result = compileWithKsp(source)
-        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, "Compilation failed:\n${result.messages}")
-        // Phase 9 Step 3 — the generated codec should reference Topic at the encode
-        // site via the inner property and reconstruct it on decode.
-        val generated = result.generatedSources.joinToString("\n")
-        assertTrue(
-            "value.topic.raw" in generated || "topic.raw" in generated,
-            "expected encode site to read .raw off the value-class wrapper; got:\n$generated",
-        )
-        assertTrue(
-            "Topic(" in generated,
-            "expected decode site to invoke the value-class constructor; got:\n$generated",
-        )
     }
 }

@@ -21,25 +21,18 @@ data class Rgb(
 
 /** Codec object for Rgb — 3 bytes on the wire. */
 object RgbCodec : Codec<Rgb> {
-    override fun decode(
-        buffer: ReadBuffer,
-        context: DecodeContext,
-    ): Rgb = Rgb(buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte())
+    override fun decode(buffer: ReadBuffer): Rgb = Rgb(buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte())
 
     override fun encode(
         buffer: WriteBuffer,
         value: Rgb,
-        context: EncodeContext,
     ) {
         buffer.writeUByte(value.r)
         buffer.writeUByte(value.g)
         buffer.writeUByte(value.b)
     }
 
-    override fun wireSize(
-        value: Rgb,
-        context: EncodeContext,
-    ): Int = 3
+    override fun sizeOf(value: Rgb): Int = 3
 }
 
 /** @UseCodec without a length annotation — codec reads directly from buffer. */
@@ -83,6 +76,8 @@ data object RgbOffsetKey : CodecContext.Key<Int>()
  * This proves that context actually flows through @UseCodec fields.
  */
 object ContextAwareRgbCodec : Codec<Rgb> {
+    override fun decode(buffer: ReadBuffer): Rgb = decode(buffer, DecodeContext.Empty)
+
     override fun decode(
         buffer: ReadBuffer,
         context: DecodeContext,
@@ -98,6 +93,11 @@ object ContextAwareRgbCodec : Codec<Rgb> {
     override fun encode(
         buffer: WriteBuffer,
         value: Rgb,
+    ) = encode(buffer, value, EncodeContext.Empty)
+
+    override fun encode(
+        buffer: WriteBuffer,
+        value: Rgb,
         context: EncodeContext,
     ) {
         val offset = context[RgbOffsetKey] ?: 0
@@ -106,10 +106,7 @@ object ContextAwareRgbCodec : Codec<Rgb> {
         buffer.writeUByte((value.b.toInt() - offset).toUByte())
     }
 
-    override fun wireSize(
-        value: Rgb,
-        context: EncodeContext,
-    ): Int = 3
+    override fun sizeOf(value: Rgb): Int = 3
 }
 
 /** Uses the context-aware codec — context must flow through for correct round-trip. */
@@ -118,63 +115,4 @@ data class ContextColoredPoint(
     val x: Int,
     val y: Int,
     @UseCodec(ContextAwareRgbCodec::class) val color: Rgb,
-)
-
-// ========== Directional @UseCodec ==========
-
-/** Decode-only codec — only implements Decoder<T>. */
-object RgbDecoder : com.ditchoom.buffer.codec.Decoder<Rgb> {
-    override fun decode(
-        buffer: ReadBuffer,
-        context: DecodeContext,
-    ): Rgb = Rgb(buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte())
-}
-
-/** Encode-only codec — only implements Encoder<T>. */
-object RgbEncoder : com.ditchoom.buffer.codec.Encoder<Rgb> {
-    override fun encode(
-        buffer: WriteBuffer,
-        value: Rgb,
-        context: EncodeContext,
-    ) {
-        buffer.writeUByte(value.r)
-        buffer.writeUByte(value.g)
-        buffer.writeUByte(value.b)
-    }
-
-    override fun wireSize(
-        value: Rgb,
-        context: EncodeContext,
-    ): Int = 3
-}
-
-/** Inferred decode-only: RgbDecoder only implements Decoder. */
-@ProtocolMessage
-data class DecodeOnlyColoredPoint(
-    val x: Int,
-    val y: Int,
-    @UseCodec(RgbDecoder::class) val color: Rgb,
-)
-
-/** Explicit encode-only. */
-@ProtocolMessage(direction = com.ditchoom.buffer.codec.annotations.Direction.EncodeOnly)
-data class EncodeOnlyColoredPoint(
-    val x: Int,
-    val y: Int,
-    @UseCodec(RgbEncoder::class) val color: Rgb,
-)
-
-/** Bidirectional codec forced to decode-only by annotation. */
-@ProtocolMessage(direction = com.ditchoom.buffer.codec.annotations.Direction.DecodeOnly)
-data class ForcedDecodeOnlyPoint(
-    val x: Int,
-    val y: Int,
-    @UseCodec(RgbCodec::class) val color: Rgb,
-)
-
-/** Decode-only with @LengthPrefixed. */
-@ProtocolMessage
-data class DecodeOnlyPrefixedColor(
-    val id: UByte,
-    @UseCodec(RgbDecoder::class) @LengthPrefixed val color: Rgb,
 )

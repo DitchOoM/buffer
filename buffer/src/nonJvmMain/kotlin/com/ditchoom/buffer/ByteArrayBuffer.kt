@@ -120,7 +120,6 @@ class ByteArrayBuffer(
     }
 
     override fun writeByte(byte: Byte): WriteBuffer {
-        checkWriteBounds(1)
         data[positionValue++] = byte
         return this
     }
@@ -129,14 +128,12 @@ class ByteArrayBuffer(
         index: Int,
         byte: Byte,
     ): WriteBuffer {
-        checkIndexBounds(index, 1)
         data[index] = byte
         return this
     }
 
     override fun writeShort(short: Short): WriteBuffer {
-        checkWriteBounds(2)
-        writeShortUnchecked(positionValue, short)
+        set(positionValue, short)
         positionValue += Short.SIZE_BYTES
         return this
     }
@@ -145,15 +142,6 @@ class ByteArrayBuffer(
         index: Int,
         short: Short,
     ): WriteBuffer {
-        checkIndexBounds(index, 2)
-        writeShortUnchecked(index, short)
-        return this
-    }
-
-    private fun writeShortUnchecked(
-        index: Int,
-        short: Short,
-    ) {
         val v = short.toInt()
         if (littleEndian) {
             data[index] = v.toByte()
@@ -162,11 +150,11 @@ class ByteArrayBuffer(
             data[index] = (v shr 8).toByte()
             data[index + 1] = v.toByte()
         }
+        return this
     }
 
     override fun writeInt(int: Int): WriteBuffer {
-        checkWriteBounds(4)
-        writeIntUnchecked(positionValue, int)
+        set(positionValue, int)
         positionValue += Int.SIZE_BYTES
         return this
     }
@@ -175,15 +163,6 @@ class ByteArrayBuffer(
         index: Int,
         int: Int,
     ): WriteBuffer {
-        checkIndexBounds(index, 4)
-        writeIntUnchecked(index, int)
-        return this
-    }
-
-    private fun writeIntUnchecked(
-        index: Int,
-        int: Int,
-    ) {
         if (littleEndian) {
             data[index] = int.toByte()
             data[index + 1] = (int shr 8).toByte()
@@ -195,11 +174,11 @@ class ByteArrayBuffer(
             data[index + 2] = (int shr 8).toByte()
             data[index + 3] = int.toByte()
         }
+        return this
     }
 
     override fun writeLong(long: Long): WriteBuffer {
-        checkWriteBounds(8)
-        writeLongUnchecked(positionValue, long)
+        set(positionValue, long)
         positionValue += Long.SIZE_BYTES
         return this
     }
@@ -208,22 +187,14 @@ class ByteArrayBuffer(
         index: Int,
         long: Long,
     ): WriteBuffer {
-        checkIndexBounds(index, 8)
-        writeLongUnchecked(index, long)
-        return this
-    }
-
-    private fun writeLongUnchecked(
-        index: Int,
-        long: Long,
-    ) {
         if (littleEndian) {
-            writeIntUnchecked(index, long.toInt())
-            writeIntUnchecked(index + 4, (long shr 32).toInt())
+            set(index, long.toInt())
+            set(index + 4, (long shr 32).toInt())
         } else {
-            writeIntUnchecked(index, (long shr 32).toInt())
-            writeIntUnchecked(index + 4, long.toInt())
+            set(index, (long shr 32).toInt())
+            set(index + 4, long.toInt())
         }
+        return this
     }
 
     override fun writeBytes(
@@ -231,7 +202,6 @@ class ByteArrayBuffer(
         offset: Int,
         length: Int,
     ): WriteBuffer {
-        checkWriteBounds(length)
         bytes.copyInto(data, positionValue, offset, offset + length)
         positionValue += length
         return this
@@ -239,8 +209,6 @@ class ByteArrayBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
-        if (size == 0) return
-        checkWriteBounds(size)
         val actual = buffer.unwrapFully()
         if (actual is ByteArrayBuffer) {
             actual.data.copyInto(data, positionValue, actual.positionValue, actual.positionValue + size)

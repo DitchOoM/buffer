@@ -1,11 +1,8 @@
 package com.ditchoom.buffer.codec.test
 
-import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.codec.encodeToBuffer
 import com.ditchoom.buffer.codec.test.protocols.WsCloseBody
 import com.ditchoom.buffer.codec.test.protocols.WsCloseBodyCodec
 import com.ditchoom.buffer.codec.test.protocols.WsCloseCode
@@ -55,10 +52,9 @@ class WebSocketFrameRoundTripTest {
     }
 
     @Test
-    fun `frame header wire size is 2`() {
+    fun `frame header sizeOf is 2`() {
         val header = WsFrameHeader(WsHeaderByte1(0u), WsHeaderByte2(0u))
-        val encoded = WsFrameHeaderCodec.encodeToBuffer(header)
-        assertEquals(2, encoded.remaining())
+        assertEquals(2, WsFrameHeaderCodec.sizeOf(header))
     }
 
     @Test
@@ -110,9 +106,9 @@ class WebSocketFrameRoundTripTest {
                 payload = "Hello",
             )
         val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
-        WsMaskedFrameCodec.encode(buffer, original, EncodeContext.Empty)
+        WsMaskedFrameCodec.encode(buffer, original)
         buffer.resetForRead()
-        val decoded = WsMaskedFrameCodec.decode(buffer, DecodeContext.Empty)
+        val decoded = WsMaskedFrameCodec.decode(buffer)
         assertEquals(original, decoded)
         assertEquals(WsMaskingKey(0x37FA213Du), decoded.maskingKey)
     }
@@ -126,9 +122,9 @@ class WebSocketFrameRoundTripTest {
                 payload = "Hello",
             )
         val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
-        WsMaskedFrameCodec.encode(buffer, original, EncodeContext.Empty)
+        WsMaskedFrameCodec.encode(buffer, original)
         buffer.resetForRead()
-        val decoded = WsMaskedFrameCodec.decode(buffer, DecodeContext.Empty)
+        val decoded = WsMaskedFrameCodec.decode(buffer)
         assertEquals(original, decoded)
         assertEquals(null, decoded.maskingKey)
     }

@@ -861,38 +861,17 @@ interface ReadBuffer : PositionBuffer {
  * Recursively unwraps all wrapper types (PooledBuffer, TrackedSlice) to reach the
  * underlying concrete buffer implementation.
  *
- * Throws [IllegalStateException] if a [com.ditchoom.buffer.pool.PooledBuffer] in the
- * wrapper chain has been freed — reaching through to its inner buffer after free
- * would expose memory the pool has handed to another caller.
+ * Use this instead of `(buffer as? PlatformBuffer)?.unwrap() ?: buffer` to correctly
+ * handle TrackedSlice, which implements ReadBuffer but NOT PlatformBuffer.
  */
+@Suppress("DEPRECATION")
 fun ReadBuffer.unwrapFully(): ReadBuffer {
-    var current: ReadBuffer = this
-    while (current is BufferWrapper) {
-        current = current.unwrapOnce()
+    if (this is PlatformBuffer) {
+        val unwrapped = unwrap()
+        return if (unwrapped !== this) unwrapped.unwrapFully() else this
     }
-    return current
-}
-
-/**
- * Marker interface for a [ReadBuffer] that delegates to an underlying
- * buffer. Implementing this lets [unwrapFully] traverse arbitrary wrapper
- * chains — consumers can add their own decorator types without touching
- * `unwrapFully`.
- *
- * Implementations wired internally today: `PooledBuffer`, `TrackedSlice`,
- * `LeakTrackingBuffer`.
- */
-interface BufferWrapper : ReadBuffer {
-    /**
-     * Returns the next buffer in the wrapper chain. Called by
-     * [unwrapFully]; most callers should invoke [unwrapFully] directly
-     * rather than walking wrappers step-by-step.
-     *
-     * Implementations may throw [IllegalStateException] to reject
-     * unwrapping when their invariants forbid it — e.g. a pool-returned
-     * buffer whose memory has already been handed to another caller.
-     */
-    fun unwrapOnce(): ReadBuffer
+    if (this is com.ditchoom.buffer.pool.TrackedSlice) return inner.unwrapFully()
+    return this
 }
 
 /**

@@ -78,7 +78,6 @@ kotlin {
             }
         } else if (HostManager.hostIsLinux) {
             linuxX64()
-            linuxArm64()
         }
     }
 
@@ -196,7 +195,7 @@ afterEvaluate {
                 }
             }
         }
-        if (HostManager.hostIsMac && System.getenv("LOCAL_SINGLE_HOST_PUBLISH") != "true") {
+        if (HostManager.hostIsMac) {
             tasks
                 .matching {
                     it.name.startsWith("publishKotlinMultiplatformPublication")

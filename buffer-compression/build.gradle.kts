@@ -99,7 +99,6 @@ kotlin {
                     associateWith(this@linuxX64.compilations.getByName("main"))
                 }
             }
-            linuxArm64()
         }
     }
     // Link against simdutf (transitive dependency via :buffer module)

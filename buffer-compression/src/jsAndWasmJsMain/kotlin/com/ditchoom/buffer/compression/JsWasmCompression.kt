@@ -12,7 +12,7 @@ actual val supportsSyncCompression: Boolean by lazy { isNodeJs }
 
 actual val supportsRawDeflate: Boolean by lazy { isNodeJs }
 
-actual val supportsStatefulFlush: Boolean by lazy { isNodeJs }
+actual val supportsStatefulFlush: Boolean = false
 
 actual fun compress(
     buffer: ReadBuffer,

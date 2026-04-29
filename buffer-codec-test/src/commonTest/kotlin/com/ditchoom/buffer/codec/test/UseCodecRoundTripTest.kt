@@ -1,6 +1,5 @@
 package com.ditchoom.buffer.codec.test
 
-import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -74,7 +73,7 @@ class UseCodecRoundTripTest {
     fun useCodecPreservesFieldOrder() {
         val original = ColorBlock(colorBytes = 3u, color = Rgb(1u, 2u, 3u), label = 99u)
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        ColorBlockCodec.encode(buffer, original, EncodeContext.Empty)
+        ColorBlockCodec.encode(buffer, original)
         buffer.resetForRead()
         // colorBytes (2 bytes) + rgb (3 bytes) + label (1 byte)
         assertEquals(3.toShort(), buffer.readShort()) // colorBytes = 3

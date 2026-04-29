@@ -12,7 +12,7 @@ import java.nio.ByteBuffer
  * or use `buffer.use {}`.
  *
  * Use-after-free safety: overrides the [byteBuffer] getter to throw
- * [IllegalStateException] when [isFreed]. Since ALL data operations in [BaseJvmBuffer]
+ * [IllegalStateException] when [freed]. Since ALL data operations in [BaseJvmBuffer]
  * go through [byteBuffer], this single guard protects every read/write method.
  * Metadata operations (position, limit, capacity) still work after free because
  * [BaseJvmBuffer] captures a separate `Buffer` reference at construction time.
@@ -34,7 +34,7 @@ abstract class DeterministicUnsafeJvmBuffer(
 
     override val byteBuffer: ByteBuffer
         get() {
-            if (isFreed) throw IllegalStateException("Buffer has been freed")
+            if (freed) throw IllegalStateException("Buffer has been freed")
             return super.byteBuffer
         }
 
@@ -42,25 +42,24 @@ abstract class DeterministicUnsafeJvmBuffer(
 
     override val nativeAddress: Long
         get() {
-            if (isFreed) throw IllegalStateException("Buffer has been freed")
+            if (freed) throw IllegalStateException("Buffer has been freed")
             return unsafeAddress
         }
 
     override val nativeSize: Long
         get() {
-            if (isFreed) throw IllegalStateException("Buffer has been freed")
+            if (freed) throw IllegalStateException("Buffer has been freed")
             return capacity.toLong()
         }
 
     // --- CloseableBuffer ---
 
-    @Volatile
-    final override var isFreed: Boolean = false
-        private set
+    @Volatile private var freed = false
+    override val isFreed: Boolean get() = freed
 
     override fun freeNativeMemory() {
-        if (!isFreed) {
-            isFreed = true
+        if (!freed) {
+            freed = true
             UnsafeAllocator.freeMemory(unsafeAddress)
         }
     }
@@ -69,7 +68,7 @@ abstract class DeterministicUnsafeJvmBuffer(
 
     override fun slice(): PlatformBuffer {
         // Check here too for a clear error message (vs generic byteBuffer guard)
-        if (isFreed) throw IllegalStateException("Buffer has been freed")
+        if (freed) throw IllegalStateException("Buffer has been freed")
         return sliceImpl()
     }
 

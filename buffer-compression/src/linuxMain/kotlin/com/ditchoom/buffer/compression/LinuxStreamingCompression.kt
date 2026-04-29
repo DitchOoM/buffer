@@ -1,9 +1,9 @@
 package com.ditchoom.buffer.compression
 
-import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteArrayBuffer
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.managedMemoryAccess
 import com.ditchoom.buffer.nativeMemoryAccess
 import kotlinx.cinterop.ByteVar
@@ -22,7 +22,6 @@ import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.usePinned
 import platform.zlib.Z_BUF_ERROR
-import platform.zlib.Z_DATA_ERROR
 import platform.zlib.Z_DEFLATED
 import platform.zlib.Z_FINISH
 import platform.zlib.Z_NO_FLUSH
@@ -45,20 +44,20 @@ import platform.zlib.z_stream
 actual fun StreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-    bufferFactory: BufferFactory,
+    allocator: BufferAllocator,
     outputBufferSize: Int,
     windowBits: Int,
-): StreamingCompressor = LinuxZlibStreamingCompressor(algorithm, level, bufferFactory, outputBufferSize, windowBits)
+): StreamingCompressor = LinuxZlibStreamingCompressor(algorithm, level, allocator, outputBufferSize, windowBits)
 
 /**
  * Linux streaming decompressor factory using z_stream for true incremental decompression.
  */
 actual fun StreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
-    bufferFactory: BufferFactory,
+    allocator: BufferAllocator,
     outputBufferSize: Int,
     expectedSize: Int,
-): StreamingDecompressor = LinuxZlibStreamingDecompressor(algorithm, bufferFactory, outputBufferSize)
+): StreamingDecompressor = LinuxZlibStreamingDecompressor(algorithm, allocator, outputBufferSize)
 
 /**
  * Window bits for different compression formats:
@@ -77,22 +76,22 @@ private const val WINDOW_BITS_GZIP = 31
  */
 @OptIn(ExperimentalForeignApi::class)
 private class OutputBuffer(
-    val buffer: PlatformBuffer,
+    val buffer: ReadWriteBuffer,
     val address: Long,
     private val pinnedArray: kotlinx.cinterop.Pinned<ByteArray>? = null,
 ) {
     fun release() {
         pinnedArray?.unpin()
-        buffer.freeNativeMemory()
+        (buffer as? PlatformBuffer)?.freeNativeMemory()
     }
 }
 
 /**
- * Allocates an output buffer from the factory and resolves its native address.
+ * Allocates an output buffer from the allocator and resolves its native address.
  * Supports NativeMemoryAccess (direct pointer) and ManagedMemoryAccess (pinned ByteArray).
  */
 @OptIn(ExperimentalForeignApi::class)
-private fun BufferFactory.allocateOutputBuffer(size: Int): OutputBuffer {
+private fun BufferAllocator.allocateOutputBuffer(size: Int): OutputBuffer {
     val buffer = allocate(size)
     val readBuf = buffer as ReadBuffer
 
@@ -127,7 +126,7 @@ private fun BufferFactory.allocateOutputBuffer(size: Int): OutputBuffer {
 private class LinuxZlibStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
     private val level: CompressionLevel,
-    override val bufferFactory: BufferFactory,
+    override val allocator: BufferAllocator,
     private val outputBufferSize: Int,
     private val customWindowBits: Int = 0,
 ) : StreamingCompressor {
@@ -153,10 +152,9 @@ private class LinuxZlibStreamingCompressor(
         s.next_out = null
         s.avail_out = 0u
 
-        val resolved = resolveWindowBits(algorithm, customWindowBits)
         val windowBits =
-            if (resolved != 0) {
-                resolved
+            if (customWindowBits != 0) {
+                customWindowBits
             } else {
                 when (algorithm) {
                     CompressionAlgorithm.Deflate -> WINDOW_BITS_ZLIB
@@ -185,7 +183,7 @@ private class LinuxZlibStreamingCompressor(
 
     private fun ensureOutput() {
         if (currentOutput == null) {
-            currentOutput = bufferFactory.allocateOutputBuffer(outputBufferSize)
+            currentOutput = allocator.allocateOutputBuffer(outputBufferSize)
             currentOutputWritten = 0
         }
     }
@@ -210,7 +208,7 @@ private class LinuxZlibStreamingCompressor(
         currentOutput = null
     }
 
-    override fun compressUnsafe(
+    override fun compress(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
@@ -257,7 +255,7 @@ private class LinuxZlibStreamingCompressor(
         input.position(inputPosition + remaining)
     }
 
-    override fun flushUnsafe(onOutput: (ReadBuffer) -> Unit) {
+    override fun flush(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         val s = streamPtr ?: throw CompressionException("Stream not initialized")
 
@@ -289,7 +287,7 @@ private class LinuxZlibStreamingCompressor(
         emitPartialOutput(onOutput)
     }
 
-    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
+    override fun finish(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         val s = streamPtr ?: throw CompressionException("Stream not initialized")
 
@@ -358,7 +356,7 @@ private class LinuxZlibStreamingCompressor(
 @OptIn(ExperimentalForeignApi::class)
 private class LinuxZlibStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
-    override val bufferFactory: BufferFactory,
+    override val allocator: BufferAllocator,
     private val outputBufferSize: Int,
 ) : StreamingDecompressor {
     private var streamPtr: CPointer<z_stream>? = null
@@ -403,7 +401,7 @@ private class LinuxZlibStreamingDecompressor(
 
     private fun ensureOutput() {
         if (currentOutput == null) {
-            currentOutput = bufferFactory.allocateOutputBuffer(outputBufferSize)
+            currentOutput = allocator.allocateOutputBuffer(outputBufferSize)
             currentOutputWritten = 0
         }
     }
@@ -428,7 +426,7 @@ private class LinuxZlibStreamingDecompressor(
         currentOutput = null
     }
 
-    override fun decompressUnsafe(
+    override fun decompress(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
@@ -482,12 +480,12 @@ private class LinuxZlibStreamingDecompressor(
         input.position(inputPosition + consumed)
     }
 
-    override fun flushUnsafe(onOutput: (ReadBuffer) -> Unit) {
+    override fun flush(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
         emitPartialOutput(onOutput)
     }
 
-    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
+    override fun finish(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
         if (streamEnded) {
             emitPartialOutput(onOutput)
@@ -514,14 +512,6 @@ private class LinuxZlibStreamingDecompressor(
                     // Z_BUF_ERROR with no input means the stream produced all
                     // available output. This is expected for raw deflate streams
                     // without BFINAL=1 (e.g., WebSocket per-message-deflate RFC 7692).
-                    streamEnded = true
-                }
-                Z_DATA_ERROR -> {
-                    // Z_DATA_ERROR with avail_in=0 means inflate needs more input
-                    // to verify the checksum trailer (e.g., Adler32 for zlib).
-                    // This happens when decompressUnsafe consumed all compressed data
-                    // via Z_SYNC_FLUSH but the trailer wasn't fully processed.
-                    // Since no more input will be provided, treat as stream end.
                     streamEnded = true
                 }
                 else -> throw CompressionException("inflate finish failed with code: $result")
@@ -573,35 +563,36 @@ private class LinuxZlibStreamingDecompressor(
 /**
  * Execute a block with a pointer to the buffer's data.
  * Handles pinning for ByteArrayBuffer to ensure the pointer remains valid.
- *
- * NOT inline — workaround for Kotlin/Native 2.3.0 AutoboxingTransformer crash
- * (LINUX_NATIVE_COMPILER_BUG.md). The bug triggers when an inline function with
- * generic return R calls another inline function (usePinned) that also returns R.
- * The K/N autoboxing lowering pass expects an IrTypeOperatorCall but gets a raw
- * IrGetValueImpl. Removing `inline` prevents the nested inlining that triggers it.
  */
 @OptIn(ExperimentalForeignApi::class)
-private fun <R> withInputPointer(
+private inline fun <R> withInputPointer(
     buffer: ReadBuffer,
     block: (CPointer<ByteVar>) -> R,
-): R {
-    if (buffer.nativeMemoryAccess != null) {
-        return block(buffer.nativeMemoryAccess!!.nativeAddress.toCPointer<ByteVar>()!!)
+): R =
+    when {
+        buffer.nativeMemoryAccess != null -> block(buffer.nativeMemoryAccess!!.nativeAddress.toCPointer<ByteVar>()!!)
+        buffer is ByteArrayBuffer -> {
+            val array = buffer.backingArray
+            if (array.isEmpty()) {
+                throw CompressionException("Cannot get pointer to empty buffer")
+            }
+            array.usePinned { pinned ->
+                block(pinned.addressOf(0))
+            }
+        }
+        buffer.managedMemoryAccess != null -> {
+            val array = buffer.managedMemoryAccess!!.backingArray
+            if (array.isEmpty()) {
+                throw CompressionException("Cannot get pointer to empty buffer")
+            }
+            array.usePinned { pinned ->
+                block(pinned.addressOf(0))
+            }
+        }
+        else -> throw CompressionException(
+            "Buffer must have NativeMemoryAccess or ManagedMemoryAccess, got ${buffer::class.simpleName}",
+        )
     }
-    if (buffer is ByteArrayBuffer) {
-        val array = buffer.backingArray
-        if (array.isEmpty()) throw CompressionException("Cannot get pointer to empty buffer")
-        return array.usePinned { pinned -> block(pinned.addressOf(0)) }
-    }
-    if (buffer.managedMemoryAccess != null) {
-        val array = buffer.managedMemoryAccess!!.backingArray
-        if (array.isEmpty()) throw CompressionException("Cannot get pointer to empty buffer")
-        return array.usePinned { pinned -> block(pinned.addressOf(0)) }
-    }
-    throw CompressionException(
-        "Buffer must have NativeMemoryAccess or ManagedMemoryAccess, got ${buffer::class.simpleName}",
-    )
-}
 
 // =============================================================================
 // Suspending Variants (wrap sync implementations)
@@ -610,16 +601,16 @@ private fun <R> withInputPointer(
 actual fun SuspendingStreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-    bufferFactory: BufferFactory,
+    allocator: BufferAllocator,
 ): SuspendingStreamingCompressor =
     SyncWrappingSuspendingCompressor(
-        StreamingCompressor.create(algorithm, level, bufferFactory),
+        StreamingCompressor.create(algorithm, level, allocator),
     )
 
 actual fun SuspendingStreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
-    bufferFactory: BufferFactory,
+    allocator: BufferAllocator,
 ): SuspendingStreamingDecompressor =
     SyncWrappingSuspendingDecompressor(
-        StreamingDecompressor.create(algorithm, bufferFactory),
+        StreamingDecompressor.create(algorithm, allocator),
     )

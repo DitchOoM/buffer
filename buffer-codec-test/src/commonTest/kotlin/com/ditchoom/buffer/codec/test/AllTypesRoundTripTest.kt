@@ -1,7 +1,5 @@
 package com.ditchoom.buffer.codec.test
 
-import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -29,10 +27,9 @@ class AllTypesRoundTripTest {
                 stringVal = "Hello, Codec!",
             )
         val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
-        AllTypesMessageCodec.encode(buffer, original, EncodeContext.Empty)
-        assertEquals(buffer.position(), AllTypesMessageCodec.wireSize(original, EncodeContext.Empty), "wireSize must match encoded byte count")
+        AllTypesMessageCodec.encode(buffer, original)
         buffer.resetForRead()
-        val decoded = AllTypesMessageCodec.decode(buffer, DecodeContext.Empty)
+        val decoded = AllTypesMessageCodec.decode(buffer)
         assertAllTypesEqual(original, decoded)
     }
 
@@ -54,9 +51,9 @@ class AllTypesRoundTripTest {
                 stringVal = "",
             )
         val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
-        AllTypesMessageCodec.encode(buffer, original, EncodeContext.Empty)
+        AllTypesMessageCodec.encode(buffer, original)
         buffer.resetForRead()
-        val decoded = AllTypesMessageCodec.decode(buffer, DecodeContext.Empty)
+        val decoded = AllTypesMessageCodec.decode(buffer)
         assertAllTypesEqual(original, decoded)
     }
 

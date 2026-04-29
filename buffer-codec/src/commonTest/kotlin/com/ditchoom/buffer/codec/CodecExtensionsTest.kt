@@ -13,7 +13,7 @@ class CodecExtensionsTest {
         buf.writeInt(123456) // value
         buf.resetForRead()
 
-        val decoded = SimpleStructCodec.decode(buf, DecodeContext.Empty)
+        val decoded = SimpleStructCodec.decode(buf)
         assertEquals(SimpleStruct(42u.toUShort(), 123456), decoded)
     }
 
@@ -21,7 +21,7 @@ class CodecExtensionsTest {
     fun encodeToWriteBuffer() {
         val original = SimpleStruct(42u.toUShort(), 123456)
         val buf = BufferFactory.Default.allocate(6)
-        SimpleStructCodec.encode(buf, original, EncodeContext.Empty)
+        SimpleStructCodec.encode(buf, original)
         buf.resetForRead()
 
         assertEquals(42.toShort(), buf.readShort())
@@ -42,7 +42,7 @@ class CodecExtensionsTest {
     fun encodeToBufferAndDecode() {
         val original = SimpleStruct(42u.toUShort(), 123456)
         val encoded = SimpleStructCodec.encodeToBuffer(original)
-        val decoded = SimpleStructCodec.decode(encoded, DecodeContext.Empty)
+        val decoded = SimpleStructCodec.decode(encoded)
 
         assertEquals(original, decoded)
     }
@@ -88,9 +88,9 @@ class CodecExtensionsTest {
     fun testRoundTripVariableLengthStruct() {
         val original = VariableLengthStruct(0x01, 128)
         val buf = BufferFactory.Default.allocate(16)
-        VariableLengthStructCodec.encode(buf, original, EncodeContext.Empty)
+        VariableLengthStructCodec.encode(buf, original)
         buf.resetForRead()
-        val decoded = VariableLengthStructCodec.decode(buf, DecodeContext.Empty)
+        val decoded = VariableLengthStructCodec.decode(buf)
         assertEquals(original, decoded)
     }
 
@@ -98,23 +98,35 @@ class CodecExtensionsTest {
     fun testRoundTripLengthPrefixedStruct() {
         val original = LengthPrefixedStruct(0x01u.toUByte(), "Hello")
         val encoded = LengthPrefixedStructCodec.encodeToBuffer(original)
-        val decoded = LengthPrefixedStructCodec.decode(encoded, DecodeContext.Empty)
+        val decoded = LengthPrefixedStructCodec.decode(encoded)
         assertEquals(original, decoded)
     }
 
     @Test
-    fun encodeToBufferGrowsAutomatically() {
+    fun encodeToBufferUsesSizeOfForAllocation() {
+        // SimpleStructCodec.sizeOf returns 6, so encodeToBuffer should allocate exactly 6 bytes
+        val original = SimpleStruct(42u.toUShort(), 100)
+        val encoded = SimpleStructCodec.encodeToBuffer(original)
+        assertEquals(6, encoded.remaining())
+    }
+
+    @Test
+    fun encodeToBufferFallsBackTo1024WhenSizeOfIsNull() {
+        // VariableLengthStructCodec.sizeOf returns null
         val original = VariableLengthStruct(0x01, 0)
         val encoded = VariableLengthStructCodec.encodeToBuffer(original)
-        val decoded = VariableLengthStructCodec.decode(encoded, DecodeContext.Empty)
+        // Should still contain valid data even though the buffer may be larger
+        val decoded = VariableLengthStructCodec.decode(encoded)
         assertEquals(original, decoded)
     }
 
     @Test
-    fun encodeToBufferRemainingMatchesBytesWritten() {
+    fun encodeToBufferRemainingMatchesBytesWrittenWhenSizeOfIsNull() {
+        // VariableLengthStructCodec.sizeOf returns null, buffer allocated at 1024
+        // remaining() should equal actual bytes written, not 1024
+        val original = VariableLengthStruct(0x01, 0)
+        val encoded = VariableLengthStructCodec.encodeToBuffer(original)
         // 1 byte for tag + 1 byte for VBI(0) = 2 bytes
-        val original = VariableLengthStruct(0x01, 0)
-        val encoded = VariableLengthStructCodec.encodeToBuffer(original)
         assertEquals(2, encoded.remaining())
     }
 
@@ -136,8 +148,8 @@ class CodecExtensionsTest {
         buf.writeInt(200)
         buf.resetForRead()
 
-        val first = SimpleStructCodec.decode(buf, DecodeContext.Empty)
-        val second = SimpleStructCodec.decode(buf, DecodeContext.Empty)
+        val first = SimpleStructCodec.decode(buf)
+        val second = SimpleStructCodec.decode(buf)
 
         assertEquals(SimpleStruct(1u.toUShort(), 100), first)
         assertEquals(SimpleStruct(2u.toUShort(), 200), second)

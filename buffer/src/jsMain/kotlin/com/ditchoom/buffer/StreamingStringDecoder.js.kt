@@ -75,13 +75,7 @@ private class JsStreamingStringDecoder(
         val actual = buffer.unwrapFully()
         if (actual is JsBuffer) {
             val int8Array = actual.buffer
-            val view = Uint8Array(int8Array.buffer, int8Array.byteOffset + offset, length)
-            // TextDecoder.decode() rejects SharedArrayBuffer-backed views in Chrome.
-            // Copy to a regular ArrayBuffer when the backing store is shared.
-            if (actual.sharedArrayBuffer != null) {
-                return Uint8Array(length).also { it.set(view) }
-            }
-            return view
+            return Uint8Array(int8Array.buffer, int8Array.byteOffset + offset, length)
         }
 
         // Fallback: bulk copy via readByteArray (uses copyOfRange on ByteArrayBuffer)

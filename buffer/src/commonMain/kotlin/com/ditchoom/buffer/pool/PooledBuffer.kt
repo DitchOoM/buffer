@@ -1,10 +1,7 @@
 package com.ditchoom.buffer.pool
 
-import com.ditchoom.buffer.BufferWrapper
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.CloseableBuffer
-import com.ditchoom.buffer.Parcelable
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
@@ -26,21 +23,12 @@ import com.ditchoom.buffer.bufferHashCode
 internal class PooledBuffer(
     internal val inner: PlatformBuffer,
     internal val pool: BufferPool,
-) : PlatformBuffer,
-    BufferWrapper,
-    CloseableBuffer,
-    Parcelable by inner {
-    override var isFreed: Boolean = false
-        private set
-    private var refCount = 1 // initial owner reference
+) : PlatformBuffer by inner {
+    private var freed = false
+    private var refCount = 1 // 1 for the chunk reference in StreamProcessor
 
     private fun checkNotFreed() {
-        if (isFreed) throw IllegalStateException("Buffer has been freed and returned to pool")
-    }
-
-    override fun unwrapOnce(): ReadBuffer {
-        checkNotFreed()
-        return inner
+        if (freed) throw IllegalStateException("Buffer has been freed and returned to pool")
     }
 
     internal fun addRef() {
@@ -54,8 +42,8 @@ internal class PooledBuffer(
     }
 
     override fun freeNativeMemory() {
-        if (!isFreed) {
-            isFreed = true
+        if (!freed) {
+            freed = true
             releaseRef()
         }
     }
@@ -64,6 +52,16 @@ internal class PooledBuffer(
         checkNotFreed()
         addRef()
         return TrackedSlice(inner.slice(), this)
+    }
+
+    fun close() {
+        freeNativeMemory()
+    }
+
+    @Suppress("DEPRECATION")
+    override fun unwrap(): PlatformBuffer {
+        checkNotFreed()
+        return inner.unwrap()
     }
 
     // ========================================================================
@@ -87,7 +85,7 @@ internal class PooledBuffer(
     }
 
     // ========================================================================
-    // PlatformBuffer
+    // ReadWriteBuffer
     // ========================================================================
 
     override val capacity: Int get() = inner.capacity
@@ -311,7 +309,7 @@ internal class PooledBuffer(
     }
 
     // ========================================================================
-    // PlatformBuffer — masking
+    // ReadWriteBuffer — masking
     // ========================================================================
 
     override fun xorMask(

@@ -5,9 +5,8 @@ import com.ditchoom.buffer.codec.annotations.LengthPrefix
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
-import com.ditchoom.buffer.codec.annotations.UseCodec
-import com.ditchoom.buffer.codec.annotations.VariableByteInteger
-import com.ditchoom.buffer.codec.test.functions.PropertyBagCodec
+import com.ditchoom.buffer.codec.test.annotations.PropertyBag
+import com.ditchoom.buffer.codec.test.annotations.VariableByteInteger
 
 @ProtocolMessage
 data class VbiPacket(
@@ -19,7 +18,7 @@ data class VbiPacket(
 @ProtocolMessage
 data class PropertyBagPacket(
     val version: UByte,
-    @LengthPrefixed(LengthPrefix.Varint) @UseCodec(PropertyBagCodec::class) val properties: Map<Int, Int>,
+    @PropertyBag val properties: Map<Int, Int>,
 )
 
 @ProtocolMessage
@@ -27,7 +26,7 @@ data class MixedPacket(
     val id: UShort,
     @VariableByteInteger val remaining: Int,
     @LengthPrefixed val name: String,
-    @LengthPrefixed(LengthPrefix.Varint) @UseCodec(PropertyBagCodec::class) val props: Map<Int, Int>,
+    @PropertyBag val props: Map<Int, Int>,
 )
 
 // ──────────────────────── List<NestedMessage> test types ────────────────────────

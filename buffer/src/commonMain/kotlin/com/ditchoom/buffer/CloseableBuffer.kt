@@ -23,7 +23,6 @@ package com.ditchoom.buffer
  * | Linux (deterministic) | NativeBuffer (malloc/free) | **Yes** (via `BufferFactory.deterministic()`) |
  * | WASM | LinearBuffer (linear memory) | **Yes** |
  * | JS | JsBuffer (Int8Array) | No (GC-managed) |
- * | Any platform (pooled) | PooledBuffer (via BufferPool) | **Yes** (via `BufferPool.acquire()`) |
  *
  * ## Usage
  *

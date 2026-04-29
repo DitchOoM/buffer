@@ -29,7 +29,7 @@ abstract class DeterministicDirectJvmBuffer(
 
     override val byteBuffer: ByteBuffer
         get() {
-            if (isFreed) throw IllegalStateException("Buffer has been freed")
+            if (freed) throw IllegalStateException("Buffer has been freed")
             return super.byteBuffer
         }
 
@@ -39,25 +39,24 @@ abstract class DeterministicDirectJvmBuffer(
 
     override val nativeAddress: Long
         get() {
-            if (isFreed) throw IllegalStateException("Buffer has been freed")
+            if (freed) throw IllegalStateException("Buffer has been freed")
             return directAddress
         }
 
     override val nativeSize: Long
         get() {
-            if (isFreed) throw IllegalStateException("Buffer has been freed")
+            if (freed) throw IllegalStateException("Buffer has been freed")
             return capacity.toLong()
         }
 
     // --- CloseableBuffer ---
 
-    @Volatile
-    final override var isFreed: Boolean = false
-        private set
+    @Volatile private var freed = false
+    override val isFreed: Boolean get() = freed
 
     override fun freeNativeMemory() {
-        if (!isFreed) {
-            isFreed = true
+        if (!freed) {
+            freed = true
             invokeCleanerFn?.invoke(super.byteBuffer)
         }
     }

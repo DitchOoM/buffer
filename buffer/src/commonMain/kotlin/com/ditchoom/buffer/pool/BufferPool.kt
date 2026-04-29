@@ -1,11 +1,9 @@
 package com.ditchoom.buffer.pool
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.WriteBuffer
+import com.ditchoom.buffer.ReadWriteBuffer
 
 /**
  * High-performance buffer pool that minimizes allocations by reusing buffers.
@@ -38,7 +36,7 @@ import com.ditchoom.buffer.WriteBuffer
  * ### Manual acquire/freeNativeMemory
  * ```kotlin
  * val pool = BufferPool(factory = BufferFactory.Default)
- * val buffer = pool.acquire(1024)
+ * val buffer = pool.acquire(1024) as PlatformBuffer
  * try {
  *     buffer.writeInt(42)
  * } finally {
@@ -54,14 +52,14 @@ import com.ditchoom.buffer.WriteBuffer
  * @see withBuffer for auto-releasing buffer usage
  * @see withPool for scoped pool creation
  */
-sealed interface BufferPool : BufferFactory {
+sealed interface BufferPool {
     /**
      * Acquires a buffer of at least the specified size.
      * The returned buffer is a [PooledBuffer] wrapper whose [freeNativeMemory][PlatformBuffer.freeNativeMemory]
      * returns the buffer to this pool instead of freeing it.
      * The buffer may be larger than requested.
      */
-    fun acquire(minSize: Int = 0): PlatformBuffer
+    fun acquire(minSize: Int = 0): ReadWriteBuffer
 
     /**
      * Releases a buffer back to the pool for reuse.
@@ -71,22 +69,7 @@ sealed interface BufferPool : BufferFactory {
      *
      * @throws IllegalArgumentException if [buffer] is a [PooledBuffer] from a different pool
      */
-    fun release(buffer: PlatformBuffer)
-
-    override fun allocate(
-        size: Int,
-        byteOrder: ByteOrder,
-    ): PlatformBuffer = acquire(size)
-
-    override fun wrap(
-        array: ByteArray,
-        byteOrder: ByteOrder,
-    ): PlatformBuffer {
-        val buf = acquire(array.size)
-        (buf as WriteBuffer).writeBytes(array)
-        (buf as ReadBuffer).resetForRead()
-        return buf
-    }
+    fun release(buffer: ReadWriteBuffer)
 
     /**
      * Returns statistics about pool usage.
@@ -209,7 +192,7 @@ fun createBufferPool(
  */
 inline fun <T> BufferPool.withBuffer(
     minSize: Int = 0,
-    block: (PlatformBuffer) -> T,
+    block: (ReadWriteBuffer) -> T,
 ): T {
     val buffer = acquire(minSize)
     try {

@@ -2,6 +2,7 @@ package com.ditchoom.buffer.pool
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.ReadWriteBuffer
 
 /**
  * Fast buffer pool implementation optimized for single-threaded access.
@@ -21,7 +22,7 @@ internal class SingleThreadedBufferPool(
     private var poolMisses = 0L
     private var peakPoolSize = 0
 
-    override fun acquire(minSize: Int): PlatformBuffer {
+    override fun acquire(minSize: Int): ReadWriteBuffer {
         totalAllocations++
         val size = maxOf(minSize, defaultBufferSize)
 
@@ -39,7 +40,7 @@ internal class SingleThreadedBufferPool(
         return PooledBuffer(raw, this)
     }
 
-    override fun release(buffer: PlatformBuffer) {
+    override fun release(buffer: ReadWriteBuffer) {
         val raw =
             when (buffer) {
                 is PooledBuffer -> {

@@ -2,9 +2,8 @@
 
 package com.ditchoom.buffer.compression
 
-import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.managedMemoryAccess
 import com.ditchoom.buffer.nativeMemoryAccess
 import kotlinx.cinterop.ByteVar
@@ -30,11 +29,9 @@ import platform.zlib.Z_SYNC_FLUSH
 import platform.zlib.deflate
 import platform.zlib.deflateEnd
 import platform.zlib.deflateInit2
-import platform.zlib.deflateReset
 import platform.zlib.inflate
 import platform.zlib.inflateEnd
 import platform.zlib.inflateInit2
-import platform.zlib.inflateReset
 import platform.zlib.z_stream
 
 /**
@@ -43,20 +40,20 @@ import platform.zlib.z_stream
 actual fun StreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-    bufferFactory: BufferFactory,
+    allocator: BufferAllocator,
     outputBufferSize: Int,
     windowBits: Int,
-): StreamingCompressor = AppleZlibStreamingCompressor(algorithm, level, bufferFactory, outputBufferSize, windowBits)
+): StreamingCompressor = AppleZlibStreamingCompressor(algorithm, level, allocator, outputBufferSize)
 
 /**
  * Apple streaming decompressor factory using z_stream for true incremental decompression.
  */
 actual fun StreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
-    bufferFactory: BufferFactory,
+    allocator: BufferAllocator,
     outputBufferSize: Int,
     expectedSize: Int,
-): StreamingDecompressor = AppleZlibStreamingDecompressor(algorithm, bufferFactory, outputBufferSize)
+): StreamingDecompressor = AppleZlibStreamingDecompressor(algorithm, allocator, outputBufferSize)
 
 /**
  * Window bits for different compression formats:
@@ -71,15 +68,14 @@ private const val WINDOW_BITS_GZIP = 31
 /**
  * Apple streaming compressor using zlib z_stream for true incremental compression.
  * Zero-copy: writes directly to output buffers via native pointers.
- * Supports all buffer factory types including heap-allocated buffers.
+ * Supports all allocator types including heap-allocated buffers.
  */
 @OptIn(ExperimentalForeignApi::class)
 private class AppleZlibStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
     private val level: CompressionLevel,
-    override val bufferFactory: BufferFactory,
+    override val allocator: BufferAllocator,
     private val outputBufferSize: Int,
-    private val customWindowBits: Int,
 ) : StreamingCompressor {
     private var streamPtr: CPointer<z_stream>? = null
     private var closed = false
@@ -98,16 +94,11 @@ private class AppleZlibStreamingCompressor(
         s.next_out = null
         s.avail_out = 0u
 
-        val resolved = resolveWindowBits(algorithm, customWindowBits)
         val windowBits =
-            if (resolved != 0) {
-                resolved
-            } else {
-                when (algorithm) {
-                    CompressionAlgorithm.Deflate -> WINDOW_BITS_ZLIB
-                    CompressionAlgorithm.Raw -> WINDOW_BITS_RAW
-                    CompressionAlgorithm.Gzip -> WINDOW_BITS_GZIP
-                }
+            when (algorithm) {
+                CompressionAlgorithm.Deflate -> WINDOW_BITS_ZLIB
+                CompressionAlgorithm.Raw -> WINDOW_BITS_RAW
+                CompressionAlgorithm.Gzip -> WINDOW_BITS_GZIP
             }
 
         val result =
@@ -128,7 +119,7 @@ private class AppleZlibStreamingCompressor(
         streamPtr = s.ptr
     }
 
-    override fun compressUnsafe(
+    override fun compress(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
@@ -145,7 +136,7 @@ private class AppleZlibStreamingCompressor(
             s.pointed.avail_in = remaining.convert()
 
             while (s.pointed.avail_in > 0u) {
-                val chunk = bufferFactory.allocate(outputBufferSize)
+                val chunk = allocator.allocate(outputBufferSize)
                 withOutputPointer(chunk) { chunkPtr ->
                     s.pointed.next_out = chunkPtr.reinterpret()
                     s.pointed.avail_out = outputBufferSize.convert()
@@ -168,7 +159,7 @@ private class AppleZlibStreamingCompressor(
         input.position(inputPosition + remaining)
     }
 
-    override fun flushUnsafe(onOutput: (ReadBuffer) -> Unit) {
+    override fun flush(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         val s = streamPtr ?: throw CompressionException("Stream not initialized")
 
@@ -177,7 +168,7 @@ private class AppleZlibStreamingCompressor(
 
         // Drain with Z_SYNC_FLUSH until no more output
         while (true) {
-            val chunk = bufferFactory.allocate(outputBufferSize)
+            val chunk = allocator.allocate(outputBufferSize)
             val shouldBreak =
                 withOutputPointer(chunk) { chunkPtr ->
                     s.pointed.next_out = chunkPtr.reinterpret()
@@ -202,7 +193,7 @@ private class AppleZlibStreamingCompressor(
         }
     }
 
-    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
+    override fun finish(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         val s = streamPtr ?: throw CompressionException("Stream not initialized")
 
@@ -211,7 +202,7 @@ private class AppleZlibStreamingCompressor(
 
         var finished = false
         while (!finished) {
-            val chunk = bufferFactory.allocate(outputBufferSize)
+            val chunk = allocator.allocate(outputBufferSize)
             withOutputPointer(chunk) { chunkPtr ->
                 s.pointed.next_out = chunkPtr.reinterpret()
                 s.pointed.avail_out = outputBufferSize.convert()
@@ -234,14 +225,12 @@ private class AppleZlibStreamingCompressor(
     }
 
     override fun reset() {
-        val s = streamPtr ?: return
-        val result = deflateReset(s)
-        if (result != Z_OK) {
-            deflateEnd(s)
-            nativeHeap.free(s.pointed.rawPtr)
-            streamPtr = null
-            initStream()
+        streamPtr?.let {
+            deflateEnd(it)
+            nativeHeap.free(it.pointed.rawPtr)
         }
+        streamPtr = null
+        initStream()
     }
 
     override fun close() {
@@ -263,7 +252,7 @@ private class AppleZlibStreamingCompressor(
 @OptIn(ExperimentalForeignApi::class)
 private class AppleZlibStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
-    override val bufferFactory: BufferFactory,
+    override val allocator: BufferAllocator,
     private val outputBufferSize: Int,
 ) : StreamingDecompressor {
     private var streamPtr: CPointer<z_stream>? = null
@@ -302,7 +291,7 @@ private class AppleZlibStreamingDecompressor(
         streamEnded = false
     }
 
-    override fun decompressUnsafe(
+    override fun decompress(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
@@ -322,7 +311,7 @@ private class AppleZlibStreamingDecompressor(
                 s.pointed.avail_in = remaining.convert()
 
                 while (s.pointed.avail_in > 0u && !streamEnded) {
-                    val chunk = bufferFactory.allocate(outputBufferSize)
+                    val chunk = allocator.allocate(outputBufferSize)
                     withOutputPointer(chunk) { chunkPtr ->
                         s.pointed.next_out = chunkPtr.reinterpret()
                         s.pointed.avail_out = outputBufferSize.convert()
@@ -331,10 +320,7 @@ private class AppleZlibStreamingDecompressor(
                         when (result) {
                             Z_OK -> {}
                             Z_STREAM_END -> streamEnded = true
-                            else -> throw CompressionException(
-                                "inflate(Z_SYNC_FLUSH) failed: code=$result, " +
-                                    "avail_in=${s.pointed.avail_in}, avail_out=${s.pointed.avail_out}",
-                            )
+                            else -> throw CompressionException("inflate failed with code: $result")
                         }
 
                         val produced = outputBufferSize - s.pointed.avail_out.toInt()
@@ -352,12 +338,12 @@ private class AppleZlibStreamingDecompressor(
         input.position(inputPosition + consumed)
     }
 
-    override fun flushUnsafe(onOutput: (ReadBuffer) -> Unit) {
-        // No-op: Apple decompressor emits output eagerly in decompressUnsafe(),
+    override fun flush(onOutput: (ReadBuffer) -> Unit) {
+        // No-op: Apple decompressor emits output eagerly in decompress(),
         // no partial buffering that needs flushing.
     }
 
-    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
+    override fun finish(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
         if (streamEnded) return
 
@@ -367,7 +353,7 @@ private class AppleZlibStreamingDecompressor(
         s.pointed.avail_in = 0u
 
         while (!streamEnded) {
-            val chunk = bufferFactory.allocate(outputBufferSize)
+            val chunk = allocator.allocate(outputBufferSize)
             val shouldBreak =
                 withOutputPointer(chunk) { chunkPtr ->
                     s.pointed.next_out = chunkPtr.reinterpret()
@@ -383,18 +369,7 @@ private class AppleZlibStreamingDecompressor(
                             // without BFINAL=1 (e.g., WebSocket per-message-deflate RFC 7692).
                             streamEnded = true
                         }
-                        -3 -> {
-                            // Z_DATA_ERROR (-3) with avail_in=0 means inflate needs more
-                            // input to verify the checksum trailer (e.g., Adler32 for zlib).
-                            // This happens when decompressUnsafe consumed all compressed data
-                            // via Z_SYNC_FLUSH but the trailer wasn't fully processed.
-                            // Since no more input will be provided, treat as stream end.
-                            streamEnded = true
-                        }
-                        else -> throw CompressionException(
-                            "inflate(Z_FINISH) failed: code=$result, " +
-                                "avail_in=${s.pointed.avail_in}, avail_out=${s.pointed.avail_out}",
-                        )
+                        else -> throw CompressionException("inflate finish failed with code: $result")
                     }
 
                     val produced = outputBufferSize - s.pointed.avail_out.toInt()
@@ -411,16 +386,12 @@ private class AppleZlibStreamingDecompressor(
     }
 
     override fun reset() {
-        val s = streamPtr ?: return
-        val result = inflateReset(s)
-        if (result != Z_OK) {
-            inflateEnd(s)
-            nativeHeap.free(s.pointed.rawPtr)
-            streamPtr = null
-            initStream()
-        } else {
-            streamEnded = false
+        streamPtr?.let {
+            inflateEnd(it)
+            nativeHeap.free(it.pointed.rawPtr)
         }
+        streamPtr = null
+        initStream()
     }
 
     override fun close() {
@@ -463,10 +434,10 @@ private inline fun <R> withInputPointer(
  */
 @OptIn(ExperimentalForeignApi::class)
 private inline fun <R> withOutputPointer(
-    buffer: PlatformBuffer,
+    buffer: ReadWriteBuffer,
     block: (CPointer<ByteVar>) -> R,
 ): R {
-    // Cast to ReadBuffer to resolve extension ambiguity (PlatformBuffer extends both ReadBuffer and WriteBuffer)
+    // Cast to ReadBuffer to resolve extension ambiguity (ReadWriteBuffer extends both ReadBuffer and WriteBuffer)
     val buf = buffer as ReadBuffer
     val nativeAccess = buf.nativeMemoryAccess
     if (nativeAccess != null) {
@@ -488,16 +459,16 @@ private inline fun <R> withOutputPointer(
 actual fun SuspendingStreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-    bufferFactory: BufferFactory,
+    allocator: BufferAllocator,
 ): SuspendingStreamingCompressor =
     SyncWrappingSuspendingCompressor(
-        StreamingCompressor.create(algorithm, level, bufferFactory),
+        StreamingCompressor.create(algorithm, level, allocator),
     )
 
 actual fun SuspendingStreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
-    bufferFactory: BufferFactory,
+    allocator: BufferAllocator,
 ): SuspendingStreamingDecompressor =
     SyncWrappingSuspendingDecompressor(
-        StreamingDecompressor.create(algorithm, bufferFactory),
+        StreamingDecompressor.create(algorithm, allocator),
     )

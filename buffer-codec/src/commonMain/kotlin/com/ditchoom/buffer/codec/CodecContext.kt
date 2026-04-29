@@ -29,7 +29,7 @@ interface CodecContext {
      * ```kotlin
      * object MyCodec : Codec<Foo> {
      *     // Preferred: data object (singleton, IDE-navigable)
-     *     data object AllocatorKey : CodecContext.Key<BufferFactory>()
+     *     data object AllocatorKey : CodecContext.Key<BufferAllocator>()
      *
      *     // Also valid: val with anonymous instance
      *     val MaxSizeKey = object : CodecContext.Key<Int>() {}

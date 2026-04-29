@@ -404,7 +404,6 @@ class LinearBuffer(
         offset: Int,
         length: Int,
     ): WriteBuffer {
-        checkWriteBounds(length)
         // Copy from Kotlin ByteArray (Wasm GC heap) to linear memory
         var srcOffset = offset
         var dstOffset = positionValue
@@ -439,8 +438,6 @@ class LinearBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
-        if (size == 0) return
-        checkWriteBounds(size)
         val actual = buffer.unwrapFully()
         when (actual) {
             is LinearBuffer -> {

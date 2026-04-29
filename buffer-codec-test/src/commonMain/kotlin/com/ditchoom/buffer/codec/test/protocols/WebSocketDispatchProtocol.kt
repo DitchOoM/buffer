@@ -50,31 +50,27 @@ value class WsOpcodeByte(
 @DispatchOn(WsOpcodeByte::class)
 @ProtocolMessage
 sealed interface WsControlFrame {
-    /** Opcode 0x8: Close frame — optional status code + reason. The discriminator field
-     * (`opcodeByte`) is FIRST so the variant codec writes it before the payload bytes. */
-    @PacketType(wire = 0x08)
+    /** Opcode 0x8: Close frame — optional status code + reason. */
+    @PacketType(value = 0x08, wire = 0x88) // FIN=1, opcode=8
     @ProtocolMessage
     data class Close(
-        val opcodeByte: WsOpcodeByte = WsOpcodeByte(0x88u),
         val payloadLength: UByte, // 7-bit length in byte 2 (mask=0 for server-to-client)
         val statusCode: UShort,
         @RemainingBytes val reason: String,
     ) : WsControlFrame
 
     /** Opcode 0x9: Ping frame — optional application data. */
-    @PacketType(wire = 0x09)
+    @PacketType(value = 0x09, wire = 0x89) // FIN=1, opcode=9
     @ProtocolMessage
     data class Ping(
-        val opcodeByte: WsOpcodeByte = WsOpcodeByte(0x89u),
         val payloadLength: UByte,
         @RemainingBytes val data: String,
     ) : WsControlFrame
 
     /** Opcode 0xA: Pong frame — echoes ping data. */
-    @PacketType(wire = 0x0A)
+    @PacketType(value = 0x0A, wire = 0x8A) // FIN=1, opcode=A
     @ProtocolMessage
     data class Pong(
-        val opcodeByte: WsOpcodeByte = WsOpcodeByte(0x8Au),
         val payloadLength: UByte,
         @RemainingBytes val data: String,
     ) : WsControlFrame

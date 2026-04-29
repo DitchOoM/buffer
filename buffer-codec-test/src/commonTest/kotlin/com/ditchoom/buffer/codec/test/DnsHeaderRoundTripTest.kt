@@ -1,7 +1,5 @@
 package com.ditchoom.buffer.codec.test
 
-import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -24,10 +22,9 @@ class DnsHeaderRoundTripTest {
                 arCount = 0u,
             )
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        DnsHeaderCodec.encode(buffer, original, EncodeContext.Empty)
-        assertEquals(buffer.position(), DnsHeaderCodec.wireSize(original, EncodeContext.Empty), "wireSize must match encoded byte count")
+        DnsHeaderCodec.encode(buffer, original)
         buffer.resetForRead()
-        val decoded = DnsHeaderCodec.decode(buffer, DecodeContext.Empty)
+        val decoded = DnsHeaderCodec.decode(buffer)
         assertEquals(original, decoded)
     }
 
@@ -47,9 +44,9 @@ class DnsHeaderRoundTripTest {
     fun `round trip all zeros`() {
         val original = DnsHeader(0u, DnsFlags(0u), 0u, 0u, 0u, 0u)
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        DnsHeaderCodec.encode(buffer, original, EncodeContext.Empty)
+        DnsHeaderCodec.encode(buffer, original)
         buffer.resetForRead()
-        val decoded = DnsHeaderCodec.decode(buffer, DecodeContext.Empty)
+        val decoded = DnsHeaderCodec.decode(buffer)
         assertEquals(original, decoded)
     }
 
@@ -65,9 +62,9 @@ class DnsHeaderRoundTripTest {
                 UShort.MAX_VALUE,
             )
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        DnsHeaderCodec.encode(buffer, original, EncodeContext.Empty)
+        DnsHeaderCodec.encode(buffer, original)
         buffer.resetForRead()
-        val decoded = DnsHeaderCodec.decode(buffer, DecodeContext.Empty)
+        val decoded = DnsHeaderCodec.decode(buffer)
         assertEquals(original, decoded)
     }
 }

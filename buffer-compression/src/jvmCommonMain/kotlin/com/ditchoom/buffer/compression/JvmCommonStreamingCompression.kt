@@ -1,9 +1,8 @@
 package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.BaseJvmBuffer
-import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.unwrapFully
 import java.nio.Buffer
 import java.nio.ByteBuffer
@@ -12,7 +11,7 @@ import java.util.zip.Deflater
 import java.util.zip.Inflater
 
 // Helper to unwrap PooledBuffer/TrackedSlice and access the underlying ByteBuffer.
-private fun PlatformBuffer.jvmByteBuffer(): ByteBuffer = ((this as ReadBuffer).unwrapFully() as BaseJvmBuffer).byteBuffer
+private fun ReadWriteBuffer.jvmByteBuffer(): ByteBuffer = ((this as ReadBuffer).unwrapFully() as BaseJvmBuffer).byteBuffer
 
 private fun ReadBuffer.jvmByteBufferOrNull(): ByteBuffer? = (unwrapFully() as? BaseJvmBuffer)?.byteBuffer
 
@@ -23,26 +22,26 @@ private fun ReadBuffer.jvmByteBufferOrNull(): ByteBuffer? = (unwrapFully() as? B
 actual fun StreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-    bufferFactory: BufferFactory,
+    allocator: BufferAllocator,
     outputBufferSize: Int,
     windowBits: Int,
 ): StreamingCompressor =
     when (algorithm) {
-        CompressionAlgorithm.Gzip -> JvmGzipStreamingCompressor(level, bufferFactory, outputBufferSize)
-        CompressionAlgorithm.Deflate -> JvmDeflateStreamingCompressor(level, nowrap = false, bufferFactory, outputBufferSize)
-        CompressionAlgorithm.Raw -> JvmDeflateStreamingCompressor(level, nowrap = true, bufferFactory, outputBufferSize)
+        CompressionAlgorithm.Gzip -> JvmGzipStreamingCompressor(level, allocator, outputBufferSize)
+        CompressionAlgorithm.Deflate -> JvmDeflateStreamingCompressor(level, nowrap = false, allocator, outputBufferSize)
+        CompressionAlgorithm.Raw -> JvmDeflateStreamingCompressor(level, nowrap = true, allocator, outputBufferSize)
     }
 
 actual fun StreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
-    bufferFactory: BufferFactory,
+    allocator: BufferAllocator,
     outputBufferSize: Int,
     expectedSize: Int,
 ): StreamingDecompressor =
     when (algorithm) {
-        CompressionAlgorithm.Gzip -> JvmGzipStreamingDecompressor(bufferFactory, outputBufferSize, expectedSize)
-        CompressionAlgorithm.Deflate -> JvmInflateStreamingDecompressor(nowrap = false, bufferFactory, outputBufferSize, expectedSize)
-        CompressionAlgorithm.Raw -> JvmInflateStreamingDecompressor(nowrap = true, bufferFactory, outputBufferSize, expectedSize)
+        CompressionAlgorithm.Gzip -> JvmGzipStreamingDecompressor(allocator, outputBufferSize, expectedSize)
+        CompressionAlgorithm.Deflate -> JvmInflateStreamingDecompressor(nowrap = false, allocator, outputBufferSize, expectedSize)
+        CompressionAlgorithm.Raw -> JvmInflateStreamingDecompressor(nowrap = true, allocator, outputBufferSize, expectedSize)
     }
 
 // =============================================================================
@@ -201,7 +200,7 @@ private fun CRC32.updateFrom(buffer: ReadBuffer): Int {
  * Emits a partial buffer if it has data.
  */
 private inline fun emitPartialBuffer(
-    output: PlatformBuffer?,
+    output: ReadWriteBuffer?,
     onOutput: (ReadBuffer) -> Unit,
 ): Boolean {
     if (output == null) return false
@@ -220,15 +219,15 @@ private inline fun emitPartialBuffer(
  */
 private inline fun drainDeflaterSyncFlush(
     deflater: Deflater,
-    bufferFactory: BufferFactory,
+    allocator: BufferAllocator,
     outputBufferSize: Int,
-    currentOutput: PlatformBuffer?,
+    currentOutput: ReadWriteBuffer?,
     onOutput: (ReadBuffer) -> Unit,
-): PlatformBuffer? {
+): ReadWriteBuffer? {
     var output = currentOutput
     while (true) {
         if (output == null) {
-            output = bufferFactory.allocate(outputBufferSize)
+            output = allocator.allocate(outputBufferSize)
         }
 
         val buffer = output.jvmByteBuffer()
@@ -254,29 +253,28 @@ private inline fun drainDeflaterSyncFlush(
 private class JvmDeflateStreamingCompressor(
     level: CompressionLevel,
     nowrap: Boolean,
-    override val bufferFactory: BufferFactory,
+    override val allocator: BufferAllocator,
     private val outputBufferSize: Int,
 ) : StreamingCompressor {
     private val deflater = Deflater(level.value, nowrap)
-    private var currentOutput: PlatformBuffer? = null
+    private var currentOutput: ReadWriteBuffer? = null
     private var closed = false
 
-    override fun compressUnsafe(
+    override fun compress(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
         check(!closed) { "Compressor is closed" }
-        if (input.remaining() == 0) return
         deflater.setInputFrom(input)
         drainDeflater(onOutput)
     }
 
-    override fun flushUnsafe(onOutput: (ReadBuffer) -> Unit) {
+    override fun flush(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
-        currentOutput = drainDeflaterSyncFlush(deflater, bufferFactory, outputBufferSize, currentOutput, onOutput)
+        currentOutput = drainDeflaterSyncFlush(deflater, allocator, outputBufferSize, currentOutput, onOutput)
     }
 
-    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
+    override fun finish(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         deflater.finish()
         drainDeflaterFinishing(onOutput)
@@ -300,7 +298,7 @@ private class JvmDeflateStreamingCompressor(
     private fun drainDeflater(onOutput: (ReadBuffer) -> Unit) {
         while (!deflater.needsInput()) {
             if (currentOutput == null) {
-                currentOutput = bufferFactory.allocate(outputBufferSize)
+                currentOutput = allocator.allocate(outputBufferSize)
             }
 
             val output = currentOutput!!
@@ -321,7 +319,7 @@ private class JvmDeflateStreamingCompressor(
     private fun drainDeflaterFinishing(onOutput: (ReadBuffer) -> Unit) {
         while (!deflater.finished()) {
             if (currentOutput == null) {
-                currentOutput = bufferFactory.allocate(outputBufferSize)
+                currentOutput = allocator.allocate(outputBufferSize)
             }
 
             val output = currentOutput!!
@@ -344,25 +342,24 @@ private class JvmDeflateStreamingCompressor(
 
 private class JvmGzipStreamingCompressor(
     level: CompressionLevel,
-    override val bufferFactory: BufferFactory,
+    override val allocator: BufferAllocator,
     private val outputBufferSize: Int,
 ) : StreamingCompressor {
     private val deflater = Deflater(level.value, true)
     private val crc = CRC32()
-    private var currentOutput: PlatformBuffer? = null
+    private var currentOutput: ReadWriteBuffer? = null
     private var totalInputBytes = 0L
     private var headerWritten = false
     private var closed = false
 
-    override fun compressUnsafe(
+    override fun compress(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
         check(!closed) { "Compressor is closed" }
-        if (input.remaining() == 0) return
 
         if (!headerWritten) {
-            onOutput(bufferFactory.allocateGzipHeader())
+            onOutput(allocator.allocateGzipHeader())
             headerWritten = true
         }
 
@@ -371,16 +368,16 @@ private class JvmGzipStreamingCompressor(
         drainDeflater(onOutput)
     }
 
-    override fun flushUnsafe(onOutput: (ReadBuffer) -> Unit) {
+    override fun flush(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
-        currentOutput = drainDeflaterSyncFlush(deflater, bufferFactory, outputBufferSize, currentOutput, onOutput)
+        currentOutput = drainDeflaterSyncFlush(deflater, allocator, outputBufferSize, currentOutput, onOutput)
     }
 
-    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
+    override fun finish(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
 
         if (!headerWritten) {
-            onOutput(bufferFactory.allocateGzipHeader())
+            onOutput(allocator.allocateGzipHeader())
         }
 
         deflater.finish()
@@ -388,7 +385,7 @@ private class JvmGzipStreamingCompressor(
         emitPartialBuffer(currentOutput, onOutput)
 
         // Write trailer (8 bytes)
-        val trailerBuffer = bufferFactory.allocate(8)
+        val trailerBuffer = allocator.allocate(8)
         trailerBuffer.writeLong(gzipTrailerLong(crc.value.toInt(), (totalInputBytes and 0xFFFFFFFFL).toInt()))
         trailerBuffer.resetForRead()
         onOutput(trailerBuffer)
@@ -414,7 +411,7 @@ private class JvmGzipStreamingCompressor(
     private fun drainDeflater(onOutput: (ReadBuffer) -> Unit) {
         while (!deflater.needsInput()) {
             if (currentOutput == null) {
-                currentOutput = bufferFactory.allocate(outputBufferSize)
+                currentOutput = allocator.allocate(outputBufferSize)
             }
 
             val output = currentOutput!!
@@ -435,7 +432,7 @@ private class JvmGzipStreamingCompressor(
     private fun drainDeflaterFinishing(onOutput: (ReadBuffer) -> Unit) {
         while (!deflater.finished()) {
             if (currentOutput == null) {
-                currentOutput = bufferFactory.allocate(outputBufferSize)
+                currentOutput = allocator.allocate(outputBufferSize)
             }
 
             val output = currentOutput!!
@@ -462,16 +459,16 @@ private class JvmGzipStreamingCompressor(
 
 private class JvmInflateStreamingDecompressor(
     nowrap: Boolean,
-    override val bufferFactory: BufferFactory,
+    override val allocator: BufferAllocator,
     outputBufferSize: Int,
     expectedSize: Int,
 ) : StreamingDecompressor {
     private val inflater = Inflater(nowrap)
     private val effectiveBufferSize = if (expectedSize > 0) minOf(expectedSize, outputBufferSize) else outputBufferSize
-    private var currentOutput: PlatformBuffer? = null
+    private var currentOutput: ReadWriteBuffer? = null
     private var closed = false
 
-    override fun decompressUnsafe(
+    override fun decompress(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
@@ -480,7 +477,7 @@ private class JvmInflateStreamingDecompressor(
         drainInflater(onOutput)
     }
 
-    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
+    override fun finish(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
         drainInflater(onOutput)
         emitPartialBuffer(currentOutput, onOutput)
@@ -491,7 +488,7 @@ private class JvmInflateStreamingDecompressor(
         }
     }
 
-    override fun flushUnsafe(onOutput: (ReadBuffer) -> Unit) {
+    override fun flush(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
         // Drain any remaining output the inflater can produce from previously
         // consumed input (e.g., after processing the sync marker).
@@ -517,7 +514,7 @@ private class JvmInflateStreamingDecompressor(
     private fun drainInflater(onOutput: (ReadBuffer) -> Unit) {
         while (!inflater.needsInput() && !inflater.finished()) {
             if (currentOutput == null) {
-                currentOutput = bufferFactory.allocate(effectiveBufferSize)
+                currentOutput = allocator.allocate(effectiveBufferSize)
             }
 
             val output = currentOutput!!
@@ -548,40 +545,39 @@ private class JvmInflateStreamingDecompressor(
 actual fun SuspendingStreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-    bufferFactory: BufferFactory,
+    allocator: BufferAllocator,
 ): SuspendingStreamingCompressor =
     SyncWrappingSuspendingCompressor(
-        StreamingCompressor.create(algorithm, level, bufferFactory),
+        StreamingCompressor.create(algorithm, level, allocator),
     )
 
 actual fun SuspendingStreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
-    bufferFactory: BufferFactory,
+    allocator: BufferAllocator,
 ): SuspendingStreamingDecompressor =
     SyncWrappingSuspendingDecompressor(
-        StreamingDecompressor.create(algorithm, bufferFactory),
+        StreamingDecompressor.create(algorithm, allocator),
     )
 
 private class JvmGzipStreamingDecompressor(
-    override val bufferFactory: BufferFactory,
+    override val allocator: BufferAllocator,
     outputBufferSize: Int,
     expectedSize: Int,
 ) : StreamingDecompressor {
     private val inflater = Inflater(true)
     private val effectiveBufferSize = if (expectedSize > 0) minOf(expectedSize, outputBufferSize) else outputBufferSize
-    private var currentOutput: PlatformBuffer? = null
+    private var currentOutput: ReadWriteBuffer? = null
     private var headerParsed = false
     private val headerBytes = ByteArray(12)
     private var headerPos = 0
     private var headerFlags = -1 // -1 = fixed header not yet parsed
     private var closed = false
 
-    override fun decompressUnsafe(
+    override fun decompress(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
     ) {
         check(!closed) { "Decompressor is closed" }
-        if (input.remaining() == 0) return
 
         if (!headerParsed) {
             if (!parseGzipHeader(input)) return
@@ -592,7 +588,7 @@ private class JvmGzipStreamingDecompressor(
         drainInflater(onOutput)
     }
 
-    override fun finishUnsafe(onOutput: (ReadBuffer) -> Unit) {
+    override fun finish(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
         drainInflater(onOutput)
         emitPartialBuffer(currentOutput, onOutput)
@@ -618,7 +614,7 @@ private class JvmGzipStreamingDecompressor(
     private fun drainInflater(onOutput: (ReadBuffer) -> Unit) {
         while (!inflater.needsInput() && !inflater.finished()) {
             if (currentOutput == null) {
-                currentOutput = bufferFactory.allocate(effectiveBufferSize)
+                currentOutput = allocator.allocate(effectiveBufferSize)
             }
 
             val output = currentOutput!!

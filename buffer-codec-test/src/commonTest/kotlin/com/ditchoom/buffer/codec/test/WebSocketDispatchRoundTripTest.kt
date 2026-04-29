@@ -1,7 +1,5 @@
 package com.ditchoom.buffer.codec.test
 
-import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -51,21 +49,21 @@ class WebSocketDispatchRoundTripTest {
 
     @Test
     fun closeSubCodecRoundTrip() {
-        val original = WsControlFrame.Close(payloadLength = 4u, statusCode = 1000u, reason = "OK")
+        val original = WsControlFrame.Close(4u, 1000u, "OK")
         val decoded = WsControlFrameCloseCodec.testRoundTrip(original)
         assertEquals(original, decoded)
     }
 
     @Test
     fun pingSubCodecRoundTrip() {
-        val original = WsControlFrame.Ping(payloadLength = 5u, data = "hello")
+        val original = WsControlFrame.Ping(5u, "hello")
         val decoded = WsControlFramePingCodec.testRoundTrip(original)
         assertEquals(original, decoded)
     }
 
     @Test
     fun pongSubCodecRoundTrip() {
-        val original = WsControlFrame.Pong(payloadLength = 5u, data = "hello")
+        val original = WsControlFrame.Pong(5u, "hello")
         val decoded = WsControlFramePongCodec.testRoundTrip(original)
         assertEquals(original, decoded)
     }
@@ -81,7 +79,7 @@ class WebSocketDispatchRoundTripTest {
         buffer.writeBytes("OK".encodeToByteArray()) // reason
         buffer.resetForRead()
 
-        val decoded = WsControlFrameCodec.decode(buffer, DecodeContext.Empty)
+        val decoded = WsControlFrameCodec.decode(buffer)
         assertTrue(decoded is WsControlFrame.Close)
         assertEquals(1000u.toUShort(), decoded.statusCode)
         assertEquals("OK", decoded.reason)
@@ -95,7 +93,7 @@ class WebSocketDispatchRoundTripTest {
         buffer.writeBytes("ping".encodeToByteArray())
         buffer.resetForRead()
 
-        val decoded = WsControlFrameCodec.decode(buffer, DecodeContext.Empty)
+        val decoded = WsControlFrameCodec.decode(buffer)
         assertTrue(decoded is WsControlFrame.Ping)
         assertEquals("ping", decoded.data)
     }
@@ -108,7 +106,7 @@ class WebSocketDispatchRoundTripTest {
         buffer.writeBytes("pong".encodeToByteArray())
         buffer.resetForRead()
 
-        val decoded = WsControlFrameCodec.decode(buffer, DecodeContext.Empty)
+        val decoded = WsControlFrameCodec.decode(buffer)
         assertTrue(decoded is WsControlFrame.Pong)
         assertEquals("pong", decoded.data)
     }
@@ -120,7 +118,7 @@ class WebSocketDispatchRoundTripTest {
         buffer.resetForRead()
 
         assertFailsWith<IllegalArgumentException> {
-            WsControlFrameCodec.decode(buffer, DecodeContext.Empty)
+            WsControlFrameCodec.decode(buffer)
         }
     }
 
@@ -128,7 +126,7 @@ class WebSocketDispatchRoundTripTest {
 
     @Test
     fun closeDispatchRoundTrip() {
-        val original: WsControlFrame = WsControlFrame.Close(payloadLength = 6u, statusCode = 1001u, reason = "away")
+        val original: WsControlFrame = WsControlFrame.Close(6u, 1001u, "away")
         val decoded = WsControlFrameCodec.testRoundTrip(original)
         assertTrue(decoded is WsControlFrame.Close)
         assertEquals(original, decoded)
@@ -136,7 +134,7 @@ class WebSocketDispatchRoundTripTest {
 
     @Test
     fun pingDispatchRoundTrip() {
-        val original: WsControlFrame = WsControlFrame.Ping(payloadLength = 0u, data = "")
+        val original: WsControlFrame = WsControlFrame.Ping(0u, "")
         val decoded = WsControlFrameCodec.testRoundTrip(original)
         assertTrue(decoded is WsControlFrame.Ping)
         assertEquals(original, decoded)
@@ -144,7 +142,7 @@ class WebSocketDispatchRoundTripTest {
 
     @Test
     fun pongDispatchRoundTrip() {
-        val original: WsControlFrame = WsControlFrame.Pong(payloadLength = 3u, data = "abc")
+        val original: WsControlFrame = WsControlFrame.Pong(3u, "abc")
         val decoded = WsControlFrameCodec.testRoundTrip(original)
         assertTrue(decoded is WsControlFrame.Pong)
         assertEquals(original, decoded)
@@ -153,7 +151,7 @@ class WebSocketDispatchRoundTripTest {
     @Test
     fun encodeWritesCorrectOpcodeWithFin() {
         val buffer = BufferFactory.Default.allocate(32, ByteOrder.BIG_ENDIAN)
-        WsControlFrameCodec.encode(buffer, WsControlFrame.Ping(payloadLength = 0u, data = ""), EncodeContext.Empty)
+        WsControlFrameCodec.encode(buffer, WsControlFrame.Ping(0u, ""))
         // First byte should be 0x89 (FIN=1, opcode=9)
         assertEquals(0x89.toByte(), buffer[0])
     }

@@ -1,6 +1,5 @@
 package com.ditchoom.buffer.pool
 
-import com.ditchoom.buffer.BufferWrapper
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.bufferEquals
 import com.ditchoom.buffer.bufferHashCode
@@ -14,11 +13,8 @@ internal class TrackedSlice(
     internal val inner: ReadBuffer,
     private val parent: PooledBuffer,
 ) : ReadBuffer by inner,
-    BufferWrapper,
     PoolReleasable {
     private var released = false
-
-    override fun unwrapOnce(): ReadBuffer = inner
 
     override fun releaseToPool() {
         if (!released) {

@@ -1,7 +1,5 @@
 package com.ditchoom.buffer.codec.test
 
-import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -63,9 +61,9 @@ class MqttPacketRoundTripTest {
                 password = "pass",
             )
         val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
-        MqttPacketConnectCodec.encode(buffer, original, EncodeContext.Empty)
+        MqttPacketConnectCodec.encode(buffer, original)
         buffer.resetForRead()
-        val decoded = MqttPacketConnectCodec.decode(buffer, DecodeContext.Empty)
+        val decoded = MqttPacketConnectCodec.decode(buffer)
         assertEquals(original, decoded)
     }
 
@@ -80,9 +78,9 @@ class MqttPacketRoundTripTest {
                 clientId = "minimal",
             )
         val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
-        MqttPacketConnectCodec.encode(buffer, original, EncodeContext.Empty)
+        MqttPacketConnectCodec.encode(buffer, original)
         buffer.resetForRead()
-        val decoded = MqttPacketConnectCodec.decode(buffer, DecodeContext.Empty)
+        val decoded = MqttPacketConnectCodec.decode(buffer)
         assertEquals(original, decoded)
         assertNull(decoded.willTopic)
         assertNull(decoded.willMessage)
@@ -101,9 +99,9 @@ class MqttPacketRoundTripTest {
                 clientId = "",
             )
         val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
-        MqttPacketConnectCodec.encode(buffer, original, EncodeContext.Empty)
+        MqttPacketConnectCodec.encode(buffer, original)
         buffer.resetForRead()
-        val decoded = MqttPacketConnectCodec.decode(buffer, DecodeContext.Empty)
+        val decoded = MqttPacketConnectCodec.decode(buffer)
         assertEquals("", decoded.clientId)
     }
 
@@ -219,7 +217,7 @@ class MqttPacketRoundTripTest {
         buffer.writeByte(0xFF.toByte())
         buffer.resetForRead()
         assertFailsWith<IllegalArgumentException> {
-            MqttPacketCodec.decode(buffer, DecodeContext.Empty)
+            MqttPacketCodec.decode(buffer)
         }
     }
 

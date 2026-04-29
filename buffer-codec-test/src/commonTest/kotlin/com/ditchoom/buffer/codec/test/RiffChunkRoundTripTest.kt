@@ -1,7 +1,5 @@
 package com.ditchoom.buffer.codec.test
 
-import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
@@ -65,7 +63,7 @@ class RiffChunkRoundTripTest {
     fun dataChunkRoundTrip() {
         val original = RiffChunk.Data(chunkSize = 5u, samples = "audio")
         val buffer = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
-        RiffChunkDataCodec.encode(buffer, original, EncodeContext.Empty) { buf, s -> buf.writeString(s) }
+        RiffChunkDataCodec.encode(buffer, original) { buf, s -> buf.writeString(s) }
         buffer.resetForRead()
         val decoded = RiffChunkDataCodec.decode<String>(buffer) { pr -> pr.readString(pr.remaining()) }
         assertEquals(5u, decoded.chunkSize)
@@ -78,7 +76,7 @@ class RiffChunkRoundTripTest {
     fun fmtExactWireBytes() {
         val original = RiffChunk.Fmt(16u, 1u, 1u, 22050u, 44100u, 2u, 16u)
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        RiffChunkFmtCodec.encode(buffer, original, EncodeContext.Empty)
+        RiffChunkFmtCodec.encode(buffer, original)
 
         // chunkSize=16 in LE: 10 00 00 00
         assertEquals(0x10.toByte(), buffer[0])
@@ -106,7 +104,7 @@ class RiffChunkRoundTripTest {
     @Test
     fun factExactWireBytes() {
         val buffer = BufferFactory.Default.allocate(32, ByteOrder.BIG_ENDIAN)
-        RiffChunkFactCodec.encode(buffer, RiffChunk.Fact(4u, 44100u), EncodeContext.Empty)
+        RiffChunkFactCodec.encode(buffer, RiffChunk.Fact(4u, 44100u))
 
         // chunkSize=4 in LE: 04 00 00 00
         assertEquals(0x04.toByte(), buffer[0])
@@ -138,7 +136,7 @@ class RiffChunkRoundTripTest {
         buffer.writeShort(16.toShort().reverseBytes()) // bitsPerSample LE
         buffer.resetForRead()
 
-        val decoded = RiffChunkCodec.decode(buffer, DecodeContext.Empty)
+        val decoded = RiffChunkCodec.decode(buffer)
         assertTrue(decoded is RiffChunk.Fmt)
         assertEquals(16u, decoded.chunkSize)
         assertEquals(1u.toUShort(), decoded.audioFormat)
@@ -155,7 +153,7 @@ class RiffChunkRoundTripTest {
         buffer.writeInt(44100.reverseBytes()) // sampleCount LE
         buffer.resetForRead()
 
-        val decoded = RiffChunkCodec.decode(buffer, DecodeContext.Empty)
+        val decoded = RiffChunkCodec.decode(buffer)
         assertTrue(decoded is RiffChunk.Fact)
         assertEquals(4u, decoded.chunkSize)
         assertEquals(44100u, decoded.sampleCount)
@@ -166,7 +164,7 @@ class RiffChunkRoundTripTest {
         val buffer = BufferFactory.Default.allocate(16, ByteOrder.BIG_ENDIAN)
         buffer.writeInt(0x4C495354) // "LIST" — not registered
         buffer.resetForRead()
-        assertFailsWith<IllegalArgumentException> { RiffChunkCodec.decode(buffer, DecodeContext.Empty) }
+        assertFailsWith<IllegalArgumentException> { RiffChunkCodec.decode(buffer) }
     }
 
     // ========== Dispatch round-trip ==========
@@ -190,7 +188,7 @@ class RiffChunkRoundTripTest {
     @Test
     fun encodeWritesCorrectChunkIdBytes() {
         val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        RiffChunkCodec.encode(buffer, RiffChunk.Fact(4u, 0u), EncodeContext.Empty)
+        RiffChunkCodec.encode(buffer, RiffChunk.Fact(4u, 0u))
         // First 4 bytes should be "fact" = 0x66616374 (BE chunk ID)
         assertEquals(0x66.toByte(), buffer[0]) // 'f'
         assertEquals(0x61.toByte(), buffer[1]) // 'a'

@@ -26,6 +26,9 @@ data class FieldContext(
  *
  * Write function: WriteBuffer extension, takes field value + optional context args.
  *   Generated: `buffer.writeFoo(value.fieldName, value.contextArg1)`
+ *
+ * SizeOf function: standalone, takes field value, returns Int.
+ *   Generated: `fooSize(value.fieldName)`
  */
 data class CustomFieldDescriptor(
     /** ReadBuffer extension function to call for decoding */
@@ -34,14 +37,10 @@ data class CustomFieldDescriptor(
     val writeFunction: FunctionRef,
     /** Fixed byte size if known at compile time, or -1 for variable-length */
     val fixedSize: Int = -1,
+    /** Standalone function(fieldValue) -> Int for runtime size. null = skip sizeOf */
+    val sizeOfFunction: FunctionRef? = null,
     /** Previously decoded field names to pass as extra arguments to read/write functions */
     val contextFields: List<String> = emptyList(),
-    /**
-     * Top-level function to call for `wireSize(value)`. Receives the field value as the
-     * first argument followed by [contextFields]. When null, the generator uses
-     * [fixedSize] as a literal size (and errors at codegen time if [fixedSize] is -1).
-     */
-    val wireSizeFunction: FunctionRef? = null,
 )
 
 data class FunctionRef(
