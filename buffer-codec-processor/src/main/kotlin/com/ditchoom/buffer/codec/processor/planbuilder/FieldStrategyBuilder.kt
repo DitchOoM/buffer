@@ -421,8 +421,36 @@ internal class FieldStrategyBuilder(
                     sourceFqn = site,
                 )
         }
-        val length =
-            resolveLengthSource(param, errors, site) ?: LengthSource.Remaining(trailingBytes = 0)
+        val length = resolveLengthSource(param, errors, site)
+        if (length == null) {
+            // Phase 9 Step 4-redo C5: port the legacy diagnostic so the
+            // user's `@Payload` field gets a clear error message rather than
+            // silently defaulting to `Remaining` (which would round-trip
+            // incorrectly when followed by trailing fields). Mirrors legacy
+            // FieldAnalyzer.kt:1254 wording.
+            //
+            // Only fire when no length annotation is present — when one IS
+            // present but malformed (e.g. `@LengthFrom("missing")`),
+            // resolveLengthSource has already accumulated a more specific
+            // error.
+            val hasAnyLengthAnnotation =
+                param.annotations.has(AnnotationFqns.LengthPrefixed) ||
+                    param.annotations.has(AnnotationFqns.LengthFrom) ||
+                    param.annotations.has(AnnotationFqns.RemainingBytes)
+            if (!hasAnyLengthAnnotation) {
+                errors +=
+                    KspError(
+                        message =
+                            "Payload field '${param.name}' on '$ownerFqn' requires a length annotation so the " +
+                                "codec knows how many bytes to read. Add one of: @LengthPrefixed (writes/reads " +
+                                "a length prefix before the data), @RemainingBytes (reads all remaining bytes — " +
+                                "only valid on the last field), or @LengthFrom(\"fieldName\") (reads length from " +
+                                "a previously decoded field).",
+                        sourceFqn = site,
+                    )
+            }
+            return Nel.fromList(errors).left()
+        }
         errorsToLeft(errors)?.let { return it }
         return FieldPlan(
             name = param.name,
