@@ -417,15 +417,27 @@ class ProtocolMessageProcessor(
         // `kotlin.*` primitives, all of which the default fallback resolves correctly.
         val registry = buildRegistry(discovery)
         val classType = registry.resolve(TypeFqn(symbol.fqn))
+        val emitter = CodecEmitter(registry)
         val fileSpec =
             try {
-                CodecEmitter(registry).emit(plan, classType)
+                emitter.emit(plan, classType)
             } catch (t: Throwable) {
                 // Defensive guard: if the emitter throws (e.g. Slice 1 hits a strategy
                 // path that raises), fall through to legacy rather than crash the round.
                 logger.warn(
                     "Slice 1 pipeline failed to emit '${classDecl.simpleName.asString()}' (${t.message}); " +
                         "falling back to legacy emitter.",
+                    classDecl,
+                )
+                return false
+            }
+        val supplemental =
+            try {
+                emitter.emitSupplemental(plan, classType)
+            } catch (t: Throwable) {
+                logger.warn(
+                    "Phase 9 supplemental emission failed for '${classDecl.simpleName.asString()}' " +
+                        "(${t.message}); falling back to legacy emitter.",
                     classDecl,
                 )
                 return false
@@ -443,6 +455,9 @@ class ProtocolMessageProcessor(
                 Dependencies(aggregating = false)
             }
         rebuiltFileSpec.writeTo(codeGenerator, deps)
+        for (extra in supplemental) {
+            withLegacyFileHeader(extra).writeTo(codeGenerator, deps)
+        }
         return true
     }
 
