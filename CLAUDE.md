@@ -127,11 +127,19 @@ val actual = buffer.unwrapFully()
 
 Three interface levels:
 
-- `Encoder<in T>` — encode only. Has `encode(buffer, value)` and `wireSizeHint`.
-- `Decoder<out T>` — decode only. Has `decode(buffer): T`. Fun interface for SAM.
-- `Codec<T>` — bidirectional. Extends both + `FrameDetector`. Adds context-aware overloads.
+- `Encoder<in T>` — encode only. Has `encode(buffer, value, context)` and `wireSize(value, context)`.
+- `Decoder<out T>` — decode only. Has `decode(buffer, context): T`. `fun interface` for SAM lambdas.
+- `Codec<T>` — bidirectional. Extends both + `FrameDetector`.
 
-`encodeToBuffer()` auto-sizes via an internal `GrowableWriteBuffer` (2x doubling). Generated codecs set `wireSizeHint` to the sum of fixed-size fields. Defaults to 16 for hand-written codecs.
+### Codec contract — payload bytes only
+
+`encode` writes payload bytes only. `wireSize` returns that same payload-byte count. `decode` reads from the buffer's current position to its natural delimiter (fixed width, terminator) or to `buffer.remaining()` for variable-length payloads — implementations trust the caller's buffer-bounding.
+
+**Framing is the framework's job.** Length prefixes, length-from-other-fields, dispatch headers, and remaining-bytes slicing are all expressed via field annotations on the *consumer*: `@LengthPrefixed`, `@LengthFrom`, `@RemainingBytes`, `@DispatchOn`. Custom `Codec<T>` implementations never write a length prefix themselves; the consumer adds one with `@LengthPrefixed @UseCodec(MyCodec)`.
+
+`encodeToBuffer()` allocates an exact-size buffer using `wireSize`. Hand-written encoders that don't override `wireSize` fall back to a 2x-doubling `GrowableWriteBuffer`. Generated codecs always override.
+
+The two structural assertions baked into `testRoundTrip` — `wireSize == bytes-written` and `decode consumes exactly the payload` — catch regressions where a codec re-introduces internal length-prefix framing.
 
 ### Use `@ProtocolMessage` for Structured Data
 
