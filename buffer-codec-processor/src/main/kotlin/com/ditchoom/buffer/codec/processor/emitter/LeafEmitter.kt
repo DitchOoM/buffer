@@ -1355,31 +1355,38 @@ class LeafEmitter(
     // -----------------------------------------------------------------------
 
     /**
-     * Phase 9 Step 4 — Cap 2 emitter for `Plan.Leaf` with one or more
-     * `@Payload` type parameters. Mirrors legacy
-     * `CodecGenerator.buildPayloadCodecFile` for the shapes the new pipeline
-     * exercises:
+     * Phase 9 Step 4-redo — Cap 2 receiver-style emitter for `Plan.Leaf` with
+     * one or more `@Payload` type parameters. Mirrors legacy
+     * `CodecGenerator.buildPayloadCodecFile` line-for-line for the receiver
+     * convention so generated source diffs cleanly when the Step C7 defer
+     * drops:
      *
      *  - Skips the `Codec<T>` superinterface (the unbound type parameter `P`
      *    has no instantiable type at object level).
      *  - Emits typed-lambda `<P> decode(buffer, context, payloadDecoder)`
-     *    `<P> encode(buffer, value, context, payloadEncoder)` and
-     *    `<P> wireSize(value, context, payloadSize)` overloads. Multi-payload
-     *    classes get one lambda per `@Payload` type-parameter (legacy convention:
-     *    parameter named `decode<FieldName>` / `encode<FieldName>` / `size<FieldName>`).
-     *  - Emits per-payload-field `<FieldName>DecodeKey`, `<FieldName>EncodeKey`,
-     *    `<FieldName>SizeKey` data objects extending `CodecContext.Key`.
-     *  - Emits `decodeFromContext`, `encodeFromContext`, `wireSizeFromContext`
-     *    bridges that read the lambdas off the context and delegate.
-     *
-     * Simplification vs legacy: lambda receiver is bare `(ReadBuffer) -> P`
-     * rather than legacy's `*Context.(ReadBuffer) -> P`. Legacy synthesizes a
-     * sibling `*Context` data class via `PayloadContextGenerator`; we omit that
-     * here. Consumer mqtt v4/v5 dispatchers interact via `decodeFromContext`
-     * (Context.Key path) and consumer round-trip tests pass bare lambdas
-     * `{ slice -> slice }` to `decode(buffer, ctx, ...)` — both shapes accept
-     * a no-receiver lambda from the call-site, so the simplification is
-     * source-compatible with consumer code.
+     *    where the decode lambda is **receiver-style**
+     *    `${EnclosingSimpleNames}Context.(ReadBuffer) -> P`. The receiver gives
+     *    the caller typed access to every already-decoded non-payload field
+     *    via `this`, which is the load-bearing case for MQTT v5 (read parsed
+     *    properties before deciding the application-payload shape) and any
+     *    `@UseCodec` zero-copy handoff (image decoders, framers, etc. that
+     *    need the surrounding metadata to interpret the bytes correctly).
+     *  - Encode + wireSize lambdas stay **bare**: the caller already holds a
+     *    typed `P`, so receiver scoping adds no information; the surface
+     *    matches legacy.
+     *  - Multi-payload classes get one lambda per `@Payload` type-parameter
+     *    (legacy convention: parameter named `decode<FieldName>` /
+     *    `encode<FieldName>` / `size<FieldName>`).
+     *  - Decode body sequence: read non-payload fields + raw payload slices
+     *    → construct `${Context}` from the non-payload locals →
+     *    `_ctx.decodePayload(_raw_payload)` invokes the lambda with the
+     *    receiver bound.
+     *  - Per-payload-field `<FieldName>DecodeKey` stores
+     *    `${Context}.(ReadBuffer) -> Any?` (receiver-style mirror of the
+     *    typed-lambda shape so `decodeFromContext` can pass through without
+     *    a lambda wrap). `EncodeKey` / `SizeKey` keep the bare-lambda type.
+     *  - `decodeFromContext`, `encodeFromContext`, `wireSizeFromContext`
+     *    bridges read the lambdas off the context and delegate.
      */
     private fun emitPayloadCodec(
         plan: Plan.Leaf,
@@ -1394,7 +1401,11 @@ class LeafEmitter(
         val fieldNameToTypeParam =
             plan.payloadFields.associate { it.fieldName to it.typeParamName }
 
-        if (canDecode) type.addFunction(buildPayloadDecodeFun(plan, classType, fieldNameToTypeParam))
+        // All payload fields on a single leaf share the same context class
+        // (legacy `PayloadContextGenerator` convention). Resolve once.
+        val contextType = payloadContextTypeFor(plan)
+
+        if (canDecode) type.addFunction(buildPayloadDecodeFun(plan, classType, fieldNameToTypeParam, contextType))
         if (canEncode) {
             type.addFunction(buildPayloadEncodeFun(plan, classType, fieldNameToTypeParam))
             type.addFunction(buildPayloadWireSizeFun(plan, classType, fieldNameToTypeParam))
@@ -1402,7 +1413,7 @@ class LeafEmitter(
 
         // Per-payload-field DecodeKey / EncodeKey / SizeKey data objects.
         for (pf in plan.payloadFields) {
-            type.addType(buildPayloadDecodeKey(pf.fieldName))
+            type.addType(buildPayloadDecodeKey(pf.fieldName, contextType))
             type.addType(buildPayloadEncodeKey(pf.fieldName))
             type.addType(buildPayloadSizeKey(pf.fieldName))
         }
@@ -1423,6 +1434,25 @@ class LeafEmitter(
         return fileBuilder.build()
     }
 
+    /**
+     * Resolves the receiver `*Context` class for the leaf's payload-decode
+     * lambda. `payloadFields` is non-empty by construction (caller guards on
+     * `payloadTypeParams.isNotEmpty()` upstream and
+     * [com.ditchoom.buffer.codec.processor.planbuilder.PlanBuilder] only
+     * populates `payloadTypeParams` when at least one ctor parameter binds
+     * to one of those type parameters). Every entry shares the same
+     * `contextClassFqn`, so we read the first one.
+     */
+    private fun payloadContextTypeFor(plan: Plan.Leaf): ClassName {
+        val first =
+            plan.payloadFields.firstOrNull()
+                ?: error(
+                    "emitPayloadCodec invoked for ${plan.decl.canonical} with no payloadFields; " +
+                        "Plan IR contract: payloadTypeParams.isNotEmpty() implies payloadFields.isNotEmpty()",
+                )
+        return TypeRegistry.splitFqn(first.contextClassFqn)
+    }
+
     private fun starReturnType(
         classType: ClassName,
         plan: Plan.Leaf,
@@ -1436,7 +1466,8 @@ class LeafEmitter(
     private fun buildPayloadDecodeFun(
         plan: Plan.Leaf,
         classType: ClassName,
-        fieldNameToTypeParam: Map<String, String>,
+        @Suppress("UNUSED_PARAMETER") fieldNameToTypeParam: Map<String, String>,
+        contextType: ClassName,
     ): FunSpec {
         val fb =
             FunSpec
@@ -1455,6 +1486,7 @@ class LeafEmitter(
             val tp = TypeVariableName(pf.typeParamName)
             val lambdaType =
                 LambdaTypeName.get(
+                    receiver = contextType,
                     parameters = listOf(ParameterSpec.unnamed(Names.ReadBuffer)),
                     returnType = tp,
                 )
@@ -1462,7 +1494,7 @@ class LeafEmitter(
         }
         fb.returns(typedReturnType(classType, plan))
 
-        // Phase 1: read raw bytes / non-payload fields in declaration order.
+        // Phase 1: read non-payload fields + raw payload slices in declaration order.
         val cb = CodeBlock.builder()
         for (f in plan.fields) {
             val s = f.strategy
@@ -1473,13 +1505,27 @@ class LeafEmitter(
                 cb.add(stmt)
             }
         }
-        // Phase 2: invoke each payload decoder lambda on its raw slice to produce typed `P`.
+        // Phase 2: build the typed receiver context from the already-decoded
+        // non-payload locals so the user-supplied lambda can read sibling
+        // fields off `this`. Object-form when every field is @Payload (rare).
+        val nonPayloadLocals = plan.fields.filter { it.strategy !is FieldStrategy.PayloadSlot }
+        if (nonPayloadLocals.isEmpty()) {
+            cb.addStatement("val _ctx = %T", contextType)
+        } else {
+            cb.addStatement(
+                "val _ctx = %T(%L)",
+                contextType,
+                nonPayloadLocals.joinToString(", ") { it.name },
+            )
+        }
+        // Phase 3: invoke each payload-decoder lambda via the receiver so
+        // `this` inside the lambda is the typed context.
         for (pf in plan.payloadFields) {
             val rawVar = "_raw_${pf.fieldName}"
             val paramName = payloadDecodeParamName(pf.fieldName)
-            cb.addStatement("val %L = %L(%L)", pf.fieldName, paramName, rawVar)
+            cb.addStatement("val %L = _ctx.%L(%L)", pf.fieldName, paramName, rawVar)
         }
-        // Phase 3: constructor call.
+        // Phase 4: constructor call.
         val ctorArgs = plan.fields.joinToString(", ") { "${it.name} = ${it.name}" }
         cb.addStatement("return %T(%L)", classType, ctorArgs)
         fb.addCode(cb.build())
@@ -1705,11 +1751,18 @@ class LeafEmitter(
         }
     }
 
-    private fun buildPayloadDecodeKey(fieldName: String): TypeSpec {
-        // `(ReadBuffer) -> Any?` — context-keyed lambda type. The typed
-        // signature is reconstructed by `decodeFromContext`'s call to `decode<P>`.
+    private fun buildPayloadDecodeKey(
+        fieldName: String,
+        contextType: ClassName,
+    ): TypeSpec {
+        // Receiver-style `${Context}.(ReadBuffer) -> Any?` mirrors the
+        // typed-lambda parameter shape so `decodeFromContext` can read
+        // the lambda from the context and pass it through to `decode<P>`
+        // without an intermediate wrap (the type system uses contravariance
+        // on `Any?` to match any inferred `P`).
         val lambdaType =
             LambdaTypeName.get(
+                receiver = contextType,
                 parameters = listOf(ParameterSpec.unnamed(Names.ReadBuffer)),
                 returnType = ANY.copy(nullable = true),
             )

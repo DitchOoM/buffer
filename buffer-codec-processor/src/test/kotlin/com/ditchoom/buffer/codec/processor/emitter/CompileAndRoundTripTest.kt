@@ -311,6 +311,61 @@ class CompileAndRoundTripTest {
         )
     }
 
+    // ---- Capability 2 (receiver-style) — Plan.Leaf with payloadFields ---
+    //
+    // Phase 9 Step 4-redo C3 — when the IR carries `payloadTypeParams` and
+    // `payloadFields`, [LeafEmitter.emitPayloadCodec] fans out into a
+    // typed-lambda decode overload `<P> decode(buffer, ctx, decode<Field>:
+    // ${EnclosingSimpleNames}Context.(ReadBuffer) -> P): T<P>`. The
+    // receiver type is the synthesised `*Context` companion class (emitted
+    // by [PayloadContextEmitter]); receiver-style decode lets the caller
+    // read sibling fields off `this`. Encode + size lambdas stay bare.
+    //
+    // The fixture [grpcFrameLikeReceiverFixture] populates payloadTypeParams
+    // / payloadFields so Cap 2 emit triggers; the assertion pins the
+    // receiver type in the lambda parameter signature.
+    @Test
+    fun `cap2 receiver-style — Leaf with payloadFields emits typed-lambda decode with context receiver`() {
+        val plan = grpcFrameLikeReceiverFixture()
+        val classType = EmitterFixtures.cn("PayloadOnlyLeafReceiver")
+        val emitted = emitText(plan, classType)
+
+        // Typed-lambda decode overload.
+        val typedLambdaSignature = Regex("""\bfun\s*<\s*P\s*>\s*decode\s*\(""")
+        assertTrue(
+            typedLambdaSignature.containsMatchIn(emitted),
+            "expected `<P> fun decode(...)` typed-lambda overload to be emitted; got:\n$emitted",
+        )
+
+        // Receiver-style decode lambda parameter — the receiver type is the
+        // synthesised PayloadOnlyLeafReceiverContext, NOT bare ReadBuffer.
+        val receiverLambda = Regex("""decodePayload\s*:\s*PayloadOnlyLeafReceiverContext\.\(ReadBuffer\)\s*->\s*P""")
+        assertTrue(
+            receiverLambda.containsMatchIn(emitted),
+            "expected `decodePayload: PayloadOnlyLeafReceiverContext.(ReadBuffer) -> P` receiver-style " +
+                "lambda parameter; got:\n$emitted",
+        )
+
+        // Decode body builds the context from the non-payload locals before
+        // invoking the lambda via the receiver.
+        assertTrue(
+            emitted.contains("val _ctx = "),
+            "expected `val _ctx = ...` context construction in decode body; got:\n$emitted",
+        )
+        assertTrue(
+            emitted.contains("_ctx.decodePayload(_raw_payload)"),
+            "expected `_ctx.decodePayload(_raw_payload)` receiver-style invocation; got:\n$emitted",
+        )
+
+        // Encode + size lambdas remain bare (no receiver) — caller already
+        // holds typed P, so the receiver scoping adds no information.
+        val bareEncodeLambda = Regex("""encodePayload\s*:\s*\(WriteBuffer,\s*P\)\s*->\s*Unit""")
+        assertTrue(
+            bareEncodeLambda.containsMatchIn(emitted),
+            "expected encode lambda to stay bare `(WriteBuffer, P) -> Unit`; got:\n$emitted",
+        )
+    }
+
     // ---- Capability 3 — @LengthPrefixed on NestedMessage / External -----
     //
     // Phase C Cap 3 extended [FieldStrategy.NestedMessage] and
@@ -589,6 +644,53 @@ class CompileAndRoundTripTest {
                 ),
             batches = emptyList(),
             dir = Direction.Bidirectional,
+        )
+
+    /**
+     * Step 4-redo C3 fixture — `Plan.Leaf` with `payloadTypeParams` and
+     * `payloadFields` populated so [LeafEmitter.emitPayloadCodec] fans out
+     * the receiver-style typed-lambda decode overload.
+     *
+     * Wire shape mirrors [grpcFrameLikePayloadFixture]; the difference is
+     * the populated payload IR fields, which trip the Cap 2 guard
+     * `plan.payloadTypeParams.isNotEmpty()`. The synthesised context FQN
+     * is `com.ditchoom.codec.test.PayloadOnlyLeafReceiverContext`.
+     */
+    private fun grpcFrameLikeReceiverFixture(): Plan.Leaf =
+        Plan.Leaf(
+            decl = EmitterFixtures.fqn("PayloadOnlyLeafReceiver"),
+            fields =
+                listOf(
+                    FieldPlan(
+                        name = "kind",
+                        type = TypeFqn("kotlin.UByte"),
+                        strategy = FieldStrategy.Primitive(PrimitiveKind.UByte, 1, Endianness.Big),
+                    ),
+                    FieldPlan(
+                        name = "payload",
+                        type = TypeFqn("kotlin.P"),
+                        strategy =
+                            FieldStrategy.PayloadSlot(
+                                typeParam = "P",
+                                length = LengthSource.Remaining(trailingBytes = 0),
+                            ),
+                    ),
+                ),
+            batches = emptyList(),
+            dir = Direction.Bidirectional,
+            payloadTypeParams =
+                listOf(
+                    com.ditchoom.buffer.codec.processor.ir
+                        .PayloadTypeParam(name = "P", upperBound = null),
+                ),
+            payloadFields =
+                listOf(
+                    PayloadFieldRef(
+                        fieldName = "payload",
+                        typeParamName = "P",
+                        contextClassFqn = "com.ditchoom.codec.test.PayloadOnlyLeafReceiverContext",
+                    ),
+                ),
         )
 
     /**
