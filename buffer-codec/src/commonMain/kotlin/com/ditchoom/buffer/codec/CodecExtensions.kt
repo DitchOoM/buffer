@@ -66,6 +66,13 @@ fun encodeWithGrowth(
 /**
  * Testing utility: encodes [value], optionally verifies the wire bytes match [expectedBytes],
  * then decodes and returns the result. Intended for use in test suites to validate codec correctness.
+ *
+ * Doubles as a Guard 1 (payload-only round-trip) check: asserts that
+ *   - `wireSize` equals the byte count produced by `encode`, and
+ *   - `decode` consumes exactly those payload bytes (no over- or under-read).
+ *
+ * Together these assertions catch regressions where a codec re-introduces internal
+ * length-prefix framing in violation of the [Codec] payload-only contract.
  */
 fun <T> Codec<T>.testRoundTrip(
     value: T,
@@ -88,7 +95,12 @@ fun <T> Codec<T>.testRoundTrip(
         }
         encoded.resetForRead()
     }
-    return decode(encoded, decodeContext)
+    val decoded = decode(encoded, decodeContext)
+    check(encoded.remaining() == 0) {
+        "decode must consume exactly the payload bytes (Guard 1): " +
+            "${encoded.remaining()} byte(s) left over after decode of ${this::class.simpleName}"
+    }
+    return decoded
 }
 
 private fun ByteArray.toHexString(): String = joinToString("") { (it.toInt() and 0xFF).toString(16).padStart(2, '0') }
