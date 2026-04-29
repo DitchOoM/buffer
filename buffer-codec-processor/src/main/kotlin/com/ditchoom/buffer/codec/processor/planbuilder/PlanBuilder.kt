@@ -493,7 +493,7 @@ object PlanBuilder {
             } else {
                 "bytes 0x${collisionLo.toString(16).uppercase()}..0x${collisionHi.toString(16).uppercase()}"
             }
-        return "Sealed root '${sealed.fqn}' variant spans overlap: " +
+        return "Sealed root '${sealed.fqn}' has overlapping variant wire claims (spans overlap): " +
             "'${existing.variantFqn}' (${rangeStr(existing.lo, existing.hi)}) and " +
             "'${new.variantFqn}' (${rangeStr(new.lo, new.hi)}) both claim $collisionStr."
     }

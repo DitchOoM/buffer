@@ -166,6 +166,11 @@ class PlanBuilderRuleTest {
 
     @Test
     fun `RemainingBytes outside the tail position is rejected`() {
+        // A trailing field that is variable-size (here: another @RemainingBytes-style
+        // length-prefixed string) must surface the "must appear at the tail" diagnostic.
+        // Trailing fixed-size primitive trailers are accepted via the auto-reserve path
+        // — covered by DataClassCodegenTest's "remaining bytes followed by fixed-size
+        // trailer auto-reserves bytes".
         val symbol =
             Fixtures.dataLike(
                 fqn = "test.Misplaced",
@@ -176,7 +181,11 @@ class PlanBuilderRuleTest {
                             Fixtures.primitiveTypeRef("kotlin.String"),
                             annotations = listOf(Fixtures.remainingBytes()),
                         ),
-                        Fixtures.param("trailer", Fixtures.primitiveTypeRef("kotlin.UByte")),
+                        Fixtures.param(
+                            "trailer",
+                            Fixtures.primitiveTypeRef("kotlin.String"),
+                            annotations = listOf(Fixtures.lengthPrefixed()),
+                        ),
                     ),
             )
         val errors = PlanBuilder.build(symbol).expectLeft()

@@ -63,7 +63,7 @@ internal object RangeDisjointnessChecker {
                         collision.last().toString(16).uppercase()
                     }"
             }
-        return "Sealed root '${sealed.decl.canonical}' variant spans overlap: " +
+        return "Sealed root '${sealed.decl.canonical}' has overlapping variant wire claims (spans overlap): " +
             "'${existing.subclass.canonical}' (${rangeStr(existing.lo, existing.hi)}) and " +
             "'${new.canonical}' (${rangeStr(newLo, newHi)}) both claim $collisionStr."
     }
