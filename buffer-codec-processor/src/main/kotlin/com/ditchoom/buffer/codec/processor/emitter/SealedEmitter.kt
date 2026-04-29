@@ -233,8 +233,46 @@ class SealedEmitter(
             // `@LengthFrom` or `@RemainingBytes` — not peekable inline.
             return false
         }
+        // Index condition-target fields for the WhenExpr.FieldRef path heads
+        // so we can verify their strategy is also peekable. Mirrors
+        // `LeafEmitter.computePeekPlan`'s conditionTargets pre-scan.
+        val conditionTargets = mutableSetOf<String>()
         for (f in variant.fields) {
-            if (f.conditionality !is com.ditchoom.buffer.codec.processor.ir.Conditionality.Always) return false
+            val cond = f.conditionality
+            if (cond is com.ditchoom.buffer.codec.processor.ir.Conditionality.WhenExpr) {
+                val expr = cond.expr
+                if (expr is com.ditchoom.buffer.codec.processor.ir.BooleanExpression.FieldRef &&
+                    expr.path.isNotEmpty()
+                ) {
+                    conditionTargets.add(expr.path.first())
+                }
+            }
+        }
+        for (f in variant.fields) {
+            val cond = f.conditionality
+            val isConditional =
+                cond is com.ditchoom.buffer.codec.processor.ir.Conditionality.WhenExpr
+            if (isConditional) {
+                // Only peekable conditionals are FieldRef paths; RemainingGte / Eq /
+                // Gt all require knowledge unavailable at peek-time. The condition
+                // target's strategy must itself be peek-capturable (Bool primitive
+                // or ValueClass wrapping a primitive).
+                val expr =
+                    (cond as com.ditchoom.buffer.codec.processor.ir.Conditionality.WhenExpr).expr
+                if (expr !is com.ditchoom.buffer.codec.processor.ir.BooleanExpression.FieldRef) {
+                    return false
+                }
+            }
+            // Validate the condition target field itself is capturable.
+            if (f.name in conditionTargets) {
+                when (val s = f.strategy) {
+                    is FieldStrategy.Primitive ->
+                        if (s.kind != PrimitiveKind.Bool || s.wireBytes != 1) return false
+                    is FieldStrategy.ValueClass ->
+                        if (s.inner !is FieldStrategy.Primitive) return false
+                    else -> return false
+                }
+            }
             when (val s = f.strategy) {
                 is FieldStrategy.Primitive -> Unit
                 is FieldStrategy.DiscriminatorOwned -> Unit

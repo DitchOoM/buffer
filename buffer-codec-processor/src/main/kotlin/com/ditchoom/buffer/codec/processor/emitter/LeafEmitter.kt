@@ -1170,7 +1170,15 @@ class LeafEmitter(
             return
         }
         fb.addCode("var offset = baseOffset\n")
-        for (step in plan.steps) {
+        emitPeekSteps(fb, plan.steps)
+        fb.addCode("return %T.Size(offset - baseOffset)\n", Names.PeekResult)
+    }
+
+    private fun emitPeekSteps(
+        fb: FunSpec.Builder,
+        steps: List<PeekStep>,
+    ) {
+        for (step in steps) {
             when (step) {
                 is PeekStep.AddFixed -> if (step.bytes > 0) fb.addCode("offset += %L\n", step.bytes)
                 is PeekStep.PeekUShortPrefix -> {
@@ -1192,25 +1200,97 @@ class LeafEmitter(
                     fb.addCode("offset += %L\n", step.varName)
                 }
                 is PeekStep.AddCapturedLen -> fb.addCode("offset += %L\n", step.varName)
+                is PeekStep.PeekConditionBoolean -> {
+                    fb.addCode("if (stream.available() < offset + 1) return %T.NeedsMoreData\n", Names.PeekResult)
+                    fb.addCode("val %L = stream.peekByte(offset).toInt() != 0\n", step.varName)
+                }
+                is PeekStep.PeekConditionValueClass -> {
+                    val wrapperType = TypeRegistry.splitFqn(step.wrapperFqn)
+                    fb.addCode(
+                        "if (stream.available() < offset + %L) return %T.NeedsMoreData\n",
+                        step.wireBytes,
+                        Names.PeekResult,
+                    )
+                    fb.addCode(
+                        "val %L = %T(%L)\n",
+                        step.varName,
+                        wrapperType,
+                        peekNativeExpr("stream", "offset", step.wireBytes, step.innerKind),
+                    )
+                }
+                is PeekStep.Conditional -> {
+                    fb.addCode("if (%L) {\n", step.conditionExpr)
+                    emitPeekSteps(fb, step.innerSteps)
+                    fb.addCode("}\n")
+                }
             }
         }
-        fb.addCode("return %T.Size(offset - baseOffset)\n", Names.PeekResult)
+    }
+
+    /** Mirrors legacy `PeekFrameSizeEmitter.peekNativeExpr` — returns the
+     * primitive-kind-aware peek expression (signed vs. unsigned, bytes ↔
+     * native type) so a value-class wrapper can be constructed directly
+     * from the peeked bytes without an intermediate `Int` cast. */
+    private fun peekNativeExpr(
+        stream: String,
+        offset: String,
+        wireBytes: Int,
+        kind: PrimitiveKind,
+    ): String {
+        val signed =
+            when (kind) {
+                PrimitiveKind.Byte, PrimitiveKind.Short, PrimitiveKind.Int, PrimitiveKind.Long, PrimitiveKind.Float, PrimitiveKind.Double -> true
+                PrimitiveKind.UByte, PrimitiveKind.UShort, PrimitiveKind.UInt, PrimitiveKind.ULong, PrimitiveKind.Bool -> false
+            }
+        return when {
+            wireBytes == 1 && !signed -> "$stream.peekByte($offset).toUByte()"
+            wireBytes == 1 && signed -> "$stream.peekByte($offset)"
+            wireBytes == 2 && !signed -> "$stream.peekShort($offset).toUShort()"
+            wireBytes == 2 && signed -> "$stream.peekShort($offset)"
+            wireBytes == 4 && !signed -> "$stream.peekInt($offset).toUInt()"
+            wireBytes == 4 && signed -> "$stream.peekInt($offset)"
+            wireBytes == 8 && !signed -> "$stream.peekLong($offset).toULong()"
+            wireBytes == 8 && signed -> "$stream.peekLong($offset)"
+            else -> "$stream.peekByte($offset)"
+        }
     }
 
     /**
      * Mirrors `PeekFrameSizeEmitter.generate` for the strategies the new pipeline
-     * supports (Primitive + StringField + VarInt). Returns `null` when peek
-     * generation is impossible — the legacy behaviour of "no peek functions
-     * emitted" then applies.
+     * supports (Primitive + StringField + VarInt + ValueClass). Returns `null`
+     * when peek generation is impossible — the legacy behaviour of "no peek
+     * functions emitted" then applies.
+     *
+     * Conditional fields lowered to `Conditionality.WhenExpr` are supported for
+     * `BooleanExpression.FieldRef` whose head is a peekable Boolean primitive
+     * or value-class field on the same class. The condition target is captured
+     * via a `PeekConditionBoolean` / `PeekConditionValueClass` step (peek
+     * without offset advance) when its regular step would otherwise be a
+     * `FlushFixed` or fixed-primitive — so the field still contributes its
+     * wire bytes through the regular processing pass below the capture.
+     * Conditional fields wrap their inner steps in a `PeekStep.Conditional`
+     * block. `RemainingGte` / `Eq` / `Gt` boolean expressions are not yet
+     * peekable; the planner returns `null` for those.
      */
     private fun computePeekPlan(plan: Plan.Leaf): PeekPlan? {
         // Pre-scan: which fields are referenced by `@LengthFrom`? Their captured
         // length variables must be retained for the consuming field's add-step.
         val lengthFromTargets = mutableSetOf<String>()
+        // Pre-scan: which fields' values are referenced by some other field's
+        // `@When` / `@WhenTrue` boolean expression? Those become condition
+        // targets and require a capture step before their regular processing.
+        val conditionTargets = mutableSetOf<String>()
         for (f in plan.fields) {
             val s = f.strategy
             if (s is FieldStrategy.StringField && s.length is LengthSource.FromField) {
                 lengthFromTargets.add(s.length.name)
+            }
+            val cond = f.conditionality
+            if (cond is Conditionality.WhenExpr) {
+                val expr = cond.expr
+                if (expr is BooleanExpression.FieldRef && expr.path.isNotEmpty()) {
+                    conditionTargets.add(expr.path.first())
+                }
             }
         }
         val steps = mutableListOf<PeekStep>()
@@ -1223,81 +1303,149 @@ class LeafEmitter(
                 .flatMap { it.extractions }
                 .map { it.targetField }
                 .toSet()
-        for (f in effective) {
-            if (f.name in batchedNames) continue
-            if (f.conditionality !is Conditionality.Always) {
-                // Conditional fields make exact frame size impossible.
-                return null
+
+        // Walk one field, appending steps to [out]. Returns the updated
+        // [fixedAccum] or null when the field is not peek-able. Conditional
+        // fields wrap their own walk's steps in `PeekStep.Conditional`. The
+        // helper closes over [conditionTargets] so the same recursion path
+        // can be used both at the top level and inside a Conditional's inner
+        // step list.
+        fun processField(
+            f: FieldPlan,
+            out: MutableList<PeekStep>,
+            initialAccum: Int,
+        ): Int? {
+            var accum = initialAccum
+            // Before processing the field's own bytes: if its value needs
+            // capturing for a downstream conditional, peek-and-bind into
+            // `_cond_<name>` first. The capture step does not advance the
+            // peek offset — the field's regular processing below does.
+            if (f.name in conditionTargets) {
+                when (val s = f.strategy) {
+                    is FieldStrategy.Primitive -> {
+                        if (s.kind == PrimitiveKind.Bool && s.wireBytes == 1) {
+                            out.add(PeekStep.AddFixed(accum))
+                            accum = 0
+                            out.add(PeekStep.PeekConditionBoolean("_cond_${f.name}"))
+                        } else {
+                            return null
+                        }
+                    }
+                    is FieldStrategy.ValueClass -> {
+                        val inner = s.inner
+                        if (inner !is FieldStrategy.Primitive) return null
+                        out.add(PeekStep.AddFixed(accum))
+                        accum = 0
+                        out.add(
+                            PeekStep.PeekConditionValueClass(
+                                "_cond_${f.name}",
+                                s.valueClassFqn.canonical,
+                                inner.wireBytes,
+                                inner.kind,
+                            ),
+                        )
+                    }
+                    else -> return null
+                }
             }
             val s = f.strategy
             when (s) {
                 is FieldStrategy.Primitive -> {
                     if (f.name in lengthFromTargets) {
-                        // Capture this primitive into a local for the @LengthFrom consumer.
-                        steps.add(PeekStep.AddFixed(fixedAccum))
-                        fixedAccum = 0
+                        out.add(PeekStep.AddFixed(accum))
+                        accum = 0
                         val varName = "_${f.name}"
                         when (s.wireBytes) {
-                            1 -> steps.add(PeekStep.PeekUBytePrefix(varName, captureOnly = true))
-                            2 -> steps.add(PeekStep.PeekUShortPrefix(varName, captureOnly = true))
-                            4 -> steps.add(PeekStep.PeekIntPrefix(varName, captureOnly = true))
+                            1 -> out.add(PeekStep.PeekUBytePrefix(varName, captureOnly = true))
+                            2 -> out.add(PeekStep.PeekUShortPrefix(varName, captureOnly = true))
+                            4 -> out.add(PeekStep.PeekIntPrefix(varName, captureOnly = true))
                             else -> return null
                         }
                         capturedLen[f.name] = varName
-                        // PeekUShortPrefix etc. above already emit `offset += N` AND `offset += varName`.
-                        // For capture-only we want only the byte advance, NOT the addVar; rework below.
                         return null // Capture+consume pairs aren't supported in the simple emit; bail out.
                     }
-                    fixedAccum += s.wireBytes
+                    accum += s.wireBytes
                 }
-                is FieldStrategy.VarInt -> return null // VBI is variable-width; legacy omits peek too.
+                is FieldStrategy.VarInt -> return null
                 is FieldStrategy.StringField -> {
                     when (val l = s.length) {
                         is LengthSource.Inline ->
                             when (l.encoding) {
                                 LengthEncoding.Byte -> {
-                                    steps.add(PeekStep.AddFixed(fixedAccum))
-                                    fixedAccum = 0
-                                    steps.add(PeekStep.PeekUBytePrefix("_${f.name}Len", captureOnly = false))
+                                    out.add(PeekStep.AddFixed(accum))
+                                    accum = 0
+                                    out.add(PeekStep.PeekUBytePrefix("_${f.name}Len", captureOnly = false))
                                 }
                                 LengthEncoding.Short -> {
-                                    steps.add(PeekStep.AddFixed(fixedAccum))
-                                    fixedAccum = 0
-                                    steps.add(PeekStep.PeekUShortPrefix("_${f.name}Len", captureOnly = false))
+                                    out.add(PeekStep.AddFixed(accum))
+                                    accum = 0
+                                    out.add(PeekStep.PeekUShortPrefix("_${f.name}Len", captureOnly = false))
                                 }
                                 LengthEncoding.Int -> {
-                                    steps.add(PeekStep.AddFixed(fixedAccum))
-                                    fixedAccum = 0
-                                    steps.add(PeekStep.PeekIntPrefix("_${f.name}Len", captureOnly = false))
+                                    out.add(PeekStep.AddFixed(accum))
+                                    accum = 0
+                                    out.add(PeekStep.PeekIntPrefix("_${f.name}Len", captureOnly = false))
                                 }
-                                LengthEncoding.Varint -> return null // legacy omits peek for VBI prefix
+                                LengthEncoding.Varint -> return null
                             }
                         is LengthSource.FromField -> {
                             val cap = capturedLen[l.name] ?: return null
-                            steps.add(PeekStep.AddFixed(fixedAccum))
-                            fixedAccum = 0
-                            steps.add(PeekStep.AddCapturedLen(cap))
+                            out.add(PeekStep.AddFixed(accum))
+                            accum = 0
+                            out.add(PeekStep.AddCapturedLen(cap))
                         }
-                        is LengthSource.Remaining -> return null // legacy omits peek
+                        is LengthSource.Remaining -> return null
                     }
                 }
-                // Phase 9 Step 3: value-class wraps a primitive — peek treats it as
-                // the inner primitive's fixed wire width.
                 is FieldStrategy.ValueClass -> {
                     val inner = s.inner
                     if (inner is FieldStrategy.Primitive) {
-                        fixedAccum += inner.wireBytes
+                        accum += inner.wireBytes
                     } else {
                         return null
                     }
                 }
+                // DiscriminatorOwned contributes zero wire bytes from the
+                // variant's perspective: the dispatcher writes/reads the
+                // discriminator, so the variant body skips it. Mirrors legacy
+                // `PeekFrameSizeEmitter.processField` `DiscriminatorField` arm.
+                is FieldStrategy.DiscriminatorOwned -> Unit
                 is FieldStrategy.PayloadSlot,
                 is FieldStrategy.NestedMessage,
                 is FieldStrategy.External,
-                is FieldStrategy.DiscriminatorOwned,
                 is FieldStrategy.Spi,
                 is FieldStrategy.Collection_,
                 -> return null
+            }
+            return accum
+        }
+
+        for (f in effective) {
+            if (f.name in batchedNames) continue
+            val cond = f.conditionality
+            if (cond is Conditionality.Always) {
+                fixedAccum = processField(f, steps, fixedAccum) ?: return null
+            } else if (cond is Conditionality.WhenExpr) {
+                val expr = cond.expr
+                if (expr !is BooleanExpression.FieldRef) {
+                    // RemainingGte / Eq / Gt aren't peekable yet — legacy
+                    // returns null for those too.
+                    return null
+                }
+                val condExpr = "_cond_${expr.path.joinToString(".")}"
+                val innerSteps = mutableListOf<PeekStep>()
+                var innerAccum = processField(f, innerSteps, 0) ?: return null
+                if (innerAccum > 0) innerSteps.add(PeekStep.AddFixed(innerAccum))
+                steps.add(PeekStep.AddFixed(fixedAccum))
+                fixedAccum = 0
+                steps.add(
+                    PeekStep.Conditional(
+                        condExpr,
+                        innerSteps.filter { it !is PeekStep.AddFixed || it.bytes > 0 },
+                    ),
+                )
+            } else {
+                return null
             }
         }
         steps.add(PeekStep.AddFixed(fixedAccum))
@@ -1307,7 +1455,6 @@ class LeafEmitter(
             if (allFixed) {
                 steps.filterIsInstance<PeekStep.AddFixed>().sumOf { it.bytes }
             } else {
-                // Up to and including the first variable peek prefix.
                 var sum = 0
                 for (step in steps) {
                     when (step) {
@@ -1315,7 +1462,10 @@ class LeafEmitter(
                         is PeekStep.PeekUBytePrefix -> return PeekPlan(steps, sum + 1, allFixed = false)
                         is PeekStep.PeekUShortPrefix -> return PeekPlan(steps, sum + 2, allFixed = false)
                         is PeekStep.PeekIntPrefix -> return PeekPlan(steps, sum + 4, allFixed = false)
-                        is PeekStep.AddCapturedLen -> {} // no min contribution
+                        is PeekStep.PeekConditionBoolean -> return PeekPlan(steps, sum + 1, allFixed = false)
+                        is PeekStep.PeekConditionValueClass -> return PeekPlan(steps, sum + step.wireBytes, allFixed = false)
+                        is PeekStep.Conditional -> return PeekPlan(steps, sum + 1, allFixed = false)
+                        is PeekStep.AddCapturedLen -> {}
                     }
                 }
                 sum
@@ -1351,6 +1501,30 @@ class LeafEmitter(
 
         data class AddCapturedLen(
             val varName: String,
+        ) : PeekStep
+
+        /** Peek a 1-byte boolean condition target into `_cond_<name>` without
+         * advancing the peek offset. The field's regular processing advances. */
+        data class PeekConditionBoolean(
+            val varName: String,
+        ) : PeekStep
+
+        /** Peek a value-class field whose inner is a primitive into a wrapper
+         * instance bound to `_cond_<name>` without advancing the offset. The
+         * field's regular processing advances by the inner primitive's bytes. */
+        data class PeekConditionValueClass(
+            val varName: String,
+            val wrapperFqn: String,
+            val wireBytes: Int,
+            val innerKind: PrimitiveKind,
+        ) : PeekStep
+
+        /** Wraps inner steps in `if (conditionExpr) { ... }`. The conditionExpr
+         * resolves to a captured `_cond_*` local emitted by an earlier
+         * `PeekConditionBoolean` / `PeekConditionValueClass`. */
+        data class Conditional(
+            val conditionExpr: String,
+            val innerSteps: List<PeekStep>,
         ) : PeekStep
     }
 
