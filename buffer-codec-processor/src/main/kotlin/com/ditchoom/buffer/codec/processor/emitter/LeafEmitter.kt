@@ -96,6 +96,19 @@ class LeafEmitter(
         if (canDecode) type.addFunction(buildDecodeFun(plan, classType))
         if (canEncode) type.addFunction(buildEncodeFun(plan, classType))
         if (canEncode) type.addFunction(buildWireSizeFun(plan, classType))
+        // When the variant carries its discriminator as a constructor field
+        // (e.g. `data class WithHeader(val header: Tag, ...)` under
+        // `@DispatchOn(Tag::class)`), emit sibling `encodeBody(buffer, value)` /
+        // `wireSizeBody(value)` entry points that skip the discriminator. Pairs
+        // with the dispatcher's body-only framing path: callers write byte1 +
+        // length-prefix themselves and delegate the body to the codec, instead
+        // of double-writing the discriminator. Mirrors legacy
+        // `CodecGenerator.buildCodecFile` lines 146-174 / 202-232.
+        val hasDiscriminatorField = plan.fields.any { it.strategy is FieldStrategy.DiscriminatorOwned }
+        if (canEncode && hasDiscriminatorField) {
+            type.addFunction(buildBodyEncodeFun(plan, classType))
+            type.addFunction(buildBodyWireSizeFun(plan, classType))
+        }
         // Peek emission: peek belongs to FrameDetector which is part of `Codec<T>`
         // (and conceptually decoding). Emit the override only when the codec is
         // decode-capable. The non-suspending overload is `override fun` for
@@ -792,6 +805,102 @@ class LeafEmitter(
         return fb.build()
     }
 
+    /**
+     * Sibling of [buildEncodeFun] that skips fields backed by
+     * `FieldStrategy.DiscriminatorOwned`. Emitted when the variant declares
+     * its discriminator as a constructor field — the dispatcher writes the
+     * discriminator (and any framing) itself and delegates the body to this
+     * entry point. The function has a default `context = EncodeContext.Empty`
+     * so callers without payload-bearing nested codecs need not construct
+     * one. Mirrors legacy `CodecGenerator.buildCodecFile` lines 146-174.
+     */
+    private fun buildBodyEncodeFun(
+        plan: Plan.Leaf,
+        classType: ClassName,
+    ): FunSpec {
+        val fb =
+            FunSpec
+                .builder("encodeBody")
+                .addParameter("buffer", Names.WriteBuffer)
+                .addParameter(ParameterSpec.builder("value", classType).build())
+                .addParameter(
+                    ParameterSpec
+                        .builder("context", Names.EncodeContext)
+                        .defaultValue("%T.Empty", Names.EncodeContext)
+                        .build(),
+                )
+        val batchedFieldNames =
+            plan.batches
+                .flatMap { it.extractions }
+                .map { it.targetField }
+                .toSet()
+        for (batch in plan.batches) {
+            val parts =
+                batch.extractions.joinToString(" or ") { ex ->
+                    val fieldRef = "value.${ex.targetField}"
+                    if (ex.shift == 0) {
+                        "(if ($fieldRef) 0x${Integer.toHexString(ex.mask)} else 0)"
+                    } else {
+                        "(($fieldRef.toInt() and 0x${Integer.toHexString(ex.mask)}) shl ${ex.shift})"
+                    }
+                }
+            val writeName =
+                when (batch.widthBytes) {
+                    1 -> "writeUByte"
+                    2 -> "writeUShort"
+                    4 -> "writeUInt"
+                    else -> error("Unsupported batch width: ${batch.widthBytes}")
+                }
+            val cast =
+                when (batch.widthBytes) {
+                    1 -> ".toUByte()"
+                    2 -> ".toUShort()"
+                    4 -> ".toUInt()"
+                    else -> ""
+                }
+            fb.addCode("buffer.%L((%L)%L)\n", writeName, parts, cast)
+        }
+        val effective =
+            effectiveFields(plan)
+                .filter { it.name !in batchedFieldNames }
+                .filter { it.strategy !is FieldStrategy.DiscriminatorOwned }
+        val whenRemainingTail = mutableListOf<FieldPlan>()
+        for (i in effective.indices.reversed()) {
+            val f = effective[i]
+            val cond = f.conditionality
+            if (cond is Conditionality.WhenExpr && cond.expr is BooleanExpression.RemainingGte) {
+                whenRemainingTail.add(0, f)
+            } else {
+                break
+            }
+        }
+        val whenRemainingNames = whenRemainingTail.map { it.name }.toSet()
+        for (field in effective) {
+            if (field.name in whenRemainingNames) continue
+            val cond = field.conditionality
+            if (cond is Conditionality.WhenExpr) {
+                fb.addCode("val %L = value.%L\n", field.name, field.name)
+                fb.addCode("if (%L != null) {\n", field.name)
+                val stmt = encodeStatement(field)
+                if (stmt != null) fb.addCode(stmt)
+                fb.addCode("}\n")
+            } else {
+                val stmt = encodeStatement(field) ?: continue
+                fb.addCode(stmt)
+            }
+        }
+        if (whenRemainingTail.isNotEmpty()) {
+            for (f in whenRemainingTail) {
+                fb.addCode("val %L = value.%L\n", f.name, f.name)
+                fb.addCode("if (%L != null) {\n", f.name)
+                val stmt = encodeStatement(f)
+                if (stmt != null) fb.addCode(stmt)
+            }
+            repeat(whenRemainingTail.size) { fb.addCode("}\n") }
+        }
+        return fb.build()
+    }
+
     private fun encodeStatement(field: FieldPlan): CodeBlock? =
         when (val s = field.strategy) {
             is FieldStrategy.Primitive -> {
@@ -1009,6 +1118,64 @@ class LeafEmitter(
                 }
             }
 
+            is WireSizeEmitter.Plan.Accumulator -> {
+                fb.addCode("var size = %L\n", batchBytes)
+                sizePlan.contributions.forEach { fb.addCode("size += %L\n", it) }
+                fb.addCode("return size\n")
+            }
+        }
+        return fb.build()
+    }
+
+    /**
+     * Sibling of [buildWireSizeFun] that excludes `DiscriminatorOwned` fields
+     * from the sum. Pairs with [buildBodyEncodeFun]: the dispatcher writes the
+     * discriminator (and any framing) itself and queries this body-only size
+     * to determine the framed body length. Mirrors legacy
+     * `CodecGenerator.buildCodecFile` lines 197-232.
+     */
+    private fun buildBodyWireSizeFun(
+        plan: Plan.Leaf,
+        classType: ClassName,
+    ): FunSpec {
+        val fb =
+            FunSpec
+                .builder("wireSizeBody")
+                .addParameter(ParameterSpec.builder("value", classType).build())
+                .addParameter(
+                    ParameterSpec
+                        .builder("context", Names.EncodeContext)
+                        .defaultValue("%T.Empty", Names.EncodeContext)
+                        .build(),
+                )
+                .returns(INT)
+        val batchBytes = plan.batches.sumOf { it.widthBytes }
+        val batchedFieldNames =
+            plan.batches
+                .flatMap { it.extractions }
+                .map { it.targetField }
+                .toSet()
+        val fields =
+            effectiveFields(plan)
+                .filter { it.name !in batchedFieldNames }
+                .filter { it.strategy !is FieldStrategy.DiscriminatorOwned }
+        val sizePlan =
+            WireSizeEmitter.choose(
+                fields = fields,
+                fixedSizeOf = WireSizeEmitter::defaultFixedSizeOf,
+                contributionFor = { sizeContribution(it) },
+            )
+        when (sizePlan) {
+            is WireSizeEmitter.Plan.ConstLiteral ->
+                fb.addCode("return %L\n", sizePlan.totalBytes + batchBytes)
+            is WireSizeEmitter.Plan.FixedPlusOneVariable -> {
+                val prefix = sizePlan.prefixBytes + batchBytes
+                if (prefix == 0) {
+                    fb.addCode("return %L\n", sizePlan.variableExpr)
+                } else {
+                    fb.addCode("return %L + %L\n", prefix, sizePlan.variableExpr)
+                }
+            }
             is WireSizeEmitter.Plan.Accumulator -> {
                 fb.addCode("var size = %L\n", batchBytes)
                 sizePlan.contributions.forEach { fb.addCode("size += %L\n", it) }
