@@ -224,45 +224,6 @@ class ProtocolMessageProcessor(
         // dispatch through the new pipeline routes through new-pipeline
         // variant codecs (after C6's tryPipeline-for-variants) without any
         // signature mismatch.
-        // Phase 9 Step 3 conservative defer: classes that depend on the new
-        // value-class auto-detect path stay on legacy until Step 5 reconciles
-        // sealed-dispatcher peek emission with legacy's `allVariantsSupportPeek`
-        // gating. Without this defer, Step 3 flips sealed roots like `MqttPacket`
-        // (whose variants are themselves `@JvmInline value class`) from legacy
-        // to the new pipeline, but the new SealedEmitter's `variantSupportsPeek`
-        // is stricter than legacy's gate — `MIN_HEADER_BYTES` and `peekFrameSize`
-        // are silently omitted, breaking consumers that stream-decode via the
-        // sealed dispatcher. The detection itself (FieldStrategy.ValueClass +
-        // RawClassMetadata.valueClassInfo) is in place and verified by
-        // `ValueClassFieldTest`; this gate keeps routing identical to pre-Step 3.
-        val externals = cachedDiscovery?.externalClasses.orEmpty()
-        fun hasExternalValueClassField(
-            s: com.ditchoom.buffer.codec.processor.discovery.RawSymbol.DataLike,
-        ): Boolean = s.constructorParameters.any { p -> externals[p.typeRef.fqn]?.valueClassInfo != null }
-        if (symbol is com.ditchoom.buffer.codec.processor.discovery.RawSymbol.DataLike) {
-            if (symbol.classKind ==
-                com.ditchoom.buffer.codec.processor.discovery.DataLikeKind.ValueClass
-            ) {
-                return false
-            }
-            if (hasExternalValueClassField(symbol)) return false
-        }
-        if (symbol is com.ditchoom.buffer.codec.processor.discovery.RawSymbol.SealedRoot) {
-            val discovery = cachedDiscovery
-            if (discovery != null) {
-                for (childFqn in symbol.subclassFqns) {
-                    val child = discovery.symbols.firstOrNull { it.fqn == childFqn } ?: continue
-                    if (child is com.ditchoom.buffer.codec.processor.discovery.RawSymbol.DataLike) {
-                        if (child.classKind ==
-                            com.ditchoom.buffer.codec.processor.discovery.DataLikeKind.ValueClass
-                        ) {
-                            return false
-                        }
-                        if (hasExternalValueClassField(child)) return false
-                    }
-                }
-            }
-        }
         return true
     }
 
