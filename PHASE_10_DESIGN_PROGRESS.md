@@ -3436,15 +3436,344 @@ time before any emitter code is written.
 
 ## Stage-A gate — `Connection<MqttControlPacket<…>>` integration test
 
-After all ten slices are validated, the final gate before any emitter
-code is a real `Connection<T>` round-trip. Sketch lives here once
-slice 10 is locked. Outline (to be expanded):
+The final gate before *any* emitter code lands. Validates that the
+ten annotation slices and the asConnection bridge (locked decisions
+9 + 10) compose into a real round-trip. Lives in
+`buffer-codec-test/src/commonTest/kotlin/com/ditchoom/buffer/codec/test/`
+once Stage A reintroduces the test source set.
 
-- Paired in-memory `ByteStream` (two `Channel<ReadBuffer>` queues, one per direction).
-- `Codec<MqttControlPacket<MyWill, MyAuth, MyPub>>.asConnection(transport, pool, …)` → `Connection<MqttControlPacket<MyWill, MyAuth, MyPub>>`.
-- Send a typed-payload `Publish<JpegFrame>` through one side; collect on the other.
-- Inject a synthetic chunk-splitting wrapper around the inbound `ByteStream` that returns the encoded bytes in arbitrary 1- to 17-byte chunks so `peekFrameSize` is forced through the `NeedsMoreData → Complete` progression at every byte boundary.
-- Assert: byte-exact round-trip; `DecodeContext` propagates from caller to `JpegImageCodec`; the allocation tracker (Stage C dependency) reports zero `ByteArray` allocations on the hot path; closing one side completes the other side's flow normally.
+### Test fixture — paired in-memory `ByteStream`
+
+```kotlin
+/**
+ * Two unidirectional Channels glued back-to-back. `client.write(buf)`
+ * appears on `server.read()`, and vice-versa. Closing either side
+ * eventually surfaces ReadResult.End on the other; abnormal cancellation
+ * surfaces ReadResult.Reset (modeled as cancelled channel exception).
+ *
+ * Buffers are passed by reference — no copies, no pool round-trip.
+ * Each side runs in the test's coroutine scope; cancellation
+ * propagates via structured concurrency.
+ */
+internal class PairedMemoryByteStreams(scope: CoroutineScope) {
+    private val clientToServer = Channel<ReadBuffer>(Channel.UNLIMITED)
+    private val serverToClient = Channel<ReadBuffer>(Channel.UNLIMITED)
+
+    val client: ByteStream = ChannelByteStream(serverToClient, clientToServer)
+    val server: ByteStream = ChannelByteStream(clientToServer, serverToClient)
+
+    private class ChannelByteStream(
+        private val incoming: Channel<ReadBuffer>,
+        private val outgoing: Channel<ReadBuffer>,
+    ) : ByteStream {
+        @Volatile private var open = true
+        override val isOpen: Boolean get() = open
+        override suspend fun read(timeout: Duration): ReadResult =
+            try {
+                ReadResult.Data(withTimeout(timeout) { incoming.receive() })
+            } catch (_: ClosedReceiveChannelException) {
+                ReadResult.End
+            } catch (e: CancellationException) {
+                throw e
+            }
+        override suspend fun write(buffer: ReadBuffer, timeout: Duration): BytesWritten {
+            val n = buffer.remaining()
+            withTimeout(timeout) { outgoing.send(buffer) }
+            return BytesWritten(n)
+        }
+        override suspend fun close() {
+            open = false
+            outgoing.close()
+        }
+    }
+}
+```
+
+### Test fixture — chunk-splitting `ByteStream` wrapper
+
+Forces `peekFrameSize` through every byte boundary so any off-by-one
+in the slice 8 / slice 10 peek logic surfaces:
+
+```kotlin
+/**
+ * Wraps an upstream ByteStream and re-chunks its reads into pieces
+ * of size 1..maxChunk (deterministic, seeded). `write` passes through
+ * unchanged. Used to verify that decode survives arbitrary fragmentation.
+ */
+internal class ChunkSplittingByteStream(
+    private val upstream: ByteStream,
+    private val maxChunk: Int = 17,                                                 // prime, > MqttFixedHeader, < typical PUBLISH
+    seed: Long = 0xC0DEC0DE,
+    private val pool: BufferPool,
+) : ByteStream {
+    private val rng = Random(seed)
+    private var residual: ReadBuffer? = null
+
+    override val isOpen: Boolean get() = upstream.isOpen
+
+    override suspend fun read(timeout: Duration): ReadResult {
+        val source = residual ?: when (val r = upstream.read(timeout)) {
+            is ReadResult.Data -> r.buffer
+            ReadResult.End     -> return ReadResult.End
+            ReadResult.Reset   -> return ReadResult.Reset
+        }
+        val take = minOf(source.remaining(), 1 + rng.nextInt(maxChunk))
+        val out = pool.acquire(take)
+        repeat(take) { out.writeByte(source.readByte()) }
+        out.flip()
+        residual = if (source.remaining() > 0) source else null.also {
+            // Wire: source exhausted — release the upstream chunk if pool-owned
+        }
+        return ReadResult.Data(out)
+    }
+
+    override suspend fun write(buffer: ReadBuffer, timeout: Duration) =
+        upstream.write(buffer, timeout)
+
+    override suspend fun close() = upstream.close()
+}
+```
+
+### The test
+
+```kotlin
+class MqttPublishRoundTripTest {
+
+    @Test
+    fun `typed-payload Publish round-trips byte-exact across split chunks`() = runTest {
+        withPool { pool ->
+            val pair = PairedMemoryByteStreams(this)
+            // Wrap server's read side with chunk splitting — server-side decode
+            // sees the wire bytes in arbitrary 1..17-byte chunks.
+            val serverIn = ChunkSplittingByteStream(pair.server, maxChunk = 17, pool = pool)
+
+            val ctx = DecodeContext.Empty.with(JpegImageCodec.AllocatorKey, hwAllocator)
+
+            val sender: Connection<MqttControlPacket<Nothing, Nothing, MyPub>> =
+                MqttControlPacketCodec.asConnection(
+                    transport = pair.client,
+                    pool = pool,
+                    encodeContext = EncodeContext.Empty,
+                    decodeContext = DecodeContext.Empty,                            // unused on send path
+                )
+            val receiver: Connection<MqttControlPacket<Nothing, Nothing, MyPub>> =
+                MqttControlPacketCodec.asConnection(
+                    transport = composeServerWithChunkSplit(pair.server, serverIn),
+                    pool = pool,
+                    encodeContext = EncodeContext.Empty,
+                    decodeContext = ctx,
+                ) { /* SAM block: thread the publishPayloadDecoder via a builder
+                       overload — the bridge needs to know how to invoke
+                       MqttControlPacketCodec.decode with the right SAMs. See
+                       finding "asConnection SAM threading" below. */ }
+
+            // 1. Send a typed-payload Publish<JpegFrame>.
+            val original = MqttControlPacket.Publish(
+                header = MqttFixedHeader(0x32u),                                    // PUBLISH, QoS=1
+                topic = "images/cam1",
+                packetId = PacketId(0x1234u),
+                properties = emptyList(),
+                payload = JpegFrame("cam1", testBitmap()),
+            )
+            sender.send(original)
+
+            // 2. Collect on the other side.
+            val received = receiver.receive().first()
+
+            // Assertions:
+            assertIs<MqttControlPacket.Publish<MyPub>>(received)
+            received as MqttControlPacket.Publish<MyPub>
+            assertEquals(original.header.raw, received.header.raw)
+            assertEquals(original.topic, received.topic)
+            assertEquals(original.packetId, received.packetId)
+            assertIs<JpegFrame>(received.payload)
+            (received.payload as JpegFrame).let {
+                assertEquals(original.payload.cameraId, it.cameraId)
+                assertImageEquals(original.payload.image, it.image)                // SSIM > 0.999
+            }
+
+            // 3. DecodeContext propagated.
+            assertSame(hwAllocator, ctx[JpegImageCodec.AllocatorKey])
+            assertTrue(JpegImageCodec.lastInvocationUsedAllocator(hwAllocator))    // platform-actual hook
+
+            // 4. Zero ByteArray allocations on the hot path.
+            //    Stage C wires the allocation tracker; until then assert via
+            //    a manual probe on the JVM (HotspotMemoryUsage delta).
+            assertEquals(0, allocationTracker.byteArrayAllocsDuring { /* the round-trip above */ })
+
+            // 5. Closing one side completes the other side's flow normally.
+            sender.close()
+            // receiver.receive() collector already returned via .first() — restart
+            // a fresh collect to verify End → flow completes (not throws):
+            receiver.receive().toList().let { assertEquals(emptyList(), it) }
+        }
+    }
+
+    @Test
+    fun `unexpected packet type fires throwing default with field-path`() = runTest {
+        withPool { pool ->
+            val pair = PairedMemoryByteStreams(this)
+            val sender = MqttControlPacketCodec.asConnection(pair.client, pool)
+            // Receiver provides no decoders → all default to throwing.
+            val receiver: Connection<MqttControlPacket<Nothing, Nothing, Nothing>> =
+                MqttControlPacketCodec.asConnection(pair.server, pool)
+
+            sender.send(MqttControlPacket.Publish(
+                header = MqttFixedHeader(0x30u), topic = "t", packetId = null,
+                properties = emptyList(), payload = NullPub,
+            ) as MqttControlPacket<Nothing, Nothing, Nothing>)                     // hypothetical erased upcast
+
+            val ex = assertFailsWith<DecodeException> {
+                receiver.receive().first()
+            }
+            assertEquals("MqttControlPacket.Publish.payload", ex.fieldPath)
+            assertEquals("PUBLISH not expected", ex.message?.substringAfter(": ")
+                ?.substringAfter(": "))
+        }
+    }
+
+    @Test
+    fun `transport reset propagates as TransportResetException`() = runTest {
+        withPool { pool ->
+            val pair = PairedMemoryByteStreams(this)
+            val receiver = MqttControlPacketCodec.asConnection(pair.server, pool)
+            // Cancel the reading by cancelling the underlying scope mid-collect.
+            val collector = launch {
+                assertFailsWith<TransportResetException> {
+                    receiver.receive().first()
+                }
+            }
+            yield()
+            (pair.client as ChannelByteStream).simulateReset()                     // synthetic helper
+            collector.join()
+        }
+    }
+
+    @Test
+    fun `bare-Payload decode escape hatch (sniffer mode)`() = runTest {
+        withPool { pool ->
+            val pair = PairedMemoryByteStreams(this)
+            val sender = MqttControlPacketCodec.asConnection(pair.client, pool)
+            val sniffer: Connection<MqttControlPacket<Payload, Payload, Payload>> =
+                MqttControlPacketCodec.asConnection(pair.server, pool) {
+                    // Bare-Payload SAMs — copy bytes opaquely.
+                    publishPayloadDecoder = { slice, _ ->
+                        OpaqueBlob(slice.readBytes(slice.remaining()))             // explicit memcpy — sniffer pattern
+                    }
+                }
+            sender.send(somePublish)
+            val received = sniffer.receive().first()
+            assertIs<MqttControlPacket.Publish<Payload>>(received)
+            assertIs<OpaqueBlob>((received as MqttControlPacket.Publish<Payload>).payload)
+        }
+    }
+}
+```
+
+### What the test proves (mapping to slices)
+
+| Assertion                                               | Validates slice(s) |
+|---------------------------------------------------------|-------------------|
+| Byte-exact `header.raw` round-trip                      | 1, 8 (value class transparent codec) |
+| BE prefix on `topic`, UTF-8 decode                      | 2, 3 |
+| `packetId` present iff `header.qos > 0`                 | 6 (extended), 8 (variant body) |
+| `JpegImageCodec.decode` invoked over a bounded slice    | 4, 5, 9 |
+| `Partial`-receiver dispatch on `topic` in payload SAM   | 10 |
+| `peekFrameSize` walks NeedsMoreData → Complete across 1..17-byte chunks  | 1, 3, 4, 6, 8 (peek logic across all framing shapes) |
+| `DecodeContext` flows from `asConnection` caller into `JpegImageCodec`  | 9, locked decision 6 |
+| Throwing-default fires with the right field path         | 10 (throwing-default rule) |
+| `TransportResetException` propagates                    | locked decision 9.3 |
+| Bare-`Payload<Payload>` decode works                    | §8.14, locked decision 10 |
+| Closing the sender → receiver flow completes normally   | locked decision 9.4 |
+| Zero `ByteArray` allocations on the hot path            | PHASE_9_RESET item 3, locked decision 9.6 |
+
+### Findings produced *while sketching* the test
+
+1. **`asConnection` needs a SAM-threading overload for sealed parents
+   with Payload variants.** The default `Codec<T>.asConnection`
+   signature from locked decision 9.1 takes no SAM parameters — but
+   `MqttControlPacketCodec.decode` requires three. **Add a builder-style
+   overload:**
+
+   ```kotlin
+   inline fun <Will : Payload, Auth : Payload, Pub : Payload>
+       MqttControlPacketCodec.asConnection(
+           transport: ByteStream,
+           pool: BufferPool,
+           decodeContext: DecodeContext = DecodeContext.Empty,
+           encodeContext: EncodeContext = EncodeContext.Empty,
+           id: Long = 0L,
+           streamByteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
+           readTimeout: Duration = 15.seconds,
+           writeTimeout: Duration = 15.seconds,
+           configure: MqttControlPacketCodec.AsConnectionBuilder<Will, Auth, Pub>.() -> Unit = {},
+       ): Connection<MqttControlPacket<Will, Auth, Pub>>
+   ```
+
+   The `AsConnectionBuilder` exposes `var connectWillPayloadDecoder
+   = throwingDefault(...)` (etc.) so consumers override only the slots
+   they care about. The processor emits the builder per Payload-bearing
+   sealed parent. The plain `Codec<T>.asConnection` from 9.1 stays —
+   it covers the no-Payload case.
+
+   **Lock that as an addendum to decision 9.1**: codecs that take
+   extra decode parameters get a per-codec builder overload generated
+   alongside. The plain `asConnection` stays for the trivial case.
+
+2. **The `ChunkSplittingByteStream` test fixture is reusable.** Move
+   to `buffer-codec-test/src/commonMain/.../testfixtures/` so other
+   slices (Stage A's Heartbeat, Stage B's DNS+ATT, etc.) can re-use
+   it. Lock the convention.
+
+3. **`assertImageEquals` and `JpegImageCodec.lastInvocationUsedAllocator`
+   are platform-actual concerns**, not framework. Document the test's
+   platform-actual seam: the JVM test fixture provides ImageIO
+   helpers; JS uses `createImageBitmap` + canvas pixel diff. The
+   framework's `:buffer-codec-test` module declares the test
+   abstractly and platform sourceSets implement.
+
+4. **`allocationTracker.byteArrayAllocsDuring { … }`** is the Stage-C
+   deferred decision ("Zero-`ByteArray` enforcement: allocation
+   tracker hooked into `:buffer-codec-test`; mechanism TBD"). The
+   integration test exercises this hook; the *implementation* of the
+   hook is Stage C. **Lock the contract today: a test-only object
+   `allocationTracker` with `byteArrayAllocsDuring(block: () -> Unit):
+   Long` returning the count of ByteArray allocations during `block`,
+   counted via JVM `ThreadMXBean.getThreadAllocatedBytes` plus a
+   ByteArray-specific filter on JVM, and via `MemorySnapshot` deltas
+   on Native.** Mechanism details land in Stage C; the API is locked
+   here.
+
+5. **The `simulateReset()` helper on `ChannelByteStream`** is a
+   test-only seam. Locked as part of the test fixture.
+
+### Stage-A entry conditions (gate criteria)
+
+The test **must compile and pass** before any Stage A emitter code is
+written. To compile:
+
+- All ten annotation runtime / processor surfaces match the locks
+  recorded in slices 1–10 above.
+- `Codec<T>.asConnection` (locked decision 9) is implemented in
+  `buffer-codec` with the builder overload from finding 1.
+- `TransportResetException` is added to `:buffer-flow`.
+- The chunk-splitting + paired-memory test fixtures land in
+  `:buffer-codec-test/src/commonMain/.../testfixtures/`.
+
+To pass:
+
+- All five test methods green on JVM (the canonical platform).
+- JS / Native-skipped is acceptable for the integration test (the
+  per-slice processor unit tests must pass on every platform; the
+  end-to-end test on JVM is the gate).
+- Allocation tracker reports zero `ByteArray` allocations on the
+  Publish round-trip. (Stage C may relax this to "verified manually"
+  if the tracker isn't ready; the manual measurement procedure is
+  documented in the test KDoc.)
+
+Once these conditions hold, **Stage A through Stage H proceed per the
+PHASE_9_RESET execution plan** with the slice-validation findings
+guiding each emitter increment.
 
 ## Decisions still pending (everything else)
 
