@@ -2190,18 +2190,26 @@ the discriminator. ✓
    for an unknown discriminator returns `Complete(1)` so decode is
    invoked next and raises `DecodeException`. Never returns
    `NeedsMoreData` for an unknown discriminator — that would deadlock.
-7. **Lock the `data object` codec emission rule.** A `data object`
-   variant with no fields decodes to the singleton instance and
-   encodes to nothing past the discriminator. No `Partial`, no codec
-   object for the variant itself — the parent dispatcher handles both
-   directions inline. Resolves the PHASE_9_RESET deferred decision
-   *"`data object` vs empty `data class`"* in favor of *both*: the
-   processor accepts both shapes, treats a `data object` as a sealed-
-   tree leaf with no body codec, and treats an empty `data class`
-   identically (allocating a new instance per decode rather than
-   returning a singleton). **Decision: support both; `data object`
-   yields a singleton, empty `data class` yields per-decode allocation
-   (negligible — empty objects are scalar-replaced on the JVM).**
+7. **Lock the body-less variant shape.** Body-less sealed-parent
+   variants are declared as `data object`. The processor decodes them
+   to the singleton instance and encodes nothing past the discriminator.
+   No `Partial`, no codec object for the variant — the parent dispatcher
+   handles both directions inline.
+
+   **Resolves PHASE_9_RESET deferred decision *"`data object` vs empty
+   `data class`"* in favor of `data object`.** The "empty `data class`"
+   alternative was a phrasing artifact from the original deferred-
+   decisions table — Kotlin's compiler rejects `data class Foo()` with
+   *"Data class must have at least one primary constructor parameter"*,
+   so empty `data class` was never a real option. `data object` is the
+   only legal body-less shape, and it is the right shape: singleton
+   identity, sensible `equals`/`hashCode`/`toString`, and zero per-
+   decode allocation.
+
+   A non-data `object Foo : Parent` is also accepted by the processor
+   for backwards compatibility with hand-rolled hierarchies, but the
+   processor warns "use `data object` for parity with non-empty
+   variants and to inherit standard equals/hashCode."
 
 **Slice status:** validated. Seven locks recorded (including
 resolution of two PHASE_9_RESET deferred decisions: companion
@@ -2564,7 +2572,317 @@ when the call site is monomorphic, which it always is here. ✓
 bug fix surfaced by the streaming audit — under-read defense).
 Move on to slice 9.
 
-### Slices 9–10 — schedule
+### Slice 9 — `@UseCodec` over an `expect`/`actual` platform-actual codec
+
+**Source vector.** A real platform-actual codec for image bytes. The
+locked decision 8.7 already sketched the shape: `expect class
+ImageBitmap` plus `expect object JpegImageCodec : Codec<ImageBitmap>`
+in `commonMain`, with platform actuals using `BufferedImage` /
+`ImageIO` on JVM, `createImageBitmap` (async) on JS, etc.
+
+For this slice we exercise `@UseCodec(JpegImageCodec::class)` on a
+field of a synthetic message that mimics the *envelope shape* of an
+MQTT v5 PUBLISH carrying a JPEG payload — without yet introducing the
+full `Payload`-marker SAM machinery (slice 10). The intent: prove
+`@UseCodec` slice handoff, async decoding through `SuspendingDecoder`,
+typed-context propagation, and the `expect`/`actual` resolution path.
+
+```kotlin
+// commonMain
+expect class ImageBitmap
+
+/**
+ * Platform-actual codec for JPEG bytes ↔ ImageBitmap. Synchronous on
+ * platforms where the image library is sync (JVM ImageIO, Apple
+ * UIImage init), suspending on platforms where it isn't (JS
+ * createImageBitmap returns a Promise; the actual implements
+ * SuspendingDecoder, not Decoder).
+ *
+ * On send-only platforms / receive-only platforms, the `actual` may
+ * implement only Encoder<ImageBitmap> or only the relevant decoder
+ * interface. The expect declares the union (Codec) for common-code
+ * reachability; the linker resolves to whatever subset the actual
+ * implements (locked decision #1).
+ */
+expect object JpegImageCodec : Codec<ImageBitmap>
+
+/**
+ * Synthetic image-frame envelope. Mirrors the shape of an MQTT v5
+ * PUBLISH "image" topic message without dragging in the full sealed
+ * parent / Payload-marker machinery (slice 10 covers that). Exercises
+ * @UseCodec slice handoff plus DecodeContext propagation to the
+ * platform-actual codec.
+ */
+@ProtocolMessage(wireOrder = Endianness.Big)
+data class ImageFrame(
+    @LengthPrefixed val cameraId: String,                 // slice 3 shape
+    val capturedAt: Long,                                 // 8b BE timestamp
+    val payloadLen: Int,                                  // 4b BE length-source
+    @LengthFrom("payloadLen")
+    @UseCodec(JpegImageCodec::class)
+    val image: ImageBitmap,
+)
+```
+
+Four fields, three non-trivial (length-prefixed string, length-source
+length, `@LengthFrom` + `@UseCodec` slice). Diagram trigger fires.
+
+**Sketched generated output.**
+
+```kotlin
+/**
+ * Generated codec for [ImageFrame] — wire-format details below.
+ *
+ * @see ImageFrame
+ * @see JpegImageCodec
+ *
+ * ```text
+ *  0                   1                   2                   3
+ *  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+ * +---------------------------------------------------------------+
+ * | <prefix=Short BE> + <len> bytes — cameraId                    |
+ * +---------------------------------------------------------------+
+ * |                       capturedAt (8b BE)                      |
+ * +---------------------------------------------------------------+
+ * |                       payloadLen (4b BE)                      |
+ * +---------------------------------------------------------------+
+ * | <payloadLen> bytes — image (from payloadLen, via JpegImageCodec)|
+ * +---------------------------------------------------------------+
+ * ```
+ *
+ * Source documentation:
+ *   Synthetic image-frame envelope. Mirrors the shape of an MQTT v5
+ *   PUBLISH "image" topic message without dragging in the full sealed
+ *   parent / Payload-marker machinery (slice 10 covers that). Exercises
+ *   @UseCodec slice handoff plus DecodeContext propagation to the
+ *   platform-actual codec.
+ */
+object ImageFrameCodec : Codec<ImageFrame> {
+
+    /**
+     * Reads cameraId, capturedAt, payloadLen, then bounds the buffer to
+     * `payloadLen` bytes and hands off to [JpegImageCodec.decode].
+     *
+     * `JpegImageCodec.decode` may suspend on platforms whose `actual`
+     * implements `SuspendingDecoder`; the codec contract requires this
+     * decode method itself be suspending whenever any field's codec is
+     * suspending — see Codec.decode is `suspend`-or-not at compile time.
+     *
+     * (For slice-9 purposes we treat JpegImageCodec as sync; a separate
+     * note in §10 of the doc covers async-decode propagation through
+     * the parent codec.)
+     */
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): ImageFrame {
+        val cameraIdLen = buffer.readUShort().toInt()
+        val cameraId = buffer.readString(cameraIdLen, Charset.UTF8).toString()
+        val capturedAt = buffer.readLong()
+        val payloadLen = buffer.readInt()
+        // Wire: bound the buffer to payloadLen and hand off to JpegImageCodec
+        val outerLimit = buffer.limit()
+        buffer.setLimit(buffer.position() + payloadLen)
+        val image = JpegImageCodec.decode(buffer, context)                        // slice handoff
+        // Defensive: advance to declared end (slice 8 lock — defends under-read)
+        buffer.position(buffer.limit())
+        buffer.setLimit(outerLimit)
+        return ImageFrame(cameraId, capturedAt, payloadLen, image)
+    }
+
+    /**
+     * Writes cameraId (length-prefixed), capturedAt, payloadLen, then
+     * the image bytes via JpegImageCodec.encode.
+     *
+     * Encode-time check: the image's wireSize must equal payloadLen
+     * (consumer is responsible for setting payloadLen consistently —
+     * we surface the mismatch here, not in the wire output).
+     */
+    override fun encode(buffer: WriteBuffer, value: ImageFrame, context: EncodeContext) {
+        writeLengthPrefixedShort(buffer, value.cameraId)
+        buffer.writeLong(value.capturedAt)
+        // Wire: payloadLen must be consistent with the image codec's exact size
+        val imageSize = (JpegImageCodec.wireSize(value.image, context) as WireSize.Exact).bytes
+        require(value.payloadLen == imageSize) {
+            "ImageFrame.payloadLen=${value.payloadLen} disagrees with JpegImageCodec.wireSize=$imageSize"
+        }
+        buffer.writeInt(value.payloadLen)
+        JpegImageCodec.encode(buffer, value.image, context)                       // direct expect call
+    }
+
+    /**
+     * Sum of fixed bytes (2 + cameraIdUtf8 + 8 + 4) plus image size.
+     * BackPatch on cameraId; Exact on image (slice 4 lock — @UseCodec
+     * inside a @LengthFrom field must report Exact). Result is BackPatch
+     * only because of the cameraId UTF-8 byte count.
+     */
+    override fun wireSize(value: ImageFrame, context: EncodeContext): WireSize =
+        WireSize.BackPatch
+
+    /**
+     * Frame size = 2 + cameraIdLen + 8 + 4 + payloadLen. Peek prefix,
+     * then payloadLen at the right offset.
+     */
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+        if (stream.available() - baseOffset < 2) return PeekResult.NeedsMoreData
+        val cameraIdLen = stream.peekShort(baseOffset).toUShort().toInt()
+        val payloadLenOff = baseOffset + 2 + cameraIdLen + 8
+        if (stream.available() - payloadLenOff < 4) return PeekResult.NeedsMoreData
+        val payloadLen = stream.peekInt(payloadLenOff)                             // BE peek
+        require(payloadLen >= 0) { "ImageFrame payloadLen overflow: $payloadLen" }
+        val total = 2 + cameraIdLen + 8 + 4 + payloadLen
+        return if (stream.available() - baseOffset >= total) PeekResult.Complete(total)
+        else PeekResult.NeedsMoreData
+    }
+
+    private fun writeLengthPrefixedShort(buffer: WriteBuffer, value: String) {
+        // Same helper as slice 6 — emitted per-codec per slice 8 lock.
+        val lenPos = buffer.position()
+        buffer.writeUShort(0u)
+        val before = buffer.position()
+        buffer.writeString(value, Charset.UTF8)
+        val written = buffer.position() - before
+        require(written <= UShort.MAX_VALUE.toInt())
+        buffer[lenPos]     = ((written ushr 8) and 0xFF).toByte()
+        buffer[lenPos + 1] = (written and 0xFF).toByte()
+    }
+}
+```
+
+The platform-actual JVM codec (illustrative; not part of the codec
+runtime — sits in consumer module's `jvmMain`):
+
+```kotlin
+// jvmMain
+actual typealias ImageBitmap = java.awt.image.BufferedImage
+
+actual object JpegImageCodec : Codec<ImageBitmap> {
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): ImageBitmap {
+        // Wire: ImageIO needs an InputStream view — wrap the slice without copying
+        // (BufferReadInputStream is consumer-side helper that adapts ReadBuffer
+        // to InputStream over the buffer's current position..limit window).
+        val inputStream = BufferReadInputStream(buffer)
+        return ImageIO.read(inputStream) ?: throw DecodeException(
+            fieldPath = "ImageBitmap",
+            bufferPosition = buffer.position(),
+            expected = "JPEG bytes ImageIO can decode",
+            actual = "decode returned null",
+        )
+    }
+    override fun encode(buffer: WriteBuffer, value: ImageBitmap, context: EncodeContext) {
+        val out = BufferWriteOutputStream(buffer)
+        ImageIO.write(value, "jpg", out)
+    }
+    override fun wireSize(value: ImageBitmap, context: EncodeContext): WireSize {
+        // ImageIO doesn't expose pre-encoded size — encode-twice would defeat
+        // the purpose. Real platform-actuals expose this via their SDK; for
+        // this illustrative actual we'd attach the JPEG byte size as a
+        // CodecKey on the value, or precompute and cache. Document the
+        // pattern in slice findings.
+        return WireSize.BackPatch
+    }
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult =
+        PeekResult.NoFraming                                                       // embedded only
+}
+```
+
+**Audit — zero-copy.** Decode reads three scalars + one UTF-8 string +
+slice-bounds the buffer + passes the bounded slice to
+`JpegImageCodec.decode`. The slice handoff is zero-copy: the same
+`ReadBuffer` is passed; only `limit` was changed. The platform-actual
+JVM codec wraps the buffer in a `BufferReadInputStream` adapter that
+reads through the buffer's current window — no `ByteArray` copy. Encode
+analogous — `BufferWriteOutputStream` writes through the buffer
+directly. ✓
+
+(Note: a real production `JpegImageCodec` actual on the JVM would
+likely use a JFIF-aware byte counter for `wireSize` rather than
+returning `BackPatch`. The slice-4 lock requires `Exact` for
+`@LengthFrom`-bounded `@UseCodec` fields — *that's a tension*. See
+findings below.)
+
+**Audit — batching.** Two alternatives considered and ruled out:
+
+1. *Have the parent decode read the whole buffer slice as a `ByteArray`
+   and hand it to `JpegImageCodec.decodeBytes(bytes)`.* Forces a
+   `ByteArray` allocation. **Ruled out — locked.**
+2. *Make `JpegImageCodec` take a `ReadBuffer` slice + length
+   explicitly instead of relying on `setLimit + restore`.* Symmetric
+   with slice 4: the `setLimit + restore` pattern is the uniform
+   bounding contract; passing length explicitly creates a parallel
+   convention. **Ruled out — uniform contract wins.**
+
+**Less-clever alternative ruled out on audit grounds.** ✓
+
+**Audit — reviewability.**
+
+- The `@UseCodec(JpegImageCodec::class)` annotation reads as English: "decode this field via JpegImageCodec." A reader holding the model can find the codec via the `KClass` literal — IDE jump-to works.
+- The `@see JpegImageCodec` cross-link is essential for navigation between the parent codec and the platform-actual; without it, the reader has to grep.
+- The encode-time `require` consistency check on `payloadLen` vs `JpegImageCodec.wireSize` catches a model-side bug (caller mis-set `payloadLen`) at the encode site — much better than a silent wire-format violation. Same shape as slice 6 / slice 8 require guards.
+- `JpegImageCodec` is referenced by *unqualified name* in the generated `decode` body — no import path, no FQN. The parent codec's enclosing file imports `JpegImageCodec` once at the top. **Lock the import policy.**
+- The platform-actual JVM codec is *not* part of the generated output — it lives in consumer code. The codec processor never inspects the actual; per locked decision 8.7, the linker resolves the `expect` reference at compile time. ✓
+
+**Audit — streaming.**
+
+- `peekFrameSize` walks `NeedsMoreData → Complete` correctly across multi-stage availability windows (prefix-only → mid-cameraId → mid-capturedAt → mid-payloadLen → mid-image → Complete). Verified mentally; baseOffset propagates. ✓
+- Encode under `BackPatch` (because of cameraId). Bridge takes the growable + `writeGathered` path. The `JpegImageCodec.encode` call writes through the growable buffer; if the JPEG bytes span multiple chunks, `writeGathered` flushes them in order. ✓
+- Async-decode propagation: when `JpegImageCodec`'s actual is suspending (JS `createImageBitmap`), `ImageFrameCodec.decode` itself must be suspending. The `Decoder<T>` interface is sync; `SuspendingDecoder<T>` is suspending. The processor must emit `ImageFrameCodec` as a `SuspendingDecoder<ImageFrame>` (or a `Codec<T>` that uses `SuspendingDecoder` for the `decode` method) when *any* `@UseCodec`-referenced codec on a contained field is `SuspendingDecoder`. The check is conservative: if the *expect* declaration of `JpegImageCodec` in `commonMain` is `Codec<ImageBitmap>` (sync), the parent stays sync; consumers needing the async path declare the expect as `SuspendingDecoder<ImageBitmap>` instead. **Lock the propagation rule:** `expect` declaration sync-ness drives the parent's sync-ness.
+- Terminal-field slice-bounding (the `image` field): slice 4 contract (setLimit + restore + position-advance). Re-uses the same pattern verbatim. ✓
+- `JpegImageCodec.peekFrameSize` returning `NoFraming` is correct (embedded-only, slice 5 lock). The bridge would refuse to use `JpegImageCodec.asConnection` standalone — exactly the desired guarantee. ✓
+
+**Findings.**
+
+1. **Lock the `@UseCodec` `expect`/`actual` resolution path.**
+   `@UseCodec(MyCodec::class)` resolves to a direct call to `MyCodec`
+   (the `expect` symbol) in generated code. The Kotlin linker resolves
+   to the platform `actual` at compile time. KSP **does not** inspect
+   the `actual` — only the `expect` declaration. Per-platform
+   capability differences (sync vs suspending decode, encode-only
+   actuals) are surfaced via the *interface* the `expect` declares.
+   **Resolves PHASE_9_RESET deferred decision.**
+2. **Lock the import policy for `@UseCodec` references.** Generated
+   codec files import `@UseCodec`-referenced codecs by simple name at
+   the file top. Generated method bodies use the simple name. Cross-
+   module references use FQN at the import site. Default reaches into
+   the enclosing class for the `KClass` literal's package.
+3. **Lock the sync/async parent propagation rule.** When *any* field's
+   codec (whether nested `@ProtocolMessage`, `@UseCodec`, or sealed
+   variant) is `SuspendingDecoder<T>`, the parent codec must declare
+   its `decode` as `suspend`. Conservative: chosen at compile time
+   from the `expect` declaration's interface — sync `expect` →
+   sync parent; suspending `expect` → suspending parent.
+4. **Lock the `@UseCodec` + `@LengthFrom` wireSize-tension resolution.**
+   The slice-4 lock requires `@UseCodec` codecs in `@LengthFrom`-bounded
+   fields to report `WireSize.Exact`. Where the platform-actual cannot
+   determine size cheaply (ImageIO above), the consumer has three
+   options:
+   - **(a)** *Cache the encoded bytes.* The `expect object` can carry
+     a small `EncodeKey` slot (`JpegImageCodec.PreEncodedBytesKey`) on
+     the `EncodeContext` mapped to a per-value precomputed
+     `ByteArray` (consumer-managed cache). `wireSize` reads from the
+     cache. Trades memory for round-trip determinism.
+   - **(b)** *Use a wrapping value class that carries the byte count
+     alongside the image.* `data class JpegFrame(val image:
+     ImageBitmap, val byteSize: Int)` and a separate codec that knows
+     `byteSize`. Externalizes the size to the model field.
+   - **(c)** *Drop the `@LengthFrom` constraint and use
+     `@LengthPrefixed` instead.* The codec then reports `BackPatch`
+     and the prefix is set after encode. Costs one back-patch per
+     image but no `Exact` requirement.
+   This is consumer-side mechanics, not framework. The framework's job
+   ends at the `Exact` requirement — the consumer picks (a)/(b)/(c).
+   **Document this as the tension-resolution pattern in PHASE_10
+   reference text.**
+5. **Lock the `BufferReadInputStream` / `BufferWriteOutputStream`
+   adapter hint.** Platform-actual codecs that need stream APIs
+   (Java `InputStream`, JS `Blob`, Apple `NSInputStream`) get adapter
+   helpers in their platform source set. These adapters are
+   consumer-side, not framework — but PHASE_10 should reference them
+   in the "platform-actual patterns" section so the convention is
+   discoverable.
+
+**Slice status:** validated. Five locks recorded (including
+resolution of the PHASE_9_RESET expect/actual decision). Move on to
+slice 10.
+
+### Slice 10 — schedule
 
 | # | Annotation                       | Source vector                                    | Status   |
 |---|----------------------------------|--------------------------------------------------|----------|
@@ -2576,6 +2894,7 @@ Move on to slice 9.
 | 6 | `@WhenTrue`                      | MQTT v3.1.1 CONNECT optional payload fields      | ✓ done   |
 | 7 | `@PacketType`                    | Tiny command protocol (4 variants, no DispatchOn)| ✓ done   |
 | 8 | `@DispatchOn` + `@DispatchValue` | MQTT v3.1.1 fixed header value class             | ✓ done   |
+| 9 | `@UseCodec`                      | JpegImageCodec expect/actual via @LengthFrom     | ✓ done   |
 | 3 | `@LengthPrefixed`                | WebSocket close-frame reason or MQTT v5 utf8     | pending  |
 | 4 | `@LengthFrom`                    | RIFF chunk body via `@LengthFrom("chunkSize")`   | pending  |
 | 5 | `@RemainingBytes`                | WebSocket text-frame trailing payload            | pending  |
