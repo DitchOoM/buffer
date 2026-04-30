@@ -2882,7 +2882,418 @@ findings below.)
 resolution of the PHASE_9_RESET expect/actual decision). Move on to
 slice 10.
 
-### Slice 10 — schedule
+### Slice 10 — `Payload` SAM via MQTT v5 PUBLISH
+
+**Source vector.** Full MQTT v5 PUBLISH (§3.3) — the most demanding
+shape in the codec rewrite. Carries:
+
+- `MqttFixedHeader` (slice 8 value class) with QoS bits in the flag nibble,
+- `@LengthPrefixed val topic: String` (slice 3),
+- `@WhenTrue("header.qos > 0") val packetId: PacketId?` (slice 6 — note: this
+  is a *non-Boolean* gate, requires a small extension to slice 6's lock — see
+  findings),
+- `properties: List<Property>` (variable-length list — Stage G surface; we model
+  it with a placeholder `List<Property>` and lean on slice 4's `@LengthFrom`
+  via a leading `propertiesLen: Int`),
+- `payload: Pub` where `Pub : Payload` is the consumer-bound payload slot
+  type — the Section 8 SAM-receiver mechanic.
+
+For this slice we focus on the **Payload SAM** part — properties get a
+short-form fixture (a hand-rolled `PropertyListCodec` referenced via
+`@UseCodec` so we don't conflate Stage G mechanics into slice 10).
+
+```kotlin
+import com.ditchoom.buffer.codec.Payload
+
+@JvmInline value class PacketId(val raw: UShort)
+// No PacketIdCodec — single-backing-property value class without @UseCodec
+// gets a transparent codec per §8.10 / slice 6 lock 3. The processor reads
+// `buffer.readUShort()` and constructs `PacketId(...)` inline at every
+// PacketId-typed field's call site (and writes `buffer.writeUShort(value.raw)`
+// inline on encode). No codec object emitted; no per-call dispatch.
+
+interface Property                                                                  // placeholder; Stage G defines this
+object PropertyListCodec : Codec<List<Property>> {
+    // Hand-rolled fixture for slice 10 — Stage G replaces with the real
+    // length-prefixed List<NestedMessage> emission.
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): List<Property> = emptyList()
+    override fun encode(buffer: WriteBuffer, value: List<Property>, context: EncodeContext) { /* no-op for slice */ }
+    override fun wireSize(value: List<Property>, context: EncodeContext): WireSize = WireSize.Exact(0)
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
+}
+
+/**
+ * Re-introduced sealed parent from Section 8.2 with the Publish slot
+ * filled in. PingReq/PingResp/Disconnect from slice 8 retained as
+ * Nothing-bound variants (covariant).
+ */
+@DispatchOn(MqttFixedHeader::class)
+@ProtocolMessage(wireOrder = Endianness.Big)
+sealed interface MqttControlPacket<out Pub : Payload> {
+    @ProtocolMessage @PacketType(value = 12, wire = 0xC0)
+    data object PingReq : MqttControlPacket<Nothing>
+
+    @ProtocolMessage @PacketType(value = 13, wire = 0xD0)
+    data object PingResp : MqttControlPacket<Nothing>
+
+    @ProtocolMessage @PacketType(value = 14, wire = 0xE0)
+    data object Disconnect : MqttControlPacket<Nothing>
+
+    /**
+     * MQTT v5 PUBLISH — §3.3. Header carries QoS in flag bits;
+     * packetId is present iff QoS > 0; payload is the consumer-typed
+     * slot.
+     */
+    @ProtocolMessage @PacketType(value = 3, wire = 0x30)                           // QoS 0, no DUP, no RETAIN
+    data class Publish<out Pub : Payload>(
+        val header: MqttFixedHeader,
+        @LengthPrefixed val topic: String,
+        @WhenTrue("header.qos > 0") val packetId: PacketId? = null,
+        @UseCodec(PropertyListCodec::class) val properties: List<Property>,
+        val payload: Pub,                                                          // Payload slot — terminal
+    ) : MqttControlPacket<Pub>
+}
+
+// Consumer-side payload shape (per Section 8.8):
+sealed interface MyPub : Payload
+data class JpegFrame(val cameraId: String, val image: ImageBitmap) : MyPub
+data class TempReading(val sensorId: String, val celsius: Double) : MyPub
+data object NullPub : MyPub                                                        // empty-body variant
+
+typealias MyMqttPacket = MqttControlPacket<MyPub>
+```
+
+**Sketched generated output (Publish variant + payload SAM scaffold).**
+
+```kotlin
+/**
+ * Generated codec for [MqttControlPacket.Publish] — wire-format below.
+ *
+ * @see MqttControlPacket.Publish
+ * @see MqttFixedHeader
+ * @see PropertyListCodec
+ *
+ * ```text
+ *  0
+ *  0 1 2 3 4 5 6 7
+ * +-+-+-+-+-+-+-+-+
+ * |  pktType=3  |D|Q Q|R|  header (1b) — flags = DUP/QoS/RETAIN
+ * +-+-+-+-+-+-+-+-+
+ * | <prefix=Short BE> + <len> bytes — topic                                 |
+ * +-------------------------------------------------------------------------+
+ * | packetId (2b BE) [when header.qos > 0]                                  |
+ * +-------------------------------------------------------------------------+
+ * | <propertiesLen bytes> — properties (via PropertyListCodec)              |
+ * +-------------------------------------------------------------------------+
+ * | <payload.wireSize bytes — terminal> — payload (Pub : Payload)           |
+ * +-------------------------------------------------------------------------+
+ * ```
+ *
+ * The `payload` slot is decoded via the SAM passed to
+ * [MqttControlPacketCodec.decode] (or this variant's [decode] directly).
+ * See [Partial], [PayloadDecoder], [PayloadEncoder].
+ *
+ * Source documentation:
+ *   MQTT v5 PUBLISH — §3.3. Header carries QoS in flag bits; packetId
+ *   is present iff QoS > 0; payload is the consumer-typed slot.
+ */
+object MqttControlPacket.PublishCodec {
+
+    /**
+     * Materialized state of all fields decoded *before* the Payload-typed
+     * `payload` field. The decoder lambda receives this as its receiver
+     * so it can dispatch on `topic` (or any other already-decoded field)
+     * via bare-name access.
+     */
+    data class Partial(
+        val header: MqttFixedHeader,
+        val topic: String,
+        val packetId: PacketId?,
+        val properties: List<Property>,
+    )
+
+    /** SAM for the consumer-bound payload decoder. */
+    fun interface PayloadDecoder<out P : Payload> {
+        suspend fun Partial.decode(slice: ReadBuffer, ctx: DecodeContext): P
+    }
+
+    /** SAM for the consumer-bound payload encoder. */
+    fun interface PayloadEncoder<in P : Payload> {
+        fun encode(value: MqttControlPacket.Publish<P>, buffer: WriteBuffer, ctx: EncodeContext)
+        fun wireSize(value: MqttControlPacket.Publish<P>, ctx: EncodeContext): WireSize =
+            WireSize.BackPatch
+    }
+
+    /**
+     * Decodes a Publish, invoking [payloadDecoder] over a slice bounded
+     * to the buffer's remaining bytes (the parent `MqttControlPacketCodec`
+     * has already setLimit-bounded the buffer to the variant body).
+     */
+    suspend fun <P : Payload> decode(
+        buffer: ReadBuffer,
+        context: DecodeContext,
+        header: MqttFixedHeader,                                                   // discriminator pass-through (slice 8 lock)
+        payloadDecoder: PayloadDecoder<P>,
+    ): MqttControlPacket.Publish<P> {
+        val topicLen = buffer.readUShort().toInt()
+        val topic = buffer.readString(topicLen, Charset.UTF8).toString()
+        // Wire: PacketId is a single-UShort value class — read inline (slice 6 lock 3 / §8.10)
+        val packetId = if (header.qos > 0) PacketId(buffer.readUShort()) else null
+        val properties = PropertyListCodec.decode(buffer, context)
+        // Wire: payload is the terminal field — buffer.remaining() is the slice
+        val partial = Partial(header, topic, packetId, properties)
+        val payload = with(payloadDecoder) { partial.decode(buffer, context) }
+        // Defensive: advance past any unread payload bytes (slice 8 under-read defense)
+        if (buffer.remaining() > 0) buffer.position(buffer.limit())
+        return MqttControlPacket.Publish(header, topic, packetId, properties, payload)
+    }
+
+    /**
+     * Encodes a Publish, invoking [payloadEncoder] for the Payload-typed
+     * slot. Encode-time consistency check: header.qos > 0 ↔ packetId != null.
+     */
+    fun <P : Payload> encode(
+        buffer: WriteBuffer,
+        value: MqttControlPacket.Publish<P>,
+        context: EncodeContext,
+        payloadEncoder: PayloadEncoder<P>,
+    ) {
+        // header is written by the parent dispatcher; this codec writes only the variant body
+        writeLengthPrefixedShort(buffer, value.topic)
+        if (value.header.qos > 0) {
+            require(value.packetId != null) { "QoS=${value.header.qos} but packetId is null" }
+            // Wire: inline write of the value class's backing UShort (slice 6 lock 3 / §8.10)
+            buffer.writeUShort(value.packetId.raw)
+        } else {
+            require(value.packetId == null) { "QoS=0 but packetId=${value.packetId} is non-null" }
+        }
+        PropertyListCodec.encode(buffer, value.properties, context)
+        payloadEncoder.encode(value, buffer, context)
+    }
+
+    /**
+     * BackPatch — payload size is consumer-determined and topic UTF-8
+     * count is data-dependent.
+     */
+    fun <P : Payload> wireSize(
+        value: MqttControlPacket.Publish<P>,
+        context: EncodeContext,
+        payloadEncoder: PayloadEncoder<P>,
+    ): WireSize = WireSize.BackPatch
+
+    private fun writeLengthPrefixedShort(buffer: WriteBuffer, value: String) {
+        // Per slice 8 lock — emitted per-codec, not shared.
+        val lenPos = buffer.position()
+        buffer.writeUShort(0u)
+        val before = buffer.position()
+        buffer.writeString(value, Charset.UTF8)
+        val written = buffer.position() - before
+        require(written <= UShort.MAX_VALUE.toInt())
+        buffer[lenPos]     = ((written ushr 8) and 0xFF).toByte()
+        buffer[lenPos + 1] = (written and 0xFF).toByte()
+    }
+}
+```
+
+The sealed parent's aggregator is updated to thread the Payload SAMs:
+
+```kotlin
+/**
+ * Sealed parent decode aggregator. Each Payload-bearing variant has a
+ * SAM parameter; non-Payload variants are dispatched inline. Throwing
+ * defaults from Section 8.5 are typed `<Nothing>` so they slot into
+ * any covariant Pub : Payload position.
+ */
+suspend fun <Pub : Payload> MqttControlPacketCodec.decode(
+    buffer: ReadBuffer,
+    context: DecodeContext,
+    publishPayloadDecoder: MqttControlPacket.PublishCodec.PayloadDecoder<Pub> =
+        throwingPayloadDecoder("PUBLISH not expected"),
+): MqttControlPacket<Pub> {
+    val header = MqttFixedHeaderCodec.decode(buffer, context)
+    val remainingLen = RemainingLengthCodec.decode(buffer, context)
+    val outerLimit = buffer.limit()
+    buffer.setLimit(buffer.position() + remainingLen)
+    val packet = when (header.packetType) {
+        12 -> MqttControlPacket.PingReq
+        13 -> MqttControlPacket.PingResp
+        14 -> MqttControlPacket.Disconnect
+        3  -> MqttControlPacket.PublishCodec.decode(buffer, context, header, publishPayloadDecoder)
+        else -> throw DecodeException(
+            fieldPath  = "MqttControlPacket.<header.packetType>",
+            bufferPosition = buffer.position() - 1,
+            expected   = "one of 3, 12, 13, 14",
+            actual     = header.packetType.toString(),
+        )
+    }
+    buffer.position(buffer.limit())                                                 // slice 8 under-read defense
+    buffer.setLimit(outerLimit)
+    return packet
+}
+
+/** Throwing-default factory — typed Nothing so it slots into any P : Payload slot. */
+internal fun throwingPayloadDecoder(reason: String):
+    MqttControlPacket.PublishCodec.PayloadDecoder<Nothing> =
+    MqttControlPacket.PublishCodec.PayloadDecoder { _, _ ->
+        throw DecodeException(
+            fieldPath  = "MqttControlPacket.Publish.payload",
+            bufferPosition = 0,
+            expected   = "consumer-supplied PayloadDecoder",
+            actual     = reason,
+        )
+    }
+```
+
+Worked consumer call (mirrors §8.8):
+
+```kotlin
+val packet: MyMqttPacket = MqttControlPacketCodec.decode(buffer, ctx,
+    publishPayloadDecoder = { slice, ctx ->                                        // Partial receiver in scope
+        when {
+            topic.startsWith("images/")     -> JpegFrame(topic.substringAfter('/'),
+                                                          JpegImageCodec.decode(slice, ctx))
+            topic == "telemetry/temp"       -> {
+                val sensorId = topic.substringAfter('/')
+                val celsius = slice.readDouble()
+                TempReading(sensorId, celsius)
+            }
+            else                            -> NullPub
+        }
+    },
+)
+```
+
+**Audit — zero-copy.** All field reads use the same patterns validated
+in slices 3, 6, 8. The Payload SAM hands the *same* `ReadBuffer` to
+the consumer's lambda — no copy, no slice wrapper allocation. The
+`Partial` data class is a stack-allocatable record on the JVM (escape
+analysis), and on Native it's a regular struct allocation; either way
+its lifecycle is tied to the decode call. The `with(payloadDecoder) {
+partial.decode(...) }` invocation compiles to a single virtual call on
+the SAM lambda — zero allocation past the lambda capture (which is
+JVM-cached for non-capturing lambdas, allocated once per consumer call
+for capturing). ✓
+
+**Audit — batching.** Three alternatives considered and ruled out:
+
+1. *Skip the Partial — pass individual already-decoded values to the
+   SAM as parameters.* Forces every decoder lambda to take 4–10
+   parameters (one per pre-payload field), and the parameter list grows
+   every time the message gets a new field. The Partial absorbs the
+   churn — adding a field to `Publish` adds a field to `Partial` and
+   nothing else. **Ruled out — Partial is the right shape for
+   evolution.**
+2. *Lift the Partial to a generic for the whole sealed parent so all
+   payload decoders share one type.* Pollutes the API surface — every
+   variant's Partial would have to nullable-fold every other variant's
+   pre-payload fields. The per-variant Partial is the right granularity.
+   **Ruled out.**
+3. *Use a context receiver (Kotlin 2.x) instead of `with(payloadDecoder)
+   { partial.decode(...) }`.* Context receivers aren't yet stable enough
+   for a load-bearing API surface; the `with`-block is one extra Kotlin
+   keyword and works on Kotlin 1.9+. Revisit once context receivers
+   ship as stable. **Ruled out — for now.**
+
+**Less-clever alternative ruled out on audit grounds.** ✓
+
+**Audit — reviewability.**
+
+- The Partial class lives inside the variant's codec (`PublishCodec.Partial`) — the namespace makes the relationship explicit. A reader sees `Partial` and immediately knows it's "the state captured before the Payload field of `Publish`."
+- The `PayloadDecoder` SAM is a `fun interface` — the consumer call site reads as `{ slice, ctx -> … }` with bare access to Partial fields via the receiver. This is the headline ergonomic improvement of slice 10. ✓
+- The throwing-default mechanism is *opt-in absent*: a consumer that doesn't pass `publishPayloadDecoder` gets the default lambda which raises `DecodeException` *only* when a Publish packet actually arrives. No upfront cost for receive-only consumers that don't expect Publish. ✓
+- The encode-side `PayloadEncoder` mirror has the same shape and is symmetric. The SAM signatures (`<out P>` for decoder, `<in P>` for encoder) follow Kotlin variance discipline — the throwing-default decoder is `<Nothing>` (covariant slot-anything), throwing-default encoder is `<Any>` (contravariant slot-anything). ✓
+- The `topic.startsWith("images/")` consumer dispatch reads as English. The Partial-receiver bare-name access is the design lever — without it, the consumer writes `partial.topic.startsWith(...)` everywhere. With it, the consumer reads "topic starts with images/." ✓
+
+**Audit — streaming.**
+
+- `peekFrameSize` for the parent is unchanged from slice 8 (peeks header, peeks VBI, returns total). The Payload's size is *inside* the variant body length, so the parent doesn't need to know about Payload at peek time. ✓
+- `Publish.decode` runs over a buffer pre-bounded by the parent to `position + remainingLen`. The Payload is the terminal field; `buffer.remaining()` at the point of the SAM call equals `payloadLen` = remaining variant body bytes. The consumer's lambda reads through that slice directly. ✓
+- Consumer lambda `JpegImageCodec.decode(slice, ctx)` is the same handoff as slice 9 — slice handed off by `setLimit` (already in place at the variant level), no re-bounding needed. ✓
+- Suspending propagation: `PayloadDecoder.decode` is `suspend` (per §8.4 lock), so `Publish.decode` is `suspend`, so `MqttControlPacketCodec.decode` is `suspend`, so the bridge's receive flow uses `SuspendingDecoder`. **Lock the cascade rule: Payload SAM presence forces the entire decoder chain to `suspend` — even if no consumer needs it on a particular platform.** Reasoning: keeping the type signature consistent across platforms avoids `actual` mismatches, and `suspend fun` on a sync-only platform is a no-op cost.
+- Encode under `BackPatch` — bridge takes growable + `writeGathered`. The `payloadEncoder.encode(...)` call writes through the growable buffer; large payloads span multiple chunks. ✓
+- Bare-`Payload` escape hatch (per §8.14): a consumer can call `MqttControlPacketCodec.decode<Payload>(buffer, ctx, publishPayloadDecoder = { slice, ctx -> SomePayloadHolder(slice.readBytes(remaining())) })`. Loses sealed exhaustiveness on the payload — the right tradeoff for forwarders/sniffers. ✓
+- Throwing default fires with the expected message when an unexpected packet type arrives — tested by the integration sketch below. ✓
+
+**Findings.**
+
+1. **Lock the Partial-emission rule.** The processor emits one
+   `Partial` data class per Payload-bearing message, named exactly
+   `Partial`, nested inside the variant's codec object. Fields are
+   the message's pre-Payload fields in declaration order, with the
+   types they have on the message (including nullability and value
+   classes). Multiple Payload fields → multiple Partials, named
+   `Partial1`, `Partial2`, … by appearance order; each Partial carries
+   the values from the preceding Partial plus the in-between fields
+   (per §8.11 — "later Payload Partials are generic in earlier
+   Payload type params").
+2. **Lock the SAM emission rule.** Each Payload-typed field emits
+   `fun interface FieldNamePayloadDecoder<out P : Payload>` and
+   `fun interface FieldNamePayloadEncoder<in P : Payload>`. Names
+   capitalize the field name and append `PayloadDecoder` /
+   `PayloadEncoder`. Single-Payload-field messages may use the simpler
+   `PayloadDecoder` / `PayloadEncoder` names — processor decides
+   based on field count.
+3. **Lock the `@WhenTrue` non-Boolean expression rule.** Slice 6
+   established `@WhenTrue("flags.willFlag")` for `Boolean` properties.
+   The Publish example uses `@WhenTrue("header.qos > 0")` — a
+   *boolean expression* over an `Int` property, not a `Boolean`
+   property reference. **Extend slice 6's resolution rule:** the
+   expression accepts:
+   - `"fieldName"` — Boolean field reference,
+   - `"fieldName.property"` — Boolean property on a value-class field,
+   - `"fieldName.property OP value"` where OP is one of `>`, `>=`,
+     `<`, `<=`, `==`, `!=` and `value` is an integer literal.
+   Compile-time KSP parser handles the comparison forms; restrict
+   value to integer literal (no full expression DSL — keeps the
+   surface narrow). Generated code emits the comparison verbatim:
+   `if (header.qos > 0) { … }`.
+4. **Lock the throwing-default emission rule.** Each Payload SAM
+   parameter on the parent dispatcher's decode/encode gets a default
+   value of `throwing<Variant><Field>Decoder("VARIANT not expected")`
+   (or analogous for encode). Defaults are stored as static factory
+   functions with the typed-`Nothing`/`Any` covariance trick from
+   §8.4. Field-path message names exactly which slot was missing.
+5. **Lock the suspending cascade rule.** Any Payload SAM in a sealed
+   tree forces the whole tree's decode aggregator to `suspend`. Same
+   applies to `@UseCodec` references to `SuspendingDecoder` codecs
+   per slice 9 lock 3. Single rule: *suspend propagates outward from
+   any suspending leaf to all decoders that aggregate it.*
+6. **Lock the `with(payloadDecoder) { partial.decode(...) }`
+   invocation pattern.** The processor emits `with(decoder) {
+   partial.decode(slice, ctx) }` rather than a context-receiver-
+   based call; reconsider if context receivers stabilize. Both
+   compile to the same bytecode on Kotlin 2.x.
+7. **Lock the `MqttCodec` convenience alias rule.** `MqttCodec` is
+   a top-level `typealias` for `MqttControlPacketCodec` (or a thin
+   extension function pair) — naming nicety, not a separate type.
+   Per §8.9.9, processor emits this when the sealed parent is
+   annotated with an opt-in `@CodecAlias("MqttCodec")` or similar
+   (annotation surface deferred to Stage H — for slice 10 we just
+   note the convention).
+8. **Reconfirm the transparent value-class codec rule.** `PacketId` in
+   the Publish sketch is `@JvmInline value class PacketId(val raw:
+   UShort)` with no `@UseCodec`. The processor does **not** emit a
+   `PacketIdCodec`; the generated decode reads `buffer.readUShort()`
+   inline and constructs `PacketId(...)` directly, and the generated
+   encode writes `buffer.writeUShort(value.packetId.raw)` inline.
+   Reaffirms §8.10 and slice 6 lock 3 — single-backing-property value
+   classes without `@UseCodec` are transparent. Generating a codec
+   object for them would be a synthetic value-class wrapper
+   (forbidden by locked decision 10.5).
+9. **Resolve the `Pub : Payload` covariance edge case for body-less
+   variants.** `MqttControlPacket<Nothing>` ↔ `MqttControlPacket<Pub>`
+   for any `Pub : Payload` is sound by `out` variance — `data object
+   PingReq : MqttControlPacket<Nothing>` slots into a
+   `MqttControlPacket<MyPub>` typealias position without a cast. The
+   `when` exhaustiveness checker preserves the smart-cast through
+   `is Publish` to `Publish<MyPub>`. Verified mentally against
+   §8.8's worked example. ✓
+
+**Slice status:** validated. Eight locks recorded. **All ten
+annotation slices complete.** The integration test design follows
+below.
+
+### All ten slices — final schedule
 
 | # | Annotation                       | Source vector                                    | Status   |
 |---|----------------------------------|--------------------------------------------------|----------|
@@ -2895,6 +3306,7 @@ slice 10.
 | 7 | `@PacketType`                    | Tiny command protocol (4 variants, no DispatchOn)| ✓ done   |
 | 8 | `@DispatchOn` + `@DispatchValue` | MQTT v3.1.1 fixed header value class             | ✓ done   |
 | 9 | `@UseCodec`                      | JpegImageCodec expect/actual via @LengthFrom     | ✓ done   |
+|10 | `Payload` SAM                    | Full MQTT v5 PUBLISH end-to-end                  | ✓ done   |
 | 3 | `@LengthPrefixed`                | WebSocket close-frame reason or MQTT v5 utf8     | pending  |
 | 4 | `@LengthFrom`                    | RIFF chunk body via `@LengthFrom("chunkSize")`   | pending  |
 | 5 | `@RemainingBytes`                | WebSocket text-frame trailing payload            | pending  |
