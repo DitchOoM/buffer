@@ -112,7 +112,7 @@ interface Codec<T> :
  * implements this interface plus `Nothing` (covariance). `ByteArray`,
  * `ReadBuffer`, `String`, etc. cannot be used as a payload type — consumers
  * wrap and copy explicitly inside their decoder lambda. See Section 8 of
- * `PHASE_10_DESIGN_PROGRESS.md` for the full rationale.
+ * `PHASE_10_DESIGN.md` (and `PHASE_10_DESIGN_NOTES.md` for derivation) for the full rationale.
  */
 interface Payload
 

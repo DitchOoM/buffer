@@ -1,4 +1,20 @@
-# Phase 10 design progress (2026-04-29)
+# Phase 10 design — working notes (archival)
+
+> **Status: archival.** This file captures the iterative design walks
+> from 2026-04-29 to 2026-04-30 that produced ten "locked decisions"
+> and ten annotation slice validations. After two parallel reviews
+> (senior engineer + senior staff engineer) surfaced architectural
+> gaps — most importantly the missing distinction between *structural
+> annotations* (compile-time shape KSP needs) and *runtime codec
+> wrappers* (XOR, compression, padding, VBI, property lists, etc.) —
+> the authoritative design contract moved to **`PHASE_10_DESIGN.md`**.
+>
+> This file is preserved for derivation history. When `PHASE_10_DESIGN.md`
+> references a finding (e.g., "the under-read defense surfaced in
+> notes §slice 8 finding 4"), this is where the original reasoning lives.
+> Do not extend this file. Extend `PHASE_10_DESIGN.md`.
+
+---
 
 In-progress design notes for the codec rewrite that PHASE_9_RESET.md
 called for. Captures locked decisions and remaining open questions.

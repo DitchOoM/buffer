@@ -100,7 +100,8 @@ A single-strategy rewrite with a tighter validation loop:
 
 ## Locked decisions
 
-The full design contract lives in `PHASE_10_DESIGN_PROGRESS.md`. Treat
+The full design contract lives in `PHASE_10_DESIGN.md` (with derivation
+history archived in `PHASE_10_DESIGN_NOTES.md`). Treat
 that file as authoritative — this section is a one-line index so future
 sessions can scan what's settled before reopening anything.
 
