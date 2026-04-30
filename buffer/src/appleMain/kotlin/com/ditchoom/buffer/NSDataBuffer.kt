@@ -112,9 +112,9 @@ class NSDataBuffer(
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
-    override fun slice(): ReadBuffer {
+    override fun slice(byteOrder: ByteOrder): ReadBuffer {
         // Zero-copy slice using pointer arithmetic
-        return NSDataBufferSlice(this, position, limit - position)
+        return NSDataBufferSlice(this, position, limit - position, byteOrder)
     }
 
     override fun readByteArray(size: Int): ByteArray {
@@ -225,6 +225,7 @@ internal class NSDataBufferSlice(
     private val parent: NSDataBuffer,
     private val sliceOffset: Int,
     val capacity: Int,
+    override val byteOrder: ByteOrder = parent.byteOrder,
 ) : ReadBuffer,
     NativeMemoryAccess {
     private var position: Int = 0
@@ -232,8 +233,6 @@ internal class NSDataBufferSlice(
 
     // Pointer to the start of this slice's data
     val bytePointer: CPointer<ByteVar> = (parent.data.bytes as CPointer<ByteVar> + sliceOffset)!!
-
-    override val byteOrder: ByteOrder get() = parent.byteOrder
 
     override val nativeAddress: Long get() = bytePointer.toLong()
 
@@ -291,7 +290,8 @@ internal class NSDataBufferSlice(
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
-    override fun slice(): ReadBuffer = NSDataBufferSlice(parent, sliceOffset + position, limit - position)
+    override fun slice(byteOrder: ByteOrder): ReadBuffer =
+        NSDataBufferSlice(parent, sliceOffset + position, limit - position, byteOrder)
 
     override fun readByteArray(size: Int): ByteArray {
         if (size < 1) {

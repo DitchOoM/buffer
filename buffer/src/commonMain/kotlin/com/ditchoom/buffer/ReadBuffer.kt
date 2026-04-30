@@ -89,16 +89,24 @@ interface ReadBuffer : PositionBuffer {
      *
      * **Does not change this buffer's position.**
      *
+     * The slice's [byteOrder] defaults to this buffer's [byteOrder]; pass an
+     * explicit value to override (useful when handing a sub-region to a codec
+     * whose wire byte order differs from the parent's). All built-in backends
+     * implement byte-order propagation consistently — see
+     * `BufferSliceByteOrderTests` in commonTest.
+     *
      * ```kotlin
      * buffer.position(10)
      * buffer.setLimit(20)
-     * val slice = buffer.slice()  // slice has position=0, limit=10
-     * // buffer position is still 10
+     * val slice = buffer.slice()                            // inherits parent byte order
+     * val leSlice = buffer.slice(ByteOrder.LITTLE_ENDIAN)   // override per slice
+     * // buffer position is still 10 in both cases
      * ```
      *
+     * @param byteOrder Byte order for the returned slice. Defaults to this buffer's order.
      * @return A new ReadBuffer viewing the remaining bytes
      */
-    fun slice(): ReadBuffer
+    fun slice(byteOrder: ByteOrder = this.byteOrder): ReadBuffer
 
     /**
      * Reads [size] bytes as a new buffer and advances position.

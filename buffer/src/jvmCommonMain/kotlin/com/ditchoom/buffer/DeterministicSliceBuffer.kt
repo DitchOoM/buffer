@@ -60,5 +60,5 @@ abstract class DeterministicSliceBuffer(
     /** No-op — this slice does not own the native memory. */
     override fun freeNativeMemory() {}
 
-    abstract override fun slice(): PlatformBuffer
+    abstract override fun slice(byteOrder: ByteOrder): PlatformBuffer
 }

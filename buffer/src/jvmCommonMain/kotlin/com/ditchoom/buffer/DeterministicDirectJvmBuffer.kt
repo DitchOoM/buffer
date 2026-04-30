@@ -63,5 +63,5 @@ abstract class DeterministicDirectJvmBuffer(
 
     // --- Slicing ---
 
-    abstract override fun slice(): PlatformBuffer
+    abstract override fun slice(byteOrder: ByteOrder): PlatformBuffer
 }

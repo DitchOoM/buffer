@@ -40,7 +40,7 @@ abstract class BaseJvmBuffer(
 
     override fun readByteArray(size: Int) = byteBuffer.toArray(size)
 
-    abstract override fun slice(): PlatformBuffer
+    abstract override fun slice(byteOrder: ByteOrder): PlatformBuffer
 
     override fun readShort(): Short = byteBuffer.short
 

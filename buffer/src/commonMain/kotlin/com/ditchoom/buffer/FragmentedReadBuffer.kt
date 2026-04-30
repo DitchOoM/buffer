@@ -86,14 +86,14 @@ class FragmentedReadBuffer(
         return buffer
     }
 
-    override fun slice(): ReadBuffer {
+    override fun slice(byteOrder: ByteOrder): ReadBuffer {
         if (first.position() == 0 && first.limit() == 0) {
             return second
         } else if (second.position() == 0 && second.limit() == 0) {
             return first
         }
-        val first = first.slice()
-        val second = second.slice()
+        val first = first.slice(byteOrder)
+        val second = second.slice(byteOrder)
         val buffer = BufferFactory.managed().allocate(first.limit() + second.limit())
         buffer.write(first)
         buffer.write(second)

@@ -49,7 +49,7 @@ class ByteArrayBuffer(
 
     override fun get(index: Int): Byte = data[index]
 
-    override fun slice(): ReadBuffer {
+    override fun slice(byteOrder: ByteOrder): ReadBuffer {
         val sliced = data.sliceArray(positionValue until limitValue)
         return ByteArrayBuffer(sliced, byteOrder)
     }

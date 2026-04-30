@@ -7,5 +7,5 @@ class JvmBuffer(
     byteBuffer: ByteBuffer,
     fileRef: RandomAccessFile? = null,
 ) : BaseJvmBuffer(byteBuffer, fileRef) {
-    override fun slice() = JvmBuffer(byteBuffer.slice())
+    override fun slice(byteOrder: ByteOrder): JvmBuffer = JvmBuffer(byteBuffer.slice().order(byteOrder.toJava()))
 }

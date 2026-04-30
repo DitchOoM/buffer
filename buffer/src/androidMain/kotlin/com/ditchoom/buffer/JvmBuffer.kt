@@ -16,7 +16,7 @@ import java.nio.ByteBuffer
 open class JvmBuffer(
     val buffer: ByteBuffer,
 ) : BaseJvmBuffer(buffer) {
-    override fun slice() = JvmBuffer(byteBuffer.slice())
+    override fun slice(byteOrder: ByteOrder): JvmBuffer = JvmBuffer(byteBuffer.slice().order(byteOrder.toJava()))
 
     override fun describeContents(): Int = 0
 

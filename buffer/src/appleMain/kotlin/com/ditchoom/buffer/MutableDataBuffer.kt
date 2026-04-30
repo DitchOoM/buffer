@@ -149,9 +149,9 @@ class MutableDataBuffer private constructor(
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
-    override fun slice(): ReadBuffer {
+    override fun slice(byteOrder: ByteOrder): ReadBuffer {
         // Zero-copy slice using pointer arithmetic
-        return MutableDataBufferSlice(this, position, limit - position)
+        return MutableDataBufferSlice(this, position, limit - position, byteOrder)
     }
 
     override fun readByteArray(size: Int): ByteArray {
@@ -578,6 +578,7 @@ class MutableDataBufferSlice(
     private val parent: MutableDataBuffer,
     private val sliceOffset: Int,
     private val sliceLength: Int,
+    override val byteOrder: ByteOrder = parent.byteOrder,
 ) : ReadBuffer,
     NativeMemoryAccess {
     private var position: Int = 0
@@ -589,8 +590,6 @@ class MutableDataBufferSlice(
     override val nativeAddress: Long get() = bytePointer.toLong()
 
     override val nativeSize: Long get() = sliceLength.toLong()
-
-    override val byteOrder: ByteOrder get() = parent.byteOrder
 
     override fun resetForRead() {
         limit = position
@@ -644,7 +643,8 @@ class MutableDataBufferSlice(
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
-    override fun slice(): ReadBuffer = MutableDataBufferSlice(parent, sliceOffset + position, limit - position)
+    override fun slice(byteOrder: ByteOrder): ReadBuffer =
+        MutableDataBufferSlice(parent, sliceOffset + position, limit - position, byteOrder)
 
     override fun readByteArray(size: Int): ByteArray {
         if (size < 1) {

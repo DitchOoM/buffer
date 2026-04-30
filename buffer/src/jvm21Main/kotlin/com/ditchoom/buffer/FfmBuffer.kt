@@ -99,11 +99,11 @@ class FfmBuffer(
      * Returns an [FfmSliceBuffer] slice with a global-scope ByteBuffer view.
      * The slice retains the arena-scoped segment for lifecycle checking via [FfmSliceBuffer.checkAlive].
      */
-    override fun slice(): PlatformBuffer {
+    override fun slice(byteOrder: ByteOrder): PlatformBuffer {
         assertAlive()
         val slicedSegment = segment.asSlice(position().toLong(), remaining().toLong())
         val globalView = MemorySegment.ofAddress(slicedSegment.address()).reinterpret(slicedSegment.byteSize())
-        val sliceByteBuffer = globalView.asByteBuffer().order(byteBuffer.order())
+        val sliceByteBuffer = globalView.asByteBuffer().order(byteOrder.toJava())
         return FfmSliceBuffer(slicedSegment, sliceByteBuffer)
     }
 }

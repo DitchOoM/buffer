@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.pool
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.bufferEquals
 import com.ditchoom.buffer.bufferHashCode
@@ -23,9 +24,9 @@ internal class TrackedSlice(
         }
     }
 
-    override fun slice(): ReadBuffer {
+    override fun slice(byteOrder: ByteOrder): ReadBuffer {
         parent.addRef()
-        return TrackedSlice(inner.slice(), parent)
+        return TrackedSlice(inner.slice(byteOrder), parent)
     }
 
     override fun equals(other: Any?): Boolean = bufferEquals(this, other)

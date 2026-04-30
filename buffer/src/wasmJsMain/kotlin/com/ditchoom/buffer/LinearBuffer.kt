@@ -355,7 +355,7 @@ class LinearBuffer(
         }
     }
 
-    override fun slice(): ReadBuffer {
+    override fun slice(byteOrder: ByteOrder): ReadBuffer {
         // Create a new LinearBuffer view of the remaining portion
         // This is zero-copy - just creates a new view with different base offset
         return LinearBuffer(
