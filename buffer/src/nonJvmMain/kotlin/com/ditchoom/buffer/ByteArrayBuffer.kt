@@ -57,7 +57,7 @@ class ByteArrayBuffer(
 
     override fun get(index: Int): Byte = data[offset + index]
 
-    override fun slice(byteOrder: ByteOrder): ReadBuffer =
+    override fun slice(byteOrder: ByteOrder): ByteArrayBuffer =
         ByteArrayBuffer(
             data,
             byteOrder,

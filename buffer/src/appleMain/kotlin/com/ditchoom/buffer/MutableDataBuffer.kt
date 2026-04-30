@@ -149,7 +149,7 @@ class MutableDataBuffer private constructor(
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
-    override fun slice(byteOrder: ByteOrder): ReadBuffer {
+    override fun slice(byteOrder: ByteOrder): MutableDataBufferSlice {
         // Zero-copy slice using pointer arithmetic
         return MutableDataBufferSlice(this, position, limit - position, byteOrder)
     }
@@ -644,7 +644,7 @@ class MutableDataBufferSlice(
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
-    override fun slice(byteOrder: ByteOrder): ReadBuffer =
+    override fun slice(byteOrder: ByteOrder): MutableDataBufferSlice =
         MutableDataBufferSlice(parent, sliceOffset + position, limit - position, byteOrder)
 
     override fun readByteArray(size: Int): ByteArray {

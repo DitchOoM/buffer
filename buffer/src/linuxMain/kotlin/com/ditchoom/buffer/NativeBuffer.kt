@@ -198,7 +198,7 @@ class NativeBuffer private constructor(
         return result
     }
 
-    override fun slice(byteOrder: ByteOrder): ReadBuffer {
+    override fun slice(byteOrder: ByteOrder): PlatformBuffer {
         checkOpen()
         val sliceAddress = nativeAddress + positionValue
         return NativeBufferSlice(sliceAddress, remaining(), byteOrder, this)
@@ -698,7 +698,7 @@ private class NativeBufferSlice(
         return result
     }
 
-    override fun slice(byteOrder: ByteOrder): ReadBuffer {
+    override fun slice(byteOrder: ByteOrder): PlatformBuffer {
         checkOpen()
         return NativeBufferSlice(baseAddress + positionValue, remaining(), byteOrder, parent)
     }

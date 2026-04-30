@@ -48,7 +48,7 @@ internal class PooledBuffer(
         }
     }
 
-    override fun slice(byteOrder: ByteOrder): ReadBuffer {
+    override fun slice(byteOrder: ByteOrder): PlatformBuffer {
         checkNotFreed()
         addRef()
         return TrackedSlice(inner.slice(byteOrder), this)

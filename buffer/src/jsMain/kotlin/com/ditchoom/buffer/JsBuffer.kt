@@ -102,7 +102,7 @@ class JsBuffer(
     }
 
     // Zero-copy slice using subarray
-    override fun slice(byteOrder: ByteOrder): ReadBuffer =
+    override fun slice(byteOrder: ByteOrder): JsBuffer =
         JsBuffer(
             buffer.subarray(positionValue, limitValue),
             byteOrder,

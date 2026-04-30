@@ -29,26 +29,24 @@ class BufferSliceByteOrderBehaviorTests {
         )
 
     /**
-     * Filters [factories] to only those whose `slice()` is *both* writable
-     * (slice IS a WriteBuffer) *and* genuinely zero-copy (writes through the
-     * slice are visible in the parent).
+     * Filters [factories] to only those whose `slice()` is genuinely zero-copy
+     * (writes through the slice are visible in the parent).
      *
-     * After ByteArrayBuffer slice was made zero-copy and Apple
-     * `MutableDataBufferSlice` / Linux `NativeBufferSlice` were made
-     * writable, every factory preset surfaced here passes the filter.
-     * The dynamic check stays so the regression net catches any future
-     * backend that returns a read-only or copying slice.
+     * `PlatformBuffer.slice()` is statically a `PlatformBuffer`, so writability
+     * is a type-system guarantee — there's no runtime check for that. The
+     * runtime check is for write *propagation*: a backend that copied on
+     * slice would have a writable slice whose writes don't show up in the
+     * parent, and this filter would catch it.
      *
      * The lone read-only-slice backend is `NSDataBufferSlice` (parent
-     * `NSDataBuffer` wraps an immutable `NSData`). It's not reachable via
-     * the factory presets enumerated here; only via
-     * `BufferFactory.Default.wrap(nsData)` directly.
+     * `NSDataBuffer` wraps an immutable `NSData` and is `: ReadBuffer`,
+     * not `: PlatformBuffer`). It's not reachable via the factory presets
+     * enumerated here; only via `BufferFactory.Default.wrap(nsData)` directly.
      */
     private fun zeroCopySliceFactories(): List<Pair<String, BufferFactory>> =
         factories().filter { (_, factory) ->
             val parent = factory.allocate(8, ByteOrder.BIG_ENDIAN)
             val slice = parent.slice()
-            if (slice !is WriteBuffer) return@filter false
             slice.writeInt(0xCAFEBABE.toInt())
             // If the slice's write was visible in parent[0..3], it's zero-copy.
             parent[0] == 0xCA.toByte() && parent[1] == 0xFE.toByte() &&
@@ -226,23 +224,20 @@ class BufferSliceByteOrderBehaviorTests {
     }
 
     /**
-     * Slice semantics are now uniform: every factory preset reachable from
-     * the cross-platform `factories()` list returns a writable, zero-copy
-     * slice. The only read-only-slice backend remaining is `NSDataBufferSlice`
-     * (parent `NSDataBuffer` wraps an immutable `NSData`); that one isn't
-     * exposed via factory presets, only via `BufferFactory.Default.wrap(nsData)`.
+     * Asserts the post-normalization invariant: every factory preset returns
+     * a slice whose writes propagate to the parent. Writability is enforced
+     * at the type level via `PlatformBuffer.slice(): PlatformBuffer`, so the
+     * runtime assertion here is purely about write propagation.
      *
-     * This test asserts that invariant holds on every factory: slice is a
-     * WriteBuffer and writes propagate to parent. If a future backend
-     * regresses to COPY or READ_ONLY for a preset slice, the assertion
-     * fires and pins the regression to the named factory.
+     * Read-only `NSDataBuffer` (and its `NSDataBufferSlice`) sit outside the
+     * `PlatformBuffer` hierarchy and aren't exposed by the factory presets
+     * iterated here, so the read-only case is structurally excluded.
      */
     @Test
-    fun sliceSemanticsClassification() {
+    fun slicePropagatesWritesToParent() {
         for ((name, factory) in factories()) {
             val parent = factory.allocate(8, ByteOrder.BIG_ENDIAN)
             val slice = parent.slice()
-            assertTrue(slice is WriteBuffer, "$name slice must implement WriteBuffer")
             slice.writeInt(0xCAFEBABE.toInt())
             assertEquals(0xCA.toByte(), parent[0], "$name slice writes must propagate to parent[0]")
             assertEquals(0xFE.toByte(), parent[1], "$name slice writes must propagate to parent[1]")
@@ -304,7 +299,6 @@ class BufferSliceByteOrderBehaviorTests {
         val pool = BufferPool()
         try {
             val pooled = pool.acquire(8) as PooledBuffer
-            assertTrue(pooled is ReadBuffer, "pooled is ReadBuffer")
             // PooledBuffer's byteOrder reflects the underlying buffer.
             val parentOrder = pooled.byteOrder
 
@@ -348,6 +342,25 @@ class BufferSliceByteOrderBehaviorTests {
             val secondSlice = firstSlice.slice(ByteOrder.LITTLE_ENDIAN)
             assertEquals(ByteOrder.LITTLE_ENDIAN, secondSlice.byteOrder, "slice-of-slice LE override")
             assertTrue(secondSlice is TrackedSlice, "slice-of-TrackedSlice still TrackedSlice")
+        } finally {
+            pool.clear()
+        }
+    }
+
+    @Test
+    fun pooledBufferSliceWritesPropagateToParent() {
+        // Pool slice is now a writable PlatformBuffer (via PlatformBuffer.slice()
+        // covariant return). Writes through the slice must land in the pool
+        // buffer's underlying memory, just like for non-pooled slices.
+        val pool = BufferPool()
+        try {
+            val pooled = pool.acquire(8) as PooledBuffer
+            val slice = pooled.slice() // statically PlatformBuffer
+            slice.writeInt(0xCAFEBABE.toInt())
+            assertEquals(0xCA.toByte(), pooled[0], "pool slice write must propagate to pooled[0]")
+            assertEquals(0xFE.toByte(), pooled[1], "pool slice write must propagate to pooled[1]")
+            assertEquals(0xBA.toByte(), pooled[2], "pool slice write must propagate to pooled[2]")
+            assertEquals(0xBE.toByte(), pooled[3], "pool slice write must propagate to pooled[3]")
         } finally {
             pool.clear()
         }
