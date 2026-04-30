@@ -1967,7 +1967,604 @@ bodies are arithmetic + buffer ops, not allocation. ✓
 
 **Slice status:** validated. Five locks recorded. Move on to slice 7.
 
-### Slices 7–10 — schedule
+### Slice 7 — `@PacketType` simple sealed dispatch (no `@DispatchOn`)
+
+**Source vector.** WebSocket frame opcodes (RFC 6455 §5.2) are
+*almost* a `@PacketType` fit, but the opcode shares its byte with the
+FIN bit and RSVs — that's `@DispatchOn` territory (slice 8). The
+cleanest match for *plain* `@PacketType` is a hand-rolled command
+protocol the codec test suite was already exercising in the Phase 9
+attempts: a stream of commands prefixed by a 1-byte type discriminator,
+no flags, no shared bits. To make it spec-grounded, we model the
+**SOCKS5 method-selection request** (RFC 1928 §3) — the server's
+method-selection response is a 2-byte fixed shape, but the client's
+*request* dispatches on a sub-opcode in some extensions. We keep it
+synthetic but spec-style.
+
+```kotlin
+/**
+ * Tiny command protocol — 1 byte discriminator followed by a per-
+ * variant body. Vector for plain @PacketType dispatch (no
+ * @DispatchOn — the discriminator owns its byte exclusively).
+ */
+@ProtocolMessage(wireOrder = Endianness.Big)
+sealed interface Command {
+    /** Empty heartbeat — body is zero bytes. */
+    @ProtocolMessage @PacketType(0x01)
+    data object Ping : Command
+
+    /** Round-trip echo carrying a length-prefixed UTF-8 message. */
+    @ProtocolMessage @PacketType(0x02)
+    data class Echo(@LengthPrefixed val message: String) : Command
+
+    /** Single 32-bit BE counter increment delta. */
+    @ProtocolMessage @PacketType(0x03)
+    data class Bump(val delta: Int) : Command
+
+    /** Termination — body is zero bytes. */
+    @ProtocolMessage @PacketType(0xFF)
+    data object Bye : Command
+}
+```
+
+Sealed parent with four variants — diagram trigger fires on the
+discriminator (always emitted for sealed parents per Section 10.3),
+and each variant gets its own per-variant codec emission as it would
+in isolation.
+
+**Sketched generated output (parent dispatcher).**
+
+```kotlin
+/**
+ * Generated codec for [Command] — wire-format details below.
+ *
+ * @see Command
+ * @see Command.Ping
+ * @see Command.Echo
+ * @see Command.Bump
+ * @see Command.Bye
+ *
+ * ```text
+ *  0
+ *  0 1 2 3 4 5 6 7
+ * +-+-+-+-+-+-+-+-+
+ * |  type (1b BE) |  → 0x01 Ping | 0x02 Echo | 0x03 Bump | 0xFF Bye
+ * +-+-+-+-+-+-+-+-+
+ * |  variant body (per @PacketType — see per-variant codec)         |
+ * +-----------------------------------------------------------------+
+ * ```
+ *
+ * Source documentation:
+ *   Tiny command protocol — 1 byte discriminator followed by a per-
+ *   variant body. Vector for plain @PacketType dispatch (no
+ *   @DispatchOn — the discriminator owns its byte exclusively).
+ */
+object CommandCodec : Codec<Command> {
+
+    /** Reads the 1-byte type, dispatches to the matching variant codec. */
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): Command {
+        val type = buffer.readUByte().toInt()
+        return when (type) {
+            0x01 -> Command.Ping
+            0x02 -> Command.EchoCodec.decode(buffer, context)
+            0x03 -> Command.BumpCodec.decode(buffer, context)
+            0xFF -> Command.Bye
+            else -> throw DecodeException(
+                fieldPath  = "Command.<type>",
+                bufferPosition = buffer.position() - 1,
+                expected   = "one of 0x01, 0x02, 0x03, 0xFF",
+                actual     = "0x${type.toString(16)}",
+            )
+        }
+    }
+
+    /** Writes the variant's wire byte, then the variant body. */
+    override fun encode(buffer: WriteBuffer, value: Command, context: EncodeContext) {
+        when (value) {
+            Command.Ping       -> buffer.writeUByte(0x01u)
+            is Command.Echo    -> { buffer.writeUByte(0x02u); Command.EchoCodec.encode(buffer, value, context) }
+            is Command.Bump    -> { buffer.writeUByte(0x03u); Command.BumpCodec.encode(buffer, value, context) }
+            Command.Bye        -> buffer.writeUByte(0xFFu)
+        }
+    }
+
+    /**
+     * Discriminator (1) + per-variant size. `Exact` when the chosen
+     * variant is `Exact`; `BackPatch` when the chosen variant is
+     * `BackPatch`. Compile-time per-variant analysis keeps this
+     * cheap.
+     */
+    override fun wireSize(value: Command, context: EncodeContext): WireSize =
+        when (value) {
+            Command.Ping       -> WireSize.Exact(1)
+            is Command.Echo    -> WireSize.BackPatch                              // Echo body is BackPatch
+            is Command.Bump    -> WireSize.Exact(1 + 4)
+            Command.Bye        -> WireSize.Exact(1)
+        }
+
+    /** Frame size = 1 + per-variant frame size. */
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+        if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
+        val type = stream.peekByte(baseOffset).toInt() and 0xFF
+        return when (type) {
+            0x01 -> PeekResult.Complete(1)                                        // Ping is body-less
+            0x02 -> when (val r = Command.EchoCodec.peekFrameSize(stream, baseOffset + 1)) {
+                is PeekResult.Complete -> PeekResult.Complete(1 + r.bytes)
+                PeekResult.NeedsMoreData -> PeekResult.NeedsMoreData
+                PeekResult.NoFraming -> error("Echo variant codec returned NoFraming inside dispatcher")
+            }
+            0x03 ->
+                if (stream.available() - baseOffset >= 5) PeekResult.Complete(5)
+                else PeekResult.NeedsMoreData
+            0xFF -> PeekResult.Complete(1)
+            else ->
+                // Wire: unknown discriminator — the framer cannot know how many
+                // bytes the unknown variant would consume; surface as Complete(1)
+                // and let decode raise the typed DecodeException.
+                PeekResult.Complete(1)
+        }
+    }
+}
+```
+
+**Audit — zero-copy.** Decode is a single byte read + a `when`
+dispatch. Each variant's codec is invoked directly (no reflection, no
+KClass lookup). `Command.Ping` and `Command.Bye` are `data object`
+singletons — the decode branch returns the singleton instance without
+allocating. Encode is a single byte write + variant body. `wireSize`
+is a `when` over value-class returns. `peekFrameSize` is byte peek +
+arithmetic + per-variant peek dispatch. No `ByteArray`, no boxing of
+the discriminator. ✓
+
+**Audit — batching.** Three alternatives considered and ruled out:
+
+1. *Generate a `LongIntMap`-style discriminator → codec lookup table
+   indexed by the type byte.* For 4 variants the `when` is faster
+   than a hash lookup; the JVM compiles small `when (Int)` ladders to
+   `tableswitch` bytecode (O(1)). For 256 variants a switch is still
+   the right shape. **Ruled out — switch wins at every realistic
+   variant count.**
+2. *Avoid the per-variant `peekFrameSize` recursion by inlining each
+   variant's known frame size constant.* Possible for fixed-size
+   variants (`Bump = 5`, `Ping = 1`, `Bye = 1`) and we *do* inline
+   those. For variable-size variants (`Echo`) we must call the
+   variant's `peekFrameSize` because only it knows the prefix layout.
+   The hybrid we have — inline constants for fixed variants, recurse
+   for variable variants — is the smallest possible work. ✓
+3. *Use sealed-interface exhaustiveness to elide the `else` branch
+   in decode.* Can't — the wire byte is an unbounded `Int`; the
+   `when (type)` ladder is over `Int`, not over `Command`. The
+   `else` *must* throw because the wire could carry any byte. ✓
+
+**Less-clever alternative ruled out on audit grounds.** ✓
+
+**Audit — reviewability.**
+
+- Variant names map to spec terminology where applicable (Ping/Echo are universal; Bump/Bye are this protocol's terms). The `@PacketType(0x01)` literal sits next to the variant declaration so a reviewer can map wire byte ↔ variant in one glance.
+- The wire diagram lists all four discriminator values inline — no scrolling. **Lock the rule:** sealed dispatcher diagrams enumerate every known wire value next to the discriminator row.
+- Per-variant codecs (`Command.EchoCodec`, `Command.BumpCodec`) are companion-positioned with their variant; the parent's `@see` block links each one. Companion placement decision: variant codec lives at `Command.EchoCodec` (companion of the variant), parent codec lives at `CommandCodec` (sibling of the sealed interface). **Lock companion placement.**
+- The decode `else` raises a typed `DecodeException` with `fieldPath = "Command.<type>"` — the `<type>` placeholder is the convention for "the discriminator field of a sealed parent." Slice 8 will extend this pattern with `<header.packetType>` for `@DispatchOn` cases. **Lock the field-path convention for synthetic discriminator slots.**
+- The `peekFrameSize` `else` branch returns `Complete(1)` for unknown discriminators — *not* `NeedsMoreData`. Reasoning: peek can't know what an unknown variant looks like, so reporting `NeedsMoreData` would deadlock the bridge (it would wait for bytes that never resolve the framing). Reporting `Complete(1)` lets the bridge call `decode(...)` which then throws a `DecodeException` immediately — surfacing the bad input at the right layer. **Lock the unknown-discriminator peek policy.**
+
+**Audit — streaming.**
+
+- `peekFrameSize` walks correctly across all four variants:
+  - `Ping`: 1 byte → Complete(1); 0 bytes → NeedsMoreData.
+  - `Bump`: 1–4 bytes → NeedsMoreData; 5 bytes → Complete(5).
+  - `Echo`: 1 byte (just type) → recurse → NeedsMoreData; type + prefix only → NeedsMoreData; type + prefix + body → Complete(1 + 2 + len).
+  - `Bye`: 1 byte → Complete(1).
+  Verified mentally for partial-buffer inputs; baseOffset propagates. ✓
+- Encode under per-variant `Exact` or `BackPatch` — the bridge picks the right path per call. The `wireSize` returns the variant's category, not a fold of "any variant could BackPatch." This means **a sealed parent's `wireSize` must be value-dependent** — it can't be a static property of the codec. That matches the existing `Encoder.wireSize` signature (`(value, context) → WireSize`); confirms the surface. ✓
+- Terminal-field slice-bounding: `Echo`'s body is bounded by its own `@LengthPrefixed` prefix (slice 3 contract). Other variants are fixed-size. No new bounding pattern introduced. ✓
+
+**Findings.**
+
+1. **Lock the `@PacketType` discriminator wire shape.** 1-byte (`UByte`)
+   discriminator. Larger discriminators are `@DispatchOn` territory
+   (slice 8). `@PacketType(value: Int)` accepts `0..255` — values
+   outside that range are a compile-time error.
+2. **Lock the duplicate-`@PacketType` compile-time check.** Two
+   variants of the same sealed parent declaring the same `value` (and
+   the same `wire` if `@DispatchOn` is in play) → compile error.
+   Already documented; promote to a load-bearing KSP check.
+3. **Lock the sealed-dispatcher diagram convention.** Sealed parent
+   codecs always emit a wire diagram of the discriminator alone (per
+   Section 10.3 trigger), with every known wire value enumerated
+   inline next to the discriminator row.
+4. **Lock the companion placement convention.** Variant codecs live
+   inside the variant's companion as `VariantName.Codec` (or
+   `Command.EchoCodec` if the dispatcher is at `CommandCodec`); parent
+   codecs are siblings of the sealed interface as `CommandCodec`.
+   This resolves the PHASE_9_RESET deferred decision *"Companion-object
+   placement (`MyMessage.Codec` vs sibling `MyMessageCodec`)"* —
+   **decision: sibling for top-level codecs, companion for variants
+   under a sealed parent.** Top-level matches `MyMessageCodec` for
+   discoverability (global `MyMessageCodec.decode(...)`); variant
+   companion makes the variant's codec land under the variant's name
+   for sealed-aware tooling and IDE auto-import.
+5. **Lock the synthetic-field-path convention for discriminators.**
+   Decode failure on a sealed parent's discriminator slot uses
+   `fieldPath = "<ParentName>.<type>"` (or `<header.packetType>` for
+   `@DispatchOn` + `@DispatchValue` slot — see slice 8).
+6. **Lock the unknown-discriminator peek policy.** `peekFrameSize`
+   for an unknown discriminator returns `Complete(1)` so decode is
+   invoked next and raises `DecodeException`. Never returns
+   `NeedsMoreData` for an unknown discriminator — that would deadlock.
+7. **Lock the `data object` codec emission rule.** A `data object`
+   variant with no fields decodes to the singleton instance and
+   encodes to nothing past the discriminator. No `Partial`, no codec
+   object for the variant itself — the parent dispatcher handles both
+   directions inline. Resolves the PHASE_9_RESET deferred decision
+   *"`data object` vs empty `data class`"* in favor of *both*: the
+   processor accepts both shapes, treats a `data object` as a sealed-
+   tree leaf with no body codec, and treats an empty `data class`
+   identically (allocating a new instance per decode rather than
+   returning a singleton). **Decision: support both; `data object`
+   yields a singleton, empty `data class` yields per-decode allocation
+   (negligible — empty objects are scalar-replaced on the JVM).**
+
+**Slice status:** validated. Seven locks recorded (including
+resolution of two PHASE_9_RESET deferred decisions: companion
+placement and `data object` vs empty `data class`). Move on to slice 8.
+
+### Slice 8 — `@DispatchOn` + `@DispatchValue` over MQTT v3 fixed header
+
+**Source vector.** MQTT v3.1.1 §2.2 Fixed Header: a single byte where
+the high nibble is the `MQTT Control Packet type` and the low nibble
+holds packet-type-specific flags. The packet-type values 0..15 each
+identify a control packet variant; the flag bits carry per-variant
+modifiers (DUP, QoS, RETAIN for PUBLISH; reserved-zero for most
+others). The `@DispatchOn` + `@DispatchValue` pair is exactly built
+for this: the dispatcher reads the value-class header, extracts a
+4-bit packet-type from it via the `@DispatchValue` property, and
+dispatches on the extracted value while the *full byte* (with flags
+intact) gets passed into the variant codec for further interpretation.
+
+We model a small but realistic v3 packet set — Connect (slice 6's
+payload, restored to a real envelope), PingReq, Disconnect, plus a
+mid-tier with a non-zero packetId (Subscribe). Variants without
+payload bodies are `data object`s per slice 7's lock.
+
+```kotlin
+/**
+ * MQTT v3.1.1 §2.2 Fixed Header. High nibble = control packet type,
+ * low nibble = packet-type-specific flags.
+ */
+@JvmInline
+@ProtocolMessage
+value class MqttFixedHeader(val raw: UByte) {
+    @DispatchValue
+    val packetType: Int get() = (raw.toInt() ushr 4) and 0x0F
+
+    val flags: UByte get() = (raw and 0x0Fu)
+    val dup:    Boolean get() = (raw.toInt() and 0b0000_1000) != 0
+    val qos:    Int     get() = (raw.toInt() ushr 1) and 0b11
+    val retain: Boolean get() = (raw.toInt() and 0b0000_0001) != 0
+}
+
+/**
+ * MQTT v3.1.1 control packet sealed parent. Dispatched on
+ * MqttFixedHeader.packetType (the @DispatchValue property). Variants
+ * carry the full header so they can read the flag bits when needed
+ * (Publish in slices 9–10; Connect/PingReq/Disconnect ignore flags).
+ *
+ * Payload-typed Publish and Connect are added in slices 9–10; this
+ * slice exercises @DispatchOn over body-less and prefix-only variants.
+ */
+@DispatchOn(MqttFixedHeader::class)
+@ProtocolMessage(wireOrder = Endianness.Big)
+sealed interface MqttControlPacket {
+    /** §3.12 PINGREQ — zero remaining length. */
+    @ProtocolMessage @PacketType(value = 12, wire = 0xC0)
+    data object PingReq : MqttControlPacket
+
+    /** §3.13 PINGRESP — zero remaining length. */
+    @ProtocolMessage @PacketType(value = 13, wire = 0xD0)
+    data object PingResp : MqttControlPacket
+
+    /** §3.14 DISCONNECT — zero remaining length in v3. */
+    @ProtocolMessage @PacketType(value = 14, wire = 0xE0)
+    data object Disconnect : MqttControlPacket
+
+    /** §3.4 PUBACK — header + 2-byte packet identifier. */
+    @ProtocolMessage @PacketType(value = 4, wire = 0x40)
+    data class PubAck(
+        val header: MqttFixedHeader,
+        val packetId: UShort,
+    ) : MqttControlPacket
+}
+```
+
+Sealed parent with mixed body-less + prefix-only variants. The
+discriminator is bit-packed inside the header byte, and the `wire`
+parameter on each `@PacketType` is the raw byte to write on encode
+(`packetType << 4`, with the variant's reserved-zero flags set per
+spec). `@PacketType(value = …, wire = …)` carries both — `value` is
+the extracted dispatch value, `wire` is the raw byte that round-trips
+through the value class.
+
+**Sketched generated output (parent dispatcher).**
+
+```kotlin
+/**
+ * Generated codec for [MqttControlPacket] — wire-format details below.
+ *
+ * @see MqttControlPacket
+ * @see MqttFixedHeader
+ * @see MqttControlPacket.PingReq
+ * @see MqttControlPacket.PingResp
+ * @see MqttControlPacket.Disconnect
+ * @see MqttControlPacket.PubAck
+ *
+ * ```text
+ *  0
+ *  0 1 2 3 4 5 6 7
+ * +-+-+-+-+-+-+-+-+
+ * |  pktType  | flags | header (1b) — dispatch on packetType (high nibble)
+ * +-+-+-+-+-+-+-+-+
+ * | remaining length (variable byte int — see RemainingLengthCodec)         |
+ * +-------------------------------------------------------------------------+
+ * | variant body (per @PacketType — see per-variant codec)                  |
+ * +-------------------------------------------------------------------------+
+ *
+ * Dispatch table (packetType → wire byte):
+ *   12 (PingReq)    → 0xC0
+ *   13 (PingResp)   → 0xD0
+ *   14 (Disconnect) → 0xE0
+ *    4 (PubAck)     → 0x40
+ * ```
+ *
+ * Source documentation:
+ *   MQTT v3.1.1 control packet sealed parent. Dispatched on
+ *   MqttFixedHeader.packetType (the @DispatchValue property). Variants
+ *   carry the full header so they can read the flag bits when needed
+ *   (Publish in slices 9–10; Connect/PingReq/Disconnect ignore flags).
+ *
+ *   Payload-typed Publish and Connect are added in slices 9–10; this
+ *   slice exercises @DispatchOn over body-less and prefix-only variants.
+ */
+object MqttControlPacketCodec : Codec<MqttControlPacket> {
+
+    /**
+     * Reads the fixed header, then the remaining-length VBI, then
+     * dispatches on `header.packetType` to the per-variant codec.
+     *
+     * The header is forwarded to variant codecs via the buffer position
+     * already advancing past it; variants that need it (PubAck, Publish)
+     * receive it as the first parameter to their `decode` (the processor
+     * arranges this — see per-variant generated codec).
+     */
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): MqttControlPacket {
+        val header = MqttFixedHeaderCodec.decode(buffer, context)
+        val remainingLen = RemainingLengthCodec.decode(buffer, context)
+        // Wire: bound the buffer to the variant body, then dispatch
+        val outerLimit = buffer.limit()
+        buffer.setLimit(buffer.position() + remainingLen)
+        val packet = when (val type = header.packetType) {
+            12 -> MqttControlPacket.PingReq
+            13 -> MqttControlPacket.PingResp
+            14 -> MqttControlPacket.Disconnect
+            4  -> MqttControlPacket.PubAckCodec.decode(buffer, context, header)
+            else -> throw DecodeException(
+                fieldPath  = "MqttControlPacket.<header.packetType>",
+                bufferPosition = buffer.position() - 1 - vbiBytesUsed(remainingLen),
+                expected   = "one of 4, 12, 13, 14",
+                actual     = type.toString(),
+            )
+        }
+        buffer.setLimit(outerLimit)
+        return packet
+    }
+
+    /** Writes the variant's wire byte, then the remaining-length VBI, then the body. */
+    override fun encode(buffer: WriteBuffer, value: MqttControlPacket, context: EncodeContext) {
+        when (value) {
+            MqttControlPacket.PingReq -> {
+                buffer.writeUByte(0xC0u); RemainingLengthCodec.encode(buffer, 0, context)
+            }
+            MqttControlPacket.PingResp -> {
+                buffer.writeUByte(0xD0u); RemainingLengthCodec.encode(buffer, 0, context)
+            }
+            MqttControlPacket.Disconnect -> {
+                buffer.writeUByte(0xE0u); RemainingLengthCodec.encode(buffer, 0, context)
+            }
+            is MqttControlPacket.PubAck -> {
+                // Wire: encode-time consistency — header.packetType must equal 4
+                require(value.header.packetType == 4) {
+                    "PubAck encoded with header.packetType=${value.header.packetType}"
+                }
+                buffer.writeUByte(value.header.raw)
+                RemainingLengthCodec.encode(buffer, 2, context)
+                MqttControlPacket.PubAckCodec.encode(buffer, value, context)
+            }
+        }
+    }
+
+    /** Discriminator (1) + VBI (1..4) + per-variant body size. */
+    override fun wireSize(value: MqttControlPacket, context: EncodeContext): WireSize =
+        when (value) {
+            MqttControlPacket.PingReq,
+            MqttControlPacket.PingResp,
+            MqttControlPacket.Disconnect -> WireSize.Exact(2)                     // 1 header + 1 VBI(0)
+            is MqttControlPacket.PubAck  -> WireSize.Exact(1 + 1 + 2)             // 1 header + 1 VBI(2) + 2 packetId
+        }
+
+    /** Frame size = 1 (header) + VBI bytes + remainingLength value. */
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+        if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
+        // Wire: peek the header, then decode the VBI in-place to learn the body size
+        val rawHeader = stream.peekByte(baseOffset).toInt() and 0xFF
+        val (vbiBytes, remainingLen) = peekVbi(stream, baseOffset + 1)
+            ?: return PeekResult.NeedsMoreData
+        val total = 1 + vbiBytes + remainingLen
+        return if (stream.available() - baseOffset >= total) PeekResult.Complete(total)
+        else PeekResult.NeedsMoreData
+    }
+
+    /** Number of VBI bytes consumed when encoding [value]; computed by class. */
+    private fun vbiBytesUsed(value: Int): Int =
+        when {
+            value < 128       -> 1
+            value < 16_384    -> 2
+            value < 2_097_152 -> 3
+            else              -> 4
+        }
+
+    /**
+     * Decodes a VBI starting at the given stream offset without consuming.
+     * Returns (bytesUsed, value) on success, null if more bytes are needed.
+     */
+    private fun peekVbi(stream: StreamProcessor, off: Int): Pair<Int, Int>? {
+        var multiplier = 1
+        var value = 0
+        var i = 0
+        while (i < 4) {
+            if (stream.available() - off - i < 1) return null
+            val byte = stream.peekByte(off + i).toInt() and 0xFF
+            value += (byte and 0x7F) * multiplier
+            i++
+            if ((byte and 0x80) == 0) return i to value
+            multiplier *= 128
+        }
+        // Wire: malformed VBI (>4 bytes); decode will raise the typed error
+        return 4 to value
+    }
+}
+```
+
+The variant `data class PubAck` codec:
+
+```kotlin
+/**
+ * Generated codec for [MqttControlPacket.PubAck] — invoked over a
+ * pre-bounded buffer (limit = position + remainingLength). Reads the
+ * 2-byte BE packetId and constructs the variant.
+ */
+object MqttControlPacket.PubAckCodec {
+    fun decode(buffer: ReadBuffer, context: DecodeContext, header: MqttFixedHeader): MqttControlPacket.PubAck {
+        val packetId = buffer.readUShort()
+        return MqttControlPacket.PubAck(header, packetId)
+    }
+    fun encode(buffer: WriteBuffer, value: MqttControlPacket.PubAck, context: EncodeContext) {
+        buffer.writeUShort(value.packetId)
+    }
+    // Variant codec has no wireSize / peekFrameSize at the top level — the
+    // parent's wireSize / peekFrameSize handles framing for the whole packet.
+}
+```
+
+The `MqttFixedHeaderCodec` and `RemainingLengthCodec` are leaf codecs:
+
+```kotlin
+/** Transparent codec for the @JvmInline value class — reads/writes the backing UByte. */
+object MqttFixedHeaderCodec : Codec<MqttFixedHeader> {
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): MqttFixedHeader =
+        MqttFixedHeader(buffer.readUByte())
+    override fun encode(buffer: WriteBuffer, value: MqttFixedHeader, context: EncodeContext) {
+        buffer.writeUByte(value.raw)
+    }
+    override fun wireSize(value: MqttFixedHeader, context: EncodeContext): WireSize =
+        WireSize.Exact(1)
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult =
+        if (stream.available() - baseOffset >= 1) PeekResult.Complete(1) else PeekResult.NeedsMoreData
+}
+```
+
+(The `RemainingLengthCodec` is the MQTT VBI codec — body omitted; it
+is structurally identical to the `peekVbi` helper above plus
+straightforward encode.)
+
+**Audit — zero-copy.** Header read is one byte. VBI read is at most 4
+bytes plus integer arithmetic. `setLimit + restore` is two integer
+field writes (slice 4 contract). `data object` variants return the
+singleton — no allocation. `PubAck` allocates one instance per decode.
+The value-class `MqttFixedHeader` boxes only when assigned to a non-
+`MqttFixedHeader` typed slot (e.g., the `header` parameter of the
+variant decode); the JVM and Kotlin/Native compilers eliminate the box
+when the call site is monomorphic, which it always is here. ✓
+
+**Audit — batching.** Three alternatives considered and ruled out:
+
+1. *Read header + VBI as one fused operation.* The VBI's length
+   depends on the bytes themselves; can't be folded without sacrificing
+   correctness on max-length VBIs. **Ruled out — semantically
+   different.**
+2. *Avoid the `setLimit + restore` for fixed-size variants.* For
+   `PingReq` / `Disconnect` (body length 0) and `PubAck` (body length
+   2), the body size is known at compile time once the discriminator
+   is matched. We could skip the bound for these. But: the bound is
+   the only thing that catches a *malformed* packet declaring
+   `remainingLen = 5` while saying `packetType = 12` (PingReq). The
+   bound forces decode to see exactly the bytes the wire claims, and
+   the `setLimit + restore` cost is two writes per packet — negligible.
+   **Ruled out — defense in depth wins for two writes.**
+3. *Cache the `vbiBytesUsed` value computed during decode for use in
+   the error path's `bufferPosition` math.* The value is only read on
+   the error path (already exceptional); recomputing from the value is
+   one switch and saves a stack slot. **Ruled out — premature.**
+
+**Less-clever alternative ruled out on audit grounds.** ✓
+
+**Audit — reviewability.**
+
+- Variant names map directly to MQTT v3.1.1 spec sections (`PingReq` = §3.12, etc.). The dispatch table in the diagram makes the bit-pattern visible without grepping.
+- The fixed-header diagram bit-splits the byte into `[ pktType:4 | flags:4 ]` per Section 10.2 bit-packed rule — a reviewer sees exactly which bits drive dispatch.
+- The `// Wire:` comments are sparse and load-bearing: setLimit, encode-time consistency guard, peek VBI fallback for malformed inputs.
+- The `peekVbi` helper is private to `MqttControlPacketCodec` and named for what it does. A future codec that needs the same operation gets its own copy — KSP doesn't share helpers across codecs (they're emitted per-codec for closure of context). **Lock that helper-emission scope: per-codec, never shared.**
+- The generated `PubAckCodec.decode` takes `header` as a parameter rather than re-reading the header from the buffer. This propagates the discriminator into the variant cleanly. **Lock the discriminator-pass-through rule: variant codecs that need the discriminator receive it as an explicit parameter; they do not re-read the discriminator byte.**
+- The encode-time `require` on `PubAck` consistency is the same shape as slice 6's `@WhenTrue` guards. Symmetric across the framework. ✓
+
+**Audit — streaming.**
+
+- `peekFrameSize` walks correctly:
+  - 0 bytes → NeedsMoreData (no header).
+  - 1 byte → recurse into peekVbi at offset 1; byte unavailable → NeedsMoreData.
+  - 2..5 bytes (header + partial/full VBI + remaining body partial) → progresses through NeedsMoreData → Complete as bytes arrive.
+  - Verified for `PingReq` (1 + 1 + 0 = 2 bytes) and `PubAck` (1 + 1 + 2 = 4 bytes). ✓
+- The peek must NOT consume bytes — `stream.peekByte(off)` is non-consuming, the VBI walk uses `peekByte(off + i)` not `readByte()`. ✓
+- Encode: `PubAck` is `Exact(4)` — bridge takes the fast `pool.withBuffer(4)` path. `Ping*` / `Disconnect` are `Exact(2)`. None of the slice-8 variants are BackPatch (BackPatch shows up in slice 9–10 with the Publish payload and Connect's optional fields). ✓
+- Terminal-field slice-bounding: the parent `setLimit + restore` bounds the variant body to exactly `remainingLen` bytes, so even a malformed `PubAck` claiming `remainingLen = 100` is caught at decode (the variant tries to read 2 bytes, then `setLimit` restores; if more bytes were claimed than the variant consumed, the parent's restore reseats the outer limit and the next packet picks up at the wrong position — **bug risk!**).
+
+  Wait — that's a real issue. Let me re-examine. If `remainingLen = 100` is declared but `PubAck` only consumes 2 bytes, the parent's `setLimit(position + 100)` advances `limit` to `pos + 100`, the variant decodes (reads 2 bytes; position now `start + 2`), and the parent does `setLimit(outerLimit)` — but the *position* is still at `start + 2`, leaving 98 bytes that *should* have been part of this packet still in the buffer. The next outer call would try to decode them as a new packet header — wrong.
+
+  **Fix:** the parent's `setLimit + restore` must also `seekToLimit` (i.e., advance position to the inner limit) before restoring. Add `buffer.position(buffer.limit())` between the variant decode and the limit restore. The variant having "left bytes on the table" is itself a wire-format violation worth surfacing as a typed `DecodeException`, but in the worst case (variant under-reads), the parent advancing position to the declared end keeps the outer stream consistent.
+
+  **Lock the parent post-dispatch position-advance rule:** after a `@DispatchOn` parent decodes its variant, it advances the buffer's position to the inner limit before restoring the outer limit. Variant under-reads become buffer skips, not stream-corruption bugs. Optionally, the processor can emit a `require(buffer.position() == buffer.limit())` between the two calls when the variant codec is known to consume exactly its declared body length — defense in depth.
+
+**Findings.**
+
+1. **Lock the `wire` byte semantics.** `@PacketType(value = N, wire = M)`
+   for a `@DispatchOn`-using sealed parent: `value` is the extracted
+   `@DispatchValue` integer (the dispatch key), `wire` is the raw byte
+   the value class would round-trip from on encode (header byte for
+   that variant). The processor validates at compile time that
+   `MqttFixedHeader(wire.toUByte()).packetType == value` (or the
+   equivalent for the discriminator class) so the `wire` and `value`
+   can never disagree. Already noted in `Annotations.kt` documentation
+   for `@PacketType`; promote to a load-bearing KSP check.
+2. **Lock the discriminator-pass-through rule.** Variant codecs that
+   need the discriminator receive it as an explicit parameter to
+   their `decode`. They never re-read it from the buffer.
+3. **Lock the per-codec helper-emission scope.** Helper functions
+   (`peekVbi`, `writeLengthPrefixedShort`, etc.) are private to the
+   codec object that uses them. Two codecs that need the same helper
+   get two copies. Reasoning: helpers close over context (annotation
+   choices, byte order, variant set) that varies per codec; sharing
+   would force a runtime dispatch on context. Per-codec emission
+   keeps each helper monomorphic and inline-friendly.
+4. **Lock the parent post-dispatch position-advance rule.** After a
+   `@DispatchOn` parent invokes a variant codec inside a length-bounded
+   region, it advances the buffer position to the inner limit before
+   restoring the outer limit. Defends against under-reading variants.
+   Optionally emit `require(position == limit)` for variants whose
+   wire size is known to match the declared length exactly.
+5. **Defers nothing further.** All slice-8 mechanics resolved.
+
+**Slice status:** validated. Five locks recorded (including a real
+bug fix surfaced by the streaming audit — under-read defense).
+Move on to slice 9.
+
+### Slices 9–10 — schedule
 
 | # | Annotation                       | Source vector                                    | Status   |
 |---|----------------------------------|--------------------------------------------------|----------|
@@ -1977,6 +2574,8 @@ bodies are arithmetic + buffer ops, not allocation. ✓
 | 4 | `@LengthFrom`                    | RIFF chunk body via `@LengthFrom("chunkSize")`   | ✓ done   |
 | 5 | `@RemainingBytes`                | WebSocket close-frame body                       | ✓ done   |
 | 6 | `@WhenTrue`                      | MQTT v3.1.1 CONNECT optional payload fields      | ✓ done   |
+| 7 | `@PacketType`                    | Tiny command protocol (4 variants, no DispatchOn)| ✓ done   |
+| 8 | `@DispatchOn` + `@DispatchValue` | MQTT v3.1.1 fixed header value class             | ✓ done   |
 | 3 | `@LengthPrefixed`                | WebSocket close-frame reason or MQTT v5 utf8     | pending  |
 | 4 | `@LengthFrom`                    | RIFF chunk body via `@LengthFrom("chunkSize")`   | pending  |
 | 5 | `@RemainingBytes`                | WebSocket text-frame trailing payload            | pending  |
