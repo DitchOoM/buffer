@@ -109,7 +109,7 @@ private fun BufferAllocator.allocateOutputBuffer(size: Int): OutputBuffer {
             throw CompressionException("Cannot get pointer to empty buffer")
         }
         val pinned = array.pin()
-        val address = pinned.addressOf(0).rawValue.toLong()
+        val address = pinned.addressOf(managed.arrayOffset).rawValue.toLong()
         return OutputBuffer(buffer, address, pinned)
     }
 
@@ -577,16 +577,17 @@ private inline fun <R> withInputPointer(
                 throw CompressionException("Cannot get pointer to empty buffer")
             }
             array.usePinned { pinned ->
-                block(pinned.addressOf(0))
+                block(pinned.addressOf(buffer.arrayOffset))
             }
         }
         buffer.managedMemoryAccess != null -> {
-            val array = buffer.managedMemoryAccess!!.backingArray
+            val managed = buffer.managedMemoryAccess!!
+            val array = managed.backingArray
             if (array.isEmpty()) {
                 throw CompressionException("Cannot get pointer to empty buffer")
             }
             array.usePinned { pinned ->
-                block(pinned.addressOf(0))
+                block(pinned.addressOf(managed.arrayOffset))
             }
         }
         else -> throw CompressionException(
