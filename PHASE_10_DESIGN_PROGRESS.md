@@ -836,12 +836,1147 @@ is the explicit subject of slice 2.
 
 **Slice status:** validated. Move on to slice 2.
 
-### Slices 2–10 — schedule
+### Slice 2 — `@WireOrder` + `@WireBytes` on a mixed-endian header
+
+**Source vector.** Two real fields fused into one synthetic message so
+the slice exercises both annotations interacting:
+
+- **DNS header (RFC 1035 §4.1.1).** Six 16-bit big-endian fields:
+  `id`, `flags`, `qdCount`, `anCount`, `nsCount`, `arCount`. 12 bytes
+  fixed; everything is BE because DNS is network-order.
+- **BLE ATT Read Blob Response, length triplet (Bluetooth Core 4.0+ Vol
+  3 Part F §3.4.4.6).** A 3-byte little-endian unsigned offset packed
+  alongside an opcode in some ATT PDU shapes — concretely: an `opcode`
+  byte plus a 24-bit LE `attHandleOffset`.
+
+We mash them into one message that is BE by default (DNS-style) but has
+one explicit LE 3-byte field bolted on (ATT-style). This is the exact
+shape `@WireOrder` + `@WireBytes` are meant to handle: the message
+default is one endianness, a single field overrides it, and that field
+also has a non-natural byte width.
+
+```kotlin
+/**
+ * Mixed-endian header — DNS-style six 16-bit BE fields followed by an
+ * opcode byte and a 24-bit little-endian offset. Synthetic: collapses
+ * RFC 1035 §4.1.1 with a BLE ATT length-triplet shape so a single
+ * vector exercises @WireOrder per-field override and @WireBytes
+ * custom width.
+ */
+@ProtocolMessage(wireOrder = Endianness.Big)
+data class MixedHeader(
+    val id: UShort,
+    val flags: UShort,
+    val qdCount: UShort,
+    val anCount: UShort,
+    val nsCount: UShort,
+    val arCount: UShort,
+    val opcode: UByte,                                    // 1 byte; endianness moot
+    @WireOrder(Endianness.Little)
+    @WireBytes(3)
+    val attHandleOffset: Int,                             // 3 bytes LE; sign-extended into Int
+)
+```
+
+Eight fields, one is non-trivial (mixed-endian + custom width) — the
+Section 10.3 trigger fires, so a diagram **is** emitted. Total wire
+size: 6×2 + 1 + 3 = **16 bytes**, fully fixed.
+
+**Sketched generated output.**
+
+```kotlin
+/**
+ * Generated codec for [MixedHeader] — wire-format details below.
+ *
+ * @see MixedHeader
+ *
+ * ```text
+ *  0                   1                   2                   3
+ *  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+ * +-------------------------------+-------------------------------+
+ * |             id (2b BE)        |          flags (2b BE)        |
+ * +-------------------------------+-------------------------------+
+ * |          qdCount (2b BE)      |        anCount (2b BE)        |
+ * +-------------------------------+-------------------------------+
+ * |          nsCount (2b BE)      |        arCount (2b BE)        |
+ * +-------------------------------+-------------------------------+
+ * |    opcode     |       attHandleOffset (3b LE)                 |
+ * +---------------+-----------------------------------------------+
+ * ```
+ *
+ * Source documentation:
+ *   Mixed-endian header — DNS-style six 16-bit BE fields followed by an
+ *   opcode byte and a 24-bit little-endian offset. Synthetic: collapses
+ *   RFC 1035 §4.1.1 with a BLE ATT length-triplet shape so a single
+ *   vector exercises @WireOrder per-field override and @WireBytes
+ *   custom width.
+ */
+object MixedHeaderCodec : Codec<MixedHeader> {
+
+    /** Reads 16 bytes — six BE u16s, one u8, one 3-byte LE offset. */
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): MixedHeader {
+        // Wire: message default is BE; readUShort hits the buffer's BE path
+        val id      = buffer.readUShort()
+        val flags   = buffer.readUShort()
+        val qdCount = buffer.readUShort()
+        val anCount = buffer.readUShort()
+        val nsCount = buffer.readUShort()
+        val arCount = buffer.readUShort()
+        val opcode  = buffer.readUByte()
+        // Wire: 3 LE bytes assembled little-end-first into an Int (top byte = 0)
+        val b0 = buffer.readUByte().toInt()
+        val b1 = buffer.readUByte().toInt()
+        val b2 = buffer.readUByte().toInt()
+        val attHandleOffset = b0 or (b1 shl 8) or (b2 shl 16)
+        return MixedHeader(id, flags, qdCount, anCount, nsCount, arCount, opcode, attHandleOffset)
+    }
+
+    /** Writes 16 bytes — six BE u16s, one u8, one 3-byte LE offset. */
+    override fun encode(buffer: WriteBuffer, value: MixedHeader, context: EncodeContext) {
+        buffer.writeUShort(value.id)
+        buffer.writeUShort(value.flags)
+        buffer.writeUShort(value.qdCount)
+        buffer.writeUShort(value.anCount)
+        buffer.writeUShort(value.nsCount)
+        buffer.writeUShort(value.arCount)
+        buffer.writeUByte(value.opcode)
+        // Wire: 3 LE bytes — emit low byte first, drop top byte
+        val v = value.attHandleOffset
+        buffer.writeUByte((v and 0xFF).toUByte())
+        buffer.writeUByte(((v ushr 8) and 0xFF).toUByte())
+        buffer.writeUByte(((v ushr 16) and 0xFF).toUByte())
+    }
+
+    /** Always 16 bytes. */
+    override fun wireSize(value: MixedHeader, context: EncodeContext): WireSize =
+        WireSize.Exact(16)
+
+    /** Always 16 bytes — peek succeeds the moment 16 bytes are buffered. */
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult =
+        if (stream.available() - baseOffset >= 16) PeekResult.Complete(16)
+        else PeekResult.NeedsMoreData
+}
+```
+
+**Audit — zero-copy.** Decode is eight scalar reads plus three byte
+reads composed via shifts; the only allocation is the `MixedHeader`
+itself. Encode is eight scalar writes plus three byte writes; no
+intermediate buffer. `wireSize` is `WireSize.Exact(16)`. `peekFrameSize`
+is one comparison. No `ByteArray`, no pool acquire on the codec hot
+path. ✓
+
+**Audit — batching.** I considered three tighter shapes and ruled each
+out on audit grounds:
+
+1. *"Read all six BE u16s as one giant `readByteArray(12)` then
+   re-parse."* Forces a `ByteArray` allocation. **Ruled out — violates
+   PHASE_9_RESET item 3.**
+2. *"Read three LE bytes as `readMedium()` if the buffer ever grows
+   such an API."* Today there's no `readMedium()` / `read24LE` on
+   `ReadBuffer`; adding one is pure scope creep for one slice. The
+   shift-and-combine is one CPU instruction per byte plus two ORs —
+   already optimal on every target. **Ruled out — speculative API for
+   no measurable win.**
+3. *"Encode the 16 bytes by allocating a 16-byte `ByteArray`,
+   filling it with `Bits.put`, and bulk-writing."* Same `ByteArray`
+   ban; also a memory copy. **Ruled out.**
+
+The straight-line scalar-write code is both the most readable and the
+fastest path on every backend. **Less-clever alternative ruled out on
+audit grounds.** ✓
+
+**Audit — reviewability.**
+
+- Field names are the literal RFC 1035 names (`qdCount`, `anCount`, etc.) and the literal BLE ATT term (`attHandleOffset`). A reader holding either spec next to this generated code can verify it in one pass.
+- Two `// Wire:` comments are present, only where the optimization is non-obvious:
+  - one on the LE 3-byte assembly (the shift pattern is the optimization vs. allocating an intermediate buffer or a stdlib `Int.fromLittleEndianBytes` that doesn't exist),
+  - one on the symmetric LE 3-byte emit.
+- The BE u16 reads / writes are *not* commented — the call name (`readUShort`) on a BE-default message is unambiguous.
+- The wire diagram (Section 10) makes the mixed-endian byte 13–15 region visually obvious — opcode and the LE triplet are in the same row, which mirrors the wire layout exactly.
+- No `// Batched:` comments are needed because there is no batched optimization (see audit-batching above).
+- `attHandleOffset` is declared `Int`, not `UInt` — the underlying 24-bit value fits in either, but `Int` matches `@WireBytes(N)`'s natural Kotlin-side type for "decoded into Long/Int." Decision noted for slice 4 cross-reference. ✓
+
+**Audit — streaming.**
+
+- `peekFrameSize` returns `Complete(16)` precisely when 16 bytes are buffered past the base offset; with 15 bytes it returns `NeedsMoreData`. ✓
+- Encode under `Exact(16)`: bridge acquires a ≥ 16-byte pool buffer (16 byte ask resolves to the pool's `defaultBufferSize` minimum, typically 8 KB), encode writes 16 bytes, transport.write fires. No `ByteArray` materialization. ✓
+- BackPatch path unreachable — codec returns `Exact`. ✓
+- Terminal-field slice-bounding not applicable (no terminal variable field).
+
+**Findings.**
+
+1. `@WireOrder(Endianness.Little)` + `@WireBytes(3)` compose cleanly: the
+   per-field annotations override the message default *only* for the
+   annotated field, generated code stays fixed-layout, `wireSize` stays
+   `Exact`. The two annotations are independent — the processor honors
+   `@WireOrder` by emitting either the BE-natural call (default), the
+   LE-natural call (when the buffer's natural order is LE), or the
+   manual byte assembly (when the wire width doesn't match the Kotlin
+   type's natural width, as here). No coupling between the two
+   annotations beyond the fact that custom-width usually goes hand in
+   hand with explicit endianness.
+2. **Defers PHASE_9_RESET decision "@WireOrder + @WireBytes
+   consolidation".** Keeping them separate (per CLAUDE.md §8.4
+   originally and confirmed here) is the right call: the annotations
+   *do* different things — one selects byte order, the other selects
+   wire width. Consolidating into one `@Wire(order=…, bytes=…)`
+   would force the user to spell out both even when only one is
+   non-default; staying separate keeps the call sites minimal. Lock
+   that decision now: **separate annotations, no consolidation.**
+3. **Defers PHASE_9_RESET decision "`LengthPrefix` enum shape".** Not
+   yet driven — slice 3 is the first concrete vector that exercises
+   it. Defer to slice 3.
+4. The `// Wire:` comment policy from Section 10.4-equivalent (rephrased
+   here for emitter rules): emit a `// Wire:` comment when the byte
+   pattern being assembled is non-obvious from the call sequence
+   (multi-byte assembly via shifts, bit-packing, custom width). Do
+   *not* emit one for natural-width scalar reads in the message default
+   endianness. **Lock the policy: comment only the non-obvious.**
+
+**Slice status:** validated. Two locks recorded (separate
+`@WireOrder`/`@WireBytes`; `// Wire:` comment policy). Move on to
+slice 3.
+
+### Slice 3 — `@LengthPrefixed` on MQTT v5 UTF-8 string fields
+
+**Source vector.** MQTT v5 uses a single uniform shape for every UTF-8
+string on the wire, defined in §1.5.4 of the spec ("UTF-8 Encoded
+String"): a 2-byte big-endian unsigned length prefix followed by the
+UTF-8 bytes (≤ 65 535 bytes). The PUBLISH packet's *topic name* is the
+canonical field exercising this shape — every PUBLISH carries one,
+exactly once, between the variable-header byte counts and the optional
+packet identifier.
+
+For this slice we model a stripped-down "PUBLISH variable header head"
+that has just the topic name and a non-string trailing scalar so the
+prefix's *not-terminal* role is also exercised (terminal would let
+`@RemainingBytes` apply, which is slice 5).
+
+```kotlin
+/**
+ * Stripped-down MQTT v5 PUBLISH variable header: a UTF-8 length-prefixed
+ * topic name followed by a packet identifier. Mirrors §3.3.2.1
+ * (Topic Name) + §3.3.2.2 (Packet Identifier) without the property
+ * length / properties / payload.
+ */
+@ProtocolMessage(wireOrder = Endianness.Big)
+data class PublishHead(
+    @LengthPrefixed                              // default = LengthPrefix.Short (2 bytes BE)
+    val topic: String,
+    val packetId: UShort,
+)
+```
+
+Two fields → falls *below* the Section 10.3 diagram trigger by field
+count. But: at least one field is non-trivial (`@LengthPrefixed`), and
+the rule reads "more than 2 fields **AND** at least one non-trivial."
+Both conjuncts must be true; here field-count fails. **No diagram
+emitted.** This is a deliberate test of the trigger boundary — the
+single-prefix-plus-trailing-scalar shape is common enough (HTTP/2
+header pair, DNS QNAME-len + Type, ATT prepare-write request) that we
+do *not* want to clutter every two-field codec with a one-line diagram.
+
+**Sketched generated output.**
+
+```kotlin
+/**
+ * Generated codec for [PublishHead] — wire-format details below.
+ *
+ * @see PublishHead
+ *
+ * Source documentation:
+ *   Stripped-down MQTT v5 PUBLISH variable header: a UTF-8 length-prefixed
+ *   topic name followed by a packet identifier. Mirrors §3.3.2.1
+ *   (Topic Name) + §3.3.2.2 (Packet Identifier) without the property
+ *   length / properties / payload.
+ */
+object PublishHeadCodec : Codec<PublishHead> {
+
+    /**
+     * Reads a 2-byte BE length prefix, then `len` UTF-8 bytes for [PublishHead.topic],
+     * then 2 BE bytes for [PublishHead.packetId].
+     *
+     * @throws DecodeException if the buffer is shorter than `2 + len + 2`.
+     */
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): PublishHead {
+        val topicLen = buffer.readUShort().toInt()
+        val topic = buffer.readString(topicLen, Charset.UTF8).toString()
+        val packetId = buffer.readUShort()
+        return PublishHead(topic, packetId)
+    }
+
+    /**
+     * Writes a 2-byte BE length prefix, the UTF-8 bytes, then 2 BE bytes for packetId.
+     * Uses back-patch on the prefix: writes a placeholder, calls `writeString`, then
+     * patches the prefix at the recorded absolute position.
+     */
+    override fun encode(buffer: WriteBuffer, value: PublishHead, context: EncodeContext) {
+        // Wire: back-patched 2-byte BE length prefix
+        val lenPos = buffer.position()
+        buffer.writeUShort(0u)                              // placeholder
+        val before = buffer.position()
+        buffer.writeString(value.topic, Charset.UTF8)
+        val written = buffer.position() - before
+        require(written <= UShort.MAX_VALUE.toInt()) {
+            "topic exceeds 65535 UTF-8 bytes (got $written)"
+        }
+        // Wire: patch the prefix at lenPos with the actual byte count
+        buffer[lenPos]     = ((written ushr 8) and 0xFF).toByte()
+        buffer[lenPos + 1] = (written and 0xFF).toByte()
+        buffer.writeUShort(value.packetId)
+    }
+
+    /**
+     * `BackPatch` because the topic's UTF-8 byte count isn't known without
+     * encoding (or pre-measuring, which is itself a UTF-8 walk we'd just
+     * re-do at write time). The bridge handles `BackPatch` by routing
+     * encode through a growable pool-backed write buffer.
+     */
+    override fun wireSize(value: PublishHead, context: EncodeContext): WireSize =
+        WireSize.BackPatch
+
+    /**
+     * Frame size = 2 + topicLen + 2. Peeks the prefix; if available,
+     * returns Complete with the total byte count; otherwise NeedsMoreData.
+     */
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+        if (stream.available() - baseOffset < 2) return PeekResult.NeedsMoreData
+        val topicLen = stream.peekShort(baseOffset).toUShort().toInt()  // BE peek
+        val total = 2 + topicLen + 2
+        return if (stream.available() - baseOffset >= total) PeekResult.Complete(total)
+        else PeekResult.NeedsMoreData
+    }
+}
+```
+
+**Audit — zero-copy.** Decode allocates one `String` for the topic
+(unavoidable — `String` is the declared field type and Kotlin Strings
+are heap objects on every backend). The `readString(n, Charset.UTF8)`
+call hits the buffer's natively-optimized UTF-8 path — on Apple it's
+NSString init from a sliced NSData, on JVM it's a `String(bytes, off,
+len, UTF_8)` direct constructor over the underlying `byte[]`, no
+intermediate `ByteArray` alloc on either backend. Encode goes through
+`writeString` which delegates to the buffer's native UTF-8 encoder
+(JVM: `String.getBytes(UTF_8)` once into the destination region; Apple:
+`NSString.dataUsingEncoding`). Back-patch absolute writes (`buffer[i] =
+…`) are zero-allocation index-set operations. `wireSize` returns the
+shared `WireSize.BackPatch` data object — zero allocation. ✓
+
+**Audit — batching.** Encode could in principle pre-compute the UTF-8
+byte length to avoid back-patching, then size the buffer exactly. Two
+options considered:
+
+1. *Pre-measure with `text.utf8ByteCount()` (or equivalent), then
+   `WireSize.Exact(2 + n + 2)`.* Requires a full UTF-8 codepoint walk at
+   sizing time and a second walk at encode time — pure waste. Some
+   buffer backends *could* expose a fused "encode into buffer, return
+   bytes written" call that lets encode return without a back-patch,
+   but the bridge already owns the growable buffer in `BackPatch` mode,
+   so the cost is one extra acquired chunk plus two `set` calls. **Ruled
+   out — measurably slower for the common short-topic case.**
+2. *Use a varint length prefix when we know strings are short.* Out of
+   scope: the spec is fixed at 2-byte BE for MQTT v5 strings; varints
+   appear only in MQTT's "Variable Byte Integer" type, which is a
+   different annotation surface (`@VariableByteInteger` or similar,
+   not yet introduced).
+
+Back-patch is the right shape here, and the bridge's `BackPatch` →
+gather-write path handles it without `ByteArray`. **Less-clever
+alternative ruled out on audit grounds.** ✓
+
+**Audit — reviewability.**
+
+- `topicLen`, `topic`, `packetId` map directly to MQTT v5 §3.3.2.1 / §3.3.2.2 vocabulary. A reader holding the spec validates this in one pass.
+- Two `// Wire:` comments — both flagging non-obvious operations: the back-patch placeholder (one-line setup), and the prefix patch (the absolute-set sequence is opaque without naming what byte pattern it produces).
+- `peekFrameSize`'s `peekShort(baseOffset).toUShort().toInt()` could carry a `// Wire:` comment, but the body is short and the call name is self-explanatory: peek a 2-byte BE length prefix, treat as unsigned, expand to Int for size arithmetic. Decision: **no comment** — the call sequence reads as English.
+- `require(written <= UShort.MAX_VALUE.toInt())` is the only `EncodeException`-precondition; phrased as `require` so it surfaces the actual byte count in the message for debugging. Not promoted to a custom `EncodeException` here because `wireSize` couldn't have lied — the violation is a model-side bug (oversized topic), not a wire-protocol bug. ✓
+- Diagram absent per Section 10.3 trigger — the field list is shorter than any diagram would be, and the back-patch mechanic is captured by the encode method's KDoc.
+
+**Audit — streaming.**
+
+- `peekFrameSize` advances through `NeedsMoreData → Complete`:
+  - 0 or 1 bytes buffered → `NeedsMoreData` (prefix unavailable).
+  - 2 bytes buffered, prefix says `len = N`, only some of `N` body bytes present → `NeedsMoreData` (body incomplete).
+  - 2 + N + 2 bytes buffered → `Complete(2 + N + 2)`.
+  - Verified mentally: `stream.peekShort(baseOffset)` reads the prefix without consuming bytes; the `total` arithmetic is independent of `baseOffset`. ✓
+- Encode under `BackPatch`: bridge acquires a pool buffer, writes placeholder + topic + suffix into a growable wrapper; on grow events the wrapper requests another pool chunk and chains them; `transport.writeGathered(chunks)` flushes. Patch sites land in chunk[0] (the prefix is always the first 2 bytes of the first chunk because no encode action precedes the placeholder). **Confirms that the back-patch position is always within the same chunk as the placeholder write — no cross-chunk back-patch.** ✓
+- Terminal-field slice-bounding not applicable.
+- The `peekShort(baseOffset)` call assumes the `StreamProcessor` is BIG_ENDIAN — which is the bridge default per Section 9.1 (`streamByteOrder: ByteOrder = ByteOrder.BIG_ENDIAN`). For LE-default streams (e.g., RIFF) the codec must compose a manual 2-byte assembly via `peekByte(off) | peekByte(off+1) shl 8`. **Lock that policy: peek calls in generated `peekFrameSize` use the byte order of the field's `@WireOrder` (or message default), and emit manual byte assembly when that disagrees with the stream's natural order.** This is the same logic as the encode/decode path — symmetric, no special case.
+
+**Findings.**
+
+1. **Defers PHASE_9_RESET decision "`LengthPrefix` enum shape".**
+   Resolved here: keep the **enum shape** (`Byte` / `Short` / `Int`)
+   already present in `Annotations.kt`. Reasoning:
+   - Three discrete sizes cover MQTT v3/v4/v5, WebSocket extended-length,
+     RIFF, PNG IHDR, every TLV protocol surveyed.
+   - `Varint` was on the leaning list but is a different *type*: it doesn't
+     describe a fixed prefix size, it describes a self-delimited number.
+     Force varint into a separate annotation (e.g., `@VariableByteInteger`)
+     when it's needed; keep `LengthPrefix` enum shape clean.
+   - `Fixed(Int)` was the alternative; rejected because (a) `Int` would
+     allow nonsense values like `Fixed(7)`, (b) the three concrete sizes
+     are the only ones any extant protocol uses, (c) `Fixed(Int)` blocks
+     the compiler from validating the prefix range against the field's
+     UTF-8 byte count (e.g., `Fixed(1)` + a String > 255 bytes is a
+     compile error today; `Fixed(Int)` makes that arithmetic deferred to
+     runtime). **Lock: `LengthPrefix` stays the existing enum, no
+     `Fixed(Int)` overload.**
+2. **Lock the back-patch placement rule.** Generated encode for a
+   `@LengthPrefixed` field always writes (a) a placeholder of the
+   prefix's exact byte width at the field's start, (b) the body, (c) the
+   true count back to the placeholder via absolute `set`. Within a
+   single growable buffer (the bridge's BackPatch path) the placeholder
+   and the body's first byte land in the same chunk because the
+   placeholder write is the first action of the field. Cross-chunk
+   back-patch is impossible by construction — proven above.
+3. **Lock the peek byte-order rule.** Generated `peekFrameSize` peeks
+   length prefixes using the prefix's wire byte order, regardless of the
+   stream's configured order. Emit manual byte assembly if they disagree.
+   Symmetric with encode/decode.
+4. **Defers the "`String` vs `CharSequence` field type" question.** Not
+   raised before but worth a one-liner: the model field is declared
+   `String`, the `readString` API returns `CharSequence`, generated
+   decode does `.toString()`. Could relax to `CharSequence` in the
+   model field type to skip that conversion, but it costs the consumer
+   more — every comparison and `equals` on a `CharSequence` field is
+   non-canonical. **Lock: model fields are `String`, decode does the
+   `.toString()` — readability and consumer ergonomics over a single
+   non-allocating call.**
+
+**Slice status:** validated. Three locks recorded (LengthPrefix enum
+stays; back-patch placement rule; peek byte-order rule; plus a
+String-vs-CharSequence policy note). Move on to slice 4.
+
+### Slice 4 — `@LengthFrom` on RIFF chunk body
+
+**Source vector.** Continuing slice 1's RIFF chunk header. The body
+size is *not* prefixed at the body's own start — it lives in the
+preceding `chunkSize` field of the header. This is the textbook
+`@LengthFrom("siblingField")` case: a non-string variable-length
+field whose byte count is decided by an earlier sibling.
+
+```kotlin
+/**
+ * One full RIFF chunk: 4-byte FourCC tag, 4-byte LE size, body of
+ * exactly [chunkSize] bytes, then optionally one pad byte to keep the
+ * next chunk 2-byte aligned (the pad is framed by the *enclosing*
+ * RIFF list, not by the chunk itself, so it is not modeled here).
+ */
+@ProtocolMessage(wireOrder = Endianness.Little)
+data class RiffChunk(
+    val fourCC: UInt,
+    val chunkSize: UInt,
+    @LengthFrom("chunkSize")
+    @UseCodec(RawChunkBodyCodec::class)
+    val body: ChunkBody,
+)
+
+/**
+ * Body of a RIFF chunk — opaque bytes for slice 4. Real codecs
+ * dispatch on `fourCC` to a specific body type via @UseCodec; here
+ * the body is an opaque holder so the slice tests @LengthFrom
+ * routing in isolation.
+ */
+@JvmInline value class ChunkBody(val raw: ReadBuffer)
+
+/**
+ * Hand-written codec referenced by @UseCodec on the body field.
+ * Reads `remaining()` bytes (the slice has been bounded by the
+ * processor before this codec is called) and returns a buffer slice.
+ */
+object RawChunkBodyCodec : Codec<ChunkBody> {
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): ChunkBody =
+        ChunkBody(buffer.readBytes(buffer.remaining()))    // zero-copy slice
+    override fun encode(buffer: WriteBuffer, value: ChunkBody, context: EncodeContext) {
+        buffer.write(value.raw)
+    }
+    override fun wireSize(value: ChunkBody, context: EncodeContext): WireSize =
+        WireSize.Exact(value.raw.remaining())
+    // peekFrameSize stays NoFraming — this codec is only ever invoked
+    // by the parent's slice-bound decode, never as a stream root.
+}
+```
+
+Three fields, two non-trivial (`@LengthFrom`, `@UseCodec`) → diagram
+**is** emitted.
+
+**Sketched generated output (RiffChunkCodec).**
+
+```kotlin
+/**
+ * Generated codec for [RiffChunk] — wire-format details below.
+ *
+ * @see RiffChunk
+ * @see RiffChunkHeaderCodec
+ * @see RawChunkBodyCodec
+ *
+ * ```text
+ *  0                   1                   2                   3
+ *  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+ * +---------------+---------------+---------------+---------------+
+ * |     'R'       |     'I'       |     'F'       |     'F'       |  fourCC (4b ASCII)
+ * +---------------+---------------+---------------+---------------+
+ * |                          chunkSize (4b LE)                    |
+ * +---------------------------------------------------------------+
+ * | <chunkSize> bytes — body (from chunkSize)                     |
+ * +---------------------------------------------------------------+
+ * ```
+ *
+ * Source documentation:
+ *   One full RIFF chunk: 4-byte FourCC tag, 4-byte LE size, body of
+ *   exactly [chunkSize] bytes, then optionally one pad byte to keep the
+ *   next chunk 2-byte aligned (the pad is framed by the *enclosing*
+ *   RIFF list, not by the chunk itself, so it is not modeled here).
+ */
+object RiffChunkCodec : Codec<RiffChunk> {
+
+    /**
+     * Reads 8 header bytes, then exactly [RiffChunk.chunkSize] body bytes
+     * via [RawChunkBodyCodec] over a setLimit-bounded slice.
+     */
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): RiffChunk {
+        val fourCC    = buffer.readUInt()
+        val chunkSize = java.lang.Integer.reverseBytes(buffer.readInt()).toUInt()
+        // Wire: bound the buffer to chunkSize bytes so RawChunkBodyCodec sees
+        // remaining()==chunkSize, then restore the outer limit.
+        val outerLimit = buffer.limit()
+        buffer.setLimit(buffer.position() + chunkSize.toInt())
+        val body = RawChunkBodyCodec.decode(buffer, context)
+        buffer.setLimit(outerLimit)
+        return RiffChunk(fourCC, chunkSize, body)
+    }
+
+    /** Writes 8 header bytes, then the body bytes — wire size = 8 + body.raw.remaining(). */
+    override fun encode(buffer: WriteBuffer, value: RiffChunk, context: EncodeContext) {
+        buffer.writeUInt(value.fourCC)
+        buffer.writeInt(java.lang.Integer.reverseBytes(value.chunkSize.toInt()))
+        RawChunkBodyCodec.encode(buffer, value.body, context)
+    }
+
+    /**
+     * `Exact(8 + body.raw.remaining())` — body codec reports `Exact`,
+     * fields above it are fixed, so the sum is exact.
+     */
+    override fun wireSize(value: RiffChunk, context: EncodeContext): WireSize {
+        val bodySize = (RawChunkBodyCodec.wireSize(value.body, context) as WireSize.Exact).bytes
+        return WireSize.Exact(8 + bodySize)
+    }
+
+    /**
+     * Frame size = 8 + chunkSize. Peek the LE chunkSize at offset 4 and add 8.
+     */
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+        if (stream.available() - baseOffset < 8) return PeekResult.NeedsMoreData
+        // Wire: 4 LE bytes at offset+4 — manual assembly because stream is BE
+        val b0 = stream.peekByte(baseOffset + 4).toInt() and 0xFF
+        val b1 = stream.peekByte(baseOffset + 5).toInt() and 0xFF
+        val b2 = stream.peekByte(baseOffset + 6).toInt() and 0xFF
+        val b3 = stream.peekByte(baseOffset + 7).toInt() and 0xFF
+        val chunkSize = b0 or (b1 shl 8) or (b2 shl 16) or (b3 shl 24)
+        require(chunkSize >= 0) { "RIFF chunkSize overflow: $chunkSize" }
+        val total = 8 + chunkSize
+        return if (stream.available() - baseOffset >= total) PeekResult.Complete(total)
+        else PeekResult.NeedsMoreData
+    }
+}
+```
+
+**Audit — zero-copy.** Decode reads two scalars; the body slice is
+`buffer.readBytes(remaining)` which on every backend returns a
+*sliced view* of the underlying bytes (zero copy — `JvmBuffer` returns
+a duplicated `ByteBuffer` over the same memory; `ByteArrayBuffer`
+returns a slice over the same `ByteArray`; native buffers return a
+pointer offset). The `setLimit` / restore dance is two integer field
+writes. `RawChunkBodyCodec.decode` allocates only the inline value
+class wrapper around the slice. Encode writes two scalars then bulk-
+copies the body via `buffer.write(value.raw)`, which on aligned-
+backend pairs (Direct→Direct) hits the platform's `put(ByteBuffer)`
+fast path. `wireSize` returns a value-class `Exact`. `peekFrameSize`
+allocates nothing — four `peekByte` calls + arithmetic. ✓
+
+**Audit — batching.** I considered three alternatives and ruled each out:
+
+1. *Inline `body = ChunkBody(buffer.readBytes(chunkSize.toInt()))` and
+   skip the `setLimit` dance.* Would work for *this* codec because
+   `RawChunkBodyCodec` happens to use `remaining()`, but it bakes the
+   length-source resolution into the parent rather than isolating it
+   in the body codec. The general `@LengthFrom` contract is "the body
+   codec sees a buffer bounded such that `remaining()` == the resolved
+   length" — that contract must be uniform across all `@UseCodec`
+   choices, including ones that read internal sub-structure where
+   `setLimit` matters. **Ruled out — breaks the general contract.**
+2. *Use `slice(N).use { }` instead of `setLimit`.* That is the *async*
+   bounding strategy from locked decision #5. Sync decode uses
+   `setLimit` because it's zero-allocation; `slice().use { }` allocates
+   the slice wrapper. Symmetry with locked decision #5 is preserved
+   here — sync = `setLimit`, async = `slice`. ✓
+3. *Skip the `outerLimit` restore.* Forces the parent codec to know
+   nothing came after the body in this enclosing scope, which is
+   *true for a standalone RIFF chunk* but *false for a RIFF chunk
+   embedded inside a RIFF LIST*. The restore costs one int write and
+   makes the codec composable. **Ruled out — restore is mandatory for
+   composability.**
+
+**Less-clever alternative ruled out on audit grounds.** ✓
+
+**Audit — reviewability.**
+
+- `chunkSize` and `body` are the literal RIFF spec terms. The `@LengthFrom("chunkSize")` annotation reads as English: "body length is taken from the chunkSize field." A reader holding the spec validates this in one pass.
+- Two `// Wire:` comments — both flagging non-obvious operations: the `setLimit` dance (the bound + restore pattern is the optimization vs. allocating a slice), and the manual 4-byte LE assembly in `peekFrameSize` (the shift pattern is the optimization vs. requiring a `peekIntLittleEndian` API that doesn't exist).
+- `wireSize`'s `as WireSize.Exact` cast looks scary — it would throw `ClassCastException` if `RawChunkBodyCodec` ever returned `BackPatch`. But: this exact codec is `@UseCodec`-bound at compile time, and the processor *should* validate at compile time that any `@UseCodec`-referenced codec for a `@LengthFrom`-bounded field reports a determinable size. **Lock that as a compile-time check.**
+- The cross-reference `@see RawChunkBodyCodec` is essential — without it the reader can't tell what `body` decoding does without grepping. ✓
+
+**Audit — streaming.**
+
+- `peekFrameSize` walks `NeedsMoreData → Complete`:
+  - 0–7 bytes → NeedsMoreData.
+  - 8 bytes, header readable, `chunkSize = N`, body partially present → NeedsMoreData.
+  - 8 + N bytes → `Complete(8 + N)`.
+  - Verified mentally; baseOffset propagates correctly. ✓
+- The `require(chunkSize >= 0)` guards against a 32-bit chunk size with the high bit set being interpreted as a negative `Int`. RIFF allows `UInt` chunk sizes (up to 4 GiB), but the bridge's `Complete(bytes: Int)` is `Int`-typed, and a > 2 GiB chunk is unframable through this peek path anyway. **Lock the policy: when `@LengthFrom` resolves to a value > `Int.MAX_VALUE`, throw a typed `DecodeException` from peek**, not a silent overflow. The hand-sketched code uses `require` for clarity — the emitter will wrap as `throw DecodeException(...)`. Good catch.
+- Encode under `Exact` (because the body codec reports `Exact` and the parent sums). Bridge acquires a single pool buffer of `≥ 8 + body bytes`, encode runs straight through, transport.write fires. No `BackPatch`, no `writeGathered`. ✓
+- Terminal-field slice-bounding: body is the terminal field, but the bound came from a sibling field, not from "remaining outer bytes." That's `@LengthFrom`, not `@RemainingBytes` — distinct cases, slice 5 covers the latter. The `setLimit + restore` pattern is identical though, so slice 5 will reuse this proof.
+
+**Findings.**
+
+1. **Lock the `@LengthFrom("…")` resolution form.** `String` literal
+   referencing a sibling property name. Compile-time validated:
+   referenced field must exist, must precede this field, must be a
+   numeric type. This matches the existing annotation
+   (`Annotations.kt:141`). Ruled out alternatives:
+   - *Property reference* (`@LengthFrom(RiffChunk::chunkSize)`) — needs
+     `KProperty` reflection at compile time, processor would have to
+     resolve the reference through KSP's symbol resolution; same end
+     state as a string + name lookup but with extra ceremony at the
+     call site.
+   - *Compile-time-resolved name* (some wrapper around the string) —
+     same as the string but with ceremony.
+   String wins on minimal call-site noise, KSP validation is no harder
+   than for a property reference, and string literals show up in
+   error-message field-paths naturally.
+2. **Lock the `setLimit + restore` bounding contract.** Sync decode of
+   any `@LengthFrom`-bounded field saves the outer limit, sets the
+   limit to `position + len`, calls the body codec, restores the outer
+   limit. Body codec sees `remaining() == len`. This is the uniform
+   contract for *every* `@UseCodec`-referenced sync codec inside a
+   length-bounded field — they all read by `remaining()` or call their
+   own decode logic that respects the buffer limit.
+3. **Lock the "wireSize must be `Exact` if length-source resolves to
+   `Exact`" compile-time check.** A `@UseCodec`-referenced codec
+   inside a `@LengthFrom`-bounded field must report `WireSize.Exact`
+   so the parent's `wireSize` sum is also `Exact` and the bridge takes
+   the fast `pool.withBuffer` path. Processor errors at compile time
+   if the referenced codec is known to return `BackPatch`. This is a
+   conservative check — the processor only knows the return type
+   declared on the codec object, not its runtime behavior, so the
+   check is "does the codec override `wireSize` to return `Exact`
+   unconditionally" — fail if not. (Generated codecs declare this
+   explicitly so the check is tractable.)
+4. **Lock the peek overflow rule.** When a `@LengthFrom` reference
+   resolves to a value that would make the total frame size exceed
+   `Int.MAX_VALUE`, the generated `peekFrameSize` throws
+   `DecodeException` (not `IllegalArgumentException`, not silent
+   wrap-around). Surfaces malformed inputs at frame detection rather
+   than at decode time, which is friendlier to the streaming loop.
+5. **Defers nothing further.** All `@LengthFrom`-relevant pending
+   decisions resolved.
+
+**Slice status:** validated. Four locks recorded. Move on to slice 5.
+
+### Slice 5 — `@RemainingBytes` on a WebSocket close-frame body
+
+**Source vector.** WebSocket close-frame body, RFC 6455 §5.5.1: a
+2-byte big-endian status code followed by an *optional* UTF-8 reason
+string that occupies whatever remains of the frame (the WebSocket
+frame header already pre-bounds the buffer). The reason has no length
+prefix because the outer frame's payload-length field provides it; the
+reason is whatever's left after the 2-byte status code is consumed.
+
+This is the textbook `@RemainingBytes` case: a terminal field that
+consumes "everything else" relative to a pre-bounded buffer.
+
+```kotlin
+/**
+ * WebSocket close-frame body — RFC 6455 §5.5.1. The 2-byte BE status
+ * code is followed by an optional UTF-8 reason string that occupies
+ * the remainder of the frame's payload region. The frame's payload
+ * length is supplied by the WebSocket frame header (handled by the
+ * outer codec), so the reason field needs no prefix of its own.
+ */
+@ProtocolMessage(wireOrder = Endianness.Big)
+data class CloseFrameBody(
+    val statusCode: UShort,
+    @RemainingBytes
+    val reason: String,
+)
+```
+
+Two fields, one non-trivial (`@RemainingBytes`). Diagram trigger fails
+on field count (≤ 2). **No diagram emitted** — the method-level KDoc
+on `decode` carries the wire shape adequately.
+
+**Sketched generated output.**
+
+```kotlin
+/**
+ * Generated codec for [CloseFrameBody] — wire-format details below.
+ *
+ * @see CloseFrameBody
+ *
+ * Source documentation:
+ *   WebSocket close-frame body — RFC 6455 §5.5.1. The 2-byte BE status
+ *   code is followed by an optional UTF-8 reason string that occupies
+ *   the remainder of the frame's payload region. The frame's payload
+ *   length is supplied by the WebSocket frame header (handled by the
+ *   outer codec), so the reason field needs no prefix of its own.
+ */
+object CloseFrameBodyCodec : Codec<CloseFrameBody> {
+
+    /**
+     * Reads 2 BE bytes for [CloseFrameBody.statusCode], then everything
+     * else in the buffer as UTF-8 for [CloseFrameBody.reason].
+     *
+     * @throws DecodeException if the buffer is shorter than 2 bytes.
+     */
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): CloseFrameBody {
+        val statusCode = buffer.readUShort()
+        val reasonBytes = buffer.remaining()
+        // Wire: terminal field — consume whatever is left in the bounded buffer
+        val reason = if (reasonBytes == 0) "" else buffer.readString(reasonBytes, Charset.UTF8).toString()
+        return CloseFrameBody(statusCode, reason)
+    }
+
+    /** Writes 2 BE bytes for statusCode, then UTF-8 bytes for reason. */
+    override fun encode(buffer: WriteBuffer, value: CloseFrameBody, context: EncodeContext) {
+        buffer.writeUShort(value.statusCode)
+        if (value.reason.isNotEmpty()) {
+            buffer.writeString(value.reason, Charset.UTF8)
+        }
+    }
+
+    /**
+     * `BackPatch` because the reason's UTF-8 byte count isn't known
+     * without encoding (or pre-measuring, which is itself a UTF-8
+     * walk we'd just re-do at write time).
+     */
+    override fun wireSize(value: CloseFrameBody, context: EncodeContext): WireSize =
+        WireSize.BackPatch
+
+    /**
+     * Frame size is determined by the *outer* framer (WebSocket frame
+     * header). This codec is invoked over a pre-bounded buffer, never
+     * as a stream root, so framing is not its concern.
+     */
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult =
+        PeekResult.NoFraming
+}
+```
+
+**Audit — zero-copy.** Decode pulls one scalar; the reason string is
+read via `buffer.readString(remaining, UTF_8)` which on every backend
+hits the native UTF-8-decode path with no intermediate `ByteArray`
+(same path validated in slice 3). The empty-reason branch avoids a
+zero-length `String` allocation by using the constant `""`. Encode
+writes one scalar then the UTF-8 bytes; the `isNotEmpty` check skips
+the encoder call entirely for empty reasons (encoders for some
+backends still allocate a 0-byte intermediate when called on an empty
+string — the guard avoids that). `wireSize` returns the shared
+`WireSize.BackPatch` data object. `peekFrameSize` is a constant return.
+✓
+
+**Audit — batching.** Two alternatives considered and ruled out:
+
+1. *Fold the empty-reason guard into `writeString` by trusting it to
+   noop on `""`.* `writeString` semantics are charset-implementation-
+   defined; on Apple the call goes through `NSString.dataUsingEncoding`
+   which allocates an empty `NSData`. The guard is one comparison and
+   it removes a per-platform allocation question. **Keep the guard.**
+2. *Use `buffer.write(reasonAsBuffer)` if the reason is already a
+   `ByteBuffer`.* It isn't — the model field is `String`. Forcing
+   pre-encoded reasons would push the encoding decision out to every
+   call site, violating the model-field-types-are-Kotlin-natural
+   policy. **Ruled out.**
+
+**Less-clever alternative ruled out on audit grounds.** ✓
+
+**Audit — reviewability.**
+
+- `statusCode` and `reason` are the literal RFC 6455 §5.5.1 terms.
+- One `// Wire:` comment, on the `remaining()` read — the reader needs to know that the bounded-buffer contract is what makes this terminal-consume-rest legal. Without the comment, a reader unfamiliar with the framework might assume `remaining()` reflects the underlying transport, not the codec's pre-bounded slice.
+- The `if (reasonBytes == 0) ""` path is short enough that a comment would be noise — the call sequence is self-documenting.
+- The `peekFrameSize` returning `NoFraming` is intentional: this codec is *never* the framing root for a stream. A reviewer skimming for framing bugs sees `NoFraming` and immediately knows "this codec is composed inside another framer." The KDoc on `peekFrameSize` says exactly that. ✓
+- Bridge usage check: locked decision #9 says `NoFraming` returned by a bridged codec at the framing boundary throws at startup. So a consumer that *accidentally* tried `CloseFrameBodyCodec.asConnection(transport, …)` would crash immediately with the message from 9.3 — exactly the desired behavior. ✓
+
+**Audit — streaming.**
+
+- `peekFrameSize` returns `NoFraming`; the bridge promotes that to a startup throw. Verified against locked decision #9.3. ✓
+- Encode under `BackPatch`: bridge uses growable + `writeGathered`. Two writes (scalar + string), no back-patch *position* needed (the size is *determined by* the encoded bytes, but no preceding length-prefix slot exists to patch). The bridge's `BackPatch` path is exercised purely for the growable buffer's chunk linking, not for any in-place patch. **Confirms `BackPatch` ≠ "always involves a patch site"; sometimes it just means "size unknown up front."** Lock that semantic clarification.
+- Terminal-field slice-bounding **is** the central concern of this slice. Decode relies on `buffer.remaining()` returning exactly the body's byte count. That holds when the codec is invoked through:
+  - the bridge's `readBufferScoped(n) { decode(this, ctx) }` path (the slice is `n` bytes, no more, no less),
+  - a parent codec's `setLimit + restore` dance (e.g., `RiffChunkCodec` from slice 4 — substituted there with a hypothetical `CloseFrameBody`-typed body, the same pattern would bound the buffer for this codec),
+  - an async slice via `parent.slice(N).use { … }` (locked decision #5 — same `remaining()` contract).
+  All three bounding paths preserve the contract. ✓
+- The `setLimit + restore` interaction with `@RemainingBytes`: when a `@RemainingBytes` field is *not* terminal in some weird future model, the processor must reject at compile time. **Lock the compile-time check: `@RemainingBytes` is only valid on the terminal non-conditional field.** Already partially documented in `Annotations.kt:120` ("Must be the last non-conditional field in the constructor") — promoting it from doc-comment to enforced KSP check.
+
+**Findings.**
+
+1. **Lock the `BackPatch` semantic clarification.**
+   `WireSize.BackPatch` means "exact byte count not known up front,
+   so the bridge uses a growable buffer." It does **not** imply "an
+   in-place patch happens at encode time." Some codecs (this one,
+   `LogEntry` with a single `@RemainingBytes` field, etc.) report
+   `BackPatch` purely because their size is data-dependent; they have
+   no preceding length slot to patch back to. Document this in the
+   `WireSize.BackPatch` KDoc when the runtime types get next touched.
+2. **Lock the `@RemainingBytes` placement compile-time check.**
+   Processor enforces that `@RemainingBytes` annotates exactly one
+   field per message, that field is the last non-conditional field in
+   the primary constructor's parameter list, and (if any conditional
+   `@WhenTrue` fields follow it) the conditional fields' presence is
+   gated such that "absent" maintains the terminal-consume-rest
+   semantics. The simplest enforcement: trailing-conditional fields
+   are forbidden after a `@RemainingBytes` field. Conditional fields
+   come *first* in the variable-length tail, terminal `@RemainingBytes`
+   comes last. (Re-examine if a real protocol violates this — none
+   surveyed so far does.)
+3. **Lock the empty-string write guard.** Generated encode for any
+   `String`-typed field issues `if (value.field.isNotEmpty())
+   buffer.writeString(value.field, …)`. Skips a per-platform
+   zero-length-allocation question. Cost: one comparison per emit.
+   Worth it.
+4. **Lock the empty-string decode shortcut.** Generated decode for
+   any `String`-typed field that *might* be zero-length (i.e., any
+   `@RemainingBytes` field) uses `if (n == 0) ""` to short-circuit
+   the `readString` call. `""` is a JVM-interned constant on all
+   Kotlin backends; no allocation.
+5. **Lock the `peekFrameSize = NoFraming` policy for "embedded only"
+   codecs.** Codecs that are only ever invoked over a pre-bounded
+   buffer (e.g., body codecs referenced by `@UseCodec` in a
+   `@LengthFrom` / `@RemainingBytes` field, terminal sub-message
+   codecs) explicitly return `NoFraming`. The bridge's startup throw
+   from 9.3 protects against accidental misuse as a stream root. This
+   policy applies uniformly; the processor emits `NoFraming` whenever
+   the codec lacks a length-discoverable structure.
+
+**Slice status:** validated. Five locks recorded. Move on to slice 6.
+
+### Slice 6 — `@WhenTrue` on MQTT v3.1.1 CONNECT optional fields
+
+**Source vector.** MQTT v3.1.1 §3.1 CONNECT is the canonical
+conditional-fields protocol: a single `connectFlags` byte in the
+variable header gates the presence of will-topic, will-message,
+username, and password fields in the payload section. The flag bits:
+
+```
+Bit:      7         6        5        4-3        2          1            0
+Field:  user     password   will     willQoS   will      cleanStart   reserved
+        Name      flag      retain              flag       flag         (0)
+        flag                                                          
+```
+
+The dotted-path `@WhenTrue("flags.willFlag")` form from
+`Annotations.kt:215` is exactly built for this — `connectFlags` is a
+value class (`@JvmInline`) carrying a `UByte` whose bit-extracted
+properties drive the gates. We use a stripped-down CONNECT (no
+`protocolName` / `protocolLevel` / `keepAlive` / `clientId` — those are
+covered by combinations of slices 1, 2, 3) so the slice exercises
+`@WhenTrue` in isolation.
+
+```kotlin
+/**
+ * MQTT v3.1.1 §3.1.2.3 Connect Flags. Bit-packed UByte; computed
+ * properties extract individual flag bits for use in @WhenTrue gates.
+ */
+@JvmInline
+@ProtocolMessage
+value class ConnectFlags(val raw: UByte) {
+    val cleanStart:   Boolean get() = (raw.toInt() and 0b0000_0010) != 0
+    val willFlag:     Boolean get() = (raw.toInt() and 0b0000_0100) != 0
+    val willRetain:   Boolean get() = (raw.toInt() and 0b0010_0000) != 0
+    val passwordFlag: Boolean get() = (raw.toInt() and 0b0100_0000) != 0
+    val userNameFlag: Boolean get() = (raw.toInt() and 0b1000_0000) != 0
+    val willQos:      Int     get() = (raw.toInt() ushr 3) and 0b11
+}
+
+/**
+ * Stripped-down MQTT v3.1.1 CONNECT payload. Demonstrates @WhenTrue
+ * dotted-path resolution against the bit-extracted properties of
+ * [ConnectFlags]. Real CONNECT also carries protocolName, level,
+ * keepAlive, and clientId — omitted here so the slice tests
+ * conditional gating in isolation.
+ */
+@ProtocolMessage(wireOrder = Endianness.Big)
+data class ConnectPayload(
+    val flags: ConnectFlags,
+    @LengthPrefixed @WhenTrue("flags.willFlag")     val willTopic:   String? = null,
+    @LengthPrefixed @WhenTrue("flags.willFlag")     val willMessage: String? = null,
+    @LengthPrefixed @WhenTrue("flags.userNameFlag") val userName:    String? = null,
+    @LengthPrefixed @WhenTrue("flags.passwordFlag") val password:    String? = null,
+)
+```
+
+Five fields, four non-trivial (conditional length-prefixed). Diagram
+trigger fires.
+
+**Sketched generated output.**
+
+```kotlin
+/**
+ * Generated codec for [ConnectPayload] — wire-format details below.
+ *
+ * @see ConnectPayload
+ * @see ConnectFlags
+ *
+ * ```text
+ *  0
+ *  0 1 2 3 4 5 6 7
+ * +-+-+-+-+-+-+-+-+
+ * |U|P|R| Q |W|C|0|  flags (1b) — userNameFlag/passwordFlag/willRetain/willQos/willFlag/cleanStart
+ * +-+-+-+-+-+-+-+-+
+ * | <prefix=Short BE> + <len> bytes — willTopic   [when flags.willFlag]     |
+ * +-------------------------------------------------------------------------+
+ * | <prefix=Short BE> + <len> bytes — willMessage [when flags.willFlag]     |
+ * +-------------------------------------------------------------------------+
+ * | <prefix=Short BE> + <len> bytes — userName    [when flags.userNameFlag] |
+ * +-------------------------------------------------------------------------+
+ * | <prefix=Short BE> + <len> bytes — password    [when flags.passwordFlag] |
+ * +-------------------------------------------------------------------------+
+ * ```
+ *
+ * Source documentation:
+ *   Stripped-down MQTT v3.1.1 CONNECT payload. Demonstrates @WhenTrue
+ *   dotted-path resolution against the bit-extracted properties of
+ *   [ConnectFlags]. Real CONNECT also carries protocolName, level,
+ *   keepAlive, and clientId — omitted here so the slice tests
+ *   conditional gating in isolation.
+ */
+object ConnectPayloadCodec : Codec<ConnectPayload> {
+
+    /**
+     * Reads the flags byte, then conditionally reads each
+     * length-prefixed UTF-8 string when its flag bit is set.
+     */
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): ConnectPayload {
+        val flags = ConnectFlagsCodec.decode(buffer, context)
+        // Wire: each conditional field is fully absent when its gate is false
+        val willTopic = if (flags.willFlag) {
+            val n = buffer.readUShort().toInt()
+            buffer.readString(n, Charset.UTF8).toString()
+        } else null
+        val willMessage = if (flags.willFlag) {
+            val n = buffer.readUShort().toInt()
+            buffer.readString(n, Charset.UTF8).toString()
+        } else null
+        val userName = if (flags.userNameFlag) {
+            val n = buffer.readUShort().toInt()
+            buffer.readString(n, Charset.UTF8).toString()
+        } else null
+        val password = if (flags.passwordFlag) {
+            val n = buffer.readUShort().toInt()
+            buffer.readString(n, Charset.UTF8).toString()
+        } else null
+        return ConnectPayload(flags, willTopic, willMessage, userName, password)
+    }
+
+    /**
+     * Writes the flags byte, then conditionally writes each present
+     * field. Compile-time consistency check has already verified that
+     * the flag/field pairings can never be inconsistent (a present
+     * field with its flag unset is a model bug; see encode-time guard).
+     */
+    override fun encode(buffer: WriteBuffer, value: ConnectPayload, context: EncodeContext) {
+        ConnectFlagsCodec.encode(buffer, value.flags, context)
+        // Wire: encode-time guards — flag must agree with field nullity
+        if (value.flags.willFlag) {
+            require(value.willTopic   != null) { "flags.willFlag set but willTopic is null" }
+            require(value.willMessage != null) { "flags.willFlag set but willMessage is null" }
+            writeLengthPrefixedShort(buffer, value.willTopic)
+            writeLengthPrefixedShort(buffer, value.willMessage)
+        } else {
+            require(value.willTopic   == null) { "willTopic present but flags.willFlag is false" }
+            require(value.willMessage == null) { "willMessage present but flags.willFlag is false" }
+        }
+        if (value.flags.userNameFlag) {
+            require(value.userName != null) { "flags.userNameFlag set but userName is null" }
+            writeLengthPrefixedShort(buffer, value.userName)
+        } else {
+            require(value.userName == null) { "userName present but flags.userNameFlag is false" }
+        }
+        if (value.flags.passwordFlag) {
+            require(value.password != null) { "flags.passwordFlag set but password is null" }
+            writeLengthPrefixedShort(buffer, value.password)
+        } else {
+            require(value.password == null) { "password present but flags.passwordFlag is false" }
+        }
+    }
+
+    /**
+     * `BackPatch` because conditional UTF-8 fields' byte counts are
+     * data-dependent. The bridge handles the growable + writeGathered
+     * path.
+     */
+    override fun wireSize(value: ConnectPayload, context: EncodeContext): WireSize =
+        WireSize.BackPatch
+
+    /**
+     * Frame size = 1 (flags) + sum of (2 + len_i) for each present
+     * conditional field. Peeks each prefix in turn, walking offsets
+     * forward; gates are evaluated against the peeked flags byte.
+     */
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+        if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
+        val rawFlags = stream.peekByte(baseOffset).toInt() and 0xFF
+        val willFlag     = (rawFlags and 0b0000_0100) != 0
+        val userNameFlag = (rawFlags and 0b1000_0000) != 0
+        val passwordFlag = (rawFlags and 0b0100_0000) != 0
+        var off = baseOffset + 1
+        // Wire: each present field contributes 2 (BE prefix) + prefix value bytes
+        if (willFlag) {
+            val r1 = peekLengthPrefixed(stream, off) ?: return PeekResult.NeedsMoreData
+            off = r1
+            val r2 = peekLengthPrefixed(stream, off) ?: return PeekResult.NeedsMoreData
+            off = r2
+        }
+        if (userNameFlag) {
+            val r = peekLengthPrefixed(stream, off) ?: return PeekResult.NeedsMoreData
+            off = r
+        }
+        if (passwordFlag) {
+            val r = peekLengthPrefixed(stream, off) ?: return PeekResult.NeedsMoreData
+            off = r
+        }
+        return PeekResult.Complete(off - baseOffset)
+    }
+
+    // Helper emitted once per codec that uses LengthPrefixed Short fields:
+    private fun writeLengthPrefixedShort(buffer: WriteBuffer, value: String) {
+        val lenPos = buffer.position()
+        buffer.writeUShort(0u)
+        val before = buffer.position()
+        buffer.writeString(value, Charset.UTF8)
+        val written = buffer.position() - before
+        require(written <= UShort.MAX_VALUE.toInt()) {
+            "string exceeds 65535 UTF-8 bytes (got $written)"
+        }
+        buffer[lenPos]     = ((written ushr 8) and 0xFF).toByte()
+        buffer[lenPos + 1] = (written and 0xFF).toByte()
+    }
+
+    // Helper emitted once per codec that uses peekFrameSize on Short prefixes:
+    private fun peekLengthPrefixed(stream: StreamProcessor, off: Int): Int? {
+        if (stream.available() - off < 2) return null
+        val len = stream.peekShort(off).toUShort().toInt()
+        val end = off + 2 + len
+        return if (stream.available() - off >= 2 + len) end else null
+    }
+}
+```
+
+**Audit — zero-copy.** Same path as slice 3 for each present
+length-prefixed string; absent fields cost nothing (no `readString`,
+no allocation). The `flags` value class is `@JvmInline` so it boxes
+only when needed at construction; field reads (`flags.willFlag` etc.)
+are inline `UByte` bit ops with no boxing on every Kotlin backend.
+`peekFrameSize` allocates nothing — just peek bytes and arithmetic.
+The two private helpers are small enough that the JVM inlines them at
+the call site; on Native they're regular function calls, but their
+bodies are arithmetic + buffer ops, not allocation. ✓
+
+**Audit — batching.** Three alternatives considered and ruled out:
+
+1. *Generate one giant `if/else` ladder for every flag combination.*
+   16 ladders for 4 bits, 32 for 5 — combinatorial blowup. Sequential
+   `if (flag) { … }` blocks are linear in the number of conditional
+   fields, and the JVM's branch predictor handles the predictable
+   pattern well. **Ruled out — combinatorial.**
+2. *Use a stateful "presence map" computed once at decode start.*
+   Adds a stack-allocated `Int` and four bit ops up front, saves
+   nothing because each field's gate is still evaluated once. The
+   straight-line `if (flags.willFlag)` reads better. **Ruled out —
+   no win.**
+3. *Inline the peek length-prefix helper at every call site.* Three or
+   four nearly-identical 4-line blocks vs. one private function call.
+   The function call is one JVM bytecode (or one Kotlin/Native
+   instruction); inlining costs reviewability. **Ruled out — DRY
+   wins, the helper is a per-codec emission, not a runtime cross-codec
+   dispatch.**
+
+**Less-clever alternative ruled out on audit grounds.** ✓
+
+**Audit — reviewability.**
+
+- Field names are the literal MQTT v3.1.1 §3.1.3 names (`willTopic`, `willMessage`, `userName`, `password`). Flag-bit names match §3.1.2.3.
+- The wire diagram explicitly carries the `[when flags.willFlag]` annotations inline per Section 10.2 — a reader sees which fields are conditional without scrolling to the encode/decode method.
+- Two `// Wire:` comments — both flagging non-obvious behavior:
+  - `decode` comment: "each conditional field is fully absent when its gate is false." Without this, a reader might wonder if absent fields take some other shape (zero-length prefix, default value, etc.).
+  - `peekFrameSize` comment: explains the offset-walk pattern.
+- The encode-time `require` guards turn what would otherwise be a silent wire-format violation into an actionable error. Phrased symmetrically (flag set → field present, flag unset → field absent) so the error always names the side that's wrong. **Lock the policy: every `@WhenTrue` field gets a paired set of `require` guards in encode that enforce flag/nullity consistency.**
+- `ConnectFlagsCodec.decode` / `.encode` are referenced — the `@see ConnectFlags` link makes it findable. Slice 8 will exercise `@DispatchOn` over a similar value class; the `@JvmInline` codec generation must be consistent across slices. ✓
+- Dotted path `flags.willFlag` resolves at compile time: the processor walks the field type's properties and validates `willFlag` exists, returns `Boolean`, and is declared on the `@ProtocolMessage`-annotated type. Bad path → compile error with field-path in the message. **Lock the resolution rule.**
+
+**Audit — streaming.**
+
+- `peekFrameSize` walks `NeedsMoreData → Complete` correctly across all 16 flag combinations:
+  - 0 bytes → NeedsMoreData (no flags byte yet).
+  - 1 byte (flags=0): no conditional fields, `Complete(1)` immediately.
+  - 1 byte (flags with bits set), partial body → NeedsMoreData at the first incomplete prefix or string.
+  - All bytes present → `Complete(off - baseOffset)`.
+  Verified mentally for `flags = 0xC0` (userName + password set, no will): peek 0xC0 → off=1; userName prefix at off=1, len=N → off=3+N; password prefix at off=3+N, len=M → off=5+N+M. `Complete(4 + N + M)` — matches encode wire size. ✓
+- Encode under `BackPatch` — bridge handles via growable + `writeGathered`. Each `writeLengthPrefixedShort` patches *within* its own placeholder + body span; never crosses chunk boundaries by the same logic as slice 3 (the placeholder is the first action of each present field's emit). ✓
+- Terminal-field slice-bounding not strictly applicable — but `peekFrameSize` naturally produces a finite frame size that the bridge can use to bound the buffer for `decode`. The decode method itself doesn't need `setLimit` because each field's length is self-describing once the flags are known. ✓
+
+**Findings.**
+
+1. **Lock the `@WhenTrue` dotted-path resolution rule.** The
+   expression is one of:
+   - `"fieldName"` — references a `Boolean` field on the same message.
+   - `"fieldName.property"` — references a `Boolean`-returning property
+     on the field's type. The field's type must be a class declared
+     `@ProtocolMessage` (or annotated as a value class for the
+     dispatcher path); the property must be `Boolean`-typed and
+     declared on that type.
+   Compile-time validation: bad field name, bad property name, or
+   wrong return type → compile error with the field-path in the message.
+   Matches `Annotations.kt:215` documentation; promotes the doc rule
+   to a load-bearing KSP check.
+2. **Lock the encode-time consistency guard rule.** Every `@WhenTrue`
+   field gets paired `require` guards in encode: one for "gate true →
+   field non-null", one for "gate false → field null". Phrased to
+   name which side is wrong. Surfaces model-side misuse as
+   `IllegalArgumentException` instead of silent wire-format corruption.
+3. **Lock the value-class transparent codec rule for backing-property-
+   only value classes.** `ConnectFlagsCodec` is generated as a
+   one-liner that reads/writes the backing `UByte` directly — no
+   `Partial`, no extra structure. The computed properties
+   (`willFlag`, `cleanStart`, etc.) are read-only Kotlin getters that
+   are inlined at the call site. **Decision recorded against
+   PHASE_10 §8.10 (value classes compose seamlessly).**
+4. **Lock the per-codec helper emission rule.** When two or more
+   fields in the same codec use the same prefix shape (e.g., three
+   `@LengthPrefixed(LengthPrefix.Short)` fields), the processor emits
+   a single private helper function (`writeLengthPrefixedShort`,
+   `peekLengthPrefixedShort`) and calls it from each field's encode /
+   peek branch. When only one field uses the shape, the body is
+   inlined at the call site. Threshold: ≥ 2 uses → extract; 1 use →
+   inline. Reviewability win, no allocation cost.
+5. **Lock the conditional-field encode skip semantics.** When a
+   `@WhenTrue` gate is false, the processor *also* asserts (via
+   `require`) that the field is null, but emits **nothing** to the
+   wire for that field. Symmetric with decode skipping the read.
+
+**Slice status:** validated. Five locks recorded. Move on to slice 7.
+
+### Slices 7–10 — schedule
 
 | # | Annotation                       | Source vector                                    | Status   |
 |---|----------------------------------|--------------------------------------------------|----------|
 | 1 | `@ProtocolMessage`               | RIFF chunk header                                | ✓ done   |
-| 2 | `@WireOrder` + `@WireBytes`      | DNS header (BE) + BLE-ATT 3-byte LE length       | pending  |
+| 2 | `@WireOrder` + `@WireBytes`      | DNS header (BE) + BLE-ATT 3-byte LE length       | ✓ done   |
+| 3 | `@LengthPrefixed`                | MQTT v5 PUBLISH topic + packetId                 | ✓ done   |
+| 4 | `@LengthFrom`                    | RIFF chunk body via `@LengthFrom("chunkSize")`   | ✓ done   |
+| 5 | `@RemainingBytes`                | WebSocket close-frame body                       | ✓ done   |
+| 6 | `@WhenTrue`                      | MQTT v3.1.1 CONNECT optional payload fields      | ✓ done   |
 | 3 | `@LengthPrefixed`                | WebSocket close-frame reason or MQTT v5 utf8     | pending  |
 | 4 | `@LengthFrom`                    | RIFF chunk body via `@LengthFrom("chunkSize")`   | pending  |
 | 5 | `@RemainingBytes`                | WebSocket text-frame trailing payload            | pending  |
