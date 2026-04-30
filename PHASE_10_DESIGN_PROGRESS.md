@@ -14,12 +14,25 @@ naturally inside the new processor's first commit.
 
 ## Current branch state
 
-- HEAD: `5cf04d2 PHASE_9_RESET: models are negotiable; specs are not`
-- Revert commit: `c03dac7` (resets all Phase 9 changes back to merge-base
+- HEAD: `d61b206 buffer-flow: restore Connection/StreamMux/ByteStream + adapters`
+  (one commit past `4fbe05a codec: Stage 0 — strip processor to scaffolding`).
+- Revert commit: `c03dac7` (reset all Phase 9 changes back to merge-base
   shape from `676d53f`).
-- `:buffer-codec-test:jvmTest` is green at HEAD (verified).
-- mavenLocal stale jar still blocks downstream mqtt repo — republish
-  is post-rewrite, not now.
+- Stage 0 (`4fbe05a`) reduced `:buffer-codec-processor` to KSP scaffolding
+  — runtime types + annotations remain, no emitter source. `:buffer-codec-test:jvmTest`
+  reports `NO-SOURCE` until Stage A puts a fixture back.
+- `d61b206` restored the eight buffer-flow source files + three test files
+  that the `c03dac7` revert had collateral-deleted. These are the transport
+  abstractions (`Connection`, `Sender`, `Receiver`, `StreamMux`, `ByteStream`,
+  `ReadResult`, `BytesWritten`, `ConnectionByteStream` adapter, `Map` adapters)
+  that the upcoming `Codec<T>.asConnection` bridge plugs into. `:buffer-flow:check`
+  is green.
+- mavenLocal stale jar still blocks downstream mqtt repo — republish is
+  post-rewrite, not now.
+
+**No emitter code, no Stage A, until decisions 9 + 10 are locked, all ten
+annotation slices below pass hand-walked validation, and the Stage-A-gate
+integration test (final section) is sketched and approved.**
 
 ## Locked decisions
 
@@ -495,6 +508,365 @@ No `<*>`, no casts, fully exhaustive at every level.
     forwarders that don't need to dispatch on payload subtype. Loses
     sealed exhaustiveness on the payload (Payload itself is not sealed),
     which is the right tradeoff for that use case.
+
+### 9. `asConnection` streaming bridge — codec to `Connection<T>`
+
+Locked 2026-04-30. Bridges a generated `Codec<T>` to the buffer-flow
+`Connection<T>` interface so protocol layers stop hand-rolling
+`while (stream.available() >= …) { peek; read; decode; emit }` loops.
+
+#### 9.1 Surface
+
+```kotlin
+// buffer-codec → depends on :buffer-flow (api), :buffer (StreamProcessor, BufferPool)
+
+/**
+ * Wraps a [ByteStream] transport in a typed [Connection] driven by this codec.
+ *
+ * `send` encodes via [Encoder.encode] / [Encoder.wireSize] into a pool-backed
+ * buffer and writes the bytes to [transport]. `receive` reads bytes from
+ * [transport] into a private [StreamProcessor], gates on
+ * [FrameDetector.peekFrameSize], and emits decoded values.
+ *
+ * Single subscriber semantics: one collector at a time, no internal
+ * channel, natural backpressure. Concurrency contract matches [Connection]
+ * (not thread-safe; external sync required for parallel send + collect).
+ *
+ * Lifecycle: [Connection.close] closes [transport] and releases any
+ * retained pool buffers. Cancelling the collecting coroutine cancels the
+ * in-flight `transport.read()` and releases the [StreamProcessor].
+ */
+fun <T> Codec<T>.asConnection(
+    transport: ByteStream,
+    pool: BufferPool,
+    decodeContext: DecodeContext = DecodeContext.Empty,
+    encodeContext: EncodeContext = EncodeContext.Empty,
+    id: Long = 0L,
+    streamByteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
+    readTimeout: Duration = 15.seconds,
+    writeTimeout: Duration = 15.seconds,
+): Connection<T>
+
+/** Send-only specialization for unidirectional outbound streams. */
+fun <T> Encoder<T>.asSender(
+    transport: ByteStream,
+    pool: BufferPool,
+    encodeContext: EncodeContext = EncodeContext.Empty,
+    writeTimeout: Duration = 15.seconds,
+): Sender<T>
+
+/**
+ * Receive-only specialization. Requires both decode and frame detection;
+ * a `Codec<T>` satisfies both via inheritance, but a custom decoder paired
+ * with a separately-held framer also fits.
+ */
+fun <T, FD> FD.asReceiver(
+    transport: ByteStream,
+    pool: BufferPool,
+    decodeContext: DecodeContext = DecodeContext.Empty,
+    streamByteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
+    readTimeout: Duration = 15.seconds,
+): Receiver<T> where FD : Decoder<T>, FD : FrameDetector
+```
+
+#### 9.2 Send semantics
+
+1. Compute `wireSize(value, encodeContext)`.
+2. **`Exact(n)` path:** `pool.withBuffer(minSize = n) { buf -> encode(buf, value, encodeContext); buf.flip(); transport.write(buf, writeTimeout) }`. One buffer, one write, zero copies past the encoded bytes; pool reclaim is automatic via `withBuffer`.
+3. **`BackPatch` path:** acquire a pool buffer; wrap in a `GrowableWriteBuffer` that requests further buffers from `pool` on grow events (each grown chunk is tracked for `writeGathered`); after `encode` returns, gather-write the chunk list via `transport.writeGathered(chunks, writeTimeout)`; release every chunk in `finally`.
+4. `EncodeException` propagates to the `send` caller. Transport stays open so the caller can retry or close at their discretion.
+5. `send` is suspending; serialization across concurrent invocations is the caller's responsibility per the `Connection<T>` thread-safety contract.
+
+#### 9.3 Receive semantics
+
+`receive()` returns a **cold** `Flow<T>` built with `flow { … }`. On each collector the bridge:
+
+1. Lazily creates a private `StreamProcessor` configured with `pool` and `streamByteOrder`. The processor lives only for the duration of the collection (released in `finally`).
+2. Loops:
+   - Call `peekFrameSize(stream, baseOffset = 0)`.
+     - `Complete(n)` → `stream.readBufferScoped(n) { decode(this, decodeContext) }` → `emit(value)`.
+     - `NeedsMoreData` → `transport.read(readTimeout)`:
+       - `ReadResult.Data(chunk)` → `stream.append(chunk)` → loop.
+       - `ReadResult.End` → break loop and complete the flow normally.
+       - `ReadResult.Reset` → throw `TransportResetException` (defined in `:buffer-flow`; subclass of `IllegalStateException`); flow terminates as failed.
+     - `NoFraming` → throw `IllegalStateException("Codec ${this::class.simpleName} returned NoFraming at the framing boundary; override peekFrameSize on bridged codecs.")`. Surfaces misconfiguration loudly at first emit instead of hanging the loop.
+3. Backpressure is natural: the next `transport.read()` doesn't fire until the previous `emit` has been consumed. No internal channel.
+4. `DecodeException` propagates as a terminal flow failure. The stream state after a decode failure is treated as corrupt; callers should `close()` the connection rather than re-collect.
+5. Single-subscriber: the cold flow does not multiplex. Two parallel collectors race the transport and produce undefined behaviour — this matches the `Connection<T>` thread-safety contract.
+
+#### 9.4 Lifecycle
+
+- `close()` closes `transport`, releases any retained pool buffers held by the send-side, and is idempotent.
+- Cancelling the collecting coroutine cancels the in-flight `transport.read()` (suspending — propagates `CancellationException`), releases the `StreamProcessor` in `finally`, and leaves `transport` open for reuse via `send()` or a fresh collect.
+- `Connection.id` is supplied by the caller (defaults to `0L` for single-stream transports), passed through unchanged. For `StreamMux`-backed bridges the `StreamMux` implementation owns id assignment and threads the value down.
+
+#### 9.5 No internal coroutine scope
+
+The bridge does not take a `CoroutineScope` parameter. The receive flow runs entirely inside the collector's coroutine; the send path is synchronous-suspend inside `send()`. There is nothing for the bridge to launch and therefore no scope leak risk. The `ConnectionByteStream` adapter (which *does* take a scope because it has to bridge push→pull semantics across the `ByteStream` boundary) is a separate concern in the protocol-layering direction.
+
+#### 9.6 Pool ownership
+
+The bridge **borrows** `pool` — never closes it, never clears it. Callers own pool lifecycle via `withPool { … }` or equivalent. Acquired buffers are always released in a matching `finally`. If a `BackPatch` encode throws mid-stream, every chunk acquired up to that point is released before the exception propagates.
+
+#### 9.7 Where it lives
+
+Implementation lands in `buffer-codec/src/commonMain/kotlin/com/ditchoom/buffer/codec/AsConnection.kt`. `:buffer-codec` adds an `api` dependency on `:buffer-flow` (it already depends on `:buffer`). No platform-specific code.
+
+### 10. Documentation generation contract — KDoc + ASCII wire diagrams
+
+Locked 2026-04-30. Each generated codec object carries enough KDoc that a
+reader skimming generated sources can match what they see against the
+source spec without paging back to the model.
+
+#### 10.1 Per-codec KDoc shape
+
+Every generated `object FooCodec : Codec<Foo>` (and every per-payload
+`object FooCodec.PayloadDecoder<…>` / `Partial`) gets exactly this KDoc
+block, in this order:
+
+1. **One-line summary, mechanical:** `Generated codec for [Foo] — wire-format details below.` Always this template; never paraphrased from the message's KDoc. Paraphrasing decays as the spec evolves; mechanical text doesn't.
+2. **Type-link references:** `@see Foo` plus one `@see` per nested codec invoked by `decode` (`@see HeaderCodec`, `@see [PayloadDecoder]`, etc.). Cross-module references use FQN; same-module use simple name.
+3. **ASCII wire diagram** (see 10.2; emitted only when 10.3's trigger fires).
+4. **Source documentation block:** if the message class itself carries KDoc, it is reproduced *verbatim* under the heading `Source documentation:`. Never re-summarized, never elided, never reflowed. If the message has no KDoc, this block is omitted.
+
+Per-method KDoc (encode / decode / wireSize / peekFrameSize) is one line per method describing the role plus an `@throws DecodeException` / `@throws EncodeException` block where applicable. No prose elaboration; the method bodies are short enough that names + the wire diagram carry the rest.
+
+#### 10.2 Diagram rendering rules
+
+Diagrams use the RFC-793 grid style — a top scale of bit positions with a vertical bar at each byte boundary, then one row per field (or one row per word for multi-byte fields).
+
+| Field shape | Rendering |
+|---|---|
+| Fixed-width scalar within a byte (≤ 8 bits) | bit-level cells in the byte's row, labeled with the field name |
+| Fixed-width multi-byte scalar | full-width row(s) labeled `name (Nb LE/BE)` where `Nb` is byte count |
+| `@WireBytes(N)` custom-width scalar | full-width row labeled with the explicit byte count and endianness |
+| Variable-length field (`@LengthPrefixed`, `@LengthFrom`, `@RemainingBytes`, terminal slice) | single full-width row labeled `<len> bytes — name` with the length-source hint in parens (e.g., `(prefix=Short BE)`, `(remaining)`, `(from chunkSize)`) |
+| Conditional field (`@WhenTrue`) | row prefixed with `[when expr]` so the gate is inline; absent fields not drawn |
+| Sealed dispatch (`@PacketType`) | the discriminator byte/word as one row with all known wire values listed in a sub-table; per-variant diagram lives on each variant's codec, not the dispatcher's |
+| Bit-packed value class (`@DispatchOn`) | the discriminator byte rendered at the bit level with sub-property labels (e.g., `packetType (4)` `flags (4)`) |
+
+Diagrams are emitted as fenced KDoc blocks marked with the language tag `text` (so Dokka renders them as preformatted code, not Markdown).
+
+Anchor example (RIFF chunk header — slice 1 below uses this):
+
+```
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++---------------+---------------+---------------+---------------+
+|     'R'       |     'I'       |     'F'       |     'F'       |  fourCC (4b ASCII)
++---------------+---------------+---------------+---------------+
+|                          chunkSize (4b LE)                    |
++---------------------------------------------------------------+
+| <chunkSize> bytes — body (from chunkSize)                     |
++---------------------------------------------------------------+
+```
+
+#### 10.3 When a diagram is emitted
+
+The processor emits a diagram on a generated codec **only if both**:
+
+1. The annotated message has **more than 2 fields**, AND
+2. **At least one field is non-trivial** — meaning any of:
+   - variable-length (`@LengthPrefixed`, `@LengthFrom`, `@RemainingBytes`, terminal Payload),
+   - conditional (`@WhenTrue`),
+   - dispatched (`@PacketType` discriminator on a sealed parent),
+   - bit-packed (value class with `@DispatchValue` extracting bits),
+   - custom-width (`@WireBytes`),
+   - mixed-endian (`@WireOrder` overriding the message default on at least one field).
+
+Single-scalar messages (Heartbeat) and trivial fixed-layout messages
+(two `Long`s, three `UByte`s) do not get a diagram — the field list is
+already self-documenting and a diagram would be visual noise. Sealed
+parents always get a diagram of the discriminator alone, even if they
+themselves have ≤ 2 fields, because the dispatch is the reviewability
+lever.
+
+#### 10.4 No paraphrased KDoc
+
+The processor never invents prose summarizing message intent. The only
+generated prose is:
+
+- the mechanical one-liner from 10.1.1,
+- mechanical method-role lines,
+- the verbatim source-doc block from 10.1.4.
+
+Anything richer (rationale, history, references to spec sections) is
+the model author's responsibility and is propagated unchanged.
+
+#### 10.5 No synthetic value-class wrappers around primitives
+
+The processor never generates a wrapper value class around a primitive
+field type to "hold" wire metadata. If a message field is
+`val packetId: UShort`, the generated codec reads `buffer.readUShort()`
+and writes it directly; no `PacketIdCodec` indirection, no `PacketId`
+inline class. Wire metadata (endianness, custom width) lives on
+annotations, not on synthetic types.
+
+The only types the processor introduces are:
+
+- the codec `object` itself (`FooCodec`),
+- payload `Partial` data classes (Section 8),
+- payload decoder/encoder SAM `fun interface`s (Section 8).
+
+User-declared value classes (e.g., `MqttFixedHeader`) are read and
+written through their `@JvmInline` backing property — no wrapping or
+re-boxing.
+
+## Annotation validation slices
+
+Each subsection below exercises one annotation against a real wire-format
+field, sketches the generated `encode` / `decode` / `wireSize` /
+`peekFrameSize` output by hand (with the wire diagram per Section 10),
+audits zero-copy / batching, and records reviewability + streaming
+findings. Order is gating: a slice is locked only after the prior one
+has been signed off in this file.
+
+> **Slices 2–10 + integration test are scheduled** but unfilled at this
+> commit. They will be added in subsequent commits, one slice per
+> sitting, in the order listed under "Validation slice schedule" below.
+
+### Slice 1 — `@ProtocolMessage` on the RIFF chunk header
+
+**Source vector.** RIFF (Resource Interchange File Format), used by WAV,
+AVI, WebP, and many others. A RIFF chunk is the primitive structural
+unit: a 4-byte ASCII FourCC tag, a 4-byte little-endian unsigned size,
+then `size` bytes of body, then optional 1-byte pad to keep the next
+chunk 2-byte aligned. For Slice 1 we exercise only the *header* — the
+body is the subject of slices 4 (`@LengthFrom`) and 5 (`@RemainingBytes`).
+
+```kotlin
+/**
+ * RIFF chunk header — 4-byte ASCII tag plus 4-byte little-endian size.
+ * The body of [chunkSize] bytes follows on the wire; see [RiffChunk] for
+ * the framed view.
+ */
+@ProtocolMessage(wireOrder = Endianness.Little)
+data class RiffChunkHeader(
+    val fourCC: UInt,    // 4 bytes; ASCII packed BE in the spec, but
+                         // we expose it as a numeric tag for matching
+    val chunkSize: UInt, // 4 bytes LE — payload byte count, excluding pad
+)
+```
+
+Header-only is exactly 8 bytes, fixed layout, two fields → falls *below*
+the Section 10.3 diagram trigger (≤ 2 fields, no non-trivial). No
+diagram emitted. The codec object KDoc carries only the mechanical
+one-liner + `@see RiffChunkHeader` + the verbatim KDoc block.
+
+**Sketched generated output.**
+
+```kotlin
+/**
+ * Generated codec for [RiffChunkHeader] — wire-format details below.
+ *
+ * @see RiffChunkHeader
+ *
+ * Source documentation:
+ *   RIFF chunk header — 4-byte ASCII tag plus 4-byte little-endian size.
+ *   The body of [chunkSize] bytes follows on the wire; see [RiffChunk] for
+ *   the framed view.
+ */
+object RiffChunkHeaderCodec : Codec<RiffChunkHeader> {
+
+    /** Reads 8 bytes — fourCC then little-endian chunkSize. */
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): RiffChunkHeader {
+        val fourCC    = buffer.readUInt()                   // big-endian tag bytes
+        val chunkSize = java.lang.Integer.reverseBytes(buffer.readInt()).toUInt()
+        return RiffChunkHeader(fourCC, chunkSize)
+    }
+
+    /** Writes 8 bytes — fourCC then little-endian chunkSize. */
+    override fun encode(buffer: WriteBuffer, value: RiffChunkHeader, context: EncodeContext) {
+        buffer.writeUInt(value.fourCC)
+        buffer.writeInt(java.lang.Integer.reverseBytes(value.chunkSize.toInt()))
+    }
+
+    /** Always 8 bytes. */
+    override fun wireSize(value: RiffChunkHeader, context: EncodeContext): WireSize =
+        WireSize.Exact(8)
+
+    /** Always 8 bytes — peek succeeds the moment 8 bytes are buffered. */
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult =
+        if (stream.available() - baseOffset >= 8) PeekResult.Complete(8)
+        else PeekResult.NeedsMoreData
+}
+```
+
+**Audit — zero-copy.** Decode pulls two scalars from the buffer; nothing
+is allocated except the `RiffChunkHeader` instance itself. Encode writes
+two scalars; no temporary buffer. `wireSize` returns a value-class
+`WireSize.Exact` — no allocation on the JVM after escape analysis.
+`peekFrameSize` is a single comparison — no allocation. Zero `ByteArray`,
+zero pool acquire on the codec hot path. ✓
+
+**Audit — batching.** No bulk operation applicable for a 4+4 split with
+mixed effective endianness. The two scalar writes hit the underlying
+buffer's primitive write path; on a DirectJvmBuffer that's two `putInt`
+calls with no per-call object allocation. The little-endian swap on
+`chunkSize` is `Integer.reverseBytes` (one CPU instruction on x86 via
+`bswap`). No batching opportunity ruled out: tried "encode as one Long"
+— that would force a manual 4-byte BE / 4-byte LE assembly that's both
+less readable and not measurably faster on either DirectJvmBuffer or
+ByteArrayBuffer. **Less-clever alternative ruled out on audit grounds.** ✓
+
+**Audit — reviewability.**
+
+- Self-documenting names map directly to spec terminology: `fourCC`, `chunkSize` are the literal RIFF spec terms (RIFF 1.0, "Chunk Header" section).
+- The mechanical 1-liner and `@see` link tell the reader where to look. The verbatim KDoc block carries the model author's reference to `RiffChunk`.
+- No `// Wire:` comment is needed — `readUInt()` + `reverseBytes(readInt()).toUInt()` is unambiguously "BE u32 then LE u32"; adding a comment would just restate the call.
+- No `// Batched:` comment is needed — there is no batched optimization here.
+- A reader holding the RIFF spec next to this generated file can validate the wire layout in one pass without scrolling. ✓
+
+**Audit — streaming.**
+
+- `peekFrameSize` returns `Complete(8)` exactly when 8 bytes are buffered past the base offset. With 7 bytes buffered it returns `NeedsMoreData`. Verified mentally against the bridge loop in 9.3: `Complete(8)` → `readBufferScoped(8) { decode(this, ctx) }` → emit. ✓
+- Encode under `WireSize.Exact(8)`: bridge acquires a ≥ 8-byte pool buffer, encode writes to it, transport.write fires. No `ByteArray` materialization. Verified against 9.2 step 2. ✓
+- Encode under `WireSize.BackPatch` is unreachable here (codec returns `Exact`). Confirmed the `Exact` path is exercised; the BackPatch path is exercised in slice 3.
+- Terminal-field slice-bounding is not applicable to this slice (no terminal variable field). Will be exercised in slices 4 and 5.
+
+**Findings.** `@ProtocolMessage` on a fixed-layout, ≤ 2-field, mixed-endian
+header generates clean code that is byte-correct, zero-allocating, fully
+streaming-compatible, and reviewable against the RIFF spec without
+augmentation. The diagram-trigger threshold (Section 10.3) correctly
+omits a diagram here — the field list is shorter than any diagram would
+be. The little-endian override per field (via `wireOrder = Little` on
+the message and BE-natural `fourCC` read as a tag) is handled by
+endianness mechanics, not by the annotation under test; that interaction
+is the explicit subject of slice 2.
+
+**Slice status:** validated. Move on to slice 2.
+
+### Slices 2–10 — schedule
+
+| # | Annotation                       | Source vector                                    | Status   |
+|---|----------------------------------|--------------------------------------------------|----------|
+| 1 | `@ProtocolMessage`               | RIFF chunk header                                | ✓ done   |
+| 2 | `@WireOrder` + `@WireBytes`      | DNS header (BE) + BLE-ATT 3-byte LE length       | pending  |
+| 3 | `@LengthPrefixed`                | WebSocket close-frame reason or MQTT v5 utf8     | pending  |
+| 4 | `@LengthFrom`                    | RIFF chunk body via `@LengthFrom("chunkSize")`   | pending  |
+| 5 | `@RemainingBytes`                | WebSocket text-frame trailing payload            | pending  |
+| 6 | `@WhenTrue`                      | MQTT v3 CONNECT will/username/password gates     | pending  |
+| 7 | `@PacketType`                    | Sealed dispatch (small sealed parent)            | pending  |
+| 8 | `@DispatchOn` + `@DispatchValue` | MQTT v5 fixed header value class                 | pending  |
+| 9 | `@UseCodec`                      | MQTT v5 PUBLISH typed payload via JpegImageCodec | pending  |
+|10 | `Payload` SAM                    | Full MQTT v5 PUBLISH end-to-end                  | pending  |
+
+Each pending row will be filled in the same shape as Slice 1 — source
+vector, sketched generated output, four-axis audit (zero-copy /
+batching / reviewability / streaming), findings — and locked one at a
+time before any emitter code is written.
+
+## Stage-A gate — `Connection<MqttControlPacket<…>>` integration test
+
+After all ten slices are validated, the final gate before any emitter
+code is a real `Connection<T>` round-trip. Sketch lives here once
+slice 10 is locked. Outline (to be expanded):
+
+- Paired in-memory `ByteStream` (two `Channel<ReadBuffer>` queues, one per direction).
+- `Codec<MqttControlPacket<MyWill, MyAuth, MyPub>>.asConnection(transport, pool, …)` → `Connection<MqttControlPacket<MyWill, MyAuth, MyPub>>`.
+- Send a typed-payload `Publish<JpegFrame>` through one side; collect on the other.
+- Inject a synthetic chunk-splitting wrapper around the inbound `ByteStream` that returns the encoded bytes in arbitrary 1- to 17-byte chunks so `peekFrameSize` is forced through the `NeedsMoreData → Complete` progression at every byte boundary.
+- Assert: byte-exact round-trip; `DecodeContext` propagates from caller to `JpegImageCodec`; the allocation tracker (Stage C dependency) reports zero `ByteArray` allocations on the hot path; closing one side completes the other side's flow normally.
 
 ## Decisions still pending (everything else)
 
