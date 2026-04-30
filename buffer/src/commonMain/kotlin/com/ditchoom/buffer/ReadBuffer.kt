@@ -132,6 +132,9 @@ interface ReadBuffer : PositionBuffer {
      */
     fun readUnsignedByte(): UByte = readByte().toUByte()
 
+    /** Short-form alias for [readUnsignedByte]. Symmetric with [WriteBuffer.writeUByte]. */
+    fun readUByte(): UByte = readUnsignedByte()
+
     /**
      * Gets a byte as unsigned at the specified index without changing position.
      */
@@ -172,6 +175,9 @@ interface ReadBuffer : PositionBuffer {
     /** Reads a 16-bit unsigned integer and advances position by 2. */
     fun readUnsignedShort(): UShort = readShort().toUShort()
 
+    /** Short-form alias for [readUnsignedShort]. Symmetric with [WriteBuffer.writeUShort]. */
+    fun readUShort(): UShort = readUnsignedShort()
+
     /** Gets a 16-bit unsigned integer at the specified index without changing position. */
     fun getUnsignedShort(index: Int): UShort = getShort(index).toUShort()
 
@@ -203,6 +209,9 @@ interface ReadBuffer : PositionBuffer {
 
     /** Reads a 32-bit unsigned integer and advances position by 4. */
     fun readUnsignedInt(): UInt = readInt().toUInt()
+
+    /** Short-form alias for [readUnsignedInt]. Symmetric with [WriteBuffer.writeUInt]. */
+    fun readUInt(): UInt = readUnsignedInt()
 
     /** Gets a 32-bit unsigned integer at the specified index without changing position. */
     fun getUnsignedInt(index: Int): UInt = getInt(index).toUInt()
@@ -241,6 +250,9 @@ interface ReadBuffer : PositionBuffer {
 
     /** Reads a 64-bit unsigned integer and advances position by 8. */
     fun readUnsignedLong(): ULong = readLong().toULong()
+
+    /** Short-form alias for [readUnsignedLong]. Symmetric with [WriteBuffer.writeULong]. */
+    fun readULong(): ULong = readUnsignedLong()
 
     /** Gets a 64-bit unsigned integer at the specified index without changing position. */
     fun getUnsignedLong(index: Int): ULong = getLong(index).toULong()
