@@ -2923,21 +2923,39 @@ object PropertyListCodec : Codec<List<Property>> {
 }
 
 /**
- * Re-introduced sealed parent from Section 8.2 with the Publish slot
- * filled in. PingReq/PingResp/Disconnect from slice 8 retained as
- * Nothing-bound variants (covariant).
+ * Full §8.2 sealed parent — three Payload slots: Will (CONNECT will-
+ * message body), Auth (CONNECT password / AUTH auth-data), Pub (PUBLISH
+ * payload). PingReq/PingResp/Disconnect are body-less and bind every
+ * slot to Nothing; Publish binds Pub only; Connect binds Will + Auth
+ * only.
  */
 @DispatchOn(MqttFixedHeader::class)
 @ProtocolMessage(wireOrder = Endianness.Big)
-sealed interface MqttControlPacket<out Pub : Payload> {
+sealed interface MqttControlPacket<out Will : Payload, out Auth : Payload, out Pub : Payload> {
     @ProtocolMessage @PacketType(value = 12, wire = 0xC0)
-    data object PingReq : MqttControlPacket<Nothing>
+    data object PingReq : MqttControlPacket<Nothing, Nothing, Nothing>
 
     @ProtocolMessage @PacketType(value = 13, wire = 0xD0)
-    data object PingResp : MqttControlPacket<Nothing>
+    data object PingResp : MqttControlPacket<Nothing, Nothing, Nothing>
 
     @ProtocolMessage @PacketType(value = 14, wire = 0xE0)
-    data object Disconnect : MqttControlPacket<Nothing>
+    data object Disconnect : MqttControlPacket<Nothing, Nothing, Nothing>
+
+    /**
+     * MQTT v5 §3.1 CONNECT (skeleton — full CONNECT also carries
+     * protocolName, level, keepAlive, properties, clientId).
+     * willPayload occupies the Will slot; password occupies the Auth
+     * slot. Both are conditional on connectFlags bits per slice 6.
+     */
+    @ProtocolMessage @PacketType(value = 1, wire = 0x10)
+    data class Connect<out Will : Payload, out Auth : Payload>(
+        val header: MqttFixedHeader,
+        val flags: ConnectFlags,
+        @LengthPrefixed val clientId: String,
+        @WhenTrue("flags.willFlag")     val willPayload: Will?,                    // Will slot — conditional
+        @WhenTrue("flags.userNameFlag") val userName:    String?,
+        @WhenTrue("flags.passwordFlag") val password:    Auth?,                    // Auth slot — conditional
+    ) : MqttControlPacket<Will, Auth, Nothing>
 
     /**
      * MQTT v5 PUBLISH — §3.3. Header carries QoS in flag bits;
@@ -2950,17 +2968,23 @@ sealed interface MqttControlPacket<out Pub : Payload> {
         @LengthPrefixed val topic: String,
         @WhenTrue("header.qos > 0") val packetId: PacketId? = null,
         @UseCodec(PropertyListCodec::class) val properties: List<Property>,
-        val payload: Pub,                                                          // Payload slot — terminal
-    ) : MqttControlPacket<Pub>
+        val payload: Pub,                                                          // Pub slot — terminal
+    ) : MqttControlPacket<Nothing, Nothing, Pub>
 }
 
-// Consumer-side payload shape (per Section 8.8):
+// Consumer-side payload shapes (per Section 8.8):
+sealed interface MyWill : Payload
+data class HeartbeatWill(val deviceId: String, val timestamp: Long) : MyWill
+
+sealed interface MyAuth : Payload
+data class OAuthToken(val token: String) : MyAuth
+
 sealed interface MyPub : Payload
 data class JpegFrame(val cameraId: String, val image: ImageBitmap) : MyPub
 data class TempReading(val sensorId: String, val celsius: Double) : MyPub
 data object NullPub : MyPub                                                        // empty-body variant
 
-typealias MyMqttPacket = MqttControlPacket<MyPub>
+typealias MyMqttPacket = MqttControlPacket<MyWill, MyAuth, MyPub>
 ```
 
 **Sketched generated output (Publish variant + payload SAM scaffold).**
@@ -3099,17 +3123,22 @@ The sealed parent's aggregator is updated to thread the Payload SAMs:
 
 ```kotlin
 /**
- * Sealed parent decode aggregator. Each Payload-bearing variant has a
- * SAM parameter; non-Payload variants are dispatched inline. Throwing
- * defaults from Section 8.5 are typed `<Nothing>` so they slot into
- * any covariant Pub : Payload position.
+ * Sealed parent decode aggregator (§8.5). Threads one SAM parameter
+ * per (variant × Payload-typed field). Non-Payload variants
+ * (PingReq/PingResp/Disconnect) are dispatched inline. Throwing
+ * defaults are typed `<Nothing>` so they slot into any covariant
+ * `Will/Auth/Pub : Payload` position.
  */
-suspend fun <Pub : Payload> MqttControlPacketCodec.decode(
+suspend fun <Will : Payload, Auth : Payload, Pub : Payload> MqttControlPacketCodec.decode(
     buffer: ReadBuffer,
     context: DecodeContext,
+    connectWillPayloadDecoder: MqttControlPacket.ConnectCodec.WillPayloadDecoder<Will> =
+        throwingWillPayloadDecoder("CONNECT will not expected"),
+    connectPasswordDecoder: MqttControlPacket.ConnectCodec.PasswordDecoder<Will, Auth> =
+        throwingPasswordDecoder("CONNECT password not expected"),
     publishPayloadDecoder: MqttControlPacket.PublishCodec.PayloadDecoder<Pub> =
-        throwingPayloadDecoder("PUBLISH not expected"),
-): MqttControlPacket<Pub> {
+        throwingPublishPayloadDecoder("PUBLISH not expected"),
+): MqttControlPacket<Will, Auth, Pub> {
     val header = MqttFixedHeaderCodec.decode(buffer, context)
     val remainingLen = RemainingLengthCodec.decode(buffer, context)
     val outerLimit = buffer.limit()
@@ -3118,11 +3147,13 @@ suspend fun <Pub : Payload> MqttControlPacketCodec.decode(
         12 -> MqttControlPacket.PingReq
         13 -> MqttControlPacket.PingResp
         14 -> MqttControlPacket.Disconnect
+        1  -> MqttControlPacket.ConnectCodec.decode(buffer, context, header,
+                  connectWillPayloadDecoder, connectPasswordDecoder)
         3  -> MqttControlPacket.PublishCodec.decode(buffer, context, header, publishPayloadDecoder)
         else -> throw DecodeException(
             fieldPath  = "MqttControlPacket.<header.packetType>",
             bufferPosition = buffer.position() - 1,
-            expected   = "one of 3, 12, 13, 14",
+            expected   = "one of 1, 3, 12, 13, 14",
             actual     = header.packetType.toString(),
         )
     }
@@ -3131,24 +3162,61 @@ suspend fun <Pub : Payload> MqttControlPacketCodec.decode(
     return packet
 }
 
-/** Throwing-default factory — typed Nothing so it slots into any P : Payload slot. */
-internal fun throwingPayloadDecoder(reason: String):
+/**
+ * Throwing-default factories — one per (variant × Payload field) pair.
+ * `Will` and `Auth` SAMs typed Nothing, `Password` SAM typed
+ * `PasswordDecoder<Nothing, Nothing>` because its Partial carries the
+ * earlier Will value (§8.11 — multi-Payload Partials are generic in
+ * earlier slot params). The processor emits these with explicit
+ * field-path messages.
+ */
+internal fun throwingWillPayloadDecoder(reason: String):
+    MqttControlPacket.ConnectCodec.WillPayloadDecoder<Nothing> =
+    MqttControlPacket.ConnectCodec.WillPayloadDecoder { _, _ ->
+        throw DecodeException(
+            fieldPath = "MqttControlPacket.Connect.willPayload",
+            bufferPosition = 0,
+            expected = "consumer-supplied WillPayloadDecoder",
+            actual = reason,
+        )
+    }
+
+internal fun throwingPasswordDecoder(reason: String):
+    MqttControlPacket.ConnectCodec.PasswordDecoder<Nothing, Nothing> =
+    MqttControlPacket.ConnectCodec.PasswordDecoder { _, _ ->
+        throw DecodeException(
+            fieldPath = "MqttControlPacket.Connect.password",
+            bufferPosition = 0,
+            expected = "consumer-supplied PasswordDecoder",
+            actual = reason,
+        )
+    }
+
+internal fun throwingPublishPayloadDecoder(reason: String):
     MqttControlPacket.PublishCodec.PayloadDecoder<Nothing> =
     MqttControlPacket.PublishCodec.PayloadDecoder { _, _ ->
         throw DecodeException(
-            fieldPath  = "MqttControlPacket.Publish.payload",
+            fieldPath = "MqttControlPacket.Publish.payload",
             bufferPosition = 0,
-            expected   = "consumer-supplied PayloadDecoder",
-            actual     = reason,
+            expected = "consumer-supplied PayloadDecoder",
+            actual = reason,
         )
     }
 ```
 
-Worked consumer call (mirrors §8.8):
+Worked consumer call (mirrors §8.8 — three Payload slots, three SAMs):
 
 ```kotlin
 val packet: MyMqttPacket = MqttControlPacketCodec.decode(buffer, ctx,
-    publishPayloadDecoder = { slice, ctx ->                                        // Partial receiver in scope
+    connectWillPayloadDecoder = { slice, ctx ->                                    // Connect.Partial1 receiver
+        // bare names: header, flags, clientId already decoded
+        HeartbeatWill(deviceId = clientId, timestamp = slice.readLong())
+    },
+    connectPasswordDecoder = { slice, ctx ->                                       // Connect.Partial2<Will> receiver
+        // bare names: header, flags, clientId, willPayload, userName already decoded
+        OAuthToken(slice.readString(slice.remaining(), Charset.UTF8).toString())
+    },
+    publishPayloadDecoder = { slice, ctx ->                                        // Publish.Partial receiver
         when {
             topic.startsWith("images/")     -> JpegFrame(topic.substringAfter('/'),
                                                           JpegImageCodec.decode(slice, ctx))
@@ -3161,7 +3229,17 @@ val packet: MyMqttPacket = MqttControlPacketCodec.decode(buffer, ctx,
         }
     },
 )
+
+when (packet) {
+    is Connect    -> { /* packet typed Connect<MyWill, MyAuth> by smart-cast */ }
+    is Publish    -> { /* packet typed Publish<MyPub> by smart-cast */ }
+    PingReq, PingResp, Disconnect -> Unit
+}
 ```
+
+The consumer never writes a manual cast. Smart-cast through `is` narrows
+each variant to its concrete `<…>` instantiation; `out` variance binds
+`Nothing`-slot variants into any `MyMqttPacket` position.
 
 **Audit — zero-copy.** All field reads use the same patterns validated
 in slices 3, 6, 8. The Payload SAM hands the *same* `ReadBuffer` to
@@ -3270,7 +3348,42 @@ for capturing). ✓
    annotated with an opt-in `@CodecAlias("MqttCodec")` or similar
    (annotation surface deferred to Stage H — for slice 10 we just
    note the convention).
-8. **Reconfirm the transparent value-class codec rule.** `PacketId` in
+8. **Validate the multi-slot sealed parent + per-(variant × Payload-
+   field) SAM aggregator (§8.2 + §8.5).** The full
+   `MqttControlPacket<Will, Auth, Pub>` parent has *three* Payload
+   slots, with `Connect<Will, Auth>` consuming Will + Auth and
+   `Publish<Pub>` consuming Pub. The aggregator's decode signature
+   threads three SAM parameters (one per Payload field across all
+   variants — `connectWillPayloadDecoder`, `connectPasswordDecoder`,
+   `publishPayloadDecoder`), not three per-variant SAMs. This matches
+   §8.5: the aggregator is keyed on (variant, payload-field) pairs,
+   not on variants alone. Body-less variants (PingReq/PingResp/
+   Disconnect) bind every slot to `Nothing` so they slot into any
+   concrete `MqttControlPacket<MyWill, MyAuth, MyPub>` position via
+   `out` variance.
+
+   The Connect variant's two Payload fields (`willPayload`, `password`)
+   each generate their own Partial: `Connect.Partial1` for the
+   willPayload position (carries header/flags/clientId), `Connect.
+   Partial2<Will>` for the password position (carries Partial1 + the
+   typed willPayload + userName). Per §8.11, `Partial2` is *generic*
+   in the earlier slot's type param so the consumer's password
+   decoder lambda can read `willPayload: Will?` as a typed value.
+   The throwing-default factory for `PasswordDecoder` is therefore
+   typed `<Nothing, Nothing>`, slotting into any concrete `<Will,
+   Auth>` instantiation by covariance.
+
+   **Decision recorded against §8.2 / §8.5 / §8.11:** the aggregator's
+   SAM list is `(variant.simpleName + "Codec." + payloadField.name +
+   "Decoder")` — `connectWillPayloadDecoder`, `connectPasswordDecoder`,
+   `publishPayloadDecoder` — and emitted in declaration order across
+   the sealed tree. No SAM is emitted for the Will/Auth slots on
+   variants that don't bind them (PingReq/PingResp/Disconnect have
+   none). The processor walks the sealed tree once at compile time,
+   collects (variant, payload-field) pairs, and emits one SAM
+   parameter per pair with a throwing default.
+
+9. **Reconfirm the transparent value-class codec rule.** `PacketId` in
    the Publish sketch is `@JvmInline value class PacketId(val raw:
    UShort)` with no `@UseCodec`. The processor does **not** emit a
    `PacketIdCodec`; the generated decode reads `buffer.readUShort()`
@@ -3280,8 +3393,8 @@ for capturing). ✓
    classes without `@UseCodec` are transparent. Generating a codec
    object for them would be a synthetic value-class wrapper
    (forbidden by locked decision 10.5).
-9. **Resolve the `Pub : Payload` covariance edge case for body-less
-   variants.** `MqttControlPacket<Nothing>` ↔ `MqttControlPacket<Pub>`
+10. **Resolve the `Pub : Payload` covariance edge case for body-less
+    variants.** `MqttControlPacket<Nothing>` ↔ `MqttControlPacket<Pub>`
    for any `Pub : Payload` is sound by `out` variance — `data object
    PingReq : MqttControlPacket<Nothing>` slots into a
    `MqttControlPacket<MyPub>` typealias position without a cast. The
