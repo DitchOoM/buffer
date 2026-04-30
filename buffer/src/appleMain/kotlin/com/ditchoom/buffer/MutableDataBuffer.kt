@@ -579,8 +579,9 @@ class MutableDataBufferSlice(
     private val sliceOffset: Int,
     private val sliceLength: Int,
     override val byteOrder: ByteOrder = parent.byteOrder,
-) : ReadBuffer,
+) : PlatformBuffer,
     NativeMemoryAccess {
+    override val capacity: Int get() = sliceLength
     private var position: Int = 0
     private var limit: Int = sliceLength
 
@@ -703,4 +704,123 @@ class MutableDataBufferSlice(
             ((result as CPointer<ByteVar>).toLong() - (bytePointer + position).toLong()).toInt()
         }
     }
+
+    // region Write operations — slice writes propagate to parent's NSMutableData
+    // because bytePointer aliases parent.bytePointer + sliceOffset.
+
+    override fun resetForWrite() {
+        position = 0
+        limit = sliceLength
+    }
+
+    override fun writeByte(byte: Byte): WriteBuffer {
+        bytePointer[position++] = byte
+        return this
+    }
+
+    override fun set(
+        index: Int,
+        byte: Byte,
+    ): WriteBuffer {
+        bytePointer[index] = byte
+        return this
+    }
+
+    override fun set(
+        index: Int,
+        short: Short,
+    ): WriteBuffer {
+        val value = if (byteOrder == ByteOrder.BIG_ENDIAN) short.reverseBytes() else short
+        (bytePointer + index)!!.reinterpret<ShortVar>()[0] = value
+        return this
+    }
+
+    override fun set(
+        index: Int,
+        int: Int,
+    ): WriteBuffer {
+        val value = if (byteOrder == ByteOrder.BIG_ENDIAN) int.reverseBytes() else int
+        (bytePointer + index)!!.reinterpret<IntVar>()[0] = value
+        return this
+    }
+
+    override fun set(
+        index: Int,
+        long: Long,
+    ): WriteBuffer {
+        val value = if (byteOrder == ByteOrder.BIG_ENDIAN) long.reverseBytes() else long
+        (bytePointer + index)!!.reinterpret<LongVar>()[0] = value
+        return this
+    }
+
+    override fun writeBytes(
+        bytes: ByteArray,
+        offset: Int,
+        length: Int,
+    ): WriteBuffer {
+        if (length < 1) return this
+        bytes.usePinned { pin ->
+            memcpy((bytePointer + position)!!, pin.addressOf(offset), length.convert())
+        }
+        position += length
+        return this
+    }
+
+    override fun write(buffer: ReadBuffer) {
+        val bytesToCopy = buffer.remaining()
+        if (bytesToCopy == 0) return
+        val srcNative = buffer.nativeMemoryAccess
+        if (srcNative != null) {
+            val srcPtr = srcNative.nativeAddress.toCPointer<ByteVar>()!! + buffer.position()
+            memcpy(bytePointer + position, srcPtr, bytesToCopy.convert())
+        } else {
+            val srcManaged = buffer.managedMemoryAccess
+            if (srcManaged != null) {
+                srcManaged.backingArray.usePinned { pinned ->
+                    memcpy(
+                        bytePointer + position,
+                        pinned.addressOf(srcManaged.arrayOffset + buffer.position()),
+                        bytesToCopy.convert(),
+                    )
+                }
+            } else {
+                writeBytes(buffer.readByteArray(bytesToCopy))
+                return
+            }
+        }
+        position += bytesToCopy
+        buffer.position(buffer.position() + bytesToCopy)
+    }
+
+    override fun writeString(
+        text: CharSequence,
+        charset: Charset,
+    ): WriteBuffer {
+        val string =
+            if (text is String) {
+                @Suppress("CAST_NEVER_SUCCEEDS")
+                text as NSString
+            } else {
+                @Suppress("CAST_NEVER_SUCCEEDS")
+                text.toString() as NSString
+            }
+        val charsetEncoding = charset.toEncoding()
+        val stringData = string.dataUsingEncoding(charsetEncoding)!!
+
+        @Suppress("UNCHECKED_CAST")
+        val stringBytes = stringData.bytes as CPointer<ByteVar>
+        val stringLength = stringData.length.toInt()
+
+        memcpy(bytePointer + position, stringBytes, stringLength.convert())
+        position += stringLength
+        return this
+    }
+
+    fun close() = Unit
+
+    // endregion
+
+    override fun equals(other: Any?): Boolean = bufferEquals(this, other)
+
+    override fun hashCode(): Int = bufferHashCode(this)
 }

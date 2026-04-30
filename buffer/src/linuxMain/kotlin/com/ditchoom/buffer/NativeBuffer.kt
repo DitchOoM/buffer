@@ -585,14 +585,16 @@ class NativeBuffer private constructor(
 }
 
 /**
- * Read-only slice of a NativeBuffer sharing parent's memory.
+ * Slice of a NativeBuffer sharing parent's memory. Writes propagate to
+ * the parent's buffer because [baseAddress] aliases parent.nativeAddress
+ * + sliceOffset.
  */
 private class NativeBufferSlice(
     private val baseAddress: Long,
-    val capacity: Int,
+    override val capacity: Int,
     override val byteOrder: ByteOrder,
     private val parent: NativeBuffer,
-) : ReadBuffer,
+) : PlatformBuffer,
     NativeMemoryAccess {
     private var positionValue: Int = 0
     private var limitValue: Int = capacity
@@ -700,6 +702,130 @@ private class NativeBufferSlice(
         checkOpen()
         return NativeBufferSlice(baseAddress + positionValue, remaining(), byteOrder, parent)
     }
+
+    // === Write operations — slice writes propagate to parent's malloc'd memory
+    // because baseAddress aliases parent.nativeAddress + sliceOffset. ===
+
+    override fun resetForWrite() {
+        positionValue = 0
+        limitValue = capacity
+    }
+
+    override fun writeByte(byte: Byte): WriteBuffer {
+        checkOpen()
+        UnsafeMemory.putByte(baseAddress + positionValue++, byte)
+        return this
+    }
+
+    override fun set(
+        index: Int,
+        byte: Byte,
+    ): WriteBuffer {
+        checkOpen()
+        UnsafeMemory.putByte(baseAddress + index, byte)
+        return this
+    }
+
+    override fun set(
+        index: Int,
+        short: Short,
+    ): WriteBuffer {
+        checkOpen()
+        val value = if (littleEndian == nativeIsLittleEndian) short else short.reverseBytes()
+        UnsafeMemory.putShort(baseAddress + index, value)
+        return this
+    }
+
+    override fun set(
+        index: Int,
+        int: Int,
+    ): WriteBuffer {
+        checkOpen()
+        val value = if (littleEndian == nativeIsLittleEndian) int else int.reverseBytes()
+        UnsafeMemory.putInt(baseAddress + index, value)
+        return this
+    }
+
+    override fun set(
+        index: Int,
+        long: Long,
+    ): WriteBuffer {
+        checkOpen()
+        val value = if (littleEndian == nativeIsLittleEndian) long else long.reverseBytes()
+        UnsafeMemory.putLong(baseAddress + index, value)
+        return this
+    }
+
+    override fun writeBytes(
+        bytes: ByteArray,
+        offset: Int,
+        length: Int,
+    ): WriteBuffer {
+        checkOpen()
+        UnsafeMemory.copyMemoryFromArray(bytes, offset, baseAddress + positionValue, length)
+        positionValue += length
+        return this
+    }
+
+    override fun write(buffer: ReadBuffer) {
+        checkOpen()
+        val size = buffer.remaining()
+        if (size == 0) return
+
+        val srcNative = buffer.nativeMemoryAccess
+        if (srcNative != null) {
+            UnsafeMemory.copyMemory(
+                srcNative.nativeAddress + buffer.position(),
+                baseAddress + positionValue,
+                size.toLong(),
+            )
+            positionValue += size
+            buffer.position(buffer.position() + size)
+            return
+        }
+
+        val srcManaged = buffer.managedMemoryAccess
+        if (srcManaged != null) {
+            UnsafeMemory.copyMemoryFromArray(
+                srcManaged.backingArray,
+                srcManaged.arrayOffset + buffer.position(),
+                baseAddress + positionValue,
+                size,
+            )
+            positionValue += size
+            buffer.position(buffer.position() + size)
+            return
+        }
+
+        writeBytes(buffer.readByteArray(size))
+    }
+
+    override fun writeString(
+        text: CharSequence,
+        charset: Charset,
+    ): WriteBuffer {
+        checkOpen()
+        if (charset != Charset.UTF8) {
+            throw UnsupportedOperationException("NativeBuffer slice only supports UTF-8 charset. Got: $charset")
+        }
+        val str = text.toString()
+        val len = str.length
+        if (len == 0) return this
+        val chars = str.toCharArray()
+        val dstAddr = baseAddress + positionValue
+        val written =
+            chars.usePinned { pinned ->
+                buf_simdutf_convert_utf16le_to_utf8(
+                    pinned.addressOf(0).reinterpret(),
+                    len.convert(),
+                    dstAddr.toCPointer()!!,
+                ).toInt()
+            }
+        positionValue += written
+        return this
+    }
+
+    fun close() = Unit
 
     override fun equals(other: Any?): Boolean = bufferEquals(this, other)
 
