@@ -11,50 +11,56 @@ import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 
 /**
- * Generated codec for [RiffChunk] — wire-format details below.
+ * Generated codec for [WavFmtChunk] — wire-format details below.
  *
  * Hand-written for the Phase 10 slice 4 type-check exercise. KSP will
  * emit structurally identical code once the Stage E emitter handles
  * `@LengthFrom` + `@UseCodec`; this file proves the sketched shape
  * compiles against the real runtime APIs and that the slice-bounding
- * `setLimit` + restore contract round-trips end-to-end.
+ * `setLimit` + restore contract round-trips end-to-end against a
+ * typed body.
  *
- * @see RiffChunk
- * @see RawChunkBodyCodec
+ * @see WavFmtChunk
+ * @see WavFmtBodyCodec
  *
  * ```text
  *  0                   1                   2                   3
  *  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
  * +---------------+---------------+---------------+---------------+
- * |     'R'       |     'I'       |     'F'       |     'F'       |  fourCC (4b ASCII)
+ * |     'f'       |     'm'       |     't'       |     ' '       |  fourCC (4b ASCII)
  * +---------------+---------------+---------------+---------------+
  * |                          chunkSize (4b LE)                    |
  * +---------------------------------------------------------------+
- * | <chunkSize> bytes — body (length resolved via @LengthFrom)    |
+ * | <chunkSize> bytes — body decoded by WavFmtBodyCodec           |
  * +---------------------------------------------------------------+
  * ```
  *
  * Source documentation:
- *   One full RIFF chunk: 4-byte FourCC tag, 4-byte LE size, body of
- *   exactly [chunkSize] bytes, then optionally one pad byte to keep the
- *   next chunk 2-byte aligned (the pad is framed by the *enclosing*
- *   RIFF list, not by the chunk itself, so it is not modeled here).
+ *   One full WAV `fmt ` chunk: the standard RIFF chunk header (4-byte
+ *   FourCC + 4-byte LE size) followed by a [WavFmtBody] of exactly
+ *   [chunkSize] bytes. The PCM-form body is fixed at 16 bytes; the WAV
+ *   spec also defines a 18- or 18+N-byte WAVEFORMATEX form, but for the
+ *   slice-4 vector we model the PCM case so the body type is fully typed.
  */
-object RiffChunkCodec : Codec<RiffChunk> {
+object WavFmtChunkCodec : Codec<WavFmtChunk> {
+    private const val HEADER_BYTES = 8
+
     /**
-     * Reads 8 header bytes, then exactly [RiffChunk.chunkSize] body
-     * bytes via [RawChunkBodyCodec] over a `setLimit`-bounded slice.
+     * Reads 8 header bytes, then exactly [WavFmtChunk.chunkSize] body
+     * bytes via [WavFmtBodyCodec] over a `setLimit`-bounded slice.
      *
      * The bound + restore pattern is the sync analogue of locked
      * decision #5 (sync = `setLimit`, async = `slice().use { }`). It is
      * the uniform contract for every `@UseCodec`-referenced sync codec
      * inside a length-bounded field — the inner codec sees a buffer
-     * whose `remaining()` equals the resolved length.
+     * whose `remaining()` equals the resolved length, and the outer
+     * limit is restored even if the body codec throws so a chunk
+     * embedded inside a RIFF LIST stays composable.
      */
     override fun decode(
         buffer: ReadBuffer,
         context: DecodeContext,
-    ): RiffChunk {
+    ): WavFmtChunk {
         // Wire: FourCC bytes are positional ASCII — read as a 4-byte tag in
         // wire order (high byte first regardless of buffer endianness)
         val b0 = buffer.readUByte().toUInt()
@@ -70,25 +76,27 @@ object RiffChunkCodec : Codec<RiffChunk> {
         val s3 = buffer.readUByte().toUInt()
         val chunkSize = s0 or (s1 shl 8) or (s2 shl 16) or (s3 shl 24)
 
-        // Wire: bound the buffer to exactly chunkSize bytes so RawChunkBodyCodec
+        // Wire: bound the buffer to exactly chunkSize bytes so WavFmtBodyCodec
         // sees remaining() == chunkSize, then restore the outer limit so
-        // composition with an enclosing RIFF LIST is preserved.
-        val resolvedLength = resolveBodyLength(chunkSize, fieldPath = "RiffChunk.body")
+        // composition with an enclosing RIFF LIST is preserved. The bound is
+        // defensive for a fixed-size body, but the contract has to be
+        // uniform across @UseCodec choices.
+        val resolvedLength = resolveBodyLength(chunkSize, fieldPath = "WavFmtChunk.body")
         val outerLimit = buffer.limit()
         buffer.setLimit(buffer.position() + resolvedLength)
         val body =
             try {
-                RawChunkBodyCodec.decode(buffer, context)
+                WavFmtBodyCodec.decode(buffer, context)
             } finally {
                 buffer.setLimit(outerLimit)
             }
-        return RiffChunk(fourCC, chunkSize, body)
+        return WavFmtChunk(fourCC, chunkSize, body)
     }
 
     /** Writes 8 header bytes, then the body bytes — wire size = 8 + body wire size. */
     override fun encode(
         buffer: WriteBuffer,
-        value: RiffChunk,
+        value: WavFmtChunk,
         context: EncodeContext,
     ) {
         // Wire: FourCC bytes are positional ASCII — emit high byte first
@@ -103,7 +111,7 @@ object RiffChunkCodec : Codec<RiffChunk> {
         buffer.writeUByte(((value.chunkSize shr 16) and 0xFFu).toUByte())
         buffer.writeUByte(((value.chunkSize shr 24) and 0xFFu).toUByte())
 
-        RawChunkBodyCodec.encode(buffer, value.body, context)
+        WavFmtBodyCodec.encode(buffer, value.body, context)
     }
 
     /**
@@ -114,11 +122,11 @@ object RiffChunkCodec : Codec<RiffChunk> {
      * `pool.withBuffer` fast path.
      */
     override fun wireSize(
-        value: RiffChunk,
+        value: WavFmtChunk,
         context: EncodeContext,
     ): WireSize {
-        val bodySize = (RawChunkBodyCodec.wireSize(value.body, context) as WireSize.Exact).bytes
-        return WireSize.Exact(8 + bodySize)
+        val bodySize = (WavFmtBodyCodec.wireSize(value.body, context) as WireSize.Exact).bytes
+        return WireSize.Exact(HEADER_BYTES + bodySize)
     }
 
     /**
@@ -136,7 +144,7 @@ object RiffChunkCodec : Codec<RiffChunk> {
         stream: StreamProcessor,
         baseOffset: Int,
     ): PeekResult {
-        if (stream.available() - baseOffset < 8) return PeekResult.NeedsMoreData
+        if (stream.available() - baseOffset < HEADER_BYTES) return PeekResult.NeedsMoreData
         // Wire: 4 LE bytes at offset+4 — manual assembly because StreamProcessor
         // exposes byte-level peek only. Mirrors the LE assembly in decode().
         val b0 = stream.peekByte(baseOffset + 4).toInt() and 0xFF
@@ -153,8 +161,8 @@ object RiffChunkCodec : Codec<RiffChunk> {
     }
 
     /**
-     * Decode-time guard for [RiffChunk.chunkSize] → Int conversion. The
-     * sync decode bound is `position + len`; both are Ints, so a
+     * Decode-time guard for [WavFmtChunk.chunkSize] → Int conversion.
+     * The sync decode bound is `position + len`; both are Ints, so a
      * chunkSize > `Int.MAX_VALUE` cannot be honored. Throws a typed
      * [DecodeException] so callers can distinguish protocol-level
      * overflow from a generic IllegalArgumentException.
@@ -182,14 +190,14 @@ object RiffChunkCodec : Codec<RiffChunk> {
         chunkSize: UInt,
         baseOffset: Int,
     ): Int {
-        if (chunkSize > (Int.MAX_VALUE - 8).toUInt()) {
+        if (chunkSize > (Int.MAX_VALUE - HEADER_BYTES).toUInt()) {
             throw DecodeException(
-                fieldPath = "RiffChunk.chunkSize",
+                fieldPath = "WavFmtChunk.chunkSize",
                 bufferPosition = baseOffset + 4,
                 expected = "8 + chunkSize <= ${Int.MAX_VALUE}",
                 actual = "8 + $chunkSize",
             )
         }
-        return 8 + chunkSize.toInt()
+        return HEADER_BYTES + chunkSize.toInt()
     }
 }
