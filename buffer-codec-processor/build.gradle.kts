@@ -44,6 +44,18 @@ dependencies {
     implementation(project(":buffer-codec"))
     testImplementation(kotlin("test"))
     testImplementation(libs.kctfork.ksp)
+
+    // kctfork 0.12.0-alpha01 transitively requests 2.3.0-RC; force the
+    // embedded test compiler to the same 2.3.0 final the rest of the
+    // project is built with.
+    constraints {
+        testImplementation("org.jetbrains.kotlin:kotlin-compiler-embeddable") {
+            version { strictly("2.3.0") }
+        }
+        testImplementation("org.jetbrains.kotlin:kotlin-annotation-processing-embeddable") {
+            version { strictly("2.3.0") }
+        }
+    }
 }
 
 val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
