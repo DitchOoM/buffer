@@ -81,3 +81,13 @@ ktlint {
         exclude { it.file.path.contains("/generated/") || it.file.path.contains("/build/") }
     }
 }
+
+// JVM tests use JFR allocation tracking (see SimpleHeaderAllocationTest) to
+// enforce Locked Decision row 16: zero `[B` allocations attributable to the
+// codec on JVM. Disabling TLAB makes every allocation flow through
+// `jdk.ObjectAllocationOutsideTLAB`, which is reported per-allocation rather
+// than per-TLAB-rotation — without this, byte[] allocations that fit inside
+// an existing TLAB never trigger an event and the assertion is non-deterministic.
+tasks.named<Test>("jvmTest") {
+    jvmArgs("-XX:-UseTLAB")
+}
