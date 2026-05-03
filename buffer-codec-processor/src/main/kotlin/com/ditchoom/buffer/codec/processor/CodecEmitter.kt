@@ -19,7 +19,7 @@ import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 import com.squareup.kotlinpoet.TypeSpec
 
 /**
- * Stage A + B emitter.
+ * Stage A + B + C emitter.
  *
  * Generates a sibling `object ${MessageName}Codec : Codec<${MessageName}>`
  * for each `@ProtocolMessage`-annotated symbol whose shape fits the
@@ -48,12 +48,27 @@ import com.squareup.kotlinpoet.TypeSpec
  *     property name on encode. Bit-packed logical fields exposed as
  *     getters in user code are invisible to the emitter (they
  *     introduce no wire format).
+ *   - **Stage C — signed scalar fields.** `Byte` / `Short` / `Int` /
+ *     `Long` at their natural width and the message's default byte
+ *     order. Manual byte assembly stays unsigned-only; signed scalars
+ *     with `@WireBytes` or explicit `@WireOrder` are silently skipped
+ *     until a vector justifies the sign-extension design.
+ *   - **Stage C — `@LengthPrefixed val: String` terminal.** A
+ *     trailing `String` field with a `LengthPrefix.{Byte|Short|Int}`
+ *     prefix in the message wire order. Encode reserves the prefix
+ *     slot, writes the body via the runtime's `writeString(text,
+ *     Charset.UTF8)`, measures the byte count from the position
+ *     delta, and patches the prefix in place (`WireSize.BackPatch` —
+ *     locked decision row 15). Encode emits an `EncodeException`
+ *     runtime guard when the UTF-8 byte length exceeds the prefix's
+ *     range; for 4-byte prefixes the check is skipped because Int
+ *     position deltas can never exceed UInt max.
  *
  * Anything outside this surface — `@LengthFrom`, `@WhenTrue`,
  * `@RemainingBytes`, `@UseCodec`, sealed dispatch (`@DispatchOn`,
- * `@PacketType`), signed scalars, `String` fields, `@LengthPrefixed`
- * on a non-terminal field — is silently skipped here and picked up by
- * later stages as their capability lands.
+ * `@PacketType`), signed scalars in the manual-byte-assembly path,
+ * `@LengthPrefixed` on a non-terminal field — is silently skipped
+ * here and picked up by later stages as their capability lands.
  */
 internal class CodecEmitter(
     private val codeGenerator: CodeGenerator,
@@ -135,6 +150,16 @@ internal class CodecEmitter(
             // out of scope for this emitter; bail rather than try to interpret.
             if (wireBytesAnn != null) return null
             if (!isTerminal) return null
+            val prefixWidth = readLengthPrefix(lengthPrefixed)
+            val qualified = type.declaration.qualifiedName?.asString()
+            if (qualified == "kotlin.String") {
+                return FieldSpec.LengthPrefixedString(
+                    name = name,
+                    ownerSimpleName = ownerSimpleName,
+                    prefixWidth = prefixWidth,
+                    prefixWireOrder = messageWireOrder,
+                )
+            }
             val decl = type.declaration as? KSClassDeclaration ?: return null
             val isProtocolMessage =
                 decl.annotations.any { ann ->
@@ -146,7 +171,6 @@ internal class CodecEmitter(
                 }
             if (!isProtocolMessage) return null
             if (Modifier.DATA !in decl.modifiers) return null
-            val prefixWidth = readLengthPrefix(lengthPrefixed)
             return FieldSpec.LengthPrefixedMessage(
                 name = name,
                 ownerSimpleName = ownerSimpleName,
@@ -166,6 +190,10 @@ internal class CodecEmitter(
         // never references an out-of-bounds bit shift.
         if (wireBytes < 1 || wireBytes > 8) return null
         if (wireBytes > kind.width) return null
+        // Signed scalars only support the natural-width default-order path here.
+        // Manual byte assembly stays unsigned-only — sign extension on a partial
+        // read is its own design and not load-bearing for any Stage C–H vector.
+        if (kind.isSigned && (wireBytes != kind.width || resolved != Endianness.Default)) return null
         return FieldSpec.Scalar(
             name = name,
             kind = kind,
@@ -254,6 +282,7 @@ internal class CodecEmitter(
             when (field) {
                 is FieldSpec.Scalar -> appendDecodeScalar(body, field)
                 is FieldSpec.LengthPrefixedMessage -> appendDecodeLengthPrefixed(body, field)
+                is FieldSpec.LengthPrefixedString -> appendDecodeLengthPrefixedString(body, field)
             }
         }
         val ctorArgs = shape.fields.joinToString(", ") { "${it.name} = ${it.name}" }
@@ -274,6 +303,7 @@ internal class CodecEmitter(
             when (field) {
                 is FieldSpec.Scalar -> appendEncodeScalar(body, field, shape.ownerSimpleName)
                 is FieldSpec.LengthPrefixedMessage -> appendEncodeLengthPrefixed(body, field)
+                is FieldSpec.LengthPrefixedString -> appendEncodeLengthPrefixedString(body, field)
             }
         }
         return FunSpec
@@ -294,25 +324,33 @@ internal class CodecEmitter(
                 .addParameter("value", shape.messageClassName)
                 .addParameter("context", ENCODE_CONTEXT_CN)
                 .returns(WIRE_SIZE_CN)
-        val terminal = shape.fields.lastOrNull() as? FieldSpec.LengthPrefixedMessage
-        if (terminal == null) {
-            val total = shape.fields.sumOf { (it as FieldSpec.Scalar).wireBytes }
-            builder.addStatement("return %T.Exact(%L)", WIRE_SIZE_CN, total)
-        } else {
-            val headerBytes = scalarHeaderBytes(shape) + terminal.prefixWidth
-            builder.addStatement(
-                "val %L = (%T.wireSize(value.%L, context) as %T.Exact).bytes",
-                "${terminal.name}Size",
-                terminal.codecType,
-                terminal.name,
-                WIRE_SIZE_CN,
-            )
-            builder.addStatement(
-                "return %T.Exact(%L + %L)",
-                WIRE_SIZE_CN,
-                headerBytes,
-                "${terminal.name}Size",
-            )
+        when (val terminal = shape.fields.lastOrNull()) {
+            is FieldSpec.LengthPrefixedString -> {
+                // Locked Decision row 15: @LengthPrefixed val: String defaults to BackPatch.
+                // Pre-measuring the UTF-8 byte length would require a second walk that the
+                // back-patch path collapses into the single writeString call.
+                builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+            }
+            is FieldSpec.LengthPrefixedMessage -> {
+                val headerBytes = scalarHeaderBytes(shape) + terminal.prefixWidth
+                builder.addStatement(
+                    "val %L = (%T.wireSize(value.%L, context) as %T.Exact).bytes",
+                    "${terminal.name}Size",
+                    terminal.codecType,
+                    terminal.name,
+                    WIRE_SIZE_CN,
+                )
+                builder.addStatement(
+                    "return %T.Exact(%L + %L)",
+                    WIRE_SIZE_CN,
+                    headerBytes,
+                    "${terminal.name}Size",
+                )
+            }
+            else -> {
+                val total = shape.fields.sumOf { (it as FieldSpec.Scalar).wireBytes }
+                builder.addStatement("return %T.Exact(%L)", WIRE_SIZE_CN, total)
+            }
         }
         return builder.build()
     }
@@ -325,42 +363,49 @@ internal class CodecEmitter(
                 .addParameter("stream", STREAM_PROCESSOR_CN)
                 .addParameter("baseOffset", INT)
                 .returns(PEEK_RESULT_CN)
-        val terminal = shape.fields.lastOrNull() as? FieldSpec.LengthPrefixedMessage
-        if (terminal == null) {
-            val total = shape.fields.sumOf { (it as FieldSpec.Scalar).wireBytes }
-            builder.addStatement(
-                "return if (stream.available() - baseOffset >= %L) %T.Complete(%L) else %T.NeedsMoreData",
-                total,
-                PEEK_RESULT_CN,
-                total,
-                PEEK_RESULT_CN,
-            )
-            return builder.build()
-        }
+        val terminal = shape.fields.lastOrNull()
+        val (name, ownerSimpleName, prefixWidth, prefixWireOrder) =
+            when (terminal) {
+                is FieldSpec.LengthPrefixedMessage ->
+                    PrefixPeek(terminal.name, terminal.ownerSimpleName, terminal.prefixWidth, terminal.prefixWireOrder)
+                is FieldSpec.LengthPrefixedString ->
+                    PrefixPeek(terminal.name, terminal.ownerSimpleName, terminal.prefixWidth, terminal.prefixWireOrder)
+                else -> null
+            } ?: run {
+                val total = shape.fields.sumOf { (it as FieldSpec.Scalar).wireBytes }
+                builder.addStatement(
+                    "return if (stream.available() - baseOffset >= %L) %T.Complete(%L) else %T.NeedsMoreData",
+                    total,
+                    PEEK_RESULT_CN,
+                    total,
+                    PEEK_RESULT_CN,
+                )
+                return builder.build()
+            }
         val prefixOffset = scalarHeaderBytes(shape)
-        val headerBytes = prefixOffset + terminal.prefixWidth
+        val headerBytes = prefixOffset + prefixWidth
         val body = CodeBlock.builder()
         body.addStatement(
             "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
             headerBytes,
             PEEK_RESULT_CN,
         )
-        appendPeekPrefixAssembly(body, terminal, prefixOffset)
+        appendPeekPrefixAssembly(body, name, prefixWidth, prefixWireOrder, prefixOffset)
         body.beginControlFlow(
             "if (%L > (Int.MAX_VALUE - %L).toUInt())",
-            "${terminal.name}Prefix",
+            "${name}Prefix",
             headerBytes,
         )
         body.addStatement(
             "throw %T(fieldPath = %S, bufferPosition = baseOffset + %L, expected = %S, actual = %P)",
             DECODE_EXCEPTION_CN,
-            "${terminal.ownerSimpleName}.${terminal.name}",
+            "$ownerSimpleName.$name",
             prefixOffset,
             "$headerBytes + length prefix <= \${Int.MAX_VALUE}",
-            "$headerBytes + \${${terminal.name}Prefix}",
+            "$headerBytes + \${${name}Prefix}",
         )
         body.endControlFlow()
-        body.addStatement("val total = %L + %L.toInt()", headerBytes, "${terminal.name}Prefix")
+        body.addStatement("val total = %L + %L.toInt()", headerBytes, "${name}Prefix")
         body.addStatement(
             "return if (stream.available() - baseOffset >= total) %T.Complete(total) else %T.NeedsMoreData",
             PEEK_RESULT_CN,
@@ -369,6 +414,13 @@ internal class CodecEmitter(
         builder.addCode(body.build())
         return builder.build()
     }
+
+    private data class PrefixPeek(
+        val name: String,
+        val ownerSimpleName: String,
+        val prefixWidth: Int,
+        val prefixWireOrder: Endianness,
+    )
 
     private fun scalarHeaderBytes(shape: CodecShape): Int =
         shape.fields
@@ -388,6 +440,10 @@ internal class CodecEmitter(
                     ScalarKind.UShort -> "readUShort"
                     ScalarKind.UInt -> "readUInt"
                     ScalarKind.ULong -> "readULong"
+                    ScalarKind.Byte -> "readByte"
+                    ScalarKind.Short -> "readShort"
+                    ScalarKind.Int -> "readInt"
+                    ScalarKind.Long -> "readLong"
                 }
             body.addStatement("val %L = buffer.%L()", field.name, read)
             return
@@ -430,6 +486,8 @@ internal class CodecEmitter(
                 ScalarKind.UByte -> ".toUByte()"
                 ScalarKind.UShort -> ".toUShort()"
                 ScalarKind.UInt, ScalarKind.ULong -> ""
+                ScalarKind.Byte, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long ->
+                    error("manual scalar decode is unsigned-only; analyzeField rejects signed manual-path fields")
             }
         body.addStatement("val %L = %L%L", field.name, combined, narrow)
     }
@@ -450,6 +508,10 @@ internal class CodecEmitter(
                     ScalarKind.UShort -> "writeUShort"
                     ScalarKind.UInt -> "writeUInt"
                     ScalarKind.ULong -> "writeULong"
+                    ScalarKind.Byte -> "writeByte"
+                    ScalarKind.Short -> "writeShort"
+                    ScalarKind.Int -> "writeInt"
+                    ScalarKind.Long -> "writeLong"
                 }
             body.addStatement("buffer.%L(%L)", write, accessor)
             return
@@ -475,6 +537,7 @@ internal class CodecEmitter(
                 ScalarKind.UInt -> accessor to "((1u shl ${8 * field.wireBytes}) - 1u)"
                 ScalarKind.UShort -> "$accessor.toUInt()" to "((1u shl ${8 * field.wireBytes}) - 1u)"
                 ScalarKind.UByte -> return // wireBytes < 1 is rejected by analyzeField
+                ScalarKind.Byte, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long -> return // signed kinds skip the manual path entirely
             }
         val maxValue = (1L shl (8 * field.wireBytes)) - 1
         body.beginControlFlow("if (%L > %L)", lhs, maxLit)
@@ -502,6 +565,8 @@ internal class CodecEmitter(
             when (field.kind) {
                 ScalarKind.UByte, ScalarKind.UShort -> ".toUInt()"
                 ScalarKind.UInt, ScalarKind.ULong -> ""
+                ScalarKind.Byte, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long ->
+                    error("manual scalar encode is unsigned-only; analyzeField rejects signed manual-path fields")
             }
         val wide = "$accessor$widePromote"
         val maskLit = if (width >= 5) "0xFFuL" else "0xFFu"
@@ -591,6 +656,83 @@ internal class CodecEmitter(
         body.addStatement("%T.encode(buffer, value.%L, context)", field.codecType, field.name)
     }
 
+    private fun appendDecodeLengthPrefixedString(
+        body: CodeBlock.Builder,
+        field: FieldSpec.LengthPrefixedString,
+    ) {
+        val prefixVar = "${field.name}Prefix"
+        appendBufferPrefixDecode(body, prefixVar, field.prefixWidth, field.prefixWireOrder)
+        body.beginControlFlow("if (%L > Int.MAX_VALUE.toUInt())", prefixVar)
+        body.addStatement(
+            "throw %T(fieldPath = %S, bufferPosition = -1, expected = %S, actual = %L.toString())",
+            DECODE_EXCEPTION_CN,
+            "${field.ownerSimpleName}.${field.name}",
+            "length prefix <= \${Int.MAX_VALUE}",
+            prefixVar,
+        )
+        body.endControlFlow()
+        val lengthVar = "${field.name}Length"
+        body.addStatement("val %L = %L.toInt()", lengthVar, prefixVar)
+        body.addStatement(
+            "val %L = buffer.readString(%L, %T.UTF8)",
+            field.name,
+            lengthVar,
+            CHARSET_CN,
+        )
+    }
+
+    private fun appendEncodeLengthPrefixedString(
+        body: CodeBlock.Builder,
+        field: FieldSpec.LengthPrefixedString,
+    ) {
+        // BackPatch pattern (Locked Decision row 15): reserve prefix slot, write
+        // the body via the runtime's UTF-8 path, measure byte count from the
+        // position delta, patch the prefix in place, restore position past the
+        // body. The runtime's `writeString(text, Charset.UTF8)` is zero-`ByteArray`
+        // on JVM / Apple / JS; the WASM and nonJvm `writeString` paths still
+        // allocate one ByteArray per call (Locked Decision row 16, deferred to a
+        // separate runtime task).
+        val sizePosVar = "${field.name}SizePosition"
+        val bodyStartVar = "${field.name}BodyStart"
+        val endPosVar = "${field.name}EndPosition"
+        val byteCountVar = "${field.name}ByteCount"
+        body.addStatement("val %L = buffer.position()", sizePosVar)
+        body.addStatement("buffer.position(%L + %L)", sizePosVar, field.prefixWidth)
+        body.addStatement("val %L = buffer.position()", bodyStartVar)
+        body.addStatement(
+            "buffer.writeString(value.%L, %T.UTF8)",
+            field.name,
+            CHARSET_CN,
+        )
+        body.addStatement("val %L = buffer.position()", endPosVar)
+        body.addStatement("val %L = %L - %L", byteCountVar, endPosVar, bodyStartVar)
+        // Runtime overflow guard. For 4-byte prefixes the max (UInt.MAX_VALUE =
+        // 2^32-1) exceeds Int.MAX_VALUE, so a position-delta byte count can never
+        // overflow it — the check would be dead code.
+        if (field.prefixWidth < 4) {
+            val maxValue = (1L shl (field.prefixWidth * 8)) - 1
+            val widthName =
+                when (field.prefixWidth) {
+                    1 -> "Byte"
+                    2 -> "Short"
+                    else -> error("unreachable: prefixWidth must be 1, 2, or 4")
+                }
+            body.beginControlFlow("if (%L > %L)", byteCountVar, maxValue)
+            body.addStatement(
+                "throw %T(fieldPath = %S, reason = %P)",
+                ENCODE_EXCEPTION_CN,
+                "${field.ownerSimpleName}.${field.name}",
+                "UTF-8 byte length \${$byteCountVar} exceeds @LengthPrefixed(LengthPrefix.$widthName) max $maxValue",
+            )
+            body.endControlFlow()
+        }
+        body.addStatement("buffer.position(%L)", sizePosVar)
+        val prefixVar = "${field.name}Prefix"
+        body.addStatement("val %L = %L.toUInt()", prefixVar, byteCountVar)
+        appendBufferPrefixEncode(body, prefixVar, field.prefixWidth, field.prefixWireOrder)
+        body.addStatement("buffer.position(%L)", endPosVar)
+    }
+
     private fun appendBufferPrefixEncode(
         body: CodeBlock.Builder,
         prefixVar: String,
@@ -621,11 +763,12 @@ internal class CodecEmitter(
 
     private fun appendPeekPrefixAssembly(
         body: CodeBlock.Builder,
-        field: FieldSpec.LengthPrefixedMessage,
+        fieldName: String,
+        width: Int,
+        wireOrder: Endianness,
         prefixOffset: Int,
     ) {
-        val prefixVar = "${field.name}Prefix"
-        val width = field.prefixWidth
+        val prefixVar = "${fieldName}Prefix"
         if (width == 1) {
             body.addStatement(
                 "val %L = (stream.peekByte(baseOffset + %L).toInt() and 0xFF).toUInt()",
@@ -635,7 +778,7 @@ internal class CodecEmitter(
             return
         }
         val bigEndian =
-            when (field.prefixWireOrder) {
+            when (wireOrder) {
                 Endianness.Big -> true
                 Endianness.Little -> false
                 Endianness.Default -> true
@@ -682,15 +825,27 @@ internal class CodecEmitter(
             val prefixWidth: Int,
             val prefixWireOrder: Endianness,
         ) : FieldSpec
+
+        data class LengthPrefixedString(
+            override val name: String,
+            val ownerSimpleName: String,
+            val prefixWidth: Int,
+            val prefixWireOrder: Endianness,
+        ) : FieldSpec
     }
 
     private enum class ScalarKind(
         val width: Int,
+        val isSigned: Boolean,
     ) {
-        UByte(1),
-        UShort(2),
-        UInt(4),
-        ULong(8),
+        UByte(1, false),
+        UShort(2, false),
+        UInt(4, false),
+        ULong(8, false),
+        Byte(1, true),
+        Short(2, true),
+        Int(4, true),
+        Long(8, true),
     }
 
     private enum class Endianness {
@@ -708,6 +863,10 @@ internal class CodecEmitter(
                 "kotlin.UShort" to ScalarKind.UShort,
                 "kotlin.UInt" to ScalarKind.UInt,
                 "kotlin.ULong" to ScalarKind.ULong,
+                "kotlin.Byte" to ScalarKind.Byte,
+                "kotlin.Short" to ScalarKind.Short,
+                "kotlin.Int" to ScalarKind.Int,
+                "kotlin.Long" to ScalarKind.Long,
             )
 
         private val READ_BUFFER_CN = ClassName("com.ditchoom.buffer", "ReadBuffer")
@@ -720,5 +879,6 @@ internal class CodecEmitter(
         private val STREAM_PROCESSOR_CN = ClassName("com.ditchoom.buffer.stream", "StreamProcessor")
         private val DECODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "DecodeException")
         private val ENCODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "EncodeException")
+        private val CHARSET_CN = ClassName("com.ditchoom.buffer", "Charset")
     }
 }
