@@ -115,6 +115,7 @@ sessions can scan what's settled before reopening anything.
 | 6 | `CodecContext` keeps immutable map-backed shape; adds `getOrDefault`, field-path tracking, direction-specific keys. |
 | 7 | `DecodeKey` / `EncodeKey` / `CodecKey` interfaces; KSP enforces object-only implementations. |
 | 8 | `@Payload` shape: empty marker interface + slot generics on sealed parent + per-slot SAMs with `Partial` receiver. |
+| 9 | Wire-mirroring carve-out: redundant length carriers (fields whose only purpose is to bound a sibling) are expressed by `@LengthPrefixed` on the bounded field, not as constructor parameters. Checksums, magic numbers, and padding stay as constructor parameters. |
 
 ## Deferred decisions
 

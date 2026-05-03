@@ -87,8 +87,22 @@ enum class LengthPrefix {
 }
 
 /**
- * Marks a String or payload field as length-prefixed: prefix bytes followed by UTF-8 data.
- * Default is 2-byte big-endian (`UShort`) prefix.
+ * Marks a length-prefixed field: prefix bytes carrying the value's wire size,
+ * followed by the value's bytes. Default prefix width is 2-byte big-endian
+ * (`UShort`).
+ *
+ * Accepted on:
+ *   - `String` fields — the value is the field's UTF-8 bytes.
+ *   - `@ProtocolMessage` data class fields — the value is the message body's
+ *     wire bytes; encode emits the prefix carrying the body's `wireSize`,
+ *     decode reads the prefix, bounds inner decode, restores the outer limit.
+ *
+ * For adjacent length carriers, prefer `@LengthPrefixed` over modeling the
+ * length as a separate constructor parameter and a `@LengthFrom` reference —
+ * a redundant length carrier is an impossible-state class (the prefix and
+ * `body.wireSize()` independently encode the same quantity). `@LengthFrom`
+ * is reserved for genuine remote-prefix uses (length carried in a non-
+ * adjacent field).
  *
  * ```kotlin
  * @ProtocolMessage
@@ -96,6 +110,15 @@ enum class LengthPrefix {
  *     @LengthPrefixed val name: String,                         // 2-byte prefix (default)
  *     @LengthPrefixed(LengthPrefix.Byte) val nickname: String,  // 1-byte prefix (max 255)
  *     @LengthPrefixed(LengthPrefix.Int) val bio: String,        // 4-byte prefix
+ * )
+ *
+ * @ProtocolMessage
+ * data class WavFmtBody(val audioFormat: UShort, /* ... */)
+ *
+ * @ProtocolMessage(wireOrder = Endianness.Little)
+ * data class WavFmtChunk(
+ *     val fourCC: UInt,
+ *     @LengthPrefixed(LengthPrefix.Int) val body: WavFmtBody,   // 4-byte LE prefix carries body.wireSize
  * )
  * ```
  */
@@ -122,19 +145,34 @@ annotation class LengthPrefixed(
 annotation class RemainingBytes
 
 /**
- * Marks a String field whose byte length is determined by a preceding numeric field.
- * The referenced field must exist, come before this field, and be a numeric type.
+ * Marks a field whose byte length is determined by a **non-adjacent**
+ * numeric field elsewhere in the message — the length is carried as a
+ * separate constructor parameter because the consumer cares about it as a
+ * number (e.g., it is parsed by a different codec, or several positions
+ * ahead of the bounded field).
+ *
+ * **For adjacent length carriers, use `@LengthPrefixed` instead.** A field
+ * whose only purpose is to bound the immediately following sibling is a
+ * redundant length carrier — modeling it as an independent constructor
+ * parameter encodes the same quantity twice (prefix vs. value's `wireSize`)
+ * and is rejected by the validator (Phase 10 rule R1). The remaining valid
+ * use of `@LengthFrom` is genuine remote-prefix: length carried in a non-
+ * adjacent field, often parsed by a different codec or sitting several
+ * positions away (MQTT-style header-bounded payloads, parent-passed
+ * bounds via `@DispatchOn`, etc.).
  *
  * ```kotlin
  * @ProtocolMessage
- * data class NamedRecord(
- *     val nameLength: UShort,
- *     @LengthFrom("nameLength") val name: String,  // reads nameLength bytes as UTF-8
- *     val value: Int,
+ * data class RemoteHeader(
+ *     val payloadLength: UShort,    // consumer-visible — flow control, routing
+ *     val flags: UByte,
+ *     val correlationId: UInt,
+ *     @LengthFrom("payloadLength") val payload: String,
  * )
  * ```
  *
- * @param field The name of the preceding numeric field that holds the byte length.
+ * @param field The name of the non-adjacent numeric field that holds the
+ * byte length. Must exist, come before this field, and be a numeric type.
  */
 @Target(AnnotationTarget.VALUE_PARAMETER)
 @Retention(AnnotationRetention.BINARY)

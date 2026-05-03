@@ -1266,6 +1266,21 @@ String-vs-CharSequence policy note). Move on to slice 4.
 
 ### Slice 4 — `@LengthFrom` on RIFF chunk body
 
+> **Correction note (redesign-2).** The locked
+> `@LengthFrom("chunkSize") @UseCodec(WavFmtBodyCodec::class)` shape
+> walked below was superseded after the wire-mirroring carve-out (see
+> `PHASE_9_RESET.md` "Locked Decisions" row 9) narrowed `@LengthFrom`
+> to remote-prefix only. Slice 4's vector now exercises widened
+> `@LengthPrefixed` on a `@ProtocolMessage` field — `WavFmtChunk` is
+> a 2-field data class `(fourCC: UInt, @LengthPrefixed(LengthPrefix.Int)
+> body: WavFmtBody)`. The walk text below is preserved for archival
+> continuity; the live wire-vector is byte-identical (24 bytes: 4
+> fourCC + 4 LE prefix + 16 body), only the annotation surface
+> changed. `@UseCodec` proof migrates exclusively to slice 9. R1
+> (validator's adjacent-`@LengthFrom` rejection) makes the original
+> shape a compile error today, so the live code in
+> `buffer-codec-test/.../riff/` is the authoritative reference.
+
 **Source vector.** Continuing slice 1's RIFF chunk header. The body
 size is *not* prefixed at the body's own start — it lives in the
 preceding `chunkSize` field of the header. This is the textbook
