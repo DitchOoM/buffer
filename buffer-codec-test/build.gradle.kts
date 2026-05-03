@@ -51,11 +51,24 @@ kotlin {
     }
 }
 
-kotlin.targets.configureEach {
-    if (name != "metadata") {
-        dependencies.add("ksp${name.replaceFirstChar { it.uppercase() }}", project(":buffer-codec-processor"))
-        // Ensure KSP can resolve annotations from buffer-codec (needed for new annotations on clean builds)
-        dependencies.add("ksp${name.replaceFirstChar { it.uppercase() }}", project(":buffer-codec"))
+// Run KSP once on the common metadata compilation so generated codecs land
+// in commonMain and every target compilation sees the same symbols. This is
+// the KSP2 common-multiplatform shape; per-target KSP runs would scatter
+// generated sources across `jvmMain`/`jsMain`/etc. and break references
+// from commonMain (e.g., `WavFmtChunkCodec` → `WavFmtBodyCodec`) and from
+// commonTest.
+dependencies {
+    add("kspCommonMainMetadata", project(":buffer-codec-processor"))
+    add("kspCommonMainMetadata", project(":buffer-codec"))
+}
+
+kotlin.sourceSets.named("commonMain") {
+    kotlin.srcDir("build/generated/ksp/metadata/commonMain/kotlin")
+}
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().configureEach {
+    if (name != "kspCommonMainKotlinMetadata") {
+        dependsOn("kspCommonMainKotlinMetadata")
     }
 }
 

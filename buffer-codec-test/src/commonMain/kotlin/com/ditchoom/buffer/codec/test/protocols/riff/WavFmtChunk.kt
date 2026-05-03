@@ -4,6 +4,7 @@ import com.ditchoom.buffer.codec.annotations.Endianness
 import com.ditchoom.buffer.codec.annotations.LengthPrefix
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+import com.ditchoom.buffer.codec.annotations.WireOrder
 
 /**
  * One full WAV `fmt ` chunk: a 4-byte FourCC followed by a length-
@@ -30,7 +31,7 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
  */
 @ProtocolMessage(wireOrder = Endianness.Little)
 data class WavFmtChunk(
-    val fourCC: UInt,
+    @WireOrder(Endianness.Big) val fourCC: UInt,
     @LengthPrefixed(LengthPrefix.Int)
     val body: WavFmtBody,
 )

@@ -2,6 +2,7 @@ package com.ditchoom.buffer.codec.test.protocols.riff
 
 import com.ditchoom.buffer.codec.annotations.Endianness
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+import com.ditchoom.buffer.codec.annotations.WireOrder
 
 /**
  * RIFF chunk header — 4-byte ASCII FourCC tag followed by a 4-byte
@@ -11,11 +12,13 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
  *
  * Slice 1 vector for `@ProtocolMessage`. Validates: fixed-layout
  * two-field message with mixed effective endianness (FourCC bytes
- * are positional ASCII, exposed as a numeric tag for matching;
- * `chunkSize` is little-endian per the RIFF 1.0 spec).
+ * are positional ASCII — `@WireOrder(Endianness.Big)` makes the
+ * MSB-first wire serialization explicit so the emitter has a
+ * faithful directive; `chunkSize` is little-endian per the RIFF 1.0
+ * spec, inheriting the message-level `wireOrder`).
  */
 @ProtocolMessage(wireOrder = Endianness.Little)
 data class RiffChunkHeader(
-    val fourCC: UInt,
+    @WireOrder(Endianness.Big) val fourCC: UInt,
     val chunkSize: UInt,
 )

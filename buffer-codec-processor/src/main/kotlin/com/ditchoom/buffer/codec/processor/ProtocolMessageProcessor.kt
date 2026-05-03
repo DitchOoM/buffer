@@ -44,9 +44,11 @@ import com.google.devtools.ksp.validate
  *     `@DispatchOn`).
  */
 class ProtocolMessageProcessor(
-    @Suppress("unused") private val codeGenerator: CodeGenerator,
+    private val codeGenerator: CodeGenerator,
     private val logger: KSPLogger,
 ) : SymbolProcessor {
+    private val emitter = CodecEmitter(codeGenerator, logger)
+
     override fun process(resolver: Resolver): List<KSAnnotated> {
         // Payload lives in buffer-codec, the same artifact that defines
         // @ProtocolMessage. If we have any @ProtocolMessage symbols to
@@ -86,6 +88,7 @@ class ProtocolMessageProcessor(
                 )
             }
             validateAdjacentLengthFrom(symbol, ctor.parameters, payloadType)
+            emitter.tryEmit(symbol)
         }
         return deferred
     }

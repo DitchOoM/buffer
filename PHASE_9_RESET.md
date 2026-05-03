@@ -116,6 +116,9 @@ sessions can scan what's settled before reopening anything.
 | 7 | `DecodeKey` / `EncodeKey` / `CodecKey` interfaces; KSP enforces object-only implementations. |
 | 8 | `@Payload` shape: empty marker interface + slot generics on sealed parent + per-slot SAMs with `Partial` receiver. |
 | 9 | Wire-mirroring carve-out: redundant length carriers (fields whose only purpose is to bound a sibling) are expressed by `@LengthPrefixed` on the bounded field, not as constructor parameters. Checksums, magic numbers, and padding stay as constructor parameters. |
+| 10 | Generated-code language: KotlinPoet via KSP `CodeGenerator`. Emit one file per `@ProtocolMessage` at `<source-package>/<MessageName>Codec.kt`, hooked through `Dependencies(aggregating = false, sourceFile)` for incremental compilation. Driven by Stage A. |
+| 11 | Codec object placement: sibling top-level `object MyMessageCodec`, not `MyMessage.Codec` companion. Matches the Phase 10 hand-written reference codecs (`RiffChunkHeaderCodec`, `WavFmtBodyCodec`, `WavFmtChunkCodec`); keeps generated source out of the data-class declaration file and avoids companion-on-data-class equals/hashCode/copy noise. Driven by Stage A. |
+| 12 | `peekFrameSize` emission rule: emit it whenever the frame size is statically determinable from the wire format (fixed-size sum, or leading `@LengthPrefixed` whose prefix is peek-readable). Default `PeekResult.NoFraming` only when the wire format genuinely doesn't allow it. Strictly more capability than the hand-written reference codecs (which omit it on bodies that aren't typical stream roots) — no test or doctrine row contradicts this. Driven by Stage A. |
 
 ## Deferred decisions
 
@@ -125,13 +128,11 @@ decision from a concrete vector beats deciding in the abstract.
 
 | Topic                                          | Sketch / current leaning                                                  | Driven by stage |
 |------------------------------------------------|---------------------------------------------------------------------------|-----------------|
-| Generated code language                        | Kotlin source via KotlinPoet (assumed but never formally locked)           | Stage A         |
 | Zero-`ByteArray` enforcement                   | Allocation tracker hooked into `:buffer-codec-test`; mechanism TBD         | Stage C         |
 | `@LengthFrom("fieldName")` resolution          | String DSL vs property reference vs compile-time resolved name             | Stage E         |
 | `@WhenTrue("flags.willFlag")` DSL              | Dotted-string DSL with KSP validation against actual field path            | Stage E         |
 | `LengthPrefix` enum shape                      | `Byte` / `Short` / `Int` / `Varint` vs `Fixed(Int)` / `Variable`           | Stage C         |
 | `@WireOrder` + `@WireBytes` consolidation      | Keep separate per Section 8.4 of CLAUDE.md, or fold into one annotation    | Stage B         |
-| Companion-object placement                     | `MyMessage.Codec` vs sibling `MyMessageCodec` object                       | Stage A         |
 | `@UseCodec` `expect`/`actual` resolution path  | Direct call to `expect` object, linker resolves; KSP doesn't inspect actual | Stage H         |
 | `data object` vs empty `data class`            | `data class` for dispatcher cleanliness per item 5 above                   | Stage F         |
 | Field-path tracking mechanism                  | `PathContext` facet pushed/popped through nested codec calls               | Stage E         |
