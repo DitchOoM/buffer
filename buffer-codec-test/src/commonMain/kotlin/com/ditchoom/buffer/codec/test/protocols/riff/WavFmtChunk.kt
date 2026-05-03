@@ -1,24 +1,27 @@
 package com.ditchoom.buffer.codec.test.protocols.riff
 
 import com.ditchoom.buffer.codec.annotations.Endianness
-import com.ditchoom.buffer.codec.annotations.LengthFrom
+import com.ditchoom.buffer.codec.annotations.LengthPrefix
+import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-import com.ditchoom.buffer.codec.annotations.UseCodec
 
 /**
- * One full WAV `fmt ` chunk: the standard RIFF chunk header (4-byte
- * FourCC + 4-byte LE size) followed by a [WavFmtBody] of exactly
- * [chunkSize] bytes. The PCM-form body is fixed at 16 bytes; the WAV
- * spec also defines a 18- or 18+N-byte WAVEFORMATEX form, but for the
- * slice-4 vector we model the PCM case so the body type is fully typed.
+ * One full WAV `fmt ` chunk: a 4-byte FourCC followed by a length-
+ * prefixed [WavFmtBody]. The 4-byte LE prefix carries the body's wire
+ * size; the PCM-form body is fixed at 16 bytes, so a typical PCM `fmt `
+ * chunk is 24 bytes on the wire (4 fourCC + 4 prefix + 16 body).
  *
- * Slice 4 vector for `@LengthFrom` + `@UseCodec`. The body field is
- * delegated to [WavFmtBodyCodec] over a buffer that the parent codec
- * pre-bounds to exactly `chunkSize` bytes. The bound is defensive for
- * a fixed-size body — the body codec reads a known number of bytes —
- * but the bound + restore mechanism is the uniform contract for every
- * `@UseCodec` body inside a `@LengthFrom`-bounded field, and slice 4
- * exists to validate that contract.
+ * Slice 4 vector for `@LengthPrefixed` on a `@ProtocolMessage` field
+ * (R3 widening). Encode emits the prefix carrying `WavFmtBodyCodec`'s
+ * `wireSize`; decode reads the prefix, `setLimit`-bounds, decodes the
+ * body, and restores the outer limit so a chunk embedded inside a RIFF
+ * LIST stays composable.
+ *
+ * The `chunkSize` field is no longer a constructor parameter — its sole
+ * purpose was to bound the body, which `@LengthPrefixed` now expresses
+ * directly. Wire-mirroring carve-out: redundant length carriers are not
+ * constructor parameters; checksums, magic numbers, and padding still
+ * are.
  *
  * No `ReadBuffer` / `ByteArray` field appears on a `@ProtocolMessage`
  * data class anywhere in the slice — Section 8 of the design doctrine
@@ -28,14 +31,12 @@ import com.ditchoom.buffer.codec.annotations.UseCodec
 @ProtocolMessage(wireOrder = Endianness.Little)
 data class WavFmtChunk(
     val fourCC: UInt,
-    val chunkSize: UInt,
-    @LengthFrom("chunkSize")
-    @UseCodec(WavFmtBodyCodec::class)
+    @LengthPrefixed(LengthPrefix.Int)
     val body: WavFmtBody,
 )
 
 /**
- * The fields of a PCM WAV `fmt ` chunk. All six fields are stored
+ * The fields of a PCM WAV `fmt ` body. All six fields are stored
  * little-endian on the wire; the wire layout is fixed at 16 bytes:
  *
  *   audioFormat (2) | numChannels (2) | sampleRate (4) |

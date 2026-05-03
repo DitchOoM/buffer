@@ -14,11 +14,11 @@ import com.ditchoom.buffer.stream.StreamProcessor
  * Generated codec for [WavFmtChunk] — wire-format details below.
  *
  * Hand-written for the Phase 10 slice 4 type-check exercise. KSP will
- * emit structurally identical code once the Stage E emitter handles
- * `@LengthFrom` + `@UseCodec`; this file proves the sketched shape
- * compiles against the real runtime APIs and that the slice-bounding
- * `setLimit` + restore contract round-trips end-to-end against a
- * typed body.
+ * emit structurally identical code once the Stage A emitter handles
+ * `@LengthPrefixed` on a `@ProtocolMessage`-typed field; this file
+ * proves the sketched shape compiles against the real runtime APIs and
+ * that the slice-bounding `setLimit` + restore contract round-trips
+ * end-to-end against a typed body.
  *
  * @see WavFmtChunk
  * @see WavFmtBodyCodec
@@ -29,33 +29,27 @@ import com.ditchoom.buffer.stream.StreamProcessor
  * +---------------+---------------+---------------+---------------+
  * |     'f'       |     'm'       |     't'       |     ' '       |  fourCC (4b ASCII)
  * +---------------+---------------+---------------+---------------+
- * |                          chunkSize (4b LE)                    |
+ * |                       body length (4b LE)                     |  @LengthPrefixed prefix
  * +---------------------------------------------------------------+
- * | <chunkSize> bytes — body decoded by WavFmtBodyCodec           |
+ * | <length> bytes — body decoded by WavFmtBodyCodec              |
  * +---------------------------------------------------------------+
  * ```
- *
- * Source documentation:
- *   One full WAV `fmt ` chunk: the standard RIFF chunk header (4-byte
- *   FourCC + 4-byte LE size) followed by a [WavFmtBody] of exactly
- *   [chunkSize] bytes. The PCM-form body is fixed at 16 bytes; the WAV
- *   spec also defines a 18- or 18+N-byte WAVEFORMATEX form, but for the
- *   slice-4 vector we model the PCM case so the body type is fully typed.
  */
 object WavFmtChunkCodec : Codec<WavFmtChunk> {
     private const val HEADER_BYTES = 8
 
     /**
-     * Reads 8 header bytes, then exactly [WavFmtChunk.chunkSize] body
-     * bytes via [WavFmtBodyCodec] over a `setLimit`-bounded slice.
+     * Reads 4 fourCC bytes, then a 4-byte LE length prefix, then exactly
+     * `prefix` body bytes via [WavFmtBodyCodec] over a `setLimit`-bounded
+     * slice.
      *
      * The bound + restore pattern is the sync analogue of locked
      * decision #5 (sync = `setLimit`, async = `slice().use { }`). It is
-     * the uniform contract for every `@UseCodec`-referenced sync codec
-     * inside a length-bounded field — the inner codec sees a buffer
-     * whose `remaining()` equals the resolved length, and the outer
-     * limit is restored even if the body codec throws so a chunk
-     * embedded inside a RIFF LIST stays composable.
+     * the uniform contract for every `@LengthPrefixed`-bounded field —
+     * the inner codec sees a buffer whose `remaining()` equals the
+     * resolved length, and the outer limit is restored even if the body
+     * codec throws so a chunk embedded inside a RIFF LIST stays
+     * composable.
      */
     override fun decode(
         buffer: ReadBuffer,
@@ -69,19 +63,17 @@ object WavFmtChunkCodec : Codec<WavFmtChunk> {
         val b3 = buffer.readUByte().toUInt()
         val fourCC = (b0 shl 24) or (b1 shl 16) or (b2 shl 8) or b3
 
-        // Wire: 4 LE bytes for chunkSize — assemble little-end-first
+        // Wire: 4 LE bytes for the @LengthPrefixed prefix — assemble little-end-first
         val s0 = buffer.readUByte().toUInt()
         val s1 = buffer.readUByte().toUInt()
         val s2 = buffer.readUByte().toUInt()
         val s3 = buffer.readUByte().toUInt()
-        val chunkSize = s0 or (s1 shl 8) or (s2 shl 16) or (s3 shl 24)
+        val prefix = s0 or (s1 shl 8) or (s2 shl 16) or (s3 shl 24)
 
-        // Wire: bound the buffer to exactly chunkSize bytes so WavFmtBodyCodec
-        // sees remaining() == chunkSize, then restore the outer limit so
-        // composition with an enclosing RIFF LIST is preserved. The bound is
-        // defensive for a fixed-size body, but the contract has to be
-        // uniform across @UseCodec choices.
-        val resolvedLength = resolveBodyLength(chunkSize, fieldPath = "WavFmtChunk.body")
+        // Wire: bound the buffer to exactly prefix bytes so WavFmtBodyCodec
+        // sees remaining() == prefix, then restore the outer limit so
+        // composition with an enclosing RIFF LIST is preserved.
+        val resolvedLength = resolveBodyLength(prefix, fieldPath = "WavFmtChunk.body")
         val outerLimit = buffer.limit()
         buffer.setLimit(buffer.position() + resolvedLength)
         val body =
@@ -90,10 +82,10 @@ object WavFmtChunkCodec : Codec<WavFmtChunk> {
             } finally {
                 buffer.setLimit(outerLimit)
             }
-        return WavFmtChunk(fourCC, chunkSize, body)
+        return WavFmtChunk(fourCC, body)
     }
 
-    /** Writes 8 header bytes, then the body bytes — wire size = 8 + body wire size. */
+    /** Writes 4 fourCC bytes, the 4-byte LE prefix, then the body bytes. */
     override fun encode(
         buffer: WriteBuffer,
         value: WavFmtChunk,
@@ -105,20 +97,23 @@ object WavFmtChunkCodec : Codec<WavFmtChunk> {
         buffer.writeUByte(((value.fourCC shr 8) and 0xFFu).toUByte())
         buffer.writeUByte((value.fourCC and 0xFFu).toUByte())
 
-        // Wire: 4 LE bytes for chunkSize — emit low byte first
-        buffer.writeUByte((value.chunkSize and 0xFFu).toUByte())
-        buffer.writeUByte(((value.chunkSize shr 8) and 0xFFu).toUByte())
-        buffer.writeUByte(((value.chunkSize shr 16) and 0xFFu).toUByte())
-        buffer.writeUByte(((value.chunkSize shr 24) and 0xFFu).toUByte())
+        // Wire: 4 LE bytes carrying the body's wire size — emit low byte first.
+        // WavFmtBodyCodec reports Exact (slice 4 lock #3), so the prefix is
+        // a known integer at encode time and no two-pass write is needed.
+        val prefix = (WavFmtBodyCodec.wireSize(value.body, context) as WireSize.Exact).bytes.toUInt()
+        buffer.writeUByte((prefix and 0xFFu).toUByte())
+        buffer.writeUByte(((prefix shr 8) and 0xFFu).toUByte())
+        buffer.writeUByte(((prefix shr 16) and 0xFFu).toUByte())
+        buffer.writeUByte(((prefix shr 24) and 0xFFu).toUByte())
 
         WavFmtBodyCodec.encode(buffer, value.body, context)
     }
 
     /**
      * `Exact(8 + body wire size)`. The body codec reports `Exact` (slice
-     * 4 lock #3 — any `@UseCodec` body inside a `@LengthFrom`-bounded
-     * field must report `Exact`); the header is fixed at 8 bytes; the
-     * sum is therefore exact and the framework takes the
+     * 4 lock #3 — any `@LengthPrefixed`-bounded body must report
+     * `Exact`); the header (fourCC + 4-byte prefix) is fixed at 8 bytes;
+     * the sum is therefore exact and the framework takes the
      * `pool.withBuffer` fast path.
      */
     override fun wireSize(
@@ -130,15 +125,15 @@ object WavFmtChunkCodec : Codec<WavFmtChunk> {
     }
 
     /**
-     * Frame size = 8 + chunkSize. Peeks the 4-byte LE chunkSize at
-     * offset 4 and returns `Complete(8 + chunkSize)` once that many
-     * bytes are available.
+     * Frame size = 8 + prefix. Peeks the 4-byte LE prefix at offset 4
+     * and returns `Complete(8 + prefix)` once that many bytes are
+     * available.
      *
      * Slice 4 lock #4: when the resolved frame size would exceed
-     * `Int.MAX_VALUE` (RIFF's UInt range allows up to 4 GiB), throw a
-     * typed [DecodeException] from peek rather than wrapping silently.
-     * Surfaces malformed inputs at frame detection rather than at
-     * decode time.
+     * `Int.MAX_VALUE` (the LE prefix's UInt range allows up to 4 GiB),
+     * throw a typed [DecodeException] from peek rather than wrapping
+     * silently. Surfaces malformed inputs at frame detection rather
+     * than at decode time.
      */
     override fun peekFrameSize(
         stream: StreamProcessor,
@@ -151,8 +146,8 @@ object WavFmtChunkCodec : Codec<WavFmtChunk> {
         val b1 = stream.peekByte(baseOffset + 5).toInt() and 0xFF
         val b2 = stream.peekByte(baseOffset + 6).toInt() and 0xFF
         val b3 = stream.peekByte(baseOffset + 7).toInt() and 0xFF
-        val chunkSize = (b0 or (b1 shl 8) or (b2 shl 16) or (b3 shl 24)).toUInt()
-        val total = peekTotalFrameSize(chunkSize, baseOffset = baseOffset)
+        val prefix = (b0 or (b1 shl 8) or (b2 shl 16) or (b3 shl 24)).toUInt()
+        val total = peekTotalFrameSize(prefix, baseOffset = baseOffset)
         return if (stream.available() - baseOffset >= total) {
             PeekResult.Complete(total)
         } else {
@@ -161,43 +156,43 @@ object WavFmtChunkCodec : Codec<WavFmtChunk> {
     }
 
     /**
-     * Decode-time guard for [WavFmtChunk.chunkSize] → Int conversion.
+     * Decode-time guard for the 4-byte LE length prefix → Int conversion.
      * The sync decode bound is `position + len`; both are Ints, so a
-     * chunkSize > `Int.MAX_VALUE` cannot be honored. Throws a typed
+     * prefix > `Int.MAX_VALUE` cannot be honored. Throws a typed
      * [DecodeException] so callers can distinguish protocol-level
      * overflow from a generic IllegalArgumentException.
      */
     private fun resolveBodyLength(
-        chunkSize: UInt,
+        prefix: UInt,
         fieldPath: String,
     ): Int {
-        if (chunkSize > Int.MAX_VALUE.toUInt()) {
+        if (prefix > Int.MAX_VALUE.toUInt()) {
             throw DecodeException(
                 fieldPath = fieldPath,
                 bufferPosition = -1,
-                expected = "chunkSize <= ${Int.MAX_VALUE}",
-                actual = chunkSize.toString(),
+                expected = "length prefix <= ${Int.MAX_VALUE}",
+                actual = prefix.toString(),
             )
         }
-        return chunkSize.toInt()
+        return prefix.toInt()
     }
 
     /**
-     * Peek-time guard for `8 + chunkSize` overflow into a negative
-     * Int. Throws so the streaming loop fails fast at frame detection.
+     * Peek-time guard for `8 + prefix` overflow into a negative Int.
+     * Throws so the streaming loop fails fast at frame detection.
      */
     private fun peekTotalFrameSize(
-        chunkSize: UInt,
+        prefix: UInt,
         baseOffset: Int,
     ): Int {
-        if (chunkSize > (Int.MAX_VALUE - HEADER_BYTES).toUInt()) {
+        if (prefix > (Int.MAX_VALUE - HEADER_BYTES).toUInt()) {
             throw DecodeException(
-                fieldPath = "WavFmtChunk.chunkSize",
+                fieldPath = "WavFmtChunk.body",
                 bufferPosition = baseOffset + 4,
-                expected = "8 + chunkSize <= ${Int.MAX_VALUE}",
-                actual = "8 + $chunkSize",
+                expected = "8 + length prefix <= ${Int.MAX_VALUE}",
+                actual = "8 + $prefix",
             )
         }
-        return HEADER_BYTES + chunkSize.toInt()
+        return HEADER_BYTES + prefix.toInt()
     }
 }

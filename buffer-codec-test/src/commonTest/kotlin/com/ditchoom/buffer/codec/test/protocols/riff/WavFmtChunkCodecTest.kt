@@ -19,15 +19,15 @@ import kotlin.test.assertTrue
  * Slice 4 type-check vector. Validates that the hand-emitted
  * [WavFmtChunkCodec] round-trips byte-exact, that the body codec sees a
  * `setLimit`-bounded view of the buffer (so `remaining()` matches the
- * `@LengthFrom` resolved length), that the outer limit is restored
+ * `@LengthPrefixed` resolved length), that the outer limit is restored
  * after the body codec returns (so a chunk embedded in an enclosing
  * RIFF LIST is composable), and that `peekFrameSize` walks
- * `NeedsMoreData → Complete(8 + chunkSize)`.
+ * `NeedsMoreData → Complete(8 + prefix)`.
  *
  * Wire vector — a PCM `fmt ` chunk:
- *   bytes [f, m, t, ' ', size[0..3], body[0..15]]
+ *   bytes [f, m, t, ' ', prefix[0..3], body[0..15]]
  *   FourCC = 'fmt ' = 0x66_6D_74_20
- *   chunkSize = 16 (LE)
+ *   prefix = 16 (LE) — the body's wire size
  *   body = audioFormat=1, numChannels=2, sampleRate=44100,
  *          byteRate=176400, blockAlign=4, bitsPerSample=16
  */
@@ -72,9 +72,31 @@ class WavFmtChunkCodecTest {
     private fun makeChunk(): WavFmtChunk =
         WavFmtChunk(
             fourCC = fmtTag,
-            chunkSize = pcmBodyWireSize.toUInt(),
             body = pcmBody,
         )
+
+    @Test
+    fun wavFmtChunkHasTwoConstructorParameters() {
+        // Locks the impossible-state-class fix: `chunkSize` is no longer a
+        // constructor parameter — the body's bound is expressed by
+        // `@LengthPrefixed` on the body field, not by an independent
+        // length carrier that could disagree with `body.wireSize()`. Slice
+        // 4 redesign-2 (Phase 10 R3 widening) requires arity == 2.
+        //
+        // Compile-time lock: pinning `::WavFmtChunk` to a 2-parameter
+        // function type. If a third constructor parameter is reintroduced
+        // (or one is removed), the constructor reference no longer
+        // matches and this assignment fails to compile — strictly tighter
+        // than a runtime reflection check, and works in commonTest
+        // without `kotlin-reflect` on the classpath.
+        @Suppress("UNUSED_VARIABLE")
+        val arityLock: (UInt, WavFmtBody) -> WavFmtChunk = ::WavFmtChunk
+        // Sanity: destructuring confirms exactly two components are
+        // accessible at runtime.
+        val (fourCC, body) = makeChunk()
+        assertEquals(fmtTag, fourCC)
+        assertEquals(pcmBody, body)
+    }
 
     @Test
     fun roundTripsByteExact() {
