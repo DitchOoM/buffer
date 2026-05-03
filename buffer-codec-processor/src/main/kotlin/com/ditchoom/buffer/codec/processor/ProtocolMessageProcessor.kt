@@ -4,6 +4,7 @@ import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.processing.SymbolProcessor
+import com.google.devtools.ksp.symbol.ClassKind
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSType
@@ -42,6 +43,14 @@ import com.google.devtools.ksp.validate
  *     reserved for genuine remote-prefix uses (length carried in a
  *     non-adjacent field, parsed elsewhere, or parent-passed via
  *     `@DispatchOn`).
+ *
+ *   - **Stage D dispatcher rules.** A `@ProtocolMessage sealed
+ *     interface` without `@DispatchOn` is a simple-dispatch parent.
+ *     Every direct sealed subclass must carry `@PacketType(value =
+ *     N)` with `N in 0..255`, and `value` must be unique within a
+ *     parent. Missing/out-of-range/duplicate values are compile
+ *     errors. Sealed parents carrying `@DispatchOn` are skipped
+ *     (Stage F surface).
  */
 class ProtocolMessageProcessor(
     private val codeGenerator: CodeGenerator,
@@ -76,6 +85,11 @@ class ProtocolMessageProcessor(
                 deferred += symbol
                 continue
             }
+            if (Modifier.SEALED in symbol.modifiers && symbol.classKind == ClassKind.INTERFACE) {
+                validateSealedDispatcher(symbol)
+                emitter.tryEmit(symbol)
+                continue
+            }
             val ctor = symbol.primaryConstructor ?: continue
             for (param in ctor.parameters) {
                 walkType(
@@ -92,6 +106,72 @@ class ProtocolMessageProcessor(
             emitter.tryEmit(symbol)
         }
         return deferred
+    }
+
+    private fun validateSealedDispatcher(parent: KSClassDeclaration) {
+        // @DispatchOn parents go through Stage F's value-class discriminator
+        // path; Stage D's @PacketType-uniqueness rules don't model the bit-
+        // packed shape and would produce false positives.
+        if (parent.annotations.any { ann ->
+                ann.shortName.asString() == DISPATCH_ON_SHORT &&
+                    ann.annotationType
+                        .resolve()
+                        .declaration.qualifiedName
+                        ?.asString() == DISPATCH_ON_QNAME
+            }
+        ) {
+            return
+        }
+        val parentName = parent.qualifiedName?.asString() ?: parent.simpleName.asString()
+        val seen = mutableMapOf<Int, String>()
+        for (sub in parent.getSealedSubclasses()) {
+            val subName = sub.qualifiedName?.asString() ?: sub.simpleName.asString()
+            val packetType =
+                sub.annotations.firstOrNull { ann ->
+                    ann.shortName.asString() == PACKET_TYPE_SHORT &&
+                        ann.annotationType
+                            .resolve()
+                            .declaration.qualifiedName
+                            ?.asString() == PACKET_TYPE_QNAME
+                }
+            if (packetType == null) {
+                logger.error(
+                    "@ProtocolMessage sealed parent $parentName has subclass $subName " +
+                        "without @PacketType. Every variant of a simple sealed dispatch " +
+                        "parent must carry @PacketType(value = N) where N in 0..255.",
+                    sub,
+                )
+                continue
+            }
+            val rawValue =
+                packetType.arguments
+                    .firstOrNull { it.name?.asString() == "value" }
+                    ?.value as? Int
+            if (rawValue == null) {
+                logger.error(
+                    "@PacketType on $subName is missing a `value` argument.",
+                    sub,
+                )
+                continue
+            }
+            if (rawValue !in 0..255) {
+                logger.error(
+                    "@PacketType($rawValue) on $subName is out of range — the simple " +
+                        "dispatch discriminator is one byte, so value must be in 0..255.",
+                    sub,
+                )
+                continue
+            }
+            val prior = seen.put(rawValue, subName)
+            if (prior != null) {
+                logger.error(
+                    "@PacketType($rawValue) on $subName duplicates the value already " +
+                        "declared by $prior under the same sealed parent $parentName. " +
+                        "Discriminator values must be unique within a parent.",
+                    sub,
+                )
+            }
+        }
     }
 
     private fun validateWireBytes(
@@ -120,7 +200,11 @@ class ProtocolMessageProcessor(
                 )
                 continue
             }
-            val typeQname = param.type.resolve().declaration.qualifiedName?.asString()
+            val typeQname =
+                param.type
+                    .resolve()
+                    .declaration.qualifiedName
+                    ?.asString()
             val natural = NATURAL_WIDTHS[typeQname]
             if (natural != null && n > natural) {
                 logger.error(
@@ -250,6 +334,10 @@ class ProtocolMessageProcessor(
         private const val LENGTH_FROM_SHORT = "LengthFrom"
         private const val WIRE_BYTES_QNAME = "com.ditchoom.buffer.codec.annotations.WireBytes"
         private const val WIRE_BYTES_SHORT = "WireBytes"
+        private const val PACKET_TYPE_QNAME = "com.ditchoom.buffer.codec.annotations.PacketType"
+        private const val PACKET_TYPE_SHORT = "PacketType"
+        private const val DISPATCH_ON_QNAME = "com.ditchoom.buffer.codec.annotations.DispatchOn"
+        private const val DISPATCH_ON_SHORT = "DispatchOn"
         private const val MAX_DEPTH = 16
 
         private val FORBIDDEN_TYPES =

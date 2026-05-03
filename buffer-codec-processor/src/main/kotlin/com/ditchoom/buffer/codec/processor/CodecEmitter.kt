@@ -19,7 +19,7 @@ import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 import com.squareup.kotlinpoet.TypeSpec
 
 /**
- * Stage A + B + C emitter.
+ * Stage A + B + C + D emitter.
  *
  * Generates a sibling `object ${MessageName}Codec : Codec<${MessageName}>`
  * for each `@ProtocolMessage`-annotated symbol whose shape fits the
@@ -63,20 +63,46 @@ import com.squareup.kotlinpoet.TypeSpec
  *     runtime guard when the UTF-8 byte length exceeds the prefix's
  *     range; for 4-byte prefixes the check is skipped because Int
  *     position deltas can never exceed UInt max.
+ *   - **Stage D — simple sealed dispatch with `@PacketType`.** A
+ *     `@ProtocolMessage sealed interface` whose direct sealed
+ *     subclasses each carry `@PacketType(value)` produces a
+ *     dispatcher object: `decode` reads a 1-byte discriminator and
+ *     delegates to the matched variant codec, `encode` writes the
+ *     discriminator then delegates, `wireSize` is per-variant (literal
+ *     `Exact(1 + N)` for fixed-size variants, `BackPatch` if the
+ *     variant terminal is `@LengthPrefixed val: String`, runtime
+ *     `Exact(1 + variant.bytes)` if the variant terminal is a
+ *     `@LengthPrefixed @ProtocolMessage` body), and `peekFrameSize`
+ *     peeks the discriminator and delegates to the variant's peek
+ *     with `baseOffset + 1`. Unknown discriminator at decode or peek
+ *     time throws `DecodeException` per Locked Decision row 17. Skips
+ *     when the parent carries `@DispatchOn` (Stage F).
  *
  * Anything outside this surface — `@LengthFrom`, `@WhenTrue`,
- * `@RemainingBytes`, `@UseCodec`, sealed dispatch (`@DispatchOn`,
- * `@PacketType`), signed scalars in the manual-byte-assembly path,
- * `@LengthPrefixed` on a non-terminal field — is silently skipped
- * here and picked up by later stages as their capability lands.
+ * `@RemainingBytes`, `@UseCodec`, `@DispatchOn`, signed scalars in
+ * the manual-byte-assembly path, `@LengthPrefixed` on a non-terminal
+ * field — is silently skipped here and picked up by later stages as
+ * their capability lands.
  */
 internal class CodecEmitter(
     private val codeGenerator: CodeGenerator,
     @Suppress("unused") private val logger: KSPLogger,
 ) {
     fun tryEmit(symbol: KSClassDeclaration) {
-        val shape = analyze(symbol) ?: return
         val sourceFile = symbol.containingFile ?: return
+        if (Modifier.SEALED in symbol.modifiers && symbol.classKind == ClassKind.INTERFACE) {
+            val dispatcher = analyzeSealedDispatcher(symbol) ?: return
+            val file = buildSealedDispatcherFileSpec(dispatcher)
+            codeGenerator
+                .createNewFile(
+                    Dependencies(aggregating = false, sourceFile),
+                    dispatcher.packageName,
+                    dispatcher.codecSimpleName,
+                ).bufferedWriter()
+                .use { writer -> file.writeTo(writer) }
+            return
+        }
+        val shape = analyze(symbol) ?: return
         val file = buildFileSpec(shape)
         codeGenerator
             .createNewFile(
@@ -96,7 +122,9 @@ internal class CodecEmitter(
         if (!isData && !isValue) return null
         if (Modifier.SEALED in symbol.modifiers) return null
         if (symbol.annotations.any { it.shortName.asString() == "DispatchOn" }) return null
-        if (symbol.annotations.any { it.shortName.asString() == "PacketType" }) return null
+        // `@PacketType` on a data class is a Stage D variant — emit its standalone
+        // codec via the existing data-class path. The dispatcher (separate emit
+        // path keyed on the sealed parent) calls `${VariantSimpleName}Codec`.
         val ctor = symbol.primaryConstructor ?: return null
         if (ctor.parameters.isEmpty()) return null
         // Value class must have exactly one primary constructor parameter (Kotlin
@@ -117,11 +145,32 @@ internal class CodecEmitter(
         val pkg = symbol.packageName.asString()
         return CodecShape(
             packageName = pkg,
-            messageClassName = ClassName(pkg, ownerSimpleName),
+            messageClassName = classNameOf(symbol),
             ownerSimpleName = ownerSimpleName,
             codecSimpleName = "${ownerSimpleName}Codec",
             fields = fields,
         )
+    }
+
+    /**
+     * Builds a `ClassName` that walks parent declarations so a nested
+     * variant like `Command.Ping` is referenced correctly. Top-level
+     * classes degrade to `ClassName(pkg, simpleName)` — same shape as
+     * before. Stage D variants are written nested inside the sealed
+     * parent (matching the `@PacketType` kdoc), so this is required
+     * for variant `messageClassName` references in the generated
+     * `Codec<Command.Ping>` interface and the dispatcher's `is Ping`
+     * branches.
+     */
+    private fun classNameOf(decl: KSClassDeclaration): ClassName {
+        val pkg = decl.packageName.asString()
+        val chain = mutableListOf<String>()
+        var cursor: com.google.devtools.ksp.symbol.KSDeclaration? = decl
+        while (cursor is KSClassDeclaration) {
+            chain.add(0, cursor.simpleName.asString())
+            cursor = cursor.parentDeclaration
+        }
+        return ClassName(pkg, chain.first(), *chain.drop(1).toTypedArray())
     }
 
     private fun analyzeField(
@@ -174,7 +223,7 @@ internal class CodecEmitter(
             return FieldSpec.LengthPrefixedMessage(
                 name = name,
                 ownerSimpleName = ownerSimpleName,
-                messageType = ClassName(decl.packageName.asString(), decl.simpleName.asString()),
+                messageType = classNameOf(decl),
                 codecType = ClassName(decl.packageName.asString(), "${decl.simpleName.asString()}Codec"),
                 prefixWidth = prefixWidth,
                 prefixWireOrder = messageWireOrder,
@@ -797,6 +846,280 @@ internal class CodecEmitter(
                 if (shiftBits == 0) byteName else "($byteName shl $shiftBits)"
             }
         body.addStatement("val %L = (%L).toUInt()", prefixVar, parts.joinToString(" or "))
+    }
+
+    /**
+     * Stage D — analyze a `@ProtocolMessage sealed interface` parent.
+     *
+     * Returns null (silently skip) when the parent carries
+     * `@DispatchOn` (Stage F surface), when the parent has zero
+     * sealed subclasses, or when any direct subclass fails to fit
+     * Stage A/B/C/D's variant shape (missing `@PacketType`,
+     * out-of-range value, not a `data class`, or its own field shape
+     * is not analyzable). The validator in `ProtocolMessageProcessor`
+     * surfaces user-facing diagnostics for the missing-`@PacketType`
+     * and duplicate-value cases; this method's silence keeps the
+     * emitter consistent with Stage A/B/C "out of shape, no codec".
+     */
+    private fun analyzeSealedDispatcher(symbol: KSClassDeclaration): DispatcherShape? {
+        if (symbol.annotations.any { it.shortName.asString() == "DispatchOn" }) return null
+        val subclasses = symbol.getSealedSubclasses().toList()
+        if (subclasses.isEmpty()) return null
+        val variants = mutableListOf<VariantSpec>()
+        val seenValues = mutableSetOf<Int>()
+        for (sub in subclasses) {
+            if (Modifier.DATA !in sub.modifiers) return null
+            val packetType =
+                sub.annotations.firstOrNull { it.shortName.asString() == "PacketType" }
+                    ?: return null
+            val rawValue =
+                packetType.arguments
+                    .firstOrNull { it.name?.asString() == "value" }
+                    ?.value as? Int ?: return null
+            if (rawValue !in 0..255) return null
+            if (!seenValues.add(rawValue)) return null
+            val variantShape = analyze(sub) ?: return null
+            val variantWireSize = classifyVariantWireSize(variantShape)
+            variants +=
+                VariantSpec(
+                    simpleName = sub.simpleName.asString(),
+                    className = classNameOf(sub),
+                    codecClassName =
+                        ClassName(
+                            sub.packageName.asString(),
+                            "${sub.simpleName.asString()}Codec",
+                        ),
+                    packetTypeValue = rawValue,
+                    wireSize = variantWireSize,
+                )
+        }
+        // Sort by discriminator value so the generated `expected = "one of {...}"`
+        // string and the `when` branches are deterministic, and so the dispatcher
+        // table reads in the natural ascending order.
+        variants.sortBy { it.packetTypeValue }
+        val pkg = symbol.packageName.asString()
+        val parentSimpleName = symbol.simpleName.asString()
+        return DispatcherShape(
+            packageName = pkg,
+            parentClassName = ClassName(pkg, parentSimpleName),
+            parentSimpleName = parentSimpleName,
+            codecSimpleName = "${parentSimpleName}Codec",
+            variants = variants,
+        )
+    }
+
+    private fun classifyVariantWireSize(shape: CodecShape): VariantWireSize =
+        when (shape.fields.lastOrNull()) {
+            is FieldSpec.LengthPrefixedString -> VariantWireSize.BackPatch
+            is FieldSpec.LengthPrefixedMessage -> VariantWireSize.RuntimeExact
+            is FieldSpec.Scalar, null -> {
+                val total =
+                    shape.fields.sumOf { (it as FieldSpec.Scalar).wireBytes }
+                VariantWireSize.LiteralExact(total)
+            }
+        }
+
+    private fun buildSealedDispatcherFileSpec(shape: DispatcherShape): FileSpec {
+        val codecType =
+            TypeSpec
+                .objectBuilder(shape.codecSimpleName)
+                .addSuperinterface(CODEC_CN.parameterizedBy(shape.parentClassName))
+                .addFunction(buildDispatcherDecodeFun(shape))
+                .addFunction(buildDispatcherEncodeFun(shape))
+                .addFunction(buildDispatcherWireSizeFun(shape))
+                .addFunction(buildDispatcherPeekFrameFun(shape))
+                .build()
+        return FileSpec
+            .builder(shape.packageName, shape.codecSimpleName)
+            .addType(codecType)
+            .build()
+    }
+
+    private fun expectedDiscriminatorSet(shape: DispatcherShape): String =
+        shape.variants.joinToString(prefix = "one of {", postfix = "}") {
+            "0x${it.packetTypeValue.toString(16).padStart(2, '0').uppercase()}"
+        }
+
+    private fun buildDispatcherDecodeFun(shape: DispatcherShape): FunSpec {
+        val body = CodeBlock.builder()
+        body.addStatement("val discriminatorPosition = buffer.position()")
+        body.addStatement("val discriminator = buffer.readUByte().toInt()")
+        body.beginControlFlow("return when (discriminator)")
+        for (variant in shape.variants) {
+            body.addStatement(
+                "0x%L -> %T.decode(buffer, context)",
+                variant.packetTypeValue
+                    .toString(16)
+                    .padStart(2, '0')
+                    .uppercase(),
+                variant.codecClassName,
+            )
+        }
+        body.beginControlFlow("else ->")
+        body.addStatement(
+            "throw %T(fieldPath = %S, bufferPosition = discriminatorPosition, expected = %S, actual = %P)",
+            DECODE_EXCEPTION_CN,
+            "${shape.parentSimpleName}.discriminator",
+            expectedDiscriminatorSet(shape),
+            "0x\${discriminator.toString(16).padStart(2, '0').uppercase()}",
+        )
+        body.endControlFlow()
+        body.endControlFlow()
+        return FunSpec
+            .builder("decode")
+            .addModifiers(KModifier.OVERRIDE)
+            .addParameter("buffer", READ_BUFFER_CN)
+            .addParameter("context", DECODE_CONTEXT_CN)
+            .returns(shape.parentClassName)
+            .addCode(body.build())
+            .build()
+    }
+
+    private fun buildDispatcherEncodeFun(shape: DispatcherShape): FunSpec {
+        val body = CodeBlock.builder()
+        body.beginControlFlow("when (value)")
+        for (variant in shape.variants) {
+            body.beginControlFlow("is %T ->", variant.className)
+            body.addStatement(
+                "buffer.writeUByte(0x%L.toUByte())",
+                variant.packetTypeValue
+                    .toString(16)
+                    .padStart(2, '0')
+                    .uppercase(),
+            )
+            body.addStatement(
+                "%T.encode(buffer, value, context)",
+                variant.codecClassName,
+            )
+            body.endControlFlow()
+        }
+        body.endControlFlow()
+        return FunSpec
+            .builder("encode")
+            .addModifiers(KModifier.OVERRIDE)
+            .addParameter("buffer", WRITE_BUFFER_CN)
+            .addParameter("value", shape.parentClassName)
+            .addParameter("context", ENCODE_CONTEXT_CN)
+            .addCode(body.build())
+            .build()
+    }
+
+    private fun buildDispatcherWireSizeFun(shape: DispatcherShape): FunSpec {
+        val body = CodeBlock.builder()
+        body.beginControlFlow("return when (value)")
+        for (variant in shape.variants) {
+            when (val ws = variant.wireSize) {
+                is VariantWireSize.LiteralExact ->
+                    body.addStatement(
+                        "is %T -> %T.Exact(%L)",
+                        variant.className,
+                        WIRE_SIZE_CN,
+                        1 + ws.bytes,
+                    )
+                is VariantWireSize.BackPatch ->
+                    body.addStatement(
+                        "is %T -> %T.BackPatch",
+                        variant.className,
+                        WIRE_SIZE_CN,
+                    )
+                is VariantWireSize.RuntimeExact -> {
+                    body.beginControlFlow("is %T ->", variant.className)
+                    body.addStatement(
+                        "val inner = (%T.wireSize(value, context) as %T.Exact).bytes",
+                        variant.codecClassName,
+                        WIRE_SIZE_CN,
+                    )
+                    body.addStatement("%T.Exact(1 + inner)", WIRE_SIZE_CN)
+                    body.endControlFlow()
+                }
+            }
+        }
+        body.endControlFlow()
+        return FunSpec
+            .builder("wireSize")
+            .addModifiers(KModifier.OVERRIDE)
+            .addParameter("value", shape.parentClassName)
+            .addParameter("context", ENCODE_CONTEXT_CN)
+            .returns(WIRE_SIZE_CN)
+            .addCode(body.build())
+            .build()
+    }
+
+    private fun buildDispatcherPeekFrameFun(shape: DispatcherShape): FunSpec {
+        val body = CodeBlock.builder()
+        body.addStatement(
+            "if (stream.available() - baseOffset < 1) return %T.NeedsMoreData",
+            PEEK_RESULT_CN,
+        )
+        body.addStatement(
+            "val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF",
+        )
+        body.beginControlFlow("return when (discriminator)")
+        for (variant in shape.variants) {
+            body.beginControlFlow(
+                "0x%L ->",
+                variant.packetTypeValue
+                    .toString(16)
+                    .padStart(2, '0')
+                    .uppercase(),
+            )
+            body.beginControlFlow(
+                "when (val inner = %T.peekFrameSize(stream, baseOffset + 1))",
+                variant.codecClassName,
+            )
+            body.addStatement(
+                "is %T.Complete -> %T.Complete(1 + inner.bytes)",
+                PEEK_RESULT_CN,
+                PEEK_RESULT_CN,
+            )
+            body.addStatement("else -> inner")
+            body.endControlFlow()
+            body.endControlFlow()
+        }
+        body.beginControlFlow("else ->")
+        body.addStatement(
+            "throw %T(fieldPath = %S, bufferPosition = baseOffset, expected = %S, actual = %P)",
+            DECODE_EXCEPTION_CN,
+            "${shape.parentSimpleName}.discriminator",
+            expectedDiscriminatorSet(shape),
+            "0x\${discriminator.toString(16).padStart(2, '0').uppercase()}",
+        )
+        body.endControlFlow()
+        body.endControlFlow()
+        return FunSpec
+            .builder("peekFrameSize")
+            .addModifiers(KModifier.OVERRIDE)
+            .addParameter("stream", STREAM_PROCESSOR_CN)
+            .addParameter("baseOffset", INT)
+            .returns(PEEK_RESULT_CN)
+            .addCode(body.build())
+            .build()
+    }
+
+    private data class DispatcherShape(
+        val packageName: String,
+        val parentClassName: ClassName,
+        val parentSimpleName: String,
+        val codecSimpleName: String,
+        val variants: List<VariantSpec>,
+    )
+
+    private data class VariantSpec(
+        val simpleName: String,
+        val className: ClassName,
+        val codecClassName: ClassName,
+        val packetTypeValue: Int,
+        val wireSize: VariantWireSize,
+    )
+
+    private sealed interface VariantWireSize {
+        data class LiteralExact(
+            val bytes: Int,
+        ) : VariantWireSize
+
+        data object RuntimeExact : VariantWireSize
+
+        data object BackPatch : VariantWireSize
     }
 
     private data class CodecShape(
