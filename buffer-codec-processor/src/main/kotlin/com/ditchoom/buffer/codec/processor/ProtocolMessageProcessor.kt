@@ -88,9 +88,49 @@ class ProtocolMessageProcessor(
                 )
             }
             validateAdjacentLengthFrom(symbol, ctor.parameters, payloadType)
+            validateWireBytes(symbol, ctor.parameters)
             emitter.tryEmit(symbol)
         }
         return deferred
+    }
+
+    private fun validateWireBytes(
+        owner: KSClassDeclaration,
+        parameters: List<KSValueParameter>,
+    ) {
+        for (param in parameters) {
+            val ann =
+                param.annotations.firstOrNull { a ->
+                    a.shortName.asString() == WIRE_BYTES_SHORT &&
+                        a.annotationType
+                            .resolve()
+                            .declaration.qualifiedName
+                            ?.asString() == WIRE_BYTES_QNAME
+                } ?: continue
+            val n =
+                ann.arguments
+                    .firstOrNull { it.name?.asString() == "value" }
+                    ?.value as? Int ?: continue
+            val ownerName = owner.qualifiedName?.asString() ?: owner.simpleName.asString()
+            val fieldName = param.name?.asString() ?: "<unknown>"
+            if (n < 1 || n > 8) {
+                logger.error(
+                    "@WireBytes($n) on $ownerName.$fieldName is out of range — width must be 1..8 bytes.",
+                    param,
+                )
+                continue
+            }
+            val typeQname = param.type.resolve().declaration.qualifiedName?.asString()
+            val natural = NATURAL_WIDTHS[typeQname]
+            if (natural != null && n > natural) {
+                logger.error(
+                    "@WireBytes($n) on $ownerName.$fieldName exceeds the natural width of " +
+                        "$typeQname ($natural bytes). @WireBytes narrows the wire encoding; " +
+                        "it cannot widen past the Kotlin type's range.",
+                    param,
+                )
+            }
+        }
     }
 
     private fun validateAdjacentLengthFrom(
@@ -208,6 +248,8 @@ class ProtocolMessageProcessor(
         private const val PAYLOAD_QNAME = "com.ditchoom.buffer.codec.Payload"
         private const val LENGTH_FROM_QNAME = "com.ditchoom.buffer.codec.annotations.LengthFrom"
         private const val LENGTH_FROM_SHORT = "LengthFrom"
+        private const val WIRE_BYTES_QNAME = "com.ditchoom.buffer.codec.annotations.WireBytes"
+        private const val WIRE_BYTES_SHORT = "WireBytes"
         private const val MAX_DEPTH = 16
 
         private val FORBIDDEN_TYPES =
@@ -217,6 +259,18 @@ class ProtocolMessageProcessor(
                 "com.ditchoom.buffer.PlatformBuffer",
                 "kotlin.ByteArray",
                 "java.nio.ByteBuffer",
+            )
+
+        private val NATURAL_WIDTHS =
+            mapOf(
+                "kotlin.UByte" to 1,
+                "kotlin.Byte" to 1,
+                "kotlin.UShort" to 2,
+                "kotlin.Short" to 2,
+                "kotlin.UInt" to 4,
+                "kotlin.Int" to 4,
+                "kotlin.ULong" to 8,
+                "kotlin.Long" to 8,
             )
     }
 }

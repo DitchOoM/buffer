@@ -19,32 +19,41 @@ import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 import com.squareup.kotlinpoet.TypeSpec
 
 /**
- * Stage A emitter (slices 1–3).
+ * Stage A + B emitter.
  *
  * Generates a sibling `object ${MessageName}Codec : Codec<${MessageName}>`
- * for each `@ProtocolMessage` data class whose constructor parameters
- * fit the supported shape:
+ * for each `@ProtocolMessage`-annotated symbol whose shape fits the
+ * supported surface:
  *
- *   - Zero or more leading **fixed-width unsigned scalar** fields
- *     (`UByte`, `UShort`, `UInt`, `ULong`), each with an optional
- *     `@WireOrder` per-field override of the message-level wireOrder.
- *   - Optionally, exactly **one trailing `@LengthPrefixed` field** whose
- *     declared type is itself a `@ProtocolMessage` data class (R3
- *     widening). The prefix width follows the `LengthPrefix` enum
- *     (`Byte` / `Short` / `Int`); prefix bytes are written and read in
- *     the message-level wireOrder.
+ *   - **Stage A — fixed-size unsigned scalar fields.** A `data class`
+ *     (or `@JvmInline value class`) with one or more `UByte` /
+ *     `UShort` / `UInt` / `ULong` fields, each with optional
+ *     `@WireOrder` per-field overrides of the message-level wireOrder.
+ *   - **Stage A — `@LengthPrefixed @ProtocolMessage`-typed body.** A
+ *     trailing field of `@ProtocolMessage` data class type, length-
+ *     prefixed by `LengthPrefix.{Byte|Short|Int}` in the message wire
+ *     order; emitter generates `setLimit` + restore decode, prefix-
+ *     peek `peekFrameSize`, and the slice-4 lock #4 `Int.MAX_VALUE`
+ *     overflow guards.
+ *   - **Stage B — `@WireBytes(N)` narrowing.** A scalar field whose
+ *     wire width is narrower than the Kotlin type's natural size.
+ *     Always uses manual byte assembly; effective byte order falls
+ *     back to `Big` (network) when neither the field nor the message
+ *     declares one. Encode emits an `EncodeException` runtime guard
+ *     when the value exceeds the narrowed range.
+ *   - **Stage B — value-class wrapper at the top level.** A
+ *     `@JvmInline value class` with a single inner unsigned scalar is
+ *     treated as a one-field shape. The codec wraps the read scalar
+ *     into the value class on decode and unwraps it via the inner
+ *     property name on encode. Bit-packed logical fields exposed as
+ *     getters in user code are invisible to the emitter (they
+ *     introduce no wire format).
  *
- * Anything outside this shape — `@LengthFrom`, `@WhenTrue`, `@WireBytes`,
+ * Anything outside this surface — `@LengthFrom`, `@WhenTrue`,
  * `@RemainingBytes`, `@UseCodec`, sealed dispatch (`@DispatchOn`,
- * `@PacketType`), signed scalars, `String` fields, `@LengthPrefixed` on
- * a non-terminal field — is silently skipped here and picked up by
+ * `@PacketType`), signed scalars, `String` fields, `@LengthPrefixed`
+ * on a non-terminal field — is silently skipped here and picked up by
  * later stages as their capability lands.
- *
- * Manual byte assembly is used whenever the resolved wire order is
- * `Big` or `Little` so the emitted codec is independent of the runtime
- * buffer's byte order — the `wireOrder` of a `@ProtocolMessage` is a
- * property of the message, not the buffer (matches the hand-written
- * Phase 10 reference codecs).
  */
 internal class CodecEmitter(
     private val codeGenerator: CodeGenerator,
@@ -67,13 +76,17 @@ internal class CodecEmitter(
 
     private fun analyze(symbol: KSClassDeclaration): CodecShape? {
         if (symbol.classKind != ClassKind.CLASS) return null
-        if (Modifier.DATA !in symbol.modifiers) return null
+        val isData = Modifier.DATA in symbol.modifiers
+        val isValue = Modifier.VALUE in symbol.modifiers
+        if (!isData && !isValue) return null
         if (Modifier.SEALED in symbol.modifiers) return null
-        if (Modifier.VALUE in symbol.modifiers) return null
         if (symbol.annotations.any { it.shortName.asString() == "DispatchOn" }) return null
         if (symbol.annotations.any { it.shortName.asString() == "PacketType" }) return null
         val ctor = symbol.primaryConstructor ?: return null
         if (ctor.parameters.isEmpty()) return null
+        // Value class must have exactly one primary constructor parameter (Kotlin
+        // already enforces this, but we add a defensive guard rather than relying on it).
+        if (isValue && ctor.parameters.size != 1) return null
 
         val ownerSimpleName = symbol.simpleName.asString()
         val messageWireOrder = readMessageWireOrder(symbol)
@@ -90,6 +103,7 @@ internal class CodecEmitter(
         return CodecShape(
             packageName = pkg,
             messageClassName = ClassName(pkg, ownerSimpleName),
+            ownerSimpleName = ownerSimpleName,
             codecSimpleName = "${ownerSimpleName}Codec",
             fields = fields,
         )
@@ -102,10 +116,12 @@ internal class CodecEmitter(
         isTerminal: Boolean,
     ): FieldSpec? {
         var lengthPrefixed: KSAnnotation? = null
+        var wireBytesAnn: KSAnnotation? = null
         for (ann in param.annotations) {
             when (ann.shortName.asString()) {
                 "WireOrder" -> { /* allowed on scalars */ }
                 "LengthPrefixed" -> lengthPrefixed = ann
+                "WireBytes" -> wireBytesAnn = ann
                 else -> return null
             }
         }
@@ -115,10 +131,9 @@ internal class CodecEmitter(
         if (type.isMarkedNullable) return null
 
         if (lengthPrefixed != null) {
-            // Slice 3: @LengthPrefixed on a @ProtocolMessage data class field,
-            // and only when this is the terminal parameter (the typical wire
-            // shape; non-terminal length-prefixed payloads are out of scope
-            // for Stage A).
+            // `@LengthPrefixed` and `@WireBytes` together is meaningless and
+            // out of scope for this emitter; bail rather than try to interpret.
+            if (wireBytesAnn != null) return null
             if (!isTerminal) return null
             val decl = type.declaration as? KSClassDeclaration ?: return null
             val isProtocolMessage =
@@ -145,7 +160,18 @@ internal class CodecEmitter(
         val qualified = type.declaration.qualifiedName?.asString() ?: return null
         val kind = SUPPORTED_SCALARS[qualified] ?: return null
         val resolved = readFieldWireOrder(param) ?: messageWireOrder
-        return FieldSpec.Scalar(name = name, kind = kind, resolvedWireOrder = resolved)
+        val wireBytes = wireBytesAnn?.let { readWireBytes(it) } ?: kind.width
+        // R4 narrows what the emitter accepts; the validator emits the actual
+        // diagnostic. Skip emission for unsupported widths so generated code
+        // never references an out-of-bounds bit shift.
+        if (wireBytes < 1 || wireBytes > 8) return null
+        if (wireBytes > kind.width) return null
+        return FieldSpec.Scalar(
+            name = name,
+            kind = kind,
+            resolvedWireOrder = resolved,
+            wireBytes = wireBytes,
+        )
     }
 
     private fun readMessageWireOrder(symbol: KSClassDeclaration): Endianness {
@@ -194,9 +220,16 @@ internal class CodecEmitter(
             "Byte" -> 1
             "Short" -> 2
             "Int" -> 4
-            // Default per Annotations.kt: LengthPrefix.Short
+            // Default per Annotations.kt: LengthPrefix.Short.
             else -> 2
         }
+    }
+
+    private fun readWireBytes(ann: KSAnnotation): Int {
+        val arg =
+            ann.arguments.firstOrNull { it.name?.asString() == "value" }?.value
+                ?: ann.arguments.firstOrNull()?.value
+        return (arg as? Int) ?: -1
     }
 
     private fun buildFileSpec(shape: CodecShape): FileSpec {
@@ -239,7 +272,7 @@ internal class CodecEmitter(
         val body = CodeBlock.builder()
         for (field in shape.fields) {
             when (field) {
-                is FieldSpec.Scalar -> appendEncodeScalar(body, field)
+                is FieldSpec.Scalar -> appendEncodeScalar(body, field, shape.ownerSimpleName)
                 is FieldSpec.LengthPrefixedMessage -> appendEncodeLengthPrefixed(body, field)
             }
         }
@@ -263,10 +296,10 @@ internal class CodecEmitter(
                 .returns(WIRE_SIZE_CN)
         val terminal = shape.fields.lastOrNull() as? FieldSpec.LengthPrefixedMessage
         if (terminal == null) {
-            val total = shape.fields.sumOf { (it as FieldSpec.Scalar).kind.width }
+            val total = shape.fields.sumOf { (it as FieldSpec.Scalar).wireBytes }
             builder.addStatement("return %T.Exact(%L)", WIRE_SIZE_CN, total)
         } else {
-            val headerBytes = scalarPrefixBytes(shape) + terminal.prefixWidth
+            val headerBytes = scalarHeaderBytes(shape) + terminal.prefixWidth
             builder.addStatement(
                 "val %L = (%T.wireSize(value.%L, context) as %T.Exact).bytes",
                 "${terminal.name}Size",
@@ -294,7 +327,7 @@ internal class CodecEmitter(
                 .returns(PEEK_RESULT_CN)
         val terminal = shape.fields.lastOrNull() as? FieldSpec.LengthPrefixedMessage
         if (terminal == null) {
-            val total = shape.fields.sumOf { (it as FieldSpec.Scalar).kind.width }
+            val total = shape.fields.sumOf { (it as FieldSpec.Scalar).wireBytes }
             builder.addStatement(
                 "return if (stream.available() - baseOffset >= %L) %T.Complete(%L) else %T.NeedsMoreData",
                 total,
@@ -304,7 +337,7 @@ internal class CodecEmitter(
             )
             return builder.build()
         }
-        val prefixOffset = scalarPrefixBytes(shape)
+        val prefixOffset = scalarHeaderBytes(shape)
         val headerBytes = prefixOffset + terminal.prefixWidth
         val body = CodeBlock.builder()
         body.addStatement(
@@ -337,29 +370,34 @@ internal class CodecEmitter(
         return builder.build()
     }
 
-    private fun scalarPrefixBytes(shape: CodecShape): Int =
+    private fun scalarHeaderBytes(shape: CodecShape): Int =
         shape.fields
             .filterIsInstance<FieldSpec.Scalar>()
-            .sumOf { it.kind.width }
+            .sumOf { it.wireBytes }
 
     private fun appendDecodeScalar(
         body: CodeBlock.Builder,
         field: FieldSpec.Scalar,
     ) {
-        when (field.resolvedWireOrder) {
-            Endianness.Default -> {
-                val read =
-                    when (field.kind) {
-                        ScalarKind.UByte -> "readUByte"
-                        ScalarKind.UShort -> "readUShort"
-                        ScalarKind.UInt -> "readUInt"
-                        ScalarKind.ULong -> "readULong"
-                    }
-                body.addStatement("val %L = buffer.%L()", field.name, read)
-            }
-            Endianness.Big -> appendManualScalarDecode(body, field, bigEndian = true)
-            Endianness.Little -> appendManualScalarDecode(body, field, bigEndian = false)
+        val needsManual =
+            field.wireBytes != field.kind.width || field.resolvedWireOrder != Endianness.Default
+        if (!needsManual) {
+            val read =
+                when (field.kind) {
+                    ScalarKind.UByte -> "readUByte"
+                    ScalarKind.UShort -> "readUShort"
+                    ScalarKind.UInt -> "readUInt"
+                    ScalarKind.ULong -> "readULong"
+                }
+            body.addStatement("val %L = buffer.%L()", field.name, read)
+            return
         }
+        val bigEndian =
+            when (field.resolvedWireOrder) {
+                Endianness.Little -> false
+                Endianness.Big, Endianness.Default -> true
+            }
+        appendManualScalarDecode(body, field, bigEndian)
     }
 
     private fun appendManualScalarDecode(
@@ -367,12 +405,12 @@ internal class CodecEmitter(
         field: FieldSpec.Scalar,
         bigEndian: Boolean,
     ) {
-        val width = field.kind.width
-        if (width == 1) {
+        val width = field.wireBytes
+        if (field.kind == ScalarKind.UByte && width == 1) {
             body.addStatement("val %L = buffer.readUByte()", field.name)
             return
         }
-        val accumulator = if (width == 8) "toULong" else "toUInt"
+        val accumulator = if (width >= 5) "toULong" else "toUInt"
         for (i in 0 until width) {
             body.addStatement(
                 "val %L = buffer.readUByte().%L()",
@@ -386,11 +424,12 @@ internal class CodecEmitter(
                 val shiftBits = if (bigEndian) (width - 1 - i) * 8 else i * 8
                 if (shiftBits == 0) byteName else "($byteName shl $shiftBits)"
             }
-        val combined = "(${parts.joinToString(" or ")})"
+        val combined = if (parts.size == 1) parts[0] else "(${parts.joinToString(" or ")})"
         val narrow =
             when (field.kind) {
+                ScalarKind.UByte -> ".toUByte()"
                 ScalarKind.UShort -> ".toUShort()"
-                ScalarKind.UByte, ScalarKind.UInt, ScalarKind.ULong -> ""
+                ScalarKind.UInt, ScalarKind.ULong -> ""
             }
         body.addStatement("val %L = %L%L", field.name, combined, narrow)
     }
@@ -398,22 +437,54 @@ internal class CodecEmitter(
     private fun appendEncodeScalar(
         body: CodeBlock.Builder,
         field: FieldSpec.Scalar,
+        ownerSimpleName: String,
     ) {
+        appendEncodeGuard(body, field, ownerSimpleName)
         val accessor = "value.${field.name}"
-        when (field.resolvedWireOrder) {
-            Endianness.Default -> {
-                val write =
-                    when (field.kind) {
-                        ScalarKind.UByte -> "writeUByte"
-                        ScalarKind.UShort -> "writeUShort"
-                        ScalarKind.UInt -> "writeUInt"
-                        ScalarKind.ULong -> "writeULong"
-                    }
-                body.addStatement("buffer.%L(%L)", write, accessor)
-            }
-            Endianness.Big -> appendManualScalarEncode(body, field, accessor, bigEndian = true)
-            Endianness.Little -> appendManualScalarEncode(body, field, accessor, bigEndian = false)
+        val needsManual =
+            field.wireBytes != field.kind.width || field.resolvedWireOrder != Endianness.Default
+        if (!needsManual) {
+            val write =
+                when (field.kind) {
+                    ScalarKind.UByte -> "writeUByte"
+                    ScalarKind.UShort -> "writeUShort"
+                    ScalarKind.UInt -> "writeUInt"
+                    ScalarKind.ULong -> "writeULong"
+                }
+            body.addStatement("buffer.%L(%L)", write, accessor)
+            return
         }
+        val bigEndian =
+            when (field.resolvedWireOrder) {
+                Endianness.Little -> false
+                Endianness.Big, Endianness.Default -> true
+            }
+        appendManualScalarEncode(body, field, accessor, bigEndian)
+    }
+
+    private fun appendEncodeGuard(
+        body: CodeBlock.Builder,
+        field: FieldSpec.Scalar,
+        ownerSimpleName: String,
+    ) {
+        if (field.wireBytes >= field.kind.width) return
+        val accessor = "value.${field.name}"
+        val (lhs, maxLit) =
+            when (field.kind) {
+                ScalarKind.ULong -> accessor to "((1uL shl ${8 * field.wireBytes}) - 1uL)"
+                ScalarKind.UInt -> accessor to "((1u shl ${8 * field.wireBytes}) - 1u)"
+                ScalarKind.UShort -> "$accessor.toUInt()" to "((1u shl ${8 * field.wireBytes}) - 1u)"
+                ScalarKind.UByte -> return // wireBytes < 1 is rejected by analyzeField
+            }
+        val maxValue = (1L shl (8 * field.wireBytes)) - 1
+        body.beginControlFlow("if (%L > %L)", lhs, maxLit)
+        body.addStatement(
+            "throw %T(fieldPath = %S, reason = %S)",
+            ENCODE_EXCEPTION_CN,
+            "$ownerSimpleName.${field.name}",
+            "value exceeds @WireBytes(${field.wireBytes}) range (max $maxValue)",
+        )
+        body.endControlFlow()
     }
 
     private fun appendManualScalarEncode(
@@ -422,19 +493,18 @@ internal class CodecEmitter(
         accessor: String,
         bigEndian: Boolean,
     ) {
-        val width = field.kind.width
-        if (width == 1) {
+        val width = field.wireBytes
+        if (field.kind == ScalarKind.UByte && width == 1) {
             body.addStatement("buffer.writeUByte(%L)", accessor)
             return
         }
         val widePromote =
             when (field.kind) {
-                ScalarKind.UShort -> ".toUInt()"
+                ScalarKind.UByte, ScalarKind.UShort -> ".toUInt()"
                 ScalarKind.UInt, ScalarKind.ULong -> ""
-                ScalarKind.UByte -> error("unreachable: width==1 returned above")
             }
         val wide = "$accessor$widePromote"
-        val maskLit = if (width == 8) "0xFFuL" else "0xFFu"
+        val maskLit = if (width >= 5) "0xFFuL" else "0xFFu"
         for (i in 0 until width) {
             val shiftBits = if (bigEndian) (width - 1 - i) * 8 else i * 8
             val expr =
@@ -488,7 +558,7 @@ internal class CodecEmitter(
             when (wireOrder) {
                 Endianness.Big -> true
                 Endianness.Little -> false
-                Endianness.Default -> true // network byte order
+                Endianness.Default -> true
             }
         for (i in 0 until prefixWidth) {
             body.addStatement(
@@ -589,6 +659,7 @@ internal class CodecEmitter(
     private data class CodecShape(
         val packageName: String,
         val messageClassName: ClassName,
+        val ownerSimpleName: String,
         val codecSimpleName: String,
         val fields: List<FieldSpec>,
     )
@@ -600,6 +671,7 @@ internal class CodecEmitter(
             override val name: String,
             val kind: ScalarKind,
             val resolvedWireOrder: Endianness,
+            val wireBytes: Int,
         ) : FieldSpec
 
         data class LengthPrefixedMessage(
@@ -647,5 +719,6 @@ internal class CodecEmitter(
         private val PEEK_RESULT_CN = ClassName("com.ditchoom.buffer.codec", "PeekResult")
         private val STREAM_PROCESSOR_CN = ClassName("com.ditchoom.buffer.stream", "StreamProcessor")
         private val DECODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "DecodeException")
+        private val ENCODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "EncodeException")
     }
 }

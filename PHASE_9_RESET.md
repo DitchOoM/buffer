@@ -119,6 +119,7 @@ sessions can scan what's settled before reopening anything.
 | 10 | Generated-code language: KotlinPoet via KSP `CodeGenerator`. Emit one file per `@ProtocolMessage` at `<source-package>/<MessageName>Codec.kt`, hooked through `Dependencies(aggregating = false, sourceFile)` for incremental compilation. Driven by Stage A. |
 | 11 | Codec object placement: sibling top-level `object MyMessageCodec`, not `MyMessage.Codec` companion. Matches the Phase 10 hand-written reference codecs (`RiffChunkHeaderCodec`, `WavFmtBodyCodec`, `WavFmtChunkCodec`); keeps generated source out of the data-class declaration file and avoids companion-on-data-class equals/hashCode/copy noise. Driven by Stage A. |
 | 12 | `peekFrameSize` emission rule: emit it whenever the frame size is statically determinable from the wire format (fixed-size sum, or leading `@LengthPrefixed` whose prefix is peek-readable). Default `PeekResult.NoFraming` only when the wire format genuinely doesn't allow it. Strictly more capability than the hand-written reference codecs (which omit it on bodies that aren't typical stream roots) — no test or doctrine row contradicts this. Driven by Stage A. |
+| 13 | `@WireOrder` and `@WireBytes` stay separate. They encode different concerns: `@WireOrder(Endianness)` is byte order for natural-width fields; `@WireBytes(N)` is wire width when narrower than the Kotlin type's natural size. Folding would force every field to declare both even when one is redundant. Bit-packed fixed-size headers (e.g., `MqttFixedHeader`, `MySqlPacketHeader`) are expressed as `@JvmInline value class`-of-raw with bit-shift getters in user code — no `@WireBytes` needed because the structure packs into a natural-width scalar. Driven by Stage B. |
 
 ## Deferred decisions
 
@@ -132,7 +133,6 @@ decision from a concrete vector beats deciding in the abstract.
 | `@LengthFrom("fieldName")` resolution          | String DSL vs property reference vs compile-time resolved name             | Stage E         |
 | `@WhenTrue("flags.willFlag")` DSL              | Dotted-string DSL with KSP validation against actual field path            | Stage E         |
 | `LengthPrefix` enum shape                      | `Byte` / `Short` / `Int` / `Varint` vs `Fixed(Int)` / `Variable`           | Stage C         |
-| `@WireOrder` + `@WireBytes` consolidation      | Keep separate per Section 8.4 of CLAUDE.md, or fold into one annotation    | Stage B         |
 | `@UseCodec` `expect`/`actual` resolution path  | Direct call to `expect` object, linker resolves; KSP doesn't inspect actual | Stage H         |
 | `data object` vs empty `data class`            | `data class` for dispatcher cleanliness per item 5 above                   | Stage F         |
 | Field-path tracking mechanism                  | `PathContext` facet pushed/popped through nested codec calls               | Stage E         |
