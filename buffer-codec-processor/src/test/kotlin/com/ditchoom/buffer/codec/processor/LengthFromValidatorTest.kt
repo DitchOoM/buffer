@@ -204,6 +204,172 @@ class LengthFromValidatorTest {
         )
     }
 
+    @Test
+    fun acceptsNonAdjacentNumericSibling() {
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.annotations.LengthFrom
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+                @ProtocolMessage
+                data class RemoteHeader(
+                    val payloadLength: UShort,
+                    val flags: UByte,
+                    val correlationId: UInt,
+                    @LengthFrom("payloadLength") val payload: String,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+        assertFalse(
+            result.messages.contains("@LengthFrom"),
+            "valid non-adjacent @LengthFrom must compile silently. Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
+    fun firesWhenSiblingIsMissingAndListsAvailable() {
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.annotations.LengthFrom
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+                @ProtocolMessage
+                data class Msg(
+                    val expectedLength: UShort,
+                    val flags: UByte,
+                    @LengthFrom("missing") val payload: String,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("test.Msg.payload"),
+            "diagnostic should reference the offending field. Messages:\n${result.messages}",
+        )
+        assertTrue(
+            result.messages.contains("`missing`"),
+            "diagnostic should name the missing field. Messages:\n${result.messages}",
+        )
+        assertTrue(
+            result.messages.contains("expectedLength"),
+            "diagnostic should list available numeric siblings (expectedLength). Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
+    fun firesWhenSiblingIsDeclaredAfterBoundField() {
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.annotations.LengthFrom
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+                @ProtocolMessage
+                data class Msg(
+                    @LengthFrom("payloadLength") val payload: String,
+                    val payloadLength: UShort,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("declared at-or-after"),
+            "diagnostic should explain the declaration-order rule. Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
+    fun firesWhenSiblingIsNonNumeric() {
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.annotations.LengthFrom
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+                @ProtocolMessage
+                data class Msg(
+                    val tag: String,
+                    val flags: UByte,
+                    @LengthFrom("tag") val payload: String,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("test.Msg.payload"),
+            "diagnostic should reference the offending field. Messages:\n${result.messages}",
+        )
+        assertTrue(
+            result.messages.contains("non-nullable numeric scalar"),
+            "diagnostic should name the numeric-source rule. Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
+    fun firesWhenBoundFieldIsNotString() {
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.annotations.LengthFrom
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+                @ProtocolMessage
+                data class Msg(
+                    val payloadLength: UShort,
+                    val flags: UByte,
+                    @LengthFrom("payloadLength") val payload: Int,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("test.Msg.payload"),
+            "diagnostic should reference the offending field. Messages:\n${result.messages}",
+        )
+        assertTrue(
+            result.messages.contains("non-nullable `String`"),
+            "diagnostic should name the field-type universe restriction. Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
+    fun firesWhenBoundFieldIsNullableString() {
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.annotations.LengthFrom
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+                @ProtocolMessage
+                data class Msg(
+                    val payloadLength: UShort,
+                    val flags: UByte,
+                    @LengthFrom("payloadLength") val payload: String?,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("non-nullable `String`"),
+            "diagnostic should name the non-nullable rule. Messages:\n${result.messages}",
+        )
+    }
+
     private fun compile(
         @Language("kotlin") source: String,
     ): JvmCompilationResult =

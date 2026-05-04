@@ -54,6 +54,18 @@ import com.google.devtools.ksp.validate
  *     errors. Sealed parents carrying `@DispatchOn` are skipped
  *     (Stage F surface).
  *
+ *   - **Stage E `@LengthFrom` shape (Locked Decision row 18, slice 4).**
+ *     For `@LengthFrom("siblingField") val payload: T`: the bound
+ *     field type must be `String` (Stage E's field-type universe per
+ *     row 18); the referenced parameter must exist as a sibling
+ *     declared before the bound parameter, and must resolve to a
+ *     numeric type (`Byte` / `Short` / `Int` / `Long` /
+ *     `UByte` / `UShort` / `UInt` / `ULong`). Diagnostics list the
+ *     numeric `val` siblings declared before the bound field. The
+ *     adjacent-`@LengthFrom` migration suggestion (R1) is independent
+ *     and continues to fire when the referenced sibling is the
+ *     immediately-preceding parameter.
+ *
  *   - **Stage E `@WhenTrue` shape (Locked Decision row 19, slices 2–3).**
  *     The bound parameter type must be nullable. Two source-expression
  *     forms are supported:
@@ -121,6 +133,7 @@ class ProtocolMessageProcessor(
                 )
             }
             validateAdjacentLengthFrom(symbol, ctor.parameters, payloadType)
+            validateLengthFrom(symbol, ctor.parameters)
             validateWireBytes(symbol, ctor.parameters)
             validateWhenTrue(symbol, ctor.parameters)
             emitter.tryEmit(symbol)
@@ -460,6 +473,116 @@ class ProtocolMessageProcessor(
         }
     }
 
+    /**
+     * Stage E slice 4 — `@LengthFrom` shape validation (Locked Decision row 18).
+     *
+     * Independent from R1 (adjacent-`@LengthFrom` migration suggestion):
+     *   - Bound field type must be `String` — Stage E's field-type
+     *     universe (row 18). `ByteArray`, nested `@ProtocolMessage`,
+     *     and `@Payload` slots widen this in later stages.
+     *   - Referenced sibling must exist as a sibling of the bound
+     *     parameter; diagnostics list available numeric siblings
+     *     declared before the bound field.
+     *   - Referenced sibling must be declared *before* the bound
+     *     parameter so the length is in scope at decode time.
+     *   - Referenced sibling type must be a non-nullable numeric
+     *     scalar (`Byte` / `Short` / `Int` / `Long` / `UByte` /
+     *     `UShort` / `UInt` / `ULong`). Numeric value classes are
+     *     deferred until a vector requires them.
+     */
+    private fun validateLengthFrom(
+        owner: KSClassDeclaration,
+        parameters: List<KSValueParameter>,
+    ) {
+        val ownerName = owner.qualifiedName?.asString() ?: owner.simpleName.asString()
+        for ((index, param) in parameters.withIndex()) {
+            val ann =
+                param.annotations.firstOrNull { a ->
+                    a.shortName.asString() == LENGTH_FROM_SHORT &&
+                        a.annotationType
+                            .resolve()
+                            .declaration.qualifiedName
+                            ?.asString() == LENGTH_FROM_QNAME
+                } ?: continue
+            val referenced =
+                ann.arguments
+                    .firstOrNull { it.name?.asString() == "field" }
+                    ?.value as? String ?: continue
+            val fieldName = param.name?.asString() ?: "<unknown>"
+
+            val type = param.type.resolve()
+            val typeQname = type.declaration.qualifiedName?.asString()
+            if (typeQname != STRING_QNAME || type.isMarkedNullable) {
+                val displayed = typeQname ?: "<unresolved>"
+                val nullableSuffix = if (type.isMarkedNullable) "?" else ""
+                logger.error(
+                    "@LengthFrom(\"$referenced\") on $ownerName.$fieldName requires the bound " +
+                        "field to be a non-nullable `String`, but it is `$displayed$nullableSuffix`. " +
+                        "Locked Decision row 18 limits the Stage E `@LengthFrom` field-type " +
+                        "universe to `String`; `ByteArray`, nested `@ProtocolMessage`, and " +
+                        "`@Payload` slots are deferred to later stages.",
+                    param,
+                )
+                continue
+            }
+
+            val sourceIndex = parameters.indexOfFirst { it.name?.asString() == referenced }
+            if (sourceIndex < 0) {
+                val available =
+                    parameters
+                        .take(index)
+                        .mapNotNull { p ->
+                            val n = p.name?.asString() ?: return@mapNotNull null
+                            val resolved = p.type.resolve()
+                            val q =
+                                resolved
+                                    .declaration
+                                    .qualifiedName
+                                    ?.asString()
+                            if (q in NUMERIC_SCALAR_QNAMES && !resolved.isMarkedNullable) n else null
+                        }
+                logger.error(
+                    "@LengthFrom(\"$referenced\") on $ownerName.$fieldName references " +
+                        "`$referenced`, which is not a constructor parameter of $ownerName. " +
+                        if (available.isEmpty()) {
+                            "$ownerName has no numeric siblings declared before $fieldName."
+                        } else {
+                            "Available numeric siblings declared before $fieldName: ${available.joinToString()}."
+                        },
+                    param,
+                )
+                continue
+            }
+            if (sourceIndex >= index) {
+                logger.error(
+                    "@LengthFrom(\"$referenced\") on $ownerName.$fieldName references " +
+                        "$ownerName.$referenced, which is declared at-or-after $fieldName in the " +
+                        "constructor parameter list. The length-carrier sibling must be declared " +
+                        "before the bound field so its value is available at decode time.",
+                    param,
+                )
+                continue
+            }
+
+            val sourceParam = parameters[sourceIndex]
+            val sourceType = sourceParam.type.resolve()
+            val sourceQname = sourceType.declaration.qualifiedName?.asString()
+            if (sourceQname !in NUMERIC_SCALAR_QNAMES || sourceType.isMarkedNullable) {
+                val displayed = sourceQname ?: "<unresolved>"
+                val nullableSuffix = if (sourceType.isMarkedNullable) "?" else ""
+                logger.error(
+                    "@LengthFrom(\"$referenced\") on $ownerName.$fieldName requires source " +
+                        "`$ownerName.$referenced` to be a non-nullable numeric scalar " +
+                        "(Byte / Short / Int / Long / UByte / UShort / UInt / ULong), but it " +
+                        "is `$displayed$nullableSuffix`. Locked Decision row 18 limits the source " +
+                        "type to non-nullable numeric kinds.",
+                    param,
+                )
+                continue
+            }
+        }
+    }
+
     private fun walkType(
         type: KSType,
         owner: KSClassDeclaration,
@@ -539,7 +662,20 @@ class ProtocolMessageProcessor(
         private const val WHEN_TRUE_QNAME = "com.ditchoom.buffer.codec.annotations.WhenTrue"
         private const val WHEN_TRUE_SHORT = "WhenTrue"
         private const val BOOLEAN_QNAME = "kotlin.Boolean"
+        private const val STRING_QNAME = "kotlin.String"
         private const val MAX_DEPTH = 16
+
+        private val NUMERIC_SCALAR_QNAMES =
+            setOf(
+                "kotlin.Byte",
+                "kotlin.Short",
+                "kotlin.Int",
+                "kotlin.Long",
+                "kotlin.UByte",
+                "kotlin.UShort",
+                "kotlin.UInt",
+                "kotlin.ULong",
+            )
 
         private val FORBIDDEN_TYPES =
             setOf(

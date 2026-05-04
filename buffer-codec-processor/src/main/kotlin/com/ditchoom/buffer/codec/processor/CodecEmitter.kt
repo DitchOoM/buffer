@@ -186,11 +186,13 @@ internal class CodecEmitter(
         // Slice 2 restriction: a Conditional field can appear only at the terminal
         // position. Non-terminal Conditional needs the more general peekFrameSize
         // walk that interleaves prefix-chase + conditional-byte addition; that lands
-        // alongside the slice 5 MQTT v3 CONNECT vector. Silently skip emit for the
-        // non-terminal case for now (the validator's `validateWhenTrue` still
-        // surfaces shape diagnostics).
+        // alongside the slice 5 MQTT v3 CONNECT vector. Slice 4 restriction:
+        // LengthFromString is also terminal-only — its peek path follows the same
+        // fixed-prefix-then-body shape as the other variable-length terminals.
+        // Silently skip emit for the non-terminal case (validators still fire).
         for ((index, field) in fields.withIndex()) {
             if (field is FieldSpec.Conditional && index != fields.lastIndex) return null
+            if (field is FieldSpec.LengthFromString && index != fields.lastIndex) return null
         }
 
         val pkg = symbol.packageName.asString()
@@ -249,11 +251,13 @@ internal class CodecEmitter(
             )
         }
         var lengthPrefixed: KSAnnotation? = null
+        var lengthFromAnn: KSAnnotation? = null
         var wireBytesAnn: KSAnnotation? = null
         for (ann in param.annotations) {
             when (ann.shortName.asString()) {
                 "WireOrder" -> { /* allowed on scalars */ }
                 "LengthPrefixed" -> lengthPrefixed = ann
+                "LengthFrom" -> lengthFromAnn = ann
                 "WireBytes" -> wireBytesAnn = ann
                 else -> return null
             }
@@ -262,6 +266,22 @@ internal class CodecEmitter(
         val type = param.type.resolve()
         if (type.isError) return null
         if (type.isMarkedNullable) return null
+
+        if (lengthFromAnn != null) {
+            // Stage E slice 4 — `@LengthFrom("siblingField") val: String`.
+            // Mutually exclusive with `@LengthPrefixed` / `@WireBytes` on the
+            // same parameter; the validator rejects the combinations the
+            // emitter doesn't model. R1 (adjacent-LF migration suggestion) is
+            // independent of this analyzer branch.
+            if (lengthPrefixed != null || wireBytesAnn != null) return null
+            return analyzeLengthFromStringField(
+                param = param,
+                lengthFromAnn = lengthFromAnn,
+                ownerSimpleName = ownerSimpleName,
+                params = params,
+                index = index,
+            )
+        }
 
         if (lengthPrefixed != null) {
             // `@LengthPrefixed` and `@WireBytes` together is meaningless and
@@ -392,6 +412,62 @@ internal class CodecEmitter(
             wireBytes = innerKind.width,
         )
     }
+
+    /**
+     * Stage E slice 4 — `@LengthFrom("siblingField") val: String`.
+     *
+     * Returns null silently for any shape the validator already
+     * names (missing sibling, declared-after, non-numeric sibling,
+     * non-`String` field type) — the validator's diagnostic is the
+     * user-facing surface. Slice 4 narrows the sibling to a `Scalar`
+     * field; value-class siblings (numeric `value class` wrapping a
+     * scalar) are doctrine-row-18 valid but defer until a vector
+     * requires them.
+     */
+    private fun analyzeLengthFromStringField(
+        param: KSValueParameter,
+        lengthFromAnn: KSAnnotation,
+        ownerSimpleName: String,
+        params: List<KSValueParameter>,
+        index: Int,
+    ): FieldSpec.LengthFromString? {
+        val name = param.name?.asString() ?: return null
+        val type = param.type.resolve()
+        if (type.isError) return null
+        if (type.isMarkedNullable) return null
+        if (type.declaration.qualifiedName?.asString() != "kotlin.String") return null
+
+        val referenced =
+            lengthFromAnn.arguments
+                .firstOrNull { it.name?.asString() == "field" }
+                ?.value as? String ?: return null
+        val sibling = locatePriorSibling(referenced, params, index) ?: return null
+        // Slice 4 limits the sibling to a Scalar field with a numeric
+        // kind. Value-class siblings (numeric value class wrapping a
+        // scalar) compose with row 18 but defer until a vector requires
+        // them; analyzeField would currently model them as
+        // ValueClassScalar, not Scalar, so the prefix walk would never
+        // peek-resolve them as a length.
+        val siblingType = sibling.type.resolve()
+        if (siblingType.isError || siblingType.isMarkedNullable) return null
+        val siblingQname = siblingType.declaration.qualifiedName?.asString() ?: return null
+        val siblingKind = SUPPORTED_SCALARS[siblingQname] ?: return null
+        // Slice 4 narrows the sibling kind to those the peek path can
+        // assemble. The validator accepts the full numeric scalar set
+        // per row 18; the analyzer's narrower set means a `Long` /
+        // `ULong` / signed-multi-byte sibling silently produces no
+        // codec. Wider peek support lands when a vector requires it.
+        if (siblingKind !in PEEKABLE_LENGTH_FROM_SIBLING_KINDS) return null
+        return FieldSpec.LengthFromString(
+            name = name,
+            ownerSimpleName = ownerSimpleName,
+            lengthSiblingName = referenced,
+            lengthSiblingKind = siblingKind,
+        )
+    }
+
+    private val PEEKABLE_LENGTH_FROM_SIBLING_KINDS =
+        setOf(ScalarKind.UByte, ScalarKind.Byte, ScalarKind.UShort, ScalarKind.UInt)
 
     /**
      * Stage E slices 2–3 — `@WhenTrue` analysis (Locked Decision row 19).
@@ -744,6 +820,7 @@ internal class CodecEmitter(
                 is FieldSpec.Scalar -> appendDecodeScalar(body, field)
                 is FieldSpec.LengthPrefixedMessage -> appendDecodeLengthPrefixed(body, field)
                 is FieldSpec.LengthPrefixedString -> appendDecodeLengthPrefixedString(body, field)
+                is FieldSpec.LengthFromString -> appendDecodeLengthFromString(body, field)
                 is FieldSpec.ValueClassScalar -> appendDecodeValueClassScalar(body, field)
                 is FieldSpec.Conditional -> appendDecodeConditional(body, field)
             }
@@ -767,6 +844,7 @@ internal class CodecEmitter(
                 is FieldSpec.Scalar -> appendEncodeScalar(body, field, shape.ownerSimpleName)
                 is FieldSpec.LengthPrefixedMessage -> appendEncodeLengthPrefixed(body, field)
                 is FieldSpec.LengthPrefixedString -> appendEncodeLengthPrefixedString(body, field)
+                is FieldSpec.LengthFromString -> appendEncodeLengthFromString(body, field)
                 is FieldSpec.ValueClassScalar -> appendEncodeValueClassScalar(body, field)
                 is FieldSpec.Conditional -> appendEncodeConditional(body, field)
             }
@@ -818,6 +896,21 @@ internal class CodecEmitter(
                     "${terminal.name}Size",
                 )
             }
+            is FieldSpec.LengthFromString -> {
+                // Slice 4 — the body byte count is the sibling's value
+                // (the user is responsible for keeping it consistent
+                // with `value.<name>`'s UTF-8 byte length). Total =
+                // fixed prefix bytes + sibling value.toInt(). Exact
+                // is preferred over BackPatch because no measurement
+                // is needed; the caller can size buffers exactly.
+                val prefixBytes = scalarHeaderBytes(shape)
+                builder.addStatement(
+                    "return %T.Exact(%L + value.%L.toInt())",
+                    WIRE_SIZE_CN,
+                    prefixBytes,
+                    terminal.lengthSiblingName,
+                )
+            }
             else -> {
                 val total = shape.fields.sumOfFixedWireBytes()
                 builder.addStatement("return %T.Exact(%L)", WIRE_SIZE_CN, total)
@@ -847,6 +940,10 @@ internal class CodecEmitter(
         val terminal = shape.fields.lastOrNull()
         if (terminal is FieldSpec.Conditional) {
             appendPeekConditional(builder, shape, terminal)
+            return builder.build()
+        }
+        if (terminal is FieldSpec.LengthFromString) {
+            appendPeekLengthFromString(builder, shape, terminal)
             return builder.build()
         }
         val (name, ownerSimpleName, prefixWidth, prefixWireOrder) =
@@ -1651,6 +1748,264 @@ internal class CodecEmitter(
         body.addStatement("buffer.position(%L)", endPosVar)
     }
 
+    /**
+     * Stage E slice 4 — emit decode for `@LengthFrom("siblingField")
+     * val: String`. The sibling local is in scope (decode visits
+     * fields in constructor order, and analyzeLengthFromStringField
+     * has verified the sibling is declared before this field).
+     *
+     * Generated shape:
+     * ```
+     * <Int.MAX_VALUE guard for sibling kinds whose range exceeds Int>
+     * val <name>Length = <sibling>.toInt()
+     * val <name> = buffer.readString(<name>Length, Charset.UTF8)
+     * ```
+     *
+     * The guard is skipped for `Byte` / `Short` / `Int` / `UByte` /
+     * `UShort`, whose values fit in a non-negative `Int`. `UInt`,
+     * `ULong`, and `Long` need the runtime guard because their range
+     * exceeds `Int.MAX_VALUE`.
+     */
+    private fun appendDecodeLengthFromString(
+        body: CodeBlock.Builder,
+        field: FieldSpec.LengthFromString,
+    ) {
+        appendLengthFromIntMaxGuard(
+            body = body,
+            siblingAccessor = field.lengthSiblingName,
+            siblingKind = field.lengthSiblingKind,
+            ownerSimpleName = field.ownerSimpleName,
+            fieldName = field.name,
+        )
+        // Inline `.toInt()` on the sibling local rather than binding
+        // an intermediate. A `${field.name}Length` intermediate would
+        // shadow the sibling local when the user names the carrier
+        // `<bound>Length` — a natural Kotlin convention that the
+        // generated code must not break.
+        body.addStatement(
+            "val %L = buffer.readString(%L.toInt(), %T.UTF8)",
+            field.name,
+            field.lengthSiblingName,
+            CHARSET_CN,
+        )
+    }
+
+    /**
+     * Stage E slice 4 — emit encode for `@LengthFrom("siblingField")
+     * val: String`. The sibling field has already been encoded by
+     * the prior field's emit step; this step writes only the body.
+     * The user is responsible for keeping `value.<sibling>`
+     * consistent with `value.<name>.encodeToByteArray().size`; the
+     * codec trusts that contract (a runtime cross-check would
+     * allocate per row 16).
+     */
+    private fun appendEncodeLengthFromString(
+        body: CodeBlock.Builder,
+        field: FieldSpec.LengthFromString,
+    ) {
+        body.addStatement(
+            "buffer.writeString(value.%L, %T.UTF8)",
+            field.name,
+            CHARSET_CN,
+        )
+    }
+
+    /**
+     * Stage E slice 4 — emit `peekFrameSize` for a message whose
+     * terminal field is a `FieldSpec.LengthFromString`.
+     *
+     * Walks the fixed-size prefix to find the sibling's offset,
+     * peeks the sibling bytes (order-aware via the sibling field's
+     * resolvedWireOrder), and adds the sibling value as the body
+     * byte count. Falls back to `NoFraming` if any prior field is
+     * variable-length or if the sibling is not a Scalar — both are
+     * defensive against future widenings.
+     */
+    private fun appendPeekLengthFromString(
+        builder: FunSpec.Builder,
+        shape: CodecShape,
+        terminal: FieldSpec.LengthFromString,
+    ) {
+        val prefixFields = shape.fields.dropLast(1)
+        val fixedPrefix = prefixFields.filterIsInstance<FieldSpec.FixedSize>()
+        if (fixedPrefix.size != prefixFields.size) {
+            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+            return
+        }
+        var siblingOffset = -1
+        var siblingField: FieldSpec.Scalar? = null
+        var bytesSeen = 0
+        for (field in fixedPrefix) {
+            if (field.name == terminal.lengthSiblingName) {
+                if (field !is FieldSpec.Scalar) {
+                    // analyzeLengthFromStringField rejects non-Scalar siblings;
+                    // this branch is defensive against an analyzer/emitter drift.
+                    builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+                    return
+                }
+                siblingOffset = bytesSeen
+                siblingField = field
+                break
+            }
+            bytesSeen += field.wireBytes
+        }
+        if (siblingField == null || siblingOffset < 0) {
+            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+            return
+        }
+        val prefixBytes = fixedPrefix.sumOf { it.wireBytes }
+        val body = CodeBlock.builder()
+        body.addStatement(
+            "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
+            prefixBytes,
+            PEEK_RESULT_CN,
+        )
+        val siblingPeekVar = "${terminal.lengthSiblingName}Peek"
+        appendPeekScalar(body, siblingField, siblingPeekVar, siblingOffset)
+        appendLengthFromIntMaxGuard(
+            body = body,
+            siblingAccessor = siblingPeekVar,
+            siblingKind = terminal.lengthSiblingKind,
+            ownerSimpleName = terminal.ownerSimpleName,
+            fieldName = terminal.name,
+        )
+        body.addStatement(
+            "val total = %L + %L.toInt()",
+            prefixBytes,
+            siblingPeekVar,
+        )
+        body.addStatement(
+            "return if (stream.available() - baseOffset >= total) %T.Complete(total) else %T.NeedsMoreData",
+            PEEK_RESULT_CN,
+            PEEK_RESULT_CN,
+        )
+        builder.addCode(body.build())
+    }
+
+    /**
+     * Slice 4 — order-aware single-scalar peek for the prefix walk
+     * that locates a length-carrier sibling. Single-byte kinds
+     * (`UByte` / `Byte`) read directly; unsigned multi-byte kinds
+     * (`UShort` / `UInt`) assemble bytes BE/LE per the field's
+     * resolvedWireOrder. Wider and signed multi-byte kinds aren't
+     * required by any in-scope vector; they would need parallel
+     * peek paths (signed sign-extension, ULong promotion).
+     */
+    private fun appendPeekScalar(
+        body: CodeBlock.Builder,
+        field: FieldSpec.Scalar,
+        targetVar: String,
+        offset: Int,
+    ) {
+        when (field.kind) {
+            ScalarKind.UByte -> {
+                body.addStatement(
+                    "val %L = stream.peekByte(baseOffset + %L).toUByte()",
+                    targetVar,
+                    offset,
+                )
+            }
+            ScalarKind.Byte -> {
+                body.addStatement(
+                    "val %L = stream.peekByte(baseOffset + %L)",
+                    targetVar,
+                    offset,
+                )
+            }
+            ScalarKind.UShort, ScalarKind.UInt -> {
+                val width = field.wireBytes
+                val bigEndian =
+                    when (field.resolvedWireOrder) {
+                        Endianness.Big, Endianness.Default -> true
+                        Endianness.Little -> false
+                    }
+                for (i in 0 until width) {
+                    body.addStatement(
+                        "val %L = stream.peekByte(baseOffset + %L).toInt() and 0xFF",
+                        "${targetVar}B$i",
+                        offset + i,
+                    )
+                }
+                val parts =
+                    (0 until width).map { i ->
+                        val byteName = "${targetVar}B$i"
+                        val shiftBits = if (bigEndian) (width - 1 - i) * 8 else i * 8
+                        if (shiftBits == 0) byteName else "($byteName shl $shiftBits)"
+                    }
+                val narrow =
+                    when (field.kind) {
+                        ScalarKind.UShort -> "(%L).toUInt().toUShort()"
+                        ScalarKind.UInt -> "(%L).toUInt()"
+                        else -> error("unreachable")
+                    }
+                body.addStatement("val %L = $narrow", targetVar, parts.joinToString(" or "))
+            }
+            ScalarKind.ULong, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long, ScalarKind.Boolean ->
+                error(
+                    "peek-side reconstruction for length-carrier kind ${field.kind} not implemented; " +
+                        "analyzeLengthFromStringField should have rejected this shape until the wider " +
+                        "peek path lands.",
+                )
+        }
+    }
+
+    /**
+     * Slice 4 — Int.MAX_VALUE guard for `@LengthFrom` siblings whose
+     * range exceeds `Int`. `UByte` (max 255), `UShort` (max 65535),
+     * `Byte` (max 127), `Short` (max 32767), and `Int` (identity)
+     * fit in a non-negative `Int` and skip the guard. `UInt`,
+     * `ULong`, and `Long` need the runtime check.
+     */
+    private fun appendLengthFromIntMaxGuard(
+        body: CodeBlock.Builder,
+        siblingAccessor: String,
+        siblingKind: ScalarKind,
+        ownerSimpleName: String,
+        fieldName: String,
+    ) {
+        val needsGuard =
+            when (siblingKind) {
+                ScalarKind.UByte, ScalarKind.UShort, ScalarKind.Byte, ScalarKind.Short, ScalarKind.Int -> false
+                ScalarKind.UInt -> true
+                ScalarKind.ULong -> true
+                ScalarKind.Long -> true
+                ScalarKind.Boolean ->
+                    error("Boolean is rejected by analyzeLengthFromStringField; this branch is unreachable.")
+            }
+        if (!needsGuard) return
+        val (cmp, actualExpr) =
+            when (siblingKind) {
+                ScalarKind.UInt -> "Int.MAX_VALUE.toUInt()" to "$siblingAccessor.toString()"
+                ScalarKind.ULong -> "Int.MAX_VALUE.toULong()" to "$siblingAccessor.toString()"
+                ScalarKind.Long -> "Int.MAX_VALUE.toLong()" to "$siblingAccessor.toString()"
+                else -> error("unreachable")
+            }
+        body.beginControlFlow("if (%L > %L)", siblingAccessor, cmp)
+        body.addStatement(
+            "throw %T(fieldPath = %S, bufferPosition = -1, expected = %S, actual = %L)",
+            DECODE_EXCEPTION_CN,
+            "$ownerSimpleName.$fieldName",
+            "@LengthFrom source <= \${Int.MAX_VALUE}",
+            actualExpr,
+        )
+        body.endControlFlow()
+        // For signed siblings, also reject negative values. Otherwise
+        // toInt() returns a negative length and readString would
+        // either throw or read past the buffer end with a confusing
+        // error.
+        if (siblingKind == ScalarKind.Long) {
+            body.beginControlFlow("if (%L < 0L)", siblingAccessor)
+            body.addStatement(
+                "throw %T(fieldPath = %S, bufferPosition = -1, expected = %S, actual = %L.toString())",
+                DECODE_EXCEPTION_CN,
+                "$ownerSimpleName.$fieldName",
+                "@LengthFrom source >= 0",
+                siblingAccessor,
+            )
+            body.endControlFlow()
+        }
+    }
+
     private fun appendBufferPrefixEncode(
         body: CodeBlock.Builder,
         prefixVar: String,
@@ -1784,6 +2139,12 @@ internal class CodecEmitter(
         return when (shape.fields.lastOrNull()) {
             is FieldSpec.LengthPrefixedString -> VariantWireSize.BackPatch
             is FieldSpec.LengthPrefixedMessage -> VariantWireSize.RuntimeExact
+            // Slice 4: a LengthFromString variant's body byte count is the
+            // sibling value at encode time — same shape as a runtime-Exact
+            // length-prefixed-message body. Dispatcher size emission walks
+            // the variant codec's wireSize, which is already Exact for this
+            // shape.
+            is FieldSpec.LengthFromString -> VariantWireSize.RuntimeExact
             is FieldSpec.Scalar, is FieldSpec.ValueClassScalar, null ->
                 VariantWireSize.LiteralExact(shape.fields.sumOfFixedWireBytes())
             is FieldSpec.Conditional -> VariantWireSize.BackPatch
@@ -2040,6 +2401,34 @@ internal class CodecEmitter(
             val ownerSimpleName: String,
             val prefixWidth: Int,
             val prefixWireOrder: Endianness,
+        ) : FieldSpec
+
+        /**
+         * Stage E slice 4 — `@LengthFrom("siblingField") val: String`.
+         * The body wire bytes are determined by a non-adjacent
+         * length-carrier sibling decoded earlier. Decode reads
+         * `<sibling>.toInt()` UTF-8 bytes (with an Int.MAX_VALUE
+         * guard for sibling kinds whose range exceeds Int);
+         * encode writes the body without a prefix slot — the user is
+         * responsible for setting the sibling field to the correct
+         * UTF-8 byte count, the codec trusts that contract.
+         *
+         * `lengthSiblingKind` is the resolved scalar kind of the
+         * length-carrier; the decoder uses it to drive the
+         * Int.MAX_VALUE guard (skipped for kinds whose range fits in
+         * Int) and the peek path uses it to peek-read the sibling
+         * bytes from the prefix walk.
+         *
+         * Slice 4 narrows the sibling to a `Scalar` field; value-
+         * class siblings (a `@JvmInline value class` wrapping a
+         * numeric scalar) compose with row 18 but defer until a
+         * vector requires them.
+         */
+        data class LengthFromString(
+            override val name: String,
+            val ownerSimpleName: String,
+            val lengthSiblingName: String,
+            val lengthSiblingKind: ScalarKind,
         ) : FieldSpec
 
         /**
