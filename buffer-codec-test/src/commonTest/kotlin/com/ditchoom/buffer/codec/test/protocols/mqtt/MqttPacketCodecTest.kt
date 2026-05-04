@@ -157,6 +157,76 @@ class MqttPacketCodecTest {
     }
 
     @Test
+    fun encodesPingReqAsTwoBytes() {
+        // §3.12.1 — PINGREQ wire is exactly C0 00.
+        val msg = MqttPacket.PingReq()
+        encodeAndAssertBytes(msg, byteArrayOf(0xC0.toByte(), 0x00))
+    }
+
+    @Test
+    fun encodesPingRespAsTwoBytes() {
+        // §3.13.1 — PINGRESP wire is exactly D0 00.
+        val msg = MqttPacket.PingResp()
+        encodeAndAssertBytes(msg, byteArrayOf(0xD0.toByte(), 0x00))
+    }
+
+    @Test
+    fun decodesPingReqFromSpecBytes() {
+        val buf =
+            BufferFactory.Default.allocate(2).also {
+                it.writeByte(0xC0.toByte())
+                it.writeByte(0x00)
+            }
+        buf.resetForRead()
+        val decoded = MqttPacketCodec.decode(buf, DecodeContext.Empty)
+        val pingReq = assertIs<MqttPacket.PingReq>(decoded)
+        assertEquals(MqttFixedHeader(0xC0u), pingReq.header)
+        assertEquals(0u, pingReq.remainingLength)
+    }
+
+    @Test
+    fun decodesPingRespFromSpecBytes() {
+        val buf =
+            BufferFactory.Default.allocate(2).also {
+                it.writeByte(0xD0.toByte())
+                it.writeByte(0x00)
+            }
+        buf.resetForRead()
+        val decoded = MqttPacketCodec.decode(buf, DecodeContext.Empty)
+        val pingResp = assertIs<MqttPacket.PingResp>(decoded)
+        assertEquals(MqttFixedHeader(0xD0u), pingResp.header)
+        assertEquals(0u, pingResp.remainingLength)
+    }
+
+    @Test
+    fun roundTripsPingReqAndPingResp() {
+        for (msg in listOf(MqttPacket.PingReq(), MqttPacket.PingResp())) {
+            val buf = encode(msg)
+            buf.resetForRead()
+            val decoded = MqttPacketCodec.decode(buf, DecodeContext.Empty)
+            assertEquals(msg, decoded, "round-trip $msg")
+        }
+    }
+
+    @Test
+    fun peekFrameSizeForPingReqCompletesAtTwoBytes() {
+        // Same shape as Disconnect — header + var-int RL=0 → 2 bytes total.
+        val pool = BufferPool()
+        val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
+        try {
+            val two = BufferFactory.Default.allocate(2)
+            two.writeByte(0xC0.toByte())
+            two.writeByte(0x00)
+            two.resetForRead()
+            stream.append(two)
+            assertEquals(PeekResult.Complete(2), MqttPacketCodec.peekFrameSize(stream))
+        } finally {
+            stream.release()
+            pool.clear()
+        }
+    }
+
+    @Test
     fun peekFrameSizeNeedsMoreDataWhenEmpty() {
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)

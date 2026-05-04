@@ -81,11 +81,37 @@ sealed interface MqttPacket {
     ) : MqttPacket
 
     /**
+     * Type-12 PINGREQ per §3.12 — fixed header `0xC0` + remaining
+     * length `0`. The spec mandates byte 2 (RL) is present and equal
+     * to 0 even though there's no body; the codec writes both bytes
+     * (`C0 00`) and the data-class defaults match the spec values
+     * one-to-one so callers can construct `PingReq()` with no args.
+     *
+     * Modeling as a `data class` with all-defaulted fields rather
+     * than a Kotlin `object` because the dispatcher requires variants
+     * to carry the discriminator field — and the spec mandates the
+     * RL byte regardless. True `object` support would only suit
+     * protocols where the discriminator alone is the entire wire
+     * frame; MQTT isn't one of those.
+     */
+    @PacketType(value = 12)
+    @ProtocolMessage
+    data class PingReq(
+        val header: MqttFixedHeader = MqttFixedHeader(0xC0u),
+        @RemainingLength val remainingLength: UInt = 0u,
+    ) : MqttPacket
+
+    /** Type-13 PINGRESP per §3.13 — fixed header `0xD0` + RL `0`, total `D0 00`. */
+    @PacketType(value = 13)
+    @ProtocolMessage
+    data class PingResp(
+        val header: MqttFixedHeader = MqttFixedHeader(0xD0u),
+        @RemainingLength val remainingLength: UInt = 0u,
+    ) : MqttPacket
+
+    /**
      * Type-14 DISCONNECT — fixed header + zero-byte remaining
-     * length per §3.14, total `E0 00` on the wire. Slice 6 narrow
-     * requires the variant to be a `data class` (not `object`),
-     * so we model it with the header + var-int RL fields. Object
-     * variants land in a future slice.
+     * length per §3.14, total `E0 00` on the wire.
      */
     @PacketType(value = 14)
     @ProtocolMessage
