@@ -693,6 +693,23 @@ internal class CodecEmitter(
         setOf(ScalarKind.UByte, ScalarKind.Byte)
 
     /**
+     * Slice 6.5 — peek-side reconstruction kinds for `@DispatchOn`
+     * value-class discriminators. Slice 6's narrow set was just
+     * single-byte; slice 6.5 widens to 2/4-byte unsigned kinds for
+     * real-spec multi-byte discriminators (e.g., HTTP/2's first 4
+     * bytes packed as `length<<8 | type`). `appendPeekFixedScalar`
+     * with the discriminator value class's `wireOrder` handles the
+     * byte assembly.
+     *
+     * `ULong` and signed multi-byte kinds are still rejected — they
+     * would need parallel peek paths (ULong promotion, signed
+     * sign-extension), and no in-scope discriminator vector
+     * requires them.
+     */
+    private val PEEKABLE_DISPATCHER_INNER_KINDS =
+        setOf(ScalarKind.UByte, ScalarKind.Byte, ScalarKind.UShort, ScalarKind.UInt)
+
+    /**
      * Stage E — typed shape of the `@WhenTrue("…")` expression
      * literal. Closed by doctrine row 19: only the simple-name and
      * one-level dotted forms are valid; deeper paths are a compile
@@ -1499,23 +1516,27 @@ internal class CodecEmitter(
         }
 
     /**
-     * Slice 3 / 5a — single-byte scalar peek for value-class inner
-     * reconstruction. `offsetExpr` is interpolated into
+     * Slice 3 / 5a / 6.5 — value-class inner-scalar peek. Used for
+     * predicate-source reconstruction in `@WhenTrue` (slice 3) and
+     * for discriminator reconstruction in `@DispatchOn` (slice 6.5).
+     *
+     * `offsetExpr` is interpolated into
      * `stream.peekByte(baseOffset + <expr>)`; callers with a fixed
      * offset pass `"$N"`, sequential walk callers pass the running
      * offset variable (`"__offset"`).
      *
-     * Wider kinds (`UShort` / `UInt` / `ULong` / signed multi-byte)
-     * aren't required by any in-scope `@WhenTrue` value-class
-     * source; they would need order-aware byte assembly that
-     * `appendPeekScalar` already handles for `LengthFromString`
-     * sibling peek.
+     * Single-byte kinds (`UByte` / `Byte` / `Boolean`) read directly.
+     * Multi-byte unsigned kinds (`UShort` / `UInt`) assemble bytes
+     * BE/LE per `wireOrder`. `ULong` and signed multi-byte kinds
+     * aren't required by any in-scope vector and would need parallel
+     * paths (ULong promotion / signed sign-extension).
      */
     private fun appendPeekFixedScalar(
         body: CodeBlock.Builder,
         kind: ScalarKind,
         targetVar: String,
         offsetExpr: String,
+        wireOrder: Endianness = Endianness.Default,
     ) {
         when (kind) {
             ScalarKind.UByte ->
@@ -1536,13 +1557,39 @@ internal class CodecEmitter(
                     targetVar,
                     offsetExpr,
                 )
-            ScalarKind.UShort, ScalarKind.UInt, ScalarKind.ULong,
-            ScalarKind.Short, ScalarKind.Int, ScalarKind.Long,
-            ->
+            ScalarKind.UShort, ScalarKind.UInt -> {
+                val width = kind.width
+                val bigEndian =
+                    when (wireOrder) {
+                        Endianness.Big, Endianness.Default -> true
+                        Endianness.Little -> false
+                    }
+                for (i in 0 until width) {
+                    val byteOffset = if (i == 0) offsetExpr else "$offsetExpr + $i"
+                    body.addStatement(
+                        "val %L = stream.peekByte(baseOffset + %L).toInt() and 0xFF",
+                        "${targetVar}B$i",
+                        byteOffset,
+                    )
+                }
+                val parts =
+                    (0 until width).map { i ->
+                        val byteName = "${targetVar}B$i"
+                        val shiftBits = if (bigEndian) (width - 1 - i) * 8 else i * 8
+                        if (shiftBits == 0) byteName else "($byteName shl $shiftBits)"
+                    }
+                val narrow =
+                    when (kind) {
+                        ScalarKind.UShort -> "(%L).toUInt().toUShort()"
+                        ScalarKind.UInt -> "(%L).toUInt()"
+                        else -> error("unreachable")
+                    }
+                body.addStatement("val %L = $narrow", targetVar, parts.joinToString(" or "))
+            }
+            ScalarKind.ULong, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long ->
                 error(
                     "peek-side reconstruction for value-class inner kind $kind not implemented; " +
-                        "analyzeConditionalField should have rejected this shape until the wider " +
-                        "peek path lands.",
+                        "the analyzer should have rejected this shape until the wider peek path lands.",
                 )
         }
     }
@@ -2118,6 +2165,15 @@ internal class CodecEmitter(
         if (innerType.isError || innerType.isMarkedNullable) return null
         val innerKind =
             SUPPORTED_SCALARS[innerType.declaration.qualifiedName?.asString()] ?: return null
+        // Slice 6.5: peek-side reconstruction supports single-byte kinds
+        // (slice 6) plus 2/4-byte unsigned kinds. ULong / signed multi-byte
+        // discriminators aren't required by any in-scope vector and would
+        // need parallel peek paths.
+        if (innerKind !in PEEKABLE_DISPATCHER_INNER_KINDS) return null
+        // Slice 6.5: read the discriminator value class's `@ProtocolMessage(
+        // wireOrder = ...)` so multi-byte byte assembly during peek matches
+        // the encode/decode wire layout. Single-byte kinds ignore this.
+        val discriminatorWireOrder = readMessageWireOrder(discriminatorDecl)
 
         val dispatchProp =
             discriminatorDecl
@@ -2179,6 +2235,7 @@ internal class CodecEmitter(
                     "${discriminatorDecl.simpleName.asString()}Codec",
                 ),
             discriminatorInnerKind = innerKind,
+            discriminatorInnerWireOrder = discriminatorWireOrder,
             dispatchValuePropertyName = dispatchValuePropertyName,
             variants = variants,
         )
@@ -2505,7 +2562,13 @@ internal class CodecEmitter(
         // single-byte kinds via appendPeekFixedScalar — the same path the
         // slice 3 value-class @WhenTrue source uses. Wider discriminators
         // would route through appendPeekScalar's order-aware assembly.
-        appendPeekFixedScalar(body, shape.discriminatorInnerKind, "__discRaw", "0")
+        appendPeekFixedScalar(
+            body = body,
+            kind = shape.discriminatorInnerKind,
+            targetVar = "__discRaw",
+            offsetExpr = "0",
+            wireOrder = shape.discriminatorInnerWireOrder,
+        )
         body.addStatement(
             "val __discriminator = %T(__discRaw)",
             shape.discriminatorClassName,
@@ -2567,6 +2630,7 @@ internal class CodecEmitter(
         val discriminatorClassName: ClassName,
         val discriminatorCodecClassName: ClassName,
         val discriminatorInnerKind: ScalarKind,
+        val discriminatorInnerWireOrder: Endianness,
         val dispatchValuePropertyName: String,
         val variants: List<DispatchOnVariantSpec>,
     )
