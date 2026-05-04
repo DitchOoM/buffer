@@ -3356,6 +3356,15 @@ internal class CodecEmitter(
         if (returnType.declaration.qualifiedName?.asString() != "kotlin.Int") return null
         val dispatchValuePropertyName = dispatchProp.simpleName.asString()
 
+        // Stage H slice 10d — detect whether the sealed parent declares
+        // `<P : Payload>` / `<out P : Payload>`. When present, the
+        // dispatcher emits as a generic class binding `P` and threads a
+        // constructor-injected `payloadCodec: Codec<P>` to any variant
+        // that itself carries `<P : Payload>` (slice 10b shape).
+        // `<Nothing>`-typed variants don't need the codec — they keep
+        // static-object references.
+        val payloadTypeParameter = detectPayloadTypeParameter(symbol)
+
         val subclasses = symbol.getSealedSubclasses().toList()
         if (subclasses.isEmpty()) return null
         val variants = mutableListOf<DispatchOnVariantSpec>()
@@ -3377,16 +3386,39 @@ internal class CodecEmitter(
             // Variant must analyze cleanly via the existing data-class path.
             // The header field will be a FieldSpec.ValueClassScalar (slice 3).
             analyze(sub) ?: return null
+            // Slice 10d: detect whether the variant itself is generic
+            // (slice 10b shape — `<P : Payload>` type parameter on the
+            // variant data class). If so, the dispatcher constructs the
+            // variant codec via `VariantCodec(payloadCodec)` and stores
+            // the instance under a derived field name (e.g.,
+            // `dataCodec`); other variants reach the codec via
+            // static-object reference unchanged.
+            val variantPayloadParam = detectPayloadTypeParameter(sub)
+            val variantSimpleName = sub.simpleName.asString()
+            val genericInstanceFieldName =
+                if (variantPayloadParam != null) {
+                    // Outer dispatcher must be generic to thread the
+                    // codec — a `<P : Payload>` variant under a
+                    // non-generic parent has no codec source and is a
+                    // shape error caught by the validator (see
+                    // ProtocolMessageProcessor's payload-type-parameter
+                    // checks).
+                    if (payloadTypeParameter == null) return null
+                    "${variantSimpleName.replaceFirstChar { it.lowercase() }}Codec"
+                } else {
+                    null
+                }
             variants +=
                 DispatchOnVariantSpec(
-                    simpleName = sub.simpleName.asString(),
+                    simpleName = variantSimpleName,
                     className = classNameOf(sub),
                     codecClassName =
                         ClassName(
                             sub.packageName.asString(),
-                            "${sub.simpleName.asString()}Codec",
+                            "${variantSimpleName}Codec",
                         ),
                     dispatchValue = rawValue,
+                    genericInstanceFieldName = genericInstanceFieldName,
                 )
         }
         variants.sortBy { it.dispatchValue }
@@ -3407,6 +3439,7 @@ internal class CodecEmitter(
             discriminatorInnerWireOrder = discriminatorWireOrder,
             dispatchValuePropertyName = dispatchValuePropertyName,
             variants = variants,
+            payloadTypeParameter = payloadTypeParameter,
         )
     }
 
@@ -3636,27 +3669,171 @@ internal class CodecEmitter(
      * discriminator via its codec, restore position, dispatch);
      * the variant codec then reads from the original position with
      * its first field being the discriminator value class.
+     *
+     * Stage H slice 10d — when the sealed parent is generic
+     * (`<out P : Payload>`), the dispatcher emits as a class
+     * `class FooCodec<P : Payload>(payloadCodec: Codec<P>)` instead
+     * of `object FooCodec`. Generic variants have their codec
+     * instances constructed once in the primary constructor and
+     * stored as private properties; emit sites reference those
+     * fields. `Nothing`-typed variants are unchanged — they keep
+     * the static-object reference path.
      */
     private fun buildDispatchOnDispatcherFileSpec(shape: DispatchOnDispatcherShape): FileSpec {
+        val parentTypeRef = dispatcherParentTypeRef(shape)
         val codecType =
-            TypeSpec
-                .objectBuilder(shape.codecSimpleName)
-                .addSuperinterface(CODEC_CN.parameterizedBy(shape.parentClassName))
-                .addFunction(buildDispatchOnDecodeFun(shape))
-                .addFunction(buildDispatchOnEncodeFun(shape))
-                .addFunction(buildDispatchOnWireSizeFun(shape))
-                .addFunction(buildDispatchOnPeekFun(shape))
-                .build()
+            if (shape.payloadTypeParameter != null) {
+                buildGenericDispatchOnDispatcherTypeSpec(shape, shape.payloadTypeParameter, parentTypeRef)
+            } else {
+                TypeSpec
+                    .objectBuilder(shape.codecSimpleName)
+                    .addSuperinterface(CODEC_CN.parameterizedBy(parentTypeRef))
+                    .addFunction(buildDispatchOnDecodeFun(shape, parentTypeRef))
+                    .addFunction(buildDispatchOnEncodeFun(shape, parentTypeRef))
+                    .addFunction(buildDispatchOnWireSizeFun(shape, parentTypeRef))
+                    .addFunction(buildDispatchOnPeekFun(shape))
+                    .build()
+            }
         return FileSpec
             .builder(shape.packageName, shape.codecSimpleName)
             .addType(codecType)
             .build()
     }
 
+    /**
+     * Stage H slice 10d — `class FooCodec<P : Payload>(payloadCodec:
+     * Codec<P>) : Codec<Foo<P>>` shape. Each generic variant gets a
+     * private property initialized to `<VariantCodec>(payloadCodec)`
+     * in the primary constructor; the encode/decode/wireSize/peek
+     * emit sites then reference the field instead of the static
+     * codec class.
+     */
+    private fun buildGenericDispatchOnDispatcherTypeSpec(
+        shape: DispatchOnDispatcherShape,
+        binding: PayloadTypeParameter,
+        parentTypeRef: TypeName,
+    ): TypeSpec {
+        val typeVar = TypeVariableName(binding.typeVariableName, binding.bound)
+        val codecOfP = CODEC_CN.parameterizedBy(typeVar)
+        val builder =
+            TypeSpec
+                .classBuilder(shape.codecSimpleName)
+                .addTypeVariable(typeVar)
+                .primaryConstructor(
+                    FunSpec
+                        .constructorBuilder()
+                        .addParameter(binding.codecParameterName, codecOfP)
+                        .build(),
+                ).addProperty(
+                    com.squareup.kotlinpoet.PropertySpec
+                        .builder(binding.codecParameterName, codecOfP, KModifier.PRIVATE)
+                        .initializer(binding.codecParameterName)
+                        .build(),
+                ).addSuperinterface(CODEC_CN.parameterizedBy(parentTypeRef))
+        for (variant in shape.variants) {
+            val fieldName = variant.genericInstanceFieldName ?: continue
+            // Variant codec is `class <VariantName>Codec<P : Payload>(
+            //   payloadCodec: Codec<P>)` per slice 10b. Construct it
+            // once with the dispatcher's codec.
+            val fieldType = variant.codecClassName.parameterizedBy(typeVar)
+            builder.addProperty(
+                com.squareup.kotlinpoet.PropertySpec
+                    .builder(fieldName, fieldType, KModifier.PRIVATE)
+                    .initializer("%T(%L)", variant.codecClassName, binding.codecParameterName)
+                    .build(),
+            )
+        }
+        return builder
+            .addFunction(buildDispatchOnDecodeFun(shape, parentTypeRef))
+            .addFunction(buildDispatchOnEncodeFun(shape, parentTypeRef))
+            .addFunction(buildDispatchOnWireSizeFun(shape, parentTypeRef))
+            .addFunction(buildDispatchOnPeekFun(shape))
+            .build()
+    }
+
+    /**
+     * Stage H slice 10d — return the parent's TypeName as it should
+     * appear in the codec's `Codec<...>` superinterface, encode/decode
+     * signatures, and constructor calls.
+     *
+     * For a non-generic sealed parent, this is `parentClassName`
+     * (e.g., `MqttPacket`). For a generic sealed parent, this is
+     * `parentClassName.parameterizedBy(P)` (e.g., `Http2Frame<P>`).
+     */
+    private fun dispatcherParentTypeRef(shape: DispatchOnDispatcherShape): TypeName =
+        if (shape.payloadTypeParameter != null) {
+            shape.parentClassName.parameterizedBy(
+                TypeVariableName(shape.payloadTypeParameter.typeVariableName),
+            )
+        } else {
+            shape.parentClassName
+        }
+
+    /**
+     * Stage H slice 10d — return the Kotlin code-block that yields
+     * the variant's codec receiver for `<receiver>.decode(...)` /
+     * `.encode(...)` / `.wireSize(...)` / `.peekFrameSize(...)` calls.
+     *
+     * Generic variants reference the dispatcher's private property
+     * (an instance constructed once with `payloadCodec`); non-generic
+     * variants reference the static codec class directly. The two
+     * cases are syntactically distinct (`%L` vs `%T`) — the helper
+     * keeps the emit sites symmetric.
+     */
+    private fun DispatchOnVariantSpec.codecReceiver(): CodeBlock =
+        if (genericInstanceFieldName != null) {
+            CodeBlock.of("%L", genericInstanceFieldName)
+        } else {
+            CodeBlock.of("%T", codecClassName)
+        }
+
+    /**
+     * Stage H slice 10d — encode-side `is` check for a variant. For
+     * a generic variant, the smart cast uses star projection
+     * (`Foo.Data<*>`) since the dispatcher's `value: Foo<P>` doesn't
+     * tell us the runtime variant's `P` is the same `P`. The variant
+     * codec call site needs the typed `Foo.Data<P>` cast — see
+     * `variantCastTypeName`.
+     */
+    private fun variantBranchTypeName(
+        variant: DispatchOnVariantSpec,
+        binding: PayloadTypeParameter?,
+    ): TypeName =
+        if (variant.genericInstanceFieldName != null) {
+            requireNotNull(binding) {
+                "Generic variant ${variant.simpleName} requires the dispatcher to bind a payload type parameter"
+            }
+            variant.className.parameterizedBy(com.squareup.kotlinpoet.STAR)
+        } else {
+            variant.className
+        }
+
+    /**
+     * Stage H slice 10d — typed cast TypeName for the variant codec
+     * call. Generic variants need `value as Foo.Data<P>` so the
+     * variant codec's `<P : Payload>` accepts the value; non-generic
+     * variants pass the `value` parameter directly without a cast.
+     */
+    private fun variantTypedRef(
+        variant: DispatchOnVariantSpec,
+        binding: PayloadTypeParameter?,
+    ): TypeName =
+        if (variant.genericInstanceFieldName != null) {
+            requireNotNull(binding)
+            variant.className.parameterizedBy(
+                TypeVariableName(binding.typeVariableName),
+            )
+        } else {
+            variant.className
+        }
+
     private fun expectedDispatchValueSet(shape: DispatchOnDispatcherShape): String =
         shape.variants.joinToString(prefix = "one of {", postfix = "}") { it.dispatchValue.toString() }
 
-    private fun buildDispatchOnDecodeFun(shape: DispatchOnDispatcherShape): FunSpec {
+    private fun buildDispatchOnDecodeFun(
+        shape: DispatchOnDispatcherShape,
+        parentTypeRef: TypeName,
+    ): FunSpec {
         val body = CodeBlock.builder()
         body.addStatement("val discriminatorPosition = buffer.position()")
         body.addStatement(
@@ -3670,9 +3847,9 @@ internal class CodecEmitter(
         body.beginControlFlow("return when (__dispatchValue)")
         for (variant in shape.variants) {
             body.addStatement(
-                "%L -> %T.decode(buffer, context)",
+                "%L -> %L.decode(buffer, context)",
                 variant.dispatchValue,
-                variant.codecClassName,
+                variant.codecReceiver(),
             )
         }
         body.beginControlFlow("else ->")
@@ -3690,47 +3867,91 @@ internal class CodecEmitter(
             .addModifiers(KModifier.OVERRIDE)
             .addParameter("buffer", READ_BUFFER_CN)
             .addParameter("context", DECODE_CONTEXT_CN)
-            .returns(shape.parentClassName)
+            .returns(parentTypeRef)
             .addCode(body.build())
             .build()
     }
 
-    private fun buildDispatchOnEncodeFun(shape: DispatchOnDispatcherShape): FunSpec {
+    private fun buildDispatchOnEncodeFun(
+        shape: DispatchOnDispatcherShape,
+        parentTypeRef: TypeName,
+    ): FunSpec {
         val body = CodeBlock.builder()
+        // Slice 10d — generic variants are smart-cast to their
+        // star-projected form (`is Foo.Data<*>`) and then explicitly
+        // cast to `Foo.Data<P>` at the call site so the variant codec's
+        // `<P : Payload>` accepts the value. The cast is statically
+        // safe by construction: the dispatcher's `value: Foo<P>`
+        // matched as `Foo.Data<*>` must be `Foo.Data<R : P>` for some
+        // R, which the variant codec's `Codec<P>` accepts via the
+        // `out P` covariance on the sealed parent.
+        val anyGeneric = shape.variants.any { it.genericInstanceFieldName != null }
+        if (anyGeneric) {
+            body.add("@Suppress(%S)\n", "UNCHECKED_CAST")
+        }
         body.beginControlFlow("when (value)")
         for (variant in shape.variants) {
-            body.addStatement(
-                "is %T -> %T.encode(buffer, value, context)",
-                variant.className,
-                variant.codecClassName,
-            )
+            val branchType = variantBranchTypeName(variant, shape.payloadTypeParameter)
+            if (variant.genericInstanceFieldName != null) {
+                val typedRef = variantTypedRef(variant, shape.payloadTypeParameter)
+                body.addStatement(
+                    "is %T -> %L.encode(buffer, value as %T, context)",
+                    branchType,
+                    variant.codecReceiver(),
+                    typedRef,
+                )
+            } else {
+                body.addStatement(
+                    "is %T -> %L.encode(buffer, value, context)",
+                    branchType,
+                    variant.codecReceiver(),
+                )
+            }
         }
         body.endControlFlow()
         return FunSpec
             .builder("encode")
             .addModifiers(KModifier.OVERRIDE)
             .addParameter("buffer", WRITE_BUFFER_CN)
-            .addParameter("value", shape.parentClassName)
+            .addParameter("value", parentTypeRef)
             .addParameter("context", ENCODE_CONTEXT_CN)
             .addCode(body.build())
             .build()
     }
 
-    private fun buildDispatchOnWireSizeFun(shape: DispatchOnDispatcherShape): FunSpec {
+    private fun buildDispatchOnWireSizeFun(
+        shape: DispatchOnDispatcherShape,
+        parentTypeRef: TypeName,
+    ): FunSpec {
         val body = CodeBlock.builder()
+        val anyGeneric = shape.variants.any { it.genericInstanceFieldName != null }
+        if (anyGeneric) {
+            body.add("@Suppress(%S)\n", "UNCHECKED_CAST")
+        }
         body.beginControlFlow("return when (value)")
         for (variant in shape.variants) {
-            body.addStatement(
-                "is %T -> %T.wireSize(value, context)",
-                variant.className,
-                variant.codecClassName,
-            )
+            val branchType = variantBranchTypeName(variant, shape.payloadTypeParameter)
+            if (variant.genericInstanceFieldName != null) {
+                val typedRef = variantTypedRef(variant, shape.payloadTypeParameter)
+                body.addStatement(
+                    "is %T -> %L.wireSize(value as %T, context)",
+                    branchType,
+                    variant.codecReceiver(),
+                    typedRef,
+                )
+            } else {
+                body.addStatement(
+                    "is %T -> %L.wireSize(value, context)",
+                    branchType,
+                    variant.codecReceiver(),
+                )
+            }
         }
         body.endControlFlow()
         return FunSpec
             .builder("wireSize")
             .addModifiers(KModifier.OVERRIDE)
-            .addParameter("value", shape.parentClassName)
+            .addParameter("value", parentTypeRef)
             .addParameter("context", ENCODE_CONTEXT_CN)
             .returns(WIRE_SIZE_CN)
             .addCode(body.build())
@@ -3767,9 +3988,9 @@ internal class CodecEmitter(
             // Variant.peek counts the discriminator bytes in its own header
             // field, so we delegate at baseOffset, not baseOffset + 1.
             body.addStatement(
-                "%L -> %T.peekFrameSize(stream, baseOffset)",
+                "%L -> %L.peekFrameSize(stream, baseOffset)",
                 variant.dispatchValue,
-                variant.codecClassName,
+                variant.codecReceiver(),
             )
         }
         body.beginControlFlow("else ->")
@@ -3821,6 +4042,16 @@ internal class CodecEmitter(
         val discriminatorInnerWireOrder: Endianness,
         val dispatchValuePropertyName: String,
         val variants: List<DispatchOnVariantSpec>,
+        /**
+         * Stage H slice 10d — present when the sealed parent declares
+         * `<out P : Payload>` (or `<P : Payload>`). Causes the
+         * dispatcher to emit as a generic class
+         * `class FooCodec<P : Payload>(payloadCodec: Codec<P>) :
+         * Codec<Foo<P>>` instead of `object FooCodec : Codec<Foo>`.
+         * Generic variants thread through `payloadCodec`;
+         * `Nothing`-typed variants use static codec refs as before.
+         */
+        val payloadTypeParameter: PayloadTypeParameter? = null,
     )
 
     /**
@@ -3828,12 +4059,23 @@ internal class CodecEmitter(
      * `VariantSpec` in carrying only the dispatch value (no
      * `wireSize` — the variant codec's own `wireSize` is the source
      * of truth, since the variant's bytes are exactly its body).
+     *
+     * Stage H slice 10d adds `genericInstanceFieldName`: when the
+     * variant data class declares `<P : Payload>` (slice 10b shape),
+     * the variant's codec is a generic class that needs a constructor-
+     * injected `payloadCodec`. The dispatcher constructs the variant
+     * codec instance once in its primary constructor and stores it as
+     * a private property under this field name (e.g., `dataCodec`);
+     * emit sites reference the field instead of the static codec
+     * class. `null` for `Nothing`-typed variants — those use static
+     * codec object references unchanged.
      */
     private data class DispatchOnVariantSpec(
         val simpleName: String,
         val className: ClassName,
         val codecClassName: ClassName,
         val dispatchValue: Int,
+        val genericInstanceFieldName: String? = null,
     )
 
     private data class VariantSpec(

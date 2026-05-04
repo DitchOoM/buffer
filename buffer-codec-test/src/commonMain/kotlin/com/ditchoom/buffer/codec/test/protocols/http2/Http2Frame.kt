@@ -1,11 +1,13 @@
 package com.ditchoom.buffer.codec.test.protocols.http2
 
+import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.annotations.DispatchOn
 import com.ditchoom.buffer.codec.annotations.DispatchValue
 import com.ditchoom.buffer.codec.annotations.Endianness
 import com.ditchoom.buffer.codec.annotations.LengthFrom
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import kotlin.jvm.JvmInline
 
 /**
@@ -81,15 +83,18 @@ value class Http2StreamId(
 }
 
 /**
- * Stage F slice 6.5 doctrine vector — sealed dispatcher over the
- * HTTP/2 frame header (RFC 7540 §4.1).
+ * Stage F slice 6.5 / Stage H slice 10d doctrine vector — sealed
+ * dispatcher over the HTTP/2 frame header (RFC 7540 §4.1).
  *
- * Slice 6.5 covers HTTP/2 frame types whose payload size is fixed
- * by the spec: PING (RFC §6.7, length=8 always) and WINDOW_UPDATE
- * (RFC §6.9, length=4 always). Variable-payload frame types
- * (DATA, HEADERS, SETTINGS, GOAWAY) need either Stage G's
- * variable-length list payload or a `@LengthFrom("header.length")`
- * dotted-form widening — both deferred.
+ * Slice 10d lifts this sealed parent to `<out P : Payload>` so a
+ * payload-bearing variant (`Data<P : Payload>`, RFC §6.1) can
+ * coexist with payload-free variants (`Settings`, `Ping`,
+ * `WindowUpdate`, all `: Http2Frame<Nothing>`). The generated
+ * dispatcher becomes a generic class
+ * `Http2FrameCodec<P : Payload>(payloadCodec: Codec<P>) :
+ * Codec<Http2Frame<P>>` — payload-free variants are reachable
+ * through any `<P>` instantiation thanks to `Nothing` being a
+ * subtype of `P` (covariance via `out P`).
  *
  * Wire layout per RFC 7540 §4.1:
  *
@@ -112,7 +117,37 @@ value class Http2StreamId(
  */
 @DispatchOn(Http2LengthAndType::class)
 @ProtocolMessage(wireOrder = Endianness.Big)
-sealed interface Http2Frame {
+sealed interface Http2Frame<out P : Payload> {
+    /**
+     * DATA frame per RFC 7540 §6.1 — generic-bounded payload slot.
+     *
+     * Slice 10d narrow:
+     *   - PADDED flag (bit 0x08) is ignored; the optional padding
+     *     length byte + trailing pad bytes are deferred. Slice 10d
+     *     assumes no padding (matches the simplest §6.1 wire shape).
+     *   - END_STREAM flag (bit 0x01) is preserved on the wire (it's
+     *     just a flag bit in the existing `flags: UByte` field) but
+     *     carries no codec semantics.
+     *   - The body's byte count is determined by the buffer's outer
+     *     limit (slice 10a/10b shape) — NOT by `header.length`. A
+     *     consumer wraps the codec with a `setLimit(header.length)`
+     *     before delegating; a future slice will lift this so the
+     *     dispatcher reads `header.length` and bounds the buffer
+     *     before delegating to the variant codec.
+     *
+     * Absorbed from the slice 10b standalone `Http2DataFrame<P>`
+     * fixture per the doctrine answer locked while landing 10b
+     * (sealed-parent generic-aware integration is slice 10d's job).
+     */
+    @PacketType(value = 0)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class Data<P : Payload>(
+        val header: Http2LengthAndType,
+        val flags: UByte,
+        val streamId: Http2StreamId,
+        @RemainingBytes val payload: P,
+    ) : Http2Frame<P>
+
     /**
      * PING frame per RFC 7540 §6.7 — always carries an 8-byte
      * opaque payload that the receiver echoes back. The spec
@@ -128,7 +163,7 @@ sealed interface Http2Frame {
         val flags: UByte,
         val streamId: Http2StreamId,
         val opaqueData: ULong,
-    ) : Http2Frame
+    ) : Http2Frame<Nothing>
 
     /**
      * WINDOW_UPDATE frame per RFC 7540 §6.9 — always 4-byte
@@ -144,7 +179,7 @@ sealed interface Http2Frame {
         val flags: UByte,
         val streamId: Http2StreamId,
         val windowSizeIncrement: UInt,
-    ) : Http2Frame
+    ) : Http2Frame<Nothing>
 
     /**
      * SETTINGS frame per RFC 7540 §6.5 — payload is a sequence of
@@ -165,5 +200,5 @@ sealed interface Http2Frame {
         val flags: UByte,
         val streamId: Http2StreamId,
         @LengthFrom("header.length") val entries: List<Http2Setting>,
-    ) : Http2Frame
+    ) : Http2Frame<Nothing>
 }
