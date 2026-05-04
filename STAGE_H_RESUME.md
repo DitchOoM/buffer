@@ -8,12 +8,15 @@ incremental delta and the open design questions.
 
 ## Branch state
 
-- Branch: `feature/directional-codec`, head `f728700`. Not pushed.
-- 22 stacked commits since the last `main`-merged commit (`d83a534`).
+- Branch: `feature/directional-codec`, head `51e0042`. Not pushed.
+- 24 stacked commits since the last `main`-merged commit (`d83a534`).
   All commits are individually buildable and individually green.
 - Test counts at head:
-  - `:buffer-codec-test:jvmTest` — 192 tests, all pass.
+  - `:buffer-codec-test:jvmTest` — 197 tests, all pass.
   - `:buffer-codec-processor:test` — 46 tests, all pass.
+  - `:buffer-codec-test:compileKotlin{Js,WasmJs,LinuxX64}` — all
+    succeed (slice 10e proves expect/actual resolution
+    end-to-end across every configured target).
   - `:buffer-codec-test:jsNodeTest` — pre-existing failure
     (`WavFmtChunkCodecTest.decodeFailsWhenChunkSizeUnderBoundsTheBody`,
     JS-vs-JVM divergence in `setLimit + readString` behavior, predates
@@ -52,6 +55,8 @@ In commit order — see each commit's full message for the design notes:
 | `5b5d9f9` | H.10d | Generic-aware `@DispatchOn` dispatcher — `Http2Frame<out P : Payload>` absorbing `Http2DataFrame` |
 | `fc5f46d` | — | Doc: STAGE_H_RESUME briefing for slice 10f (now superseded by this file) |
 | `f728700` | H.10f | `MqttPacket<out P : Payload>` + `Publish<P>` variant — lifts the `@RemainingLength` + typed payload carve-out |
+| `f715849` | — | Doc: STAGE_H_RESUME briefing for slice 10e (now superseded by this file) |
+| `51e0042` | H.10e | `@UseCodec` `expect`/`actual` linker-resolution lock + `MqttCodec<P>` typealias |
 
 ### Annotation surface as it stands today
 
@@ -233,11 +238,16 @@ design against today's emitter shape.
    limit on `Partial` and restoring it via try/finally on
    `complete`. Closes PHASE_9_RESET §Stage H acceptance #1
    through the MQTT control-packet sealed.
-7. ⏳ **Slice 10e — `@UseCodec` `expect`/`actual` lock + `MqttCodec`
-   alias.** Lock the cross-platform resolution decision (the
-   deferred-decisions row "@UseCodec expect/actual resolution path"
-   already leans toward "direct call, linker resolves"). Add the
-   convenience alias.
+7. ✅ **Slice 10e (`51e0042`)** — `@UseCodec` `expect`/`actual`
+   linker-resolution lock + `MqttCodec<P>` typealias. Promoted the
+   deferred-decisions row to PHASE_9_RESET Locked Decisions row 21
+   ("direct call, Kotlin linker resolves; KSP doesn't inspect
+   platform actuals"). Slice 10e doctrine vector
+   `RemoteCommandPayloadCodec` proves it end-to-end via
+   `expect`/`actual` declarations across `jvmMain`/`jsMain`/
+   `wasmJsMain`/`nativeMain`. `typealias MqttCodec<P> =
+   MqttPacketCodec<P>` is a hand-written one-liner per
+   PHASE_9_RESET §"Stage H — Payload SAM".
 
 ### Slice 10a + 10b shape — landed
 
@@ -394,12 +404,32 @@ design against today's emitter shape.
   paths (with/without RL) differ only in the `outerLimit` field
   + try/finally body; the no-RL path is unchanged.
 
-### Slice 10d.5 / 10e open design questions
+### Slice 10e shape — landed
 
-The remaining deferred work is two independent slices.
+- **`@UseCodec` resolution doctrine:** direct call, Kotlin linker
+  resolves; KSP doesn't inspect platform actuals (Locked Decision
+  row 21 in PHASE_9_RESET). The processor accepts `expect object`
+  as a valid `@UseCodec` target without modification — KSP reports
+  `classKind == ClassKind.OBJECT` for both expect and actual
+  declarations, and the validator's `ClassKind.OBJECT` check (line
+  786) suffices.
+- **Multiplatform fixture (`RemoteCommandPayloadCodec`):**
+  `expect object` in commonMain + `actual object` in `jvmMain` /
+  `jsMain` / `wasmJsMain` / `nativeMain`. Each actual delegates
+  to a shared `internal RemoteCommandPayloadCodecImpl` so wire
+  bytes are identical across platforms; only the resolution path
+  differs. Compiles cleanly on all four target sets.
+- **`MqttCodec<P>` alias:** hand-written `typealias MqttCodec<P> =
+  MqttPacketCodec<P>` in `buffer-codec-test/.../mqtt/MqttCodec.kt`.
+  Hand-written rather than emitter-generated: one line of
+  consumer-side code doesn't justify processor complexity, and
+  emitting the typealias would force a naming-collision burden
+  on every consumer that uses the generated codec name directly.
 
-**Slice 10d.5 — lambda aggregator.** PHASE_9_RESET wants per-
-variant lambda overloads:
+### Slice 10d.5 — open design questions
+
+Slice 10d.5 (per-variant lambda aggregator) is the only remaining
+deferred slice. PHASE_9_RESET wants per-variant lambda overloads:
 `decode(buffer, context, onPublish: (PartialOfPublish<P>) ->
 Foo<P>, ...)` with throwing defaults. Today consumers compose
 the equivalent via `<VariantName>Codec.partial<P>(...)` + manual
@@ -410,16 +440,6 @@ parent is more flexible (consumer can substitute or wrap), but
 defies the discriminator's promise that the result is the
 matched variant. Defer until a `:buffer-flow` smoke test
 surfaces an ergonomic need.
-
-**Slice 10e — `@UseCodec` `expect`/`actual` lock + `MqttCodec`
-alias.** Lock the cross-platform resolution decision (the
-deferred-decisions row "@UseCodec expect/actual resolution
-path" already leans toward "direct call, linker resolves"; the
-slice 10a generated code already does this for single-platform
-`object` references — the lock formalizes it for multiplatform
-consumers). Add the convenience `typealias MqttCodec<P> =
-MqttPacketCodec<P>` per PHASE_9_RESET. Both are small and
-mechanical; bundle into one slice.
 
 ### Existing pieces to compose, not rebuild
 
@@ -494,30 +514,26 @@ take advantage of these. Worth investigating after Stage H stabilises.
 
 ## How to start the next session
 
+Stage H's load-bearing capabilities are landed. The only remaining
+slice is **10d.5 (per-variant lambda aggregator)**, which is
+deferred until the `:buffer-flow` smoke test surfaces an ergonomic
+need — consumers can already compose the equivalent via
+`<VariantName>Codec.partial<P>(...)` + manual discriminator
+dispatch.
+
 1. Read `PHASE_9_RESET.md` §"Stage H — Payload SAM via MQTT v5
-   PUBLISH" for the overall Stage H spec.
-2. Read this file's "Stage H — slice progress" section. Slices
-   10a, 10b, 10c, 10d, and 10f are landed (`ee7bb81`, `7b2f00f`,
-   `18c6012`, `5b5d9f9`, `f728700`). The remaining work splits
-   into two independent slices: 10d.5 (lambda aggregator) and
-   10e (`@UseCodec` `expect`/`actual` lock + `MqttCodec` alias).
-   Either can land first — they don't stack.
-3. Read the slice 10f emit code before extending it. The
-   `Partial` outer-limit capture (`buildPartialClassTypeSpec`,
-   `buildPartialCompleteFun`, `buildPartialEntryFun` + the
-   `hasRemainingLength` branch) and the slice 10d generic
-   dispatcher (`buildGenericDispatchOnDispatcherTypeSpec` +
-   `genericInstanceFieldName`) are the building blocks any
-   further dispatcher work composes with. The slice 10c
-   `Partial` machinery + slice 10f's outer-limit capture is the
-   building block for 10d.5's lambda aggregator (the lambda
-   receives a `Partial` carrying the captured outer limit and
-   returns the completed variant).
-4. Resolve the slice's open design questions (this file's "Slice
-   10d.5 / 10e open design questions" section) before
-   implementing. For 10d.5, the lambda return type (variant vs
-   parent) is the design lock; for 10e, the `expect`/`actual`
-   semantics lock is largely settled — confirm against a real
-   multiplatform consumer.
-5. Re-derive emit designs against today's emitter shape — don't
+   PUBLISH" for the overall Stage H spec, plus Locked Decisions
+   row 21 (slice 10e doctrine).
+2. If picking up Stage H slice 10d.5: read this file's "Slice
+   10d.5 — open design questions" section. The lambda return type
+   (variant vs parent) is the design lock; both shapes have
+   tradeoffs that only a concrete `:buffer-flow` smoke test
+   ergonomic can resolve cleanly.
+3. If picking up downstream consumer work (`:buffer-flow`,
+   `mqtt`, `websocket` cutovers per PHASE_9_RESET §"Non-goals"):
+   the codec-emitter API is now feature-complete for the cutover.
+   Slice 10c `Partial` + slice 10d/10f generic dispatcher + slice
+   10e expect/actual resolution gives the consumer everything
+   acceptance #1–#4 of PHASE_9_RESET §Stage H requires.
+4. Re-derive emit designs against today's emitter shape — don't
    copy from the reverted worktree without verifying.
