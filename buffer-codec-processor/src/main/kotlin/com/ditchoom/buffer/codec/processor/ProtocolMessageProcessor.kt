@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.processor
 
+import com.google.devtools.ksp.getDeclaredProperties
 import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.processing.Resolver
@@ -7,6 +8,7 @@ import com.google.devtools.ksp.processing.SymbolProcessor
 import com.google.devtools.ksp.symbol.ClassKind
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
+import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.symbol.KSValueParameter
 import com.google.devtools.ksp.symbol.Modifier
@@ -52,15 +54,22 @@ import com.google.devtools.ksp.validate
  *     errors. Sealed parents carrying `@DispatchOn` are skipped
  *     (Stage F surface).
  *
- *   - **Stage E `@WhenTrue` shape (Locked Decision row 19, slice 2).**
- *     For the simple-name form `@WhenTrue("siblingField")`: the
- *     bound parameter type must be nullable; the referenced
- *     constructor parameter must exist, must be declared before the
- *     bound parameter, and must be a non-nullable `Boolean`. The
- *     dotted form `"<sibling>.<property>"` is silently allowed here
- *     and validated when slice 3 lands. No constraint on the
- *     constructor default expression — KSP cannot inspect default
- *     expression trees.
+ *   - **Stage E `@WhenTrue` shape (Locked Decision row 19, slices 2–3).**
+ *     The bound parameter type must be nullable. Two source-expression
+ *     forms are supported:
+ *       - Simple-name form `@WhenTrue("siblingField")`: the referenced
+ *         constructor parameter must exist, must be declared before the
+ *         bound parameter, and must be a non-nullable `Boolean`.
+ *       - Dotted form `@WhenTrue("sibling.property")`: the sibling
+ *         must be a constructor parameter declared before the bound
+ *         parameter; its type must be a `value class`; the property
+ *         must be a `val` declared on that value class with no extra
+ *         value parameters and a non-nullable `Boolean` return type.
+ *         Deeper-than-one-level paths are rejected. Diagnostics for the
+ *         dotted form name the available `Boolean`-returning `val`
+ *         properties on the resolved sibling type.
+ *     No constraint on the constructor default expression — KSP cannot
+ *     inspect default expression trees.
  */
 class ProtocolMessageProcessor(
     private val codeGenerator: CodeGenerator,
@@ -229,17 +238,23 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Stage E slice 2 — `@WhenTrue` shape validation (Locked Decision row 19).
+     * Stage E slices 2–3 — `@WhenTrue` shape validation (Locked Decision row 19).
      *
-     * Checks the simple-name expression form (`@WhenTrue("siblingField")`):
-     *   - Bound parameter type must be nullable (`T?`).
-     *   - Source field must exist as a sibling of the bound parameter.
-     *   - Source field must be declared *before* the bound parameter.
-     *   - Source field must be non-nullable `Boolean`.
+     * The bound parameter type must always be nullable (`T?`); when the
+     * predicate is false the decoder writes `null`, so absence has to be
+     * representable for every supported inner type.
      *
-     * The dotted form (`"<sibling>.<property>"`) lands in slice 3; it is
-     * silently skipped here so that slice 3 can wire emit + validation
-     * together without slice 2 producing premature diagnostics.
+     * Two source-expression forms:
+     *   - Simple-name `"siblingField"`: source must exist as a sibling
+     *     declared before the bound parameter and resolve to a non-
+     *     nullable `Boolean`.
+     *   - Dotted `"sibling.property"`: sibling must exist as a sibling
+     *     declared before the bound parameter and resolve to a `value
+     *     class`; the property must be a `val` declared on that value
+     *     class with no additional value parameters and a non-nullable
+     *     `Boolean` return type. Deeper-than-one-level paths are
+     *     rejected. Diagnostics list the value-class properties that
+     *     would have satisfied the contract.
      */
     private fun validateWhenTrue(
         owner: KSClassDeclaration,
@@ -259,8 +274,6 @@ class ProtocolMessageProcessor(
                 ann.arguments
                     .firstOrNull { it.name?.asString() == "expression" }
                     ?.value as? String ?: continue
-            // Dotted form lands in slice 3 — skip silently here.
-            if (expression.contains('.')) continue
 
             val fieldName = param.name?.asString() ?: "<unknown>"
             val type = param.type.resolve()
@@ -275,7 +288,21 @@ class ProtocolMessageProcessor(
                 continue
             }
 
-            val sourceIndex = parameters.indexOfFirst { it.name?.asString() == expression }
+            val parts = expression.split('.')
+            if (parts.size > 2) {
+                logger.error(
+                    "@WhenTrue(\"$expression\") on $ownerName.$fieldName uses a deeper-than-one-level " +
+                        "path. Locked Decision row 19 limits the dotted form to `<sibling>.<property>` " +
+                        "where `<sibling>` is a sibling constructor parameter and `<property>` is a " +
+                        "`Boolean`-returning `val` on the sibling's `value class` type.",
+                    param,
+                )
+                continue
+            }
+            val siblingName = parts[0]
+            val propertyName = parts.getOrNull(1)
+
+            val sourceIndex = parameters.indexOfFirst { it.name?.asString() == siblingName }
             if (sourceIndex < 0) {
                 val available =
                     parameters
@@ -292,7 +319,7 @@ class ProtocolMessageProcessor(
                         }
                 logger.error(
                     "@WhenTrue(\"$expression\") on $ownerName.$fieldName references " +
-                        "`$expression`, which is not a constructor parameter of $ownerName. " +
+                        "`$siblingName`, which is not a constructor parameter of $ownerName. " +
                         if (available.isEmpty()) {
                             "$ownerName has no `Boolean` siblings declared before $fieldName."
                         } else {
@@ -305,7 +332,7 @@ class ProtocolMessageProcessor(
             if (sourceIndex >= index) {
                 logger.error(
                     "@WhenTrue(\"$expression\") on $ownerName.$fieldName references " +
-                        "$ownerName.$expression, which is declared at-or-after $fieldName in the " +
+                        "$ownerName.$siblingName, which is declared at-or-after $fieldName in the " +
                         "constructor parameter list. The source field must be declared before " +
                         "the conditional field so its value is available at decode time.",
                     param,
@@ -315,21 +342,78 @@ class ProtocolMessageProcessor(
 
             val sourceParam = parameters[sourceIndex]
             val sourceType = sourceParam.type.resolve()
-            val sourceQname = sourceType.declaration.qualifiedName?.asString()
-            if (sourceQname != BOOLEAN_QNAME || sourceType.isMarkedNullable) {
-                val displayed = sourceQname ?: "<unresolved>"
-                val nullableSuffix = if (sourceType.isMarkedNullable) "?" else ""
-                logger.error(
-                    "@WhenTrue(\"$expression\") on $ownerName.$fieldName requires source " +
-                        "`$ownerName.$expression` to be a non-nullable `Boolean`, but it is " +
-                        "`$displayed$nullableSuffix`. Locked Decision row 19 limits the simple " +
-                        "expression form to a sibling `Boolean` field.",
-                    param,
-                )
-                continue
+            if (propertyName == null) {
+                val sourceQname = sourceType.declaration.qualifiedName?.asString()
+                if (sourceQname != BOOLEAN_QNAME || sourceType.isMarkedNullable) {
+                    val displayed = sourceQname ?: "<unresolved>"
+                    val nullableSuffix = if (sourceType.isMarkedNullable) "?" else ""
+                    logger.error(
+                        "@WhenTrue(\"$expression\") on $ownerName.$fieldName requires source " +
+                            "`$ownerName.$siblingName` to be a non-nullable `Boolean`, but it is " +
+                            "`$displayed$nullableSuffix`. Locked Decision row 19 limits the simple " +
+                            "expression form to a sibling `Boolean` field.",
+                        param,
+                    )
+                    continue
+                }
+            } else {
+                val siblingDecl = sourceType.declaration as? KSClassDeclaration
+                if (siblingDecl == null || Modifier.VALUE !in siblingDecl.modifiers) {
+                    val displayed =
+                        sourceType.declaration.qualifiedName?.asString() ?: "<unresolved>"
+                    val nullableSuffix = if (sourceType.isMarkedNullable) "?" else ""
+                    logger.error(
+                        "@WhenTrue(\"$expression\") on $ownerName.$fieldName uses a dotted source " +
+                            "but `$ownerName.$siblingName` resolves to `$displayed$nullableSuffix`, which " +
+                            "is not a `value class`. Locked Decision row 19 limits the dotted form to " +
+                            "siblings whose type is a `@JvmInline value class` exposing a " +
+                            "`Boolean`-returning `val` property.",
+                        param,
+                    )
+                    continue
+                }
+                val booleanProperties = booleanReturningValProperties(siblingDecl)
+                val candidate =
+                    siblingDecl
+                        .getDeclaredProperties()
+                        .firstOrNull { it.simpleName.asString() == propertyName }
+                if (candidate == null || !isBooleanReturningValProperty(candidate)) {
+                    val available =
+                        if (booleanProperties.isEmpty()) {
+                            "${siblingDecl.qualifiedName?.asString() ?: siblingDecl.simpleName.asString()} " +
+                                "has no `Boolean`-returning `val` properties."
+                        } else {
+                            "Available `Boolean`-returning `val` properties on " +
+                                "${siblingDecl.qualifiedName?.asString() ?: siblingDecl.simpleName.asString()}: " +
+                                "${booleanProperties.joinToString()}."
+                        }
+                    logger.error(
+                        "@WhenTrue(\"$expression\") on $ownerName.$fieldName references property " +
+                            "`$propertyName`, which is not a `Boolean`-returning `val` declared on " +
+                            "${siblingDecl.qualifiedName?.asString() ?: siblingDecl.simpleName.asString()}. " +
+                            available,
+                        param,
+                    )
+                    continue
+                }
             }
         }
     }
+
+    private fun isBooleanReturningValProperty(prop: KSPropertyDeclaration): Boolean {
+        if (prop.isMutable) return false
+        if (prop.extensionReceiver != null) return false
+        val returnType = prop.type.resolve()
+        if (returnType.isMarkedNullable) return false
+        return returnType.declaration.qualifiedName?.asString() == BOOLEAN_QNAME
+    }
+
+    private fun booleanReturningValProperties(decl: KSClassDeclaration): List<String> =
+        decl
+            .getDeclaredProperties()
+            .filter { isBooleanReturningValProperty(it) }
+            .mapNotNull { it.simpleName.asString() }
+            .toList()
 
     private fun validateAdjacentLengthFrom(
         owner: KSClassDeclaration,

@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.processor
 
+import com.google.devtools.ksp.getDeclaredProperties
 import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.Dependencies
 import com.google.devtools.ksp.processing.KSPLogger
@@ -100,14 +101,29 @@ import com.squareup.kotlinpoet.U_SHORT
  *     the predicate is true. Slice 2 also adds `Boolean` as a 1-byte
  *     scalar (no `@WireBytes` / `@WireOrder`); slice 2 inner is
  *     restricted to natural-width Scalar — `@LengthPrefixed` inner
- *     and dotted-form expression (`"flags.willFlag"`) land in slices
- *     3 and 5.
+ *     lands in slice 5 alongside MQTT v3 CONNECT.
+ *   - **Stage E slice 3 — dotted `@WhenTrue("sibling.property")` plus
+ *     value-class fields.** A constructor parameter whose type is a
+ *     `value class` with a single supported-scalar primary
+ *     constructor parameter is a first-class field shape: decode
+ *     reads the inner scalar at natural width and constructs the
+ *     value class; encode unwraps via the inner property and writes
+ *     the inner scalar. The dotted-form `@WhenTrue("sibling.property")`
+ *     resolves the predicate as `sibling.property` against an in-scope
+ *     value-class local, where `sibling` is such a value-class field
+ *     declared before the bound parameter and `property` is a
+ *     `Boolean`-returning `val` declared on that value class.
+ *     `peekFrameSize` peeks the value class's inner-scalar bytes at
+ *     the sibling's offset, reconstructs the value class, and calls
+ *     the predicate property. `@WireBytes` / `@WireOrder` on the
+ *     outer parameter are out of scope for slice 3.
  *
- * Anything outside this surface — `@LengthFrom`, dotted-form
- * `@WhenTrue`, `@RemainingBytes`, `@UseCodec`, `@DispatchOn`, signed
- * scalars in the manual-byte-assembly path, `@LengthPrefixed` on a
- * non-terminal field, non-terminal `@WhenTrue` — is silently skipped
- * here and picked up by later stages as their capability lands.
+ * Anything outside this surface — `@LengthFrom`, `@RemainingBytes`,
+ * `@UseCodec`, `@DispatchOn`, signed scalars in the manual-byte-
+ * assembly path, `@LengthPrefixed` on a non-terminal field, non-
+ * terminal `@WhenTrue`, `@LengthPrefixed`-inner `@WhenTrue` — is
+ * silently skipped here and picked up by later stages as their
+ * capability lands.
  */
 internal class CodecEmitter(
     private val codeGenerator: CodeGenerator,
@@ -284,7 +300,15 @@ internal class CodecEmitter(
         }
 
         val qualified = type.declaration.qualifiedName?.asString() ?: return null
-        val kind = SUPPORTED_SCALARS[qualified] ?: return null
+        val kind = SUPPORTED_SCALARS[qualified]
+        if (kind == null) {
+            // Stage E slice 3 — value-class field. Only the natural-width
+            // unannotated path is in scope; @WireBytes / @WireOrder on the
+            // outer parameter widen this and are deferred to a later slice.
+            if (wireBytesAnn != null) return null
+            if (param.annotations.any { it.shortName.asString() == "WireOrder" }) return null
+            return analyzeValueClassScalarField(param, ownerSimpleName)
+        }
 
         // Boolean is 1-byte natural-width with no byte order; @WireBytes / @WireOrder
         // are meaningless on Boolean and are rejected here so the manual-byte-assembly
@@ -321,22 +345,67 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage E slice 2 — `@WhenTrue` against a sibling `Boolean` field.
+     * Stage E slice 3 — value-class field analysis for the parent
+     * data class. The field's type must be a `value class` whose
+     * primary constructor takes a single supported-scalar parameter.
+     * Wire form is the inner scalar at natural width and
+     * `Endianness.Default`; the parent inlines the read/write rather
+     * than calling the value class's separately emitted codec, since
+     * the value class's wire form is exactly its inner scalar.
+     */
+    private fun analyzeValueClassScalarField(
+        param: KSValueParameter,
+        ownerSimpleName: String,
+    ): FieldSpec.ValueClassScalar? {
+        val name = param.name?.asString() ?: return null
+        val type = param.type.resolve()
+        if (type.isError) return null
+        if (type.isMarkedNullable) return null
+        val decl = type.declaration as? KSClassDeclaration ?: return null
+        if (Modifier.VALUE !in decl.modifiers) return null
+        val ctor = decl.primaryConstructor ?: return null
+        if (ctor.parameters.size != 1) return null
+        val innerParam = ctor.parameters[0]
+        val innerName = innerParam.name?.asString() ?: return null
+        val innerType = innerParam.type.resolve()
+        if (innerType.isError) return null
+        if (innerType.isMarkedNullable) return null
+        val innerQname = innerType.declaration.qualifiedName?.asString() ?: return null
+        val innerKind = SUPPORTED_SCALARS[innerQname] ?: return null
+        // Slice 3 limits the inner scalar to its natural-width default-order
+        // path. @WireBytes / @WireOrder on the inner property would widen the
+        // shape and are deferred along with the same widening on direct
+        // scalar fields.
+        if (innerParam.annotations.any { ann ->
+                val n = ann.shortName.asString()
+                n == "WireBytes" || n == "WireOrder"
+            }
+        ) {
+            return null
+        }
+        return FieldSpec.ValueClassScalar(
+            name = name,
+            ownerSimpleName = ownerSimpleName,
+            valueClassType = classNameOf(decl),
+            innerKind = innerKind,
+            innerPropertyName = innerName,
+            wireBytes = innerKind.width,
+        )
+    }
+
+    /**
+     * Stage E slices 2–3 — `@WhenTrue` analysis (Locked Decision row 19).
      *
-     * Handles the simple-name expression form (`"siblingFieldName"`).
-     * Dotted form (`"<sibling>.<property>"`) is silently skipped here
-     * and lands in slice 3.
+     * Pipeline: parse the expression into a typed `WhenTrueExpression`
+     * → resolve the source against the prior siblings into a
+     * `ConditionRef` → analyze the bound parameter's inner shape →
+     * wrap into `FieldSpec.Conditional`. Each step returns `null` to
+     * abort silently when the shape is out-of-scope; the validator in
+     * `ProtocolMessageProcessor` surfaces the user-facing diagnostic.
      *
-     * Slice 2 restricts the inner field to a natural-width Scalar:
-     *   - any `SUPPORTED_SCALARS` type (including `Boolean`),
-     *   - no `@WireBytes`, no `@WireOrder`, no `@LengthPrefixed`.
-     * Wider inner types (LengthPrefixed/Message) and manual byte-assembly
-     * scalars defer to slices 5+.
-     *
-     * Returns null for any case the slice doesn't support — the validator
-     * surfaces user-facing diagnostics for the cases it can name; the
-     * emitter's silence keeps Stage A/B/C/D's "out of shape, no codec"
-     * pattern intact.
+     * Slice 5 will grow [analyzeConditionalInner] to recognise
+     * `@LengthPrefixed val: String` inners; nothing else in this
+     * function changes for that step.
      */
     private fun analyzeConditionalField(
         param: KSValueParameter,
@@ -346,55 +415,183 @@ internal class CodecEmitter(
         params: List<KSValueParameter>,
         index: Int,
     ): FieldSpec? {
-        // Slice 2 inner is always natural-width Endianness.Default; the message
-        // wire order doesn't compose here yet. Slice 5 will widen to manual-
-        // byte-assembly inner shapes that respect the message-level order.
-        val expression =
+        if (!boundParameterIsConditionalShape(param)) return null
+        val name = param.name?.asString() ?: return null
+
+        val expression = parseWhenTrueExpression(whenTrueAnn) ?: return null
+        val condition = resolveCondition(expression, params, index) ?: return null
+        val inner = analyzeConditionalInner(param, name) ?: return null
+
+        return FieldSpec.Conditional(
+            name = name,
+            ownerSimpleName = ownerSimpleName,
+            condition = condition,
+            nullableTypeName = scalarTypeName(inner.kind).copy(nullable = true),
+            inner = inner,
+        )
+    }
+
+    /**
+     * Bound parameter must be nullable (so absence is representable
+     * when the predicate is false) and may carry no annotations beyond
+     * `@WhenTrue`. Composition with `@LengthPrefixed` / `@WireBytes`
+     * widens the shape and lands in slice 5; today's emitter rejects
+     * the combination silently.
+     */
+    private fun boundParameterIsConditionalShape(param: KSValueParameter): Boolean {
+        val type = param.type.resolve()
+        if (type.isError) return false
+        if (!type.isMarkedNullable) return false
+        return param.annotations.all { it.shortName.asString() == "WhenTrue" }
+    }
+
+    /**
+     * Parse the `@WhenTrue("…")` expression literal into a typed
+     * shape. Returns `null` for malformed annotation arguments and
+     * for paths deeper than one dot — both are silently rejected by
+     * the emitter and named by the validator.
+     */
+    private fun parseWhenTrueExpression(whenTrueAnn: KSAnnotation): WhenTrueExpression? {
+        val raw =
             whenTrueAnn.arguments
                 .firstOrNull { it.name?.asString() == "expression" }
                 ?.value as? String
                 ?: return null
-        // Slice 2 supports only the simple-name form; dotted form is slice 3.
-        if (expression.contains('.')) return null
-        // Reject other annotations on the same parameter for slice 2 — wider
-        // composition (e.g., `@WhenTrue` + `@LengthPrefixed`) lands in slice 5.
-        for (ann in param.annotations) {
-            when (ann.shortName.asString()) {
-                "WhenTrue" -> {} // already handled
-                else -> return null
-            }
+        val parts = raw.split('.')
+        return when (parts.size) {
+            1 -> WhenTrueExpression.Simple(parts[0])
+            2 -> WhenTrueExpression.Dotted(parts[0], parts[1])
+            else -> null
         }
-        val name = param.name?.asString() ?: return null
-        val type = param.type.resolve()
-        if (type.isError) return null
-        if (!type.isMarkedNullable) return null
+    }
 
-        // Source must exist as an earlier sibling and be non-nullable Boolean.
-        val sourceIndex = params.indexOfFirst { it.name?.asString() == expression }
-        if (sourceIndex < 0 || sourceIndex >= index) return null
-        val sourceType = params[sourceIndex].type.resolve()
-        if (sourceType.isError) return null
-        if (sourceType.isMarkedNullable) return null
+    /**
+     * Resolve the source expression against the prior siblings of the
+     * bound parameter. Returns the `ConditionRef` when the source
+     * shape matches doctrine row 19; returns `null` otherwise (the
+     * validator emits the diagnostic).
+     */
+    private fun resolveCondition(
+        expression: WhenTrueExpression,
+        params: List<KSValueParameter>,
+        boundIndex: Int,
+    ): ConditionRef? {
+        val sibling = locatePriorSibling(expression.siblingName, params, boundIndex) ?: return null
+        return when (expression) {
+            is WhenTrueExpression.Simple -> resolveSimpleCondition(expression, sibling)
+            is WhenTrueExpression.Dotted -> resolveDottedCondition(expression, sibling)
+        }
+    }
+
+    private fun locatePriorSibling(
+        siblingName: String,
+        params: List<KSValueParameter>,
+        boundIndex: Int,
+    ): KSValueParameter? {
+        val sourceIndex = params.indexOfFirst { it.name?.asString() == siblingName }
+        if (sourceIndex < 0 || sourceIndex >= boundIndex) return null
+        return params[sourceIndex]
+    }
+
+    private fun resolveSimpleCondition(
+        expression: WhenTrueExpression.Simple,
+        sibling: KSValueParameter,
+    ): ConditionRef? {
+        val sourceType = sibling.type.resolve()
+        if (sourceType.isError || sourceType.isMarkedNullable) return null
         if (sourceType.declaration.qualifiedName?.asString() != "kotlin.Boolean") return null
+        return ConditionRef.Sibling(expression.siblingName)
+    }
 
-        // Inner shape: natural-width Scalar only for slice 2.
-        val innerType = type.makeNotNullable()
+    private fun resolveDottedCondition(
+        expression: WhenTrueExpression.Dotted,
+        sibling: KSValueParameter,
+    ): ConditionRef? {
+        val sourceType = sibling.type.resolve()
+        if (sourceType.isError || sourceType.isMarkedNullable) return null
+        val siblingDecl = sourceType.declaration as? KSClassDeclaration ?: return null
+        if (Modifier.VALUE !in siblingDecl.modifiers) return null
+        // Slice 3 peek-side reconstructs the value class via its
+        // primary constructor, so the value class must have exactly
+        // one supported-scalar inner. Without this guard, `analyzeField`
+        // would refuse to model the sibling as `ValueClassScalar`,
+        // and the conditional emit + peek paths would disagree at
+        // codegen time.
+        val ctor = siblingDecl.primaryConstructor ?: return null
+        if (ctor.parameters.size != 1) return null
+        val innerType = ctor.parameters[0].type.resolve()
+        if (innerType.isError || innerType.isMarkedNullable) return null
+        val innerQname = innerType.declaration.qualifiedName?.asString() ?: return null
+        if (SUPPORTED_SCALARS[innerQname] !in PEEKABLE_VALUE_CLASS_INNER_KINDS) return null
+        val property =
+            siblingDecl
+                .getDeclaredProperties()
+                .firstOrNull { it.simpleName.asString() == expression.propertyName } ?: return null
+        if (property.isMutable) return null
+        if (property.extensionReceiver != null) return null
+        val returnType = property.type.resolve()
+        if (returnType.isMarkedNullable) return null
+        if (returnType.declaration.qualifiedName?.asString() != "kotlin.Boolean") return null
+        return ConditionRef.ValueClassProperty(
+            siblingName = expression.siblingName,
+            propertyName = expression.propertyName,
+        )
+    }
+
+    /**
+     * Analyze the bound parameter's inner shape. Slices 2/3 support
+     * any natural-width supported scalar at `Endianness.Default`;
+     * slice 5 widens this to `@LengthPrefixed val: String` for the
+     * MQTT v3 CONNECT optional fields. When that lands, this function
+     * branches on the bound parameter's annotations and returns a
+     * sealed-typed inner; for now there is only one inner kind so a
+     * sealed `ConditionalInner` would be premature.
+     */
+    private fun analyzeConditionalInner(
+        param: KSValueParameter,
+        name: String,
+    ): FieldSpec.Scalar? {
+        val innerType = param.type.resolve().makeNotNullable()
         val qualified = innerType.declaration.qualifiedName?.asString() ?: return null
         val kind = SUPPORTED_SCALARS[qualified] ?: return null
-        val inner =
-            FieldSpec.Scalar(
-                name = name,
-                kind = kind,
-                resolvedWireOrder = Endianness.Default,
-                wireBytes = kind.width,
-            )
-        return FieldSpec.Conditional(
+        return FieldSpec.Scalar(
             name = name,
-            ownerSimpleName = ownerSimpleName,
-            conditionFieldName = expression,
-            nullableTypeName = scalarTypeName(kind).copy(nullable = true),
-            inner = inner,
+            kind = kind,
+            resolvedWireOrder = Endianness.Default,
+            wireBytes = kind.width,
         )
+    }
+
+    /**
+     * Slice 3 peek reconstructs the sibling value class by reading
+     * the inner scalar bytes and calling the value class's primary
+     * constructor. Only the kinds wired into `appendPeekFixedScalar`
+     * are accepted; wider scalars need slice 5's order-aware peek
+     * path. Boolean is excluded because a value-class around a
+     * Boolean is degenerate (the property accessor would just return
+     * the wrapped value) and not load-bearing for any in-scope
+     * vector.
+     */
+    private val PEEKABLE_VALUE_CLASS_INNER_KINDS =
+        setOf(ScalarKind.UByte, ScalarKind.Byte)
+
+    /**
+     * Stage E — typed shape of the `@WhenTrue("…")` expression
+     * literal. Closed by doctrine row 19: only the simple-name and
+     * one-level dotted forms are valid; deeper paths are a compile
+     * error and never reach the analyzer.
+     */
+    private sealed interface WhenTrueExpression {
+        val siblingName: String
+
+        data class Simple(
+            override val siblingName: String,
+        ) : WhenTrueExpression
+
+        data class Dotted(
+            override val siblingName: String,
+            val propertyName: String,
+        ) : WhenTrueExpression
     }
 
     private fun scalarTypeName(kind: ScalarKind): TypeName =
@@ -529,6 +726,7 @@ internal class CodecEmitter(
                 is FieldSpec.Scalar -> appendDecodeScalar(body, field)
                 is FieldSpec.LengthPrefixedMessage -> appendDecodeLengthPrefixed(body, field)
                 is FieldSpec.LengthPrefixedString -> appendDecodeLengthPrefixedString(body, field)
+                is FieldSpec.ValueClassScalar -> appendDecodeValueClassScalar(body, field)
                 is FieldSpec.Conditional -> appendDecodeConditional(body, field)
             }
         }
@@ -551,6 +749,7 @@ internal class CodecEmitter(
                 is FieldSpec.Scalar -> appendEncodeScalar(body, field, shape.ownerSimpleName)
                 is FieldSpec.LengthPrefixedMessage -> appendEncodeLengthPrefixed(body, field)
                 is FieldSpec.LengthPrefixedString -> appendEncodeLengthPrefixedString(body, field)
+                is FieldSpec.ValueClassScalar -> appendEncodeValueClassScalar(body, field)
                 is FieldSpec.Conditional -> appendEncodeConditional(body, field)
             }
         }
@@ -602,12 +801,22 @@ internal class CodecEmitter(
                 )
             }
             else -> {
-                val total = shape.fields.sumOf { (it as FieldSpec.Scalar).wireBytes }
+                val total = shape.fields.sumOfFixedWireBytes()
                 builder.addStatement("return %T.Exact(%L)", WIRE_SIZE_CN, total)
             }
         }
         return builder.build()
     }
+
+    /**
+     * Stage E slice 3 — sum the `wireBytes` of every `FixedSize` field
+     * in the list. Variable-length fields (`LengthPrefixed*`,
+     * `Conditional`) contribute 0 and are filtered out by the
+     * `filterIsInstance` step. Callers that require the result to
+     * cover every field gate on terminal shape before calling.
+     */
+    private fun List<FieldSpec>.sumOfFixedWireBytes(): Int =
+        filterIsInstance<FieldSpec.FixedSize>().sumOf { it.wireBytes }
 
     private fun buildPeekFrameFun(shape: CodecShape): FunSpec {
         val builder =
@@ -630,7 +839,7 @@ internal class CodecEmitter(
                     PrefixPeek(terminal.name, terminal.ownerSimpleName, terminal.prefixWidth, terminal.prefixWireOrder)
                 else -> null
             } ?: run {
-                val total = shape.fields.sumOf { (it as FieldSpec.Scalar).wireBytes }
+                val total = shape.fields.sumOfFixedWireBytes()
                 builder.addStatement(
                     "return if (stream.available() - baseOffset >= %L) %T.Complete(%L) else %T.NeedsMoreData",
                     total,
@@ -680,10 +889,7 @@ internal class CodecEmitter(
         val prefixWireOrder: Endianness,
     )
 
-    private fun scalarHeaderBytes(shape: CodecShape): Int =
-        shape.fields
-            .filterIsInstance<FieldSpec.Scalar>()
-            .sumOf { it.wireBytes }
+    private fun scalarHeaderBytes(shape: CodecShape): Int = shape.fields.sumOfFixedWireBytes()
 
     private fun appendDecodeScalar(
         body: CodeBlock.Builder,
@@ -824,6 +1030,42 @@ internal class CodecEmitter(
     }
 
     /**
+     * Stage E slice 3 — emit decode for a `@JvmInline value class` field
+     * with a single supported-scalar inner. Reads the inner scalar at
+     * natural width and constructs the value class via its primary
+     * constructor. The local is named after the outer parameter so
+     * dotted-form `@WhenTrue` resolvers can address it as `<name>.<property>`.
+     */
+    private fun appendDecodeValueClassScalar(
+        body: CodeBlock.Builder,
+        field: FieldSpec.ValueClassScalar,
+    ) {
+        body.addStatement(
+            "val %L = %T(%L)",
+            field.name,
+            field.valueClassType,
+            naturalScalarReadExpr(field.innerKind),
+        )
+    }
+
+    /**
+     * Stage E slice 3 — emit encode for a value-class field. Unwraps
+     * via the inner property name and writes the inner scalar at
+     * natural width.
+     */
+    private fun appendEncodeValueClassScalar(
+        body: CodeBlock.Builder,
+        field: FieldSpec.ValueClassScalar,
+    ) {
+        body.addStatement(
+            naturalScalarWriteStatement(
+                field.innerKind,
+                "value.${field.name}.${field.innerPropertyName}",
+            ),
+        )
+    }
+
+    /**
      * Stage E slice 2 — emit a `@WhenTrue` decode block.
      *
      * Generated shape:
@@ -845,13 +1087,13 @@ internal class CodecEmitter(
             "val %L: %T = if (%L) %L else null",
             field.name,
             field.nullableTypeName,
-            field.conditionFieldName,
+            decodeConditionExpr(field.condition),
             naturalScalarReadExpr(field.inner.kind),
         )
     }
 
     /**
-     * Stage E slice 2 — emit a `@WhenTrue` encode block.
+     * Stage E slice 2/3 — emit a `@WhenTrue` encode block.
      *
      * Generated shape:
      * ```
@@ -861,6 +1103,9 @@ internal class CodecEmitter(
      * }
      * ```
      *
+     * `<source>` is `value.<sibling>` for the simple form and
+     * `value.<sibling>.<property>` for the dotted form.
+     *
      * Predicate-false branch writes nothing (zero bytes for the slot, per
      * Locked Decision row 19). Predicate-true with `value.<name> == null`
      * throws `EncodeException` with field-path attribution (row 20).
@@ -869,7 +1114,7 @@ internal class CodecEmitter(
         body: CodeBlock.Builder,
         field: FieldSpec.Conditional,
     ) {
-        body.beginControlFlow("if (value.%L)", field.conditionFieldName)
+        body.beginControlFlow("if (%L)", encodeConditionAccessor(field.condition))
         val localName = "${field.name}Value"
         body.addStatement(
             "val %L = value.%L ?: throw %T(fieldPath = %S, reason = %S)",
@@ -877,11 +1122,44 @@ internal class CodecEmitter(
             field.name,
             ENCODE_EXCEPTION_CN,
             "${field.ownerSimpleName}.${field.name}",
-            "@WhenTrue(\"${field.conditionFieldName}\") predicate is true but field is null",
+            "@WhenTrue(\"${conditionExpressionLiteral(field.condition)}\") predicate is true but field is null",
         )
         body.addStatement(naturalScalarWriteStatement(field.inner.kind, localName))
         body.endControlFlow()
     }
+
+    /**
+     * Decode-side predicate accessor. The decode visitor introduces
+     * each prior field as a local in scope (constructor order), so
+     * the simple form references the local directly and the dotted
+     * form chains the property off the value-class local.
+     */
+    private fun decodeConditionExpr(condition: ConditionRef): String =
+        when (condition) {
+            is ConditionRef.Sibling -> condition.name
+            is ConditionRef.ValueClassProperty -> "${condition.siblingName}.${condition.propertyName}"
+        }
+
+    /**
+     * Encode-side predicate accessor. Encode reads from the message
+     * value, so all paths start at `value.`. Simple form is
+     * `value.<sibling>`; dotted form is `value.<sibling>.<property>`.
+     */
+    private fun encodeConditionAccessor(condition: ConditionRef): String =
+        when (condition) {
+            is ConditionRef.Sibling -> "value.${condition.name}"
+            is ConditionRef.ValueClassProperty -> "value.${condition.siblingName}.${condition.propertyName}"
+        }
+
+    /**
+     * Reconstruct the original `@WhenTrue("...")` expression literal
+     * for use in `EncodeException` field-path messages (row 20).
+     */
+    private fun conditionExpressionLiteral(condition: ConditionRef): String =
+        when (condition) {
+            is ConditionRef.Sibling -> condition.name
+            is ConditionRef.ValueClassProperty -> "${condition.siblingName}.${condition.propertyName}"
+        }
 
     /**
      * Stage E slice 2 — emit `peekFrameSize` for a message whose terminal
@@ -901,45 +1179,33 @@ internal class CodecEmitter(
         terminal: FieldSpec.Conditional,
     ) {
         val prefixFields = shape.fields.dropLast(1)
-        // All preceding fields must be Scalar for slice 2's peek walk; if any
-        // is variable-length, slice 5's more general walk lands.
-        if (prefixFields.any { it !is FieldSpec.Scalar }) {
+        // All preceding fields must be FixedSize for the slice 2/3 peek
+        // walk; if any is variable-length, slice 5's more general walk lands.
+        val fixedPrefix = prefixFields.filterIsInstance<FieldSpec.FixedSize>()
+        if (fixedPrefix.size != prefixFields.size) {
             builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
             return
         }
-        val prefixBytes = prefixFields.sumOf { (it as FieldSpec.Scalar).wireBytes }
-        var sourceOffset = -1
-        var bytesSeen = 0
-        for (field in prefixFields) {
-            val scalar = field as FieldSpec.Scalar
-            if (scalar.name == terminal.conditionFieldName) {
-                sourceOffset = bytesSeen
-                break
-            }
-            bytesSeen += scalar.wireBytes
-        }
-        if (sourceOffset < 0) {
+        val sibling = resolvePeekSibling(fixedPrefix, terminal.condition)
+        if (sibling == null) {
             // analyzeConditionalField guarantees the source is a sibling declared
             // before this field, so this branch is defensive — it would mean the
             // emitter and analyzer disagree.
             builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
             return
         }
+        val prefixBytes = fixedPrefix.sumOf { it.wireBytes }
         val body = CodeBlock.builder()
         body.addStatement(
             "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
             prefixBytes,
             PEEK_RESULT_CN,
         )
-        body.addStatement(
-            "val %L = stream.peekByte(baseOffset + %L) != 0.toByte()",
-            terminal.conditionFieldName,
-            sourceOffset,
-        )
+        appendPeekConditionResolution(body, sibling, terminal.condition)
         body.addStatement(
             "val total = %L + if (%L) %L else 0",
             prefixBytes,
-            terminal.conditionFieldName,
+            peekConditionLocalName(terminal.condition),
             terminal.inner.wireBytes,
         )
         body.addStatement(
@@ -949,6 +1215,125 @@ internal class CodecEmitter(
         )
         builder.addCode(body.build())
     }
+
+    /**
+     * Find the prefix field referenced by a `ConditionRef` and return
+     * it together with its byte offset in the prefix walk. Returns
+     * `null` if the sibling is missing or has the wrong type — that
+     * mismatch indicates `analyzeConditionalField` and the prefix
+     * walk disagree, so the peek falls back to `NoFraming`.
+     */
+    private fun resolvePeekSibling(
+        fixedPrefix: List<FieldSpec.FixedSize>,
+        condition: ConditionRef,
+    ): PeekSibling? {
+        val (siblingName, expectKind) =
+            when (condition) {
+                is ConditionRef.Sibling -> condition.name to PeekSiblingKind.Scalar
+                is ConditionRef.ValueClassProperty -> condition.siblingName to PeekSiblingKind.ValueClassScalar
+            }
+        var offset = 0
+        for (field in fixedPrefix) {
+            if (field.name == siblingName) {
+                val matches =
+                    when (expectKind) {
+                        PeekSiblingKind.Scalar -> field is FieldSpec.Scalar
+                        PeekSiblingKind.ValueClassScalar -> field is FieldSpec.ValueClassScalar
+                    }
+                if (!matches) return null
+                return PeekSibling(field, offset)
+            }
+            offset += field.wireBytes
+        }
+        return null
+    }
+
+    /**
+     * Emit the peek-side resolution of the boolean predicate. For a
+     * sibling-`Boolean` source, peek the byte directly. For a value-
+     * class property, peek the inner scalar bytes, reconstruct the
+     * value class, and call the predicate property.
+     */
+    private fun appendPeekConditionResolution(
+        body: CodeBlock.Builder,
+        sibling: PeekSibling,
+        condition: ConditionRef,
+    ) {
+        when (condition) {
+            is ConditionRef.Sibling -> {
+                body.addStatement(
+                    "val %L = stream.peekByte(baseOffset + %L) != 0.toByte()",
+                    condition.name,
+                    sibling.offset,
+                )
+            }
+            is ConditionRef.ValueClassProperty -> {
+                val field = sibling.field as FieldSpec.ValueClassScalar
+                val rawVar = "${condition.siblingName}Raw"
+                appendPeekFixedScalar(body, field.innerKind, rawVar, sibling.offset)
+                body.addStatement(
+                    "val %L = %T(%L).%L",
+                    peekConditionLocalName(condition),
+                    field.valueClassType,
+                    rawVar,
+                    condition.propertyName,
+                )
+            }
+        }
+    }
+
+    private fun peekConditionLocalName(condition: ConditionRef): String =
+        when (condition) {
+            is ConditionRef.Sibling -> condition.name
+            is ConditionRef.ValueClassProperty -> "${condition.siblingName}${condition.propertyName.replaceFirstChar { it.uppercase() }}"
+        }
+
+    private fun appendPeekFixedScalar(
+        body: CodeBlock.Builder,
+        kind: ScalarKind,
+        targetVar: String,
+        offset: Int,
+    ) {
+        // Slice 3 peek covers the natural-width single-byte scalars used by
+        // the SmallFlags vector (UByte). Wider scalars and manual-byte-
+        // assembly inner kinds compose with slice 5's variable-prefix walk
+        // and aren't required by any in-scope @WhenTrue source today.
+        when (kind) {
+            ScalarKind.UByte ->
+                body.addStatement(
+                    "val %L = stream.peekByte(baseOffset + %L).toUByte()",
+                    targetVar,
+                    offset,
+                )
+            ScalarKind.Byte ->
+                body.addStatement(
+                    "val %L = stream.peekByte(baseOffset + %L)",
+                    targetVar,
+                    offset,
+                )
+            ScalarKind.Boolean ->
+                body.addStatement(
+                    "val %L = stream.peekByte(baseOffset + %L) != 0.toByte()",
+                    targetVar,
+                    offset,
+                )
+            ScalarKind.UShort, ScalarKind.UInt, ScalarKind.ULong,
+            ScalarKind.Short, ScalarKind.Int, ScalarKind.Long,
+            ->
+                error(
+                    "peek-side reconstruction for value-class inner kind $kind not implemented; " +
+                        "analyzeConditionalField should have rejected this shape until the wider " +
+                        "peek path lands.",
+                )
+        }
+    }
+
+    private data class PeekSibling(
+        val field: FieldSpec.FixedSize,
+        val offset: Int,
+    )
+
+    private enum class PeekSiblingKind { Scalar, ValueClassScalar }
 
     private fun appendDecodeLengthPrefixed(
         body: CodeBlock.Builder,
@@ -1234,10 +1619,8 @@ internal class CodecEmitter(
         return when (shape.fields.lastOrNull()) {
             is FieldSpec.LengthPrefixedString -> VariantWireSize.BackPatch
             is FieldSpec.LengthPrefixedMessage -> VariantWireSize.RuntimeExact
-            is FieldSpec.Scalar, null -> {
-                val total = shape.fields.sumOf { (it as FieldSpec.Scalar).wireBytes }
-                VariantWireSize.LiteralExact(total)
-            }
+            is FieldSpec.Scalar, is FieldSpec.ValueClassScalar, null ->
+                VariantWireSize.LiteralExact(shape.fields.sumOfFixedWireBytes())
             is FieldSpec.Conditional -> VariantWireSize.BackPatch
         }
     }
@@ -1456,12 +1839,27 @@ internal class CodecEmitter(
     private sealed interface FieldSpec {
         val name: String
 
+        /**
+         * Stage A onward — fields whose wire byte count is fixed at
+         * compile time. The `peekFrameSize` prefix walk and the
+         * fixed-size variant `wireSize` summation type-narrow to this
+         * shape so they no longer need runtime casts to read
+         * `wireBytes`.
+         *
+         * Slice 5 keeps this interface unchanged: the variable-length
+         * prefix walk for MQTT v3 CONNECT lives on a separate branch,
+         * not as a third member here.
+         */
+        sealed interface FixedSize : FieldSpec {
+            val wireBytes: Int
+        }
+
         data class Scalar(
             override val name: String,
             val kind: ScalarKind,
             val resolvedWireOrder: Endianness,
-            val wireBytes: Int,
-        ) : FieldSpec
+            override val wireBytes: Int,
+        ) : FixedSize
 
         data class LengthPrefixedMessage(
             override val name: String,
@@ -1480,23 +1878,74 @@ internal class CodecEmitter(
         ) : FieldSpec
 
         /**
-         * Stage E — `@WhenTrue` conditional wrapper. Slice 2 supports only
+         * Stage E slice 3 — a `@JvmInline value class` field whose primary
+         * constructor takes a single supported scalar. Wire form is the
+         * inner scalar at its natural width and `Endianness.Default`;
+         * `@WireBytes` / `@WireOrder` on the outer parameter are out of
+         * scope for slice 3 and silently rejected (caught by the
+         * non-conditional analyzeField path). Decode reads the inner
+         * scalar and constructs the value class; encode writes
+         * `value.<outer>.<innerProperty>`. Top-level value classes
+         * already had a path via `analyze`; slice 3 lifts the same
+         * shape to a first-class field type so the dotted-form
+         * `@WhenTrue` can resolve `sibling.property` against an
+         * in-scope value-class local. Stage F's `@DispatchOn` value-
+         * class discriminator will reuse this entry too.
+         */
+        data class ValueClassScalar(
+            override val name: String,
+            val ownerSimpleName: String,
+            val valueClassType: ClassName,
+            val innerKind: ScalarKind,
+            val innerPropertyName: String,
+            override val wireBytes: Int,
+        ) : FixedSize
+
+        /**
+         * Stage E — `@WhenTrue` conditional wrapper. Slice 2/3 support
          * `inner: FieldSpec.Scalar` at natural width (no `@WireBytes`,
          * no `@WireOrder`); slice 5 widens `inner` to `LengthPrefixedString`
          * for the MQTT v3 CONNECT optional-field shape.
          *
-         * `conditionFieldName` is the simple sibling-Boolean form for slice 2
-         * (e.g., `"hasExtra"`). Slice 3 will add the dotted `<sibling>.<property>`
-         * form via a new sealed `ConditionRef` shape; for now we keep the simpler
-         * field carrying just the name.
+         * `condition` carries the resolved source: slice 2's sibling-
+         * Boolean form (`ConditionRef.Sibling`) and slice 3's dotted
+         * value-class-property form (`ConditionRef.ValueClassProperty`).
          */
         data class Conditional(
             override val name: String,
             val ownerSimpleName: String,
-            val conditionFieldName: String,
+            val condition: ConditionRef,
             val nullableTypeName: TypeName,
             val inner: Scalar,
         ) : FieldSpec
+    }
+
+    /**
+     * Stage E — resolved source of a `@WhenTrue` predicate.
+     *
+     * Slice 2's `Sibling` form names a sibling `Boolean` constructor
+     * parameter declared before the bound field. Slice 3's
+     * `ValueClassProperty` form names a sibling parameter (a value
+     * class with a single supported-scalar inner) plus a `Boolean`-
+     * returning `val` property declared on that value class.
+     */
+    private sealed interface ConditionRef {
+        data class Sibling(
+            val name: String,
+        ) : ConditionRef
+
+        /**
+         * The value class's inner kind and ClassName are not stored
+         * here — by the time the peek emitter needs them it has
+         * already located the sibling's `FieldSpec.ValueClassScalar`
+         * in the prefix walk and reads them from there. Keeping them
+         * out of `ConditionRef` removes the duplicate-source-of-truth
+         * trap (the FieldSpec is authoritative).
+         */
+        data class ValueClassProperty(
+            val siblingName: String,
+            val propertyName: String,
+        ) : ConditionRef
     }
 
     private enum class ScalarKind(
