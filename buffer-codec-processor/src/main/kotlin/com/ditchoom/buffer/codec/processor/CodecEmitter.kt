@@ -1179,7 +1179,18 @@ internal class CodecEmitter(
                     .addFunction(buildEncodeFun(shape))
                     .addFunction(buildWireSizeFun(shape))
                     .addFunction(buildPeekFrameFun(shape))
-                    .build()
+                    .also { builder ->
+                        // Slice 10c — every codec carrying a typed payload field
+                        // gets a `Partial` nested class plus a `partial(buffer,
+                        // context)` decode entry. For the slice 10a (object)
+                        // shape, `partial` is a member of the codec object.
+                        if (shouldEmitPartial(shape)) {
+                            builder.addType(buildPartialClassTypeSpec(shape, payloadTypeParameter = null))
+                            builder.addFunction(
+                                buildPartialEntryFun(shape, payloadTypeParameter = null),
+                            )
+                        }
+                    }.build()
             }
         return FileSpec
             .builder(shape.packageName, shape.codecSimpleName)
@@ -1220,7 +1231,20 @@ internal class CodecEmitter(
             .addFunction(buildEncodeFun(shape, parameterizedMessage))
             .addFunction(buildWireSizeFun(shape, parameterizedMessage))
             .addFunction(buildPeekFrameFun(shape))
-            .build()
+            .also { builder ->
+                // Slice 10c — for the slice 10b (class) shape, `Partial` is a
+                // nested class (independent type parameter <P : Payload>) and
+                // `partial<P>(buffer, context)` lives on a companion object.
+                // Companion-side placement matters: consumers must be able to
+                // call `MqttPublishV3Codec.partial<JpegImage>(buffer, context)`
+                // WITHOUT instantiating the surrounding generic codec class
+                // (the whole point of slice 10b's Partial is to defer the
+                // codec choice past header decode).
+                if (shouldEmitPartial(shape)) {
+                    builder.addType(buildPartialClassTypeSpec(shape, payloadTypeParameter = binding))
+                    builder.addType(buildPartialCompanionObject(shape, payloadTypeParameter = binding))
+                }
+            }.build()
     }
 
     private fun buildDecodeFun(
@@ -1305,6 +1329,257 @@ internal class CodecEmitter(
             .addCode(body.build())
             .build()
     }
+
+    /**
+     * Stage H slice 10c — gate for emitting the `Partial` decode pattern.
+     * Partial only makes sense for messages carrying a typed payload field
+     * (slice 10a `@UseCodec` shape or slice 10b `<P : Payload>` shape);
+     * `RemainingBytesPayload` is the marker for both. The
+     * `@RemainingLength` carve-out below is a deliberate slice-10c
+     * narrow: a Partial whose header decode runs `setLimit` would force
+     * `complete()` to either inherit the narrowed limit (correct for
+     * payload bounding) or restore the outer limit (correct for caller
+     * cleanup) — picking one at emit time without a vector that exercises
+     * both ergonomics is premature. The slice 10a / 10b vectors don't
+     * combine `@RemainingLength` with the payload field (slice 10d's
+     * outer dispatcher will own the var-int instead), so deferring the
+     * combination loses no current capability. Lift this when slice 10d
+     * lands a vector that exercises the combo.
+     */
+    private fun shouldEmitPartial(shape: CodecShape): Boolean {
+        if (shape.fields.none { it is FieldSpec.RemainingBytesPayload }) return false
+        if (shape.fields.any { it is FieldSpec.RemainingLength }) return false
+        return true
+    }
+
+    /**
+     * Stage H slice 10c — emit the nested `Partial` class. The `Partial`
+     * captures the buffer and context so `complete(...)` can defer the
+     * payload decode, and exposes the header fields as `val`s for
+     * pre-payload inspection (the topic-keyed dispatch case from
+     * `:buffer-flow` acceptance #4).
+     *
+     * The constructor is `internal` because consumers always reach
+     * `Partial` through the `partial(...)` entry function — there's no
+     * legitimate reason for foreign-module construction. Generated
+     * codecs and consumer code live in the same module, so `internal`
+     * keeps the API surface tight without restricting reachability for
+     * the codec's own emit.
+     *
+     * Type-parameter shape:
+     *   - Slice 10a (concrete payload): no type parameter on `Partial`.
+     *     `complete(): MessageType` uses the `@UseCodec`-pinned codec.
+     *   - Slice 10b (generic payload `<P : Payload>`): `Partial<P :
+     *     Payload>` carries its own type variable (independent of the
+     *     surrounding generic codec class — the whole point of slice
+     *     10b's Partial is that the payload codec is supplied at
+     *     `complete(...)` time, not at codec instantiation).
+     *     `complete(payloadCodec: Decoder<P>): MessageType<P>` takes
+     *     the codec as a parameter; `Decoder<P>` (not a separate
+     *     `PayloadDecoder<P>` SAM) — the contract is identical and a
+     *     parallel SAM would be noise.
+     */
+    private fun buildPartialClassTypeSpec(
+        shape: CodecShape,
+        payloadTypeParameter: PayloadTypeParameter?,
+    ): TypeSpec {
+        val payloadField =
+            shape.fields.lastOrNull() as? FieldSpec.RemainingBytesPayload
+                ?: error("buildPartialClassTypeSpec called for shape without trailing RemainingBytesPayload")
+        val headerFields = shape.fields.dropLast(1)
+
+        val classBuilder = TypeSpec.classBuilder("Partial")
+        val typeVar =
+            payloadTypeParameter?.let {
+                TypeVariableName(it.typeVariableName, it.bound)
+            }
+        if (typeVar != null) classBuilder.addTypeVariable(typeVar)
+
+        val ctorBuilder = FunSpec.constructorBuilder().addModifiers(KModifier.INTERNAL)
+        for (field in headerFields) {
+            val typeName = partialFieldTypeName(field)
+            ctorBuilder.addParameter(field.name, typeName)
+            classBuilder.addProperty(
+                com.squareup.kotlinpoet.PropertySpec
+                    .builder(field.name, typeName)
+                    .initializer(field.name)
+                    .build(),
+            )
+        }
+        ctorBuilder.addParameter("buffer", READ_BUFFER_CN)
+        ctorBuilder.addParameter("context", DECODE_CONTEXT_CN)
+        classBuilder.primaryConstructor(ctorBuilder.build())
+        // Buffer + context are private state used by complete(); no
+        // public getter — the consumer should never re-read the buffer
+        // through the Partial.
+        classBuilder.addProperty(
+            com.squareup.kotlinpoet.PropertySpec
+                .builder("buffer", READ_BUFFER_CN, KModifier.PRIVATE)
+                .initializer("buffer")
+                .build(),
+        )
+        classBuilder.addProperty(
+            com.squareup.kotlinpoet.PropertySpec
+                .builder("context", DECODE_CONTEXT_CN, KModifier.PRIVATE)
+                .initializer("context")
+                .build(),
+        )
+
+        classBuilder.addFunction(
+            buildPartialCompleteFun(shape, payloadTypeParameter, payloadField, headerFields),
+        )
+        return classBuilder.build()
+    }
+
+    /**
+     * Stage H slice 10c — emit the `Partial.complete(...)` function.
+     *
+     * Slice 10a path: the codec is `@UseCodec`-pinned, so `complete()`
+     * takes no parameters and calls `<UserCodec>.decode(buffer, context)`
+     * directly. Slice 10b path: the codec is supplied at the call site,
+     * so `complete(payloadCodec: Decoder<P>)` accepts the decoder and
+     * calls `payloadCodec.decode(buffer, context)`. Both branches share
+     * the trailing constructor call.
+     */
+    private fun buildPartialCompleteFun(
+        shape: CodecShape,
+        payloadTypeParameter: PayloadTypeParameter?,
+        payloadField: FieldSpec.RemainingBytesPayload,
+        headerFields: List<FieldSpec>,
+    ): FunSpec {
+        val funBuilder = FunSpec.builder("complete")
+        val returnType =
+            if (payloadTypeParameter != null) {
+                shape.messageClassName.parameterizedBy(
+                    TypeVariableName(payloadTypeParameter.typeVariableName),
+                )
+            } else {
+                shape.messageClassName
+            }
+        funBuilder.returns(returnType)
+
+        when (val source = payloadField.source) {
+            is PayloadCodecSource.UserCodecObject -> {
+                funBuilder.addStatement(
+                    "val %L = %T.decode(buffer, context)",
+                    payloadField.name,
+                    source.codecType,
+                )
+            }
+            is PayloadCodecSource.ConstructorInjected -> {
+                val pTpName =
+                    payloadTypeParameter
+                        ?: error("ConstructorInjected payload source requires a payload type parameter")
+                funBuilder.addParameter(
+                    source.parameterName,
+                    DECODER_CN.parameterizedBy(TypeVariableName(pTpName.typeVariableName)),
+                )
+                funBuilder.addStatement(
+                    "val %L = %L.decode(buffer, context)",
+                    payloadField.name,
+                    source.parameterName,
+                )
+            }
+        }
+        val ctorArgs = shape.fields.joinToString(", ") { "${it.name} = ${it.name}" }
+        funBuilder.addStatement("return %T(%L)", returnType, ctorArgs)
+        return funBuilder.build()
+    }
+
+    /**
+     * Stage H slice 10c — emit the `partial(buffer, context)` decode
+     * entry. Slice 10a places this as a member function on the codec
+     * `object`; slice 10b places it on the codec class's companion
+     * object (with a fresh `<P : Payload>` type parameter so the call
+     * site can choose the payload type without instantiating the
+     * surrounding generic codec class).
+     *
+     * The body decodes every header field (everything before the
+     * trailing `RemainingBytesPayload`), then constructs the nested
+     * `Partial` capturing the buffer + context. The header decode
+     * statements are the same `appendDecodeField` emit used by the
+     * full `decode(...)` — Partial differs only in stopping before
+     * the payload field and packaging the locals into `Partial`
+     * instead of the full message constructor.
+     */
+    private fun buildPartialEntryFun(
+        shape: CodecShape,
+        payloadTypeParameter: PayloadTypeParameter?,
+    ): FunSpec {
+        val headerFields = shape.fields.dropLast(1)
+        val partialClassName = ClassName(shape.packageName, shape.codecSimpleName, "Partial")
+        val funBuilder = FunSpec.builder("partial")
+        val returnType =
+            if (payloadTypeParameter != null) {
+                funBuilder.addTypeVariable(
+                    TypeVariableName(payloadTypeParameter.typeVariableName, payloadTypeParameter.bound),
+                )
+                partialClassName.parameterizedBy(
+                    TypeVariableName(payloadTypeParameter.typeVariableName),
+                )
+            } else {
+                partialClassName
+            }
+        funBuilder
+            .addParameter("buffer", READ_BUFFER_CN)
+            .addParameter("context", DECODE_CONTEXT_CN)
+            .returns(returnType)
+
+        val body = CodeBlock.builder()
+        for (field in headerFields) appendDecodeField(body, field)
+        val ctorArgs =
+            (headerFields.map { "${it.name} = ${it.name}" } + listOf("buffer = buffer", "context = context"))
+                .joinToString(", ")
+        body.addStatement("return %T(%L)", returnType, ctorArgs)
+        funBuilder.addCode(body.build())
+        return funBuilder.build()
+    }
+
+    /**
+     * Stage H slice 10c — companion-object wrapper for the slice 10b
+     * `partial<P>(...)` entry. Companion-side placement is required:
+     * a member-side `partial(...)` would force the consumer to first
+     * construct `MqttPublishV3Codec(somePayloadCodec)` just to call
+     * `partial`, defeating the slice 10b purpose of deferring the
+     * codec choice past the header decode.
+     */
+    private fun buildPartialCompanionObject(
+        shape: CodecShape,
+        payloadTypeParameter: PayloadTypeParameter,
+    ): TypeSpec =
+        TypeSpec
+            .companionObjectBuilder()
+            .addFunction(buildPartialEntryFun(shape, payloadTypeParameter))
+            .build()
+
+    /**
+     * Stage H slice 10c — derive the property `TypeName` for a header
+     * field on the `Partial` class. The `Partial` mirrors the data
+     * class's header fields with their original Kotlin types, so this
+     * map is a closed mirror of `FieldSpec`'s shape-to-type mapping.
+     * The trailing `RemainingBytesPayload` field is never asked for
+     * (it's stripped by `headerFields = shape.fields.dropLast(1)` at
+     * every call site).
+     */
+    private fun partialFieldTypeName(field: FieldSpec): TypeName =
+        when (field) {
+            is FieldSpec.Scalar -> scalarTypeName(field.kind)
+            is FieldSpec.LengthPrefixedString -> ClassName("kotlin", "String")
+            is FieldSpec.LengthPrefixedMessage -> field.messageType
+            is FieldSpec.LengthFromString -> ClassName("kotlin", "String")
+            is FieldSpec.LengthFromList ->
+                ClassName("kotlin.collections", "List").parameterizedBy(field.elementClassName)
+            is FieldSpec.RemainingBytesScalarList ->
+                ClassName("kotlin.collections", "List").parameterizedBy(scalarTypeName(field.elementKind))
+            is FieldSpec.RemainingBytesPayload ->
+                error(
+                    "partialFieldTypeName called on a RemainingBytesPayload field — caller " +
+                        "should strip the payload field before mapping header types.",
+                )
+            is FieldSpec.RemainingLength -> U_INT
+            is FieldSpec.ValueClassScalar -> field.valueClassType
+            is FieldSpec.Conditional -> field.nullableTypeName
+        }
 
     private fun buildWireSizeFun(
         shape: CodecShape,
@@ -4048,6 +4323,7 @@ internal class CodecEmitter(
         private val READ_BUFFER_CN = ClassName("com.ditchoom.buffer", "ReadBuffer")
         private val WRITE_BUFFER_CN = ClassName("com.ditchoom.buffer", "WriteBuffer")
         private val CODEC_CN = ClassName("com.ditchoom.buffer.codec", "Codec")
+        private val DECODER_CN = ClassName("com.ditchoom.buffer.codec", "Decoder")
         private val DECODE_CONTEXT_CN = ClassName("com.ditchoom.buffer.codec", "DecodeContext")
         private val ENCODE_CONTEXT_CN = ClassName("com.ditchoom.buffer.codec", "EncodeContext")
         private val WIRE_SIZE_CN = ClassName("com.ditchoom.buffer.codec", "WireSize")
