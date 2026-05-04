@@ -353,11 +353,10 @@ Open questions to address while sequencing:
 - Apple build verification carryover from commits `f0a68a9` /
   `318b638` (touched `MutableDataBuffer` paths) — confirm on a macOS
   host before any merge to main. Not blocking Stage E.
-- **Pre-existing Android `:buffer:compileReleaseKotlinAndroid`
-  failure** (`AndroidDeterministicUnsafeJvmBuffer` doesn't
-  implement `sliceImpl`). Reproduces on the local environment but
-  does not affect any codec module. Not Stage E's scope; flag for
-  the buffer-runtime owner.
+- Android `:buffer:compileReleaseKotlinAndroid` was broken at the
+  start of the Stage D closeout (signature drift on
+  `AndroidDeterministicUnsafeJvmBuffer.sliceImpl`); fixed in
+  out-of-stage commit `fbee95e`. No further action.
 - Eight `*_BUG.md` / `*_ISSUES.md` notes at repo root remain out of
   scope. Don't sweep them.
 - Pre-existing ktlint violations in
