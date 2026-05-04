@@ -19,7 +19,9 @@ import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
 import com.squareup.kotlinpoet.INT
 import com.squareup.kotlinpoet.KModifier
+import com.squareup.kotlinpoet.LambdaTypeName
 import com.squareup.kotlinpoet.LONG
+import com.squareup.kotlinpoet.ParameterSpec
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 import com.squareup.kotlinpoet.SHORT
 import com.squareup.kotlinpoet.TypeName
@@ -3796,8 +3798,170 @@ internal class CodecEmitter(
             .addFunction(buildDispatchOnEncodeFun(shape, parentTypeRef))
             .addFunction(buildDispatchOnWireSizeFun(shape, parentTypeRef))
             .addFunction(buildDispatchOnPeekFun(shape))
+            .addType(buildDispatchOnAggregatorCompanion(shape, binding))
             .build()
     }
+
+    /**
+     * Stage H slice 10d.5 — companion object hosting
+     * `decodeAggregating(buffer, context, on<Variant>: (...) -> ...,
+     * ...)`. The aggregator is a parallel decode pathway that lets
+     * the consumer pick the payload codec per call (and per
+     * payload-bearing variant) instead of pinning a single codec at
+     * dispatcher construction. Each payload-bearing variant gets a
+     * lambda parameter `on<VariantName>: (<VariantCodec>.Partial<P>)
+     * -> <Parent>.<VariantName><P>` defaulting to a `DecodeException`
+     * with field-path attribution per row 17 — consumers override
+     * only the variants they expect to receive; un-overridden
+     * payload-bearing variants throw at runtime if they arrive.
+     *
+     * Companion-side placement matches slice 10b/10c's `partial<P>(
+     * ...)` convention: the aggregator's `<P : Payload>` is a
+     * function-level type variable, decoupled from any surrounding
+     * dispatcher class instantiation. Consumers call
+     * `<DispatcherCodec>.decodeAggregating<JpegImage>(buffer,
+     * context, onPublish = …)` without instantiating the
+     * dispatcher class, since the aggregator never invokes the
+     * constructor-injected `payloadCodec` (the per-call lambda
+     * supplies the codec via `partial.complete(theirCodec)`).
+     *
+     * Only emitted on generic dispatchers (non-generic dispatchers
+     * have no payload-bearing variants by construction, so the
+     * aggregator would have no lambdas).
+     */
+    private fun buildDispatchOnAggregatorCompanion(
+        shape: DispatchOnDispatcherShape,
+        binding: PayloadTypeParameter,
+    ): TypeSpec =
+        TypeSpec
+            .companionObjectBuilder()
+            .addFunction(buildDispatchOnDecodeAggregatingFun(shape, binding))
+            .build()
+
+    /**
+     * Stage H slice 10d.5 — emit `decodeAggregating(...)` on the
+     * generic dispatcher's companion. Same routing logic as
+     * `decode(buffer, context)` — but for payload-bearing variants
+     * the dispatcher invokes the consumer's lambda with the variant
+     * codec's `Partial<P>` instead of calling the constructor-
+     * injected variant codec. `<Nothing>`-typed variants take the
+     * standard codec dispatch (their codecs need no payload codec).
+     *
+     * Lambda return type is the **variant** (`Foo.Publish<P>`), not
+     * the parent (`Foo<P>`). The discriminator's promise is "this
+     * byte means PUBLISH"; the lambda's job is to complete the
+     * matched variant from a `Partial`, not to substitute a
+     * different variant. Returning the variant gives the dispatcher's
+     * `when` branch a typed result that assigns to `Foo<P>` via
+     * `out P` covariance with no cast. The "consumer wraps the
+     * result" use case is served by wrapping outside the dispatcher
+     * call.
+     */
+    private fun buildDispatchOnDecodeAggregatingFun(
+        shape: DispatchOnDispatcherShape,
+        binding: PayloadTypeParameter,
+    ): FunSpec {
+        val typeVar = TypeVariableName(binding.typeVariableName, binding.bound)
+        val parentTypeRef = shape.parentClassName.parameterizedBy(typeVar)
+
+        val funBuilder =
+            FunSpec
+                .builder("decodeAggregating")
+                .addTypeVariable(typeVar)
+                .addParameter("buffer", READ_BUFFER_CN)
+                .addParameter("context", DECODE_CONTEXT_CN)
+                .returns(parentTypeRef)
+
+        for (variant in shape.variants) {
+            if (variant.genericInstanceFieldName == null) continue
+            val partialType =
+                variant.codecClassName
+                    .nestedClass("Partial")
+                    .parameterizedBy(typeVar)
+            val variantTypedRef = variant.className.parameterizedBy(typeVar)
+            val lambdaType =
+                LambdaTypeName.get(
+                    receiver = null,
+                    parameters = arrayOf(partialType),
+                    returnType = variantTypedRef,
+                )
+            // Default-lambda field-path attribution: identifies the
+            // variant whose handler was missing. Throws on lambda
+            // invocation (i.e., when a payload-bearing variant
+            // actually arrives), not at dispatcher construction —
+            // unhandled variants only fail when they're received.
+            val defaultLambda =
+                CodeBlock.of(
+                    "{ _ -> throw %T(fieldPath = %S, bufferPosition = -1, expected = %S, actual = %S) }",
+                    DECODE_EXCEPTION_CN,
+                    "${shape.parentSimpleName}.${variant.simpleName}.handler",
+                    "consumer-supplied ${variant.simpleName} handler",
+                    "no handler supplied",
+                )
+            funBuilder.addParameter(
+                ParameterSpec
+                    .builder(aggregatorLambdaParameterName(variant), lambdaType)
+                    .defaultValue(defaultLambda)
+                    .build(),
+            )
+        }
+
+        val body = CodeBlock.builder()
+        body.addStatement("val discriminatorPosition = buffer.position()")
+        body.addStatement(
+            "val __discriminator = %T.decode(buffer, context)",
+            shape.discriminatorCodecClassName,
+        )
+        body.addStatement("buffer.position(discriminatorPosition)")
+        body.addStatement(
+            "val __dispatchValue = __discriminator.%L",
+            shape.dispatchValuePropertyName,
+        )
+        body.beginControlFlow("return when (__dispatchValue)")
+        for (variant in shape.variants) {
+            if (variant.genericInstanceFieldName != null) {
+                // Payload-bearing variant: dispatch via the consumer's
+                // lambda. The aggregator passes the variant codec's
+                // Partial<P> — the lambda completes the decode with the
+                // payload codec it chooses for this call.
+                body.addStatement(
+                    "%L -> %L(%T.partial<%T>(buffer, context))",
+                    variant.dispatchValue,
+                    aggregatorLambdaParameterName(variant),
+                    variant.codecClassName,
+                    typeVar,
+                )
+            } else {
+                // <Nothing>-typed variant: standard dispatch unchanged.
+                body.addStatement(
+                    "%L -> %T.decode(buffer, context)",
+                    variant.dispatchValue,
+                    variant.codecClassName,
+                )
+            }
+        }
+        body.beginControlFlow("else ->")
+        body.addStatement(
+            "throw %T(fieldPath = %S, bufferPosition = discriminatorPosition, expected = %S, actual = %P)",
+            DECODE_EXCEPTION_CN,
+            "${shape.parentSimpleName}.discriminator",
+            expectedDispatchValueSet(shape),
+            "\${__dispatchValue}",
+        )
+        body.endControlFlow()
+        body.endControlFlow()
+        funBuilder.addCode(body.build())
+        return funBuilder.build()
+    }
+
+    /**
+     * Stage H slice 10d.5 — derive the lambda parameter name for a
+     * payload-bearing variant. Convention: `on<VariantName>` (camel-
+     * case lowering of the leading character). Disambiguates lambdas
+     * across multiple payload-bearing variants without ambiguity.
+     */
+    private fun aggregatorLambdaParameterName(variant: DispatchOnVariantSpec): String =
+        "on${variant.simpleName}"
 
     /**
      * Stage H slice 10d — return the parent's TypeName as it should
