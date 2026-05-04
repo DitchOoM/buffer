@@ -181,6 +181,41 @@ annotation class LengthFrom(
 )
 
 /**
+ * Marks a `UInt` field that carries a **variable-length integer**
+ * encoding the byte count of everything that follows it in the
+ * message. Reads/writes the MQTT v3.1.1 §2.2.3 / MQTT v5.0 §1.5.5
+ * variable-byte-integer format (1–4 bytes, continuation bit `0x80`
+ * on each byte except the last, value range `0..268,435,455`).
+ *
+ * On decode, after reading the var-int the codec sets the buffer's
+ * limit to `position + value`, so subsequent fields (including
+ * `@RemainingBytes` lists) are naturally bounded by the field's
+ * value. The buffer's outer limit is restored before decode
+ * returns. On encode, the codec writes the user-supplied value as
+ * a var-int — the user is responsible for keeping the value
+ * consistent with the byte count of the fields that follow (same
+ * row 16 trust contract as `@LengthFrom`).
+ *
+ * ```kotlin
+ * @ProtocolMessage(wireOrder = Endianness.Big)
+ * data class MqttSubAck(
+ *     val header: MqttFixedHeader,                    // 1 byte (type=9 << 4)
+ *     @RemainingLength val remainingLength: UInt,     // var-int, bounds rest
+ *     val packetIdentifier: UShort,                   // 2 bytes
+ *     @RemainingBytes val returnCodes: List<UByte>,   // bounded by remainingLength
+ * )
+ * ```
+ *
+ * Restrictions: applies to `UInt` fields only; at most one
+ * `@RemainingLength` per message. Mutually exclusive with
+ * `@LengthFrom` / `@LengthPrefixed` / `@WireBytes` /
+ * `@RemainingBytes` on the same parameter.
+ */
+@Target(AnnotationTarget.VALUE_PARAMETER)
+@Retention(AnnotationRetention.BINARY)
+annotation class RemainingLength
+
+/**
  * Overrides the wire width of a numeric field. The [value] specifies the number
  * of bytes on the wire (1-8). Must not exceed the Kotlin type's natural size.
  * Cannot be used on `Float`, `Double`, or `Boolean`.
