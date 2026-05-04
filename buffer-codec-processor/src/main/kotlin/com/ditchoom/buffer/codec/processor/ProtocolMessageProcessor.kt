@@ -54,6 +54,20 @@ import com.google.devtools.ksp.validate
  *     errors. Sealed parents carrying `@DispatchOn` are skipped
  *     (Stage F surface).
  *
+ *   - **Stage F `@DispatchOn` value-class discriminator (slice 6).**
+ *     A `@ProtocolMessage sealed interface` parent carrying
+ *     `@DispatchOn(<DiscriminatorType>::class)` is a bit-packed
+ *     dispatch parent. The discriminator must be a
+ *     `@JvmInline value class` with a single non-nullable numeric-
+ *     scalar inner and exactly one `@DispatchValue`-annotated `val`
+ *     property returning non-nullable `Int`. Each variant must be
+ *     a `data class` with `@PacketType(value = N)` (`N in 0..255`,
+ *     unique within the parent), and must declare the
+ *     DiscriminatorType as its first constructor parameter so the
+ *     variant codec reads/writes the byte naturally (slice 6
+ *     narrow — `object` and discriminator-from-context shapes are
+ *     deferred).
+ *
  *   - **Stage E `@LengthFrom` shape (Locked Decision row 18, slice 4).**
  *     For `@LengthFrom("siblingField") val payload: T`: the bound
  *     field type must be `String` (Stage E's field-type universe per
@@ -118,6 +132,7 @@ class ProtocolMessageProcessor(
             }
             if (Modifier.SEALED in symbol.modifiers && symbol.classKind == ClassKind.INTERFACE) {
                 validateSealedDispatcher(symbol)
+                validateDispatchOnSealed(symbol)
                 emitter.tryEmit(symbol)
                 continue
             }
@@ -201,6 +216,211 @@ class ProtocolMessageProcessor(
                     "@PacketType($rawValue) on $subName duplicates the value already " +
                         "declared by $prior under the same sealed parent $parentName. " +
                         "Discriminator values must be unique within a parent.",
+                    sub,
+                )
+            }
+        }
+    }
+
+    /**
+     * Stage F slice 6 — `@DispatchOn` value-class discriminator dispatcher
+     * (Locked Decision row TBD; doctrine entry to be appended once the
+     * vector lands in PHASE_9_RESET).
+     *
+     * Validates the bit-packed dispatch shape:
+     *   - Parent is a `@ProtocolMessage sealed interface` carrying
+     *     `@DispatchOn(<DiscriminatorType>::class)`.
+     *   - DiscriminatorType is a `@JvmInline value class` whose
+     *     primary constructor takes a single non-nullable supported
+     *     scalar parameter.
+     *   - DiscriminatorType has exactly one declared `val` property
+     *     annotated with `@DispatchValue`, returning a non-nullable
+     *     `Int`, with no extension receiver.
+     *   - Each variant is a `data class` carrying `@PacketType(value
+     *     = N)` with `N in 0..255`. `value` uniqueness within the
+     *     parent is enforced.
+     *   - Each variant's first constructor parameter has the
+     *     `DiscriminatorType` (slice 6 narrow — variants without the
+     *     header field would need the consume + forward-via-context
+     *     model, deferred until a vector requires it).
+     *
+     * `@PacketType.wire` is permitted (the annotation declares it)
+     * but unused at emit time: the variant's header field carries
+     * the full byte on encode, so a separate `wire` is redundant.
+     * Slice 6 doesn't validate consistency between `value` and
+     * `wire`; users who set a non-default `wire` should know the
+     * variant's header default value matches.
+     */
+    private fun validateDispatchOnSealed(parent: KSClassDeclaration) {
+        val dispatchOn =
+            parent.annotations.firstOrNull { ann ->
+                ann.shortName.asString() == DISPATCH_ON_SHORT &&
+                    ann.annotationType
+                        .resolve()
+                        .declaration.qualifiedName
+                        ?.asString() == DISPATCH_ON_QNAME
+            } ?: return
+        val parentName = parent.qualifiedName?.asString() ?: parent.simpleName.asString()
+
+        val discriminatorType =
+            dispatchOn.arguments
+                .firstOrNull { it.name?.asString() == "type" }
+                ?.value as? KSType
+                ?: return
+        val discriminatorDecl = discriminatorType.declaration as? KSClassDeclaration ?: return
+        val discriminatorName = discriminatorDecl.qualifiedName?.asString() ?: discriminatorDecl.simpleName.asString()
+
+        if (Modifier.VALUE !in discriminatorDecl.modifiers) {
+            logger.error(
+                "@DispatchOn($discriminatorName::class) on $parentName references a type that is " +
+                    "not a `value class`. Slice 6 requires the discriminator to be a " +
+                    "`@JvmInline value class` whose primary constructor takes a single supported " +
+                    "scalar (UByte/Byte/UShort/UInt/etc.).",
+                parent,
+            )
+            return
+        }
+        val discriminatorCtor = discriminatorDecl.primaryConstructor
+        if (discriminatorCtor == null || discriminatorCtor.parameters.size != 1) {
+            logger.error(
+                "@DispatchOn($discriminatorName::class) on $parentName references a value class " +
+                    "whose primary constructor does not take exactly one parameter.",
+                parent,
+            )
+            return
+        }
+        val discriminatorInner = discriminatorCtor.parameters[0].type.resolve()
+        if (discriminatorInner.isError || discriminatorInner.isMarkedNullable) {
+            logger.error(
+                "@DispatchOn($discriminatorName::class) on $parentName: discriminator's inner " +
+                    "parameter must be a non-nullable supported scalar.",
+                parent,
+            )
+            return
+        }
+        val innerQname = discriminatorInner.declaration.qualifiedName?.asString()
+        if (innerQname !in NUMERIC_SCALAR_QNAMES) {
+            val displayed = innerQname ?: "<unresolved>"
+            logger.error(
+                "@DispatchOn($discriminatorName::class) on $parentName: discriminator's inner " +
+                    "parameter type is `$displayed`, but slice 6 limits it to a numeric scalar " +
+                    "(Byte / Short / Int / Long / UByte / UShort / UInt / ULong).",
+                parent,
+            )
+            return
+        }
+
+        val dispatchValueProperties =
+            discriminatorDecl
+                .getDeclaredProperties()
+                .filter { prop ->
+                    prop.annotations.any {
+                        it.shortName.asString() == DISPATCH_VALUE_SHORT &&
+                            it.annotationType
+                                .resolve()
+                                .declaration.qualifiedName
+                                ?.asString() == DISPATCH_VALUE_QNAME
+                    }
+                }.toList()
+        if (dispatchValueProperties.size != 1) {
+            logger.error(
+                "@DispatchOn($discriminatorName::class) on $parentName: $discriminatorName must " +
+                    "declare exactly one property annotated with `@DispatchValue`. Found ${dispatchValueProperties.size}.",
+                parent,
+            )
+            return
+        }
+        val dispatchProp = dispatchValueProperties[0]
+        if (dispatchProp.isMutable || dispatchProp.extensionReceiver != null) {
+            logger.error(
+                "@DispatchValue property `${dispatchProp.simpleName.asString()}` on $discriminatorName " +
+                    "must be a `val` declared on the value class itself (no extension receiver).",
+                dispatchProp,
+            )
+            return
+        }
+        val dispatchReturn = dispatchProp.type.resolve()
+        if (dispatchReturn.isMarkedNullable ||
+            dispatchReturn.declaration.qualifiedName?.asString() != "kotlin.Int"
+        ) {
+            val displayed = dispatchReturn.declaration.qualifiedName?.asString() ?: "<unresolved>"
+            val nullableSuffix = if (dispatchReturn.isMarkedNullable) "?" else ""
+            logger.error(
+                "@DispatchValue property `${dispatchProp.simpleName.asString()}` on $discriminatorName " +
+                    "must return non-nullable `Int`, but returns `$displayed$nullableSuffix`.",
+                dispatchProp,
+            )
+            return
+        }
+
+        val seen = mutableMapOf<Int, String>()
+        for (sub in parent.getSealedSubclasses()) {
+            val subName = sub.qualifiedName?.asString() ?: sub.simpleName.asString()
+            if (Modifier.DATA !in sub.modifiers) {
+                logger.error(
+                    "@DispatchOn variant $subName must be a `data class`. Slice 6 doesn't yet " +
+                        "support `object` / non-data variants — those would need the consume + " +
+                        "forward-via-context model.",
+                    sub,
+                )
+                continue
+            }
+            val packetType =
+                sub.annotations.firstOrNull { ann ->
+                    ann.shortName.asString() == PACKET_TYPE_SHORT &&
+                        ann.annotationType
+                            .resolve()
+                            .declaration.qualifiedName
+                            ?.asString() == PACKET_TYPE_QNAME
+                }
+            if (packetType == null) {
+                logger.error(
+                    "@DispatchOn variant $subName is missing `@PacketType(value = N)`. Every " +
+                        "variant of a bit-packed dispatch parent must carry an extracted dispatch " +
+                        "value to match against the parent's `@DispatchValue` property.",
+                    sub,
+                )
+                continue
+            }
+            val rawValue =
+                packetType.arguments
+                    .firstOrNull { it.name?.asString() == "value" }
+                    ?.value as? Int
+            if (rawValue == null) {
+                logger.error(
+                    "@PacketType on $subName is missing a `value` argument.",
+                    sub,
+                )
+                continue
+            }
+            if (rawValue !in 0..255) {
+                logger.error(
+                    "@PacketType($rawValue) on $subName is out of range — `value` must be in 0..255.",
+                    sub,
+                )
+                continue
+            }
+            val prior = seen.put(rawValue, subName)
+            if (prior != null) {
+                logger.error(
+                    "@PacketType($rawValue) on $subName duplicates the value already declared by " +
+                        "$prior under the same sealed parent $parentName.",
+                    sub,
+                )
+                continue
+            }
+            val variantCtor = sub.primaryConstructor
+            val firstParam = variantCtor?.parameters?.firstOrNull()
+            val firstParamType = firstParam?.type?.resolve()
+            val firstParamQname = firstParamType?.declaration?.qualifiedName?.asString()
+            if (firstParam == null || firstParamQname != discriminatorName) {
+                val displayed = firstParamQname ?: "<missing>"
+                logger.error(
+                    "@DispatchOn variant $subName must declare its first constructor parameter " +
+                        "as the discriminator type `$discriminatorName`, but it is `$displayed`. " +
+                        "Slice 6 requires the variant to carry the discriminator field so its " +
+                        "codec reads/writes the byte naturally; the `object` and " +
+                        "discriminator-from-context shapes are deferred.",
                     sub,
                 )
             }
@@ -659,6 +879,8 @@ class ProtocolMessageProcessor(
         private const val PACKET_TYPE_SHORT = "PacketType"
         private const val DISPATCH_ON_QNAME = "com.ditchoom.buffer.codec.annotations.DispatchOn"
         private const val DISPATCH_ON_SHORT = "DispatchOn"
+        private const val DISPATCH_VALUE_QNAME = "com.ditchoom.buffer.codec.annotations.DispatchValue"
+        private const val DISPATCH_VALUE_SHORT = "DispatchValue"
         private const val WHEN_TRUE_QNAME = "com.ditchoom.buffer.codec.annotations.WhenTrue"
         private const val WHEN_TRUE_SHORT = "WhenTrue"
         private const val BOOLEAN_QNAME = "kotlin.Boolean"

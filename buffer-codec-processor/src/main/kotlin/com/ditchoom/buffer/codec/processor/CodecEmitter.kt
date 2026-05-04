@@ -132,6 +132,21 @@ internal class CodecEmitter(
     fun tryEmit(symbol: KSClassDeclaration) {
         val sourceFile = symbol.containingFile ?: return
         if (Modifier.SEALED in symbol.modifiers && symbol.classKind == ClassKind.INTERFACE) {
+            // Slice 6 — try the @DispatchOn dispatcher path first; if the
+            // parent doesn't carry the annotation, fall back to Stage D's
+            // simple dispatcher.
+            val dispatchOnShape = analyzeDispatchOnSealedDispatcher(symbol)
+            if (dispatchOnShape != null) {
+                val file = buildDispatchOnDispatcherFileSpec(dispatchOnShape)
+                codeGenerator
+                    .createNewFile(
+                        Dependencies(aggregating = false, sourceFile),
+                        dispatchOnShape.packageName,
+                        dispatchOnShape.codecSimpleName,
+                    ).bufferedWriter()
+                    .use { writer -> file.writeTo(writer) }
+                return
+            }
             val dispatcher = analyzeSealedDispatcher(symbol) ?: return
             val file = buildSealedDispatcherFileSpec(dispatcher)
             codeGenerator
@@ -2071,6 +2086,104 @@ internal class CodecEmitter(
         )
     }
 
+    /**
+     * Stage F slice 6 — analyze a `@DispatchOn`-annotated sealed
+     * parent into a `DispatchOnDispatcherShape`.
+     *
+     * Returns null (silent skip) when the parent doesn't carry
+     * `@DispatchOn`, when the discriminator type isn't a value class
+     * with a single supported-scalar inner, when the discriminator
+     * has zero or multiple `@DispatchValue` properties (the
+     * validator names this case), or when any variant fails to fit
+     * the slice 6 shape (data class, has `@PacketType(value = N)`,
+     * first parameter is the discriminator type). The validator
+     * surfaces user-facing diagnostics; the emitter's silence keeps
+     * the "out of shape, no codec" pattern intact.
+     */
+    private fun analyzeDispatchOnSealedDispatcher(
+        symbol: KSClassDeclaration,
+    ): DispatchOnDispatcherShape? {
+        val dispatchOn =
+            symbol.annotations.firstOrNull { it.shortName.asString() == "DispatchOn" }
+                ?: return null
+        val discriminatorType =
+            dispatchOn.arguments
+                .firstOrNull { it.name?.asString() == "type" }
+                ?.value as? KSType ?: return null
+        val discriminatorDecl = discriminatorType.declaration as? KSClassDeclaration ?: return null
+        if (Modifier.VALUE !in discriminatorDecl.modifiers) return null
+        val discriminatorCtor = discriminatorDecl.primaryConstructor ?: return null
+        if (discriminatorCtor.parameters.size != 1) return null
+        val innerType = discriminatorCtor.parameters[0].type.resolve()
+        if (innerType.isError || innerType.isMarkedNullable) return null
+        val innerKind =
+            SUPPORTED_SCALARS[innerType.declaration.qualifiedName?.asString()] ?: return null
+
+        val dispatchProp =
+            discriminatorDecl
+                .getDeclaredProperties()
+                .singleOrNull { prop ->
+                    prop.annotations.any { it.shortName.asString() == "DispatchValue" }
+                } ?: return null
+        if (dispatchProp.isMutable || dispatchProp.extensionReceiver != null) return null
+        val returnType = dispatchProp.type.resolve()
+        if (returnType.isMarkedNullable) return null
+        if (returnType.declaration.qualifiedName?.asString() != "kotlin.Int") return null
+        val dispatchValuePropertyName = dispatchProp.simpleName.asString()
+
+        val subclasses = symbol.getSealedSubclasses().toList()
+        if (subclasses.isEmpty()) return null
+        val variants = mutableListOf<DispatchOnVariantSpec>()
+        val seenValues = mutableSetOf<Int>()
+        for (sub in subclasses) {
+            if (Modifier.DATA !in sub.modifiers) return null
+            val packetType =
+                sub.annotations.firstOrNull { it.shortName.asString() == "PacketType" } ?: return null
+            val rawValue =
+                packetType.arguments
+                    .firstOrNull { it.name?.asString() == "value" }
+                    ?.value as? Int ?: return null
+            if (rawValue !in 0..255) return null
+            if (!seenValues.add(rawValue)) return null
+            val ctor = sub.primaryConstructor ?: return null
+            val firstParam = ctor.parameters.firstOrNull() ?: return null
+            val firstParamQname = firstParam.type.resolve().declaration.qualifiedName?.asString()
+            if (firstParamQname != discriminatorDecl.qualifiedName?.asString()) return null
+            // Variant must analyze cleanly via the existing data-class path.
+            // The header field will be a FieldSpec.ValueClassScalar (slice 3).
+            analyze(sub) ?: return null
+            variants +=
+                DispatchOnVariantSpec(
+                    simpleName = sub.simpleName.asString(),
+                    className = classNameOf(sub),
+                    codecClassName =
+                        ClassName(
+                            sub.packageName.asString(),
+                            "${sub.simpleName.asString()}Codec",
+                        ),
+                    dispatchValue = rawValue,
+                )
+        }
+        variants.sortBy { it.dispatchValue }
+        val pkg = symbol.packageName.asString()
+        val parentSimpleName = symbol.simpleName.asString()
+        return DispatchOnDispatcherShape(
+            packageName = pkg,
+            parentClassName = ClassName(pkg, parentSimpleName),
+            parentSimpleName = parentSimpleName,
+            codecSimpleName = "${parentSimpleName}Codec",
+            discriminatorClassName = classNameOf(discriminatorDecl),
+            discriminatorCodecClassName =
+                ClassName(
+                    discriminatorDecl.packageName.asString(),
+                    "${discriminatorDecl.simpleName.asString()}Codec",
+                ),
+            discriminatorInnerKind = innerKind,
+            dispatchValuePropertyName = dispatchValuePropertyName,
+            variants = variants,
+        )
+    }
+
     private fun classifyVariantWireSize(shape: CodecShape): VariantWireSize {
         // Locked Decision row 19: any `@WhenTrue` field collapses wireSize to
         // BackPatch — including inside a sealed variant.
@@ -2272,12 +2385,203 @@ internal class CodecEmitter(
             .build()
     }
 
+    /**
+     * Slice 6 — emit the bit-packed dispatcher codec. Uses the
+     * peek-without-consume model on decode (save position, decode
+     * discriminator via its codec, restore position, dispatch);
+     * the variant codec then reads from the original position with
+     * its first field being the discriminator value class.
+     */
+    private fun buildDispatchOnDispatcherFileSpec(shape: DispatchOnDispatcherShape): FileSpec {
+        val codecType =
+            TypeSpec
+                .objectBuilder(shape.codecSimpleName)
+                .addSuperinterface(CODEC_CN.parameterizedBy(shape.parentClassName))
+                .addFunction(buildDispatchOnDecodeFun(shape))
+                .addFunction(buildDispatchOnEncodeFun(shape))
+                .addFunction(buildDispatchOnWireSizeFun(shape))
+                .addFunction(buildDispatchOnPeekFun(shape))
+                .build()
+        return FileSpec
+            .builder(shape.packageName, shape.codecSimpleName)
+            .addType(codecType)
+            .build()
+    }
+
+    private fun expectedDispatchValueSet(shape: DispatchOnDispatcherShape): String =
+        shape.variants.joinToString(prefix = "one of {", postfix = "}") { it.dispatchValue.toString() }
+
+    private fun buildDispatchOnDecodeFun(shape: DispatchOnDispatcherShape): FunSpec {
+        val body = CodeBlock.builder()
+        body.addStatement("val discriminatorPosition = buffer.position()")
+        body.addStatement(
+            "val __discriminator = %T.decode(buffer, context)",
+            shape.discriminatorCodecClassName,
+        )
+        // Rewind so the variant codec re-reads the discriminator bytes
+        // as its first FieldSpec.ValueClassScalar field.
+        body.addStatement("buffer.position(discriminatorPosition)")
+        body.addStatement("val __dispatchValue = __discriminator.%L", shape.dispatchValuePropertyName)
+        body.beginControlFlow("return when (__dispatchValue)")
+        for (variant in shape.variants) {
+            body.addStatement(
+                "%L -> %T.decode(buffer, context)",
+                variant.dispatchValue,
+                variant.codecClassName,
+            )
+        }
+        body.beginControlFlow("else ->")
+        body.addStatement(
+            "throw %T(fieldPath = %S, bufferPosition = discriminatorPosition, expected = %S, actual = %P)",
+            DECODE_EXCEPTION_CN,
+            "${shape.parentSimpleName}.discriminator",
+            expectedDispatchValueSet(shape),
+            "\${__dispatchValue}",
+        )
+        body.endControlFlow()
+        body.endControlFlow()
+        return FunSpec
+            .builder("decode")
+            .addModifiers(KModifier.OVERRIDE)
+            .addParameter("buffer", READ_BUFFER_CN)
+            .addParameter("context", DECODE_CONTEXT_CN)
+            .returns(shape.parentClassName)
+            .addCode(body.build())
+            .build()
+    }
+
+    private fun buildDispatchOnEncodeFun(shape: DispatchOnDispatcherShape): FunSpec {
+        val body = CodeBlock.builder()
+        body.beginControlFlow("when (value)")
+        for (variant in shape.variants) {
+            body.addStatement(
+                "is %T -> %T.encode(buffer, value, context)",
+                variant.className,
+                variant.codecClassName,
+            )
+        }
+        body.endControlFlow()
+        return FunSpec
+            .builder("encode")
+            .addModifiers(KModifier.OVERRIDE)
+            .addParameter("buffer", WRITE_BUFFER_CN)
+            .addParameter("value", shape.parentClassName)
+            .addParameter("context", ENCODE_CONTEXT_CN)
+            .addCode(body.build())
+            .build()
+    }
+
+    private fun buildDispatchOnWireSizeFun(shape: DispatchOnDispatcherShape): FunSpec {
+        val body = CodeBlock.builder()
+        body.beginControlFlow("return when (value)")
+        for (variant in shape.variants) {
+            body.addStatement(
+                "is %T -> %T.wireSize(value, context)",
+                variant.className,
+                variant.codecClassName,
+            )
+        }
+        body.endControlFlow()
+        return FunSpec
+            .builder("wireSize")
+            .addModifiers(KModifier.OVERRIDE)
+            .addParameter("value", shape.parentClassName)
+            .addParameter("context", ENCODE_CONTEXT_CN)
+            .returns(WIRE_SIZE_CN)
+            .addCode(body.build())
+            .build()
+    }
+
+    private fun buildDispatchOnPeekFun(shape: DispatchOnDispatcherShape): FunSpec {
+        val body = CodeBlock.builder()
+        val discriminatorBytes = shape.discriminatorInnerKind.width
+        body.addStatement(
+            "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
+            discriminatorBytes,
+            PEEK_RESULT_CN,
+        )
+        // Peek the discriminator's inner-scalar bytes at baseOffset and
+        // reconstruct the value class. Slice 6 supports natural-width
+        // single-byte kinds via appendPeekFixedScalar — the same path the
+        // slice 3 value-class @WhenTrue source uses. Wider discriminators
+        // would route through appendPeekScalar's order-aware assembly.
+        appendPeekFixedScalar(body, shape.discriminatorInnerKind, "__discRaw", "0")
+        body.addStatement(
+            "val __discriminator = %T(__discRaw)",
+            shape.discriminatorClassName,
+        )
+        body.addStatement("val __dispatchValue = __discriminator.%L", shape.dispatchValuePropertyName)
+        body.beginControlFlow("return when (__dispatchValue)")
+        for (variant in shape.variants) {
+            // Variant.peek counts the discriminator bytes in its own header
+            // field, so we delegate at baseOffset, not baseOffset + 1.
+            body.addStatement(
+                "%L -> %T.peekFrameSize(stream, baseOffset)",
+                variant.dispatchValue,
+                variant.codecClassName,
+            )
+        }
+        body.beginControlFlow("else ->")
+        body.addStatement(
+            "throw %T(fieldPath = %S, bufferPosition = baseOffset, expected = %S, actual = %P)",
+            DECODE_EXCEPTION_CN,
+            "${shape.parentSimpleName}.discriminator",
+            expectedDispatchValueSet(shape),
+            "\${__dispatchValue}",
+        )
+        body.endControlFlow()
+        body.endControlFlow()
+        return FunSpec
+            .builder("peekFrameSize")
+            .addModifiers(KModifier.OVERRIDE)
+            .addParameter("stream", STREAM_PROCESSOR_CN)
+            .addParameter("baseOffset", INT)
+            .returns(PEEK_RESULT_CN)
+            .addCode(body.build())
+            .build()
+    }
+
     private data class DispatcherShape(
         val packageName: String,
         val parentClassName: ClassName,
         val parentSimpleName: String,
         val codecSimpleName: String,
         val variants: List<VariantSpec>,
+    )
+
+    /**
+     * Stage F slice 6 — bit-packed dispatcher shape.
+     *
+     * The discriminator is a `@JvmInline value class` whose
+     * `@DispatchValue`-annotated property produces an `Int` to match
+     * against `@PacketType.value`. Variants are data classes whose
+     * first constructor parameter is the discriminator type, so the
+     * variant codec naturally reads/writes the discriminator byte
+     * via the slice 3 `FieldSpec.ValueClassScalar` path.
+     */
+    private data class DispatchOnDispatcherShape(
+        val packageName: String,
+        val parentClassName: ClassName,
+        val parentSimpleName: String,
+        val codecSimpleName: String,
+        val discriminatorClassName: ClassName,
+        val discriminatorCodecClassName: ClassName,
+        val discriminatorInnerKind: ScalarKind,
+        val dispatchValuePropertyName: String,
+        val variants: List<DispatchOnVariantSpec>,
+    )
+
+    /**
+     * Variant spec for `@DispatchOn` dispatch. Differs from
+     * `VariantSpec` in carrying only the dispatch value (no
+     * `wireSize` — the variant codec's own `wireSize` is the source
+     * of truth, since the variant's bytes are exactly its body).
+     */
+    private data class DispatchOnVariantSpec(
+        val simpleName: String,
+        val className: ClassName,
+        val codecClassName: ClassName,
+        val dispatchValue: Int,
     )
 
     private data class VariantSpec(
