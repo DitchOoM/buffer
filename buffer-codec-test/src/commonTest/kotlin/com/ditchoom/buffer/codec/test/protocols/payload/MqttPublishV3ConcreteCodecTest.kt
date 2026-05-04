@@ -17,7 +17,7 @@ import kotlin.test.assertTrue
 
 /**
  * Stage H slice 10a doctrine vector — full round-trip for
- * `MqttPublishV3` with a typed `JpegImage` payload routed through
+ * `MqttPublishV3Concrete` with a typed `JpegImage` payload routed through
  * the user-supplied `JpegImageCodec`.
  *
  * Acceptance points (mapped to PHASE_9_RESET §Stage H):
@@ -28,18 +28,18 @@ import kotlin.test.assertTrue
  *   4. Caller-set `buffer.limit()` bounds the payload region; trailing
  *      bytes after the bounded region are not consumed.
  */
-class MqttPublishV3CodecTest {
+class MqttPublishV3ConcreteCodecTest {
     @Test
     fun encodesByteExactWireFormat() {
         val msg =
-            MqttPublishV3(
+            MqttPublishV3Concrete(
                 header = MqttFixedHeader(0x30u),
                 topic = "a/b",
                 packetId = PacketId(0x1234u),
                 payload = JpegImage(width = 4u, height = 8u, data = byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte())),
             )
         val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        MqttPublishV3Codec.encode(buf, msg, EncodeContext.Empty)
+        MqttPublishV3ConcreteCodec.encode(buf, msg, EncodeContext.Empty)
         val written = buf.position()
         // 1 (header) + 2 (topic prefix) + 3 (topic body) + 2 (packetId) +
         // 4 (jpeg width+height) + 4 (jpeg data) = 16
@@ -67,7 +67,7 @@ class MqttPublishV3CodecTest {
     @Test
     fun roundTripsFromExactlyBoundedBuffer() {
         val original =
-            MqttPublishV3(
+            MqttPublishV3Concrete(
                 header = MqttFixedHeader(0x30u),
                 topic = "sensors/room/42",
                 packetId = PacketId(0x0042u),
@@ -79,9 +79,9 @@ class MqttPublishV3CodecTest {
                     ),
             )
         val buf = BufferFactory.Default.allocate(256, ByteOrder.BIG_ENDIAN)
-        MqttPublishV3Codec.encode(buf, original, EncodeContext.Empty)
+        MqttPublishV3ConcreteCodec.encode(buf, original, EncodeContext.Empty)
         buf.resetForRead()
-        val decoded = MqttPublishV3Codec.decode(buf, DecodeContext.Empty)
+        val decoded = MqttPublishV3ConcreteCodec.decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
@@ -92,14 +92,14 @@ class MqttPublishV3CodecTest {
         // narrowing the limit before decode (slice 10d's outer
         // dispatcher will do this via the @RemainingLength var-int).
         val original =
-            MqttPublishV3(
+            MqttPublishV3Concrete(
                 header = MqttFixedHeader(0x30u),
                 topic = "t",
                 packetId = PacketId(1u),
                 payload = JpegImage(2u, 3u, byteArrayOf(0x11, 0x22, 0x33)),
             )
         val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        MqttPublishV3Codec.encode(buf, original, EncodeContext.Empty)
+        MqttPublishV3ConcreteCodec.encode(buf, original, EncodeContext.Empty)
         val publishBytes = buf.position()
         // Append trailing bytes that the publish decode must NOT read.
         buf.writeByte(0xCA.toByte())
@@ -111,7 +111,7 @@ class MqttPublishV3CodecTest {
         // to slice 10d's outer dispatcher reading @RemainingLength and
         // calling setLimit before delegating.
         buf.setLimit(publishBytes)
-        val decoded = MqttPublishV3Codec.decode(buf, DecodeContext.Empty)
+        val decoded = MqttPublishV3ConcreteCodec.decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
         assertEquals(publishBytes, buf.position(), "decode advanced exactly through the publish")
     }
@@ -119,7 +119,7 @@ class MqttPublishV3CodecTest {
     @Test
     fun wireSizeIsBackPatchForSlice10aConservativePath() {
         val msg =
-            MqttPublishV3(
+            MqttPublishV3Concrete(
                 header = MqttFixedHeader(0x30u),
                 topic = "x",
                 packetId = PacketId(0u),
@@ -130,7 +130,7 @@ class MqttPublishV3CodecTest {
         // the user codec itself returns Exact (JpegImageCodec does).
         // Promotion to runtime-Exact is a follow-on with a vector that
         // measurably benefits.
-        assertEquals(WireSize.BackPatch, MqttPublishV3Codec.wireSize(msg, EncodeContext.Empty))
+        assertEquals(WireSize.BackPatch, MqttPublishV3ConcreteCodec.wireSize(msg, EncodeContext.Empty))
     }
 
     @Test
@@ -142,7 +142,7 @@ class MqttPublishV3CodecTest {
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NoFraming, MqttPublishV3Codec.peekFrameSize(stream))
+            assertEquals(PeekResult.NoFraming, MqttPublishV3ConcreteCodec.peekFrameSize(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -156,14 +156,14 @@ class MqttPublishV3CodecTest {
         // currently consume the context (no keys are read), so this is a
         // shape check, not a value check.
         val msg =
-            MqttPublishV3(
+            MqttPublishV3Concrete(
                 header = MqttFixedHeader(0x30u),
                 topic = "k",
                 packetId = PacketId(7u),
                 payload = JpegImage(1u, 1u, byteArrayOf(0x42)),
             )
         val buf = BufferFactory.Default.allocate(32, ByteOrder.BIG_ENDIAN)
-        MqttPublishV3Codec.encode(buf, msg, EncodeContext.Empty)
+        MqttPublishV3ConcreteCodec.encode(buf, msg, EncodeContext.Empty)
         assertTrue(buf.position() > 0, "generated encode delegated to JpegImageCodec without throwing")
     }
 }

@@ -24,6 +24,7 @@ import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 import com.squareup.kotlinpoet.SHORT
 import com.squareup.kotlinpoet.TypeName
 import com.squareup.kotlinpoet.TypeSpec
+import com.squareup.kotlinpoet.TypeVariableName
 import com.squareup.kotlinpoet.U_BYTE
 import com.squareup.kotlinpoet.U_INT
 import com.squareup.kotlinpoet.U_LONG
@@ -190,13 +191,22 @@ internal class CodecEmitter(
 
         val ownerSimpleName = symbol.simpleName.asString()
         val messageWireOrder = readMessageWireOrder(symbol)
+        val payloadTypeParameter = detectPayloadTypeParameter(symbol)
 
         val fields = mutableListOf<FieldSpec>()
         val params = ctor.parameters
         for ((index, param) in params.withIndex()) {
             val isTerminal = index == params.lastIndex
             val field =
-                analyzeField(param, messageWireOrder, ownerSimpleName, isTerminal, params, index) ?: return null
+                analyzeField(
+                    param = param,
+                    messageWireOrder = messageWireOrder,
+                    ownerSimpleName = ownerSimpleName,
+                    isTerminal = isTerminal,
+                    params = params,
+                    index = index,
+                    payloadTypeParameter = payloadTypeParameter,
+                ) ?: return null
             fields += field
         }
         // Slice 4 / 7a / 7b restriction (still in force): LengthFromString,
@@ -216,12 +226,56 @@ internal class CodecEmitter(
         }
 
         val pkg = symbol.packageName.asString()
+        // Slice 10b: if the data class declares <P : Payload> but no
+        // RemainingBytesPayload field uses it via ConstructorInjected,
+        // the type parameter is unused — return null so the emitter
+        // skips. The validator in ProtocolMessageProcessor surfaces
+        // the user-facing diagnostic.
+        if (payloadTypeParameter != null &&
+            fields.none { f ->
+                f is FieldSpec.RemainingBytesPayload &&
+                    f.source is PayloadCodecSource.ConstructorInjected
+            }
+        ) {
+            return null
+        }
         return CodecShape(
             packageName = pkg,
             messageClassName = classNameOf(symbol),
             ownerSimpleName = ownerSimpleName,
             codecSimpleName = "${ownerSimpleName}Codec",
             fields = fields,
+            payloadTypeParameter = payloadTypeParameter,
+        )
+    }
+
+    /**
+     * Stage H slice 10b — detect whether the `@ProtocolMessage` data
+     * class declares a `<P : Payload>` type parameter. Returns the
+     * binding (`typeVariableName`, derived `codecParameterName`,
+     * `Payload` bound) when exactly one type parameter is present
+     * and its upper bound is `com.ditchoom.buffer.codec.Payload`.
+     *
+     * Slice 10b narrow: at most one type parameter, single Payload
+     * bound. Multiple type parameters and arbitrary bounds defer.
+     */
+    private fun detectPayloadTypeParameter(symbol: KSClassDeclaration): PayloadTypeParameter? {
+        val typeParams = symbol.typeParameters
+        if (typeParams.size != 1) return null
+        val tp = typeParams[0]
+        // Each type parameter has zero-or-more bounds; require at
+        // least one bound that resolves to Payload. Other bounds (e.g.,
+        // `<P : Payload, Comparable<P>>`) defer.
+        val bounds = tp.bounds.toList()
+        if (bounds.size != 1) return null
+        val bound = bounds[0].resolve()
+        if (bound.isError) return null
+        if (bound.declaration.qualifiedName?.asString() != PAYLOAD_QNAME) return null
+        val tpName = tp.name.asString()
+        return PayloadTypeParameter(
+            typeVariableName = tpName,
+            codecParameterName = "payloadCodec",
+            bound = ClassName(PAYLOAD_PKG, PAYLOAD_SIMPLE),
         )
     }
 
@@ -253,6 +307,7 @@ internal class CodecEmitter(
         isTerminal: Boolean,
         params: List<KSValueParameter>,
         index: Int,
+        payloadTypeParameter: PayloadTypeParameter? = null,
     ): FieldSpec? {
         // Stage E — `@WhenTrue` opens a separate analysis path: nullability is
         // required, the inner shape is built from the non-null type, and the
@@ -301,10 +356,22 @@ internal class CodecEmitter(
             // expected — the slice 8 MQTT vector pairs them).
             // Stage H slice 10a — `@RemainingBytes @UseCodec val: P` where
             // P : Payload routes to RemainingBytesPayload.
+            // Stage H slice 10b — `@RemainingBytes val: P` where P is the
+            // type parameter `<P : Payload>` of the enclosing data class
+            // routes to RemainingBytesPayload via ConstructorInjected.
             if (lengthFromAnn != null || lengthPrefixed != null || wireBytesAnn != null) return null
             if (remainingLengthAnn != null) return null
             if (useCodecAnn != null && type.implementsPayload()) {
                 return analyzeRemainingBytesPayloadField(param, type, useCodecAnn, ownerSimpleName)
+            }
+            if (useCodecAnn == null && payloadTypeParameter != null && type.matchesTypeParameter(payloadTypeParameter)) {
+                val name = param.name?.asString() ?: return null
+                return FieldSpec.RemainingBytesPayload(
+                    name = name,
+                    ownerSimpleName = ownerSimpleName,
+                    payloadType = TypeVariableName(payloadTypeParameter.typeVariableName),
+                    source = PayloadCodecSource.ConstructorInjected(payloadTypeParameter.codecParameterName),
+                )
             }
             val typeQname = type.declaration.qualifiedName?.asString()
             if (typeQname != "kotlin.collections.List") return null
@@ -723,7 +790,7 @@ internal class CodecEmitter(
             name = name,
             ownerSimpleName = ownerSimpleName,
             payloadType = classNameOf(payloadDecl),
-            userCodecType = ClassName(codecPkg, codecSimple),
+            source = PayloadCodecSource.UserCodecObject(ClassName(codecPkg, codecSimple)),
         )
     }
 
@@ -740,6 +807,19 @@ internal class CodecEmitter(
         return decl.getAllSuperTypes().any { st ->
             st.declaration.qualifiedName?.asString() == PAYLOAD_QNAME
         }
+    }
+
+    /**
+     * Stage H slice 10b — does this type refer to the message's
+     * declared `<P : Payload>` type parameter? KSP represents type-
+     * parameter references as a `KSTypeParameter` declaration with
+     * the parameter's simple name; the qualified name is null. The
+     * match is by simple-name comparison against the binding.
+     */
+    private fun KSType.matchesTypeParameter(binding: PayloadTypeParameter): Boolean {
+        val decl = declaration
+        if (decl !is com.google.devtools.ksp.symbol.KSTypeParameter) return false
+        return decl.name.asString() == binding.typeVariableName
     }
 
     /**
@@ -1089,21 +1169,64 @@ internal class CodecEmitter(
 
     private fun buildFileSpec(shape: CodecShape): FileSpec {
         val codecType =
-            TypeSpec
-                .objectBuilder(shape.codecSimpleName)
-                .addSuperinterface(CODEC_CN.parameterizedBy(shape.messageClassName))
-                .addFunction(buildDecodeFun(shape))
-                .addFunction(buildEncodeFun(shape))
-                .addFunction(buildWireSizeFun(shape))
-                .addFunction(buildPeekFrameFun(shape))
-                .build()
+            if (shape.payloadTypeParameter != null) {
+                buildGenericCodecTypeSpec(shape, shape.payloadTypeParameter)
+            } else {
+                TypeSpec
+                    .objectBuilder(shape.codecSimpleName)
+                    .addSuperinterface(CODEC_CN.parameterizedBy(shape.messageClassName))
+                    .addFunction(buildDecodeFun(shape))
+                    .addFunction(buildEncodeFun(shape))
+                    .addFunction(buildWireSizeFun(shape))
+                    .addFunction(buildPeekFrameFun(shape))
+                    .build()
+            }
         return FileSpec
             .builder(shape.packageName, shape.codecSimpleName)
             .addType(codecType)
             .build()
     }
 
-    private fun buildDecodeFun(shape: CodecShape): FunSpec {
+    /**
+     * Stage H slice 10b — emit
+     * `class FooCodec<P : Payload>(private val payloadCodec: Codec<P>)
+     *  : Codec<Foo<P>>`
+     * for shapes whose data class declares a `<P : Payload>` type
+     * parameter and a corresponding `RemainingBytesPayload` field with
+     * `ConstructorInjected` source.
+     */
+    private fun buildGenericCodecTypeSpec(
+        shape: CodecShape,
+        binding: PayloadTypeParameter,
+    ): TypeSpec {
+        val typeVar = TypeVariableName(binding.typeVariableName, binding.bound)
+        val parameterizedMessage = shape.messageClassName.parameterizedBy(typeVar)
+        val codecOfP = CODEC_CN.parameterizedBy(typeVar)
+        return TypeSpec
+            .classBuilder(shape.codecSimpleName)
+            .addTypeVariable(typeVar)
+            .primaryConstructor(
+                FunSpec
+                    .constructorBuilder()
+                    .addParameter(binding.codecParameterName, codecOfP)
+                    .build(),
+            ).addProperty(
+                com.squareup.kotlinpoet.PropertySpec
+                    .builder(binding.codecParameterName, codecOfP, KModifier.PRIVATE)
+                    .initializer(binding.codecParameterName)
+                    .build(),
+            ).addSuperinterface(CODEC_CN.parameterizedBy(parameterizedMessage))
+            .addFunction(buildDecodeFun(shape, parameterizedMessage))
+            .addFunction(buildEncodeFun(shape, parameterizedMessage))
+            .addFunction(buildWireSizeFun(shape, parameterizedMessage))
+            .addFunction(buildPeekFrameFun(shape))
+            .build()
+    }
+
+    private fun buildDecodeFun(
+        shape: CodecShape,
+        messageType: TypeName = shape.messageClassName,
+    ): FunSpec {
         val body = CodeBlock.builder()
         // Slice 8 — when @RemainingLength is present, fields BEFORE it
         // emit normally; the var-int + setLimit emits at its position;
@@ -1115,12 +1238,12 @@ internal class CodecEmitter(
         val ctorArgs = shape.fields.joinToString(", ") { "${it.name} = ${it.name}" }
         if (rlIndex < 0) {
             for (field in shape.fields) appendDecodeField(body, field)
-            body.addStatement("return %T(%L)", shape.messageClassName, ctorArgs)
+            body.addStatement("return %T(%L)", messageType, ctorArgs)
         } else {
             for (i in 0..rlIndex) appendDecodeField(body, shape.fields[i])
             body.beginControlFlow("return try")
             for (i in (rlIndex + 1) until shape.fields.size) appendDecodeField(body, shape.fields[i])
-            body.addStatement("%T(%L)", shape.messageClassName, ctorArgs)
+            body.addStatement("%T(%L)", messageType, ctorArgs)
             body.nextControlFlow("finally")
             val rlField = shape.fields[rlIndex] as FieldSpec.RemainingLength
             body.addStatement("buffer.setLimit(__%LOuterLimit)", rlField.name)
@@ -1131,7 +1254,7 @@ internal class CodecEmitter(
             .addModifiers(KModifier.OVERRIDE)
             .addParameter("buffer", READ_BUFFER_CN)
             .addParameter("context", DECODE_CONTEXT_CN)
-            .returns(shape.messageClassName)
+            .returns(messageType)
             .addCode(body.build())
             .build()
     }
@@ -1154,7 +1277,10 @@ internal class CodecEmitter(
         }
     }
 
-    private fun buildEncodeFun(shape: CodecShape): FunSpec {
+    private fun buildEncodeFun(
+        shape: CodecShape,
+        messageType: TypeName = shape.messageClassName,
+    ): FunSpec {
         val body = CodeBlock.builder()
         for (field in shape.fields) {
             when (field) {
@@ -1174,18 +1300,21 @@ internal class CodecEmitter(
             .builder("encode")
             .addModifiers(KModifier.OVERRIDE)
             .addParameter("buffer", WRITE_BUFFER_CN)
-            .addParameter("value", shape.messageClassName)
+            .addParameter("value", messageType)
             .addParameter("context", ENCODE_CONTEXT_CN)
             .addCode(body.build())
             .build()
     }
 
-    private fun buildWireSizeFun(shape: CodecShape): FunSpec {
+    private fun buildWireSizeFun(
+        shape: CodecShape,
+        messageType: TypeName = shape.messageClassName,
+    ): FunSpec {
         val builder =
             FunSpec
                 .builder("wireSize")
                 .addModifiers(KModifier.OVERRIDE)
-                .addParameter("value", shape.messageClassName)
+                .addParameter("value", messageType)
                 .addParameter("context", ENCODE_CONTEXT_CN)
                 .returns(WIRE_SIZE_CN)
         // Slice 8 — any `@RemainingLength` field fully determines wireSize:
@@ -2474,9 +2603,9 @@ internal class CodecEmitter(
         field: FieldSpec.RemainingBytesPayload,
     ) {
         body.addStatement(
-            "val %L = %T.decode(buffer, context)",
+            "val %L = %L.decode(buffer, context)",
             field.name,
-            field.userCodecType,
+            field.source.codecReceiver(),
         )
     }
 
@@ -2493,8 +2622,8 @@ internal class CodecEmitter(
         field: FieldSpec.RemainingBytesPayload,
     ) {
         body.addStatement(
-            "%T.encode(buffer, value.%L, context)",
-            field.userCodecType,
+            "%L.encode(buffer, value.%L, context)",
+            field.source.codecReceiver(),
             field.name,
         )
     }
@@ -3456,6 +3585,31 @@ internal class CodecEmitter(
         val ownerSimpleName: String,
         val codecSimpleName: String,
         val fields: List<FieldSpec>,
+        /**
+         * Stage H slice 10b — when the @ProtocolMessage data class
+         * carries a `<P : Payload>` type parameter and a
+         * `RemainingBytesPayload` field whose source is
+         * `ConstructorInjected`, this is the type-parameter name
+         * (`P`) and the constructor-injected codec parameter name
+         * (`payloadCodec`). When non-null, the emitter generates
+         * `class FooCodec<P : Payload>(private val payloadCodec:
+         * Codec<P>) : Codec<Foo<P>>` instead of
+         * `object FooCodec : Codec<Foo>`.
+         */
+        val payloadTypeParameter: PayloadTypeParameter? = null,
+    )
+
+    /**
+     * Stage H slice 10b — type-parameter binding for a generic-bounded
+     * codec class. `typeVariableName` is the Kotlin type variable
+     * (e.g., `P`); `codecParameterName` is the constructor parameter
+     * holding the user-supplied codec (e.g., `payloadCodec`); `bound`
+     * is the upper bound (always `Payload` for slice 10b).
+     */
+    private data class PayloadTypeParameter(
+        val typeVariableName: String,
+        val codecParameterName: String,
+        val bound: ClassName,
     )
 
     private sealed interface FieldSpec {
@@ -3564,8 +3718,8 @@ internal class CodecEmitter(
         data class RemainingBytesPayload(
             override val name: String,
             val ownerSimpleName: String,
-            val payloadType: ClassName,
-            val userCodecType: ClassName,
+            val payloadType: TypeName,
+            val source: PayloadCodecSource,
         ) : FieldSpec
 
         /**
@@ -3779,6 +3933,50 @@ internal class CodecEmitter(
     }
 
     /**
+     * Stage H — typed source of a `Codec<T>` instance for a
+     * `RemainingBytesPayload` field. Mirrors the slice 9 `LengthSource`
+     * pattern (doctrine #2: no nullable fields representing form
+     * distinction; the type system enforces exhaustive `when`).
+     *
+     * Two forms:
+     *   - `UserCodecObject` (slice 10a): the field carries
+     *     `@UseCodec(Foo::class)` referencing a Kotlin `object`
+     *     declaration. Emit calls `Foo.decode(...)` /
+     *     `Foo.encode(...)` directly.
+     *   - `ConstructorInjected` (slice 10b): the message has a
+     *     `<P : Payload>` type parameter and the field type IS that
+     *     parameter. The codec is supplied as a constructor parameter
+     *     of the generated codec class; emit calls
+     *     `payloadCodec.decode(...)` (or whatever name the parameter
+     *     takes).
+     */
+    private sealed interface PayloadCodecSource {
+        data class UserCodecObject(
+            val codecType: ClassName,
+        ) : PayloadCodecSource
+
+        /**
+         * `parameterName` is the name of the constructor field on the
+         * generated codec class. Conventionally derived from the
+         * payload field's name (`payload` → `payloadCodec`).
+         */
+        data class ConstructorInjected(
+            val parameterName: String,
+        ) : PayloadCodecSource
+    }
+
+    /**
+     * Slice 10a/10b — emit-side accessor for the user codec. Returns
+     * the receiver Kotlin sub-expression for `<receiver>.decode(...)`
+     * / `<receiver>.encode(...)` / `<receiver>.wireSize(...)` calls.
+     */
+    private fun PayloadCodecSource.codecReceiver(): CodeBlock =
+        when (this) {
+            is PayloadCodecSource.UserCodecObject -> CodeBlock.of("%T", codecType)
+            is PayloadCodecSource.ConstructorInjected -> CodeBlock.of("%L", parameterName)
+        }
+
+    /**
      * Slice 9 — encode-side accessor for a LengthSource. Returns the
      * Kotlin sub-expression that yields the body byte count as an
      * `Int` when prefixed with `value.`. Used by `wireSize` and the
@@ -3831,6 +4029,8 @@ internal class CodecEmitter(
     private companion object {
         private const val PROTOCOL_MESSAGE_QNAME = "com.ditchoom.buffer.codec.annotations.ProtocolMessage"
         private const val PAYLOAD_QNAME = "com.ditchoom.buffer.codec.Payload"
+        private const val PAYLOAD_PKG = "com.ditchoom.buffer.codec"
+        private const val PAYLOAD_SIMPLE = "Payload"
 
         private val SUPPORTED_SCALARS =
             mapOf(

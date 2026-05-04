@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols.payload
 
+import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
@@ -17,7 +18,7 @@ import kotlin.jvm.JvmInline
 
 /**
  * Stage H slice 10a doctrine vector — MQTT v3.1.1 §3.3 PUBLISH
- * with a typed payload supplied via `@UseCodec`.
+ * concretely typed against `JpegImage` via `@UseCodec`.
  *
  * Wire layout (slice 10a narrow — no `@RemainingLength` field is
  * surfaced in the data class; the buffer's `limit()` is set by the
@@ -36,6 +37,12 @@ import kotlin.jvm.JvmInline
  *   +--------+--------+
  * ```
  *
+ * Slice 10a's `MqttPublishV3Concrete` and slice 10b's generic
+ * `MqttPublishV3<P : Payload>` (below) coexist — each captures a
+ * real consumer pattern. Concrete shape suits protocols where one
+ * message always carries a single specific payload type; generic
+ * shape suits consumers who pick the payload type at the call site.
+ *
  * Slice 10a deliberately narrows the spec shape to validate the
  * typed-payload + `@UseCodec` emit path:
  *   - No QoS-conditional `packetId` (§3.3.2.2): packetId is always
@@ -47,15 +54,13 @@ import kotlin.jvm.JvmInline
  *     promotes this into the dispatcher).
  *
  * The `payload` field uses the slice 10a shape: `@RemainingBytes
- * @UseCodec(JpegImageCodec::class) val: JpegImage` where
- * `JpegImage : Payload` and `JpegImageCodec : Codec<JpegImage>`
- * is user-supplied. Decode delegates to
- * `JpegImageCodec.decode(buffer, context)` against the buffer's
+ * @UseCodec(JpegImageCodec::class) val: JpegImage`. Decode delegates
+ * to `JpegImageCodec.decode(buffer, context)` against the buffer's
  * outer-set limit; encode delegates to
  * `JpegImageCodec.encode(buffer, value.payload, context)`.
  */
 @ProtocolMessage(wireOrder = Endianness.Big)
-data class MqttPublishV3(
+data class MqttPublishV3Concrete(
     val header: MqttFixedHeader,
     @LengthPrefixed val topic: String,
     val packetId: PacketId,
@@ -63,6 +68,71 @@ data class MqttPublishV3(
     @UseCodec(JpegImageCodec::class)
     val payload: JpegImage,
 )
+
+/**
+ * Stage H slice 10b doctrine vector — MQTT v3.1.1 §3.3 PUBLISH with
+ * a generic-bounded payload slot. Same wire layout as
+ * `MqttPublishV3Concrete`, but the payload's codec is supplied at
+ * the call site instead of being baked in.
+ *
+ * The generated codec is a class:
+ * ```
+ * class MqttPublishV3Codec<P : Payload>(private val payloadCodec: Codec<P>)
+ *     : Codec<MqttPublishV3<P>>
+ * ```
+ *
+ * Consumers instantiate per payload type:
+ * ```
+ * val jpegCodec = MqttPublishV3Codec(JpegImageCodec)
+ * val textCodec = MqttPublishV3Codec(TextPayloadCodec)
+ * ```
+ *
+ * Wire bytes are identical across instantiations — only the payload
+ * decoder differs. The trigger for the generic emit path is the
+ * `<P : Payload>` type parameter on the data class plus the
+ * `@RemainingBytes val payload: P` field with no `@UseCodec`. The
+ * type parameter and the constructor-injected codec coexist with
+ * slice 10a's `@UseCodec` path through the `PayloadCodecSource`
+ * sealed (`UserCodecObject` for slice 10a, `ConstructorInjected`
+ * for slice 10b).
+ */
+@ProtocolMessage(wireOrder = Endianness.Big)
+data class MqttPublishV3<P : Payload>(
+    val header: MqttFixedHeader,
+    @LengthPrefixed val topic: String,
+    val packetId: PacketId,
+    @RemainingBytes val payload: P,
+)
+
+/**
+ * Second user-supplied `Payload` for slice 10b — a UTF-8 text
+ * payload. Pairing two distinct payload types confirms the generic
+ * codec genuinely accepts arbitrary `Codec<P>` rather than
+ * accidentally being JpegImage-specific.
+ */
+data class TextPayload(
+    val text: String,
+) : Payload
+
+object TextPayloadCodec : Codec<TextPayload> {
+    override fun decode(
+        buffer: ReadBuffer,
+        context: DecodeContext,
+    ): TextPayload = TextPayload(buffer.readString(buffer.remaining(), Charset.UTF8))
+
+    override fun encode(
+        buffer: WriteBuffer,
+        value: TextPayload,
+        context: EncodeContext,
+    ) {
+        buffer.writeString(value.text, Charset.UTF8)
+    }
+
+    override fun wireSize(
+        value: TextPayload,
+        context: EncodeContext,
+    ): WireSize = WireSize.BackPatch
+}
 
 /**
  * MQTT packet identifier. 16-bit unsigned, modeled as a value class

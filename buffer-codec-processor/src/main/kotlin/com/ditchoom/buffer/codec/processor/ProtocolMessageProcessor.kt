@@ -153,6 +153,7 @@ class ProtocolMessageProcessor(
             validateWireBytes(symbol, ctor.parameters)
             validateWhenTrue(symbol, ctor.parameters)
             validateUseCodec(symbol, ctor.parameters, payloadType)
+            validatePayloadTypeParameter(symbol, ctor.parameters)
             emitter.tryEmit(symbol)
         }
         return deferred
@@ -931,6 +932,21 @@ class ProtocolMessageProcessor(
         payloadType: KSType,
     ) {
         val ownerName = owner.qualifiedName?.asString() ?: owner.simpleName.asString()
+        // Stage H slice 10b — when the data class declares a
+        // `<P : Payload>` type parameter, fields of type `P` are
+        // resolved through the constructor-injected codec, not via
+        // `@UseCodec`. Skip the "Payload field requires @UseCodec"
+        // check for those fields. The set of names is captured up
+        // front so the per-parameter loop can match without
+        // re-resolving each iteration.
+        val payloadTypeParameterNames =
+            owner.typeParameters
+                .filter { tp ->
+                    val bounds = tp.bounds.toList()
+                    bounds.size == 1 &&
+                        bounds[0].resolve().declaration.qualifiedName?.asString() == PAYLOAD_QNAME
+                }.map { it.name.asString() }
+                .toSet()
         for (param in parameters) {
             val fieldName = param.name?.asString() ?: "<unknown>"
             val fieldType = param.type.resolve()
@@ -943,7 +959,29 @@ class ProtocolMessageProcessor(
                             .declaration.qualifiedName
                             ?.asString() == USE_CODEC_QNAME
                 }
+            val fieldDecl = fieldType.declaration
+            val isTypeParameterReference =
+                fieldDecl is com.google.devtools.ksp.symbol.KSTypeParameter &&
+                    fieldDecl.name.asString() in payloadTypeParameterNames
             val isPayloadField = !fieldType.isMarkedNullable && payloadType.isAssignableFrom(fieldType)
+            if (isTypeParameterReference) {
+                // Slice 10b: constructor-injected codec resolves the
+                // type-parameter-typed field. `@UseCodec` is mutually
+                // exclusive with this resolution mechanism.
+                if (useCodec != null) {
+                    logger.error(
+                        "@UseCodec on $ownerName.$fieldName is mutually exclusive with the " +
+                            "generic `<P : Payload>` constructor-injected codec resolution. The " +
+                            "field's type is the type parameter `${fieldDecl.name.asString()}`, " +
+                            "which routes through the generated codec's constructor parameter " +
+                            "(`payloadCodec: Codec<${fieldDecl.name.asString()}>`). Remove " +
+                            "`@UseCodec` to use the generic path, or change the field's type to a " +
+                            "concrete `Payload` subtype to use the `@UseCodec`-driven path.",
+                        param,
+                    )
+                }
+                continue
+            }
             if (isPayloadField && useCodec == null) {
                 logger.error(
                     "@ProtocolMessage field $ownerName.$fieldName has type extending " +
@@ -1029,6 +1067,92 @@ class ProtocolMessageProcessor(
                     param,
                 )
             }
+        }
+    }
+
+    /**
+     * Stage H slice 10b — `<P : Payload>` type-parameter shape
+     * validation.
+     *
+     * A `@ProtocolMessage` data class with a `<P : Payload>` type
+     * parameter must use the parameter as the type of at least one
+     * `@RemainingBytes`-annotated field. Without that field, the
+     * type parameter is unused — KSP would infer it as `Nothing` at
+     * call sites, and the constructor-injected `Codec<P>` parameter
+     * the emitter generates would have nothing to drive.
+     *
+     * Slice 10b narrow: at most one type parameter per data class,
+     * single `Payload` upper bound. Multiple type parameters or
+     * non-`Payload` bounds are rejected here so the generic emit
+     * path stays type-safe.
+     */
+    private fun validatePayloadTypeParameter(
+        owner: KSClassDeclaration,
+        parameters: List<KSValueParameter>,
+    ) {
+        val ownerName = owner.qualifiedName?.asString() ?: owner.simpleName.asString()
+        val typeParams = owner.typeParameters
+        if (typeParams.isEmpty()) return
+        if (typeParams.size > 1) {
+            logger.error(
+                "@ProtocolMessage `$ownerName` declares ${typeParams.size} type parameters; " +
+                    "slice 10b supports at most one (`<P : Payload>`). Multiple type parameters " +
+                    "are deferred — open a follow-up vector when a real protocol needs them.",
+                owner,
+            )
+            return
+        }
+        val tp = typeParams[0]
+        val bounds = tp.bounds.toList()
+        val tpName = tp.name.asString()
+        if (bounds.size != 1) {
+            logger.error(
+                "@ProtocolMessage `$ownerName` type parameter `$tpName` must have exactly one " +
+                    "upper bound (`<$tpName : Payload>`), but has ${bounds.size}. Slice 10b " +
+                    "supports a single `Payload` bound only.",
+                owner,
+            )
+            return
+        }
+        val boundQname = bounds[0].resolve().declaration.qualifiedName?.asString()
+        if (boundQname != PAYLOAD_QNAME) {
+            logger.error(
+                "@ProtocolMessage `$ownerName` type parameter `$tpName` must be bounded by " +
+                    "`com.ditchoom.buffer.codec.Payload`, but is bounded by " +
+                    "`${boundQname ?: "<unresolved>"}`. Slice 10b's generic-bounded payload slot " +
+                    "is the only generics path the emitter recognizes today.",
+                owner,
+            )
+            return
+        }
+        // Bound is Payload — confirm at least one parameter has type
+        // P AND `@RemainingBytes`.
+        val anyMatching =
+            parameters.any { p ->
+                val ftype = p.type.resolve()
+                if (ftype.isError) return@any false
+                val fdecl = ftype.declaration
+                if (fdecl !is com.google.devtools.ksp.symbol.KSTypeParameter) return@any false
+                if (fdecl.name.asString() != tpName) return@any false
+                p.annotations.any { ann ->
+                    ann.shortName.asString() == REMAINING_BYTES_SHORT &&
+                        ann.annotationType
+                            .resolve()
+                            .declaration.qualifiedName
+                            ?.asString() == REMAINING_BYTES_QNAME
+                }
+            }
+        if (!anyMatching) {
+            logger.error(
+                "@ProtocolMessage `$ownerName` declares type parameter `<$tpName : Payload>` but " +
+                    "no `@RemainingBytes val: $tpName` field uses it. The generic emit path " +
+                    "exists to surface a constructor-injected `Codec<$tpName>` parameter — " +
+                    "without a field consuming it, the parameter is unused. Either add " +
+                    "`@RemainingBytes val payload: $tpName` (slice 10b shape) or drop the " +
+                    "type parameter and use `@UseCodec(...)` against a concrete `Payload` " +
+                    "subtype (slice 10a shape).",
+                owner,
+            )
         }
     }
 
