@@ -1,32 +1,37 @@
 package com.ditchoom.buffer.codec.test.protocols.simple
 
+import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.WhenTrue
 import kotlin.jvm.JvmInline
 
 /**
- * Stage E slice 3 doctrine vector — `@WhenTrue` against the dotted
- * `<sibling>.<property>` form, where `<sibling>` is a `@JvmInline
- * value class` exposing a `Boolean`-returning `val` property
- * (Locked Decision row 19, dotted clause).
+ * Stage E slice 3 + 3.5 doctrine vector — `@WhenTrue` against the
+ * dotted `<sibling>.<property>` form, where `<sibling>` is a
+ * `@JvmInline value class` exposing a `Boolean`-returning `val`
+ * property (Locked Decision row 19, dotted clause), composed with
+ * the `@LengthPrefixed val: String?` inner-shape widening (row 19,
+ * inner type universe).
  *
- * Smallest-possible shape that exercises both new emitter
- * capabilities at once:
+ * Smallest-possible shape that exercises both emitter capabilities
+ * at once:
  *   1. Value-class-as-field on a parent data class
  *      (`flags: SmallFlags`, decoded as a single inner UByte and
  *      reconstructed via the value class's primary constructor).
  *   2. Dotted-form `@WhenTrue("flags.want")` resolving against the
  *      reconstructed value class's `want: Boolean` property.
+ *   3. `@LengthPrefixed`-inner `@WhenTrue` slot — the predicate
+ *      gates an entire length-prefixed UTF-8 string body
+ *      (BackPatch encode, Int.MAX_VALUE-guarded decode).
  *
- * Wire layout:
+ * Wire layout (default LengthPrefix.Short, 2-byte big-endian
+ * prefix):
  *   - `WithFlagPayload(flags = SmallFlags(0))`             → `00`
- *   - `WithFlagPayload(flags = SmallFlags(1), payload = N)` → `01 NN NN NN NN`
+ *   - `WithFlagPayload(flags = SmallFlags(1), payload = "")`   → `01 00 00`
+ *   - `WithFlagPayload(flags = SmallFlags(1), payload = "hi")` → `01 00 02 68 69`
  *
- * Slice 3 keeps the bound parameter inner shape narrow on purpose
- * (`payload: Int?` is a natural-width Scalar — the slice 2
- * restriction). MQTT v3 CONNECT's `@LengthPrefixed`-inner shape
- * lands in slice 5; this fixture validates only the dotted-form
- * resolver and the value-class-field round-trip.
+ * Predicate-false collapses the entire slot (prefix included) to
+ * zero bytes per Locked Decision row 19.
  */
 @JvmInline
 @ProtocolMessage
@@ -45,5 +50,5 @@ value class SmallFlags(
 @ProtocolMessage
 data class WithFlagPayload(
     val flags: SmallFlags,
-    @WhenTrue("flags.want") val payload: Int? = null,
+    @LengthPrefixed @WhenTrue("flags.want") val payload: String? = null,
 )

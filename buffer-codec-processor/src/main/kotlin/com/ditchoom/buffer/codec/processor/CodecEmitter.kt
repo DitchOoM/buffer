@@ -410,7 +410,7 @@ internal class CodecEmitter(
     private fun analyzeConditionalField(
         param: KSValueParameter,
         whenTrueAnn: KSAnnotation,
-        @Suppress("UNUSED_PARAMETER") messageWireOrder: Endianness,
+        messageWireOrder: Endianness,
         ownerSimpleName: String,
         params: List<KSValueParameter>,
         index: Int,
@@ -420,29 +420,32 @@ internal class CodecEmitter(
 
         val expression = parseWhenTrueExpression(whenTrueAnn) ?: return null
         val condition = resolveCondition(expression, params, index) ?: return null
-        val inner = analyzeConditionalInner(param, name) ?: return null
+        val inner = analyzeConditionalInner(param, messageWireOrder) ?: return null
 
         return FieldSpec.Conditional(
             name = name,
             ownerSimpleName = ownerSimpleName,
             condition = condition,
-            nullableTypeName = scalarTypeName(inner.kind).copy(nullable = true),
+            nullableTypeName = conditionalInnerNullableTypeName(inner),
             inner = inner,
         )
     }
 
     /**
      * Bound parameter must be nullable (so absence is representable
-     * when the predicate is false) and may carry no annotations beyond
-     * `@WhenTrue`. Composition with `@LengthPrefixed` / `@WireBytes`
-     * widens the shape and lands in slice 5; today's emitter rejects
-     * the combination silently.
+     * when the predicate is false). Annotations beyond `@WhenTrue`
+     * itself are limited to `@LengthPrefixed` (slice 3.5);
+     * `@WireBytes` / `@WireOrder` widen the shape and land in a
+     * later slice.
      */
     private fun boundParameterIsConditionalShape(param: KSValueParameter): Boolean {
         val type = param.type.resolve()
         if (type.isError) return false
         if (!type.isMarkedNullable) return false
-        return param.annotations.all { it.shortName.asString() == "WhenTrue" }
+        return param.annotations.all {
+            val n = it.shortName.asString()
+            n == "WhenTrue" || n == "LengthPrefixed"
+        }
     }
 
     /**
@@ -539,28 +542,43 @@ internal class CodecEmitter(
     }
 
     /**
-     * Analyze the bound parameter's inner shape. Slices 2/3 support
+     * Analyze the bound parameter's inner shape. Slices 2/3 supported
      * any natural-width supported scalar at `Endianness.Default`;
-     * slice 5 widens this to `@LengthPrefixed val: String` for the
-     * MQTT v3 CONNECT optional fields. When that lands, this function
-     * branches on the bound parameter's annotations and returns a
-     * sealed-typed inner; for now there is only one inner kind so a
-     * sealed `ConditionalInner` would be premature.
+     * slice 3.5 widens to `@LengthPrefixed val: String?` for the MQTT
+     * v3 CONNECT optional fields. The branch is on the presence of
+     * `@LengthPrefixed` on the bound parameter; further widenings
+     * (`@LengthPrefixed @ProtocolMessage` body, `@WireBytes`-narrowed
+     * scalars) become additional members of `ConditionalInner` and
+     * additional branches here.
      */
     private fun analyzeConditionalInner(
         param: KSValueParameter,
-        name: String,
-    ): FieldSpec.Scalar? {
+        messageWireOrder: Endianness,
+    ): ConditionalInner? {
+        val lengthPrefixedAnn =
+            param.annotations.firstOrNull { it.shortName.asString() == "LengthPrefixed" }
         val innerType = param.type.resolve().makeNotNullable()
         val qualified = innerType.declaration.qualifiedName?.asString() ?: return null
+        if (lengthPrefixedAnn != null) {
+            // Slice 3.5 widens the inner universe to LengthPrefixed
+            // String only. LengthPrefixed @ProtocolMessage bodies are
+            // doctrine-row-19 valid but defer until a vector requires
+            // them.
+            if (qualified != "kotlin.String") return null
+            return ConditionalInner.LengthPrefixedString(
+                prefixWidth = readLengthPrefix(lengthPrefixedAnn),
+                prefixWireOrder = messageWireOrder,
+            )
+        }
         val kind = SUPPORTED_SCALARS[qualified] ?: return null
-        return FieldSpec.Scalar(
-            name = name,
-            kind = kind,
-            resolvedWireOrder = Endianness.Default,
-            wireBytes = kind.width,
-        )
+        return ConditionalInner.Scalar(kind = kind)
     }
+
+    private fun conditionalInnerNullableTypeName(inner: ConditionalInner): TypeName =
+        when (inner) {
+            is ConditionalInner.Scalar -> scalarTypeName(inner.kind).copy(nullable = true)
+            is ConditionalInner.LengthPrefixedString -> STRING_NULLABLE_TN
+        }
 
     /**
      * Slice 3 peek reconstructs the sibling value class by reading
@@ -1083,13 +1101,37 @@ internal class CodecEmitter(
         body: CodeBlock.Builder,
         field: FieldSpec.Conditional,
     ) {
-        body.addStatement(
-            "val %L: %T = if (%L) %L else null",
-            field.name,
-            field.nullableTypeName,
-            decodeConditionExpr(field.condition),
-            naturalScalarReadExpr(field.inner.kind),
-        )
+        when (val inner = field.inner) {
+            is ConditionalInner.Scalar -> {
+                body.addStatement(
+                    "val %L: %T = if (%L) %L else null",
+                    field.name,
+                    field.nullableTypeName,
+                    decodeConditionExpr(field.condition),
+                    naturalScalarReadExpr(inner.kind),
+                )
+            }
+            is ConditionalInner.LengthPrefixedString -> {
+                body.beginControlFlow(
+                    "val %L: %T = if (%L)",
+                    field.name,
+                    field.nullableTypeName,
+                    decodeConditionExpr(field.condition),
+                )
+                val lengthVar =
+                    appendLengthPrefixedStringPrefixDecode(
+                        body = body,
+                        name = field.name,
+                        ownerSimpleName = field.ownerSimpleName,
+                        prefixWidth = inner.prefixWidth,
+                        prefixWireOrder = inner.prefixWireOrder,
+                    )
+                body.addStatement("buffer.readString(%L, %T.UTF8)", lengthVar, CHARSET_CN)
+                body.nextControlFlow("else")
+                body.addStatement("null")
+                body.endControlFlow()
+            }
+        }
     }
 
     /**
@@ -1099,12 +1141,15 @@ internal class CodecEmitter(
      * ```
      * if (value.<source>) {
      *     val <name>Value = value.<name> ?: throw EncodeException(...)
-     *     <writeStatement using `<name>Value`>
+     *     <writeStatement(s) using `<name>Value`>
      * }
      * ```
      *
      * `<source>` is `value.<sibling>` for the simple form and
-     * `value.<sibling>.<property>` for the dotted form.
+     * `value.<sibling>.<property>` for the dotted form. The body is
+     * a single-line scalar write for `ConditionalInner.Scalar` and
+     * the BackPatch length-prefix sequence for
+     * `ConditionalInner.LengthPrefixedString` (slice 3.5).
      *
      * Predicate-false branch writes nothing (zero bytes for the slot, per
      * Locked Decision row 19). Predicate-true with `value.<name> == null`
@@ -1124,7 +1169,19 @@ internal class CodecEmitter(
             "${field.ownerSimpleName}.${field.name}",
             "@WhenTrue(\"${conditionExpressionLiteral(field.condition)}\") predicate is true but field is null",
         )
-        body.addStatement(naturalScalarWriteStatement(field.inner.kind, localName))
+        when (val inner = field.inner) {
+            is ConditionalInner.Scalar ->
+                body.addStatement(naturalScalarWriteStatement(inner.kind, localName))
+            is ConditionalInner.LengthPrefixedString ->
+                appendLengthPrefixedStringEncode(
+                    body = body,
+                    name = field.name,
+                    ownerSimpleName = field.ownerSimpleName,
+                    prefixWidth = inner.prefixWidth,
+                    prefixWireOrder = inner.prefixWireOrder,
+                    accessor = localName,
+                )
+        }
         body.endControlFlow()
     }
 
@@ -1162,16 +1219,23 @@ internal class CodecEmitter(
         }
 
     /**
-     * Stage E slice 2 — emit `peekFrameSize` for a message whose terminal
-     * field is a `FieldSpec.Conditional` and whose preceding fields are all
-     * `FieldSpec.Scalar` (the slice 2 vector shape).
+     * Stage E slice 2/3 — emit `peekFrameSize` for a message whose
+     * terminal field is a `FieldSpec.Conditional` and whose preceding
+     * fields are all `FixedSize`.
      *
-     * Walks the prefix scalars statically, peeks the boolean source at its
-     * fixed offset, and adds the inner field's wire bytes only when the
-     * predicate is true. Returns `Complete(total)` or `NeedsMoreData`.
+     * Walks the fixed-size prefix statically, resolves the boolean
+     * source at its fixed offset, then either:
+     *   - For `ConditionalInner.Scalar`: adds the inner's fixed
+     *     `wireBytes` only when the predicate is true.
+     *   - For `ConditionalInner.LengthPrefixedString` (slice 3.5):
+     *     when the predicate is true, peeks the length prefix at the
+     *     post-prefix offset and adds prefix bytes + body bytes;
+     *     when false, returns just the prefix bytes (the slot is
+     *     zero bytes on the wire per row 19).
      *
-     * Slice 5 generalises this for variable-length prefix fields (MQTT v3
-     * CONNECT has a leading `@LengthPrefixed` before its flags byte).
+     * A future widening generalises this for variable-length prefix
+     * fields (e.g., a leading `@LengthPrefixed` before the flags
+     * byte in MQTT v3 CONNECT).
      */
     private fun appendPeekConditional(
         builder: FunSpec.Builder,
@@ -1180,7 +1244,7 @@ internal class CodecEmitter(
     ) {
         val prefixFields = shape.fields.dropLast(1)
         // All preceding fields must be FixedSize for the slice 2/3 peek
-        // walk; if any is variable-length, slice 5's more general walk lands.
+        // walk; if any is variable-length, the more general walk lands later.
         val fixedPrefix = prefixFields.filterIsInstance<FieldSpec.FixedSize>()
         if (fixedPrefix.size != prefixFields.size) {
             builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
@@ -1195,6 +1259,7 @@ internal class CodecEmitter(
             return
         }
         val prefixBytes = fixedPrefix.sumOf { it.wireBytes }
+        val condLocal = peekConditionLocalName(terminal.condition)
         val body = CodeBlock.builder()
         body.addStatement(
             "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
@@ -1202,17 +1267,62 @@ internal class CodecEmitter(
             PEEK_RESULT_CN,
         )
         appendPeekConditionResolution(body, sibling, terminal.condition)
-        body.addStatement(
-            "val total = %L + if (%L) %L else 0",
-            prefixBytes,
-            peekConditionLocalName(terminal.condition),
-            terminal.inner.wireBytes,
-        )
-        body.addStatement(
-            "return if (stream.available() - baseOffset >= total) %T.Complete(total) else %T.NeedsMoreData",
-            PEEK_RESULT_CN,
-            PEEK_RESULT_CN,
-        )
+        when (val inner = terminal.inner) {
+            is ConditionalInner.Scalar -> {
+                body.addStatement(
+                    "val total = %L + if (%L) %L else 0",
+                    prefixBytes,
+                    condLocal,
+                    inner.kind.width,
+                )
+                body.addStatement(
+                    "return if (stream.available() - baseOffset >= total) %T.Complete(total) else %T.NeedsMoreData",
+                    PEEK_RESULT_CN,
+                    PEEK_RESULT_CN,
+                )
+            }
+            is ConditionalInner.LengthPrefixedString -> {
+                // Predicate-false path: zero-byte slot, total is just the
+                // fixed prefix.
+                body.beginControlFlow("if (!%L)", condLocal)
+                body.addStatement(
+                    "return if (stream.available() - baseOffset >= %L) %T.Complete(%L) else %T.NeedsMoreData",
+                    prefixBytes,
+                    PEEK_RESULT_CN,
+                    prefixBytes,
+                    PEEK_RESULT_CN,
+                )
+                body.endControlFlow()
+                val headerBytes = prefixBytes + inner.prefixWidth
+                body.addStatement(
+                    "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
+                    headerBytes,
+                    PEEK_RESULT_CN,
+                )
+                appendPeekPrefixAssembly(body, terminal.name, inner.prefixWidth, inner.prefixWireOrder, prefixBytes)
+                val prefixVar = "${terminal.name}Prefix"
+                body.beginControlFlow(
+                    "if (%L > (Int.MAX_VALUE - %L).toUInt())",
+                    prefixVar,
+                    headerBytes,
+                )
+                body.addStatement(
+                    "throw %T(fieldPath = %S, bufferPosition = baseOffset + %L, expected = %S, actual = %P)",
+                    DECODE_EXCEPTION_CN,
+                    "${terminal.ownerSimpleName}.${terminal.name}",
+                    prefixBytes,
+                    "$headerBytes + length prefix <= \${Int.MAX_VALUE}",
+                    "$headerBytes + \${$prefixVar}",
+                )
+                body.endControlFlow()
+                body.addStatement("val total = %L + %L.toInt()", headerBytes, prefixVar)
+                body.addStatement(
+                    "return if (stream.available() - baseOffset >= total) %T.Complete(total) else %T.NeedsMoreData",
+                    PEEK_RESULT_CN,
+                    PEEK_RESULT_CN,
+                )
+            }
+        }
         builder.addCode(body.build())
     }
 
@@ -1413,19 +1523,14 @@ internal class CodecEmitter(
         body: CodeBlock.Builder,
         field: FieldSpec.LengthPrefixedString,
     ) {
-        val prefixVar = "${field.name}Prefix"
-        appendBufferPrefixDecode(body, prefixVar, field.prefixWidth, field.prefixWireOrder)
-        body.beginControlFlow("if (%L > Int.MAX_VALUE.toUInt())", prefixVar)
-        body.addStatement(
-            "throw %T(fieldPath = %S, bufferPosition = -1, expected = %S, actual = %L.toString())",
-            DECODE_EXCEPTION_CN,
-            "${field.ownerSimpleName}.${field.name}",
-            "length prefix <= \${Int.MAX_VALUE}",
-            prefixVar,
-        )
-        body.endControlFlow()
-        val lengthVar = "${field.name}Length"
-        body.addStatement("val %L = %L.toInt()", lengthVar, prefixVar)
+        val lengthVar =
+            appendLengthPrefixedStringPrefixDecode(
+                body = body,
+                name = field.name,
+                ownerSimpleName = field.ownerSimpleName,
+                prefixWidth = field.prefixWidth,
+                prefixWireOrder = field.prefixWireOrder,
+            )
         body.addStatement(
             "val %L = buffer.readString(%L, %T.UTF8)",
             field.name,
@@ -1434,9 +1539,69 @@ internal class CodecEmitter(
         )
     }
 
+    /**
+     * Slice 3.5 — emit the prefix read + Int.MAX_VALUE guard + length
+     * Int conversion shared by length-prefixed-string field decode
+     * and the conditional `@LengthPrefixed @WhenTrue` decode path.
+     * Returns the local variable name holding the resolved
+     * (Int-typed) length.
+     */
+    private fun appendLengthPrefixedStringPrefixDecode(
+        body: CodeBlock.Builder,
+        name: String,
+        ownerSimpleName: String,
+        prefixWidth: Int,
+        prefixWireOrder: Endianness,
+    ): String {
+        val prefixVar = "${name}Prefix"
+        appendBufferPrefixDecode(body, prefixVar, prefixWidth, prefixWireOrder)
+        body.beginControlFlow("if (%L > Int.MAX_VALUE.toUInt())", prefixVar)
+        body.addStatement(
+            "throw %T(fieldPath = %S, bufferPosition = -1, expected = %S, actual = %L.toString())",
+            DECODE_EXCEPTION_CN,
+            "$ownerSimpleName.$name",
+            "length prefix <= \${Int.MAX_VALUE}",
+            prefixVar,
+        )
+        body.endControlFlow()
+        val lengthVar = "${name}Length"
+        body.addStatement("val %L = %L.toInt()", lengthVar, prefixVar)
+        return lengthVar
+    }
+
     private fun appendEncodeLengthPrefixedString(
         body: CodeBlock.Builder,
         field: FieldSpec.LengthPrefixedString,
+    ) {
+        appendLengthPrefixedStringEncode(
+            body = body,
+            name = field.name,
+            ownerSimpleName = field.ownerSimpleName,
+            prefixWidth = field.prefixWidth,
+            prefixWireOrder = field.prefixWireOrder,
+            accessor = "value.${field.name}",
+        )
+    }
+
+    /**
+     * Slice 3.5 — shared BackPatch encoder for length-prefixed-string
+     * fields and the conditional `@LengthPrefixed @WhenTrue` encode
+     * path (Locked Decision row 15).
+     *
+     * `accessor` is the expression that yields the string value;
+     * field-form callers pass `value.<name>`, conditional-form
+     * callers pass the locally-bound non-null value (already
+     * null-checked at the conditional gate). `name` is used for
+     * generated-variable naming and the field-path attribution
+     * literal.
+     */
+    private fun appendLengthPrefixedStringEncode(
+        body: CodeBlock.Builder,
+        name: String,
+        ownerSimpleName: String,
+        prefixWidth: Int,
+        prefixWireOrder: Endianness,
+        accessor: String,
     ) {
         // BackPatch pattern (Locked Decision row 15): reserve prefix slot, write
         // the body via the runtime's UTF-8 path, measure byte count from the
@@ -1445,16 +1610,16 @@ internal class CodecEmitter(
         // on JVM / Apple / JS; the WASM and nonJvm `writeString` paths still
         // allocate one ByteArray per call (Locked Decision row 16, deferred to a
         // separate runtime task).
-        val sizePosVar = "${field.name}SizePosition"
-        val bodyStartVar = "${field.name}BodyStart"
-        val endPosVar = "${field.name}EndPosition"
-        val byteCountVar = "${field.name}ByteCount"
+        val sizePosVar = "${name}SizePosition"
+        val bodyStartVar = "${name}BodyStart"
+        val endPosVar = "${name}EndPosition"
+        val byteCountVar = "${name}ByteCount"
         body.addStatement("val %L = buffer.position()", sizePosVar)
-        body.addStatement("buffer.position(%L + %L)", sizePosVar, field.prefixWidth)
+        body.addStatement("buffer.position(%L + %L)", sizePosVar, prefixWidth)
         body.addStatement("val %L = buffer.position()", bodyStartVar)
         body.addStatement(
-            "buffer.writeString(value.%L, %T.UTF8)",
-            field.name,
+            "buffer.writeString(%L, %T.UTF8)",
+            accessor,
             CHARSET_CN,
         )
         body.addStatement("val %L = buffer.position()", endPosVar)
@@ -1462,10 +1627,10 @@ internal class CodecEmitter(
         // Runtime overflow guard. For 4-byte prefixes the max (UInt.MAX_VALUE =
         // 2^32-1) exceeds Int.MAX_VALUE, so a position-delta byte count can never
         // overflow it — the check would be dead code.
-        if (field.prefixWidth < 4) {
-            val maxValue = (1L shl (field.prefixWidth * 8)) - 1
+        if (prefixWidth < 4) {
+            val maxValue = (1L shl (prefixWidth * 8)) - 1
             val widthName =
-                when (field.prefixWidth) {
+                when (prefixWidth) {
                     1 -> "Byte"
                     2 -> "Short"
                     else -> error("unreachable: prefixWidth must be 1, 2, or 4")
@@ -1474,15 +1639,15 @@ internal class CodecEmitter(
             body.addStatement(
                 "throw %T(fieldPath = %S, reason = %P)",
                 ENCODE_EXCEPTION_CN,
-                "${field.ownerSimpleName}.${field.name}",
+                "$ownerSimpleName.$name",
                 "UTF-8 byte length \${$byteCountVar} exceeds @LengthPrefixed(LengthPrefix.$widthName) max $maxValue",
             )
             body.endControlFlow()
         }
         body.addStatement("buffer.position(%L)", sizePosVar)
-        val prefixVar = "${field.name}Prefix"
+        val prefixVar = "${name}Prefix"
         body.addStatement("val %L = %L.toUInt()", prefixVar, byteCountVar)
-        appendBufferPrefixEncode(body, prefixVar, field.prefixWidth, field.prefixWireOrder)
+        appendBufferPrefixEncode(body, prefixVar, prefixWidth, prefixWireOrder)
         body.addStatement("buffer.position(%L)", endPosVar)
     }
 
@@ -1903,9 +2068,11 @@ internal class CodecEmitter(
 
         /**
          * Stage E — `@WhenTrue` conditional wrapper. Slice 2/3 support
-         * `inner: FieldSpec.Scalar` at natural width (no `@WireBytes`,
-         * no `@WireOrder`); slice 5 widens `inner` to `LengthPrefixedString`
-         * for the MQTT v3 CONNECT optional-field shape.
+         * `ConditionalInner.Scalar` at natural width (no `@WireBytes`,
+         * no `@WireOrder`); slice 3.5 widens `inner` to
+         * `ConditionalInner.LengthPrefixedString` for the MQTT v3
+         * CONNECT optional-field shape (`@LengthPrefixed @WhenTrue
+         * val: String?`).
          *
          * `condition` carries the resolved source: slice 2's sibling-
          * Boolean form (`ConditionRef.Sibling`) and slice 3's dotted
@@ -1916,8 +2083,31 @@ internal class CodecEmitter(
             val ownerSimpleName: String,
             val condition: ConditionRef,
             val nullableTypeName: TypeName,
-            val inner: Scalar,
+            val inner: ConditionalInner,
         ) : FieldSpec
+    }
+
+    /**
+     * Stage E — typed shape of a `@WhenTrue` field's bound (inner)
+     * type. Doctrine row 19 lists the slot's underlying type universe
+     * as anything Stages A/B/C/D already emit; the emitter implements
+     * that universe one shape at a time:
+     *   - `Scalar`: any natural-width supported scalar (slices 2/3).
+     *   - `LengthPrefixedString`: `@LengthPrefixed val: String?`
+     *     (slice 3.5).
+     * Future widenings (`@WireBytes`-narrowed scalars, `@LengthPrefixed
+     * @ProtocolMessage` body) are additional members; the existing
+     * branches stay closed by the sealed.
+     */
+    private sealed interface ConditionalInner {
+        data class Scalar(
+            val kind: ScalarKind,
+        ) : ConditionalInner
+
+        data class LengthPrefixedString(
+            val prefixWidth: Int,
+            val prefixWireOrder: Endianness,
+        ) : ConditionalInner
     }
 
     /**
@@ -1999,5 +2189,6 @@ internal class CodecEmitter(
         private val DECODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "DecodeException")
         private val ENCODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "EncodeException")
         private val CHARSET_CN = ClassName("com.ditchoom.buffer", "Charset")
+        private val STRING_NULLABLE_TN = ClassName("kotlin", "String").copy(nullable = true)
     }
 }

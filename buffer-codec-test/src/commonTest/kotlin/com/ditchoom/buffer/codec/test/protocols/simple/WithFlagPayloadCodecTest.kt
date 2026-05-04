@@ -2,6 +2,7 @@ package com.ditchoom.buffer.codec.test.protocols.simple
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
+import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
@@ -14,18 +15,32 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 /**
- * Stage E slice-3 doctrine vector. Validates the dotted-form
+ * Stage E slice 3 + 3.5 doctrine vector. Validates the dotted-form
  * `@WhenTrue("flags.want")` resolver against the value-class field
- * `flags: SmallFlags`, plus value-class-as-field decode/encode
- * round-trip and `peekFrameSize` reconstruction of the value class
- * from the peeked inner-scalar bytes.
+ * `flags: SmallFlags`, composed with `@LengthPrefixed val: String?`
+ * as the bound (inner) shape: round-trip across both predicate
+ * values, encoder zero-byte skip when predicate false (entire slot
+ * including the length prefix), decoder nullness round-trip,
+ * `WireSize.BackPatch` per Locked Decision row 19, and
+ * `peekFrameSize` walking from `NeedsMoreData` to `Complete` via
+ * drip-feeding the flags byte and the conditional length-prefixed
+ * body.
  */
 class WithFlagPayloadCodecTest {
     @Test
-    fun roundTripsPredicateTrue() {
+    fun roundTripsPredicateTrueWithBody() {
+        val payload = "hi"
         roundTrip(
-            WithFlagPayload(flags = SmallFlags.WANT, payload = 0x12345678),
-            expectedTotalBytes = 1 + 4,
+            WithFlagPayload(flags = SmallFlags.WANT, payload = payload),
+            expectedTotalBytes = 1 + 2 + payload.encodeToByteArray().size,
+        )
+    }
+
+    @Test
+    fun roundTripsPredicateTrueWithEmptyBody() {
+        roundTrip(
+            WithFlagPayload(flags = SmallFlags.WANT, payload = ""),
+            expectedTotalBytes = 1 + 2,
         )
     }
 
@@ -37,18 +52,20 @@ class WithFlagPayloadCodecTest {
     @Test
     fun encodePredicateFalseWritesOnlyTheFlagsByte() {
         val buf = encode(WithFlagPayload(flags = SmallFlags.NONE))
-        assertEquals(1, buf.position(), "predicate-false encode writes only the flags byte")
+        assertEquals(1, buf.position(), "predicate-false encode writes only the flags byte (no prefix slot)")
         buf.resetForRead()
         assertEquals(0.toByte(), buf.readByte(), "SmallFlags(0) encodes to 0x00")
     }
 
     @Test
-    fun encodePredicateTrueWritesFlagsThenInt() {
-        val buf = encode(WithFlagPayload(flags = SmallFlags.WANT, payload = 0x01020304))
-        assertEquals(5, buf.position(), "predicate-true encode writes 1 + 4 bytes")
+    fun encodePredicateTrueWritesFlagsThenPrefixedBody() {
+        val buf = encode(WithFlagPayload(flags = SmallFlags.WANT, payload = "hi"))
+        assertEquals(5, buf.position(), "predicate-true encode writes 1 (flags) + 2 (prefix) + 2 (body)")
         buf.resetForRead()
         assertEquals(1.toByte(), buf.readByte(), "SmallFlags(1) encodes to 0x01")
-        assertEquals(0x01020304, buf.readInt(), "payload encoded big-endian")
+        assertEquals(2.toShort(), buf.readShort(), "length prefix is 2 (big-endian)")
+        assertEquals('h'.code.toByte(), buf.readByte())
+        assertEquals('i'.code.toByte(), buf.readByte())
     }
 
     @Test
@@ -62,14 +79,15 @@ class WithFlagPayloadCodecTest {
     }
 
     @Test
-    fun decodePredicateTrueReadsValueClassThenPayload() {
-        val buf = BufferFactory.Default.allocate(5)
+    fun decodePredicateTrueReadsValueClassThenLengthPrefixedBody() {
+        val buf = BufferFactory.Default.allocate(8)
         buf.writeByte(0x01.toByte())
-        buf.writeInt(0x0A0B0C0D)
+        buf.writeShort(3.toShort())
+        buf.writeString("hey", Charset.UTF8)
         buf.resetForRead()
         val decoded = WithFlagPayloadCodec.decode(buf, DecodeContext.Empty)
         assertEquals(SmallFlags.WANT, decoded.flags)
-        assertEquals(0x0A0B0C0D, decoded.payload)
+        assertEquals("hey", decoded.payload)
     }
 
     @Test
@@ -78,7 +96,7 @@ class WithFlagPayloadCodecTest {
         assertEquals(
             WireSize.BackPatch,
             WithFlagPayloadCodec.wireSize(
-                WithFlagPayload(flags = SmallFlags.WANT, payload = 1),
+                WithFlagPayload(flags = SmallFlags.WANT, payload = "hi"),
                 EncodeContext.Empty,
             ),
         )
@@ -119,7 +137,7 @@ class WithFlagPayloadCodecTest {
     @Test
     fun peekFrameSizeWalksNeedsMoreDataToCompleteWhenPredicateTrue() {
         val pool = BufferPool()
-        val original = WithFlagPayload(flags = SmallFlags.WANT, payload = 0x12345678)
+        val original = WithFlagPayload(flags = SmallFlags.WANT, payload = "hi")
         val encoded = encode(original)
         encoded.resetForRead()
         val totalBytes = encoded.remaining()
