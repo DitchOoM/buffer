@@ -2,6 +2,7 @@ package com.ditchoom.buffer.codec.test.protocols.mqtt
 
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+import com.ditchoom.buffer.codec.annotations.RemainingLength
 import com.ditchoom.buffer.codec.annotations.WhenTrue
 import kotlin.jvm.JvmInline
 
@@ -38,10 +39,12 @@ value class MqttConnectFlags(
 }
 
 /**
- * Stage E slice 5b doctrine vector — MQTT v3.1.1 CONNECT variable
- * header + payload as a single `@ProtocolMessage`. This is the
- * load-bearing vector that ties together every Stage E annotation
- * row 1 of `PHASE_9_RESET.md` mentions:
+ * Stage E slice 5b + Stage G slice 8 doctrine vector — full
+ * MQTT v3.1.1 CONNECT packet per §3.1 as a single
+ * `@ProtocolMessage`. Composes the fixed header byte + var-int
+ * `@RemainingLength` (slice 8) with the variable header + payload
+ * (slice 5b). Load-bearing vector for every Stage E + G annotation
+ * `PHASE_9_RESET.md` mentions:
  *
  *   - `@LengthPrefixed val: String` — protocol name, client id,
  *     and the four optional payload fields. Slice 5a allowed
@@ -86,6 +89,8 @@ value class MqttConnectFlags(
  */
 @ProtocolMessage
 data class MqttConnect(
+    val header: MqttFixedHeader,
+    @RemainingLength val remainingLength: UInt,
     @LengthPrefixed val protocolName: String,
     val protocolLevel: UByte,
     val connectFlags: MqttConnectFlags,

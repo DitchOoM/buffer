@@ -15,24 +15,31 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 /**
- * Stage E slice 5b doctrine vector. Validates the full MQTT v3.1.1
- * CONNECT variable-header + payload byte-exactly against
- * MQTT-3.1.1 §3.1, exercising every Stage E annotation in
+ * Stage E slice 5b + Stage G slice 8 doctrine vector. Validates
+ * the full MQTT v3.1.1 CONNECT packet byte-exactly against
+ * MQTT-3.1.1 §3.1, exercising every Stage E + G annotation in
  * combination:
  *
+ *   - `@RemainingLength` var-int header (slice 8) bounds decode.
+ *   - Value-class fixed-header field (slice 3 / 6).
  *   - Non-terminal `@LengthPrefixed val: String` (slice 5a).
- *   - Value-class field with bit-packed Boolean getters (slice 3).
+ *   - Value-class connectFlags field with bit-packed Boolean getters
+ *     (slice 3).
  *   - Multiple `@LengthPrefixed @WhenTrue("connectFlags.<bit>")
  *     val: String?` slots (slice 3 dotted form + slice 3.5
  *     LengthPrefixed inner + slice 5b non-terminal Conditional).
- *   - Sequential peek walk through alternating fixed,
- *     variable-length, and conditional fields (slice 5a).
+ *   - Sequential peek walk via the slice 8 RemainingLength fast
+ *     path (header byte + var-int + value covers the full message).
  */
 class MqttConnectCodecTest {
     @Test
     fun roundTripsClientIdOnly() {
+        // body: 6 (protocolName "MQTT" with prefix) + 1 (level) + 1 (flags) +
+        //       2 (keepalive) + 5 (clientId "abc" with prefix) = 15
         val msg =
             MqttConnect(
+                header = MqttFixedHeader(0x10u),
+                remainingLength = 15u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0x02u),
@@ -41,6 +48,8 @@ class MqttConnectCodecTest {
             )
         val expected =
             byteArrayOf(
+                0x10, // fixed header (type=1 << 4)
+                0x0F, // remaining length = 15 (1-byte var-int)
                 // Variable header
                 0x00, 0x04, 'M'.code.toByte(), 'Q'.code.toByte(), 'T'.code.toByte(), 'T'.code.toByte(),
                 0x04,
@@ -54,9 +63,13 @@ class MqttConnectCodecTest {
 
     @Test
     fun roundTripsUsernameAndPassword() {
+        // body: 6 (proto) + 1 (level) + 1 (flags) + 2 (keepalive) +
+        //       6 (clientId "test") + 6 (username "user") + 6 (password "pass") = 28
         // Flags: usernamePresent (0x80) | passwordPresent (0x40) | cleanSession (0x02) = 0xC2
         val msg =
             MqttConnect(
+                header = MqttFixedHeader(0x10u),
+                remainingLength = 28u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0xC2u),
@@ -67,6 +80,8 @@ class MqttConnectCodecTest {
             )
         val expected =
             byteArrayOf(
+                0x10,
+                0x1C, // remaining length = 28
                 0x00, 0x04, 'M'.code.toByte(), 'Q'.code.toByte(), 'T'.code.toByte(), 'T'.code.toByte(),
                 0x04,
                 0xC2.toByte(),
@@ -81,9 +96,12 @@ class MqttConnectCodecTest {
 
     @Test
     fun roundTripsWillFields() {
+        // body: 6 + 1 + 1 + 2 + 3 (clientId "c") + 3 (willTopic "t") + 3 (willMessage "m") = 19
         // Flags: willPresent (0x04) | willRetain (0x20) | cleanSession (0x02) = 0x26
         val msg =
             MqttConnect(
+                header = MqttFixedHeader(0x10u),
+                remainingLength = 19u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0x26u),
@@ -94,6 +112,8 @@ class MqttConnectCodecTest {
             )
         val expected =
             byteArrayOf(
+                0x10,
+                0x13, // remaining length = 19
                 0x00, 0x04, 'M'.code.toByte(), 'Q'.code.toByte(), 'T'.code.toByte(), 'T'.code.toByte(),
                 0x04,
                 0x26.toByte(),
@@ -108,9 +128,13 @@ class MqttConnectCodecTest {
 
     @Test
     fun roundTripsAllOptionalFieldsPresent() {
+        // body: 6 + 1 + 1 + 2 + 8 (clientId "client") + 8 (willTopic "will/t") +
+        //       5 (willMessage "bye") + 7 (username "alice") + 8 (password "secret") = 46
         // Flags: usernamePresent | passwordPresent | willRetain | willPresent | cleanSession = 0xE6
         val msg =
             MqttConnect(
+                header = MqttFixedHeader(0x10u),
+                remainingLength = 46u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0xE6u),
@@ -132,6 +156,8 @@ class MqttConnectCodecTest {
         // Same wire bytes as roundTripsUsernameAndPassword.
         val wire =
             byteArrayOf(
+                0x10,
+                0x1C,
                 0x00, 0x04, 'M'.code.toByte(), 'Q'.code.toByte(), 'T'.code.toByte(), 'T'.code.toByte(),
                 0x04,
                 0xC2.toByte(),
@@ -151,18 +177,44 @@ class MqttConnectCodecTest {
     }
 
     @Test
-    fun wireSizeIsBackPatch() {
-        // Locked Decision rows 15 and 19 both apply: any LPS String AND any
-        // @WhenTrue field collapse to BackPatch. MQTT CONNECT has both.
+    fun decodeRespectsRemainingLengthBoundEvenWithTrailingBytes() {
+        // CONNECT body bounded to 15 bytes by remainingLength. Following
+        // bytes simulate the start of a second packet — must NOT be consumed.
+        val wire =
+            byteArrayOf(
+                0x10, 0x0F,
+                0x00, 0x04, 'M'.code.toByte(), 'Q'.code.toByte(), 'T'.code.toByte(), 'T'.code.toByte(),
+                0x04,
+                0x02.toByte(),
+                0x00, 0x3C,
+                0x00, 0x03, 'a'.code.toByte(), 'b'.code.toByte(), 'c'.code.toByte(),
+                // Trailing bytes (start of next packet, e.g., a PINGREQ 0xC0 0x00)
+                0xC0.toByte(), 0x00,
+            )
+        val buf = BufferFactory.Default.allocate(wire.size).also { it.writeBytes(wire) }
+        buf.resetForRead()
+        val decoded = MqttConnectCodec.decode(buf, DecodeContext.Empty)
+        assertEquals("abc", decoded.clientId)
+        assertEquals(2, buf.remaining(), "trailing 2 bytes (next packet) left in buffer")
+    }
+
+    @Test
+    fun wireSizeIsExactBasedOnRemainingLength() {
+        // Slice 8 — @RemainingLength makes wireSize Exact regardless of the
+        // @WhenTrue and @LengthPrefixed fields that would otherwise force
+        // BackPatch (the user's remainingLength gives us the answer).
         val msg =
             MqttConnect(
+                header = MqttFixedHeader(0x10u),
+                remainingLength = 15u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0x02u),
                 keepAliveSeconds = 60u,
                 clientId = "abc",
             )
-        assertEquals(WireSize.BackPatch, MqttConnectCodec.wireSize(msg, EncodeContext.Empty))
+        // 1 (header) + 1 (var-int for 15) + 15 (body) = 17
+        assertEquals(WireSize.Exact(17), MqttConnectCodec.wireSize(msg, EncodeContext.Empty))
     }
 
     @Test
@@ -170,6 +222,8 @@ class MqttConnectCodecTest {
         val pool = BufferPool()
         val original =
             MqttConnect(
+                header = MqttFixedHeader(0x10u),
+                remainingLength = 28u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0xC2u),
@@ -181,6 +235,8 @@ class MqttConnectCodecTest {
         val encoded = encode(original)
         encoded.resetForRead()
         val totalBytes = encoded.remaining()
+        // 1 (header) + 1 (var-int) + 28 (body) = 30
+        assertEquals(30, totalBytes)
 
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
@@ -216,13 +272,15 @@ class MqttConnectCodecTest {
     }
 
     @Test
-    fun peekFrameSizeShortCircuitsWhenOptionalsAbsent() {
-        // When the connectFlags byte signals no optional fields, the peek
-        // walk's predicate-gated branches all skip — total is just the
-        // fixed prefix + protocol name + client id length-prefixed body.
+    fun peekFrameSizeShortCircuitsAfterReadingHeaderAndVarInt() {
+        // With slice 8's RemainingLength fast path, peek can complete after
+        // reading just header (1 byte) + var-int (1-4 bytes) — it doesn't
+        // need to walk the payload.
         val pool = BufferPool()
         val original =
             MqttConnect(
+                header = MqttFixedHeader(0x10u),
+                remainingLength = 15u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0x02u),
@@ -232,8 +290,8 @@ class MqttConnectCodecTest {
         val encoded = encode(original)
         encoded.resetForRead()
         val expectedTotal = encoded.remaining()
-        // 6 (protocol name) + 1 (level) + 1 (flags) + 2 (keepalive) + 5 (clientId) = 15
-        assertEquals(15, expectedTotal, "wire layout sanity check")
+        // 1 (header) + 1 (var-int) + 15 (body) = 17
+        assertEquals(17, expectedTotal)
 
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
