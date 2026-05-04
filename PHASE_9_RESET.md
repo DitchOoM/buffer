@@ -138,6 +138,7 @@ decision from a concrete vector beats deciding in the abstract.
 |------------------------------------------------|---------------------------------------------------------------------------|-----------------|
 | `@UseCodec` `expect`/`actual` resolution path  | Direct call to `expect` object, linker resolves; KSP doesn't inspect actual | Stage H         |
 | `data object` vs empty `data class`            | `data class` for dispatcher cleanliness per item 5 above                   | Stage F         |
+| Decompose `@RemainingLength` into format + behavior | Slice 8's `@RemainingLength` is MQTT v3.1.1 §2.2.3-shaped: 7-bit + continuation bit, capped at 4 bytes (max ~268M), AND implicitly sets `buffer.limit` to bound subsequent decode. The byte format is identical to MIDI variable-length quantities and is a constrained subset of LEB128 (Protobuf/WASM/Avro), which allow unbounded byte length and add zig-zag for signed types. The implicit-bounding behavior is MQTT-specific. **Followup before merging the PR**: decompose into orthogonal annotations — `@VarByteInt(maxBytes = N)` for the format and `@BoundsRemaining` for the buffer-limit side effect. MQTT's existing pairing becomes `@VarByteInt @BoundsRemaining val remainingLength: UInt`; non-MQTT protocols can use `@VarByteInt` alone (MIDI VLQ, Protobuf-style varints if max is widened). Decision deferred until a second var-int-using vector lands so `@VarByteInt`'s parameter set isn't designed in the abstract. | Stage G follow-up |
 
 ## Stages A–H — execution plan
 

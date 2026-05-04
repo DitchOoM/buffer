@@ -181,11 +181,12 @@ annotation class LengthFrom(
 )
 
 /**
- * Marks a `UInt` field that carries a **variable-length integer**
+ * **MQTT-specific.** Marks a `UInt` field that carries the MQTT
+ * v3.1.1 §2.2.3 / MQTT v5.0 §1.5.5 "Remaining Length" — a
+ * variable-byte-integer (1–4 bytes, continuation bit `0x80` on
+ * each byte except the last, value range `0..268,435,455`)
  * encoding the byte count of everything that follows it in the
- * message. Reads/writes the MQTT v3.1.1 §2.2.3 / MQTT v5.0 §1.5.5
- * variable-byte-integer format (1–4 bytes, continuation bit `0x80`
- * on each byte except the last, value range `0..268,435,455`).
+ * message.
  *
  * On decode, after reading the var-int the codec sets the buffer's
  * limit to `position + value`, so subsequent fields (including
@@ -205,6 +206,26 @@ annotation class LengthFrom(
  *     @RemainingBytes val returnCodes: List<UByte>,   // bounded by remainingLength
  * )
  * ```
+ *
+ * **Specificity caveats.** Three things tie this annotation to
+ * MQTT:
+ *   1. The byte format is hard-coded to MQTT's 1–4 byte cap. The
+ *      same 7-bit + continuation pattern is used by MIDI variable-
+ *      length quantities (often unbounded) and is a constrained
+ *      subset of LEB128 (Protobuf, WebAssembly, Avro), which allows
+ *      unbounded byte length and adds zig-zag for signed types.
+ *      Codecs for those protocols would need a separate annotation.
+ *   2. The implicit `setLimit`-on-decode behavior is MQTT-shaped.
+ *      Protobuf varint length prefixes typically bound a single
+ *      nested field, not "everything after me in the parent".
+ *   3. The name comes from MQTT's spec terminology.
+ *
+ * The followup tracked in PHASE_9_RESET.md's deferred-decisions
+ * table is to decompose this into orthogonal annotations
+ * (`@VarByteInt` for the format + `@BoundsRemaining` for the
+ * limit-setting behavior) once a second var-int-using vector
+ * arrives so the format-parameter set can be designed against a
+ * concrete second case.
  *
  * Restrictions: applies to `UInt` fields only; at most one
  * `@RemainingLength` per message. Mutually exclusive with
