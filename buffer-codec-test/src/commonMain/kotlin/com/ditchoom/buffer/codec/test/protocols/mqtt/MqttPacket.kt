@@ -1,10 +1,14 @@
 package com.ditchoom.buffer.codec.test.protocols.mqtt
 
+import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.annotations.DispatchOn
 import com.ditchoom.buffer.codec.annotations.DispatchValue
+import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import com.ditchoom.buffer.codec.annotations.RemainingLength
+import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
 import kotlin.jvm.JvmInline
 
 /**
@@ -31,9 +35,15 @@ value class MqttFixedHeader(
 }
 
 /**
- * Stage F slice 6 doctrine vector — sealed dispatcher over
- * `MqttFixedHeader` exercising the `@DispatchOn` value-class
- * discriminator emit path.
+ * Stage F slice 6 + Stage H slice 10f doctrine vector — sealed
+ * dispatcher over `MqttFixedHeader` exercising the `@DispatchOn`
+ * value-class discriminator emit path.
+ *
+ * Slice 10f lifts the parent to `<out P : Payload>` so the new
+ * `Publish<P : Payload>` variant (MQTT v3.1.1 §3.3) can carry a
+ * typed payload routed through the slice 10d generic dispatcher.
+ * Payload-free variants stay `: MqttPacket<Nothing>`; covariance
+ * makes them assignable to any `MqttPacket<P>` instantiation.
  *
  * Each variant carries the fixed header as its first field. The
  * slice 6 dispatcher peeks the header byte without consuming,
@@ -42,12 +52,8 @@ value class MqttFixedHeader(
  * bytes (including the header field) via the slice 3
  * `FieldSpec.ValueClassScalar` path.
  *
- * Two variants are modeled here; the broader MQTT control-packet
- * set (PUBLISH with payload, SUBSCRIBE with topic filters, etc.)
- * needs Stage G's variable-length list shape and is deferred.
- *
- * Wire layout per MQTT-3.1.1, with @RemainingLength var-int between
- * the fixed header and the body (slice 8 spec compliance):
+ * Wire layout per MQTT-3.1.1, with `@RemainingLength` var-int
+ * between the fixed header and the body (slice 8 spec compliance):
  *
  * ```text
  * Connect (type 1, header byte typically 0x10):
@@ -56,6 +62,13 @@ value class MqttFixedHeader(
  *   00 02                    keep-alive seconds (2-byte BE)
  *   00 04 'a' 'b' 'c' 'd'    client id (LengthPrefixed)
  *
+ * Publish (type 3, header byte typically 0x30 for QoS=0):
+ *   30                       fixed header
+ *   <var-int>                remaining length (= 2 + topic + 2 + payload bytes)
+ *   00 03 't' '/' '1'        topic (LengthPrefixed)
+ *   00 2A                    packet id
+ *   <payload bytes>          decoded by the user-supplied Codec<P>
+ *
  * Disconnect (type 14, header byte typically 0xE0):
  *   E0                       fixed header
  *   00                       remaining length = 0 (per §3.14)
@@ -63,7 +76,7 @@ value class MqttFixedHeader(
  */
 @DispatchOn(MqttFixedHeader::class)
 @ProtocolMessage
-sealed interface MqttPacket {
+sealed interface MqttPacket<out P : Payload> {
     /**
      * Type-1 CONNECT, simplified to the fields slice 6 cleanly
      * exercises (full CONNECT lives in `MqttConnect`; combining the
@@ -77,8 +90,50 @@ sealed interface MqttPacket {
         val header: MqttFixedHeader = MqttFixedHeader(0x10u),
         @RemainingLength val remainingLength: UInt,
         val keepAliveSeconds: UShort,
-        @com.ditchoom.buffer.codec.annotations.LengthPrefixed val clientId: String,
-    ) : MqttPacket
+        @LengthPrefixed val clientId: String,
+    ) : MqttPacket<Nothing>
+
+    /**
+     * Type-3 PUBLISH per MQTT v3.1.1 §3.3 — generic-bounded payload
+     * variant. Wire layout (QoS=0 narrow):
+     *
+     *   - `header` (`MqttFixedHeader`, 1 byte): packet type=3 in
+     *     the top 4 bits, flags in the bottom 4. The default
+     *     `0x30` is QoS=0 with no DUP/RETAIN.
+     *   - `@RemainingLength remainingLength` (1–4 bytes): total
+     *     bytes in `topic`, `packetId`, and `payload`. The codec
+     *     reads the var-int and bounds the buffer so trailing
+     *     fields stop at the var-int's value.
+     *   - `@LengthPrefixed topic` (UShort BE prefix + UTF-8 body):
+     *     the publish topic name.
+     *   - `packetId` (`PacketId`, UShort BE): the packet identifier.
+     *     Per spec, packetId is only present when `header.flags
+     *     & 0x06 != 0` (QoS > 0); slice 10f narrow always includes
+     *     it (matches the slice 10a/10b PUBLISH fixture). Lifting
+     *     this to a QoS-conditional `@WhenTrue("header.flags > ...")`
+     *     wait for a vector that exercises QoS-bit dotted predicates
+     *     against the value-class header.
+     *   - `@RemainingBytes payload: P` (variable, decoded by the
+     *     user-supplied `Codec<P>`): consumes the remaining bytes
+     *     of the var-int-bounded region.
+     *
+     * Slice 10f exercises:
+     *   - The new generic `MqttPacket<out P : Payload>` shape with
+     *     `Publish<P> : MqttPacket<P>`.
+     *   - `@RemainingLength` + `@RemainingBytes payload: P` in the
+     *     same data class — the slice 10c carve-out lifts here.
+     *   - `Partial.complete()` running inside the var-int-narrowed
+     *     bound and restoring the outer limit on completion.
+     */
+    @PacketType(value = 3)
+    @ProtocolMessage
+    data class Publish<P : Payload>(
+        val header: MqttFixedHeader = MqttFixedHeader(0x30u),
+        @RemainingLength val remainingLength: UInt,
+        @LengthPrefixed val topic: String,
+        val packetId: PacketId,
+        @RemainingBytes val payload: P,
+    ) : MqttPacket<P>
 
     /**
      * Type-12 PINGREQ per §3.12 — fixed header `0xC0` + remaining
@@ -99,7 +154,7 @@ sealed interface MqttPacket {
     data class PingReq(
         val header: MqttFixedHeader = MqttFixedHeader(0xC0u),
         @RemainingLength val remainingLength: UInt = 0u,
-    ) : MqttPacket
+    ) : MqttPacket<Nothing>
 
     /** Type-13 PINGRESP per §3.13 — fixed header `0xD0` + RL `0`, total `D0 00`. */
     @PacketType(value = 13)
@@ -107,7 +162,7 @@ sealed interface MqttPacket {
     data class PingResp(
         val header: MqttFixedHeader = MqttFixedHeader(0xD0u),
         @RemainingLength val remainingLength: UInt = 0u,
-    ) : MqttPacket
+    ) : MqttPacket<Nothing>
 
     /**
      * Type-14 DISCONNECT — fixed header + zero-byte remaining
@@ -118,5 +173,5 @@ sealed interface MqttPacket {
     data class Disconnect(
         val header: MqttFixedHeader = MqttFixedHeader(0xE0u),
         @RemainingLength val remainingLength: UInt = 0u,
-    ) : MqttPacket
+    ) : MqttPacket<Nothing>
 }

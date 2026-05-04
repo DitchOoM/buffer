@@ -1331,26 +1331,25 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage H slice 10c — gate for emitting the `Partial` decode pattern.
-     * Partial only makes sense for messages carrying a typed payload field
-     * (slice 10a `@UseCodec` shape or slice 10b `<P : Payload>` shape);
-     * `RemainingBytesPayload` is the marker for both. The
-     * `@RemainingLength` carve-out below is a deliberate slice-10c
-     * narrow: a Partial whose header decode runs `setLimit` would force
-     * `complete()` to either inherit the narrowed limit (correct for
-     * payload bounding) or restore the outer limit (correct for caller
-     * cleanup) — picking one at emit time without a vector that exercises
-     * both ergonomics is premature. The slice 10a / 10b vectors don't
-     * combine `@RemainingLength` with the payload field (slice 10d's
-     * outer dispatcher will own the var-int instead), so deferring the
-     * combination loses no current capability. Lift this when slice 10d
-     * lands a vector that exercises the combo.
+     * Stage H slice 10c / 10f — gate for emitting the `Partial` decode
+     * pattern. Partial is emitted whenever a message carries a typed
+     * payload field (slice 10a `@UseCodec` shape or slice 10b `<P :
+     * Payload>` shape); `RemainingBytesPayload` is the marker for both.
+     *
+     * Slice 10f lifts the slice 10c `@RemainingLength` carve-out. When
+     * a shape combines `@RemainingLength` with a typed payload (the
+     * MQTT v3 PUBLISH §3.3 wire shape), the `Partial` captures the
+     * outer buffer limit at partial-decode time (the same local that
+     * `appendDecodeRemainingLength` already emits as
+     * `__<rlName>OuterLimit`); `complete()` runs the payload decode
+     * inside the var-int-narrowed bound (correct for payload bounding)
+     * and restores the outer limit via `try/finally` (correct for
+     * caller cleanup). Both correctness concerns the slice 10c carve-
+     * out flagged are handled by capturing the outer limit on the
+     * Partial and restoring on completion — no consumer-visible API
+     * change versus the no-RL path.
      */
-    private fun shouldEmitPartial(shape: CodecShape): Boolean {
-        if (shape.fields.none { it is FieldSpec.RemainingBytesPayload }) return false
-        if (shape.fields.any { it is FieldSpec.RemainingLength }) return false
-        return true
-    }
+    private fun shouldEmitPartial(shape: CodecShape): Boolean = shape.fields.any { it is FieldSpec.RemainingBytesPayload }
 
     /**
      * Stage H slice 10c — emit the nested `Partial` class. The `Partial`
@@ -1387,6 +1386,11 @@ internal class CodecEmitter(
             shape.fields.lastOrNull() as? FieldSpec.RemainingBytesPayload
                 ?: error("buildPartialClassTypeSpec called for shape without trailing RemainingBytesPayload")
         val headerFields = shape.fields.dropLast(1)
+        // Slice 10f — when the headers contain @RemainingLength, the
+        // partial decode mid-walk runs `setLimit(position + RL.toInt())`
+        // and stashes the prior limit in `__<rlName>OuterLimit`. Capture
+        // that local on the Partial so `complete()` can restore it.
+        val hasRemainingLength = shape.fields.any { it is FieldSpec.RemainingLength }
 
         val classBuilder = TypeSpec.classBuilder("Partial")
         val typeVar =
@@ -1406,12 +1410,24 @@ internal class CodecEmitter(
                     .build(),
             )
         }
+        if (hasRemainingLength) {
+            ctorBuilder.addParameter("outerLimit", INT)
+        }
         ctorBuilder.addParameter("buffer", READ_BUFFER_CN)
         ctorBuilder.addParameter("context", DECODE_CONTEXT_CN)
         classBuilder.primaryConstructor(ctorBuilder.build())
-        // Buffer + context are private state used by complete(); no
-        // public getter — the consumer should never re-read the buffer
-        // through the Partial.
+        // Buffer + context (and the captured outerLimit, if any) are
+        // private state used by complete(); no public getter — the
+        // consumer should never re-read the buffer or fiddle with the
+        // limit through the Partial.
+        if (hasRemainingLength) {
+            classBuilder.addProperty(
+                com.squareup.kotlinpoet.PropertySpec
+                    .builder("outerLimit", INT, KModifier.PRIVATE)
+                    .initializer("outerLimit")
+                    .build(),
+            )
+        }
         classBuilder.addProperty(
             com.squareup.kotlinpoet.PropertySpec
                 .builder("buffer", READ_BUFFER_CN, KModifier.PRIVATE)
@@ -1426,7 +1442,7 @@ internal class CodecEmitter(
         )
 
         classBuilder.addFunction(
-            buildPartialCompleteFun(shape, payloadTypeParameter, payloadField, headerFields),
+            buildPartialCompleteFun(shape, payloadTypeParameter, payloadField, hasRemainingLength),
         )
         return classBuilder.build()
     }
@@ -1445,7 +1461,7 @@ internal class CodecEmitter(
         shape: CodecShape,
         payloadTypeParameter: PayloadTypeParameter?,
         payloadField: FieldSpec.RemainingBytesPayload,
-        headerFields: List<FieldSpec>,
+        hasRemainingLength: Boolean,
     ): FunSpec {
         val funBuilder = FunSpec.builder("complete")
         val returnType =
@@ -1458,31 +1474,50 @@ internal class CodecEmitter(
             }
         funBuilder.returns(returnType)
 
-        when (val source = payloadField.source) {
-            is PayloadCodecSource.UserCodecObject -> {
-                funBuilder.addStatement(
-                    "val %L = %T.decode(buffer, context)",
-                    payloadField.name,
-                    source.codecType,
-                )
+        // Resolve the payload-decode statement up front; both the
+        // RL and no-RL paths emit the same statement, just inside or
+        // outside the try-block.
+        val payloadDecodeStmt =
+            when (val source = payloadField.source) {
+                is PayloadCodecSource.UserCodecObject ->
+                    CodeBlock.of(
+                        "val %L = %T.decode(buffer, context)\n",
+                        payloadField.name,
+                        source.codecType,
+                    )
+                is PayloadCodecSource.ConstructorInjected -> {
+                    val pTpName =
+                        payloadTypeParameter
+                            ?: error("ConstructorInjected payload source requires a payload type parameter")
+                    funBuilder.addParameter(
+                        source.parameterName,
+                        DECODER_CN.parameterizedBy(TypeVariableName(pTpName.typeVariableName)),
+                    )
+                    CodeBlock.of(
+                        "val %L = %L.decode(buffer, context)\n",
+                        payloadField.name,
+                        source.parameterName,
+                    )
+                }
             }
-            is PayloadCodecSource.ConstructorInjected -> {
-                val pTpName =
-                    payloadTypeParameter
-                        ?: error("ConstructorInjected payload source requires a payload type parameter")
-                funBuilder.addParameter(
-                    source.parameterName,
-                    DECODER_CN.parameterizedBy(TypeVariableName(pTpName.typeVariableName)),
-                )
-                funBuilder.addStatement(
-                    "val %L = %L.decode(buffer, context)",
-                    payloadField.name,
-                    source.parameterName,
-                )
-            }
-        }
         val ctorArgs = shape.fields.joinToString(", ") { "${it.name} = ${it.name}" }
-        funBuilder.addStatement("return %T(%L)", returnType, ctorArgs)
+        val body = CodeBlock.builder()
+        if (hasRemainingLength) {
+            // Slice 10f — payload decode runs inside the var-int-
+            // narrowed bound (correct for payload bounding); the outer
+            // limit is restored via try/finally so the caller's outer
+            // limit survives even if the user codec throws.
+            body.beginControlFlow("return try")
+            body.add(payloadDecodeStmt)
+            body.addStatement("%T(%L)", returnType, ctorArgs)
+            body.nextControlFlow("finally")
+            body.addStatement("buffer.setLimit(outerLimit)")
+            body.endControlFlow()
+        } else {
+            body.add(payloadDecodeStmt)
+            body.addStatement("return %T(%L)", returnType, ctorArgs)
+        }
+        funBuilder.addCode(body.build())
         return funBuilder.build()
     }
 
@@ -1527,9 +1562,22 @@ internal class CodecEmitter(
 
         val body = CodeBlock.builder()
         for (field in headerFields) appendDecodeField(body, field)
+        val rlField = shape.fields.firstOrNull { it is FieldSpec.RemainingLength } as? FieldSpec.RemainingLength
+        val outerLimitArgs =
+            if (rlField != null) {
+                // appendDecodeRemainingLength emits the outer-limit
+                // local as `__<rlName>OuterLimit` (see line ~2964); pass
+                // it through so the Partial can restore on complete.
+                listOf("outerLimit = __${rlField.name}OuterLimit")
+            } else {
+                emptyList()
+            }
         val ctorArgs =
-            (headerFields.map { "${it.name} = ${it.name}" } + listOf("buffer = buffer", "context = context"))
-                .joinToString(", ")
+            (
+                headerFields.map { "${it.name} = ${it.name}" } +
+                    outerLimitArgs +
+                    listOf("buffer = buffer", "context = context")
+            ).joinToString(", ")
         body.addStatement("return %T(%L)", returnType, ctorArgs)
         funBuilder.addCode(body.build())
         return funBuilder.build()
