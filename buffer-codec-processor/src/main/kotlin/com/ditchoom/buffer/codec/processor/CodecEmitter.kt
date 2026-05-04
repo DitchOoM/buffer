@@ -183,15 +183,13 @@ internal class CodecEmitter(
                 analyzeField(param, messageWireOrder, ownerSimpleName, isTerminal, params, index) ?: return null
             fields += field
         }
-        // Slice 2 restriction: a Conditional field can appear only at the terminal
-        // position. Non-terminal Conditional needs the more general peekFrameSize
-        // walk that interleaves prefix-chase + conditional-byte addition; that lands
-        // alongside the slice 5 MQTT v3 CONNECT vector. Slice 4 restriction:
-        // LengthFromString is also terminal-only — its peek path follows the same
-        // fixed-prefix-then-body shape as the other variable-length terminals.
-        // Silently skip emit for the non-terminal case (validators still fire).
+        // Slice 4 restriction (still in force): LengthFromString is terminal-only.
+        // Its non-adjacent placement is by doctrine row 18, and the slice 4 emit
+        // path doesn't need a non-terminal variant for any in-scope vector.
+        // Slice 5b lifts the prior non-terminal-Conditional restriction — the
+        // sequential peek walk handles arbitrary positions, and decode/encode
+        // are inherently sequential.
         for ((index, field) in fields.withIndex()) {
-            if (field is FieldSpec.Conditional && index != fields.lastIndex) return null
             if (field is FieldSpec.LengthFromString && index != fields.lastIndex) return null
         }
 
