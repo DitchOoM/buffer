@@ -776,7 +776,19 @@ class ProtocolMessageProcessor(
                 continue
             }
 
-            val sourceIndex = parameters.indexOfFirst { it.name?.asString() == referenced }
+            val parts = referenced.split('.')
+            if (parts.size > 2) {
+                logger.error(
+                    "@LengthFrom(\"$referenced\") on $ownerName.$fieldName uses a deeper-than-one-level " +
+                        "path. Only `<sibling>` and `<sibling>.<property>` forms are accepted.",
+                    param,
+                )
+                continue
+            }
+            val siblingName = parts[0]
+            val propertyName = parts.getOrNull(1)
+
+            val sourceIndex = parameters.indexOfFirst { it.name?.asString() == siblingName }
             if (sourceIndex < 0) {
                 val available =
                     parameters
@@ -793,7 +805,7 @@ class ProtocolMessageProcessor(
                         }
                 logger.error(
                     "@LengthFrom(\"$referenced\") on $ownerName.$fieldName references " +
-                        "`$referenced`, which is not a constructor parameter of $ownerName. " +
+                        "`$siblingName`, which is not a constructor parameter of $ownerName. " +
                         if (available.isEmpty()) {
                             "$ownerName has no numeric siblings declared before $fieldName."
                         } else {
@@ -806,7 +818,7 @@ class ProtocolMessageProcessor(
             if (sourceIndex >= index) {
                 logger.error(
                     "@LengthFrom(\"$referenced\") on $ownerName.$fieldName references " +
-                        "$ownerName.$referenced, which is declared at-or-after $fieldName in the " +
+                        "$ownerName.$siblingName, which is declared at-or-after $fieldName in the " +
                         "constructor parameter list. The length-carrier sibling must be declared " +
                         "before the bound field so its value is available at decode time.",
                     param,
@@ -816,21 +828,77 @@ class ProtocolMessageProcessor(
 
             val sourceParam = parameters[sourceIndex]
             val sourceType = sourceParam.type.resolve()
-            val sourceQname = sourceType.declaration.qualifiedName?.asString()
-            if (sourceQname !in NUMERIC_SCALAR_QNAMES || sourceType.isMarkedNullable) {
-                val displayed = sourceQname ?: "<unresolved>"
-                val nullableSuffix = if (sourceType.isMarkedNullable) "?" else ""
-                logger.error(
-                    "@LengthFrom(\"$referenced\") on $ownerName.$fieldName requires source " +
-                        "`$ownerName.$referenced` to be a non-nullable numeric scalar " +
-                        "(Byte / Short / Int / Long / UByte / UShort / UInt / ULong), but it " +
-                        "is `$displayed$nullableSuffix`. Locked Decision row 18 limits the source " +
-                        "type to non-nullable numeric kinds.",
-                    param,
-                )
-                continue
+            if (propertyName == null) {
+                // Simple form: sibling must be a numeric scalar.
+                val sourceQname = sourceType.declaration.qualifiedName?.asString()
+                if (sourceQname !in NUMERIC_SCALAR_QNAMES || sourceType.isMarkedNullable) {
+                    val displayed = sourceQname ?: "<unresolved>"
+                    val nullableSuffix = if (sourceType.isMarkedNullable) "?" else ""
+                    logger.error(
+                        "@LengthFrom(\"$referenced\") on $ownerName.$fieldName requires source " +
+                            "`$ownerName.$siblingName` to be a non-nullable numeric scalar " +
+                            "(Byte / Short / Int / Long / UByte / UShort / UInt / ULong), but it " +
+                            "is `$displayed$nullableSuffix`. Locked Decision row 18 limits the simple " +
+                            "expression form to a numeric scalar sibling.",
+                        param,
+                    )
+                    continue
+                }
+            } else {
+                // Dotted form (slice 9): sibling must be a value class with a
+                // single supported-scalar inner; property must be a non-extension
+                // `val` returning non-nullable `Int`.
+                val siblingDecl = sourceType.declaration as? KSClassDeclaration
+                if (siblingDecl == null || Modifier.VALUE !in siblingDecl.modifiers) {
+                    val displayed = sourceType.declaration.qualifiedName?.asString() ?: "<unresolved>"
+                    logger.error(
+                        "@LengthFrom(\"$referenced\") on $ownerName.$fieldName uses a dotted source " +
+                            "but `$ownerName.$siblingName` resolves to `$displayed`, which is not a " +
+                            "`value class`. The dotted form requires the sibling to be a `@JvmInline " +
+                            "value class` exposing an `Int`-returning `val` property.",
+                        param,
+                    )
+                    continue
+                }
+                val candidate =
+                    siblingDecl
+                        .getDeclaredProperties()
+                        .firstOrNull { it.simpleName.asString() == propertyName }
+                if (candidate == null || !isIntReturningValProperty(candidate)) {
+                    val available =
+                        siblingDecl
+                            .getDeclaredProperties()
+                            .filter { isIntReturningValProperty(it) }
+                            .mapNotNull { it.simpleName.asString() }
+                            .toList()
+                    val availableMsg =
+                        if (available.isEmpty()) {
+                            "${siblingDecl.qualifiedName?.asString() ?: siblingDecl.simpleName.asString()} " +
+                                "has no `Int`-returning `val` properties."
+                        } else {
+                            "Available `Int`-returning `val` properties on " +
+                                "${siblingDecl.qualifiedName?.asString() ?: siblingDecl.simpleName.asString()}: " +
+                                "${available.joinToString()}."
+                        }
+                    logger.error(
+                        "@LengthFrom(\"$referenced\") on $ownerName.$fieldName references property " +
+                            "`$propertyName`, which is not an `Int`-returning `val` declared on " +
+                            "${siblingDecl.qualifiedName?.asString() ?: siblingDecl.simpleName.asString()}. " +
+                            availableMsg,
+                        param,
+                    )
+                    continue
+                }
             }
         }
+    }
+
+    private fun isIntReturningValProperty(prop: KSPropertyDeclaration): Boolean {
+        if (prop.isMutable) return false
+        if (prop.extensionReceiver != null) return false
+        val returnType = prop.type.resolve()
+        if (returnType.isMarkedNullable) return false
+        return returnType.declaration.qualifiedName?.asString() == "kotlin.Int"
     }
 
     private fun walkType(

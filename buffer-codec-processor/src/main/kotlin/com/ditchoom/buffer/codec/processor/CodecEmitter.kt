@@ -485,15 +485,16 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage E slice 4 — `@LengthFrom("siblingField") val: String`.
+     * Stage E slice 4 / Stage G slice 9 — `@LengthFrom("ref") val:
+     * String`. Two source-expression forms:
+     *   - Simple-name `"sibling"` (slice 4): sibling is a numeric
+     *     `Scalar`; body byte count = `sibling.toInt()`.
+     *   - Dotted `"sibling.property"` (slice 9): sibling is a
+     *     value-class field; body byte count = `sibling.property`
+     *     (the property returns `Int` directly).
      *
      * Returns null silently for any shape the validator already
-     * names (missing sibling, declared-after, non-numeric sibling,
-     * non-`String` field type) — the validator's diagnostic is the
-     * user-facing surface. Slice 4 narrows the sibling to a `Scalar`
-     * field; value-class siblings (numeric `value class` wrapping a
-     * scalar) are doctrine-row-18 valid but defer until a vector
-     * requires them.
+     * names — the validator's diagnostic is the user-facing surface.
      */
     private fun analyzeLengthFromStringField(
         param: KSValueParameter,
@@ -512,28 +513,68 @@ internal class CodecEmitter(
             lengthFromAnn.arguments
                 .firstOrNull { it.name?.asString() == "field" }
                 ?.value as? String ?: return null
-        val sibling = locatePriorSibling(referenced, params, index) ?: return null
-        // Slice 4 limits the sibling to a Scalar field with a numeric
-        // kind. Value-class siblings (numeric value class wrapping a
-        // scalar) compose with row 18 but defer until a vector requires
-        // them; analyzeField would currently model them as
-        // ValueClassScalar, not Scalar, so the prefix walk would never
-        // peek-resolve them as a length.
-        val siblingType = sibling.type.resolve()
-        if (siblingType.isError || siblingType.isMarkedNullable) return null
-        val siblingQname = siblingType.declaration.qualifiedName?.asString() ?: return null
-        val siblingKind = SUPPORTED_SCALARS[siblingQname] ?: return null
-        // Slice 4 narrows the sibling kind to those the peek path can
-        // assemble. The validator accepts the full numeric scalar set
-        // per row 18; the analyzer's narrower set means a `Long` /
-        // `ULong` / signed-multi-byte sibling silently produces no
-        // codec. Wider peek support lands when a vector requires it.
-        if (siblingKind !in PEEKABLE_LENGTH_FROM_SIBLING_KINDS) return null
+        val source = analyzeLengthSource(referenced, params, index) ?: return null
         return FieldSpec.LengthFromString(
             name = name,
             ownerSimpleName = ownerSimpleName,
-            lengthSiblingName = referenced,
-            lengthSiblingKind = siblingKind,
+            source = source,
+        )
+    }
+
+    /**
+     * Slice 4 / Stage G slice 9 — resolve a `@LengthFrom` annotation
+     * argument into a typed `LengthSource`. Simple-name `"sibling"`
+     * → `LengthSource.Sibling`; dotted `"sibling.property"` →
+     * `LengthSource.ValueClassProperty`. Returns null when the shape
+     * is out of scope (missing sibling, declared-after, simple form
+     * with non-numeric sibling, dotted form with non-value-class
+     * sibling or non-Int-returning property) — the validator's
+     * diagnostic is the user-facing surface.
+     */
+    private fun analyzeLengthSource(
+        referenced: String,
+        params: List<KSValueParameter>,
+        index: Int,
+    ): LengthSource? {
+        val parts = referenced.split('.')
+        if (parts.size > 2) return null
+        val siblingName = parts[0]
+        val propertyName = parts.getOrNull(1)
+        val sibling = locatePriorSibling(siblingName, params, index) ?: return null
+        val siblingType = sibling.type.resolve()
+        if (siblingType.isError || siblingType.isMarkedNullable) return null
+        if (propertyName == null) {
+            // Simple form: sibling must be a numeric scalar in the peekable
+            // kind set (slice 4).
+            val siblingQname = siblingType.declaration.qualifiedName?.asString() ?: return null
+            val siblingKind = SUPPORTED_SCALARS[siblingQname] ?: return null
+            if (siblingKind !in PEEKABLE_LENGTH_FROM_SIBLING_KINDS) return null
+            return LengthSource.Sibling(siblingName, siblingKind)
+        }
+        // Dotted form: sibling must be a `value class` with a single
+        // peekable-scalar inner; property must be a non-extension `val`
+        // returning non-nullable `Int`.
+        val siblingDecl = siblingType.declaration as? KSClassDeclaration ?: return null
+        if (Modifier.VALUE !in siblingDecl.modifiers) return null
+        val ctor = siblingDecl.primaryConstructor ?: return null
+        if (ctor.parameters.size != 1) return null
+        val innerType = ctor.parameters[0].type.resolve()
+        if (innerType.isError || innerType.isMarkedNullable) return null
+        val innerQname = innerType.declaration.qualifiedName?.asString() ?: return null
+        val innerKind = SUPPORTED_SCALARS[innerQname] ?: return null
+        if (innerKind !in PEEKABLE_LENGTH_FROM_SIBLING_KINDS) return null
+        val property =
+            siblingDecl
+                .getDeclaredProperties()
+                .firstOrNull { it.simpleName.asString() == propertyName } ?: return null
+        if (property.isMutable || property.extensionReceiver != null) return null
+        val returnType = property.type.resolve()
+        if (returnType.isMarkedNullable) return null
+        if (returnType.declaration.qualifiedName?.asString() != "kotlin.Int") return null
+        return LengthSource.ValueClassProperty(
+            siblingName = siblingName,
+            propertyName = propertyName,
+            valueClassInnerKind = innerKind,
         )
     }
 
@@ -580,18 +621,12 @@ internal class CodecEmitter(
             lengthFromAnn.arguments
                 .firstOrNull { it.name?.asString() == "field" }
                 ?.value as? String ?: return null
-        val sibling = locatePriorSibling(referenced, params, index) ?: return null
-        val siblingType = sibling.type.resolve()
-        if (siblingType.isError || siblingType.isMarkedNullable) return null
-        val siblingQname = siblingType.declaration.qualifiedName?.asString() ?: return null
-        val siblingKind = SUPPORTED_SCALARS[siblingQname] ?: return null
-        if (siblingKind !in PEEKABLE_LENGTH_FROM_SIBLING_KINDS) return null
+        val source = analyzeLengthSource(referenced, params, index) ?: return null
 
         return FieldSpec.LengthFromList(
             name = name,
             ownerSimpleName = ownerSimpleName,
-            lengthSiblingName = referenced,
-            lengthSiblingKind = siblingKind,
+            source = source,
             elementClassName = classNameOf(elementDecl),
             elementCodecClassName =
                 ClassName(
@@ -1147,31 +1182,25 @@ internal class CodecEmitter(
                 )
             }
             is FieldSpec.LengthFromString -> {
-                // Slice 4 — the body byte count is the sibling's value
-                // (the user is responsible for keeping it consistent
-                // with `value.<name>`'s UTF-8 byte length). Total =
-                // fixed prefix bytes + sibling value.toInt(). Exact
-                // is preferred over BackPatch because no measurement
-                // is needed; the caller can size buffers exactly.
+                // Slice 4 / 9 — body byte count comes from the
+                // resolved LengthSource (sibling.toInt() for simple,
+                // sibling.property for dotted). User-trusted (row 16).
                 val prefixBytes = scalarHeaderBytes(shape)
                 builder.addStatement(
-                    "return %T.Exact(%L + value.%L.toInt())",
+                    "return %T.Exact(%L + %L)",
                     WIRE_SIZE_CN,
                     prefixBytes,
-                    terminal.lengthSiblingName,
+                    terminal.source.encodeAccessor(),
                 )
             }
             is FieldSpec.LengthFromList -> {
-                // Slice 7a — same Exact shape as LengthFromString: the
-                // body byte count is the sibling's value, and the user
-                // is responsible for `value.<sibling>` matching the sum
-                // of element wireSizes.
+                // Slice 7a / 9 — same Exact shape via LengthSource.
                 val prefixBytes = scalarHeaderBytes(shape)
                 builder.addStatement(
-                    "return %T.Exact(%L + value.%L.toInt())",
+                    "return %T.Exact(%L + %L)",
                     WIRE_SIZE_CN,
                     prefixBytes,
-                    terminal.lengthSiblingName,
+                    terminal.source.encodeAccessor(),
                 )
             }
             is FieldSpec.RemainingBytesScalarList -> {
@@ -1423,16 +1452,14 @@ internal class CodecEmitter(
                         body = body,
                         name = field.name,
                         ownerSimpleName = field.ownerSimpleName,
-                        siblingName = field.lengthSiblingName,
-                        siblingKind = field.lengthSiblingKind,
+                        source = field.source,
                     )
                 is FieldSpec.LengthFromList ->
                     appendSequentialPeekLengthFrom(
                         body = body,
                         name = field.name,
                         ownerSimpleName = field.ownerSimpleName,
-                        siblingName = field.lengthSiblingName,
-                        siblingKind = field.lengthSiblingKind,
+                        source = field.source,
                     )
                 is FieldSpec.RemainingBytesScalarList ->
                     error(
@@ -1472,8 +1499,8 @@ internal class CodecEmitter(
                             is ConditionRef.Sibling -> c.name
                             is ConditionRef.ValueClassProperty -> c.siblingName
                         }
-                is FieldSpec.LengthFromString -> sources += field.lengthSiblingName
-                is FieldSpec.LengthFromList -> sources += field.lengthSiblingName
+                is FieldSpec.LengthFromString -> sources += field.source.siblingName
+                is FieldSpec.LengthFromList -> sources += field.source.siblingName
                 else -> { /* not a source */ }
             }
         }
@@ -1530,30 +1557,34 @@ internal class CodecEmitter(
     }
 
     /**
-     * Slice 5a / 7a — peek a `@LengthFrom`-style slot (terminal
+     * Slice 5a / 7a / 9 — peek a `@LengthFrom`-style slot (terminal
      * `LengthFromString` or `LengthFromList`) inside the sequential
-     * walk. The sibling local was peek-stashed earlier (because the
-     * sibling is in `needsPeekStash`); apply the Int.MAX_VALUE guard
-     * and advance the running offset by the sibling's value.
+     * walk. The sibling local was peek-stashed earlier (slice 4
+     * Scalar-sibling case) or the sibling value-class instance was
+     * peek-stashed and reconstructed (slice 9 dotted case); the
+     * `LengthSource.decodeAccessor()` produces the right Int
+     * expression for either form. The Int.MAX_VALUE guard only
+     * applies to the simple form (the dotted property returns Int).
      */
     private fun appendSequentialPeekLengthFrom(
         body: CodeBlock.Builder,
         name: String,
         ownerSimpleName: String,
-        siblingName: String,
-        siblingKind: ScalarKind,
+        source: LengthSource,
     ) {
-        appendLengthFromIntMaxGuard(
-            body = body,
-            siblingAccessor = siblingName,
-            siblingKind = siblingKind,
-            ownerSimpleName = ownerSimpleName,
-            fieldName = name,
-        )
+        if (source is LengthSource.Sibling) {
+            appendLengthFromIntMaxGuard(
+                body = body,
+                siblingAccessor = source.siblingName,
+                siblingKind = source.siblingKind,
+                ownerSimpleName = ownerSimpleName,
+                fieldName = name,
+            )
+        }
         body.addStatement(
-            "val %LBytes = %L.toInt()",
+            "val %LBytes = %L",
             name,
-            siblingName,
+            source.decodeAccessor(),
         )
         body.addStatement(
             "if (stream.available() - baseOffset < __offset + %LBytes) return %T.NeedsMoreData",
@@ -2210,22 +2241,27 @@ internal class CodecEmitter(
         body: CodeBlock.Builder,
         field: FieldSpec.LengthFromString,
     ) {
-        appendLengthFromIntMaxGuard(
-            body = body,
-            siblingAccessor = field.lengthSiblingName,
-            siblingKind = field.lengthSiblingKind,
-            ownerSimpleName = field.ownerSimpleName,
-            fieldName = field.name,
-        )
-        // Inline `.toInt()` on the sibling local rather than binding
+        // Simple form needs an Int.MAX_VALUE guard for kinds whose
+        // range exceeds Int (UInt / ULong / Long); the dotted form's
+        // property returns Int directly so no guard is needed.
+        if (field.source is LengthSource.Sibling) {
+            appendLengthFromIntMaxGuard(
+                body = body,
+                siblingAccessor = field.source.siblingName,
+                siblingKind = field.source.siblingKind,
+                ownerSimpleName = field.ownerSimpleName,
+                fieldName = field.name,
+            )
+        }
+        // Inline the sibling/property accessor rather than binding
         // an intermediate. A `${field.name}Length` intermediate would
         // shadow the sibling local when the user names the carrier
         // `<bound>Length` — a natural Kotlin convention that the
         // generated code must not break.
         body.addStatement(
-            "val %L = buffer.readString(%L.toInt(), %T.UTF8)",
+            "val %L = buffer.readString(%L, %T.UTF8)",
             field.name,
-            field.lengthSiblingName,
+            field.source.decodeAccessor(),
             CHARSET_CN,
         )
     }
@@ -2278,16 +2314,18 @@ internal class CodecEmitter(
         body: CodeBlock.Builder,
         field: FieldSpec.LengthFromList,
     ) {
-        appendLengthFromIntMaxGuard(
-            body = body,
-            siblingAccessor = field.lengthSiblingName,
-            siblingKind = field.lengthSiblingKind,
-            ownerSimpleName = field.ownerSimpleName,
-            fieldName = field.name,
-        )
+        if (field.source is LengthSource.Sibling) {
+            appendLengthFromIntMaxGuard(
+                body = body,
+                siblingAccessor = field.source.siblingName,
+                siblingKind = field.source.siblingKind,
+                ownerSimpleName = field.ownerSimpleName,
+                fieldName = field.name,
+            )
+        }
         val bytesVar = "${field.name}Bytes"
         val outerLimitVar = "${field.name}OuterLimit"
-        body.addStatement("val %L = %L.toInt()", bytesVar, field.lengthSiblingName)
+        body.addStatement("val %L = %L", bytesVar, field.source.decodeAccessor())
         body.addStatement("val %L = buffer.limit()", outerLimitVar)
         body.addStatement("buffer.setLimit(buffer.position() + %L)", bytesVar)
         body.addStatement("val %L = mutableListOf<%T>()", field.name, field.elementClassName)
@@ -3366,42 +3404,38 @@ internal class CodecEmitter(
          * Slice 7a narrow: element must be a `@ProtocolMessage data
          * class`. List of scalar (`List<UByte>` / `List<Int>` etc.)
          * is the slice 7b shape with `@RemainingBytes`.
+         *
+         * `source` carries the resolved length carrier: slice 4's
+         * sibling-Scalar form (`LengthSource.Sibling`) or slice 9's
+         * dotted value-class-property form
+         * (`LengthSource.ValueClassProperty`).
          */
         data class LengthFromList(
             override val name: String,
             val ownerSimpleName: String,
-            val lengthSiblingName: String,
-            val lengthSiblingKind: ScalarKind,
+            val source: LengthSource,
             val elementClassName: ClassName,
             val elementCodecClassName: ClassName,
         ) : FieldSpec
 
         /**
-         * Stage E slice 4 — `@LengthFrom("siblingField") val: String`.
-         * The body wire bytes are determined by a non-adjacent
-         * length-carrier sibling decoded earlier. Decode reads
-         * `<sibling>.toInt()` UTF-8 bytes (with an Int.MAX_VALUE
-         * guard for sibling kinds whose range exceeds Int);
-         * encode writes the body without a prefix slot — the user is
-         * responsible for setting the sibling field to the correct
-         * UTF-8 byte count, the codec trusts that contract.
+         * Stage E slice 4 / Stage G slice 9 —
+         * `@LengthFrom("ref") val: String`. The body wire bytes are
+         * determined by a non-adjacent length carrier decoded
+         * earlier. Decode reads `source.localAccessor` UTF-8 bytes;
+         * encode writes the body without a prefix slot — the user
+         * is responsible for setting the carrier to the correct
+         * UTF-8 byte count (row 16 trust contract).
          *
-         * `lengthSiblingKind` is the resolved scalar kind of the
-         * length-carrier; the decoder uses it to drive the
-         * Int.MAX_VALUE guard (skipped for kinds whose range fits in
-         * Int) and the peek path uses it to peek-read the sibling
-         * bytes from the prefix walk.
-         *
-         * Slice 4 narrows the sibling to a `Scalar` field; value-
-         * class siblings (a `@JvmInline value class` wrapping a
-         * numeric scalar) compose with row 18 but defer until a
-         * vector requires them.
+         * `source` carries the resolved length carrier. See
+         * `LengthSource` — slice 4's sibling-Scalar form and slice
+         * 9's dotted value-class-property form share this field
+         * type.
          */
         data class LengthFromString(
             override val name: String,
             val ownerSimpleName: String,
-            val lengthSiblingName: String,
-            val lengthSiblingKind: ScalarKind,
+            val source: LengthSource,
         ) : FieldSpec
 
         /**
@@ -3499,6 +3533,91 @@ internal class CodecEmitter(
             val propertyName: String,
         ) : ConditionRef
     }
+
+    /**
+     * Stage G slice 9 — typed source of a `@LengthFrom` byte count.
+     *
+     * Closed sealed: row 18 lists the simple-name sibling form
+     * (slice 4) and the dotted `<sibling>.<property>` form (slice 9)
+     * as the only two valid sources. The type system enforces
+     * exhaustive `when` at every emit site, removing the implicit
+     * "if propertyName non-null ignore the kind" relationship the
+     * earlier flat-fields shape required.
+     *
+     * Both forms reference a sibling field (the simple form's
+     * sibling IS the numeric scalar; the dotted form's sibling is
+     * a value class wrapping a numeric scalar). `siblingName` is
+     * therefore present in both shapes — which lets
+     * `collectPeekStashSources` and the sequential walk treat both
+     * uniformly (always stash the sibling field's local).
+     */
+    private sealed interface LengthSource {
+        val siblingName: String
+
+        /**
+         * Slice 4 simple form: sibling is a `Scalar` field. Body
+         * byte count = `<sibling>.toInt()`. Decode applies an
+         * `Int.MAX_VALUE` guard for kinds whose range exceeds Int
+         * (UInt / ULong / Long).
+         */
+        data class Sibling(
+            override val siblingName: String,
+            val siblingKind: ScalarKind,
+        ) : LengthSource
+
+        /**
+         * Slice 9 dotted form: sibling is a `value class` wrapping
+         * a numeric scalar; body byte count = `<sibling>.<property>`.
+         * The property must return non-nullable `Int`, so the byte
+         * count is `Int` directly — no `.toInt()` conversion or
+         * `Int.MAX_VALUE` guard needed at decode time.
+         *
+         * `valueClassInnerKind` IS load-bearing for peek (the peek-
+         * stash for the value-class field reconstructs the value
+         * class from its inner-scalar bytes; the inner kind drives
+         * the byte width). Stored on the source — not the
+         * referenced `FieldSpec.ValueClassScalar` — to keep the
+         * peek emit site self-contained when the LengthFrom is
+         * itself the field being walked. The wireOrder propagation
+         * for the value class's inner-byte assembly is a known
+         * limitation: today's emit defaults to big-endian (correct
+         * for HTTP/2 SETTINGS, the slice 9 vector); little-endian
+         * value-class siblings would need additional plumbing —
+         * tracked alongside the @RemainingLength followup in
+         * PHASE_9_RESET's deferred-decisions table.
+         */
+        data class ValueClassProperty(
+            override val siblingName: String,
+            val propertyName: String,
+            val valueClassInnerKind: ScalarKind,
+        ) : LengthSource
+    }
+
+    /**
+     * Slice 9 — encode-side accessor for a LengthSource. Returns the
+     * Kotlin sub-expression that yields the body byte count as an
+     * `Int` when prefixed with `value.`. Used by `wireSize` and the
+     * @LengthFrom encode path.
+     */
+    private fun LengthSource.encodeAccessor(): String =
+        when (this) {
+            is LengthSource.Sibling -> "value.$siblingName.toInt()"
+            is LengthSource.ValueClassProperty -> "value.$siblingName.$propertyName"
+        }
+
+    /**
+     * Slice 9 — decode-side accessor for a LengthSource. Returns the
+     * Kotlin sub-expression that yields the body byte count as an
+     * `Int` against locals already in scope. The simple form
+     * accesses the sibling local directly; the dotted form accesses
+     * the value-class local's property (the property returns `Int`,
+     * so no `.toInt()` conversion is needed).
+     */
+    private fun LengthSource.decodeAccessor(): String =
+        when (this) {
+            is LengthSource.Sibling -> "$siblingName.toInt()"
+            is LengthSource.ValueClassProperty -> "$siblingName.$propertyName"
+        }
 
     private enum class ScalarKind(
         val width: Int,

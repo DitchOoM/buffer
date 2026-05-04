@@ -187,6 +187,95 @@ class Http2FrameCodecTest {
     }
 
     @Test
+    fun encodesSettingsVariantByteExact() {
+        // SETTINGS frame per RFC 7540 §6.5 with two entries.
+        // length = 12 (two 6-byte entries), type = 4 (SETTINGS).
+        val msg =
+            Http2Frame.Settings(
+                header = Http2LengthAndType.of(length = 12, type = 4),
+                flags = 0u,
+                streamId = Http2StreamId(0u),
+                entries =
+                    listOf(
+                        Http2Setting(identifier = 0x0003u, value = 100u),  // MAX_CONCURRENT_STREAMS
+                        Http2Setting(identifier = 0x0004u, value = 65535u), // INITIAL_WINDOW_SIZE
+                    ),
+            )
+        val expected =
+            byteArrayOf(
+                // Header: length=12 (24-bit BE) + type=4
+                0x00, 0x00, 0x0C, 0x04,
+                // Flags
+                0x00,
+                // StreamId = 0
+                0x00, 0x00, 0x00, 0x00,
+                // Entry 1: identifier=3, value=100
+                0x00, 0x03, 0x00, 0x00, 0x00, 0x64,
+                // Entry 2: identifier=4, value=65535
+                0x00, 0x04, 0x00, 0x00, 0xFF.toByte(), 0xFF.toByte(),
+            )
+        encodeAndAssertBytes(msg, expected)
+    }
+
+    @Test
+    fun decodesSettingsVariantViaDispatcher() {
+        val wire =
+            byteArrayOf(
+                0x00, 0x00, 0x0C, 0x04,
+                0x00,
+                0x00, 0x00, 0x00, 0x00,
+                0x00, 0x03, 0x00, 0x00, 0x00, 0x64,
+                0x00, 0x04, 0x00, 0x00, 0xFF.toByte(), 0xFF.toByte(),
+            )
+        val buf = bigEndianBufferOf(wire)
+        val decoded = Http2FrameCodec.decode(buf, DecodeContext.Empty)
+        val settings = assertIs<Http2Frame.Settings>(decoded)
+        assertEquals(12, settings.header.length)
+        assertEquals(4, settings.header.type)
+        assertEquals(2, settings.entries.size)
+        assertEquals(Http2Setting(0x0003u, 100u), settings.entries[0])
+        assertEquals(Http2Setting(0x0004u, 65535u), settings.entries[1])
+    }
+
+    @Test
+    fun roundTripsSettingsViaDispatcher() {
+        val original =
+            Http2Frame.Settings(
+                header = Http2LengthAndType.of(length = 18, type = 4),
+                flags = 0u,
+                streamId = Http2StreamId(0u),
+                entries =
+                    listOf(
+                        Http2Setting(identifier = 0x0001u, value = 4096u),
+                        Http2Setting(identifier = 0x0005u, value = 16384u),
+                        Http2Setting(identifier = 0x0006u, value = 0xFFFFFFFFu),
+                    ),
+            )
+        val buf = encode(original)
+        buf.resetForRead()
+        assertEquals(original, Http2FrameCodec.decode(buf, DecodeContext.Empty))
+    }
+
+    @Test
+    fun decodeSettingsRespectsHeaderLengthBound() {
+        // Wire has 6-byte payload but trailing bytes follow — decode
+        // must stop at header.length=6 (one entry) and leave the rest.
+        val wire =
+            byteArrayOf(
+                0x00, 0x00, 0x06, 0x04,
+                0x00,
+                0x00, 0x00, 0x00, 0x00,
+                0x00, 0x03, 0x00, 0x00, 0x00, 0x64,
+                // Trailing bytes (next frame's header)
+                0x00, 0x00, 0x08, 0x06,
+            )
+        val buf = bigEndianBufferOf(wire)
+        val settings = assertIs<Http2Frame.Settings>(Http2FrameCodec.decode(buf, DecodeContext.Empty))
+        assertEquals(1, settings.entries.size, "decode bounded by header.length, not buffer remaining")
+        assertEquals(4, buf.remaining(), "trailing 4 bytes left in buffer for next frame")
+    }
+
+    @Test
     fun roundTripsWindowUpdate() {
         val original =
             Http2Frame.WindowUpdate(

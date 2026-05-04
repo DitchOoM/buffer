@@ -3,6 +3,7 @@ package com.ditchoom.buffer.codec.test.protocols.http2
 import com.ditchoom.buffer.codec.annotations.DispatchOn
 import com.ditchoom.buffer.codec.annotations.DispatchValue
 import com.ditchoom.buffer.codec.annotations.Endianness
+import com.ditchoom.buffer.codec.annotations.LengthFrom
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import kotlin.jvm.JvmInline
@@ -143,5 +144,26 @@ sealed interface Http2Frame {
         val flags: UByte,
         val streamId: Http2StreamId,
         val windowSizeIncrement: UInt,
+    ) : Http2Frame
+
+    /**
+     * SETTINGS frame per RFC 7540 §6.5 — payload is a sequence of
+     * 6-byte settings entries, count derived from `header.length / 6`.
+     *
+     * Stage G slice 9 doctrine vector — exercises the dotted-form
+     * `@LengthFrom("header.length")` against the value-class header
+     * field. The dispatcher integration is what slice 7a's standalone
+     * `Http2SettingsFrame` couldn't deliver (simple-name `@LengthFrom`
+     * couldn't reach into the value class). Both fixtures coexist:
+     * `Http2SettingsFrame` covers simple-name `@LengthFrom("length")`
+     * on a top-level scalar, this variant covers the dotted form.
+     */
+    @PacketType(value = 4)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class Settings(
+        val header: Http2LengthAndType,
+        val flags: UByte,
+        val streamId: Http2StreamId,
+        @LengthFrom("header.length") val entries: List<Http2Setting>,
     ) : Http2Frame
 }
