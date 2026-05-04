@@ -4,6 +4,7 @@ import com.ditchoom.buffer.codec.annotations.DispatchOn
 import com.ditchoom.buffer.codec.annotations.DispatchValue
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+import com.ditchoom.buffer.codec.annotations.RemainingLength
 import kotlin.jvm.JvmInline
 
 /**
@@ -45,16 +46,19 @@ value class MqttFixedHeader(
  * set (PUBLISH with payload, SUBSCRIBE with topic filters, etc.)
  * needs Stage G's variable-length list shape and is deferred.
  *
- * Wire layout per MQTT-3.1.1:
+ * Wire layout per MQTT-3.1.1, with @RemainingLength var-int between
+ * the fixed header and the body (slice 8 spec compliance):
  *
  * ```text
  * Connect (type 1, header byte typically 0x10):
  *   10                       fixed header
+ *   <var-int>                remaining length (= 2 + 2 + clientId.length bytes)
  *   00 02                    keep-alive seconds (2-byte BE)
  *   00 04 'a' 'b' 'c' 'd'    client id (LengthPrefixed)
  *
  * Disconnect (type 14, header byte typically 0xE0):
- *   E0                       fixed header (no body bytes)
+ *   E0                       fixed header
+ *   00                       remaining length = 0 (per §3.14)
  * ```
  */
 @DispatchOn(MqttFixedHeader::class)
@@ -71,18 +75,22 @@ sealed interface MqttPacket {
     @ProtocolMessage
     data class Connect(
         val header: MqttFixedHeader = MqttFixedHeader(0x10u),
+        @RemainingLength val remainingLength: UInt,
         val keepAliveSeconds: UShort,
         @com.ditchoom.buffer.codec.annotations.LengthPrefixed val clientId: String,
     ) : MqttPacket
 
     /**
-     * Type-14 DISCONNECT — header byte only, no payload. Slice 6
-     * narrow requires the variant to be a `data class` (not
-     * `object`), so we model it with the header field alone.
+     * Type-14 DISCONNECT — fixed header + zero-byte remaining
+     * length per §3.14, total `E0 00` on the wire. Slice 6 narrow
+     * requires the variant to be a `data class` (not `object`),
+     * so we model it with the header + var-int RL fields. Object
+     * variants land in a future slice.
      */
     @PacketType(value = 14)
     @ProtocolMessage
     data class Disconnect(
         val header: MqttFixedHeader = MqttFixedHeader(0xE0u),
+        @RemainingLength val remainingLength: UInt = 0u,
     ) : MqttPacket
 }

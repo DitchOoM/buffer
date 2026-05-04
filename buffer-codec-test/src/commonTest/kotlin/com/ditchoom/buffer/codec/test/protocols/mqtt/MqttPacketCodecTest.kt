@@ -38,15 +38,18 @@ class MqttPacketCodecTest {
 
     @Test
     fun encodesConnectVariantByteExact() {
+        // body = keepalive (2) + clientId LP (2 + 4) = 8 bytes
         val msg =
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
+                remainingLength = 8u,
                 keepAliveSeconds = 60u,
                 clientId = "abcd",
             )
         val expected =
             byteArrayOf(
                 0x10, // fixed header (type=1, flags=0)
+                0x08, // remaining length = 8 (1-byte var-int)
                 0x00, 0x3C, // keep-alive 60
                 0x00, 0x04, 'a'.code.toByte(), 'b'.code.toByte(), 'c'.code.toByte(), 'd'.code.toByte(),
             )
@@ -54,9 +57,10 @@ class MqttPacketCodecTest {
     }
 
     @Test
-    fun encodesDisconnectVariantAsHeaderByteOnly() {
+    fun encodesDisconnectVariantAsTwoBytes() {
+        // §3.14 — DISCONNECT is exactly two bytes on the wire: E0 00.
         val msg = MqttPacket.Disconnect(header = MqttFixedHeader(0xE0u))
-        val expected = byteArrayOf(0xE0.toByte())
+        val expected = byteArrayOf(0xE0.toByte(), 0x00)
         encodeAndAssertBytes(msg, expected)
     }
 
@@ -65,6 +69,7 @@ class MqttPacketCodecTest {
         val wire =
             byteArrayOf(
                 0x10,
+                0x08,
                 0x00, 0x3C,
                 0x00, 0x04, 'a'.code.toByte(), 'b'.code.toByte(), 'c'.code.toByte(), 'd'.code.toByte(),
             )
@@ -73,17 +78,24 @@ class MqttPacketCodecTest {
         val decoded = MqttPacketCodec.decode(buf, DecodeContext.Empty)
         val connect = assertIs<MqttPacket.Connect>(decoded)
         assertEquals(MqttFixedHeader(0x10u), connect.header)
+        assertEquals(8u, connect.remainingLength)
         assertEquals(60u.toUShort(), connect.keepAliveSeconds)
         assertEquals("abcd", connect.clientId)
     }
 
     @Test
     fun decodesDisconnectFromSpecBytes() {
-        val buf = BufferFactory.Default.allocate(1).also { it.writeByte(0xE0.toByte()) }
+        // E0 00 — the canonical MQTT DISCONNECT wire.
+        val buf =
+            BufferFactory.Default.allocate(2).also {
+                it.writeByte(0xE0.toByte())
+                it.writeByte(0x00)
+            }
         buf.resetForRead()
         val decoded = MqttPacketCodec.decode(buf, DecodeContext.Empty)
         val disconnect = assertIs<MqttPacket.Disconnect>(decoded)
         assertEquals(MqttFixedHeader(0xE0u), disconnect.header)
+        assertEquals(0u, disconnect.remainingLength)
     }
 
     @Test
@@ -95,6 +107,7 @@ class MqttPacketCodecTest {
         val wire =
             byteArrayOf(
                 0x12,
+                0x05,
                 0x00, 0x3C,
                 0x00, 0x01, 'x'.code.toByte(),
             )
@@ -120,9 +133,11 @@ class MqttPacketCodecTest {
 
     @Test
     fun roundTripsConnect() {
+        // body = 2 (keepalive) + 2 + 8 (clientId "client-1" with LP) = 12
         val original =
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
+                remainingLength = 12u,
                 keepAliveSeconds = 30u,
                 clientId = "client-1",
             )
@@ -154,7 +169,9 @@ class MqttPacketCodecTest {
     }
 
     @Test
-    fun peekFrameSizeCompletesAtOneByteForDisconnect() {
+    fun peekFrameSizeCompletesAtTwoBytesForDisconnect() {
+        // Disconnect wire is `E0 00`. Peek needs both bytes (header + var-int)
+        // to know the total length is 2.
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
@@ -162,7 +179,16 @@ class MqttPacketCodecTest {
             one.writeByte(0xE0.toByte())
             one.resetForRead()
             stream.append(one)
-            assertEquals(PeekResult.Complete(1), MqttPacketCodec.peekFrameSize(stream))
+            assertEquals(
+                PeekResult.NeedsMoreData,
+                MqttPacketCodec.peekFrameSize(stream),
+                "header alone — peek still needs the var-int byte",
+            )
+            val two = BufferFactory.Default.allocate(1)
+            two.writeByte(0x00)
+            two.resetForRead()
+            stream.append(two)
+            assertEquals(PeekResult.Complete(2), MqttPacketCodec.peekFrameSize(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -175,6 +201,7 @@ class MqttPacketCodecTest {
         val original =
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
+                remainingLength = 7u, // 2 (keepalive) + 2 + 3 (clientId "abc") = 7
                 keepAliveSeconds = 60u,
                 clientId = "abc",
             )
