@@ -8,11 +8,16 @@ incremental delta and the open design questions.
 
 ## Branch state
 
-- Branch: `feature/directional-codec`, head `51e0042`. Not pushed.
-- 24 stacked commits since the last `main`-merged commit (`d83a534`).
+- Branch: `feature/directional-codec`, head `d84ddc7`. Not pushed.
+- 26 stacked commits since the last `main`-merged commit (`d83a534`).
   All commits are individually buildable and individually green.
+- **Stage H is feature-complete** — every PHASE_9_RESET §Stage H
+  capability has landed (slices 10a, 10b, 10c, 10d, 10d.5, 10e,
+  10f). The remaining work is downstream consumer cutover
+  (`:buffer-flow`, `mqtt`, `websocket` per PHASE_9_RESET
+  §"Non-goals"); the codec-emitter API is stable.
 - Test counts at head:
-  - `:buffer-codec-test:jvmTest` — 197 tests, all pass.
+  - `:buffer-codec-test:jvmTest` — 204 tests, all pass.
   - `:buffer-codec-processor:test` — 46 tests, all pass.
   - `:buffer-codec-test:compileKotlin{Js,WasmJs,LinuxX64}` — all
     succeed (slice 10e proves expect/actual resolution
@@ -57,6 +62,8 @@ In commit order — see each commit's full message for the design notes:
 | `f728700` | H.10f | `MqttPacket<out P : Payload>` + `Publish<P>` variant — lifts the `@RemainingLength` + typed payload carve-out |
 | `f715849` | — | Doc: STAGE_H_RESUME briefing for slice 10e (now superseded by this file) |
 | `51e0042` | H.10e | `@UseCodec` `expect`/`actual` linker-resolution lock + `MqttCodec<P>` typealias |
+| `f180480` | — | Doc: STAGE_H_RESUME briefing for slice 10d.5 (now superseded by this file) |
+| `d84ddc7` | H.10d.5 | Lambda-aggregator `decodeAggregating(...)` on generic dispatcher companion |
 
 ### Annotation surface as it stands today
 
@@ -223,15 +230,14 @@ design against today's emitter shape.
    on the wire and reachable through any `<P>` instantiation
    via covariance. The lambda-aggregator API and the MqttPacket
    lift are deferred (see slice 10d.5 / 10f below).
-5. ⏳ **Slice 10d.5 — lambda aggregator API.** PHASE_9_RESET names
-   "`MqttControlPacketCodec.decode` aggregator with throwing-default
-   lambdas across every payload-bearing variant." Slice 10d landed
-   the generic dispatcher; the lambda overload is a separable
-   capability. Today consumers can already get per-call codec
-   selection via `<VariantName>Codec.partial<P>(...)` (slice 10c) +
-   manual discriminator dispatch — the aggregator wraps it in a
-   single call. Land when the smoke test surfaces an ergonomic
-   need.
+5. ✅ **Slice 10d.5 (`d84ddc7`)** — lambda-aggregator
+   `decodeAggregating(buffer, context, on<Variant> = ...)` on the
+   generic dispatcher's companion object. Per-variant lambda
+   parameters with throwing-default attribution per row 17
+   (`fieldPath = "<Parent>.<Variant>.handler"`). Wraps slice 10c's
+   `<VariantCodec>.partial<P>(...)` machinery in a single dispatch
+   call so consumers can pick the payload codec per call without
+   pre-instantiating the dispatcher class.
 6. ✅ **Slice 10f (`f728700`)** — `MqttPacket<out P : Payload>` +
    `Publish<P>` variant. Lifts the slice 10c
    `@RemainingLength` carve-out by capturing the outer buffer
@@ -426,20 +432,41 @@ design against today's emitter shape.
   emitting the typealias would force a naming-collision burden
   on every consumer that uses the generated codec name directly.
 
-### Slice 10d.5 — open design questions
+### Slice 10d.5 shape — landed
 
-Slice 10d.5 (per-variant lambda aggregator) is the only remaining
-deferred slice. PHASE_9_RESET wants per-variant lambda overloads:
-`decode(buffer, context, onPublish: (PartialOfPublish<P>) ->
-Foo<P>, ...)` with throwing defaults. Today consumers compose
-the equivalent via `<VariantName>Codec.partial<P>(...)` + manual
-discriminator dispatch — the aggregator wraps both in one call.
-Open: lambda return type — does it return the variant
-(`Foo.Publish<P>`) or the parent (`Foo<P>`)? Returning the
-parent is more flexible (consumer can substitute or wrap), but
-defies the discriminator's promise that the result is the
-matched variant. Defer until a `:buffer-flow` smoke test
-surfaces an ergonomic need.
+- **Lambda return type: variant, not parent.** The discriminator's
+  promise is "this byte means PUBLISH"; the lambda's job is to
+  complete the matched variant from a `Partial`, not to substitute
+  a different variant. Returning the variant (`Foo.Publish<P>`)
+  gives the dispatcher's `when` branch a typed result that
+  assigns to `Foo<P>` via `out P` covariance with no cast. The
+  "consumer wraps the result" use case is served by wrapping
+  outside the dispatcher call.
+- **Lambda arg type: `<VariantCodec>.Partial<P>`.** Slice 10c's
+  `Partial` is the natural seam — the consumer inspects headers
+  on the `Partial`, then completes via `partial.complete(
+  payloadCodec)` choosing the codec at the call site.
+- **Companion-side placement.** Mirrors slice 10b/10c's
+  `partial<P>(...)` convention. The aggregator's `<P : Payload>`
+  is a function-level type variable; consumers call
+  `<DispatcherCodec>.decodeAggregating<P>(...)` without
+  instantiating the dispatcher class. The aggregator never
+  invokes the constructor-injected `payloadCodec` — the per-call
+  lambda supplies the codec.
+- **Throwing-default lambdas.** Each payload-bearing variant's
+  lambda defaults to a `DecodeException` with `fieldPath =
+  "<Parent>.<Variant>.handler"`. Consumers override only the
+  variants they expect. `bufferPosition` is `-1` because parameter
+  defaults can't reference function locals — the meaningful
+  attribution is `fieldPath` (which variant needed a handler).
+- **Method shape: separate function name (`decodeAggregating`)
+  rather than `decode` overload.** `decode(buffer, context)` is
+  the `Codec<T>.decode` interface override; an overload would
+  collide. A separate name keeps the `Codec<T>` interface pristine
+  and signals at the call site that this is a different decode
+  pathway with different semantics.
+- **Generic dispatchers only.** Non-generic dispatchers have no
+  payload-bearing variants by construction.
 
 ### Existing pieces to compose, not rebuild
 
@@ -514,26 +541,32 @@ take advantage of these. Worth investigating after Stage H stabilises.
 
 ## How to start the next session
 
-Stage H's load-bearing capabilities are landed. The only remaining
-slice is **10d.5 (per-variant lambda aggregator)**, which is
-deferred until the `:buffer-flow` smoke test surfaces an ergonomic
-need — consumers can already compose the equivalent via
-`<VariantName>Codec.partial<P>(...)` + manual discriminator
-dispatch.
+**Stage H is feature-complete.** Every PHASE_9_RESET §Stage H
+capability has landed (slices 10a, 10b, 10c, 10d, 10d.5, 10e,
+10f). The remaining work is downstream consumer cutover, not
+further codec-emitter slices.
 
 1. Read `PHASE_9_RESET.md` §"Stage H — Payload SAM via MQTT v5
    PUBLISH" for the overall Stage H spec, plus Locked Decisions
    row 21 (slice 10e doctrine).
-2. If picking up Stage H slice 10d.5: read this file's "Slice
-   10d.5 — open design questions" section. The lambda return type
-   (variant vs parent) is the design lock; both shapes have
-   tradeoffs that only a concrete `:buffer-flow` smoke test
-   ergonomic can resolve cleanly.
-3. If picking up downstream consumer work (`:buffer-flow`,
-   `mqtt`, `websocket` cutovers per PHASE_9_RESET §"Non-goals"):
-   the codec-emitter API is now feature-complete for the cutover.
-   Slice 10c `Partial` + slice 10d/10f generic dispatcher + slice
-   10e expect/actual resolution gives the consumer everything
-   acceptance #1–#4 of PHASE_9_RESET §Stage H requires.
-4. Re-derive emit designs against today's emitter shape — don't
-   copy from the reverted worktree without verifying.
+2. The codec-emitter API surface for downstream consumers:
+   - **`<Codec>.decode(buffer, context)`** — standard decode via
+     constructor-injected `payloadCodec` (slices 10a/10b/10d/10f).
+   - **`<Codec>.partial(buffer, context)`** (slice 10c, member on
+     object dispatchers) and **`<Codec>.partial<P>(buffer,
+     context)`** (slice 10c, companion on generic dispatchers) —
+     header decode + deferred payload completion.
+   - **`<DispatcherCodec>.decodeAggregating<P>(buffer, context,
+     on<Variant> = ...)`** (slice 10d.5) — per-variant lambda
+     aggregator with throwing-default attribution. Wraps the
+     `Partial` machinery in a single dispatch call.
+3. Downstream consumer cutover (`:buffer-flow`, `mqtt`,
+   `websocket` per PHASE_9_RESET §"Non-goals"): start with
+   `:buffer-flow`, since acceptance #4 (PUBLISH frames through
+   `Connection<MqttControlPacket<…>>`) is the remaining
+   integration milestone. The `MqttCodec(somePayloadCodec)`
+   alias from slice 10e is the ergonomic name for the dispatcher.
+4. The remaining followup in PHASE_9_RESET deferred-decisions:
+   `@RemainingLength` decompose into `@VarByteInt + @BoundsRemaining`.
+   Drive from a second var-int-using vector (Stage G follow-up),
+   not as part of Stage H closeout.
