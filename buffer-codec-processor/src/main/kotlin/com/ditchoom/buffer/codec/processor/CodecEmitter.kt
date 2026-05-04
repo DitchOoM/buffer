@@ -481,6 +481,14 @@ internal class CodecEmitter(
             innerKind = innerKind,
             innerPropertyName = innerName,
             wireBytes = innerKind.width,
+            // Slice 9 follow-up: propagate the value class's own
+            // `@ProtocolMessage(wireOrder)` so multi-byte inner kinds
+            // (UShort/UInt) assemble bytes correctly during peek-side
+            // reconstruction in the sequential walk. Defaults to
+            // Endianness.Default (collapses to big-endian) when the
+            // value class doesn't declare an order, matching slice 3's
+            // prior behavior.
+            valueClassWireOrder = readMessageWireOrder(decl),
         )
     }
 
@@ -1421,7 +1429,17 @@ internal class CodecEmitter(
                     appendPeekAvailabilityCheck(body, field.wireBytes)
                     if (field.name in needsPeekStash) {
                         val rawVar = "${field.name}Raw"
-                        appendPeekFixedScalar(body, field.innerKind, rawVar, "__offset")
+                        // Slice 9 follow-up: pass the value class's wireOrder
+                        // so multi-byte inner kinds (UShort/UInt) assemble in
+                        // the correct order on the peek side. Single-byte
+                        // kinds ignore the parameter.
+                        appendPeekFixedScalar(
+                            body = body,
+                            kind = field.innerKind,
+                            targetVar = rawVar,
+                            offsetExpr = "__offset",
+                            wireOrder = field.valueClassWireOrder,
+                        )
                         body.addStatement(
                             "val %L = %T(%L)",
                             field.name,
@@ -3441,17 +3459,22 @@ internal class CodecEmitter(
         /**
          * Stage E slice 3 — a `@JvmInline value class` field whose primary
          * constructor takes a single supported scalar. Wire form is the
-         * inner scalar at its natural width and `Endianness.Default`;
-         * `@WireBytes` / `@WireOrder` on the outer parameter are out of
-         * scope for slice 3 and silently rejected (caught by the
-         * non-conditional analyzeField path). Decode reads the inner
-         * scalar and constructs the value class; encode writes
-         * `value.<outer>.<innerProperty>`. Top-level value classes
-         * already had a path via `analyze`; slice 3 lifts the same
-         * shape to a first-class field type so the dotted-form
-         * `@WhenTrue` can resolve `sibling.property` against an
-         * in-scope value-class local. Stage F's `@DispatchOn` value-
-         * class discriminator will reuse this entry too.
+         * inner scalar at its natural width.
+         *
+         * `valueClassWireOrder` is the value class's own
+         * `@ProtocolMessage(wireOrder)` (defaults to `Endianness.Default`
+         * which collapses to big-endian). This is propagated to the
+         * sequential walk's value-class peek-stash so multi-byte inner
+         * kinds (UShort/UInt) assemble bytes in the correct order during
+         * peek, regardless of the runtime buffer's `ByteOrder`. Decode
+         * and encode of the value-class field still use `buffer.read*`
+         * / `buffer.write*` and rely on the buffer's runtime byte order
+         * (consistent with how the codec treats Scalar fields without
+         * `@WireOrder`).
+         *
+         * `@WireBytes` / `@WireOrder` on the outer parameter are out
+         * of scope and silently rejected (caught by the non-conditional
+         * analyzeField path).
          */
         data class ValueClassScalar(
             override val name: String,
@@ -3460,6 +3483,7 @@ internal class CodecEmitter(
             val innerKind: ScalarKind,
             val innerPropertyName: String,
             override val wireBytes: Int,
+            val valueClassWireOrder: Endianness,
         ) : FixedSize
 
         /**
