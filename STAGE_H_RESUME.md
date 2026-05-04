@@ -8,17 +8,26 @@ incremental delta and the open design questions.
 
 ## Branch state
 
-- Branch: `feature/directional-codec`, head `d84ddc7`. Not pushed.
-- 26 stacked commits since the last `main`-merged commit (`d83a534`).
-  All commits are individually buildable and individually green.
-- **Stage H is feature-complete** — every PHASE_9_RESET §Stage H
-  capability has landed (slices 10a, 10b, 10c, 10d, 10d.5, 10e,
-  10f). The remaining work is downstream consumer cutover
-  (`:buffer-flow`, `mqtt`, `websocket` per PHASE_9_RESET
-  §"Non-goals"); the codec-emitter API is stable.
+- Branch: `feature/directional-codec`, head `a8f5225` (working tree
+  ahead by the slice 10g smoke-test landing — see "Slice 10g shape"
+  below; not yet committed). Not pushed.
+- 27 stacked commits since the last `main`-merged commit (`d83a534`)
+  once 10g commits. All commits are individually buildable and
+  individually green.
+- **Stage H is feature-complete and acceptance #4 is closed.** Every
+  PHASE_9_RESET §Stage H capability has landed (slices 10a, 10b,
+  10c, 10d, 10d.5, 10e, 10f) and the `:buffer-flow` smoke test
+  (slice 10g, this session) closes acceptance #4: PUBLISH frames
+  flow through `Connection<MqttPacket<…>>` end-to-end via the new
+  `ByteStream.asCodecConnection(...)` bridge. Remaining work is the
+  `mqtt` and `websocket` cutover (PHASE_9_RESET §"Non-goals") and
+  PR merge.
 - Test counts at head:
   - `:buffer-codec-test:jvmTest` — 204 tests, all pass.
   - `:buffer-codec-processor:test` — 46 tests, all pass.
+  - `:buffer-flow:jvmTest` / `:jsNodeTest` / `:wasmJsNodeTest` /
+    `:linuxX64Test` — 4 new `CodecConnectionSmokeTest` tests on
+    each, 16/16 pass. Slice 10g acceptance.
   - `:buffer-codec-test:compileKotlin{Js,WasmJs,LinuxX64}` — all
     succeed (slice 10e proves expect/actual resolution
     end-to-end across every configured target).
@@ -432,6 +441,95 @@ design against today's emitter shape.
   emitting the typealias would force a naming-collision burden
   on every consumer that uses the generated codec name directly.
 
+### Slice 10g shape — landed (this session)
+
+Acceptance #4 close: `:buffer-flow` smoke test exercising the
+codec-emitter API through `Connection<MqttPacket<TextPayload>>`.
+Not a codec-emitter slice; an integration vector that exercises
+slice 10c's `Partial`, slice 10d's generic dispatcher, slice 10d.5's
+`decodeAggregating`, and the streaming `peekFrameSize` path
+(emitted across every Stage F+G slice) end-to-end through the
+flow boundary.
+
+- **API added.** Single new `commonMain` extension at
+  `:buffer-flow/.../codec/CodecConnection.kt` —
+  `fun <T : Any> ByteStream.asCodecConnection(codec, pool, scope,
+  id, byteOrder, sendBufferSize): Connection<T>`. Single `pool`
+  parameter serves both directions: send via
+  `BufferFactory.Default.withPooling(pool)` (one
+  `factory.allocate(...).use { codec.encode(); byteStream.write() }`
+  per send), receive via `StreamProcessor.create(pool, byteOrder)`
+  driving a `peekFrameSize` → `readBufferScoped(decode)` loop on a
+  background coroutine that pushes decoded values to an unlimited
+  `Channel<T>`.
+- **Module wiring.** `:buffer-flow:commonMain` adds
+  `compileOnly(project(":buffer-codec"))` so the bridge surface is
+  optional — consumers using only `Connection` / `StreamMux` pay
+  no codec-module compile cost; consumers using
+  `asCodecConnection` add `:buffer-codec` to their own
+  dependencies. `:buffer-flow:commonTest` adds
+  `:buffer-codec` + `:buffer-codec-test` so the smoke test reaches
+  the existing `MqttPacket` / `MqttPacketCodec` /
+  `TextPayloadCodec` fixtures.
+- **Why one pool, not pool + factory.** Investigated:
+  `BufferFactory.allocate()` does support deterministic cleanup
+  via `.use { freeNativeMemory() }` (CloseableBuffer interface),
+  so factory-allocated buffers can absolutely be released. The
+  refcount/slice tracking that the receive loop needs is on
+  `PooledBuffer`, not on `BufferPool` itself — a `withPooling`
+  factory produces those same `PooledBuffer` instances. The
+  remaining blocker is purely `StreamProcessor.create`'s
+  signature: it takes `BufferPool` directly, not a
+  `PoolingFactory`. Caller-supplies one pool, the bridge derives
+  a pooling factory internally for the send path.
+- **Test fixture: `TextPayload`, not `JpegImage`.**
+  `JpegImageCodec.decode` ends with `readByteArray(remaining)`,
+  which allocates a `ByteArray` for the payload data. That's
+  fine for codec-emitter unit tests but would muddy the smoke
+  test's "framing path is zero-`ByteArray`" claim. `TextPayload`
+  uses `readString` / `writeString`, which is zero-`ByteArray`
+  on JVM/Apple/JS. The WASM/`nonJvm` `writeString` carve-out
+  (Locked Decision row 16) is acknowledged in a comment in the
+  smoke-test file.
+- **Tests landed (4 × 4 platforms = 16 / 16 pass):**
+  1. `publishRoundTripsThroughConnection` — encode + send a
+     `MqttPacket.Publish<TextPayload>` from one in-memory
+     `Connection<MqttPacket<TextPayload>>`, receive it on the
+     other; `assertEquals(publish, received)`.
+  2. `payloadFreeVariantsRoundTrip` — `Connect` + `Disconnect`
+     (typed `MqttPacket<Nothing>`) flow through
+     `Connection<MqttPacket<TextPayload>>` via covariance.
+  3. `peekFramingHandlesSplitWrites` — drip-feed an encoded
+     `Publish` byte-by-byte; the receive loop surfaces exactly
+     one decoded message after the final byte. Confirms the
+     `peekFrameSize` → `readBufferScoped(decode)` loop survives
+     fragmented inbound chunks.
+  4. `aggregatorPathTopicKeyed` — sends a `Publish` through the
+     standard `asCodecConnection` bridge, then on the receive
+     side calls `MqttPacketCodec.decodeAggregating` directly
+     against a raw `StreamProcessor` with an
+     `onPublish = { partial -> partial.complete(codecForTopic) }`
+     handler. Demonstrates the slice 10d.5 seam works at the
+     edge for topic-keyed payload-codec selection.
+- **In-memory `ByteStream` pair.** Smoke-test-private helper
+  (not promoted to commonMain). A `Channel<ReadBuffer>` per
+  direction; `read` is `channel.receive()`, `write` is
+  `channel.send(buffer)`. Small enough that promoting it to a
+  testing utility is premature — wait for a second consumer.
+- **Coverage.** `jvmTest`, `jsNodeTest`, `wasmJsNodeTest`,
+  `linuxX64Test` all pass. Apple targets, Android, Windows
+  native are unreachable from the Linux dev host but use the
+  same commonMain source — same expectation.
+- **Allocation-tracking enforcement deferred.** A JFR-driven
+  zero-`[B` test mirroring `:buffer-codec-test`'s harness was on
+  the original plan as test #5; deferred because lifting the JFR
+  harness across module boundaries is its own scope. The
+  framing-side codec emitters are already JFR-validated in
+  `:buffer-codec-test`; the bridge's allocation guarantee is the
+  same emitter contract reused, plus one factory allocation per
+  send (which is the documented send-side cost). Promote to a
+  proper test if/when a regression surfaces.
+
 ### Slice 10d.5 shape — landed
 
 - **Lambda return type: variant, not parent.** The discriminator's
@@ -541,15 +639,51 @@ take advantage of these. Worth investigating after Stage H stabilises.
 
 ## How to start the next session
 
-**Stage H is feature-complete.** Every PHASE_9_RESET §Stage H
-capability has landed (slices 10a, 10b, 10c, 10d, 10d.5, 10e,
-10f). The remaining work is downstream consumer cutover, not
-further codec-emitter slices.
+**Stage H is feature-complete and acceptance #4 is closed.** Every
+PHASE_9_RESET §Stage H capability has landed (slices 10a, 10b,
+10c, 10d, 10d.5, 10e, 10f) and the `:buffer-flow` smoke test
+(slice 10g) verifies PUBLISH frames flow through
+`Connection<MqttPacket<…>>` end-to-end. The remaining work is
+the `mqtt` and `websocket` cutovers and PR merge.
 
-1. Read `PHASE_9_RESET.md` §"Stage H — Payload SAM via MQTT v5
-   PUBLISH" for the overall Stage H spec, plus Locked Decisions
-   row 21 (slice 10e doctrine).
-2. The codec-emitter API surface for downstream consumers:
+1. **Commit the slice 10g work.** Working tree carries:
+   - `buffer-flow/build.gradle.kts` — `compileOnly(":buffer-codec")`
+     on commonMain + commonTest deps for fixtures.
+   - `buffer-flow/src/commonMain/kotlin/com/ditchoom/buffer/flow/codec/CodecConnection.kt`
+     — the bridge.
+   - `buffer-flow/src/commonTest/kotlin/com/ditchoom/buffer/flow/codec/CodecConnectionSmokeTest.kt`
+     — 4 tests, 16/16 pass across jvm/js/wasmJs/linuxX64.
+
+   Suggested commit message stem: `Stage H slice 10g: :buffer-flow
+   smoke test closes acceptance #4 — PUBLISH through
+   Connection<MqttPacket<…>>`.
+2. **PR merge prep.** Read `PHASE_9_RESET.md` §"Stage H —
+   Payload SAM via MQTT v5 PUBLISH" for the overall acceptance
+   list. All four acceptance criteria are now met:
+   - #1 typed-payload `@UseCodec` round-trip (slice 10a vector).
+   - #2 bare-`Payload` escape hatch (slice 10b
+     `MqttPublishV3<P : Payload>` vector).
+   - #3 throwing-default fires on missing handler
+     (`MqttPacketAggregatorCodecTest.aggregatorThrowsWhenPublishHandlerOmitted`).
+   - #4 `:buffer-flow` PUBLISH round-trip (slice 10g, this session).
+3. **Next stage of work — `mqtt` and `websocket` repo cutovers
+   (PHASE_9_RESET §"Non-goals" carve-out).** Both repos are
+   currently frozen on the legacy codec path. Cutover steps:
+   - Republish `:buffer-codec` + `:buffer-codec-processor` to
+     mavenLocal (PHASE_9_RESET §Constraints flags this is post-
+     rewrite, not load-bearing during the rewrite).
+   - In each downstream repo, replace hand-written codecs with
+     `@ProtocolMessage`-annotated data classes per the doctrine
+     vectors in `:buffer-codec-test`. The MQTT v3.1.1 / v5 wire
+     vectors in
+     `:buffer-codec-test/.../protocols/mqtt/MqttPacket.kt` and
+     `:buffer-codec-test/.../protocols/payload/MqttPublishV3.kt`
+     are the closest analog for the `mqtt` repo's models.
+   - Wire each downstream's `Connection` boundary through
+     `ByteStream.asCodecConnection(codec, pool, scope)` from
+     this session's bridge.
+4. The codec-emitter API surface for downstream consumers
+   (unchanged):
    - **`<Codec>.decode(buffer, context)`** — standard decode via
      constructor-injected `payloadCodec` (slices 10a/10b/10d/10f).
    - **`<Codec>.partial(buffer, context)`** (slice 10c, member on
@@ -560,13 +694,11 @@ further codec-emitter slices.
      on<Variant> = ...)`** (slice 10d.5) — per-variant lambda
      aggregator with throwing-default attribution. Wraps the
      `Partial` machinery in a single dispatch call.
-3. Downstream consumer cutover (`:buffer-flow`, `mqtt`,
-   `websocket` per PHASE_9_RESET §"Non-goals"): start with
-   `:buffer-flow`, since acceptance #4 (PUBLISH frames through
-   `Connection<MqttControlPacket<…>>`) is the remaining
-   integration milestone. The `MqttCodec(somePayloadCodec)`
-   alias from slice 10e is the ergonomic name for the dispatcher.
-4. The remaining followup in PHASE_9_RESET deferred-decisions:
+   - **`ByteStream.asCodecConnection(codec, pool, scope, id,
+     byteOrder, sendBufferSize): Connection<T>`** (slice 10g) —
+     turns a `ByteStream` into a typed `Connection<T>` using the
+     codec for framing.
+5. The remaining followup in PHASE_9_RESET deferred-decisions:
    `@RemainingLength` decompose into `@VarByteInt + @BoundsRemaining`.
    Drive from a second var-int-using vector (Stage G follow-up),
    not as part of Stage H closeout.
