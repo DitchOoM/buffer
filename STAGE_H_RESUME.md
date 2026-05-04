@@ -8,11 +8,11 @@ incremental delta and the open design questions.
 
 ## Branch state
 
-- Branch: `feature/directional-codec`, head `5b5d9f9`. Not pushed.
-- 20 stacked commits since the last `main`-merged commit (`d83a534`).
+- Branch: `feature/directional-codec`, head `f728700`. Not pushed.
+- 22 stacked commits since the last `main`-merged commit (`d83a534`).
   All commits are individually buildable and individually green.
 - Test counts at head:
-  - `:buffer-codec-test:jvmTest` — 187 tests, all pass.
+  - `:buffer-codec-test:jvmTest` — 192 tests, all pass.
   - `:buffer-codec-processor:test` — 46 tests, all pass.
   - `:buffer-codec-test:jsNodeTest` — pre-existing failure
     (`WavFmtChunkCodecTest.decodeFailsWhenChunkSizeUnderBoundsTheBody`,
@@ -50,6 +50,8 @@ In commit order — see each commit's full message for the design notes:
 | `18c6012` | H.10c | `Partial` decode pattern — `Codec.partial(...)` + `Partial.complete(...)` for typed-payload header decode |
 | `5d878aa` | — | Doc: STAGE_H_RESUME briefing for slice 10d (now superseded by this file) |
 | `5b5d9f9` | H.10d | Generic-aware `@DispatchOn` dispatcher — `Http2Frame<out P : Payload>` absorbing `Http2DataFrame` |
+| `fc5f46d` | — | Doc: STAGE_H_RESUME briefing for slice 10f (now superseded by this file) |
+| `f728700` | H.10f | `MqttPacket<out P : Payload>` + `Publish<P>` variant — lifts the `@RemainingLength` + typed payload carve-out |
 
 ### Annotation surface as it stands today
 
@@ -225,15 +227,12 @@ design against today's emitter shape.
    manual discriminator dispatch — the aggregator wraps it in a
    single call. Land when the smoke test surfaces an ergonomic
    need.
-6. ⏳ **Slice 10f — `MqttPacket` lift to `<out P : Payload>` with
-   `Publish<P>` variant.** Requires designing how `@RemainingLength`
-   composes with the typed payload field — slice 10c carved this
-   combination out (`shouldEmitPartial` skips shapes carrying
-   `@RemainingLength`). The natural answer is to lift the carve-out
-   too: have `Partial` capture the buffer with the `@RemainingLength`
-   -narrowed limit, run `complete` inside the bound, and restore
-   the outer limit on completion. Land alongside the MQTT lift so
-   the design has a concrete vector.
+6. ✅ **Slice 10f (`f728700`)** — `MqttPacket<out P : Payload>` +
+   `Publish<P>` variant. Lifts the slice 10c
+   `@RemainingLength` carve-out by capturing the outer buffer
+   limit on `Partial` and restoring it via try/finally on
+   `complete`. Closes PHASE_9_RESET §Stage H acceptance #1
+   through the MQTT control-packet sealed.
 7. ⏳ **Slice 10e — `@UseCodec` `expect`/`actual` lock + `MqttCodec`
    alias.** Lock the cross-platform resolution decision (the
    deferred-decisions row "@UseCodec expect/actual resolution path"
@@ -374,33 +373,53 @@ design against today's emitter shape.
   camelCase variant name + `Codec` (`DataCodec` → `dataCodec`).
   Symmetric with the slice 10b `payloadCodec` convention.
 
-### Slice 10d.5 / 10f open design questions
+### Slice 10f shape — landed
 
-The deferred work splits naturally into two independent slices.
+- **Outer-limit capture in `Partial`.** When the partial decode
+  body crosses `@RemainingLength` (`appendDecodeRemainingLength`
+  emits `__<rlName>OuterLimit = buffer.limit()` then `setLimit(
+  position + RL)`), the Partial constructor takes the outer
+  limit as a `private val outerLimit: Int` field; the partial
+  entry function wires `outerLimit = __<rlName>OuterLimit` into
+  the constructor call.
+- **`complete` try/finally.** When the shape carries
+  `@RemainingLength`, `Partial.complete(...)` wraps the payload
+  decode + constructor call in `try { … } finally {
+  buffer.setLimit(outerLimit) }`. The payload decode runs inside
+  the var-int-narrowed bound (correct for payload bounding); the
+  outer limit is restored even if the user codec throws.
+- **`shouldEmitPartial` lift.** The slice 10c `@RemainingLength`
+  skip is removed — `Partial` is now emitted unconditionally
+  whenever a `RemainingBytesPayload` field is present. The two
+  paths (with/without RL) differ only in the `outerLimit` field
+  + try/finally body; the no-RL path is unchanged.
+
+### Slice 10d.5 / 10e open design questions
+
+The remaining deferred work is two independent slices.
 
 **Slice 10d.5 — lambda aggregator.** PHASE_9_RESET wants per-
 variant lambda overloads:
 `decode(buffer, context, onPublish: (PartialOfPublish<P>) ->
 Foo<P>, ...)` with throwing defaults. Today consumers compose
 the equivalent via `<VariantName>Codec.partial<P>(...)` + manual
-discriminator dispatch. The aggregator wraps both in one call.
+discriminator dispatch — the aggregator wraps both in one call.
 Open: lambda return type — does it return the variant
 (`Foo.Publish<P>`) or the parent (`Foo<P>`)? Returning the
 parent is more flexible (consumer can substitute or wrap), but
 defies the discriminator's promise that the result is the
-matched variant.
+matched variant. Defer until a `:buffer-flow` smoke test
+surfaces an ergonomic need.
 
-**Slice 10f — `MqttPacket` lift to `<out P : Payload>` with
-`Publish<P>` variant.** The blocker is `@RemainingLength` +
-typed payload composition (slice 10c carved this out in
-`shouldEmitPartial`). The natural design: lift the slice 10c
-carve-out by having `Partial` capture the buffer with the
-`@RemainingLength`-narrowed limit, run `complete` inside the
-bound, and have `complete` restore the outer limit on
-completion via a try/finally. Open: `Partial` carries the
-captured outer limit as a private field, or recomputes it from
-the bound (less state, more arithmetic). Land alongside the
-MQTT lift so the design has a concrete vector.
+**Slice 10e — `@UseCodec` `expect`/`actual` lock + `MqttCodec`
+alias.** Lock the cross-platform resolution decision (the
+deferred-decisions row "@UseCodec expect/actual resolution
+path" already leans toward "direct call, linker resolves"; the
+slice 10a generated code already does this for single-platform
+`object` references — the lock formalizes it for multiplatform
+consumers). Add the convenience `typealias MqttCodec<P> =
+MqttPacketCodec<P>` per PHASE_9_RESET. Both are small and
+mechanical; bundle into one slice.
 
 ### Existing pieces to compose, not rebuild
 
@@ -478,24 +497,27 @@ take advantage of these. Worth investigating after Stage H stabilises.
 1. Read `PHASE_9_RESET.md` §"Stage H — Payload SAM via MQTT v5
    PUBLISH" for the overall Stage H spec.
 2. Read this file's "Stage H — slice progress" section. Slices
-   10a, 10b, 10c, and 10d are landed (`ee7bb81`, `7b2f00f`,
-   `18c6012`, `5b5d9f9`). The remaining work splits into three
-   independent slices: 10d.5 (lambda aggregator), 10f (MqttPacket
-   lift), and 10e (`@UseCodec` `expect`/`actual` lock + `MqttCodec`
-   alias). Pick whichever has the clearest vector — they don't
-   stack.
-3. Read the slice 10d emit code before extending it. The generic
-   dispatcher emit (`buildGenericDispatchOnDispatcherTypeSpec`,
-   `dispatcherParentTypeRef`, `variantBranchTypeName`,
-   `variantTypedRef`, `DispatchOnVariantSpec.codecReceiver`) and
-   the variant-side codec construction (`genericInstanceFieldName`)
-   are the building blocks any further dispatcher work composes
-   with. The `Partial` machinery from slice 10c is the building
-   block for 10d.5's lambda aggregator (the lambda receives a
-   `Partial` and returns the completed variant).
+   10a, 10b, 10c, 10d, and 10f are landed (`ee7bb81`, `7b2f00f`,
+   `18c6012`, `5b5d9f9`, `f728700`). The remaining work splits
+   into two independent slices: 10d.5 (lambda aggregator) and
+   10e (`@UseCodec` `expect`/`actual` lock + `MqttCodec` alias).
+   Either can land first — they don't stack.
+3. Read the slice 10f emit code before extending it. The
+   `Partial` outer-limit capture (`buildPartialClassTypeSpec`,
+   `buildPartialCompleteFun`, `buildPartialEntryFun` + the
+   `hasRemainingLength` branch) and the slice 10d generic
+   dispatcher (`buildGenericDispatchOnDispatcherTypeSpec` +
+   `genericInstanceFieldName`) are the building blocks any
+   further dispatcher work composes with. The slice 10c
+   `Partial` machinery + slice 10f's outer-limit capture is the
+   building block for 10d.5's lambda aggregator (the lambda
+   receives a `Partial` carrying the captured outer limit and
+   returns the completed variant).
 4. Resolve the slice's open design questions (this file's "Slice
-   10d.5 / 10f open design questions" section) before
-   implementing. For 10f, the `@RemainingLength` + typed payload
-   combination is the blocking design lock.
+   10d.5 / 10e open design questions" section) before
+   implementing. For 10d.5, the lambda return type (variant vs
+   parent) is the design lock; for 10e, the `expect`/`actual`
+   semantics lock is largely settled — confirm against a real
+   multiplatform consumer.
 5. Re-derive emit designs against today's emitter shape — don't
    copy from the reverted worktree without verifying.
