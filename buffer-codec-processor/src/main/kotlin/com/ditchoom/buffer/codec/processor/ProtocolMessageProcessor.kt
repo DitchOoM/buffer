@@ -51,6 +51,16 @@ import com.google.devtools.ksp.validate
  *     parent. Missing/out-of-range/duplicate values are compile
  *     errors. Sealed parents carrying `@DispatchOn` are skipped
  *     (Stage F surface).
+ *
+ *   - **Stage E `@WhenTrue` shape (Locked Decision row 19, slice 2).**
+ *     For the simple-name form `@WhenTrue("siblingField")`: the
+ *     bound parameter type must be nullable; the referenced
+ *     constructor parameter must exist, must be declared before the
+ *     bound parameter, and must be a non-nullable `Boolean`. The
+ *     dotted form `"<sibling>.<property>"` is silently allowed here
+ *     and validated when slice 3 lands. No constraint on the
+ *     constructor default expression — KSP cannot inspect default
+ *     expression trees.
  */
 class ProtocolMessageProcessor(
     private val codeGenerator: CodeGenerator,
@@ -103,6 +113,7 @@ class ProtocolMessageProcessor(
             }
             validateAdjacentLengthFrom(symbol, ctor.parameters, payloadType)
             validateWireBytes(symbol, ctor.parameters)
+            validateWhenTrue(symbol, ctor.parameters)
             emitter.tryEmit(symbol)
         }
         return deferred
@@ -213,6 +224,109 @@ class ProtocolMessageProcessor(
                         "it cannot widen past the Kotlin type's range.",
                     param,
                 )
+            }
+        }
+    }
+
+    /**
+     * Stage E slice 2 — `@WhenTrue` shape validation (Locked Decision row 19).
+     *
+     * Checks the simple-name expression form (`@WhenTrue("siblingField")`):
+     *   - Bound parameter type must be nullable (`T?`).
+     *   - Source field must exist as a sibling of the bound parameter.
+     *   - Source field must be declared *before* the bound parameter.
+     *   - Source field must be non-nullable `Boolean`.
+     *
+     * The dotted form (`"<sibling>.<property>"`) lands in slice 3; it is
+     * silently skipped here so that slice 3 can wire emit + validation
+     * together without slice 2 producing premature diagnostics.
+     */
+    private fun validateWhenTrue(
+        owner: KSClassDeclaration,
+        parameters: List<KSValueParameter>,
+    ) {
+        val ownerName = owner.qualifiedName?.asString() ?: owner.simpleName.asString()
+        for ((index, param) in parameters.withIndex()) {
+            val ann =
+                param.annotations.firstOrNull { a ->
+                    a.shortName.asString() == WHEN_TRUE_SHORT &&
+                        a.annotationType
+                            .resolve()
+                            .declaration.qualifiedName
+                            ?.asString() == WHEN_TRUE_QNAME
+                } ?: continue
+            val expression =
+                ann.arguments
+                    .firstOrNull { it.name?.asString() == "expression" }
+                    ?.value as? String ?: continue
+            // Dotted form lands in slice 3 — skip silently here.
+            if (expression.contains('.')) continue
+
+            val fieldName = param.name?.asString() ?: "<unknown>"
+            val type = param.type.resolve()
+            if (!type.isMarkedNullable) {
+                logger.error(
+                    "@WhenTrue(\"$expression\") on $ownerName.$fieldName requires the field type " +
+                        "to be nullable (e.g., `Int?` not `Int`). When the predicate is false, the " +
+                        "decoder needs to assign `null` to the slot — that is the only way to " +
+                        "represent absence uniformly across types (Locked Decision row 19).",
+                    param,
+                )
+                continue
+            }
+
+            val sourceIndex = parameters.indexOfFirst { it.name?.asString() == expression }
+            if (sourceIndex < 0) {
+                val available =
+                    parameters
+                        .take(index)
+                        .mapNotNull { p ->
+                            val n = p.name?.asString() ?: return@mapNotNull null
+                            val resolved = p.type.resolve()
+                            val q =
+                                resolved
+                                    .declaration
+                                    .qualifiedName
+                                    ?.asString()
+                            if (q == BOOLEAN_QNAME && !resolved.isMarkedNullable) n else null
+                        }
+                logger.error(
+                    "@WhenTrue(\"$expression\") on $ownerName.$fieldName references " +
+                        "`$expression`, which is not a constructor parameter of $ownerName. " +
+                        if (available.isEmpty()) {
+                            "$ownerName has no `Boolean` siblings declared before $fieldName."
+                        } else {
+                            "Available `Boolean` siblings declared before $fieldName: ${available.joinToString()}."
+                        },
+                    param,
+                )
+                continue
+            }
+            if (sourceIndex >= index) {
+                logger.error(
+                    "@WhenTrue(\"$expression\") on $ownerName.$fieldName references " +
+                        "$ownerName.$expression, which is declared at-or-after $fieldName in the " +
+                        "constructor parameter list. The source field must be declared before " +
+                        "the conditional field so its value is available at decode time.",
+                    param,
+                )
+                continue
+            }
+
+            val sourceParam = parameters[sourceIndex]
+            val sourceType = sourceParam.type.resolve()
+            val sourceQname = sourceType.declaration.qualifiedName?.asString()
+            if (sourceQname != BOOLEAN_QNAME || sourceType.isMarkedNullable) {
+                val displayed = sourceQname ?: "<unresolved>"
+                val nullableSuffix = if (sourceType.isMarkedNullable) "?" else ""
+                logger.error(
+                    "@WhenTrue(\"$expression\") on $ownerName.$fieldName requires source " +
+                        "`$ownerName.$expression` to be a non-nullable `Boolean`, but it is " +
+                        "`$displayed$nullableSuffix`. Locked Decision row 19 limits the simple " +
+                        "expression form to a sibling `Boolean` field.",
+                    param,
+                )
+                continue
             }
         }
     }
@@ -338,6 +452,9 @@ class ProtocolMessageProcessor(
         private const val PACKET_TYPE_SHORT = "PacketType"
         private const val DISPATCH_ON_QNAME = "com.ditchoom.buffer.codec.annotations.DispatchOn"
         private const val DISPATCH_ON_SHORT = "DispatchOn"
+        private const val WHEN_TRUE_QNAME = "com.ditchoom.buffer.codec.annotations.WhenTrue"
+        private const val WHEN_TRUE_SHORT = "WhenTrue"
+        private const val BOOLEAN_QNAME = "kotlin.Boolean"
         private const val MAX_DEPTH = 16
 
         private val FORBIDDEN_TYPES =

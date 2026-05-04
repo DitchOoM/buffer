@@ -9,14 +9,23 @@ import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.symbol.KSValueParameter
 import com.google.devtools.ksp.symbol.Modifier
+import com.squareup.kotlinpoet.BOOLEAN
+import com.squareup.kotlinpoet.BYTE
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
 import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
 import com.squareup.kotlinpoet.INT
 import com.squareup.kotlinpoet.KModifier
+import com.squareup.kotlinpoet.LONG
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
+import com.squareup.kotlinpoet.SHORT
+import com.squareup.kotlinpoet.TypeName
 import com.squareup.kotlinpoet.TypeSpec
+import com.squareup.kotlinpoet.U_BYTE
+import com.squareup.kotlinpoet.U_INT
+import com.squareup.kotlinpoet.U_LONG
+import com.squareup.kotlinpoet.U_SHORT
 
 /**
  * Stage A + B + C + D emitter.
@@ -77,12 +86,28 @@ import com.squareup.kotlinpoet.TypeSpec
  *     with `baseOffset + 1`. Unknown discriminator at decode or peek
  *     time throws `DecodeException` per Locked Decision row 17. Skips
  *     when the parent carries `@DispatchOn` (Stage F).
+ *   - **Stage E slice 2 — `@WhenTrue` against a sibling `Boolean`.**
+ *     A constructor parameter `@WhenTrue("siblingField") val name: T?`
+ *     where `siblingField` is a non-nullable `Boolean` parameter
+ *     declared before this one. Decode emits
+ *     `val name: T? = if (sibling) <readT> else null`; encode skips
+ *     the slot entirely when the predicate is false (zero bytes),
+ *     and throws `EncodeException` if the predicate is true and the
+ *     field is null. Per Locked Decision row 19, any `@WhenTrue`
+ *     field collapses message-level `WireSize` to `BackPatch`.
+ *     `peekFrameSize` walks scalar prefix fields, peeks the boolean
+ *     source statically, and adds the inner field's bytes only when
+ *     the predicate is true. Slice 2 also adds `Boolean` as a 1-byte
+ *     scalar (no `@WireBytes` / `@WireOrder`); slice 2 inner is
+ *     restricted to natural-width Scalar — `@LengthPrefixed` inner
+ *     and dotted-form expression (`"flags.willFlag"`) land in slices
+ *     3 and 5.
  *
- * Anything outside this surface — `@LengthFrom`, `@WhenTrue`,
- * `@RemainingBytes`, `@UseCodec`, `@DispatchOn`, signed scalars in
- * the manual-byte-assembly path, `@LengthPrefixed` on a non-terminal
- * field — is silently skipped here and picked up by later stages as
- * their capability lands.
+ * Anything outside this surface — `@LengthFrom`, dotted-form
+ * `@WhenTrue`, `@RemainingBytes`, `@UseCodec`, `@DispatchOn`, signed
+ * scalars in the manual-byte-assembly path, `@LengthPrefixed` on a
+ * non-terminal field, non-terminal `@WhenTrue` — is silently skipped
+ * here and picked up by later stages as their capability lands.
  */
 internal class CodecEmitter(
     private val codeGenerator: CodeGenerator,
@@ -138,8 +163,18 @@ internal class CodecEmitter(
         val params = ctor.parameters
         for ((index, param) in params.withIndex()) {
             val isTerminal = index == params.lastIndex
-            val field = analyzeField(param, messageWireOrder, ownerSimpleName, isTerminal) ?: return null
+            val field =
+                analyzeField(param, messageWireOrder, ownerSimpleName, isTerminal, params, index) ?: return null
             fields += field
+        }
+        // Slice 2 restriction: a Conditional field can appear only at the terminal
+        // position. Non-terminal Conditional needs the more general peekFrameSize
+        // walk that interleaves prefix-chase + conditional-byte addition; that lands
+        // alongside the slice 5 MQTT v3 CONNECT vector. Silently skip emit for the
+        // non-terminal case for now (the validator's `validateWhenTrue` still
+        // surfaces shape diagnostics).
+        for ((index, field) in fields.withIndex()) {
+            if (field is FieldSpec.Conditional && index != fields.lastIndex) return null
         }
 
         val pkg = symbol.packageName.asString()
@@ -178,7 +213,25 @@ internal class CodecEmitter(
         messageWireOrder: Endianness,
         ownerSimpleName: String,
         isTerminal: Boolean,
+        params: List<KSValueParameter>,
+        index: Int,
     ): FieldSpec? {
+        // Stage E — `@WhenTrue` opens a separate analysis path: nullability is
+        // required, the inner shape is built from the non-null type, and the
+        // result wraps in `FieldSpec.Conditional`. The non-conditional analysis
+        // below stays unchanged for any field without `@WhenTrue`.
+        val whenTrueAnn =
+            param.annotations.firstOrNull { it.shortName.asString() == "WhenTrue" }
+        if (whenTrueAnn != null) {
+            return analyzeConditionalField(
+                param = param,
+                whenTrueAnn = whenTrueAnn,
+                messageWireOrder = messageWireOrder,
+                ownerSimpleName = ownerSimpleName,
+                params = params,
+                index = index,
+            )
+        }
         var lengthPrefixed: KSAnnotation? = null
         var wireBytesAnn: KSAnnotation? = null
         for (ann in param.annotations) {
@@ -232,6 +285,22 @@ internal class CodecEmitter(
 
         val qualified = type.declaration.qualifiedName?.asString() ?: return null
         val kind = SUPPORTED_SCALARS[qualified] ?: return null
+
+        // Boolean is 1-byte natural-width with no byte order; @WireBytes / @WireOrder
+        // are meaningless on Boolean and are rejected here so the manual-byte-assembly
+        // path (which has no Boolean support) is never reachable. Forces resolved =
+        // Default regardless of the message-level wire order.
+        if (kind == ScalarKind.Boolean) {
+            if (wireBytesAnn != null) return null
+            if (param.annotations.any { it.shortName.asString() == "WireOrder" }) return null
+            return FieldSpec.Scalar(
+                name = name,
+                kind = kind,
+                resolvedWireOrder = Endianness.Default,
+                wireBytes = 1,
+            )
+        }
+
         val resolved = readFieldWireOrder(param) ?: messageWireOrder
         val wireBytes = wireBytesAnn?.let { readWireBytes(it) } ?: kind.width
         // R4 narrows what the emitter accepts; the validator emits the actual
@@ -250,6 +319,134 @@ internal class CodecEmitter(
             wireBytes = wireBytes,
         )
     }
+
+    /**
+     * Stage E slice 2 — `@WhenTrue` against a sibling `Boolean` field.
+     *
+     * Handles the simple-name expression form (`"siblingFieldName"`).
+     * Dotted form (`"<sibling>.<property>"`) is silently skipped here
+     * and lands in slice 3.
+     *
+     * Slice 2 restricts the inner field to a natural-width Scalar:
+     *   - any `SUPPORTED_SCALARS` type (including `Boolean`),
+     *   - no `@WireBytes`, no `@WireOrder`, no `@LengthPrefixed`.
+     * Wider inner types (LengthPrefixed/Message) and manual byte-assembly
+     * scalars defer to slices 5+.
+     *
+     * Returns null for any case the slice doesn't support — the validator
+     * surfaces user-facing diagnostics for the cases it can name; the
+     * emitter's silence keeps Stage A/B/C/D's "out of shape, no codec"
+     * pattern intact.
+     */
+    private fun analyzeConditionalField(
+        param: KSValueParameter,
+        whenTrueAnn: KSAnnotation,
+        @Suppress("UNUSED_PARAMETER") messageWireOrder: Endianness,
+        ownerSimpleName: String,
+        params: List<KSValueParameter>,
+        index: Int,
+    ): FieldSpec? {
+        // Slice 2 inner is always natural-width Endianness.Default; the message
+        // wire order doesn't compose here yet. Slice 5 will widen to manual-
+        // byte-assembly inner shapes that respect the message-level order.
+        val expression =
+            whenTrueAnn.arguments
+                .firstOrNull { it.name?.asString() == "expression" }
+                ?.value as? String
+                ?: return null
+        // Slice 2 supports only the simple-name form; dotted form is slice 3.
+        if (expression.contains('.')) return null
+        // Reject other annotations on the same parameter for slice 2 — wider
+        // composition (e.g., `@WhenTrue` + `@LengthPrefixed`) lands in slice 5.
+        for (ann in param.annotations) {
+            when (ann.shortName.asString()) {
+                "WhenTrue" -> {} // already handled
+                else -> return null
+            }
+        }
+        val name = param.name?.asString() ?: return null
+        val type = param.type.resolve()
+        if (type.isError) return null
+        if (!type.isMarkedNullable) return null
+
+        // Source must exist as an earlier sibling and be non-nullable Boolean.
+        val sourceIndex = params.indexOfFirst { it.name?.asString() == expression }
+        if (sourceIndex < 0 || sourceIndex >= index) return null
+        val sourceType = params[sourceIndex].type.resolve()
+        if (sourceType.isError) return null
+        if (sourceType.isMarkedNullable) return null
+        if (sourceType.declaration.qualifiedName?.asString() != "kotlin.Boolean") return null
+
+        // Inner shape: natural-width Scalar only for slice 2.
+        val innerType = type.makeNotNullable()
+        val qualified = innerType.declaration.qualifiedName?.asString() ?: return null
+        val kind = SUPPORTED_SCALARS[qualified] ?: return null
+        val inner =
+            FieldSpec.Scalar(
+                name = name,
+                kind = kind,
+                resolvedWireOrder = Endianness.Default,
+                wireBytes = kind.width,
+            )
+        return FieldSpec.Conditional(
+            name = name,
+            ownerSimpleName = ownerSimpleName,
+            conditionFieldName = expression,
+            nullableTypeName = scalarTypeName(kind).copy(nullable = true),
+            inner = inner,
+        )
+    }
+
+    private fun scalarTypeName(kind: ScalarKind): TypeName =
+        when (kind) {
+            ScalarKind.Boolean -> BOOLEAN
+            ScalarKind.UByte -> U_BYTE
+            ScalarKind.UShort -> U_SHORT
+            ScalarKind.UInt -> U_INT
+            ScalarKind.ULong -> U_LONG
+            ScalarKind.Byte -> BYTE
+            ScalarKind.Short -> SHORT
+            ScalarKind.Int -> INT
+            ScalarKind.Long -> LONG
+        }
+
+    /**
+     * Stage E slice 2 — read expression for a natural-width scalar. Used by
+     * the conditional emit path (which needs an expression, not a statement)
+     * and by the existing non-conditional decode (refactored to share).
+     */
+    private fun naturalScalarReadExpr(kind: ScalarKind): String =
+        when (kind) {
+            ScalarKind.Boolean -> "buffer.readByte() != 0.toByte()"
+            ScalarKind.UByte -> "buffer.readUByte()"
+            ScalarKind.UShort -> "buffer.readUShort()"
+            ScalarKind.UInt -> "buffer.readUInt()"
+            ScalarKind.ULong -> "buffer.readULong()"
+            ScalarKind.Byte -> "buffer.readByte()"
+            ScalarKind.Short -> "buffer.readShort()"
+            ScalarKind.Int -> "buffer.readInt()"
+            ScalarKind.Long -> "buffer.readLong()"
+        }
+
+    /**
+     * Stage E slice 2 — write statement for a natural-width scalar given an
+     * accessor expression. Boolean encodes as `0x00` / `0x01`.
+     */
+    private fun naturalScalarWriteStatement(
+        kind: ScalarKind,
+        accessor: String,
+    ): String =
+        when (kind) {
+            ScalarKind.Boolean -> "buffer.writeByte(if ($accessor) 1.toByte() else 0.toByte())"
+            ScalarKind.UByte -> "buffer.writeUByte($accessor)"
+            ScalarKind.UShort -> "buffer.writeUShort($accessor)"
+            ScalarKind.UInt -> "buffer.writeUInt($accessor)"
+            ScalarKind.ULong -> "buffer.writeULong($accessor)"
+            ScalarKind.Byte -> "buffer.writeByte($accessor)"
+            ScalarKind.Short -> "buffer.writeShort($accessor)"
+            ScalarKind.Int -> "buffer.writeInt($accessor)"
+            ScalarKind.Long -> "buffer.writeLong($accessor)"
+        }
 
     private fun readMessageWireOrder(symbol: KSClassDeclaration): Endianness {
         val ann =
@@ -332,6 +529,7 @@ internal class CodecEmitter(
                 is FieldSpec.Scalar -> appendDecodeScalar(body, field)
                 is FieldSpec.LengthPrefixedMessage -> appendDecodeLengthPrefixed(body, field)
                 is FieldSpec.LengthPrefixedString -> appendDecodeLengthPrefixedString(body, field)
+                is FieldSpec.Conditional -> appendDecodeConditional(body, field)
             }
         }
         val ctorArgs = shape.fields.joinToString(", ") { "${it.name} = ${it.name}" }
@@ -353,6 +551,7 @@ internal class CodecEmitter(
                 is FieldSpec.Scalar -> appendEncodeScalar(body, field, shape.ownerSimpleName)
                 is FieldSpec.LengthPrefixedMessage -> appendEncodeLengthPrefixed(body, field)
                 is FieldSpec.LengthPrefixedString -> appendEncodeLengthPrefixedString(body, field)
+                is FieldSpec.Conditional -> appendEncodeConditional(body, field)
             }
         }
         return FunSpec
@@ -373,6 +572,12 @@ internal class CodecEmitter(
                 .addParameter("value", shape.messageClassName)
                 .addParameter("context", ENCODE_CONTEXT_CN)
                 .returns(WIRE_SIZE_CN)
+        // Locked Decision row 19: any `@WhenTrue` field collapses the message
+        // wireSize to BackPatch — we don't attempt conditional-Exact arithmetic.
+        if (shape.fields.any { it is FieldSpec.Conditional }) {
+            builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+            return builder.build()
+        }
         when (val terminal = shape.fields.lastOrNull()) {
             is FieldSpec.LengthPrefixedString -> {
                 // Locked Decision row 15: @LengthPrefixed val: String defaults to BackPatch.
@@ -413,6 +618,10 @@ internal class CodecEmitter(
                 .addParameter("baseOffset", INT)
                 .returns(PEEK_RESULT_CN)
         val terminal = shape.fields.lastOrNull()
+        if (terminal is FieldSpec.Conditional) {
+            appendPeekConditional(builder, shape, terminal)
+            return builder.build()
+        }
         val (name, ownerSimpleName, prefixWidth, prefixWireOrder) =
             when (terminal) {
                 is FieldSpec.LengthPrefixedMessage ->
@@ -483,18 +692,7 @@ internal class CodecEmitter(
         val needsManual =
             field.wireBytes != field.kind.width || field.resolvedWireOrder != Endianness.Default
         if (!needsManual) {
-            val read =
-                when (field.kind) {
-                    ScalarKind.UByte -> "readUByte"
-                    ScalarKind.UShort -> "readUShort"
-                    ScalarKind.UInt -> "readUInt"
-                    ScalarKind.ULong -> "readULong"
-                    ScalarKind.Byte -> "readByte"
-                    ScalarKind.Short -> "readShort"
-                    ScalarKind.Int -> "readInt"
-                    ScalarKind.Long -> "readLong"
-                }
-            body.addStatement("val %L = buffer.%L()", field.name, read)
+            body.addStatement("val %L = %L", field.name, naturalScalarReadExpr(field.kind))
             return
         }
         val bigEndian =
@@ -537,6 +735,8 @@ internal class CodecEmitter(
                 ScalarKind.UInt, ScalarKind.ULong -> ""
                 ScalarKind.Byte, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long ->
                     error("manual scalar decode is unsigned-only; analyzeField rejects signed manual-path fields")
+                ScalarKind.Boolean ->
+                    error("Boolean is pinned to the natural-read path; analyzeField rejects manual-path Boolean")
             }
         body.addStatement("val %L = %L%L", field.name, combined, narrow)
     }
@@ -551,18 +751,7 @@ internal class CodecEmitter(
         val needsManual =
             field.wireBytes != field.kind.width || field.resolvedWireOrder != Endianness.Default
         if (!needsManual) {
-            val write =
-                when (field.kind) {
-                    ScalarKind.UByte -> "writeUByte"
-                    ScalarKind.UShort -> "writeUShort"
-                    ScalarKind.UInt -> "writeUInt"
-                    ScalarKind.ULong -> "writeULong"
-                    ScalarKind.Byte -> "writeByte"
-                    ScalarKind.Short -> "writeShort"
-                    ScalarKind.Int -> "writeInt"
-                    ScalarKind.Long -> "writeLong"
-                }
-            body.addStatement("buffer.%L(%L)", write, accessor)
+            body.addStatement(naturalScalarWriteStatement(field.kind, accessor))
             return
         }
         val bigEndian =
@@ -587,6 +776,7 @@ internal class CodecEmitter(
                 ScalarKind.UShort -> "$accessor.toUInt()" to "((1u shl ${8 * field.wireBytes}) - 1u)"
                 ScalarKind.UByte -> return // wireBytes < 1 is rejected by analyzeField
                 ScalarKind.Byte, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long -> return // signed kinds skip the manual path entirely
+                ScalarKind.Boolean -> return // analyzeField pins Boolean to natural width — never narrows
             }
         val maxValue = (1L shl (8 * field.wireBytes)) - 1
         body.beginControlFlow("if (%L > %L)", lhs, maxLit)
@@ -616,6 +806,8 @@ internal class CodecEmitter(
                 ScalarKind.UInt, ScalarKind.ULong -> ""
                 ScalarKind.Byte, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long ->
                     error("manual scalar encode is unsigned-only; analyzeField rejects signed manual-path fields")
+                ScalarKind.Boolean ->
+                    error("Boolean is pinned to the natural-write path; analyzeField rejects manual-path Boolean")
             }
         val wide = "$accessor$widePromote"
         val maskLit = if (width >= 5) "0xFFuL" else "0xFFu"
@@ -629,6 +821,133 @@ internal class CodecEmitter(
                 }
             body.addStatement("buffer.writeUByte((%L).toUByte())", expr)
         }
+    }
+
+    /**
+     * Stage E slice 2 — emit a `@WhenTrue` decode block.
+     *
+     * Generated shape:
+     * ```
+     * val <name>: <NullableType> = if (<source>) <readExpr> else null
+     * ```
+     *
+     * The source is a sibling `Boolean` local already in scope (decode visits
+     * fields in constructor order, and analyzeConditionalField has verified
+     * the source is declared before this field). `readExpr` is the natural-
+     * width scalar read for the inner kind (slice 2 restricts inner to a
+     * natural-width Scalar; slice 5 widens to LengthPrefixedString).
+     */
+    private fun appendDecodeConditional(
+        body: CodeBlock.Builder,
+        field: FieldSpec.Conditional,
+    ) {
+        body.addStatement(
+            "val %L: %T = if (%L) %L else null",
+            field.name,
+            field.nullableTypeName,
+            field.conditionFieldName,
+            naturalScalarReadExpr(field.inner.kind),
+        )
+    }
+
+    /**
+     * Stage E slice 2 — emit a `@WhenTrue` encode block.
+     *
+     * Generated shape:
+     * ```
+     * if (value.<source>) {
+     *     val <name>Value = value.<name> ?: throw EncodeException(...)
+     *     <writeStatement using `<name>Value`>
+     * }
+     * ```
+     *
+     * Predicate-false branch writes nothing (zero bytes for the slot, per
+     * Locked Decision row 19). Predicate-true with `value.<name> == null`
+     * throws `EncodeException` with field-path attribution (row 20).
+     */
+    private fun appendEncodeConditional(
+        body: CodeBlock.Builder,
+        field: FieldSpec.Conditional,
+    ) {
+        body.beginControlFlow("if (value.%L)", field.conditionFieldName)
+        val localName = "${field.name}Value"
+        body.addStatement(
+            "val %L = value.%L ?: throw %T(fieldPath = %S, reason = %S)",
+            localName,
+            field.name,
+            ENCODE_EXCEPTION_CN,
+            "${field.ownerSimpleName}.${field.name}",
+            "@WhenTrue(\"${field.conditionFieldName}\") predicate is true but field is null",
+        )
+        body.addStatement(naturalScalarWriteStatement(field.inner.kind, localName))
+        body.endControlFlow()
+    }
+
+    /**
+     * Stage E slice 2 — emit `peekFrameSize` for a message whose terminal
+     * field is a `FieldSpec.Conditional` and whose preceding fields are all
+     * `FieldSpec.Scalar` (the slice 2 vector shape).
+     *
+     * Walks the prefix scalars statically, peeks the boolean source at its
+     * fixed offset, and adds the inner field's wire bytes only when the
+     * predicate is true. Returns `Complete(total)` or `NeedsMoreData`.
+     *
+     * Slice 5 generalises this for variable-length prefix fields (MQTT v3
+     * CONNECT has a leading `@LengthPrefixed` before its flags byte).
+     */
+    private fun appendPeekConditional(
+        builder: FunSpec.Builder,
+        shape: CodecShape,
+        terminal: FieldSpec.Conditional,
+    ) {
+        val prefixFields = shape.fields.dropLast(1)
+        // All preceding fields must be Scalar for slice 2's peek walk; if any
+        // is variable-length, slice 5's more general walk lands.
+        if (prefixFields.any { it !is FieldSpec.Scalar }) {
+            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+            return
+        }
+        val prefixBytes = prefixFields.sumOf { (it as FieldSpec.Scalar).wireBytes }
+        var sourceOffset = -1
+        var bytesSeen = 0
+        for (field in prefixFields) {
+            val scalar = field as FieldSpec.Scalar
+            if (scalar.name == terminal.conditionFieldName) {
+                sourceOffset = bytesSeen
+                break
+            }
+            bytesSeen += scalar.wireBytes
+        }
+        if (sourceOffset < 0) {
+            // analyzeConditionalField guarantees the source is a sibling declared
+            // before this field, so this branch is defensive — it would mean the
+            // emitter and analyzer disagree.
+            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+            return
+        }
+        val body = CodeBlock.builder()
+        body.addStatement(
+            "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
+            prefixBytes,
+            PEEK_RESULT_CN,
+        )
+        body.addStatement(
+            "val %L = stream.peekByte(baseOffset + %L) != 0.toByte()",
+            terminal.conditionFieldName,
+            sourceOffset,
+        )
+        body.addStatement(
+            "val total = %L + if (%L) %L else 0",
+            prefixBytes,
+            terminal.conditionFieldName,
+            terminal.inner.wireBytes,
+        )
+        body.addStatement(
+            "return if (stream.available() - baseOffset >= total) %T.Complete(total) else %T.NeedsMoreData",
+            PEEK_RESULT_CN,
+            PEEK_RESULT_CN,
+        )
+        builder.addCode(body.build())
     }
 
     private fun appendDecodeLengthPrefixed(
@@ -908,16 +1227,20 @@ internal class CodecEmitter(
         )
     }
 
-    private fun classifyVariantWireSize(shape: CodecShape): VariantWireSize =
-        when (shape.fields.lastOrNull()) {
+    private fun classifyVariantWireSize(shape: CodecShape): VariantWireSize {
+        // Locked Decision row 19: any `@WhenTrue` field collapses wireSize to
+        // BackPatch — including inside a sealed variant.
+        if (shape.fields.any { it is FieldSpec.Conditional }) return VariantWireSize.BackPatch
+        return when (shape.fields.lastOrNull()) {
             is FieldSpec.LengthPrefixedString -> VariantWireSize.BackPatch
             is FieldSpec.LengthPrefixedMessage -> VariantWireSize.RuntimeExact
             is FieldSpec.Scalar, null -> {
-                val total =
-                    shape.fields.sumOf { (it as FieldSpec.Scalar).wireBytes }
+                val total = shape.fields.sumOf { (it as FieldSpec.Scalar).wireBytes }
                 VariantWireSize.LiteralExact(total)
             }
+            is FieldSpec.Conditional -> VariantWireSize.BackPatch
         }
+    }
 
     private fun buildSealedDispatcherFileSpec(shape: DispatcherShape): FileSpec {
         val codecType =
@@ -1155,12 +1478,35 @@ internal class CodecEmitter(
             val prefixWidth: Int,
             val prefixWireOrder: Endianness,
         ) : FieldSpec
+
+        /**
+         * Stage E — `@WhenTrue` conditional wrapper. Slice 2 supports only
+         * `inner: FieldSpec.Scalar` at natural width (no `@WireBytes`,
+         * no `@WireOrder`); slice 5 widens `inner` to `LengthPrefixedString`
+         * for the MQTT v3 CONNECT optional-field shape.
+         *
+         * `conditionFieldName` is the simple sibling-Boolean form for slice 2
+         * (e.g., `"hasExtra"`). Slice 3 will add the dotted `<sibling>.<property>`
+         * form via a new sealed `ConditionRef` shape; for now we keep the simpler
+         * field carrying just the name.
+         */
+        data class Conditional(
+            override val name: String,
+            val ownerSimpleName: String,
+            val conditionFieldName: String,
+            val nullableTypeName: TypeName,
+            val inner: Scalar,
+        ) : FieldSpec
     }
 
     private enum class ScalarKind(
         val width: Int,
         val isSigned: Boolean,
     ) {
+        // Boolean is a 1-byte scalar with no byte order and no `@WireBytes` narrowing.
+        // Stage E precondition for `@WhenTrue` (Locked Decision row 19 mandates a
+        // `Boolean`-typed source field).
+        Boolean(1, false),
         UByte(1, false),
         UShort(2, false),
         UInt(4, false),
@@ -1182,6 +1528,7 @@ internal class CodecEmitter(
 
         private val SUPPORTED_SCALARS =
             mapOf(
+                "kotlin.Boolean" to ScalarKind.Boolean,
                 "kotlin.UByte" to ScalarKind.UByte,
                 "kotlin.UShort" to ScalarKind.UShort,
                 "kotlin.UInt" to ScalarKind.UInt,

@@ -238,7 +238,11 @@ annotation class WireOrder(
 
 /**
  * Conditional field: only present on the wire when the referenced expression is `true`.
- * The field must be nullable with a default value of `null`.
+ * The field must be nullable. Setting `= null` as the constructor default is conventional
+ * (so the data class can be constructed without naming the field when the predicate
+ * is false) but is **not** enforced — KSP cannot inspect default expression trees, so
+ * any rule the validator can't actually check is not part of the contract
+ * (Locked Decision row 19).
  *
  * ```kotlin
  * @ProtocolMessage
@@ -248,14 +252,20 @@ annotation class WireOrder(
  * )
  * ```
  *
- * Dotted expressions access properties on value class fields:
+ * Dotted expressions access properties on `@JvmInline value class` fields:
  *
  * ```kotlin
  * @WhenTrue("flags.willFlag") val willTopic: String? = null
  * ```
  *
- * @param expression `"fieldName"` for a Boolean field, or `"fieldName.property"` for a
- *   property on a value class field.
+ * Encoder semantics (row 19): when the predicate is `false`, the entire slot is
+ * skipped on the wire (zero bytes written, including any `@LengthPrefixed` prefix).
+ * When the predicate is `true` and the field's value is `null`, encode throws
+ * `EncodeException` with field-path attribution.
+ *
+ * @param expression `"fieldName"` for a sibling `Boolean` field, or
+ *   `"fieldName.property"` where `fieldName` is a sibling `@JvmInline value class`
+ *   exposing a `Boolean`-returning `val` property.
  */
 @Target(AnnotationTarget.VALUE_PARAMETER)
 @Retention(AnnotationRetention.BINARY)
