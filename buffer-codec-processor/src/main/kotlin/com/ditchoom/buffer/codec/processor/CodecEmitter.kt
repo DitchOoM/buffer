@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.processor
 
+import com.google.devtools.ksp.getAllSuperTypes
 import com.google.devtools.ksp.getDeclaredProperties
 import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.Dependencies
@@ -211,6 +212,7 @@ internal class CodecEmitter(
             if (field is FieldSpec.LengthFromString && index != fields.lastIndex) return null
             if (field is FieldSpec.LengthFromList && index != fields.lastIndex) return null
             if (field is FieldSpec.RemainingBytesScalarList && index != fields.lastIndex) return null
+            if (field is FieldSpec.RemainingBytesPayload && index != fields.lastIndex) return null
         }
 
         val pkg = symbol.packageName.asString()
@@ -273,6 +275,7 @@ internal class CodecEmitter(
         var remainingBytesAnn: KSAnnotation? = null
         var remainingLengthAnn: KSAnnotation? = null
         var wireBytesAnn: KSAnnotation? = null
+        var useCodecAnn: KSAnnotation? = null
         for (ann in param.annotations) {
             when (ann.shortName.asString()) {
                 "WireOrder" -> { /* allowed on scalars */ }
@@ -281,6 +284,7 @@ internal class CodecEmitter(
                 "RemainingBytes" -> remainingBytesAnn = ann
                 "RemainingLength" -> remainingLengthAnn = ann
                 "WireBytes" -> wireBytesAnn = ann
+                "UseCodec" -> useCodecAnn = ann
                 else -> return null
             }
         }
@@ -295,8 +299,13 @@ internal class CodecEmitter(
             // @LengthPrefixed / @WireBytes / @RemainingLength on the SAME
             // parameter (note: `@RemainingLength` on a SIBLING field is
             // expected — the slice 8 MQTT vector pairs them).
+            // Stage H slice 10a — `@RemainingBytes @UseCodec val: P` where
+            // P : Payload routes to RemainingBytesPayload.
             if (lengthFromAnn != null || lengthPrefixed != null || wireBytesAnn != null) return null
             if (remainingLengthAnn != null) return null
+            if (useCodecAnn != null && type.implementsPayload()) {
+                return analyzeRemainingBytesPayloadField(param, type, useCodecAnn, ownerSimpleName)
+            }
             val typeQname = type.declaration.qualifiedName?.asString()
             if (typeQname != "kotlin.collections.List") return null
             return analyzeRemainingBytesScalarListField(param, type, ownerSimpleName)
@@ -685,6 +694,53 @@ internal class CodecEmitter(
      */
     private val REMAINING_BYTES_LIST_ELEMENT_KINDS =
         setOf(ScalarKind.UByte, ScalarKind.Byte)
+
+    /**
+     * Stage H slice 10a — `@RemainingBytes @UseCodec(C::class) val: P`
+     * where `P` extends `com.ditchoom.buffer.codec.Payload` and `C` is
+     * a Kotlin `object` implementing `Codec<P>`. Returns null silently
+     * for shapes the validator rejects (target not an `object`, target
+     * doesn't implement `Codec<P>`); the validator surfaces the
+     * user-facing diagnostic.
+     */
+    private fun analyzeRemainingBytesPayloadField(
+        param: KSValueParameter,
+        type: KSType,
+        useCodecAnn: KSAnnotation,
+        ownerSimpleName: String,
+    ): FieldSpec.RemainingBytesPayload? {
+        val name = param.name?.asString() ?: return null
+        val payloadDecl = type.declaration as? KSClassDeclaration ?: return null
+        val codecKsType =
+            useCodecAnn.arguments
+                .firstOrNull { it.name?.asString() == "codec" }
+                ?.value as? KSType ?: return null
+        val codecDecl = codecKsType.declaration as? KSClassDeclaration ?: return null
+        if (codecDecl.classKind != ClassKind.OBJECT) return null
+        val codecPkg = codecDecl.packageName.asString()
+        val codecSimple = codecDecl.simpleName.asString()
+        return FieldSpec.RemainingBytesPayload(
+            name = name,
+            ownerSimpleName = ownerSimpleName,
+            payloadType = classNameOf(payloadDecl),
+            userCodecType = ClassName(codecPkg, codecSimple),
+        )
+    }
+
+    /**
+     * Stage H slice 10a — does this type implement
+     * `com.ditchoom.buffer.codec.Payload`? Used in `analyzeField` to
+     * route `@RemainingBytes @UseCodec` on a Payload-typed field to
+     * `RemainingBytesPayload` instead of the default
+     * `RemainingBytesScalarList` (which requires a `List<S>` shape).
+     */
+    private fun KSType.implementsPayload(): Boolean {
+        val decl = declaration as? KSClassDeclaration ?: return false
+        if (decl.qualifiedName?.asString() == PAYLOAD_QNAME) return true
+        return decl.getAllSuperTypes().any { st ->
+            st.declaration.qualifiedName?.asString() == PAYLOAD_QNAME
+        }
+    }
 
     /**
      * Stage E slices 2–3 — `@WhenTrue` analysis (Locked Decision row 19).
@@ -1091,6 +1147,7 @@ internal class CodecEmitter(
             is FieldSpec.LengthFromString -> appendDecodeLengthFromString(body, field)
             is FieldSpec.LengthFromList -> appendDecodeLengthFromList(body, field)
             is FieldSpec.RemainingBytesScalarList -> appendDecodeRemainingBytesScalarList(body, field)
+            is FieldSpec.RemainingBytesPayload -> appendDecodeRemainingBytesPayload(body, field)
             is FieldSpec.RemainingLength -> appendDecodeRemainingLength(body, field)
             is FieldSpec.ValueClassScalar -> appendDecodeValueClassScalar(body, field)
             is FieldSpec.Conditional -> appendDecodeConditional(body, field)
@@ -1107,6 +1164,7 @@ internal class CodecEmitter(
                 is FieldSpec.LengthFromString -> appendEncodeLengthFromString(body, field)
                 is FieldSpec.LengthFromList -> appendEncodeLengthFromList(body, field)
                 is FieldSpec.RemainingBytesScalarList -> appendEncodeRemainingBytesScalarList(body, field)
+                is FieldSpec.RemainingBytesPayload -> appendEncodeRemainingBytesPayload(body, field)
                 is FieldSpec.RemainingLength -> appendEncodeRemainingLength(body, field)
                 is FieldSpec.ValueClassScalar -> appendEncodeValueClassScalar(body, field)
                 is FieldSpec.Conditional -> appendEncodeConditional(body, field)
@@ -1160,6 +1218,16 @@ internal class CodecEmitter(
         // Locked Decision row 19: any `@WhenTrue` field collapses the message
         // wireSize to BackPatch — we don't attempt conditional-Exact arithmetic.
         if (shape.fields.any { it is FieldSpec.Conditional }) {
+            builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+            return builder.build()
+        }
+        // Stage H slice 10a: a `@RemainingBytes @UseCodec val: P` field's
+        // wireSize comes from the user codec, which may be Exact or
+        // BackPatch. Slice 10a takes the conservative BackPatch path
+        // unconditionally — promoting to runtime-Exact-via-cast (mirroring
+        // LengthPrefixedMessage) is a follow-on once we have a vector
+        // where the size optimization actually matters.
+        if (shape.fields.any { it is FieldSpec.RemainingBytesPayload }) {
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
             return builder.build()
         }
@@ -1224,6 +1292,12 @@ internal class CodecEmitter(
                     elementWidth,
                 )
             }
+            is FieldSpec.RemainingBytesPayload ->
+                error(
+                    "RemainingBytesPayload terminal shape should be handled by the BackPatch " +
+                        "early-return at the top of buildWireSizeFun; reaching this branch " +
+                        "indicates a missed early return.",
+                )
             is FieldSpec.RemainingLength ->
                 error(
                     "RemainingLength terminal shape should be handled by the early-return at the " +
@@ -1275,6 +1349,15 @@ internal class CodecEmitter(
         // must use outer-protocol framing (e.g., MQTT's fixed-header
         // remaining-length) to determine the bounded read.
         if (shape.fields.any { it is FieldSpec.RemainingBytesScalarList }) {
+            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+            return builder.build()
+        }
+        // Slice 10a — same NoFraming collapse for `@RemainingBytes
+        // @UseCodec val: P`. Body byte count is whatever the user codec
+        // reads against the caller-set limit; slice 10d's outer
+        // dispatcher will own peek by reading the fixed header's
+        // remaining-length first.
+        if (shape.fields.any { it is FieldSpec.RemainingBytesPayload }) {
             builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
             return builder.build()
         }
@@ -1482,6 +1565,11 @@ internal class CodecEmitter(
                 is FieldSpec.RemainingBytesScalarList ->
                     error(
                         "RemainingBytesScalarList should be handled by buildPeekFrameFun's " +
+                            "upfront NoFraming short-circuit before reaching the sequential walk.",
+                    )
+                is FieldSpec.RemainingBytesPayload ->
+                    error(
+                        "RemainingBytesPayload should be handled by buildPeekFrameFun's " +
                             "upfront NoFraming short-circuit before reaching the sequential walk.",
                     )
                 is FieldSpec.RemainingLength ->
@@ -2374,6 +2462,44 @@ internal class CodecEmitter(
     }
 
     /**
+     * Stage H slice 10a — emit decode for
+     * `@RemainingBytes @UseCodec(C::class) val: P`. Delegates to the
+     * user-supplied `C.decode(buffer, context)` against whatever
+     * `buffer.limit()` already says — same caller-bounds-buffer contract
+     * as `RemainingBytesScalarList`. The outer dispatcher (slice 10d
+     * for MQTT) sets the limit before calling this codec.
+     */
+    private fun appendDecodeRemainingBytesPayload(
+        body: CodeBlock.Builder,
+        field: FieldSpec.RemainingBytesPayload,
+    ) {
+        body.addStatement(
+            "val %L = %T.decode(buffer, context)",
+            field.name,
+            field.userCodecType,
+        )
+    }
+
+    /**
+     * Stage H slice 10a — emit encode for
+     * `@RemainingBytes @UseCodec(C::class) val: P`. Delegates to the
+     * user-supplied `C.encode(buffer, value.<name>, context)`. No length
+     * carrier on the wire — the user codec writes its bytes against the
+     * buffer's current position and the trust contract (row 16) leaves
+     * total-byte-count consistency to the outer dispatcher.
+     */
+    private fun appendEncodeRemainingBytesPayload(
+        body: CodeBlock.Builder,
+        field: FieldSpec.RemainingBytesPayload,
+    ) {
+        body.addStatement(
+            "%T.encode(buffer, value.%L, context)",
+            field.userCodecType,
+            field.name,
+        )
+    }
+
+    /**
      * Stage G slice 7b — emit decode for `@RemainingBytes val: List<S>`
      * where `S` is a single-byte scalar. Loops `while (buffer.position()
      * < buffer.limit())` reading the per-element scalar; the caller is
@@ -2890,6 +3016,10 @@ internal class CodecEmitter(
         // buildWireSizeFun); the dispatcher size table needs to know not to
         // attempt a literal sum.
         if (shape.fields.any { it is FieldSpec.LengthPrefixedString }) return VariantWireSize.BackPatch
+        // Slice 10a: same BackPatch classification — variant codec's own
+        // wireSize is BackPatch (see buildWireSizeFun's RemainingBytesPayload
+        // early-return); the dispatcher must skip the runtime-Exact cast.
+        if (shape.fields.any { it is FieldSpec.RemainingBytesPayload }) return VariantWireSize.BackPatch
         return when (shape.fields.lastOrNull()) {
             is FieldSpec.LengthPrefixedMessage -> VariantWireSize.RuntimeExact
             // Slice 4: a LengthFromString variant's body byte count is the
@@ -2911,6 +3041,11 @@ internal class CodecEmitter(
             is FieldSpec.Scalar, is FieldSpec.ValueClassScalar, null ->
                 VariantWireSize.LiteralExact(shape.fields.sumOfFixedWireBytes())
             is FieldSpec.LengthPrefixedString, is FieldSpec.Conditional -> VariantWireSize.BackPatch
+            // Slice 10a: handled by the upfront BackPatch short-circuit; this
+            // branch is unreachable because the early return collapses any
+            // shape carrying a RemainingBytesPayload field before the
+            // terminal-shape `when` runs.
+            is FieldSpec.RemainingBytesPayload -> VariantWireSize.BackPatch
         }
     }
 
@@ -3408,6 +3543,32 @@ internal class CodecEmitter(
         ) : FieldSpec
 
         /**
+         * Stage H slice 10a — `@RemainingBytes @UseCodec(C::class) val:
+         * P` where `P` extends `com.ditchoom.buffer.codec.Payload` and
+         * `C` is a Kotlin `object` implementing `Codec<P>`. Decode
+         * delegates to `C.decode(buffer, context)` against the bounded
+         * buffer; encode delegates to `C.encode(buffer, value.<name>,
+         * context)`. Same caller-bounds-buffer contract as
+         * `RemainingBytesScalarList`: an outer dispatcher (slice 10d
+         * for MQTT) sets `buffer.limit()` to bound the payload region
+         * before this codec runs.
+         *
+         * Slice 10a narrow: terminal-only (no fields after the
+         * payload), no generics on the outer message (slice 10b),
+         * concrete `Payload`-typed field (no `<P : Payload>`
+         * type parameter), no `Partial` decode pattern (slice 10c),
+         * no aggregator (slice 10d), no `expect`/`actual` resolution
+         * across platforms (slice 10e — single-platform `object`
+         * declaration only).
+         */
+        data class RemainingBytesPayload(
+            override val name: String,
+            val ownerSimpleName: String,
+            val payloadType: ClassName,
+            val userCodecType: ClassName,
+        ) : FieldSpec
+
+        /**
          * Stage G slice 7a — `@LengthFrom("siblingField") val: List<T>`
          * where `T` is a `@ProtocolMessage data class`. The sibling
          * provides the body byte count; the decoder bounds the buffer
@@ -3669,6 +3830,7 @@ internal class CodecEmitter(
 
     private companion object {
         private const val PROTOCOL_MESSAGE_QNAME = "com.ditchoom.buffer.codec.annotations.ProtocolMessage"
+        private const val PAYLOAD_QNAME = "com.ditchoom.buffer.codec.Payload"
 
         private val SUPPORTED_SCALARS =
             mapOf(

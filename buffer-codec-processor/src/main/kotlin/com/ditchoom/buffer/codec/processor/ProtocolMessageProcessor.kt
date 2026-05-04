@@ -152,6 +152,7 @@ class ProtocolMessageProcessor(
             validateLengthFrom(symbol, ctor.parameters)
             validateWireBytes(symbol, ctor.parameters)
             validateWhenTrue(symbol, ctor.parameters)
+            validateUseCodec(symbol, ctor.parameters, payloadType)
             emitter.tryEmit(symbol)
         }
         return deferred
@@ -901,6 +902,163 @@ class ProtocolMessageProcessor(
         return returnType.declaration.qualifiedName?.asString() == "kotlin.Int"
     }
 
+    /**
+     * Stage H slice 10a — `@UseCodec` shape validation.
+     *
+     * For slice 10a, the only supported composition is
+     * `@RemainingBytes @UseCodec(C::class) val: P` where `P` extends
+     * `com.ditchoom.buffer.codec.Payload` and `C` is a Kotlin `object`
+     * implementing `Codec<P>`. Other compositions
+     * (`@LengthFrom @UseCodec`, `@LengthPrefixed @UseCodec`, no-framing-
+     * annotation `@UseCodec`) are deferred to later slices and produce
+     * an explicit "not yet supported" diagnostic so the user isn't left
+     * with silent emit failure.
+     *
+     * Diagnostics:
+     *   - `@UseCodec` target is not a Kotlin `object` declaration.
+     *   - `@UseCodec` target object does not implement `Codec<T>` where
+     *     `T` matches the bound field's type.
+     *   - Field type extends `Payload` but the parameter has no
+     *     `@UseCodec` annotation (no codec can be emitted).
+     *   - `@UseCodec` paired with a non-`@RemainingBytes` framing
+     *     annotation, or with no framing annotation at all (slice 10a
+     *     supports only `@RemainingBytes @UseCodec` on a Payload-typed
+     *     field).
+     */
+    private fun validateUseCodec(
+        owner: KSClassDeclaration,
+        parameters: List<KSValueParameter>,
+        payloadType: KSType,
+    ) {
+        val ownerName = owner.qualifiedName?.asString() ?: owner.simpleName.asString()
+        for (param in parameters) {
+            val fieldName = param.name?.asString() ?: "<unknown>"
+            val fieldType = param.type.resolve()
+            if (fieldType.isError) continue
+            val useCodec =
+                param.annotations.firstOrNull { ann ->
+                    ann.shortName.asString() == USE_CODEC_SHORT &&
+                        ann.annotationType
+                            .resolve()
+                            .declaration.qualifiedName
+                            ?.asString() == USE_CODEC_QNAME
+                }
+            val isPayloadField = !fieldType.isMarkedNullable && payloadType.isAssignableFrom(fieldType)
+            if (isPayloadField && useCodec == null) {
+                logger.error(
+                    "@ProtocolMessage field $ownerName.$fieldName has type extending " +
+                        "`com.ditchoom.buffer.codec.Payload` but no `@UseCodec`. The codec " +
+                        "emitter has no way to read or write a Payload-typed field without a " +
+                        "user-supplied `Codec<T>` reference. Add `@UseCodec(SomeCodec::class)` " +
+                        "naming a Kotlin `object` that implements `Codec<${fieldType.declaration.simpleName.asString()}>`.",
+                    param,
+                )
+                continue
+            }
+            if (useCodec == null) continue
+
+            val hasRemainingBytes =
+                param.annotations.any { ann ->
+                    ann.shortName.asString() == REMAINING_BYTES_SHORT &&
+                        ann.annotationType
+                            .resolve()
+                            .declaration.qualifiedName
+                            ?.asString() == REMAINING_BYTES_QNAME
+                }
+            val hasOtherFraming =
+                param.annotations.any { ann ->
+                    val n = ann.shortName.asString()
+                    val q =
+                        ann.annotationType
+                            .resolve()
+                            .declaration.qualifiedName
+                            ?.asString()
+                    (n == LENGTH_FROM_SHORT && q == LENGTH_FROM_QNAME) ||
+                        n == "LengthPrefixed"
+                }
+            if (!hasRemainingBytes || hasOtherFraming) {
+                logger.error(
+                    "@UseCodec on $ownerName.$fieldName is not yet supported in slice 10a. " +
+                        "Slice 10a only emits `@RemainingBytes @UseCodec val: P` where `P` " +
+                        "extends `com.ditchoom.buffer.codec.Payload`. Other compositions " +
+                        "(`@LengthFrom @UseCodec`, `@LengthPrefixed @UseCodec`, bare `@UseCodec` " +
+                        "with no framing annotation) are deferred to later Stage H slices.",
+                    param,
+                )
+                continue
+            }
+            if (!isPayloadField) {
+                val displayed = fieldType.declaration.qualifiedName?.asString() ?: "<unresolved>"
+                logger.error(
+                    "@RemainingBytes @UseCodec on $ownerName.$fieldName requires the bound " +
+                        "field's type to extend `com.ditchoom.buffer.codec.Payload`, but it " +
+                        "is `$displayed`. Slice 10a's typed-payload path is the only " +
+                        "`@UseCodec` composition wired up — wrap the value in a `Payload`-" +
+                        "tagged type or wait for a later slice that lifts this restriction.",
+                    param,
+                )
+                continue
+            }
+
+            val codecKsType =
+                useCodec.arguments
+                    .firstOrNull { it.name?.asString() == "codec" }
+                    ?.value as? KSType
+            if (codecKsType == null || codecKsType.isError) continue
+            val codecDecl = codecKsType.declaration as? KSClassDeclaration ?: continue
+            val codecName = codecDecl.qualifiedName?.asString() ?: codecDecl.simpleName.asString()
+            if (codecDecl.classKind != ClassKind.OBJECT) {
+                logger.error(
+                    "@UseCodec($codecName::class) on $ownerName.$fieldName references " +
+                        "`$codecName`, which is not a Kotlin `object` declaration. The codec " +
+                        "emitter calls `$codecName.decode(...)` directly, which requires the " +
+                        "target to be an object. Convert the declaration to `object $codecName " +
+                        ": Codec<${fieldType.declaration.simpleName.asString()}>`.",
+                    param,
+                )
+                continue
+            }
+            if (!implementsCodecOf(codecDecl, fieldType)) {
+                val expectedSimpleName = fieldType.declaration.simpleName.asString()
+                logger.error(
+                    "@UseCodec($codecName::class) on $ownerName.$fieldName references object " +
+                        "`$codecName`, which does not implement `com.ditchoom.buffer.codec.Codec<" +
+                        "$expectedSimpleName>`. The emitter calls `$codecName.decode(...)` and " +
+                        "`$codecName.encode(...)` against the bound field's declared type; the " +
+                        "object must satisfy the `Codec<$expectedSimpleName>` contract.",
+                    param,
+                )
+            }
+        }
+    }
+
+    /**
+     * Stage H slice 10a — does `codecDecl` implement
+     * `com.ditchoom.buffer.codec.Codec<T>` where `T == fieldType`?
+     * Walks the object's full super-type set and compares the single
+     * type argument's qualified name and nullability against the bound
+     * field's resolved type.
+     *
+     * Conservative match: requires fully-resolved type args. Returns
+     * `false` for error types (KSP unresolved imports), letting the
+     * caller decide whether to skip silently or surface a diagnostic.
+     */
+    private fun implementsCodecOf(
+        codecDecl: KSClassDeclaration,
+        fieldType: KSType,
+    ): Boolean {
+        val expectedQname = fieldType.declaration.qualifiedName?.asString() ?: return false
+        for (st in codecDecl.superTypes) {
+            val resolved = st.resolve()
+            if (resolved.isError) continue
+            if (resolved.declaration.qualifiedName?.asString() != CODEC_QNAME) continue
+            val arg = resolved.arguments.firstOrNull()?.type?.resolve() ?: continue
+            if (arg.isError) continue
+            if (arg.declaration.qualifiedName?.asString() == expectedQname) return true
+        }
+        return false
+    }
+
     private fun walkType(
         type: KSType,
         owner: KSClassDeclaration,
@@ -981,6 +1139,11 @@ class ProtocolMessageProcessor(
         private const val DISPATCH_VALUE_SHORT = "DispatchValue"
         private const val WHEN_TRUE_QNAME = "com.ditchoom.buffer.codec.annotations.WhenTrue"
         private const val WHEN_TRUE_SHORT = "WhenTrue"
+        private const val USE_CODEC_QNAME = "com.ditchoom.buffer.codec.annotations.UseCodec"
+        private const val USE_CODEC_SHORT = "UseCodec"
+        private const val REMAINING_BYTES_QNAME = "com.ditchoom.buffer.codec.annotations.RemainingBytes"
+        private const val REMAINING_BYTES_SHORT = "RemainingBytes"
+        private const val CODEC_QNAME = "com.ditchoom.buffer.codec.Codec"
         private const val BOOLEAN_QNAME = "kotlin.Boolean"
         private const val STRING_QNAME = "kotlin.String"
         private const val LIST_QNAME = "kotlin.collections.List"

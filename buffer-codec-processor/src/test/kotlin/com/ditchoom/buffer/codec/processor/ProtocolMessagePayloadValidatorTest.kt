@@ -61,18 +61,45 @@ class ProtocolMessagePayloadValidatorTest {
 
     @Test
     fun doesNotFireWhenFieldExtendsPayload() {
+        // Slice 10a tightened the contract: a Payload-typed field with no
+        // resolution mechanism (no `@UseCodec`) is a hard error, not a
+        // silent skip. The §8 short-circuit assertion still holds when the
+        // field uses the slice 10a composition `@RemainingBytes
+        // @UseCodec(...)` against a user-supplied Codec object — the walk
+        // halts at the Payload marker before descending into OpaqueBlob's
+        // ByteArray inner.
         val result =
             compile(
                 """
                 package test
 
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.Codec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
                 import com.ditchoom.buffer.codec.Payload
+                import com.ditchoom.buffer.codec.WireSize
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.RemainingBytes
+                import com.ditchoom.buffer.codec.annotations.UseCodec
 
                 data class OpaqueBlob(val bytes: ByteArray) : Payload
 
+                object OpaqueBlobCodec : Codec<OpaqueBlob> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): OpaqueBlob =
+                        OpaqueBlob(buffer.readByteArray(buffer.remaining()))
+                    override fun encode(buffer: WriteBuffer, value: OpaqueBlob, context: EncodeContext) {
+                        buffer.writeBytes(value.bytes)
+                    }
+                    override fun wireSize(value: OpaqueBlob, context: EncodeContext): WireSize =
+                        WireSize.Exact(value.bytes.size)
+                }
+
                 @ProtocolMessage
-                data class ChunkWithPayloadField(val body: OpaqueBlob)
+                data class ChunkWithPayloadField(
+                    @RemainingBytes @UseCodec(OpaqueBlobCodec::class) val body: OpaqueBlob,
+                )
                 """.trimIndent(),
             )
         // The Payload short-circuit must fire BEFORE we descend into OpaqueBlob's
