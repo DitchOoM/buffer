@@ -198,14 +198,14 @@ internal class CodecEmitter(
                 analyzeField(param, messageWireOrder, ownerSimpleName, isTerminal, params, index) ?: return null
             fields += field
         }
-        // Slice 4 restriction (still in force): LengthFromString is terminal-only.
-        // Its non-adjacent placement is by doctrine row 18, and the slice 4 emit
-        // path doesn't need a non-terminal variant for any in-scope vector.
-        // Slice 5b lifts the prior non-terminal-Conditional restriction — the
-        // sequential peek walk handles arbitrary positions, and decode/encode
-        // are inherently sequential.
+        // Slice 4 / 7a restriction (still in force): LengthFromString and
+        // LengthFromList are terminal-only — their bodies consume a sibling-
+        // bounded byte range and emit logic doesn't yet model trailing fields
+        // after a variable-length list. Slice 5b lifted the
+        // non-terminal-Conditional restriction.
         for ((index, field) in fields.withIndex()) {
             if (field is FieldSpec.LengthFromString && index != fields.lastIndex) return null
+            if (field is FieldSpec.LengthFromList && index != fields.lastIndex) return null
         }
 
         val pkg = symbol.packageName.asString()
@@ -281,19 +281,34 @@ internal class CodecEmitter(
         if (type.isMarkedNullable) return null
 
         if (lengthFromAnn != null) {
-            // Stage E slice 4 — `@LengthFrom("siblingField") val: String`.
-            // Mutually exclusive with `@LengthPrefixed` / `@WireBytes` on the
-            // same parameter; the validator rejects the combinations the
-            // emitter doesn't model. R1 (adjacent-LF migration suggestion) is
-            // independent of this analyzer branch.
+            // Stage E slice 4 / Stage G slice 7a — `@LengthFrom` field types:
+            //   - `String` (slice 4): body is a single UTF-8 string sized by sibling.
+            //   - `List<T>` where T is a `@ProtocolMessage data class` (slice 7a):
+            //     body is a sequence of nested messages, byte-bounded by sibling.
+            // Mutually exclusive with `@LengthPrefixed` / `@WireBytes` on the same
+            // parameter. R1 (adjacent-LF migration suggestion) is independent.
             if (lengthPrefixed != null || wireBytesAnn != null) return null
-            return analyzeLengthFromStringField(
-                param = param,
-                lengthFromAnn = lengthFromAnn,
-                ownerSimpleName = ownerSimpleName,
-                params = params,
-                index = index,
-            )
+            val typeQname = type.declaration.qualifiedName?.asString()
+            return when (typeQname) {
+                "kotlin.String" ->
+                    analyzeLengthFromStringField(
+                        param = param,
+                        lengthFromAnn = lengthFromAnn,
+                        ownerSimpleName = ownerSimpleName,
+                        params = params,
+                        index = index,
+                    )
+                "kotlin.collections.List" ->
+                    analyzeLengthFromListField(
+                        param = param,
+                        listType = type,
+                        lengthFromAnn = lengthFromAnn,
+                        ownerSimpleName = ownerSimpleName,
+                        params = params,
+                        index = index,
+                    )
+                else -> null
+            }
         }
 
         if (lengthPrefixed != null) {
@@ -491,6 +506,67 @@ internal class CodecEmitter(
 
     private val PEEKABLE_LENGTH_FROM_SIBLING_KINDS =
         setOf(ScalarKind.UByte, ScalarKind.Byte, ScalarKind.UShort, ScalarKind.UInt)
+
+    /**
+     * Stage G slice 7a — `@LengthFrom("siblingField") val: List<T>`
+     * where `T` is a `@ProtocolMessage data class`. Same sibling-
+     * resolution rules as `analyzeLengthFromStringField`; the
+     * difference is the bound field's wire shape (variable-count
+     * sequence of nested-message bodies vs. single UTF-8 string).
+     *
+     * Returns null silently for shapes the validator doesn't
+     * accept yet — non-`@ProtocolMessage` element type, value-class
+     * sibling, signed-multi-byte sibling.
+     */
+    private fun analyzeLengthFromListField(
+        param: KSValueParameter,
+        listType: KSType,
+        lengthFromAnn: KSAnnotation,
+        ownerSimpleName: String,
+        params: List<KSValueParameter>,
+        index: Int,
+    ): FieldSpec.LengthFromList? {
+        val name = param.name?.asString() ?: return null
+        val typeArgs = listType.arguments
+        if (typeArgs.size != 1) return null
+        val elementType = typeArgs[0].type?.resolve() ?: return null
+        if (elementType.isError || elementType.isMarkedNullable) return null
+        val elementDecl = elementType.declaration as? KSClassDeclaration ?: return null
+        if (Modifier.DATA !in elementDecl.modifiers) return null
+        val isProtocolMessage =
+            elementDecl.annotations.any { ann ->
+                ann.shortName.asString() == "ProtocolMessage" &&
+                    ann.annotationType
+                        .resolve()
+                        .declaration.qualifiedName
+                        ?.asString() == PROTOCOL_MESSAGE_QNAME
+            }
+        if (!isProtocolMessage) return null
+
+        val referenced =
+            lengthFromAnn.arguments
+                .firstOrNull { it.name?.asString() == "field" }
+                ?.value as? String ?: return null
+        val sibling = locatePriorSibling(referenced, params, index) ?: return null
+        val siblingType = sibling.type.resolve()
+        if (siblingType.isError || siblingType.isMarkedNullable) return null
+        val siblingQname = siblingType.declaration.qualifiedName?.asString() ?: return null
+        val siblingKind = SUPPORTED_SCALARS[siblingQname] ?: return null
+        if (siblingKind !in PEEKABLE_LENGTH_FROM_SIBLING_KINDS) return null
+
+        return FieldSpec.LengthFromList(
+            name = name,
+            ownerSimpleName = ownerSimpleName,
+            lengthSiblingName = referenced,
+            lengthSiblingKind = siblingKind,
+            elementClassName = classNameOf(elementDecl),
+            elementCodecClassName =
+                ClassName(
+                    elementDecl.packageName.asString(),
+                    "${elementDecl.simpleName.asString()}Codec",
+                ),
+        )
+    }
 
     /**
      * Stage E slices 2–3 — `@WhenTrue` analysis (Locked Decision row 19).
@@ -861,6 +937,7 @@ internal class CodecEmitter(
                 is FieldSpec.LengthPrefixedMessage -> appendDecodeLengthPrefixed(body, field)
                 is FieldSpec.LengthPrefixedString -> appendDecodeLengthPrefixedString(body, field)
                 is FieldSpec.LengthFromString -> appendDecodeLengthFromString(body, field)
+                is FieldSpec.LengthFromList -> appendDecodeLengthFromList(body, field)
                 is FieldSpec.ValueClassScalar -> appendDecodeValueClassScalar(body, field)
                 is FieldSpec.Conditional -> appendDecodeConditional(body, field)
             }
@@ -885,6 +962,7 @@ internal class CodecEmitter(
                 is FieldSpec.LengthPrefixedMessage -> appendEncodeLengthPrefixed(body, field)
                 is FieldSpec.LengthPrefixedString -> appendEncodeLengthPrefixedString(body, field)
                 is FieldSpec.LengthFromString -> appendEncodeLengthFromString(body, field)
+                is FieldSpec.LengthFromList -> appendEncodeLengthFromList(body, field)
                 is FieldSpec.ValueClassScalar -> appendEncodeValueClassScalar(body, field)
                 is FieldSpec.Conditional -> appendEncodeConditional(body, field)
             }
@@ -946,6 +1024,19 @@ internal class CodecEmitter(
                 // fixed prefix bytes + sibling value.toInt(). Exact
                 // is preferred over BackPatch because no measurement
                 // is needed; the caller can size buffers exactly.
+                val prefixBytes = scalarHeaderBytes(shape)
+                builder.addStatement(
+                    "return %T.Exact(%L + value.%L.toInt())",
+                    WIRE_SIZE_CN,
+                    prefixBytes,
+                    terminal.lengthSiblingName,
+                )
+            }
+            is FieldSpec.LengthFromList -> {
+                // Slice 7a — same Exact shape as LengthFromString: the
+                // body byte count is the sibling's value, and the user
+                // is responsible for `value.<sibling>` matching the sum
+                // of element wireSizes.
                 val prefixBytes = scalarHeaderBytes(shape)
                 builder.addStatement(
                     "return %T.Exact(%L + value.%L.toInt())",
@@ -1071,26 +1162,22 @@ internal class CodecEmitter(
                         prefixWidth = field.prefixWidth,
                         prefixWireOrder = field.prefixWireOrder,
                     )
-                is FieldSpec.LengthFromString -> {
-                    appendLengthFromIntMaxGuard(
+                is FieldSpec.LengthFromString ->
+                    appendSequentialPeekLengthFrom(
                         body = body,
-                        siblingAccessor = field.lengthSiblingName,
-                        siblingKind = field.lengthSiblingKind,
+                        name = field.name,
                         ownerSimpleName = field.ownerSimpleName,
-                        fieldName = field.name,
+                        siblingName = field.lengthSiblingName,
+                        siblingKind = field.lengthSiblingKind,
                     )
-                    body.addStatement(
-                        "val %LBytes = %L.toInt()",
-                        field.name,
-                        field.lengthSiblingName,
+                is FieldSpec.LengthFromList ->
+                    appendSequentialPeekLengthFrom(
+                        body = body,
+                        name = field.name,
+                        ownerSimpleName = field.ownerSimpleName,
+                        siblingName = field.lengthSiblingName,
+                        siblingKind = field.lengthSiblingKind,
                     )
-                    body.addStatement(
-                        "if (stream.available() - baseOffset < __offset + %LBytes) return %T.NeedsMoreData",
-                        field.name,
-                        PEEK_RESULT_CN,
-                    )
-                    body.addStatement("__offset += %LBytes", field.name)
-                }
                 is FieldSpec.Conditional ->
                     appendSequentialPeekConditional(body, field)
             }
@@ -1120,6 +1207,7 @@ internal class CodecEmitter(
                             is ConditionRef.ValueClassProperty -> c.siblingName
                         }
                 is FieldSpec.LengthFromString -> sources += field.lengthSiblingName
+                is FieldSpec.LengthFromList -> sources += field.lengthSiblingName
                 else -> { /* not a source */ }
             }
         }
@@ -1173,6 +1261,40 @@ internal class CodecEmitter(
             prefixWidth,
             prefixVar,
         )
+    }
+
+    /**
+     * Slice 5a / 7a — peek a `@LengthFrom`-style slot (terminal
+     * `LengthFromString` or `LengthFromList`) inside the sequential
+     * walk. The sibling local was peek-stashed earlier (because the
+     * sibling is in `needsPeekStash`); apply the Int.MAX_VALUE guard
+     * and advance the running offset by the sibling's value.
+     */
+    private fun appendSequentialPeekLengthFrom(
+        body: CodeBlock.Builder,
+        name: String,
+        ownerSimpleName: String,
+        siblingName: String,
+        siblingKind: ScalarKind,
+    ) {
+        appendLengthFromIntMaxGuard(
+            body = body,
+            siblingAccessor = siblingName,
+            siblingKind = siblingKind,
+            ownerSimpleName = ownerSimpleName,
+            fieldName = name,
+        )
+        body.addStatement(
+            "val %LBytes = %L.toInt()",
+            name,
+            siblingName,
+        )
+        body.addStatement(
+            "if (stream.available() - baseOffset < __offset + %LBytes) return %T.NeedsMoreData",
+            name,
+            PEEK_RESULT_CN,
+        )
+        body.addStatement("__offset += %LBytes", name)
     }
 
     /**
@@ -1862,6 +1984,72 @@ internal class CodecEmitter(
         )
     }
 
+    /**
+     * Stage G slice 7a — emit decode for `@LengthFrom("siblingField")
+     * val: List<T>`. Bounds the buffer via `setLimit` to the
+     * sibling-derived byte count, loops reading elements via the
+     * element codec until the bounded position is reached, restores
+     * the outer limit. The `try`/`finally` guarantees limit
+     * restoration even if an element decode throws.
+     *
+     * Generated shape:
+     * ```
+     * <Int.MAX_VALUE guard for the sibling kind, if needed>
+     * val <name>Bytes = <sibling>.toInt()
+     * val <name>OuterLimit = buffer.limit()
+     * buffer.setLimit(buffer.position() + <name>Bytes)
+     * val <name> = mutableListOf<ElementType>()
+     * try {
+     *     while (buffer.position() < buffer.limit()) {
+     *         <name> += ElementCodec.decode(buffer, context)
+     *     }
+     * } finally {
+     *     buffer.setLimit(<name>OuterLimit)
+     * }
+     * ```
+     */
+    private fun appendDecodeLengthFromList(
+        body: CodeBlock.Builder,
+        field: FieldSpec.LengthFromList,
+    ) {
+        appendLengthFromIntMaxGuard(
+            body = body,
+            siblingAccessor = field.lengthSiblingName,
+            siblingKind = field.lengthSiblingKind,
+            ownerSimpleName = field.ownerSimpleName,
+            fieldName = field.name,
+        )
+        val bytesVar = "${field.name}Bytes"
+        val outerLimitVar = "${field.name}OuterLimit"
+        body.addStatement("val %L = %L.toInt()", bytesVar, field.lengthSiblingName)
+        body.addStatement("val %L = buffer.limit()", outerLimitVar)
+        body.addStatement("buffer.setLimit(buffer.position() + %L)", bytesVar)
+        body.addStatement("val %L = mutableListOf<%T>()", field.name, field.elementClassName)
+        body.beginControlFlow("try")
+        body.beginControlFlow("while (buffer.position() < buffer.limit())")
+        body.addStatement("%L += %T.decode(buffer, context)", field.name, field.elementCodecClassName)
+        body.endControlFlow()
+        body.nextControlFlow("finally")
+        body.addStatement("buffer.setLimit(%L)", outerLimitVar)
+        body.endControlFlow()
+    }
+
+    /**
+     * Stage G slice 7a — emit encode for `@LengthFrom("siblingField")
+     * val: List<T>`. Iterates the list and writes each element via
+     * the element codec. The user is responsible for keeping
+     * `value.<sibling>` consistent with the sum of element wire
+     * sizes (same row-16 trust contract as the LengthFromString
+     * encode path).
+     */
+    private fun appendEncodeLengthFromList(
+        body: CodeBlock.Builder,
+        field: FieldSpec.LengthFromList,
+    ) {
+        body.beginControlFlow("for (__elem in value.%L)", field.name)
+        body.addStatement("%T.encode(buffer, __elem, context)", field.elementCodecClassName)
+        body.endControlFlow()
+    }
 
     /**
      * Slice 4 / 5a — order-aware single-scalar peek for the prefix
@@ -2259,6 +2447,8 @@ internal class CodecEmitter(
             // the variant codec's wireSize, which is already Exact for this
             // shape.
             is FieldSpec.LengthFromString -> VariantWireSize.RuntimeExact
+            // Slice 7a: same Exact-via-sibling shape as LengthFromString.
+            is FieldSpec.LengthFromList -> VariantWireSize.RuntimeExact
             is FieldSpec.Scalar, is FieldSpec.ValueClassScalar, null ->
                 VariantWireSize.LiteralExact(shape.fields.sumOfFixedWireBytes())
             is FieldSpec.LengthPrefixedString, is FieldSpec.Conditional -> VariantWireSize.BackPatch
@@ -2713,6 +2903,31 @@ internal class CodecEmitter(
             val ownerSimpleName: String,
             val prefixWidth: Int,
             val prefixWireOrder: Endianness,
+        ) : FieldSpec
+
+        /**
+         * Stage G slice 7a — `@LengthFrom("siblingField") val: List<T>`
+         * where `T` is a `@ProtocolMessage data class`. The sibling
+         * provides the body byte count; the decoder bounds the buffer
+         * via `setLimit` and reads elements via the element's own
+         * codec until the bounded position is reached.
+         *
+         * Encode iterates the list and writes each element via the
+         * element codec; the user is responsible for keeping the
+         * sibling consistent with the encoded byte count (same row 16
+         * trust contract as `LengthFromString`).
+         *
+         * Slice 7a narrow: element must be a `@ProtocolMessage data
+         * class`. List of scalar (`List<UByte>` / `List<Int>` etc.)
+         * is the slice 7b shape with `@RemainingBytes`.
+         */
+        data class LengthFromList(
+            override val name: String,
+            val ownerSimpleName: String,
+            val lengthSiblingName: String,
+            val lengthSiblingKind: ScalarKind,
+            val elementClassName: ClassName,
+            val elementCodecClassName: ClassName,
         ) : FieldSpec
 
         /**

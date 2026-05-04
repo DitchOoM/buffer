@@ -68,12 +68,13 @@ import com.google.devtools.ksp.validate
  *     narrow — `object` and discriminator-from-context shapes are
  *     deferred).
  *
- *   - **Stage E `@LengthFrom` shape (Locked Decision row 18, slice 4).**
- *     For `@LengthFrom("siblingField") val payload: T`: the bound
- *     field type must be `String` (Stage E's field-type universe per
- *     row 18); the referenced parameter must exist as a sibling
- *     declared before the bound parameter, and must resolve to a
- *     numeric type (`Byte` / `Short` / `Int` / `Long` /
+ *   - **Stage E `@LengthFrom` shape (Locked Decision row 18, slice
+ *     4 + Stage G slice 7a).** For `@LengthFrom("siblingField") val
+ *     payload: T`: the bound field type must be either `String`
+ *     (slice 4) or `List<E>` where `E` is a `@ProtocolMessage data
+ *     class` (slice 7a). The referenced parameter must exist as a
+ *     sibling declared before the bound parameter, and must resolve
+ *     to a numeric type (`Byte` / `Short` / `Int` / `Long` /
  *     `UByte` / `UShort` / `UInt` / `ULong`). Diagnostics list the
  *     numeric `val` siblings declared before the bound field. The
  *     adjacent-`@LengthFrom` migration suggestion (R1) is independent
@@ -641,6 +642,30 @@ class ProtocolMessageProcessor(
         return returnType.declaration.qualifiedName?.asString() == BOOLEAN_QNAME
     }
 
+    /**
+     * Slice 7a — `@LengthFrom` on `List<T>` requires `T` to be a
+     * `@ProtocolMessage data class`. Returns true when `listType`'s
+     * single type argument resolves to such a declaration. Other
+     * element shapes (scalar, value class, non-data class) are
+     * deferred — slice 7b's `@RemainingBytes` is the path for
+     * scalar element lists.
+     */
+    private fun isListOfProtocolMessageDataClass(listType: KSType): Boolean {
+        val typeArgs = listType.arguments
+        if (typeArgs.size != 1) return false
+        val elementType = typeArgs[0].type?.resolve() ?: return false
+        if (elementType.isError || elementType.isMarkedNullable) return false
+        val elementDecl = elementType.declaration as? KSClassDeclaration ?: return false
+        if (Modifier.DATA !in elementDecl.modifiers) return false
+        return elementDecl.annotations.any { ann ->
+            ann.shortName.asString() == "ProtocolMessage" &&
+                ann.annotationType
+                    .resolve()
+                    .declaration.qualifiedName
+                    ?.asString() == PROTOCOL_MESSAGE_QNAME
+        }
+    }
+
     private fun booleanReturningValProperties(decl: KSClassDeclaration): List<String> =
         decl
             .getDeclaredProperties()
@@ -732,15 +757,20 @@ class ProtocolMessageProcessor(
 
             val type = param.type.resolve()
             val typeQname = type.declaration.qualifiedName?.asString()
-            if (typeQname != STRING_QNAME || type.isMarkedNullable) {
+            val isStringType = typeQname == STRING_QNAME && !type.isMarkedNullable
+            val isListOfProtocolMessage =
+                !type.isMarkedNullable &&
+                    typeQname == LIST_QNAME &&
+                    isListOfProtocolMessageDataClass(type)
+            if (!isStringType && !isListOfProtocolMessage) {
                 val displayed = typeQname ?: "<unresolved>"
                 val nullableSuffix = if (type.isMarkedNullable) "?" else ""
                 logger.error(
                     "@LengthFrom(\"$referenced\") on $ownerName.$fieldName requires the bound " +
-                        "field to be a non-nullable `String`, but it is `$displayed$nullableSuffix`. " +
-                        "Locked Decision row 18 limits the Stage E `@LengthFrom` field-type " +
-                        "universe to `String`; `ByteArray`, nested `@ProtocolMessage`, and " +
-                        "`@Payload` slots are deferred to later stages.",
+                        "field to be either a non-nullable `String` or a non-nullable " +
+                        "`List<T>` where `T` is a `@ProtocolMessage data class`, but it is " +
+                        "`$displayed$nullableSuffix`. `ByteArray`, nested `@ProtocolMessage`, " +
+                        "and `@Payload` slots are deferred to later stages.",
                     param,
                 )
                 continue
@@ -885,6 +915,7 @@ class ProtocolMessageProcessor(
         private const val WHEN_TRUE_SHORT = "WhenTrue"
         private const val BOOLEAN_QNAME = "kotlin.Boolean"
         private const val STRING_QNAME = "kotlin.String"
+        private const val LIST_QNAME = "kotlin.collections.List"
         private const val MAX_DEPTH = 16
 
         private val NUMERIC_SCALAR_QNAMES =
