@@ -8,11 +8,11 @@ incremental delta and the open design questions.
 
 ## Branch state
 
-- Branch: `feature/directional-codec`, head `18c6012`. Not pushed.
-- 18 stacked commits since the last `main`-merged commit (`d83a534`).
+- Branch: `feature/directional-codec`, head `5b5d9f9`. Not pushed.
+- 20 stacked commits since the last `main`-merged commit (`d83a534`).
   All commits are individually buildable and individually green.
 - Test counts at head:
-  - `:buffer-codec-test:jvmTest` — 186 tests, all pass.
+  - `:buffer-codec-test:jvmTest` — 187 tests, all pass.
   - `:buffer-codec-processor:test` — 46 tests, all pass.
   - `:buffer-codec-test:jsNodeTest` — pre-existing failure
     (`WavFmtChunkCodecTest.decodeFailsWhenChunkSizeUnderBoundsTheBody`,
@@ -48,6 +48,8 @@ In commit order — see each commit's full message for the design notes:
 | `7b2f00f` | H.10b | Generic-bounded payload slots — `MqttPublishV3<P>` + `Http2DataFrame<P>` |
 | `0660008` | — | Doc: STAGE_H_RESUME briefing for slice 10c (now superseded by this file) |
 | `18c6012` | H.10c | `Partial` decode pattern — `Codec.partial(...)` + `Partial.complete(...)` for typed-payload header decode |
+| `5d878aa` | — | Doc: STAGE_H_RESUME briefing for slice 10d (now superseded by this file) |
+| `5b5d9f9` | H.10d | Generic-aware `@DispatchOn` dispatcher — `Http2Frame<out P : Payload>` absorbing `Http2DataFrame` |
 
 ### Annotation surface as it stands today
 
@@ -206,14 +208,33 @@ design against today's emitter shape.
    (PHASE_9_RESET acceptance #4) — flow can decode headers
    without committing to a payload type at the type-erased
    `Connection<MqttControlPacket<…>>` boundary.
-4. ⏳ **Slice 10d — aggregator + generic-aware sealed dispatcher.**
-   Emit `MqttControlPacketCodec.decode` taking one lambda per
-   payload-bearing variant; missing handler throws with field-path
-   attribution. Lifts `Http2Frame` to `<out P : Payload>` (with
-   `Settings : Http2Frame<Nothing>`) and absorbs the standalone
-   `Http2DataFrame<P>` from slice 10b as a sealed variant.
-   Acceptance #3.
-5. ⏳ **Slice 10e — `@UseCodec` `expect`/`actual` lock + `MqttCodec`
+4. ✅ **Slice 10d (`5b5d9f9`)** — generic-aware `@DispatchOn`
+   dispatcher. `Http2Frame` lifts to `<out P : Payload>`; the
+   absorbed `Data<P : Payload>` variant routes through a
+   constructor-injected `payloadCodec`. `<Nothing>`-typed
+   variants (`Settings`, `Ping`, `WindowUpdate`) are unchanged
+   on the wire and reachable through any `<P>` instantiation
+   via covariance. The lambda-aggregator API and the MqttPacket
+   lift are deferred (see slice 10d.5 / 10f below).
+5. ⏳ **Slice 10d.5 — lambda aggregator API.** PHASE_9_RESET names
+   "`MqttControlPacketCodec.decode` aggregator with throwing-default
+   lambdas across every payload-bearing variant." Slice 10d landed
+   the generic dispatcher; the lambda overload is a separable
+   capability. Today consumers can already get per-call codec
+   selection via `<VariantName>Codec.partial<P>(...)` (slice 10c) +
+   manual discriminator dispatch — the aggregator wraps it in a
+   single call. Land when the smoke test surfaces an ergonomic
+   need.
+6. ⏳ **Slice 10f — `MqttPacket` lift to `<out P : Payload>` with
+   `Publish<P>` variant.** Requires designing how `@RemainingLength`
+   composes with the typed payload field — slice 10c carved this
+   combination out (`shouldEmitPartial` skips shapes carrying
+   `@RemainingLength`). The natural answer is to lift the carve-out
+   too: have `Partial` capture the buffer with the `@RemainingLength`
+   -narrowed limit, run `complete` inside the bound, and restore
+   the outer limit on completion. Land alongside the MQTT lift so
+   the design has a concrete vector.
+7. ⏳ **Slice 10e — `@UseCodec` `expect`/`actual` lock + `MqttCodec`
    alias.** Lock the cross-platform resolution decision (the
    deferred-decisions row "@UseCodec expect/actual resolution path"
    already leans toward "direct call, linker resolves"). Add the
@@ -322,63 +343,64 @@ design against today's emitter shape.
   must land first so the flow can resolve PUBLISH within the
   `MqttControlPacket` sealed.
 
-### Slice 10d open design questions
+### Slice 10d shape — landed
 
-The next session should re-derive these against the current
-emitter shape (the slice 10a/10b/10c emit code, the
-`PayloadCodecSource` and `PayloadTypeParameter` types, the
-`@DispatchOn` aggregator from slice 6, and the `Partial`
-infrastructure). The prior worktree is reference only.
+- **Detection rule.** The dispatcher emits as a generic class
+  iff the sealed parent has exactly one type parameter with
+  `Payload` upper bound (`detectPayloadTypeParameter` — same
+  helper as slice 10b for data classes; reused for sealed
+  parents). Variance (`out P`) is ignored — the helper checks
+  bounds independently of variance, so `<P : Payload>` and
+  `<out P : Payload>` both qualify.
+- **Per-variant generic detection.** Each variant runs through
+  the same `detectPayloadTypeParameter`. A variant with `<P :
+  Payload>` becomes a "generic variant" — the dispatcher
+  constructs `<VariantName>Codec(payloadCodec)` once in the
+  primary constructor, stores it as a private property, and
+  references the field at every emit site. A `<P : Payload>`
+  variant under a non-generic sealed parent is a shape error
+  (the parent has no codec to thread); the analyze path
+  `return null`s silently and the validator surfaces the
+  diagnostic.
+- **Encode `is`-check + cast.** Generic variants smart-cast
+  to their star-projected form (`is Foo.Data<*>`) and then
+  explicit-cast to `Foo.Data<P>` at the variant codec call
+  site (`@Suppress("UNCHECKED_CAST")`). The cast is statically
+  safe by construction: the dispatcher's `value: Foo<P>`
+  matched as `Foo.Data<*>` must be `Foo.Data<R : P>` for some
+  R, which the variant codec's `Codec<P>` accepts via the
+  `out P` covariance on the sealed parent.
+- **Field naming.** `<VariantName>Codec` instance fields use
+  camelCase variant name + `Codec` (`DataCodec` → `dataCodec`).
+  Symmetric with the slice 10b `payloadCodec` convention.
 
-- **Generic-aware sealed dispatch.** Today the slice 6 dispatcher
-  emits `class MqttControlPacketCodec : Codec<MqttControlPacket>`
-  with a `when` over variants. Slice 10d needs the parent to
-  become `<out P : Payload>`: `MqttControlPacket<out P :
-  Payload>`, with payload-bearing variants like `Publish<P> :
-  MqttControlPacket<P>` and payload-free variants like
-  `PingReq : MqttControlPacket<Nothing>`. The dispatcher's
-  generated codec needs a constructor parameter `payloadCodec:
-  Codec<P>` it threads to the typed variants and ignores for
-  the others. Doctrine answer locked while landing 10b said
-  this is the right path; the open question is the emit-time
-  detection: does the validator key off "any direct sealed
-  variant has a `<P : Payload>` type parameter," or off the
-  presence of `@DispatchOn` plus a payload-bearing variant?
-- **Aggregator API.** PHASE_9_RESET names "`MqttControlPacketCodec
-  .decode` aggregator with throwing-default lambdas across every
-  payload-bearing variant." Two emit shapes:
-  (a) `decode(buffer, context, onPublish: (Partial<P>) ->
-  MqttControlPacket<P>, ...)` — one parameter per
-  payload-bearing variant, defaulting to a throwing lambda with
-  field-path attribution per row 17. The user overrides only the
-  variants they expect.
-  (b) `decode(buffer, context, payloadCodec: Codec<P>)` — the
-  generic codec class instance approach (no lambdas; the
-  dispatcher uses the same codec for every payload-bearing
-  variant). Less flexible but matches the slice 10b
-  constructor-injected pattern.
-  Tradeoff: (a) is the PHASE_9_RESET design, (b) is the
-  natural extension of slice 10b.
-- **`Http2Frame` lift to `<out P : Payload>`.** Slice 10b kept
-  `Http2DataFrame<P>` standalone. Slice 10d needs to fold it
-  into `Http2Frame` per the doctrine answer. The other
-  variants (`Settings`, `Headers`, `Continuation`) become
-  `: Http2Frame<Nothing>`. The validator must accept the
-  shape; the emit must produce a generic dispatcher class
-  that threads `payloadCodec: Codec<P>` to the DATA variant
-  and supplies `Codec<Nothing>` (or just ignores) for the
-  others.
-- **`@UseCodec` `expect`/`actual` resolution lock.** Defer to
-  slice 10e; not load-bearing for 10d.
-- **Throwing-default field-path attribution.** Per row 17
-  (`fieldPath` = `"<SealedParentSimpleName>.discriminator"`,
-  `expected` = `"one of {0xNN, …}"`, `actual` = the unexpected
-  byte). For 10d's per-variant default lambdas, the field-path
-  pattern should be `"<SealedParentSimpleName>.<VariantName>"`
-  with `reason` naming the missing handler.
-- **`MqttCodec` convenience alias.** Slice 10e per
-  PHASE_9_RESET — typealias for the dispatcher to ease
-  consumer-facing names. Defer to 10e.
+### Slice 10d.5 / 10f open design questions
+
+The deferred work splits naturally into two independent slices.
+
+**Slice 10d.5 — lambda aggregator.** PHASE_9_RESET wants per-
+variant lambda overloads:
+`decode(buffer, context, onPublish: (PartialOfPublish<P>) ->
+Foo<P>, ...)` with throwing defaults. Today consumers compose
+the equivalent via `<VariantName>Codec.partial<P>(...)` + manual
+discriminator dispatch. The aggregator wraps both in one call.
+Open: lambda return type — does it return the variant
+(`Foo.Publish<P>`) or the parent (`Foo<P>`)? Returning the
+parent is more flexible (consumer can substitute or wrap), but
+defies the discriminator's promise that the result is the
+matched variant.
+
+**Slice 10f — `MqttPacket` lift to `<out P : Payload>` with
+`Publish<P>` variant.** The blocker is `@RemainingLength` +
+typed payload composition (slice 10c carved this out in
+`shouldEmitPartial`). The natural design: lift the slice 10c
+carve-out by having `Partial` capture the buffer with the
+`@RemainingLength`-narrowed limit, run `complete` inside the
+bound, and have `complete` restore the outer limit on
+completion via a try/finally. Open: `Partial` carries the
+captured outer limit as a private field, or recomputes it from
+the bound (less state, more arithmetic). Land alongside the
+MQTT lift so the design has a concrete vector.
 
 ### Existing pieces to compose, not rebuild
 
@@ -456,20 +478,24 @@ take advantage of these. Worth investigating after Stage H stabilises.
 1. Read `PHASE_9_RESET.md` §"Stage H — Payload SAM via MQTT v5
    PUBLISH" for the overall Stage H spec.
 2. Read this file's "Stage H — slice progress" section. Slices
-   10a, 10b, and 10c are landed (`ee7bb81`, `7b2f00f`, `18c6012`);
-   slice 10d (aggregator + generic-aware sealed dispatcher) is
-   next.
-3. Read the actual slice 10c code before designing 10d — the
-   `Partial` nested class, `partial(...)` companion-object entry,
-   and `shouldEmitPartial`/`partialFieldTypeName` helpers are the
-   building blocks the slice 10d aggregator composes with. The
-   slice 6 `@DispatchOn` aggregator dispatcher (the closest
-   analog for the throwing-default lambda pattern) lives in
-   `buildDispatchOnDispatcherFileSpec`.
-4. Resolve slice 10d's open design questions (this file's "Slice
-   10d open design questions" section) before implementing. The
-   generic-aware sealed dispatch shape and the aggregator API
-   are the first design locks needed.
-5. Re-derive the slice 10d emit design against today's emitter
-   shape — don't copy from the reverted worktree without
-   verifying.
+   10a, 10b, 10c, and 10d are landed (`ee7bb81`, `7b2f00f`,
+   `18c6012`, `5b5d9f9`). The remaining work splits into three
+   independent slices: 10d.5 (lambda aggregator), 10f (MqttPacket
+   lift), and 10e (`@UseCodec` `expect`/`actual` lock + `MqttCodec`
+   alias). Pick whichever has the clearest vector — they don't
+   stack.
+3. Read the slice 10d emit code before extending it. The generic
+   dispatcher emit (`buildGenericDispatchOnDispatcherTypeSpec`,
+   `dispatcherParentTypeRef`, `variantBranchTypeName`,
+   `variantTypedRef`, `DispatchOnVariantSpec.codecReceiver`) and
+   the variant-side codec construction (`genericInstanceFieldName`)
+   are the building blocks any further dispatcher work composes
+   with. The `Partial` machinery from slice 10c is the building
+   block for 10d.5's lambda aggregator (the lambda receives a
+   `Partial` and returns the completed variant).
+4. Resolve the slice's open design questions (this file's "Slice
+   10d.5 / 10f open design questions" section) before
+   implementing. For 10f, the `@RemainingLength` + typed payload
+   combination is the blocking design lock.
+5. Re-derive emit designs against today's emitter shape — don't
+   copy from the reverted worktree without verifying.
