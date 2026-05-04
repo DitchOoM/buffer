@@ -287,10 +287,14 @@ internal class CodecEmitter(
             // `@LengthPrefixed` and `@WireBytes` together is meaningless and
             // out of scope for this emitter; bail rather than try to interpret.
             if (wireBytesAnn != null) return null
-            if (!isTerminal) return null
             val prefixWidth = readLengthPrefix(lengthPrefixed)
             val qualified = type.declaration.qualifiedName?.asString()
             if (qualified == "kotlin.String") {
+                // Slice 5a: `@LengthPrefixed val: String` is now allowed at any
+                // position. Decode reads prefix + body; encode uses BackPatch
+                // and restores position past the body, so subsequent fields
+                // emit cleanly. The sequential peek walk handles the prefix
+                // chase.
                 return FieldSpec.LengthPrefixedString(
                     name = name,
                     ownerSimpleName = ownerSimpleName,
@@ -298,6 +302,12 @@ internal class CodecEmitter(
                     prefixWireOrder = messageWireOrder,
                 )
             }
+            // `@LengthPrefixed @ProtocolMessage` body stays terminal-only:
+            // wireSize calls into the inner codec's wireSize at encode time,
+            // and the dispatcher table needs the body to be the last field
+            // for runtime-Exact size composition. Lifting this requires
+            // extending the dispatcher / wireSize emit path too.
+            if (!isTerminal) return null
             val decl = type.declaration as? KSClassDeclaration ?: return null
             val isProtocolMessage =
                 decl.annotations.any { ann ->
@@ -873,13 +883,16 @@ internal class CodecEmitter(
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
             return builder.build()
         }
+        // Locked Decision row 15: any `@LengthPrefixed val: String` collapses
+        // wireSize to BackPatch (pre-measuring the UTF-8 byte length is the
+        // walk the BackPatch path collapses into the single writeString call).
+        // Slice 5a — the rule applies regardless of position now that LPS
+        // String can appear non-terminally.
+        if (shape.fields.any { it is FieldSpec.LengthPrefixedString }) {
+            builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+            return builder.build()
+        }
         when (val terminal = shape.fields.lastOrNull()) {
-            is FieldSpec.LengthPrefixedString -> {
-                // Locked Decision row 15: @LengthPrefixed val: String defaults to BackPatch.
-                // Pre-measuring the UTF-8 byte length would require a second walk that the
-                // back-patch path collapses into the single writeString call.
-                builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
-            }
             is FieldSpec.LengthPrefixedMessage -> {
                 val headerBytes = scalarHeaderBytes(shape) + terminal.prefixWidth
                 builder.addStatement(
@@ -937,72 +950,229 @@ internal class CodecEmitter(
                 .addParameter("stream", STREAM_PROCESSOR_CN)
                 .addParameter("baseOffset", INT)
                 .returns(PEEK_RESULT_CN)
-        val terminal = shape.fields.lastOrNull()
-        if (terminal is FieldSpec.Conditional) {
-            appendPeekConditional(builder, shape, terminal)
+        // All-FixedSize messages collapse to a single arithmetic check —
+        // no walk needed, and the generated code is significantly tighter
+        // than the sequential path (which would emit a per-field
+        // availability check + offset advance).
+        if (shape.fields.all { it is FieldSpec.FixedSize }) {
+            val total = shape.fields.sumOfFixedWireBytes()
+            builder.addStatement(
+                "return if (stream.available() - baseOffset >= %L) %T.Complete(%L) else %T.NeedsMoreData",
+                total,
+                PEEK_RESULT_CN,
+                total,
+                PEEK_RESULT_CN,
+            )
             return builder.build()
         }
-        if (terminal is FieldSpec.LengthFromString) {
-            appendPeekLengthFromString(builder, shape, terminal)
-            return builder.build()
-        }
-        val (name, ownerSimpleName, prefixWidth, prefixWireOrder) =
-            when (terminal) {
-                is FieldSpec.LengthPrefixedMessage ->
-                    PrefixPeek(terminal.name, terminal.ownerSimpleName, terminal.prefixWidth, terminal.prefixWireOrder)
-                is FieldSpec.LengthPrefixedString ->
-                    PrefixPeek(terminal.name, terminal.ownerSimpleName, terminal.prefixWidth, terminal.prefixWireOrder)
-                else -> null
-            } ?: run {
-                val total = shape.fields.sumOfFixedWireBytes()
-                builder.addStatement(
-                    "return if (stream.available() - baseOffset >= %L) %T.Complete(%L) else %T.NeedsMoreData",
-                    total,
-                    PEEK_RESULT_CN,
-                    total,
-                    PEEK_RESULT_CN,
-                )
-                return builder.build()
-            }
-        val prefixOffset = scalarHeaderBytes(shape)
-        val headerBytes = prefixOffset + prefixWidth
+        appendSequentialPeek(builder, shape)
+        return builder.build()
+    }
+
+    /**
+     * Slice 5a — general sequential peek walk.
+     *
+     * Tracks a running `__offset` (relative to `baseOffset`) and per
+     * field:
+     *   - Ensures enough bytes are available before any peek that
+     *     would otherwise read past the buffer end.
+     *   - Stashes peeked bytes for `Scalar` and `ValueClassScalar`
+     *     fields whose names are referenced by a later `Conditional`
+     *     source or `LengthFromString` length-carrier. Stashed locals
+     *     are named after the field itself (e.g., `flags`,
+     *     `payloadLength`) so the predicate / sibling expressions
+     *     read naturally.
+     *   - Advances `__offset` by the field's contribution: fixed
+     *     bytes for `FixedSize`, prefix-width plus body-byte-count
+     *     (peeked) for `LengthPrefixed*`, sibling-driven length for
+     *     `LengthFromString`, predicate-gated shape for
+     *     `Conditional`.
+     *
+     * Replaces the slice 2/3/3.5/4 specialized peek paths
+     * (single-LPS-terminal, single-Conditional-terminal,
+     * single-LengthFromString-terminal). Equivalent results for those
+     * shapes; previously-skipped shapes (multiple sequential
+     * variable-length fields, non-terminal Conditional, non-terminal
+     * LengthPrefixedString) become emitable here.
+     */
+    private fun appendSequentialPeek(
+        builder: FunSpec.Builder,
+        shape: CodecShape,
+    ) {
+        val needsPeekStash = collectPeekStashSources(shape)
         val body = CodeBlock.builder()
+        body.addStatement("var __offset = 0")
+        for (field in shape.fields) {
+            when (field) {
+                is FieldSpec.Scalar -> {
+                    appendPeekAvailabilityCheck(body, field.wireBytes)
+                    if (field.name in needsPeekStash) {
+                        appendPeekScalar(body, field, field.name, "__offset")
+                    }
+                    body.addStatement("__offset += %L", field.wireBytes)
+                }
+                is FieldSpec.ValueClassScalar -> {
+                    appendPeekAvailabilityCheck(body, field.wireBytes)
+                    if (field.name in needsPeekStash) {
+                        val rawVar = "${field.name}Raw"
+                        appendPeekFixedScalar(body, field.innerKind, rawVar, "__offset")
+                        body.addStatement(
+                            "val %L = %T(%L)",
+                            field.name,
+                            field.valueClassType,
+                            rawVar,
+                        )
+                    }
+                    body.addStatement("__offset += %L", field.wireBytes)
+                }
+                is FieldSpec.LengthPrefixedString ->
+                    appendSequentialPeekLengthPrefixed(
+                        body = body,
+                        name = field.name,
+                        ownerSimpleName = field.ownerSimpleName,
+                        prefixWidth = field.prefixWidth,
+                        prefixWireOrder = field.prefixWireOrder,
+                    )
+                is FieldSpec.LengthPrefixedMessage ->
+                    appendSequentialPeekLengthPrefixed(
+                        body = body,
+                        name = field.name,
+                        ownerSimpleName = field.ownerSimpleName,
+                        prefixWidth = field.prefixWidth,
+                        prefixWireOrder = field.prefixWireOrder,
+                    )
+                is FieldSpec.LengthFromString -> {
+                    appendLengthFromIntMaxGuard(
+                        body = body,
+                        siblingAccessor = field.lengthSiblingName,
+                        siblingKind = field.lengthSiblingKind,
+                        ownerSimpleName = field.ownerSimpleName,
+                        fieldName = field.name,
+                    )
+                    body.addStatement(
+                        "val %LBytes = %L.toInt()",
+                        field.name,
+                        field.lengthSiblingName,
+                    )
+                    body.addStatement(
+                        "if (stream.available() - baseOffset < __offset + %LBytes) return %T.NeedsMoreData",
+                        field.name,
+                        PEEK_RESULT_CN,
+                    )
+                    body.addStatement("__offset += %LBytes", field.name)
+                }
+                is FieldSpec.Conditional ->
+                    appendSequentialPeekConditional(body, field)
+            }
+        }
         body.addStatement(
-            "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
-            headerBytes,
-            PEEK_RESULT_CN,
-        )
-        appendPeekPrefixAssembly(body, name, prefixWidth, prefixWireOrder, prefixOffset)
-        body.beginControlFlow(
-            "if (%L > (Int.MAX_VALUE - %L).toUInt())",
-            "${name}Prefix",
-            headerBytes,
-        )
-        body.addStatement(
-            "throw %T(fieldPath = %S, bufferPosition = baseOffset + %L, expected = %S, actual = %P)",
-            DECODE_EXCEPTION_CN,
-            "$ownerSimpleName.$name",
-            prefixOffset,
-            "$headerBytes + length prefix <= \${Int.MAX_VALUE}",
-            "$headerBytes + \${${name}Prefix}",
-        )
-        body.endControlFlow()
-        body.addStatement("val total = %L + %L.toInt()", headerBytes, "${name}Prefix")
-        body.addStatement(
-            "return if (stream.available() - baseOffset >= total) %T.Complete(total) else %T.NeedsMoreData",
+            "return if (stream.available() - baseOffset >= __offset) %T.Complete(__offset) else %T.NeedsMoreData",
             PEEK_RESULT_CN,
             PEEK_RESULT_CN,
         )
         builder.addCode(body.build())
-        return builder.build()
     }
 
-    private data class PrefixPeek(
-        val name: String,
-        val ownerSimpleName: String,
-        val prefixWidth: Int,
-        val prefixWireOrder: Endianness,
-    )
+    /**
+     * Walk the fields and collect every name whose value will be
+     * referenced later in the peek (by a `Conditional` predicate
+     * source or a `LengthFromString` length carrier). The walk
+     * stashes those fields' values into named locals.
+     */
+    private fun collectPeekStashSources(shape: CodecShape): Set<String> {
+        val sources = mutableSetOf<String>()
+        for (field in shape.fields) {
+            when (field) {
+                is FieldSpec.Conditional ->
+                    sources +=
+                        when (val c = field.condition) {
+                            is ConditionRef.Sibling -> c.name
+                            is ConditionRef.ValueClassProperty -> c.siblingName
+                        }
+                is FieldSpec.LengthFromString -> sources += field.lengthSiblingName
+                else -> { /* not a source */ }
+            }
+        }
+        return sources
+    }
+
+    private fun appendPeekAvailabilityCheck(
+        body: CodeBlock.Builder,
+        bytes: Int,
+    ) {
+        body.addStatement(
+            "if (stream.available() - baseOffset < __offset + %L) return %T.NeedsMoreData",
+            bytes,
+            PEEK_RESULT_CN,
+        )
+    }
+
+    /**
+     * Slice 5a — peek a length-prefixed body (`@LengthPrefixed val:
+     * String` or `@LengthPrefixed @ProtocolMessage`) inside the
+     * sequential walk. The shape is identical for both: peek the
+     * prefix at `__offset`, guard against `Int` overflow when
+     * combined with the running offset, advance `__offset` by
+     * `prefixWidth + prefix.toInt()`.
+     */
+    private fun appendSequentialPeekLengthPrefixed(
+        body: CodeBlock.Builder,
+        name: String,
+        ownerSimpleName: String,
+        prefixWidth: Int,
+        prefixWireOrder: Endianness,
+    ) {
+        appendPeekAvailabilityCheck(body, prefixWidth)
+        appendPeekPrefixAssembly(body, name, prefixWidth, prefixWireOrder, "__offset")
+        val prefixVar = "${name}Prefix"
+        body.beginControlFlow(
+            "if (%L > (Int.MAX_VALUE - __offset - %L).toUInt())",
+            prefixVar,
+            prefixWidth,
+        )
+        body.addStatement(
+            "throw %T(fieldPath = %S, bufferPosition = baseOffset + __offset, expected = %S, actual = %P)",
+            DECODE_EXCEPTION_CN,
+            "$ownerSimpleName.$name",
+            "__offset + $prefixWidth + length prefix <= \${Int.MAX_VALUE}",
+            "\${__offset + $prefixWidth + $prefixVar.toInt()}",
+        )
+        body.endControlFlow()
+        body.addStatement(
+            "__offset += %L + %L.toInt()",
+            prefixWidth,
+            prefixVar,
+        )
+    }
+
+    /**
+     * Slice 5a — peek a `@WhenTrue` slot inside the sequential walk.
+     * The predicate source has already been peek-stashed (added to
+     * `needsPeekStash` and read when its field was visited); the
+     * inner shape is gated on that stashed local.
+     */
+    private fun appendSequentialPeekConditional(
+        body: CodeBlock.Builder,
+        field: FieldSpec.Conditional,
+    ) {
+        val condExpr = decodeConditionExpr(field.condition)
+        body.beginControlFlow("if (%L)", condExpr)
+        when (val inner = field.inner) {
+            is ConditionalInner.Scalar -> {
+                appendPeekAvailabilityCheck(body, inner.kind.width)
+                body.addStatement("__offset += %L", inner.kind.width)
+            }
+            is ConditionalInner.LengthPrefixedString ->
+                appendSequentialPeekLengthPrefixed(
+                    body = body,
+                    name = field.name,
+                    ownerSimpleName = field.ownerSimpleName,
+                    prefixWidth = inner.prefixWidth,
+                    prefixWireOrder = inner.prefixWireOrder,
+                )
+        }
+        body.endControlFlow()
+    }
 
     private fun scalarHeaderBytes(shape: CodecShape): Int = shape.fields.sumOfFixedWireBytes()
 
@@ -1316,213 +1486,42 @@ internal class CodecEmitter(
         }
 
     /**
-     * Stage E slice 2/3 — emit `peekFrameSize` for a message whose
-     * terminal field is a `FieldSpec.Conditional` and whose preceding
-     * fields are all `FixedSize`.
+     * Slice 3 / 5a — single-byte scalar peek for value-class inner
+     * reconstruction. `offsetExpr` is interpolated into
+     * `stream.peekByte(baseOffset + <expr>)`; callers with a fixed
+     * offset pass `"$N"`, sequential walk callers pass the running
+     * offset variable (`"__offset"`).
      *
-     * Walks the fixed-size prefix statically, resolves the boolean
-     * source at its fixed offset, then either:
-     *   - For `ConditionalInner.Scalar`: adds the inner's fixed
-     *     `wireBytes` only when the predicate is true.
-     *   - For `ConditionalInner.LengthPrefixedString` (slice 3.5):
-     *     when the predicate is true, peeks the length prefix at the
-     *     post-prefix offset and adds prefix bytes + body bytes;
-     *     when false, returns just the prefix bytes (the slot is
-     *     zero bytes on the wire per row 19).
-     *
-     * A future widening generalises this for variable-length prefix
-     * fields (e.g., a leading `@LengthPrefixed` before the flags
-     * byte in MQTT v3 CONNECT).
+     * Wider kinds (`UShort` / `UInt` / `ULong` / signed multi-byte)
+     * aren't required by any in-scope `@WhenTrue` value-class
+     * source; they would need order-aware byte assembly that
+     * `appendPeekScalar` already handles for `LengthFromString`
+     * sibling peek.
      */
-    private fun appendPeekConditional(
-        builder: FunSpec.Builder,
-        shape: CodecShape,
-        terminal: FieldSpec.Conditional,
-    ) {
-        val prefixFields = shape.fields.dropLast(1)
-        // All preceding fields must be FixedSize for the slice 2/3 peek
-        // walk; if any is variable-length, the more general walk lands later.
-        val fixedPrefix = prefixFields.filterIsInstance<FieldSpec.FixedSize>()
-        if (fixedPrefix.size != prefixFields.size) {
-            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
-            return
-        }
-        val sibling = resolvePeekSibling(fixedPrefix, terminal.condition)
-        if (sibling == null) {
-            // analyzeConditionalField guarantees the source is a sibling declared
-            // before this field, so this branch is defensive — it would mean the
-            // emitter and analyzer disagree.
-            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
-            return
-        }
-        val prefixBytes = fixedPrefix.sumOf { it.wireBytes }
-        val condLocal = peekConditionLocalName(terminal.condition)
-        val body = CodeBlock.builder()
-        body.addStatement(
-            "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
-            prefixBytes,
-            PEEK_RESULT_CN,
-        )
-        appendPeekConditionResolution(body, sibling, terminal.condition)
-        when (val inner = terminal.inner) {
-            is ConditionalInner.Scalar -> {
-                body.addStatement(
-                    "val total = %L + if (%L) %L else 0",
-                    prefixBytes,
-                    condLocal,
-                    inner.kind.width,
-                )
-                body.addStatement(
-                    "return if (stream.available() - baseOffset >= total) %T.Complete(total) else %T.NeedsMoreData",
-                    PEEK_RESULT_CN,
-                    PEEK_RESULT_CN,
-                )
-            }
-            is ConditionalInner.LengthPrefixedString -> {
-                // Predicate-false path: zero-byte slot, total is just the
-                // fixed prefix.
-                body.beginControlFlow("if (!%L)", condLocal)
-                body.addStatement(
-                    "return if (stream.available() - baseOffset >= %L) %T.Complete(%L) else %T.NeedsMoreData",
-                    prefixBytes,
-                    PEEK_RESULT_CN,
-                    prefixBytes,
-                    PEEK_RESULT_CN,
-                )
-                body.endControlFlow()
-                val headerBytes = prefixBytes + inner.prefixWidth
-                body.addStatement(
-                    "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
-                    headerBytes,
-                    PEEK_RESULT_CN,
-                )
-                appendPeekPrefixAssembly(body, terminal.name, inner.prefixWidth, inner.prefixWireOrder, prefixBytes)
-                val prefixVar = "${terminal.name}Prefix"
-                body.beginControlFlow(
-                    "if (%L > (Int.MAX_VALUE - %L).toUInt())",
-                    prefixVar,
-                    headerBytes,
-                )
-                body.addStatement(
-                    "throw %T(fieldPath = %S, bufferPosition = baseOffset + %L, expected = %S, actual = %P)",
-                    DECODE_EXCEPTION_CN,
-                    "${terminal.ownerSimpleName}.${terminal.name}",
-                    prefixBytes,
-                    "$headerBytes + length prefix <= \${Int.MAX_VALUE}",
-                    "$headerBytes + \${$prefixVar}",
-                )
-                body.endControlFlow()
-                body.addStatement("val total = %L + %L.toInt()", headerBytes, prefixVar)
-                body.addStatement(
-                    "return if (stream.available() - baseOffset >= total) %T.Complete(total) else %T.NeedsMoreData",
-                    PEEK_RESULT_CN,
-                    PEEK_RESULT_CN,
-                )
-            }
-        }
-        builder.addCode(body.build())
-    }
-
-    /**
-     * Find the prefix field referenced by a `ConditionRef` and return
-     * it together with its byte offset in the prefix walk. Returns
-     * `null` if the sibling is missing or has the wrong type — that
-     * mismatch indicates `analyzeConditionalField` and the prefix
-     * walk disagree, so the peek falls back to `NoFraming`.
-     */
-    private fun resolvePeekSibling(
-        fixedPrefix: List<FieldSpec.FixedSize>,
-        condition: ConditionRef,
-    ): PeekSibling? {
-        val (siblingName, expectKind) =
-            when (condition) {
-                is ConditionRef.Sibling -> condition.name to PeekSiblingKind.Scalar
-                is ConditionRef.ValueClassProperty -> condition.siblingName to PeekSiblingKind.ValueClassScalar
-            }
-        var offset = 0
-        for (field in fixedPrefix) {
-            if (field.name == siblingName) {
-                val matches =
-                    when (expectKind) {
-                        PeekSiblingKind.Scalar -> field is FieldSpec.Scalar
-                        PeekSiblingKind.ValueClassScalar -> field is FieldSpec.ValueClassScalar
-                    }
-                if (!matches) return null
-                return PeekSibling(field, offset)
-            }
-            offset += field.wireBytes
-        }
-        return null
-    }
-
-    /**
-     * Emit the peek-side resolution of the boolean predicate. For a
-     * sibling-`Boolean` source, peek the byte directly. For a value-
-     * class property, peek the inner scalar bytes, reconstruct the
-     * value class, and call the predicate property.
-     */
-    private fun appendPeekConditionResolution(
-        body: CodeBlock.Builder,
-        sibling: PeekSibling,
-        condition: ConditionRef,
-    ) {
-        when (condition) {
-            is ConditionRef.Sibling -> {
-                body.addStatement(
-                    "val %L = stream.peekByte(baseOffset + %L) != 0.toByte()",
-                    condition.name,
-                    sibling.offset,
-                )
-            }
-            is ConditionRef.ValueClassProperty -> {
-                val field = sibling.field as FieldSpec.ValueClassScalar
-                val rawVar = "${condition.siblingName}Raw"
-                appendPeekFixedScalar(body, field.innerKind, rawVar, sibling.offset)
-                body.addStatement(
-                    "val %L = %T(%L).%L",
-                    peekConditionLocalName(condition),
-                    field.valueClassType,
-                    rawVar,
-                    condition.propertyName,
-                )
-            }
-        }
-    }
-
-    private fun peekConditionLocalName(condition: ConditionRef): String =
-        when (condition) {
-            is ConditionRef.Sibling -> condition.name
-            is ConditionRef.ValueClassProperty -> "${condition.siblingName}${condition.propertyName.replaceFirstChar { it.uppercase() }}"
-        }
-
     private fun appendPeekFixedScalar(
         body: CodeBlock.Builder,
         kind: ScalarKind,
         targetVar: String,
-        offset: Int,
+        offsetExpr: String,
     ) {
-        // Slice 3 peek covers the natural-width single-byte scalars used by
-        // the SmallFlags vector (UByte). Wider scalars and manual-byte-
-        // assembly inner kinds compose with slice 5's variable-prefix walk
-        // and aren't required by any in-scope @WhenTrue source today.
         when (kind) {
             ScalarKind.UByte ->
                 body.addStatement(
                     "val %L = stream.peekByte(baseOffset + %L).toUByte()",
                     targetVar,
-                    offset,
+                    offsetExpr,
                 )
             ScalarKind.Byte ->
                 body.addStatement(
                     "val %L = stream.peekByte(baseOffset + %L)",
                     targetVar,
-                    offset,
+                    offsetExpr,
                 )
             ScalarKind.Boolean ->
                 body.addStatement(
                     "val %L = stream.peekByte(baseOffset + %L) != 0.toByte()",
                     targetVar,
-                    offset,
+                    offsetExpr,
                 )
             ScalarKind.UShort, ScalarKind.UInt, ScalarKind.ULong,
             ScalarKind.Short, ScalarKind.Int, ScalarKind.Long,
@@ -1534,13 +1533,6 @@ internal class CodecEmitter(
                 )
         }
     }
-
-    private data class PeekSibling(
-        val field: FieldSpec.FixedSize,
-        val offset: Int,
-    )
-
-    private enum class PeekSiblingKind { Scalar, ValueClassScalar }
 
     private fun appendDecodeLengthPrefixed(
         body: CodeBlock.Builder,
@@ -1810,106 +1802,47 @@ internal class CodecEmitter(
         )
     }
 
-    /**
-     * Stage E slice 4 — emit `peekFrameSize` for a message whose
-     * terminal field is a `FieldSpec.LengthFromString`.
-     *
-     * Walks the fixed-size prefix to find the sibling's offset,
-     * peeks the sibling bytes (order-aware via the sibling field's
-     * resolvedWireOrder), and adds the sibling value as the body
-     * byte count. Falls back to `NoFraming` if any prior field is
-     * variable-length or if the sibling is not a Scalar — both are
-     * defensive against future widenings.
-     */
-    private fun appendPeekLengthFromString(
-        builder: FunSpec.Builder,
-        shape: CodecShape,
-        terminal: FieldSpec.LengthFromString,
-    ) {
-        val prefixFields = shape.fields.dropLast(1)
-        val fixedPrefix = prefixFields.filterIsInstance<FieldSpec.FixedSize>()
-        if (fixedPrefix.size != prefixFields.size) {
-            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
-            return
-        }
-        var siblingOffset = -1
-        var siblingField: FieldSpec.Scalar? = null
-        var bytesSeen = 0
-        for (field in fixedPrefix) {
-            if (field.name == terminal.lengthSiblingName) {
-                if (field !is FieldSpec.Scalar) {
-                    // analyzeLengthFromStringField rejects non-Scalar siblings;
-                    // this branch is defensive against an analyzer/emitter drift.
-                    builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
-                    return
-                }
-                siblingOffset = bytesSeen
-                siblingField = field
-                break
-            }
-            bytesSeen += field.wireBytes
-        }
-        if (siblingField == null || siblingOffset < 0) {
-            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
-            return
-        }
-        val prefixBytes = fixedPrefix.sumOf { it.wireBytes }
-        val body = CodeBlock.builder()
-        body.addStatement(
-            "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
-            prefixBytes,
-            PEEK_RESULT_CN,
-        )
-        val siblingPeekVar = "${terminal.lengthSiblingName}Peek"
-        appendPeekScalar(body, siblingField, siblingPeekVar, siblingOffset)
-        appendLengthFromIntMaxGuard(
-            body = body,
-            siblingAccessor = siblingPeekVar,
-            siblingKind = terminal.lengthSiblingKind,
-            ownerSimpleName = terminal.ownerSimpleName,
-            fieldName = terminal.name,
-        )
-        body.addStatement(
-            "val total = %L + %L.toInt()",
-            prefixBytes,
-            siblingPeekVar,
-        )
-        body.addStatement(
-            "return if (stream.available() - baseOffset >= total) %T.Complete(total) else %T.NeedsMoreData",
-            PEEK_RESULT_CN,
-            PEEK_RESULT_CN,
-        )
-        builder.addCode(body.build())
-    }
 
     /**
-     * Slice 4 — order-aware single-scalar peek for the prefix walk
-     * that locates a length-carrier sibling. Single-byte kinds
-     * (`UByte` / `Byte`) read directly; unsigned multi-byte kinds
-     * (`UShort` / `UInt`) assemble bytes BE/LE per the field's
-     * resolvedWireOrder. Wider and signed multi-byte kinds aren't
-     * required by any in-scope vector; they would need parallel
-     * peek paths (signed sign-extension, ULong promotion).
+     * Slice 4 / 5a — order-aware single-scalar peek for the prefix
+     * walk. Single-byte kinds (`UByte` / `Byte`) read directly;
+     * unsigned multi-byte kinds (`UShort` / `UInt`) assemble bytes
+     * BE/LE per the field's resolvedWireOrder. Wider and signed
+     * multi-byte kinds aren't required by any in-scope vector; they
+     * would need parallel peek paths (signed sign-extension, ULong
+     * promotion).
+     *
+     * `offsetExpr` is the Kotlin sub-expression interpolated into
+     * `stream.peekByte(baseOffset + <offsetExpr>)`. Callers with a
+     * fixed offset pass `"0"` / `"7"`; the slice 5a sequential walk
+     * passes the running-offset variable (`"__offset"`).
      */
     private fun appendPeekScalar(
         body: CodeBlock.Builder,
         field: FieldSpec.Scalar,
         targetVar: String,
-        offset: Int,
+        offsetExpr: String,
     ) {
         when (field.kind) {
+            ScalarKind.Boolean -> {
+                body.addStatement(
+                    "val %L = stream.peekByte(baseOffset + %L) != 0.toByte()",
+                    targetVar,
+                    offsetExpr,
+                )
+            }
             ScalarKind.UByte -> {
                 body.addStatement(
                     "val %L = stream.peekByte(baseOffset + %L).toUByte()",
                     targetVar,
-                    offset,
+                    offsetExpr,
                 )
             }
             ScalarKind.Byte -> {
                 body.addStatement(
                     "val %L = stream.peekByte(baseOffset + %L)",
                     targetVar,
-                    offset,
+                    offsetExpr,
                 )
             }
             ScalarKind.UShort, ScalarKind.UInt -> {
@@ -1920,10 +1853,11 @@ internal class CodecEmitter(
                         Endianness.Little -> false
                     }
                 for (i in 0 until width) {
+                    val byteOffset = if (i == 0) offsetExpr else "$offsetExpr + $i"
                     body.addStatement(
                         "val %L = stream.peekByte(baseOffset + %L).toInt() and 0xFF",
                         "${targetVar}B$i",
-                        offset + i,
+                        byteOffset,
                     )
                 }
                 val parts =
@@ -1940,11 +1874,10 @@ internal class CodecEmitter(
                     }
                 body.addStatement("val %L = $narrow", targetVar, parts.joinToString(" or "))
             }
-            ScalarKind.ULong, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long, ScalarKind.Boolean ->
+            ScalarKind.ULong, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long ->
                 error(
-                    "peek-side reconstruction for length-carrier kind ${field.kind} not implemented; " +
-                        "analyzeLengthFromStringField should have rejected this shape until the wider " +
-                        "peek path lands.",
+                    "peek-side reconstruction for sibling kind ${field.kind} not implemented; " +
+                        "the analyzer should have rejected this shape until the wider peek path lands.",
                 )
         }
     }
@@ -2034,19 +1967,26 @@ internal class CodecEmitter(
         }
     }
 
+    /**
+     * Stage C / 5a — peek-assemble a length-prefix as a `UInt`.
+     * `prefixOffsetExpr` is interpolated into
+     * `stream.peekByte(baseOffset + <expr>)`; callers with a fixed
+     * offset pass `"0"` / `"$N"`, the slice 5a sequential walk
+     * passes the running-offset variable.
+     */
     private fun appendPeekPrefixAssembly(
         body: CodeBlock.Builder,
         fieldName: String,
         width: Int,
         wireOrder: Endianness,
-        prefixOffset: Int,
+        prefixOffsetExpr: String,
     ) {
         val prefixVar = "${fieldName}Prefix"
         if (width == 1) {
             body.addStatement(
                 "val %L = (stream.peekByte(baseOffset + %L).toInt() and 0xFF).toUInt()",
                 prefixVar,
-                prefixOffset,
+                prefixOffsetExpr,
             )
             return
         }
@@ -2057,10 +1997,11 @@ internal class CodecEmitter(
                 Endianness.Default -> true
             }
         for (i in 0 until width) {
+            val byteOffset = if (i == 0) prefixOffsetExpr else "$prefixOffsetExpr + $i"
             body.addStatement(
                 "val %L = stream.peekByte(baseOffset + %L).toInt() and 0xFF",
                 "${prefixVar}B$i",
-                prefixOffset + i,
+                byteOffset,
             )
         }
         val parts =
@@ -2136,8 +2077,13 @@ internal class CodecEmitter(
         // Locked Decision row 19: any `@WhenTrue` field collapses wireSize to
         // BackPatch — including inside a sealed variant.
         if (shape.fields.any { it is FieldSpec.Conditional }) return VariantWireSize.BackPatch
+        // Slice 5a: any `@LengthPrefixed val: String` (terminal or otherwise)
+        // collapses wireSize to BackPatch per row 15. The variant codec's
+        // own wireSize already produces BackPatch in this case (see
+        // buildWireSizeFun); the dispatcher size table needs to know not to
+        // attempt a literal sum.
+        if (shape.fields.any { it is FieldSpec.LengthPrefixedString }) return VariantWireSize.BackPatch
         return when (shape.fields.lastOrNull()) {
-            is FieldSpec.LengthPrefixedString -> VariantWireSize.BackPatch
             is FieldSpec.LengthPrefixedMessage -> VariantWireSize.RuntimeExact
             // Slice 4: a LengthFromString variant's body byte count is the
             // sibling value at encode time — same shape as a runtime-Exact
@@ -2147,7 +2093,7 @@ internal class CodecEmitter(
             is FieldSpec.LengthFromString -> VariantWireSize.RuntimeExact
             is FieldSpec.Scalar, is FieldSpec.ValueClassScalar, null ->
                 VariantWireSize.LiteralExact(shape.fields.sumOfFixedWireBytes())
-            is FieldSpec.Conditional -> VariantWireSize.BackPatch
+            is FieldSpec.LengthPrefixedString, is FieldSpec.Conditional -> VariantWireSize.BackPatch
         }
     }
 
