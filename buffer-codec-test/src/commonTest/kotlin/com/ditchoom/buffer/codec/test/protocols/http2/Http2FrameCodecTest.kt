@@ -44,7 +44,7 @@ class Http2FrameCodecTest {
             Http2Frame.Ping(
                 header = Http2LengthAndType.of(length = 8, type = 6),
                 flags = 0x00u,
-                streamId = 0u,
+                streamId = Http2StreamId(0u),
                 opaqueData = 0xDEAD_BEEF_CAFE_F00DuL,
             )
         val expected =
@@ -69,7 +69,7 @@ class Http2FrameCodecTest {
             Http2Frame.WindowUpdate(
                 header = Http2LengthAndType.of(length = 4, type = 8),
                 flags = 0x00u,
-                streamId = 1u,
+                streamId = Http2StreamId(1u),
                 windowSizeIncrement = 65535u,
             )
         val expected =
@@ -101,7 +101,7 @@ class Http2FrameCodecTest {
         assertEquals(8, ping.header.length)
         assertEquals(6, ping.header.type)
         assertEquals(0x00u.toUByte(), ping.flags)
-        assertEquals(0u, ping.streamId)
+        assertEquals(Http2StreamId(0u), ping.streamId)
         assertEquals(0x1234_5678_9ABC_DEF0uL, ping.opaqueData)
     }
 
@@ -119,8 +119,45 @@ class Http2FrameCodecTest {
         val wu = assertIs<Http2Frame.WindowUpdate>(decoded)
         assertEquals(4, wu.header.length)
         assertEquals(8, wu.header.type)
-        assertEquals(5u, wu.streamId)
+        assertEquals(Http2StreamId(5u), wu.streamId)
         assertEquals(4096u, wu.windowSizeIncrement)
+    }
+
+    @Test
+    fun http2StreamIdRejectsHighBitOnConstruction() {
+        // Per RFC 7540 §4.1, the reserved `R` bit MUST be 0 on send.
+        // The Http2StreamId value class enforces this at construction
+        // time so the encoded bytes are spec-compliant by virtue of
+        // the field's type.
+        assertFailsWith<IllegalArgumentException> {
+            Http2StreamId(0x80000000u)
+        }
+        // Boundary: 0x7FFFFFFF (max 31-bit value) is legal.
+        assertEquals(0x7FFFFFFFu, Http2StreamId(0x7FFFFFFFu).raw)
+    }
+
+    @Test
+    fun decodeThrowsWhenWireBytesViolateRBit() {
+        // A peer that violates the spec by setting the R bit on a
+        // streamId — our decode surfaces it loudly via the value class
+        // init rather than silently masking. Lenient masking is a
+        // connection-layer choice (mask before constructing the value
+        // class); the codec stays strict so spec violations don't go
+        // unnoticed.
+        val wire =
+            byteArrayOf(
+                // Header: length=8 type=6 (PING)
+                0x00, 0x00, 0x08, 0x06,
+                0x00,
+                // streamId with R bit set: 0x80_00_00_00
+                0x80.toByte(), 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00,
+            )
+        val buf = bigEndianBufferOf(wire)
+        assertFailsWith<IllegalArgumentException> {
+            Http2FrameCodec.decode(buf, DecodeContext.Empty)
+        }
     }
 
     @Test
@@ -141,7 +178,7 @@ class Http2FrameCodecTest {
             Http2Frame.Ping(
                 header = Http2LengthAndType.of(length = 8, type = 6),
                 flags = 0x01u,
-                streamId = 0u,
+                streamId = Http2StreamId(0u),
                 opaqueData = 0x0102_0304_0506_0708uL,
             )
         val buf = encode(original)
@@ -155,7 +192,7 @@ class Http2FrameCodecTest {
             Http2Frame.WindowUpdate(
                 header = Http2LengthAndType.of(length = 4, type = 8),
                 flags = 0x00u,
-                streamId = 12345u,
+                streamId = Http2StreamId(12345u),
                 windowSizeIncrement = 0x7FFF_FFFFu,
             )
         val buf = encode(original)
@@ -192,7 +229,7 @@ class Http2FrameCodecTest {
             Http2Frame.Ping(
                 header = Http2LengthAndType.of(length = 8, type = 6),
                 flags = 0u,
-                streamId = 0u,
+                streamId = Http2StreamId(0u),
                 opaqueData = 0u,
             )
         val encoded = encode(original)
