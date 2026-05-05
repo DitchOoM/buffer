@@ -256,30 +256,52 @@ qos: UByte)`. UNSUBSCRIBE per §3.10.3 is the same shape but qos-less
 
 Two emitter capability checks needed before J.M can land these:
 
-- **`@RemainingBytes List<MessageType>`** — does slice 7a/7b cover
-  `List<@ProtocolMessage data class>` as the `@RemainingBytes` body?
-  If not, this is a small emitter extension (or a J.M-precursor slice).
-- **`@RemainingBytes List<@LengthPrefixed String>`** — same question
-  for length-prefixed strings. If not, a wrapper type
-  `@JvmInline value class MqttTopicFilter(@LengthPrefixed val name:
-  String)` or `data class MqttUnsubscribeTopic(@LengthPrefixed val
-  name: String)` lifts UNSUBSCRIBE into the same shape as SUBSCRIBE.
-
-Audit `:buffer-codec-test` for existing `@RemainingBytes
-List<MessageType>` fixtures (likely none — slice 7a's
-`MqttSubAckBody` was `List<UByte>`). If absent, J.M starts with a
-small emitter slice to add the capability.
+- **`@RemainingBytes List<MessageType>`** — **resolved by J.M.0.**
+  The slice 7c `RepeatedBlocks` doctrine fixture proves the
+  capability end-to-end (encode + decode + wireSize-Exact + peek =
+  NoFraming). SUBSCRIBE wraps a `MqttTopicFilter` data class
+  (`@LengthPrefixed name: String, qos: UByte`) into the same shape.
+- **`@RemainingBytes List<@LengthPrefixed String>`** — still open.
+  UNSUBSCRIBE per §3.10.3 is a list of length-prefixed topics;
+  the J.M.0 emitter accepts only `List<@ProtocolMessage data
+  class>`, not bare strings. Solution: wrap with a single-field
+  `data class MqttUnsubscribeTopic(@LengthPrefixed val name:
+  String)` so UNSUBSCRIBE rides the J.M.0 path. No further emitter
+  work required.
 
 ## Landing order
 
 Each step is individually green; the test baseline must stay green
 throughout.
 
-1. **Audit `@RemainingBytes List<MessageType>` capability.** Grep
-   `:buffer-codec-test` and `:buffer-codec-processor`'s emit branches.
-   If absent, add a J.M.0 emitter slice for `List<@ProtocolMessage>`
-   bodies + a fixture (e.g. `RepeatedBlocks` doctrine vector). This
-   unblocks SUBSCRIBE / UNSUBSCRIBE.
+1. **Audit `@RemainingBytes List<MessageType>` capability.** **LANDED
+   as J.M.0** — the emitter slice and `RepeatedBlocks` doctrine
+   fixture are in place. Per the audit:
+   - Pre-J.M.0, `@RemainingBytes List<S>` accepted only single-byte
+     scalars (`UByte` / `Byte`) via the slice 7b
+     `RemainingBytesScalarList` shape; the doc on
+     `analyzeRemainingBytesScalarListField` explicitly deferred
+     `@ProtocolMessage` elements "until a vector requires them."
+   - J.M.0 added `FieldSpec.RemainingBytesProtocolMessageList` plus
+     analyze/decode/encode/wireSize/peek branches in
+     `CodecEmitter.kt`. The decode/encode loops mirror
+     `LengthFromList`'s element-codec dispatch (slice 7a) but bound
+     by the caller-set buffer limit (mirror of slice 7b's
+     `RemainingBytesScalarList`).
+   - Doctrine fixture lives at
+     `:buffer-codec-test/src/commonMain/.../slice7c/RepeatedBlocks.kt`
+     with byte-exact tests at
+     `:buffer-codec-test/src/commonTest/.../slice7c/RepeatedBlocksCodecTest.kt`
+     (7 tests: empty + N-element encode, decode-until-buffer-limit,
+     decode-respects-external-limit, round-trip, wireSize-Exact-via-
+     element-sum, peekFrameSize-NoFraming).
+   - `:buffer-codec-test:jvmTest` count: 232 → 239. Other module
+     counts unchanged.
+
+   This unblocks SUBSCRIBE / UNSUBSCRIBE (step 5). With J.M.0 landed,
+   step 2 (`Publish.packetId` QoS-conditional) is the next entry
+   point — independent of the rest and lands cleanly in parallel
+   with steps 3–4 (the SubAck / Connect folds).
 2. **Add `qosGreaterThanZero: Boolean` to `MqttFixedHeader`.** Update
    `Publish.packetId` to `@WhenTrue("header.qosGreaterThanZero")
    val packetId: PacketId? = null`. Run `MqttPacketCodecTest` —

@@ -226,6 +226,7 @@ internal class CodecEmitter(
             if (field is FieldSpec.LengthFromString && index != fields.lastIndex) return null
             if (field is FieldSpec.LengthFromList && index != fields.lastIndex) return null
             if (field is FieldSpec.RemainingBytesScalarList && index != fields.lastIndex) return null
+            if (field is FieldSpec.RemainingBytesProtocolMessageList && index != fields.lastIndex) return null
             if (field is FieldSpec.RemainingBytesPayload && index != fields.lastIndex) return null
         }
 
@@ -377,6 +378,12 @@ internal class CodecEmitter(
             }
             val typeQname = type.declaration.qualifiedName?.asString()
             if (typeQname != "kotlin.collections.List") return null
+            // Phase J.M.0 — try the @ProtocolMessage element shape first;
+            // fall through to scalar element on null. Element classification
+            // is mutually exclusive (a list element can't be both scalar
+            // and a @ProtocolMessage data class), so order is informational.
+            analyzeRemainingBytesProtocolMessageListField(param, type, ownerSimpleName)
+                ?.let { return it }
             return analyzeRemainingBytesScalarListField(param, type, ownerSimpleName)
         }
 
@@ -730,9 +737,9 @@ internal class CodecEmitter(
      *
      * Returns null silently for any shape outside the slice 7b
      * narrow set: list of multi-byte scalar (would need order-aware
-     * read), list of `@ProtocolMessage` element (would need element
-     * codec dispatch in the read loop), or list of value-class
-     * scalar.
+     * read), list of `@ProtocolMessage` element (Phase J.M.0 — see
+     * `analyzeRemainingBytesProtocolMessageListField`), or list of
+     * value-class scalar.
      */
     private fun analyzeRemainingBytesScalarListField(
         param: KSValueParameter,
@@ -751,6 +758,51 @@ internal class CodecEmitter(
             name = name,
             ownerSimpleName = ownerSimpleName,
             elementKind = elementKind,
+        )
+    }
+
+    /**
+     * Phase J.M.0 — `@RemainingBytes val: List<T>` where `T` is a
+     * `@ProtocolMessage data class`. Sister of
+     * `analyzeLengthFromListField` (slice 7a, sibling-bounded) for the
+     * caller-bounded variant: instead of a sibling length carrier, the
+     * outer protocol's framing sets `buffer.limit()` before delegating,
+     * and the read loop runs `while (position < limit)`.
+     *
+     * Returns null silently when the list element isn't a
+     * `@ProtocolMessage data class`; the caller falls through to
+     * `analyzeRemainingBytesScalarListField` for scalar element lists.
+     */
+    private fun analyzeRemainingBytesProtocolMessageListField(
+        param: KSValueParameter,
+        listType: KSType,
+        ownerSimpleName: String,
+    ): FieldSpec.RemainingBytesProtocolMessageList? {
+        val name = param.name?.asString() ?: return null
+        val typeArgs = listType.arguments
+        if (typeArgs.size != 1) return null
+        val elementType = typeArgs[0].type?.resolve() ?: return null
+        if (elementType.isError || elementType.isMarkedNullable) return null
+        val elementDecl = elementType.declaration as? KSClassDeclaration ?: return null
+        if (Modifier.DATA !in elementDecl.modifiers) return null
+        val isProtocolMessage =
+            elementDecl.annotations.any { ann ->
+                ann.shortName.asString() == "ProtocolMessage" &&
+                    ann.annotationType
+                        .resolve()
+                        .declaration.qualifiedName
+                        ?.asString() == PROTOCOL_MESSAGE_QNAME
+            }
+        if (!isProtocolMessage) return null
+        return FieldSpec.RemainingBytesProtocolMessageList(
+            name = name,
+            ownerSimpleName = ownerSimpleName,
+            elementClassName = classNameOf(elementDecl),
+            elementCodecClassName =
+                ClassName(
+                    elementDecl.packageName.asString(),
+                    "${elementDecl.simpleName.asString()}Codec",
+                ),
         )
     }
 
@@ -1386,6 +1438,8 @@ internal class CodecEmitter(
             is FieldSpec.LengthFromString -> appendDecodeLengthFromString(body, field)
             is FieldSpec.LengthFromList -> appendDecodeLengthFromList(body, field)
             is FieldSpec.RemainingBytesScalarList -> appendDecodeRemainingBytesScalarList(body, field)
+            is FieldSpec.RemainingBytesProtocolMessageList ->
+                appendDecodeRemainingBytesProtocolMessageList(body, field)
             is FieldSpec.RemainingBytesPayload -> appendDecodeRemainingBytesPayload(body, field)
             is FieldSpec.UseCodecScalar -> appendDecodeUseCodecScalar(body, field)
             is FieldSpec.ValueClassScalar -> appendDecodeValueClassScalar(body, field)
@@ -1406,6 +1460,8 @@ internal class CodecEmitter(
                 is FieldSpec.LengthFromString -> appendEncodeLengthFromString(body, field)
                 is FieldSpec.LengthFromList -> appendEncodeLengthFromList(body, field)
                 is FieldSpec.RemainingBytesScalarList -> appendEncodeRemainingBytesScalarList(body, field)
+                is FieldSpec.RemainingBytesProtocolMessageList ->
+                    appendEncodeRemainingBytesProtocolMessageList(body, field)
                 is FieldSpec.RemainingBytesPayload -> appendEncodeRemainingBytesPayload(body, field)
                 is FieldSpec.UseCodecScalar -> appendEncodeUseCodecScalar(body, field)
                 is FieldSpec.ValueClassScalar -> appendEncodeValueClassScalar(body, field)
@@ -1712,6 +1768,13 @@ internal class CodecEmitter(
                 ClassName("kotlin.collections", "List").parameterizedBy(field.elementClassName)
             is FieldSpec.RemainingBytesScalarList ->
                 ClassName("kotlin.collections", "List").parameterizedBy(scalarTypeName(field.elementKind))
+            is FieldSpec.RemainingBytesProtocolMessageList ->
+                error(
+                    "partialFieldTypeName called on a RemainingBytesProtocolMessageList field — " +
+                        "this shape is terminal-only and the Partial decode pattern only fires " +
+                        "for shapes with a trailing RemainingBytesPayload. The two shapes are " +
+                        "mutually exclusive at the terminal slot, so this branch is unreachable.",
+                )
             is FieldSpec.RemainingBytesPayload ->
                 error(
                     "partialFieldTypeName called on a RemainingBytesPayload field — caller " +
@@ -1819,6 +1882,22 @@ internal class CodecEmitter(
                     elementWidth,
                 )
             }
+            is FieldSpec.RemainingBytesProtocolMessageList -> {
+                // Phase J.M.0 — body byte count = sum of element wireSizes.
+                // Each element codec's wireSize is cast to Exact at runtime —
+                // same convention as LengthPrefixedMessage's `as Exact` cast
+                // above; BackPatch element codecs throw ClassCastException
+                // (fixture-design contract for this slice).
+                val prefixBytes = scalarHeaderBytes(shape)
+                builder.addStatement(
+                    "return %T.Exact(%L + value.%L.sumOf { (%T.wireSize(it, context) as %T.Exact).bytes })",
+                    WIRE_SIZE_CN,
+                    prefixBytes,
+                    terminal.name,
+                    terminal.elementCodecClassName,
+                    WIRE_SIZE_CN,
+                )
+            }
             is FieldSpec.RemainingBytesPayload ->
                 error(
                     "RemainingBytesPayload terminal shape should be handled by the BackPatch " +
@@ -1886,7 +1965,15 @@ internal class CodecEmitter(
         // buffer limit, which the stream-side peek can't see; consumers
         // must use outer-protocol framing (e.g., MQTT's fixed-header
         // remaining-length) to determine the bounded read.
-        if (shape.fields.any { it is FieldSpec.RemainingBytesScalarList }) {
+        // Phase J.M.0 — same NoFraming collapse for the
+        // `@RemainingBytes List<@ProtocolMessage T>` shape: the body's
+        // byte count is still caller-bounded; only the per-iteration
+        // read changes.
+        if (shape.fields.any {
+                it is FieldSpec.RemainingBytesScalarList ||
+                    it is FieldSpec.RemainingBytesProtocolMessageList
+            }
+        ) {
             builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
             return builder.build()
         }
@@ -2117,6 +2204,12 @@ internal class CodecEmitter(
                     error(
                         "RemainingBytesScalarList should be handled by buildPeekFrameFun's " +
                             "upfront NoFraming short-circuit before reaching the sequential walk.",
+                    )
+                is FieldSpec.RemainingBytesProtocolMessageList ->
+                    error(
+                        "RemainingBytesProtocolMessageList should be handled by " +
+                            "buildPeekFrameFun's upfront NoFraming short-circuit before reaching " +
+                            "the sequential walk.",
                     )
                 is FieldSpec.RemainingBytesPayload ->
                     error(
@@ -3096,6 +3189,49 @@ internal class CodecEmitter(
     }
 
     /**
+     * Phase J.M.0 — emit decode for `@RemainingBytes val: List<T>` where
+     * `T` is a `@ProtocolMessage data class`. Loops `while
+     * (buffer.position() < buffer.limit())` reading each element via
+     * the element's own codec. Same caller-bounds-buffer contract as
+     * `RemainingBytesScalarList`: an outer dispatcher (e.g. MQTT's
+     * fixed-header remaining-length variable-length integer) sets
+     * `buffer.limit()` before delegating.
+     *
+     * Generated shape:
+     * ```
+     * val <name> = mutableListOf<ElementType>()
+     * while (buffer.position() < buffer.limit()) {
+     *     <name> += ElementCodec.decode(buffer, context)
+     * }
+     * ```
+     */
+    private fun appendDecodeRemainingBytesProtocolMessageList(
+        body: CodeBlock.Builder,
+        field: FieldSpec.RemainingBytesProtocolMessageList,
+    ) {
+        body.addStatement("val %L = mutableListOf<%T>()", field.name, field.elementClassName)
+        body.beginControlFlow("while (buffer.position() < buffer.limit())")
+        body.addStatement("%L += %T.decode(buffer, context)", field.name, field.elementCodecClassName)
+        body.endControlFlow()
+    }
+
+    /**
+     * Phase J.M.0 — emit encode for `@RemainingBytes val: List<T>` where
+     * `T` is a `@ProtocolMessage data class`. Iterates the list and
+     * writes each element via the element codec. The encoded byte
+     * count is implicit in the outer protocol's framing — same row 16
+     * trust contract as `LengthFromList`'s encode path.
+     */
+    private fun appendEncodeRemainingBytesProtocolMessageList(
+        body: CodeBlock.Builder,
+        field: FieldSpec.RemainingBytesProtocolMessageList,
+    ) {
+        body.beginControlFlow("for (__elem in value.%L)", field.name)
+        body.addStatement("%T.encode(buffer, __elem, context)", field.elementCodecClassName)
+        body.endControlFlow()
+    }
+
+    /**
      * Phase I.1 — does this field narrow `buffer.limit()` mid-decode?
      * A `UseCodecScalar` does iff its codec target implements
      * `BoundingLengthCodec`. Used by [buildDecodeFun] to decide whether
@@ -3590,6 +3726,10 @@ internal class CodecEmitter(
             // list.size * elementWidth); RuntimeExact lets the dispatcher
             // forward without re-deriving.
             is FieldSpec.RemainingBytesScalarList -> VariantWireSize.RuntimeExact
+            // Phase J.M.0: variant codec's own wireSize is Exact (priorBytes +
+            // sum of element wireSizes via runtime `as Exact` cast); same
+            // RuntimeExact dispatcher-forwarding shape as RemainingBytesScalarList.
+            is FieldSpec.RemainingBytesProtocolMessageList -> VariantWireSize.RuntimeExact
             is FieldSpec.Scalar, is FieldSpec.ValueClassScalar, null ->
                 VariantWireSize.LiteralExact(shape.fields.sumOfFixedWireBytes())
             is FieldSpec.LengthPrefixedString, is FieldSpec.Conditional -> VariantWireSize.BackPatch
@@ -4527,6 +4667,45 @@ internal class CodecEmitter(
             val ownerSimpleName: String,
             val payloadType: TypeName,
             val source: PayloadCodecSource,
+        ) : FieldSpec
+
+        /**
+         * Phase J.M.0 — `@RemainingBytes val: List<T>` where `T` is a
+         * `@ProtocolMessage data class`. Sister of
+         * `RemainingBytesScalarList` for nested-message elements: the
+         * decoder reads elements while `buffer.position() <
+         * buffer.limit()`, dispatching each iteration to the element's
+         * own codec; the caller is responsible for setting
+         * `buffer.limit()` externally (typical: outer protocol carries
+         * a remaining-length variable-length integer parsed by an
+         * outer dispatcher, which sets the limit before delegating).
+         *
+         * Encode iterates the list and writes each element via the
+         * element codec — same shape as `LengthFromList`'s encode loop,
+         * minus the sibling-bound length carrier; the byte count is
+         * implicit in the outer protocol's framing (row 16 trust
+         * contract).
+         *
+         * `wireSize` is `Exact(headerBytes + sumOf elements' wireSize)`
+         * via the same runtime `as Exact` cast that
+         * `LengthPrefixedMessage` uses. Element wireSize must be Exact
+         * at runtime; BackPatch elements throw `ClassCastException` —
+         * matches the existing convention and is the fixture-design
+         * contract for this slice.
+         *
+         * Slice narrow: terminal-only (mirrors `RemainingBytesScalarList`),
+         * element must be a `@ProtocolMessage data class` (not a
+         * scalar — that path is `RemainingBytesScalarList`; not a
+         * value class — defer until a vector requires it).
+         *
+         * Unblocks: MQTT v3.1.1 SUBSCRIBE / UNSUBSCRIBE topic-filter
+         * lists (see `PHASE_J_M_BRIEF.md` step 1).
+         */
+        data class RemainingBytesProtocolMessageList(
+            override val name: String,
+            val ownerSimpleName: String,
+            val elementClassName: ClassName,
+            val elementCodecClassName: ClassName,
         ) : FieldSpec
 
         /**
