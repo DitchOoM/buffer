@@ -193,6 +193,67 @@ sealed interface MqttPacket<out P : Payload> {
     ) : MqttPacket<P>
 
     /**
+     * Type-4 PUBACK per MQTT v3.1.1 §3.4 — fixed header `0x40` +
+     * `remainingLength = 2` + `packetIdentifier`. Total wire length
+     * is always 4 bytes (`40 02 <pid_msb> <pid_lsb>`). Phase J.M
+     * step 5 first-tranche variant; one of five 2-byte-body acks
+     * (PUBACK / PUBREC / PUBREL / PUBCOMP / UNSUBACK) that share the
+     * same shape.
+     */
+    @PacketType(value = 4)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class PubAck(
+        val header: MqttFixedHeader = MqttFixedHeader(0x40u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
+        val packetIdentifier: UShort,
+    ) : MqttPacket<Nothing>
+
+    /**
+     * Type-5 PUBREC per MQTT v3.1.1 §3.5 — fixed header `0x50` +
+     * `remainingLength = 2` + `packetIdentifier`. QoS-2 publish
+     * acknowledgement (publish-received). Wire shape mirrors PUBACK.
+     */
+    @PacketType(value = 5)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class PubRec(
+        val header: MqttFixedHeader = MqttFixedHeader(0x50u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
+        val packetIdentifier: UShort,
+    ) : MqttPacket<Nothing>
+
+    /**
+     * Type-6 PUBREL per MQTT v3.1.1 §3.6 — fixed header `0x62` +
+     * `remainingLength = 2` + `packetIdentifier`. Per §3.6.1 the
+     * bottom-bit-2 flag (0x02) is reserved-and-must-be-set; the
+     * variant defaults the header byte to `0x62` to encode this on
+     * the wire. The dispatcher routes by the top 4 bits, so a
+     * caller passing `MqttFixedHeader(0x60u)` would still decode as
+     * PUBREL but produce a malformed §3.6.1 frame on encode.
+     * Trust the caller per the sealed-variant doctrine; no `init`
+     * guard.
+     */
+    @PacketType(value = 6)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class PubRel(
+        val header: MqttFixedHeader = MqttFixedHeader(0x62u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
+        val packetIdentifier: UShort,
+    ) : MqttPacket<Nothing>
+
+    /**
+     * Type-7 PUBCOMP per MQTT v3.1.1 §3.7 — fixed header `0x70` +
+     * `remainingLength = 2` + `packetIdentifier`. Final hop of the
+     * QoS-2 publish handshake.
+     */
+    @PacketType(value = 7)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class PubComp(
+        val header: MqttFixedHeader = MqttFixedHeader(0x70u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
+        val packetIdentifier: UShort,
+    ) : MqttPacket<Nothing>
+
+    /**
      * Type-9 SUBACK per MQTT v3.1.1 §3.9. Folded into the sealed
      * dispatcher in Phase J.M step 3 — the standalone `MqttSubAck`
      * fixture's body shape lifts unchanged onto the `MqttPacket`
@@ -218,6 +279,20 @@ sealed interface MqttPacket<out P : Payload> {
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         val packetIdentifier: UShort,
         @RemainingBytes val returnCodes: List<UByte>,
+    ) : MqttPacket<Nothing>
+
+    /**
+     * Type-11 UNSUBACK per MQTT v3.1.1 §3.11 — fixed header `0xB0`
+     * + `remainingLength = 2` + `packetIdentifier`. Unlike SUBACK
+     * (which carries a list of return codes), UNSUBACK in v3.1.1 is
+     * fixed-shape: total wire length is always 4 bytes.
+     */
+    @PacketType(value = 11)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class UnsubAck(
+        val header: MqttFixedHeader = MqttFixedHeader(0xB0u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
+        val packetIdentifier: UShort,
     ) : MqttPacket<Nothing>
 
     /**
