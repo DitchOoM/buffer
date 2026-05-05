@@ -2,6 +2,7 @@ package com.ditchoom.buffer.codec.test.protocols.mqttv5
 
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
@@ -115,7 +116,7 @@ class MqttV5InvariantsCodecTest {
                     remainingLength = 0u,
                     packetIdentifier = 0x0001u,
                     properties = emptyList(),
-                    topicFilters = listOf(V5Subscription("t/1", 0x00u)),
+                    topicFilters = listOf(V5Subscription("t/1", V5SubscriptionOptions.of(qos = 0))),
                 )
             }
         assertTrue(ex.message!!.contains("SUBSCRIBE header invariant"))
@@ -168,5 +169,66 @@ class MqttV5InvariantsCodecTest {
             ex.message!!.contains("topicFilters must contain at least one filter"),
             "expected topicFilters diagnostic, got: ${ex.message}",
         )
+    }
+
+    // Phase J.M.5 slice 12 — V5SubscriptionOptions impossible-state guards
+    // per §3.8.3.1.
+
+    @Test
+    fun subscriptionOptionsRejectsReservedBitsNonZero() {
+        // [MQTT-3.8.3-1] — bits 6-7 are reserved-must-be-zero. Any of
+        // 0x40, 0x80, 0xC0 trips the guard.
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                V5SubscriptionOptions(0x40u)
+            }
+        assertTrue(
+            ex.message!!.contains("reserved bits 6-7 must be zero"),
+            "expected reserved-bits diagnostic, got: ${ex.message}",
+        )
+    }
+
+    @Test
+    fun subscriptionOptionsRejectsQosThree() {
+        // [MQTT-3.8.3-2] — QoS=3 is reserved-must-not-be-used.
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                V5SubscriptionOptions(0x03u)
+            }
+        assertTrue(
+            ex.message!!.contains("QoS=3"),
+            "expected QoS-3 diagnostic, got: ${ex.message}",
+        )
+    }
+
+    @Test
+    fun subscriptionOptionsRejectsRetainHandlingThree() {
+        // [MQTT-3.8.3-4] — RetainHandling=3 is reserved.
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                V5SubscriptionOptions(0x30u) // bits 4-5 = 11
+            }
+        assertTrue(
+            ex.message!!.contains("RetainHandling=3"),
+            "expected RetainHandling-3 diagnostic, got: ${ex.message}",
+        )
+    }
+
+    @Test
+    fun subscriptionOptionsExposesAllFourFields() {
+        // QoS=1, NoLocal=true, RetainAsPublished=false, RetainHandling=2 →
+        // 0010_0101 = 0x25.
+        val opts =
+            V5SubscriptionOptions.of(
+                qos = 1,
+                noLocal = true,
+                retainAsPublished = false,
+                retainHandling = 2,
+            )
+        assertEquals(0x25u.toUByte(), opts.raw)
+        assertEquals(1, opts.qos)
+        assertEquals(true, opts.noLocal)
+        assertEquals(false, opts.retainAsPublished)
+        assertEquals(2, opts.retainHandling)
     }
 }

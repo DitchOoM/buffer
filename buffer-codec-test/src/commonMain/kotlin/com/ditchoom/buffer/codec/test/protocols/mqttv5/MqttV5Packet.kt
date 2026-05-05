@@ -17,6 +17,7 @@ import com.ditchoom.buffer.codec.test.protocols.mqttv5.authrc.V5AuthReasonCode
 import com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode
 import com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode
 import com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode
+import com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode
 import com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCode
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
 
@@ -461,9 +462,11 @@ sealed interface MqttV5Packet<out P : Payload> {
      * reason-code list (one byte per topic filter from the matching
      * SUBSCRIBE).
      *
-     * The reason codes are typed `UByte` for now (raw spec values per
-     * §3.9.3 — 0x00 = Granted QoS 0 ... 0xA2 = Wildcard Subscriptions
-     * not supported). Typed sealed enum is a follow-on.
+     * Slice 12 substitutes the bare `List<UByte>` with
+     * `List<V5SubAckReasonCode>` — uses the slice 11a
+     * `@RemainingBytes List<sealed parent>` widening. Per-element
+     * dispatch on the raw byte routes to the matching
+     * [V5SubAckReasonCode] variant.
      */
     @PacketType(value = 9)
     @ProtocolMessage(wireOrder = Endianness.Big)
@@ -473,7 +476,7 @@ sealed interface MqttV5Packet<out P : Payload> {
         val packetIdentifier: UShort,
         @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
         val properties: List<MqttV5Property>,
-        @RemainingBytes val reasonCodes: List<UByte>,
+        @RemainingBytes val reasonCodes: List<V5SubAckReasonCode>,
     ) : MqttV5Packet<Nothing> {
         init {
             // Phase J.M.5 audit-2d — header byte invariant per spec §3.9.1.

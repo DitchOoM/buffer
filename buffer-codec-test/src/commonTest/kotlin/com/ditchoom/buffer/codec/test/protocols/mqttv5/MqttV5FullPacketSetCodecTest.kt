@@ -11,6 +11,7 @@ import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttUnsubscribeTopic
 import com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode
 import com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode
+import com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImage
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImageCodec
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
@@ -153,7 +154,7 @@ class MqttV5FullPacketSetCodecTest {
                 remainingLength = 9u,
                 packetIdentifier = 0x000Au,
                 properties = emptyList(),
-                topicFilters = listOf(V5Subscription("t/1", 0x01u)),
+                topicFilters = listOf(V5Subscription("t/1", V5SubscriptionOptions.of(qos = 1))),
             )
         assertDispatcherRoundTrip(original, expectedTotalBytes = 11)
     }
@@ -165,7 +166,12 @@ class MqttV5FullPacketSetCodecTest {
                 remainingLength = 6u,
                 packetIdentifier = 0x000Au,
                 properties = emptyList(),
-                reasonCodes = listOf(0x00u, 0x01u, 0x80u),
+                reasonCodes =
+                    listOf(
+                        V5SubAckReasonCode.GrantedQoS0(),
+                        V5SubAckReasonCode.GrantedQoS1(),
+                        V5SubAckReasonCode.UnspecifiedError(),
+                    ),
             )
         assertDispatcherRoundTrip(original, expectedTotalBytes = 8)
     }

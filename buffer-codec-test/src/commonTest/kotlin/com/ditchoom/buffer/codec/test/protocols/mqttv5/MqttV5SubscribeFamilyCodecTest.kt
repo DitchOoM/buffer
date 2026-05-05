@@ -7,6 +7,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttUnsubscribeTopic
+import com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImage
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImageCodec
 import com.ditchoom.buffer.pool.BufferPool
@@ -37,7 +38,13 @@ class MqttV5SubscribeFamilyCodecTest {
                 remainingLength = 9u,
                 packetIdentifier = 0x002Au,
                 properties = emptyList(),
-                topicFilters = listOf(V5Subscription(topicFilter = "t/1", subscriptionOptions = 0x01u)),
+                topicFilters =
+                    listOf(
+                        V5Subscription(
+                            topicFilter = "t/1",
+                            subscriptionOptions = V5SubscriptionOptions.of(qos = 1),
+                        ),
+                    ),
             )
         val buf = encode(msg)
         buf.resetForRead()
@@ -69,8 +76,14 @@ class MqttV5SubscribeFamilyCodecTest {
                 properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 3_600u)),
                 topicFilters =
                     listOf(
-                        V5Subscription(topicFilter = "t/1", subscriptionOptions = 0x00u),
-                        V5Subscription(topicFilter = "t/2", subscriptionOptions = 0x02u),
+                        V5Subscription(
+                            topicFilter = "t/1",
+                            subscriptionOptions = V5SubscriptionOptions.of(qos = 0),
+                        ),
+                        V5Subscription(
+                            topicFilter = "t/2",
+                            subscriptionOptions = V5SubscriptionOptions.of(qos = 2),
+                        ),
                     ),
             )
         val buf = encode(original)
@@ -87,7 +100,7 @@ class MqttV5SubscribeFamilyCodecTest {
                 remainingLength = 4u,
                 packetIdentifier = 0x002Au,
                 properties = emptyList(),
-                reasonCodes = listOf(0x01u), // Granted QoS 1
+                reasonCodes = listOf(V5SubAckReasonCode.GrantedQoS1()),
             )
         val buf = encode(msg)
         buf.resetForRead()
@@ -105,7 +118,12 @@ class MqttV5SubscribeFamilyCodecTest {
                 remainingLength = 11u,
                 packetIdentifier = 0x0042u,
                 properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
-                reasonCodes = listOf(0x00u, 0x01u, 0x02u),
+                reasonCodes =
+                    listOf(
+                        V5SubAckReasonCode.GrantedQoS0(),
+                        V5SubAckReasonCode.GrantedQoS1(),
+                        V5SubAckReasonCode.GrantedQoS2(),
+                    ),
             )
         val buf = encode(original)
         buf.resetForRead()
@@ -165,7 +183,7 @@ class MqttV5SubscribeFamilyCodecTest {
         assertEquals(emptyList(), sub.properties)
         assertEquals(1, sub.topicFilters.size)
         assertEquals("topic", sub.topicFilters[0].topicFilter)
-        assertEquals(0x02u.toUByte(), sub.topicFilters[0].subscriptionOptions)
+        assertEquals(V5SubscriptionOptions.of(qos = 2), sub.topicFilters[0].subscriptionOptions)
     }
 
     @Test
@@ -175,7 +193,7 @@ class MqttV5SubscribeFamilyCodecTest {
                 remainingLength = 9u,
                 packetIdentifier = 0x0001u,
                 properties = emptyList(),
-                topicFilters = listOf(V5Subscription("t/1", 0x00u)),
+                topicFilters = listOf(V5Subscription("t/1", V5SubscriptionOptions.of(qos = 0))),
             )
         val buf = encode(msg)
         buf.resetForRead()
