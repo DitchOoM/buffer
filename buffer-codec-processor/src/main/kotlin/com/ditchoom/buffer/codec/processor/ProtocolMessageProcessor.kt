@@ -82,13 +82,13 @@ import com.google.devtools.ksp.validate
  *     and continues to fire when the referenced sibling is the
  *     immediately-preceding parameter.
  *
- *   - **Stage E `@WhenTrue` shape (Locked Decision row 19, slices 2–3).**
+ *   - **Stage E `@When` shape (Locked Decision row 19, slices 2–3).**
  *     The bound parameter type must be nullable. Two source-expression
  *     forms are supported:
- *       - Simple-name form `@WhenTrue("siblingField")`: the referenced
+ *       - Simple-name form `@When("siblingField")`: the referenced
  *         constructor parameter must exist, must be declared before the
  *         bound parameter, and must be a non-nullable `Boolean`.
- *       - Dotted form `@WhenTrue("sibling.property")`: the sibling
+ *       - Dotted form `@When("sibling.property")`: the sibling
  *         must be a constructor parameter declared before the bound
  *         parameter; its type must be a `value class`; the property
  *         must be a `val` declared on that value class with no extra
@@ -152,7 +152,7 @@ class ProtocolMessageProcessor(
             validateAdjacentLengthFrom(symbol, ctor.parameters, payloadType)
             validateLengthFrom(symbol, ctor.parameters)
             validateWireBytes(symbol, ctor.parameters)
-            validateWhenTrue(symbol, ctor.parameters)
+            validateWhen(symbol, ctor.parameters)
             validateUseCodec(symbol, ctor.parameters, payloadType)
             validatePayloadTypeParameter(symbol, ctor.parameters)
             emitter.tryEmit(symbol)
@@ -475,7 +475,7 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Stage E slices 2–3 — `@WhenTrue` shape validation (Locked Decision row 19).
+     * Stage E slices 2–3 — `@When` shape validation (Locked Decision row 19).
      *
      * The bound parameter type must always be nullable (`T?`); when the
      * predicate is false the decoder writes `null`, so absence has to be
@@ -493,7 +493,7 @@ class ProtocolMessageProcessor(
      *     rejected. Diagnostics list the value-class properties that
      *     would have satisfied the contract.
      */
-    private fun validateWhenTrue(
+    private fun validateWhen(
         owner: KSClassDeclaration,
         parameters: List<KSValueParameter>,
     ) {
@@ -501,22 +501,22 @@ class ProtocolMessageProcessor(
         for ((index, param) in parameters.withIndex()) {
             val ann =
                 param.annotations.firstOrNull { a ->
-                    a.shortName.asString() == WHEN_TRUE_SHORT &&
+                    a.shortName.asString() == WHEN_SHORT &&
                         a.annotationType
                             .resolve()
                             .declaration.qualifiedName
-                            ?.asString() == WHEN_TRUE_QNAME
+                            ?.asString() == WHEN_QNAME
                 } ?: continue
             val expression =
                 ann.arguments
-                    .firstOrNull { it.name?.asString() == "expression" }
+                    .firstOrNull { it.name?.asString() == "predicate" }
                     ?.value as? String ?: continue
 
             val fieldName = param.name?.asString() ?: "<unknown>"
             val type = param.type.resolve()
             if (!type.isMarkedNullable) {
                 logger.error(
-                    "@WhenTrue(\"$expression\") on $ownerName.$fieldName requires the field type " +
+                    "@When(\"$expression\") on $ownerName.$fieldName requires the field type " +
                         "to be nullable (e.g., `Int?` not `Int`). When the predicate is false, the " +
                         "decoder needs to assign `null` to the slot — that is the only way to " +
                         "represent absence uniformly across types (Locked Decision row 19).",
@@ -528,7 +528,7 @@ class ProtocolMessageProcessor(
             val parts = expression.split('.')
             if (parts.size > 2) {
                 logger.error(
-                    "@WhenTrue(\"$expression\") on $ownerName.$fieldName uses a deeper-than-one-level " +
+                    "@When(\"$expression\") on $ownerName.$fieldName uses a deeper-than-one-level " +
                         "path. Locked Decision row 19 limits the dotted form to `<sibling>.<property>` " +
                         "where `<sibling>` is a sibling constructor parameter and `<property>` is a " +
                         "`Boolean`-returning `val` on the sibling's `value class` type.",
@@ -555,7 +555,7 @@ class ProtocolMessageProcessor(
                             if (q == BOOLEAN_QNAME && !resolved.isMarkedNullable) n else null
                         }
                 logger.error(
-                    "@WhenTrue(\"$expression\") on $ownerName.$fieldName references " +
+                    "@When(\"$expression\") on $ownerName.$fieldName references " +
                         "`$siblingName`, which is not a constructor parameter of $ownerName. " +
                         if (available.isEmpty()) {
                             "$ownerName has no `Boolean` siblings declared before $fieldName."
@@ -568,7 +568,7 @@ class ProtocolMessageProcessor(
             }
             if (sourceIndex >= index) {
                 logger.error(
-                    "@WhenTrue(\"$expression\") on $ownerName.$fieldName references " +
+                    "@When(\"$expression\") on $ownerName.$fieldName references " +
                         "$ownerName.$siblingName, which is declared at-or-after $fieldName in the " +
                         "constructor parameter list. The source field must be declared before " +
                         "the conditional field so its value is available at decode time.",
@@ -585,7 +585,7 @@ class ProtocolMessageProcessor(
                     val displayed = sourceQname ?: "<unresolved>"
                     val nullableSuffix = if (sourceType.isMarkedNullable) "?" else ""
                     logger.error(
-                        "@WhenTrue(\"$expression\") on $ownerName.$fieldName requires source " +
+                        "@When(\"$expression\") on $ownerName.$fieldName requires source " +
                             "`$ownerName.$siblingName` to be a non-nullable `Boolean`, but it is " +
                             "`$displayed$nullableSuffix`. Locked Decision row 19 limits the simple " +
                             "expression form to a sibling `Boolean` field.",
@@ -600,7 +600,7 @@ class ProtocolMessageProcessor(
                         sourceType.declaration.qualifiedName?.asString() ?: "<unresolved>"
                     val nullableSuffix = if (sourceType.isMarkedNullable) "?" else ""
                     logger.error(
-                        "@WhenTrue(\"$expression\") on $ownerName.$fieldName uses a dotted source " +
+                        "@When(\"$expression\") on $ownerName.$fieldName uses a dotted source " +
                             "but `$ownerName.$siblingName` resolves to `$displayed$nullableSuffix`, which " +
                             "is not a `value class`. Locked Decision row 19 limits the dotted form to " +
                             "siblings whose type is a `@JvmInline value class` exposing a " +
@@ -625,7 +625,7 @@ class ProtocolMessageProcessor(
                                 "${booleanProperties.joinToString()}."
                         }
                     logger.error(
-                        "@WhenTrue(\"$expression\") on $ownerName.$fieldName references property " +
+                        "@When(\"$expression\") on $ownerName.$fieldName references property " +
                             "`$propertyName`, which is not a `Boolean`-returning `val` declared on " +
                             "${siblingDecl.qualifiedName?.asString() ?: siblingDecl.simpleName.asString()}. " +
                             available,
@@ -1286,8 +1286,8 @@ class ProtocolMessageProcessor(
         private const val DISPATCH_ON_SHORT = "DispatchOn"
         private const val DISPATCH_VALUE_QNAME = "com.ditchoom.buffer.codec.annotations.DispatchValue"
         private const val DISPATCH_VALUE_SHORT = "DispatchValue"
-        private const val WHEN_TRUE_QNAME = "com.ditchoom.buffer.codec.annotations.WhenTrue"
-        private const val WHEN_TRUE_SHORT = "WhenTrue"
+        private const val WHEN_QNAME = "com.ditchoom.buffer.codec.annotations.When"
+        private const val WHEN_SHORT = "When"
         private const val USE_CODEC_QNAME = "com.ditchoom.buffer.codec.annotations.UseCodec"
         private const val USE_CODEC_SHORT = "UseCodec"
         private const val REMAINING_BYTES_QNAME = "com.ditchoom.buffer.codec.annotations.RemainingBytes"

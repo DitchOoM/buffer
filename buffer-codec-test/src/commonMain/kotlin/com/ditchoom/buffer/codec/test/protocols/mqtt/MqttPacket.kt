@@ -9,7 +9,7 @@ import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import com.ditchoom.buffer.codec.annotations.UseCodec
-import com.ditchoom.buffer.codec.annotations.WhenTrue
+import com.ditchoom.buffer.codec.annotations.When
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
 import kotlin.jvm.JvmInline
 
@@ -39,7 +39,7 @@ value class MqttFixedHeader(
      * MQTT v3.1.1 §3.3.2.2 — PUBLISH carries a packet identifier
      * only when QoS > 0 (QoS bits live in `flags & 0x06`). Exposed
      * as a `Boolean`-returning `val` so `Publish.packetId` can gate
-     * on `@WhenTrue("header.qosGreaterThanZero")` via the slice-3
+     * on `@When("header.qosGreaterThanZero")` via the slice-3
      * dotted value-class predicate path.
      */
     val qosGreaterThanZero: Boolean get() = (raw.toUInt() and 0x06u) != 0u
@@ -120,7 +120,7 @@ sealed interface MqttPacket<out P : Payload> {
      * Composes every Stage E + G annotation the standalone fixture
      * exercised: `@LengthPrefixed val: String` (slice 5a non-terminal
      * placement), value-class field (slice 3), dotted
-     * `@WhenTrue("connectFlags.<bit>")` predicates (slice 3 dotted
+     * `@When("connectFlags.<bit>")` predicates (slice 3 dotted
      * form + slice 3.5 LengthPrefixed inner + slice 5b non-terminal
      * Conditional), and the `@RemainingLength` var-int header (slice 8)
      * bounding decode of the optional payload tail. The dispatcher
@@ -144,10 +144,10 @@ sealed interface MqttPacket<out P : Payload> {
         val connectFlags: MqttConnectFlags,
         val keepAliveSeconds: UShort,
         @LengthPrefixed val clientId: String,
-        @LengthPrefixed @WhenTrue("connectFlags.willPresent") val willTopic: String? = null,
-        @LengthPrefixed @WhenTrue("connectFlags.willPresent") val willMessage: String? = null,
-        @LengthPrefixed @WhenTrue("connectFlags.usernamePresent") val username: String? = null,
-        @LengthPrefixed @WhenTrue("connectFlags.passwordPresent") val password: String? = null,
+        @LengthPrefixed @When("connectFlags.willPresent") val willTopic: String? = null,
+        @LengthPrefixed @When("connectFlags.willPresent") val willMessage: String? = null,
+        @LengthPrefixed @When("connectFlags.usernamePresent") val username: String? = null,
+        @LengthPrefixed @When("connectFlags.passwordPresent") val password: String? = null,
     ) : MqttPacket<Nothing>
 
     /**
@@ -160,7 +160,7 @@ sealed interface MqttPacket<out P : Payload> {
      *
      * Phase J.M step 5 second-tranche variant. Modeled with raw
      * `UByte` fields rather than a value-class wrapper — there's no
-     * `@WhenTrue` gate that needs to inspect `sessionPresent` as a
+     * `@When` gate that needs to inspect `sessionPresent` as a
      * boolean, and the rest of the byte is reserved per spec, so the
      * `MqttConnectFlags`-style decomposition would be premature.
      */
@@ -188,7 +188,7 @@ sealed interface MqttPacket<out P : Payload> {
      *     the publish topic name.
      *   - `packetId` (`PacketId?`, UShort BE) — present only when
      *     `header.qosGreaterThanZero` is `true` per §3.3.2.2.
-     *     Modeled with `@WhenTrue("header.qosGreaterThanZero")`
+     *     Modeled with `@When("header.qosGreaterThanZero")`
      *     against the value-class header property; for QoS=0 the
      *     slot is skipped on the wire and the field reads back as
      *     `null`. Phase J.M step 2 is the vector that lifts
@@ -211,7 +211,7 @@ sealed interface MqttPacket<out P : Payload> {
         val header: MqttFixedHeader = MqttFixedHeader(0x30u),
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         @LengthPrefixed val topic: String,
-        @WhenTrue("header.qosGreaterThanZero") val packetId: PacketId? = null,
+        @When("header.qosGreaterThanZero") val packetId: PacketId? = null,
         @RemainingBytes val payload: P,
     ) : MqttPacket<P>
 

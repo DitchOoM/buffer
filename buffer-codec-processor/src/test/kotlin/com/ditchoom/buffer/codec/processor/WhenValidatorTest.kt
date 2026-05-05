@@ -12,7 +12,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Compile-time validator coverage for `@WhenTrue` (Stage E,
+ * Compile-time validator coverage for `@When` (Stage E,
  * Locked Decision row 19). Slice 2 covers the simple-name form
  * (`"siblingField"`); slice 3 covers the dotted form
  * (`"sibling.property"`) where the sibling is a `value class`
@@ -21,7 +21,7 @@ import kotlin.test.assertTrue
  * and listing the available `Boolean`-returning `val` properties on
  * the resolved value-class type.
  */
-class WhenTrueValidatorTest {
+class WhenValidatorTest {
     @Test
     fun acceptsSimpleSiblingBoolean() {
         val result =
@@ -30,19 +30,19 @@ class WhenTrueValidatorTest {
                 package test
 
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-                import com.ditchoom.buffer.codec.annotations.WhenTrue
+                import com.ditchoom.buffer.codec.annotations.When
 
                 @ProtocolMessage
                 data class Simple(
                     val hasExtra: Boolean,
-                    @WhenTrue("hasExtra") val extra: Int? = null,
+                    @When("hasExtra") val extra: Int? = null,
                 )
                 """.trimIndent(),
             )
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
         assertFalse(
-            result.messages.contains("@WhenTrue"),
-            "valid simple-form @WhenTrue must compile silently. Messages:\n${result.messages}",
+            result.messages.contains("@When"),
+            "valid simple-form @When must compile silently. Messages:\n${result.messages}",
         )
     }
 
@@ -54,7 +54,7 @@ class WhenTrueValidatorTest {
                 package test
 
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-                import com.ditchoom.buffer.codec.annotations.WhenTrue
+                import com.ditchoom.buffer.codec.annotations.When
                 import kotlin.jvm.JvmInline
 
                 @JvmInline
@@ -66,14 +66,14 @@ class WhenTrueValidatorTest {
                 @ProtocolMessage
                 data class Msg(
                     val flags: Flags,
-                    @WhenTrue("flags.want") val payload: Int? = null,
+                    @When("flags.want") val payload: Int? = null,
                 )
                 """.trimIndent(),
             )
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
         assertFalse(
-            result.messages.contains("@WhenTrue"),
-            "valid dotted @WhenTrue must compile silently. Messages:\n${result.messages}",
+            result.messages.contains("@When"),
+            "valid dotted @When must compile silently. Messages:\n${result.messages}",
         )
     }
 
@@ -85,7 +85,7 @@ class WhenTrueValidatorTest {
                 package test
 
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-                import com.ditchoom.buffer.codec.annotations.WhenTrue
+                import com.ditchoom.buffer.codec.annotations.When
                 import kotlin.jvm.JvmInline
 
                 @JvmInline
@@ -97,7 +97,7 @@ class WhenTrueValidatorTest {
                 @ProtocolMessage
                 data class Msg(
                     val flags: Flags,
-                    @WhenTrue("flags.want.extra") val payload: Int? = null,
+                    @When("flags.want.extra") val payload: Int? = null,
                 )
                 """.trimIndent(),
             )
@@ -120,7 +120,7 @@ class WhenTrueValidatorTest {
                 package test
 
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-                import com.ditchoom.buffer.codec.annotations.WhenTrue
+                import com.ditchoom.buffer.codec.annotations.When
 
                 @ProtocolMessage
                 data class Container(val want: Boolean)
@@ -128,7 +128,7 @@ class WhenTrueValidatorTest {
                 @ProtocolMessage
                 data class Msg(
                     val container: Container,
-                    @WhenTrue("container.want") val payload: Int? = null,
+                    @When("container.want") val payload: Int? = null,
                 )
                 """.trimIndent(),
             )
@@ -151,7 +151,7 @@ class WhenTrueValidatorTest {
                 package test
 
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-                import com.ditchoom.buffer.codec.annotations.WhenTrue
+                import com.ditchoom.buffer.codec.annotations.When
                 import kotlin.jvm.JvmInline
 
                 @JvmInline
@@ -164,7 +164,7 @@ class WhenTrueValidatorTest {
                 @ProtocolMessage
                 data class Msg(
                     val flags: Flags,
-                    @WhenTrue("flags.missing") val payload: Int? = null,
+                    @When("flags.missing") val payload: Int? = null,
                 )
                 """.trimIndent(),
             )
@@ -192,7 +192,7 @@ class WhenTrueValidatorTest {
                 package test
 
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-                import com.ditchoom.buffer.codec.annotations.WhenTrue
+                import com.ditchoom.buffer.codec.annotations.When
                 import kotlin.jvm.JvmInline
 
                 @JvmInline
@@ -204,7 +204,7 @@ class WhenTrueValidatorTest {
                 @ProtocolMessage
                 data class Msg(
                     val flags: Flags,
-                    @WhenTrue("flags.width") val payload: Int? = null,
+                    @When("flags.width") val payload: Int? = null,
                 )
                 """.trimIndent(),
             )
@@ -227,7 +227,7 @@ class WhenTrueValidatorTest {
                 package test
 
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-                import com.ditchoom.buffer.codec.annotations.WhenTrue
+                import com.ditchoom.buffer.codec.annotations.When
                 import kotlin.jvm.JvmInline
 
                 @JvmInline
@@ -239,7 +239,7 @@ class WhenTrueValidatorTest {
                 @ProtocolMessage
                 data class Msg(
                     val flags: Flags,
-                    @WhenTrue("flags.want") val payload: Int? = null,
+                    @When("flags.want") val payload: Int? = null,
                 )
                 """.trimIndent(),
             )
@@ -258,7 +258,7 @@ class WhenTrueValidatorTest {
                 package test
 
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-                import com.ditchoom.buffer.codec.annotations.WhenTrue
+                import com.ditchoom.buffer.codec.annotations.When
                 import kotlin.jvm.JvmInline
 
                 @JvmInline
@@ -270,7 +270,7 @@ class WhenTrueValidatorTest {
                 @ProtocolMessage
                 data class Msg(
                     val flags: Flags,
-                    @WhenTrue("flags.want") val payload: Int = 0,
+                    @When("flags.want") val payload: Int = 0,
                 )
                 """.trimIndent(),
             )
@@ -293,7 +293,7 @@ class WhenTrueValidatorTest {
                 package test
 
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-                import com.ditchoom.buffer.codec.annotations.WhenTrue
+                import com.ditchoom.buffer.codec.annotations.When
                 import kotlin.jvm.JvmInline
 
                 @JvmInline
@@ -304,7 +304,7 @@ class WhenTrueValidatorTest {
 
                 @ProtocolMessage
                 data class Msg(
-                    @WhenTrue("flags.want") val payload: Int? = null,
+                    @When("flags.want") val payload: Int? = null,
                     val flags: Flags,
                 )
                 """.trimIndent(),

@@ -7,7 +7,7 @@ import kotlin.jvm.JvmInline
  * MQTT v3.1.1 §3.1.2.3 Connect Flags. The byte is bit-packed; the
  * codec reads/writes a single `UByte` and exposes the meaningful
  * boolean bits as `Boolean`-returning `val` properties so that
- * `@WhenTrue("connectFlags.<bit>")` predicates resolve naturally
+ * `@When("connectFlags.<bit>")` predicates resolve naturally
  * against the slice 3 dotted value-class predicate path.
  *
  * Bit layout (LSB → MSB):
@@ -21,7 +21,7 @@ import kotlin.jvm.JvmInline
  *   7  usernamePresent
  *
  * `willQoS` is exposed as an `Int` (not a `Boolean`), so it does
- * not show up as a `@WhenTrue` source. That's the intent — QoS is
+ * not show up as a `@When` source. That's the intent — QoS is
  * routing information, not a presence bit.
  *
  * Lives in its own file rather than nested inside `MqttPacket.kt`

@@ -16,7 +16,7 @@ import kotlin.test.assertNull
 
 /**
  * Stage E slice 3 + 3.5 doctrine vector. Validates the dotted-form
- * `@WhenTrue("flags.want")` resolver against the value-class field
+ * `@When("flags.want")` resolver against the value-class field
  * `flags: SmallFlags`, composed with `@LengthPrefixed val: String?`
  * as the bound (inner) shape: round-trip across both predicate
  * values, encoder zero-byte skip when predicate false (entire slot
@@ -92,7 +92,7 @@ class WithFlagPayloadCodecTest {
 
     @Test
     fun wireSizeIsBackPatch() {
-        // Locked Decision row 19: any @WhenTrue field collapses message wireSize to BackPatch.
+        // Locked Decision row 19: any @When field collapses message wireSize to BackPatch.
         assertEquals(
             WireSize.BackPatch,
             WithFlagPayloadCodec.wireSize(

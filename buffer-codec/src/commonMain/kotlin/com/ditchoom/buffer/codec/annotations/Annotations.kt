@@ -237,40 +237,59 @@ annotation class WireOrder(
 )
 
 /**
- * Conditional field: only present on the wire when the referenced expression is `true`.
+ * Conditional field: only present on the wire when the [predicate] holds.
  * The field must be nullable. Setting `= null` as the constructor default is conventional
  * (so the data class can be constructed without naming the field when the predicate
  * is false) but is **not** enforced — KSP cannot inspect default expression trees, so
  * any rule the validator can't actually check is not part of the contract
  * (Locked Decision row 19).
  *
+ * ## Grammar
+ *
+ * The predicate language is **deliberately narrow**: the validator parses literal
+ * forms only — no `&&` / `||`, no `!=`, no field-to-field comparisons, no method calls.
+ * If a use case doesn't fit, model it with `@UseCodec` and a custom codec instead.
+ * Two forms are accepted:
+ *
+ * ### 1. Dotted Boolean path on a prior sibling
+ *
+ * `"<siblingField>"` resolves to a sibling `Boolean` constructor parameter declared
+ * before the bound parameter; `"<siblingField>.<property>"` resolves to a `Boolean`-
+ * returning `val` on a sibling `@JvmInline value class`.
+ *
  * ```kotlin
  * @ProtocolMessage
  * data class OptionalPayload(
  *     val hasExtra: Boolean,
- *     @WhenTrue("hasExtra") val extra: Int? = null,  // only read/written when hasExtra == true
+ *     @When("hasExtra") val extra: Int? = null,
  * )
+ *
+ * @When("flags.willFlag") val willTopic: String? = null
  * ```
  *
- * Dotted expressions access properties on `@JvmInline value class` fields:
+ * ### 2. `remaining <op> <int-literal>` *(reserved — not yet implemented)*
  *
- * ```kotlin
- * @WhenTrue("flags.willFlag") val willTopic: String? = null
- * ```
+ * `"remaining <op> <int>"` where `<op> ∈ {>=, >, ==}` gates the slot on the bounded
+ * decode buffer's `remaining()`. The identifier `remaining` is reserved/magic and
+ * does not refer to a sibling field. Designed as the future replacement for the
+ * never-introduced `@WhenRemaining(N)` annotation; lands as part of the v5
+ * property-list work (Phase J.M.5). Until then, this grammar is documented but
+ * not parsed — using it today produces the standard "sibling not found" diagnostic.
+ *
+ * ## Semantics
  *
  * Encoder semantics (row 19): when the predicate is `false`, the entire slot is
  * skipped on the wire (zero bytes written, including any `@LengthPrefixed` prefix).
  * When the predicate is `true` and the field's value is `null`, encode throws
  * `EncodeException` with field-path attribution.
  *
- * @param expression `"fieldName"` for a sibling `Boolean` field, or
- *   `"fieldName.property"` where `fieldName` is a sibling `@JvmInline value class`
- *   exposing a `Boolean`-returning `val` property.
+ * @param predicate Grammar 1 (`"siblingField"` or `"siblingField.property"`) today;
+ *   grammar 2 (`"remaining <op> <int>"`) reserved for Phase J.M.5.
  */
 @Target(AnnotationTarget.VALUE_PARAMETER)
 @Retention(AnnotationRetention.BINARY)
-annotation class WhenTrue(
-    val expression: String,
+annotation class When(
+    val predicate: String,
 )
 
 /**

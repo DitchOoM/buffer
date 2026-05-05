@@ -2,11 +2,11 @@ package com.ditchoom.buffer.codec.test.protocols.simple
 
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-import com.ditchoom.buffer.codec.annotations.WhenTrue
+import com.ditchoom.buffer.codec.annotations.When
 import kotlin.jvm.JvmInline
 
 /**
- * Stage E slice 3 + 3.5 doctrine vector — `@WhenTrue` against the
+ * Stage E slice 3 + 3.5 doctrine vector — `@When` against the
  * dotted `<sibling>.<property>` form, where `<sibling>` is a
  * `@JvmInline value class` exposing a `Boolean`-returning `val`
  * property (Locked Decision row 19, dotted clause), composed with
@@ -18,9 +18,9 @@ import kotlin.jvm.JvmInline
  *   1. Value-class-as-field on a parent data class
  *      (`flags: SmallFlags`, decoded as a single inner UByte and
  *      reconstructed via the value class's primary constructor).
- *   2. Dotted-form `@WhenTrue("flags.want")` resolving against the
+ *   2. Dotted-form `@When("flags.want")` resolving against the
  *      reconstructed value class's `want: Boolean` property.
- *   3. `@LengthPrefixed`-inner `@WhenTrue` slot — the predicate
+ *   3. `@LengthPrefixed`-inner `@When` slot — the predicate
  *      gates an entire length-prefixed UTF-8 string body
  *      (BackPatch encode, Int.MAX_VALUE-guarded decode).
  *
@@ -50,5 +50,5 @@ value class SmallFlags(
 @ProtocolMessage
 data class WithFlagPayload(
     val flags: SmallFlags,
-    @LengthPrefixed @WhenTrue("flags.want") val payload: String? = null,
+    @LengthPrefixed @When("flags.want") val payload: String? = null,
 )

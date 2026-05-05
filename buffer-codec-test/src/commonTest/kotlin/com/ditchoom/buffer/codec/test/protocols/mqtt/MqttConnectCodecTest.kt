@@ -25,7 +25,7 @@ import kotlin.test.assertNull
  *   - Non-terminal `@LengthPrefixed val: String` (slice 5a).
  *   - Value-class connectFlags field with bit-packed Boolean getters
  *     (slice 3).
- *   - Multiple `@LengthPrefixed @WhenTrue("connectFlags.<bit>")
+ *   - Multiple `@LengthPrefixed @When("connectFlags.<bit>")
  *     val: String?` slots (slice 3 dotted form + slice 3.5
  *     LengthPrefixed inner + slice 5b non-terminal Conditional).
  *   - Sequential peek walk via the slice 8 RemainingLength fast

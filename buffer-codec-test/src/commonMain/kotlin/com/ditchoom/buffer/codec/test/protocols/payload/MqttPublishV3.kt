@@ -46,7 +46,7 @@ import kotlin.jvm.JvmInline
  * Slice 10a deliberately narrows the spec shape to validate the
  * typed-payload + `@UseCodec` emit path:
  *   - No QoS-conditional `packetId` (§3.3.2.2): packetId is always
- *     present (will lift to `@WhenTrue("header.flags.qos > 0")` once
+ *     present (will lift to `@When("header.flags.qos > 0")` once
  *     QoS-bit dotted-form predicates exist).
  *   - No `@RemainingLength` var-int as a field (the outer dispatcher
  *     in slice 10d will own the var-int and `setLimit`).

@@ -91,14 +91,14 @@ import com.squareup.kotlinpoet.U_SHORT
  *     with `baseOffset + 1`. Unknown discriminator at decode or peek
  *     time throws `DecodeException` per Locked Decision row 17. Skips
  *     when the parent carries `@DispatchOn` (Stage F).
- *   - **Stage E slice 2 — `@WhenTrue` against a sibling `Boolean`.**
- *     A constructor parameter `@WhenTrue("siblingField") val name: T?`
+ *   - **Stage E slice 2 — `@When` against a sibling `Boolean`.**
+ *     A constructor parameter `@When("siblingField") val name: T?`
  *     where `siblingField` is a non-nullable `Boolean` parameter
  *     declared before this one. Decode emits
  *     `val name: T? = if (sibling) <readT> else null`; encode skips
  *     the slot entirely when the predicate is false (zero bytes),
  *     and throws `EncodeException` if the predicate is true and the
- *     field is null. Per Locked Decision row 19, any `@WhenTrue`
+ *     field is null. Per Locked Decision row 19, any `@When`
  *     field collapses message-level `WireSize` to `BackPatch`.
  *     `peekFrameSize` walks scalar prefix fields, peeks the boolean
  *     source statically, and adds the inner field's bytes only when
@@ -106,13 +106,13 @@ import com.squareup.kotlinpoet.U_SHORT
  *     scalar (no `@WireBytes` / `@WireOrder`); slice 2 inner is
  *     restricted to natural-width Scalar — `@LengthPrefixed` inner
  *     lands in slice 5 alongside MQTT v3 CONNECT.
- *   - **Stage E slice 3 — dotted `@WhenTrue("sibling.property")` plus
+ *   - **Stage E slice 3 — dotted `@When("sibling.property")` plus
  *     value-class fields.** A constructor parameter whose type is a
  *     `value class` with a single supported-scalar primary
  *     constructor parameter is a first-class field shape: decode
  *     reads the inner scalar at natural width and constructs the
  *     value class; encode unwraps via the inner property and writes
- *     the inner scalar. The dotted-form `@WhenTrue("sibling.property")`
+ *     the inner scalar. The dotted-form `@When("sibling.property")`
  *     resolves the predicate as `sibling.property` against an in-scope
  *     value-class local, where `sibling` is such a value-class field
  *     declared before the bound parameter and `property` is a
@@ -125,7 +125,7 @@ import com.squareup.kotlinpoet.U_SHORT
  * Anything outside this surface — `@LengthFrom`, `@RemainingBytes`,
  * `@UseCodec`, `@DispatchOn`, signed scalars in the manual-byte-
  * assembly path, `@LengthPrefixed` on a non-terminal field, non-
- * terminal `@WhenTrue`, `@LengthPrefixed`-inner `@WhenTrue` — is
+ * terminal `@When`, `@LengthPrefixed`-inner `@When` — is
  * silently skipped here and picked up by later stages as their
  * capability lands.
  */
@@ -314,16 +314,16 @@ internal class CodecEmitter(
         index: Int,
         payloadTypeParameter: PayloadTypeParameter? = null,
     ): FieldSpec? {
-        // Stage E — `@WhenTrue` opens a separate analysis path: nullability is
+        // Stage E — `@When` opens a separate analysis path: nullability is
         // required, the inner shape is built from the non-null type, and the
         // result wraps in `FieldSpec.Conditional`. The non-conditional analysis
-        // below stays unchanged for any field without `@WhenTrue`.
-        val whenTrueAnn =
-            param.annotations.firstOrNull { it.shortName.asString() == "WhenTrue" }
-        if (whenTrueAnn != null) {
+        // below stays unchanged for any field without `@When`.
+        val whenAnn =
+            param.annotations.firstOrNull { it.shortName.asString() == "When" }
+        if (whenAnn != null) {
             return analyzeConditionalField(
                 param = param,
-                whenTrueAnn = whenTrueAnn,
+                whenAnn = whenAnn,
                 messageWireOrder = messageWireOrder,
                 ownerSimpleName = ownerSimpleName,
                 params = params,
@@ -966,9 +966,9 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage E slices 2–3 — `@WhenTrue` analysis (Locked Decision row 19).
+     * Stage E slices 2–3 — `@When` analysis (Locked Decision row 19).
      *
-     * Pipeline: parse the expression into a typed `WhenTrueExpression`
+     * Pipeline: parse the expression into a typed `WhenExpression`
      * → resolve the source against the prior siblings into a
      * `ConditionRef` → analyze the bound parameter's inner shape →
      * wrap into `FieldSpec.Conditional`. Each step returns `null` to
@@ -981,7 +981,7 @@ internal class CodecEmitter(
      */
     private fun analyzeConditionalField(
         param: KSValueParameter,
-        whenTrueAnn: KSAnnotation,
+        whenAnn: KSAnnotation,
         messageWireOrder: Endianness,
         ownerSimpleName: String,
         params: List<KSValueParameter>,
@@ -990,7 +990,7 @@ internal class CodecEmitter(
         if (!boundParameterIsConditionalShape(param)) return null
         val name = param.name?.asString() ?: return null
 
-        val expression = parseWhenTrueExpression(whenTrueAnn) ?: return null
+        val expression = parseWhenExpression(whenAnn) ?: return null
         val condition = resolveCondition(expression, params, index) ?: return null
         val inner = analyzeConditionalInner(param, messageWireOrder) ?: return null
 
@@ -1005,7 +1005,7 @@ internal class CodecEmitter(
 
     /**
      * Bound parameter must be nullable (so absence is representable
-     * when the predicate is false). Annotations beyond `@WhenTrue`
+     * when the predicate is false). Annotations beyond `@When`
      * itself are limited to `@LengthPrefixed` (slice 3.5);
      * `@WireBytes` / `@WireOrder` widen the shape and land in a
      * later slice.
@@ -1016,26 +1016,26 @@ internal class CodecEmitter(
         if (!type.isMarkedNullable) return false
         return param.annotations.all {
             val n = it.shortName.asString()
-            n == "WhenTrue" || n == "LengthPrefixed"
+            n == "When" || n == "LengthPrefixed"
         }
     }
 
     /**
-     * Parse the `@WhenTrue("…")` expression literal into a typed
-     * shape. Returns `null` for malformed annotation arguments and
-     * for paths deeper than one dot — both are silently rejected by
-     * the emitter and named by the validator.
+     * Parse the `@When("…")` predicate literal into a typed shape.
+     * Returns `null` for malformed annotation arguments and for paths
+     * deeper than one dot — both are silently rejected by the emitter
+     * and named by the validator.
      */
-    private fun parseWhenTrueExpression(whenTrueAnn: KSAnnotation): WhenTrueExpression? {
+    private fun parseWhenExpression(whenAnn: KSAnnotation): WhenExpression? {
         val raw =
-            whenTrueAnn.arguments
-                .firstOrNull { it.name?.asString() == "expression" }
+            whenAnn.arguments
+                .firstOrNull { it.name?.asString() == "predicate" }
                 ?.value as? String
                 ?: return null
         val parts = raw.split('.')
         return when (parts.size) {
-            1 -> WhenTrueExpression.Simple(parts[0])
-            2 -> WhenTrueExpression.Dotted(parts[0], parts[1])
+            1 -> WhenExpression.Simple(parts[0])
+            2 -> WhenExpression.Dotted(parts[0], parts[1])
             else -> null
         }
     }
@@ -1047,14 +1047,14 @@ internal class CodecEmitter(
      * validator emits the diagnostic).
      */
     private fun resolveCondition(
-        expression: WhenTrueExpression,
+        expression: WhenExpression,
         params: List<KSValueParameter>,
         boundIndex: Int,
     ): ConditionRef? {
         val sibling = locatePriorSibling(expression.siblingName, params, boundIndex) ?: return null
         return when (expression) {
-            is WhenTrueExpression.Simple -> resolveSimpleCondition(expression, sibling)
-            is WhenTrueExpression.Dotted -> resolveDottedCondition(expression, sibling)
+            is WhenExpression.Simple -> resolveSimpleCondition(expression, sibling)
+            is WhenExpression.Dotted -> resolveDottedCondition(expression, sibling)
         }
     }
 
@@ -1069,7 +1069,7 @@ internal class CodecEmitter(
     }
 
     private fun resolveSimpleCondition(
-        expression: WhenTrueExpression.Simple,
+        expression: WhenExpression.Simple,
         sibling: KSValueParameter,
     ): ConditionRef? {
         val sourceType = sibling.type.resolve()
@@ -1079,7 +1079,7 @@ internal class CodecEmitter(
     }
 
     private fun resolveDottedCondition(
-        expression: WhenTrueExpression.Dotted,
+        expression: WhenExpression.Dotted,
         sibling: KSValueParameter,
     ): ConditionRef? {
         val sourceType = sibling.type.resolve()
@@ -1154,7 +1154,7 @@ internal class CodecEmitter(
 
     /**
      * Phase J.M step 2 — detect a value-class-over-scalar inner for
-     * `@WhenTrue val: T?`. Mirrors the validity checks applied to
+     * `@When val: T?`. Mirrors the validity checks applied to
      * the non-conditional [analyzeValueClassScalarField] shape:
      * value class with exactly one primary-constructor parameter
      * over a supported non-nullable scalar, no `@WireBytes` /
@@ -1225,22 +1225,22 @@ internal class CodecEmitter(
         setOf(ScalarKind.UByte, ScalarKind.Byte, ScalarKind.UShort, ScalarKind.UInt)
 
     /**
-     * Stage E — typed shape of the `@WhenTrue("…")` expression
+     * Stage E — typed shape of the `@When("…")` expression
      * literal. Closed by doctrine row 19: only the simple-name and
      * one-level dotted forms are valid; deeper paths are a compile
      * error and never reach the analyzer.
      */
-    private sealed interface WhenTrueExpression {
+    private sealed interface WhenExpression {
         val siblingName: String
 
         data class Simple(
             override val siblingName: String,
-        ) : WhenTrueExpression
+        ) : WhenExpression
 
         data class Dotted(
             override val siblingName: String,
             val propertyName: String,
-        ) : WhenTrueExpression
+        ) : WhenExpression
     }
 
     private fun scalarTypeName(kind: ScalarKind): TypeName =
@@ -1838,7 +1838,7 @@ internal class CodecEmitter(
                 .addParameter("value", messageType)
                 .addParameter("context", ENCODE_CONTEXT_CN)
                 .returns(WIRE_SIZE_CN)
-        // Locked Decision row 19: any `@WhenTrue` field collapses the message
+        // Locked Decision row 19: any `@When` field collapses the message
         // wireSize to BackPatch — we don't attempt conditional-Exact arithmetic.
         if (shape.fields.any { it is FieldSpec.Conditional }) {
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
@@ -2388,7 +2388,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Slice 5a — peek a `@WhenTrue` slot inside the sequential walk.
+     * Slice 5a — peek a `@When` slot inside the sequential walk.
      * The predicate source has already been peek-stashed (added to
      * `needsPeekStash` and read when its field was visited); the
      * inner shape is gated on that stashed local.
@@ -2568,7 +2568,7 @@ internal class CodecEmitter(
      * with a single supported-scalar inner. Reads the inner scalar at
      * natural width and constructs the value class via its primary
      * constructor. The local is named after the outer parameter so
-     * dotted-form `@WhenTrue` resolvers can address it as `<name>.<property>`.
+     * dotted-form `@When` resolvers can address it as `<name>.<property>`.
      */
     private fun appendDecodeValueClassScalar(
         body: CodeBlock.Builder,
@@ -2600,7 +2600,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage E slice 2 — emit a `@WhenTrue` decode block.
+     * Stage E slice 2 — emit a `@When` decode block.
      *
      * Generated shape:
      * ```
@@ -2664,7 +2664,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage E slice 2/3 — emit a `@WhenTrue` encode block.
+     * Stage E slice 2/3 — emit a `@When` encode block.
      *
      * Generated shape:
      * ```
@@ -2696,7 +2696,7 @@ internal class CodecEmitter(
             field.name,
             ENCODE_EXCEPTION_CN,
             "${field.ownerSimpleName}.${field.name}",
-            "@WhenTrue(\"${conditionExpressionLiteral(field.condition)}\") predicate is true but field is null",
+            "@When(\"${conditionExpressionLiteral(field.condition)}\") predicate is true but field is null",
         )
         when (val inner = field.inner) {
             is ConditionalInner.Scalar ->
@@ -2748,7 +2748,7 @@ internal class CodecEmitter(
         }
 
     /**
-     * Reconstruct the original `@WhenTrue("...")` expression literal
+     * Reconstruct the original `@When("...")` expression literal
      * for use in `EncodeException` field-path messages (row 20).
      */
     private fun conditionExpressionLiteral(condition: ConditionRef): String =
@@ -2759,7 +2759,7 @@ internal class CodecEmitter(
 
     /**
      * Slice 3 / 5a / 6.5 — value-class inner-scalar peek. Used for
-     * predicate-source reconstruction in `@WhenTrue` (slice 3) and
+     * predicate-source reconstruction in `@When` (slice 3) and
      * for discriminator reconstruction in `@DispatchOn` (slice 6.5).
      *
      * `offsetExpr` is interpolated into
@@ -2933,7 +2933,7 @@ internal class CodecEmitter(
     /**
      * Slice 3.5 — emit the prefix read + Int.MAX_VALUE guard + length
      * Int conversion shared by length-prefixed-string field decode
-     * and the conditional `@LengthPrefixed @WhenTrue` decode path.
+     * and the conditional `@LengthPrefixed @When` decode path.
      * Returns the local variable name holding the resolved
      * (Int-typed) length.
      */
@@ -2976,7 +2976,7 @@ internal class CodecEmitter(
 
     /**
      * Slice 3.5 — shared BackPatch encoder for length-prefixed-string
-     * fields and the conditional `@LengthPrefixed @WhenTrue` encode
+     * fields and the conditional `@LengthPrefixed @When` encode
      * path (Locked Decision row 15).
      *
      * `accessor` is the expression that yields the string value;
@@ -3766,7 +3766,7 @@ internal class CodecEmitter(
     }
 
     private fun classifyVariantWireSize(shape: CodecShape): VariantWireSize {
-        // Locked Decision row 19: any `@WhenTrue` field collapses wireSize to
+        // Locked Decision row 19: any `@When` field collapses wireSize to
         // BackPatch — including inside a sealed variant.
         if (shape.fields.any { it is FieldSpec.Conditional }) return VariantWireSize.BackPatch
         // Slice 5a: any `@LengthPrefixed val: String` (terminal or otherwise)
@@ -4461,7 +4461,7 @@ internal class CodecEmitter(
         // Peek the discriminator's inner-scalar bytes at baseOffset and
         // reconstruct the value class. Slice 6 supports natural-width
         // single-byte kinds via appendPeekFixedScalar — the same path the
-        // slice 3 value-class @WhenTrue source uses. Wider discriminators
+        // slice 3 value-class @When source uses. Wider discriminators
         // would route through appendPeekScalar's order-aware assembly.
         appendPeekFixedScalar(
             body = body,
@@ -4860,11 +4860,11 @@ internal class CodecEmitter(
         ) : FixedSize
 
         /**
-         * Stage E — `@WhenTrue` conditional wrapper. Slice 2/3 support
+         * Stage E — `@When` conditional wrapper. Slice 2/3 support
          * `ConditionalInner.Scalar` at natural width (no `@WireBytes`,
          * no `@WireOrder`); slice 3.5 widens `inner` to
          * `ConditionalInner.LengthPrefixedString` for the MQTT v3
-         * CONNECT optional-field shape (`@LengthPrefixed @WhenTrue
+         * CONNECT optional-field shape (`@LengthPrefixed @When
          * val: String?`).
          *
          * `condition` carries the resolved source: slice 2's sibling-
@@ -4881,7 +4881,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage E — typed shape of a `@WhenTrue` field's bound (inner)
+     * Stage E — typed shape of a `@When` field's bound (inner)
      * type. Doctrine row 19 lists the slot's underlying type universe
      * as anything Stages A/B/C/D already emit; the emitter implements
      * that universe one shape at a time:
@@ -4920,7 +4920,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage E — resolved source of a `@WhenTrue` predicate.
+     * Stage E — resolved source of a `@When` predicate.
      *
      * Slice 2's `Sibling` form names a sibling `Boolean` constructor
      * parameter declared before the bound field. Slice 3's
@@ -5080,7 +5080,7 @@ internal class CodecEmitter(
         val isSigned: Boolean,
     ) {
         // Boolean is a 1-byte scalar with no byte order and no `@WireBytes` narrowing.
-        // Stage E precondition for `@WhenTrue` (Locked Decision row 19 mandates a
+        // Stage E precondition for `@When` (Locked Decision row 19 mandates a
         // `Boolean`-typed source field).
         Boolean(1, false),
         UByte(1, false),
