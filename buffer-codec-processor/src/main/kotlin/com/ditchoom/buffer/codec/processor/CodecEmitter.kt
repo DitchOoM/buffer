@@ -422,6 +422,21 @@ internal class CodecEmitter(
             // `@LengthPrefixed` and `@WireBytes` together is meaningless and
             // out of scope for this emitter; bail rather than try to interpret.
             if (wireBytesAnn != null) return null
+            // Phase I.1 step 11 — `@LengthPrefixed @UseCodec(C::class) val xs:
+            // List<E>` routes to LengthPrefixedUseCodecList. The codec drives
+            // the wire-format prefix (var-byte-int, etc.) and bounds the
+            // element-decode region via `applyBound`. The validator surfaces
+            // any user-facing diagnostics (codec not bounding, element not
+            // @ProtocolMessage); analyzer returns null silently for shapes
+            // outside the slice.
+            if (useCodecAnn != null) {
+                return analyzeLengthPrefixedUseCodecListField(
+                    param = param,
+                    listType = type,
+                    useCodecAnn = useCodecAnn,
+                    ownerSimpleName = ownerSimpleName,
+                )
+            }
             val prefixWidth = readLengthPrefix(lengthPrefixed)
             val qualified = type.declaration.qualifiedName?.asString()
             if (qualified == "kotlin.String") {
@@ -884,6 +899,60 @@ internal class CodecEmitter(
             fieldType = fieldTypeName,
             codecType = codecClassName,
             isBounding = codecDecl.implementsBoundingLengthCodec(),
+        )
+    }
+
+    /**
+     * Phase I.1 step 11 — `@LengthPrefixed @UseCodec(C::class) val xs:
+     * List<E>` analyzer. Returns the new shape when:
+     *   - field type is `kotlin.collections.List<E>` with E a
+     *     `@ProtocolMessage data class`,
+     *   - `C` is a Kotlin `object` implementing
+     *     `BoundingLengthCodec<UInt>`.
+     *
+     * Returns null silently for shapes the validator already names —
+     * the validator's diagnostic is the user-facing surface.
+     */
+    private fun analyzeLengthPrefixedUseCodecListField(
+        param: KSValueParameter,
+        listType: KSType,
+        useCodecAnn: KSAnnotation,
+        ownerSimpleName: String,
+    ): FieldSpec.LengthPrefixedUseCodecList? {
+        val name = param.name?.asString() ?: return null
+        if (listType.declaration.qualifiedName?.asString() != "kotlin.collections.List") return null
+        val typeArgs = listType.arguments
+        if (typeArgs.size != 1) return null
+        val elementType = typeArgs[0].type?.resolve() ?: return null
+        if (elementType.isError || elementType.isMarkedNullable) return null
+        val elementDecl = elementType.declaration as? KSClassDeclaration ?: return null
+        if (Modifier.DATA !in elementDecl.modifiers) return null
+        val isProtocolMessage =
+            elementDecl.annotations.any { ann ->
+                ann.shortName.asString() == "ProtocolMessage" &&
+                    ann.annotationType
+                        .resolve()
+                        .declaration.qualifiedName
+                        ?.asString() == PROTOCOL_MESSAGE_QNAME
+            }
+        if (!isProtocolMessage) return null
+        val codecKsType =
+            useCodecAnn.arguments
+                .firstOrNull { it.name?.asString() == "codec" }
+                ?.value as? KSType ?: return null
+        val codecDecl = codecKsType.declaration as? KSClassDeclaration ?: return null
+        if (codecDecl.classKind != ClassKind.OBJECT) return null
+        if (!codecDecl.implementsBoundingLengthCodec()) return null
+        return FieldSpec.LengthPrefixedUseCodecList(
+            name = name,
+            ownerSimpleName = ownerSimpleName,
+            codecType = ClassName(codecDecl.packageName.asString(), codecDecl.simpleName.asString()),
+            elementClassName = classNameOf(elementDecl),
+            elementCodecClassName =
+                ClassName(
+                    elementDecl.packageName.asString(),
+                    "${elementDecl.simpleName.asString()}Codec",
+                ),
         )
     }
 
@@ -1484,6 +1553,7 @@ internal class CodecEmitter(
                 appendDecodeRemainingBytesProtocolMessageList(body, field)
             is FieldSpec.RemainingBytesPayload -> appendDecodeRemainingBytesPayload(body, field)
             is FieldSpec.UseCodecScalar -> appendDecodeUseCodecScalar(body, field)
+            is FieldSpec.LengthPrefixedUseCodecList -> appendDecodeLengthPrefixedUseCodecList(body, field)
             is FieldSpec.ValueClassScalar -> appendDecodeValueClassScalar(body, field)
             is FieldSpec.Conditional -> appendDecodeConditional(body, field)
         }
@@ -1506,6 +1576,7 @@ internal class CodecEmitter(
                     appendEncodeRemainingBytesProtocolMessageList(body, field)
                 is FieldSpec.RemainingBytesPayload -> appendEncodeRemainingBytesPayload(body, field)
                 is FieldSpec.UseCodecScalar -> appendEncodeUseCodecScalar(body, field)
+                is FieldSpec.LengthPrefixedUseCodecList -> appendEncodeLengthPrefixedUseCodecList(body, field)
                 is FieldSpec.ValueClassScalar -> appendEncodeValueClassScalar(body, field)
                 is FieldSpec.Conditional -> appendEncodeConditional(body, field)
             }
@@ -1823,6 +1894,8 @@ internal class CodecEmitter(
                         "should strip the payload field before mapping header types.",
                 )
             is FieldSpec.UseCodecScalar -> field.fieldType
+            is FieldSpec.LengthPrefixedUseCodecList ->
+                ClassName("kotlin.collections", "List").parameterizedBy(field.elementClassName)
             is FieldSpec.ValueClassScalar -> field.valueClassType
             is FieldSpec.Conditional -> field.nullableTypeName
         }
@@ -1860,6 +1933,14 @@ internal class CodecEmitter(
         // LengthPrefixedMessage) is a follow-on once a vector measurably
         // benefits.
         if (shape.fields.any { it is FieldSpec.UseCodecScalar }) {
+            builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+            return builder.build()
+        }
+        // Phase I.1 step 11: `@LengthPrefixed @UseCodec val: List<E>`
+        // wireSize composes the user codec's prefix size with the sum of
+        // element wireSizes. Same conservative BackPatch collapse as the
+        // bare-scalar case — runtime-Exact-via-cast is a follow-on.
+        if (shape.fields.any { it is FieldSpec.LengthPrefixedUseCodecList }) {
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
             return builder.build()
         }
@@ -1999,6 +2080,31 @@ internal class CodecEmitter(
                 return builder.build()
             }
             appendPeekUseCodecScalar(builder, shape, ucsField, budget)
+            return builder.build()
+        }
+        // Phase I.1 step 11 — `@LengthPrefixed @UseCodec val: List<E>`
+        // peek mirrors the bounding-`UseCodecScalar` walker: total =
+        // priorBytes + observed-codec-width + decodedValue.toInt(). The
+        // codec is `BoundingLengthCodec<UInt>` (validator-checked); peek
+        // budget is the UInt budget (5 bytes — covers 7-bit-continuation
+        // var-byte-int up to 4 bytes plus a sentinel byte). NoFraming
+        // when prior fields aren't all FixedSize OR the list isn't the
+        // last field — fields after the bounded region don't contribute
+        // to the value and would desync the formula.
+        val lpUcField =
+            shape.fields.firstOrNull { it is FieldSpec.LengthPrefixedUseCodecList }
+                as? FieldSpec.LengthPrefixedUseCodecList
+        if (lpUcField != null) {
+            val priorAreFixed =
+                shape.fields
+                    .takeWhile { it !== lpUcField }
+                    .all { it is FieldSpec.FixedSize }
+            val isTerminal = shape.fields.last() === lpUcField
+            if (!priorAreFixed || !isTerminal) {
+                builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+                return builder.build()
+            }
+            appendPeekLengthPrefixedUseCodecList(builder, shape, lpUcField, peekBudget = 5)
             return builder.build()
         }
         // Slice 7b — any RemainingBytesScalarList field collapses peek to
@@ -2172,6 +2278,87 @@ internal class CodecEmitter(
         builder.addCode(body.build())
     }
 
+    /**
+     * Phase I.1 step 11 — emit peek for a shape carrying a terminal
+     * `@LengthPrefixed @UseCodec val: List<E>` field. Mirrors
+     * [appendPeekUseCodecScalar]: drives the prefix codec against a
+     * non-consuming `stream.peekBuffer(...)` view, measures observed
+     * codec width, computes total = priorBytes + width +
+     * decodedValue.toInt(). The decoded UInt is the body byte count, so
+     * adding it to the prefix bytes yields the full frame size. Caller
+     * has already gated on `priorAreFixed && isTerminal`.
+     */
+    private fun appendPeekLengthPrefixedUseCodecList(
+        builder: FunSpec.Builder,
+        shape: CodecShape,
+        field: FieldSpec.LengthPrefixedUseCodecList,
+        peekBudget: Int,
+    ) {
+        val priorBytes =
+            shape.fields
+                .takeWhile { it !== field }
+                .filterIsInstance<FieldSpec.FixedSize>()
+                .sumOf { it.wireBytes }
+        val body = CodeBlock.builder()
+        body.addStatement(
+            "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
+            priorBytes + 1,
+            PEEK_RESULT_CN,
+        )
+        val peekViewVar = "__${field.name}PeekView"
+        body.addStatement(
+            "val %L = stream.peekBuffer(baseOffset + %L, %L) ?: return %T.NeedsMoreData",
+            peekViewVar,
+            priorBytes,
+            peekBudget,
+            PEEK_RESULT_CN,
+        )
+        body.beginControlFlow("try")
+        val priorPosVar = "__${field.name}PriorPos"
+        val lengthVar = "__${field.name}Length"
+        body.addStatement("val %L = %L.position()", priorPosVar, peekViewVar)
+        body.beginControlFlow("val %L = try", lengthVar)
+        body.addStatement(
+            "%T.decode(%L, %T.Empty)",
+            field.codecType,
+            peekViewVar,
+            DECODE_CONTEXT_CN,
+        )
+        body.nextControlFlow("catch (__e: %T)", ClassName("kotlin", "Throwable"))
+        body.beginControlFlow("when (__e::class.simpleName)")
+        body.addStatement(
+            "%S, %S, %S -> return %T.NeedsMoreData",
+            "BufferUnderflowException",
+            "IndexOutOfBoundsException",
+            "ArrayIndexOutOfBoundsException",
+            PEEK_RESULT_CN,
+        )
+        body.addStatement("else -> throw __e")
+        body.endControlFlow()
+        body.endControlFlow()
+        val widthVar = "__${field.name}Width"
+        body.addStatement("val %L = %L.position() - %L", widthVar, peekViewVar, priorPosVar)
+        body.addStatement(
+            "val __total = %L + %L + %L.toInt()",
+            priorBytes,
+            widthVar,
+            lengthVar,
+        )
+        body.addStatement(
+            "return if (stream.available() - baseOffset >= __total) %T.Complete(__total) else %T.NeedsMoreData",
+            PEEK_RESULT_CN,
+            PEEK_RESULT_CN,
+        )
+        body.nextControlFlow("finally")
+        body.addStatement(
+            "(%L as? %T)?.freeNativeMemory()",
+            peekViewVar,
+            PLATFORM_BUFFER_CN,
+        )
+        body.endControlFlow()
+        builder.addCode(body.build())
+    }
+
     private fun appendSequentialPeek(
         builder: FunSpec.Builder,
         shape: CodecShape,
@@ -2263,6 +2450,13 @@ internal class CodecEmitter(
                         "UseCodecScalar should be handled by buildPeekFrameFun's upfront " +
                             "NoFraming short-circuit before reaching the sequential walk; the " +
                             "generic @UseCodec peek walker is Phase I.1 step 6.",
+                    )
+                is FieldSpec.LengthPrefixedUseCodecList ->
+                    error(
+                        "LengthPrefixedUseCodecList should be handled by buildPeekFrameFun's " +
+                            "upfront NoFraming short-circuit / dedicated peek emitter before " +
+                            "reaching the sequential walk; the terminal-only peek walker is " +
+                            "Phase I.1 step 11.",
                     )
                 is FieldSpec.Conditional ->
                     appendSequentialPeekConditional(body, field)
@@ -3355,6 +3549,90 @@ internal class CodecEmitter(
     }
 
     /**
+     * Phase I.1 step 11 — emit decode for `@LengthPrefixed
+     * @UseCodec(C::class) val xs: List<E>`. The codec drives the prefix
+     * read and applies the resulting bound to `buffer.limit()`; the list
+     * is read element-by-element via E's codec inside the bounded region.
+     * Self-contained `try`/`finally` restores the outer limit, so
+     * subsequent fields run at the original limit.
+     *
+     * Generated shape:
+     * ```
+     * val __<name>OuterLimit = buffer.limit()
+     * val __<name>Length = <codecType>.decode(buffer, context)
+     * <codecType>.applyBound(buffer, __<name>Length)
+     * val <name> = mutableListOf<ElementType>()
+     * try {
+     *     while (buffer.position() < buffer.limit()) {
+     *         <name> += ElementCodec.decode(buffer, context)
+     *     }
+     * } finally {
+     *     buffer.setLimit(__<name>OuterLimit)
+     * }
+     * ```
+     */
+    private fun appendDecodeLengthPrefixedUseCodecList(
+        body: CodeBlock.Builder,
+        field: FieldSpec.LengthPrefixedUseCodecList,
+    ) {
+        val outerLimitVar = "__${field.name}OuterLimit"
+        val lengthVar = "__${field.name}Length"
+        body.addStatement("val %L = buffer.limit()", outerLimitVar)
+        body.addStatement("val %L = %T.decode(buffer, context)", lengthVar, field.codecType)
+        body.addStatement("%T.applyBound(buffer, %L)", field.codecType, lengthVar)
+        body.addStatement("val %L = mutableListOf<%T>()", field.name, field.elementClassName)
+        body.beginControlFlow("try")
+        body.beginControlFlow("while (buffer.position() < buffer.limit())")
+        body.addStatement("%L += %T.decode(buffer, context)", field.name, field.elementCodecClassName)
+        body.endControlFlow()
+        body.nextControlFlow("finally")
+        body.addStatement("buffer.setLimit(%L)", outerLimitVar)
+        body.endControlFlow()
+    }
+
+    /**
+     * Phase I.1 step 11 — emit encode for `@LengthPrefixed
+     * @UseCodec(C::class) val xs: List<E>`. Pre-measures the body byte
+     * count via the element codec's `wireSize` (cast to `Exact`), writes
+     * the prefix via the user codec's `encode`, then iterates and encodes
+     * elements. BackPatch element codecs throw `ClassCastException` —
+     * same fixture-design contract as `RemainingBytesProtocolMessageList`
+     * and `LengthPrefixedMessage`.
+     *
+     * Generated shape:
+     * ```
+     * val __<name>BodyBytes = value.<name>.sumOf {
+     *     (ElementCodec.wireSize(it, context) as WireSize.Exact).bytes
+     * }
+     * <codecType>.encode(buffer, __<name>BodyBytes.toUInt(), context)
+     * for (__elem in value.<name>) {
+     *     ElementCodec.encode(buffer, __elem, context)
+     * }
+     * ```
+     */
+    private fun appendEncodeLengthPrefixedUseCodecList(
+        body: CodeBlock.Builder,
+        field: FieldSpec.LengthPrefixedUseCodecList,
+    ) {
+        val bodyBytesVar = "__${field.name}BodyBytes"
+        body.addStatement(
+            "val %L = value.%L.sumOf { (%T.wireSize(it, context) as %T.Exact).bytes }",
+            bodyBytesVar,
+            field.name,
+            field.elementCodecClassName,
+            WIRE_SIZE_CN,
+        )
+        body.addStatement(
+            "%T.encode(buffer, %L.toUInt(), context)",
+            field.codecType,
+            bodyBytesVar,
+        )
+        body.beginControlFlow("for (__elem in value.%L)", field.name)
+        body.addStatement("%T.encode(buffer, __elem, context)", field.elementCodecClassName)
+        body.endControlFlow()
+    }
+
+    /**
      * Slice 4 / 5a — order-aware single-scalar peek for the prefix
      * walk. Single-byte kinds (`UByte` / `Byte`) read directly;
      * unsigned multi-byte kinds (`UShort` / `UInt`) assemble bytes
@@ -3786,6 +4064,9 @@ internal class CodecEmitter(
         // also skip the runtime-Exact cast. Promote later if a vector
         // benefits from runtime-Exact via codec.wireSize forwarding.
         if (shape.fields.any { it is FieldSpec.UseCodecScalar }) return VariantWireSize.BackPatch
+        // Phase I.1 step 11: same — buildWireSizeFun collapses
+        // LengthPrefixedUseCodecList-bearing shapes to BackPatch.
+        if (shape.fields.any { it is FieldSpec.LengthPrefixedUseCodecList }) return VariantWireSize.BackPatch
         return when (shape.fields.lastOrNull()) {
             is FieldSpec.LengthPrefixedMessage -> VariantWireSize.RuntimeExact
             // Slice 4: a LengthFromString variant's body byte count is the
@@ -3815,6 +4096,9 @@ internal class CodecEmitter(
             // Phase I.1: same — handled by the upfront BackPatch short-circuit
             // above; defensive branch keeps the `when` exhaustive.
             is FieldSpec.UseCodecScalar -> VariantWireSize.BackPatch
+            // Phase I.1 step 11: same — handled by the upfront BackPatch
+            // short-circuit above.
+            is FieldSpec.LengthPrefixedUseCodecList -> VariantWireSize.BackPatch
         }
     }
 
@@ -4740,6 +5024,44 @@ internal class CodecEmitter(
             val ownerSimpleName: String,
             val payloadType: TypeName,
             val source: PayloadCodecSource,
+        ) : FieldSpec
+
+        /**
+         * Phase I.1 step 11 — `@LengthPrefixed @UseCodec(C::class) val xs:
+         * List<E>` where `C` is a Kotlin `object` implementing
+         * `BoundingLengthCodec<UInt>` and `E` is a `@ProtocolMessage data
+         * class`. The codec reads/writes the body byte count via its own
+         * wire shape (e.g. MQTT var-byte-int via [MqttRemainingLengthCodec])
+         * and applies the resulting bound to the buffer's limit; the list
+         * is read/written element-by-element via `E`'s generated codec
+         * inside the bounded region.
+         *
+         * Decode is self-contained: outer limit captured into
+         * `__<name>OuterLimit`, prefix codec drives the bound via
+         * `applyBound`, elements read until `buffer.position() ==
+         * buffer.limit()`, outer limit restored in a `try { ... } finally`.
+         * Subsequent fields run at the original outer limit — the new
+         * shape is NOT registered in `isBoundingShape()` (which is
+         * reserved for fields whose narrowed limit must persist for
+         * subsequent decodes).
+         *
+         * Encode pre-measures body bytes via the element codec's wireSize
+         * (cast to `Exact`), writes the prefix via `C.encode(buffer,
+         * bodyBytes.toUInt(), ctx)`, then iterates and encodes elements.
+         * BackPatch element codecs throw `ClassCastException` — same
+         * fixture-design contract as `RemainingBytesProtocolMessageList`
+         * and `LengthPrefixedMessage`.
+         *
+         * Unblocks: MQTT v5 property-list shape
+         * (`@LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class) val
+         * properties: List<MqttProperty>`).
+         */
+        data class LengthPrefixedUseCodecList(
+            override val name: String,
+            val ownerSimpleName: String,
+            val codecType: ClassName,
+            val elementClassName: ClassName,
+            val elementCodecClassName: ClassName,
         ) : FieldSpec
 
         /**

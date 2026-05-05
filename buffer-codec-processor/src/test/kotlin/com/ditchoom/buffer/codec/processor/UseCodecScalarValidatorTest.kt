@@ -136,7 +136,101 @@ class UseCodecScalarValidatorTest {
     }
 
     @Test
-    fun rejectsLengthPrefixedUseCodecAsDeferred() {
+    fun rejectsLengthPrefixedUseCodecOnNonListField() {
+        // Phase I.1 step 11 lifts `@LengthPrefixed @UseCodec` for the
+        // `List<@ProtocolMessage E>` shape; scalar field types still get a
+        // focused diagnostic naming the required field shape.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.BoundingLengthCodec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
+                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+
+                object FixedFourByteUIntCodec : BoundingLengthCodec<UInt> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): UInt = buffer.readInt().toUInt()
+                    override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
+                        buffer.writeInt(value.toInt())
+                    }
+                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
+                        buffer.setLimit(buffer.position() + decodedValue.toInt())
+                    }
+                }
+
+                @ProtocolMessage
+                data class HeaderWithLengthPrefixedUseCodecScalar(
+                    @LengthPrefixed @UseCodec(FixedFourByteUIntCodec::class) val n: UInt,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("must be applied to a `kotlin.collections.List<E>`"),
+            "@LengthPrefixed @UseCodec on a scalar field should report the required List<E> " +
+                "shape. Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
+    fun acceptsLengthPrefixedUseCodecOnProtocolMessageList() {
+        // Phase I.1 step 11 acceptance — `@LengthPrefixed @UseCodec(C::class)
+        // val xs: List<E>` where `C : BoundingLengthCodec<UInt>` and `E` is a
+        // `@ProtocolMessage data class`. Drives the v5 property-list shape.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.BoundingLengthCodec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
+                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+
+                object FourByteLengthCodec : BoundingLengthCodec<UInt> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): UInt = buffer.readInt().toUInt()
+                    override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
+                        buffer.writeInt(value.toInt())
+                    }
+                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
+                        buffer.setLimit(buffer.position() + decodedValue.toInt())
+                    }
+                }
+
+                @ProtocolMessage
+                data class Element(val raw: Int)
+
+                @ProtocolMessage
+                data class Bag(
+                    @LengthPrefixed @UseCodec(FourByteLengthCodec::class) val items: List<Element>,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+        assertFalse(
+            result.messages.contains("@UseCodec"),
+            "no @UseCodec diagnostic should fire on the new List shape. Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
+    fun rejectsLengthPrefixedUseCodecWithNonBoundingCodec() {
+        // The shape requires `BoundingLengthCodec<UInt>` so `applyBound` is
+        // available; a plain `Codec<UInt>` produces a focused diagnostic.
         val result =
             compile(
                 """
@@ -152,7 +246,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
 
-                object UIntPassthroughCodec : Codec<UInt> {
+                object PlainUIntCodec : Codec<UInt> {
                     override fun decode(buffer: ReadBuffer, context: DecodeContext): UInt = buffer.readInt().toUInt()
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
@@ -161,15 +255,64 @@ class UseCodecScalarValidatorTest {
                 }
 
                 @ProtocolMessage
-                data class HeaderWithLengthPrefixedUseCodec(
-                    @LengthPrefixed @UseCodec(UIntPassthroughCodec::class) val n: UInt,
+                data class Element(val raw: Int)
+
+                @ProtocolMessage
+                data class Bag(
+                    @LengthPrefixed @UseCodec(PlainUIntCodec::class) val items: List<Element>,
                 )
                 """.trimIndent(),
             )
         assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
         assertTrue(
-            result.messages.contains("not yet supported"),
-            "@LengthPrefixed @UseCodec should still produce the deferred diagnostic. Messages:\n${result.messages}",
+            result.messages.contains("does not implement") &&
+                result.messages.contains("BoundingLengthCodec<UInt>"),
+            "non-bounding codec should be rejected with a focused diagnostic. Messages:\n" +
+                result.messages,
+        )
+    }
+
+    @Test
+    fun rejectsLengthPrefixedUseCodecWithNonProtocolMessageElement() {
+        // The element type must be a `@ProtocolMessage data class` so the
+        // emitter can call `<E>Codec.decode(...)` per element.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.BoundingLengthCodec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
+                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+
+                object FourByteLengthCodec : BoundingLengthCodec<UInt> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): UInt = buffer.readInt().toUInt()
+                    override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
+                        buffer.writeInt(value.toInt())
+                    }
+                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
+                        buffer.setLimit(buffer.position() + decodedValue.toInt())
+                    }
+                }
+
+                @ProtocolMessage
+                data class Bag(
+                    @LengthPrefixed @UseCodec(FourByteLengthCodec::class) val items: List<Int>,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("not a `@ProtocolMessage data class`"),
+            "non-@ProtocolMessage element should be rejected with a focused diagnostic. " +
+                "Messages:\n${result.messages}",
         )
     }
 

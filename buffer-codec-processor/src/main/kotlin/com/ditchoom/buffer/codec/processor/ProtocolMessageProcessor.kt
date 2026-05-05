@@ -8,6 +8,7 @@ import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.processing.SymbolProcessor
 import com.google.devtools.ksp.symbol.ClassKind
 import com.google.devtools.ksp.symbol.KSAnnotated
+import com.google.devtools.ksp.symbol.KSAnnotation
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.KSType
@@ -1014,7 +1015,7 @@ class ProtocolMessageProcessor(
                             .declaration.qualifiedName
                             ?.asString() == REMAINING_BYTES_QNAME
                 }
-            val hasOtherFraming =
+            val hasLengthFrom =
                 param.annotations.any { ann ->
                     val n = ann.shortName.asString()
                     val q =
@@ -1022,17 +1023,33 @@ class ProtocolMessageProcessor(
                             .resolve()
                             .declaration.qualifiedName
                             ?.asString()
-                    (n == LENGTH_FROM_SHORT && q == LENGTH_FROM_QNAME) ||
-                        n == "LengthPrefixed"
+                    n == LENGTH_FROM_SHORT && q == LENGTH_FROM_QNAME
                 }
-            if (hasOtherFraming) {
+            val hasLengthPrefixed =
+                param.annotations.any { ann -> ann.shortName.asString() == "LengthPrefixed" }
+            if (hasLengthFrom) {
                 logger.error(
-                    "@UseCodec on $ownerName.$fieldName composed with `@LengthFrom` or " +
-                        "`@LengthPrefixed` is not yet supported. Currently emitted compositions " +
-                        "are `@RemainingBytes @UseCodec val: P` (P : Payload) and bare " +
-                        "`@UseCodec val: <scalar>`. The `@LengthFrom @UseCodec` and " +
-                        "`@LengthPrefixed @UseCodec` shapes are deferred to a later slice.",
+                    "@UseCodec on $ownerName.$fieldName composed with `@LengthFrom` is not yet " +
+                        "supported. Currently emitted compositions are `@RemainingBytes @UseCodec " +
+                        "val: P` (P : Payload), bare `@UseCodec val: <scalar>`, and " +
+                        "`@LengthPrefixed @UseCodec(BoundingLengthCodec) val: List<E>` (Phase I.1 " +
+                        "step 11). The `@LengthFrom @UseCodec` shape is deferred to a later slice.",
                     param,
+                )
+                continue
+            }
+            if (hasLengthPrefixed) {
+                // Phase I.1 step 11 — `@LengthPrefixed @UseCodec(C::class) val xs: List<E>`
+                // where `C : BoundingLengthCodec<UInt>` and `E` is a `@ProtocolMessage data
+                // class`. Validate the new shape inline; subsequent generic checks (which
+                // expect `Codec<fieldType>`) don't apply because the codec's type arg is
+                // `UInt`, not the `List<E>` field type.
+                validateLengthPrefixedUseCodec(
+                    ownerName = ownerName,
+                    fieldName = fieldName,
+                    fieldType = fieldType,
+                    useCodecAnn = useCodec,
+                    param = param,
                 )
                 continue
             }
@@ -1089,6 +1106,128 @@ class ProtocolMessageProcessor(
                 )
             }
         }
+    }
+
+    /**
+     * Phase I.1 step 11 — `@LengthPrefixed @UseCodec(C::class) val xs:
+     * List<E>` validation. The codec drives the wire-format prefix
+     * (var-byte-int, sentinel-extended length, etc.) and bounds the
+     * element-decode region; elements are read element-by-element via
+     * `E`'s generated codec until the bounded region is exhausted.
+     *
+     * Slice scope:
+     *   - `C` must be a Kotlin `object` declaration (the emitter calls
+     *     `C.decode(...)` / `C.encode(...)` / `C.applyBound(...)`).
+     *   - `C` must implement `BoundingLengthCodec<UInt>` — `applyBound`
+     *     is what narrows `buffer.limit()` for the element loop, and
+     *     `UInt` is the only length-value type the slice models today.
+     *   - The field type must be `kotlin.collections.List<E>` where
+     *     `E` is a `@ProtocolMessage data class` — the emitter calls
+     *     `<E>Codec.decode(...)` / `<E>Codec.encode(...)` per element.
+     *
+     * Returns no value — diagnostics are emitted directly.
+     */
+    private fun validateLengthPrefixedUseCodec(
+        ownerName: String,
+        fieldName: String,
+        fieldType: KSType,
+        useCodecAnn: KSAnnotation,
+        param: KSValueParameter,
+    ) {
+        val codecKsType =
+            useCodecAnn.arguments
+                .firstOrNull { it.name?.asString() == "codec" }
+                ?.value as? KSType
+        if (codecKsType == null || codecKsType.isError) return
+        val codecDecl = codecKsType.declaration as? KSClassDeclaration ?: return
+        val codecName = codecDecl.qualifiedName?.asString() ?: codecDecl.simpleName.asString()
+        if (codecDecl.classKind != ClassKind.OBJECT) {
+            logger.error(
+                "@LengthPrefixed @UseCodec($codecName::class) on $ownerName.$fieldName references " +
+                    "`$codecName`, which is not a Kotlin `object` declaration. The emitter calls " +
+                    "`$codecName.decode(...)` / `$codecName.encode(...)` / `$codecName.applyBound(" +
+                    "...)` directly, which requires the target to be an object.",
+                param,
+            )
+            return
+        }
+        if (!implementsBoundingLengthCodecOfUInt(codecDecl)) {
+            logger.error(
+                "@LengthPrefixed @UseCodec($codecName::class) on $ownerName.$fieldName references " +
+                    "`$codecName`, which does not implement " +
+                    "`com.ditchoom.buffer.codec.BoundingLengthCodec<UInt>`. The length-prefixed " +
+                    "list shape requires a bounding length codec to drive `applyBound` and bound " +
+                    "the element-decode region. Implement `BoundingLengthCodec<UInt>` (e.g. " +
+                    "`MqttRemainingLengthCodec`).",
+                param,
+            )
+            return
+        }
+        val fieldTypeQname = fieldType.declaration.qualifiedName?.asString()
+        if (fieldTypeQname != LIST_QNAME) {
+            logger.error(
+                "@LengthPrefixed @UseCodec($codecName::class) on $ownerName.$fieldName must be " +
+                    "applied to a `kotlin.collections.List<E>` field where `E` is a " +
+                    "`@ProtocolMessage data class`, but the field's type is `${fieldTypeQname ?: "<unresolved>"}`. " +
+                    "The shape models a length-prefixed property bag of nested messages " +
+                    "(e.g. MQTT v5 properties).",
+                param,
+            )
+            return
+        }
+        val elementType =
+            fieldType.arguments
+                .firstOrNull()
+                ?.type
+                ?.resolve()
+        if (elementType == null || elementType.isError || elementType.isMarkedNullable) return
+        val elementDecl = elementType.declaration as? KSClassDeclaration
+        val elementQname = elementType.declaration.qualifiedName?.asString() ?: "<unresolved>"
+        val isProtocolMessageDataClass =
+            elementDecl != null &&
+                Modifier.DATA in elementDecl.modifiers &&
+                elementDecl.annotations.any { ann ->
+                    ann.shortName.asString() == "ProtocolMessage" &&
+                        ann.annotationType
+                            .resolve()
+                            .declaration.qualifiedName
+                            ?.asString() == PROTOCOL_MESSAGE_QNAME
+                }
+        if (!isProtocolMessageDataClass) {
+            logger.error(
+                "@LengthPrefixed @UseCodec($codecName::class) on $ownerName.$fieldName has list " +
+                    "element type `$elementQname`, which is not a `@ProtocolMessage data class`. " +
+                    "The emitter generates `<E>Codec.decode(...)` / `<E>Codec.encode(...)` per " +
+                    "element — the element type must carry `@ProtocolMessage` and be a `data " +
+                    "class`.",
+                param,
+            )
+        }
+    }
+
+    /**
+     * Phase I.1 step 11 — does `codecDecl` implement
+     * `com.ditchoom.buffer.codec.BoundingLengthCodec<UInt>`? Walks the
+     * object's full super-type set and compares the single type argument
+     * against `kotlin.UInt`. The `applyBound` method is what the emitter
+     * needs at decode time; restricting to `UInt` is the slice's locked
+     * scope (covers MQTT var-byte-int, LEB128, sentinel-extended
+     * lengths up to 4 bytes — enough for every current target protocol).
+     */
+    private fun implementsBoundingLengthCodecOfUInt(codecDecl: KSClassDeclaration): Boolean {
+        for (st in codecDecl.getAllSuperTypes()) {
+            if (st.isError) continue
+            val q = st.declaration.qualifiedName?.asString()
+            if (q != BOUNDING_LENGTH_CODEC_QNAME) continue
+            val arg =
+                st.arguments
+                    .firstOrNull()
+                    ?.type
+                    ?.resolve() ?: continue
+            if (arg.isError) continue
+            if (arg.declaration.qualifiedName?.asString() == "kotlin.UInt") return true
+        }
+        return false
     }
 
     /**

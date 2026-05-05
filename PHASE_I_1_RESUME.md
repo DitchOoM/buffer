@@ -368,15 +368,134 @@ After step 10:
 - `:buffer-flow:jvmTest`: 36 (unchanged).
 - `:buffer:jvmTest`: 1008 (unchanged).
 
-### Step 11 — `@LengthPrefixed @UseCodec` composition
+### Step 11 — `@LengthPrefixed @UseCodec` composition — **landed**
 
-Deferred row from slice 10a. Lifts the validator's "not yet supported"
-diagnostic for `@LengthPrefixed @UseCodec`, adds a new
-`FieldSpec.LengthPrefixedUseCodecPayload` (or similar) for the MQTT
-v5 property-list shape. The doc says this lands as part of Phase I.1
-"ergonomically belongs in the same slice." Treat as optional within
-this PR — can defer to a J.M precursor commit if the migration scope
-grows.
+Lifted the validator's "not yet supported" diagnostic for
+`@LengthPrefixed @UseCodec` and added `FieldSpec.LengthPrefixedUseCodecList`
+for the MQTT v5 property-list shape:
+`@LengthPrefixed @UseCodec(C::class) val xs: List<E>` where `C :
+BoundingLengthCodec<UInt>` and `E` is a `@ProtocolMessage data class`.
+
+**Validator (PMP.kt).** The old `hasOtherFraming` rejection split into
+`hasLengthFrom` (still deferred) and `hasLengthPrefixed` (routed to
+`validateLengthPrefixedUseCodec`). Diagnostics: target not a Kotlin
+`object`; target doesn't implement `BoundingLengthCodec<UInt>`; field
+type isn't `kotlin.collections.List<E>`; element type isn't a
+`@ProtocolMessage data class`. New helper
+`implementsBoundingLengthCodecOfUInt` walks `getAllSuperTypes()` and
+matches the `BoundingLengthCodec<UInt>` arg. Scalar
+`@LengthPrefixed @UseCodec` still rejects, but with the focused
+"must be applied to a `kotlin.collections.List<E>`" diagnostic — the
+old "deferred to a later slice" message is gone.
+
+**Analyzer (CodecEmitter.kt).** `analyzeField`'s `lengthPrefixed != null`
+branch routes to `analyzeLengthPrefixedUseCodecListField` when
+`@UseCodec` is also present. The `@LengthPrefixed val: String` /
+`@LengthPrefixed @ProtocolMessage` paths stay untouched.
+
+**Generated decode shape:**
+
+```kotlin
+val __<name>OuterLimit = buffer.limit()
+val __<name>Length = <codecType>.decode(buffer, context)
+<codecType>.applyBound(buffer, __<name>Length)
+val <name> = mutableListOf<ElementType>()
+try {
+    while (buffer.position() < buffer.limit()) {
+        <name> += ElementCodec.decode(buffer, context)
+    }
+} finally {
+    buffer.setLimit(__<name>OuterLimit)
+}
+```
+
+Self-contained `try`/`finally` — restores the outer limit BEFORE
+returning. Subsequent fields run at the original outer limit. The
+shape is **not** registered in `isBoundingShape()`, so it composes
+with an outer bounding `@UseCodec(BoundingLengthCodec)` field
+(typical MQTT v5: outer `remainingLength` + inner `properties` bag)
+without violating the at-most-one-bounding-field uniqueness check.
+
+**Generated encode shape:**
+
+```kotlin
+val __<name>BodyBytes = value.<name>.sumOf {
+    (ElementCodec.wireSize(it, context) as WireSize.Exact).bytes
+}
+<codecType>.encode(buffer, __<name>BodyBytes.toUInt(), context)
+for (__elem in value.<name>) {
+    ElementCodec.encode(buffer, __elem, context)
+}
+```
+
+BackPatch element codecs throw `ClassCastException` — matches the
+existing `LengthPrefixedMessage` / `RemainingBytesProtocolMessageList`
+contract.
+
+**Generated peek shape.** Mirrors the bounding-`UseCodecScalar`
+walker (Phase I.1 step 6) — drives the prefix codec against
+`stream.peekBuffer(...)`, measures observed codec width, computes
+`total = priorBytes + width + decodedValue.toInt()`. Gated on
+`priorAreFixed && isTerminal` (the list must be the last field, and
+prior fields all `FixedSize`); otherwise `NoFraming`. Peek budget
+is hard-coded to 5 bytes (UInt budget) — the codec's value type is
+always `UInt` in this slice. Same `BufferUnderflowException` /
+`IndexOutOfBoundsException` / `ArrayIndexOutOfBoundsException`
+simpleName whitelist as step 6.
+
+**`wireSize` collapses to `BackPatch`** when any
+`LengthPrefixedUseCodecList` field is present, unconditionally.
+Runtime-Exact promotion via `codec.wireSize(bodyBytes.toUInt())` +
+element wireSize sum is a follow-on — no current vector benefits.
+The variant `classifyVariantWireSize` mirrors this with a matching
+short-circuit so the dispatcher size table skips the `as Exact` cast.
+
+**Test counts at HEAD (step 11 landed):**
+- `:buffer-codec-test:jvmTest` — 342 (+13 new
+  `lengthprefixedusecodec` package).
+- `:buffer-codec-processor:test` — 56 (+3:
+  `acceptsLengthPrefixedUseCodecOnProtocolMessageList`,
+  `rejectsLengthPrefixedUseCodecWithNonBoundingCodec`,
+  `rejectsLengthPrefixedUseCodecWithNonProtocolMessageElement`;
+  the existing `rejectsLengthPrefixedUseCodecAsDeferred` test was
+  renamed to `rejectsLengthPrefixedUseCodecOnNonListField` and now
+  asserts the new focused diagnostic).
+- `:buffer-flow:jvmTest` — 36 (unchanged).
+
+**Files touched in step 11:**
+
+```
+buffer-codec-processor/src/main/kotlin/com/ditchoom/buffer/codec/processor/CodecEmitter.kt
+buffer-codec-processor/src/main/kotlin/com/ditchoom/buffer/codec/processor/ProtocolMessageProcessor.kt
+buffer-codec-processor/src/test/kotlin/com/ditchoom/buffer/codec/processor/UseCodecScalarValidatorTest.kt
+
+buffer-codec-test/src/commonMain/kotlin/com/ditchoom/buffer/codec/test/protocols/lengthprefixedusecodec/LengthPrefixedUseCodecListFixtures.kt   (new)
+buffer-codec-test/src/commonTest/kotlin/com/ditchoom/buffer/codec/test/protocols/lengthprefixedusecodec/LengthPrefixedUseCodecListCodecTest.kt   (new)
+```
+
+**Decisions reaffirmed in step 11:**
+
+- **Codec value type is `UInt` only.** `BoundingLengthCodec<UInt>` is
+  the only accepted codec type-arg. Covers MQTT var-byte-int (4-byte
+  max), LEB128 (32-bit), sentinel-extended length (4-byte). Wider
+  protocols would need a new shape variant; no in-scope vector needs
+  it.
+- **List<E> with E being `@ProtocolMessage data class` only.** Scalar
+  / value-class / Payload elements all reject. The emitter calls
+  `<E>Codec.decode` per element, so the element must have a generated
+  codec.
+- **Self-contained `try`/`finally` (NOT message-wide bounding).**
+  The shape narrows the limit locally and restores immediately, so it
+  composes with an outer bounding field (slice 10f's
+  `__<name>OuterLimit` machinery) without conflict. This is what
+  unblocks v5 PUBLISH (outer `remainingLength` + inner `properties`).
+- **Peek terminal-only.** Walker computes
+  `priorBytes + width + value.toInt()` — assumes the bounded region
+  spans to the end of the message. For non-terminal lists, peek
+  collapses to `NoFraming`; the outer dispatcher's bounding codec
+  (e.g. v5 outer `remainingLength`) owns whole-frame peek.
+- **`wireSize` collapses to BackPatch.** Same conservative pattern as
+  `UseCodecScalar`. Promote when a vector measurably benefits.
 
 ## Validator diagnostics still to add (step 9 follow-up)
 
@@ -452,7 +571,9 @@ buffer-codec-test/src/commonTest/kotlin/com/ditchoom/buffer/codec/test/protocols
    the deferred `Partial` outer-limit-capture extension lands.
 8. Step 10 — `@RemainingLength` deletion. Mechanical demolition
    driven by exhaustive-`when` failures + grep.
-9. Step 11 — `@LengthPrefixed @UseCodec` composition (optional;
-   defer if scope grows).
+9. Step 11 — `@LengthPrefixed @UseCodec` composition for the v5
+   property-list shape. Landed as part of Phase I.1.
 
-The 215 + 53 + 36 + 1008 test baseline must stay green throughout.
+The 342 + 56 + 36 + 1008 test baseline must stay green throughout
+follow-on work. Phase I.1 is now complete; J.M.5 (MQTT v5 modeling)
+is the next session.
