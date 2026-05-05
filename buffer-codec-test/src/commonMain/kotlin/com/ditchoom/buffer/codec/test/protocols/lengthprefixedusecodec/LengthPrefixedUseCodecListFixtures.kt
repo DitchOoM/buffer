@@ -52,3 +52,34 @@ data class TaggedPropertyBag(
     val tag: UByte,
     @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class) val properties: List<PropertyEntry>,
 )
+
+/**
+ * Phase J.M.5 audit-2b regression vector — a data class element whose
+ * `wireSize` returns `BackPatch` (due to the `@LengthPrefixed val:
+ * String` field, per row-15 doctrine). Before audit-2b the element was
+ * routed through the pre-measure encode path (because the analyzer's
+ * `elementIsSealed` flag was driven solely by `Modifier.SEALED`), and
+ * the `(ElementCodec.wireSize(it, context) as WireSize.Exact).bytes`
+ * cast would `ClassCastException` at runtime. After audit-2b the
+ * analyze-time predicate `detectElementBackPatch` walks the element's
+ * primary-constructor params and routes any element with `@When` /
+ * `@RemainingBytes` / `@UseCodec` / `@LengthPrefixed val: String`
+ * through the scratch encode path.
+ *
+ * Wire layout per element: `[lpStringLen (2 bytes BE) | lpStringBytes |
+ * value (1 byte)]`. The full bag's wire layout is `[var-byte-int length
+ * | elements]`.
+ */
+@ProtocolMessage
+data class StringTaggedProperty(
+    @LengthPrefixed val tag: String,
+    val value: UByte,
+)
+
+/**
+ * Phase J.M.5 audit-2b regression vector — see [StringTaggedProperty].
+ */
+@ProtocolMessage
+data class StringTaggedPropertyBag(
+    @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class) val properties: List<StringTaggedProperty>,
+)

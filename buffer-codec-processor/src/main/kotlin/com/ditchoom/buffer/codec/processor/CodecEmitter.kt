@@ -982,8 +982,46 @@ internal class CodecEmitter(
                     elementDecl.packageName.asString(),
                     "${elementDecl.simpleName.asString()}Codec",
                 ),
-            elementIsSealed = isSealed,
+            elementIsBackPatch = detectElementBackPatch(elementDecl),
         )
+    }
+
+    /**
+     * Phase J.M.5 audit-2b — analyze-time predicate driving the
+     * scratch-vs-pre-measure path selection in
+     * [appendEncodeLengthPrefixedListBody]. Returns `true` when the
+     * element's variant codec will produce a `WireSize.BackPatch` at
+     * runtime, in which case the encode emit must use the scratch
+     * buffer (the pre-measure path's `as WireSize.Exact` cast would
+     * `ClassCastException`).
+     *
+     * Mirrors the message-wide BackPatch short-circuits in
+     * [classifyVariantWireSize] / `buildWireSizeFun`. Any of these
+     * annotations on a primary-constructor parameter forces BackPatch:
+     *  - `@When` (`Conditional` field shape, row 19),
+     *  - `@RemainingBytes` (variable-bounded body),
+     *  - `@UseCodec` (user codec wireSize is opaque, conservatively
+     *    BackPatch — covers `UseCodecScalar`, `RemainingBytesPayload`,
+     *    `LengthPrefixedUseCodecList`),
+     *  - `@LengthPrefixed val: String` (`LengthPrefixedString`, row 15).
+     *
+     * Sealed parents stay conservatively BackPatch — promoting to
+     * Exact-when-all-variants-are-Exact is a follow-on refactor; no
+     * current vector benefits.
+     */
+    private fun detectElementBackPatch(elementDecl: KSClassDeclaration): Boolean {
+        if (Modifier.SEALED in elementDecl.modifiers) return true
+        val ctor = elementDecl.primaryConstructor ?: return false
+        return ctor.parameters.any { param ->
+            val paramTypeQname = param.type.resolve().declaration.qualifiedName?.asString()
+            param.annotations.any { ann ->
+                when (ann.shortName.asString()) {
+                    "When", "RemainingBytes", "UseCodec" -> true
+                    "LengthPrefixed" -> paramTypeQname == "kotlin.String"
+                    else -> false
+                }
+            }
+        }
     }
 
     /**
@@ -3899,7 +3937,7 @@ internal class CodecEmitter(
      * local (`<name>Value`) for the conditional path. `namespacePrefix`
      * keys the scratch / body-bytes locals.
      *
-     * Two encode paths, gated by `spec.elementIsSealed`:
+     * Two encode paths, gated by `spec.elementIsBackPatch`:
      *
      * **Sealed elements** — variants commonly carry BackPatch-wireSize
      * fields (`@LengthPrefixed val: String`, `@When` trailers), so the
@@ -3936,7 +3974,7 @@ internal class CodecEmitter(
         accessor: String,
         namespacePrefix: String,
     ) {
-        if (spec.elementIsSealed) {
+        if (spec.elementIsBackPatch) {
             val scratchVar = "__${namespacePrefix}Scratch"
             val bodyBytesVar = "__${namespacePrefix}BodyBytes"
             body.beginControlFlow(
@@ -5414,7 +5452,6 @@ internal class CodecEmitter(
             val codecType: ClassName get() = spec.codecType
             val elementClassName: ClassName get() = spec.elementClassName
             val elementCodecClassName: ClassName get() = spec.elementCodecClassName
-            val elementIsSealed: Boolean get() = spec.elementIsSealed
         }
 
         /**
@@ -5610,7 +5647,6 @@ internal class CodecEmitter(
             val codecType: ClassName get() = spec.codecType
             val elementClassName: ClassName get() = spec.elementClassName
             val elementCodecClassName: ClassName get() = spec.elementCodecClassName
-            val elementIsSealed: Boolean get() = spec.elementIsSealed
         }
     }
 
@@ -5620,27 +5656,35 @@ internal class CodecEmitter(
      *
      * Both `FieldSpec.LengthPrefixedUseCodecList` (slice 11) and
      * `ConditionalInner.LengthPrefixedUseCodecList` (J.M.5 slice 5)
-     * compose this spec. Before this dedupe both data classes carried
-     * four byte-equal fields and four near-byte-equal emit functions
-     * (decode/encode × field/conditional, plus the duplicated sealed
-     * scratch path). A future shape change (e.g., promoting the
+     * compose this spec. A future shape change (e.g., promoting the
      * codec value type beyond `UInt`) now lands in one place.
      *
-     * `elementIsSealed` gates the encode path: sealed-parent variants
-     * commonly carry BackPatch-wireSize fields (`@LengthPrefixed val:
-     * String`, `@When` trailers) so encode can't pre-measure body
-     * bytes via `as WireSize.Exact`; encode each element into a
-     * scratch buffer first, then write the VBI prefix + bulk-copy.
-     * Data-class elements are assumed Exact (slice 11 doctrine).
-     * Audit 2b notes the "sealed = BackPatch / data class = Exact"
-     * conflation as latent — the rename to `elementIsBackPatch` and
-     * analyze-time wireSize inference is a follow-on refactor.
+     * `elementIsBackPatch` gates the encode path:
+     *  - `true` → scratch-buffer encode (handles BackPatch-wireSize
+     *    elements transparently — variants whose `wireSize` returns
+     *    `BackPatch` rather than `Exact`),
+     *  - `false` → pre-measure encode via element codec's `wireSize as
+     *    Exact`. Cheaper but requires Exact-measured elements.
+     *
+     * Phase J.M.5 audit-2b — the flag is set by
+     * [detectElementBackPatch] which mirrors the message-wide BackPatch
+     * short-circuits in [classifyVariantWireSize] / [buildWireSizeFun]:
+     * any of `@When`, `@RemainingBytes`, `@UseCodec`, or `@LengthPrefixed
+     * val: String` on a constructor parameter forces the BackPatch
+     * encode path. Sealed parents stay conservatively BackPatch (defer
+     * the all-variants-Exact promotion until a fixture wants it).
+     *
+     * Before audit-2b the flag was named `elementIsSealed` and was
+     * driven solely by the source-language `Modifier.SEALED` check —
+     * which would `ClassCastException` at runtime on a data class with
+     * a BackPatch-shaped field (no fixture tripped it because slice 2's
+     * v5 property bag wraps such elements under a sealed parent).
      */
     private data class LengthPrefixedListSpec(
         val codecType: ClassName,
         val elementClassName: ClassName,
         val elementCodecClassName: ClassName,
-        val elementIsSealed: Boolean,
+        val elementIsBackPatch: Boolean,
     )
 
     /**

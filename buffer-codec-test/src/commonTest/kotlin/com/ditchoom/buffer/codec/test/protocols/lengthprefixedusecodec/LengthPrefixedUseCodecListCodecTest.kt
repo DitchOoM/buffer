@@ -277,6 +277,65 @@ class LengthPrefixedUseCodecListCodecTest {
     }
 
     @Test
+    fun stringTaggedPropertyBagRoundTrips() {
+        // Phase J.M.5 audit-2b — element with `@LengthPrefixed val: String`
+        // has BackPatch wireSize. Pre-2b the analyzer set elementIsSealed
+        // = false (because the element is `data class`, not `sealed`),
+        // routing the encode through the pre-measure path; the
+        // `as WireSize.Exact` cast on a BackPatch wireSize would
+        // ClassCastException. After 2b the analyze-time predicate
+        // `detectElementBackPatch` walks the element's primary-constructor
+        // params and forces the scratch path on `@LengthPrefixed val:
+        // String` (and `@When` / `@RemainingBytes` / `@UseCodec`).
+        val original =
+            StringTaggedPropertyBag(
+                properties =
+                    listOf(
+                        StringTaggedProperty(tag = "alpha", value = 0x11u),
+                        StringTaggedProperty(tag = "", value = 0x22u),
+                        StringTaggedProperty(tag = "the quick brown fox", value = 0xFFu),
+                    ),
+            )
+        val buffer = BufferFactory.Default.allocate(128)
+        StringTaggedPropertyBagCodec.encode(buffer, original, EncodeContext.Empty)
+        buffer.resetForRead()
+        val decoded = StringTaggedPropertyBagCodec.decode(buffer, DecodeContext.Empty)
+        assertEquals(original, decoded)
+    }
+
+    @Test
+    fun stringTaggedPropertyBagWireBytesMatchScratchPath() {
+        // Independent computation of the expected wire layout: for each
+        // element, [lpStringLen (2 BE) | tagBytes | value (1)]; sum lengths,
+        // emit MqttRemainingLengthCodec(sumLen) prefix, then concatenate.
+        val element1 = StringTaggedProperty(tag = "k", value = 0x07u)
+        val element2 = StringTaggedProperty(tag = "kv", value = 0x08u)
+        val original = StringTaggedPropertyBag(properties = listOf(element1, element2))
+
+        val buffer = BufferFactory.Default.allocate(64)
+        StringTaggedPropertyBagCodec.encode(buffer, original, EncodeContext.Empty)
+        buffer.resetForRead()
+
+        val expected = BufferFactory.Default.allocate(64)
+        // element1 = 2 (len) + 1 ("k") + 1 (value) = 4 bytes
+        // element2 = 2 (len) + 2 ("kv") + 1 (value) = 5 bytes
+        // total body = 9 bytes; prefix = MqttRemainingLengthCodec.encode(9) = 1 byte
+        MqttRemainingLengthCodec.encode(expected, 9u, EncodeContext.Empty)
+        expected.writeUShort(1u)
+        expected.writeString("k")
+        expected.writeByte(0x07)
+        expected.writeUShort(2u)
+        expected.writeString("kv")
+        expected.writeByte(0x08)
+        expected.resetForRead()
+
+        assertEquals(expected.remaining(), buffer.remaining())
+        while (expected.remaining() > 0) {
+            assertEquals(expected.readByte(), buffer.readByte())
+        }
+    }
+
+    @Test
     fun multiElementWireMatchesMqttRemainingLengthCodecPrefix() {
         // Verify byte-exact wire layout: prefix bytes via
         // MqttRemainingLengthCodec.encode, then per-element bytes.
