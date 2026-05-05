@@ -2,6 +2,7 @@ package com.ditchoom.buffer.codec.test.protocols.mqttv5
 
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.annotations.DispatchOn
+import com.ditchoom.buffer.codec.annotations.Endianness
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
@@ -48,6 +49,39 @@ import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
 @DispatchOn(MqttFixedHeader::class)
 @ProtocolMessage
 sealed interface MqttV5Packet<out P : Payload> {
+    /**
+     * Type-2 CONNACK per MQTT v5.0 §3.2 — fixed header `0x20` +
+     * remaining length + connect-ack-flags (`UByte`, §3.2.2.1: bit 0 is
+     * Session Present, others reserved) + reason code (`UByte`,
+     * §3.2.2.2) + property bag (§3.2.2.3, always present in v5).
+     *
+     * Wire layout (after `header`):
+     *
+     * ```text
+     *   <var-int>             remaining length
+     *   <flags>               connect-ack-flags (UByte)
+     *   <rc>                  reason code (UByte)
+     *   <var-int>             properties length (VBI)
+     *   <properties...>       0..N MqttV5Property entries
+     * ```
+     *
+     * Slice 3 variant — exercises the always-present property bag
+     * without new emitter capability beyond what slice 2 lifted.
+     * Reason code is modeled as a raw `UByte` (the spec assigns
+     * specific values 0x00 through 0xA2; typed sealed enum is a
+     * follow-on once a vector requires it).
+     */
+    @PacketType(value = 2)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class ConnAck(
+        val header: MqttFixedHeader = MqttFixedHeader(0x20u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
+        val connectAckFlags: UByte,
+        val reasonCode: UByte,
+        @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
+        val properties: List<MqttV5Property>,
+    ) : MqttV5Packet<Nothing>
+
     /**
      * Type-3 PUBLISH per MQTT v5.0 §3.3 — generic-bounded payload
      * variant with the new v5 property bag inserted between the
@@ -118,6 +152,18 @@ sealed interface MqttV5Packet<out P : Payload> {
     @ProtocolMessage
     data class PingReq(
         val header: MqttFixedHeader = MqttFixedHeader(0xC0u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
+    ) : MqttV5Packet<Nothing>
+
+    /**
+     * Type-13 PINGRESP per MQTT v5.0 §3.13 — fixed header `0xD0` +
+     * remaining length `0`. Wire-bytewise identical to v3.1.1 PINGRESP;
+     * v5 carries no reason code or property bag for this packet.
+     */
+    @PacketType(value = 13)
+    @ProtocolMessage
+    data class PingResp(
+        val header: MqttFixedHeader = MqttFixedHeader(0xD0u),
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
     ) : MqttV5Packet<Nothing>
 }
