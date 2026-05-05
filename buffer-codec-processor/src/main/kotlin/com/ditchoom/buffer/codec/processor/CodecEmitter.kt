@@ -799,7 +799,16 @@ internal class CodecEmitter(
         val elementType = typeArgs[0].type?.resolve() ?: return null
         if (elementType.isError || elementType.isMarkedNullable) return null
         val elementDecl = elementType.declaration as? KSClassDeclaration ?: return null
-        if (Modifier.DATA !in elementDecl.modifiers) return null
+        // Phase J.M.5 slice 11a — widened to also accept a `@ProtocolMessage`
+        // sealed parent (with `@DispatchOn`). Mirrors the audit-2a widening
+        // applied to `analyzeLengthPrefixedListSpec`. The encode emit
+        // (`appendEncodeRemainingBytesProtocolMessageList`) calls the
+        // element's `Codec.encode(...)` per element — for a sealed parent
+        // that's the dispatcher's encode, which handles BackPatch variants
+        // internally via its own scratch logic.
+        val isDataClass = Modifier.DATA in elementDecl.modifiers
+        val isSealed = Modifier.SEALED in elementDecl.modifiers
+        if (!isDataClass && !isSealed) return null
         val isProtocolMessage =
             elementDecl.annotations.any { ann ->
                 ann.shortName.asString() == "ProtocolMessage" &&
@@ -809,6 +818,12 @@ internal class CodecEmitter(
                         ?.asString() == PROTOCOL_MESSAGE_QNAME
             }
         if (!isProtocolMessage) return null
+        // Phase J.M.5 slice 11a — same payload-generic reject as
+        // `analyzeLengthPrefixedListSpec` (slice 10d rule). A `<P :
+        // Payload>` element generates a generic-class codec, not a
+        // singleton object; the per-element `<E>Codec.encode(...)` call
+        // requires the singleton form.
+        if (detectPayloadTypeParameter(elementDecl) != null) return null
         return FieldSpec.RemainingBytesProtocolMessageList(
             name = name,
             ownerSimpleName = ownerSimpleName,
@@ -818,6 +833,7 @@ internal class CodecEmitter(
                     elementDecl.packageName.asString(),
                     "${elementDecl.simpleName.asString()}Codec",
                 ),
+            elementIsBackPatch = detectElementBackPatch(elementDecl),
         )
     }
 
@@ -1319,6 +1335,15 @@ internal class CodecEmitter(
                 useCodecAnn = useCodecAnn,
             )
         }
+        if (useCodecAnn != null) {
+            // Phase J.M.5 slice 11a — `@When @UseCodec(C) val: T?`.
+            // Pre-slice this fell through to the bare-scalar branch and
+            // returned null silently for non-scalar T (sealed-parent
+            // typed reason codes in the v5 PUBACK/etc. cascade). The
+            // dedicated branch composes one-for-one with the non-
+            // conditional `analyzeUseCodecScalarField`.
+            return analyzeConditionalUseCodecInner(innerType, useCodecAnn)
+        }
         if (lengthPrefixedAnn != null) {
             // Slice 3.5 widens the inner universe to LengthPrefixed
             // String only. LengthPrefixed @ProtocolMessage bodies are
@@ -1356,6 +1381,44 @@ internal class CodecEmitter(
     ): ConditionalInner.LengthPrefixedUseCodecList? {
         val spec = analyzeLengthPrefixedListSpec(innerType, useCodecAnn) ?: return null
         return ConditionalInner.LengthPrefixedUseCodecList(spec = spec)
+    }
+
+    /**
+     * Phase J.M.5 slice 11a — `@When @UseCodec(C) val: T?`. Mirror of
+     * the non-conditional [analyzeUseCodecScalarField]: the inner type
+     * resolves to a [TypeName] via the supported-scalar table or the
+     * `KSClassDeclaration` fallback (value classes, sealed parents),
+     * and the codec target must be a Kotlin `object`. Returns `null`
+     * for shapes the validator already names (target not an `object`,
+     * non-resolvable inner) — the validator surfaces the user-facing
+     * diagnostic.
+     *
+     * Sealed-parent inners reach this analyzer when the user writes
+     * `@When("…") @UseCodec(SealedParentCodec::class) val rc:
+     * SealedParent? = null`. The generated `SealedParentCodec` is a
+     * singleton object implementing `Codec<SealedParent>`; the validator
+     * already accepts that shape via `implementsCodecOf`.
+     */
+    private fun analyzeConditionalUseCodecInner(
+        innerType: KSType,
+        useCodecAnn: KSAnnotation,
+    ): ConditionalInner.UseCodecScalar? {
+        val codecKsType =
+            useCodecAnn.arguments
+                .firstOrNull { it.name?.asString() == "codec" }
+                ?.value as? KSType ?: return null
+        val codecDecl = codecKsType.declaration as? KSClassDeclaration ?: return null
+        if (codecDecl.classKind != ClassKind.OBJECT) return null
+        val fieldTypeName: TypeName =
+            SUPPORTED_SCALARS[innerType.declaration.qualifiedName?.asString()]
+                ?.let { scalarTypeName(it) }
+                ?: (innerType.declaration as? KSClassDeclaration)?.let { classNameOf(it) }
+                ?: return null
+        val codecClassName = ClassName(codecDecl.packageName.asString(), codecDecl.simpleName.asString())
+        return ConditionalInner.UseCodecScalar(
+            fieldType = fieldTypeName,
+            codecType = codecClassName,
+        )
     }
 
     /**
@@ -1402,6 +1465,7 @@ internal class CodecEmitter(
                 ClassName("kotlin.collections", "List")
                     .parameterizedBy(inner.elementClassName)
                     .copy(nullable = true)
+            is ConditionalInner.UseCodecScalar -> inner.fieldType.copy(nullable = true)
         }
 
     /**
@@ -2116,6 +2180,22 @@ internal class CodecEmitter(
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
             return builder.build()
         }
+        // Phase J.M.5 slice 11a — `@RemainingBytes List<E>` where E is a
+        // sealed parent (or otherwise BackPatch-element) collapses to
+        // BackPatch. The runtime-Exact emit below sums element wireSizes
+        // via `as WireSize.Exact` cast; sealed-parent variants carrying
+        // `@LengthPrefixed val: String` or `@When` trailers produce
+        // BackPatch wireSize and would CCE on that cast. No fixture trips
+        // this today (slice 11a is a pure capability slice — v5 fixture
+        // substitution is slice 11b/12), but the guard is required for
+        // correctness once a typed-RC list lands.
+        if (shape.fields.any {
+                it is FieldSpec.RemainingBytesProtocolMessageList && it.elementIsBackPatch
+            }
+        ) {
+            builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+            return builder.build()
+        }
         when (val terminal = shape.fields.lastOrNull()) {
             is FieldSpec.LengthPrefixedMessage -> {
                 val headerBytes = scalarHeaderBytes(shape) + terminal.prefixWidth
@@ -2313,10 +2393,17 @@ internal class CodecEmitter(
         // body bytes — and peek can't predict whether the conditional
         // branch is taken without buffer access. v5 ack peek is owned
         // by the bounding RL upstream (same as above).
+        //
+        // Phase J.M.5 slice 11a — same collapse for `UseCodecScalar`
+        // inners. The user codec's wire width is opaque to the framework
+        // (could be a single byte for a typed RC, could be variable),
+        // so peek can't size the field without invoking the codec. v5
+        // ack peek again handled by the bounding RL upstream.
         if (shape.fields.any {
                 it is FieldSpec.Conditional && (
                     it.condition is ConditionRef.RemainingCmp ||
-                        it.inner is ConditionalInner.LengthPrefixedUseCodecList
+                        it.inner is ConditionalInner.LengthPrefixedUseCodecList ||
+                        it.inner is ConditionalInner.UseCodecScalar
                 )
             }
         ) {
@@ -2815,6 +2902,15 @@ internal class CodecEmitter(
                     "appendSequentialPeekConditional reached LengthPrefixedUseCodecList — " +
                         "buildPeekFrameFun should have short-circuited the shape to NoFraming.",
                 )
+            is ConditionalInner.UseCodecScalar ->
+                // Phase J.M.5 slice 11a — same NoFraming short-circuit as
+                // LengthPrefixedUseCodecList. The user codec's wire width
+                // is opaque, so `buildPeekFrameFun` collapses the whole
+                // frame; the sequential walk never visits this branch.
+                error(
+                    "appendSequentialPeekConditional reached UseCodecScalar — " +
+                        "buildPeekFrameFun should have short-circuited the shape to NoFraming.",
+                )
         }
         body.endControlFlow()
     }
@@ -3077,6 +3173,22 @@ internal class CodecEmitter(
                 body.addStatement("null")
                 body.endControlFlow()
             }
+            is ConditionalInner.UseCodecScalar -> {
+                // Phase J.M.5 slice 11a — `@When @UseCodec(C) val: T?`.
+                // Predicate-true delegates to the codec object's
+                // `decode(buffer, context)`, just like the non-conditional
+                // `appendDecodeUseCodecScalar` path; predicate-false yields
+                // null. The cascading-trailer cases use grammar-2
+                // `remaining >= N` predicates so the read only runs when
+                // the bounded buffer still has bytes to spend.
+                body.addStatement(
+                    "val %L: %T = if (%L) %T.decode(buffer, context) else null",
+                    field.name,
+                    field.nullableTypeName,
+                    decodeConditionExpr(field.condition),
+                    inner.codecType,
+                )
+            }
         }
     }
 
@@ -3143,6 +3255,16 @@ internal class CodecEmitter(
                     field = field,
                     inner = inner,
                     accessor = localName,
+                )
+            is ConditionalInner.UseCodecScalar ->
+                // Phase J.M.5 slice 11a — mirror of the non-conditional
+                // `appendEncodeUseCodecScalar`. Predicate-true with
+                // smart-cast non-null `<name>Value` (established above)
+                // delegates to the user codec's `encode`.
+                body.addStatement(
+                    "%T.encode(buffer, %L, context)",
+                    inner.codecType,
+                    localName,
                 )
         }
         body.endControlFlow()
@@ -4455,6 +4577,16 @@ internal class CodecEmitter(
         // Phase I.1 step 11: same — buildWireSizeFun collapses
         // LengthPrefixedUseCodecList-bearing shapes to BackPatch.
         if (shape.fields.any { it is FieldSpec.LengthPrefixedUseCodecList }) return VariantWireSize.BackPatch
+        // Phase J.M.5 slice 11a: `@RemainingBytes List<E>` with sealed-parent
+        // (or otherwise BackPatch-element) collapses to BackPatch — see
+        // [buildWireSizeFun] for the rationale (the runtime `as Exact` cast
+        // would CCE on BackPatch element variants).
+        if (shape.fields.any {
+                it is FieldSpec.RemainingBytesProtocolMessageList && it.elementIsBackPatch
+            }
+        ) {
+            return VariantWireSize.BackPatch
+        }
         return when (shape.fields.lastOrNull()) {
             is FieldSpec.LengthPrefixedMessage -> VariantWireSize.RuntimeExact
             // Slice 4: a LengthFromString variant's body byte count is the
@@ -5491,6 +5623,15 @@ internal class CodecEmitter(
             val ownerSimpleName: String,
             val elementClassName: ClassName,
             val elementCodecClassName: ClassName,
+            // Phase J.M.5 slice 11a — analyze-time predicate driving the
+            // outer message's wireSize / variant-classification short-
+            // circuit. Mirrors `LengthPrefixedListSpec.elementIsBackPatch`
+            // (audit-2b). When `true`, [buildWireSizeFun] and
+            // [classifyVariantWireSize] collapse the containing message
+            // to BackPatch — without it, the runtime `as Exact` cast on
+            // each element wireSize CCEs for sealed-parent variants
+            // carrying `@LengthPrefixed val: String` or `@When` trailers.
+            val elementIsBackPatch: Boolean,
         ) : FieldSpec
 
         /**
@@ -5648,6 +5789,33 @@ internal class CodecEmitter(
             val elementClassName: ClassName get() = spec.elementClassName
             val elementCodecClassName: ClassName get() = spec.elementCodecClassName
         }
+
+        /**
+         * Phase J.M.5 slice 11a — conditional `@When @UseCodec(C) val: T?`.
+         * Mirrors the non-conditional [FieldSpec.UseCodecScalar] emit one-
+         * for-one inside the predicate-true branch. `T` is any type the
+         * referenced codec object implements `Codec<T>` for — supported
+         * scalar via [SUPPORTED_SCALARS], value class via [classNameOf],
+         * or `@ProtocolMessage` sealed parent (with `@DispatchOn`) whose
+         * generated dispatcher is a singleton `Codec<T>` object. Decode
+         * emit: `if (predicate) C.decode(buffer, context) else null`.
+         * Encode emit: `C.encode(buffer, value.<name>, context)` inside
+         * the existing predicate-gated block.
+         *
+         * The naming mirrors `FieldSpec.UseCodecScalar` for symmetry; the
+         * "Scalar" suffix is historical — both shapes accept non-scalar
+         * types via their `KSClassDeclaration` fallback in the analyzer.
+         *
+         * BackPatch impact on the containing message is already absorbed
+         * by [classifyVariantWireSize] / [buildWireSizeFun]: any
+         * `Conditional` field collapses the message wireSize to BackPatch
+         * (row 19), which subsumes whatever the codec object's wireSize
+         * does.
+         */
+        data class UseCodecScalar(
+            val fieldType: TypeName,
+            val codecType: ClassName,
+        ) : ConditionalInner
     }
 
     /**
