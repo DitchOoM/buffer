@@ -69,9 +69,16 @@ value class MqttFixedHeader(
  * ```text
  * Connect (type 1, header byte typically 0x10):
  *   10                       fixed header
- *   <var-int>                remaining length (= 2 + 2 + clientId.length bytes)
- *   00 02                    keep-alive seconds (2-byte BE)
+ *   <var-int>                remaining length (var-int per §2.2.3)
+ *   00 04 'M' 'Q' 'T' 'T'    protocol name "MQTT" (LengthPrefixed)
+ *   04                       protocol level 4 (v3.1.1)
+ *   <flags>                  connect flags (bit-packed)
+ *   <ka_msb> <ka_lsb>        keep-alive seconds (UShort BE)
  *   00 04 'a' 'b' 'c' 'd'    client id (LengthPrefixed)
+ *   <will topic LP>?         conditional on connectFlags.willPresent
+ *   <will message LP>?       conditional on connectFlags.willPresent
+ *   <username LP>?           conditional on connectFlags.usernamePresent
+ *   <password LP>?           conditional on connectFlags.passwordPresent
  *
  * Publish (type 3, header byte typically 0x30 for QoS=0):
  *   30                       fixed header
@@ -89,19 +96,58 @@ value class MqttFixedHeader(
 @ProtocolMessage
 sealed interface MqttPacket<out P : Payload> {
     /**
-     * Type-1 CONNECT, simplified to the fields slice 6 cleanly
-     * exercises (full CONNECT lives in `MqttConnect`; combining the
-     * full body with `@DispatchOn` would require duplicating the
-     * dispatcher fixture and isn't load-bearing for the slice 6
-     * dispatcher mechanic).
+     * Type-1 CONNECT per MQTT v3.1.1 §3.1 — full variable header
+     * and payload folded onto the slice-6 sealed dispatcher in
+     * Phase J.M step 4. The standalone `MqttConnect` data class is
+     * gone; this variant now carries the complete §3.1 body.
+     *
+     * Wire layout (variable header + payload):
+     *
+     * ```text
+     *   <header>                  fixed header (typically 0x10)
+     *   <var-int>                 remaining length
+     *   00 04 'M' 'Q' 'T' 'T'     protocol name "MQTT" (LengthPrefixed)
+     *   04                        protocol level 4 (v3.1.1)
+     *   <flags>                   bit-packed connect flags
+     *   <ka_msb> <ka_lsb>         keepalive seconds (UShort BE)
+     *   <client id LP>            length-prefixed UTF-8 client id
+     *   <will topic LP>?          present iff connectFlags.willPresent
+     *   <will message LP>?        present iff connectFlags.willPresent
+     *   <username LP>?            present iff connectFlags.usernamePresent
+     *   <password LP>?            present iff connectFlags.passwordPresent
+     * ```
+     *
+     * Composes every Stage E + G annotation the standalone fixture
+     * exercised: `@LengthPrefixed val: String` (slice 5a non-terminal
+     * placement), value-class field (slice 3), dotted
+     * `@WhenTrue("connectFlags.<bit>")` predicates (slice 3 dotted
+     * form + slice 3.5 LengthPrefixed inner + slice 5b non-terminal
+     * Conditional), and the `@RemainingLength` var-int header (slice 8)
+     * bounding decode of the optional payload tail. The dispatcher
+     * peeks the fixed header byte without consuming, then the variant
+     * codec re-reads it through the slice 3 `FieldSpec.ValueClassScalar`
+     * path — same pattern slice 6's dispatcher uses for every other
+     * variant in this sealed family.
+     *
+     * Will-message and password are technically arbitrary bytes per
+     * the spec; this fixture models them as `String` because the
+     * Stage E `@LengthPrefixed`-inner universe is `String` only
+     * (Stage H widens to `@Payload` slots for arbitrary bytes).
      */
     @PacketType(value = 1)
     @ProtocolMessage
     data class Connect(
         val header: MqttFixedHeader = MqttFixedHeader(0x10u),
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
+        @LengthPrefixed val protocolName: String,
+        val protocolLevel: UByte,
+        val connectFlags: MqttConnectFlags,
         val keepAliveSeconds: UShort,
         @LengthPrefixed val clientId: String,
+        @LengthPrefixed @WhenTrue("connectFlags.willPresent") val willTopic: String? = null,
+        @LengthPrefixed @WhenTrue("connectFlags.willPresent") val willMessage: String? = null,
+        @LengthPrefixed @WhenTrue("connectFlags.usernamePresent") val username: String? = null,
+        @LengthPrefixed @WhenTrue("connectFlags.passwordPresent") val password: String? = null,
     ) : MqttPacket<Nothing>
 
     /**

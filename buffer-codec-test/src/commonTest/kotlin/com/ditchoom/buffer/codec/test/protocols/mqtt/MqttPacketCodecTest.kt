@@ -59,18 +59,25 @@ class MqttPacketCodecTest {
 
     @Test
     fun encodesConnectVariantByteExact() {
-        // body = keepalive (2) + clientId LP (2 + 4) = 8 bytes
+        // body = protoName "MQTT" LP (6) + level (1) + flags (1) +
+        //        keepalive (2) + clientId LP (2 + 4) = 16 bytes
         val msg =
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
-                remainingLength = 8u,
+                remainingLength = 16u,
+                protocolName = "MQTT",
+                protocolLevel = 0x04u,
+                connectFlags = MqttConnectFlags(0x02u),
                 keepAliveSeconds = 60u,
                 clientId = "abcd",
             )
         val expected =
             byteArrayOf(
                 0x10, // fixed header (type=1, flags=0)
-                0x08, // remaining length = 8 (1-byte var-int)
+                0x10, // remaining length = 16 (1-byte var-int)
+                0x00, 0x04, 'M'.code.toByte(), 'Q'.code.toByte(), 'T'.code.toByte(), 'T'.code.toByte(),
+                0x04, // protocol level (v3.1.1)
+                0x02, // connect flags = cleanSession only
                 0x00, 0x3C, // keep-alive 60
                 0x00, 0x04, 'a'.code.toByte(), 'b'.code.toByte(), 'c'.code.toByte(), 'd'.code.toByte(),
             )
@@ -90,7 +97,10 @@ class MqttPacketCodecTest {
         val wire =
             byteArrayOf(
                 0x10,
-                0x08,
+                0x10, // remaining length = 16
+                0x00, 0x04, 'M'.code.toByte(), 'Q'.code.toByte(), 'T'.code.toByte(), 'T'.code.toByte(),
+                0x04,
+                0x02,
                 0x00, 0x3C,
                 0x00, 0x04, 'a'.code.toByte(), 'b'.code.toByte(), 'c'.code.toByte(), 'd'.code.toByte(),
             )
@@ -99,7 +109,10 @@ class MqttPacketCodecTest {
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         val connect = assertIs<MqttPacket.Connect>(decoded)
         assertEquals(MqttFixedHeader(0x10u), connect.header)
-        assertEquals(8u, connect.remainingLength)
+        assertEquals(16u, connect.remainingLength)
+        assertEquals("MQTT", connect.protocolName)
+        assertEquals(0x04u.toUByte(), connect.protocolLevel)
+        assertEquals(MqttConnectFlags(0x02u), connect.connectFlags)
         assertEquals(60u.toUShort(), connect.keepAliveSeconds)
         assertEquals("abcd", connect.clientId)
     }
@@ -125,10 +138,15 @@ class MqttPacketCodecTest {
         // reserves CONNECT's flag nibble as 0, but the dispatcher must
         // preserve the raw byte rather than overwriting it from the
         // @PacketType annotation default.
+        // body = 6 (proto LP) + 1 (level) + 1 (flags) + 2 (keepalive) +
+        //        3 (clientId "x" LP) = 13 bytes.
         val wire =
             byteArrayOf(
                 0x12,
-                0x05,
+                0x0D, // remaining length = 13
+                0x00, 0x04, 'M'.code.toByte(), 'Q'.code.toByte(), 'T'.code.toByte(), 'T'.code.toByte(),
+                0x04,
+                0x02,
                 0x00, 0x3C,
                 0x00, 0x01, 'x'.code.toByte(),
             )
@@ -154,11 +172,15 @@ class MqttPacketCodecTest {
 
     @Test
     fun roundTripsConnect() {
-        // body = 2 (keepalive) + 2 + 8 (clientId "client-1" with LP) = 12
+        // body = 6 (proto) + 1 (level) + 1 (flags) + 2 (keepalive) +
+        //        2 + 8 (clientId "client-1" with LP) = 20
         val original =
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
-                remainingLength = 12u,
+                remainingLength = 20u,
+                protocolName = "MQTT",
+                protocolLevel = 0x04u,
+                connectFlags = MqttConnectFlags(0x02u),
                 keepAliveSeconds = 30u,
                 clientId = "client-1",
             )
@@ -289,10 +311,15 @@ class MqttPacketCodecTest {
     @Test
     fun peekFrameSizeWalksDripFedConnect() {
         val pool = BufferPool()
+        // body = 6 (proto) + 1 (level) + 1 (flags) + 2 (keepalive) +
+        //        2 + 3 (clientId "abc" with LP) = 15
         val original =
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
-                remainingLength = 7u, // 2 (keepalive) + 2 + 3 (clientId "abc") = 7
+                remainingLength = 15u,
+                protocolName = "MQTT",
+                protocolLevel = 0x04u,
+                connectFlags = MqttConnectFlags(0x02u),
                 keepAliveSeconds = 60u,
                 clientId = "abc",
             )
@@ -616,7 +643,11 @@ class MqttPacketCodecTest {
         val original =
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
-                remainingLength = 8u,
+                // body = 6 (proto) + 1 (level) + 1 (flags) + 2 (keepalive) + 6 (clientId LP "abcd") = 16
+                remainingLength = 16u,
+                protocolName = "MQTT",
+                protocolLevel = 0x04u,
+                connectFlags = MqttConnectFlags(0x02u),
                 keepAliveSeconds = 60u,
                 clientId = "abcd",
             )

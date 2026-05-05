@@ -153,7 +153,11 @@ class MqttPacketAggregatorCodecTest {
         val original =
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
-                remainingLength = 8u,
+                // body = 6 (proto) + 1 (level) + 1 (flags) + 2 (keepalive) + 6 (clientId LP "abcd") = 16
+                remainingLength = 16u,
+                protocolName = "MQTT",
+                protocolLevel = 0x04u,
+                connectFlags = MqttConnectFlags(0x02u),
                 keepAliveSeconds = 60u,
                 clientId = "abcd",
             )

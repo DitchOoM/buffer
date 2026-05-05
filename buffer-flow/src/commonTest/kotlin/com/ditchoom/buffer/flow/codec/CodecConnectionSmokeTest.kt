@@ -7,6 +7,7 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttConnectFlags
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacketCodec
@@ -102,8 +103,11 @@ class CodecConnectionSmokeTest {
                 val connect =
                     MqttPacket.Connect(
                         header = MqttFixedHeader(0x10u),
-                        // body = keepalive (2) + clientId LP (2 + 4) = 8
-                        remainingLength = 8u,
+                        // body = 6 (proto) + 1 (level) + 1 (flags) + 2 (keepalive) + 6 (clientId LP "abcd") = 16
+                        remainingLength = 16u,
+                        protocolName = "MQTT",
+                        protocolLevel = 0x04u,
+                        connectFlags = MqttConnectFlags(0x02u),
                         keepAliveSeconds = 60u,
                         clientId = "abcd",
                     )

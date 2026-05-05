@@ -30,6 +30,13 @@ import kotlin.test.assertNull
  *     LengthPrefixed inner + slice 5b non-terminal Conditional).
  *   - Sequential peek walk via the slice 8 RemainingLength fast
  *     path (header byte + var-int + value covers the full message).
+ *
+ * Phase J.M step 4 — folded onto the `MqttPacket.Connect` sealed
+ * variant. Drives `ConnectCodec` (the per-variant codec object emitted
+ * by the slice 6 dispatcher) per the brief's option 1: same byte-
+ * exact assertions, same var-int boundary coverage, same drip-fed
+ * peekFrameSize coverage. The standalone `MqttConnect` data class +
+ * `MqttConnectCodec` are gone with this fold.
  */
 class MqttConnectCodecTest {
     @Test
@@ -37,7 +44,7 @@ class MqttConnectCodecTest {
         // body: 6 (protocolName "MQTT" with prefix) + 1 (level) + 1 (flags) +
         //       2 (keepalive) + 5 (clientId "abc" with prefix) = 15
         val msg =
-            MqttConnect(
+            MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
                 remainingLength = 15u,
                 protocolName = "MQTT",
@@ -67,7 +74,7 @@ class MqttConnectCodecTest {
         //       6 (clientId "test") + 6 (username "user") + 6 (password "pass") = 28
         // Flags: usernamePresent (0x80) | passwordPresent (0x40) | cleanSession (0x02) = 0xC2
         val msg =
-            MqttConnect(
+            MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
                 remainingLength = 28u,
                 protocolName = "MQTT",
@@ -99,7 +106,7 @@ class MqttConnectCodecTest {
         // body: 6 + 1 + 1 + 2 + 3 (clientId "c") + 3 (willTopic "t") + 3 (willMessage "m") = 19
         // Flags: willPresent (0x04) | willRetain (0x20) | cleanSession (0x02) = 0x26
         val msg =
-            MqttConnect(
+            MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
                 remainingLength = 19u,
                 protocolName = "MQTT",
@@ -132,7 +139,7 @@ class MqttConnectCodecTest {
         //       5 (willMessage "bye") + 7 (username "alice") + 8 (password "secret") = 46
         // Flags: usernamePresent | passwordPresent | willRetain | willPresent | cleanSession = 0xE6
         val msg =
-            MqttConnect(
+            MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
                 remainingLength = 46u,
                 protocolName = "MQTT",
@@ -147,7 +154,7 @@ class MqttConnectCodecTest {
             )
         val buf = encode(msg)
         buf.resetForRead()
-        val decoded = MqttConnectCodec.decode(buf, DecodeContext.Empty)
+        val decoded = ConnectCodec.decode(buf, DecodeContext.Empty)
         assertEquals(msg, decoded)
     }
 
@@ -168,7 +175,7 @@ class MqttConnectCodecTest {
             )
         val buf = BufferFactory.Default.allocate(wire.size).also { it.writeBytes(wire) }
         buf.resetForRead()
-        val decoded = MqttConnectCodec.decode(buf, DecodeContext.Empty)
+        val decoded = ConnectCodec.decode(buf, DecodeContext.Empty)
         assertEquals("test", decoded.clientId)
         assertNull(decoded.willTopic, "willPresent bit not set → willTopic should be null")
         assertNull(decoded.willMessage, "willPresent bit not set → willMessage should be null")
@@ -193,7 +200,7 @@ class MqttConnectCodecTest {
             )
         val buf = BufferFactory.Default.allocate(wire.size).also { it.writeBytes(wire) }
         buf.resetForRead()
-        val decoded = MqttConnectCodec.decode(buf, DecodeContext.Empty)
+        val decoded = ConnectCodec.decode(buf, DecodeContext.Empty)
         assertEquals("abc", decoded.clientId)
         assertEquals(2, buf.remaining(), "trailing 2 bytes (next packet) left in buffer")
     }
@@ -206,7 +213,7 @@ class MqttConnectCodecTest {
         // deferred follow-on (PHASE_I_1_RESUME.md:426) — the slice-8
         // `@RemainingLength`-driven Exact path is gone with the migration.
         val msg =
-            MqttConnect(
+            MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
                 remainingLength = 15u,
                 protocolName = "MQTT",
@@ -215,14 +222,14 @@ class MqttConnectCodecTest {
                 keepAliveSeconds = 60u,
                 clientId = "abc",
             )
-        assertEquals(WireSize.BackPatch, MqttConnectCodec.wireSize(msg, EncodeContext.Empty))
+        assertEquals(WireSize.BackPatch, ConnectCodec.wireSize(msg, EncodeContext.Empty))
     }
 
     @Test
     fun peekFrameSizeWalksToCompleteOnFullMessage() {
         val pool = BufferPool()
         val original =
-            MqttConnect(
+            MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
                 remainingLength = 28u,
                 protocolName = "MQTT",
@@ -241,7 +248,7 @@ class MqttConnectCodecTest {
 
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, MqttConnectCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.NeedsMoreData, ConnectCodec.peekFrameSize(stream))
 
             for (i in 0 until totalBytes - 1) {
                 val one = BufferFactory.Default.allocate(1)
@@ -250,7 +257,7 @@ class MqttConnectCodecTest {
                 stream.append(one)
                 assertEquals(
                     PeekResult.NeedsMoreData,
-                    MqttConnectCodec.peekFrameSize(stream),
+                    ConnectCodec.peekFrameSize(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -258,11 +265,11 @@ class MqttConnectCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), MqttConnectCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.Complete(totalBytes), ConnectCodec.peekFrameSize(stream))
 
             val decoded =
                 stream.readBufferScoped(totalBytes) {
-                    MqttConnectCodec.decode(this, DecodeContext.Empty)
+                    ConnectCodec.decode(this, DecodeContext.Empty)
                 }
             assertEquals(original, decoded)
             assertEquals(0, stream.available(), "stream should be drained")
@@ -279,7 +286,7 @@ class MqttConnectCodecTest {
         // need to walk the payload.
         val pool = BufferPool()
         val original =
-            MqttConnect(
+            MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
                 remainingLength = 15u,
                 protocolName = "MQTT",
@@ -300,7 +307,7 @@ class MqttConnectCodecTest {
                 while (encoded.remaining() > 0) it.writeByte(encoded.readByte())
                 it.resetForRead()
             })
-            assertEquals(PeekResult.Complete(expectedTotal), MqttConnectCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.Complete(expectedTotal), ConnectCodec.peekFrameSize(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -308,7 +315,7 @@ class MqttConnectCodecTest {
     }
 
     private fun roundTripBytewise(
-        original: MqttConnect,
+        original: MqttPacket.Connect,
         expected: ByteArray,
     ) {
         val buf = encode(original)
@@ -319,12 +326,12 @@ class MqttConnectCodecTest {
 
         val readBuf = BufferFactory.Default.allocate(expected.size).also { it.writeBytes(expected) }
         readBuf.resetForRead()
-        val decoded = MqttConnectCodec.decode(readBuf, DecodeContext.Empty)
+        val decoded = ConnectCodec.decode(readBuf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
-    private fun encode(value: MqttConnect) =
+    private fun encode(value: MqttPacket.Connect) =
         BufferFactory.Default
             .allocate(512)
-            .also { MqttConnectCodec.encode(it, value, EncodeContext.Empty) }
+            .also { ConnectCodec.encode(it, value, EncodeContext.Empty) }
 }
