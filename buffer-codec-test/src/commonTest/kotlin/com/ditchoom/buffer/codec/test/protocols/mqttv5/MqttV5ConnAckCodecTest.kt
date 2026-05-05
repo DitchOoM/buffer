@@ -7,6 +7,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
+import com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImage
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImageCodec
 import com.ditchoom.buffer.pool.BufferPool
@@ -36,7 +37,7 @@ class MqttV5ConnAckCodecTest {
             MqttV5Packet.ConnAck(
                 remainingLength = 3u,
                 connectAckFlags = 0x00u,
-                reasonCode = 0x00u,
+                reasonCode = V5ConnectReasonCode.Success(),
                 properties = emptyList(),
             )
         val buf = encode(msg)
@@ -61,7 +62,7 @@ class MqttV5ConnAckCodecTest {
             MqttV5Packet.ConnAck(
                 remainingLength = 8u,
                 connectAckFlags = 0x01u, // session present = true
-                reasonCode = 0x00u,
+                reasonCode = V5ConnectReasonCode.Success(),
                 properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
             )
         val buf = encode(msg)
@@ -104,7 +105,7 @@ class MqttV5ConnAckCodecTest {
         val connAck = assertIs<MqttV5Packet.ConnAck>(decoded)
         assertEquals(MqttFixedHeader(0x20u), connAck.header)
         assertEquals(0x00u.toUByte(), connAck.connectAckFlags)
-        assertEquals(0x82u.toUByte(), connAck.reasonCode)
+        assertEquals(V5ConnectReasonCode.ProtocolError(), connAck.reasonCode)
         assertEquals(emptyList(), connAck.properties)
     }
 
@@ -115,7 +116,7 @@ class MqttV5ConnAckCodecTest {
                 // body = 1 + 1 + 1 (propLen=18) + 18 (Expiry + ContentType) = 21
                 remainingLength = 21u,
                 connectAckFlags = 0x01u,
-                reasonCode = 0x00u,
+                reasonCode = V5ConnectReasonCode.Success(),
                 properties =
                     listOf(
                         MqttV5Property.MessageExpiryInterval(seconds = 3_600u),
@@ -134,7 +135,7 @@ class MqttV5ConnAckCodecTest {
             MqttV5Packet.ConnAck(
                 remainingLength = 3u,
                 connectAckFlags = 0x00u,
-                reasonCode = 0x00u,
+                reasonCode = V5ConnectReasonCode.Success(),
                 properties = emptyList(),
             )
         val buf = encode(msg)

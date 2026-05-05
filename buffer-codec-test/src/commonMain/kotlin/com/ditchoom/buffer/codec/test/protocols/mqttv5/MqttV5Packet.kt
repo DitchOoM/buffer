@@ -13,60 +13,12 @@ import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttConnectFlags
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttUnsubscribeTopic
+import com.ditchoom.buffer.codec.test.protocols.mqttv5.authrc.V5AuthReasonCode
+import com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode
+import com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode
+import com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode
+import com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCode
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
-
-// Phase J.M.5 audit-2d — per-packet reason-code value spaces. Each
-// caller-supplied `reasonCode` is checked against the spec's enumerated set
-// at construction time; bogus bytes (e.g. `reasonCode = 0xFFu`) reject
-// before they reach the encoder. These sets are an interim type-system
-// substitute — slice 11b replaces them with sealed `V5XReasonCode` parents,
-// at which point the allowlists are deleted as redundant.
-private val V5_PUBACK_REASON_CODES: Set<UByte> =
-    setOf(0x00u, 0x10u, 0x80u, 0x83u, 0x87u, 0x90u, 0x91u, 0x97u, 0x99u)
-
-// PUBREC shares PUBACK's set per spec §3.4.2.1 / §3.5.2.1.
-private val V5_PUBREC_REASON_CODES: Set<UByte> = V5_PUBACK_REASON_CODES
-
-// PUBREL / PUBCOMP carry the smaller §3.6.2.1 / §3.7.2.1 set.
-private val V5_PUBREL_REASON_CODES: Set<UByte> = setOf(0x00u, 0x92u)
-private val V5_PUBCOMP_REASON_CODES: Set<UByte> = V5_PUBREL_REASON_CODES
-
-private val V5_UNSUBACK_REASON_CODES: Set<UByte> =
-    setOf(0x00u, 0x11u, 0x80u, 0x83u, 0x87u, 0x8Fu, 0x91u)
-
-private val V5_DISCONNECT_REASON_CODES: Set<UByte> =
-    setOf(
-        0x00u,
-        0x04u,
-        0x80u,
-        0x81u,
-        0x82u,
-        0x83u,
-        0x87u,
-        0x89u,
-        0x8Bu,
-        0x8Du,
-        0x8Eu,
-        0x8Fu,
-        0x90u,
-        0x93u,
-        0x94u,
-        0x95u,
-        0x97u,
-        0x98u,
-        0x99u,
-        0x9Au,
-        0x9Bu,
-        0x9Cu,
-        0x9Du,
-        0x9Eu,
-        0x9Fu,
-        0xA0u,
-        0xA1u,
-        0xA2u,
-    )
-
-private val V5_AUTH_REASON_CODES: Set<UByte> = setOf(0x00u, 0x18u, 0x19u)
 
 /**
  * Phase J.M.5 — MQTT v5.0 control-packet sealed dispatcher.
@@ -197,9 +149,10 @@ sealed interface MqttV5Packet<out P : Payload> {
      *
      * Slice 3 variant — exercises the always-present property bag
      * without new emitter capability beyond what slice 2 lifted.
-     * Reason code is modeled as a raw `UByte` (the spec assigns
-     * specific values 0x00 through 0xA2; typed sealed enum is a
-     * follow-on once a vector requires it).
+     * Slice 11b substitutes the bare `UByte` reason code with
+     * [V5ConnectReasonCode] — non-conditional bare `val: T` shape
+     * resolved by-name through the slice 11b non-conditional
+     * `ProtocolMessageScalar` analyzer branch.
      */
     @PacketType(value = 2)
     @ProtocolMessage(wireOrder = Endianness.Big)
@@ -207,7 +160,7 @@ sealed interface MqttV5Packet<out P : Payload> {
         val header: MqttFixedHeader = MqttFixedHeader(0x20u),
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         val connectAckFlags: UByte,
-        val reasonCode: UByte,
+        val reasonCode: V5ConnectReasonCode,
         @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
         val properties: List<MqttV5Property>,
     ) : MqttV5Packet<Nothing> {
@@ -321,7 +274,7 @@ sealed interface MqttV5Packet<out P : Payload> {
         val header: MqttFixedHeader = MqttFixedHeader(0x40u),
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
-        @When("remaining >= 1") val reasonCode: UByte? = null,
+        @When("remaining >= 1") val reasonCode: V5PubAckReasonCode? = null,
         @When("remaining >= 1")
         @LengthPrefixed
         @UseCodec(MqttRemainingLengthCodec::class)
@@ -347,13 +300,11 @@ sealed interface MqttV5Packet<out P : Payload> {
                 "v5 PUBACK header invariant: header.raw must be 0x40, got 0x" +
                     header.raw.toString(16) + " (spec §3.4.1)"
             }
-            // Phase J.M.5 audit-2d — reason-code value-space allowlist per
-            // §3.4.2.1. Type-system substitute pending slice 11b's typed
-            // sealed parent. Skip when null (cascading-trailer absence).
-            require(reasonCode == null || reasonCode in V5_PUBACK_REASON_CODES) {
-                "v5 PUBACK reason-code invariant: 0x" + reasonCode!!.toString(16) +
-                    " is not a valid reason code (spec §3.4.2.1)"
-            }
+            // Phase J.M.5 slice 11b — reason-code value-space is now type-
+            // system enforced via [V5PubAckReasonCode]; the audit-2d
+            // allowlist was deleted in this commit. Per-packet validity
+            // (e.g. PUBACK rejecting 0x92 PacketIdentifierNotFound) is
+            // intentionally not enforced — see V5ReasonCodes.kt header.
         }
     }
 
@@ -367,7 +318,7 @@ sealed interface MqttV5Packet<out P : Payload> {
         val header: MqttFixedHeader = MqttFixedHeader(0x50u),
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
-        @When("remaining >= 1") val reasonCode: UByte? = null,
+        @When("remaining >= 1") val reasonCode: V5PubAckReasonCode? = null,
         @When("remaining >= 1")
         @LengthPrefixed
         @UseCodec(MqttRemainingLengthCodec::class)
@@ -384,12 +335,8 @@ sealed interface MqttV5Packet<out P : Payload> {
                 "v5 PUBREC header invariant: header.raw must be 0x50, got 0x" +
                     header.raw.toString(16) + " (spec §3.5.1)"
             }
-            // Phase J.M.5 audit-2d — reason-code value-space allowlist per
-            // §3.5.2.1 (shares PUBACK's set).
-            require(reasonCode == null || reasonCode in V5_PUBREC_REASON_CODES) {
-                "v5 PUBREC reason-code invariant: 0x" + reasonCode!!.toString(16) +
-                    " is not a valid reason code (spec §3.5.2.1)"
-            }
+            // Phase J.M.5 slice 11b — reason-code value-space type-system
+            // enforced via [V5PubAckReasonCode] (shared parent with PUBACK).
         }
     }
 
@@ -404,7 +351,7 @@ sealed interface MqttV5Packet<out P : Payload> {
         val header: MqttFixedHeader = MqttFixedHeader(0x62u),
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
-        @When("remaining >= 1") val reasonCode: UByte? = null,
+        @When("remaining >= 1") val reasonCode: V5PubAckReasonCode? = null,
         @When("remaining >= 1")
         @LengthPrefixed
         @UseCodec(MqttRemainingLengthCodec::class)
@@ -423,12 +370,9 @@ sealed interface MqttV5Packet<out P : Payload> {
                 "v5 PUBREL header invariant: header.raw must be 0x62, got 0x" +
                     header.raw.toString(16) + " (spec §3.6.1)"
             }
-            // Phase J.M.5 audit-2d — reason-code value-space allowlist per
-            // §3.6.2.1 (smaller set than PUBACK).
-            require(reasonCode == null || reasonCode in V5_PUBREL_REASON_CODES) {
-                "v5 PUBREL reason-code invariant: 0x" + reasonCode!!.toString(16) +
-                    " is not a valid reason code (spec §3.6.2.1)"
-            }
+            // Phase J.M.5 slice 11b — reason-code value-space type-system
+            // enforced via [V5PubAckReasonCode] (shared parent — PUBREL's
+            // smaller spec set §3.6.2.1 not separately enforced).
         }
     }
 
@@ -442,7 +386,7 @@ sealed interface MqttV5Packet<out P : Payload> {
         val header: MqttFixedHeader = MqttFixedHeader(0x70u),
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
-        @When("remaining >= 1") val reasonCode: UByte? = null,
+        @When("remaining >= 1") val reasonCode: V5PubAckReasonCode? = null,
         @When("remaining >= 1")
         @LengthPrefixed
         @UseCodec(MqttRemainingLengthCodec::class)
@@ -459,12 +403,8 @@ sealed interface MqttV5Packet<out P : Payload> {
                 "v5 PUBCOMP header invariant: header.raw must be 0x70, got 0x" +
                     header.raw.toString(16) + " (spec §3.7.1)"
             }
-            // Phase J.M.5 audit-2d — reason-code value-space allowlist per
-            // §3.7.2.1 (shares PUBREL's set).
-            require(reasonCode == null || reasonCode in V5_PUBCOMP_REASON_CODES) {
-                "v5 PUBCOMP reason-code invariant: 0x" + reasonCode!!.toString(16) +
-                    " is not a valid reason code (spec §3.7.2.1)"
-            }
+            // Phase J.M.5 slice 11b — reason-code value-space type-system
+            // enforced via [V5PubAckReasonCode] (shared parent with PUBREL).
         }
     }
 
@@ -587,7 +527,7 @@ sealed interface MqttV5Packet<out P : Payload> {
         val header: MqttFixedHeader = MqttFixedHeader(0xB0u),
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
-        @When("remaining >= 1") val reasonCode: UByte? = null,
+        @When("remaining >= 1") val reasonCode: V5UnsubAckReasonCode? = null,
         @When("remaining >= 1")
         @LengthPrefixed
         @UseCodec(MqttRemainingLengthCodec::class)
@@ -604,12 +544,8 @@ sealed interface MqttV5Packet<out P : Payload> {
                 "v5 UNSUBACK header invariant: header.raw must be 0xB0, got 0x" +
                     header.raw.toString(16) + " (spec §3.11.1)"
             }
-            // Phase J.M.5 audit-2d — reason-code value-space allowlist per
-            // §3.11.3.
-            require(reasonCode == null || reasonCode in V5_UNSUBACK_REASON_CODES) {
-                "v5 UNSUBACK reason-code invariant: 0x" + reasonCode!!.toString(16) +
-                    " is not a valid reason code (spec §3.11.3)"
-            }
+            // Phase J.M.5 slice 11b — reason-code value-space type-system
+            // enforced via [V5UnsubAckReasonCode].
         }
     }
 
@@ -627,7 +563,7 @@ sealed interface MqttV5Packet<out P : Payload> {
     data class Disconnect(
         val header: MqttFixedHeader = MqttFixedHeader(0xE0u),
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
-        @When("remaining >= 1") val reasonCode: UByte? = null,
+        @When("remaining >= 1") val reasonCode: V5DisconnectReasonCode? = null,
         @When("remaining >= 1")
         @LengthPrefixed
         @UseCodec(MqttRemainingLengthCodec::class)
@@ -645,13 +581,8 @@ sealed interface MqttV5Packet<out P : Payload> {
                 "v5 DISCONNECT header invariant: header.raw must be 0xE0, got 0x" +
                     header.raw.toString(16) + " (spec §3.14.1)"
             }
-            // Phase J.M.5 audit-2d — reason-code value-space allowlist per
-            // §3.14.2.1. The DISCONNECT set is the largest of the v5 packets
-            // (~28 codes spanning client- and server-side reasons).
-            require(reasonCode == null || reasonCode in V5_DISCONNECT_REASON_CODES) {
-                "v5 DISCONNECT reason-code invariant: 0x" + reasonCode!!.toString(16) +
-                    " is not a valid reason code (spec §3.14.2.1)"
-            }
+            // Phase J.M.5 slice 11b — reason-code value-space type-system
+            // enforced via [V5DisconnectReasonCode] (28 variants).
         }
     }
 
@@ -668,7 +599,7 @@ sealed interface MqttV5Packet<out P : Payload> {
     data class Auth(
         val header: MqttFixedHeader = MqttFixedHeader(0xF0u),
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
-        @When("remaining >= 1") val reasonCode: UByte? = null,
+        @When("remaining >= 1") val reasonCode: V5AuthReasonCode? = null,
         @When("remaining >= 1")
         @LengthPrefixed
         @UseCodec(MqttRemainingLengthCodec::class)
@@ -685,12 +616,9 @@ sealed interface MqttV5Packet<out P : Payload> {
                 "v5 AUTH header invariant: header.raw must be 0xF0, got 0x" +
                     header.raw.toString(16) + " (spec §3.15.1)"
             }
-            // Phase J.M.5 audit-2d — reason-code value-space allowlist per
-            // §3.15.2.1.
-            require(reasonCode == null || reasonCode in V5_AUTH_REASON_CODES) {
-                "v5 AUTH reason-code invariant: 0x" + reasonCode!!.toString(16) +
-                    " is not a valid reason code (spec §3.15.2.1)"
-            }
+            // Phase J.M.5 slice 11b — reason-code value-space type-system
+            // enforced via [V5AuthReasonCode] (3 variants: Success / Continue
+            // / Re-Authenticate).
         }
     }
 

@@ -9,6 +9,8 @@ import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttConnectFlags
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttUnsubscribeTopic
+import com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode
+import com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImage
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImageCodec
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
@@ -67,7 +69,7 @@ class MqttV5FullPacketSetCodecTest {
             MqttV5Packet.ConnAck(
                 remainingLength = 3u,
                 connectAckFlags = 0x01u,
-                reasonCode = 0x00u,
+                reasonCode = V5ConnectReasonCode.Success(),
                 properties = emptyList(),
             )
         assertDispatcherRoundTrip(original, expectedTotalBytes = 5)
@@ -114,7 +116,7 @@ class MqttV5FullPacketSetCodecTest {
             MqttV5Packet.PubAck(
                 remainingLength = 9u,
                 packetIdentifier = 0x1234u,
-                reasonCode = 0x00u,
+                reasonCode = V5PubAckReasonCode.Success(),
                 properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
             )
         assertDispatcherRoundTrip(original, expectedTotalBytes = 11)

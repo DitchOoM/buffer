@@ -500,6 +500,13 @@ internal class CodecEmitter(
             // outer parameter widen this and are deferred to a later slice.
             if (wireBytesAnn != null) return null
             if (param.annotations.any { it.shortName.asString() == "WireOrder" }) return null
+            // Phase J.M.5 slice 11b — try the bare `val: T : @ProtocolMessage`
+            // shape (data class or sealed parent) before the value-class
+            // fallback. Value classes carry `Modifier.VALUE` and don't carry
+            // `Modifier.DATA`/`Modifier.SEALED`, so the two branches are
+            // mutually exclusive on the modifier check.
+            analyzeBareProtocolMessageField(param, type, ownerSimpleName)
+                ?.let { return it }
             return analyzeValueClassScalarField(param, ownerSimpleName)
         }
 
@@ -834,6 +841,56 @@ internal class CodecEmitter(
                     "${elementDecl.simpleName.asString()}Codec",
                 ),
             elementIsBackPatch = detectElementBackPatch(elementDecl),
+        )
+    }
+
+    /**
+     * Phase J.M.5 slice 11b — bare `val: T` where T is a `@ProtocolMessage`
+     * data class or sealed parent (with `@DispatchOn`). Mirrors
+     * [analyzeRemainingBytesProtocolMessageListField] for element-type
+     * requirements: data class OR sealed parent, `@ProtocolMessage`-
+     * annotated, non-payload-generic. Codec class resolves by-name to
+     * `${T.simpleName}Codec` in T's package.
+     *
+     * Caller-side gate: only invoked from the no-framing-annotation
+     * fall-through in `analyzeField` (no `@LengthPrefixed`,
+     * `@RemainingBytes`, `@LengthFrom`, `@When`, or `@UseCodec`). The
+     * conditional sister case is in [analyzeConditionalProtocolMessageInner].
+     *
+     * Establishes the by-name principle for `@ProtocolMessage` typed
+     * fields uniformly across framing annotations — see
+     * [FieldSpec.ProtocolMessageScalar] kdoc for the principle in full.
+     */
+    private fun analyzeBareProtocolMessageField(
+        param: KSValueParameter,
+        type: KSType,
+        ownerSimpleName: String,
+    ): FieldSpec.ProtocolMessageScalar? {
+        if (type.isError || type.isMarkedNullable) return null
+        val name = param.name?.asString() ?: return null
+        val decl = type.declaration as? KSClassDeclaration ?: return null
+        val isDataClass = Modifier.DATA in decl.modifiers
+        val isSealed = Modifier.SEALED in decl.modifiers
+        if (!isDataClass && !isSealed) return null
+        val isProtocolMessage =
+            decl.annotations.any { ann ->
+                ann.shortName.asString() == "ProtocolMessage" &&
+                    ann.annotationType
+                        .resolve()
+                        .declaration.qualifiedName
+                        ?.asString() == PROTOCOL_MESSAGE_QNAME
+            }
+        if (!isProtocolMessage) return null
+        if (detectPayloadTypeParameter(decl) != null) return null
+        return FieldSpec.ProtocolMessageScalar(
+            name = name,
+            ownerSimpleName = ownerSimpleName,
+            fieldType = classNameOf(decl),
+            codecType =
+                ClassName(
+                    decl.packageName.asString(),
+                    "${decl.simpleName.asString()}Codec",
+                ),
         )
     }
 
@@ -1359,6 +1416,19 @@ internal class CodecEmitter(
                 prefixWireOrder = messageWireOrder,
             )
         }
+        // Phase J.M.5 slice 11b — bare `@When val: T?` where T is a
+        // `@ProtocolMessage` data class or sealed parent. The codec is
+        // resolved by-name (`${T.simpleName}Codec` in T's package),
+        // mirroring [analyzeRemainingBytesProtocolMessageListField].
+        // This sidesteps the KSP first-round chicken-and-egg: an
+        // explicit `@UseCodec(<T>Codec::class)` against a yet-to-be-
+        // generated codec class doesn't resolve in the round that emits
+        // T's codec. Detect before the value-class branch since
+        // `@ProtocolMessage` data classes / sealed parents are neither
+        // VALUE-modifier nor in SUPPORTED_SCALARS, so the by-name path
+        // is the only one that accepts them.
+        val protocolMessageInner = analyzeConditionalProtocolMessageInner(innerType)
+        if (protocolMessageInner != null) return protocolMessageInner
         // Phase J.M step 2 — value-class-over-scalar Conditional inner
         // (MQTT v3.1.1 PUBLISH `packetId: PacketId?`). Detect before
         // the bare-scalar branch since value classes resolve to their
@@ -1426,6 +1496,52 @@ internal class CodecEmitter(
     }
 
     /**
+     * Phase J.M.5 slice 11b — `@When val: T?` where T is a
+     * `@ProtocolMessage` data class or sealed parent (with
+     * `@DispatchOn`). The codec class is resolved by-name
+     * (`${T.simpleName}Codec` in T's package), mirroring the
+     * [analyzeRemainingBytesProtocolMessageListField] convention.
+     *
+     * No `@UseCodec` annotation — and that's the point. An explicit
+     * `@UseCodec(<T>Codec::class)` against the yet-to-be-generated codec
+     * class doesn't resolve in KSP's first round (the round that emits
+     * T's codec); the silent-reject from the analyzer surfaces as a
+     * downstream link failure. By-name resolution is independent of
+     * KSP processing order.
+     *
+     * Payload-generic elements reject — same rule as
+     * `analyzeRemainingBytesProtocolMessageListField` and
+     * `analyzeLengthPrefixedListSpec`: a `<P : Payload>` element generates
+     * a generic-class codec, not a singleton object, and the per-call
+     * `<T>Codec.decode(...)` form requires the singleton.
+     */
+    private fun analyzeConditionalProtocolMessageInner(innerType: KSType): ConditionalInner.ProtocolMessageScalar? {
+        if (innerType.isError) return null
+        val decl = innerType.declaration as? KSClassDeclaration ?: return null
+        val isDataClass = Modifier.DATA in decl.modifiers
+        val isSealed = Modifier.SEALED in decl.modifiers
+        if (!isDataClass && !isSealed) return null
+        val isProtocolMessage =
+            decl.annotations.any { ann ->
+                ann.shortName.asString() == "ProtocolMessage" &&
+                    ann.annotationType
+                        .resolve()
+                        .declaration.qualifiedName
+                        ?.asString() == PROTOCOL_MESSAGE_QNAME
+            }
+        if (!isProtocolMessage) return null
+        if (detectPayloadTypeParameter(decl) != null) return null
+        return ConditionalInner.ProtocolMessageScalar(
+            fieldType = classNameOf(decl),
+            codecType =
+                ClassName(
+                    decl.packageName.asString(),
+                    "${decl.simpleName.asString()}Codec",
+                ),
+        )
+    }
+
+    /**
      * Phase J.M step 2 — detect a value-class-over-scalar inner for
      * `@When val: T?`. Mirrors the validity checks applied to
      * the non-conditional [analyzeValueClassScalarField] shape:
@@ -1470,6 +1586,7 @@ internal class CodecEmitter(
                     .parameterizedBy(inner.elementClassName)
                     .copy(nullable = true)
             is ConditionalInner.UseCodecScalar -> inner.fieldType.copy(nullable = true)
+            is ConditionalInner.ProtocolMessageScalar -> inner.fieldType.copy(nullable = true)
         }
 
     /**
@@ -1787,6 +1904,7 @@ internal class CodecEmitter(
             is FieldSpec.LengthPrefixedUseCodecList -> appendDecodeLengthPrefixedUseCodecList(body, field)
             is FieldSpec.ValueClassScalar -> appendDecodeValueClassScalar(body, field)
             is FieldSpec.Conditional -> appendDecodeConditional(body, field)
+            is FieldSpec.ProtocolMessageScalar -> appendDecodeProtocolMessageScalar(body, field)
         }
     }
 
@@ -1810,6 +1928,7 @@ internal class CodecEmitter(
                 is FieldSpec.LengthPrefixedUseCodecList -> appendEncodeLengthPrefixedUseCodecList(body, field)
                 is FieldSpec.ValueClassScalar -> appendEncodeValueClassScalar(body, field)
                 is FieldSpec.Conditional -> appendEncodeConditional(body, field)
+                is FieldSpec.ProtocolMessageScalar -> appendEncodeProtocolMessageScalar(body, field)
             }
         }
         return FunSpec
@@ -2129,6 +2248,7 @@ internal class CodecEmitter(
                 ClassName("kotlin.collections", "List").parameterizedBy(field.elementClassName)
             is FieldSpec.ValueClassScalar -> field.valueClassType
             is FieldSpec.Conditional -> field.nullableTypeName
+            is FieldSpec.ProtocolMessageScalar -> field.fieldType
         }
 
     private fun buildWireSizeFun(
@@ -2172,6 +2292,14 @@ internal class CodecEmitter(
         // element wireSizes. Same conservative BackPatch collapse as the
         // bare-scalar case — runtime-Exact-via-cast is a follow-on.
         if (shape.fields.any { it is FieldSpec.LengthPrefixedUseCodecList }) {
+            builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+            return builder.build()
+        }
+        // Phase J.M.5 slice 11b: bare `val: T : @ProtocolMessage` wireSize
+        // delegates to T's codec at runtime (RuntimeExact). Same conservative
+        // BackPatch collapse on the parent — promoting to runtime-Exact-via-
+        // cast is a follow-on once a vector benefits.
+        if (shape.fields.any { it is FieldSpec.ProtocolMessageScalar }) {
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
             return builder.build()
         }
@@ -2377,6 +2505,16 @@ internal class CodecEmitter(
         // dispatcher will own peek by reading the fixed header's
         // remaining-length first.
         if (shape.fields.any { it is FieldSpec.RemainingBytesPayload }) {
+            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+            return builder.build()
+        }
+        // Phase J.M.5 slice 11b — bare `val: T : @ProtocolMessage` collapses
+        // peek to NoFraming. The body's byte count is determined by T's
+        // codec at runtime (variable for sealed dispatchers, static for
+        // data classes), and we don't invoke decoded codecs in peek.
+        // ConnAck.reasonCode et al. peek is owned upstream by the bounding
+        // RL field via `appendPeekUseCodecScalar`.
+        if (shape.fields.any { it is FieldSpec.ProtocolMessageScalar }) {
             builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
             return builder.build()
         }
@@ -2731,6 +2869,11 @@ internal class CodecEmitter(
                             "reaching the sequential walk; the terminal-only peek walker is " +
                             "Phase I.1 step 11.",
                     )
+                is FieldSpec.ProtocolMessageScalar ->
+                    error(
+                        "ProtocolMessageScalar should be handled by buildPeekFrameFun's " +
+                            "upfront NoFraming short-circuit before reaching the sequential walk.",
+                    )
                 is FieldSpec.Conditional ->
                     appendSequentialPeekConditional(body, field)
             }
@@ -2905,6 +3048,18 @@ internal class CodecEmitter(
                 // frame; the sequential walk never visits this branch.
                 error(
                     "appendSequentialPeekConditional reached UseCodecScalar — " +
+                        "buildPeekFrameFun should have short-circuited the shape to NoFraming.",
+                )
+            is ConditionalInner.ProtocolMessageScalar ->
+                // Phase J.M.5 slice 11b — same NoFraming short-circuit. The
+                // generated `<T>Codec.peekFrameSize` could in principle size
+                // the inner field, but the cascading-trailer cases that drive
+                // this shape use grammar-2 `remaining >= N` predicates whose
+                // truth depends on the bounding RL field upstream — the
+                // outer codec's peek already returns NeedsMoreData / Complete
+                // off the RL value, so a per-field peek would be redundant.
+                error(
+                    "appendSequentialPeekConditional reached ProtocolMessageScalar — " +
                         "buildPeekFrameFun should have short-circuited the shape to NoFraming.",
                 )
         }
@@ -3185,6 +3340,19 @@ internal class CodecEmitter(
                     inner.codecType,
                 )
             }
+            is ConditionalInner.ProtocolMessageScalar -> {
+                // Phase J.M.5 slice 11b — bare `@When val: T?` for a
+                // `@ProtocolMessage` data class or sealed parent. The
+                // codec class resolves to `${T.simpleName}Codec`
+                // by-name; the call shape is identical to UseCodecScalar.
+                body.addStatement(
+                    "val %L: %T = if (%L) %T.decode(buffer, context) else null",
+                    field.name,
+                    field.nullableTypeName,
+                    decodeConditionExpr(field.condition),
+                    inner.codecType,
+                )
+            }
         }
     }
 
@@ -3257,6 +3425,15 @@ internal class CodecEmitter(
                 // `appendEncodeUseCodecScalar`. Predicate-true with
                 // smart-cast non-null `<name>Value` (established above)
                 // delegates to the user codec's `encode`.
+                body.addStatement(
+                    "%T.encode(buffer, %L, context)",
+                    inner.codecType,
+                    localName,
+                )
+            is ConditionalInner.ProtocolMessageScalar ->
+                // Phase J.M.5 slice 11b — same encode shape as
+                // UseCodecScalar; the only thing that differs is how the
+                // codec class name was resolved at analyze time.
                 body.addStatement(
                     "%T.encode(buffer, %L, context)",
                     inner.codecType,
@@ -3901,11 +4078,13 @@ internal class CodecEmitter(
 
     /**
      * `true` for `Conditional` fields whose wire presence can't be predicted
-     * from a stream-only peek walk. Three cases:
+     * from a stream-only peek walk. Four cases:
      *  - grammar-2 `remaining <op> <int>` predicates (depend on the bounded
      *    decode buffer's `remaining()` after upstream `applyBound`),
      *  - inner is `LengthPrefixedUseCodecList` (variable-length bag),
-     *  - inner is `UseCodecScalar` (opaque codec wire width).
+     *  - inner is `UseCodecScalar` (opaque codec wire width),
+     *  - inner is `ProtocolMessageScalar` (variable-width sealed dispatch /
+     *    nested message — slice 11b).
      *
      * v5 ack peek escapes this collapse because the bounding RL field
      * upstream is handled by `appendPeekUseCodecScalar` before the
@@ -3916,7 +4095,8 @@ internal class CodecEmitter(
             (
                 condition is ConditionRef.RemainingCmp ||
                     inner is ConditionalInner.LengthPrefixedUseCodecList ||
-                    inner is ConditionalInner.UseCodecScalar
+                    inner is ConditionalInner.UseCodecScalar ||
+                    inner is ConditionalInner.ProtocolMessageScalar
             )
 
     /**
@@ -3952,6 +4132,28 @@ internal class CodecEmitter(
     private fun appendEncodeUseCodecScalar(
         body: CodeBlock.Builder,
         field: FieldSpec.UseCodecScalar,
+    ) {
+        body.addStatement("%T.encode(buffer, value.%L, context)", field.codecType, field.name)
+    }
+
+    /**
+     * Phase J.M.5 slice 11b — emit decode/encode for bare `val: T :
+     * @ProtocolMessage`. Mirrors [appendEncodeUseCodecScalar] /
+     * [appendDecodeUseCodecScalar] minus the bounding-codec branch:
+     * the by-name-resolved codec is never a `BoundingLengthCodec` (those
+     * are user-supplied length codecs, never `@ProtocolMessage` body
+     * codecs).
+     */
+    private fun appendDecodeProtocolMessageScalar(
+        body: CodeBlock.Builder,
+        field: FieldSpec.ProtocolMessageScalar,
+    ) {
+        body.addStatement("val %L = %T.decode(buffer, context)", field.name, field.codecType)
+    }
+
+    private fun appendEncodeProtocolMessageScalar(
+        body: CodeBlock.Builder,
+        field: FieldSpec.ProtocolMessageScalar,
     ) {
         body.addStatement("%T.encode(buffer, value.%L, context)", field.codecType, field.name)
     }
@@ -4593,6 +4795,9 @@ internal class CodecEmitter(
         // Phase I.1 step 11: same — buildWireSizeFun collapses
         // LengthPrefixedUseCodecList-bearing shapes to BackPatch.
         if (shape.fields.any { it is FieldSpec.LengthPrefixedUseCodecList }) return VariantWireSize.BackPatch
+        // Phase J.M.5 slice 11b: same — buildWireSizeFun collapses bare
+        // `val: T : @ProtocolMessage` shapes to BackPatch.
+        if (shape.fields.any { it is FieldSpec.ProtocolMessageScalar }) return VariantWireSize.BackPatch
         // Phase J.M.5 slice 11a: `@RemainingBytes List<E>` with sealed-parent
         // (or otherwise BackPatch-element) collapses to BackPatch — see
         // [buildWireSizeFun] for the rationale (the runtime `as Exact` cast
@@ -4635,6 +4840,9 @@ internal class CodecEmitter(
             // Phase I.1 step 11: same — handled by the upfront BackPatch
             // short-circuit above.
             is FieldSpec.LengthPrefixedUseCodecList -> VariantWireSize.BackPatch
+            // Phase J.M.5 slice 11b: same — handled by the upfront BackPatch
+            // short-circuit above.
+            is FieldSpec.ProtocolMessageScalar -> VariantWireSize.BackPatch
         }
     }
 
@@ -5442,6 +5650,38 @@ internal class CodecEmitter(
         val bound: ClassName,
     )
 
+    /**
+     * # FieldSpec — analyzer's classification of one constructor parameter.
+     *
+     * ## By-name codec resolution for `@ProtocolMessage` typed fields
+     *
+     * Every field whose declared type is a `@ProtocolMessage` data class
+     * or sealed parent (with `@DispatchOn`) resolves its codec by-name:
+     * `${T.simpleName}Codec` in T's package. The annotation processor
+     * does NOT require an explicit `@UseCodec(<T>Codec::class)` wired
+     * up to that codec — by-name resolution sidesteps the KSP first-
+     * round chicken-and-egg (annotation references to as-yet-ungenerated
+     * codec classes don't resolve in the round that emits T's codec).
+     *
+     * This rule applies uniformly across framing annotations:
+     *
+     *   - `@LengthPrefixed val: T` → [LengthPrefixedMessage] (terminal)
+     *   - `@RemainingBytes val: List<T>` → [RemainingBytesProtocolMessageList]
+     *   - `@LengthPrefixed @UseCodec(C) val: List<T>` → [LengthPrefixedUseCodecList]
+     *   - `@When val: T?` → [Conditional] with [ConditionalInner.ProtocolMessageScalar]
+     *   - `val: T` (no framing) → [ProtocolMessageScalar]
+     *
+     * Each branch shares the same element-type predicate (`@ProtocolMessage`,
+     * data class OR sealed parent, non-payload-generic) and the same
+     * by-name codec resolution. The framing annotation describes how the
+     * field is bounded on the wire — not whether the field's type is
+     * accepted.
+     *
+     * Payload-generic types (`<P : Payload>`) reject across all branches:
+     * their generated codec is a class taking a constructor-injected
+     * payload codec, not a singleton object, so the by-name
+     * `<T>Codec.decode/encode(...)` form fails to resolve.
+     */
     private sealed interface FieldSpec {
         val name: String
 
@@ -5481,6 +5721,41 @@ internal class CodecEmitter(
             val ownerSimpleName: String,
             val prefixWidth: Int,
             val prefixWireOrder: Endianness,
+        ) : FieldSpec
+
+        /**
+         * Phase J.M.5 slice 11b — bare `val: T` where T is a
+         * `@ProtocolMessage` data class or sealed parent. The codec
+         * resolves to `${T.simpleName}Codec` by-name in T's package.
+         * Decode: `<codecType>.decode(buffer, context)`. Encode:
+         * `<codecType>.encode(buffer, value.<name>, context)`.
+         *
+         * Establishes the by-name principle for `@ProtocolMessage` typed
+         * fields uniformly. Where [LengthPrefixedMessage] frames the body
+         * with a length prefix and [RemainingBytesProtocolMessageList]
+         * frames a list of bodies with a caller-set buffer limit, this
+         * shape is the unframed case — the codec self-frames (sealed
+         * parents emit `<id> <body>`; data classes have a static layout
+         * known to their codec).
+         *
+         * wireSize collapses the containing message to BackPatch
+         * unconditionally (mirror of [UseCodecScalar] and
+         * [LengthPrefixedUseCodecList]). The codec's own wireSize is
+         * RuntimeExact — promoting the parent to runtime-Exact-via-cast
+         * is a follow-on once a vector measurably benefits.
+         *
+         * Payload-generic types (`<P : Payload>`) reject — same rule as
+         * [analyzeRemainingBytesProtocolMessageListField] /
+         * [analyzeLengthPrefixedListSpec]: their generated codec is a
+         * class taking a constructor-injected payload codec, not a
+         * singleton object, so the by-name `<T>Codec.decode(...)` form
+         * fails to resolve.
+         */
+        data class ProtocolMessageScalar(
+            override val name: String,
+            val ownerSimpleName: String,
+            val fieldType: ClassName,
+            val codecType: ClassName,
         ) : FieldSpec
 
         /**
@@ -5830,6 +6105,25 @@ internal class CodecEmitter(
          */
         data class UseCodecScalar(
             val fieldType: TypeName,
+            val codecType: ClassName,
+        ) : ConditionalInner
+
+        /**
+         * Phase J.M.5 slice 11b — bare `@When val: T?` where T is a
+         * `@ProtocolMessage` data class or sealed parent. The codec is
+         * resolved by-name from T's package (`${T.simpleName}Codec`),
+         * not from a `@UseCodec` annotation, so first-round KSP can wire
+         * up the call without the codec class existing yet. Decode and
+         * encode emit are byte-identical to [UseCodecScalar] — both
+         * route through `<codec>.decode(buffer, context)` /
+         * `<codec>.encode(buffer, value, context)`. The variants are
+         * kept distinct because their analyzer entry conditions and
+         * user-facing surface differ: `UseCodecScalar` requires
+         * `@UseCodec`, `ProtocolMessageScalar` rejects it (the by-name
+         * path is the no-annotation form).
+         */
+        data class ProtocolMessageScalar(
+            val fieldType: ClassName,
             val codecType: ClassName,
         ) : ConditionalInner
     }
