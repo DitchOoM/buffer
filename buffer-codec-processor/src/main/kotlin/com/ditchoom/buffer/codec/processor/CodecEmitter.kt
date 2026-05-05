@@ -217,9 +217,11 @@ internal class CodecEmitter(
         // range and the emit logic doesn't model trailing fields after a
         // variable-length tail. Slice 5b lifted the non-terminal-Conditional
         // restriction.
-        // Slice 8: at most one RemainingLength per message (multiple var-int
-        // remaining-length fields would have ambiguous bounding semantics).
-        if (fields.count { it is FieldSpec.RemainingLength } > 1) return null
+        // Slice 8 / Phase I.1: at most one bounding field per message.
+        // RemainingLength and UseCodecScalar(isBounding = true) both narrow
+        // `buffer.limit()` mid-decode; multiple of them would have ambiguous
+        // semantics (last-one-wins isn't a real protocol's wire shape).
+        if (fields.count { it.isBoundingShape() } > 1) return null
         for ((index, field) in fields.withIndex()) {
             if (field is FieldSpec.LengthFromString && index != fields.lastIndex) return null
             if (field is FieldSpec.LengthFromList && index != fields.lastIndex) return null
@@ -466,6 +468,19 @@ internal class CodecEmitter(
                 prefixWidth = prefixWidth,
                 prefixWireOrder = messageWireOrder,
             )
+        }
+
+        if (useCodecAnn != null) {
+            // Phase I.1 — bare `@UseCodec` on a non-Payload, non-type-parameter
+            // scalar (or value-class scalar). The validator (step 3) ensures
+            // the codec target is a Kotlin `object` implementing `Codec<T>`
+            // for T matching the field type; emit just records the codec
+            // class + bounding bit. Mutually exclusive with @WireBytes /
+            // @WireOrder on the same parameter — the user codec owns the
+            // wire shape.
+            if (wireBytesAnn != null) return null
+            if (param.annotations.any { it.shortName.asString() == "WireOrder" }) return null
+            return analyzeUseCodecScalarField(param, type, useCodecAnn, ownerSimpleName)
         }
 
         val qualified = type.declaration.qualifiedName?.asString() ?: return null
@@ -797,6 +812,43 @@ internal class CodecEmitter(
     }
 
     /**
+     * Phase I.1 — bare `@UseCodec(C::class) val: <scalar>`. Resolves the
+     * field's declared `TypeName` (primitive scalar via [scalarTypeName]
+     * or value-class via [classNameOf]) and inspects the codec's
+     * supertype chain to decide whether `C` implements
+     * [BoundingLengthCodec] (drives the `applyBound` + try/finally
+     * emit). Returns `null` silently when the codec target isn't a
+     * Kotlin `object` — the validator surfaces the diagnostic.
+     */
+    private fun analyzeUseCodecScalarField(
+        param: KSValueParameter,
+        type: KSType,
+        useCodecAnn: KSAnnotation,
+        ownerSimpleName: String,
+    ): FieldSpec.UseCodecScalar? {
+        val name = param.name?.asString() ?: return null
+        val codecKsType =
+            useCodecAnn.arguments
+                .firstOrNull { it.name?.asString() == "codec" }
+                ?.value as? KSType ?: return null
+        val codecDecl = codecKsType.declaration as? KSClassDeclaration ?: return null
+        if (codecDecl.classKind != ClassKind.OBJECT) return null
+        val fieldTypeName: TypeName =
+            SUPPORTED_SCALARS[type.declaration.qualifiedName?.asString()]
+                ?.let { scalarTypeName(it) }
+                ?: (type.declaration as? KSClassDeclaration)?.let { classNameOf(it) }
+                ?: return null
+        val codecClassName = ClassName(codecDecl.packageName.asString(), codecDecl.simpleName.asString())
+        return FieldSpec.UseCodecScalar(
+            name = name,
+            ownerSimpleName = ownerSimpleName,
+            fieldType = fieldTypeName,
+            codecType = codecClassName,
+            isBounding = codecDecl.implementsBoundingLengthCodec(),
+        )
+    }
+
+    /**
      * Stage H slice 10a — does this type implement
      * `com.ditchoom.buffer.codec.Payload`? Used in `analyzeField` to
      * route `@RemainingBytes @UseCodec` on a Payload-typed field to
@@ -810,6 +862,20 @@ internal class CodecEmitter(
             st.declaration.qualifiedName?.asString() == PAYLOAD_QNAME
         }
     }
+
+    /**
+     * Phase I.1 — does this codec class implement
+     * `com.ditchoom.buffer.codec.BoundingLengthCodec`? Used by the
+     * bare-`@UseCodec` analyze path to mark scalar fields whose decoded
+     * value should narrow `buffer.limit()` for subsequent decode. Walks
+     * the full supertype chain because a codec author may extend
+     * `BoundingLengthCodec` indirectly (intermediate interface or open
+     * class).
+     */
+    private fun KSClassDeclaration.implementsBoundingLengthCodec(): Boolean =
+        getAllSuperTypes().any { st ->
+            st.declaration.qualifiedName?.asString() == BOUNDING_LENGTH_CODEC_QNAME
+        }
 
     /**
      * Stage H slice 10b — does this type refer to the message's
@@ -1260,19 +1326,19 @@ internal class CodecEmitter(
         // setLimit(outer) }` so the buffer's outer limit is restored
         // even on decode failure. The constructor call becomes the
         // try-block's value expression, returned by the function.
-        val rlIndex = shape.fields.indexOfFirst { it is FieldSpec.RemainingLength }
+        val boundingIndex = shape.fields.indexOfFirst { it.isBoundingShape() }
         val ctorArgs = shape.fields.joinToString(", ") { "${it.name} = ${it.name}" }
-        if (rlIndex < 0) {
+        if (boundingIndex < 0) {
             for (field in shape.fields) appendDecodeField(body, field)
             body.addStatement("return %T(%L)", messageType, ctorArgs)
         } else {
-            for (i in 0..rlIndex) appendDecodeField(body, shape.fields[i])
+            for (i in 0..boundingIndex) appendDecodeField(body, shape.fields[i])
             body.beginControlFlow("return try")
-            for (i in (rlIndex + 1) until shape.fields.size) appendDecodeField(body, shape.fields[i])
+            for (i in (boundingIndex + 1) until shape.fields.size) appendDecodeField(body, shape.fields[i])
             body.addStatement("%T(%L)", messageType, ctorArgs)
             body.nextControlFlow("finally")
-            val rlField = shape.fields[rlIndex] as FieldSpec.RemainingLength
-            body.addStatement("buffer.setLimit(__%LOuterLimit)", rlField.name)
+            val boundingName = shape.fields[boundingIndex].name
+            body.addStatement("buffer.setLimit(__%LOuterLimit)", boundingName)
             body.endControlFlow()
         }
         return FunSpec
@@ -1298,6 +1364,7 @@ internal class CodecEmitter(
             is FieldSpec.RemainingBytesScalarList -> appendDecodeRemainingBytesScalarList(body, field)
             is FieldSpec.RemainingBytesPayload -> appendDecodeRemainingBytesPayload(body, field)
             is FieldSpec.RemainingLength -> appendDecodeRemainingLength(body, field)
+            is FieldSpec.UseCodecScalar -> appendDecodeUseCodecScalar(body, field)
             is FieldSpec.ValueClassScalar -> appendDecodeValueClassScalar(body, field)
             is FieldSpec.Conditional -> appendDecodeConditional(body, field)
         }
@@ -1318,6 +1385,7 @@ internal class CodecEmitter(
                 is FieldSpec.RemainingBytesScalarList -> appendEncodeRemainingBytesScalarList(body, field)
                 is FieldSpec.RemainingBytesPayload -> appendEncodeRemainingBytesPayload(body, field)
                 is FieldSpec.RemainingLength -> appendEncodeRemainingLength(body, field)
+                is FieldSpec.UseCodecScalar -> appendEncodeUseCodecScalar(body, field)
                 is FieldSpec.ValueClassScalar -> appendEncodeValueClassScalar(body, field)
                 is FieldSpec.Conditional -> appendEncodeConditional(body, field)
             }
@@ -1627,6 +1695,7 @@ internal class CodecEmitter(
                         "should strip the payload field before mapping header types.",
                 )
             is FieldSpec.RemainingLength -> U_INT
+            is FieldSpec.UseCodecScalar -> field.fieldType
             is FieldSpec.ValueClassScalar -> field.valueClassType
             is FieldSpec.Conditional -> field.nullableTypeName
         }
@@ -1682,6 +1751,15 @@ internal class CodecEmitter(
         // LengthPrefixedMessage) is a follow-on once we have a vector
         // where the size optimization actually matters.
         if (shape.fields.any { it is FieldSpec.RemainingBytesPayload }) {
+            builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+            return builder.build()
+        }
+        // Phase I.1: any `@UseCodec val: <scalar>` field's wireSize comes from
+        // the user codec, which may be Exact or BackPatch. Collapse to
+        // BackPatch unconditionally — runtime-Exact-via-cast (mirroring
+        // LengthPrefixedMessage) is a follow-on once a vector measurably
+        // benefits.
+        if (shape.fields.any { it is FieldSpec.UseCodecScalar }) {
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
             return builder.build()
         }
@@ -1812,6 +1890,16 @@ internal class CodecEmitter(
         // dispatcher will own peek by reading the fixed header's
         // remaining-length first.
         if (shape.fields.any { it is FieldSpec.RemainingBytesPayload }) {
+            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+            return builder.build()
+        }
+        // Phase I.1: any `@UseCodec val: <scalar>` field collapses peek to
+        // NoFraming until step 6 lands the generic peek walker
+        // (`StreamProcessor.peekBuffer` + `codec.decode` against the view).
+        // Without the walker, the framework can't drive the user codec
+        // against a non-consuming view, so the streaming loop must rely on
+        // outer-protocol framing or a dispatcher to size the frame.
+        if (shape.fields.any { it is FieldSpec.UseCodecScalar }) {
             builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
             return builder.build()
         }
@@ -2030,6 +2118,12 @@ internal class CodecEmitter(
                     error(
                         "RemainingLength should be handled by buildPeekFrameFun's " +
                             "appendPeekRemainingLength short-circuit before reaching the sequential walk.",
+                    )
+                is FieldSpec.UseCodecScalar ->
+                    error(
+                        "UseCodecScalar should be handled by buildPeekFrameFun's upfront " +
+                            "NoFraming short-circuit before reaching the sequential walk; the " +
+                            "generic @UseCodec peek walker is Phase I.1 step 6.",
                     )
                 is FieldSpec.Conditional ->
                     appendSequentialPeekConditional(body, field)
@@ -2998,6 +3092,58 @@ internal class CodecEmitter(
     }
 
     /**
+     * Phase I.1 — does this field narrow `buffer.limit()` mid-decode?
+     * `RemainingLength` always does (slice 8); a `UseCodecScalar` does
+     * iff its codec target implements `BoundingLengthCodec`. Used by
+     * [buildDecodeFun] to decide whether subsequent fields run inside
+     * `try { ... } finally { setLimit(__OuterLimit) }` and by the
+     * shape-construction uniqueness check.
+     */
+    private fun FieldSpec.isBoundingShape(): Boolean =
+        when (this) {
+            is FieldSpec.RemainingLength -> true
+            is FieldSpec.UseCodecScalar -> isBounding
+            else -> false
+        }
+
+    /**
+     * Phase I.1 — emit decode for bare `@UseCodec val: <scalar>`.
+     * Delegates to the user-supplied codec object's `decode(buffer,
+     * context)`. When the codec implements [BoundingLengthCodec], the
+     * outer buffer limit is captured into `__<name>OuterLimit` BEFORE
+     * decode (so the surrounding try/finally restores the caller's
+     * outer limit even if the user codec or `applyBound` throws), and
+     * `applyBound(buffer, <name>)` runs after decode to narrow the
+     * limit for subsequent fields — matching the slice 10f pattern for
+     * `@RemainingLength` but driven by interface inspection.
+     */
+    private fun appendDecodeUseCodecScalar(
+        body: CodeBlock.Builder,
+        field: FieldSpec.UseCodecScalar,
+    ) {
+        if (field.isBounding) {
+            body.addStatement("val __%LOuterLimit = buffer.limit()", field.name)
+        }
+        body.addStatement("val %L = %T.decode(buffer, context)", field.name, field.codecType)
+        if (field.isBounding) {
+            body.addStatement("%T.applyBound(buffer, %L)", field.codecType, field.name)
+        }
+    }
+
+    /**
+     * Phase I.1 — emit encode for bare `@UseCodec val: <scalar>`.
+     * Delegates to the user-supplied codec object's `encode(buffer,
+     * value.<name>, context)`. The user codec owns the wire shape;
+     * the framework neither validates nor measures the encoded width.
+     */
+    private fun appendEncodeUseCodecScalar(
+        body: CodeBlock.Builder,
+        field: FieldSpec.UseCodecScalar,
+    ) {
+        body.addStatement("%T.encode(buffer, value.%L, context)", field.codecType, field.name)
+    }
+
+    /**
      * Stage G slice 8 — emit decode for `@RemainingLength val: UInt`.
      * Reads the MQTT v3.1.1 §2.2.3 variable-byte-integer (1–4 bytes,
      * continuation bit `0x80`, malformed if > 4 bytes), saves the
@@ -3507,6 +3653,11 @@ internal class CodecEmitter(
         // wireSize is BackPatch (see buildWireSizeFun's RemainingBytesPayload
         // early-return); the dispatcher must skip the runtime-Exact cast.
         if (shape.fields.any { it is FieldSpec.RemainingBytesPayload }) return VariantWireSize.BackPatch
+        // Phase I.1: same shape — buildWireSizeFun collapses any
+        // UseCodecScalar-bearing shape to BackPatch, so the dispatcher must
+        // also skip the runtime-Exact cast. Promote later if a vector
+        // benefits from runtime-Exact via codec.wireSize forwarding.
+        if (shape.fields.any { it is FieldSpec.UseCodecScalar }) return VariantWireSize.BackPatch
         return when (shape.fields.lastOrNull()) {
             is FieldSpec.LengthPrefixedMessage -> VariantWireSize.RuntimeExact
             // Slice 4: a LengthFromString variant's body byte count is the
@@ -3533,6 +3684,9 @@ internal class CodecEmitter(
             // shape carrying a RemainingBytesPayload field before the
             // terminal-shape `when` runs.
             is FieldSpec.RemainingBytesPayload -> VariantWireSize.BackPatch
+            // Phase I.1: same — handled by the upfront BackPatch short-circuit
+            // above; defensive branch keeps the `when` exhaustive.
+            is FieldSpec.UseCodecScalar -> VariantWireSize.BackPatch
         }
     }
 
@@ -4405,6 +4559,39 @@ internal class CodecEmitter(
         ) : FieldSpec
 
         /**
+         * Phase I.1 — `@UseCodec(C::class) val: <scalar>` (no framing
+         * annotation), where `C` is a Kotlin `object` implementing
+         * `Codec<T>` for `T` matching the field type. The decoded value
+         * is whatever the user codec produces; encode delegates to
+         * `C.encode(buffer, value.<name>, context)`.
+         *
+         * `isBounding` is `true` when `C` implements
+         * `com.ditchoom.buffer.codec.BoundingLengthCodec<T>`. In that
+         * case the decode emit captures the outer `buffer.limit()` into
+         * `__<name>OuterLimit`, calls `C.applyBound(buffer, <name>)`
+         * after decode, and the surrounding `buildDecodeFun` wraps every
+         * subsequent field in `try { ... } finally { buffer.setLimit(
+         * __<name>OuterLimit) }` — symmetric with the slice 10f
+         * `@RemainingLength` outer-limit-restore template, just driven
+         * by interface inspection on the codec target.
+         *
+         * `fieldType` carries the field's declared `TypeName` so the
+         * generated decode local and constructor argument bind to the
+         * exact source type (UInt / Int / value class wrapper / etc.).
+         * `codecType` is the user-supplied codec object's `ClassName`,
+         * referenced directly (`<codecType>.decode(buffer, context)`)
+         * — Locked Decision row 21: Kotlin linker resolves
+         * `expect`/`actual` codecs.
+         */
+        data class UseCodecScalar(
+            override val name: String,
+            val ownerSimpleName: String,
+            val fieldType: TypeName,
+            val codecType: ClassName,
+            val isBounding: Boolean,
+        ) : FieldSpec
+
+        /**
          * Stage G slice 7b — `@RemainingBytes val: List<S>` where
          * `S` is a single-byte scalar (`UByte` / `Byte`). The
          * decoder reads elements while `buffer.position() <
@@ -4760,6 +4947,7 @@ internal class CodecEmitter(
         private const val PAYLOAD_QNAME = "com.ditchoom.buffer.codec.Payload"
         private const val PAYLOAD_PKG = "com.ditchoom.buffer.codec"
         private const val PAYLOAD_SIMPLE = "Payload"
+        private const val BOUNDING_LENGTH_CODEC_QNAME = "com.ditchoom.buffer.codec.BoundingLengthCodec"
 
         private val SUPPORTED_SCALARS =
             mapOf(

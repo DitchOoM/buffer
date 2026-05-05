@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.processor
 
+import com.google.devtools.ksp.getAllSuperTypes
 import com.google.devtools.ksp.getDeclaredProperties
 import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.KSPLogger
@@ -1189,11 +1190,18 @@ class ProtocolMessageProcessor(
         fieldType: KSType,
     ): Boolean {
         val expectedQname = fieldType.declaration.qualifiedName?.asString() ?: return false
-        for (st in codecDecl.superTypes) {
-            val resolved = st.resolve()
-            if (resolved.isError) continue
-            if (resolved.declaration.qualifiedName?.asString() != CODEC_QNAME) continue
-            val arg = resolved.arguments.firstOrNull()?.type?.resolve() ?: continue
+        // Walk the full supertype chain so a `BoundingLengthCodec<T>` impl
+        // (which transitively implements `Codec<T>`) is also recognized.
+        // Both `Codec<T>` and `BoundingLengthCodec<T>` are accepted: KSP's
+        // `getAllSuperTypes()` doesn't substitute the type variable from the
+        // intermediate interface declaration, so the transitive `Codec<T>`
+        // entry still carries the unsubstituted T. The concrete type arg is
+        // present on whichever interface the codec object directly extends.
+        for (st in codecDecl.getAllSuperTypes()) {
+            if (st.isError) continue
+            val q = st.declaration.qualifiedName?.asString()
+            if (q != CODEC_QNAME && q != BOUNDING_LENGTH_CODEC_QNAME) continue
+            val arg = st.arguments.firstOrNull()?.type?.resolve() ?: continue
             if (arg.isError) continue
             if (arg.declaration.qualifiedName?.asString() == expectedQname) return true
         }
@@ -1285,6 +1293,7 @@ class ProtocolMessageProcessor(
         private const val REMAINING_BYTES_QNAME = "com.ditchoom.buffer.codec.annotations.RemainingBytes"
         private const val REMAINING_BYTES_SHORT = "RemainingBytes"
         private const val CODEC_QNAME = "com.ditchoom.buffer.codec.Codec"
+        private const val BOUNDING_LENGTH_CODEC_QNAME = "com.ditchoom.buffer.codec.BoundingLengthCodec"
         private const val BOOLEAN_QNAME = "kotlin.Boolean"
         private const val STRING_QNAME = "kotlin.String"
         private const val LIST_QNAME = "kotlin.collections.List"
