@@ -328,6 +328,61 @@ annotation class UseCodec(
 )
 
 /**
+ * Marks a `@UseCodec` field as a derived length — the framework computes
+ * the value at encode time from the wireSize sum of fields after this
+ * one, rather than using the caller-supplied value verbatim.
+ *
+ * Closes the impossible-state class where a caller passes a length that
+ * desyncs from the actual encoded bytes — e.g.,
+ * `PubAck(remainingLength = 99u, packetIdentifier = 1u)` would write
+ * `40 99 00 01` (wire-malformed) on the existing
+ * caller-trusted-length path. With `@DerivedLength`, encode requires
+ * the caller-supplied value to match the framework-derived value
+ * (or the field's default); if they disagree, encode throws an
+ * `EncodeException` with the framework's expected value in the
+ * diagnostic.
+ *
+ * The contract change is encode-side only:
+ * - **Encode**: caller's value must equal framework-derived; mismatch
+ *   throws.
+ * - **Decode**: unchanged — read the prefix via the codec, populate
+ *   the field with the actual value, apply bound if the codec is a
+ *   `BoundingLengthCodec`.
+ *
+ * Required composition:
+ * - **Always paired with `@UseCodec(C::class)`** where `C` implements
+ *   `Codec<T>`. The codec drives the wire-format encoding (var-byte-int,
+ *   fixed-width int, etc.) and the field type matches.
+ * - **All fields after this one must contribute Exact wire bytes**
+ *   (compile-time fixed-size or runtime-Exact via the existing
+ *   `wireSize as Exact` cast). BackPatch suffix fields
+ *   (`@LengthPrefixed val: String`, `@When`, etc.) are deferred —
+ *   the validator emits a focused diagnostic naming the offending
+ *   sibling field. Future slices may lift this via the
+ *   scratch-buffer encode path.
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * data class PubAck(
+ *     val header: MqttFixedHeader = MqttFixedHeader(0x40u),
+ *     @DerivedLength @UseCodec(MqttRemainingLengthCodec::class)
+ *     val remainingLength: UInt = 2u,
+ *     val packetIdentifier: UShort,
+ * )
+ *
+ * // Constructs and encodes cleanly — `2u` matches the suffix
+ * // (packetIdentifier: UShort = 2 bytes).
+ * PubAck(packetIdentifier = 1u)              // RL defaults to 2u
+ *
+ * // Throws EncodeException at encode time:
+ * PubAck(remainingLength = 99u, packetIdentifier = 1u)
+ * ```
+ */
+@Target(AnnotationTarget.VALUE_PARAMETER)
+@Retention(AnnotationRetention.BINARY)
+annotation class DerivedLength
+
+/**
  * Specifies a custom discriminator type for a `@ProtocolMessage` sealed interface.
  *
  * By default, `@PacketType` dispatch reads a single byte and matches its full value.

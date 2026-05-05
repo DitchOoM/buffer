@@ -343,6 +343,7 @@ internal class CodecEmitter(
                 "RemainingBytes" -> remainingBytesAnn = ann
                 "WireBytes" -> wireBytesAnn = ann
                 "UseCodec" -> useCodecAnn = ann
+                "DerivedLength" -> { /* slice 14a — read inside analyzeUseCodecScalarField */ }
                 else -> return null
             }
         }
@@ -966,12 +967,27 @@ internal class CodecEmitter(
                 ?: (type.declaration as? KSClassDeclaration)?.let { classNameOf(it) }
                 ?: return null
         val codecClassName = ClassName(codecDecl.packageName.asString(), codecDecl.simpleName.asString())
+        // Phase J.M.5 slice 14a — `@DerivedLength` flips the encode contract:
+        // the framework computes the value from the suffix wireSize and
+        // throws if the caller-supplied value disagrees. Suffix-shape
+        // validation (all-FixedSize for the MVP) happens at emit time
+        // (`appendEncodeUseCodecScalar`) where the full field list is
+        // visible; the validator surfaces the user-facing diagnostic.
+        val derivedLength =
+            param.annotations.any { ann ->
+                ann.shortName.asString() == "DerivedLength" &&
+                    ann.annotationType
+                        .resolve()
+                        .declaration.qualifiedName
+                        ?.asString() == DERIVED_LENGTH_QNAME
+            }
         return FieldSpec.UseCodecScalar(
             name = name,
             ownerSimpleName = ownerSimpleName,
             fieldType = fieldTypeName,
             codecType = codecClassName,
             isBounding = codecDecl.implementsBoundingLengthCodec(),
+            derivedLength = derivedLength,
         )
     }
 
@@ -1924,7 +1940,7 @@ internal class CodecEmitter(
                 is FieldSpec.RemainingBytesProtocolMessageList ->
                     appendEncodeRemainingBytesProtocolMessageList(body, field)
                 is FieldSpec.RemainingBytesPayload -> appendEncodeRemainingBytesPayload(body, field)
-                is FieldSpec.UseCodecScalar -> appendEncodeUseCodecScalar(body, field)
+                is FieldSpec.UseCodecScalar -> appendEncodeUseCodecScalar(body, field, shape)
                 is FieldSpec.LengthPrefixedUseCodecList -> appendEncodeLengthPrefixedUseCodecList(body, field)
                 is FieldSpec.ValueClassScalar -> appendEncodeValueClassScalar(body, field)
                 is FieldSpec.Conditional -> appendEncodeConditional(body, field)
@@ -4128,11 +4144,48 @@ internal class CodecEmitter(
      * Delegates to the user-supplied codec object's `encode(buffer,
      * value.<name>, context)`. The user codec owns the wire shape;
      * the framework neither validates nor measures the encoded width.
+     *
+     * Phase J.M.5 slice 14a — when [FieldSpec.UseCodecScalar.derivedLength]
+     * is true, the framework computes the wire length from the suffix
+     * fields and asserts the caller-supplied value matches before
+     * encoding. MVP requires the suffix to be all-`FixedSize` so the
+     * derived value is a compile-time constant; non-FixedSize suffix is
+     * rejected here with an `error(...)` (the validator surfaces the
+     * user-facing diagnostic before reaching emit).
      */
     private fun appendEncodeUseCodecScalar(
         body: CodeBlock.Builder,
         field: FieldSpec.UseCodecScalar,
+        shape: CodecShape,
     ) {
+        if (field.derivedLength) {
+            val suffix = shape.fields.dropWhile { it !== field }.drop(1)
+            if (suffix.any { it !is FieldSpec.FixedSize }) {
+                error(
+                    "@DerivedLength on ${field.ownerSimpleName}.${field.name} requires all " +
+                        "subsequent fields to contribute fixed wire bytes; the validator should " +
+                        "have rejected this shape before reaching the emit path.",
+                )
+            }
+            val derivedBytes = suffix.filterIsInstance<FieldSpec.FixedSize>().sumOf { it.wireBytes }
+            val derivedLocal = "__${field.name}Derived"
+            // MVP narrows to UInt-typed fields (BoundingLengthCodec<UInt>). Validator
+            // enforces; the emit literal carries the `u` suffix for that type.
+            body.addStatement("val %L: %T = ${derivedBytes}u", derivedLocal, field.fieldType)
+            body.beginControlFlow("if (value.%L != %L)", field.name, derivedLocal)
+            body.addStatement(
+                "throw %T(fieldPath = %S, reason = \"@DerivedLength: caller-supplied value \" + " +
+                    "value.%L.toString() + \" disagrees with framework-derived value \" + " +
+                    "%L.toString() + \" (suffix wireSize)\")",
+                ENCODE_EXCEPTION_CN,
+                "${field.ownerSimpleName}.${field.name}",
+                field.name,
+                derivedLocal,
+            )
+            body.endControlFlow()
+            body.addStatement("%T.encode(buffer, %L, context)", field.codecType, derivedLocal)
+            return
+        }
         body.addStatement("%T.encode(buffer, value.%L, context)", field.codecType, field.name)
     }
 
@@ -5788,6 +5841,20 @@ internal class CodecEmitter(
             val fieldType: TypeName,
             val codecType: ClassName,
             val isBounding: Boolean,
+            /**
+             * Phase J.M.5 slice 14a — when `true`, the field is
+             * `@DerivedLength`-annotated. Encode emit computes the
+             * suffix wireSize, asserts the caller-supplied value matches
+             * (throwing `EncodeException` on mismatch), and writes the
+             * derived value via the codec. Decode unchanged.
+             *
+             * MVP requires the suffix (fields after this one) to be
+             * all-`FixedSize` — the analyzer rejects shapes with
+             * BackPatch suffix fields, validator surfaces the
+             * user-facing diagnostic. Slice 14b lifts that to the
+             * scratch-buffer path.
+             */
+            val derivedLength: Boolean,
         ) : FieldSpec
 
         /**
@@ -6362,6 +6429,7 @@ internal class CodecEmitter(
         private const val PAYLOAD_PKG = "com.ditchoom.buffer.codec"
         private const val PAYLOAD_SIMPLE = "Payload"
         private const val BOUNDING_LENGTH_CODEC_QNAME = "com.ditchoom.buffer.codec.BoundingLengthCodec"
+        private const val DERIVED_LENGTH_QNAME = "com.ditchoom.buffer.codec.annotations.DerivedLength"
 
         private val SUPPORTED_SCALARS =
             mapOf(

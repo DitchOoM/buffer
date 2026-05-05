@@ -155,6 +155,7 @@ class ProtocolMessageProcessor(
             validateWireBytes(symbol, ctor.parameters)
             validateWhen(symbol, ctor.parameters)
             validateUseCodec(symbol, ctor.parameters, payloadType)
+            validateDerivedLength(symbol, ctor.parameters)
             validatePayloadTypeParameter(symbol, ctor.parameters)
             emitter.tryEmit(symbol)
         }
@@ -1297,6 +1298,139 @@ class ProtocolMessageProcessor(
     }
 
     /**
+     * Phase J.M.5 slice 14a — `@DerivedLength` validator.
+     *
+     * Closes the impossible-state class where caller-supplied length
+     * desyncs from actual encoded bytes. The annotation marks a
+     * `@UseCodec` field as framework-derived at encode time; the encode
+     * emit asserts the caller-supplied value matches the framework
+     * computation and throws on mismatch.
+     *
+     * Diagnostics:
+     *   - `@DerivedLength` requires `@UseCodec(C::class)` on the same
+     *     parameter — without the codec there's nothing to drive the
+     *     length encoding.
+     *   - The codec target must implement `BoundingLengthCodec<UInt>`
+     *     (slice 14a MVP). Plain `Codec<UInt>` is not yet accepted —
+     *     the derived path's narrowing semantics on decode rely on
+     *     `applyBound`. `BoundingLengthCodec<T>` for `T != UInt` is
+     *     deferred along with the wider `@UseCodec` widening path.
+     *   - At most one `@DerivedLength` per message — the emit assumes
+     *     a single derivation point. Multiple would race.
+     *   - All fields after `@DerivedLength` must contribute fixed wire
+     *     bytes (case 1 MVP). Variable-length suffix fields
+     *     (`@LengthPrefixed val: String`, `@When`, etc.) would need the
+     *     scratch-buffer encode path; deferred to slice 14b.
+     */
+    private fun validateDerivedLength(
+        owner: KSClassDeclaration,
+        parameters: List<KSValueParameter>,
+    ) {
+        val ownerName = owner.qualifiedName?.asString() ?: owner.simpleName.asString()
+        val derivedFields = mutableListOf<Pair<Int, KSValueParameter>>()
+        for ((index, param) in parameters.withIndex()) {
+            val derivedAnn =
+                param.annotations.firstOrNull { ann ->
+                    ann.shortName.asString() == DERIVED_LENGTH_SHORT &&
+                        ann.annotationType
+                            .resolve()
+                            .declaration.qualifiedName
+                            ?.asString() == DERIVED_LENGTH_QNAME
+                } ?: continue
+            derivedFields += index to param
+            val fieldName = param.name?.asString() ?: "<unknown>"
+
+            val useCodecAnn =
+                param.annotations.firstOrNull { ann ->
+                    ann.shortName.asString() == USE_CODEC_SHORT &&
+                        ann.annotationType
+                            .resolve()
+                            .declaration.qualifiedName
+                            ?.asString() == USE_CODEC_QNAME
+                }
+            if (useCodecAnn == null) {
+                logger.error(
+                    "@DerivedLength on $ownerName.$fieldName must be paired with " +
+                        "`@UseCodec(C::class)` where `C` implements `BoundingLengthCodec<UInt>`. " +
+                        "Without the codec the framework has nothing to drive the wire encoding.",
+                    param,
+                )
+                continue
+            }
+
+            val codecKsType =
+                useCodecAnn.arguments
+                    .firstOrNull { it.name?.asString() == "codec" }
+                    ?.value as? KSType
+            val codecDecl = codecKsType?.declaration as? KSClassDeclaration
+            if (codecDecl != null && !implementsBoundingLengthCodecOfUInt(codecDecl)) {
+                logger.error(
+                    "@DerivedLength on $ownerName.$fieldName references " +
+                        "`${codecDecl.qualifiedName?.asString() ?: codecDecl.simpleName.asString()}`, " +
+                        "which does not implement `com.ditchoom.buffer.codec.BoundingLengthCodec<UInt>`. " +
+                        "Slice 14a MVP narrows `@DerivedLength` to UInt-typed bounding length codecs. " +
+                        "Plain `Codec<UInt>` and other type arguments are deferred.",
+                    param,
+                )
+            }
+
+            val fieldType = param.type.resolve()
+            if (!fieldType.isError) {
+                val fieldQname = fieldType.declaration.qualifiedName?.asString()
+                if (fieldQname != "kotlin.UInt") {
+                    logger.error(
+                        "@DerivedLength on $ownerName.$fieldName has type " +
+                            "`${fieldQname ?: "<unresolved>"}`. Slice 14a requires `kotlin.UInt`; " +
+                            "the codec's type parameter (`BoundingLengthCodec<UInt>`) drives the " +
+                            "field type.",
+                        param,
+                    )
+                }
+            }
+
+            // Slice 14a MVP — case 1 only: all fields after @DerivedLength must
+            // contribute fixed wire bytes. The validator approximates "fixed wire
+            // bytes" by checking annotations: any of @LengthPrefixed,
+            // @LengthFrom, @RemainingBytes, @When, @UseCodec on a sibling after
+            // @DerivedLength makes that sibling non-fixed.
+            for (suffixIndex in (index + 1) until parameters.size) {
+                val suffixParam = parameters[suffixIndex]
+                val suffixAnnNames =
+                    suffixParam.annotations
+                        .map { it.shortName.asString() }
+                        .toSet()
+                val variableShapeAnns =
+                    setOf("LengthPrefixed", "LengthFrom", "RemainingBytes", "When", "UseCodec")
+                val intersect = suffixAnnNames.intersect(variableShapeAnns)
+                if (intersect.isNotEmpty()) {
+                    val suffixName = suffixParam.name?.asString() ?: "<unknown>"
+                    logger.error(
+                        "@DerivedLength on $ownerName.$fieldName requires all subsequent " +
+                            "constructor parameters to contribute fixed wire bytes (slice 14a " +
+                            "MVP). Sibling `$ownerName.$suffixName` carries " +
+                            "${intersect.joinToString { "@$it" }}, which produces " +
+                            "variable-width or BackPatch wire bytes. The scratch-buffer encode " +
+                            "path that lifts this restriction is deferred to slice 14b.",
+                        param,
+                    )
+                    break
+                }
+            }
+        }
+        if (derivedFields.size > 1) {
+            for ((_, param) in derivedFields.drop(1)) {
+                val fieldName = param.name?.asString() ?: "<unknown>"
+                logger.error(
+                    "@DerivedLength on $ownerName.$fieldName: at most one @DerivedLength " +
+                        "field is allowed per message. The emit path assumes a single " +
+                        "derivation point; multiple would race.",
+                    param,
+                )
+            }
+        }
+    }
+
+    /**
      * Stage H slice 10b — `<P : Payload>` type-parameter shape
      * validation.
      *
@@ -1506,6 +1640,8 @@ class ProtocolMessageProcessor(
         private const val WHEN_SHORT = "When"
         private const val USE_CODEC_QNAME = "com.ditchoom.buffer.codec.annotations.UseCodec"
         private const val USE_CODEC_SHORT = "UseCodec"
+        private const val DERIVED_LENGTH_QNAME = "com.ditchoom.buffer.codec.annotations.DerivedLength"
+        private const val DERIVED_LENGTH_SHORT = "DerivedLength"
         private const val REMAINING_BYTES_QNAME = "com.ditchoom.buffer.codec.annotations.RemainingBytes"
         private const val REMAINING_BYTES_SHORT = "RemainingBytes"
         private const val CODEC_QNAME = "com.ditchoom.buffer.codec.Codec"
