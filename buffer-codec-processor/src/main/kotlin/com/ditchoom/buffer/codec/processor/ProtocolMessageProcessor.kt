@@ -526,6 +526,34 @@ class ProtocolMessageProcessor(
                 continue
             }
 
+            // Phase J.M.5 grammar 2 — `remaining <op> <int>`. Magic
+            // identifier `remaining` is reserved by the grammar; reject
+            // any malformed shape here so the analyzer never sees an
+            // ill-formed predicate. Caller-side error messages are
+            // focused on the grammar 2 shape.
+            val trimmed = expression.trim()
+            if (trimmed == "remaining" || trimmed.startsWith("remaining ") ||
+                trimmed.startsWith("remaining\t")
+            ) {
+                val tokens = trimmed.split(Regex("\\s+"))
+                val op = tokens.getOrNull(1)
+                val threshold = tokens.getOrNull(2)?.toIntOrNull()
+                val opOk = op == ">=" || op == ">" || op == "=="
+                val tokensOk = tokens.size == 3 && opOk && threshold != null && threshold >= 0
+                if (!tokensOk) {
+                    logger.error(
+                        "@When(\"$expression\") on $ownerName.$fieldName uses the reserved " +
+                            "identifier `remaining` but is not a valid grammar-2 predicate. " +
+                            "Expected `\"remaining <op> <int>\"` where <op> ∈ {>=, >, ==} and " +
+                            "<int> is a non-negative integer literal (e.g., \"remaining >= 1\"). " +
+                            "Used for cascading optional trailing fields gated on the bounded " +
+                            "decode buffer's `remaining()`.",
+                        param,
+                    )
+                }
+                continue
+            }
+
             val parts = expression.split('.')
             if (parts.size > 2) {
                 logger.error(

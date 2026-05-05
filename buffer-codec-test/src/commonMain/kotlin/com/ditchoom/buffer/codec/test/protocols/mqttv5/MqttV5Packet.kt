@@ -141,6 +141,128 @@ sealed interface MqttV5Packet<out P : Payload> {
     ) : MqttV5Packet<P>
 
     /**
+     * Type-4 PUBACK per MQTT v5.0 §3.4. Wire layout:
+     *
+     * ```text
+     *   40 <RL> <pid> [<rc>]
+     * ```
+     *
+     * Per §3.4.2.1: "The Reason Code and Property Length can be omitted
+     * if the Reason Code is 0x00 (Success) and there are no Properties.
+     * In this case the PUBACK has a Remaining Length of 2." This slice
+     * lands the `[rc]` half of the cascade — `reasonCode` is gated on
+     * `@When("remaining >= 1")`, the new grammar-2 predicate. The
+     * `[properties]` half of the cascade (gated on `remaining >= 1`
+     * after rc is read) is deferred to a later slice that lifts the
+     * conditional inner shape to accept `@LengthPrefixed @UseCodec
+     * val: List<E>?` (slice 5+).
+     *
+     * Three valid wire forms in this slice's modeling:
+     *
+     *   - `40 02 <pid_msb> <pid_lsb>`           — Success, no rc on wire
+     *   - `40 03 <pid_msb> <pid_lsb> <rc>`      — explicit reason code
+     *
+     * Encode-side: the `@When("remaining ...")` grammar-2 semantics gate
+     * the slot on `value.reasonCode != null`. Caller picks the wire
+     * form by setting `reasonCode` (null → omit; 0x00 → write 0x00 +
+     * RL=3; other → write that value + RL=3).
+     */
+    @PacketType(value = 4)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class PubAck(
+        val header: MqttFixedHeader = MqttFixedHeader(0x40u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
+        val packetIdentifier: UShort,
+        @When("remaining >= 1") val reasonCode: UByte? = null,
+    ) : MqttV5Packet<Nothing>
+
+    /**
+     * Type-5 PUBREC per MQTT v5.0 §3.5 — same shape as PUBACK with
+     * fixed header `0x50` and a different reason-code value space.
+     */
+    @PacketType(value = 5)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class PubRec(
+        val header: MqttFixedHeader = MqttFixedHeader(0x50u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
+        val packetIdentifier: UShort,
+        @When("remaining >= 1") val reasonCode: UByte? = null,
+    ) : MqttV5Packet<Nothing>
+
+    /**
+     * Type-6 PUBREL per MQTT v5.0 §3.6 — same shape as PUBACK with
+     * fixed header `0x62` (low-bit-2 reserved-and-must-be-set per
+     * §3.6.1).
+     */
+    @PacketType(value = 6)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class PubRel(
+        val header: MqttFixedHeader = MqttFixedHeader(0x62u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
+        val packetIdentifier: UShort,
+        @When("remaining >= 1") val reasonCode: UByte? = null,
+    ) : MqttV5Packet<Nothing>
+
+    /**
+     * Type-7 PUBCOMP per MQTT v5.0 §3.7 — same shape as PUBACK with
+     * fixed header `0x70`.
+     */
+    @PacketType(value = 7)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class PubComp(
+        val header: MqttFixedHeader = MqttFixedHeader(0x70u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
+        val packetIdentifier: UShort,
+        @When("remaining >= 1") val reasonCode: UByte? = null,
+    ) : MqttV5Packet<Nothing>
+
+    /**
+     * Type-11 UNSUBACK per MQTT v5.0 §3.11 — fixed header `0xB0` +
+     * RL + pid + optional reason code (per the cascade gate; the
+     * property bag and per-topic reason-code list are deferred).
+     */
+    @PacketType(value = 11)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class UnsubAck(
+        val header: MqttFixedHeader = MqttFixedHeader(0xB0u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
+        val packetIdentifier: UShort,
+        @When("remaining >= 1") val reasonCode: UByte? = null,
+    ) : MqttV5Packet<Nothing>
+
+    /**
+     * Type-14 DISCONNECT per MQTT v5.0 §3.14 — fixed header `0xE0` +
+     * RL + optional reason code. Per §3.14.2.1: "The Reason Code and
+     * Property Length can be omitted if the Reason Code is 0x00
+     * (Normal disconnection) and there are no Properties. In this case
+     * the DISCONNECT has a Remaining Length of 0." DISCONNECT has no
+     * packet identifier — the rc is the first conditional trailer
+     * after RL.
+     */
+    @PacketType(value = 14)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class Disconnect(
+        val header: MqttFixedHeader = MqttFixedHeader(0xE0u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
+        @When("remaining >= 1") val reasonCode: UByte? = null,
+    ) : MqttV5Packet<Nothing>
+
+    /**
+     * Type-15 AUTH per MQTT v5.0 §3.15 — v5-only packet. Fixed header
+     * `0xF0` + RL + optional reason code. AUTH bodies are typically
+     * sent as part of an authentication exchange; an "AUTH continue"
+     * has reasonCode = 0x18 (Continue authentication), and the
+     * authentication-method/data live in the property bag (deferred).
+     */
+    @PacketType(value = 15)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class Auth(
+        val header: MqttFixedHeader = MqttFixedHeader(0xF0u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
+        @When("remaining >= 1") val reasonCode: UByte? = null,
+    ) : MqttV5Packet<Nothing>
+
+    /**
      * Type-12 PINGREQ per MQTT v5.0 §3.12 — fixed header `0xC0` + remaining
      * length `0`. Wire-bytewise identical to v3.1.1 PINGREQ; v5 carries no
      * reason code or property bag for this packet.

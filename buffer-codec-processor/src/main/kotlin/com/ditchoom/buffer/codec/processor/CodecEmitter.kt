@@ -1107,6 +1107,19 @@ internal class CodecEmitter(
      * Returns `null` for malformed annotation arguments and for paths
      * deeper than one dot — both are silently rejected by the emitter
      * and named by the validator.
+     *
+     * Grammar 1 (sibling-based): `"siblingField"` or
+     * `"siblingField.property"`.
+     *
+     * Grammar 2 (Phase J.M.5): `"remaining <op> <int>"` where `<op>` is
+     * one of `>=`, `>`, `==`. Used for cascading optional trailing fields
+     * in MQTT v5 (PUBACK / PUBREC / PUBREL / PUBCOMP / UNSUBACK /
+     * DISCONNECT / AUTH §3.4.2.1 et al). The identifier `remaining` is
+     * magic and does not refer to a sibling — at decode time it expands
+     * to `buffer.remaining()`. At encode time the predicate has no
+     * meaningful left-hand side; the encoded slot is gated on
+     * `value.<field> != null` instead (cascading-trailer semantics: the
+     * caller signals "include this slot" by providing a non-null value).
      */
     private fun parseWhenExpression(whenAnn: KSAnnotation): WhenExpression? {
         val raw =
@@ -1114,7 +1127,26 @@ internal class CodecEmitter(
                 .firstOrNull { it.name?.asString() == "predicate" }
                 ?.value as? String
                 ?: return null
-        val parts = raw.split('.')
+        val trimmed = raw.trim()
+        // Grammar 2 — `remaining <op> <int>`. Tokenize on whitespace; reject
+        // any malformed shape (non-`remaining` head, unsupported op, non-int
+        // threshold, extra tokens).
+        if (trimmed.startsWith("remaining ") || trimmed == "remaining") {
+            val tokens = trimmed.split(Regex("\\s+"))
+            if (tokens.size != 3) return null
+            if (tokens[0] != "remaining") return null
+            val op =
+                when (tokens[1]) {
+                    ">=" -> RemainingComparisonOp.GreaterOrEqual
+                    ">" -> RemainingComparisonOp.Greater
+                    "==" -> RemainingComparisonOp.Equal
+                    else -> return null
+                }
+            val threshold = tokens[2].toIntOrNull() ?: return null
+            if (threshold < 0) return null
+            return WhenExpression.RemainingCmp(op, threshold)
+        }
+        val parts = trimmed.split('.')
         return when (parts.size) {
             1 -> WhenExpression.Simple(parts[0])
             2 -> WhenExpression.Dotted(parts[0], parts[1])
@@ -1132,13 +1164,19 @@ internal class CodecEmitter(
         expression: WhenExpression,
         params: List<KSValueParameter>,
         boundIndex: Int,
-    ): ConditionRef? {
-        val sibling = locatePriorSibling(expression.siblingName, params, boundIndex) ?: return null
-        return when (expression) {
-            is WhenExpression.Simple -> resolveSimpleCondition(expression, sibling)
-            is WhenExpression.Dotted -> resolveDottedCondition(expression, sibling)
+    ): ConditionRef? =
+        when (expression) {
+            is WhenExpression.RemainingCmp ->
+                ConditionRef.RemainingCmp(expression.op, expression.threshold)
+            is WhenExpression.Simple -> {
+                val sibling = locatePriorSibling(expression.siblingName, params, boundIndex)
+                if (sibling == null) null else resolveSimpleCondition(expression, sibling)
+            }
+            is WhenExpression.Dotted -> {
+                val sibling = locatePriorSibling(expression.siblingName, params, boundIndex)
+                if (sibling == null) null else resolveDottedCondition(expression, sibling)
+            }
         }
-    }
 
     private fun locatePriorSibling(
         siblingName: String,
@@ -1313,16 +1351,38 @@ internal class CodecEmitter(
      * error and never reach the analyzer.
      */
     private sealed interface WhenExpression {
-        val siblingName: String
-
         data class Simple(
-            override val siblingName: String,
+            val siblingName: String,
         ) : WhenExpression
 
         data class Dotted(
-            override val siblingName: String,
+            val siblingName: String,
             val propertyName: String,
         ) : WhenExpression
+
+        /**
+         * Phase J.M.5 grammar 2 — `"remaining <op> <int>"`. References no
+         * sibling; the resolver returns a `ConditionRef.RemainingCmp`
+         * directly without walking prior parameters.
+         */
+        data class RemainingCmp(
+            val op: RemainingComparisonOp,
+            val threshold: Int,
+        ) : WhenExpression
+    }
+
+    /**
+     * Phase J.M.5 — comparison operator inside the `remaining <op> <int>`
+     * grammar. Closed sealed (three values match the documented grammar).
+     * `Equal` is rare in practice (one-byte sentinel checks) but
+     * documented as part of the grammar.
+     */
+    private enum class RemainingComparisonOp(
+        val symbol: String,
+    ) {
+        GreaterOrEqual(">="),
+        Greater(">"),
+        Equal("=="),
     }
 
     private fun scalarTypeName(kind: ScalarKind): TypeName =
@@ -2146,6 +2206,23 @@ internal class CodecEmitter(
             builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
             return builder.build()
         }
+        // Phase J.M.5 — `@When("remaining <op> <int>")` collapses peek to
+        // NoFraming when reached at this point. The grammar-2 predicate
+        // tests the decode buffer's `remaining()` after the upstream
+        // bounding `applyBound`; peek has no symmetric primitive, so the
+        // conditional inner's wire presence can't be predicted from a
+        // stream-only walk. v5 acks (PUBACK et al.) escape this collapse
+        // because their bounding RL field is handled by the
+        // `UseCodecScalar` branch above — that branch returns total =
+        // priorBytes + vbi_width + rl_value before reaching here, so the
+        // sequential walk never visits the grammar-2 field.
+        if (shape.fields.any {
+                it is FieldSpec.Conditional && it.condition is ConditionRef.RemainingCmp
+            }
+        ) {
+            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+            return builder.build()
+        }
         // All-FixedSize messages collapse to a single arithmetic check —
         // no walk needed, and the generated code is significantly tighter
         // than the sequential path (which would emit a per-field
@@ -2494,11 +2571,14 @@ internal class CodecEmitter(
         for (field in shape.fields) {
             when (field) {
                 is FieldSpec.Conditional ->
-                    sources +=
-                        when (val c = field.condition) {
-                            is ConditionRef.Sibling -> c.name
-                            is ConditionRef.ValueClassProperty -> c.siblingName
-                        }
+                    when (val c = field.condition) {
+                        is ConditionRef.Sibling -> sources += c.name
+                        is ConditionRef.ValueClassProperty -> sources += c.siblingName
+                        // Grammar 2 references no sibling; the peek path
+                        // (when reachable) tests `stream.available() - baseOffset`
+                        // arithmetic directly. No stash needed.
+                        is ConditionRef.RemainingCmp -> {}
+                    }
                 is FieldSpec.LengthFromString -> sources += field.source.siblingName
                 is FieldSpec.LengthFromList -> sources += field.source.siblingName
                 else -> { /* not a source */ }
@@ -2895,7 +2975,7 @@ internal class CodecEmitter(
         body: CodeBlock.Builder,
         field: FieldSpec.Conditional,
     ) {
-        body.beginControlFlow("if (%L)", encodeConditionAccessor(field.condition))
+        body.beginControlFlow("if (%L)", encodeConditionAccessor(field.condition, field.name))
         val localName = "${field.name}Value"
         body.addStatement(
             "val %L = value.%L ?: throw %T(fieldPath = %S, reason = %S)",
@@ -2941,17 +3021,30 @@ internal class CodecEmitter(
         when (condition) {
             is ConditionRef.Sibling -> condition.name
             is ConditionRef.ValueClassProperty -> "${condition.siblingName}.${condition.propertyName}"
+            is ConditionRef.RemainingCmp ->
+                "buffer.remaining() ${condition.op.symbol} ${condition.threshold}"
         }
 
     /**
      * Encode-side predicate accessor. Encode reads from the message
      * value, so all paths start at `value.`. Simple form is
      * `value.<sibling>`; dotted form is `value.<sibling>.<property>`.
+     *
+     * Grammar 2 (`remaining <op> <int>`) encode semantics differ:
+     * cascading-trailer fields are gated on whether the caller provided
+     * a non-null value (the encode-side has no buffer-`remaining()` to
+     * test against — the slot is included iff the field is set). Caller
+     * is responsible for keeping the cascade consistent (don't set a
+     * later trailer if an earlier one is null).
      */
-    private fun encodeConditionAccessor(condition: ConditionRef): String =
+    private fun encodeConditionAccessor(
+        condition: ConditionRef,
+        fieldName: String,
+    ): String =
         when (condition) {
             is ConditionRef.Sibling -> "value.${condition.name}"
             is ConditionRef.ValueClassProperty -> "value.${condition.siblingName}.${condition.propertyName}"
+            is ConditionRef.RemainingCmp -> "value.$fieldName != null"
         }
 
     /**
@@ -2962,6 +3055,8 @@ internal class CodecEmitter(
         when (condition) {
             is ConditionRef.Sibling -> condition.name
             is ConditionRef.ValueClassProperty -> "${condition.siblingName}.${condition.propertyName}"
+            is ConditionRef.RemainingCmp ->
+                "remaining ${condition.op.symbol} ${condition.threshold}"
         }
 
     /**
@@ -5359,6 +5454,17 @@ internal class CodecEmitter(
         data class ValueClassProperty(
             val siblingName: String,
             val propertyName: String,
+        ) : ConditionRef
+
+        /**
+         * Phase J.M.5 grammar 2 — `remaining <op> <int>`. References
+         * no sibling; the decode emit expands to `buffer.remaining()
+         * <op> <threshold>` and the encode emit expands to
+         * `value.<field> != null` (cascading-trailer semantics).
+         */
+        data class RemainingCmp(
+            val op: RemainingComparisonOp,
+            val threshold: Int,
         ) : ConditionRef
     }
 

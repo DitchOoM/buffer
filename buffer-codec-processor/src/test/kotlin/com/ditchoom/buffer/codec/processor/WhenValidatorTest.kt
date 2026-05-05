@@ -286,6 +286,61 @@ class WhenValidatorTest {
     }
 
     @Test
+    fun acceptsRemainingComparisonGrammar() {
+        // Phase J.M.5 grammar 2 — `"remaining <op> <int>"` for cascading
+        // optional trailing fields (MQTT v5 acks). The predicate
+        // references no sibling; it expands to `buffer.remaining() <op>
+        // <int>` at decode and `value.<field> != null` at encode.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.When
+
+                @ProtocolMessage
+                data class Trailers(
+                    val packetId: UShort,
+                    @When("remaining >= 1") val reasonCode: UByte? = null,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+        assertFalse(
+            result.messages.contains("@When"),
+            "valid grammar-2 @When must compile silently. Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
+    fun rejectsMalformedRemainingPredicate() {
+        // `remaining` is reserved/magic — anything that starts with
+        // `remaining` but doesn't conform to `remaining <op> <int>`
+        // is rejected with a focused diagnostic naming the grammar.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.When
+
+                @ProtocolMessage
+                data class Bad(
+                    @When("remaining gte 1") val rc: UByte? = null,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("grammar-2 predicate") ||
+                result.messages.contains("\"remaining <op> <int>\""),
+            "diagnostic should name the grammar-2 shape. Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
     fun firesWhenSiblingIsDeclaredAfterBoundField() {
         val result =
             compile(
