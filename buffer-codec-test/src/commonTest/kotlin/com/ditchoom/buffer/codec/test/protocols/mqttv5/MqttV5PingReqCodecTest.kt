@@ -3,10 +3,13 @@ package com.ditchoom.buffer.codec.test.protocols.mqttv5
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
+import com.ditchoom.buffer.codec.test.protocols.payload.JpegImage
+import com.ditchoom.buffer.codec.test.protocols.payload.JpegImageCodec
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -15,15 +18,17 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 /**
- * Phase J.M.5 slice 1 — smoke test for the new
- * [MqttV5Packet] sealed dispatcher. PINGREQ v5 is wire-bytewise identical
- * to v3.1.1 PINGREQ (`C0 00`); the value here is purely structural —
- * proves the v5 sealed parent + generated codec + peek path land cleanly
- * before the property-bag shape lands in slice 2 (PUBLISH v5).
+ * Phase J.M.5 slice 1 — smoke test for the [MqttV5Packet] sealed
+ * dispatcher. PINGREQ v5 is wire-bytewise identical to v3.1.1 PINGREQ
+ * (`C0 00`); the value here is purely structural — proves the v5 sealed
+ * parent + generated codec + peek path land cleanly.
  *
- * The slice-1 sealed parent is non-generic, so the dispatcher
- * [MqttV5PacketCodec] is a singleton (no payload codec to thread). Slice
- * 2 will lift to `<out P : Payload>` and a generic dispatcher class.
+ * As of slice 2 the parent is `<out P : Payload>`, so the dispatcher
+ * is the generic class `MqttV5PacketCodec<P>(payloadCodec)`. Payload-free
+ * variants are `: MqttV5Packet<Nothing>` — covariance makes them
+ * assignable to any `MqttV5Packet<P>` instantiation, so tests for those
+ * variants can pick any payload codec (we use [JpegImageCodec] by
+ * convention).
  */
 class MqttV5PingReqCodecTest {
     @Test
@@ -49,7 +54,7 @@ class MqttV5PingReqCodecTest {
                 it.writeByte(0x00)
             }
         buf.resetForRead()
-        val decoded = MqttV5PacketCodec.decode(buf, DecodeContext.Empty)
+        val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         val pingReq = assertIs<MqttV5Packet.PingReq>(decoded)
         assertEquals(MqttFixedHeader(0xC0u), pingReq.header)
         assertEquals(0u, pingReq.remainingLength)
@@ -60,7 +65,7 @@ class MqttV5PingReqCodecTest {
         val msg = MqttV5Packet.PingReq()
         val buf = encode(msg)
         buf.resetForRead()
-        val decoded = MqttV5PacketCodec.decode(buf, DecodeContext.Empty)
+        val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         assertEquals(msg, decoded)
     }
 
@@ -74,7 +79,7 @@ class MqttV5PingReqCodecTest {
             two.writeByte(0x00)
             two.resetForRead()
             stream.append(two)
-            assertEquals(PeekResult.Complete(2), MqttV5PacketCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.Complete(2), jpegDispatcher().peekFrameSize(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -88,7 +93,7 @@ class MqttV5PingReqCodecTest {
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, MqttV5PacketCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.NeedsMoreData, jpegDispatcher().peekFrameSize(stream))
 
             val one = BufferFactory.Default.allocate(1)
             one.writeByte(0xC0.toByte())
@@ -96,7 +101,7 @@ class MqttV5PingReqCodecTest {
             stream.append(one)
             assertEquals(
                 PeekResult.NeedsMoreData,
-                MqttV5PacketCodec.peekFrameSize(stream),
+                jpegDispatcher().peekFrameSize(stream),
                 "header alone — peek still needs the var-int byte",
             )
 
@@ -104,15 +109,21 @@ class MqttV5PingReqCodecTest {
             two.writeByte(0x00)
             two.resetForRead()
             stream.append(two)
-            assertEquals(PeekResult.Complete(2), MqttV5PacketCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.Complete(2), jpegDispatcher().peekFrameSize(stream))
         } finally {
             stream.release()
             pool.clear()
         }
     }
 
-    private fun encode(value: MqttV5Packet) =
+    @Suppress("UNCHECKED_CAST")
+    private fun encode(value: MqttV5Packet<*>) =
         BufferFactory.Default
             .allocate(256)
-            .also { MqttV5PacketCodec.encode(it, value, EncodeContext.Empty) }
+            .also {
+                (jpegDispatcher() as Codec<MqttV5Packet<*>>)
+                    .encode(it, value, EncodeContext.Empty)
+            }
+
+    private fun jpegDispatcher(): MqttV5PacketCodec<JpegImage> = MqttV5PacketCodec(JpegImageCodec)
 }

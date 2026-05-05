@@ -317,6 +317,145 @@ class UseCodecScalarValidatorTest {
     }
 
     @Test
+    fun acceptsLengthPrefixedUseCodecOnSealedParentList() {
+        // Phase J.M.5 widening — `@LengthPrefixed @UseCodec(C) val xs: List<E>`
+        // also accepts `E` being a `@ProtocolMessage` sealed parent with
+        // `@DispatchOn`. The MQTT v5 property bag is exactly this shape:
+        // a polymorphic list of typed properties dispatched on the property
+        // identifier byte. The dispatcher's generated codec is a singleton
+        // object whose `decode`/`encode` signatures match what the
+        // sealed-element encode emit calls.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.BoundingLengthCodec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
+                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.annotations.DispatchOn
+                import com.ditchoom.buffer.codec.annotations.DispatchValue
+                import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+                import com.ditchoom.buffer.codec.annotations.PacketType
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+
+                object FourByteLengthCodec : BoundingLengthCodec<UInt> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): UInt = buffer.readInt().toUInt()
+                    override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
+                        buffer.writeInt(value.toInt())
+                    }
+                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
+                        buffer.setLimit(buffer.position() + decodedValue.toInt())
+                    }
+                }
+
+                @JvmInline
+                @ProtocolMessage
+                value class PropId(val raw: UByte) {
+                    @DispatchValue val id: Int get() = raw.toInt()
+                }
+
+                @DispatchOn(PropId::class)
+                @ProtocolMessage
+                sealed interface Property {
+                    @PacketType(value = 0x02)
+                    @ProtocolMessage
+                    data class Expiry(val id: PropId = PropId(0x02u), val seconds: UInt) : Property
+
+                    @PacketType(value = 0x03)
+                    @ProtocolMessage
+                    data class ContentType(val id: PropId = PropId(0x03u), val raw: UByte) : Property
+                }
+
+                @ProtocolMessage
+                data class Bag(
+                    @LengthPrefixed @UseCodec(FourByteLengthCodec::class) val items: List<Property>,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+        assertFalse(
+            result.messages.contains("@UseCodec"),
+            "no @UseCodec diagnostic should fire on a sealed-parent element. Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
+    fun rejectsLengthPrefixedUseCodecOnPayloadGenericSealedParentElement() {
+        // Phase J.M.5 — sealed-parent elements with `<P : Payload>` are
+        // rejected because their generated codec emits as a generic class
+        // (slice 10d detection rule), not a singleton object. The emitter
+        // calls `<E>Codec.decode(...)` directly, which requires the
+        // singleton form.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.BoundingLengthCodec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
+                import com.ditchoom.buffer.codec.Payload
+                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.annotations.DispatchOn
+                import com.ditchoom.buffer.codec.annotations.DispatchValue
+                import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+                import com.ditchoom.buffer.codec.annotations.PacketType
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.RemainingBytes
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+
+                object FourByteLengthCodec : BoundingLengthCodec<UInt> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): UInt = buffer.readInt().toUInt()
+                    override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
+                        buffer.writeInt(value.toInt())
+                    }
+                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
+                        buffer.setLimit(buffer.position() + decodedValue.toInt())
+                    }
+                }
+
+                @JvmInline
+                @ProtocolMessage
+                value class Tag(val raw: UByte) {
+                    @DispatchValue val id: Int get() = raw.toInt()
+                }
+
+                @DispatchOn(Tag::class)
+                @ProtocolMessage
+                sealed interface PayloadCarrier<out P : Payload> {
+                    @PacketType(value = 1)
+                    @ProtocolMessage
+                    data class Body<P : Payload>(
+                        val tag: Tag = Tag(0x01u),
+                        @RemainingBytes val body: P,
+                    ) : PayloadCarrier<P>
+                }
+
+                @ProtocolMessage
+                data class Bag(
+                    @LengthPrefixed @UseCodec(FourByteLengthCodec::class) val items: List<PayloadCarrier<*>>,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("`<P : Payload>` type parameter") &&
+                result.messages.contains("singleton object"),
+            "payload-generic sealed parent should be rejected with a focused diagnostic. " +
+                "Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
     fun rejectsLengthFromUseCodecAsDeferred() {
         val result =
             compile(

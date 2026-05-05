@@ -1,0 +1,292 @@
+package com.ditchoom.buffer.codec.test.protocols.mqttv5
+
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.ByteOrder
+import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.codec.DecodeContext
+import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
+import com.ditchoom.buffer.codec.test.protocols.payload.JpegImage
+import com.ditchoom.buffer.codec.test.protocols.payload.JpegImageCodec
+import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
+import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.test.Test
+import kotlin.test.assertContentEquals
+import kotlin.test.assertEquals
+import kotlin.test.assertIs
+
+/**
+ * Phase J.M.5 slice 2 — PUBLISH v5 + the v5 property bag (first two
+ * variants). The high-coverage smoke test the handoff specified:
+ * composes the slice 10d generic dispatcher, the slice 10c/10f
+ * outer-limit `Partial` machinery (RL + `@RemainingBytes payload`),
+ * the slice 10c `@When` value-class predicate, and the
+ * Phase I.1 step 11 `@LengthPrefixed @UseCodec` property-bag shape —
+ * the latter widened in this slice to accept sealed-parent elements
+ * (`MqttV5Property` instead of a `data class` element).
+ *
+ * The two property variants exercise distinct value shapes:
+ *   - [MqttV5Property.MessageExpiryInterval] — fixed 4-byte BE UInt body.
+ *   - [MqttV5Property.ContentType] — `@LengthPrefixed` UTF-8 string body.
+ */
+class MqttV5PublishCodecTest {
+    @Test
+    fun encodesPublishWithEmptyPropertyBagByteExact() {
+        // Wire layout at QoS=0 with no properties:
+        //   30 / RL / <topic LP> / <props LP=0> / <payload>
+        // body = 2 (topic LP) + 3 (topic) + 1 (propLen=0) + 4+1 (jpeg) = 11 bytes
+        val codec = MqttV5PacketCodec(JpegImageCodec)
+        val msg =
+            MqttV5Packet.Publish<JpegImage>(
+                header = MqttFixedHeader(0x30u),
+                remainingLength = 11u,
+                topic = "t/1",
+                packetId = null,
+                properties = emptyList(),
+                payload = JpegImage(1u, 1u, byteArrayOf(0x42)),
+            )
+        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        codec.encode(buf, msg, EncodeContext.Empty)
+        buf.resetForRead()
+        val actual = buf.readByteArray(buf.remaining())
+        val expected =
+            byteArrayOf(
+                0x30, // fixed header (type=3, QoS=0)
+                0x0B, // remaining length = 11 (1-byte var-int)
+                0x00,
+                0x03,
+                't'.code.toByte(),
+                '/'.code.toByte(),
+                '1'.code.toByte(),
+                0x00, // properties length = 0 (1-byte var-int)
+                0x00,
+                0x01,
+                0x00,
+                0x01, // jpeg width=1, height=1
+                0x42, // jpeg data
+            )
+        assertContentEquals(expected, actual)
+    }
+
+    @Test
+    fun encodesPublishWithPropertiesAtQos1ByteExact() {
+        // Wire layout with one MessageExpiryInterval (5 bytes:
+        // 1 id + 4 BE UInt) + one ContentType (13 bytes: 1 id + 2 LP +
+        // 10 UTF-8 "text/plain") = 18 property body bytes, 1-byte
+        // var-int prefix.
+        // body = 2 (topic LP) + 3 (topic) + 2 (pid)
+        //      + 1 (propLen=18) + 18 (props) + 4+1 (jpeg) = 31
+        val codec = MqttV5PacketCodec(JpegImageCodec)
+        val msg =
+            MqttV5Packet.Publish<JpegImage>(
+                header = MqttFixedHeader(0x32u), // QoS=1
+                remainingLength = 31u,
+                topic = "t/1",
+                packetId = PacketId(0x002Au),
+                properties =
+                    listOf(
+                        MqttV5Property.MessageExpiryInterval(seconds = 0x01020304u),
+                        MqttV5Property.ContentType(value = "text/plain"),
+                    ),
+                payload = JpegImage(1u, 1u, byteArrayOf(0x42)),
+            )
+        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        codec.encode(buf, msg, EncodeContext.Empty)
+        buf.resetForRead()
+        val actual = buf.readByteArray(buf.remaining())
+        val expected =
+            byteArrayOf(
+                0x32, // fixed header (type=3, QoS=1)
+                0x1F, // remaining length = 31
+                0x00,
+                0x03,
+                't'.code.toByte(),
+                '/'.code.toByte(),
+                '1'.code.toByte(),
+                0x00,
+                0x2A, // packet id = 42
+                0x12, // properties length = 18 (1-byte var-int)
+                0x02, // MessageExpiryInterval id
+                0x01,
+                0x02,
+                0x03,
+                0x04, // expiry seconds (BE UInt)
+                0x03, // ContentType id
+                0x00,
+                0x0A, // length prefix = 10
+                't'.code.toByte(),
+                'e'.code.toByte(),
+                'x'.code.toByte(),
+                't'.code.toByte(),
+                '/'.code.toByte(),
+                'p'.code.toByte(),
+                'l'.code.toByte(),
+                'a'.code.toByte(),
+                'i'.code.toByte(),
+                'n'.code.toByte(),
+                0x00,
+                0x01,
+                0x00,
+                0x01,
+                0x42, // jpeg payload
+            )
+        assertContentEquals(expected, actual)
+    }
+
+    @Test
+    fun roundTripsPublishWithEmptyPropertyBagAtQos0() {
+        val codec = MqttV5PacketCodec(JpegImageCodec)
+        val original =
+            MqttV5Packet.Publish<JpegImage>(
+                header = MqttFixedHeader(0x30u),
+                // body = 2 (topic LP) + 12 (topic) + 1 (propLen=0) + 4+8 (jpeg)
+                remainingLength = 27u,
+                topic = "sensors/jpeg",
+                packetId = null,
+                properties = emptyList(),
+                payload = JpegImage(320u, 240u, ByteArray(8) { (it * 5).toByte() }),
+            )
+        val buf = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
+        codec.encode(buf, original, EncodeContext.Empty)
+        buf.resetForRead()
+        val decoded = codec.decode(buf, DecodeContext.Empty)
+        assertEquals(original, decoded)
+    }
+
+    @Test
+    fun roundTripsPublishWithPropertiesAtQos1() {
+        val codec = MqttV5PacketCodec(JpegImageCodec)
+        val original =
+            MqttV5Packet.Publish<JpegImage>(
+                header = MqttFixedHeader(0x32u),
+                // body = 2 + 12 + 2 + 1 (propLen=18) + 18 (props) + 4+8 = 47
+                remainingLength = 47u,
+                topic = "sensors/jpeg",
+                packetId = PacketId(0x0042u),
+                properties =
+                    listOf(
+                        MqttV5Property.MessageExpiryInterval(seconds = 3_600u),
+                        MqttV5Property.ContentType(value = "text/plain"),
+                    ),
+                payload = JpegImage(320u, 240u, ByteArray(8) { (it * 5).toByte() }),
+            )
+        val buf = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
+        codec.encode(buf, original, EncodeContext.Empty)
+        buf.resetForRead()
+        val decoded = codec.decode(buf, DecodeContext.Empty)
+        assertEquals(original, decoded)
+    }
+
+    @Test
+    fun decodesPublishWithMixedPropertiesPreservesOrder() {
+        // Spec §3.3.2.3 — properties may appear in any order. Decode must
+        // preserve the wire order. ContentType first (13 bytes), then
+        // MessageExpiryInterval (5 bytes) — propBody = 18 bytes.
+        // body = 2 (topic LP) + 1 (topic 't') + 1 (propLen=18) + 18 (props)
+        //      + 4+1 (jpeg) = 27
+        val codec = MqttV5PacketCodec(JpegImageCodec)
+        val wire =
+            byteArrayOf(
+                0x30,
+                0x1B, // RL = 27
+                0x00,
+                0x01,
+                't'.code.toByte(),
+                0x12, // properties length = 18
+                0x03, // ContentType id
+                0x00,
+                0x0A,
+                't'.code.toByte(),
+                'e'.code.toByte(),
+                'x'.code.toByte(),
+                't'.code.toByte(),
+                '/'.code.toByte(),
+                'p'.code.toByte(),
+                'l'.code.toByte(),
+                'a'.code.toByte(),
+                'i'.code.toByte(),
+                'n'.code.toByte(),
+                0x02,
+                0x00,
+                0x00,
+                0x00,
+                0x60, // expiry = 96
+                0x00,
+                0x01,
+                0x00,
+                0x01,
+                0x99.toByte(),
+            )
+        val buf = BufferFactory.Default.allocate(wire.size, ByteOrder.BIG_ENDIAN).also { it.writeBytes(wire) }
+        buf.resetForRead()
+        val decoded = assertIs<MqttV5Packet.Publish<JpegImage>>(codec.decode(buf, DecodeContext.Empty))
+        assertEquals(2, decoded.properties.size)
+        val first = assertIs<MqttV5Property.ContentType>(decoded.properties[0])
+        assertEquals("text/plain", first.value)
+        val second = assertIs<MqttV5Property.MessageExpiryInterval>(decoded.properties[1])
+        assertEquals(96u, second.seconds)
+    }
+
+    @Test
+    fun publishCompleteRestoresOuterLimitFromPartialFlow() {
+        // The slice 10f Partial+@RemainingLength composition extended with
+        // step 11's inner property-bag bound. Both bounds must be restored
+        // before the outer caller continues; trailing bytes must remain
+        // visible after decode.
+        val codec = MqttV5PacketCodec(JpegImageCodec)
+        val original =
+            MqttV5Packet.Publish<JpegImage>(
+                header = MqttFixedHeader(0x32u),
+                // body = 2 (topic LP) + 1 (topic 't') + 2 (pid)
+                //      + 1 (propLen=5) + 5 (one MessageExpiryInterval) + 4+1 (jpeg)
+                remainingLength = 16u,
+                topic = "t",
+                packetId = PacketId(0x0007u),
+                properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 7u)),
+                payload = JpegImage(1u, 1u, byteArrayOf(0x42)),
+            )
+        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        codec.encode(buf, original, EncodeContext.Empty)
+        val publishBytes = buf.position()
+        // Trailing bytes the dispatcher must NOT consume.
+        buf.writeByte(0xCA.toByte())
+        buf.writeByte(0xFE.toByte())
+        buf.resetForRead()
+        val outerLimitBefore = buf.limit()
+        val decoded = codec.decode(buf, DecodeContext.Empty)
+        assertEquals(original, decoded)
+        assertEquals(publishBytes, buf.position(), "decode advanced exactly through the publish")
+        assertEquals(outerLimitBefore, buf.limit(), "outer limit restored after RL-bounded decode")
+    }
+
+    @Test
+    fun peekFrameSizeForPublishCompletes() {
+        // Peek through a complete publish frame in one append.
+        val codec = MqttV5PacketCodec(JpegImageCodec)
+        val msg =
+            MqttV5Packet.Publish<JpegImage>(
+                header = MqttFixedHeader(0x30u),
+                remainingLength = 11u,
+                topic = "t/1",
+                packetId = null,
+                properties = emptyList(),
+                payload = JpegImage(1u, 1u, byteArrayOf(0x42)),
+            )
+        val buf = BufferFactory.Default.allocate(32, ByteOrder.BIG_ENDIAN)
+        codec.encode(buf, msg, EncodeContext.Empty)
+        buf.resetForRead()
+        val totalBytes = buf.remaining()
+
+        val pool = BufferPool()
+        val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
+        try {
+            stream.append(buf)
+            assertEquals(PeekResult.Complete(totalBytes), codec.peekFrameSize(stream))
+        } finally {
+            stream.release()
+            pool.clear()
+        }
+    }
+}

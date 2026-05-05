@@ -926,7 +926,18 @@ internal class CodecEmitter(
         val elementType = typeArgs[0].type?.resolve() ?: return null
         if (elementType.isError || elementType.isMarkedNullable) return null
         val elementDecl = elementType.declaration as? KSClassDeclaration ?: return null
-        if (Modifier.DATA !in elementDecl.modifiers) return null
+        // Element must be either a `@ProtocolMessage data class` (since slice
+        // 11 landed) OR a `@ProtocolMessage` sealed parent with `@DispatchOn`
+        // (Phase J.M.5 widening). Both shapes emit a singleton-object codec
+        // whose `decode(buffer, context)` / `encode(buffer, value, context)`
+        // signatures match what `appendDecodeLengthPrefixedUseCodecList` and
+        // `appendEncodeLengthPrefixedUseCodecList` call. Reject elements that
+        // would emit as a generic class — i.e., element has a `<P : Payload>`
+        // type parameter (slice 10d's detection rule). The emitter's static
+        // call form requires a singleton-object codec.
+        val isDataClass = Modifier.DATA in elementDecl.modifiers
+        val isSealed = Modifier.SEALED in elementDecl.modifiers
+        if (!isDataClass && !isSealed) return null
         val isProtocolMessage =
             elementDecl.annotations.any { ann ->
                 ann.shortName.asString() == "ProtocolMessage" &&
@@ -936,6 +947,7 @@ internal class CodecEmitter(
                         ?.asString() == PROTOCOL_MESSAGE_QNAME
             }
         if (!isProtocolMessage) return null
+        if (detectPayloadTypeParameter(elementDecl) != null) return null
         val codecKsType =
             useCodecAnn.arguments
                 .firstOrNull { it.name?.asString() == "codec" }
@@ -953,6 +965,7 @@ internal class CodecEmitter(
                     elementDecl.packageName.asString(),
                     "${elementDecl.simpleName.asString()}Codec",
                 ),
+            elementIsSealed = isSealed,
         )
     }
 
@@ -3614,6 +3627,10 @@ internal class CodecEmitter(
         body: CodeBlock.Builder,
         field: FieldSpec.LengthPrefixedUseCodecList,
     ) {
+        if (field.elementIsSealed) {
+            appendEncodeLengthPrefixedUseCodecListSealed(body, field)
+            return
+        }
         val bodyBytesVar = "__${field.name}BodyBytes"
         body.addStatement(
             "val %L = value.%L.sumOf { (%T.wireSize(it, context) as %T.Exact).bytes }",
@@ -3629,6 +3646,66 @@ internal class CodecEmitter(
         )
         body.beginControlFlow("for (__elem in value.%L)", field.name)
         body.addStatement("%T.encode(buffer, __elem, context)", field.elementCodecClassName)
+        body.endControlFlow()
+    }
+
+    /**
+     * Phase J.M.5 — sealed-parent property-bag encode. Sealed-parent
+     * variants commonly carry `@LengthPrefixed val: String` / similar
+     * BackPatch-wireSize fields, so the pre-measure `as WireSize.Exact`
+     * cast in the data-class path doesn't apply. Encode each element
+     * into a scratch buffer first to capture the actual byte count, then
+     * write the VBI prefix and bulk-copy the scratch bytes into the
+     * outer buffer.
+     *
+     * Generated shape (sealed elements):
+     * ```
+     * val __<name>Scratch = BufferFactory.Default.allocate(64)
+     * try {
+     *     for (__elem in value.<name>) {
+     *         ElementCodec.encode(__<name>Scratch, __elem, context)
+     *     }
+     *     val __<name>BodyBytes = __<name>Scratch.position()
+     *     <codecType>.encode(buffer, __<name>BodyBytes.toUInt(), context)
+     *     __<name>Scratch.resetForRead()
+     *     buffer.write(__<name>Scratch)
+     * } finally {
+     *     (__<name>Scratch as? CloseableBuffer)?.freeNativeMemory()
+     * }
+     * ```
+     *
+     * The 64-byte starting allocation is a heuristic — `BufferFactory`
+     * grows on demand for buffers that exceed it. Tunable per-field
+     * if a measurable hot path emerges.
+     */
+    private fun appendEncodeLengthPrefixedUseCodecListSealed(
+        body: CodeBlock.Builder,
+        field: FieldSpec.LengthPrefixedUseCodecList,
+    ) {
+        val scratchVar = "__${field.name}Scratch"
+        val bodyBytesVar = "__${field.name}BodyBytes"
+        body.beginControlFlow(
+            "%T.%M.allocate(64, buffer.byteOrder).%M { %L ->",
+            BUFFER_FACTORY_CN,
+            BUFFER_FACTORY_DEFAULT_MN,
+            BUFFER_USE_MN,
+            scratchVar,
+        )
+        body.beginControlFlow("for (__elem in value.%L)", field.name)
+        body.addStatement(
+            "%T.encode(%L, __elem, context)",
+            field.elementCodecClassName,
+            scratchVar,
+        )
+        body.endControlFlow()
+        body.addStatement("val %L = %L.position()", bodyBytesVar, scratchVar)
+        body.addStatement(
+            "%T.encode(buffer, %L.toUInt(), context)",
+            field.codecType,
+            bodyBytesVar,
+        )
+        body.addStatement("%L.resetForRead()", scratchVar)
+        body.addStatement("buffer.write(%L)", scratchVar)
         body.endControlFlow()
     }
 
@@ -5062,6 +5139,21 @@ internal class CodecEmitter(
             val codecType: ClassName,
             val elementClassName: ClassName,
             val elementCodecClassName: ClassName,
+            /**
+             * Phase J.M.5 widening — `true` when the element type is a
+             * `@ProtocolMessage` sealed parent (interface or class) with
+             * `@DispatchOn`. Sealed-parent variants commonly include
+             * `@LengthPrefixed val: String` / similar BackPatch-wireSize
+             * fields, so the encode emit can't pre-measure body bytes via
+             * the existing `as WireSize.Exact` cast. The sealed path
+             * encodes elements into a scratch buffer first, captures the
+             * actual byte count, then writes the VBI prefix + bulk-copies
+             * scratch bytes into the outer buffer. `false` for the
+             * pre-existing data-class element path which keeps the
+             * Exact-cast pre-measure (the slice 11 doctrine vector
+             * fixtures rely on its allocation profile).
+             */
+            val elementIsSealed: Boolean,
         ) : FieldSpec
 
         /**
@@ -5445,6 +5537,11 @@ internal class CodecEmitter(
         private val READ_BUFFER_CN = ClassName("com.ditchoom.buffer", "ReadBuffer")
         private val WRITE_BUFFER_CN = ClassName("com.ditchoom.buffer", "WriteBuffer")
         private val PLATFORM_BUFFER_CN = ClassName("com.ditchoom.buffer", "PlatformBuffer")
+        private val BUFFER_FACTORY_CN = ClassName("com.ditchoom.buffer", "BufferFactory")
+        private val BUFFER_FACTORY_DEFAULT_MN =
+            com.squareup.kotlinpoet.MemberName("com.ditchoom.buffer", "Default")
+        private val BUFFER_USE_MN =
+            com.squareup.kotlinpoet.MemberName("com.ditchoom.buffer", "use")
         private val CODEC_CN = ClassName("com.ditchoom.buffer.codec", "Codec")
         private val DECODER_CN = ClassName("com.ditchoom.buffer.codec", "Decoder")
         private val DECODE_CONTEXT_CN = ClassName("com.ditchoom.buffer.codec", "DecodeContext")

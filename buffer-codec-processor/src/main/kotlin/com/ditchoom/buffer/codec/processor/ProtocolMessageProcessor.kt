@@ -1183,9 +1183,8 @@ class ProtocolMessageProcessor(
         if (elementType == null || elementType.isError || elementType.isMarkedNullable) return
         val elementDecl = elementType.declaration as? KSClassDeclaration
         val elementQname = elementType.declaration.qualifiedName?.asString() ?: "<unresolved>"
-        val isProtocolMessageDataClass =
+        val isProtocolMessage =
             elementDecl != null &&
-                Modifier.DATA in elementDecl.modifiers &&
                 elementDecl.annotations.any { ann ->
                     ann.shortName.asString() == "ProtocolMessage" &&
                         ann.annotationType
@@ -1193,16 +1192,53 @@ class ProtocolMessageProcessor(
                             .declaration.qualifiedName
                             ?.asString() == PROTOCOL_MESSAGE_QNAME
                 }
-        if (!isProtocolMessageDataClass) {
+        val isDataClass = elementDecl != null && Modifier.DATA in elementDecl.modifiers
+        val isSealed = elementDecl != null && Modifier.SEALED in elementDecl.modifiers
+        if (!isProtocolMessage || (!isDataClass && !isSealed)) {
             logger.error(
                 "@LengthPrefixed @UseCodec($codecName::class) on $ownerName.$fieldName has list " +
-                    "element type `$elementQname`, which is not a `@ProtocolMessage data class`. " +
-                    "The emitter generates `<E>Codec.decode(...)` / `<E>Codec.encode(...)` per " +
-                    "element — the element type must carry `@ProtocolMessage` and be a `data " +
-                    "class`.",
+                    "element type `$elementQname`, which is not a `@ProtocolMessage data class` " +
+                    "or `@ProtocolMessage` sealed parent. The emitter generates " +
+                    "`<E>Codec.decode(...)` / `<E>Codec.encode(...)` per element — the element " +
+                    "type must carry `@ProtocolMessage` and be either a `data class` or a sealed " +
+                    "parent (sealed interface / sealed class) with `@DispatchOn`.",
+                param,
+            )
+            return
+        }
+        // After the !isProtocolMessage guard returns, elementDecl is non-null.
+        elementDecl!!
+        if (hasPayloadTypeParameter(elementDecl)) {
+            logger.error(
+                "@LengthPrefixed @UseCodec($codecName::class) on $ownerName.$fieldName has list " +
+                    "element type `$elementQname`, which carries a `<P : Payload>` type " +
+                    "parameter. The emitter calls `${elementDecl.simpleName.asString()}Codec." +
+                    "decode(...)` / `.encode(...)` directly, which requires the element's " +
+                    "generated codec to be a singleton object — but a `<P : Payload>` type " +
+                    "parameter forces it to emit as a generic class. Property-bag elements must " +
+                    "be non-payload-generic.",
                 param,
             )
         }
+    }
+
+    /**
+     * Phase J.M.5 — does `decl` carry a `<P : Payload>` type parameter?
+     * Mirrors the slice 10d `detectPayloadTypeParameter` rule used in
+     * `CodecEmitter.kt` for dispatcher-class detection. Used by the
+     * `@LengthPrefixed @UseCodec(C) val: List<E>` validator to reject
+     * element types whose generated codec would emit as a generic class
+     * (the property-bag emit shape calls `<E>Codec.decode(...)` /
+     * `.encode(...)` directly, requiring a singleton object).
+     */
+    private fun hasPayloadTypeParameter(decl: KSClassDeclaration): Boolean {
+        val typeParams = decl.typeParameters
+        if (typeParams.size != 1) return false
+        val bounds = typeParams[0].bounds.toList()
+        if (bounds.size != 1) return false
+        val bound = bounds[0].resolve()
+        if (bound.isError) return false
+        return bound.declaration.qualifiedName?.asString() == PAYLOAD_QNAME
     }
 
     /**
