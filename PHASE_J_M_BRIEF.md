@@ -244,7 +244,58 @@ Per `PHASE_I_REMAINING_LENGTH_PLUGGABLE.md:326`, this is **Phase I.3**
 fixed-shape (`header + remainingLength=2 + packetIdentifier`), so
 this gap is v5-only. Out of scope for J.M (v3.1.1).
 
-### 4. SUBSCRIBE / UNSUBSCRIBE topic-filter list shape
+### 4. CONNECT will-message and password are binary, not String
+
+Per §3.1.3.3, the Will Message is "a sequence of zero or more
+bytes" — arbitrary application-message bytes the broker republishes
+verbatim. Per §3.1.3.5, the Password is "0 to 65535 bytes of binary
+data". Neither is text; modeling them as `String` (as J.M step 4
+does, inheriting from the standalone `MqttConnect` fixture's
+slice-5b shape) is wire-correct only for ASCII fixtures because
+UTF-8 happens to round-trip bytewise. It breaks the moment a
+caller wants to send arbitrary bytes.
+
+The proper shape is a `<P : Payload>`-typed slot:
+
+```kotlin
+data class Connect<WP : Payload, PP : Payload>(
+    ...,
+    @LengthPrefixed @WhenTrue("connectFlags.willPresent") val willMessage: WP? = null,
+    @LengthPrefixed @WhenTrue("connectFlags.passwordPresent") val password: PP? = null,
+) : MqttPacket<Nothing>
+```
+
+Two emitter capability gaps before this can land:
+
+- **`@LengthPrefixed @UseCodec(C::class) val: P?`** — the property-
+  list shape v5.0 needs, scoped as **Phase I.1 step 11**. Same
+  emitter machinery the binary will-message / password fields need:
+  a length-prefixed binary blob threaded through a caller-supplied
+  `Codec<P>`.
+- **Sealed-parent multi-generic dispatcher.** `MqttPacket<out P :
+  Payload>` carries a single payload generic for `Publish<P>` today;
+  `MqttPacketCodec(payloadCodec)` is a one-codec class. A
+  `Connect<WP, PP>` variant means either widening the dispatcher
+  to multi-generic or wiring per-call codec injection (the
+  aggregator's pattern for `Publish`). The aggregator path is the
+  cheaper of the two and consistent with how `Publish<P>` already
+  defers payload codec selection to the call site.
+
+Defer to **Phase J.M.5** (v5.0 modeling) — J.M.5 needs step 11
+anyway for v5's property lists, and the binary lift composes
+naturally with the v5 `Connect` body. Doing it now in J.M for
+v3.1.1 only would land step 11 early, decoupling the J.M.0 →
+J.M.5 sequencing the brief established. The escape hatch from
+gap #2 applies: if the `mqtt` repo cutover (Phase K) needs binary
+will-message / password before v5 modeling lands, prioritize step
+11 → J.M.5 ahead of the rest of J.M.
+
+Until then, the J.M step 4 fold's `String` modeling carries a
+kdoc note ("technically arbitrary bytes per the spec; modeled as
+String because the Stage E `@LengthPrefixed`-inner universe is
+String only") so the gap doesn't get lost.
+
+### 5. SUBSCRIBE / UNSUBSCRIBE topic-filter list shape
 
 SUBSCRIBE per §3.8.3 carries a list of `(topicFilter: String, qos: UByte)`
 pairs — a `@RemainingBytes List<TopicFilter>` where `TopicFilter` is a
