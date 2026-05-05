@@ -658,7 +658,7 @@ internal class CodecEmitter(
             // kind set (slice 4).
             val siblingQname = siblingType.declaration.qualifiedName?.asString() ?: return null
             val siblingKind = SUPPORTED_SCALARS[siblingQname] ?: return null
-            if (siblingKind !in PEEKABLE_LENGTH_FROM_SIBLING_KINDS) return null
+            if (siblingKind !in peekableLengthFromSiblingKinds) return null
             return LengthSource.Sibling(siblingName, siblingKind)
         }
         // Dotted form: sibling must be a `value class` with a single
@@ -672,7 +672,7 @@ internal class CodecEmitter(
         if (innerType.isError || innerType.isMarkedNullable) return null
         val innerQname = innerType.declaration.qualifiedName?.asString() ?: return null
         val innerKind = SUPPORTED_SCALARS[innerQname] ?: return null
-        if (innerKind !in PEEKABLE_LENGTH_FROM_SIBLING_KINDS) return null
+        if (innerKind !in peekableLengthFromSiblingKinds) return null
         val property =
             siblingDecl
                 .getDeclaredProperties()
@@ -688,7 +688,7 @@ internal class CodecEmitter(
         )
     }
 
-    private val PEEKABLE_LENGTH_FROM_SIBLING_KINDS =
+    private val peekableLengthFromSiblingKinds =
         setOf(ScalarKind.UByte, ScalarKind.Byte, ScalarKind.UShort, ScalarKind.UInt)
 
     /**
@@ -768,7 +768,7 @@ internal class CodecEmitter(
         if (elementType.isError || elementType.isMarkedNullable) return null
         val elementQname = elementType.declaration.qualifiedName?.asString() ?: return null
         val elementKind = SUPPORTED_SCALARS[elementQname] ?: return null
-        if (elementKind !in REMAINING_BYTES_LIST_ELEMENT_KINDS) return null
+        if (elementKind !in remainingBytesListElementKinds) return null
         return FieldSpec.RemainingBytesScalarList(
             name = name,
             ownerSimpleName = ownerSimpleName,
@@ -846,7 +846,7 @@ internal class CodecEmitter(
      * with `@RemainingBytes` by extension but defer until a vector
      * requires them.
      */
-    private val REMAINING_BYTES_LIST_ELEMENT_KINDS =
+    private val remainingBytesListElementKinds =
         setOf(ScalarKind.UByte, ScalarKind.Byte)
 
     /**
@@ -1029,7 +1029,11 @@ internal class CodecEmitter(
         if (Modifier.SEALED in elementDecl.modifiers) return true
         val ctor = elementDecl.primaryConstructor ?: return false
         return ctor.parameters.any { param ->
-            val paramTypeQname = param.type.resolve().declaration.qualifiedName?.asString()
+            val paramTypeQname =
+                param.type
+                    .resolve()
+                    .declaration.qualifiedName
+                    ?.asString()
             param.annotations.any { ann ->
                 when (ann.shortName.asString()) {
                     "When", "RemainingBytes", "UseCodec" -> true
@@ -1288,7 +1292,7 @@ internal class CodecEmitter(
         val innerType = ctor.parameters[0].type.resolve()
         if (innerType.isError || innerType.isMarkedNullable) return null
         val innerQname = innerType.declaration.qualifiedName?.asString() ?: return null
-        if (SUPPORTED_SCALARS[innerQname] !in PEEKABLE_VALUE_CLASS_INNER_KINDS) return null
+        if (SUPPORTED_SCALARS[innerQname] !in peekableValueClassInnerKinds) return null
         val property =
             siblingDecl
                 .getDeclaredProperties()
@@ -1478,7 +1482,7 @@ internal class CodecEmitter(
      * the wrapped value) and not load-bearing for any in-scope
      * vector.
      */
-    private val PEEKABLE_VALUE_CLASS_INNER_KINDS =
+    private val peekableValueClassInnerKinds =
         setOf(ScalarKind.UByte, ScalarKind.Byte)
 
     /**
@@ -1495,7 +1499,7 @@ internal class CodecEmitter(
      * sign-extension), and no in-scope discriminator vector
      * requires them.
      */
-    private val PEEKABLE_DISPATCHER_INNER_KINDS =
+    private val peekableDispatcherInnerKinds =
         setOf(ScalarKind.UByte, ScalarKind.Byte, ScalarKind.UShort, ScalarKind.UInt)
 
     /**
@@ -2399,14 +2403,7 @@ internal class CodecEmitter(
         // (could be a single byte for a typed RC, could be variable),
         // so peek can't size the field without invoking the codec. v5
         // ack peek again handled by the bounding RL upstream.
-        if (shape.fields.any {
-                it is FieldSpec.Conditional && (
-                    it.condition is ConditionRef.RemainingCmp ||
-                        it.inner is ConditionalInner.LengthPrefixedUseCodecList ||
-                        it.inner is ConditionalInner.UseCodecScalar
-                )
-            }
-        ) {
+        if (shape.fields.any { it.isPeekCollapsingConditional() }) {
             builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
             return builder.build()
         }
@@ -2428,33 +2425,6 @@ internal class CodecEmitter(
         appendSequentialPeek(builder, shape)
         return builder.build()
     }
-
-    /**
-     * Slice 5a — general sequential peek walk.
-     *
-     * Tracks a running `__offset` (relative to `baseOffset`) and per
-     * field:
-     *   - Ensures enough bytes are available before any peek that
-     *     would otherwise read past the buffer end.
-     *   - Stashes peeked bytes for `Scalar` and `ValueClassScalar`
-     *     fields whose names are referenced by a later `Conditional`
-     *     source or `LengthFromString` length-carrier. Stashed locals
-     *     are named after the field itself (e.g., `flags`,
-     *     `payloadLength`) so the predicate / sibling expressions
-     *     read naturally.
-     *   - Advances `__offset` by the field's contribution: fixed
-     *     bytes for `FixedSize`, prefix-width plus body-byte-count
-     *     (peeked) for `LengthPrefixed*`, sibling-driven length for
-     *     `LengthFromString`, predicate-gated shape for
-     *     `Conditional`.
-     *
-     * Replaces the slice 2/3/3.5/4 specialized peek paths
-     * (single-LPS-terminal, single-Conditional-terminal,
-     * single-LengthFromString-terminal). Equivalent results for those
-     * shapes; previously-skipped shapes (multiple sequential
-     * variable-length fields, non-terminal Conditional, non-terminal
-     * LengthPrefixedString) become emitable here.
-     */
 
     /**
      * Phase I.1 step 6 — emit peek for a shape carrying a bounding
@@ -2636,6 +2606,32 @@ internal class CodecEmitter(
         builder.addCode(body.build())
     }
 
+    /**
+     * Slice 5a — general sequential peek walk.
+     *
+     * Tracks a running `__offset` (relative to `baseOffset`) and per
+     * field:
+     *   - Ensures enough bytes are available before any peek that
+     *     would otherwise read past the buffer end.
+     *   - Stashes peeked bytes for `Scalar` and `ValueClassScalar`
+     *     fields whose names are referenced by a later `Conditional`
+     *     source or `LengthFromString` length-carrier. Stashed locals
+     *     are named after the field itself (e.g., `flags`,
+     *     `payloadLength`) so the predicate / sibling expressions
+     *     read naturally.
+     *   - Advances `__offset` by the field's contribution: fixed
+     *     bytes for `FixedSize`, prefix-width plus body-byte-count
+     *     (peeked) for `LengthPrefixed*`, sibling-driven length for
+     *     `LengthFromString`, predicate-gated shape for
+     *     `Conditional`.
+     *
+     * Replaces the slice 2/3/3.5/4 specialized peek paths
+     * (single-LPS-terminal, single-Conditional-terminal,
+     * single-LengthFromString-terminal). Equivalent results for those
+     * shapes; previously-skipped shapes (multiple sequential
+     * variable-length fields, non-terminal Conditional, non-terminal
+     * LengthPrefixedString) become emitable here.
+     */
     private fun appendSequentialPeek(
         builder: FunSpec.Builder,
         shape: CodecShape,
@@ -3904,6 +3900,26 @@ internal class CodecEmitter(
         }
 
     /**
+     * `true` for `Conditional` fields whose wire presence can't be predicted
+     * from a stream-only peek walk. Three cases:
+     *  - grammar-2 `remaining <op> <int>` predicates (depend on the bounded
+     *    decode buffer's `remaining()` after upstream `applyBound`),
+     *  - inner is `LengthPrefixedUseCodecList` (variable-length bag),
+     *  - inner is `UseCodecScalar` (opaque codec wire width).
+     *
+     * v5 ack peek escapes this collapse because the bounding RL field
+     * upstream is handled by `appendPeekUseCodecScalar` before the
+     * sequential walk reaches the conditional.
+     */
+    private fun FieldSpec.isPeekCollapsingConditional(): Boolean =
+        this is FieldSpec.Conditional &&
+            (
+                condition is ConditionRef.RemainingCmp ||
+                    inner is ConditionalInner.LengthPrefixedUseCodecList ||
+                    inner is ConditionalInner.UseCodecScalar
+            )
+
+    /**
      * Phase I.1 — emit decode for bare `@UseCodec val: <scalar>`.
      * Delegates to the user-supplied codec object's `decode(buffer,
      * context)`. When the codec implements [BoundingLengthCodec], the
@@ -4446,7 +4462,7 @@ internal class CodecEmitter(
         // (slice 6) plus 2/4-byte unsigned kinds. ULong / signed multi-byte
         // discriminators aren't required by any in-scope vector and would
         // need parallel peek paths.
-        if (innerKind !in PEEKABLE_DISPATCHER_INNER_KINDS) return null
+        if (innerKind !in peekableDispatcherInnerKinds) return null
         // Slice 6.5: read the discriminator value class's `@ProtocolMessage(
         // wireOrder = ...)` so multi-byte byte assembly during peek matches
         // the encode/decode wire layout. Single-byte kinds ignore this.

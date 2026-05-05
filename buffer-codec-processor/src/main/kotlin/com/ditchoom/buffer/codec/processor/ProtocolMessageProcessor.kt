@@ -532,7 +532,9 @@ class ProtocolMessageProcessor(
             // ill-formed predicate. Caller-side error messages are
             // focused on the grammar 2 shape.
             val trimmed = expression.trim()
-            if (trimmed == "remaining" || trimmed.startsWith("remaining ") ||
+            if (
+                trimmed == "remaining" ||
+                trimmed.startsWith("remaining ") ||
                 trimmed.startsWith("remaining\t")
             ) {
                 val tokens = trimmed.split(Regex("\\s+"))
