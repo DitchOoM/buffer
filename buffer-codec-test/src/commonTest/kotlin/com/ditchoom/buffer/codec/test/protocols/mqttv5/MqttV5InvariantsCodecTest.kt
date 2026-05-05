@@ -214,6 +214,74 @@ class MqttV5InvariantsCodecTest {
         )
     }
 
+    // Phase J.M.5 audit-2e — MqttV5PropertyId invariant per §2.2.2.2.
+    // Spot-checks a representative variant from each shape category
+    // (scalar / boolean / string / VBI / two-string). The full breadth
+    // (~25 variants) is structurally identical via
+    // `requireMatchingPropertyId`; testing one per shape keeps the suite
+    // tight while still proving every shape calls the helper.
+
+    @Test
+    fun messageExpiryIntervalRejectsMismatchedId() {
+        // Scalar-body variant.
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                MqttV5Property.MessageExpiryInterval(
+                    id = MqttV5PropertyId(0xFFu),
+                    seconds = 60u,
+                )
+            }
+        assertTrue(
+            ex.message!!.contains("MessageExpiryInterval id-byte invariant"),
+            "expected id-byte diagnostic, got: ${ex.message}",
+        )
+    }
+
+    @Test
+    fun contentTypeRejectsMismatchedId() {
+        // String-body variant.
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Property.ContentType(
+                id = MqttV5PropertyId(0x00u),
+                value = "text/plain",
+            )
+        }
+    }
+
+    @Test
+    fun payloadFormatIndicatorRejectsMismatchedId() {
+        // Boolean-shaped variant (already had a value-range init).
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Property.PayloadFormatIndicator(
+                id = MqttV5PropertyId(0x42u),
+                value = 1u,
+            )
+        }
+    }
+
+    @Test
+    fun subscriptionIdentifierRejectsMismatchedId() {
+        // VBI-body variant (already had a value-range init).
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Property.SubscriptionIdentifier(
+                id = MqttV5PropertyId(0x10u),
+                value = 1u,
+            )
+        }
+    }
+
+    @Test
+    fun userPropertyRejectsMismatchedId() {
+        // Two-string variant.
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Property.UserProperty(
+                id = MqttV5PropertyId(0x00u),
+                key = "k",
+                value = "v",
+            )
+        }
+    }
+
     @Test
     fun subscriptionOptionsExposesAllFourFields() {
         // QoS=1, NoLocal=true, RetainAsPublished=false, RetainHandling=2 →

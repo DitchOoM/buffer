@@ -26,6 +26,41 @@ value class MqttV5PropertyId(
 }
 
 /**
+ * Phase J.M.5 audit-2e — `@DispatchValue` byte invariant. The variant's
+ * primary-constructor `id` field defaults to the variant's
+ * `@PacketType.value`, but Kotlin lets callers override the default with
+ * a non-matching byte:
+ *
+ * ```kotlin
+ * MqttV5Property.MessageExpiryInterval(
+ *     id = MqttV5PropertyId(0xFFu),  // bogus
+ *     seconds = 60u,
+ * )
+ * ```
+ *
+ * That construction encodes the wrong dispatch byte; on decode the
+ * dispatcher fails to find a matching variant. This helper fires the
+ * `init { require }` at construction time, closing the impossible
+ * state caller-side. Same pattern as audit-2d's `MqttFixedHeader`
+ * raw-byte invariant on each `MqttV5Packet` variant.
+ *
+ * Variant-codec emit reads/writes the byte through the value-class
+ * scalar path; structural enforcement (drop the field from the primary
+ * constructor) would need an emitter widening — deferred.
+ */
+private fun requireMatchingPropertyId(
+    id: MqttV5PropertyId,
+    expected: Int,
+    variantName: String,
+) {
+    require(id.raw.toInt() == expected) {
+        "v5 property $variantName id-byte invariant: id.raw must be 0x" +
+            expected.toString(16).padStart(2, '0') +
+            ", got 0x" + id.raw.toString(16) + " (spec §2.2.2.2)"
+    }
+}
+
+/**
  * Typed MQTT v5.0 property dispatcher. v5 §2.2.2 defines ~30 properties;
  * Phase J.M.5 slice 2 landed two (MessageExpiryInterval, ContentType)
  * as a smoke test, and Phase J.M.5 slice 10 (Tier A) lands the
@@ -70,6 +105,7 @@ sealed interface MqttV5Property {
         val value: UByte,
     ) : MqttV5Property {
         init {
+            requireMatchingPropertyId(id, 0x01, "PayloadFormatIndicator")
             require(value in 0u..1u) { "PayloadFormatIndicator must be 0 or 1; got $value" }
         }
     }
@@ -83,7 +119,11 @@ sealed interface MqttV5Property {
     data class MessageExpiryInterval(
         val id: MqttV5PropertyId = MqttV5PropertyId(0x02u),
         val seconds: UInt,
-    ) : MqttV5Property
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x02, "MessageExpiryInterval")
+        }
+    }
 
     /**
      * MQTT v5.0 §3.3.2.3.9 Content Type (PUBLISH property). Wire shape:
@@ -95,7 +135,11 @@ sealed interface MqttV5Property {
     data class ContentType(
         val id: MqttV5PropertyId = MqttV5PropertyId(0x03u),
         @LengthPrefixed val value: String,
-    ) : MqttV5Property
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x03, "ContentType")
+        }
+    }
 
     /**
      * MQTT v5.0 §3.3.2.3.5 Response Topic (PUBLISH property). Topic
@@ -106,7 +150,11 @@ sealed interface MqttV5Property {
     data class ResponseTopic(
         val id: MqttV5PropertyId = MqttV5PropertyId(0x08u),
         @LengthPrefixed val value: String,
-    ) : MqttV5Property
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x08, "ResponseTopic")
+        }
+    }
 
     /**
      * MQTT v5.0 §3.8.2.1.2 Subscription Identifier (SUBSCRIBE property,
@@ -130,6 +178,7 @@ sealed interface MqttV5Property {
         @UseCodec(VariableByteIntegerCodec::class) val value: UInt,
     ) : MqttV5Property {
         init {
+            requireMatchingPropertyId(id, 0x0B, "SubscriptionIdentifier")
             // [MQTT-3.8.2.1.2-1] — value 0 is reserved.
             require(value > 0u) {
                 "SubscriptionIdentifier value must be > 0; got $value (spec §3.8.2.1.2)"
@@ -153,7 +202,11 @@ sealed interface MqttV5Property {
     data class SessionExpiryInterval(
         val id: MqttV5PropertyId = MqttV5PropertyId(0x11u),
         val seconds: UInt,
-    ) : MqttV5Property
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x11, "SessionExpiryInterval")
+        }
+    }
 
     /**
      * MQTT v5.0 §3.2.2.3.7 Assigned Client Identifier (CONNACK
@@ -165,7 +218,11 @@ sealed interface MqttV5Property {
     data class AssignedClientIdentifier(
         val id: MqttV5PropertyId = MqttV5PropertyId(0x12u),
         @LengthPrefixed val value: String,
-    ) : MqttV5Property
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x12, "AssignedClientIdentifier")
+        }
+    }
 
     /**
      * MQTT v5.0 §3.2.2.3.14 Server Keep Alive (CONNACK property).
@@ -176,7 +233,11 @@ sealed interface MqttV5Property {
     data class ServerKeepAlive(
         val id: MqttV5PropertyId = MqttV5PropertyId(0x13u),
         val seconds: UShort,
-    ) : MqttV5Property
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x13, "ServerKeepAlive")
+        }
+    }
 
     /**
      * MQTT v5.0 §3.1.2.11.9 Authentication Method (CONNECT, CONNACK,
@@ -187,7 +248,11 @@ sealed interface MqttV5Property {
     data class AuthenticationMethod(
         val id: MqttV5PropertyId = MqttV5PropertyId(0x15u),
         @LengthPrefixed val value: String,
-    ) : MqttV5Property
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x15, "AuthenticationMethod")
+        }
+    }
 
     /**
      * MQTT v5.0 §3.1.2.11.7 Request Problem Information (CONNECT
@@ -201,6 +266,7 @@ sealed interface MqttV5Property {
         val value: UByte,
     ) : MqttV5Property {
         init {
+            requireMatchingPropertyId(id, 0x17, "RequestProblemInformation")
             require(value in 0u..1u) { "RequestProblemInformation must be 0 or 1; got $value" }
         }
     }
@@ -215,7 +281,11 @@ sealed interface MqttV5Property {
     data class WillDelayInterval(
         val id: MqttV5PropertyId = MqttV5PropertyId(0x18u),
         val seconds: UInt,
-    ) : MqttV5Property
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x18, "WillDelayInterval")
+        }
+    }
 
     /**
      * MQTT v5.0 §3.1.2.11.6 Request Response Information (CONNECT
@@ -229,6 +299,7 @@ sealed interface MqttV5Property {
         val value: UByte,
     ) : MqttV5Property {
         init {
+            requireMatchingPropertyId(id, 0x19, "RequestResponseInformation")
             require(value in 0u..1u) { "RequestResponseInformation must be 0 or 1; got $value" }
         }
     }
@@ -243,7 +314,11 @@ sealed interface MqttV5Property {
     data class ResponseInformation(
         val id: MqttV5PropertyId = MqttV5PropertyId(0x1Au),
         @LengthPrefixed val value: String,
-    ) : MqttV5Property
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x1A, "ResponseInformation")
+        }
+    }
 
     /**
      * MQTT v5.0 §3.2.2.3.16 Server Reference (CONNACK / DISCONNECT
@@ -254,7 +329,11 @@ sealed interface MqttV5Property {
     data class ServerReference(
         val id: MqttV5PropertyId = MqttV5PropertyId(0x1Cu),
         @LengthPrefixed val value: String,
-    ) : MqttV5Property
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x1C, "ServerReference")
+        }
+    }
 
     /**
      * MQTT v5.0 §3.4.2.2.2 Reason String (PUBACK / PUBREC / PUBREL /
@@ -266,7 +345,11 @@ sealed interface MqttV5Property {
     data class ReasonString(
         val id: MqttV5PropertyId = MqttV5PropertyId(0x1Fu),
         @LengthPrefixed val value: String,
-    ) : MqttV5Property
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x1F, "ReasonString")
+        }
+    }
 
     /**
      * MQTT v5.0 §3.1.2.11.3 Receive Maximum (CONNECT / CONNACK
@@ -279,7 +362,11 @@ sealed interface MqttV5Property {
     data class ReceiveMaximum(
         val id: MqttV5PropertyId = MqttV5PropertyId(0x21u),
         val value: UShort,
-    ) : MqttV5Property
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x21, "ReceiveMaximum")
+        }
+    }
 
     /**
      * MQTT v5.0 §3.1.2.11.5 Topic Alias Maximum (CONNECT / CONNACK
@@ -291,7 +378,11 @@ sealed interface MqttV5Property {
     data class TopicAliasMaximum(
         val id: MqttV5PropertyId = MqttV5PropertyId(0x22u),
         val value: UShort,
-    ) : MqttV5Property
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x22, "TopicAliasMaximum")
+        }
+    }
 
     /**
      * MQTT v5.0 §3.3.2.3.4 Topic Alias (PUBLISH property). Integer
@@ -303,7 +394,11 @@ sealed interface MqttV5Property {
     data class TopicAlias(
         val id: MqttV5PropertyId = MqttV5PropertyId(0x23u),
         val value: UShort,
-    ) : MqttV5Property
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x23, "TopicAlias")
+        }
+    }
 
     /**
      * MQTT v5.0 §3.2.2.3.4 Maximum QoS (CONNACK property). Highest
@@ -318,6 +413,7 @@ sealed interface MqttV5Property {
         val value: UByte,
     ) : MqttV5Property {
         init {
+            requireMatchingPropertyId(id, 0x24, "MaximumQoS")
             require(value in 0u..1u) { "MaximumQoS must be 0 or 1; got $value" }
         }
     }
@@ -334,6 +430,7 @@ sealed interface MqttV5Property {
         val value: UByte,
     ) : MqttV5Property {
         init {
+            requireMatchingPropertyId(id, 0x25, "RetainAvailable")
             require(value in 0u..1u) { "RetainAvailable must be 0 or 1; got $value" }
         }
     }
@@ -351,7 +448,11 @@ sealed interface MqttV5Property {
         val id: MqttV5PropertyId = MqttV5PropertyId(0x26u),
         @LengthPrefixed val key: String,
         @LengthPrefixed val value: String,
-    ) : MqttV5Property
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x26, "UserProperty")
+        }
+    }
 
     /**
      * MQTT v5.0 §3.1.2.11.4 Maximum Packet Size (CONNECT / CONNACK
@@ -363,7 +464,11 @@ sealed interface MqttV5Property {
     data class MaximumPacketSize(
         val id: MqttV5PropertyId = MqttV5PropertyId(0x27u),
         val value: UInt,
-    ) : MqttV5Property
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x27, "MaximumPacketSize")
+        }
+    }
 
     /**
      * MQTT v5.0 §3.2.2.3.11 Wildcard Subscription Available (CONNACK
@@ -377,6 +482,7 @@ sealed interface MqttV5Property {
         val value: UByte,
     ) : MqttV5Property {
         init {
+            requireMatchingPropertyId(id, 0x28, "WildcardSubscriptionAvailable")
             require(value in 0u..1u) { "WildcardSubscriptionAvailable must be 0 or 1; got $value" }
         }
     }
@@ -393,6 +499,7 @@ sealed interface MqttV5Property {
         val value: UByte,
     ) : MqttV5Property {
         init {
+            requireMatchingPropertyId(id, 0x29, "SubscriptionIdentifiersAvailable")
             require(value in 0u..1u) { "SubscriptionIdentifiersAvailable must be 0 or 1; got $value" }
         }
     }
@@ -409,6 +516,7 @@ sealed interface MqttV5Property {
         val value: UByte,
     ) : MqttV5Property {
         init {
+            requireMatchingPropertyId(id, 0x2A, "SharedSubscriptionAvailable")
             require(value in 0u..1u) { "SharedSubscriptionAvailable must be 0 or 1; got $value" }
         }
     }
