@@ -7,7 +7,6 @@ import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
-import com.ditchoom.buffer.codec.annotations.RemainingLength
 import com.ditchoom.buffer.codec.annotations.UseCodec
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
 import kotlin.jvm.JvmInline
@@ -89,7 +88,7 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage
     data class Connect(
         val header: MqttFixedHeader = MqttFixedHeader(0x10u),
-        @RemainingLength val remainingLength: UInt,
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         val keepAliveSeconds: UShort,
         @LengthPrefixed val clientId: String,
     ) : MqttPacket<Nothing>
@@ -130,7 +129,7 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage
     data class Publish<P : Payload>(
         val header: MqttFixedHeader = MqttFixedHeader(0x30u),
-        @RemainingLength val remainingLength: UInt,
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         @LengthPrefixed val topic: String,
         val packetId: PacketId,
         @RemainingBytes val payload: P,
@@ -162,7 +161,7 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage
     data class PingResp(
         val header: MqttFixedHeader = MqttFixedHeader(0xD0u),
-        @RemainingLength val remainingLength: UInt = 0u,
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
     ) : MqttPacket<Nothing>
 
     /**
@@ -173,6 +172,6 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage
     data class Disconnect(
         val header: MqttFixedHeader = MqttFixedHeader(0xE0u),
-        @RemainingLength val remainingLength: UInt = 0u,
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
     ) : MqttPacket<Nothing>
 }

@@ -2,7 +2,7 @@ package com.ditchoom.buffer.codec.test.protocols.mqtt
 
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-import com.ditchoom.buffer.codec.annotations.RemainingLength
+import com.ditchoom.buffer.codec.annotations.UseCodec
 import com.ditchoom.buffer.codec.annotations.WhenTrue
 import kotlin.jvm.JvmInline
 
@@ -90,7 +90,7 @@ value class MqttConnectFlags(
 @ProtocolMessage
 data class MqttConnect(
     val header: MqttFixedHeader,
-    @RemainingLength val remainingLength: UInt,
+    @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
     @LengthPrefixed val protocolName: String,
     val protocolLevel: UByte,
     val connectFlags: MqttConnectFlags,

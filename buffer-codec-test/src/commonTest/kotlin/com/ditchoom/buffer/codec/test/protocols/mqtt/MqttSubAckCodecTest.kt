@@ -127,7 +127,12 @@ class MqttSubAckCodecTest {
     }
 
     @Test
-    fun wireSizeIsExactBasedOnRemainingLength() {
+    fun wireSizeIsBackPatchWithUseCodecScalar() {
+        // Phase I.1 step 9 — `@UseCodec(MqttRemainingLengthCodec)` collapses
+        // wireSize to BackPatch unconditionally (CodecEmitter.kt:1798).
+        // Runtime-Exact promotion via codec.wireSize forwarding is a
+        // deferred follow-on (PHASE_I_1_RESUME.md:426) — the slice-8
+        // `@RemainingLength`-driven Exact path is gone with the migration.
         val msg =
             MqttSubAck(
                 header = MqttFixedHeader(0x90u),
@@ -135,8 +140,7 @@ class MqttSubAckCodecTest {
                 packetIdentifier = 1u,
                 returnCodes = listOf(0u, 1u, 2u),
             )
-        // 1 (header) + 1 (var-int for 5) + 5 (remainingLength value) = 7
-        assertEquals(WireSize.Exact(7), MqttSubAckCodec.wireSize(msg, EncodeContext.Empty))
+        assertEquals(WireSize.BackPatch, MqttSubAckCodec.wireSize(msg, EncodeContext.Empty))
     }
 
     @Test
@@ -217,7 +221,10 @@ class MqttSubAckCodecTest {
             assertFailsWith<DecodeException> {
                 MqttSubAckCodec.decode(buf, DecodeContext.Empty)
             }
-        assertEquals("MqttSubAck.remainingLength", ex.fieldPath)
+        // Phase I.1 step 9 — fieldPath is now controlled by the codec
+        // (`MqttRemainingLengthCodec.decode`'s own throw site); the slice-8
+        // emit's `<owner>.<field>` prefix is gone with the migration.
+        assertEquals("MqttRemainingLength", ex.fieldPath)
     }
 
     @Test

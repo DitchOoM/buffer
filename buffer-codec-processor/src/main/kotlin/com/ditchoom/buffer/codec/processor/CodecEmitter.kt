@@ -1492,11 +1492,13 @@ internal class CodecEmitter(
             shape.fields.lastOrNull() as? FieldSpec.RemainingBytesPayload
                 ?: error("buildPartialClassTypeSpec called for shape without trailing RemainingBytesPayload")
         val headerFields = shape.fields.dropLast(1)
-        // Slice 10f — when the headers contain @RemainingLength, the
-        // partial decode mid-walk runs `setLimit(position + RL.toInt())`
-        // and stashes the prior limit in `__<rlName>OuterLimit`. Capture
-        // that local on the Partial so `complete()` can restore it.
-        val hasRemainingLength = shape.fields.any { it is FieldSpec.RemainingLength }
+        // Slice 10f / Phase I.1 step 9 — when the headers contain a
+        // bounding field (`@RemainingLength` or `@UseCodec` whose target
+        // implements `BoundingLengthCodec`), the partial decode mid-walk
+        // narrows `buffer.limit()` and stashes the prior limit in
+        // `__<fieldName>OuterLimit`. Capture that local on the Partial so
+        // `complete()` can restore it.
+        val hasBoundingField = shape.fields.any { it.isBoundingShape() }
 
         val classBuilder = TypeSpec.classBuilder("Partial")
         val typeVar =
@@ -1516,7 +1518,7 @@ internal class CodecEmitter(
                     .build(),
             )
         }
-        if (hasRemainingLength) {
+        if (hasBoundingField) {
             ctorBuilder.addParameter("outerLimit", INT)
         }
         ctorBuilder.addParameter("buffer", READ_BUFFER_CN)
@@ -1526,7 +1528,7 @@ internal class CodecEmitter(
         // private state used by complete(); no public getter — the
         // consumer should never re-read the buffer or fiddle with the
         // limit through the Partial.
-        if (hasRemainingLength) {
+        if (hasBoundingField) {
             classBuilder.addProperty(
                 com.squareup.kotlinpoet.PropertySpec
                     .builder("outerLimit", INT, KModifier.PRIVATE)
@@ -1548,7 +1550,7 @@ internal class CodecEmitter(
         )
 
         classBuilder.addFunction(
-            buildPartialCompleteFun(shape, payloadTypeParameter, payloadField, hasRemainingLength),
+            buildPartialCompleteFun(shape, payloadTypeParameter, payloadField, hasBoundingField),
         )
         return classBuilder.build()
     }
@@ -1567,7 +1569,7 @@ internal class CodecEmitter(
         shape: CodecShape,
         payloadTypeParameter: PayloadTypeParameter?,
         payloadField: FieldSpec.RemainingBytesPayload,
-        hasRemainingLength: Boolean,
+        hasBoundingField: Boolean,
     ): FunSpec {
         val funBuilder = FunSpec.builder("complete")
         val returnType =
@@ -1608,11 +1610,12 @@ internal class CodecEmitter(
             }
         val ctorArgs = shape.fields.joinToString(", ") { "${it.name} = ${it.name}" }
         val body = CodeBlock.builder()
-        if (hasRemainingLength) {
-            // Slice 10f — payload decode runs inside the var-int-
-            // narrowed bound (correct for payload bounding); the outer
-            // limit is restored via try/finally so the caller's outer
-            // limit survives even if the user codec throws.
+        if (hasBoundingField) {
+            // Slice 10f / Phase I.1 step 9 — payload decode runs inside
+            // the bounding-field-narrowed limit (correct for payload
+            // bounding); the outer limit is restored via try/finally so
+            // the caller's outer limit survives even if the user codec
+            // throws.
             body.beginControlFlow("return try")
             body.add(payloadDecodeStmt)
             body.addStatement("%T(%L)", returnType, ctorArgs)
@@ -1668,13 +1671,14 @@ internal class CodecEmitter(
 
         val body = CodeBlock.builder()
         for (field in headerFields) appendDecodeField(body, field)
-        val rlField = shape.fields.firstOrNull { it is FieldSpec.RemainingLength } as? FieldSpec.RemainingLength
+        val boundingField = shape.fields.firstOrNull { it.isBoundingShape() }
         val outerLimitArgs =
-            if (rlField != null) {
-                // appendDecodeRemainingLength emits the outer-limit
-                // local as `__<rlName>OuterLimit` (see line ~2964); pass
-                // it through so the Partial can restore on complete.
-                listOf("outerLimit = __${rlField.name}OuterLimit")
+            if (boundingField != null) {
+                // appendDecodeRemainingLength (slice 8) and
+                // appendDecodeUseCodecScalar (Phase I.1 step 4) both
+                // emit the outer-limit local as `__<fieldName>OuterLimit`;
+                // pass it through so the Partial can restore on complete.
+                listOf("outerLimit = __${boundingField.name}OuterLimit")
             } else {
                 emptyList()
             }

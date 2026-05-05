@@ -3,7 +3,7 @@ package com.ditchoom.buffer.codec.test.protocols.mqtt
 import com.ditchoom.buffer.codec.annotations.Endianness
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
-import com.ditchoom.buffer.codec.annotations.RemainingLength
+import com.ditchoom.buffer.codec.annotations.UseCodec
 
 /**
  * Stage G slice 8 doctrine vector — full MQTT v3.1.1 SUBACK packet
@@ -35,7 +35,7 @@ import com.ditchoom.buffer.codec.annotations.RemainingLength
 @ProtocolMessage(wireOrder = Endianness.Big)
 data class MqttSubAck(
     val header: MqttFixedHeader,
-    @RemainingLength val remainingLength: UInt,
+    @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
     val packetIdentifier: UShort,
     @RemainingBytes val returnCodes: List<UByte>,
 )

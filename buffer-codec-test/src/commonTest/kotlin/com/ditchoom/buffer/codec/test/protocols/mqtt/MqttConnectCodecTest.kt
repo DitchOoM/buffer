@@ -199,10 +199,12 @@ class MqttConnectCodecTest {
     }
 
     @Test
-    fun wireSizeIsExactBasedOnRemainingLength() {
-        // Slice 8 — @RemainingLength makes wireSize Exact regardless of the
-        // @WhenTrue and @LengthPrefixed fields that would otherwise force
-        // BackPatch (the user's remainingLength gives us the answer).
+    fun wireSizeIsBackPatchWithUseCodecScalar() {
+        // Phase I.1 step 9 — `@UseCodec(MqttRemainingLengthCodec)` collapses
+        // wireSize to BackPatch unconditionally (CodecEmitter.kt:1798).
+        // Runtime-Exact promotion via codec.wireSize forwarding is a
+        // deferred follow-on (PHASE_I_1_RESUME.md:426) — the slice-8
+        // `@RemainingLength`-driven Exact path is gone with the migration.
         val msg =
             MqttConnect(
                 header = MqttFixedHeader(0x10u),
@@ -213,8 +215,7 @@ class MqttConnectCodecTest {
                 keepAliveSeconds = 60u,
                 clientId = "abc",
             )
-        // 1 (header) + 1 (var-int for 15) + 15 (body) = 17
-        assertEquals(WireSize.Exact(17), MqttConnectCodec.wireSize(msg, EncodeContext.Empty))
+        assertEquals(WireSize.BackPatch, MqttConnectCodec.wireSize(msg, EncodeContext.Empty))
     }
 
     @Test
