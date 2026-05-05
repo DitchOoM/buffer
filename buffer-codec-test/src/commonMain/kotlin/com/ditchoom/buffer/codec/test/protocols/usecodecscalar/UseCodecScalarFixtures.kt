@@ -26,9 +26,7 @@ import com.ditchoom.buffer.codec.annotations.UseCodec
  * The framework knows nothing about either codec's wire shape — the
  * only thing it inspects is the supertype chain (presence of
  * `BoundingLengthCodec` flips the `isBounding` bit on `FieldSpec.UseCodecScalar`).
- */
-
-/**
+ *
  * Plain `Codec<UInt>`. Reads/writes a UInt with a deliberately
  * non-natural wire shape (zig-zag-encoded 4 bytes) to prove the
  * framework genuinely delegates to the user codec rather than

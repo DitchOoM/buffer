@@ -82,6 +82,18 @@ ktlint {
     }
 }
 
+// `commonMain` includes the KSP-generated `build/generated/ksp/metadata/commonMain/kotlin`
+// srcDir (see above). Ktlint filters those files out of the actual lint pass, but Gradle
+// still sees the task as reading from a directory written by `kspCommonMainKotlinMetadata`
+// and reports an implicit-dependency validation error. Declare the dependency explicitly.
+tasks
+    .matching {
+        it.name == "runKtlintCheckOverCommonMainSourceSet" ||
+            it.name == "runKtlintFormatOverCommonMainSourceSet"
+    }.configureEach {
+        dependsOn("kspCommonMainKotlinMetadata")
+    }
+
 // JVM tests use JFR allocation tracking (see SimpleHeaderAllocationTest) to
 // enforce Locked Decision row 16: zero `[B` allocations attributable to the
 // codec on JVM. Disabling TLAB makes every allocation flow through
