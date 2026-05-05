@@ -952,7 +952,10 @@ class ProtocolMessageProcessor(
                 .filter { tp ->
                     val bounds = tp.bounds.toList()
                     bounds.size == 1 &&
-                        bounds[0].resolve().declaration.qualifiedName?.asString() == PAYLOAD_QNAME
+                        bounds[0]
+                            .resolve()
+                            .declaration.qualifiedName
+                            ?.asString() == PAYLOAD_QNAME
                 }.map { it.name.asString() }
                 .toSet()
         for (param in parameters) {
@@ -1132,7 +1135,11 @@ class ProtocolMessageProcessor(
             )
             return
         }
-        val boundQname = bounds[0].resolve().declaration.qualifiedName?.asString()
+        val boundQname =
+            bounds[0]
+                .resolve()
+                .declaration.qualifiedName
+                ?.asString()
         if (boundQname != PAYLOAD_QNAME) {
             logger.error(
                 "@ProtocolMessage `$ownerName` type parameter `$tpName` must be bounded by " +
@@ -1201,7 +1208,11 @@ class ProtocolMessageProcessor(
             if (st.isError) continue
             val q = st.declaration.qualifiedName?.asString()
             if (q != CODEC_QNAME && q != BOUNDING_LENGTH_CODEC_QNAME) continue
-            val arg = st.arguments.firstOrNull()?.type?.resolve() ?: continue
+            val arg =
+                st.arguments
+                    .firstOrNull()
+                    ?.type
+                    ?.resolve() ?: continue
             if (arg.isError) continue
             if (arg.declaration.qualifiedName?.asString() == expectedQname) return true
         }

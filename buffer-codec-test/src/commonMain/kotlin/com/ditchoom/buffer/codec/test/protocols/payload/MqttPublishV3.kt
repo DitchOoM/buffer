@@ -170,8 +170,7 @@ data class JpegImage(
         return width == other.width && height == other.height && data.contentEquals(other.data)
     }
 
-    override fun hashCode(): Int =
-        (width.hashCode() * 31 + height.hashCode()) * 31 + data.contentHashCode()
+    override fun hashCode(): Int = (width.hashCode() * 31 + height.hashCode()) * 31 + data.contentHashCode()
 }
 
 /**

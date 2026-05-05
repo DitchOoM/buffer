@@ -49,8 +49,10 @@ class BufferSliceByteOrderBehaviorTests {
             val slice = parent.slice()
             slice.writeInt(0xCAFEBABE.toInt())
             // If the slice's write was visible in parent[0..3], it's zero-copy.
-            parent[0] == 0xCA.toByte() && parent[1] == 0xFE.toByte() &&
-                parent[2] == 0xBA.toByte() && parent[3] == 0xBE.toByte()
+            parent[0] == 0xCA.toByte() &&
+                parent[1] == 0xFE.toByte() &&
+                parent[2] == 0xBA.toByte() &&
+                parent[3] == 0xBE.toByte()
         }
 
     // ---------- read primitives respect slice byteOrder ----------

@@ -35,10 +35,16 @@ class FlvTagHeaderCodecTest {
     private val sampleWire =
         byteArrayOf(
             0x08,
-            0x00, 0x00, 0x16,
-            0x00, 0x00, 0x64,
             0x00,
-            0x00, 0x00, 0x00,
+            0x00,
+            0x16,
+            0x00,
+            0x00,
+            0x64,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
         )
     private val frameSize = 11
 

@@ -39,8 +39,13 @@ class MqttUnsubscribeCodecTest {
             byteArrayOf(
                 0xA2.toByte(), // fixed header (type=10, flags=0x2 reserved)
                 0x07,
-                0x00, 0x0A,
-                0x00, 0x03, 't'.code.toByte(), '/'.code.toByte(), '1'.code.toByte(),
+                0x00,
+                0x0A,
+                0x00,
+                0x03,
+                't'.code.toByte(),
+                '/'.code.toByte(),
+                '1'.code.toByte(),
             )
         encodeAndAssertBytes(msg, expected)
     }
@@ -63,9 +68,16 @@ class MqttUnsubscribeCodecTest {
             byteArrayOf(
                 0xA2.toByte(),
                 0x0A,
-                0x00, 0x01,
-                0x00, 0x01, 'a'.code.toByte(),
-                0x00, 0x03, 'b'.code.toByte(), '/'.code.toByte(), 'c'.code.toByte(),
+                0x00,
+                0x01,
+                0x00,
+                0x01,
+                'a'.code.toByte(),
+                0x00,
+                0x03,
+                'b'.code.toByte(),
+                '/'.code.toByte(),
+                'c'.code.toByte(),
             )
         encodeAndAssertBytes(msg, expected)
     }
@@ -87,9 +99,15 @@ class MqttUnsubscribeCodecTest {
     fun decodesSingleTopicFromSpecBytes() {
         val wire =
             byteArrayOf(
-                0xA2.toByte(), 0x07,
-                0x00, 0x0A,
-                0x00, 0x03, 't'.code.toByte(), '/'.code.toByte(), '1'.code.toByte(),
+                0xA2.toByte(),
+                0x07,
+                0x00,
+                0x0A,
+                0x00,
+                0x03,
+                't'.code.toByte(),
+                '/'.code.toByte(),
+                '1'.code.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
         val decoded = UnsubscribeCodec.decode(buf, DecodeContext.Empty)
@@ -104,11 +122,18 @@ class MqttUnsubscribeCodecTest {
         // body = 2 (pid) + 2 + 1 (topic "x") = 5
         val wire =
             byteArrayOf(
-                0xA2.toByte(), 0x05,
-                0x00, 0x01,
-                0x00, 0x01, 'x'.code.toByte(),
+                0xA2.toByte(),
+                0x05,
+                0x00,
+                0x01,
+                0x00,
+                0x01,
+                'x'.code.toByte(),
                 // Trailing bytes (would be the next MQTT packet)
-                0xC0.toByte(), 0x00, 0xDE.toByte(), 0xAD.toByte(),
+                0xC0.toByte(),
+                0x00,
+                0xDE.toByte(),
+                0xAD.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
         val decoded = UnsubscribeCodec.decode(buf, DecodeContext.Empty)
@@ -166,7 +191,11 @@ class MqttUnsubscribeCodecTest {
         val wire =
             byteArrayOf(
                 0xA2.toByte(),
-                0x80.toByte(), 0x80.toByte(), 0x80.toByte(), 0x80.toByte(), 0x80.toByte(),
+                0x80.toByte(),
+                0x80.toByte(),
+                0x80.toByte(),
+                0x80.toByte(),
+                0x80.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
         val ex =
@@ -227,7 +256,8 @@ class MqttUnsubscribeCodecTest {
     }
 
     private fun bigEndianBufferOf(wire: ByteArray) =
-        BufferFactory.Default.allocate(wire.size, ByteOrder.BIG_ENDIAN)
+        BufferFactory.Default
+            .allocate(wire.size, ByteOrder.BIG_ENDIAN)
             .also { it.writeBytes(wire) }
             .also { it.resetForRead() }
 

@@ -39,13 +39,18 @@ class Http2SettingsFrameCodecTest {
         val expected =
             byteArrayOf(
                 // length = 0 (24-bit BE)
-                0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x00,
                 // type = 0x04 (SETTINGS)
                 0x04,
                 // flags
                 0x00,
                 // streamId = 0
-                0x00, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
             )
         encodeAndAssertBytes(msg, expected)
     }
@@ -69,11 +74,29 @@ class Http2SettingsFrameCodecTest {
         val expected =
             byteArrayOf(
                 // header: length=12, type=4, flags=0, streamId=0
-                0x00, 0x00, 0x0C, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x0C,
+                0x04,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
                 // entry 1: identifier=3, value=100
-                0x00, 0x03, 0x00, 0x00, 0x00, 0x64,
+                0x00,
+                0x03,
+                0x00,
+                0x00,
+                0x00,
+                0x64,
                 // entry 2: identifier=4, value=65535
-                0x00, 0x04, 0x00, 0x00, 0xFF.toByte(), 0xFF.toByte(),
+                0x00,
+                0x04,
+                0x00,
+                0x00,
+                0xFF.toByte(),
+                0xFF.toByte(),
             )
         encodeAndAssertBytes(msg, expected)
     }
@@ -82,7 +105,15 @@ class Http2SettingsFrameCodecTest {
     fun decodesEmptySettingsFrame() {
         val wire =
             byteArrayOf(
-                0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x04,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
             )
         val buf = bigEndianBufferOf(wire)
         val decoded = Http2SettingsFrameCodec.decode(buf, DecodeContext.Empty)
@@ -95,9 +126,27 @@ class Http2SettingsFrameCodecTest {
     fun decodesSettingsFrameWithEntries() {
         val wire =
             byteArrayOf(
-                0x00, 0x00, 0x0C, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x03, 0x00, 0x00, 0x00, 0x64,
-                0x00, 0x04, 0x00, 0x00, 0xFF.toByte(), 0xFF.toByte(),
+                0x00,
+                0x00,
+                0x0C,
+                0x04,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x03,
+                0x00,
+                0x00,
+                0x00,
+                0x64,
+                0x00,
+                0x04,
+                0x00,
+                0x00,
+                0xFF.toByte(),
+                0xFF.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
         val decoded = Http2SettingsFrameCodec.decode(buf, DecodeContext.Empty)
@@ -114,11 +163,29 @@ class Http2SettingsFrameCodecTest {
         // bytes for the next read.
         val wire =
             byteArrayOf(
-                0x00, 0x00, 0x06, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x06,
+                0x04,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
                 // one entry (6 bytes) — bounded by length=6
-                0x00, 0x03, 0x00, 0x00, 0x00, 0x64,
+                0x00,
+                0x03,
+                0x00,
+                0x00,
+                0x00,
+                0x64,
                 // trailing bytes that look like a second entry — must NOT be consumed
-                0x00, 0x04, 0x00, 0x00, 0xFF.toByte(), 0xFF.toByte(),
+                0x00,
+                0x04,
+                0x00,
+                0x00,
+                0xFF.toByte(),
+                0xFF.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
         val decoded = Http2SettingsFrameCodec.decode(buf, DecodeContext.Empty)
@@ -218,7 +285,8 @@ class Http2SettingsFrameCodecTest {
     }
 
     private fun bigEndianBufferOf(wire: ByteArray) =
-        BufferFactory.Default.allocate(wire.size, ByteOrder.BIG_ENDIAN)
+        BufferFactory.Default
+            .allocate(wire.size, ByteOrder.BIG_ENDIAN)
             .also { it.writeBytes(wire) }
             .also { it.resetForRead() }
 

@@ -33,12 +33,18 @@ class DnsHeaderCodecTest {
         )
     private val sampleWire =
         byteArrayOf(
-            0x4D, 0x2A,
-            0x01, 0x00,
-            0x00, 0x01,
-            0x00, 0x00,
-            0x00, 0x00,
-            0x00, 0x00,
+            0x4D,
+            0x2A,
+            0x01,
+            0x00,
+            0x00,
+            0x01,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
         )
 
     @Test

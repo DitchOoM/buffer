@@ -19,8 +19,8 @@ import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
 import com.squareup.kotlinpoet.INT
 import com.squareup.kotlinpoet.KModifier
-import com.squareup.kotlinpoet.LambdaTypeName
 import com.squareup.kotlinpoet.LONG
+import com.squareup.kotlinpoet.LambdaTypeName
 import com.squareup.kotlinpoet.ParameterSpec
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 import com.squareup.kotlinpoet.SHORT
@@ -1961,8 +1961,7 @@ internal class CodecEmitter(
      * `filterIsInstance` step. Callers that require the result to
      * cover every field gate on terminal shape before calling.
      */
-    private fun List<FieldSpec>.sumOfFixedWireBytes(): Int =
-        filterIsInstance<FieldSpec.FixedSize>().sumOf { it.wireBytes }
+    private fun List<FieldSpec>.sumOfFixedWireBytes(): Int = filterIsInstance<FieldSpec.FixedSize>().sumOf { it.wireBytes }
 
     private fun buildPeekFrameFun(shape: CodecShape): FunSpec {
         val builder =
@@ -2073,6 +2072,7 @@ internal class CodecEmitter(
      * variable-length fields, non-terminal Conditional, non-terminal
      * LengthPrefixedString) become emitable here.
      */
+
     /**
      * Phase I.1 step 6 — emit peek for a shape carrying a bounding
      * `@UseCodec val: <scalar>` field. Materializes a non-consuming view
@@ -3638,9 +3638,7 @@ internal class CodecEmitter(
      * surfaces user-facing diagnostics; the emitter's silence keeps
      * the "out of shape, no codec" pattern intact.
      */
-    private fun analyzeDispatchOnSealedDispatcher(
-        symbol: KSClassDeclaration,
-    ): DispatchOnDispatcherShape? {
+    private fun analyzeDispatchOnSealedDispatcher(symbol: KSClassDeclaration): DispatchOnDispatcherShape? {
         val dispatchOn =
             symbol.annotations.firstOrNull { it.shortName.asString() == "DispatchOn" }
                 ?: return null
@@ -3703,7 +3701,11 @@ internal class CodecEmitter(
             if (!seenValues.add(rawValue)) return null
             val ctor = sub.primaryConstructor ?: return null
             val firstParam = ctor.parameters.firstOrNull() ?: return null
-            val firstParamQname = firstParam.type.resolve().declaration.qualifiedName?.asString()
+            val firstParamQname =
+                firstParam.type
+                    .resolve()
+                    .declaration.qualifiedName
+                    ?.asString()
             if (firstParamQname != discriminatorDecl.qualifiedName?.asString()) return null
             // Variant must analyze cleanly via the existing data-class path.
             // The header field will be a FieldSpec.ValueClassScalar (slice 3).
@@ -4240,8 +4242,7 @@ internal class CodecEmitter(
      * case lowering of the leading character). Disambiguates lambdas
      * across multiple payload-bearing variants without ambiguity.
      */
-    private fun aggregatorLambdaParameterName(variant: DispatchOnVariantSpec): String =
-        "on${variant.simpleName}"
+    private fun aggregatorLambdaParameterName(variant: DispatchOnVariantSpec): String = "on${variant.simpleName}"
 
     /**
      * Stage H slice 10d — return the parent's TypeName as it should

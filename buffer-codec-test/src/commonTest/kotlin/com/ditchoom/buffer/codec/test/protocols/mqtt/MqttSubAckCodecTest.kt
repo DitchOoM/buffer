@@ -47,9 +47,10 @@ class MqttSubAckCodecTest {
         val expected =
             byteArrayOf(
                 0x90.toByte(), // fixed header
-                0x03,          // remaining length (1-byte var-int)
-                0x00, 0x01,    // packet id
-                0x00,          // return code
+                0x03, // remaining length (1-byte var-int)
+                0x00,
+                0x01, // packet id
+                0x00, // return code
             )
         encodeAndAssertBytes(msg, expected)
     }
@@ -68,8 +69,11 @@ class MqttSubAckCodecTest {
             byteArrayOf(
                 0x90.toByte(),
                 0x05,
-                0x12, 0x34,
-                0x00, 0x01, 0x80.toByte(),
+                0x12,
+                0x34,
+                0x00,
+                0x01,
+                0x80.toByte(),
             )
         encodeAndAssertBytes(msg, expected)
     }
@@ -92,11 +96,16 @@ class MqttSubAckCodecTest {
         // decode region to packet-id (2) + 1 return code.
         val wire =
             byteArrayOf(
-                0x90.toByte(), 0x03,
-                0x00, 0x01,
+                0x90.toByte(),
+                0x03,
+                0x00,
+                0x01,
                 0x00,
                 // Trailing bytes (would be the next MQTT packet)
-                0xC0.toByte(), 0x00, 0xDE.toByte(), 0xAD.toByte(),
+                0xC0.toByte(),
+                0x00,
+                0xDE.toByte(),
+                0xAD.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
         val decoded = SubAckCodec.decode(buf, DecodeContext.Empty)
@@ -222,7 +231,11 @@ class MqttSubAckCodecTest {
         val wire =
             byteArrayOf(
                 0x90.toByte(),
-                0x80.toByte(), 0x80.toByte(), 0x80.toByte(), 0x80.toByte(), 0x80.toByte(),
+                0x80.toByte(),
+                0x80.toByte(),
+                0x80.toByte(),
+                0x80.toByte(),
+                0x80.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
         val ex =
@@ -357,7 +370,8 @@ class MqttSubAckCodecTest {
     }
 
     private fun bigEndianBufferOf(wire: ByteArray) =
-        BufferFactory.Default.allocate(wire.size, ByteOrder.BIG_ENDIAN)
+        BufferFactory.Default
+            .allocate(wire.size, ByteOrder.BIG_ENDIAN)
             .also { it.writeBytes(wire) }
             .also { it.resetForRead() }
 

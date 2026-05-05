@@ -75,11 +75,22 @@ class MqttPacketCodecTest {
             byteArrayOf(
                 0x10, // fixed header (type=1, flags=0)
                 0x10, // remaining length = 16 (1-byte var-int)
-                0x00, 0x04, 'M'.code.toByte(), 'Q'.code.toByte(), 'T'.code.toByte(), 'T'.code.toByte(),
+                0x00,
+                0x04,
+                'M'.code.toByte(),
+                'Q'.code.toByte(),
+                'T'.code.toByte(),
+                'T'.code.toByte(),
                 0x04, // protocol level (v3.1.1)
                 0x02, // connect flags = cleanSession only
-                0x00, 0x3C, // keep-alive 60
-                0x00, 0x04, 'a'.code.toByte(), 'b'.code.toByte(), 'c'.code.toByte(), 'd'.code.toByte(),
+                0x00,
+                0x3C, // keep-alive 60
+                0x00,
+                0x04,
+                'a'.code.toByte(),
+                'b'.code.toByte(),
+                'c'.code.toByte(),
+                'd'.code.toByte(),
             )
         encodeAndAssertBytes(msg, expected)
     }
@@ -98,11 +109,22 @@ class MqttPacketCodecTest {
             byteArrayOf(
                 0x10,
                 0x10, // remaining length = 16
-                0x00, 0x04, 'M'.code.toByte(), 'Q'.code.toByte(), 'T'.code.toByte(), 'T'.code.toByte(),
+                0x00,
+                0x04,
+                'M'.code.toByte(),
+                'Q'.code.toByte(),
+                'T'.code.toByte(),
+                'T'.code.toByte(),
                 0x04,
                 0x02,
-                0x00, 0x3C,
-                0x00, 0x04, 'a'.code.toByte(), 'b'.code.toByte(), 'c'.code.toByte(), 'd'.code.toByte(),
+                0x00,
+                0x3C,
+                0x00,
+                0x04,
+                'a'.code.toByte(),
+                'b'.code.toByte(),
+                'c'.code.toByte(),
+                'd'.code.toByte(),
             )
         val buf = BufferFactory.Default.allocate(wire.size).also { it.writeBytes(wire) }
         buf.resetForRead()
@@ -144,11 +166,19 @@ class MqttPacketCodecTest {
             byteArrayOf(
                 0x12,
                 0x0D, // remaining length = 13
-                0x00, 0x04, 'M'.code.toByte(), 'Q'.code.toByte(), 'T'.code.toByte(), 'T'.code.toByte(),
+                0x00,
+                0x04,
+                'M'.code.toByte(),
+                'Q'.code.toByte(),
+                'T'.code.toByte(),
+                'T'.code.toByte(),
                 0x04,
                 0x02,
-                0x00, 0x3C,
-                0x00, 0x01, 'x'.code.toByte(),
+                0x00,
+                0x3C,
+                0x00,
+                0x01,
+                'x'.code.toByte(),
             )
         val buf = BufferFactory.Default.allocate(wire.size).also { it.writeBytes(wire) }
         buf.resetForRead()

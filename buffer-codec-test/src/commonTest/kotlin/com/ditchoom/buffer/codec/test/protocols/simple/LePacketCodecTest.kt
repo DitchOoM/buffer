@@ -36,7 +36,8 @@ class LePacketCodecTest {
         val msg = LePacket(header = LeHeader.of(length = 1, tag = 5), payload = "x")
         val expected =
             byteArrayOf(
-                0x01, 0x05, // header LE: low byte (length=1) first, then tag=5
+                0x01,
+                0x05, // header LE: low byte (length=1) first, then tag=5
                 'x'.code.toByte(),
             )
         encodeAndAssertBytes(msg, expected)
@@ -114,7 +115,8 @@ class LePacketCodecTest {
     }
 
     private fun leBufferOf(wire: ByteArray) =
-        BufferFactory.Default.allocate(wire.size, ByteOrder.LITTLE_ENDIAN)
+        BufferFactory.Default
+            .allocate(wire.size, ByteOrder.LITTLE_ENDIAN)
             .also { it.writeBytes(wire) }
             .also { it.resetForRead() }
 

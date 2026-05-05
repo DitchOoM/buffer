@@ -40,7 +40,12 @@ class MqttPublishV3GenericCodecTest {
                 header = MqttFixedHeader(0x30u),
                 topic = "a/b",
                 packetId = PacketId(0x1234u),
-                payload = JpegImage(width = 4u, height = 8u, data = byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte())),
+                payload =
+                    JpegImage(
+                        width = 4u,
+                        height = 8u,
+                        data = byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte()),
+                    ),
             )
         val codec = MqttPublishV3Codec(JpegImageCodec)
         val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
@@ -50,13 +55,17 @@ class MqttPublishV3GenericCodecTest {
         val expected =
             byteArrayOf(
                 0x30,
-                0x00, 0x03,
+                0x00,
+                0x03,
                 'a'.code.toByte(),
                 '/'.code.toByte(),
                 'b'.code.toByte(),
-                0x12, 0x34,
-                0x00, 0x04,
-                0x00, 0x08,
+                0x12,
+                0x34,
+                0x00,
+                0x04,
+                0x00,
+                0x08,
                 0xDE.toByte(),
                 0xAD.toByte(),
                 0xBE.toByte(),

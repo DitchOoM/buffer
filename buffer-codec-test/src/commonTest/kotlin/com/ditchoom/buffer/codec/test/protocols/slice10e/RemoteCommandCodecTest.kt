@@ -91,9 +91,14 @@ class RemoteCommandCodecTest {
         val expected =
             byteArrayOf(
                 // id length-prefix (UShort BE) + body
-                0x00, 0x01, 'x'.code.toByte(),
+                0x00,
+                0x01,
+                'x'.code.toByte(),
                 // opcode (UInt BE)
-                0x12, 0x34, 0x56, 0x78,
+                0x12,
+                0x34,
+                0x56,
+                0x78,
                 // payload data: empty
             )
         assertContentEquals(expected, actual)

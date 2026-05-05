@@ -8,8 +8,8 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
-import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -36,7 +36,12 @@ class MqttPublishV3ConcreteCodecTest {
                 header = MqttFixedHeader(0x30u),
                 topic = "a/b",
                 packetId = PacketId(0x1234u),
-                payload = JpegImage(width = 4u, height = 8u, data = byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte())),
+                payload =
+                    JpegImage(
+                        width = 4u,
+                        height = 8u,
+                        data = byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte()),
+                    ),
             )
         val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         MqttPublishV3ConcreteCodec.encode(buf, msg, EncodeContext.Empty)
@@ -48,14 +53,18 @@ class MqttPublishV3ConcreteCodecTest {
         val actual = buf.readByteArray(written)
         val expected =
             byteArrayOf(
-                0x30,                      // fixed header
-                0x00, 0x03,                // topic length prefix
+                0x30, // fixed header
+                0x00,
+                0x03, // topic length prefix
                 'a'.code.toByte(),
                 '/'.code.toByte(),
                 'b'.code.toByte(),
-                0x12, 0x34,                // packet id
-                0x00, 0x04,                // jpeg width
-                0x00, 0x08,                // jpeg height
+                0x12,
+                0x34, // packet id
+                0x00,
+                0x04, // jpeg width
+                0x00,
+                0x08, // jpeg height
                 0xDE.toByte(),
                 0xAD.toByte(),
                 0xBE.toByte(),

@@ -58,12 +58,22 @@ class MqttConnectCodecTest {
                 0x10, // fixed header (type=1 << 4)
                 0x0F, // remaining length = 15 (1-byte var-int)
                 // Variable header
-                0x00, 0x04, 'M'.code.toByte(), 'Q'.code.toByte(), 'T'.code.toByte(), 'T'.code.toByte(),
+                0x00,
+                0x04,
+                'M'.code.toByte(),
+                'Q'.code.toByte(),
+                'T'.code.toByte(),
+                'T'.code.toByte(),
                 0x04,
                 0x02.toByte(), // cleanSession only
-                0x00, 0x3C,
+                0x00,
+                0x3C,
                 // Payload — clientId only
-                0x00, 0x03, 'a'.code.toByte(), 'b'.code.toByte(), 'c'.code.toByte(),
+                0x00,
+                0x03,
+                'a'.code.toByte(),
+                'b'.code.toByte(),
+                'c'.code.toByte(),
             )
         roundTripBytewise(msg, expected)
     }
@@ -89,14 +99,35 @@ class MqttConnectCodecTest {
             byteArrayOf(
                 0x10,
                 0x1C, // remaining length = 28
-                0x00, 0x04, 'M'.code.toByte(), 'Q'.code.toByte(), 'T'.code.toByte(), 'T'.code.toByte(),
+                0x00,
+                0x04,
+                'M'.code.toByte(),
+                'Q'.code.toByte(),
+                'T'.code.toByte(),
+                'T'.code.toByte(),
                 0x04,
                 0xC2.toByte(),
-                0x00, 0x3C,
-                0x00, 0x04, 't'.code.toByte(), 'e'.code.toByte(), 's'.code.toByte(), 't'.code.toByte(),
+                0x00,
+                0x3C,
+                0x00,
+                0x04,
+                't'.code.toByte(),
+                'e'.code.toByte(),
+                's'.code.toByte(),
+                't'.code.toByte(),
                 // willTopic / willMessage absent (willPresent bit not set)
-                0x00, 0x04, 'u'.code.toByte(), 's'.code.toByte(), 'e'.code.toByte(), 'r'.code.toByte(),
-                0x00, 0x04, 'p'.code.toByte(), 'a'.code.toByte(), 's'.code.toByte(), 's'.code.toByte(),
+                0x00,
+                0x04,
+                'u'.code.toByte(),
+                's'.code.toByte(),
+                'e'.code.toByte(),
+                'r'.code.toByte(),
+                0x00,
+                0x04,
+                'p'.code.toByte(),
+                'a'.code.toByte(),
+                's'.code.toByte(),
+                's'.code.toByte(),
             )
         roundTripBytewise(msg, expected)
     }
@@ -121,13 +152,25 @@ class MqttConnectCodecTest {
             byteArrayOf(
                 0x10,
                 0x13, // remaining length = 19
-                0x00, 0x04, 'M'.code.toByte(), 'Q'.code.toByte(), 'T'.code.toByte(), 'T'.code.toByte(),
+                0x00,
+                0x04,
+                'M'.code.toByte(),
+                'Q'.code.toByte(),
+                'T'.code.toByte(),
+                'T'.code.toByte(),
                 0x04,
                 0x26.toByte(),
-                0x00, 0x1E,
-                0x00, 0x01, 'c'.code.toByte(),
-                0x00, 0x01, 't'.code.toByte(),
-                0x00, 0x01, 'm'.code.toByte(),
+                0x00,
+                0x1E,
+                0x00,
+                0x01,
+                'c'.code.toByte(),
+                0x00,
+                0x01,
+                't'.code.toByte(),
+                0x00,
+                0x01,
+                'm'.code.toByte(),
                 // username / password absent
             )
         roundTripBytewise(msg, expected)
@@ -165,13 +208,34 @@ class MqttConnectCodecTest {
             byteArrayOf(
                 0x10,
                 0x1C,
-                0x00, 0x04, 'M'.code.toByte(), 'Q'.code.toByte(), 'T'.code.toByte(), 'T'.code.toByte(),
+                0x00,
+                0x04,
+                'M'.code.toByte(),
+                'Q'.code.toByte(),
+                'T'.code.toByte(),
+                'T'.code.toByte(),
                 0x04,
                 0xC2.toByte(),
-                0x00, 0x3C,
-                0x00, 0x04, 't'.code.toByte(), 'e'.code.toByte(), 's'.code.toByte(), 't'.code.toByte(),
-                0x00, 0x04, 'u'.code.toByte(), 's'.code.toByte(), 'e'.code.toByte(), 'r'.code.toByte(),
-                0x00, 0x04, 'p'.code.toByte(), 'a'.code.toByte(), 's'.code.toByte(), 's'.code.toByte(),
+                0x00,
+                0x3C,
+                0x00,
+                0x04,
+                't'.code.toByte(),
+                'e'.code.toByte(),
+                's'.code.toByte(),
+                't'.code.toByte(),
+                0x00,
+                0x04,
+                'u'.code.toByte(),
+                's'.code.toByte(),
+                'e'.code.toByte(),
+                'r'.code.toByte(),
+                0x00,
+                0x04,
+                'p'.code.toByte(),
+                'a'.code.toByte(),
+                's'.code.toByte(),
+                's'.code.toByte(),
             )
         val buf = BufferFactory.Default.allocate(wire.size).also { it.writeBytes(wire) }
         buf.resetForRead()
@@ -189,14 +253,26 @@ class MqttConnectCodecTest {
         // bytes simulate the start of a second packet — must NOT be consumed.
         val wire =
             byteArrayOf(
-                0x10, 0x0F,
-                0x00, 0x04, 'M'.code.toByte(), 'Q'.code.toByte(), 'T'.code.toByte(), 'T'.code.toByte(),
+                0x10,
+                0x0F,
+                0x00,
+                0x04,
+                'M'.code.toByte(),
+                'Q'.code.toByte(),
+                'T'.code.toByte(),
+                'T'.code.toByte(),
                 0x04,
                 0x02.toByte(),
-                0x00, 0x3C,
-                0x00, 0x03, 'a'.code.toByte(), 'b'.code.toByte(), 'c'.code.toByte(),
+                0x00,
+                0x3C,
+                0x00,
+                0x03,
+                'a'.code.toByte(),
+                'b'.code.toByte(),
+                'c'.code.toByte(),
                 // Trailing bytes (start of next packet, e.g., a PINGREQ 0xC0 0x00)
-                0xC0.toByte(), 0x00,
+                0xC0.toByte(),
+                0x00,
             )
         val buf = BufferFactory.Default.allocate(wire.size).also { it.writeBytes(wire) }
         buf.resetForRead()
@@ -303,10 +379,12 @@ class MqttConnectCodecTest {
 
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            stream.append(BufferFactory.Default.allocate(expectedTotal).also {
-                while (encoded.remaining() > 0) it.writeByte(encoded.readByte())
-                it.resetForRead()
-            })
+            stream.append(
+                BufferFactory.Default.allocate(expectedTotal).also {
+                    while (encoded.remaining() > 0) it.writeByte(encoded.readByte())
+                    it.resetForRead()
+                },
+            )
             assertEquals(PeekResult.Complete(expectedTotal), ConnectCodec.peekFrameSize(stream))
         } finally {
             stream.release()

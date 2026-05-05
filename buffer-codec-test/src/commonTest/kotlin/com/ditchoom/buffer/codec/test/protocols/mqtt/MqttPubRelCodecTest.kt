@@ -56,9 +56,14 @@ class MqttPubRelCodecTest {
     fun decodeRespectsRemainingLengthBoundEvenWithTrailingBytes() {
         val wire =
             byteArrayOf(
-                0x62, 0x02,
-                0x00, 0x01,
-                0xC0.toByte(), 0x00, 0xDE.toByte(), 0xAD.toByte(),
+                0x62,
+                0x02,
+                0x00,
+                0x01,
+                0xC0.toByte(),
+                0x00,
+                0xDE.toByte(),
+                0xAD.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
         PubRelCodec.decode(buf, DecodeContext.Empty)
@@ -101,7 +106,11 @@ class MqttPubRelCodecTest {
         val wire =
             byteArrayOf(
                 0x62,
-                0x80.toByte(), 0x80.toByte(), 0x80.toByte(), 0x80.toByte(), 0x80.toByte(),
+                0x80.toByte(),
+                0x80.toByte(),
+                0x80.toByte(),
+                0x80.toByte(),
+                0x80.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
         val ex =
@@ -156,7 +165,8 @@ class MqttPubRelCodecTest {
     }
 
     private fun bigEndianBufferOf(wire: ByteArray) =
-        BufferFactory.Default.allocate(wire.size, ByteOrder.BIG_ENDIAN)
+        BufferFactory.Default
+            .allocate(wire.size, ByteOrder.BIG_ENDIAN)
             .also { it.writeBytes(wire) }
             .also { it.resetForRead() }
 

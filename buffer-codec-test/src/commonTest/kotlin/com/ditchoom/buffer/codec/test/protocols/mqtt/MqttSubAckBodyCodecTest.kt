@@ -29,7 +29,8 @@ class MqttSubAckBodyCodecTest {
         val msg = MqttSubAckBody(packetIdentifier = 1u, returnCodes = emptyList())
         val expected =
             byteArrayOf(
-                0x00, 0x01, // packet identifier
+                0x00,
+                0x01, // packet identifier
             )
         encodeAndAssertBytes(msg, expected)
     }
@@ -48,8 +49,11 @@ class MqttSubAckBodyCodecTest {
             )
         val expected =
             byteArrayOf(
-                0x12, 0x34, // packet identifier
-                0x00, 0x01, 0x80.toByte(), // return codes
+                0x12,
+                0x34, // packet identifier
+                0x00,
+                0x01,
+                0x80.toByte(), // return codes
             )
         encodeAndAssertBytes(msg, expected)
     }

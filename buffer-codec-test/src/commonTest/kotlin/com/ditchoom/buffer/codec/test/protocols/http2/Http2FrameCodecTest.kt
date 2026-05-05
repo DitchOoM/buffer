@@ -62,14 +62,26 @@ class Http2FrameCodecTest {
         val expected =
             byteArrayOf(
                 // Header: length=8 (24-bit BE), type=6
-                0x00, 0x00, 0x08, 0x06,
+                0x00,
+                0x00,
+                0x08,
+                0x06,
                 // Flags
                 0x00,
                 // StreamId (UInt BE), 0
-                0x00, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
                 // Opaque data (ULong BE)
-                0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte(),
-                0xCA.toByte(), 0xFE.toByte(), 0xF0.toByte(), 0x0D.toByte(),
+                0xDE.toByte(),
+                0xAD.toByte(),
+                0xBE.toByte(),
+                0xEF.toByte(),
+                0xCA.toByte(),
+                0xFE.toByte(),
+                0xF0.toByte(),
+                0x0D.toByte(),
             )
         encodeAndAssertBytes(msg, expected)
     }
@@ -87,12 +99,21 @@ class Http2FrameCodecTest {
         val expected =
             byteArrayOf(
                 // Header: length=4 (24-bit BE), type=8
-                0x00, 0x00, 0x04, 0x08,
+                0x00,
+                0x00,
+                0x04,
+                0x08,
                 0x00,
                 // StreamId (UInt BE) = 1
-                0x00, 0x00, 0x00, 0x01,
+                0x00,
+                0x00,
+                0x00,
+                0x01,
                 // windowSizeIncrement (UInt BE) = 65535
-                0x00, 0x00, 0xFF.toByte(), 0xFF.toByte(),
+                0x00,
+                0x00,
+                0xFF.toByte(),
+                0xFF.toByte(),
             )
         encodeAndAssertBytes(msg, expected)
     }
@@ -101,11 +122,23 @@ class Http2FrameCodecTest {
     fun decodesPingFromSpecBytes() {
         val wire =
             byteArrayOf(
-                0x00, 0x00, 0x08, 0x06,
                 0x00,
-                0x00, 0x00, 0x00, 0x00,
-                0x12, 0x34, 0x56, 0x78,
-                0x9A.toByte(), 0xBC.toByte(), 0xDE.toByte(), 0xF0.toByte(),
+                0x00,
+                0x08,
+                0x06,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x12,
+                0x34,
+                0x56,
+                0x78,
+                0x9A.toByte(),
+                0xBC.toByte(),
+                0xDE.toByte(),
+                0xF0.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
         val decoded = binaryDispatcher().decode(buf, DecodeContext.Empty)
@@ -121,10 +154,19 @@ class Http2FrameCodecTest {
     fun decodesWindowUpdateFromSpecBytes() {
         val wire =
             byteArrayOf(
-                0x00, 0x00, 0x04, 0x08,
                 0x00,
-                0x00, 0x00, 0x00, 0x05,
-                0x00, 0x00, 0x10, 0x00,
+                0x00,
+                0x04,
+                0x08,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x05,
+                0x00,
+                0x00,
+                0x10,
+                0x00,
             )
         val buf = bigEndianBufferOf(wire)
         val decoded = binaryDispatcher().decode(buf, DecodeContext.Empty)
@@ -153,12 +195,24 @@ class Http2FrameCodecTest {
         val wire =
             byteArrayOf(
                 // Header: length=8 type=6 (PING)
-                0x00, 0x00, 0x08, 0x06,
+                0x00,
+                0x00,
+                0x08,
+                0x06,
                 0x00,
                 // streamId with R bit set: 0x80_00_00_00
-                0x80.toByte(), 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00,
+                0x80.toByte(),
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
             )
         val buf = bigEndianBufferOf(wire)
         assertFailsWith<IllegalArgumentException> {
@@ -210,15 +264,31 @@ class Http2FrameCodecTest {
         val expected =
             byteArrayOf(
                 // Header: length=12 (24-bit BE) + type=4
-                0x00, 0x00, 0x0C, 0x04,
+                0x00,
+                0x00,
+                0x0C,
+                0x04,
                 // Flags
                 0x00,
                 // StreamId = 0
-                0x00, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
                 // Entry 1: identifier=3, value=100
-                0x00, 0x03, 0x00, 0x00, 0x00, 0x64,
+                0x00,
+                0x03,
+                0x00,
+                0x00,
+                0x00,
+                0x64,
                 // Entry 2: identifier=4, value=65535
-                0x00, 0x04, 0x00, 0x00, 0xFF.toByte(), 0xFF.toByte(),
+                0x00,
+                0x04,
+                0x00,
+                0x00,
+                0xFF.toByte(),
+                0xFF.toByte(),
             )
         encodeAndAssertBytes(msg, expected)
     }
@@ -227,11 +297,27 @@ class Http2FrameCodecTest {
     fun decodesSettingsVariantViaDispatcher() {
         val wire =
             byteArrayOf(
-                0x00, 0x00, 0x0C, 0x04,
                 0x00,
-                0x00, 0x00, 0x00, 0x00,
-                0x00, 0x03, 0x00, 0x00, 0x00, 0x64,
-                0x00, 0x04, 0x00, 0x00, 0xFF.toByte(), 0xFF.toByte(),
+                0x00,
+                0x0C,
+                0x04,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x03,
+                0x00,
+                0x00,
+                0x00,
+                0x64,
+                0x00,
+                0x04,
+                0x00,
+                0x00,
+                0xFF.toByte(),
+                0xFF.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
         val decoded = binaryDispatcher().decode(buf, DecodeContext.Empty)
@@ -268,12 +354,26 @@ class Http2FrameCodecTest {
         // must stop at header.length=6 (one entry) and leave the rest.
         val wire =
             byteArrayOf(
-                0x00, 0x00, 0x06, 0x04,
                 0x00,
-                0x00, 0x00, 0x00, 0x00,
-                0x00, 0x03, 0x00, 0x00, 0x00, 0x64,
+                0x00,
+                0x06,
+                0x04,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x03,
+                0x00,
+                0x00,
+                0x00,
+                0x64,
                 // Trailing bytes (next frame's header)
-                0x00, 0x00, 0x08, 0x06,
+                0x00,
+                0x00,
+                0x08,
+                0x06,
             )
         val buf = bigEndianBufferOf(wire)
         val settings = assertIs<Http2Frame.Settings>(binaryDispatcher().decode(buf, DecodeContext.Empty))
@@ -404,12 +504,20 @@ class Http2FrameCodecTest {
         val expected =
             byteArrayOf(
                 // header: length=3 (24 bits BE) | type=0
-                0x00, 0x00, 0x03, 0x00,
+                0x00,
+                0x00,
+                0x03,
+                0x00,
                 0x00,
                 // streamId
-                0x00, 0x00, 0x00, 0x01,
+                0x00,
+                0x00,
+                0x00,
+                0x01,
                 // payload bytes
-                0x11, 0x22, 0x33,
+                0x11,
+                0x22,
+                0x33,
             )
         assertContentEquals(expected, actual)
     }
@@ -502,8 +610,7 @@ class Http2FrameCodecTest {
                     .encode(it, value, EncodeContext.Empty)
             }
 
-    private fun binaryDispatcher(): Http2FrameCodec<Http2BinaryPayload> =
-        Http2FrameCodec(Http2BinaryPayloadCodec)
+    private fun binaryDispatcher(): Http2FrameCodec<Http2BinaryPayload> = Http2FrameCodec(Http2BinaryPayloadCodec)
 }
 
 /** Minimal binary `Payload` for the slice 10d HTTP/2 vector. */
