@@ -144,28 +144,27 @@ sealed interface MqttV5Packet<out P : Payload> {
      * Type-4 PUBACK per MQTT v5.0 §3.4. Wire layout:
      *
      * ```text
-     *   40 <RL> <pid> [<rc>]
+     *   40 <RL> <pid> [<rc> [<propLen> <props...>]]
      * ```
      *
      * Per §3.4.2.1: "The Reason Code and Property Length can be omitted
      * if the Reason Code is 0x00 (Success) and there are no Properties.
-     * In this case the PUBACK has a Remaining Length of 2." This slice
-     * lands the `[rc]` half of the cascade — `reasonCode` is gated on
-     * `@When("remaining >= 1")`, the new grammar-2 predicate. The
-     * `[properties]` half of the cascade (gated on `remaining >= 1`
-     * after rc is read) is deferred to a later slice that lifts the
-     * conditional inner shape to accept `@LengthPrefixed @UseCodec
-     * val: List<E>?` (slice 5+).
+     * In this case the PUBACK has a Remaining Length of 2." Per
+     * §3.4.2.2.1: "If the Remaining Length is less than 4 there is no
+     * Property Length and the value of 0 is used."
      *
-     * Three valid wire forms in this slice's modeling:
+     * The cascade is encoded as two `@When("remaining >= 1")` predicate
+     * fields; the decoder tests the bounded buffer's `remaining()`
+     * after each step and skips the slot if there isn't a byte to read.
+     * The encoder gates each slot on field-non-null (caller signals
+     * "include this slot" by setting the field).
      *
-     *   - `40 02 <pid_msb> <pid_lsb>`           — Success, no rc on wire
-     *   - `40 03 <pid_msb> <pid_lsb> <rc>`      — explicit reason code
+     * Four valid wire forms:
      *
-     * Encode-side: the `@When("remaining ...")` grammar-2 semantics gate
-     * the slot on `value.reasonCode != null`. Caller picks the wire
-     * form by setting `reasonCode` (null → omit; 0x00 → write 0x00 +
-     * RL=3; other → write that value + RL=3).
+     *   - `40 02 <pid>`                      — Success, no rc, no props
+     *   - `40 03 <pid> <rc>`                 — rc, no props (RL<4 elides propLen per §3.4.2.2.1)
+     *   - `40 04 <pid> <rc> 00`              — rc + empty bag
+     *   - `40 (>=5) <pid> <rc> <pl> <ps...>` — rc + non-empty bag
      */
     @PacketType(value = 4)
     @ProtocolMessage(wireOrder = Endianness.Big)
@@ -174,6 +173,10 @@ sealed interface MqttV5Packet<out P : Payload> {
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
         @When("remaining >= 1") val reasonCode: UByte? = null,
+        @When("remaining >= 1")
+        @LengthPrefixed
+        @UseCodec(MqttRemainingLengthCodec::class)
+        val properties: List<MqttV5Property>? = null,
     ) : MqttV5Packet<Nothing>
 
     /**
@@ -245,6 +248,10 @@ sealed interface MqttV5Packet<out P : Payload> {
         val header: MqttFixedHeader = MqttFixedHeader(0xE0u),
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
         @When("remaining >= 1") val reasonCode: UByte? = null,
+        @When("remaining >= 1")
+        @LengthPrefixed
+        @UseCodec(MqttRemainingLengthCodec::class)
+        val properties: List<MqttV5Property>? = null,
     ) : MqttV5Packet<Nothing>
 
     /**

@@ -1098,7 +1098,7 @@ internal class CodecEmitter(
         if (!type.isMarkedNullable) return false
         return param.annotations.all {
             val n = it.shortName.asString()
-            n == "When" || n == "LengthPrefixed"
+            n == "When" || n == "LengthPrefixed" || n == "UseCodec"
         }
     }
 
@@ -1249,8 +1249,21 @@ internal class CodecEmitter(
     ): ConditionalInner? {
         val lengthPrefixedAnn =
             param.annotations.firstOrNull { it.shortName.asString() == "LengthPrefixed" }
+        val useCodecAnn =
+            param.annotations.firstOrNull { it.shortName.asString() == "UseCodec" }
         val innerType = param.type.resolve().makeNotNullable()
         val qualified = innerType.declaration.qualifiedName?.asString() ?: return null
+        if (lengthPrefixedAnn != null && useCodecAnn != null) {
+            // Phase J.M.5 — `@When @LengthPrefixed @UseCodec(C) val xs:
+            // List<E>?` cascading-trailer property bag for v5 acks.
+            // Mirrors the slice 11 non-conditional analyzer's element
+            // requirements (data class OR sealed `@ProtocolMessage`
+            // with `@DispatchOn`, no payload-generic).
+            return analyzeConditionalLengthPrefixedUseCodecListInner(
+                innerType = innerType,
+                useCodecAnn = useCodecAnn,
+            )
+        }
         if (lengthPrefixedAnn != null) {
             // Slice 3.5 widens the inner universe to LengthPrefixed
             // String only. LengthPrefixed @ProtocolMessage bodies are
@@ -1270,6 +1283,58 @@ internal class CodecEmitter(
         if (valueClassInner != null) return valueClassInner
         val kind = SUPPORTED_SCALARS[qualified] ?: return null
         return ConditionalInner.Scalar(kind = kind)
+    }
+
+    /**
+     * Phase J.M.5 — analyze a conditional `@LengthPrefixed @UseCodec(C)
+     * val xs: List<E>?` field. Mirrors
+     * [analyzeLengthPrefixedUseCodecListField] (the non-conditional
+     * counterpart) for element-type requirements: data class OR sealed
+     * parent (interface / class) with `@ProtocolMessage`, non-payload-
+     * generic. Returns `null` for any element shape that doesn't satisfy
+     * those constraints — caller falls through and the field is rejected
+     * upstream.
+     */
+    private fun analyzeConditionalLengthPrefixedUseCodecListInner(
+        innerType: KSType,
+        useCodecAnn: KSAnnotation,
+    ): ConditionalInner.LengthPrefixedUseCodecList? {
+        if (innerType.declaration.qualifiedName?.asString() != "kotlin.collections.List") return null
+        val typeArgs = innerType.arguments
+        if (typeArgs.size != 1) return null
+        val elementType = typeArgs[0].type?.resolve() ?: return null
+        if (elementType.isError || elementType.isMarkedNullable) return null
+        val elementDecl = elementType.declaration as? KSClassDeclaration ?: return null
+        val isDataClass = Modifier.DATA in elementDecl.modifiers
+        val isSealed = Modifier.SEALED in elementDecl.modifiers
+        if (!isDataClass && !isSealed) return null
+        val isProtocolMessage =
+            elementDecl.annotations.any { ann ->
+                ann.shortName.asString() == "ProtocolMessage" &&
+                    ann.annotationType
+                        .resolve()
+                        .declaration.qualifiedName
+                        ?.asString() == PROTOCOL_MESSAGE_QNAME
+            }
+        if (!isProtocolMessage) return null
+        if (detectPayloadTypeParameter(elementDecl) != null) return null
+        val codecKsType =
+            useCodecAnn.arguments
+                .firstOrNull { it.name?.asString() == "codec" }
+                ?.value as? KSType ?: return null
+        val codecDecl = codecKsType.declaration as? KSClassDeclaration ?: return null
+        if (codecDecl.classKind != ClassKind.OBJECT) return null
+        if (!codecDecl.implementsBoundingLengthCodec()) return null
+        return ConditionalInner.LengthPrefixedUseCodecList(
+            codecType = ClassName(codecDecl.packageName.asString(), codecDecl.simpleName.asString()),
+            elementClassName = classNameOf(elementDecl),
+            elementCodecClassName =
+                ClassName(
+                    elementDecl.packageName.asString(),
+                    "${elementDecl.simpleName.asString()}Codec",
+                ),
+            elementIsSealed = isSealed,
+        )
     }
 
     /**
@@ -1312,6 +1377,10 @@ internal class CodecEmitter(
             is ConditionalInner.Scalar -> scalarTypeName(inner.kind).copy(nullable = true)
             is ConditionalInner.LengthPrefixedString -> STRING_NULLABLE_TN
             is ConditionalInner.ValueClassScalar -> inner.valueClassType.copy(nullable = true)
+            is ConditionalInner.LengthPrefixedUseCodecList ->
+                ClassName("kotlin.collections", "List")
+                    .parameterizedBy(inner.elementClassName)
+                    .copy(nullable = true)
         }
 
     /**
@@ -2216,8 +2285,18 @@ internal class CodecEmitter(
         // `UseCodecScalar` branch above — that branch returns total =
         // priorBytes + vbi_width + rl_value before reaching here, so the
         // sequential walk never visits the grammar-2 field.
+        //
+        // Also collapse for any conditional whose inner is
+        // `LengthPrefixedUseCodecList` (the cascading-trailer property
+        // bag). The inner shape is variable-length — a VBI prefix +
+        // body bytes — and peek can't predict whether the conditional
+        // branch is taken without buffer access. v5 ack peek is owned
+        // by the bounding RL upstream (same as above).
         if (shape.fields.any {
-                it is FieldSpec.Conditional && it.condition is ConditionRef.RemainingCmp
+                it is FieldSpec.Conditional && (
+                    it.condition is ConditionRef.RemainingCmp ||
+                        it.inner is ConditionalInner.LengthPrefixedUseCodecList
+                )
             }
         ) {
             builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
@@ -2706,6 +2785,15 @@ internal class CodecEmitter(
                 appendPeekAvailabilityCheck(body, inner.innerKind.width)
                 body.addStatement("__offset += %L", inner.innerKind.width)
             }
+            is ConditionalInner.LengthPrefixedUseCodecList ->
+                // Phase J.M.5 — unreachable: any shape with this inner
+                // collapses the whole frame to NoFraming via
+                // `buildPeekFrameFun`'s upfront short-circuit, so the
+                // sequential walk never reaches here.
+                error(
+                    "appendSequentialPeekConditional reached LengthPrefixedUseCodecList — " +
+                        "buildPeekFrameFun should have short-circuited the shape to NoFraming.",
+                )
         }
         body.endControlFlow()
     }
@@ -2947,6 +3035,51 @@ internal class CodecEmitter(
                     naturalScalarReadExpr(inner.innerKind),
                 )
             }
+            is ConditionalInner.LengthPrefixedUseCodecList -> {
+                // Phase J.M.5 — `@When @LengthPrefixed @UseCodec(C) val
+                // xs: List<E>?` — predicate-true branch runs the slice 11
+                // inner-bag decode (read VBI prefix → applyBound → walk
+                // elements → restore outer limit). Else null.
+                body.beginControlFlow(
+                    "val %L: %T = if (%L)",
+                    field.name,
+                    field.nullableTypeName,
+                    decodeConditionExpr(field.condition),
+                )
+                val outerLimitVar = "__${field.name}OuterLimit"
+                val lengthVar = "__${field.name}Length"
+                body.addStatement("val %L = buffer.limit()", outerLimitVar)
+                body.addStatement(
+                    "val %L = %T.decode(buffer, context)",
+                    lengthVar,
+                    inner.codecType,
+                )
+                body.addStatement(
+                    "%T.applyBound(buffer, %L)",
+                    inner.codecType,
+                    lengthVar,
+                )
+                body.addStatement(
+                    "val %LValue = mutableListOf<%T>()",
+                    field.name,
+                    inner.elementClassName,
+                )
+                body.beginControlFlow("try")
+                body.beginControlFlow("while (buffer.position() < buffer.limit())")
+                body.addStatement(
+                    "%LValue += %T.decode(buffer, context)",
+                    field.name,
+                    inner.elementCodecClassName,
+                )
+                body.endControlFlow()
+                body.nextControlFlow("finally")
+                body.addStatement("buffer.setLimit(%L)", outerLimitVar)
+                body.endControlFlow()
+                body.addStatement("%LValue", field.name)
+                body.nextControlFlow("else")
+                body.addStatement("null")
+                body.endControlFlow()
+            }
         }
     }
 
@@ -3007,8 +3140,81 @@ internal class CodecEmitter(
                         "$localName.${inner.innerPropertyName}",
                     ),
                 )
+            is ConditionalInner.LengthPrefixedUseCodecList ->
+                appendEncodeConditionalLengthPrefixedUseCodecList(
+                    body = body,
+                    field = field,
+                    inner = inner,
+                    accessor = localName,
+                )
         }
         body.endControlFlow()
+    }
+
+    /**
+     * Phase J.M.5 — encode a conditional `@LengthPrefixed @UseCodec(C)
+     * val xs: List<E>?`. Reuses the slice 11 emit shapes:
+     *  - sealed elements: scratch-buffer encode (handles BackPatch
+     *    element wireSize transparently),
+     *  - data-class elements: pre-measure body bytes via element
+     *    codec's `wireSize as Exact`, write VBI prefix, iterate.
+     *
+     * `accessor` is the smart-cast non-null local established by the
+     * outer `appendEncodeConditional` (`<name>Value`). Inside this
+     * helper that local IS the list — the slice 11 non-conditional
+     * emit reads `value.<name>` instead, but here `value.<name>` is
+     * `List<E>?` so we read the local.
+     */
+    private fun appendEncodeConditionalLengthPrefixedUseCodecList(
+        body: CodeBlock.Builder,
+        field: FieldSpec.Conditional,
+        inner: ConditionalInner.LengthPrefixedUseCodecList,
+        accessor: String,
+    ) {
+        if (inner.elementIsSealed) {
+            val scratchVar = "__${field.name}Scratch"
+            val bodyBytesVar = "__${field.name}BodyBytes"
+            body.beginControlFlow(
+                "%T.%M.allocate(64, buffer.byteOrder).%M { %L ->",
+                BUFFER_FACTORY_CN,
+                BUFFER_FACTORY_DEFAULT_MN,
+                BUFFER_USE_MN,
+                scratchVar,
+            )
+            body.beginControlFlow("for (__elem in %L)", accessor)
+            body.addStatement(
+                "%T.encode(%L, __elem, context)",
+                inner.elementCodecClassName,
+                scratchVar,
+            )
+            body.endControlFlow()
+            body.addStatement("val %L = %L.position()", bodyBytesVar, scratchVar)
+            body.addStatement(
+                "%T.encode(buffer, %L.toUInt(), context)",
+                inner.codecType,
+                bodyBytesVar,
+            )
+            body.addStatement("%L.resetForRead()", scratchVar)
+            body.addStatement("buffer.write(%L)", scratchVar)
+            body.endControlFlow()
+        } else {
+            val bodyBytesVar = "__${field.name}BodyBytes"
+            body.addStatement(
+                "val %L = %L.sumOf { (%T.wireSize(it, context) as %T.Exact).bytes }",
+                bodyBytesVar,
+                accessor,
+                inner.elementCodecClassName,
+                WIRE_SIZE_CN,
+            )
+            body.addStatement(
+                "%T.encode(buffer, %L.toUInt(), context)",
+                inner.codecType,
+                bodyBytesVar,
+            )
+            body.beginControlFlow("for (__elem in %L)", accessor)
+            body.addStatement("%T.encode(buffer, __elem, context)", inner.elementCodecClassName)
+            body.endControlFlow()
+        }
     }
 
     /**
@@ -5426,6 +5632,23 @@ internal class CodecEmitter(
             val valueClassType: ClassName,
             val innerKind: ScalarKind,
             val innerPropertyName: String,
+        ) : ConditionalInner
+
+        /**
+         * Phase J.M.5 — conditional `@LengthPrefixed @UseCodec(C) val:
+         * List<E>?`. The cascading-trailer property bag for v5 acks
+         * (PUBACK et al. §3.4.2.2.1). When the predicate is true (and
+         * for grammar 2, when `value.<name> != null` at encode time),
+         * the inner shape is the slice 11 length-prefixed property-bag
+         * decode/encode. Mirrors `FieldSpec.LengthPrefixedUseCodecList`'s
+         * fields one-for-one — the same emit is used inside the
+         * conditional `if` block.
+         */
+        data class LengthPrefixedUseCodecList(
+            val codecType: ClassName,
+            val elementClassName: ClassName,
+            val elementCodecClassName: ClassName,
+            val elementIsSealed: Boolean,
         ) : ConditionalInner
     }
 

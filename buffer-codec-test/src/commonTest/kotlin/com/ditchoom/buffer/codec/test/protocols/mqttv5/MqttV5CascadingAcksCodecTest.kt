@@ -198,6 +198,105 @@ class MqttV5CascadingAcksCodecTest {
     }
 
     @Test
+    fun encodesPubAckWithEmptyPropertyBagAsRl4() {
+        // §3.4.2.2.1 — RL=4 is the minimum that carries a Property
+        // Length byte (0x00 = empty bag).
+        val msg =
+            MqttV5Packet.PubAck(
+                remainingLength = 4u,
+                packetIdentifier = 0x002Au,
+                reasonCode = 0x10u,
+                properties = emptyList(),
+            )
+        val buf = encode(msg)
+        buf.resetForRead()
+        assertContentEquals(
+            byteArrayOf(0x40, 0x04, 0x00, 0x2A, 0x10, 0x00),
+            buf.readByteArray(buf.remaining()),
+        )
+    }
+
+    @Test
+    fun encodesPubAckWithPopulatedPropertyBag() {
+        // RL = 2 (pid) + 1 (rc) + 1 (propLen) + 5 (MessageExpiry) = 9
+        val msg =
+            MqttV5Packet.PubAck(
+                remainingLength = 9u,
+                packetIdentifier = 0x002Au,
+                reasonCode = 0x00u,
+                properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
+            )
+        val buf = encode(msg)
+        buf.resetForRead()
+        assertContentEquals(
+            byteArrayOf(
+                0x40,
+                0x09, // RL = 9
+                0x00,
+                0x2A, // pid = 42
+                0x00, // rc = Success
+                0x05, // propLen = 5
+                0x02, // MessageExpiryInterval id
+                0x00,
+                0x00,
+                0x00,
+                0x3C, // expiry = 60
+            ),
+            buf.readByteArray(buf.remaining()),
+        )
+    }
+
+    @Test
+    fun roundTripsPubAckAllFourCascadeForms() {
+        val cases =
+            listOf(
+                // Form 1: bare PUBACK, no rc, no props
+                MqttV5Packet.PubAck(remainingLength = 2u, packetIdentifier = 0x0001u),
+                // Form 2: rc only (RL<4 elides propLen)
+                MqttV5Packet.PubAck(remainingLength = 3u, packetIdentifier = 0x0001u, reasonCode = 0x10u),
+                // Form 3: rc + empty property bag (RL=4)
+                MqttV5Packet.PubAck(
+                    remainingLength = 4u,
+                    packetIdentifier = 0x0001u,
+                    reasonCode = 0x00u,
+                    properties = emptyList(),
+                ),
+                // Form 4: rc + non-empty property bag
+                MqttV5Packet.PubAck(
+                    remainingLength = 22u,
+                    packetIdentifier = 0x0001u,
+                    reasonCode = 0x00u,
+                    properties =
+                        listOf(
+                            MqttV5Property.MessageExpiryInterval(seconds = 3_600u),
+                            MqttV5Property.ContentType(value = "text/plain"),
+                        ),
+                ),
+            )
+        for (msg in cases) {
+            val buf = encode(msg)
+            buf.resetForRead()
+            val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
+            assertEquals(msg, decoded, "round-trip $msg")
+        }
+    }
+
+    @Test
+    fun roundTripsDisconnectWithProperties() {
+        // body = 1 (rc) + 1 (propLen=5) + 5 (MessageExpiry) = 7
+        val original =
+            MqttV5Packet.Disconnect(
+                remainingLength = 7u,
+                reasonCode = 0x00u, // Normal disconnection (with reason for properties to attach)
+                properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
+            )
+        val buf = encode(original)
+        buf.resetForRead()
+        val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
+        assertEquals(original, decoded)
+    }
+
+    @Test
     fun peekFrameSizeForDisconnectDripFed() {
         val msg = MqttV5Packet.Disconnect(remainingLength = 1u, reasonCode = 0x8Du)
         val buf = encode(msg)
