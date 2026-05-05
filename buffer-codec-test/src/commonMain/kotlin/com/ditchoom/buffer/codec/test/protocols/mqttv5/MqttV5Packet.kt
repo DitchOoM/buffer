@@ -244,7 +244,24 @@ sealed interface MqttV5Packet<out P : Payload> {
         @LengthPrefixed
         @UseCodec(MqttRemainingLengthCodec::class)
         val properties: List<MqttV5Property>? = null,
-    ) : MqttV5Packet<Nothing>
+    ) : MqttV5Packet<Nothing> {
+        init {
+            // Phase J.M.5 audit-2c — cascading-trailer invariant. Per spec
+            // §3.4.2.2.1 the property bag is encoded only after the reason
+            // code; if `properties` is set without `reasonCode` the wire
+            // would lose its self-framing (the `propLen` byte would land
+            // where `rc` should be on decode). Caller responsibility per
+            // row 20 doctrine. Option 2 (sum-type trailers) and option 3
+            // (factory overloads) were rejected: option 2 needs the
+            // dispatcher to analyze a sealed `*Trailers` parent
+            // (substantial emitter scope); option 3's primary constructor
+            // can't be hidden cleanly on a Kotlin `data class`.
+            require(reasonCode != null || properties == null) {
+                "v5 PUBACK cascade invariant: properties cannot be set without reasonCode " +
+                    "(spec §3.4.2.2.1)"
+            }
+        }
+    }
 
     /**
      * Type-5 PUBREC per MQTT v5.0 §3.5 — same shape as PUBACK with
@@ -392,7 +409,16 @@ sealed interface MqttV5Packet<out P : Payload> {
         @LengthPrefixed
         @UseCodec(MqttRemainingLengthCodec::class)
         val properties: List<MqttV5Property>? = null,
-    ) : MqttV5Packet<Nothing>
+    ) : MqttV5Packet<Nothing> {
+        init {
+            // Phase J.M.5 audit-2c — cascading-trailer invariant per
+            // spec §3.14.2.1; see [PubAck.init] for the doctrine note.
+            require(reasonCode != null || properties == null) {
+                "v5 DISCONNECT cascade invariant: properties cannot be set without reasonCode " +
+                    "(spec §3.14.2.1)"
+            }
+        }
+    }
 
     /**
      * Type-15 AUTH per MQTT v5.0 §3.15 — v5-only packet. Fixed header

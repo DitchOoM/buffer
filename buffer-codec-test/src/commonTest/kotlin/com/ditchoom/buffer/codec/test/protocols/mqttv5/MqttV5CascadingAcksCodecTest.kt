@@ -13,6 +13,7 @@ import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 
 /**
@@ -328,6 +329,68 @@ class MqttV5CascadingAcksCodecTest {
         } finally {
             stream.release()
             pool.clear()
+        }
+    }
+
+    @Test
+    fun pubAckRejectsPropertiesWithoutReasonCode() {
+        // Phase J.M.5 audit-2c — caller cannot construct `(rc=null,
+        // properties=non-null)` because the wire would misframe (the
+        // propLen byte would land where rc should be on decode).
+        // The init-block require fires immediately at construction.
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                MqttV5Packet.PubAck(
+                    remainingLength = 4u,
+                    packetIdentifier = 0x002Au,
+                    reasonCode = null,
+                    properties = emptyList(),
+                )
+            }
+        assertEquals(
+            true,
+            ex.message?.contains("cascade invariant"),
+            "expected cascade-invariant message, got: ${ex.message}",
+        )
+    }
+
+    @Test
+    fun pubAckRejectsNonEmptyPropertiesWithoutReasonCode() {
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Packet.PubAck(
+                remainingLength = 7u,
+                packetIdentifier = 0x002Au,
+                reasonCode = null,
+                properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
+            )
+        }
+    }
+
+    @Test
+    fun disconnectRejectsPropertiesWithoutReasonCode() {
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                MqttV5Packet.Disconnect(
+                    remainingLength = 2u,
+                    reasonCode = null,
+                    properties = emptyList(),
+                )
+            }
+        assertEquals(
+            true,
+            ex.message?.contains("cascade invariant"),
+            "expected cascade-invariant message, got: ${ex.message}",
+        )
+    }
+
+    @Test
+    fun disconnectRejectsNonEmptyPropertiesWithoutReasonCode() {
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Packet.Disconnect(
+                remainingLength = 5u,
+                reasonCode = null,
+                properties = listOf(MqttV5Property.ContentType(value = "application/json")),
+            )
         }
     }
 
