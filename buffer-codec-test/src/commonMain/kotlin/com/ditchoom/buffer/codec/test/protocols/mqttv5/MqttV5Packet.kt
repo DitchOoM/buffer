@@ -9,6 +9,7 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import com.ditchoom.buffer.codec.annotations.UseCodec
 import com.ditchoom.buffer.codec.annotations.When
+import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttConnectFlags
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttUnsubscribeTopic
@@ -50,6 +51,71 @@ import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
 @DispatchOn(MqttFixedHeader::class)
 @ProtocolMessage
 sealed interface MqttV5Packet<out P : Payload> {
+    /**
+     * Type-1 CONNECT per MQTT v5.0 §3.1 — full variable header and
+     * payload. Wire layout:
+     *
+     * ```text
+     *   10 <RL>
+     *   00 04 'M' 'Q' 'T' 'T'   protocol name "MQTT" (LengthPrefixed)
+     *   05                      protocol level 5 (v5.0)
+     *   <flags>                 connect flags (bit-packed UByte)
+     *   <ka_msb> <ka_lsb>       keep-alive seconds (UShort BE)
+     *   <propLen VBI> <props..> v5 connect properties (always present)
+     *   <client id LP>          length-prefixed UTF-8 client id
+     *   <willPropLen VBI>?      will properties — present iff flags.willPresent
+     *   <will props...>?        will-property entries
+     *   <will topic LP>?        present iff flags.willPresent
+     *   <will message LP>?      present iff flags.willPresent (modeled as String;
+     *                           technically arbitrary bytes per §3.1.3.3 — same
+     *                           caveat as v3 Connect, deferred until @Payload
+     *                           slot lands)
+     *   <username LP>?          present iff flags.usernamePresent
+     *   <password LP>?          present iff flags.passwordPresent (modeled as
+     *                           String; same arbitrary-bytes caveat)
+     * ```
+     *
+     * Composes:
+     *  - the always-present property bag (slice 2 shape) between
+     *    `keepAliveSeconds` and `clientId`,
+     *  - the conditional will-properties (slice 5 shape) between
+     *    `clientId` and `willTopic` — grammar 1 predicate
+     *    `flags.willPresent` (sibling value-class property),
+     *  - the existing `@LengthPrefixed @When val: String?` shape
+     *    (slice 3.5) for will-topic / will-message / username /
+     *    password — inherited from the v3 Connect fixture.
+     *
+     * Reuses `MqttConnectFlags` from the v3 fixtures — bit layout is
+     * unchanged in v5 (§3.1.2.3).
+     *
+     * Modeled as `: MqttV5Packet<Nothing>` for now — binary
+     * will-message / password (`@Payload WP`/`@Payload PP`) needs the
+     * multi-generic dispatcher lift documented in PHASE_J_M_BRIEF.md
+     * §4. Deferred until a vector requires arbitrary will/password
+     * bytes; until then String modeling is wire-correct for ASCII.
+     */
+    @PacketType(value = 1)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class Connect(
+        val header: MqttFixedHeader = MqttFixedHeader(0x10u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
+        @LengthPrefixed val protocolName: String,
+        val protocolLevel: UByte,
+        val connectFlags: MqttConnectFlags,
+        val keepAliveSeconds: UShort,
+        @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
+        val properties: List<MqttV5Property>,
+        @LengthPrefixed val clientId: String,
+        @When("connectFlags.willPresent")
+        @LengthPrefixed
+        @UseCodec(MqttRemainingLengthCodec::class)
+        val willProperties: List<MqttV5Property>? = null,
+        @LengthPrefixed @When("connectFlags.willPresent") val willTopic: String? = null,
+        @LengthPrefixed @When("connectFlags.willPresent") val willMessage: String? = null,
+        @LengthPrefixed @When("connectFlags.usernamePresent") val username: String? = null,
+        @LengthPrefixed @When("connectFlags.passwordPresent") val password: String? = null,
+    ) : MqttV5Packet<Nothing>
+
     /**
      * Type-2 CONNACK per MQTT v5.0 §3.2 — fixed header `0x20` +
      * remaining length + connect-ack-flags (`UByte`, §3.2.2.1: bit 0 is
