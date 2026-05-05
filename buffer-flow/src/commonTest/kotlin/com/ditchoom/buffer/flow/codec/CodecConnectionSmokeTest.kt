@@ -62,7 +62,7 @@ class CodecConnectionSmokeTest {
                     )
                 val publish =
                     MqttPacket.Publish<TextPayload>(
-                        header = MqttFixedHeader(0x30u),
+                        header = MqttFixedHeader(0x32u),
                         // body = topic LP (2 + 7) + packetId (2) + payload "ping" (4) = 15
                         remainingLength = 15u,
                         topic = "hello/1",
@@ -137,7 +137,7 @@ class CodecConnectionSmokeTest {
                     )
                 val publish =
                     MqttPacket.Publish<TextPayload>(
-                        header = MqttFixedHeader(0x30u),
+                        header = MqttFixedHeader(0x32u),
                         // body = topic LP (2 + 1) + packetId (2) + payload "hi" (2) = 7
                         remainingLength = 7u,
                         topic = "x",
@@ -190,7 +190,7 @@ class CodecConnectionSmokeTest {
                     )
                 val publish =
                     MqttPacket.Publish<TextPayload>(
-                        header = MqttFixedHeader(0x30u),
+                        header = MqttFixedHeader(0x32u),
                         remainingLength = 19u, // 2 + 7 (topic) + 2 (pid) + 8 (payload "byTopic!")
                         topic = "topic/A",
                         packetId = PacketId(99u),

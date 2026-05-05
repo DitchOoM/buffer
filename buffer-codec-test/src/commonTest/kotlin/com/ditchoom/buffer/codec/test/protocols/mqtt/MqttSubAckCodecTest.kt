@@ -24,13 +24,21 @@ import kotlin.test.assertFailsWith
  *
  * Var-int boundary tests (§2.2.3) cover the 1→2, 2→3, 3→4 byte
  * transitions and the 0/max boundaries.
+ *
+ * Phase J.M step 3 — folded onto the `MqttPacket.SubAck` sealed
+ * variant. Drives `SubAckCodec` (the per-variant codec object emitted
+ * by the slice 6 dispatcher) per the brief's option 1: same byte-
+ * exact assertions, same Partial / Aggregator / peekFrameSize
+ * coverage, with the per-variant codec reachable directly. The
+ * standalone `MqttSubAck` data class + `MqttSubAckCodec` are gone
+ * with this fold.
  */
 class MqttSubAckCodecTest {
     @Test
     fun encodesSingleReturnCodeByteExact() {
         // SUBACK type=9 << 4 = 0x90, remainingLength=3 (packet id + 1 return code).
         val msg =
-            MqttSubAck(
+            MqttPacket.SubAck(
                 header = MqttFixedHeader(0x90u),
                 remainingLength = 3u,
                 packetIdentifier = 1u,
@@ -50,7 +58,7 @@ class MqttSubAckCodecTest {
     fun encodesMultipleReturnCodesByteExact() {
         // remainingLength = 2 (packet id) + 3 (return codes) = 5
         val msg =
-            MqttSubAck(
+            MqttPacket.SubAck(
                 header = MqttFixedHeader(0x90u),
                 remainingLength = 5u,
                 packetIdentifier = 0x1234u,
@@ -70,7 +78,7 @@ class MqttSubAckCodecTest {
     fun decodesSingleReturnCodeFromSpecBytes() {
         val wire = byteArrayOf(0x90.toByte(), 0x03, 0x00, 0x01, 0x00)
         val buf = bigEndianBufferOf(wire)
-        val decoded = MqttSubAckCodec.decode(buf, DecodeContext.Empty)
+        val decoded = SubAckCodec.decode(buf, DecodeContext.Empty)
         assertEquals(MqttFixedHeader(0x90u), decoded.header)
         assertEquals(3u, decoded.remainingLength)
         assertEquals(1u.toUShort(), decoded.packetIdentifier)
@@ -91,7 +99,7 @@ class MqttSubAckCodecTest {
                 0xC0.toByte(), 0x00, 0xDE.toByte(), 0xAD.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
-        val decoded = MqttSubAckCodec.decode(buf, DecodeContext.Empty)
+        val decoded = SubAckCodec.decode(buf, DecodeContext.Empty)
         assertEquals(1, decoded.returnCodes.size, "decode bounded by remainingLength, not buffer remaining")
         assertEquals(5, buf.position(), "decode advanced exactly through SUBACK")
         assertEquals(4, buf.remaining(), "trailing 4 bytes left in buffer for next packet")
@@ -108,14 +116,14 @@ class MqttSubAckCodecTest {
         buf.writeByte(0x00.toByte())
         buf.resetForRead()
         val originalLimit = buf.limit()
-        MqttSubAckCodec.decode(buf, DecodeContext.Empty)
+        SubAckCodec.decode(buf, DecodeContext.Empty)
         assertEquals(originalLimit, buf.limit(), "decode restored the outer limit")
     }
 
     @Test
     fun roundTripsSpecExample() {
         val original =
-            MqttSubAck(
+            MqttPacket.SubAck(
                 header = MqttFixedHeader(0x90u),
                 remainingLength = 5u,
                 packetIdentifier = 0xCAFEu,
@@ -123,7 +131,7 @@ class MqttSubAckCodecTest {
             )
         val buf = encode(original)
         buf.resetForRead()
-        assertEquals(original, MqttSubAckCodec.decode(buf, DecodeContext.Empty))
+        assertEquals(original, SubAckCodec.decode(buf, DecodeContext.Empty))
     }
 
     @Test
@@ -134,13 +142,13 @@ class MqttSubAckCodecTest {
         // deferred follow-on (PHASE_I_1_RESUME.md:426) — the slice-8
         // `@RemainingLength`-driven Exact path is gone with the migration.
         val msg =
-            MqttSubAck(
+            MqttPacket.SubAck(
                 header = MqttFixedHeader(0x90u),
                 remainingLength = 5u,
                 packetIdentifier = 1u,
                 returnCodes = listOf(0u, 1u, 2u),
             )
-        assertEquals(WireSize.BackPatch, MqttSubAckCodec.wireSize(msg, EncodeContext.Empty))
+        assertEquals(WireSize.BackPatch, SubAckCodec.wireSize(msg, EncodeContext.Empty))
     }
 
     @Test
@@ -202,7 +210,7 @@ class MqttSubAckCodecTest {
             val msg = makeAckWithRemainingLength(rl)
             val buf = encode(msg)
             buf.resetForRead()
-            val decoded = MqttSubAckCodec.decode(buf, DecodeContext.Empty)
+            val decoded = SubAckCodec.decode(buf, DecodeContext.Empty)
             assertEquals(rl, decoded.remainingLength, "round-trip remainingLength=$rl")
             assertEquals(msg, decoded, "full round-trip remainingLength=$rl")
         }
@@ -219,7 +227,7 @@ class MqttSubAckCodecTest {
         val buf = bigEndianBufferOf(wire)
         val ex =
             assertFailsWith<DecodeException> {
-                MqttSubAckCodec.decode(buf, DecodeContext.Empty)
+                SubAckCodec.decode(buf, DecodeContext.Empty)
             }
         // Phase I.1 step 9 — fieldPath is now controlled by the codec
         // (`MqttRemainingLengthCodec.decode`'s own throw site); the slice-8
@@ -231,7 +239,7 @@ class MqttSubAckCodecTest {
     fun peekFrameSizeWalksDripFedSubAck() {
         val pool = BufferPool()
         val original =
-            MqttSubAck(
+            MqttPacket.SubAck(
                 header = MqttFixedHeader(0x90u),
                 remainingLength = 5u,
                 packetIdentifier = 1u,
@@ -252,7 +260,7 @@ class MqttSubAckCodecTest {
                 stream.append(one)
                 assertEquals(
                     PeekResult.NeedsMoreData,
-                    MqttSubAckCodec.peekFrameSize(stream),
+                    SubAckCodec.peekFrameSize(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -260,7 +268,7 @@ class MqttSubAckCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), MqttSubAckCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.Complete(totalBytes), SubAckCodec.peekFrameSize(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -285,7 +293,7 @@ class MqttSubAckCodecTest {
             b1.writeByte(encoded.readByte())
             b1.resetForRead()
             stream.append(b1)
-            assertEquals(PeekResult.NeedsMoreData, MqttSubAckCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.NeedsMoreData, SubAckCodec.peekFrameSize(stream))
 
             // Second byte is the first var-int byte (continuation bit set since 200 > 127).
             val b2 = BufferFactory.Default.allocate(1)
@@ -294,7 +302,7 @@ class MqttSubAckCodecTest {
             stream.append(b2)
             assertEquals(
                 PeekResult.NeedsMoreData,
-                MqttSubAckCodec.peekFrameSize(stream),
+                SubAckCodec.peekFrameSize(stream),
                 "var-int continuation bit set, need second byte",
             )
 
@@ -305,7 +313,7 @@ class MqttSubAckCodecTest {
             stream.append(b3)
             assertEquals(
                 PeekResult.NeedsMoreData,
-                MqttSubAckCodec.peekFrameSize(stream),
+                SubAckCodec.peekFrameSize(stream),
                 "var-int complete but still need 200 body bytes",
             )
 
@@ -315,21 +323,21 @@ class MqttSubAckCodecTest {
                 one.writeByte(encoded.readByte())
                 one.resetForRead()
                 stream.append(one)
-                assertEquals(PeekResult.NeedsMoreData, MqttSubAckCodec.peekFrameSize(stream))
+                assertEquals(PeekResult.NeedsMoreData, SubAckCodec.peekFrameSize(stream))
             }
             val last = BufferFactory.Default.allocate(1)
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), MqttSubAckCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.Complete(totalBytes), SubAckCodec.peekFrameSize(stream))
         } finally {
             stream.release()
             pool.clear()
         }
     }
 
-    private fun makeAckWithRemainingLength(rl: UInt): MqttSubAck =
-        MqttSubAck(
+    private fun makeAckWithRemainingLength(rl: UInt): MqttPacket.SubAck =
+        MqttPacket.SubAck(
             header = MqttFixedHeader(0x90u),
             remainingLength = rl,
             packetIdentifier = 1u,
@@ -338,7 +346,7 @@ class MqttSubAckCodecTest {
         )
 
     private fun encodeAndAssertBytes(
-        msg: MqttSubAck,
+        msg: MqttPacket.SubAck,
         expected: ByteArray,
     ) {
         val buf = encode(msg)
@@ -353,8 +361,8 @@ class MqttSubAckCodecTest {
             .also { it.writeBytes(wire) }
             .also { it.resetForRead() }
 
-    private fun encode(value: MqttSubAck) =
+    private fun encode(value: MqttPacket.SubAck) =
         BufferFactory.Default
             .allocate(value.remainingLength.toInt() + 8, ByteOrder.BIG_ENDIAN)
-            .also { MqttSubAckCodec.encode(it, value, EncodeContext.Empty) }
+            .also { SubAckCodec.encode(it, value, EncodeContext.Empty) }
 }

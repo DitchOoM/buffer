@@ -3,6 +3,7 @@ package com.ditchoom.buffer.codec.test.protocols.mqtt
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.annotations.DispatchOn
 import com.ditchoom.buffer.codec.annotations.DispatchValue
+import com.ditchoom.buffer.codec.annotations.Endianness
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
@@ -144,6 +145,34 @@ sealed interface MqttPacket<out P : Payload> {
         @WhenTrue("header.qosGreaterThanZero") val packetId: PacketId? = null,
         @RemainingBytes val payload: P,
     ) : MqttPacket<P>
+
+    /**
+     * Type-9 SUBACK per MQTT v3.1.1 §3.9. Folded into the sealed
+     * dispatcher in Phase J.M step 3 — the standalone `MqttSubAck`
+     * fixture's body shape lifts unchanged onto the `MqttPacket`
+     * sealed family. The bounding `@UseCodec(MqttRemainingLengthCodec)`
+     * narrows the buffer limit so the trailing `@RemainingBytes
+     * List<UByte>` stops at the var-int's value rather than the raw
+     * buffer end (slice 7b + slice 8 composition, per the original
+     * fixture).
+     *
+     * Wire layout per §3.9.1:
+     *
+     * ```text
+     *   90                       fixed header (type=9 << 4 | flags=0)
+     *   <var-int>                remaining length (1–4 bytes)
+     *   <pid_msb> <pid_lsb>      packet identifier (UShort BE)
+     *   <rc_1> <rc_2> ... <rc_N> return codes (each 1 byte)
+     * ```
+     */
+    @PacketType(value = 9)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class SubAck(
+        val header: MqttFixedHeader = MqttFixedHeader(0x90u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
+        val packetIdentifier: UShort,
+        @RemainingBytes val returnCodes: List<UByte>,
+    ) : MqttPacket<Nothing>
 
     /**
      * Type-12 PINGREQ per §3.12 — fixed header `0xC0` + remaining
