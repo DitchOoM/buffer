@@ -144,6 +144,33 @@ interface StreamProcessor {
     fun peekLong(offset: Int = 0): Long
 
     /**
+     * Returns a non-consuming view starting at [offset] bytes from the current position,
+     * containing up to [maxBytes] bytes. The stream's position and chunk state are
+     * unchanged on return; the caller is responsible for releasing the returned view
+     * (e.g. via [PlatformBuffer.freeNativeMemory]) — same contract as [readBuffer].
+     *
+     * Returns `null` if no bytes are available past [offset] (i.e. `available <= offset`).
+     * Otherwise the returned view contains exactly `min(maxBytes, available - offset)`
+     * bytes — fewer than [maxBytes] when the stream has not yet received that many
+     * bytes past [offset]. Callers can drive a user-supplied length codec against the
+     * view; if decode fails with [IndexOutOfBoundsException] (or a platform-specific
+     * underflow exception) because the view is short, the caller signals
+     * "needs more data" and retries on the next chunk.
+     *
+     * The implementation returns a slice of the underlying chunk when the view fits
+     * in a single chunk, and copies into a pool-acquired buffer when the view spans
+     * chunk boundaries. Framing fields are typically short (≤10 bytes), so the copy
+     * cost is bounded.
+     *
+     * @param offset Byte offset from current position. Must be ≥ 0.
+     * @param maxBytes Maximum bytes the view should contain. Must be ≥ 1.
+     */
+    fun peekBuffer(
+        offset: Int,
+        maxBytes: Int,
+    ): ReadBuffer?
+
+    /**
      * Finds the first mismatch between stream data and the given pattern.
      * Optimized to compare using Long/Int primitives when possible.
      *
@@ -354,6 +381,65 @@ internal class DefaultStreamProcessor(
             peekByte(offset + 6).toInt() and 0xFF,
             peekByte(offset + 7).toInt() and 0xFF,
         )
+    }
+
+    override fun peekBuffer(
+        offset: Int,
+        maxBytes: Int,
+    ): ReadBuffer? {
+        require(offset >= 0) { "offset must be >= 0, was $offset" }
+        require(maxBytes >= 1) { "maxBytes must be >= 1, was $maxBytes" }
+        if (totalAvailable <= offset) return null
+        val size = minOf(maxBytes, totalAvailable - offset)
+
+        var startChunkIndex = 0
+        var startInChunk = 0
+        var skipRemaining = offset
+        for ((index, chunk) in chunks.withIndex()) {
+            if (skipRemaining < chunk.remaining()) {
+                startChunkIndex = index
+                startInChunk = skipRemaining
+                break
+            }
+            skipRemaining -= chunk.remaining()
+        }
+
+        val firstChunk = chunks[startChunkIndex]
+        val firstAvailable = firstChunk.remaining() - startInChunk
+
+        if (firstAvailable >= size) {
+            val absStart = firstChunk.position() + startInChunk
+            val savedPosition = firstChunk.position()
+            val savedLimit = firstChunk.limit()
+            firstChunk.position(absStart)
+            firstChunk.setLimit(absStart + size)
+            val slice = firstChunk.slice()
+            firstChunk.setLimit(savedLimit)
+            firstChunk.position(savedPosition)
+            return slice
+        }
+
+        val merged = pool.acquire(size)
+        var copied = 0
+        var index = startChunkIndex
+        var inChunk = startInChunk
+        while (copied < size) {
+            val chunk = chunks[index]
+            val srcStart = chunk.position() + inChunk
+            val srcLen = minOf(size - copied, chunk.remaining() - inChunk)
+            val savedPosition = chunk.position()
+            val savedLimit = chunk.limit()
+            chunk.position(srcStart)
+            chunk.setLimit(srcStart + srcLen)
+            merged.write(chunk)
+            chunk.setLimit(savedLimit)
+            chunk.position(savedPosition)
+            copied += srcLen
+            index++
+            inChunk = 0
+        }
+        merged.resetForRead()
+        return merged
     }
 
     override fun peekMismatch(pattern: ReadBuffer): Int {
