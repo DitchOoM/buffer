@@ -920,21 +920,40 @@ internal class CodecEmitter(
         ownerSimpleName: String,
     ): FieldSpec.LengthPrefixedUseCodecList? {
         val name = param.name?.asString() ?: return null
+        val spec = analyzeLengthPrefixedListSpec(listType, useCodecAnn) ?: return null
+        return FieldSpec.LengthPrefixedUseCodecList(
+            name = name,
+            ownerSimpleName = ownerSimpleName,
+            spec = spec,
+        )
+    }
+
+    /**
+     * Phase J.M.5 audit-2a — shared element + codec validation for the
+     * VBI-prefixed list shape. Returns the shape `spec` or `null` if any
+     * constraint fails (caller falls through, validator surfaces the
+     * focused diagnostic).
+     *
+     * Element must be either a `@ProtocolMessage data class` (slice 11)
+     * OR a `@ProtocolMessage` sealed parent with `@DispatchOn` (Phase
+     * J.M.5 widening). Both shapes emit a singleton-object codec whose
+     * `decode(buffer, context)` / `encode(buffer, value, context)`
+     * signatures match the emit helpers' calls. Payload-generic elements
+     * reject (slice 10d detection rule) — the emitter's static call form
+     * requires a singleton-object codec. Codec must implement
+     * `BoundingLengthCodec<UInt>` (validator-checked diagnostic adds
+     * the focused message; this analyzer rejects silently).
+     */
+    private fun analyzeLengthPrefixedListSpec(
+        listType: KSType,
+        useCodecAnn: KSAnnotation,
+    ): LengthPrefixedListSpec? {
         if (listType.declaration.qualifiedName?.asString() != "kotlin.collections.List") return null
         val typeArgs = listType.arguments
         if (typeArgs.size != 1) return null
         val elementType = typeArgs[0].type?.resolve() ?: return null
         if (elementType.isError || elementType.isMarkedNullable) return null
         val elementDecl = elementType.declaration as? KSClassDeclaration ?: return null
-        // Element must be either a `@ProtocolMessage data class` (since slice
-        // 11 landed) OR a `@ProtocolMessage` sealed parent with `@DispatchOn`
-        // (Phase J.M.5 widening). Both shapes emit a singleton-object codec
-        // whose `decode(buffer, context)` / `encode(buffer, value, context)`
-        // signatures match what `appendDecodeLengthPrefixedUseCodecList` and
-        // `appendEncodeLengthPrefixedUseCodecList` call. Reject elements that
-        // would emit as a generic class — i.e., element has a `<P : Payload>`
-        // type parameter (slice 10d's detection rule). The emitter's static
-        // call form requires a singleton-object codec.
         val isDataClass = Modifier.DATA in elementDecl.modifiers
         val isSealed = Modifier.SEALED in elementDecl.modifiers
         if (!isDataClass && !isSealed) return null
@@ -955,9 +974,7 @@ internal class CodecEmitter(
         val codecDecl = codecKsType.declaration as? KSClassDeclaration ?: return null
         if (codecDecl.classKind != ClassKind.OBJECT) return null
         if (!codecDecl.implementsBoundingLengthCodec()) return null
-        return FieldSpec.LengthPrefixedUseCodecList(
-            name = name,
-            ownerSimpleName = ownerSimpleName,
+        return LengthPrefixedListSpec(
             codecType = ClassName(codecDecl.packageName.asString(), codecDecl.simpleName.asString()),
             elementClassName = classNameOf(elementDecl),
             elementCodecClassName =
@@ -1299,42 +1316,8 @@ internal class CodecEmitter(
         innerType: KSType,
         useCodecAnn: KSAnnotation,
     ): ConditionalInner.LengthPrefixedUseCodecList? {
-        if (innerType.declaration.qualifiedName?.asString() != "kotlin.collections.List") return null
-        val typeArgs = innerType.arguments
-        if (typeArgs.size != 1) return null
-        val elementType = typeArgs[0].type?.resolve() ?: return null
-        if (elementType.isError || elementType.isMarkedNullable) return null
-        val elementDecl = elementType.declaration as? KSClassDeclaration ?: return null
-        val isDataClass = Modifier.DATA in elementDecl.modifiers
-        val isSealed = Modifier.SEALED in elementDecl.modifiers
-        if (!isDataClass && !isSealed) return null
-        val isProtocolMessage =
-            elementDecl.annotations.any { ann ->
-                ann.shortName.asString() == "ProtocolMessage" &&
-                    ann.annotationType
-                        .resolve()
-                        .declaration.qualifiedName
-                        ?.asString() == PROTOCOL_MESSAGE_QNAME
-            }
-        if (!isProtocolMessage) return null
-        if (detectPayloadTypeParameter(elementDecl) != null) return null
-        val codecKsType =
-            useCodecAnn.arguments
-                .firstOrNull { it.name?.asString() == "codec" }
-                ?.value as? KSType ?: return null
-        val codecDecl = codecKsType.declaration as? KSClassDeclaration ?: return null
-        if (codecDecl.classKind != ClassKind.OBJECT) return null
-        if (!codecDecl.implementsBoundingLengthCodec()) return null
-        return ConditionalInner.LengthPrefixedUseCodecList(
-            codecType = ClassName(codecDecl.packageName.asString(), codecDecl.simpleName.asString()),
-            elementClassName = classNameOf(elementDecl),
-            elementCodecClassName =
-                ClassName(
-                    elementDecl.packageName.asString(),
-                    "${elementDecl.simpleName.asString()}Codec",
-                ),
-            elementIsSealed = isSealed,
-        )
+        val spec = analyzeLengthPrefixedListSpec(innerType, useCodecAnn) ?: return null
+        return ConditionalInner.LengthPrefixedUseCodecList(spec = spec)
     }
 
     /**
@@ -3038,43 +3021,19 @@ internal class CodecEmitter(
             is ConditionalInner.LengthPrefixedUseCodecList -> {
                 // Phase J.M.5 — `@When @LengthPrefixed @UseCodec(C) val
                 // xs: List<E>?` — predicate-true branch runs the slice 11
-                // inner-bag decode (read VBI prefix → applyBound → walk
-                // elements → restore outer limit). Else null.
+                // inner-bag decode (audit-2a shared body). Else null.
                 body.beginControlFlow(
                     "val %L: %T = if (%L)",
                     field.name,
                     field.nullableTypeName,
                     decodeConditionExpr(field.condition),
                 )
-                val outerLimitVar = "__${field.name}OuterLimit"
-                val lengthVar = "__${field.name}Length"
-                body.addStatement("val %L = buffer.limit()", outerLimitVar)
-                body.addStatement(
-                    "val %L = %T.decode(buffer, context)",
-                    lengthVar,
-                    inner.codecType,
+                appendDecodeLengthPrefixedListBody(
+                    body = body,
+                    spec = inner.spec,
+                    listLocalName = "${field.name}Value",
+                    namespacePrefix = field.name,
                 )
-                body.addStatement(
-                    "%T.applyBound(buffer, %L)",
-                    inner.codecType,
-                    lengthVar,
-                )
-                body.addStatement(
-                    "val %LValue = mutableListOf<%T>()",
-                    field.name,
-                    inner.elementClassName,
-                )
-                body.beginControlFlow("try")
-                body.beginControlFlow("while (buffer.position() < buffer.limit())")
-                body.addStatement(
-                    "%LValue += %T.decode(buffer, context)",
-                    field.name,
-                    inner.elementCodecClassName,
-                )
-                body.endControlFlow()
-                body.nextControlFlow("finally")
-                body.addStatement("buffer.setLimit(%L)", outerLimitVar)
-                body.endControlFlow()
                 body.addStatement("%LValue", field.name)
                 body.nextControlFlow("else")
                 body.addStatement("null")
@@ -3153,17 +3112,14 @@ internal class CodecEmitter(
 
     /**
      * Phase J.M.5 — encode a conditional `@LengthPrefixed @UseCodec(C)
-     * val xs: List<E>?`. Reuses the slice 11 emit shapes:
-     *  - sealed elements: scratch-buffer encode (handles BackPatch
-     *    element wireSize transparently),
-     *  - data-class elements: pre-measure body bytes via element
-     *    codec's `wireSize as Exact`, write VBI prefix, iterate.
+     * val xs: List<E>?`. Audit-2a deduplication: delegates to the shared
+     * `appendEncodeLengthPrefixedListBody` helper.
      *
      * `accessor` is the smart-cast non-null local established by the
-     * outer `appendEncodeConditional` (`<name>Value`). Inside this
-     * helper that local IS the list — the slice 11 non-conditional
-     * emit reads `value.<name>` instead, but here `value.<name>` is
-     * `List<E>?` so we read the local.
+     * outer `appendEncodeConditional` (`<name>Value`). The slice 11
+     * non-conditional emit reads `value.<name>` instead — same shape,
+     * different read expression (the helper takes `accessor` as a
+     * parameter to absorb the difference).
      */
     private fun appendEncodeConditionalLengthPrefixedUseCodecList(
         body: CodeBlock.Builder,
@@ -3171,50 +3127,12 @@ internal class CodecEmitter(
         inner: ConditionalInner.LengthPrefixedUseCodecList,
         accessor: String,
     ) {
-        if (inner.elementIsSealed) {
-            val scratchVar = "__${field.name}Scratch"
-            val bodyBytesVar = "__${field.name}BodyBytes"
-            body.beginControlFlow(
-                "%T.%M.allocate(64, buffer.byteOrder).%M { %L ->",
-                BUFFER_FACTORY_CN,
-                BUFFER_FACTORY_DEFAULT_MN,
-                BUFFER_USE_MN,
-                scratchVar,
-            )
-            body.beginControlFlow("for (__elem in %L)", accessor)
-            body.addStatement(
-                "%T.encode(%L, __elem, context)",
-                inner.elementCodecClassName,
-                scratchVar,
-            )
-            body.endControlFlow()
-            body.addStatement("val %L = %L.position()", bodyBytesVar, scratchVar)
-            body.addStatement(
-                "%T.encode(buffer, %L.toUInt(), context)",
-                inner.codecType,
-                bodyBytesVar,
-            )
-            body.addStatement("%L.resetForRead()", scratchVar)
-            body.addStatement("buffer.write(%L)", scratchVar)
-            body.endControlFlow()
-        } else {
-            val bodyBytesVar = "__${field.name}BodyBytes"
-            body.addStatement(
-                "val %L = %L.sumOf { (%T.wireSize(it, context) as %T.Exact).bytes }",
-                bodyBytesVar,
-                accessor,
-                inner.elementCodecClassName,
-                WIRE_SIZE_CN,
-            )
-            body.addStatement(
-                "%T.encode(buffer, %L.toUInt(), context)",
-                inner.codecType,
-                bodyBytesVar,
-            )
-            body.beginControlFlow("for (__elem in %L)", accessor)
-            body.addStatement("%T.encode(buffer, __elem, context)", inner.elementCodecClassName)
-            body.endControlFlow()
-        }
+        appendEncodeLengthPrefixedListBody(
+            body = body,
+            spec = inner.spec,
+            accessor = accessor,
+            namespacePrefix = field.name,
+        )
     }
 
     /**
@@ -3889,15 +3807,49 @@ internal class CodecEmitter(
         body: CodeBlock.Builder,
         field: FieldSpec.LengthPrefixedUseCodecList,
     ) {
-        val outerLimitVar = "__${field.name}OuterLimit"
-        val lengthVar = "__${field.name}Length"
+        appendDecodeLengthPrefixedListBody(
+            body = body,
+            spec = field.spec,
+            listLocalName = field.name,
+            namespacePrefix = field.name,
+        )
+    }
+
+    /**
+     * Phase J.M.5 audit-2a — shared decode body for the VBI-prefixed
+     * list shape. Emitted by both `FieldSpec.LengthPrefixedUseCodecList`
+     * (slice 11) and the conditional-inner branch in
+     * `appendDecodeConditional` (J.M.5 slice 5). Five-step sequence:
+     * capture outer limit → codec.decode VBI prefix → applyBound →
+     * mutableListOf → try-while-finally restore outer limit.
+     *
+     * `listLocalName` is the variable that holds the decoded list. The
+     * non-conditional path uses the field's own name (`<field>`); the
+     * conditional path uses `<field>Value` because `<field>` is a
+     * nullable-typed local that `appendDecodeConditional` sets via the
+     * `if (predicate) { ... <listLocal> } else null` construction.
+     *
+     * `namespacePrefix` keys the local-variable names (`__<prefix>
+     * OuterLimit`, `__<prefix>Length`). Field path passes the field
+     * name; conditional path also passes the field name (so encode/
+     * decode share scratch local names within the same conditional
+     * slot).
+     */
+    private fun appendDecodeLengthPrefixedListBody(
+        body: CodeBlock.Builder,
+        spec: LengthPrefixedListSpec,
+        listLocalName: String,
+        namespacePrefix: String,
+    ) {
+        val outerLimitVar = "__${namespacePrefix}OuterLimit"
+        val lengthVar = "__${namespacePrefix}Length"
         body.addStatement("val %L = buffer.limit()", outerLimitVar)
-        body.addStatement("val %L = %T.decode(buffer, context)", lengthVar, field.codecType)
-        body.addStatement("%T.applyBound(buffer, %L)", field.codecType, lengthVar)
-        body.addStatement("val %L = mutableListOf<%T>()", field.name, field.elementClassName)
+        body.addStatement("val %L = %T.decode(buffer, context)", lengthVar, spec.codecType)
+        body.addStatement("%T.applyBound(buffer, %L)", spec.codecType, lengthVar)
+        body.addStatement("val %L = mutableListOf<%T>()", listLocalName, spec.elementClassName)
         body.beginControlFlow("try")
         body.beginControlFlow("while (buffer.position() < buffer.limit())")
-        body.addStatement("%L += %T.decode(buffer, context)", field.name, field.elementCodecClassName)
+        body.addStatement("%L += %T.decode(buffer, context)", listLocalName, spec.elementCodecClassName)
         body.endControlFlow()
         body.nextControlFlow("finally")
         body.addStatement("buffer.setLimit(%L)", outerLimitVar)
@@ -3928,86 +3880,106 @@ internal class CodecEmitter(
         body: CodeBlock.Builder,
         field: FieldSpec.LengthPrefixedUseCodecList,
     ) {
-        if (field.elementIsSealed) {
-            appendEncodeLengthPrefixedUseCodecListSealed(body, field)
-            return
-        }
-        val bodyBytesVar = "__${field.name}BodyBytes"
-        body.addStatement(
-            "val %L = value.%L.sumOf { (%T.wireSize(it, context) as %T.Exact).bytes }",
-            bodyBytesVar,
-            field.name,
-            field.elementCodecClassName,
-            WIRE_SIZE_CN,
+        appendEncodeLengthPrefixedListBody(
+            body = body,
+            spec = field.spec,
+            accessor = "value.${field.name}",
+            namespacePrefix = field.name,
         )
-        body.addStatement(
-            "%T.encode(buffer, %L.toUInt(), context)",
-            field.codecType,
-            bodyBytesVar,
-        )
-        body.beginControlFlow("for (__elem in value.%L)", field.name)
-        body.addStatement("%T.encode(buffer, __elem, context)", field.elementCodecClassName)
-        body.endControlFlow()
     }
 
     /**
-     * Phase J.M.5 — sealed-parent property-bag encode. Sealed-parent
-     * variants commonly carry `@LengthPrefixed val: String` / similar
-     * BackPatch-wireSize fields, so the pre-measure `as WireSize.Exact`
-     * cast in the data-class path doesn't apply. Encode each element
-     * into a scratch buffer first to capture the actual byte count, then
-     * write the VBI prefix and bulk-copy the scratch bytes into the
-     * outer buffer.
+     * Phase J.M.5 audit-2a — shared encode body for the VBI-prefixed
+     * list shape. Emitted by both `FieldSpec.LengthPrefixedUseCodecList`
+     * (slice 11) and `appendEncodeConditional`'s
+     * `LengthPrefixedUseCodecList` branch (J.M.5 slice 5).
      *
-     * Generated shape (sealed elements):
+     * `accessor` is the read-side expression for the list — `value.
+     * <name>` for the non-conditional path; the smart-cast non-null
+     * local (`<name>Value`) for the conditional path. `namespacePrefix`
+     * keys the scratch / body-bytes locals.
+     *
+     * Two encode paths, gated by `spec.elementIsSealed`:
+     *
+     * **Sealed elements** — variants commonly carry BackPatch-wireSize
+     * fields (`@LengthPrefixed val: String`, `@When` trailers), so the
+     * pre-measure `as WireSize.Exact` cast doesn't apply. Encode each
+     * element into a scratch buffer first to capture the actual byte
+     * count, then write the VBI prefix and bulk-copy:
      * ```
-     * val __<name>Scratch = BufferFactory.Default.allocate(64)
-     * try {
-     *     for (__elem in value.<name>) {
-     *         ElementCodec.encode(__<name>Scratch, __elem, context)
+     * BufferFactory.Default.allocate(64, buffer.byteOrder).use { __<n>Scratch ->
+     *     for (__elem in <accessor>) {
+     *         ElementCodec.encode(__<n>Scratch, __elem, context)
      *     }
-     *     val __<name>BodyBytes = __<name>Scratch.position()
-     *     <codecType>.encode(buffer, __<name>BodyBytes.toUInt(), context)
-     *     __<name>Scratch.resetForRead()
-     *     buffer.write(__<name>Scratch)
-     * } finally {
-     *     (__<name>Scratch as? CloseableBuffer)?.freeNativeMemory()
+     *     val __<n>BodyBytes = __<n>Scratch.position()
+     *     <codecType>.encode(buffer, __<n>BodyBytes.toUInt(), context)
+     *     __<n>Scratch.resetForRead()
+     *     buffer.write(__<n>Scratch)
      * }
      * ```
+     * 64-byte starting allocation is a heuristic — `BufferFactory` grows
+     * on demand for buffers that exceed it. Tunable per-field if a
+     * measurable hot path emerges.
      *
-     * The 64-byte starting allocation is a heuristic — `BufferFactory`
-     * grows on demand for buffers that exceed it. Tunable per-field
-     * if a measurable hot path emerges.
+     * **Data-class elements** — pre-measure body bytes via the element
+     * codec's `wireSize as Exact`, write VBI prefix, iterate. BackPatch
+     * elements throw `ClassCastException` — same fixture-design contract
+     * as `RemainingBytesProtocolMessageList` and `LengthPrefixedMessage`.
+     * Audit 2b notes the latent risk: a data-class element with a
+     * `@LengthPrefixed val: String` field has BackPatch wireSize and
+     * would CCE; no current fixture trips it because all sealed-parent
+     * cases are routed through the scratch path.
      */
-    private fun appendEncodeLengthPrefixedUseCodecListSealed(
+    private fun appendEncodeLengthPrefixedListBody(
         body: CodeBlock.Builder,
-        field: FieldSpec.LengthPrefixedUseCodecList,
+        spec: LengthPrefixedListSpec,
+        accessor: String,
+        namespacePrefix: String,
     ) {
-        val scratchVar = "__${field.name}Scratch"
-        val bodyBytesVar = "__${field.name}BodyBytes"
-        body.beginControlFlow(
-            "%T.%M.allocate(64, buffer.byteOrder).%M { %L ->",
-            BUFFER_FACTORY_CN,
-            BUFFER_FACTORY_DEFAULT_MN,
-            BUFFER_USE_MN,
-            scratchVar,
-        )
-        body.beginControlFlow("for (__elem in value.%L)", field.name)
-        body.addStatement(
-            "%T.encode(%L, __elem, context)",
-            field.elementCodecClassName,
-            scratchVar,
-        )
-        body.endControlFlow()
-        body.addStatement("val %L = %L.position()", bodyBytesVar, scratchVar)
-        body.addStatement(
-            "%T.encode(buffer, %L.toUInt(), context)",
-            field.codecType,
-            bodyBytesVar,
-        )
-        body.addStatement("%L.resetForRead()", scratchVar)
-        body.addStatement("buffer.write(%L)", scratchVar)
-        body.endControlFlow()
+        if (spec.elementIsSealed) {
+            val scratchVar = "__${namespacePrefix}Scratch"
+            val bodyBytesVar = "__${namespacePrefix}BodyBytes"
+            body.beginControlFlow(
+                "%T.%M.allocate(64, buffer.byteOrder).%M { %L ->",
+                BUFFER_FACTORY_CN,
+                BUFFER_FACTORY_DEFAULT_MN,
+                BUFFER_USE_MN,
+                scratchVar,
+            )
+            body.beginControlFlow("for (__elem in %L)", accessor)
+            body.addStatement(
+                "%T.encode(%L, __elem, context)",
+                spec.elementCodecClassName,
+                scratchVar,
+            )
+            body.endControlFlow()
+            body.addStatement("val %L = %L.position()", bodyBytesVar, scratchVar)
+            body.addStatement(
+                "%T.encode(buffer, %L.toUInt(), context)",
+                spec.codecType,
+                bodyBytesVar,
+            )
+            body.addStatement("%L.resetForRead()", scratchVar)
+            body.addStatement("buffer.write(%L)", scratchVar)
+            body.endControlFlow()
+        } else {
+            val bodyBytesVar = "__${namespacePrefix}BodyBytes"
+            body.addStatement(
+                "val %L = %L.sumOf { (%T.wireSize(it, context) as %T.Exact).bytes }",
+                bodyBytesVar,
+                accessor,
+                spec.elementCodecClassName,
+                WIRE_SIZE_CN,
+            )
+            body.addStatement(
+                "%T.encode(buffer, %L.toUInt(), context)",
+                spec.codecType,
+                bodyBytesVar,
+            )
+            body.beginControlFlow("for (__elem in %L)", accessor)
+            body.addStatement("%T.encode(buffer, __elem, context)", spec.elementCodecClassName)
+            body.endControlFlow()
+        }
     }
 
     /**
@@ -5437,25 +5409,13 @@ internal class CodecEmitter(
         data class LengthPrefixedUseCodecList(
             override val name: String,
             val ownerSimpleName: String,
-            val codecType: ClassName,
-            val elementClassName: ClassName,
-            val elementCodecClassName: ClassName,
-            /**
-             * Phase J.M.5 widening — `true` when the element type is a
-             * `@ProtocolMessage` sealed parent (interface or class) with
-             * `@DispatchOn`. Sealed-parent variants commonly include
-             * `@LengthPrefixed val: String` / similar BackPatch-wireSize
-             * fields, so the encode emit can't pre-measure body bytes via
-             * the existing `as WireSize.Exact` cast. The sealed path
-             * encodes elements into a scratch buffer first, captures the
-             * actual byte count, then writes the VBI prefix + bulk-copies
-             * scratch bytes into the outer buffer. `false` for the
-             * pre-existing data-class element path which keeps the
-             * Exact-cast pre-measure (the slice 11 doctrine vector
-             * fixtures rely on its allocation profile).
-             */
-            val elementIsSealed: Boolean,
-        ) : FieldSpec
+            val spec: LengthPrefixedListSpec,
+        ) : FieldSpec {
+            val codecType: ClassName get() = spec.codecType
+            val elementClassName: ClassName get() = spec.elementClassName
+            val elementCodecClassName: ClassName get() = spec.elementCodecClassName
+            val elementIsSealed: Boolean get() = spec.elementIsSealed
+        }
 
         /**
          * Phase J.M.0 — `@RemainingBytes val: List<T>` where `T` is a
@@ -5645,12 +5605,43 @@ internal class CodecEmitter(
          * conditional `if` block.
          */
         data class LengthPrefixedUseCodecList(
-            val codecType: ClassName,
-            val elementClassName: ClassName,
-            val elementCodecClassName: ClassName,
-            val elementIsSealed: Boolean,
-        ) : ConditionalInner
+            val spec: LengthPrefixedListSpec,
+        ) : ConditionalInner {
+            val codecType: ClassName get() = spec.codecType
+            val elementClassName: ClassName get() = spec.elementClassName
+            val elementCodecClassName: ClassName get() = spec.elementCodecClassName
+            val elementIsSealed: Boolean get() = spec.elementIsSealed
+        }
     }
+
+    /**
+     * Phase J.M.5 audit-2a — single source of truth for the
+     * "VBI-prefixed list of typed elements" wire shape.
+     *
+     * Both `FieldSpec.LengthPrefixedUseCodecList` (slice 11) and
+     * `ConditionalInner.LengthPrefixedUseCodecList` (J.M.5 slice 5)
+     * compose this spec. Before this dedupe both data classes carried
+     * four byte-equal fields and four near-byte-equal emit functions
+     * (decode/encode × field/conditional, plus the duplicated sealed
+     * scratch path). A future shape change (e.g., promoting the
+     * codec value type beyond `UInt`) now lands in one place.
+     *
+     * `elementIsSealed` gates the encode path: sealed-parent variants
+     * commonly carry BackPatch-wireSize fields (`@LengthPrefixed val:
+     * String`, `@When` trailers) so encode can't pre-measure body
+     * bytes via `as WireSize.Exact`; encode each element into a
+     * scratch buffer first, then write the VBI prefix + bulk-copy.
+     * Data-class elements are assumed Exact (slice 11 doctrine).
+     * Audit 2b notes the "sealed = BackPatch / data class = Exact"
+     * conflation as latent — the rename to `elementIsBackPatch` and
+     * analyze-time wireSize inference is a follow-on refactor.
+     */
+    private data class LengthPrefixedListSpec(
+        val codecType: ClassName,
+        val elementClassName: ClassName,
+        val elementCodecClassName: ClassName,
+        val elementIsSealed: Boolean,
+    )
 
     /**
      * Stage E — resolved source of a `@When` predicate.
