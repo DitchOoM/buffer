@@ -8,6 +8,7 @@ import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import com.ditchoom.buffer.codec.annotations.RemainingLength
+import com.ditchoom.buffer.codec.annotations.UseCodec
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
 import kotlin.jvm.JvmInline
 
@@ -153,7 +154,7 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage
     data class PingReq(
         val header: MqttFixedHeader = MqttFixedHeader(0xC0u),
-        @RemainingLength val remainingLength: UInt = 0u,
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
     ) : MqttPacket<Nothing>
 
     /** Type-13 PINGRESP per §3.13 — fixed header `0xD0` + RL `0`, total `D0 00`. */
