@@ -1,0 +1,172 @@
+package com.ditchoom.buffer.codec.test.protocols.mqttv5
+
+import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
+import kotlin.test.Test
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
+
+/**
+ * Phase J.M.5 audit-2d — fixture-level invariants beyond the
+ * cascading-trailer rule (audit-2c) and the reason-code allowlists
+ * (covered in [MqttV5CascadingAcksCodecTest]).
+ *
+ * Two impossible-state classes are validated here:
+ *
+ *  - **Header byte** [MQTT-2.1.3-1]. Every non-PUBLISH variant has a
+ *    canonical fixed-header byte; the low 4 bits are reserved-and-
+ *    must-be-zero (or, for PUBREL / SUBSCRIBE / UNSUBSCRIBE, reserved-
+ *    and-must-be-set to a specific pattern per §3.6.1 / §3.8.1 /
+ *    §3.10.1). PUBLISH is the documented exception — its low 4 bits
+ *    carry DUP/QoS/RETAIN flags, so only the high nibble is checked.
+ *
+ *  - **`Subscribe.topicFilters` non-empty** [MQTT-3.8.3-2]. The
+ *    SUBSCRIBE payload "MUST contain at least one Topic Filter /
+ *    Subscription Options pair".
+ *
+ *  Reason-code allowlist tests (PUBACK / PUBREC / PUBREL / PUBCOMP /
+ *  UNSUBACK / DISCONNECT / AUTH) live in [MqttV5CascadingAcksCodecTest]
+ *  alongside the cascade-invariant tests they extend.
+ */
+class MqttV5InvariantsCodecTest {
+    @Test
+    fun publishAcceptsVariableLowNibble() {
+        // PUBLISH's low 4 bits encode DUP/QoS/RETAIN per §3.3.1; the
+        // header invariant only fixes the high nibble. 0x32 (QoS=1) is
+        // exercised throughout the existing suite — this assertion is
+        // a sanity check that audit-2d didn't tighten it accidentally.
+        MqttV5Packet.Publish<com.ditchoom.buffer.codec.test.protocols.payload.JpegImage>(
+            header = MqttFixedHeader(0x3Fu), // all flag bits set
+            remainingLength = 0u,
+            topic = "t",
+            properties = emptyList(),
+            payload =
+                com.ditchoom.buffer.codec.test.protocols.payload.JpegImage(
+                    width = 0u,
+                    height = 0u,
+                    data = byteArrayOf(),
+                ),
+        )
+    }
+
+    @Test
+    fun publishRejectsWrongHighNibble() {
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                MqttV5Packet.Publish<com.ditchoom.buffer.codec.test.protocols.payload.JpegImage>(
+                    header = MqttFixedHeader(0x40u), // high nibble = 4 (PUBACK), not 3
+                    remainingLength = 0u,
+                    topic = "t",
+                    properties = emptyList(),
+                    payload =
+                        com.ditchoom.buffer.codec.test.protocols.payload.JpegImage(
+                            width = 0u,
+                            height = 0u,
+                            data = byteArrayOf(),
+                        ),
+                )
+            }
+        assertTrue(
+            ex.message!!.contains("PUBLISH header invariant"),
+            "expected PUBLISH header diagnostic, got: ${ex.message}",
+        )
+    }
+
+    @Test
+    fun pubAckRejectsWrongHighNibble() {
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                MqttV5Packet.PubAck(header = MqttFixedHeader(0x10u), packetIdentifier = 0x0001u)
+            }
+        assertTrue(
+            ex.message!!.contains("PUBACK header invariant"),
+            "expected PUBACK header diagnostic, got: ${ex.message}",
+        )
+    }
+
+    @Test
+    fun pubAckRejectsWrongLowNibble() {
+        // PUBACK low nibble is reserved-must-be-zero per §3.4.1; 0x41
+        // is wire-invalid even though the high nibble is correct.
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                MqttV5Packet.PubAck(header = MqttFixedHeader(0x41u), packetIdentifier = 0x0001u)
+            }
+        assertTrue(ex.message!!.contains("PUBACK header invariant"))
+    }
+
+    @Test
+    fun pubRelRejectsCanonicalLowNibbleZero() {
+        // PUBREL's canonical byte is 0x62 (low nibble 0010 reserved-and-
+        // must-be-set per §3.6.1). 0x60 (low nibble 0000) is the most
+        // common mistake and must reject.
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                MqttV5Packet.PubRel(header = MqttFixedHeader(0x60u), packetIdentifier = 0x0001u)
+            }
+        assertTrue(ex.message!!.contains("PUBREL header invariant"))
+    }
+
+    @Test
+    fun subscribeRejectsCanonicalLowNibbleZero() {
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                MqttV5Packet.Subscribe(
+                    header = MqttFixedHeader(0x80u),
+                    remainingLength = 0u,
+                    packetIdentifier = 0x0001u,
+                    properties = emptyList(),
+                    topicFilters = listOf(V5Subscription("t/1", 0x00u)),
+                )
+            }
+        assertTrue(ex.message!!.contains("SUBSCRIBE header invariant"))
+    }
+
+    @Test
+    fun unsubscribeRejectsCanonicalLowNibbleZero() {
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                MqttV5Packet.Unsubscribe(
+                    header = MqttFixedHeader(0xA0u),
+                    remainingLength = 0u,
+                    packetIdentifier = 0x0001u,
+                    properties = emptyList(),
+                    topics =
+                        listOf(
+                            com.ditchoom.buffer.codec.test.protocols.mqtt
+                                .MqttUnsubscribeTopic("t"),
+                        ),
+                )
+            }
+        assertTrue(ex.message!!.contains("UNSUBSCRIBE header invariant"))
+    }
+
+    @Test
+    fun pingReqRejectsWrongHeader() {
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                MqttV5Packet.PingReq(header = MqttFixedHeader(0xC1u))
+            }
+        assertTrue(ex.message!!.contains("PINGREQ header invariant"))
+    }
+
+    @Test
+    fun subscribeRejectsEmptyTopicFilters() {
+        // §3.8.3 — "The Payload of a SUBSCRIBE packet MUST contain at
+        // least one Topic Filter / Subscription Options pair"
+        // [MQTT-3.8.3-2]. Empty list is wire-invalid even though the
+        // generated codec would happily round-trip an empty body.
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                MqttV5Packet.Subscribe(
+                    remainingLength = 0u,
+                    packetIdentifier = 0x0001u,
+                    properties = emptyList(),
+                    topicFilters = emptyList(),
+                )
+            }
+        assertTrue(
+            ex.message!!.contains("topicFilters must contain at least one filter"),
+            "expected topicFilters diagnostic, got: ${ex.message}",
+        )
+    }
+}

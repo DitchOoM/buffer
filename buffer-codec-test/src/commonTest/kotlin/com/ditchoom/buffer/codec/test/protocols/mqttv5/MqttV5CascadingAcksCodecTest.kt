@@ -534,6 +534,100 @@ class MqttV5CascadingAcksCodecTest {
         }
     }
 
+    @Test
+    fun pubAckRejectsInvalidReasonCode() {
+        // Phase J.M.5 audit-2d — 0xFF is not in the §3.4.2.1 PUBACK
+        // reason-code value space. The init-block allowlist fires at
+        // construction time. Slice 11b will replace this with a typed
+        // sealed `V5PubAckReasonCode` parent and the allowlist gets
+        // deleted as redundant.
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                MqttV5Packet.PubAck(
+                    remainingLength = 3u,
+                    packetIdentifier = 0x0001u,
+                    reasonCode = 0xFFu,
+                )
+            }
+        assertEquals(
+            true,
+            ex.message?.contains("PUBACK reason-code invariant"),
+            "expected reason-code diagnostic, got: ${ex.message}",
+        )
+    }
+
+    @Test
+    fun pubRecRejectsInvalidReasonCode() {
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Packet.PubRec(
+                remainingLength = 3u,
+                packetIdentifier = 0x0001u,
+                reasonCode = 0x42u, // not in §3.5.2.1
+            )
+        }
+    }
+
+    @Test
+    fun pubRelRejectsInvalidReasonCode() {
+        // PUBREL's set is just {0x00, 0x92}; 0x10 (No matching subscribers,
+        // valid for PUBACK) is invalid here.
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                MqttV5Packet.PubRel(
+                    remainingLength = 3u,
+                    packetIdentifier = 0x0001u,
+                    reasonCode = 0x10u,
+                )
+            }
+        assertEquals(
+            true,
+            ex.message?.contains("PUBREL reason-code invariant"),
+            "expected reason-code diagnostic, got: ${ex.message}",
+        )
+    }
+
+    @Test
+    fun pubCompRejectsInvalidReasonCode() {
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Packet.PubComp(
+                remainingLength = 3u,
+                packetIdentifier = 0x0001u,
+                reasonCode = 0x80u, // valid for PUBACK, not for PUBCOMP
+            )
+        }
+    }
+
+    @Test
+    fun unsubAckRejectsInvalidReasonCode() {
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Packet.UnsubAck(
+                remainingLength = 3u,
+                packetIdentifier = 0x0001u,
+                reasonCode = 0x10u, // PUBACK code, not in §3.11.3
+            )
+        }
+    }
+
+    @Test
+    fun disconnectRejectsInvalidReasonCode() {
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Packet.Disconnect(
+                remainingLength = 1u,
+                reasonCode = 0xFFu,
+            )
+        }
+    }
+
+    @Test
+    fun authRejectsInvalidReasonCode() {
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Packet.Auth(
+                remainingLength = 1u,
+                reasonCode = 0x10u, // not one of {0x00, 0x18, 0x19}
+            )
+        }
+    }
+
     @Suppress("UNCHECKED_CAST")
     private fun encode(value: MqttV5Packet<*>) =
         BufferFactory.Default
