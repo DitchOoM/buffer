@@ -277,6 +277,39 @@ sealed interface MqttPacket<out P : Payload> {
     ) : MqttPacket<Nothing>
 
     /**
+     * Type-8 SUBSCRIBE per MQTT v3.1.1 §3.8 — fixed header `0x82` +
+     * remainingLength + packetIdentifier + a non-empty list of
+     * `MqttTopicFilter` payload elements (each `<2-byte LP><filter
+     * bytes><qos>`). Per §3.8.1 the bottom-bit-2 flag (0x02) is
+     * reserved-and-must-be-set; the variant defaults the header byte
+     * to `0x82` to encode this on the wire.
+     *
+     * Wire layout per §3.8.1:
+     *
+     * ```text
+     *   82                       fixed header (type=8 << 4 | flags=0x2)
+     *   <var-int>                remaining length (1–4 bytes)
+     *   <pid_msb> <pid_lsb>      packet identifier (UShort BE)
+     *   <topic_lp> <qos>         filter 1
+     *   …                        repeated for each filter
+     * ```
+     *
+     * Phase J.M step 5 third-tranche variant. Rides the J.M.0
+     * emitter slice (`@RemainingBytes List<@ProtocolMessage T>`); the
+     * outer `@UseCodec(MqttRemainingLengthCodec)` var-int bounds the
+     * filter-list region so decode stops at the spec-mandated end of
+     * the SUBSCRIBE rather than at buffer end.
+     */
+    @PacketType(value = 8)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class Subscribe(
+        val header: MqttFixedHeader = MqttFixedHeader(0x82u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
+        val packetIdentifier: UShort,
+        @RemainingBytes val topicFilters: List<MqttTopicFilter>,
+    ) : MqttPacket<Nothing>
+
+    /**
      * Type-9 SUBACK per MQTT v3.1.1 §3.9. Folded into the sealed
      * dispatcher in Phase J.M step 3 — the standalone `MqttSubAck`
      * fixture's body shape lifts unchanged onto the `MqttPacket`
@@ -302,6 +335,39 @@ sealed interface MqttPacket<out P : Payload> {
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         val packetIdentifier: UShort,
         @RemainingBytes val returnCodes: List<UByte>,
+    ) : MqttPacket<Nothing>
+
+    /**
+     * Type-10 UNSUBSCRIBE per MQTT v3.1.1 §3.10 — fixed header
+     * `0xA2` + remainingLength + packetIdentifier + a non-empty list
+     * of length-prefixed topic names. Per §3.10.1 the bottom-bit-2
+     * flag (0x02) is reserved-and-must-be-set; the variant defaults
+     * the header byte to `0xA2` to encode this on the wire.
+     *
+     * Wire layout per §3.10.1:
+     *
+     * ```text
+     *   A2                       fixed header (type=10 << 4 | flags=0x2)
+     *   <var-int>                remaining length (1–4 bytes)
+     *   <pid_msb> <pid_lsb>      packet identifier (UShort BE)
+     *   <topic_lp>               topic 1 (LP-prefixed UTF-8)
+     *   …                        repeated for each topic
+     * ```
+     *
+     * The payload elements wrap as `MqttUnsubscribeTopic` (a single-
+     * field data class around the LP string) so the list rides the
+     * J.M.0 emitter slice (`@RemainingBytes List<@ProtocolMessage
+     * T>`). The wrapper has no fixed overhead on the wire — bytes
+     * are exactly `<2-byte LP><name bytes>` per element, matching
+     * the spec.
+     */
+    @PacketType(value = 10)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class Unsubscribe(
+        val header: MqttFixedHeader = MqttFixedHeader(0xA2u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
+        val packetIdentifier: UShort,
+        @RemainingBytes val topics: List<MqttUnsubscribeTopic>,
     ) : MqttPacket<Nothing>
 
     /**

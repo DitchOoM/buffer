@@ -219,14 +219,14 @@ class MqttPacketAggregatorCodecTest {
 
     @Test
     fun aggregatorPropagatesUnknownDiscriminatorThrow() {
-        // Unknown discriminator (type=8, SUBSCRIBE — not yet folded
-        // into the sealed set) throws the same DecodeException as
-        // the standard dispatcher. The aggregator's catch-all `else`
-        // branch matches the standard dispatcher's row-17
-        // attribution. Phase J.M step 5 tranches 1+2 added types
-        // 2 + 4–7 + 11; types 8 / 10 remain the unknown vectors
-        // until tranche 3 lands them.
-        val buf = BufferFactory.Default.allocate(1).also { it.writeByte(0x80.toByte()) }
+        // Header byte 0xF0: type=15, reserved-and-forbidden per MQTT
+        // v3.1.1 §2.2.1. After Phase J.M step 5 tranche 3 every
+        // spec-defined v3.1.1 packet type (1–14) is folded into the
+        // dispatcher; type 15 is the only remaining unknown vector
+        // that will never gain a sealed variant. The aggregator's
+        // catch-all `else` branch matches the standard dispatcher's
+        // row-17 attribution.
+        val buf = BufferFactory.Default.allocate(1).also { it.writeByte(0xF0.toByte()) }
         buf.resetForRead()
         val ex =
             assertFailsWith<DecodeException> {
