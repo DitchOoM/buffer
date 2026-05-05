@@ -6,6 +6,7 @@ import com.ditchoom.buffer.codec.annotations.Endianness
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+import com.ditchoom.buffer.codec.annotations.UseCodec
 import kotlin.jvm.JvmInline
 
 /**
@@ -106,6 +107,40 @@ sealed interface MqttV5Property {
         val id: MqttV5PropertyId = MqttV5PropertyId(0x08u),
         @LengthPrefixed val value: String,
     ) : MqttV5Property
+
+    /**
+     * MQTT v5.0 §3.8.2.1.2 Subscription Identifier (SUBSCRIBE property,
+     * also forwarded on PUBLISH per §3.3.2.3.8). Variable-byte-integer
+     * body, range 1..268_435_455 (0 is reserved). Multiple identifiers
+     * may be carried on a PUBLISH if the message matched several
+     * subscriptions; the SUBSCRIBE form is single-valued.
+     *
+     * Phase J.M.5 slice 13 lights up VBI-bodied properties via a
+     * non-bounding `Codec<UInt>` ([VariableByteIntegerCodec]) on the
+     * bare-`@UseCodec val: <scalar>` path. Distinct from
+     * `MqttRemainingLengthCodec` — the remaining-length codec
+     * implements `BoundingLengthCodec<UInt>` because its decoded value
+     * narrows the buffer for subsequent fields; this property's value
+     * is just data, no buffer narrowing.
+     */
+    @PacketType(value = 0x0B)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class SubscriptionIdentifier(
+        val id: MqttV5PropertyId = MqttV5PropertyId(0x0Bu),
+        @UseCodec(VariableByteIntegerCodec::class) val value: UInt,
+    ) : MqttV5Property {
+        init {
+            // [MQTT-3.8.2.1.2-1] — value 0 is reserved.
+            require(value > 0u) {
+                "SubscriptionIdentifier value must be > 0; got $value (spec §3.8.2.1.2)"
+            }
+            // [MQTT-3.8.2.1.2-1] — VBI max is 0x0FFF_FFFF (268_435_455).
+            require(value <= 0x0FFF_FFFFu) {
+                "SubscriptionIdentifier value must be <= 268_435_455; got $value " +
+                    "(spec §3.8.2.1.2)"
+            }
+        }
+    }
 
     /**
      * MQTT v5.0 §3.1.2.11.2 Session Expiry Interval (CONNECT, CONNACK,

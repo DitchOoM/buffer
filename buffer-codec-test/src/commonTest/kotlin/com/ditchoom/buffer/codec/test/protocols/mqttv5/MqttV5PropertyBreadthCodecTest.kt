@@ -205,6 +205,59 @@ class MqttV5PropertyBreadthCodecTest {
         }
     }
 
+    // Phase J.M.5 slice 13 — VBI-bodied SubscriptionIdentifier (§3.8.2.1.2).
+
+    @Test
+    fun subscriptionIdentifierRoundTripsAcrossVbiWidths() {
+        // Each branch exercises a different VBI byte-width to cover the
+        // multiplier-loop in VariableByteIntegerCodec.
+        assertRoundTrip(MqttV5Property.SubscriptionIdentifier(value = 1u))
+        assertRoundTrip(MqttV5Property.SubscriptionIdentifier(value = 127u)) // 1-byte boundary
+        assertRoundTrip(MqttV5Property.SubscriptionIdentifier(value = 128u)) // 2-byte
+        assertRoundTrip(MqttV5Property.SubscriptionIdentifier(value = 16_383u))
+        assertRoundTrip(MqttV5Property.SubscriptionIdentifier(value = 16_384u)) // 3-byte
+        assertRoundTrip(MqttV5Property.SubscriptionIdentifier(value = 2_097_151u))
+        assertRoundTrip(MqttV5Property.SubscriptionIdentifier(value = 2_097_152u)) // 4-byte
+        assertRoundTrip(MqttV5Property.SubscriptionIdentifier(value = 268_435_455u)) // VBI max
+    }
+
+    @Test
+    fun subscriptionIdentifierRejectsZero() {
+        // [MQTT-3.8.2.1.2-1] — value 0 is reserved.
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Property.SubscriptionIdentifier(value = 0u)
+        }
+    }
+
+    @Test
+    fun subscriptionIdentifierRejectsAboveVbiMax() {
+        // VBI max is 0x0FFF_FFFF (268_435_455). Anything larger overflows
+        // the 4-byte VBI encoding.
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Property.SubscriptionIdentifier(value = 268_435_456u)
+        }
+    }
+
+    @Test
+    fun subscriptionIdentifierEmitsExpectedWireBytes() {
+        // value=300 fits in 2 VBI bytes: 300 = 0x12C → low7 = 0x2C with
+        // continuation, high7 = 0x02. Wire emission: id(0x0B) low(0xAC)
+        // high(0x02).
+        val buf = BufferFactory.Default.allocate(8, ByteOrder.BIG_ENDIAN)
+        MqttV5PropertyCodec.encode(
+            buf,
+            MqttV5Property.SubscriptionIdentifier(value = 300u),
+            EncodeContext.Empty,
+        )
+        buf.resetForRead()
+        val bytes = ByteArray(buf.remaining())
+        for (i in bytes.indices) bytes[i] = buf.readByte()
+        assertEquals(3, bytes.size)
+        assertEquals(0x0B.toByte(), bytes[0])
+        assertEquals(0xAC.toByte(), bytes[1])
+        assertEquals(0x02.toByte(), bytes[2])
+    }
+
     private fun assertRoundTrip(original: MqttV5Property) {
         val buffer = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
         MqttV5PropertyCodec.encode(buffer, original, EncodeContext.Empty)
