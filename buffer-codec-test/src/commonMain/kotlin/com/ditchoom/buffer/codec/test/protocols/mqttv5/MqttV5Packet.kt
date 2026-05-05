@@ -11,6 +11,7 @@ import com.ditchoom.buffer.codec.annotations.UseCodec
 import com.ditchoom.buffer.codec.annotations.When
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
+import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttUnsubscribeTopic
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
 
 /**
@@ -217,6 +218,79 @@ sealed interface MqttV5Packet<out P : Payload> {
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
         @When("remaining >= 1") val reasonCode: UByte? = null,
+    ) : MqttV5Packet<Nothing>
+
+    /**
+     * Type-8 SUBSCRIBE per MQTT v5.0 §3.8 — fixed header `0x82` +
+     * RL + packetIdentifier + always-present property bag +
+     * `@RemainingBytes List<V5Subscription>` topic-filter list.
+     *
+     * Wire layout per §3.8.1:
+     *
+     * ```text
+     *   82 <RL>
+     *   <pid_msb> <pid_lsb>
+     *   <propLen VBI> <props...>
+     *   <topic LP> <opts>      filter 1
+     *   …                      repeated for each filter
+     * ```
+     *
+     * Composes the always-present property bag (slice 2 shape) with
+     * the J.M.0 `@RemainingBytes List<@ProtocolMessage T>` shape. The
+     * inner property-bag bound is restored before the trailing list
+     * reads, and the list reads to the outer RL bound.
+     */
+    @PacketType(value = 8)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class Subscribe(
+        val header: MqttFixedHeader = MqttFixedHeader(0x82u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
+        val packetIdentifier: UShort,
+        @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
+        val properties: List<MqttV5Property>,
+        @RemainingBytes val topicFilters: List<V5Subscription>,
+    ) : MqttV5Packet<Nothing>
+
+    /**
+     * Type-9 SUBACK per MQTT v5.0 §3.9 — fixed header `0x90` + RL +
+     * pid + always-present property bag + `@RemainingBytes List<UByte>`
+     * reason-code list (one byte per topic filter from the matching
+     * SUBSCRIBE).
+     *
+     * The reason codes are typed `UByte` for now (raw spec values per
+     * §3.9.3 — 0x00 = Granted QoS 0 ... 0xA2 = Wildcard Subscriptions
+     * not supported). Typed sealed enum is a follow-on.
+     */
+    @PacketType(value = 9)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class SubAck(
+        val header: MqttFixedHeader = MqttFixedHeader(0x90u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
+        val packetIdentifier: UShort,
+        @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
+        val properties: List<MqttV5Property>,
+        @RemainingBytes val reasonCodes: List<UByte>,
+    ) : MqttV5Packet<Nothing>
+
+    /**
+     * Type-10 UNSUBSCRIBE per MQTT v5.0 §3.10 — fixed header `0xA2` +
+     * RL + pid + always-present property bag + `@RemainingBytes
+     * List<MqttUnsubscribeTopic>` topic list.
+     *
+     * Reuses [MqttUnsubscribeTopic] from the v3 fixtures — a single-
+     * field LP-string wrapper. v5 adds the property bag between pid
+     * and the topic list; the topic list shape itself is unchanged
+     * from v3 (LP UTF-8 string per topic).
+     */
+    @PacketType(value = 10)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class Unsubscribe(
+        val header: MqttFixedHeader = MqttFixedHeader(0xA2u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
+        val packetIdentifier: UShort,
+        @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
+        val properties: List<MqttV5Property>,
+        @RemainingBytes val topics: List<MqttUnsubscribeTopic>,
     ) : MqttV5Packet<Nothing>
 
     /**
