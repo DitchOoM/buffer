@@ -45,6 +45,19 @@ class MqttPacketCodecTest {
     }
 
     @Test
+    fun fixedHeaderQosGreaterThanZeroFlagsQosBits() {
+        // Phase J.M step 2 — predicate for `Publish.packetId`. Bits
+        // 1 and 2 of `flags` carry QoS per §3.3.1; the property
+        // returns true iff either bit is set.
+        assertEquals(false, MqttFixedHeader(0x30u).qosGreaterThanZero, "QoS=0 (flags=0x0)")
+        assertEquals(true, MqttFixedHeader(0x32u).qosGreaterThanZero, "QoS=1 (flags=0x2)")
+        assertEquals(true, MqttFixedHeader(0x34u).qosGreaterThanZero, "QoS=2 (flags=0x4)")
+        // DUP bit (0x8) and RETAIN bit (0x1) do not affect the predicate.
+        assertEquals(false, MqttFixedHeader(0x39u).qosGreaterThanZero, "DUP+RETAIN, QoS=0")
+        assertEquals(true, MqttFixedHeader(0x3Bu).qosGreaterThanZero, "DUP+RETAIN, QoS=1")
+    }
+
+    @Test
     fun encodesConnectVariantByteExact() {
         // body = keepalive (2) + clientId LP (2 + 4) = 8 bytes
         val msg =
@@ -342,14 +355,15 @@ class MqttPacketCodecTest {
     // ----- Slice 10f Publish variant via the generic dispatcher -----
 
     @Test
-    fun encodesPublishVariantByteExact() {
-        // Wire layout: 30 / RL / 00 03 't' '/' '1' / 00 2A / payload bytes
+    fun encodesPublishVariantByteExactAtQos1() {
+        // Wire layout: 32 / RL / 00 03 't' '/' '1' / 00 2A / payload bytes
         // body = 2 (topic LP) + 3 (topic) + 2 (packetId) + payload (4 jpeg
         // header + 4 jpeg data) = 15 bytes. RL value = 15 (1-byte var-int).
+        // Header byte 0x32 = type=3, flags=0x2 (QoS=1) — packetId is on wire.
         val codec = MqttPacketCodec(JpegImageCodec)
         val msg =
             MqttPacket.Publish<JpegImage>(
-                header = MqttFixedHeader(0x30u),
+                header = MqttFixedHeader(0x32u),
                 remainingLength = 15u,
                 topic = "t/1",
                 packetId = PacketId(0x002Au),
@@ -366,32 +380,162 @@ class MqttPacketCodecTest {
         val actual = buf.readByteArray(buf.remaining())
         val expected =
             byteArrayOf(
-                0x30, // fixed header (type=3, QoS=0)
+                0x32, // fixed header (type=3, QoS=1)
                 0x0F, // remaining length = 15 (1-byte var-int)
-                0x00, 0x03, 't'.code.toByte(), '/'.code.toByte(), '1'.code.toByte(),
-                0x00, 0x2A, // packet id = 42
+                0x00,
+                0x03,
+                't'.code.toByte(),
+                '/'.code.toByte(),
+                '1'.code.toByte(),
+                0x00,
+                0x2A, // packet id = 42
                 // jpeg payload: width=4 (BE UShort), height=8 (BE UShort), 4 data bytes
-                0x00, 0x04,
-                0x00, 0x08,
-                0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte(),
+                0x00,
+                0x04,
+                0x00,
+                0x08,
+                0xDE.toByte(),
+                0xAD.toByte(),
+                0xBE.toByte(),
+                0xEF.toByte(),
             )
         assertContentEquals(expected, actual)
     }
 
     @Test
-    fun roundTripsPublishVariantViaDispatcher() {
+    fun encodesPublishVariantByteExactAtQos0OmitsPacketId() {
+        // Phase J.M step 2 — header byte 0x30 = QoS=0, packetId field
+        // is skipped on the wire per §3.3.2.2. body = 2 (topic LP) +
+        // 3 (topic) + payload (4 jpeg header + 4 jpeg data) = 13 bytes.
+        // Compare to the QoS=1 case which adds 2 bytes for packetId.
+        val codec = MqttPacketCodec(JpegImageCodec)
+        val msg =
+            MqttPacket.Publish<JpegImage>(
+                header = MqttFixedHeader(0x30u),
+                remainingLength = 13u,
+                topic = "t/1",
+                packetId = null,
+                payload =
+                    JpegImage(
+                        width = 4u,
+                        height = 8u,
+                        data = byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte()),
+                    ),
+            )
+        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        codec.encode(buf, msg, EncodeContext.Empty)
+        buf.resetForRead()
+        val actual = buf.readByteArray(buf.remaining())
+        val expected =
+            byteArrayOf(
+                0x30, // fixed header (type=3, QoS=0)
+                0x0D, // remaining length = 13 (1-byte var-int)
+                0x00,
+                0x03,
+                't'.code.toByte(),
+                '/'.code.toByte(),
+                '1'.code.toByte(),
+                // no packet id bytes — QoS=0 omits the slot
+                0x00,
+                0x04,
+                0x00,
+                0x08,
+                0xDE.toByte(),
+                0xAD.toByte(),
+                0xBE.toByte(),
+                0xEF.toByte(),
+            )
+        assertContentEquals(expected, actual)
+    }
+
+    @Test
+    fun decodesPublishQos0YieldsNullPacketId() {
+        val codec = MqttPacketCodec(JpegImageCodec)
+        val wire =
+            byteArrayOf(
+                0x30,
+                0x0D,
+                0x00,
+                0x03,
+                't'.code.toByte(),
+                '/'.code.toByte(),
+                '1'.code.toByte(),
+                0x00,
+                0x04,
+                0x00,
+                0x08,
+                0xDE.toByte(),
+                0xAD.toByte(),
+                0xBE.toByte(),
+                0xEF.toByte(),
+            )
+        val buf = BufferFactory.Default.allocate(wire.size, ByteOrder.BIG_ENDIAN).also { it.writeBytes(wire) }
+        buf.resetForRead()
+        val decoded = assertIs<MqttPacket.Publish<JpegImage>>(codec.decode(buf, DecodeContext.Empty))
+        assertEquals(null, decoded.packetId, "QoS=0 leaves packetId absent on wire and reads back null")
+        assertEquals("t/1", decoded.topic)
+    }
+
+    @Test
+    fun encodeThrowsWhenQos1AndPacketIdIsNull() {
+        // Predicate true (QoS=1) with `value.packetId == null` is the
+        // row-20 failure mode — encode throws EncodeException with
+        // field-path attribution rather than silently emitting a
+        // truncated frame.
+        val codec = MqttPacketCodec(JpegImageCodec)
+        val msg =
+            MqttPacket.Publish<JpegImage>(
+                header = MqttFixedHeader(0x32u),
+                remainingLength = 15u,
+                topic = "t/1",
+                packetId = null,
+                payload = JpegImage(1u, 1u, byteArrayOf(0x00)),
+            )
+        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        val ex =
+            assertFailsWith<com.ditchoom.buffer.codec.EncodeException> {
+                codec.encode(buf, msg, EncodeContext.Empty)
+            }
+        assertEquals("Publish.packetId", ex.fieldPath)
+    }
+
+    @Test
+    fun roundTripsPublishVariantViaDispatcherAtQos1() {
         // The slice 10f integration test — Publish<P> routes through
         // the dispatcher's generic class with the supplied payload
         // codec. Confirms @RemainingLength + RemainingBytesPayload
-        // composition lifts the slice 10c carve-out correctly.
+        // composition lifts the slice 10c carve-out correctly. Run
+        // at QoS=1 (header byte 0x32) so the packetId slot is on the
+        // wire and round-trips through the dispatcher.
         val codec = MqttPacketCodec(JpegImageCodec)
         val original =
             MqttPacket.Publish<JpegImage>(
-                header = MqttFixedHeader(0x30u),
+                header = MqttFixedHeader(0x32u),
                 // body = 2 (topic LP) + 12 (topic) + 2 (pid) + 4+8 (jpeg)
                 remainingLength = 28u,
                 topic = "sensors/jpeg",
                 packetId = PacketId(0x0042u),
+                payload = JpegImage(320u, 240u, ByteArray(8) { (it * 5).toByte() }),
+            )
+        val buf = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
+        codec.encode(buf, original, EncodeContext.Empty)
+        buf.resetForRead()
+        val decoded = codec.decode(buf, DecodeContext.Empty)
+        assertEquals(original, decoded)
+    }
+
+    @Test
+    fun roundTripsPublishVariantAtQos0WithNullPacketId() {
+        // Phase J.M step 2 — QoS=0 round-trip drops packetId from the
+        // wire and reads back as null on the decoded side.
+        val codec = MqttPacketCodec(JpegImageCodec)
+        val original =
+            MqttPacket.Publish<JpegImage>(
+                header = MqttFixedHeader(0x30u),
+                // body = 2 (topic LP) + 12 (topic) + 4+8 (jpeg) = 26 (no packetId)
+                remainingLength = 26u,
+                topic = "sensors/jpeg",
+                packetId = null,
                 payload = JpegImage(320u, 240u, ByteArray(8) { (it * 5).toByte() }),
             )
         val buf = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
@@ -411,7 +555,7 @@ class MqttPacketCodecTest {
         val codec = MqttPacketCodec(JpegImageCodec)
         val original =
             MqttPacket.Publish<JpegImage>(
-                header = MqttFixedHeader(0x30u),
+                header = MqttFixedHeader(0x32u),
                 remainingLength = 10u, // 2 + 1 (topic "t") + 2 (pid) + 4+1 (jpeg)
                 topic = "t",
                 packetId = PacketId(0x0007u),
@@ -442,7 +586,7 @@ class MqttPacketCodecTest {
         val codec = MqttPacketCodec(JpegImageCodec)
         val original =
             MqttPacket.Publish<JpegImage>(
-                header = MqttFixedHeader(0x30u),
+                header = MqttFixedHeader(0x32u),
                 remainingLength = 12u, // 2 + 3 (topic) + 2 (pid) + 4 + 1 (jpeg data)
                 topic = "a/b",
                 packetId = PacketId(0x0001u),

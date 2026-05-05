@@ -138,7 +138,7 @@ class RemoteCommandCodecTest {
         val codec = MqttCodec(JpegImageCodec)
         val original =
             MqttPacket.Publish<JpegImage>(
-                header = MqttFixedHeader(0x30u),
+                header = MqttFixedHeader(0x32u),
                 // 2 + 1 (topic "x") + 2 (pid) + 4 + 4 (jpeg)
                 remainingLength = 13u,
                 topic = "x",

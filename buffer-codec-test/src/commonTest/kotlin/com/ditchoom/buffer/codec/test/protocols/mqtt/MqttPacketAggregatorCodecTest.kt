@@ -56,7 +56,7 @@ class MqttPacketAggregatorCodecTest {
         val publishCodec = MqttPacketCodec(JpegImageCodec)
         val original =
             MqttPacket.Publish<JpegImage>(
-                header = MqttFixedHeader(0x30u),
+                header = MqttFixedHeader(0x32u),
                 remainingLength = 13u, // 2 + 1 (topic) + 2 (pid) + 4 + 4 (jpeg)
                 topic = "x",
                 packetId = PacketId(42u),
@@ -88,7 +88,7 @@ class MqttPacketAggregatorCodecTest {
         val publishCodec = MqttPacketCodec(JpegImageCodec)
         val original =
             MqttPacket.Publish<JpegImage>(
-                header = MqttFixedHeader(0x30u),
+                header = MqttFixedHeader(0x32u),
                 remainingLength = 22u, // 2 + 11 (topic) + 2 (pid) + 4 + 3 (jpeg)
                 topic = "topic/foo/1",
                 packetId = PacketId(7u),
@@ -123,7 +123,7 @@ class MqttPacketAggregatorCodecTest {
         val publishCodec = MqttPacketCodec(JpegImageCodec)
         val original =
             MqttPacket.Publish<JpegImage>(
-                header = MqttFixedHeader(0x30u),
+                header = MqttFixedHeader(0x32u),
                 remainingLength = 13u,
                 topic = "x",
                 packetId = PacketId(42u),
@@ -175,7 +175,7 @@ class MqttPacketAggregatorCodecTest {
         // call without re-instantiating any dispatcher.
         val jpegPublish =
             MqttPacket.Publish<JpegImage>(
-                header = MqttFixedHeader(0x30u),
+                header = MqttFixedHeader(0x32u),
                 remainingLength = 13u,
                 topic = "x",
                 packetId = PacketId(1u),
@@ -183,7 +183,7 @@ class MqttPacketAggregatorCodecTest {
             )
         val textPublish =
             MqttPacket.Publish<TextPayload>(
-                header = MqttFixedHeader(0x30u),
+                header = MqttFixedHeader(0x32u),
                 remainingLength = 23u, // 2 + 1 (topic) + 2 (pid) + 18 (text "hello, slice 10d.5")
                 topic = "y",
                 packetId = PacketId(2u),
@@ -239,7 +239,7 @@ class MqttPacketAggregatorCodecTest {
         val publishCodec = MqttPacketCodec(JpegImageCodec)
         val original =
             MqttPacket.Publish<JpegImage>(
-                header = MqttFixedHeader(0x30u),
+                header = MqttFixedHeader(0x32u),
                 remainingLength = 13u,
                 topic = "x",
                 packetId = PacketId(99u),

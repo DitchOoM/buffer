@@ -1142,14 +1142,56 @@ internal class CodecEmitter(
                 prefixWireOrder = messageWireOrder,
             )
         }
+        // Phase J.M step 2 — value-class-over-scalar Conditional inner
+        // (MQTT v3.1.1 PUBLISH `packetId: PacketId?`). Detect before
+        // the bare-scalar branch since value classes resolve to their
+        // own qualified name (not in SUPPORTED_SCALARS).
+        val valueClassInner = analyzeConditionalValueClassInner(innerType)
+        if (valueClassInner != null) return valueClassInner
         val kind = SUPPORTED_SCALARS[qualified] ?: return null
         return ConditionalInner.Scalar(kind = kind)
+    }
+
+    /**
+     * Phase J.M step 2 — detect a value-class-over-scalar inner for
+     * `@WhenTrue val: T?`. Mirrors the validity checks applied to
+     * the non-conditional [analyzeValueClassScalarField] shape:
+     * value class with exactly one primary-constructor parameter
+     * over a supported non-nullable scalar, no `@WireBytes` /
+     * `@WireOrder` on the inner property (slice 3 narrow). Returns
+     * `null` for any other shape so the caller falls through to the
+     * bare-scalar branch.
+     */
+    private fun analyzeConditionalValueClassInner(innerType: KSType): ConditionalInner.ValueClassScalar? {
+        val decl = innerType.declaration as? KSClassDeclaration ?: return null
+        if (Modifier.VALUE !in decl.modifiers) return null
+        val ctor = decl.primaryConstructor ?: return null
+        if (ctor.parameters.size != 1) return null
+        val innerParam = ctor.parameters[0]
+        val innerName = innerParam.name?.asString() ?: return null
+        val innerInnerType = innerParam.type.resolve()
+        if (innerInnerType.isError || innerInnerType.isMarkedNullable) return null
+        val innerQname = innerInnerType.declaration.qualifiedName?.asString() ?: return null
+        val innerKind = SUPPORTED_SCALARS[innerQname] ?: return null
+        if (innerParam.annotations.any { ann ->
+                val n = ann.shortName.asString()
+                n == "WireBytes" || n == "WireOrder"
+            }
+        ) {
+            return null
+        }
+        return ConditionalInner.ValueClassScalar(
+            valueClassType = classNameOf(decl),
+            innerKind = innerKind,
+            innerPropertyName = innerName,
+        )
     }
 
     private fun conditionalInnerNullableTypeName(inner: ConditionalInner): TypeName =
         when (inner) {
             is ConditionalInner.Scalar -> scalarTypeName(inner.kind).copy(nullable = true)
             is ConditionalInner.LengthPrefixedString -> STRING_NULLABLE_TN
+            is ConditionalInner.ValueClassScalar -> inner.valueClassType.copy(nullable = true)
         }
 
     /**
@@ -2370,6 +2412,13 @@ internal class CodecEmitter(
                     prefixWidth = inner.prefixWidth,
                     prefixWireOrder = inner.prefixWireOrder,
                 )
+            is ConditionalInner.ValueClassScalar -> {
+                // Phase J.M step 2 — peek consumes the inner scalar's
+                // natural width when the predicate is true (the value
+                // class wraps with no extra wire bytes).
+                appendPeekAvailabilityCheck(body, inner.innerKind.width)
+                body.addStatement("__offset += %L", inner.innerKind.width)
+            }
         }
         body.endControlFlow()
     }
@@ -2598,6 +2647,19 @@ internal class CodecEmitter(
                 body.addStatement("null")
                 body.endControlFlow()
             }
+            is ConditionalInner.ValueClassScalar -> {
+                // Phase J.M step 2 — wrap the natural-width inner read
+                // in the value-class constructor (mirror of slice 3's
+                // non-conditional `appendDecodeValueClassScalar`).
+                body.addStatement(
+                    "val %L: %T = if (%L) %T(%L) else null",
+                    field.name,
+                    field.nullableTypeName,
+                    decodeConditionExpr(field.condition),
+                    inner.valueClassType,
+                    naturalScalarReadExpr(inner.innerKind),
+                )
+            }
         }
     }
 
@@ -2647,6 +2709,16 @@ internal class CodecEmitter(
                     prefixWidth = inner.prefixWidth,
                     prefixWireOrder = inner.prefixWireOrder,
                     accessor = localName,
+                )
+            is ConditionalInner.ValueClassScalar ->
+                // Phase J.M step 2 — unwrap the value class via the
+                // inner property name (mirror of slice 3's
+                // non-conditional `appendEncodeValueClassScalar`).
+                body.addStatement(
+                    naturalScalarWriteStatement(
+                        inner.innerKind,
+                        "$localName.${inner.innerPropertyName}",
+                    ),
                 )
         }
         body.endControlFlow()
@@ -4816,6 +4888,16 @@ internal class CodecEmitter(
      *   - `Scalar`: any natural-width supported scalar (slices 2/3).
      *   - `LengthPrefixedString`: `@LengthPrefixed val: String?`
      *     (slice 3.5).
+     *   - `ValueClassScalar`: `val: T?` where `T` is a `@JvmInline
+     *     value class` over a single supported scalar (Phase J.M
+     *     step 2 — the MQTT v3.1.1 PUBLISH `packetId: PacketId?`
+     *     QoS-conditional shape). Decode reads the inner scalar at
+     *     natural width and wraps via the value-class constructor;
+     *     encode unwraps the non-null value via the inner property
+     *     and writes the inner scalar. `@WireBytes` / `@WireOrder`
+     *     on the inner property are out of scope (matches the
+     *     narrowing applied to the non-conditional `ValueClassScalar`
+     *     field shape — slice 3).
      * Future widenings (`@WireBytes`-narrowed scalars, `@LengthPrefixed
      * @ProtocolMessage` body) are additional members; the existing
      * branches stay closed by the sealed.
@@ -4828,6 +4910,12 @@ internal class CodecEmitter(
         data class LengthPrefixedString(
             val prefixWidth: Int,
             val prefixWireOrder: Endianness,
+        ) : ConditionalInner
+
+        data class ValueClassScalar(
+            val valueClassType: ClassName,
+            val innerKind: ScalarKind,
+            val innerPropertyName: String,
         ) : ConditionalInner
     }
 

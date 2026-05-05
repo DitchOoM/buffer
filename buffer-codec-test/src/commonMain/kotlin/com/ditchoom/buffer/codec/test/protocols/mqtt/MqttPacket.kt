@@ -8,6 +8,7 @@ import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import com.ditchoom.buffer.codec.annotations.UseCodec
+import com.ditchoom.buffer.codec.annotations.WhenTrue
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
 import kotlin.jvm.JvmInline
 
@@ -32,6 +33,15 @@ value class MqttFixedHeader(
     val packetType: Int get() = raw.toUInt().shr(4).toInt()
 
     val flags: UByte get() = (raw.toUInt() and 0x0Fu).toUByte()
+
+    /**
+     * MQTT v3.1.1 §3.3.2.2 — PUBLISH carries a packet identifier
+     * only when QoS > 0 (QoS bits live in `flags & 0x06`). Exposed
+     * as a `Boolean`-returning `val` so `Publish.packetId` can gate
+     * on `@WhenTrue("header.qosGreaterThanZero")` via the slice-3
+     * dotted value-class predicate path.
+     */
+    val qosGreaterThanZero: Boolean get() = (raw.toUInt() and 0x06u) != 0u
 }
 
 /**
@@ -95,7 +105,7 @@ sealed interface MqttPacket<out P : Payload> {
 
     /**
      * Type-3 PUBLISH per MQTT v3.1.1 §3.3 — generic-bounded payload
-     * variant. Wire layout (QoS=0 narrow):
+     * variant. Wire layout:
      *
      *   - `header` (`MqttFixedHeader`, 1 byte): packet type=3 in
      *     the top 4 bits, flags in the bottom 4. The default
@@ -106,13 +116,13 @@ sealed interface MqttPacket<out P : Payload> {
      *     fields stop at the var-int's value.
      *   - `@LengthPrefixed topic` (UShort BE prefix + UTF-8 body):
      *     the publish topic name.
-     *   - `packetId` (`PacketId`, UShort BE): the packet identifier.
-     *     Per spec, packetId is only present when `header.flags
-     *     & 0x06 != 0` (QoS > 0); slice 10f narrow always includes
-     *     it (matches the slice 10a/10b PUBLISH fixture). Lifting
-     *     this to a QoS-conditional `@WhenTrue("header.flags > ...")`
-     *     wait for a vector that exercises QoS-bit dotted predicates
-     *     against the value-class header.
+     *   - `packetId` (`PacketId?`, UShort BE) — present only when
+     *     `header.qosGreaterThanZero` is `true` per §3.3.2.2.
+     *     Modeled with `@WhenTrue("header.qosGreaterThanZero")`
+     *     against the value-class header property; for QoS=0 the
+     *     slot is skipped on the wire and the field reads back as
+     *     `null`. Phase J.M step 2 is the vector that lifts
+     *     `ConditionalInner` to cover value-class scalars.
      *   - `@RemainingBytes payload: P` (variable, decoded by the
      *     user-supplied `Codec<P>`): consumes the remaining bytes
      *     of the var-int-bounded region.
@@ -131,7 +141,7 @@ sealed interface MqttPacket<out P : Payload> {
         val header: MqttFixedHeader = MqttFixedHeader(0x30u),
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         @LengthPrefixed val topic: String,
-        val packetId: PacketId,
+        @WhenTrue("header.qosGreaterThanZero") val packetId: PacketId? = null,
         @RemainingBytes val payload: P,
     ) : MqttPacket<P>
 
