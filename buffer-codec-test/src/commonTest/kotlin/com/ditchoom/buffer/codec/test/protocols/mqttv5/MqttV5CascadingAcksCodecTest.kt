@@ -333,6 +333,146 @@ class MqttV5CascadingAcksCodecTest {
     }
 
     @Test
+    fun pubRecRoundTripsWithPropertyBag() {
+        // Phase J.M.5 slice 10 Tier A — PUBREC now carries the optional
+        // trailing property bag (slice 5 cascade shape extended to PUBREC).
+        // Wire layout: 50 RL pid rc propLen <props...>
+        val msg =
+            MqttV5Packet.PubRec(
+                remainingLength = 9u,
+                packetIdentifier = 0x0099u,
+                reasonCode = 0x80u, // Unspecified error
+                properties = listOf(MqttV5Property.ReasonString(value = "rate")),
+            )
+        val buf = encode(msg)
+        buf.resetForRead()
+        val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
+        assertEquals(msg, decoded)
+    }
+
+    @Test
+    fun pubRelRoundTripsWithPropertyBag() {
+        val msg =
+            MqttV5Packet.PubRel(
+                remainingLength = 9u,
+                packetIdentifier = 0x00ABu,
+                reasonCode = 0x92u, // Packet Identifier not found
+                properties = listOf(MqttV5Property.ReasonString(value = "miss")),
+            )
+        val buf = encode(msg)
+        buf.resetForRead()
+        val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
+        assertEquals(msg, decoded)
+    }
+
+    @Test
+    fun pubCompRoundTripsWithPropertyBag() {
+        val msg =
+            MqttV5Packet.PubComp(
+                remainingLength = 4u,
+                packetIdentifier = 0x00CDu,
+                reasonCode = 0x00u,
+                properties = emptyList(),
+            )
+        val buf = encode(msg)
+        buf.resetForRead()
+        val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
+        assertEquals(msg, decoded)
+    }
+
+    @Test
+    fun unsubAckRoundTripsWithPropertyBag() {
+        val msg =
+            MqttV5Packet.UnsubAck(
+                remainingLength = 12u,
+                packetIdentifier = 0x00EFu,
+                reasonCode = 0x11u, // No subscription existed
+                properties = listOf(MqttV5Property.ReasonString(value = "no match")),
+            )
+        val buf = encode(msg)
+        buf.resetForRead()
+        val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
+        assertEquals(msg, decoded)
+    }
+
+    @Test
+    fun authRoundTripsWithPropertyBag() {
+        // AUTH carries the authentication-method/data exchange in its
+        // property bag. AuthenticationMethod (0x15) is now representable;
+        // Authentication Data (0x16, binary @Payload) remains deferred to
+        // Tier C (multi-payload dispatcher).
+        val msg =
+            MqttV5Packet.Auth(
+                remainingLength = 18u,
+                reasonCode = 0x18u, // Continue authentication
+                properties = listOf(MqttV5Property.AuthenticationMethod(value = "SCRAM-SHA-256")),
+            )
+        val buf = encode(msg)
+        buf.resetForRead()
+        val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
+        assertEquals(msg, decoded)
+    }
+
+    @Test
+    fun pubRecRejectsPropertiesWithoutReasonCode() {
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Packet.PubRec(
+                remainingLength = 4u,
+                packetIdentifier = 0x0099u,
+                reasonCode = null,
+                properties = emptyList(),
+            )
+        }
+    }
+
+    @Test
+    fun pubRelRejectsPropertiesWithoutReasonCode() {
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Packet.PubRel(
+                remainingLength = 4u,
+                packetIdentifier = 0x0099u,
+                reasonCode = null,
+                properties = emptyList(),
+            )
+        }
+    }
+
+    @Test
+    fun pubCompRejectsPropertiesWithoutReasonCode() {
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Packet.PubComp(
+                remainingLength = 4u,
+                packetIdentifier = 0x0099u,
+                reasonCode = null,
+                properties = emptyList(),
+            )
+        }
+    }
+
+    @Test
+    fun unsubAckRejectsPropertiesWithoutReasonCode() {
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Packet.UnsubAck(
+                remainingLength = 4u,
+                packetIdentifier = 0x0099u,
+                reasonCode = null,
+                properties = emptyList(),
+            )
+        }
+    }
+
+    @Test
+    fun authRejectsPropertiesWithoutReasonCode() {
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Packet.Auth(
+                remainingLength = 2u,
+                reasonCode = null,
+                properties = emptyList(),
+            )
+        }
+    }
+
+    @Test
     fun pubAckRejectsPropertiesWithoutReasonCode() {
         // Phase J.M.5 audit-2c — caller cannot construct `(rc=null,
         // properties=non-null)` because the wire would misframe (the

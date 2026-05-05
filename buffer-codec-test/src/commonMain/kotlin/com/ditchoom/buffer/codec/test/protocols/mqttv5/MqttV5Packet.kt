@@ -274,7 +274,19 @@ sealed interface MqttV5Packet<out P : Payload> {
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
         @When("remaining >= 1") val reasonCode: UByte? = null,
-    ) : MqttV5Packet<Nothing>
+        @When("remaining >= 1")
+        @LengthPrefixed
+        @UseCodec(MqttRemainingLengthCodec::class)
+        val properties: List<MqttV5Property>? = null,
+    ) : MqttV5Packet<Nothing> {
+        init {
+            // Phase J.M.5 audit-2c — see [PubAck.init]. Spec §3.5.2.2.1.
+            require(reasonCode != null || properties == null) {
+                "v5 PUBREC cascade invariant: properties cannot be set without reasonCode " +
+                    "(spec §3.5.2.2.1)"
+            }
+        }
+    }
 
     /**
      * Type-6 PUBREL per MQTT v5.0 §3.6 — same shape as PUBACK with
@@ -288,7 +300,19 @@ sealed interface MqttV5Packet<out P : Payload> {
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
         @When("remaining >= 1") val reasonCode: UByte? = null,
-    ) : MqttV5Packet<Nothing>
+        @When("remaining >= 1")
+        @LengthPrefixed
+        @UseCodec(MqttRemainingLengthCodec::class)
+        val properties: List<MqttV5Property>? = null,
+    ) : MqttV5Packet<Nothing> {
+        init {
+            // Phase J.M.5 audit-2c — see [PubAck.init]. Spec §3.6.2.2.1.
+            require(reasonCode != null || properties == null) {
+                "v5 PUBREL cascade invariant: properties cannot be set without reasonCode " +
+                    "(spec §3.6.2.2.1)"
+            }
+        }
+    }
 
     /**
      * Type-7 PUBCOMP per MQTT v5.0 §3.7 — same shape as PUBACK with
@@ -301,7 +325,19 @@ sealed interface MqttV5Packet<out P : Payload> {
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
         @When("remaining >= 1") val reasonCode: UByte? = null,
-    ) : MqttV5Packet<Nothing>
+        @When("remaining >= 1")
+        @LengthPrefixed
+        @UseCodec(MqttRemainingLengthCodec::class)
+        val properties: List<MqttV5Property>? = null,
+    ) : MqttV5Packet<Nothing> {
+        init {
+            // Phase J.M.5 audit-2c — see [PubAck.init]. Spec §3.7.2.2.1.
+            require(reasonCode != null || properties == null) {
+                "v5 PUBCOMP cascade invariant: properties cannot be set without reasonCode " +
+                    "(spec §3.7.2.2.1)"
+            }
+        }
+    }
 
     /**
      * Type-8 SUBSCRIBE per MQTT v5.0 §3.8 — fixed header `0x82` +
@@ -378,8 +414,9 @@ sealed interface MqttV5Packet<out P : Payload> {
 
     /**
      * Type-11 UNSUBACK per MQTT v5.0 §3.11 — fixed header `0xB0` +
-     * RL + pid + optional reason code (per the cascade gate; the
-     * property bag and per-topic reason-code list are deferred).
+     * RL + pid + optional reason code + optional property bag. The
+     * per-topic reason-code list (one byte per topic from the matching
+     * UNSUBSCRIBE) is still deferred.
      */
     @PacketType(value = 11)
     @ProtocolMessage(wireOrder = Endianness.Big)
@@ -388,7 +425,19 @@ sealed interface MqttV5Packet<out P : Payload> {
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
         @When("remaining >= 1") val reasonCode: UByte? = null,
-    ) : MqttV5Packet<Nothing>
+        @When("remaining >= 1")
+        @LengthPrefixed
+        @UseCodec(MqttRemainingLengthCodec::class)
+        val properties: List<MqttV5Property>? = null,
+    ) : MqttV5Packet<Nothing> {
+        init {
+            // Phase J.M.5 audit-2c — see [PubAck.init]. Spec §3.11.2.1.
+            require(reasonCode != null || properties == null) {
+                "v5 UNSUBACK cascade invariant: properties cannot be set without reasonCode " +
+                    "(spec §3.11.2.1)"
+            }
+        }
+    }
 
     /**
      * Type-14 DISCONNECT per MQTT v5.0 §3.14 — fixed header `0xE0` +
@@ -422,10 +471,11 @@ sealed interface MqttV5Packet<out P : Payload> {
 
     /**
      * Type-15 AUTH per MQTT v5.0 §3.15 — v5-only packet. Fixed header
-     * `0xF0` + RL + optional reason code. AUTH bodies are typically
-     * sent as part of an authentication exchange; an "AUTH continue"
-     * has reasonCode = 0x18 (Continue authentication), and the
-     * authentication-method/data live in the property bag (deferred).
+     * `0xF0` + RL + optional reason code + optional property bag. The
+     * authentication-method/data carried in the property bag are now
+     * representable via [MqttV5Property.AuthenticationMethod] (slice
+     * 10 Tier A); the binary `Authentication Data` (id 0x16) remains
+     * deferred until the multi-payload dispatcher (Tier C slice 14+).
      */
     @PacketType(value = 15)
     @ProtocolMessage(wireOrder = Endianness.Big)
@@ -433,7 +483,19 @@ sealed interface MqttV5Packet<out P : Payload> {
         val header: MqttFixedHeader = MqttFixedHeader(0xF0u),
         @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
         @When("remaining >= 1") val reasonCode: UByte? = null,
-    ) : MqttV5Packet<Nothing>
+        @When("remaining >= 1")
+        @LengthPrefixed
+        @UseCodec(MqttRemainingLengthCodec::class)
+        val properties: List<MqttV5Property>? = null,
+    ) : MqttV5Packet<Nothing> {
+        init {
+            // Phase J.M.5 audit-2c — see [PubAck.init]. Spec §3.15.2.2.1.
+            require(reasonCode != null || properties == null) {
+                "v5 AUTH cascade invariant: properties cannot be set without reasonCode " +
+                    "(spec §3.15.2.2.1)"
+            }
+        }
+    }
 
     /**
      * Type-12 PINGREQ per MQTT v5.0 §3.12 — fixed header `0xC0` + remaining
