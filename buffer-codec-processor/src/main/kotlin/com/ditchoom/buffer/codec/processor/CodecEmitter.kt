@@ -878,6 +878,43 @@ internal class CodecEmitter(
         }
 
     /**
+     * Phase I.1 step 5 — per-field-type peek-budget table.
+     *
+     * The framework's generic `@UseCodec` peek walker (step 6) materializes
+     * a non-consuming view via `stream.peekBuffer(offset, maxBytes)` and
+     * runs `codec.decode` against it. `maxBytes` is computed at emit time
+     * from this table, sized to cover both 7-bit-continuation encodings
+     * (MQTT var-byte-int, LEB128) and sentinel-extended encodings
+     * (WebSocket extended length) without per-codec opt-in.
+     *
+     * Heuristic: `max(⌈typeBits / 7⌉, 1 + typeBytes)`.
+     *
+     * | Field type   | typeBits | typeBytes | budget |
+     * |--------------|----------|-----------|--------|
+     * | `Byte`/`UByte`     | 8  | 1 |  2 |
+     * | `Short`/`UShort`   | 16 | 2 |  3 |
+     * | `Int`/`UInt`       | 32 | 4 |  5 |
+     * | `Long`/`ULong`     | 64 | 8 | 10 |
+     *
+     * Returns `null` for field types outside this set (value-class
+     * wrappers, non-scalar types). The caller falls back to
+     * `PeekResult.NoFraming` for the enclosing message — the codec is
+     * out of the generic peek-walker's reach until a per-codec opt-in
+     * lands. None of the current target protocols (MQTT var-byte-int,
+     * LEB128, MIDI VLQ, ASN.1 BER, WebSocket extended length) need
+     * a wider budget.
+     */
+    @Suppress("unused") // consumed by step 6 — generic @UseCodec peek walker.
+    private fun peekBudgetFor(typeName: TypeName): Int? =
+        when (typeName) {
+            BYTE, U_BYTE -> 2
+            SHORT, U_SHORT -> 3
+            INT, U_INT -> 5
+            LONG, U_LONG -> 10
+            else -> null
+        }
+
+    /**
      * Stage H slice 10b — does this type refer to the message's
      * declared `<P : Payload>` type parameter? KSP represents type-
      * parameter references as a `KSTypeParameter` declaration with
