@@ -217,8 +217,8 @@ internal class CodecEmitter(
         // range and the emit logic doesn't model trailing fields after a
         // variable-length tail. Slice 5b lifted the non-terminal-Conditional
         // restriction.
-        // Slice 8 / Phase I.1: at most one bounding field per message.
-        // RemainingLength and UseCodecScalar(isBounding = true) both narrow
+        // Phase I.1: at most one bounding field per message. A bounding
+        // `UseCodecScalar` (codec implements `BoundingLengthCodec`) narrows
         // `buffer.limit()` mid-decode; multiple of them would have ambiguous
         // semantics (last-one-wins isn't a real protocol's wire shape).
         if (fields.count { it.isBoundingShape() } > 1) return null
@@ -332,7 +332,6 @@ internal class CodecEmitter(
         var lengthPrefixed: KSAnnotation? = null
         var lengthFromAnn: KSAnnotation? = null
         var remainingBytesAnn: KSAnnotation? = null
-        var remainingLengthAnn: KSAnnotation? = null
         var wireBytesAnn: KSAnnotation? = null
         var useCodecAnn: KSAnnotation? = null
         for (ann in param.annotations) {
@@ -341,7 +340,6 @@ internal class CodecEmitter(
                 "LengthPrefixed" -> lengthPrefixed = ann
                 "LengthFrom" -> lengthFromAnn = ann
                 "RemainingBytes" -> remainingBytesAnn = ann
-                "RemainingLength" -> remainingLengthAnn = ann
                 "WireBytes" -> wireBytesAnn = ann
                 "UseCodec" -> useCodecAnn = ann
                 else -> return null
@@ -355,16 +353,16 @@ internal class CodecEmitter(
         if (remainingBytesAnn != null) {
             // Stage G slice 7b — `@RemainingBytes val: List<S>` where S is
             // a single-byte scalar. Mutually exclusive with @LengthFrom /
-            // @LengthPrefixed / @WireBytes / @RemainingLength on the SAME
-            // parameter (note: `@RemainingLength` on a SIBLING field is
-            // expected — the slice 8 MQTT vector pairs them).
+            // @LengthPrefixed / @WireBytes on the SAME parameter (a bounding
+            // sibling field — Phase I.1's `@UseCodec(BoundingLengthCodec)`
+            // — is expected and composes via the slice 10f Partial
+            // outer-limit machinery).
             // Stage H slice 10a — `@RemainingBytes @UseCodec val: P` where
             // P : Payload routes to RemainingBytesPayload.
             // Stage H slice 10b — `@RemainingBytes val: P` where P is the
             // type parameter `<P : Payload>` of the enclosing data class
             // routes to RemainingBytesPayload via ConstructorInjected.
             if (lengthFromAnn != null || lengthPrefixed != null || wireBytesAnn != null) return null
-            if (remainingLengthAnn != null) return null
             if (useCodecAnn != null && type.implementsPayload()) {
                 return analyzeRemainingBytesPayloadField(param, type, useCodecAnn, ownerSimpleName)
             }
@@ -380,17 +378,6 @@ internal class CodecEmitter(
             val typeQname = type.declaration.qualifiedName?.asString()
             if (typeQname != "kotlin.collections.List") return null
             return analyzeRemainingBytesScalarListField(param, type, ownerSimpleName)
-        }
-
-        if (remainingLengthAnn != null) {
-            // Stage G slice 8 — `@RemainingLength val: UInt`. Reads/writes
-            // the MQTT v3 var-int and bounds subsequent decode. Mutually
-            // exclusive with all other field-shape annotations.
-            if (lengthFromAnn != null || lengthPrefixed != null || wireBytesAnn != null) return null
-            val name = param.name?.asString() ?: return null
-            val typeQname = type.declaration.qualifiedName?.asString()
-            if (typeQname != "kotlin.UInt") return null
-            return FieldSpec.RemainingLength(name = name, ownerSimpleName = ownerSimpleName)
         }
 
         if (lengthFromAnn != null) {
@@ -1356,12 +1343,13 @@ internal class CodecEmitter(
         messageType: TypeName = shape.messageClassName,
     ): FunSpec {
         val body = CodeBlock.builder()
-        // Slice 8 — when @RemainingLength is present, fields BEFORE it
-        // emit normally; the var-int + setLimit emits at its position;
-        // fields AFTER it run inside `try { ... } finally {
-        // setLimit(outer) }` so the buffer's outer limit is restored
-        // even on decode failure. The constructor call becomes the
-        // try-block's value expression, returned by the function.
+        // Phase I.1 — when a bounding `@UseCodec(BoundingLengthCodec)`
+        // field is present, fields BEFORE it emit normally; the codec's
+        // decode + applyBound emits at its position; fields AFTER it run
+        // inside `try { ... } finally { setLimit(outer) }` so the
+        // buffer's outer limit is restored even on decode failure. The
+        // constructor call becomes the try-block's value expression,
+        // returned by the function.
         val boundingIndex = shape.fields.indexOfFirst { it.isBoundingShape() }
         val ctorArgs = shape.fields.joinToString(", ") { "${it.name} = ${it.name}" }
         if (boundingIndex < 0) {
@@ -1399,7 +1387,6 @@ internal class CodecEmitter(
             is FieldSpec.LengthFromList -> appendDecodeLengthFromList(body, field)
             is FieldSpec.RemainingBytesScalarList -> appendDecodeRemainingBytesScalarList(body, field)
             is FieldSpec.RemainingBytesPayload -> appendDecodeRemainingBytesPayload(body, field)
-            is FieldSpec.RemainingLength -> appendDecodeRemainingLength(body, field)
             is FieldSpec.UseCodecScalar -> appendDecodeUseCodecScalar(body, field)
             is FieldSpec.ValueClassScalar -> appendDecodeValueClassScalar(body, field)
             is FieldSpec.Conditional -> appendDecodeConditional(body, field)
@@ -1420,7 +1407,6 @@ internal class CodecEmitter(
                 is FieldSpec.LengthFromList -> appendEncodeLengthFromList(body, field)
                 is FieldSpec.RemainingBytesScalarList -> appendEncodeRemainingBytesScalarList(body, field)
                 is FieldSpec.RemainingBytesPayload -> appendEncodeRemainingBytesPayload(body, field)
-                is FieldSpec.RemainingLength -> appendEncodeRemainingLength(body, field)
                 is FieldSpec.UseCodecScalar -> appendEncodeUseCodecScalar(body, field)
                 is FieldSpec.ValueClassScalar -> appendEncodeValueClassScalar(body, field)
                 is FieldSpec.Conditional -> appendEncodeConditional(body, field)
@@ -1442,18 +1428,17 @@ internal class CodecEmitter(
      * payload field (slice 10a `@UseCodec` shape or slice 10b `<P :
      * Payload>` shape); `RemainingBytesPayload` is the marker for both.
      *
-     * Slice 10f lifts the slice 10c `@RemainingLength` carve-out. When
-     * a shape combines `@RemainingLength` with a typed payload (the
-     * MQTT v3 PUBLISH §3.3 wire shape), the `Partial` captures the
-     * outer buffer limit at partial-decode time (the same local that
-     * `appendDecodeRemainingLength` already emits as
-     * `__<rlName>OuterLimit`); `complete()` runs the payload decode
-     * inside the var-int-narrowed bound (correct for payload bounding)
-     * and restores the outer limit via `try/finally` (correct for
-     * caller cleanup). Both correctness concerns the slice 10c carve-
-     * out flagged are handled by capturing the outer limit on the
-     * Partial and restoring on completion — no consumer-visible API
-     * change versus the no-RL path.
+     * Slice 10f / Phase I.1 step 9 — when a shape also carries a
+     * bounding `@UseCodec(BoundingLengthCodec)` field (the MQTT v3
+     * PUBLISH §3.3 wire shape), the `Partial` captures the outer buffer
+     * limit at partial-decode time (the same local that
+     * `appendDecodeUseCodecScalar` emits as `__<fieldName>OuterLimit`);
+     * `complete()` runs the payload decode inside the bounding-narrowed
+     * limit (correct for payload bounding) and restores the outer limit
+     * via `try/finally` (correct for caller cleanup). Both correctness
+     * concerns the slice 10c carve-out flagged are handled by capturing
+     * the outer limit on the Partial and restoring on completion — no
+     * consumer-visible API change versus the unbounded path.
      */
     private fun shouldEmitPartial(shape: CodecShape): Boolean = shape.fields.any { it is FieldSpec.RemainingBytesPayload }
 
@@ -1492,12 +1477,11 @@ internal class CodecEmitter(
             shape.fields.lastOrNull() as? FieldSpec.RemainingBytesPayload
                 ?: error("buildPartialClassTypeSpec called for shape without trailing RemainingBytesPayload")
         val headerFields = shape.fields.dropLast(1)
-        // Slice 10f / Phase I.1 step 9 — when the headers contain a
-        // bounding field (`@RemainingLength` or `@UseCodec` whose target
-        // implements `BoundingLengthCodec`), the partial decode mid-walk
-        // narrows `buffer.limit()` and stashes the prior limit in
-        // `__<fieldName>OuterLimit`. Capture that local on the Partial so
-        // `complete()` can restore it.
+        // Slice 10f / Phase I.1 — when the headers contain a bounding
+        // `@UseCodec` field (codec implements `BoundingLengthCodec`),
+        // the partial decode mid-walk narrows `buffer.limit()` and
+        // stashes the prior limit in `__<fieldName>OuterLimit`. Capture
+        // that local on the Partial so `complete()` can restore it.
         val hasBoundingField = shape.fields.any { it.isBoundingShape() }
 
         val classBuilder = TypeSpec.classBuilder("Partial")
@@ -1674,9 +1658,8 @@ internal class CodecEmitter(
         val boundingField = shape.fields.firstOrNull { it.isBoundingShape() }
         val outerLimitArgs =
             if (boundingField != null) {
-                // appendDecodeRemainingLength (slice 8) and
-                // appendDecodeUseCodecScalar (Phase I.1 step 4) both
-                // emit the outer-limit local as `__<fieldName>OuterLimit`;
+                // appendDecodeUseCodecScalar (Phase I.1 step 4) emits
+                // the outer-limit local as `__<fieldName>OuterLimit`;
                 // pass it through so the Partial can restore on complete.
                 listOf("outerLimit = __${boundingField.name}OuterLimit")
             } else {
@@ -1734,7 +1717,6 @@ internal class CodecEmitter(
                     "partialFieldTypeName called on a RemainingBytesPayload field — caller " +
                         "should strip the payload field before mapping header types.",
                 )
-            is FieldSpec.RemainingLength -> U_INT
             is FieldSpec.UseCodecScalar -> field.fieldType
             is FieldSpec.ValueClassScalar -> field.valueClassType
             is FieldSpec.Conditional -> field.nullableTypeName
@@ -1751,33 +1733,6 @@ internal class CodecEmitter(
                 .addParameter("value", messageType)
                 .addParameter("context", ENCODE_CONTEXT_CN)
                 .returns(WIRE_SIZE_CN)
-        // Slice 8 — any `@RemainingLength` field fully determines wireSize:
-        // leading-fixed bytes + var-int bytes for the remainingLength value +
-        // remainingLength.toInt() bytes (which per spec covers everything
-        // after the var-int). This early return overrides the BackPatch
-        // collapses for Conditional / LengthPrefixedString below — the
-        // user-supplied remainingLength gives us an Exact answer even when
-        // the trailing fields would otherwise force BackPatch.
-        val remainingLengthField =
-            shape.fields.firstOrNull { it is FieldSpec.RemainingLength } as? FieldSpec.RemainingLength
-        if (remainingLengthField != null) {
-            val prefixBytes =
-                shape.fields
-                    .takeWhile { it !is FieldSpec.RemainingLength }
-                    .filterIsInstance<FieldSpec.FixedSize>()
-                    .sumOf { it.wireBytes }
-            builder.addStatement(
-                "val __remainingLengthBytes = %L",
-                varIntByteCountExpr("value.${remainingLengthField.name}"),
-            )
-            builder.addStatement(
-                "return %T.Exact(%L + __remainingLengthBytes + value.%L.toInt())",
-                WIRE_SIZE_CN,
-                prefixBytes,
-                remainingLengthField.name,
-            )
-            return builder.build()
-        }
         // Locked Decision row 19: any `@WhenTrue` field collapses the message
         // wireSize to BackPatch — we don't attempt conditional-Exact arithmetic.
         if (shape.fields.any { it is FieldSpec.Conditional }) {
@@ -1870,12 +1825,6 @@ internal class CodecEmitter(
                         "early-return at the top of buildWireSizeFun; reaching this branch " +
                         "indicates a missed early return.",
                 )
-            is FieldSpec.RemainingLength ->
-                error(
-                    "RemainingLength terminal shape should be handled by the early-return at the " +
-                        "top of buildWireSizeFun; reaching this branch indicates a missed early " +
-                        "return.",
-                )
             else -> {
                 val total = shape.fields.sumOfFixedWireBytes()
                 builder.addStatement("return %T.Exact(%L)", WIRE_SIZE_CN, total)
@@ -1902,38 +1851,21 @@ internal class CodecEmitter(
                 .addParameter("stream", STREAM_PROCESSOR_CN)
                 .addParameter("baseOffset", INT)
                 .returns(PEEK_RESULT_CN)
-        // Slice 8 — `@RemainingLength` carries the message's full
-        // remaining byte count via a leading var-int. peek can compute
-        // the total exactly: leading-fixed bytes + var-int bytes +
-        // var-int value. This OVERRIDES the RemainingBytesScalarList
-        // NoFraming below — once a RemainingLength field is in scope,
-        // the bound is known statically and the trailing
-        // RemainingBytesScalarList is naturally bounded.
-        val rlField =
-            shape.fields.firstOrNull { it is FieldSpec.RemainingLength } as? FieldSpec.RemainingLength
-        if (rlField != null) {
-            appendPeekRemainingLength(builder, shape, rlField)
-            return builder.build()
-        }
         // Phase I.1 step 6 — generic `@UseCodec` peek walker. When a
         // bounding `UseCodecScalar` field is present, the framework drives
         // the user codec against a non-consuming `stream.peekBuffer(...)`
         // view to discover the value, then computes total = priorBytes +
-        // codec-width + value.toInt() — same shape as
-        // `appendPeekRemainingLength`, just with the user codec doing the
-        // var-int read instead of an inlined MQTT §2.2.3 loop. Placed
-        // BEFORE the `RemainingBytesScalarList` / `RemainingBytesPayload`
-        // NoFraming collapses below: a bounding codec gives peek the
-        // value-driven byte count that bounds any trailing
-        // `@RemainingBytes` body (the slice 8 RemainingLength branch above
-        // applies the same precedence).
+        // codec-width + value.toInt() — the user codec does the var-int
+        // read against the peek view. Placed BEFORE the
+        // `RemainingBytesScalarList` / `RemainingBytesPayload` NoFraming
+        // collapses below: a bounding codec gives peek the value-driven
+        // byte count that bounds any trailing `@RemainingBytes` body.
         //
         // Conservative fallback to NoFraming for shapes outside the
         // walker's reach: non-bounding `@UseCodec` (no value-to-byte
         // mapping), value-class / non-scalar field types (no peek-budget
         // entry), or non-FixedSize prior fields (the walker assumes a
-        // statically-known prior byte count, mirroring the slice 8
-        // RemainingLength constraint).
+        // statically-known prior byte count).
         val ucsField =
             shape.fields.firstOrNull { it is FieldSpec.UseCodecScalar } as? FieldSpec.UseCodecScalar
         if (ucsField != null) {
@@ -2013,99 +1945,13 @@ internal class CodecEmitter(
      * LengthPrefixedString) become emitable here.
      */
     /**
-     * Slice 8 — peek for messages containing a `@RemainingLength`
-     * field. The leading-fixed bytes' availability is checked first,
-     * then the var-int is peek-decoded byte-by-byte (1–4 bytes,
-     * yielding `NeedsMoreData` mid-stream). Once the var-int value
-     * is known, total = leading-fixed bytes + var-int byte count +
-     * value.
-     */
-    private fun appendPeekRemainingLength(
-        builder: FunSpec.Builder,
-        shape: CodecShape,
-        rlField: FieldSpec.RemainingLength,
-    ) {
-        // Bytes before the @RemainingLength field. Slice 8 narrow:
-        // these MUST be FixedSize. Non-fixed leading fields would
-        // require routing through the sequential walk first; defer.
-        val priorFields = shape.fields.takeWhile { it !is FieldSpec.RemainingLength }
-        val nonFixed = priorFields.filterNot { it is FieldSpec.FixedSize }
-        if (nonFixed.isNotEmpty()) {
-            // Fall back to the sequential walk + NoFraming-via-RemainingBytes
-            // pattern; here we just mark NoFraming defensively. analyzeField
-            // doesn't currently produce this shape.
-            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
-            return
-        }
-        val priorBytes = priorFields.filterIsInstance<FieldSpec.FixedSize>().sumOf { it.wireBytes }
-        val body = CodeBlock.builder()
-        body.addStatement(
-            "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
-            priorBytes + 1,
-            PEEK_RESULT_CN,
-        )
-        // Peek-decode var-int starting at baseOffset + priorBytes.
-        // 1–4 byte loop with continuation-bit check; per-byte
-        // availability check yields NeedsMoreData if a continuation
-        // byte indicates more data than the stream has.
-        val multiplierVar = "__${rlField.name}Multiplier"
-        val byteVar = "__${rlField.name}Byte"
-        val bytesReadVar = "__${rlField.name}BytesRead"
-        body.addStatement("var %L = 1u", multiplierVar)
-        body.addStatement("var %L = 0u", rlField.name)
-        body.addStatement("var %L = 0", bytesReadVar)
-        body.addStatement("var %L = 0", byteVar)
-        body.beginControlFlow("do")
-        body.beginControlFlow("if (%L >= 4)", bytesReadVar)
-        body.addStatement(
-            "throw %T(fieldPath = %S, bufferPosition = baseOffset + %L + %L, expected = %S, actual = %S)",
-            DECODE_EXCEPTION_CN,
-            "${rlField.ownerSimpleName}.${rlField.name}",
-            priorBytes,
-            bytesReadVar,
-            "variable-byte-integer at most 4 bytes (MQTT §2.2.3)",
-            "5+ bytes with continuation bit set",
-        )
-        body.endControlFlow()
-        body.addStatement(
-            "if (stream.available() - baseOffset < %L + %L + 1) return %T.NeedsMoreData",
-            priorBytes,
-            bytesReadVar,
-            PEEK_RESULT_CN,
-        )
-        body.addStatement(
-            "%L = stream.peekByte(baseOffset + %L + %L).toInt() and 0xFF",
-            byteVar,
-            priorBytes,
-            bytesReadVar,
-        )
-        body.addStatement("%L += (%L and 0x7F).toUInt() * %L", rlField.name, byteVar, multiplierVar)
-        body.addStatement("%L *= 128u", multiplierVar)
-        body.addStatement("%L += 1", bytesReadVar)
-        body.endControlFlow() // do
-        body.addStatement("while ((%L and 0x80) != 0)", byteVar)
-        body.addStatement(
-            "val total = %L + %L + %L.toInt()",
-            priorBytes,
-            bytesReadVar,
-            rlField.name,
-        )
-        body.addStatement(
-            "return if (stream.available() - baseOffset >= total) %T.Complete(total) else %T.NeedsMoreData",
-            PEEK_RESULT_CN,
-            PEEK_RESULT_CN,
-        )
-        builder.addCode(body.build())
-    }
-
-    /**
      * Phase I.1 step 6 — emit peek for a shape carrying a bounding
      * `@UseCodec val: <scalar>` field. Materializes a non-consuming view
      * via `stream.peekBuffer(baseOffset + priorBytes, peekBudget)`, runs
      * `<codec>.decode` against the view, and computes total =
      * priorBytes + observed-codec-width + decodedValue.toInt(). The
-     * total mirrors slice 8's `appendPeekRemainingLength` math but the
-     * var-int decode is the user codec instead of an inlined MQTT loop.
+     * user codec does the var-int read against the peek view, so the
+     * peek path stays in lockstep with the decode path by construction.
      *
      * `IndexOutOfBoundsException` from the codec (the documented
      * underflow signal on `ReadBuffer`) collapses to
@@ -2276,11 +2122,6 @@ internal class CodecEmitter(
                     error(
                         "RemainingBytesPayload should be handled by buildPeekFrameFun's " +
                             "upfront NoFraming short-circuit before reaching the sequential walk.",
-                    )
-                is FieldSpec.RemainingLength ->
-                    error(
-                        "RemainingLength should be handled by buildPeekFrameFun's " +
-                            "appendPeekRemainingLength short-circuit before reaching the sequential walk.",
                     )
                 is FieldSpec.UseCodecScalar ->
                     error(
@@ -3256,15 +3097,14 @@ internal class CodecEmitter(
 
     /**
      * Phase I.1 — does this field narrow `buffer.limit()` mid-decode?
-     * `RemainingLength` always does (slice 8); a `UseCodecScalar` does
-     * iff its codec target implements `BoundingLengthCodec`. Used by
-     * [buildDecodeFun] to decide whether subsequent fields run inside
-     * `try { ... } finally { setLimit(__OuterLimit) }` and by the
-     * shape-construction uniqueness check.
+     * A `UseCodecScalar` does iff its codec target implements
+     * `BoundingLengthCodec`. Used by [buildDecodeFun] to decide whether
+     * subsequent fields run inside `try { ... } finally {
+     * setLimit(__OuterLimit) }` and by the shape-construction
+     * uniqueness check.
      */
     private fun FieldSpec.isBoundingShape(): Boolean =
         when (this) {
-            is FieldSpec.RemainingLength -> true
             is FieldSpec.UseCodecScalar -> isBounding
             else -> false
         }
@@ -3277,8 +3117,8 @@ internal class CodecEmitter(
      * decode (so the surrounding try/finally restores the caller's
      * outer limit even if the user codec or `applyBound` throws), and
      * `applyBound(buffer, <name>)` runs after decode to narrow the
-     * limit for subsequent fields — matching the slice 10f pattern for
-     * `@RemainingLength` but driven by interface inspection.
+     * limit for subsequent fields — driven by interface inspection on
+     * the codec target (the slice 10f outer-limit-restore pattern).
      */
     private fun appendDecodeUseCodecScalar(
         body: CodeBlock.Builder,
@@ -3305,91 +3145,6 @@ internal class CodecEmitter(
     ) {
         body.addStatement("%T.encode(buffer, value.%L, context)", field.codecType, field.name)
     }
-
-    /**
-     * Stage G slice 8 — emit decode for `@RemainingLength val: UInt`.
-     * Reads the MQTT v3.1.1 §2.2.3 variable-byte-integer (1–4 bytes,
-     * continuation bit `0x80`, malformed if > 4 bytes), saves the
-     * outer buffer limit (so the surrounding decode body can restore
-     * it via `try`/`finally`), and sets `buffer.setLimit(position +
-     * value.toInt())` so subsequent fields decode within the bounded
-     * region. Throws `DecodeException` for malformed var-ints (5th
-     * byte still has continuation bit set).
-     */
-    private fun appendDecodeRemainingLength(
-        body: CodeBlock.Builder,
-        field: FieldSpec.RemainingLength,
-    ) {
-        val outerLimitVar = "__${field.name}OuterLimit"
-        body.addStatement("val %L = buffer.limit()", outerLimitVar)
-        // Inline var-int read so each codec is self-contained (no shared
-        // runtime helper). The MQTT spec rejects 5th continuation byte;
-        // we surface as DecodeException with field-path attribution.
-        val multiplierVar = "__${field.name}Multiplier"
-        val byteVar = "__${field.name}Byte"
-        val bytesReadVar = "__${field.name}BytesRead"
-        body.addStatement("var %L = 1u", multiplierVar)
-        body.addStatement("var %L = 0u", field.name)
-        body.addStatement("var %L = 0", bytesReadVar)
-        body.addStatement("var %L = 0", byteVar)
-        body.beginControlFlow("do")
-        body.beginControlFlow("if (%L >= 4)", bytesReadVar)
-        body.addStatement(
-            "throw %T(fieldPath = %S, bufferPosition = -1, expected = %S, actual = %S)",
-            DECODE_EXCEPTION_CN,
-            "${field.ownerSimpleName}.${field.name}",
-            "variable-byte-integer at most 4 bytes (MQTT §2.2.3)",
-            "5+ bytes with continuation bit set",
-        )
-        body.endControlFlow()
-        body.addStatement("%L = buffer.readUByte().toInt()", byteVar)
-        body.addStatement("%L += (%L and 0x7F).toUInt() * %L", field.name, byteVar, multiplierVar)
-        body.addStatement("%L *= 128u", multiplierVar)
-        body.addStatement("%L += 1", bytesReadVar)
-        body.endControlFlow() // do
-        body.addStatement("while ((%L and 0x80) != 0)", byteVar)
-        // The bounded limit applies to subsequent field decodes (the
-        // post-RemainingLength block runs inside try/finally that
-        // restores `outerLimitVar`).
-        body.addStatement("buffer.setLimit(buffer.position() + %L.toInt())", field.name)
-    }
-
-    /**
-     * Stage G slice 8 — emit encode for `@RemainingLength val: UInt`.
-     * Writes the value as a MQTT v3 variable-byte-integer (1–4 bytes,
-     * continuation bit on every byte except the last). User is
-     * responsible for the value matching the trailing wire byte
-     * count (row 16 trust contract — measuring would require
-     * encoding all subsequent fields twice).
-     */
-    private fun appendEncodeRemainingLength(
-        body: CodeBlock.Builder,
-        field: FieldSpec.RemainingLength,
-    ) {
-        val remainingVar = "__${field.name}Remaining"
-        val byteVar = "__${field.name}Byte"
-        body.addStatement("var %L = value.%L", remainingVar, field.name)
-        body.beginControlFlow("do")
-        body.addStatement("var %L = (%L and 0x7Fu).toInt()", byteVar, remainingVar)
-        body.addStatement("%L = %L shr 7", remainingVar, remainingVar)
-        body.beginControlFlow("if (%L > 0u)", remainingVar)
-        body.addStatement("%L = %L or 0x80", byteVar, byteVar)
-        body.endControlFlow()
-        body.addStatement("buffer.writeUByte(%L.toUByte())", byteVar)
-        body.endControlFlow() // do
-        body.addStatement("while (%L > 0u)", remainingVar)
-    }
-
-    /**
-     * Stage G slice 8 — Kotlin sub-expression for the var-int byte
-     * count of a `UInt` value, used by `wireSize` and the dispatcher
-     * peek to compute total message bytes without a runtime call.
-     */
-    private fun varIntByteCountExpr(valueExpr: String): String =
-        "if ($valueExpr <= 127u) 1 " +
-            "else if ($valueExpr <= 16383u) 2 " +
-            "else if ($valueExpr <= 2097151u) 3 " +
-            "else 4"
 
     /**
      * Slice 4 / 5a — order-aware single-scalar peek for the prefix
@@ -3835,10 +3590,6 @@ internal class CodecEmitter(
             // list.size * elementWidth); RuntimeExact lets the dispatcher
             // forward without re-deriving.
             is FieldSpec.RemainingBytesScalarList -> VariantWireSize.RuntimeExact
-            // Slice 8: variant codec's wireSize is Exact (prior + var-int
-            // bytes + value.toInt()); RuntimeExact lets the dispatcher
-            // forward.
-            is FieldSpec.RemainingLength -> VariantWireSize.RuntimeExact
             is FieldSpec.Scalar, is FieldSpec.ValueClassScalar, null ->
                 VariantWireSize.LiteralExact(shape.fields.sumOfFixedWireBytes())
             is FieldSpec.LengthPrefixedString, is FieldSpec.Conditional -> VariantWireSize.BackPatch
@@ -4700,28 +4451,6 @@ internal class CodecEmitter(
         ) : FieldSpec
 
         /**
-         * Stage G slice 8 — `@RemainingLength val: UInt` reads/writes
-         * the MQTT v3.1.1 §2.2.3 variable-byte-integer (1–4 bytes,
-         * continuation bit `0x80`, range `0..268,435,455`) AND sets
-         * the buffer's limit on decode to `position + value` so
-         * subsequent fields (including `@RemainingBytes` lists) are
-         * bounded by the field's value. The buffer's outer limit is
-         * restored before decode returns via try/finally.
-         *
-         * The MQTT spec calls this exact field "Remaining Length";
-         * the annotation matches the spec terminology and semantics
-         * one-to-one. Reusable beyond MQTT for any protocol that
-         * carries a leading variable-length size header (Protobuf
-         * varints differ in encoding — they're zig-zag and unbounded
-         * — so a separate `@VarInt` annotation is the right path
-         * for those).
-         */
-        data class RemainingLength(
-            override val name: String,
-            val ownerSimpleName: String,
-        ) : FieldSpec
-
-        /**
          * Phase I.1 — `@UseCodec(C::class) val: <scalar>` (no framing
          * annotation), where `C` is a Kotlin `object` implementing
          * `Codec<T>` for `T` matching the field type. The decoded value
@@ -4734,9 +4463,8 @@ internal class CodecEmitter(
          * `__<name>OuterLimit`, calls `C.applyBound(buffer, <name>)`
          * after decode, and the surrounding `buildDecodeFun` wraps every
          * subsequent field in `try { ... } finally { buffer.setLimit(
-         * __<name>OuterLimit) }` — symmetric with the slice 10f
-         * `@RemainingLength` outer-limit-restore template, just driven
-         * by interface inspection on the codec target.
+         * __<name>OuterLimit) }` — the slice 10f outer-limit-restore
+         * template, driven by interface inspection on the codec target.
          *
          * `fieldType` carries the field's declared `TypeName` so the
          * generated decode local and constructor argument bind to the
@@ -5001,8 +4729,7 @@ internal class CodecEmitter(
          * limitation: today's emit defaults to big-endian (correct
          * for HTTP/2 SETTINGS, the slice 9 vector); little-endian
          * value-class siblings would need additional plumbing —
-         * tracked alongside the @RemainingLength followup in
-         * PHASE_9_RESET's deferred-decisions table.
+         * tracked in PHASE_9_RESET's deferred-decisions table.
          */
         data class ValueClassProperty(
             override val siblingName: String,
