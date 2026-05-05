@@ -904,7 +904,6 @@ internal class CodecEmitter(
      * LEB128, MIDI VLQ, ASN.1 BER, WebSocket extended length) need
      * a wider budget.
      */
-    @Suppress("unused") // consumed by step 6 — generic @UseCodec peek walker.
     private fun peekBudgetFor(typeName: TypeName): Int? =
         when (typeName) {
             BYTE, U_BYTE -> 2
@@ -1912,6 +1911,40 @@ internal class CodecEmitter(
             appendPeekRemainingLength(builder, shape, rlField)
             return builder.build()
         }
+        // Phase I.1 step 6 — generic `@UseCodec` peek walker. When a
+        // bounding `UseCodecScalar` field is present, the framework drives
+        // the user codec against a non-consuming `stream.peekBuffer(...)`
+        // view to discover the value, then computes total = priorBytes +
+        // codec-width + value.toInt() — same shape as
+        // `appendPeekRemainingLength`, just with the user codec doing the
+        // var-int read instead of an inlined MQTT §2.2.3 loop. Placed
+        // BEFORE the `RemainingBytesScalarList` / `RemainingBytesPayload`
+        // NoFraming collapses below: a bounding codec gives peek the
+        // value-driven byte count that bounds any trailing
+        // `@RemainingBytes` body (the slice 8 RemainingLength branch above
+        // applies the same precedence).
+        //
+        // Conservative fallback to NoFraming for shapes outside the
+        // walker's reach: non-bounding `@UseCodec` (no value-to-byte
+        // mapping), value-class / non-scalar field types (no peek-budget
+        // entry), or non-FixedSize prior fields (the walker assumes a
+        // statically-known prior byte count, mirroring the slice 8
+        // RemainingLength constraint).
+        val ucsField =
+            shape.fields.firstOrNull { it is FieldSpec.UseCodecScalar } as? FieldSpec.UseCodecScalar
+        if (ucsField != null) {
+            val budget = peekBudgetFor(ucsField.fieldType)
+            val priorAreFixed =
+                shape.fields
+                    .takeWhile { it !== ucsField }
+                    .all { it is FieldSpec.FixedSize }
+            if (!ucsField.isBounding || budget == null || !priorAreFixed) {
+                builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+                return builder.build()
+            }
+            appendPeekUseCodecScalar(builder, shape, ucsField, budget)
+            return builder.build()
+        }
         // Slice 7b — any RemainingBytesScalarList field collapses peek to
         // NoFraming. The body's byte count comes from the caller-set
         // buffer limit, which the stream-side peek can't see; consumers
@@ -1927,16 +1960,6 @@ internal class CodecEmitter(
         // dispatcher will own peek by reading the fixed header's
         // remaining-length first.
         if (shape.fields.any { it is FieldSpec.RemainingBytesPayload }) {
-            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
-            return builder.build()
-        }
-        // Phase I.1: any `@UseCodec val: <scalar>` field collapses peek to
-        // NoFraming until step 6 lands the generic peek walker
-        // (`StreamProcessor.peekBuffer` + `codec.decode` against the view).
-        // Without the walker, the framework can't drive the user codec
-        // against a non-consuming view, so the streaming loop must rely on
-        // outer-protocol framing or a dispatcher to size the frame.
-        if (shape.fields.any { it is FieldSpec.UseCodecScalar }) {
             builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
             return builder.build()
         }
@@ -2068,6 +2091,105 @@ internal class CodecEmitter(
             PEEK_RESULT_CN,
             PEEK_RESULT_CN,
         )
+        builder.addCode(body.build())
+    }
+
+    /**
+     * Phase I.1 step 6 — emit peek for a shape carrying a bounding
+     * `@UseCodec val: <scalar>` field. Materializes a non-consuming view
+     * via `stream.peekBuffer(baseOffset + priorBytes, peekBudget)`, runs
+     * `<codec>.decode` against the view, and computes total =
+     * priorBytes + observed-codec-width + decodedValue.toInt(). The
+     * total mirrors slice 8's `appendPeekRemainingLength` math but the
+     * var-int decode is the user codec instead of an inlined MQTT loop.
+     *
+     * `IndexOutOfBoundsException` from the codec (the documented
+     * underflow signal on `ReadBuffer`) collapses to
+     * `PeekResult.NeedsMoreData`. Other exceptions (e.g. the codec's
+     * own `DecodeException` for malformed wire) propagate — the stream
+     * genuinely has bad data and the caller should observe the
+     * exception, not loop on `NeedsMoreData`.
+     *
+     * The peek view is released via `freeNativeMemory()` in a `finally`
+     * so the slow-path pool buffer is returned even when peek aborts.
+     * The fast-path slice's `freeNativeMemory()` is a no-op for non-
+     * pooled chunks.
+     */
+    private fun appendPeekUseCodecScalar(
+        builder: FunSpec.Builder,
+        shape: CodecShape,
+        field: FieldSpec.UseCodecScalar,
+        peekBudget: Int,
+    ) {
+        val priorBytes =
+            shape.fields
+                .takeWhile { it !== field }
+                .filterIsInstance<FieldSpec.FixedSize>()
+                .sumOf { it.wireBytes }
+        val body = CodeBlock.builder()
+        body.addStatement(
+            "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
+            priorBytes + 1,
+            PEEK_RESULT_CN,
+        )
+        val peekViewVar = "__${field.name}PeekView"
+        body.addStatement(
+            "val %L = stream.peekBuffer(baseOffset + %L, %L) ?: return %T.NeedsMoreData",
+            peekViewVar,
+            priorBytes,
+            peekBudget,
+            PEEK_RESULT_CN,
+        )
+        body.beginControlFlow("try")
+        val priorPosVar = "__${field.name}PriorPos"
+        body.addStatement("val %L = %L.position()", priorPosVar, peekViewVar)
+        body.beginControlFlow("val %L = try", field.name)
+        body.addStatement(
+            "%T.decode(%L, %T.Empty)",
+            field.codecType,
+            peekViewVar,
+            DECODE_CONTEXT_CN,
+        )
+        // Catch the underflow exception cross-platform via simpleName
+        // whitelist: JVM `java.nio.BufferUnderflowException` (extends
+        // RuntimeException, NOT IndexOutOfBoundsException), JS/WASM/
+        // Native `IndexOutOfBoundsException` / `ArrayIndexOutOfBoundsException`.
+        // Any other exception (e.g. the codec's own DecodeException for
+        // malformed wire) propagates — the stream genuinely has bad
+        // data and the caller should observe it, not loop on
+        // NeedsMoreData.
+        body.nextControlFlow("catch (__e: %T)", ClassName("kotlin", "Throwable"))
+        body.beginControlFlow("when (__e::class.simpleName)")
+        body.addStatement(
+            "%S, %S, %S -> return %T.NeedsMoreData",
+            "BufferUnderflowException",
+            "IndexOutOfBoundsException",
+            "ArrayIndexOutOfBoundsException",
+            PEEK_RESULT_CN,
+        )
+        body.addStatement("else -> throw __e")
+        body.endControlFlow()
+        body.endControlFlow()
+        val widthVar = "__${field.name}Width"
+        body.addStatement("val %L = %L.position() - %L", widthVar, peekViewVar, priorPosVar)
+        body.addStatement(
+            "val __total = %L + %L + %L.toInt()",
+            priorBytes,
+            widthVar,
+            field.name,
+        )
+        body.addStatement(
+            "return if (stream.available() - baseOffset >= __total) %T.Complete(__total) else %T.NeedsMoreData",
+            PEEK_RESULT_CN,
+            PEEK_RESULT_CN,
+        )
+        body.nextControlFlow("finally")
+        body.addStatement(
+            "(%L as? %T)?.freeNativeMemory()",
+            peekViewVar,
+            PLATFORM_BUFFER_CN,
+        )
+        body.endControlFlow()
         builder.addCode(body.build())
     }
 
@@ -5001,6 +5123,7 @@ internal class CodecEmitter(
 
         private val READ_BUFFER_CN = ClassName("com.ditchoom.buffer", "ReadBuffer")
         private val WRITE_BUFFER_CN = ClassName("com.ditchoom.buffer", "WriteBuffer")
+        private val PLATFORM_BUFFER_CN = ClassName("com.ditchoom.buffer", "PlatformBuffer")
         private val CODEC_CN = ClassName("com.ditchoom.buffer.codec", "Codec")
         private val DECODER_CN = ClassName("com.ditchoom.buffer.codec", "Decoder")
         private val DECODE_CONTEXT_CN = ClassName("com.ditchoom.buffer.codec", "DecodeContext")

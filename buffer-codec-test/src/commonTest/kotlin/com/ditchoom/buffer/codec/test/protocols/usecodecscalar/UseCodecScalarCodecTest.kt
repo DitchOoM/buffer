@@ -140,16 +140,97 @@ class UseCodecScalarCodecTest {
     }
 
     @Test
-    fun boundedFramePeekFrameSizeIsNoFraming() {
+    fun boundedFramePeekFrameSizeReportsCompleteForFullFrame() {
+        // tag (2 BE) + length (4 LE = 3) + 3 payload bytes = 9 total bytes.
+        // The generic @UseCodec peek walker drives Le32LengthCodec against
+        // a non-consuming view, measures its 4-byte width, and reports
+        // PeekResult.Complete(2 + 4 + 3) = Complete(9).
         val pool = BufferPool(defaultBufferSize = 64)
         val processor = StreamProcessor.create(pool)
         try {
             val buffer = BufferFactory.Default.allocate(16)
             buffer.writeShort(0x0001)
-            Le32LengthCodec.encode(buffer, 0u, EncodeContext.Empty)
+            Le32LengthCodec.encode(buffer, 3u, EncodeContext.Empty)
+            buffer.writeByte(0xAA.toByte())
+            buffer.writeByte(0xBB.toByte())
+            buffer.writeByte(0xCC.toByte())
             buffer.resetForRead()
             processor.append(buffer)
-            assertTrue(BoundedFrameCodec.peekFrameSize(processor) is PeekResult.NoFraming)
+            val peek = BoundedFrameCodec.peekFrameSize(processor)
+            assertTrue(peek is PeekResult.Complete, "expected Complete, got $peek")
+            assertEquals(9, peek.bytes)
+        } finally {
+            processor.release()
+            pool.clear()
+        }
+    }
+
+    @Test
+    fun boundedFramePeekReportsNeedsMoreDataDripFeedingHeader() {
+        // Drip-feed bytes one at a time; peek must report NeedsMoreData
+        // until the codec can decode the length value (tag 2 bytes +
+        // codec width 4 bytes = 6 bytes minimum), then NeedsMoreData
+        // again until the payload arrives, then Complete.
+        val pool = BufferPool(defaultBufferSize = 64)
+        val processor = StreamProcessor.create(pool)
+        try {
+            val full = BufferFactory.Default.allocate(16)
+            full.writeShort(0x0001)
+            Le32LengthCodec.encode(full, 2u, EncodeContext.Empty)
+            full.writeByte(0xAA.toByte())
+            full.writeByte(0xBB.toByte())
+            full.resetForRead()
+            val totalBytes = full.remaining()
+            assertEquals(8, totalBytes) // 2 + 4 + 2
+
+            for (i in 1 until totalBytes) {
+                val chunk = BufferFactory.Default.allocate(1)
+                chunk.writeByte(full.readByte())
+                chunk.resetForRead()
+                processor.append(chunk)
+                val peek = BoundedFrameCodec.peekFrameSize(processor)
+                assertEquals(
+                    PeekResult.NeedsMoreData,
+                    peek,
+                    "after $i of $totalBytes bytes, expected NeedsMoreData but got $peek",
+                )
+            }
+            // Final byte arrives — peek now reports Complete(8).
+            val last = BufferFactory.Default.allocate(1)
+            last.writeByte(full.readByte())
+            last.resetForRead()
+            processor.append(last)
+            val peek = BoundedFrameCodec.peekFrameSize(processor)
+            assertTrue(peek is PeekResult.Complete, "expected Complete, got $peek")
+            assertEquals(8, peek.bytes)
+        } finally {
+            processor.release()
+            pool.clear()
+        }
+    }
+
+    @Test
+    fun boundedFramePeekDoesNotConsumeBytes() {
+        // Repeated peeks must report the same Complete result without
+        // consuming any bytes from the stream.
+        val pool = BufferPool(defaultBufferSize = 64)
+        val processor = StreamProcessor.create(pool)
+        try {
+            val buffer = BufferFactory.Default.allocate(16)
+            buffer.writeShort(0x4242)
+            Le32LengthCodec.encode(buffer, 2u, EncodeContext.Empty)
+            buffer.writeByte(0x11)
+            buffer.writeByte(0x22)
+            buffer.resetForRead()
+            processor.append(buffer)
+            val availableBefore = processor.available()
+            assertEquals(8, availableBefore)
+            repeat(5) {
+                val peek = BoundedFrameCodec.peekFrameSize(processor)
+                assertTrue(peek is PeekResult.Complete)
+                assertEquals(8, peek.bytes)
+                assertEquals(availableBefore, processor.available(), "peek must be non-consuming")
+            }
         } finally {
             processor.release()
             pool.clear()
