@@ -904,16 +904,21 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Stage H slice 10a — `@UseCodec` shape validation.
+     * `@UseCodec` shape validation.
      *
-     * For slice 10a, the only supported composition is
-     * `@RemainingBytes @UseCodec(C::class) val: P` where `P` extends
-     * `com.ditchoom.buffer.codec.Payload` and `C` is a Kotlin `object`
-     * implementing `Codec<P>`. Other compositions
-     * (`@LengthFrom @UseCodec`, `@LengthPrefixed @UseCodec`, no-framing-
-     * annotation `@UseCodec`) are deferred to later slices and produce
-     * an explicit "not yet supported" diagnostic so the user isn't left
-     * with silent emit failure.
+     * Currently supported compositions:
+     *   - Stage H slice 10a — `@RemainingBytes @UseCodec(C::class) val: P`
+     *     where `P` extends `com.ditchoom.buffer.codec.Payload` and `C` is
+     *     a Kotlin `object` implementing `Codec<P>`.
+     *   - Phase I.1 — bare `@UseCodec(C::class) val: <scalar>` (no framing
+     *     annotation), where the field is a non-Payload, non-type-parameter
+     *     scalar and `C` is a Kotlin `object` implementing `Codec<T>` for
+     *     T matching the field type. Drives pluggable length-encoding via
+     *     user-supplied codecs (e.g. `MqttRemainingLengthCodec`).
+     *
+     * `@LengthFrom @UseCodec` and `@LengthPrefixed @UseCodec` remain
+     * deferred to a later slice and produce an explicit "not yet supported"
+     * diagnostic so the user isn't left with silent emit failure.
      *
      * Diagnostics:
      *   - `@UseCodec` target is not a Kotlin `object` declaration.
@@ -921,10 +926,12 @@ class ProtocolMessageProcessor(
      *     `T` matches the bound field's type.
      *   - Field type extends `Payload` but the parameter has no
      *     `@UseCodec` annotation (no codec can be emitted).
-     *   - `@UseCodec` paired with a non-`@RemainingBytes` framing
-     *     annotation, or with no framing annotation at all (slice 10a
-     *     supports only `@RemainingBytes @UseCodec` on a Payload-typed
-     *     field).
+     *   - Payload-typed field carries `@UseCodec` without `@RemainingBytes`
+     *     (slice 10a's Payload path requires the pair).
+     *   - `@RemainingBytes @UseCodec` on a non-Payload field (slice 10a
+     *     restricts the bounded shape to Payload).
+     *   - `@UseCodec` paired with `@LengthFrom` or `@LengthPrefixed`
+     *     (deferred to a later slice).
      */
     private fun validateUseCodec(
         owner: KSClassDeclaration,
@@ -1014,18 +1021,28 @@ class ProtocolMessageProcessor(
                     (n == LENGTH_FROM_SHORT && q == LENGTH_FROM_QNAME) ||
                         n == "LengthPrefixed"
                 }
-            if (!hasRemainingBytes || hasOtherFraming) {
+            if (hasOtherFraming) {
                 logger.error(
-                    "@UseCodec on $ownerName.$fieldName is not yet supported in slice 10a. " +
-                        "Slice 10a only emits `@RemainingBytes @UseCodec val: P` where `P` " +
-                        "extends `com.ditchoom.buffer.codec.Payload`. Other compositions " +
-                        "(`@LengthFrom @UseCodec`, `@LengthPrefixed @UseCodec`, bare `@UseCodec` " +
-                        "with no framing annotation) are deferred to later Stage H slices.",
+                    "@UseCodec on $ownerName.$fieldName composed with `@LengthFrom` or " +
+                        "`@LengthPrefixed` is not yet supported. Currently emitted compositions " +
+                        "are `@RemainingBytes @UseCodec val: P` (P : Payload) and bare " +
+                        "`@UseCodec val: <scalar>`. The `@LengthFrom @UseCodec` and " +
+                        "`@LengthPrefixed @UseCodec` shapes are deferred to a later slice.",
                     param,
                 )
                 continue
             }
-            if (!isPayloadField) {
+            if (!hasRemainingBytes && isPayloadField) {
+                logger.error(
+                    "@UseCodec on $ownerName.$fieldName must be paired with `@RemainingBytes` " +
+                        "when the field's type extends `com.ditchoom.buffer.codec.Payload`. The " +
+                        "current `@UseCodec` shapes are `@RemainingBytes @UseCodec val: P` " +
+                        "(P : Payload, slice 10a) and bare `@UseCodec val: <scalar>` (Phase I.1).",
+                    param,
+                )
+                continue
+            }
+            if (hasRemainingBytes && !isPayloadField) {
                 val displayed = fieldType.declaration.qualifiedName?.asString() ?: "<unresolved>"
                 logger.error(
                     "@RemainingBytes @UseCodec on $ownerName.$fieldName requires the bound " +
