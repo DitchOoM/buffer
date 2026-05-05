@@ -151,6 +151,29 @@ sealed interface MqttPacket<out P : Payload> {
     ) : MqttPacket<Nothing>
 
     /**
+     * Type-2 CONNACK per MQTT v3.1.1 §3.2 — fixed header `0x20` +
+     * `remainingLength = 2` + `connectAckFlags` (`UByte` per §3.2.2.1
+     * — bit 0 carries Session Present, bits 7–1 are reserved) +
+     * `returnCode` (`UByte` per §3.2.2.3, 0x00 accepted, 0x01–0x05
+     * various failure modes). Total wire length is always 4 bytes:
+     * `20 02 <flags> <rc>`.
+     *
+     * Phase J.M step 5 second-tranche variant. Modeled with raw
+     * `UByte` fields rather than a value-class wrapper — there's no
+     * `@WhenTrue` gate that needs to inspect `sessionPresent` as a
+     * boolean, and the rest of the byte is reserved per spec, so the
+     * `MqttConnectFlags`-style decomposition would be premature.
+     */
+    @PacketType(value = 2)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class ConnAck(
+        val header: MqttFixedHeader = MqttFixedHeader(0x20u),
+        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
+        val connectAckFlags: UByte,
+        val returnCode: UByte,
+    ) : MqttPacket<Nothing>
+
+    /**
      * Type-3 PUBLISH per MQTT v3.1.1 §3.3 — generic-bounded payload
      * variant. Wire layout:
      *
