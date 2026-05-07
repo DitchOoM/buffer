@@ -228,6 +228,7 @@ internal class CodecEmitter(
             if (field is FieldSpec.RemainingBytesScalarList && index != fields.lastIndex) return null
             if (field is FieldSpec.RemainingBytesProtocolMessageList && index != fields.lastIndex) return null
             if (field is FieldSpec.RemainingBytesPayload && index != fields.lastIndex) return null
+            if (field is FieldSpec.RemainingBytesString && index != fields.lastIndex) return null
         }
 
         val pkg = symbol.packageName.asString()
@@ -429,6 +430,13 @@ internal class CodecEmitter(
                 )
             }
             val typeQname = type.declaration.qualifiedName?.asString()
+            // `@RemainingBytes val: String` — trailing UTF-8 bytes consume the
+            // bounded buffer. Documented in the annotation kdoc since
+            // `@RemainingBytes` was introduced; the emitter branch landed here.
+            if (typeQname == "kotlin.String") {
+                val name = param.name?.asString() ?: return null
+                return FieldSpec.RemainingBytesString(name = name, ownerSimpleName = ownerSimpleName)
+            }
             if (typeQname != "kotlin.collections.List") return null
             // Phase J.M.0 — try the @ProtocolMessage element shape first;
             // fall through to scalar element on null. Element classification
@@ -2350,6 +2358,7 @@ internal class CodecEmitter(
             is FieldSpec.RemainingBytesProtocolMessageList ->
                 appendDecodeRemainingBytesProtocolMessageList(body, field)
             is FieldSpec.RemainingBytesPayload -> appendDecodeRemainingBytesPayload(body, field)
+            is FieldSpec.RemainingBytesString -> appendDecodeRemainingBytesString(body, field)
             is FieldSpec.UseCodecScalar -> appendDecodeUseCodecScalar(body, field)
             is FieldSpec.LengthPrefixedUseCodecList -> appendDecodeLengthPrefixedUseCodecList(body, field)
             is FieldSpec.LengthPrefixedUseCodecPayload ->
@@ -2398,6 +2407,7 @@ internal class CodecEmitter(
             is FieldSpec.RemainingBytesProtocolMessageList ->
                 appendEncodeRemainingBytesProtocolMessageList(body, field)
             is FieldSpec.RemainingBytesPayload -> appendEncodeRemainingBytesPayload(body, field)
+            is FieldSpec.RemainingBytesString -> appendEncodeRemainingBytesString(body, field)
             is FieldSpec.UseCodecScalar -> appendEncodeUseCodecScalar(body, field, shape)
             is FieldSpec.LengthPrefixedUseCodecList -> appendEncodeLengthPrefixedUseCodecList(body, field)
             is FieldSpec.LengthPrefixedUseCodecPayload ->
@@ -2741,6 +2751,13 @@ internal class CodecEmitter(
                     "partialFieldTypeName called on a RemainingBytesPayload field — caller " +
                         "should strip the payload field before mapping header types.",
                 )
+            is FieldSpec.RemainingBytesString ->
+                error(
+                    "partialFieldTypeName called on a RemainingBytesString field — this shape " +
+                        "is terminal-only and the Partial decode pattern only fires for shapes " +
+                        "with a trailing RemainingBytesPayload. The two are mutually exclusive " +
+                        "at the terminal slot, so this branch is unreachable.",
+                )
             is FieldSpec.UseCodecScalar -> field.fieldType
             is FieldSpec.LengthPrefixedUseCodecList ->
                 ClassName("kotlin.collections", "List").parameterizedBy(field.elementClassName)
@@ -2816,6 +2833,14 @@ internal class CodecEmitter(
         // Slice 5a — the rule applies regardless of position now that LPS
         // String can appear non-terminally.
         if (shape.fields.any { it is FieldSpec.LengthPrefixedString }) {
+            builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+            return builder.build()
+        }
+        // `@RemainingBytes val: String` collapses wireSize to BackPatch for the
+        // same reason `@LengthPrefixed val: String` does — pre-measuring the
+        // UTF-8 byte count is the walk the BackPatch path collapses into the
+        // single writeString call.
+        if (shape.fields.any { it is FieldSpec.RemainingBytesString }) {
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
             return builder.build()
         }
@@ -3000,7 +3025,8 @@ internal class CodecEmitter(
         // read changes.
         if (shape.fields.any {
                 it is FieldSpec.RemainingBytesScalarList ||
-                    it is FieldSpec.RemainingBytesProtocolMessageList
+                    it is FieldSpec.RemainingBytesProtocolMessageList ||
+                    it is FieldSpec.RemainingBytesString
             }
         ) {
             builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
@@ -3361,6 +3387,11 @@ internal class CodecEmitter(
                 is FieldSpec.RemainingBytesPayload ->
                     error(
                         "RemainingBytesPayload should be handled by buildPeekFrameFun's " +
+                            "upfront NoFraming short-circuit before reaching the sequential walk.",
+                    )
+                is FieldSpec.RemainingBytesString ->
+                    error(
+                        "RemainingBytesString should be handled by buildPeekFrameFun's " +
                             "upfront NoFraming short-circuit before reaching the sequential walk.",
                     )
                 is FieldSpec.UseCodecScalar ->
@@ -4651,6 +4682,42 @@ internal class CodecEmitter(
     }
 
     /**
+     * `@RemainingBytes val: String` — decode reads UTF-8 bytes from the current
+     * position to `buffer.limit()`. The caller (or an outer dispatcher) is
+     * responsible for narrowing `buffer.limit()` to the bounded extent before
+     * invoking decode; same caller-bounds-buffer contract as
+     * [appendDecodeRemainingBytesScalarList] / [appendDecodeRemainingBytesPayload].
+     */
+    private fun appendDecodeRemainingBytesString(
+        body: CodeBlock.Builder,
+        field: FieldSpec.RemainingBytesString,
+    ) {
+        body.addStatement(
+            "val %L = buffer.readString(buffer.remaining(), %T.UTF8)",
+            field.name,
+            CHARSET_CN,
+        )
+    }
+
+    /**
+     * Encode counterpart for `@RemainingBytes val: String`. Writes the value's
+     * UTF-8 byte representation. The encoded byte count is reported via
+     * [appendBackPatchWireSize] (the parent message's wireSize collapses to
+     * BackPatch because the trailing string's byte count isn't known up front
+     * without re-encoding).
+     */
+    private fun appendEncodeRemainingBytesString(
+        body: CodeBlock.Builder,
+        field: FieldSpec.RemainingBytesString,
+    ) {
+        body.addStatement(
+            "buffer.writeString(value.%L, %T.UTF8)",
+            field.name,
+            CHARSET_CN,
+        )
+    }
+
+    /**
      * Phase J.M.0 — emit decode for `@RemainingBytes val: List<T>` where
      * `T` is a `@ProtocolMessage data class`. Loops `while
      * (buffer.position() < buffer.limit())` reading each element via
@@ -5518,6 +5585,9 @@ internal class CodecEmitter(
         // buildWireSizeFun); the dispatcher size table needs to know not to
         // attempt a literal sum.
         if (shape.fields.any { it is FieldSpec.LengthPrefixedString }) return VariantWireSize.BackPatch
+        // Same BackPatch classification — `@RemainingBytes val: String` collapses
+        // wireSize per the buildWireSizeFun early-return rule.
+        if (shape.fields.any { it is FieldSpec.RemainingBytesString }) return VariantWireSize.BackPatch
         // Slice 10a: same BackPatch classification — variant codec's own
         // wireSize is BackPatch (see buildWireSizeFun's RemainingBytesPayload
         // early-return); the dispatcher must skip the runtime-Exact cast.
@@ -5584,6 +5654,9 @@ internal class CodecEmitter(
             // Phase J.M.5 slice 11b: same — handled by the upfront BackPatch
             // short-circuit above.
             is FieldSpec.ProtocolMessageScalar -> VariantWireSize.BackPatch
+            // `@RemainingBytes val: String` — handled by the upfront BackPatch
+            // short-circuit above.
+            is FieldSpec.RemainingBytesString -> VariantWireSize.BackPatch
         }
     }
 
@@ -6753,6 +6826,22 @@ internal class CodecEmitter(
             override val name: String,
             val ownerSimpleName: String,
             val elementKind: ScalarKind,
+        ) : FieldSpec
+
+        /**
+         * `@RemainingBytes val: String` — UTF-8 string consuming the rest of the
+         * buffer. Decode reads `buffer.readString(buffer.remaining(), Charset.UTF8)`;
+         * encode writes the value's UTF-8 bytes. Same caller-bounds-buffer contract
+         * as [RemainingBytesScalarList] / [RemainingBytesPayload]: an outer dispatcher
+         * sets `buffer.limit()` before this codec runs.
+         *
+         * Terminal-only (must be the last non-conditional field). The annotation
+         * kdoc has documented this shape since `@RemainingBytes` was introduced;
+         * the analyzer / emitter branch landed here.
+         */
+        data class RemainingBytesString(
+            override val name: String,
+            val ownerSimpleName: String,
         ) : FieldSpec
 
         /**
