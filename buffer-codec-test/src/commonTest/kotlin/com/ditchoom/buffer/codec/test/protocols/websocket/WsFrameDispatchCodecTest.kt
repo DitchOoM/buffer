@@ -125,8 +125,17 @@ class WsFrameDispatchCodecTest {
     fun maskedPongHelloRoundTripsAndUnmasksToPlainHello() {
         val wire =
             byteArrayOf(
-                0x8a.toByte(), 0x85.toByte(), 0x37.toByte(), 0xfa.toByte(), 0x21.toByte(), 0x3d.toByte(),
-                0x7f.toByte(), 0x9f.toByte(), 0x4d.toByte(), 0x51.toByte(), 0x58.toByte(),
+                0x8a.toByte(),
+                0x85.toByte(),
+                0x37.toByte(),
+                0xfa.toByte(),
+                0x21.toByte(),
+                0x3d.toByte(),
+                0x7f.toByte(),
+                0x9f.toByte(),
+                0x4d.toByte(),
+                0x51.toByte(),
+                0x58.toByte(),
             )
         val frame =
             WsFrame.Pong(
