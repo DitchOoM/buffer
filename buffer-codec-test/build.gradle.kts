@@ -12,6 +12,13 @@ plugins {
 
 group = "com.ditchoom"
 
+// Mirror :buffer-codec / :buffer-flow / :buffer-compression: on CI, expand
+// the native target list so consumers can resolve this module's variants
+// for every target they declare. :buffer-flow's commonTest depends on this
+// module, and its iOS / tvOS / watchOS test compilations otherwise fail
+// with `No matching variant of project :buffer-codec-test was found`.
+val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
+
 repositories {
     google()
     mavenCentral()
@@ -31,11 +38,33 @@ kotlin {
         browser()
         nodejs()
     }
-    if (HostManager.hostIsMac) {
-        val osArch = System.getProperty("os.arch")
-        if (osArch == "aarch64") macosArm64() else macosX64()
-    } else if (HostManager.hostIsLinux) {
-        linuxX64()
+    if (isRunningOnGithub) {
+        // CI: register the same Apple / Linux target list that downstream
+        // consumers (:buffer-flow, :buffer-compression) declare.
+        if (HostManager.hostIsMac) {
+            macosX64()
+            macosArm64()
+            iosArm64()
+            iosSimulatorArm64()
+            iosX64()
+            watchosArm64()
+            watchosSimulatorArm64()
+            watchosX64()
+            tvosArm64()
+            tvosSimulatorArm64()
+            tvosX64()
+        }
+        if (HostManager.hostIsLinux) {
+            linuxX64()
+            linuxArm64()
+        }
+    } else {
+        if (HostManager.hostIsMac) {
+            val osArch = System.getProperty("os.arch")
+            if (osArch == "aarch64") macosArm64() else macosX64()
+        } else if (HostManager.hostIsLinux) {
+            linuxX64()
+        }
     }
 
     applyDefaultHierarchyTemplate()
