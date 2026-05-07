@@ -20,6 +20,8 @@ import com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5Disconnect
 import com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode
 import com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode
 import com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCode
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
 
 /**
@@ -74,13 +76,12 @@ sealed interface MqttV5Packet<out P : Payload> {
      *   <willPropLen VBI>?      will properties — present iff flags.willPresent
      *   <will props...>?        will-property entries
      *   <will topic LP>?        present iff flags.willPresent
-     *   <will message LP>?      present iff flags.willPresent (modeled as String;
-     *                           technically arbitrary bytes per §3.1.3.3 — same
-     *                           caveat as v3 Connect, deferred until @Payload
-     *                           slot lands)
+     *   <will payload LP>?      present iff flags.willPresent (Phase J.M.5
+     *                           slice 15d retyped from String to BinaryData;
+     *                           §3.1.3.3 binary-data spec contract)
      *   <username LP>?          present iff flags.usernamePresent
-     *   <password LP>?          present iff flags.passwordPresent (modeled as
-     *                           String; same arbitrary-bytes caveat)
+     *   <password LP>?          present iff flags.passwordPresent (Phase J.M.5
+     *                           slice 15d retyped to BinaryData per §3.1.3.5)
      * ```
      *
      * Composes:
@@ -96,11 +97,13 @@ sealed interface MqttV5Packet<out P : Payload> {
      * Reuses `MqttConnectFlags` from the v3 fixtures — bit layout is
      * unchanged in v5 (§3.1.2.3).
      *
-     * Modeled as `: MqttV5Packet<Nothing>` for now — binary
-     * will-message / password (`@Payload WP`/`@Payload PP`) needs the
-     * multi-generic dispatcher lift documented in PHASE_J_M_BRIEF.md
-     * §4. Deferred until a vector requires arbitrary will/password
-     * bytes; until then String modeling is wire-correct for ASCII.
+     * Phase J.M.5 slice 15d retyped will-message and password from
+     * `String?` to `BinaryData?` referenced via
+     * `@LengthPrefixed @UseCodec(BinaryDataCodec::class)` (slice 15a's
+     * scalar Payload shape). The multi-generic dispatcher lift
+     * mentioned in PHASE_J_M_BRIEF.md §4 is no longer needed — slice
+     * 15's typed Payload slots cover the binary-data contract via the
+     * `Payload` marker without lifting the parent's type parameters.
      */
     @PacketType(value = 1)
     @ProtocolMessage(wireOrder = Endianness.Big)
@@ -118,9 +121,15 @@ sealed interface MqttV5Packet<out P : Payload> {
         @UseCodec(MqttRemainingLengthCodec::class)
         val willProperties: List<MqttV5Property>? = null,
         @LengthPrefixed @When("connectFlags.willPresent") val willTopic: String? = null,
-        @LengthPrefixed @When("connectFlags.willPresent") val willMessage: String? = null,
+        @LengthPrefixed
+        @UseCodec(BinaryDataCodec::class)
+        @When("connectFlags.willPresent")
+        val willPayload: BinaryData? = null,
         @LengthPrefixed @When("connectFlags.usernamePresent") val username: String? = null,
-        @LengthPrefixed @When("connectFlags.passwordPresent") val password: String? = null,
+        @LengthPrefixed
+        @UseCodec(BinaryDataCodec::class)
+        @When("connectFlags.passwordPresent")
+        val password: BinaryData? = null,
     ) : MqttV5Packet<Nothing> {
         init {
             // Phase J.M.5 audit-2d — header byte invariant per spec §3.1.1.

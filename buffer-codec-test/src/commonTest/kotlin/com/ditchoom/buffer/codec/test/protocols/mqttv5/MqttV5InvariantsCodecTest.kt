@@ -372,7 +372,9 @@ class MqttV5InvariantsCodecTest {
                             .MqttConnectFlags(0x42u),
                     keepAliveSeconds = 0u,
                     clientId = "id",
-                    password = "pw",
+                    password =
+                        com.ditchoom.buffer.codec.test.protocols.payload
+                            .BinaryData("pw".encodeToByteArray()),
                 )
             }
         assertTrue(

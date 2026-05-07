@@ -9,7 +9,10 @@ import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
+import com.ditchoom.buffer.codec.annotations.UseCodec
 import com.ditchoom.buffer.codec.annotations.When
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
 import kotlin.jvm.JvmInline
 
@@ -143,10 +146,12 @@ sealed interface MqttPacket<out P : Payload> {
      * path — same pattern slice 6's dispatcher uses for every other
      * variant in this sealed family.
      *
-     * Will-message and password are technically arbitrary bytes per
-     * the spec; this fixture models them as `String` because the
-     * Stage E `@LengthPrefixed`-inner universe is `String` only
-     * (Stage H widens to `@Payload` slots for arbitrary bytes).
+     * Phase J.M.5 slice 15d retyped will-message and password from
+     * `String?` to `BinaryData?` (a `Payload`-marked value class over
+     * `ByteArray`) referenced via `@LengthPrefixed @UseCodec(
+     * BinaryDataCodec::class)`. The wire form is unchanged (UShort BE
+     * prefix + body bytes); the data class now reflects the
+     * arbitrary-bytes spec contract per §3.1.3.3 / §3.1.3.5.
      */
     @PacketType(value = 1)
     @ProtocolMessage
@@ -158,9 +163,15 @@ sealed interface MqttPacket<out P : Payload> {
         val keepAliveSeconds: UShort,
         @LengthPrefixed val clientId: String,
         @LengthPrefixed @When("connectFlags.willPresent") val willTopic: String? = null,
-        @LengthPrefixed @When("connectFlags.willPresent") val willMessage: String? = null,
+        @LengthPrefixed
+        @UseCodec(BinaryDataCodec::class)
+        @When("connectFlags.willPresent")
+        val willPayload: BinaryData? = null,
         @LengthPrefixed @When("connectFlags.usernamePresent") val username: String? = null,
-        @LengthPrefixed @When("connectFlags.passwordPresent") val password: String? = null,
+        @LengthPrefixed
+        @UseCodec(BinaryDataCodec::class)
+        @When("connectFlags.passwordPresent")
+        val password: BinaryData? = null,
     ) : MqttPacket<Nothing> {
         init {
             // Phase J.M.5 audit-2f — v3.1.1 §3.1.2.9 [MQTT-3.1.2-22]: if the

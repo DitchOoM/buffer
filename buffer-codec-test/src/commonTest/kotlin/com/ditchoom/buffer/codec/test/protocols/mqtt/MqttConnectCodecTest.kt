@@ -7,6 +7,7 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -91,7 +92,7 @@ class MqttConnectCodecTest {
                 keepAliveSeconds = 60u,
                 clientId = "test",
                 username = "user",
-                password = "pass",
+                password = BinaryData("pass".encodeToByteArray()),
             )
         val expected =
             byteArrayOf(
@@ -143,7 +144,7 @@ class MqttConnectCodecTest {
                 keepAliveSeconds = 30u,
                 clientId = "c",
                 willTopic = "t",
-                willMessage = "m",
+                willPayload = BinaryData("m".encodeToByteArray()),
             )
         val expected =
             byteArrayOf(
@@ -187,13 +188,17 @@ class MqttConnectCodecTest {
                 keepAliveSeconds = 120u,
                 clientId = "client",
                 willTopic = "will/t",
-                willMessage = "bye",
+                willPayload = BinaryData("bye".encodeToByteArray()),
                 username = "alice",
-                password = "secret",
+                password = BinaryData("secret".encodeToByteArray()),
             )
         val buf = encode(msg)
         val decoded = ConnectCodec.decode(buf, DecodeContext.Empty)
-        assertEquals(msg, decoded)
+        assertEquals(msg.clientId, decoded.clientId)
+        assertEquals(msg.willTopic, decoded.willTopic)
+        assertContentEquals(msg.willPayload!!.bytes, decoded.willPayload!!.bytes)
+        assertEquals(msg.username, decoded.username)
+        assertContentEquals(msg.password!!.bytes, decoded.password!!.bytes)
     }
 
     @Test
@@ -237,9 +242,9 @@ class MqttConnectCodecTest {
         val decoded = ConnectCodec.decode(buf, DecodeContext.Empty)
         assertEquals("test", decoded.clientId)
         assertNull(decoded.willTopic, "willPresent bit not set → willTopic should be null")
-        assertNull(decoded.willMessage, "willPresent bit not set → willMessage should be null")
+        assertNull(decoded.willPayload, "willPresent bit not set → willPayload should be null")
         assertEquals("user", decoded.username)
-        assertEquals("pass", decoded.password)
+        assertContentEquals("pass".encodeToByteArray(), decoded.password!!.bytes)
     }
 
     @Test
@@ -288,7 +293,7 @@ class MqttConnectCodecTest {
                 keepAliveSeconds = 60u,
                 clientId = "test",
                 username = "user",
-                password = "pass",
+                password = BinaryData("pass".encodeToByteArray()),
             )
         val encoded = encode(original)
         val totalBytes = encoded.remaining()
@@ -320,7 +325,7 @@ class MqttConnectCodecTest {
                 stream.readBufferScoped(totalBytes) {
                     ConnectCodec.decode(this, DecodeContext.Empty)
                 }
-            assertEquals(original, decoded)
+            assertConnectEquals(original, decoded)
             assertEquals(0, stream.available(), "stream should be drained")
         } finally {
             stream.release()
@@ -375,7 +380,30 @@ class MqttConnectCodecTest {
         val readBuf = BufferFactory.Default.allocate(expected.size).also { it.writeBytes(expected) }
         readBuf.resetForRead()
         val decoded = ConnectCodec.decode(readBuf, DecodeContext.Empty)
-        assertEquals(original, decoded)
+        assertConnectEquals(original, decoded)
+    }
+
+    /**
+     * Phase J.M.5 slice 15d — `BinaryData` is a `@JvmInline value class`
+     * over `ByteArray` whose default `equals` is reference-based; data
+     * class `equals` therefore can't recover round-trip equality on
+     * Connect's willPayload / password fields. Compare each field
+     * individually with `contentEquals` for the BinaryData slots.
+     */
+    private fun assertConnectEquals(
+        original: MqttPacket.Connect,
+        decoded: MqttPacket.Connect,
+    ) {
+        assertEquals(original.header, decoded.header)
+        assertEquals(original.protocolName, decoded.protocolName)
+        assertEquals(original.protocolLevel, decoded.protocolLevel)
+        assertEquals(original.connectFlags, decoded.connectFlags)
+        assertEquals(original.keepAliveSeconds, decoded.keepAliveSeconds)
+        assertEquals(original.clientId, decoded.clientId)
+        assertEquals(original.willTopic, decoded.willTopic)
+        assertEquals(original.willPayload?.bytes?.toList(), decoded.willPayload?.bytes?.toList())
+        assertEquals(original.username, decoded.username)
+        assertEquals(original.password?.bytes?.toList(), decoded.password?.bytes?.toList())
     }
 
     private fun encode(value: MqttPacket.Connect): ReadBuffer = ConnectCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)

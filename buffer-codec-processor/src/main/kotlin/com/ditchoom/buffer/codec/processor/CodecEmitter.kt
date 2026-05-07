@@ -1490,13 +1490,20 @@ internal class CodecEmitter(
         val qualified = innerType.declaration.qualifiedName?.asString() ?: return null
         if (lengthPrefixedAnn != null && useCodecAnn != null) {
             // Phase J.M.5 — `@When @LengthPrefixed @UseCodec(C) val xs:
-            // List<E>?` cascading-trailer property bag for v5 acks.
-            // Mirrors the slice 11 non-conditional analyzer's element
-            // requirements (data class OR sealed `@ProtocolMessage`
-            // with `@DispatchOn`, no payload-generic).
-            return analyzeConditionalLengthPrefixedUseCodecListInner(
+            // List<E>?` cascading-trailer property bag for v5 acks
+            // (slice 11 list shape) OR slice 15d's
+            // `@When @LengthPrefixed @UseCodec(C) val: T?` where
+            // T : Payload (CONNECT will-payload + password). Try the
+            // list path first; fall through to the payload path.
+            analyzeConditionalLengthPrefixedUseCodecListInner(
                 innerType = innerType,
                 useCodecAnn = useCodecAnn,
+            )?.let { return it }
+            return analyzeConditionalLengthPrefixedUseCodecPayloadInner(
+                innerType = innerType,
+                useCodecAnn = useCodecAnn,
+                prefixWidth = readLengthPrefix(lengthPrefixedAnn),
+                prefixWireOrder = messageWireOrder,
             )
         }
         if (useCodecAnn != null) {
@@ -1558,6 +1565,37 @@ internal class CodecEmitter(
     ): ConditionalInner.LengthPrefixedUseCodecList? {
         val spec = analyzeLengthPrefixedListSpec(innerType, useCodecAnn) ?: return null
         return ConditionalInner.LengthPrefixedUseCodecList(spec = spec)
+    }
+
+    /**
+     * Phase J.M.5 slice 15d — analyze a conditional
+     * `@When @LengthPrefixed @UseCodec(C) val: T?` where `T : Payload`.
+     * Mirrors [analyzeLengthPrefixedUseCodecPayloadField] (the non-
+     * conditional counterpart) for type / codec requirements. Returns
+     * `null` for any shape that doesn't satisfy those constraints —
+     * caller falls through and the field is rejected upstream.
+     */
+    private fun analyzeConditionalLengthPrefixedUseCodecPayloadInner(
+        innerType: KSType,
+        useCodecAnn: KSAnnotation,
+        prefixWidth: Int,
+        prefixWireOrder: Endianness,
+    ): ConditionalInner.LengthPrefixedUseCodecPayload? {
+        if (!innerType.implementsPayload()) return null
+        val payloadDecl = innerType.declaration as? KSClassDeclaration ?: return null
+        val codecKsType =
+            useCodecAnn.arguments
+                .firstOrNull { it.name?.asString() == "codec" }
+                ?.value as? KSType ?: return null
+        val codecDecl = codecKsType.declaration as? KSClassDeclaration ?: return null
+        if (codecDecl.classKind != ClassKind.OBJECT) return null
+        val codecClassName = ClassName(codecDecl.packageName.asString(), codecDecl.simpleName.asString())
+        return ConditionalInner.LengthPrefixedUseCodecPayload(
+            payloadType = classNameOf(payloadDecl),
+            payloadCodecType = codecClassName,
+            prefixWidth = prefixWidth,
+            prefixWireOrder = prefixWireOrder,
+        )
     }
 
     /**
@@ -1688,6 +1726,8 @@ internal class CodecEmitter(
                 ClassName("kotlin.collections", "List")
                     .parameterizedBy(inner.elementClassName)
                     .copy(nullable = true)
+            is ConditionalInner.LengthPrefixedUseCodecPayload ->
+                inner.payloadType.copy(nullable = true)
             is ConditionalInner.UseCodecScalar -> inner.fieldType.copy(nullable = true)
             is ConditionalInner.ProtocolMessageScalar -> inner.fieldType.copy(nullable = true)
         }
@@ -3521,6 +3561,19 @@ internal class CodecEmitter(
                     "appendSequentialPeekConditional reached LengthPrefixedUseCodecList — " +
                         "buildPeekFrameFun should have short-circuited the shape to NoFraming.",
                 )
+            is ConditionalInner.LengthPrefixedUseCodecPayload ->
+                // Phase J.M.5 slice 15d — peek walks the fixed-width
+                // prefix and advances by the body byte count. Same
+                // shape as [LengthPrefixedString] — the prefix tells
+                // the peek walker how many bytes to advance without
+                // running the user codec.
+                appendSequentialPeekLengthPrefixed(
+                    body = body,
+                    name = field.name,
+                    ownerSimpleName = field.ownerSimpleName,
+                    prefixWidth = inner.prefixWidth,
+                    prefixWireOrder = inner.prefixWireOrder,
+                )
             is ConditionalInner.UseCodecScalar ->
                 // Phase J.M.5 slice 11a — same NoFraming short-circuit as
                 // LengthPrefixedUseCodecList. The user codec's wire width
@@ -3804,6 +3857,38 @@ internal class CodecEmitter(
                 body.addStatement("null")
                 body.endControlFlow()
             }
+            is ConditionalInner.LengthPrefixedUseCodecPayload -> {
+                // Phase J.M.5 slice 15d — predicate-true branch reads the
+                // fixed-width prefix, narrows `buffer.limit()` to position
+                // + length, runs `<C>.decode`, restores the outer limit.
+                // Mirrors [appendDecodeLengthPrefixedUseCodecPayload] but
+                // wrapped in the conditional's `if (predicate)` gate.
+                body.beginControlFlow(
+                    "val %L: %T = if (%L)",
+                    field.name,
+                    field.nullableTypeName,
+                    decodeConditionExpr(field.condition),
+                )
+                val lengthVar =
+                    appendLengthPrefixedStringPrefixDecode(
+                        body = body,
+                        name = field.name,
+                        ownerSimpleName = field.ownerSimpleName,
+                        prefixWidth = inner.prefixWidth,
+                        prefixWireOrder = inner.prefixWireOrder,
+                    )
+                val outerLimitVar = "__${field.name}OuterLimit"
+                body.addStatement("val %L = buffer.limit()", outerLimitVar)
+                body.addStatement("buffer.setLimit(buffer.position() + %L)", lengthVar)
+                body.beginControlFlow("try")
+                body.addStatement("%T.decode(buffer, context)", inner.payloadCodecType)
+                body.nextControlFlow("finally")
+                body.addStatement("buffer.setLimit(%L)", outerLimitVar)
+                body.endControlFlow()
+                body.nextControlFlow("else")
+                body.addStatement("null")
+                body.endControlFlow()
+            }
             is ConditionalInner.UseCodecScalar -> {
                 // Phase J.M.5 slice 11a — `@When @UseCodec(C) val: T?`.
                 // Predicate-true delegates to the codec object's
@@ -3900,6 +3985,19 @@ internal class CodecEmitter(
                     inner = inner,
                     accessor = localName,
                 )
+            is ConditionalInner.LengthPrefixedUseCodecPayload ->
+                // Phase J.M.5 slice 15d — BackPatch shape mirroring
+                // [appendEncodeLengthPrefixedUseCodecPayload]: reserve
+                // prefix slot, run `<C>.encode`, measure body byte count,
+                // patch the prefix in place, restore position. Reads the
+                // smart-cast non-null `<name>Value` local established by
+                // the outer `appendEncodeConditional`.
+                appendEncodeConditionalLengthPrefixedUseCodecPayload(
+                    body = body,
+                    field = field,
+                    inner = inner,
+                    accessor = localName,
+                )
             is ConditionalInner.UseCodecScalar ->
                 // Phase J.M.5 slice 11a — mirror of the non-conditional
                 // `appendEncodeUseCodecScalar`. Predicate-true with
@@ -3946,6 +4044,59 @@ internal class CodecEmitter(
             accessor = accessor,
             namespacePrefix = field.name,
         )
+    }
+
+    /**
+     * Phase J.M.5 slice 15d — encode a conditional `@LengthPrefixed
+     * @UseCodec(C) val: T?` where T : Payload. BackPatch shape mirroring
+     * [appendEncodeLengthPrefixedUseCodecPayload]: reserve prefix slot,
+     * run `<C>.encode(buffer, accessor, context)` against the
+     * accumulating buffer, measure body byte count from the position
+     * delta, patch the prefix, restore position past the body.
+     *
+     * `accessor` is the smart-cast non-null local established by the
+     * outer `appendEncodeConditional` (`<name>Value`). The non-
+     * conditional emit reads `value.<name>` directly.
+     */
+    private fun appendEncodeConditionalLengthPrefixedUseCodecPayload(
+        body: CodeBlock.Builder,
+        field: FieldSpec.Conditional,
+        inner: ConditionalInner.LengthPrefixedUseCodecPayload,
+        accessor: String,
+    ) {
+        val sizePosVar = "${field.name}SizePosition"
+        val bodyStartVar = "${field.name}BodyStart"
+        val endPosVar = "${field.name}EndPosition"
+        val byteCountVar = "${field.name}ByteCount"
+        body.addStatement("val %L = buffer.position()", sizePosVar)
+        body.addStatement("buffer.position(%L + %L)", sizePosVar, inner.prefixWidth)
+        body.addStatement("val %L = buffer.position()", bodyStartVar)
+        body.addStatement("%T.encode(buffer, %L, context)", inner.payloadCodecType, accessor)
+        body.addStatement("val %L = buffer.position()", endPosVar)
+        body.addStatement("val %L = %L - %L", byteCountVar, endPosVar, bodyStartVar)
+        if (inner.prefixWidth < 4) {
+            val maxValue = (1L shl (inner.prefixWidth * 8)) - 1
+            val widthName =
+                when (inner.prefixWidth) {
+                    1 -> "Byte"
+                    2 -> "Short"
+                    else -> error("unreachable: prefixWidth must be 1, 2, or 4")
+                }
+            body.beginControlFlow("if (%L > %L)", byteCountVar, maxValue)
+            body.addStatement(
+                "throw %T(fieldPath = %S, reason = %P)",
+                ENCODE_EXCEPTION_CN,
+                "${field.ownerSimpleName}.${field.name}",
+                "encoded payload byte length \${$byteCountVar} exceeds " +
+                    "@LengthPrefixed(LengthPrefix.$widthName) max $maxValue",
+            )
+            body.endControlFlow()
+        }
+        body.addStatement("buffer.position(%L)", sizePosVar)
+        val prefixVar = "${field.name}Prefix"
+        body.addStatement("val %L = %L.toUInt()", prefixVar, byteCountVar)
+        appendBufferPrefixEncode(body, prefixVar, inner.prefixWidth, inner.prefixWireOrder)
+        body.addStatement("buffer.position(%L)", endPosVar)
     }
 
     /**
@@ -6916,6 +7067,25 @@ internal class CodecEmitter(
             val elementClassName: ClassName get() = spec.elementClassName
             val elementCodecClassName: ClassName get() = spec.elementCodecClassName
         }
+
+        /**
+         * Phase J.M.5 slice 15d — conditional `@When @LengthPrefixed
+         * @UseCodec(C) val: T?` where `T : Payload`. Mirrors
+         * [FieldSpec.LengthPrefixedUseCodecPayload]'s emit one-for-one
+         * inside the predicate-true branch.
+         *
+         * Drives the v3/v5 CONNECT will-payload + password slots
+         * (gated on `connectFlags.willPresent` / `passwordPresent`).
+         * The cascading-trailer cases use predicate truthfulness from
+         * the connect-flag value class properties (slice 3 dotted
+         * value-class-property predicates).
+         */
+        data class LengthPrefixedUseCodecPayload(
+            val payloadType: TypeName,
+            val payloadCodecType: ClassName,
+            val prefixWidth: Int,
+            val prefixWireOrder: Endianness,
+        ) : ConditionalInner
 
         /**
          * Phase J.M.5 slice 11a — conditional `@When @UseCodec(C) val: T?`.

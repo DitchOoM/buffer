@@ -9,6 +9,7 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttConnectFlags
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImage
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImageCodec
 import com.ditchoom.buffer.pool.BufferPool
@@ -106,13 +107,17 @@ class MqttV5ConnectCodecTest {
                 clientId = "abc",
                 willProperties = emptyList(),
                 willTopic = "w/1",
-                willMessage = "hello",
+                willPayload = BinaryData("hello".encodeToByteArray()),
                 username = "abc",
-                password = "pwd",
+                password = BinaryData("pwd".encodeToByteArray()),
             )
         val buf = encode(original)
-        val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
-        assertEquals(original, decoded)
+        val decoded = assertIs<MqttV5Packet.Connect>(jpegDispatcher().decode(buf, DecodeContext.Empty))
+        assertEquals(original.clientId, decoded.clientId)
+        assertEquals(original.willTopic, decoded.willTopic)
+        assertContentEquals(original.willPayload!!.bytes, decoded.willPayload!!.bytes)
+        assertEquals(original.username, decoded.username)
+        assertContentEquals(original.password!!.bytes, decoded.password!!.bytes)
     }
 
     @Test
@@ -132,11 +137,13 @@ class MqttV5ConnectCodecTest {
                 clientId = "abc",
                 willProperties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 600u)),
                 willTopic = "w/1",
-                willMessage = "hello",
+                willPayload = BinaryData("hello".encodeToByteArray()),
             )
         val buf = encode(original)
-        val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
-        assertEquals(original, decoded)
+        val decoded = assertIs<MqttV5Packet.Connect>(jpegDispatcher().decode(buf, DecodeContext.Empty))
+        assertEquals(original.clientId, decoded.clientId)
+        assertEquals(original.willTopic, decoded.willTopic)
+        assertContentEquals(original.willPayload!!.bytes, decoded.willPayload!!.bytes)
     }
 
     @Test

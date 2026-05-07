@@ -1192,7 +1192,15 @@ class ProtocolMessageProcessor(
         // because a non-List Payload field must not fall through to the
         // list-shape diagnostics.
         if (fieldTypeQname != LIST_QNAME) {
-            val isPayloadField = !fieldType.isMarkedNullable && payloadType.isAssignableFrom(fieldType)
+            // Phase J.M.5 slice 15a/15d — nullable types arrive here when
+            // the field carries `@When` (slice 15d gates Connect.willPayload
+            // / password on connect-flag bits). Strip the nullability for
+            // the Payload-assignability check; the analyzer's conditional
+            // path (`analyzeConditionalLengthPrefixedUseCodecPayloadInner`)
+            // already runs against the non-null inner type.
+            val nonNullableFieldType =
+                if (fieldType.isMarkedNullable) fieldType.makeNotNullable() else fieldType
+            val isPayloadField = payloadType.isAssignableFrom(nonNullableFieldType)
             if (!isPayloadField) {
                 logger.error(
                     "@LengthPrefixed @UseCodec($codecName::class) on $ownerName.$fieldName has " +
@@ -1644,7 +1652,12 @@ class ProtocolMessageProcessor(
     ) {
         if (depth > MAX_DEPTH) return
         if (type.isError) return
-        if (payloadType.isAssignableFrom(type)) return
+        // Phase J.M.5 slice 15d — nullable Payload types arrive here when
+        // the field carries `@When` (e.g., `@When val: BinaryData?`).
+        // Short-circuit on the non-nullable form so the §8 walk doesn't
+        // descend into the value class's `ByteArray` inner.
+        val nonNullableType = if (type.isMarkedNullable) type.makeNotNullable() else type
+        if (payloadType.isAssignableFrom(nonNullableType)) return
 
         val qualified = type.declaration.qualifiedName?.asString()
         if (qualified != null && qualified in FORBIDDEN_TYPES) {
