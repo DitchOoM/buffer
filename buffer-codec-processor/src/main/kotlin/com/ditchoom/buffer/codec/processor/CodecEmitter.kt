@@ -251,6 +251,40 @@ internal class CodecEmitter(
             codecSimpleName = "${ownerSimpleName}Codec",
             fields = fields,
             payloadTypeParameter = payloadTypeParameter,
+            framedBy = detectFramedBy(symbol),
+        )
+    }
+
+    /**
+     * Phase J.M.5 slice 14b — detect `@FramedBy(codec, after)` on a
+     * `@ProtocolMessage` class. Returns null when the annotation is
+     * absent. When present, captures the codec target's class name (so
+     * the emit can reference it as `MqttRemainingLengthCodec.encode(...)`
+     * etc.) and the `after` field name (empty string by default).
+     *
+     * The validator (`validateFramedBy` in
+     * `ProtocolMessageProcessor.kt`) is responsible for surfacing
+     * codec-target / after-field diagnostics; this analyzer trusts the
+     * validator and only structurally extracts the annotation arguments.
+     */
+    private fun detectFramedBy(symbol: KSClassDeclaration): FramedByConfig? {
+        val ann =
+            symbol.annotations.firstOrNull { a ->
+                a.shortName.asString() == "FramedBy" &&
+                    a.annotationType
+                        .resolve()
+                        .declaration.qualifiedName
+                        ?.asString() == FRAMED_BY_QNAME
+            } ?: return null
+        val codecKsType =
+            ann.arguments.firstOrNull { it.name?.asString() == "codec" }?.value as? KSType
+                ?: return null
+        val codecDecl = codecKsType.declaration as? KSClassDeclaration ?: return null
+        val afterName =
+            (ann.arguments.firstOrNull { it.name?.asString() == "after" }?.value as? String) ?: ""
+        return FramedByConfig(
+            codecClassName = classNameOf(codecDecl),
+            afterFieldName = afterName,
         )
     }
 
@@ -343,7 +377,6 @@ internal class CodecEmitter(
                 "RemainingBytes" -> remainingBytesAnn = ann
                 "WireBytes" -> wireBytesAnn = ann
                 "UseCodec" -> useCodecAnn = ann
-                "DerivedLength" -> { /* slice 14a — read inside analyzeUseCodecScalarField */ }
                 else -> return null
             }
         }
@@ -967,27 +1000,12 @@ internal class CodecEmitter(
                 ?: (type.declaration as? KSClassDeclaration)?.let { classNameOf(it) }
                 ?: return null
         val codecClassName = ClassName(codecDecl.packageName.asString(), codecDecl.simpleName.asString())
-        // Phase J.M.5 slice 14a — `@DerivedLength` flips the encode contract:
-        // the framework computes the value from the suffix wireSize and
-        // throws if the caller-supplied value disagrees. Suffix-shape
-        // validation (all-FixedSize for the MVP) happens at emit time
-        // (`appendEncodeUseCodecScalar`) where the full field list is
-        // visible; the validator surfaces the user-facing diagnostic.
-        val derivedLength =
-            param.annotations.any { ann ->
-                ann.shortName.asString() == "DerivedLength" &&
-                    ann.annotationType
-                        .resolve()
-                        .declaration.qualifiedName
-                        ?.asString() == DERIVED_LENGTH_QNAME
-            }
         return FieldSpec.UseCodecScalar(
             name = name,
             ownerSimpleName = ownerSimpleName,
             fieldType = fieldTypeName,
             codecType = codecClassName,
             isBounding = codecDecl.implementsBoundingLengthCodec(),
-            derivedLength = derivedLength,
         )
     }
 
@@ -1785,7 +1803,125 @@ internal class CodecEmitter(
         return (arg as? Int) ?: -1
     }
 
+    /**
+     * Phase J.M.5 slice 14b — `@FramedBy` file spec. Emits an `object`
+     * codec with the new encode signature
+     * (`encode(value, context, factory): ReadBuffer`) and the strict
+     * decode (`decode(buffer, context): T` with bound assertion). The
+     * codec does **not** implement `Codec<T>` — its encode contract
+     * differs because the framework owns framing and returns a slice
+     * spanning exactly the framed wire bytes (see the slice 14b handoff,
+     * Q5).
+     *
+     * The probe shape (slice14b) exercises `after = ""` only. The
+     * sealed-parent + `after = "<header>"` path that integrates with
+     * `@PacketType` dispatch is the natural domain of slice 14c (the
+     * MQTT v3/v5 substitution); this emit path leaves a hook for that
+     * by accepting [FramedByConfig.afterFieldName] but currently only
+     * implements the empty-string case.
+     */
+    private fun buildFramedByFileSpec(
+        shape: CodecShape,
+        framedBy: FramedByConfig,
+    ): FileSpec {
+        val typeSpec =
+            TypeSpec
+                .objectBuilder(shape.codecSimpleName)
+                .addFunction(buildFramedByDecodeFun(shape, framedBy))
+                .addFunction(buildFramedByEncodeFun(shape, framedBy))
+                .build()
+        return FileSpec
+            .builder(shape.packageName, shape.codecSimpleName)
+            .addType(typeSpec)
+            .build()
+    }
+
+    private fun buildFramedByDecodeFun(
+        shape: CodecShape,
+        framedBy: FramedByConfig,
+    ): FunSpec {
+        val body = CodeBlock.builder()
+        body.addStatement("val __framingOuterLimit = buffer.limit()")
+        body.addStatement(
+            "val __framingLength = %T.decode(buffer, context)",
+            framedBy.codecClassName,
+        )
+        body.addStatement("%T.applyBound(buffer, __framingLength)", framedBy.codecClassName)
+        body.addStatement("val __framingStart = buffer.position()")
+        body.addStatement("val __framingBound = __framingStart + __framingLength.toInt()")
+        body.beginControlFlow("return try")
+        for (field in shape.fields) appendDecodeField(body, field)
+        body.beginControlFlow("if (buffer.position() != __framingBound)")
+        body.addStatement(
+            "throw %T(\n  fieldPath = %S,\n  bufferPosition = buffer.position(),\n" +
+                "  expected = \"body to consume \" + __framingLength + \" bytes\",\n" +
+                "  actual = (buffer.position() - __framingStart).toString() + \" bytes\",\n)",
+            DECODE_EXCEPTION_CN,
+            "${shape.ownerSimpleName}.@FramedBy",
+        )
+        body.endControlFlow()
+        val ctorArgs = shape.fields.joinToString(", ") { "${it.name} = ${it.name}" }
+        body.addStatement("%T(%L)", shape.messageClassName, ctorArgs)
+        body.nextControlFlow("finally")
+        body.addStatement("buffer.setLimit(__framingOuterLimit)")
+        body.endControlFlow()
+        return FunSpec
+            .builder("decode")
+            .addParameter("buffer", READ_BUFFER_CN)
+            .addParameter("context", DECODE_CONTEXT_CN)
+            .returns(shape.messageClassName)
+            .addCode(body.build())
+            .build()
+    }
+
+    private fun buildFramedByEncodeFun(
+        shape: CodecShape,
+        framedBy: FramedByConfig,
+    ): FunSpec {
+        val body = CodeBlock.builder()
+        body.add(
+            "return %T.encode(\n",
+            FRAMED_ENCODER_CN,
+        )
+        body.indent()
+        body.add("factory = factory,\n")
+        body.add("framingCodec = %T,\n", framedBy.codecClassName)
+        body.add("context = context,\n")
+        body.unindent()
+        body.beginControlFlow(") { buffer ->")
+        for (field in shape.fields) {
+            when (field) {
+                is FieldSpec.Scalar -> appendEncodeScalar(body, field, shape.ownerSimpleName)
+                is FieldSpec.LengthPrefixedMessage -> appendEncodeLengthPrefixed(body, field)
+                is FieldSpec.LengthPrefixedString -> appendEncodeLengthPrefixedString(body, field)
+                is FieldSpec.LengthFromString -> appendEncodeLengthFromString(body, field)
+                is FieldSpec.LengthFromList -> appendEncodeLengthFromList(body, field)
+                is FieldSpec.RemainingBytesScalarList -> appendEncodeRemainingBytesScalarList(body, field)
+                is FieldSpec.RemainingBytesProtocolMessageList ->
+                    appendEncodeRemainingBytesProtocolMessageList(body, field)
+                is FieldSpec.RemainingBytesPayload -> appendEncodeRemainingBytesPayload(body, field)
+                is FieldSpec.UseCodecScalar -> appendEncodeUseCodecScalar(body, field, shape)
+                is FieldSpec.LengthPrefixedUseCodecList -> appendEncodeLengthPrefixedUseCodecList(body, field)
+                is FieldSpec.ValueClassScalar -> appendEncodeValueClassScalar(body, field)
+                is FieldSpec.Conditional -> appendEncodeConditional(body, field)
+                is FieldSpec.ProtocolMessageScalar -> appendEncodeProtocolMessageScalar(body, field)
+            }
+        }
+        body.endControlFlow()
+        return FunSpec
+            .builder("encode")
+            .addParameter("value", shape.messageClassName)
+            .addParameter("context", ENCODE_CONTEXT_CN)
+            .addParameter("factory", BUFFER_FACTORY_CN)
+            .returns(READ_BUFFER_CN)
+            .addCode(body.build())
+            .build()
+    }
+
     private fun buildFileSpec(shape: CodecShape): FileSpec {
+        if (shape.framedBy != null && shape.payloadTypeParameter == null) {
+            return buildFramedByFileSpec(shape, shape.framedBy)
+        }
         val codecType =
             if (shape.payloadTypeParameter != null) {
                 buildGenericCodecTypeSpec(shape, shape.payloadTypeParameter)
@@ -4144,48 +4280,13 @@ internal class CodecEmitter(
      * Delegates to the user-supplied codec object's `encode(buffer,
      * value.<name>, context)`. The user codec owns the wire shape;
      * the framework neither validates nor measures the encoded width.
-     *
-     * Phase J.M.5 slice 14a — when [FieldSpec.UseCodecScalar.derivedLength]
-     * is true, the framework computes the wire length from the suffix
-     * fields and asserts the caller-supplied value matches before
-     * encoding. MVP requires the suffix to be all-`FixedSize` so the
-     * derived value is a compile-time constant; non-FixedSize suffix is
-     * rejected here with an `error(...)` (the validator surfaces the
-     * user-facing diagnostic before reaching emit).
      */
+    @Suppress("UNUSED_PARAMETER")
     private fun appendEncodeUseCodecScalar(
         body: CodeBlock.Builder,
         field: FieldSpec.UseCodecScalar,
         shape: CodecShape,
     ) {
-        if (field.derivedLength) {
-            val suffix = shape.fields.dropWhile { it !== field }.drop(1)
-            if (suffix.any { it !is FieldSpec.FixedSize }) {
-                error(
-                    "@DerivedLength on ${field.ownerSimpleName}.${field.name} requires all " +
-                        "subsequent fields to contribute fixed wire bytes; the validator should " +
-                        "have rejected this shape before reaching the emit path.",
-                )
-            }
-            val derivedBytes = suffix.filterIsInstance<FieldSpec.FixedSize>().sumOf { it.wireBytes }
-            val derivedLocal = "__${field.name}Derived"
-            // MVP narrows to UInt-typed fields (BoundingLengthCodec<UInt>). Validator
-            // enforces; the emit literal carries the `u` suffix for that type.
-            body.addStatement("val %L: %T = ${derivedBytes}u", derivedLocal, field.fieldType)
-            body.beginControlFlow("if (value.%L != %L)", field.name, derivedLocal)
-            body.addStatement(
-                "throw %T(fieldPath = %S, reason = \"@DerivedLength: caller-supplied value \" + " +
-                    "value.%L.toString() + \" disagrees with framework-derived value \" + " +
-                    "%L.toString() + \" (suffix wireSize)\")",
-                ENCODE_EXCEPTION_CN,
-                "${field.ownerSimpleName}.${field.name}",
-                field.name,
-                derivedLocal,
-            )
-            body.endControlFlow()
-            body.addStatement("%T.encode(buffer, %L, context)", field.codecType, derivedLocal)
-            return
-        }
         body.addStatement("%T.encode(buffer, value.%L, context)", field.codecType, field.name)
     }
 
@@ -5688,6 +5789,28 @@ internal class CodecEmitter(
          * `object FooCodec : Codec<Foo>`.
          */
         val payloadTypeParameter: PayloadTypeParameter? = null,
+        /**
+         * Phase J.M.5 slice 14b — when the @ProtocolMessage class is
+         * also annotated with `@FramedBy(codec, after)`, this captures
+         * the framing codec's class name and the optional `after` field
+         * name. When non-null, the emitter routes to a different file
+         * spec (no `Codec<T>` superinterface, encode signature returns
+         * `ReadBuffer`, decode adds a strict bound check).
+         */
+        val framedBy: FramedByConfig? = null,
+    )
+
+    /**
+     * Phase J.M.5 slice 14b — `@FramedBy` configuration captured during
+     * analyze. The emitter consumes this to switch the file spec to the
+     * slicing-scheme encode + strict-decode shape. `afterFieldName` is
+     * empty for prefix-at-offset-0 (the standalone probe case);
+     * non-empty values are reserved for sealed-parent + @PacketType
+     * dispatch (slice 14c).
+     */
+    private data class FramedByConfig(
+        val codecClassName: ClassName,
+        val afterFieldName: String,
     )
 
     /**
@@ -5841,20 +5964,6 @@ internal class CodecEmitter(
             val fieldType: TypeName,
             val codecType: ClassName,
             val isBounding: Boolean,
-            /**
-             * Phase J.M.5 slice 14a — when `true`, the field is
-             * `@DerivedLength`-annotated. Encode emit computes the
-             * suffix wireSize, asserts the caller-supplied value matches
-             * (throwing `EncodeException` on mismatch), and writes the
-             * derived value via the codec. Decode unchanged.
-             *
-             * MVP requires the suffix (fields after this one) to be
-             * all-`FixedSize` — the analyzer rejects shapes with
-             * BackPatch suffix fields, validator surfaces the
-             * user-facing diagnostic. Slice 14b lifts that to the
-             * scratch-buffer path.
-             */
-            val derivedLength: Boolean,
         ) : FieldSpec
 
         /**
@@ -6429,7 +6538,7 @@ internal class CodecEmitter(
         private const val PAYLOAD_PKG = "com.ditchoom.buffer.codec"
         private const val PAYLOAD_SIMPLE = "Payload"
         private const val BOUNDING_LENGTH_CODEC_QNAME = "com.ditchoom.buffer.codec.BoundingLengthCodec"
-        private const val DERIVED_LENGTH_QNAME = "com.ditchoom.buffer.codec.annotations.DerivedLength"
+        private const val FRAMED_BY_QNAME = "com.ditchoom.buffer.codec.annotations.FramedBy"
 
         private val SUPPORTED_SCALARS =
             mapOf(
@@ -6461,6 +6570,7 @@ internal class CodecEmitter(
         private val STREAM_PROCESSOR_CN = ClassName("com.ditchoom.buffer.stream", "StreamProcessor")
         private val DECODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "DecodeException")
         private val ENCODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "EncodeException")
+        private val FRAMED_ENCODER_CN = ClassName("com.ditchoom.buffer.codec", "FramedEncoder")
         private val CHARSET_CN = ClassName("com.ditchoom.buffer", "Charset")
         private val STRING_NULLABLE_TN = ClassName("kotlin", "String").copy(nullable = true)
     }

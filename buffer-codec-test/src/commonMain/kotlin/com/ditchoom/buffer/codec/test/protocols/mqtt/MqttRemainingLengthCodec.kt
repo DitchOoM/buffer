@@ -28,6 +28,8 @@ import com.ditchoom.buffer.codec.WireSize
 object MqttRemainingLengthCodec : BoundingLengthCodec<UInt> {
     private const val MAX_VALUE: UInt = 0x0FFF_FFFFu
 
+    override val maxWireSize: Int = 4
+
     override fun decode(
         buffer: ReadBuffer,
         context: DecodeContext,

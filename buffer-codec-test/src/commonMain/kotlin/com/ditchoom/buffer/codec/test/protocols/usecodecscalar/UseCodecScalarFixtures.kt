@@ -67,6 +67,8 @@ object ZigZagUIntCodec : Codec<UInt> {
  * substitute correctly.
  */
 object Le32LengthCodec : BoundingLengthCodec<UInt> {
+    override val maxWireSize: Int = 4
+
     override fun decode(
         buffer: ReadBuffer,
         context: DecodeContext,

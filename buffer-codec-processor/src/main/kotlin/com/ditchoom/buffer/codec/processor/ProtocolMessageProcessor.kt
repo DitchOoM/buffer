@@ -136,6 +136,7 @@ class ProtocolMessageProcessor(
             if (Modifier.SEALED in symbol.modifiers && symbol.classKind == ClassKind.INTERFACE) {
                 validateSealedDispatcher(symbol)
                 validateDispatchOnSealed(symbol)
+                validateFramedBy(symbol)
                 emitter.tryEmit(symbol)
                 continue
             }
@@ -155,7 +156,7 @@ class ProtocolMessageProcessor(
             validateWireBytes(symbol, ctor.parameters)
             validateWhen(symbol, ctor.parameters)
             validateUseCodec(symbol, ctor.parameters, payloadType)
-            validateDerivedLength(symbol, ctor.parameters)
+            validateFramedBy(symbol)
             validatePayloadTypeParameter(symbol, ctor.parameters)
             emitter.tryEmit(symbol)
         }
@@ -1298,133 +1299,183 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Phase J.M.5 slice 14a — `@DerivedLength` validator.
+     * Phase J.M.5 slice 14b — `@FramedBy` validator.
      *
-     * Closes the impossible-state class where caller-supplied length
-     * desyncs from actual encoded bytes. The annotation marks a
-     * `@UseCodec` field as framework-derived at encode time; the encode
-     * emit asserts the caller-supplied value matches the framework
-     * computation and throws on mismatch.
+     * `@FramedBy` is the structural replacement for slice 14a's
+     * `@DerivedLength`: the framework owns framing, computing the prefix
+     * from the encoded body's wire size and asserting strict consumption
+     * on decode. The annotation is class-level and applies to data
+     * classes (standalone framed messages) or sealed parents (every
+     * variant inherits the framing rule).
      *
      * Diagnostics:
-     *   - `@DerivedLength` requires `@UseCodec(C::class)` on the same
-     *     parameter — without the codec there's nothing to drive the
-     *     length encoding.
-     *   - The codec target must implement `BoundingLengthCodec<UInt>`
-     *     (slice 14a MVP). Plain `Codec<UInt>` is not yet accepted —
-     *     the derived path's narrowing semantics on decode rely on
-     *     `applyBound`. `BoundingLengthCodec<T>` for `T != UInt` is
-     *     deferred along with the wider `@UseCodec` widening path.
-     *   - At most one `@DerivedLength` per message — the emit assumes
-     *     a single derivation point. Multiple would race.
-     *   - All fields after `@DerivedLength` must contribute fixed wire
-     *     bytes (case 1 MVP). Variable-length suffix fields
-     *     (`@LengthPrefixed val: String`, `@When`, etc.) would need the
-     *     scratch-buffer encode path; deferred to slice 14b.
+     *   - **E1** — codec target must implement `BoundingLengthCodec<UInt>`.
+     *     The slicing-scheme emit calls the codec's `encode` for the
+     *     prefix, `applyBound` on decode, and reads `maxWireSize` to
+     *     size the slack region.
+     *   - **E2** — `after = "X"` names a field that is not on the class's
+     *     primary constructor (or, for sealed parents, on every variant's
+     *     primary constructor).
+     *   - **E3** — `after = "X"` names a field whose type does not have
+     *     Exact wire width. The header field's width must be known at
+     *     codegen time so the slack region is sized correctly.
+     *   - **E4** — class participates in `@PacketType` dispatch
+     *     (sealed parent with `@PacketType` variants, or class itself
+     *     carries `@PacketType`) but `after = ""`. The discriminator must
+     *     precede the prefix so the dispatcher can route.
+     *   - **E6** — class carries both `@FramedBy` and a `@DerivedLength`-
+     *     annotated field. Two annotations for the same wire concern is
+     *     the muddle the design pass exists to prevent. Transient — only
+     *     fires if a stale fixture survives the same-commit removal.
      */
-    private fun validateDerivedLength(
-        owner: KSClassDeclaration,
-        parameters: List<KSValueParameter>,
-    ) {
+    private fun validateFramedBy(owner: KSClassDeclaration) {
         val ownerName = owner.qualifiedName?.asString() ?: owner.simpleName.asString()
-        val derivedFields = mutableListOf<Pair<Int, KSValueParameter>>()
-        for ((index, param) in parameters.withIndex()) {
-            val derivedAnn =
-                param.annotations.firstOrNull { ann ->
+        val framedByAnn =
+            owner.annotations.firstOrNull { ann ->
+                ann.shortName.asString() == FRAMED_BY_SHORT &&
+                    ann.annotationType
+                        .resolve()
+                        .declaration.qualifiedName
+                        ?.asString() == FRAMED_BY_QNAME
+            } ?: return
+
+        // E6 — coexistence with @DerivedLength on a constructor parameter.
+        val ctor = owner.primaryConstructor
+        val derivedField =
+            ctor?.parameters?.firstOrNull { p ->
+                p.annotations.any { ann ->
                     ann.shortName.asString() == DERIVED_LENGTH_SHORT &&
                         ann.annotationType
                             .resolve()
                             .declaration.qualifiedName
                             ?.asString() == DERIVED_LENGTH_QNAME
-                } ?: continue
-            derivedFields += index to param
-            val fieldName = param.name?.asString() ?: "<unknown>"
+                }
+            }
+        if (derivedField != null) {
+            val derivedName = derivedField.name?.asString() ?: "<unknown>"
+            logger.error(
+                "@FramedBy on $ownerName cannot coexist with @DerivedLength on " +
+                    "$ownerName.$derivedName. Both annotations target the same wire concern (the " +
+                    "framing prefix). Remove the @DerivedLength field — @FramedBy takes ownership of " +
+                    "framing and discards the prefix value on decode.",
+                owner,
+            )
+        }
 
-            val useCodecAnn =
-                param.annotations.firstOrNull { ann ->
-                    ann.shortName.asString() == USE_CODEC_SHORT &&
+        // E1 — codec target must be `BoundingLengthCodec<UInt>`.
+        val codecKsType =
+            framedByAnn.arguments
+                .firstOrNull { it.name?.asString() == "codec" }
+                ?.value as? KSType
+        val codecDecl = codecKsType?.declaration as? KSClassDeclaration
+        if (codecDecl != null && !implementsBoundingLengthCodecOfUInt(codecDecl)) {
+            val codecName = codecDecl.qualifiedName?.asString() ?: codecDecl.simpleName.asString()
+            logger.error(
+                "@FramedBy on $ownerName references `$codecName`, which does not implement " +
+                    "`com.ditchoom.buffer.codec.BoundingLengthCodec<UInt>`. The slicing-scheme emit " +
+                    "needs `applyBound` (decode) and `maxWireSize` (encode); the codec must declare " +
+                    "the bounding-length capability with `UInt` as its type argument.",
+                owner,
+            )
+        }
+
+        val afterName =
+            (
+                framedByAnn.arguments
+                    .firstOrNull { it.name?.asString() == "after" }
+                    ?.value as? String
+            ) ?: ""
+
+        val isSealedParent = Modifier.SEALED in owner.modifiers && owner.classKind == ClassKind.INTERFACE
+
+        if (afterName.isEmpty()) {
+            // E4 — @FramedBy with no `after` is incompatible with @PacketType dispatch.
+            val variantsWithPacketType =
+                if (isSealedParent) {
+                    owner
+                        .getSealedSubclasses()
+                        .filter { sub ->
+                            sub.annotations.any { ann ->
+                                ann.shortName.asString() == PACKET_TYPE_SHORT &&
+                                    ann.annotationType
+                                        .resolve()
+                                        .declaration.qualifiedName
+                                        ?.asString() == PACKET_TYPE_QNAME
+                            }
+                        }.toList()
+                } else {
+                    emptyList()
+                }
+            val ownerHasPacketType =
+                owner.annotations.any { ann ->
+                    ann.shortName.asString() == PACKET_TYPE_SHORT &&
                         ann.annotationType
                             .resolve()
                             .declaration.qualifiedName
-                            ?.asString() == USE_CODEC_QNAME
+                            ?.asString() == PACKET_TYPE_QNAME
                 }
-            if (useCodecAnn == null) {
+            if (ownerHasPacketType || variantsWithPacketType.isNotEmpty()) {
                 logger.error(
-                    "@DerivedLength on $ownerName.$fieldName must be paired with " +
-                        "`@UseCodec(C::class)` where `C` implements `BoundingLengthCodec<UInt>`. " +
-                        "Without the codec the framework has nothing to drive the wire encoding.",
-                    param,
+                    "@FramedBy on $ownerName has `after = \"\"` but the class participates in " +
+                        "@PacketType dispatch. The discriminator byte must precede the framing prefix " +
+                        "on the wire so the dispatcher can route — set `after = \"<headerField>\"` " +
+                        "naming the constructor field that carries the discriminator.",
+                    owner,
+                )
+            }
+            return
+        }
+
+        // E2/E3 — `after = "X"`: X exists with Exact wire width on every primary constructor.
+        val targets: List<Pair<KSClassDeclaration, List<KSValueParameter>>> =
+            if (isSealedParent) {
+                owner.getSealedSubclasses().toList().mapNotNull { variant ->
+                    variant.primaryConstructor?.let { variant to it.parameters }
+                }
+            } else {
+                listOf(owner to (ctor?.parameters ?: emptyList()))
+            }
+
+        for ((variant, parameters) in targets) {
+            val variantName = variant.qualifiedName?.asString() ?: variant.simpleName.asString()
+            val target = parameters.firstOrNull { it.name?.asString() == afterName }
+            if (target == null) {
+                val available = parameters.mapNotNull { it.name?.asString() }
+                logger.error(
+                    "@FramedBy on $ownerName: `after = \"$afterName\"` names a field that is not on " +
+                        "$variantName's primary constructor. Available: ${available.joinToString().ifEmpty { "<none>" }}.",
+                    variant,
                 )
                 continue
             }
-
-            val codecKsType =
-                useCodecAnn.arguments
-                    .firstOrNull { it.name?.asString() == "codec" }
-                    ?.value as? KSType
-            val codecDecl = codecKsType?.declaration as? KSClassDeclaration
-            if (codecDecl != null && !implementsBoundingLengthCodecOfUInt(codecDecl)) {
+            // E3 — Exact wire width: only fixed-width scalar types or value classes wrapping them.
+            val targetType = target.type.resolve()
+            val targetTypeQname = targetType.declaration.qualifiedName?.asString()
+            val targetIsValueClass =
+                (targetType.declaration as? KSClassDeclaration)?.let { td ->
+                    Modifier.VALUE in td.modifiers
+                } ?: false
+            val isFixedScalar = targetTypeQname in NATURAL_WIDTHS
+            if (!isFixedScalar && !targetIsValueClass) {
                 logger.error(
-                    "@DerivedLength on $ownerName.$fieldName references " +
-                        "`${codecDecl.qualifiedName?.asString() ?: codecDecl.simpleName.asString()}`, " +
-                        "which does not implement `com.ditchoom.buffer.codec.BoundingLengthCodec<UInt>`. " +
-                        "Slice 14a MVP narrows `@DerivedLength` to UInt-typed bounding length codecs. " +
-                        "Plain `Codec<UInt>` and other type arguments are deferred.",
-                    param,
+                    "@FramedBy on $ownerName: `after = \"$afterName\"` on $variantName has type " +
+                        "`${targetTypeQname ?: "<unresolved>"}`, which does not have Exact wire width. " +
+                        "Only fixed-width scalars (UByte/Byte/UShort/Short/UInt/Int/ULong/Long) or " +
+                        "@JvmInline value classes wrapping them are accepted as the framing header.",
+                    target,
                 )
+                continue
             }
-
-            val fieldType = param.type.resolve()
-            if (!fieldType.isError) {
-                val fieldQname = fieldType.declaration.qualifiedName?.asString()
-                if (fieldQname != "kotlin.UInt") {
-                    logger.error(
-                        "@DerivedLength on $ownerName.$fieldName has type " +
-                            "`${fieldQname ?: "<unresolved>"}`. Slice 14a requires `kotlin.UInt`; " +
-                            "the codec's type parameter (`BoundingLengthCodec<UInt>`) drives the " +
-                            "field type.",
-                        param,
-                    )
-                }
-            }
-
-            // Slice 14a MVP — case 1 only: all fields after @DerivedLength must
-            // contribute fixed wire bytes. The validator approximates "fixed wire
-            // bytes" by checking annotations: any of @LengthPrefixed,
-            // @LengthFrom, @RemainingBytes, @When, @UseCodec on a sibling after
-            // @DerivedLength makes that sibling non-fixed.
-            for (suffixIndex in (index + 1) until parameters.size) {
-                val suffixParam = parameters[suffixIndex]
-                val suffixAnnNames =
-                    suffixParam.annotations
-                        .map { it.shortName.asString() }
-                        .toSet()
-                val variableShapeAnns =
-                    setOf("LengthPrefixed", "LengthFrom", "RemainingBytes", "When", "UseCodec")
-                val intersect = suffixAnnNames.intersect(variableShapeAnns)
-                if (intersect.isNotEmpty()) {
-                    val suffixName = suffixParam.name?.asString() ?: "<unknown>"
-                    logger.error(
-                        "@DerivedLength on $ownerName.$fieldName requires all subsequent " +
-                            "constructor parameters to contribute fixed wire bytes (slice 14a " +
-                            "MVP). Sibling `$ownerName.$suffixName` carries " +
-                            "${intersect.joinToString { "@$it" }}, which produces " +
-                            "variable-width or BackPatch wire bytes. The scratch-buffer encode " +
-                            "path that lifts this restriction is deferred to slice 14b.",
-                        param,
-                    )
-                    break
-                }
-            }
-        }
-        if (derivedFields.size > 1) {
-            for ((_, param) in derivedFields.drop(1)) {
-                val fieldName = param.name?.asString() ?: "<unknown>"
+            // Reject annotations that introduce variable wire width on the header field.
+            val variableAnns = setOf("LengthPrefixed", "LengthFrom", "RemainingBytes", "When", "WireBytes")
+            val targetAnnNames = target.annotations.map { it.shortName.asString() }.toSet()
+            val variableHits = targetAnnNames.intersect(variableAnns)
+            if (variableHits.isNotEmpty()) {
                 logger.error(
-                    "@DerivedLength on $ownerName.$fieldName: at most one @DerivedLength " +
-                        "field is allowed per message. The emit path assumes a single " +
-                        "derivation point; multiple would race.",
-                    param,
+                    "@FramedBy on $ownerName: `after = \"$afterName\"` on $variantName carries " +
+                        "${variableHits.joinToString { "@$it" }}, which produces variable wire width. " +
+                        "The framing header must have Exact wire width.",
+                    target,
                 )
             }
         }
@@ -1642,6 +1693,8 @@ class ProtocolMessageProcessor(
         private const val USE_CODEC_SHORT = "UseCodec"
         private const val DERIVED_LENGTH_QNAME = "com.ditchoom.buffer.codec.annotations.DerivedLength"
         private const val DERIVED_LENGTH_SHORT = "DerivedLength"
+        private const val FRAMED_BY_QNAME = "com.ditchoom.buffer.codec.annotations.FramedBy"
+        private const val FRAMED_BY_SHORT = "FramedBy"
         private const val REMAINING_BYTES_QNAME = "com.ditchoom.buffer.codec.annotations.RemainingBytes"
         private const val REMAINING_BYTES_SHORT = "RemainingBytes"
         private const val CODEC_QNAME = "com.ditchoom.buffer.codec.Codec"

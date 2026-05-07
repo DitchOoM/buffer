@@ -39,4 +39,16 @@ interface BoundingLengthCodec<T : Any> : Codec<T> {
         buffer: ReadBuffer,
         decodedValue: T,
     )
+
+    /**
+     * The maximum number of bytes this codec ever writes for a single
+     * encoded value. Used by the `@FramedBy` slicing-scheme emitter to
+     * size the slack region at the front of the encode buffer so the
+     * prefix can be right-flushed against the body without shifting body
+     * bytes. For variable-width codecs (e.g. MQTT remaining-length: 1..4
+     * bytes), this is the upper bound; for fixed-width codecs it equals
+     * the wire width. Implementations should pick the smallest value
+     * that satisfies `wireSize(maxValueOnWire).asExact == maxWireSize`.
+     */
+    val maxWireSize: Int
 }

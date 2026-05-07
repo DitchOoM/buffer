@@ -156,6 +156,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.annotations.UseCodec
 
                 object FixedFourByteUIntCodec : BoundingLengthCodec<UInt> {
+                    override val maxWireSize: Int = 4
                     override fun decode(buffer: ReadBuffer, context: DecodeContext): UInt = buffer.readInt().toUInt()
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
@@ -201,6 +202,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.annotations.UseCodec
 
                 object FourByteLengthCodec : BoundingLengthCodec<UInt> {
+                    override val maxWireSize: Int = 4
                     override fun decode(buffer: ReadBuffer, context: DecodeContext): UInt = buffer.readInt().toUInt()
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
@@ -292,6 +294,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.annotations.UseCodec
 
                 object FourByteLengthCodec : BoundingLengthCodec<UInt> {
+                    override val maxWireSize: Int = 4
                     override fun decode(buffer: ReadBuffer, context: DecodeContext): UInt = buffer.readInt().toUInt()
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
@@ -344,6 +347,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.annotations.UseCodec
 
                 object FourByteLengthCodec : BoundingLengthCodec<UInt> {
+                    override val maxWireSize: Int = 4
                     override fun decode(buffer: ReadBuffer, context: DecodeContext): UInt = buffer.readInt().toUInt()
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
@@ -413,6 +417,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.annotations.UseCodec
 
                 object FourByteLengthCodec : BoundingLengthCodec<UInt> {
+                    override val maxWireSize: Int = 4
                     override fun decode(buffer: ReadBuffer, context: DecodeContext): UInt = buffer.readInt().toUInt()
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
