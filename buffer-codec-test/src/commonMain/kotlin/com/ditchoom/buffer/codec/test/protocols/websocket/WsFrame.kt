@@ -12,7 +12,7 @@ import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import kotlin.jvm.JvmInline
 
-/**
+/*
  * RFC 6455 WebSocket frame fixture for the buffer-codec processor.
  *
  * Mirrors the production model in the `websocket` repo (`com.ditchoom.websocket.frame.WsCodec`)
@@ -90,8 +90,6 @@ import kotlin.jvm.JvmInline
  * - **Stateful policy** (fragmentation rules, control-frame ≤125, close-handshake
  *   choreography, ping echo). These cross frame boundaries; codecs are pure per-frame.
  */
-
-// ──────────────────────── Header bit-packing ────────────────────────
 
 /**
  * Frame header byte 1 — FIN/RSV1/RSV2/RSV3/opcode packed into a single `UByte`.
