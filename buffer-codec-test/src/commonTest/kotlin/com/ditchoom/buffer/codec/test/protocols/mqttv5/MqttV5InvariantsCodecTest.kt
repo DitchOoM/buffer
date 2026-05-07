@@ -42,7 +42,7 @@ class MqttV5InvariantsCodecTest {
             packetId =
                 com.ditchoom.buffer.codec.test.protocols.payload
                     .PacketId(1u),
-            properties = emptyList(),
+            properties = V5PropertyBag.EMPTY,
             payload =
                 com.ditchoom.buffer.codec.test.protocols.payload.JpegImage(
                     width = 0u,
@@ -59,7 +59,7 @@ class MqttV5InvariantsCodecTest {
                 MqttV5Packet.Publish<com.ditchoom.buffer.codec.test.protocols.payload.JpegImage>(
                     header = MqttFixedHeader(0x40u), // high nibble = 4 (PUBACK), not 3
                     topic = "t",
-                    properties = emptyList(),
+                    properties = V5PropertyBag.EMPTY,
                     payload =
                         com.ditchoom.buffer.codec.test.protocols.payload.JpegImage(
                             width = 0u,
@@ -116,7 +116,7 @@ class MqttV5InvariantsCodecTest {
                 MqttV5Packet.Subscribe(
                     header = MqttFixedHeader(0x80u),
                     packetIdentifier = 0x0001u,
-                    properties = emptyList(),
+                    properties = V5PropertyBag.EMPTY,
                     topicFilters = listOf(V5Subscription("t/1", V5SubscriptionOptions.of(qos = 0))),
                 )
             }
@@ -130,7 +130,7 @@ class MqttV5InvariantsCodecTest {
                 MqttV5Packet.Unsubscribe(
                     header = MqttFixedHeader(0xA0u),
                     packetIdentifier = 0x0001u,
-                    properties = emptyList(),
+                    properties = V5PropertyBag.EMPTY,
                     topics =
                         listOf(
                             com.ditchoom.buffer.codec.test.protocols.mqtt
@@ -160,7 +160,7 @@ class MqttV5InvariantsCodecTest {
             assertFailsWith<IllegalArgumentException> {
                 MqttV5Packet.Subscribe(
                     packetIdentifier = 0x0001u,
-                    properties = emptyList(),
+                    properties = V5PropertyBag.EMPTY,
                     topicFilters = emptyList(),
                 )
             }
@@ -417,7 +417,7 @@ class MqttV5InvariantsCodecTest {
                     reasonCode =
                         com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode
                             .Success(),
-                    properties = emptyList(),
+                    properties = V5PropertyBag.EMPTY,
                 )
             }
         assertTrue(
@@ -436,7 +436,7 @@ class MqttV5InvariantsCodecTest {
                     header = MqttFixedHeader(0x32u), // QoS=1
                     topic = "t",
                     packetId = null,
-                    properties = emptyList(),
+                    properties = V5PropertyBag.EMPTY,
                     payload =
                         com.ditchoom.buffer.codec.test.protocols.payload.JpegImage(
                             width = 0u,
@@ -455,7 +455,7 @@ class MqttV5InvariantsCodecTest {
             assertFailsWith<IllegalArgumentException> {
                 MqttV5Packet.SubAck(
                     packetIdentifier = 0x0001u,
-                    properties = emptyList(),
+                    properties = V5PropertyBag.EMPTY,
                     reasonCodes = emptyList(),
                 )
             }
@@ -470,7 +470,7 @@ class MqttV5InvariantsCodecTest {
             assertFailsWith<IllegalArgumentException> {
                 MqttV5Packet.Unsubscribe(
                     packetIdentifier = 0x0001u,
-                    properties = emptyList(),
+                    properties = V5PropertyBag.EMPTY,
                     topics = emptyList(),
                 )
             }

@@ -41,7 +41,7 @@ class MqttV5ConnectCodecTest {
                 protocolLevel = 0x05u,
                 connectFlags = MqttConnectFlags(0x02u), // clean start
                 keepAliveSeconds = 60u,
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
                 clientId = "abc",
             )
         val buf = encode(msg)
@@ -79,7 +79,7 @@ class MqttV5ConnectCodecTest {
                 protocolLevel = 0x05u,
                 connectFlags = MqttConnectFlags(0x02u),
                 keepAliveSeconds = 60u,
-                properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 3_600u)),
+                properties = V5PropertyBag.of(MqttV5Property.MessageExpiryInterval(seconds = 3_600u)),
                 clientId = "abc",
             )
         val buf = encode(original)
@@ -103,9 +103,9 @@ class MqttV5ConnectCodecTest {
                 protocolLevel = 0x05u,
                 connectFlags = MqttConnectFlags(0xC4u),
                 keepAliveSeconds = 30u,
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
                 clientId = "abc",
-                willProperties = emptyList(),
+                willProperties = V5PropertyBag.EMPTY,
                 willTopic = "w/1",
                 willPayload = BinaryData("hello".encodeToByteArray()),
                 username = "abc",
@@ -133,9 +133,9 @@ class MqttV5ConnectCodecTest {
                 protocolLevel = 0x05u,
                 connectFlags = MqttConnectFlags(0x04u),
                 keepAliveSeconds = 30u,
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
                 clientId = "abc",
-                willProperties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 600u)),
+                willProperties = V5PropertyBag.of(MqttV5Property.MessageExpiryInterval(seconds = 600u)),
                 willTopic = "w/1",
                 willPayload = BinaryData("hello".encodeToByteArray()),
             )
@@ -183,7 +183,7 @@ class MqttV5ConnectCodecTest {
         assertEquals(0x05u.toUByte(), connect.protocolLevel)
         assertEquals(MqttConnectFlags(0x02u), connect.connectFlags)
         assertEquals(60u.toUShort(), connect.keepAliveSeconds)
-        assertEquals(emptyList(), connect.properties)
+        assertEquals(V5PropertyBag.EMPTY, connect.properties)
         assertEquals("abc", connect.clientId)
         assertEquals(null, connect.willProperties)
         assertEquals(null, connect.willTopic)
@@ -198,7 +198,7 @@ class MqttV5ConnectCodecTest {
                 protocolLevel = 0x05u,
                 connectFlags = MqttConnectFlags(0x02u),
                 keepAliveSeconds = 60u,
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
                 clientId = "abc",
             )
         val buf = encode(msg)

@@ -38,7 +38,7 @@ class MqttV5ConnAckCodecTest {
             MqttV5Packet.ConnAck(
                 connectAckFlags = 0x00u,
                 reasonCode = V5ConnectReasonCode.Success(),
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
             )
         val buf = encode(msg)
         val actual = buf.readByteArray(buf.remaining())
@@ -61,7 +61,7 @@ class MqttV5ConnAckCodecTest {
             MqttV5Packet.ConnAck(
                 connectAckFlags = 0x01u, // session present = true
                 reasonCode = V5ConnectReasonCode.Success(),
-                properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
+                properties = V5PropertyBag.of(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
             )
         val buf = encode(msg)
         val actual = buf.readByteArray(buf.remaining())
@@ -103,7 +103,7 @@ class MqttV5ConnAckCodecTest {
         assertEquals(MqttFixedHeader(0x20u), connAck.header)
         assertEquals(0x00u.toUByte(), connAck.connectAckFlags)
         assertEquals(V5ConnectReasonCode.ProtocolError(), connAck.reasonCode)
-        assertEquals(emptyList(), connAck.properties)
+        assertEquals(V5PropertyBag.EMPTY, connAck.properties)
     }
 
     @Test
@@ -114,7 +114,7 @@ class MqttV5ConnAckCodecTest {
                 connectAckFlags = 0x01u,
                 reasonCode = V5ConnectReasonCode.Success(),
                 properties =
-                    listOf(
+                    V5PropertyBag.of(
                         MqttV5Property.MessageExpiryInterval(seconds = 3_600u),
                         MqttV5Property.ContentType(value = "text/plain"),
                     ),
@@ -130,7 +130,7 @@ class MqttV5ConnAckCodecTest {
             MqttV5Packet.ConnAck(
                 connectAckFlags = 0x00u,
                 reasonCode = V5ConnectReasonCode.Success(),
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
             )
         val buf = encode(msg)
         val totalBytes = buf.remaining()

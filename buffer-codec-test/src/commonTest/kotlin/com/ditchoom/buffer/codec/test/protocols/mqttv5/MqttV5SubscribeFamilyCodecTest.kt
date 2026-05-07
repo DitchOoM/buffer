@@ -37,7 +37,7 @@ class MqttV5SubscribeFamilyCodecTest {
         val msg =
             MqttV5Packet.Subscribe(
                 packetIdentifier = 0x002Au,
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
                 topicFilters =
                     listOf(
                         V5Subscription(
@@ -71,7 +71,7 @@ class MqttV5SubscribeFamilyCodecTest {
                 // body = 2 (pid) + 1 (propLen=5) + 5 (MessageExpiry)
                 //      + 6 (LP "t/1": 2+3 + opts: 1) + 6 (LP "t/2" + opts) = 20
                 packetIdentifier = 0x0042u,
-                properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 3_600u)),
+                properties = V5PropertyBag.of(MqttV5Property.MessageExpiryInterval(seconds = 3_600u)),
                 topicFilters =
                     listOf(
                         V5Subscription(
@@ -95,7 +95,7 @@ class MqttV5SubscribeFamilyCodecTest {
         val msg =
             MqttV5Packet.SubAck(
                 packetIdentifier = 0x002Au,
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
                 reasonCodes = listOf(V5SubAckReasonCode.GrantedQoS1()),
             )
         val buf = encode(msg)
@@ -111,7 +111,7 @@ class MqttV5SubscribeFamilyCodecTest {
             MqttV5Packet.SubAck(
                 // body = 2 + 1 (propLen=5) + 5 (MessageExpiry) + 3 (rc list) = 11
                 packetIdentifier = 0x0042u,
-                properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
+                properties = V5PropertyBag.of(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
                 reasonCodes =
                     listOf(
                         V5SubAckReasonCode.GrantedQoS0(),
@@ -130,7 +130,7 @@ class MqttV5SubscribeFamilyCodecTest {
             MqttV5Packet.Unsubscribe(
                 // body = 2 (pid) + 1 (propLen=0) + 5 (LP "t/1": 2+3) + 5 (LP "t/2") = 13
                 packetIdentifier = 0x0042u,
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
                 topics =
                     listOf(
                         MqttUnsubscribeTopic(name = "t/1"),
@@ -171,7 +171,7 @@ class MqttV5SubscribeFamilyCodecTest {
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         val sub = assertIs<MqttV5Packet.Subscribe>(decoded)
         assertEquals(0x0007u.toUShort(), sub.packetIdentifier)
-        assertEquals(emptyList(), sub.properties)
+        assertEquals(V5PropertyBag.EMPTY, sub.properties)
         assertEquals(1, sub.topicFilters.size)
         assertEquals("topic", sub.topicFilters[0].topicFilter)
         assertEquals(V5SubscriptionOptions.of(qos = 2), sub.topicFilters[0].subscriptionOptions)
@@ -182,7 +182,7 @@ class MqttV5SubscribeFamilyCodecTest {
         val msg =
             MqttV5Packet.Subscribe(
                 packetIdentifier = 0x0001u,
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
                 topicFilters = listOf(V5Subscription("t/1", V5SubscriptionOptions.of(qos = 0))),
             )
         val buf = encode(msg)

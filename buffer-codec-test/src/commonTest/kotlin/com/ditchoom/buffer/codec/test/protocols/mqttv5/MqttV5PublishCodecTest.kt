@@ -16,6 +16,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 
 /**
  * Phase J.M.5 slice 2 — PUBLISH v5 + the v5 property bag (first two
@@ -43,7 +44,7 @@ class MqttV5PublishCodecTest {
                 header = MqttFixedHeader(0x30u),
                 topic = "t/1",
                 packetId = null,
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
                 payload = JpegImage(1u, 1u, byteArrayOf(0x42)),
             )
         val buf = codec.encode(msg, EncodeContext.Empty, BufferFactory.Default)
@@ -82,7 +83,7 @@ class MqttV5PublishCodecTest {
                 topic = "t/1",
                 packetId = PacketId(0x002Au),
                 properties =
-                    listOf(
+                    V5PropertyBag.of(
                         MqttV5Property.MessageExpiryInterval(seconds = 0x01020304u),
                         MqttV5Property.ContentType(value = "text/plain"),
                     ),
@@ -138,7 +139,7 @@ class MqttV5PublishCodecTest {
                 // body = 2 (topic LP) + 12 (topic) + 1 (propLen=0) + 4+8 (jpeg)
                 topic = "sensors/jpeg",
                 packetId = null,
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
                 payload = JpegImage(320u, 240u, ByteArray(8) { (it * 5).toByte() }),
             )
         val buf = codec.encode(original, EncodeContext.Empty, BufferFactory.Default)
@@ -156,7 +157,7 @@ class MqttV5PublishCodecTest {
                 topic = "sensors/jpeg",
                 packetId = PacketId(0x0042u),
                 properties =
-                    listOf(
+                    V5PropertyBag.of(
                         MqttV5Property.MessageExpiryInterval(seconds = 3_600u),
                         MqttV5Property.ContentType(value = "text/plain"),
                     ),
@@ -168,10 +169,12 @@ class MqttV5PublishCodecTest {
     }
 
     @Test
-    fun decodesPublishWithMixedPropertiesPreservesOrder() {
-        // Spec §3.3.2.3 — properties may appear in any order. Decode must
-        // preserve the wire order. ContentType first (13 bytes), then
-        // MessageExpiryInterval (5 bytes) — propBody = 18 bytes.
+    fun decodesPublishWithMixedPropertiesIntoTypedSlots() {
+        // Spec §3.3.2.3 — properties may appear in any order on the wire.
+        // Slice 15f routes each unique-cardinality variant into its typed
+        // V5PropertyBag slot regardless of wire arrival order. Wire here is
+        // ContentType first (13 bytes), then MessageExpiryInterval (5
+        // bytes); both must end up in their respective typed slots.
         // body = 2 (topic LP) + 1 (topic 't') + 1 (propLen=18) + 18 (props)
         //      + 4+1 (jpeg) = 27
         val codec = MqttV5PacketCodec(JpegImageCodec)
@@ -210,11 +213,10 @@ class MqttV5PublishCodecTest {
         val buf = BufferFactory.Default.allocate(wire.size, ByteOrder.BIG_ENDIAN).also { it.writeBytes(wire) }
         buf.resetForRead()
         val decoded = assertIs<MqttV5Packet.Publish<JpegImage>>(codec.decode(buf, DecodeContext.Empty))
-        assertEquals(2, decoded.properties.size)
-        val first = assertIs<MqttV5Property.ContentType>(decoded.properties[0])
-        assertEquals("text/plain", first.value)
-        val second = assertIs<MqttV5Property.MessageExpiryInterval>(decoded.properties[1])
-        assertEquals(96u, second.seconds)
+        val contentType = assertNotNull(decoded.properties.contentType)
+        assertEquals("text/plain", contentType.value)
+        val expiry = assertNotNull(decoded.properties.messageExpiryInterval)
+        assertEquals(96u, expiry.seconds)
     }
 
     @Test
@@ -231,7 +233,7 @@ class MqttV5PublishCodecTest {
                 //      + 1 (propLen=5) + 5 (one MessageExpiryInterval) + 4+1 (jpeg)
                 topic = "t",
                 packetId = PacketId(0x0007u),
-                properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 7u)),
+                properties = V5PropertyBag.of(MqttV5Property.MessageExpiryInterval(seconds = 7u)),
                 payload = JpegImage(1u, 1u, byteArrayOf(0x42)),
             )
         val encoded = codec.encode(original, EncodeContext.Empty, BufferFactory.Default)
@@ -258,7 +260,7 @@ class MqttV5PublishCodecTest {
                 header = MqttFixedHeader(0x30u),
                 topic = "t/1",
                 packetId = null,
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
                 payload = JpegImage(1u, 1u, byteArrayOf(0x42)),
             )
         val buf = codec.encode(msg, EncodeContext.Empty, BufferFactory.Default)

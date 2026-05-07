@@ -113,13 +113,12 @@ sealed interface MqttV5Packet<out P : Payload> {
         val protocolLevel: UByte,
         val connectFlags: MqttConnectFlags,
         val keepAliveSeconds: UShort,
-        @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
-        val properties: List<MqttV5Property>,
+        @UseCodec(V5PropertyBagCodec::class)
+        val properties: V5PropertyBag = V5PropertyBag.EMPTY,
         @LengthPrefixed val clientId: String,
         @When("connectFlags.willPresent")
-        @LengthPrefixed
-        @UseCodec(MqttRemainingLengthCodec::class)
-        val willProperties: List<MqttV5Property>? = null,
+        @UseCodec(V5PropertyBagCodec::class)
+        val willProperties: V5PropertyBag? = null,
         @LengthPrefixed @When("connectFlags.willPresent") val willTopic: String? = null,
         @LengthPrefixed
         @UseCodec(BinaryDataCodec::class)
@@ -171,8 +170,8 @@ sealed interface MqttV5Packet<out P : Payload> {
         val header: MqttFixedHeader = MqttFixedHeader(0x20u),
         val connectAckFlags: UByte,
         val reasonCode: V5ConnectReasonCode,
-        @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
-        val properties: List<MqttV5Property>,
+        @UseCodec(V5PropertyBagCodec::class)
+        val properties: V5PropertyBag = V5PropertyBag.EMPTY,
     ) : MqttV5Packet<Nothing> {
         init {
             // Phase J.M.5 audit-2d — header byte invariant per spec §3.2.1.
@@ -210,14 +209,15 @@ sealed interface MqttV5Packet<out P : Payload> {
      *     `@When("header.qosGreaterThanZero")` against the
      *     value-class header property.
      *   - `properties` (VBI length prefix + properties, §3.3.2.3):
-     *     v5-specific property bag. Encoded as
-     *     `@LengthPrefixed @UseCodec(MqttRemainingLengthCodec)
-     *     val: List<MqttV5Property>` — the Phase I.1 step 11 shape.
-     *     The codec writes a VBI length prefix for the body bytes,
-     *     then iterates and encodes each property; decode reads the
-     *     VBI prefix, narrows the limit via `applyBound`, and reads
-     *     elements until the inner limit is hit (then restores the
-     *     outer limit before the payload is read).
+     *     v5-specific property bag. Phase J.M.5 slice 15f replaced the
+     *     `List<MqttV5Property>` field with the typed [V5PropertyBag]
+     *     wrapper; encoded as `@UseCodec(V5PropertyBagCodec::class) val:
+     *     V5PropertyBag`. The codec self-frames its VBI prefix
+     *     internally, writes set properties in property-id ascending
+     *     order, and on decode narrows the limit, dispatches each entry
+     *     into its typed slot (rejecting duplicates of unique-cardinality
+     *     variants as Protocol Error per §2.2.2), and restores the outer
+     *     limit before the payload is read.
      *   - `payload: P` (variable, §3.3.3): consumes the remaining
      *     bytes of the var-int-bounded region via the user-supplied
      *     `Codec<P>`.
@@ -243,8 +243,8 @@ sealed interface MqttV5Packet<out P : Payload> {
         val header: MqttFixedHeader = MqttFixedHeader(0x30u),
         @LengthPrefixed val topic: String,
         @When("header.qosGreaterThanZero") val packetId: PacketId? = null,
-        @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
-        val properties: List<MqttV5Property>,
+        @UseCodec(V5PropertyBagCodec::class)
+        val properties: V5PropertyBag = V5PropertyBag.EMPTY,
         @RemainingBytes val payload: P,
     ) : MqttV5Packet<P> {
         init {
@@ -299,9 +299,8 @@ sealed interface MqttV5Packet<out P : Payload> {
         val packetIdentifier: UShort,
         @When("remaining >= 1") val reasonCode: V5PubAckReasonCode? = null,
         @When("remaining >= 1")
-        @LengthPrefixed
-        @UseCodec(MqttRemainingLengthCodec::class)
-        val properties: List<MqttV5Property>? = null,
+        @UseCodec(V5PropertyBagCodec::class)
+        val properties: V5PropertyBag? = null,
     ) : MqttV5Packet<Nothing> {
         init {
             // Phase J.M.5 audit-2c — cascading-trailer invariant. Per spec
@@ -342,9 +341,8 @@ sealed interface MqttV5Packet<out P : Payload> {
         val packetIdentifier: UShort,
         @When("remaining >= 1") val reasonCode: V5PubAckReasonCode? = null,
         @When("remaining >= 1")
-        @LengthPrefixed
-        @UseCodec(MqttRemainingLengthCodec::class)
-        val properties: List<MqttV5Property>? = null,
+        @UseCodec(V5PropertyBagCodec::class)
+        val properties: V5PropertyBag? = null,
     ) : MqttV5Packet<Nothing> {
         init {
             // Phase J.M.5 audit-2c — see [PubAck.init]. Spec §3.5.2.2.1.
@@ -374,9 +372,8 @@ sealed interface MqttV5Packet<out P : Payload> {
         val packetIdentifier: UShort,
         @When("remaining >= 1") val reasonCode: V5PubAckReasonCode? = null,
         @When("remaining >= 1")
-        @LengthPrefixed
-        @UseCodec(MqttRemainingLengthCodec::class)
-        val properties: List<MqttV5Property>? = null,
+        @UseCodec(V5PropertyBagCodec::class)
+        val properties: V5PropertyBag? = null,
     ) : MqttV5Packet<Nothing> {
         init {
             // Phase J.M.5 audit-2c — see [PubAck.init]. Spec §3.6.2.2.1.
@@ -408,9 +405,8 @@ sealed interface MqttV5Packet<out P : Payload> {
         val packetIdentifier: UShort,
         @When("remaining >= 1") val reasonCode: V5PubAckReasonCode? = null,
         @When("remaining >= 1")
-        @LengthPrefixed
-        @UseCodec(MqttRemainingLengthCodec::class)
-        val properties: List<MqttV5Property>? = null,
+        @UseCodec(V5PropertyBagCodec::class)
+        val properties: V5PropertyBag? = null,
     ) : MqttV5Packet<Nothing> {
         init {
             // Phase J.M.5 audit-2c — see [PubAck.init]. Spec §3.7.2.2.1.
@@ -453,8 +449,8 @@ sealed interface MqttV5Packet<out P : Payload> {
     data class Subscribe(
         val header: MqttFixedHeader = MqttFixedHeader(0x82u),
         val packetIdentifier: UShort,
-        @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
-        val properties: List<MqttV5Property>,
+        @UseCodec(V5PropertyBagCodec::class)
+        val properties: V5PropertyBag = V5PropertyBag.EMPTY,
         @RemainingBytes val topicFilters: List<V5Subscription>,
     ) : MqttV5Packet<Nothing> {
         init {
@@ -491,8 +487,8 @@ sealed interface MqttV5Packet<out P : Payload> {
     data class SubAck(
         val header: MqttFixedHeader = MqttFixedHeader(0x90u),
         val packetIdentifier: UShort,
-        @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
-        val properties: List<MqttV5Property>,
+        @UseCodec(V5PropertyBagCodec::class)
+        val properties: V5PropertyBag = V5PropertyBag.EMPTY,
         @RemainingBytes val reasonCodes: List<V5SubAckReasonCode>,
     ) : MqttV5Packet<Nothing> {
         init {
@@ -525,8 +521,8 @@ sealed interface MqttV5Packet<out P : Payload> {
     data class Unsubscribe(
         val header: MqttFixedHeader = MqttFixedHeader(0xA2u),
         val packetIdentifier: UShort,
-        @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
-        val properties: List<MqttV5Property>,
+        @UseCodec(V5PropertyBagCodec::class)
+        val properties: V5PropertyBag = V5PropertyBag.EMPTY,
         @RemainingBytes val topics: List<MqttUnsubscribeTopic>,
     ) : MqttV5Packet<Nothing> {
         init {
@@ -560,9 +556,8 @@ sealed interface MqttV5Packet<out P : Payload> {
         val packetIdentifier: UShort,
         @When("remaining >= 1") val reasonCode: V5UnsubAckReasonCode? = null,
         @When("remaining >= 1")
-        @LengthPrefixed
-        @UseCodec(MqttRemainingLengthCodec::class)
-        val properties: List<MqttV5Property>? = null,
+        @UseCodec(V5PropertyBagCodec::class)
+        val properties: V5PropertyBag? = null,
     ) : MqttV5Packet<Nothing> {
         init {
             // Phase J.M.5 audit-2c — see [PubAck.init]. Spec §3.11.2.1.
@@ -595,9 +590,8 @@ sealed interface MqttV5Packet<out P : Payload> {
         val header: MqttFixedHeader = MqttFixedHeader(0xE0u),
         @When("remaining >= 1") val reasonCode: V5DisconnectReasonCode? = null,
         @When("remaining >= 1")
-        @LengthPrefixed
-        @UseCodec(MqttRemainingLengthCodec::class)
-        val properties: List<MqttV5Property>? = null,
+        @UseCodec(V5PropertyBagCodec::class)
+        val properties: V5PropertyBag? = null,
     ) : MqttV5Packet<Nothing> {
         init {
             // Phase J.M.5 audit-2c — cascading-trailer invariant per
@@ -630,9 +624,8 @@ sealed interface MqttV5Packet<out P : Payload> {
         val header: MqttFixedHeader = MqttFixedHeader(0xF0u),
         @When("remaining >= 1") val reasonCode: V5AuthReasonCode? = null,
         @When("remaining >= 1")
-        @LengthPrefixed
-        @UseCodec(MqttRemainingLengthCodec::class)
-        val properties: List<MqttV5Property>? = null,
+        @UseCodec(V5PropertyBagCodec::class)
+        val properties: V5PropertyBag? = null,
     ) : MqttV5Packet<Nothing> {
         init {
             // Phase J.M.5 audit-2c — see [PubAck.init]. Spec §3.15.2.2.1.

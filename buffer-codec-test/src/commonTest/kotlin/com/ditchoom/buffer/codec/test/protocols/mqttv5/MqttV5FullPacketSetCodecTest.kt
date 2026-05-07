@@ -58,7 +58,7 @@ class MqttV5FullPacketSetCodecTest {
                 protocolLevel = 0x05u,
                 connectFlags = MqttConnectFlags(0x02u),
                 keepAliveSeconds = 60u,
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
                 clientId = "abc",
             )
         assertDispatcherRoundTrip(original, expectedTotalBytes = 18)
@@ -70,7 +70,7 @@ class MqttV5FullPacketSetCodecTest {
             MqttV5Packet.ConnAck(
                 connectAckFlags = 0x01u,
                 reasonCode = V5ConnectReasonCode.Success(),
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
             )
         assertDispatcherRoundTrip(original, expectedTotalBytes = 5)
     }
@@ -81,7 +81,7 @@ class MqttV5FullPacketSetCodecTest {
             MqttV5Packet.Publish(
                 topic = "t/1",
                 packetId = null,
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
                 payload = JpegImage(1u, 1u, byteArrayOf(0x42)),
             )
         assertDispatcherRoundTrip(original, expectedTotalBytes = 13)
@@ -94,7 +94,7 @@ class MqttV5FullPacketSetCodecTest {
                 header = MqttFixedHeader(0x32u),
                 topic = "t/1",
                 packetId = PacketId(0x002Au),
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
                 payload = JpegImage(1u, 1u, byteArrayOf(0x42)),
             )
         assertDispatcherRoundTrip(original, expectedTotalBytes = 15)
@@ -114,7 +114,7 @@ class MqttV5FullPacketSetCodecTest {
             MqttV5Packet.PubAck(
                 packetIdentifier = 0x1234u,
                 reasonCode = V5PubAckReasonCode.Success(),
-                properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
+                properties = V5PropertyBag.of(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
             )
         assertDispatcherRoundTrip(original, expectedTotalBytes = 11)
     }
@@ -148,7 +148,7 @@ class MqttV5FullPacketSetCodecTest {
         val original =
             MqttV5Packet.Subscribe(
                 packetIdentifier = 0x000Au,
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
                 topicFilters = listOf(V5Subscription("t/1", V5SubscriptionOptions.of(qos = 1))),
             )
         assertDispatcherRoundTrip(original, expectedTotalBytes = 11)
@@ -159,7 +159,7 @@ class MqttV5FullPacketSetCodecTest {
         val original =
             MqttV5Packet.SubAck(
                 packetIdentifier = 0x000Au,
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
                 reasonCodes =
                     listOf(
                         V5SubAckReasonCode.GrantedQoS0(),
@@ -175,7 +175,7 @@ class MqttV5FullPacketSetCodecTest {
         val original =
             MqttV5Packet.Unsubscribe(
                 packetIdentifier = 0x000Au,
-                properties = emptyList(),
+                properties = V5PropertyBag.EMPTY,
                 topics = listOf(MqttUnsubscribeTopic("t/1")),
             )
         assertDispatcherRoundTrip(original, expectedTotalBytes = 10)
