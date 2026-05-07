@@ -9,6 +9,7 @@ import org.intellij.lang.annotations.Language
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * Validator-side coverage for `@RemainingBytes val: String` — a shape the
@@ -124,17 +125,17 @@ class RemainingBytesStringValidatorTest {
     }
 
     /**
-     * Terminal-only rule survives: a non-terminal `@RemainingBytes val: String`
-     * must still be rejected (returning null from the analyzer cascades to the
-     * parent codec being skipped — the same silent-drop the fix closes for the
-     * happy path, intentionally retained for the malformed case).
+     * J.M.6.c (issue #151 part 2) — `@RemainingBytes` followed by a
+     * fixed-size scalar trailer is now ACCEPTED. The analyzer subtracts
+     * the trailer's wire bytes from `buffer.limit()` before the body
+     * read, so the trailer survives intact.
      *
-     * Without restoring PR #153's auto-reservation of fixed trailers, the only
-     * legal position for `@RemainingBytes` of any shape is the last constructor
-     * parameter (or the last non-conditional field).
+     * This is the shape PR #153's TrailingChecksum fixture pinned and
+     * the J.M.6.c PNG fixture exercises end-to-end (length + type +
+     * `@RemainingBytes` data + 4-byte CRC).
      */
     @Test
-    fun rejectsRemainingBytesStringWhenNotTerminal() {
+    fun acceptsRemainingBytesStringWithFixedScalarTrailer() {
         val result =
             compile(
                 """
@@ -144,17 +145,57 @@ class RemainingBytesStringValidatorTest {
                 import com.ditchoom.buffer.codec.annotations.RemainingBytes
 
                 @ProtocolMessage
-                data class WrongOrder(
+                data class TextWithChecksum(
                     @RemainingBytes val text: String,
                     val checksum: UByte,
                 )
                 """.trimIndent(),
             )
-        // The analyzer drops the shape (returns null), so KSP succeeds but no
-        // codec is generated. A downstream consumer attempting to reference
-        // `WrongOrderCodec` would fail in the next round. Mirroring how
-        // Slice11aValidatorTest treats other terminal-only rejections.
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+        assertFalse(
+            result.messages.contains("error:"),
+            "fixed-size scalar trailer must be accepted. Messages:\n${result.messages}",
+        )
+    }
+
+    /**
+     * J.M.6.c — `@RemainingBytes` followed by a *variable-size* trailer
+     * is rejected with a focused error naming both the body field and
+     * the offending trailer. Variable-size trailers (here: a second
+     * `@LengthPrefixed val: String`) leave the body decode with no way
+     * to know its end without re-encoding.
+     */
+    @Test
+    fun rejectsRemainingBytesStringFollowedByVariableSizeTrailer() {
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.RemainingBytes
+
+                @ProtocolMessage
+                data class TextWithVariableTrailer(
+                    @RemainingBytes val text: String,
+                    @LengthPrefixed val footer: String,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("@RemainingBytes on test.TextWithVariableTrailer.text"),
+            "diagnostic should name the body field. Messages:\n${result.messages}",
+        )
+        assertTrue(
+            result.messages.contains("test.TextWithVariableTrailer.footer"),
+            "diagnostic should name the offending trailer. Messages:\n${result.messages}",
+        )
+        assertTrue(
+            result.messages.contains("@LengthPrefixed"),
+            "diagnostic should mention the trailing annotation. Messages:\n${result.messages}",
+        )
     }
 
     private fun compile(

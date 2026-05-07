@@ -187,6 +187,7 @@ class ProtocolMessageProcessor(
             validateUseCodec(symbol, ctor.parameters, payloadType)
             validateFramedBy(symbol)
             validatePayloadTypeParameter(symbol, ctor.parameters)
+            validateRemainingBytesTrailers(symbol, ctor.parameters)
             emitter.tryEmit(symbol)
         }
         return deferred
@@ -470,6 +471,64 @@ class ProtocolMessageProcessor(
                         "discriminator-from-context shapes are deferred.",
                     sub,
                 )
+            }
+        }
+    }
+
+    /**
+     * J.M.6.c (issue #151 part 2) — non-terminal `@RemainingBytes` is
+     * allowed iff every trailing field is fixed-size on the wire (per
+     * the analyzer's `FieldSpec.FixedSize` predicate, today: plain
+     * scalars and value-class scalars). Variable-size trailers
+     * (`@LengthPrefixed`, `@LengthFrom`, another `@RemainingBytes`,
+     * `@When`, `@UseCodec`) leave the body decode with no way to
+     * compute its end without re-encoding, so the analyzer silently
+     * drops the codec — this validator surfaces a focused diagnostic
+     * naming both the body field and the offending trailer.
+     */
+    private fun validateRemainingBytesTrailers(
+        owner: KSClassDeclaration,
+        parameters: List<KSValueParameter>,
+    ) {
+        val ownerName = owner.qualifiedName?.asString() ?: owner.simpleName.asString()
+        for ((index, param) in parameters.withIndex()) {
+            val hasRemainingBytes =
+                param.annotations.any { ann ->
+                    ann.shortName.asString() == REMAINING_BYTES_SHORT &&
+                        ann.annotationType
+                            .resolve()
+                            .declaration.qualifiedName
+                            ?.asString() == REMAINING_BYTES_QNAME
+                }
+            if (!hasRemainingBytes) continue
+            if (index == parameters.lastIndex) continue
+            val bodyName = param.name?.asString() ?: "<unknown>"
+            for (trailingIdx in (index + 1) until parameters.size) {
+                val trailing = parameters[trailingIdx]
+                val trailingName = trailing.name?.asString() ?: "<unknown>"
+                val variableAnn =
+                    trailing.annotations.firstOrNull { ann ->
+                        val short = ann.shortName.asString()
+                        short == LENGTH_PREFIXED_SHORT ||
+                            short == LENGTH_FROM_SHORT ||
+                            short == REMAINING_BYTES_SHORT ||
+                            short == WHEN_SHORT ||
+                            short == USE_CODEC_SHORT
+                    }
+                if (variableAnn != null) {
+                    val annShortName = variableAnn.shortName.asString()
+                    logger.error(
+                        "@RemainingBytes on $ownerName.$bodyName is non-terminal but is " +
+                            "followed by $ownerName.$trailingName which carries " +
+                            "@$annShortName — non-terminal @RemainingBytes requires every " +
+                            "trailing field to be fixed-size on the wire (a plain scalar or a " +
+                            "value-class scalar) so the body decode can subtract a known byte " +
+                            "count from buffer.limit(). Move the @RemainingBytes field to the " +
+                            "end of the constructor parameter list, or remove the " +
+                            "@$annShortName trailer.",
+                        trailing,
+                    )
+                }
             }
         }
     }
@@ -1804,6 +1863,7 @@ class ProtocolMessageProcessor(
         private const val PAYLOAD_QNAME = "com.ditchoom.buffer.codec.Payload"
         private const val LENGTH_FROM_QNAME = "com.ditchoom.buffer.codec.annotations.LengthFrom"
         private const val LENGTH_FROM_SHORT = "LengthFrom"
+        private const val LENGTH_PREFIXED_SHORT = "LengthPrefixed"
         private const val WIRE_BYTES_QNAME = "com.ditchoom.buffer.codec.annotations.WireBytes"
         private const val WIRE_BYTES_SHORT = "WireBytes"
         private const val PACKET_TYPE_QNAME = "com.ditchoom.buffer.codec.annotations.PacketType"

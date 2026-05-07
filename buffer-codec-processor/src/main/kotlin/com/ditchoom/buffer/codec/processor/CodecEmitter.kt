@@ -251,10 +251,62 @@ internal class CodecEmitter(
             // would require dispatcher-side wireSize composition that doesn't
             // exist yet for nested-message bodies sized by a sibling.
             if (field is FieldSpec.LengthFromMessage && index != fields.lastIndex) return null
-            if (field is FieldSpec.RemainingBytesScalarList && index != fields.lastIndex) return null
-            if (field is FieldSpec.RemainingBytesProtocolMessageList && index != fields.lastIndex) return null
-            if (field is FieldSpec.RemainingBytesPayload && index != fields.lastIndex) return null
-            if (field is FieldSpec.RemainingBytesString && index != fields.lastIndex) return null
+            // J.M.6.c (issue #151 part 2) — `@RemainingBytes` no longer has
+            // to be the last field. Trailing fields must all be
+            // `FieldSpec.FixedSize` (Scalar + ValueClassScalar today, not
+            // UseCodecScalar) so the decode emit can subtract a known byte
+            // count from `buffer.limit()` and hand the @RemainingBytes
+            // body the correct bounded region. Variable-size trailers
+            // would leave the body with no way to know its end without
+            // re-encoding — surfaced as a focused validator error in
+            // ProtocolMessageProcessor.validateRemainingBytesTrailers.
+            if (field is FieldSpec.RemainingBytesScalarList &&
+                index != fields.lastIndex &&
+                !trailingFieldsAreFixedSize(fields, index)
+            ) {
+                return null
+            }
+            if (field is FieldSpec.RemainingBytesProtocolMessageList &&
+                index != fields.lastIndex &&
+                !trailingFieldsAreFixedSize(fields, index)
+            ) {
+                return null
+            }
+            if (field is FieldSpec.RemainingBytesPayload &&
+                index != fields.lastIndex &&
+                !trailingFieldsAreFixedSize(fields, index)
+            ) {
+                return null
+            }
+            if (field is FieldSpec.RemainingBytesString &&
+                index != fields.lastIndex &&
+                !trailingFieldsAreFixedSize(fields, index)
+            ) {
+                return null
+            }
+        }
+
+        // J.M.6.c — fill in `reservedTrailingBytes` on every non-terminal
+        // `RemainingBytes*` field. Terminal cases (default 0) keep
+        // existing emit behavior; non-terminal cases drive the decode
+        // emit's `buffer.limit() - <reserved>` adjustment.
+        for (i in fields.indices) {
+            val field = fields[i]
+            if (i == fields.lastIndex) continue
+            val reserved = reservedTrailingBytesAfter(fields, i)
+            if (reserved == 0) continue
+            fields[i] =
+                when (field) {
+                    is FieldSpec.RemainingBytesScalarList ->
+                        field.copy(reservedTrailingBytes = reserved)
+                    is FieldSpec.RemainingBytesString ->
+                        field.copy(reservedTrailingBytes = reserved)
+                    is FieldSpec.RemainingBytesProtocolMessageList ->
+                        field.copy(reservedTrailingBytes = reserved)
+                    is FieldSpec.RemainingBytesPayload ->
+                        field.copy(reservedTrailingBytes = reserved)
+                    else -> field
+                }
         }
 
         val pkg = symbol.packageName.asString()
@@ -383,6 +435,41 @@ internal class CodecEmitter(
         }
         return ClassName(pkg, chain.first(), *chain.drop(1).toTypedArray())
     }
+
+    /**
+     * J.M.6.c — true when every field at index > `fromIndex` is a
+     * `FieldSpec.FixedSize` (Scalar + ValueClassScalar). Used by the
+     * non-terminal `@RemainingBytes` qualification check: such trailers
+     * have a known wire-byte count, so the body decode can subtract that
+     * count from `buffer.limit()` and read its bounded region. Variable-
+     * size trailers (`UseCodecScalar`, `LengthPrefixedString`,
+     * conditionals, …) defer — extending FixedSize to cover them is a
+     * follow-up if a real fixture demands it.
+     */
+    private fun trailingFieldsAreFixedSize(
+        fields: List<FieldSpec>,
+        fromIndex: Int,
+    ): Boolean {
+        for (i in (fromIndex + 1) until fields.size) {
+            if (fields[i] !is FieldSpec.FixedSize) return false
+        }
+        return true
+    }
+
+    /**
+     * J.M.6.c — sum of `wireBytes` for every `FieldSpec.FixedSize` field
+     * after `fromIndex`. Caller must have already verified via
+     * [trailingFieldsAreFixedSize] that the tail qualifies; the
+     * `filterIsInstance` is defensive (mirrors [sumOfFixedWireBytes]).
+     */
+    private fun reservedTrailingBytesAfter(
+        fields: List<FieldSpec>,
+        fromIndex: Int,
+    ): Int =
+        fields
+            .drop(fromIndex + 1)
+            .filterIsInstance<FieldSpec.FixedSize>()
+            .sumOf { it.wireBytes }
 
     private fun analyzeField(
         param: KSValueParameter,
@@ -2983,6 +3070,24 @@ internal class CodecEmitter(
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
             return builder.build()
         }
+        // J.M.6.c — non-terminal `@RemainingBytes*` fields collapse the
+        // parent's wireSize to BackPatch. The terminal-`when` branches
+        // below assume the body field IS the terminal (so they sum
+        // header bytes + body bytes); when the body sits before a
+        // FixedSize trailer the terminal is the trailer's Scalar /
+        // ValueClassScalar, the body's bytes get dropped, and the
+        // resulting Exact value would under-count the message.
+        // BackPatch sidesteps the bookkeeping — the encoder uses a
+        // growable buffer and reports the actual byte count after the
+        // body emits, same shape as `@LengthPrefixed val: String`.
+        if (shape.fields.any {
+                (it is FieldSpec.RemainingBytesScalarList && it.reservedTrailingBytes != 0) ||
+                    (it is FieldSpec.RemainingBytesProtocolMessageList && it.reservedTrailingBytes != 0)
+            }
+        ) {
+            builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+            return builder.build()
+        }
         when (val terminal = shape.fields.lastOrNull()) {
             is FieldSpec.LengthPrefixedMessage -> {
                 val headerBytes = scalarHeaderBytes(shape) + terminal.prefixWidth
@@ -4824,11 +4929,30 @@ internal class CodecEmitter(
         body: CodeBlock.Builder,
         field: FieldSpec.RemainingBytesPayload,
     ) {
+        if (field.reservedTrailingBytes == 0) {
+            body.addStatement(
+                "val %L = %L.decode(buffer, context)",
+                field.name,
+                field.source.codecReceiver(),
+            )
+            return
+        }
+        // J.M.6.c — non-terminal RemainingBytesPayload. Narrow the
+        // buffer's limit to leave the trailing FixedSize fields in the
+        // outer-limit region; restore the outer limit in a try/finally
+        // so the trailing field emits run against the original limit.
+        val outerLimitVar = "__${field.name}OuterLimit"
+        body.addStatement("val %L = buffer.limit()", outerLimitVar)
         body.addStatement(
-            "val %L = %L.decode(buffer, context)",
-            field.name,
-            field.source.codecReceiver(),
+            "buffer.setLimit(%L - %L)",
+            outerLimitVar,
+            field.reservedTrailingBytes,
         )
+        body.beginControlFlow("val %L = try", field.name)
+        body.addStatement("%L.decode(buffer, context)", field.source.codecReceiver())
+        body.nextControlFlow("finally")
+        body.addStatement("buffer.setLimit(%L)", outerLimitVar)
+        body.endControlFlow()
     }
 
     /**
@@ -4872,7 +4996,16 @@ internal class CodecEmitter(
     ) {
         val elementTypeName = scalarTypeName(field.elementKind)
         body.addStatement("val %L = mutableListOf<%T>()", field.name, elementTypeName)
-        body.beginControlFlow("while (buffer.position() < buffer.limit())")
+        if (field.reservedTrailingBytes == 0) {
+            body.beginControlFlow("while (buffer.position() < buffer.limit())")
+        } else {
+            // J.M.6.c — leave `reservedTrailingBytes` for the trailing
+            // FixedSize fields that emit after the body loop.
+            body.beginControlFlow(
+                "while (buffer.position() < buffer.limit() - %L)",
+                field.reservedTrailingBytes,
+            )
+        }
         body.addStatement("%L += %L", field.name, naturalScalarReadExpr(field.elementKind))
         body.endControlFlow()
     }
@@ -4905,9 +5038,20 @@ internal class CodecEmitter(
         body: CodeBlock.Builder,
         field: FieldSpec.RemainingBytesString,
     ) {
+        if (field.reservedTrailingBytes == 0) {
+            body.addStatement(
+                "val %L = buffer.readString(buffer.remaining(), %T.UTF8)",
+                field.name,
+                CHARSET_CN,
+            )
+            return
+        }
+        // J.M.6.c — read the body byte count minus the reserved trailing
+        // FixedSize bytes; the trailing field emits run normally after.
         body.addStatement(
-            "val %L = buffer.readString(buffer.remaining(), %T.UTF8)",
+            "val %L = buffer.readString(buffer.remaining() - %L, %T.UTF8)",
             field.name,
+            field.reservedTrailingBytes,
             CHARSET_CN,
         )
     }
@@ -4952,7 +5096,15 @@ internal class CodecEmitter(
         field: FieldSpec.RemainingBytesProtocolMessageList,
     ) {
         body.addStatement("val %L = mutableListOf<%T>()", field.name, field.elementClassName)
-        body.beginControlFlow("while (buffer.position() < buffer.limit())")
+        if (field.reservedTrailingBytes == 0) {
+            body.beginControlFlow("while (buffer.position() < buffer.limit())")
+        } else {
+            // J.M.6.c — leave room for the trailing FixedSize fields.
+            body.beginControlFlow(
+                "while (buffer.position() < buffer.limit() - %L)",
+                field.reservedTrailingBytes,
+            )
+        }
         body.addStatement("%L += %T.decode(buffer, context)", field.name, field.elementCodecClassName)
         body.endControlFlow()
     }
@@ -5843,6 +5995,16 @@ internal class CodecEmitter(
         // would CCE on BackPatch element variants).
         if (shape.fields.any {
                 it is FieldSpec.RemainingBytesProtocolMessageList && it.elementIsBackPatch
+            }
+        ) {
+            return VariantWireSize.BackPatch
+        }
+        // J.M.6.c: non-terminal `@RemainingBytes*` collapses the variant
+        // codec's wireSize to BackPatch (see [buildWireSizeFun] above);
+        // the dispatcher's per-variant size table mirrors that.
+        if (shape.fields.any {
+                (it is FieldSpec.RemainingBytesScalarList && it.reservedTrailingBytes != 0) ||
+                    (it is FieldSpec.RemainingBytesProtocolMessageList && it.reservedTrailingBytes != 0)
             }
         ) {
             return VariantWireSize.BackPatch
@@ -7087,6 +7249,14 @@ internal class CodecEmitter(
             override val name: String,
             val ownerSimpleName: String,
             val elementKind: ScalarKind,
+            /**
+             * J.M.6.c — sum of `wireBytes` for trailing FixedSize fields
+             * after this one. 0 when terminal; non-zero only when the
+             * shape carries fixed-size scalars / value classes after the
+             * `@RemainingBytes` body. Decode emit subtracts this from
+             * `buffer.limit()` so trailing bytes survive the body loop.
+             */
+            val reservedTrailingBytes: Int = 0,
         ) : FieldSpec
 
         /**
@@ -7103,6 +7273,8 @@ internal class CodecEmitter(
         data class RemainingBytesString(
             override val name: String,
             val ownerSimpleName: String,
+            /** J.M.6.c — see [RemainingBytesScalarList.reservedTrailingBytes]. */
+            val reservedTrailingBytes: Int = 0,
         ) : FieldSpec
 
         /**
@@ -7129,6 +7301,8 @@ internal class CodecEmitter(
             val ownerSimpleName: String,
             val payloadType: TypeName,
             val source: PayloadCodecSource,
+            /** J.M.6.c — see [RemainingBytesScalarList.reservedTrailingBytes]. */
+            val reservedTrailingBytes: Int = 0,
         ) : FieldSpec
 
         /**
@@ -7260,6 +7434,8 @@ internal class CodecEmitter(
             // each element wireSize CCEs for sealed-parent variants
             // carrying `@LengthPrefixed val: String` or `@When` trailers.
             val elementIsBackPatch: Boolean,
+            /** J.M.6.c — see [RemainingBytesScalarList.reservedTrailingBytes]. */
+            val reservedTrailingBytes: Int = 0,
         ) : FieldSpec
 
         /**
