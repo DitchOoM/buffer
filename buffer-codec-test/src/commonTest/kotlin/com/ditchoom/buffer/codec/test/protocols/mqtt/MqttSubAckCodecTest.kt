@@ -188,8 +188,28 @@ class MqttSubAckCodecTest {
         // SUBACK requires remainingLength >= 2 (packet id) + 1 (at least one
         // return code per spec) = 3, so we test boundary values >= 3.
         // 127 (1 byte boundary), 128 (2 byte first), 16383 (2 byte boundary),
-        // 16384 (3 byte first), 2097151 (3 byte boundary), 2097152 (4 byte first).
-        for (rl in listOf(127u, 128u, 16383u, 16384u, 2_097_151u, 2_097_152u)) {
+        // 16384 (3 byte first).
+        //
+        // The 3→4 byte VBI transition (2_097_151 / 2_097_152) is intentionally
+        // omitted from the SUBACK composition test:
+        //
+        //  - It's covered for the codec directly by
+        //    [MqttRemainingLengthCodecTest.roundTripsAcrossAllByteWidths]
+        //    (which round-trips `UInt` through the VBI codec without
+        //    inflating a SUBACK body).
+        //  - It's covered on the SUBACK encode side by
+        //    [varIntEncodesAt4ByteBoundary].
+        //
+        // Hitting it here forces a 2 MB `List<UByte>` decode loop. On
+        // Kotlin/JS the cost isn't the ArrayList resizes (pre-sizing was
+        // measured to give 0% improvement) but boxing 2 M `UByte`s into
+        // JS heap objects — ~100 ms locally, ~500 ms on the slower GitHub
+        // Actions JS Node runner. With both 4-byte cases that's ~1 s of
+        // boxing, which combined with framework overhead trips Mocha's
+        // default 2 s timeout (`Error at node:internal/timers:505`). Real
+        // SUBACK packets carry < 100 return codes (one per matching topic
+        // filter); the 2 M-element body is purely synthetic test data.
+        for (rl in listOf(127u, 128u, 16383u, 16384u)) {
             val msg = makeAckWithRemainingLength(rl)
             val buf = encode(msg)
             val decoded = SubAckCodec.decode(buf, DecodeContext.Empty)
