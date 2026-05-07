@@ -54,7 +54,15 @@ class LengthFromValidatorTest {
     }
 
     @Test
-    fun firesOnAdjacentLengthFromMessageBody() {
+    fun acceptsAdjacentLengthFromOnNestedProtocolMessageBody() {
+        // J.M.6.b carve-out (issue #151 part 1): R1 stays silent when the
+        // bound field's type is a nested `@ProtocolMessage` data class or
+        // sealed parent. The `@LengthPrefixed` migration target only
+        // supports 1 / 2 / 4-byte prefixes (LengthPrefix.Byte / Short /
+        // Int) — protocols with non-standard prefix widths (e.g. TLS
+        // uint24) cannot express their wire shape via `@LengthPrefixed`
+        // and genuinely need `@LengthFrom` even when the length sibling
+        // is adjacent.
         val result =
             compile(
                 """
@@ -62,24 +70,23 @@ class LengthFromValidatorTest {
 
                 import com.ditchoom.buffer.codec.annotations.LengthFrom
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.WireBytes
 
                 @ProtocolMessage
                 data class Body(val a: UByte, val b: UByte)
 
                 @ProtocolMessage
                 data class Frame(
-                    val fourCC: UInt,
-                    val chunkSize: UInt,
-                    @LengthFrom("chunkSize") val body: Body,
+                    val msgType: UByte,
+                    @WireBytes(3) val length: UInt,
+                    @LengthFrom("length") val body: Body,
                 )
                 """.trimIndent(),
             )
-        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
-        assertContainsAdjacentLengthFromError(
-            result,
-            owner = "test.Frame",
-            boundField = "body",
-            referencedField = "chunkSize",
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+        assertFalse(
+            result.messages.contains("immediately preceding constructor parameter"),
+            "adjacent @LengthFrom on nested @ProtocolMessage must not trigger R1. Messages:\n${result.messages}",
         )
     }
 

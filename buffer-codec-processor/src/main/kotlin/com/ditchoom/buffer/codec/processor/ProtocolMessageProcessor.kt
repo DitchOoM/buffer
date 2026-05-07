@@ -742,6 +742,28 @@ class ProtocolMessageProcessor(
         }
     }
 
+    /**
+     * J.M.6.b — `@LengthFrom val: T` requires `T` to be a `@ProtocolMessage`
+     * data class or sealed parent (no type parameters — payload-generic
+     * shapes have a constructor-injected codec, not a singleton object,
+     * and the by-name `<T>Codec.decode(...)` form fails to resolve).
+     */
+    private fun isNestedProtocolMessageType(decl: KSClassDeclaration): Boolean {
+        val isProtocolMessage =
+            decl.annotations.any { ann ->
+                ann.shortName.asString() == "ProtocolMessage" &&
+                    ann.annotationType
+                        .resolve()
+                        .declaration.qualifiedName
+                        ?.asString() == PROTOCOL_MESSAGE_QNAME
+            }
+        if (!isProtocolMessage) return false
+        if (decl.typeParameters.isNotEmpty()) return false
+        val isDataClass = Modifier.DATA in decl.modifiers
+        val isSealed = Modifier.SEALED in decl.modifiers
+        return isDataClass || isSealed
+    }
+
     private fun booleanReturningValProperties(decl: KSClassDeclaration): List<String> =
         decl
             .getDeclaredProperties()
@@ -778,6 +800,19 @@ class ProtocolMessageProcessor(
             // expands to cover this case once @LengthPrefixed widens.
             val boundFieldType = param.type.resolve()
             if (payloadType.isAssignableFrom(boundFieldType)) continue
+
+            // J.M.6.b carve-out: skip when the bound field's type is a nested
+            // `@ProtocolMessage` data class or sealed parent. The
+            // `@LengthPrefixed` migration target (LengthPrefixedMessage) only
+            // supports 1 / 2 / 4-byte prefixes (LengthPrefix.Byte / Short /
+            // Int) — protocols with non-standard prefix widths (e.g. TLS
+            // uint24) cannot express their wire shape via @LengthPrefixed and
+            // genuinely need @LengthFrom even when the length sibling is
+            // adjacent. The user signals intent by carrying the length as a
+            // typed sibling (often with @WireBytes(N)) and pairing
+            // @LengthFrom on the body field.
+            val boundDecl = boundFieldType.declaration as? KSClassDeclaration
+            if (boundDecl != null && isNestedProtocolMessageType(boundDecl)) continue
 
             val ownerName = owner.qualifiedName?.asString() ?: owner.simpleName.asString()
             val boundFieldName = param.name?.asString() ?: "<unknown>"
@@ -838,15 +873,25 @@ class ProtocolMessageProcessor(
                 !type.isMarkedNullable &&
                     typeQname == LIST_QNAME &&
                     isListOfProtocolMessageDataClass(type)
-            if (!isStringType && !isListOfProtocolMessage) {
+            // J.M.6.b — accept nested `@ProtocolMessage` data class or
+            // sealed parent (issue #151 part 1). The body's bytes are
+            // bounded by the sibling-derived length; decode delegates to
+            // `<TCodec>.decode` against the narrowed buffer.
+            val nestedProtocolMessageDecl =
+                if (!type.isMarkedNullable) type.declaration as? KSClassDeclaration else null
+            val isNestedProtocolMessage =
+                nestedProtocolMessageDecl != null &&
+                    isNestedProtocolMessageType(nestedProtocolMessageDecl)
+            if (!isStringType && !isListOfProtocolMessage && !isNestedProtocolMessage) {
                 val displayed = typeQname ?: "<unresolved>"
                 val nullableSuffix = if (type.isMarkedNullable) "?" else ""
                 logger.error(
                     "@LengthFrom(\"$referenced\") on $ownerName.$fieldName requires the bound " +
-                        "field to be either a non-nullable `String` or a non-nullable " +
-                        "`List<T>` where `T` is a `@ProtocolMessage data class`, but it is " +
-                        "`$displayed$nullableSuffix`. `ByteArray`, nested `@ProtocolMessage`, " +
-                        "and `@Payload` slots are deferred to later stages.",
+                        "field to be a non-nullable `String`, a non-nullable `List<T>` where " +
+                        "`T` is a `@ProtocolMessage data class`, or a non-nullable nested " +
+                        "`@ProtocolMessage` data class / sealed parent, but it is " +
+                        "`$displayed$nullableSuffix`. `ByteArray` and `@Payload` slots are " +
+                        "deferred to later stages.",
                     param,
                 )
                 continue

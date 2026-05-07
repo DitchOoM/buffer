@@ -246,6 +246,11 @@ internal class CodecEmitter(
         for ((index, field) in fields.withIndex()) {
             if (field is FieldSpec.LengthFromString && index != fields.lastIndex) return null
             if (field is FieldSpec.LengthFromList && index != fields.lastIndex) return null
+            // J.M.6.b — `@LengthFrom val: T : @ProtocolMessage` is terminal-only
+            // (mirror of `LengthPrefixedMessage`'s terminal-only rule). Lifting
+            // would require dispatcher-side wireSize composition that doesn't
+            // exist yet for nested-message bodies sized by a sibling.
+            if (field is FieldSpec.LengthFromMessage && index != fields.lastIndex) return null
             if (field is FieldSpec.RemainingBytesScalarList && index != fields.lastIndex) return null
             if (field is FieldSpec.RemainingBytesProtocolMessageList && index != fields.lastIndex) return null
             if (field is FieldSpec.RemainingBytesPayload && index != fields.lastIndex) return null
@@ -469,12 +474,21 @@ internal class CodecEmitter(
         }
 
         if (lengthFromAnn != null) {
-            // Stage E slice 4 / Stage G slice 7a — `@LengthFrom` field types:
-            //   - `String` (slice 4): body is a single UTF-8 string sized by sibling.
-            //   - `List<T>` where T is a `@ProtocolMessage data class` (slice 7a):
-            //     body is a sequence of nested messages, byte-bounded by sibling.
-            // Mutually exclusive with `@LengthPrefixed` / `@WireBytes` on the same
-            // parameter. R1 (adjacent-LF migration suggestion) is independent.
+            // Stage E slice 4 / Stage G slice 7a / J.M.6.b — `@LengthFrom`
+            // field types:
+            //   - `String` (slice 4): body is a single UTF-8 string sized
+            //     by sibling.
+            //   - `List<T>` where T is a `@ProtocolMessage data class`
+            //     (slice 7a): body is a sequence of nested messages,
+            //     byte-bounded by sibling.
+            //   - `T` where T is a `@ProtocolMessage` data class or sealed
+            //     parent (J.M.6.b — issue #151 part 1): body is a single
+            //     nested message; sibling length covers the whole nested
+            //     wire form. Mirrors `LengthPrefixedMessage` but draws the
+            //     length from a sibling rather than an inline prefix.
+            // Mutually exclusive with `@LengthPrefixed` / `@WireBytes` on
+            // the same parameter. R1 (adjacent-LF migration suggestion) is
+            // independent.
             if (lengthPrefixed != null || wireBytesAnn != null) return null
             val typeQname = type.declaration.qualifiedName?.asString()
             return when (typeQname) {
@@ -495,7 +509,15 @@ internal class CodecEmitter(
                         params = params,
                         index = index,
                     )
-                else -> null
+                else ->
+                    analyzeLengthFromMessageField(
+                        param = param,
+                        type = type,
+                        lengthFromAnn = lengthFromAnn,
+                        ownerSimpleName = ownerSimpleName,
+                        params = params,
+                        index = index,
+                    )
             }
         }
 
@@ -842,6 +864,69 @@ internal class CodecEmitter(
                 ClassName(
                     elementDecl.packageName.asString(),
                     "${elementDecl.simpleName.asString()}Codec",
+                ),
+        )
+    }
+
+    /**
+     * J.M.6.b (issue #151 part 1) — `@LengthFrom("siblingField") val: T`
+     * where `T` is a `@ProtocolMessage` data class or sealed parent. The
+     * sibling resolves a length value (same `LengthSource` as
+     * [analyzeLengthFromStringField] / [analyzeLengthFromListField]) that
+     * bounds the nested message's decode region; encode delegates to
+     * `<TCodec>.encode` and the user is responsible for setting the
+     * sibling to the body's wire size.
+     *
+     * Returns null silently when the field type isn't a `@ProtocolMessage`
+     * data class or sealed parent. Payload-generic types (`<P : Payload>`)
+     * reject — same rule as the other by-name shapes (their codec is a
+     * class taking a constructor-injected payload codec, not a singleton).
+     */
+    private fun analyzeLengthFromMessageField(
+        param: KSValueParameter,
+        type: KSType,
+        lengthFromAnn: KSAnnotation,
+        ownerSimpleName: String,
+        params: List<KSValueParameter>,
+        index: Int,
+    ): FieldSpec.LengthFromMessage? {
+        val name = param.name?.asString() ?: return null
+        if (type.isError || type.isMarkedNullable) return null
+        val decl = type.declaration as? KSClassDeclaration ?: return null
+        val isProtocolMessage =
+            decl.annotations.any { ann ->
+                ann.shortName.asString() == "ProtocolMessage" &&
+                    ann.annotationType
+                        .resolve()
+                        .declaration.qualifiedName
+                        ?.asString() == PROTOCOL_MESSAGE_QNAME
+            }
+        if (!isProtocolMessage) return null
+        // Accept both data-class and sealed-parent shapes — the by-name
+        // codec resolution is identical (`<TCodec>.decode/encode`); the
+        // sealed parent's codec is the dispatcher object.
+        val isDataClass = Modifier.DATA in decl.modifiers
+        val isSealed = Modifier.SEALED in decl.modifiers
+        if (!isDataClass && !isSealed) return null
+        // Payload-generic types reject (their codec is a class with
+        // constructor-injected codec, not a singleton object).
+        if (decl.typeParameters.isNotEmpty()) return null
+
+        val referenced =
+            lengthFromAnn.arguments
+                .firstOrNull { it.name?.asString() == "field" }
+                ?.value as? String ?: return null
+        val source = analyzeLengthSource(referenced, params, index) ?: return null
+
+        return FieldSpec.LengthFromMessage(
+            name = name,
+            ownerSimpleName = ownerSimpleName,
+            source = source,
+            messageType = classNameOf(decl),
+            codecType =
+                ClassName(
+                    decl.packageName.asString(),
+                    "${decl.simpleName.asString()}Codec",
                 ),
         )
     }
@@ -2389,6 +2474,7 @@ internal class CodecEmitter(
             is FieldSpec.LengthPrefixedString -> appendDecodeLengthPrefixedString(body, field)
             is FieldSpec.LengthFromString -> appendDecodeLengthFromString(body, field)
             is FieldSpec.LengthFromList -> appendDecodeLengthFromList(body, field)
+            is FieldSpec.LengthFromMessage -> appendDecodeLengthFromMessage(body, field)
             is FieldSpec.RemainingBytesScalarList -> appendDecodeRemainingBytesScalarList(body, field)
             is FieldSpec.RemainingBytesProtocolMessageList ->
                 appendDecodeRemainingBytesProtocolMessageList(body, field)
@@ -2438,6 +2524,7 @@ internal class CodecEmitter(
             is FieldSpec.LengthPrefixedString -> appendEncodeLengthPrefixedString(body, field)
             is FieldSpec.LengthFromString -> appendEncodeLengthFromString(body, field)
             is FieldSpec.LengthFromList -> appendEncodeLengthFromList(body, field)
+            is FieldSpec.LengthFromMessage -> appendEncodeLengthFromMessage(body, field)
             is FieldSpec.RemainingBytesScalarList -> appendEncodeRemainingBytesScalarList(body, field)
             is FieldSpec.RemainingBytesProtocolMessageList ->
                 appendEncodeRemainingBytesProtocolMessageList(body, field)
@@ -2770,6 +2857,7 @@ internal class CodecEmitter(
             is FieldSpec.LengthPrefixedString -> ClassName("kotlin", "String")
             is FieldSpec.LengthPrefixedMessage -> field.messageType
             is FieldSpec.LengthFromString -> ClassName("kotlin", "String")
+            is FieldSpec.LengthFromMessage -> field.messageType
             is FieldSpec.LengthFromList ->
                 ClassName("kotlin.collections", "List").parameterizedBy(field.elementClassName)
             is FieldSpec.RemainingBytesScalarList ->
@@ -2926,6 +3014,21 @@ internal class CodecEmitter(
             }
             is FieldSpec.LengthFromList -> {
                 // Slice 7a / 9 — same Exact shape via LengthSource.
+                val prefixBytes = scalarHeaderBytes(shape)
+                builder.addStatement(
+                    "return %T.Exact(%L + %L)",
+                    WIRE_SIZE_CN,
+                    prefixBytes,
+                    terminal.source.encodeAccessor(),
+                )
+            }
+            is FieldSpec.LengthFromMessage -> {
+                // J.M.6.b — body byte count = sibling-resolved length
+                // (same row-16 user-trust contract as LengthFromString /
+                // LengthFromList). The nested message's own wireSize is
+                // RuntimeExact at runtime, but we don't query it here:
+                // the user supplies the sibling and is responsible for
+                // keeping it consistent with the body's encoded size.
                 val prefixBytes = scalarHeaderBytes(shape)
                 builder.addStatement(
                     "return %T.Exact(%L + %L)",
@@ -3408,6 +3511,16 @@ internal class CodecEmitter(
                         ownerSimpleName = field.ownerSimpleName,
                         source = field.source,
                     )
+                is FieldSpec.LengthFromMessage ->
+                    // J.M.6.b — peek shape identical to LengthFromString /
+                    // LengthFromList: body byte count comes from the
+                    // sibling, regardless of nested-message contents.
+                    appendSequentialPeekLengthFrom(
+                        body = body,
+                        name = field.name,
+                        ownerSimpleName = field.ownerSimpleName,
+                        source = field.source,
+                    )
                 is FieldSpec.RemainingBytesScalarList ->
                     error(
                         "RemainingBytesScalarList should be handled by buildPeekFrameFun's " +
@@ -3493,6 +3606,7 @@ internal class CodecEmitter(
                     }
                 is FieldSpec.LengthFromString -> sources += field.source.siblingName
                 is FieldSpec.LengthFromList -> sources += field.source.siblingName
+                is FieldSpec.LengthFromMessage -> sources += field.source.siblingName
                 else -> { /* not a source */ }
             }
         }
@@ -4635,6 +4749,70 @@ internal class CodecEmitter(
     }
 
     /**
+     * J.M.6.b (issue #151 part 1) — emit decode for
+     * `@LengthFrom("siblingField") val: T : @ProtocolMessage`. Bounds the
+     * buffer via `setLimit` to the sibling-derived end, delegates to
+     * `<TCodec>.decode(buffer, context)`, restores the outer limit in a
+     * `try`/`finally`. Same outer-limit-restore template as
+     * [appendDecodeLengthFromList].
+     *
+     * Generated shape:
+     * ```
+     * <Int.MAX_VALUE guard for the sibling kind, if needed>
+     * val <name>Bytes = <sibling>.toInt()
+     * val <name>OuterLimit = buffer.limit()
+     * buffer.setLimit(buffer.position() + <name>Bytes)
+     * val <name> = try {
+     *     <TCodec>.decode(buffer, context)
+     * } finally {
+     *     buffer.setLimit(<name>OuterLimit)
+     * }
+     * ```
+     */
+    private fun appendDecodeLengthFromMessage(
+        body: CodeBlock.Builder,
+        field: FieldSpec.LengthFromMessage,
+    ) {
+        if (field.source is LengthSource.Sibling) {
+            appendLengthFromIntMaxGuard(
+                body = body,
+                siblingAccessor = field.source.siblingName,
+                siblingKind = field.source.siblingKind,
+                ownerSimpleName = field.ownerSimpleName,
+                fieldName = field.name,
+            )
+        }
+        val bytesVar = "${field.name}Bytes"
+        val outerLimitVar = "${field.name}OuterLimit"
+        body.addStatement("val %L = %L", bytesVar, field.source.decodeAccessor())
+        body.addStatement("val %L = buffer.limit()", outerLimitVar)
+        body.addStatement("buffer.setLimit(buffer.position() + %L)", bytesVar)
+        body.beginControlFlow("val %L = try", field.name)
+        body.addStatement("%T.decode(buffer, context)", field.codecType)
+        body.nextControlFlow("finally")
+        body.addStatement("buffer.setLimit(%L)", outerLimitVar)
+        body.endControlFlow()
+    }
+
+    /**
+     * J.M.6.b — emit encode for `@LengthFrom("siblingField") val: T :
+     * @ProtocolMessage`. Single delegation to `<TCodec>.encode`. The
+     * sibling field has already been encoded by the prior field's emit
+     * step; the user is responsible for keeping `value.<sibling>`
+     * consistent with `<TCodec>.wireSize(value.<name>, context).bytes`.
+     */
+    private fun appendEncodeLengthFromMessage(
+        body: CodeBlock.Builder,
+        field: FieldSpec.LengthFromMessage,
+    ) {
+        body.addStatement(
+            "%T.encode(buffer, value.%L, context)",
+            field.codecType,
+            field.name,
+        )
+    }
+
+    /**
      * Stage H slice 10a — emit decode for
      * `@RemainingBytes @UseCodec(C::class) val: P`. Delegates to the
      * user-supplied `C.decode(buffer, context)` against whatever
@@ -5679,6 +5857,8 @@ internal class CodecEmitter(
             is FieldSpec.LengthFromString -> VariantWireSize.RuntimeExact
             // Slice 7a: same Exact-via-sibling shape as LengthFromString.
             is FieldSpec.LengthFromList -> VariantWireSize.RuntimeExact
+            // J.M.6.b: same Exact-via-sibling shape as LengthFromString.
+            is FieldSpec.LengthFromMessage -> VariantWireSize.RuntimeExact
             // Slice 7b: variant codec's own wireSize is Exact (priorBytes +
             // list.size * elementWidth); RuntimeExact lets the dispatcher
             // forward without re-deriving.
@@ -6793,6 +6973,25 @@ internal class CodecEmitter(
             val codecType: ClassName,
             val prefixWidth: Int,
             val prefixWireOrder: Endianness,
+        ) : FieldSpec
+
+        /**
+         * J.M.6.b (issue #151 part 1) — `@LengthFrom("siblingField") val: T`
+         * where `T` is a `@ProtocolMessage` data class or sealed parent.
+         * Sister of [LengthPrefixedMessage] for the sibling-bounded variant:
+         * the body's byte count comes from the sibling's `LengthSource`
+         * rather than an inline prefix. Decode narrows the buffer's limit
+         * to the sibling-derived end and restores the outer limit in a
+         * `try/finally`; encode delegates to `<codecType>.encode` and the
+         * user is responsible for sizing the sibling. wireSize collapses
+         * to BackPatch on the parent (mirror of [LengthPrefixedMessage]).
+         */
+        data class LengthFromMessage(
+            override val name: String,
+            val ownerSimpleName: String,
+            val source: LengthSource,
+            val messageType: ClassName,
+            val codecType: ClassName,
         ) : FieldSpec
 
         data class LengthPrefixedString(
