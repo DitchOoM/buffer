@@ -5,9 +5,12 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 
 /**
  * Phase J.M.5 slice 10 (Tier A) — round-trip + edge-cases for each
@@ -235,6 +238,101 @@ class MqttV5PropertyBreadthCodecTest {
         // the 4-byte VBI encoding.
         assertFailsWith<IllegalArgumentException> {
             MqttV5Property.SubscriptionIdentifier(value = 268_435_456u)
+        }
+    }
+
+    @Test
+    fun correlationDataRoundTripsNonEmpty() {
+        // Phase J.M.5 slice 15c — `@LengthPrefixed @UseCodec val: T : Payload`.
+        // Wire form: id(0x09) + UShort BE prefix + body bytes.
+        val bytes = byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte())
+        val original = MqttV5Property.CorrelationData(data = BinaryData(bytes))
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        MqttV5PropertyCodec.encode(buffer, original, EncodeContext.Empty)
+        buffer.resetForRead()
+        val decoded =
+            assertIs<MqttV5Property.CorrelationData>(
+                MqttV5PropertyCodec.decode(buffer, DecodeContext.Empty),
+            )
+        assertContentEquals(original.data.bytes, decoded.data.bytes)
+        assertEquals(0, buffer.remaining(), "decode must consume all encoded bytes")
+    }
+
+    @Test
+    fun correlationDataEmitsExpectedWireBytes() {
+        val msg = MqttV5Property.CorrelationData(data = BinaryData(byteArrayOf(0x10, 0x20, 0x30)))
+        val buffer = BufferFactory.Default.allocate(8, ByteOrder.BIG_ENDIAN)
+        MqttV5PropertyCodec.encode(buffer, msg, EncodeContext.Empty)
+        buffer.resetForRead()
+        val out = ByteArray(buffer.remaining())
+        for (i in out.indices) out[i] = buffer.readByte()
+        // id(0x09) + len(00 03) + body(10 20 30) = 6 bytes.
+        assertContentEquals(byteArrayOf(0x09, 0x00, 0x03, 0x10, 0x20, 0x30), out)
+    }
+
+    @Test
+    fun correlationDataRoundTripsEmpty() {
+        // Empty body → id(0x09) + len(00 00). Tests the
+        // `@LengthPrefixed @UseCodec` zero-length boundary.
+        val original = MqttV5Property.CorrelationData(data = BinaryData(ByteArray(0)))
+        val buffer = BufferFactory.Default.allocate(8, ByteOrder.BIG_ENDIAN)
+        MqttV5PropertyCodec.encode(buffer, original, EncodeContext.Empty)
+        buffer.resetForRead()
+        val decoded =
+            assertIs<MqttV5Property.CorrelationData>(
+                MqttV5PropertyCodec.decode(buffer, DecodeContext.Empty),
+            )
+        assertEquals(0, decoded.data.bytes.size)
+    }
+
+    @Test
+    fun authenticationDataRoundTrips() {
+        // Phase J.M.5 slice 15c — same shape as CorrelationData with a
+        // different property identifier (0x16). SCRAM-SHA-256 challenge-
+        // shaped opaque body.
+        val bytes = ByteArray(32) { (it and 0xFF).toByte() }
+        val original = MqttV5Property.AuthenticationData(data = BinaryData(bytes))
+        val buffer = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
+        MqttV5PropertyCodec.encode(buffer, original, EncodeContext.Empty)
+        buffer.resetForRead()
+        val decoded =
+            assertIs<MqttV5Property.AuthenticationData>(
+                MqttV5PropertyCodec.decode(buffer, DecodeContext.Empty),
+            )
+        assertContentEquals(original.data.bytes, decoded.data.bytes)
+        assertEquals(0, buffer.remaining())
+    }
+
+    @Test
+    fun authenticationDataEmitsExpectedWireBytes() {
+        val msg = MqttV5Property.AuthenticationData(data = BinaryData(byteArrayOf(0x42, 0x55)))
+        val buffer = BufferFactory.Default.allocate(8, ByteOrder.BIG_ENDIAN)
+        MqttV5PropertyCodec.encode(buffer, msg, EncodeContext.Empty)
+        buffer.resetForRead()
+        val out = ByteArray(buffer.remaining())
+        for (i in out.indices) out[i] = buffer.readByte()
+        // id(0x16) + len(00 02) + body(42 55) = 5 bytes.
+        assertContentEquals(byteArrayOf(0x16, 0x00, 0x02, 0x42, 0x55), out)
+    }
+
+    @Test
+    fun correlationDataRejectsMismatchedId() {
+        // audit-2e id-byte invariant carries through to the new variant.
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Property.CorrelationData(
+                id = MqttV5PropertyId(0x00u),
+                data = BinaryData(byteArrayOf()),
+            )
+        }
+    }
+
+    @Test
+    fun authenticationDataRejectsMismatchedId() {
+        assertFailsWith<IllegalArgumentException> {
+            MqttV5Property.AuthenticationData(
+                id = MqttV5PropertyId(0xFFu),
+                data = BinaryData(byteArrayOf()),
+            )
         }
     }
 

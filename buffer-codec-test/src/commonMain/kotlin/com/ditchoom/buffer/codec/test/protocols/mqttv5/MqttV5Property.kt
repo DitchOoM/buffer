@@ -7,6 +7,8 @@ import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.UseCodec
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import kotlin.jvm.JvmInline
 
 /**
@@ -68,12 +70,11 @@ private fun requireMatchingPropertyId(
  * (0/1-validated UByte), single-LP-string, and two-LP-string (User
  * Property) shapes.
  *
- * Three variants stay deferred:
- *   - 0x09 Correlation Data (binary `@Payload`) — needs the multi-
- *     payload dispatcher (Tier C slice 14+).
- *   - 0x0B Subscription Identifier (VBI Int body) — needs the VBI
- *     scalar codec wiring (Tier C slice 13).
- *   - 0x16 Authentication Data (binary `@Payload`) — same as 0x09.
+ * Slice 13 added 0x0B SubscriptionIdentifier via the VBI scalar codec
+ * (`@UseCodec(VariableByteIntegerCodec)`). Slice 15c adds 0x09
+ * CorrelationData and 0x16 AuthenticationData via the new
+ * `@LengthPrefixed @UseCodec val: T : Payload` shape (slice 15a).
+ * No property variants stay deferred.
  *
  * Each variant carries the property-id byte as its first field; the
  * dispatcher peeks the byte, extracts `id`, matches `@PacketType.value`,
@@ -153,6 +154,31 @@ sealed interface MqttV5Property {
     ) : MqttV5Property {
         init {
             requireMatchingPropertyId(id, 0x08, "ResponseTopic")
+        }
+    }
+
+    /**
+     * MQTT v5.0 §3.3.2.3.6 Correlation Data (PUBLISH property, also
+     * Will properties §3.1.3.2.7). Opaque binary blob the publisher
+     * uses to correlate a request with its response in a request/
+     * response style PUBLISH; the broker forwards it unchanged to
+     * subscribers.
+     *
+     * Phase J.M.5 slice 15c — first production-shaped use of the new
+     * `@LengthPrefixed @UseCodec val: T : Payload` (slice 15a) shape.
+     * The wire form is v5 §1.5.6 Binary Data: 2-byte UShort BE prefix
+     * + body bytes. [BinaryData] is a `Payload`-marked value class
+     * over `ByteArray` (slice 15 D1/D2); [BinaryDataCodec] is the
+     * `Codec<BinaryData>` referenced via `@UseCodec`.
+     */
+    @PacketType(value = 0x09)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class CorrelationData(
+        val id: MqttV5PropertyId = MqttV5PropertyId(0x09u),
+        @LengthPrefixed @UseCodec(BinaryDataCodec::class) val data: BinaryData,
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x09, "CorrelationData")
         }
     }
 
@@ -251,6 +277,30 @@ sealed interface MqttV5Property {
     ) : MqttV5Property {
         init {
             requireMatchingPropertyId(id, 0x15, "AuthenticationMethod")
+        }
+    }
+
+    /**
+     * MQTT v5.0 §3.1.2.11.10 Authentication Data (CONNECT, CONNACK,
+     * AUTH properties). Opaque binary blob carrying the authentication
+     * scheme's protocol data (e.g., a SASL challenge/response). The
+     * scheme name is carried separately in [AuthenticationMethod]
+     * (id 0x15).
+     *
+     * Phase J.M.5 slice 15c — second production-shaped use of the new
+     * `@LengthPrefixed @UseCodec val: T : Payload` (slice 15a) shape.
+     * Wire form is v5 §1.5.6 Binary Data: 2-byte UShort BE prefix +
+     * body bytes. Same shape as [CorrelationData]; the two variants
+     * differ only in the property identifier byte.
+     */
+    @PacketType(value = 0x16)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class AuthenticationData(
+        val id: MqttV5PropertyId = MqttV5PropertyId(0x16u),
+        @LengthPrefixed @UseCodec(BinaryDataCodec::class) val data: BinaryData,
+    ) : MqttV5Property {
+        init {
+            requireMatchingPropertyId(id, 0x16, "AuthenticationData")
         }
     }
 
