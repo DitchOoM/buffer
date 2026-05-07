@@ -131,7 +131,7 @@ class MqttPublishV3ConcreteCodecTest {
             MqttPublishV3Concrete(
                 header = MqttFixedHeader(0x30u),
                 topic = "x",
-                packetId = PacketId(0u),
+                packetId = PacketId(1u),
                 payload = JpegImage(0u, 0u, ByteArray(0)),
             )
         // Slice 10a unconditionally returns BackPatch when a

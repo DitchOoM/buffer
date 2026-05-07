@@ -43,6 +43,19 @@ value class MqttFixedHeader(
      * dotted value-class predicate path.
      */
     val qosGreaterThanZero: Boolean get() = (raw.toUInt() and 0x06u) != 0u
+
+    init {
+        // Phase J.M.5 audit-2f — PUBLISH QoS=3 is malformed per §3.3.1.2
+        // [MQTT-3.3.1-4]. Init-block fallback; cleaner future fix is a
+        // typed V5PublishFlags companion to MqttFixedHeader.flags. Other
+        // packet types' low-nibble invariants are caught by per-variant
+        // init-blocks (e.g. PUBREL must be 0x62), so this only fires for
+        // PUBLISH (packetType == 3).
+        require(!(packetType == 3 && (raw.toInt() and 0x06) == 0x06)) {
+            "MqttFixedHeader: PUBLISH QoS=3 is malformed (spec §3.3.1.2 [MQTT-3.3.1-4]); " +
+                "got 0x" + raw.toString(16)
+        }
+    }
 }
 
 /**
@@ -148,7 +161,19 @@ sealed interface MqttPacket<out P : Payload> {
         @LengthPrefixed @When("connectFlags.willPresent") val willMessage: String? = null,
         @LengthPrefixed @When("connectFlags.usernamePresent") val username: String? = null,
         @LengthPrefixed @When("connectFlags.passwordPresent") val password: String? = null,
-    ) : MqttPacket<Nothing>
+    ) : MqttPacket<Nothing> {
+        init {
+            // Phase J.M.5 audit-2f — v3.1.1 §3.1.2.9 [MQTT-3.1.2-22]: if the
+            // username flag is set to 0, the password flag MUST also be 0.
+            // v5 dropped this rule (§3.1.3.5 allows password without
+            // username), so the guard lives on the v3 Connect variant
+            // rather than on the shared MqttConnectFlags class.
+            require(connectFlags.usernamePresent || !connectFlags.passwordPresent) {
+                "v3 CONNECT invariant: passwordPresent requires usernamePresent " +
+                    "(spec §3.1.2.9 [MQTT-3.1.2-22])"
+            }
+        }
+    }
 
     /**
      * Type-2 CONNACK per MQTT v3.1.1 §3.2 — fixed header `0x20` +
@@ -211,7 +236,20 @@ sealed interface MqttPacket<out P : Payload> {
         @LengthPrefixed val topic: String,
         @When("header.qosGreaterThanZero") val packetId: PacketId? = null,
         @RemainingBytes val payload: P,
-    ) : MqttPacket<P>
+    ) : MqttPacket<P> {
+        init {
+            // Phase J.M.5 audit-2f — §2.2.1 [MQTT-2.2.1-3]: PUBLISH carries
+            // a packet identifier iff QoS > 0. The @When framework tolerates
+            // a packetId set when the predicate is false; this init-block
+            // closes the gap caller-side. Cleaner emitter-level fix is to
+            // tighten @When-skipped writes — deferred.
+            require(header.qosGreaterThanZero == (packetId != null)) {
+                "v3 PUBLISH invariant: packetId is required iff header.qosGreaterThanZero " +
+                    "(spec §2.2.1); header=0x" + header.raw.toString(16) +
+                    " packetId=" + packetId
+            }
+        }
+    }
 
     /**
      * Type-4 PUBACK per MQTT v3.1.1 §3.4 — fixed header `0x40` +

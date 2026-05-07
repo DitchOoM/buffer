@@ -171,6 +171,14 @@ sealed interface MqttV5Packet<out P : Payload> {
                 "v5 CONNACK header invariant: header.raw must be 0x20, got 0x" +
                     header.raw.toString(16) + " (spec §3.2.1)"
             }
+            // Phase J.M.5 audit-2f — §3.2.2.1 [MQTT-3.2.2-1]: bits 7-1 of the
+            // Connect Acknowledge Flags are reserved and MUST be 0; only bit
+            // 0 (Session Present) is meaningful. A typed V5ConnAckFlags
+            // value class would be cleaner; init-block fallback here.
+            require((connectAckFlags.toInt() and 0xFE) == 0) {
+                "v5 CONNACK connectAckFlags reserved bits 7-1 must be zero (spec §3.2.2.1); " +
+                    "got 0x" + connectAckFlags.toString(16)
+            }
         }
     }
 
@@ -238,6 +246,13 @@ sealed interface MqttV5Packet<out P : Payload> {
             require(header.raw.toInt() shr 4 == 3) {
                 "v5 PUBLISH header invariant: header.raw high nibble must be 3, got 0x" +
                     header.raw.toString(16) + " (spec §3.3.1)"
+            }
+            // Phase J.M.5 audit-2f — §2.2.1: PUBLISH carries a packet
+            // identifier iff QoS > 0. Same gap as v3 — see [MqttPacket.Publish.init].
+            require(header.qosGreaterThanZero == (packetId != null)) {
+                "v5 PUBLISH invariant: packetId is required iff header.qosGreaterThanZero " +
+                    "(spec §2.2.1); header=0x" + header.raw.toString(16) +
+                    " packetId=" + packetId
             }
         }
     }
@@ -477,6 +492,12 @@ sealed interface MqttV5Packet<out P : Payload> {
                 "v5 SUBACK header invariant: header.raw must be 0x90, got 0x" +
                     header.raw.toString(16) + " (spec §3.9.1)"
             }
+            // Phase J.M.5 audit-2f — §3.9.3: SUBACK MUST contain one Reason
+            // Code per Topic Filter in the matching SUBSCRIBE; an empty
+            // list is wire-invalid.
+            require(reasonCodes.isNotEmpty()) {
+                "v5 SUBACK invariant: reasonCodes must contain at least one entry (spec §3.9.3)"
+            }
         }
     }
 
@@ -506,6 +527,13 @@ sealed interface MqttV5Packet<out P : Payload> {
             require(header.raw.toInt() == 0xA2) {
                 "v5 UNSUBSCRIBE header invariant: header.raw must be 0xA2, got 0x" +
                     header.raw.toString(16) + " (spec §3.10.1)"
+            }
+            // Phase J.M.5 audit-2f — §3.10.3 [MQTT-3.10.3-2]: UNSUBSCRIBE's
+            // payload MUST contain at least one Topic Filter; an empty list
+            // is wire-invalid. Mirrors the [Subscribe.topicFilters] guard.
+            require(topics.isNotEmpty()) {
+                "v5 UNSUBSCRIBE invariant: topics must contain at least one filter " +
+                    "(spec §3.10.3 [MQTT-3.10.3-2])"
             }
         }
     }

@@ -355,7 +355,7 @@ sealed interface MqttV5Property {
      * MQTT v5.0 §3.1.2.11.3 Receive Maximum (CONNECT / CONNACK
      * properties). Maximum number of in-flight QoS 1/2 PUBLISH
      * packets the receiver is willing to process concurrently.
-     * Spec disallows 0 — caller-validated, no init-require here.
+     * Spec disallows 0 per [MQTT-3.1.2-32].
      */
     @PacketType(value = 0x21)
     @ProtocolMessage(wireOrder = Endianness.Big)
@@ -365,6 +365,10 @@ sealed interface MqttV5Property {
     ) : MqttV5Property {
         init {
             requireMatchingPropertyId(id, 0x21, "ReceiveMaximum")
+            // Phase J.M.5 audit-2f — §3.1.2.11.3 [MQTT-3.1.2-32]: 0 is invalid.
+            require(value > 0u) {
+                "ReceiveMaximum value must be > 0 (spec §3.1.2.11.3 [MQTT-3.1.2-32]); got $value"
+            }
         }
     }
 
@@ -387,7 +391,7 @@ sealed interface MqttV5Property {
     /**
      * MQTT v5.0 §3.3.2.3.4 Topic Alias (PUBLISH property). Integer
      * mapped to the topic name on the connection; 0 is invalid per
-     * spec (caller-validated).
+     * §3.3.2.3.4 [MQTT-3.3.2-8].
      */
     @PacketType(value = 0x23)
     @ProtocolMessage(wireOrder = Endianness.Big)
@@ -397,6 +401,10 @@ sealed interface MqttV5Property {
     ) : MqttV5Property {
         init {
             requireMatchingPropertyId(id, 0x23, "TopicAlias")
+            // Phase J.M.5 audit-2f — §3.3.2.3.4 [MQTT-3.3.2-8]: 0 is invalid.
+            require(value > 0u) {
+                "TopicAlias value must be > 0 (spec §3.3.2.3.4 [MQTT-3.3.2-8]); got $value"
+            }
         }
     }
 
@@ -457,7 +465,7 @@ sealed interface MqttV5Property {
     /**
      * MQTT v5.0 §3.1.2.11.4 Maximum Packet Size (CONNECT / CONNACK
      * properties). Largest packet the receiver will accept, in bytes.
-     * 0 is invalid per spec (caller-validated).
+     * 0 is invalid per §3.1.2.11.4 [MQTT-3.1.2-31].
      */
     @PacketType(value = 0x27)
     @ProtocolMessage(wireOrder = Endianness.Big)
@@ -467,6 +475,10 @@ sealed interface MqttV5Property {
     ) : MqttV5Property {
         init {
             requireMatchingPropertyId(id, 0x27, "MaximumPacketSize")
+            // Phase J.M.5 audit-2f — §3.1.2.11.4 [MQTT-3.1.2-31]: 0 is invalid.
+            require(value > 0u) {
+                "MaximumPacketSize value must be > 0 (spec §3.1.2.11.4 [MQTT-3.1.2-31]); got $value"
+            }
         }
     }
 

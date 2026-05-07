@@ -39,4 +39,23 @@ value class MqttConnectFlags(
     val willRetain: Boolean get() = (raw.toInt() and 0x20) != 0
     val passwordPresent: Boolean get() = (raw.toInt() and 0x40) != 0
     val usernamePresent: Boolean get() = (raw.toInt() and 0x80) != 0
+
+    init {
+        // Phase J.M.5 audit-2f — bit 0 is reserved per §3.1.2.3 [MQTT-3.1.2-3].
+        require((raw.toInt() and 0x01) == 0) {
+            "MqttConnectFlags reserved bit 0 must be zero (spec §3.1.2.3); got 0x" + raw.toString(16)
+        }
+        // Phase J.M.5 audit-2f — willQoS bits 3-4 form a 2-bit QoS field; value 3
+        // is malformed per §3.1.2.6 [MQTT-3.1.2-13]. If !willPresent the bits MUST
+        // be 0 [MQTT-3.1.2-14]. Shared between v3 and v5 — both spec sections
+        // align here.
+        val willQoS = (raw.toInt() shr 3) and 0x03
+        require(willQoS != 3) {
+            "MqttConnectFlags willQoS must not be 3 (spec §3.1.2.6); got 0x" + raw.toString(16)
+        }
+        require(willPresent || willQoS == 0) {
+            "MqttConnectFlags willQoS must be 0 when willPresent is false (spec §3.1.2.6); " +
+                "got 0x" + raw.toString(16)
+        }
+    }
 }

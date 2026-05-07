@@ -515,24 +515,20 @@ class MqttPacketCodecTest {
     }
 
     @Test
-    fun encodeThrowsWhenQos1AndPacketIdIsNull() {
-        // Predicate true (QoS=1) with `value.packetId == null` is the
-        // row-20 failure mode — encode throws EncodeException with
-        // field-path attribution rather than silently emitting a
-        // truncated frame.
-        val codec = MqttPacketCodec(JpegImageCodec)
-        val msg =
+    fun constructThrowsWhenQos1AndPacketIdIsNull() {
+        // Phase J.M.5 audit-2f closed the row-20 failure mode caller-side:
+        // the §2.2.1 cross-bit invariant (header.qosGreaterThanZero ==
+        // (packetId != null)) now fires from the data class init-block at
+        // construction time, before the codec ever sees the message.
+        // Previously this asserted EncodeException at encode time.
+        assertFailsWith<IllegalArgumentException> {
             MqttPacket.Publish<JpegImage>(
                 header = MqttFixedHeader(0x32u),
                 topic = "t/1",
                 packetId = null,
                 payload = JpegImage(1u, 1u, byteArrayOf(0x00)),
             )
-        val ex =
-            assertFailsWith<com.ditchoom.buffer.codec.EncodeException> {
-                codec.encode(msg, EncodeContext.Empty, BufferFactory.Default)
-            }
-        assertEquals("Publish.packetId", ex.fieldPath)
+        }
     }
 
     @Test

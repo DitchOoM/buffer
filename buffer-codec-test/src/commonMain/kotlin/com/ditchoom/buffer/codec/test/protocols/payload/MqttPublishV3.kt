@@ -138,12 +138,22 @@ object TextPayloadCodec : Codec<TextPayload> {
  * MQTT packet identifier. 16-bit unsigned, modeled as a value class
  * so it can later carry validation (non-zero per §2.3.1) without
  * leaking the raw `UShort` across the surrounding API.
+ *
+ * Phase J.M.5 audit-2f closed §2.2.1 [MQTT-2.2.1-3] caller-side: a
+ * packet identifier of 0 is invalid in both v3 and v5; the init-block
+ * `require` makes that impossible to construct.
  */
 @JvmInline
 @ProtocolMessage
 value class PacketId(
     val raw: UShort,
-)
+) {
+    init {
+        require(raw > 0u) {
+            "PacketId must be > 0 (spec §2.2.1 [MQTT-2.2.1-3]); got $raw"
+        }
+    }
+}
 
 /**
  * User-supplied `Payload` for the slice 10a vector.

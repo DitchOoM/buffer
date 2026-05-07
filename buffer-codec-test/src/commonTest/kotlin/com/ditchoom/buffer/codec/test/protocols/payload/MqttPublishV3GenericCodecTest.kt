@@ -139,7 +139,7 @@ class MqttPublishV3GenericCodecTest {
             MqttPublishV3<JpegImage>(
                 header = MqttFixedHeader(0x30u),
                 topic = "x",
-                packetId = PacketId(0u),
+                packetId = PacketId(1u),
                 payload = JpegImage(0u, 0u, ByteArray(0)),
             )
         // Same conservative-BackPatch contract as slice 10a — the
