@@ -3,6 +3,7 @@ package com.ditchoom.buffer.codec.test.protocols.mqttv5
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
@@ -53,7 +54,6 @@ class MqttV5FullPacketSetCodecTest {
     fun connectRoundTripsThroughDispatcher() {
         val original =
             MqttV5Packet.Connect(
-                remainingLength = 16u,
                 protocolName = "MQTT",
                 protocolLevel = 0x05u,
                 connectFlags = MqttConnectFlags(0x02u),
@@ -68,7 +68,6 @@ class MqttV5FullPacketSetCodecTest {
     fun connAckRoundTripsThroughDispatcher() {
         val original =
             MqttV5Packet.ConnAck(
-                remainingLength = 3u,
                 connectAckFlags = 0x01u,
                 reasonCode = V5ConnectReasonCode.Success(),
                 properties = emptyList(),
@@ -80,7 +79,6 @@ class MqttV5FullPacketSetCodecTest {
     fun publishQos0RoundTripsThroughDispatcher() {
         val original =
             MqttV5Packet.Publish(
-                remainingLength = 11u,
                 topic = "t/1",
                 packetId = null,
                 properties = emptyList(),
@@ -94,7 +92,6 @@ class MqttV5FullPacketSetCodecTest {
         val original =
             MqttV5Packet.Publish(
                 header = MqttFixedHeader(0x32u),
-                remainingLength = 13u,
                 topic = "t/1",
                 packetId = PacketId(0x002Au),
                 properties = emptyList(),
@@ -115,7 +112,6 @@ class MqttV5FullPacketSetCodecTest {
     fun pubAckWithCascadingTrailersRoundTripsThroughDispatcher() {
         val original =
             MqttV5Packet.PubAck(
-                remainingLength = 9u,
                 packetIdentifier = 0x1234u,
                 reasonCode = V5PubAckReasonCode.Success(),
                 properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
@@ -151,7 +147,6 @@ class MqttV5FullPacketSetCodecTest {
     fun subscribeRoundTripsThroughDispatcher() {
         val original =
             MqttV5Packet.Subscribe(
-                remainingLength = 9u,
                 packetIdentifier = 0x000Au,
                 properties = emptyList(),
                 topicFilters = listOf(V5Subscription("t/1", V5SubscriptionOptions.of(qos = 1))),
@@ -163,7 +158,6 @@ class MqttV5FullPacketSetCodecTest {
     fun subAckRoundTripsThroughDispatcher() {
         val original =
             MqttV5Packet.SubAck(
-                remainingLength = 6u,
                 packetIdentifier = 0x000Au,
                 properties = emptyList(),
                 reasonCodes =
@@ -180,7 +174,6 @@ class MqttV5FullPacketSetCodecTest {
     fun unsubscribeRoundTripsThroughDispatcher() {
         val original =
             MqttV5Packet.Unsubscribe(
-                remainingLength = 8u,
                 packetIdentifier = 0x000Au,
                 properties = emptyList(),
                 topics = listOf(MqttUnsubscribeTopic("t/1")),
@@ -221,7 +214,6 @@ class MqttV5FullPacketSetCodecTest {
         expectedTotalBytes: Int,
     ) {
         val encoded = encodeViaDispatcher(original)
-        encoded.resetForRead()
         assertEquals(
             expectedTotalBytes,
             encoded.remaining(),
@@ -237,7 +229,7 @@ class MqttV5FullPacketSetCodecTest {
         val pool = BufferPool()
         val fullStream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            fullStream.append(encodeViaDispatcher(original).also { it.resetForRead() })
+            fullStream.append(encodeViaDispatcher(original))
             assertEquals(
                 PeekResult.Complete(expectedTotalBytes),
                 dispatcher.peekFrameSize(fullStream),
@@ -252,7 +244,7 @@ class MqttV5FullPacketSetCodecTest {
         val dripPool = BufferPool()
         val dripStream = StreamProcessor.create(dripPool, ByteOrder.BIG_ENDIAN)
         try {
-            val dripSource = encodeViaDispatcher(original).also { it.resetForRead() }
+            val dripSource = encodeViaDispatcher(original)
             for (i in 0 until expectedTotalBytes - 1) {
                 val one = BufferFactory.Default.allocate(1)
                 one.writeByte(dripSource.readByte())
@@ -279,8 +271,6 @@ class MqttV5FullPacketSetCodecTest {
         }
     }
 
-    private fun encodeViaDispatcher(value: MqttV5Packet<JpegImage>) =
-        BufferFactory.Default
-            .allocate(128, ByteOrder.BIG_ENDIAN)
-            .also { dispatcher.encode(it, value, EncodeContext.Empty) }
+    private fun encodeViaDispatcher(value: MqttV5Packet<JpegImage>): ReadBuffer =
+        dispatcher.encode(value, EncodeContext.Empty, BufferFactory.Default)
 }

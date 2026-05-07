@@ -41,15 +41,12 @@ class MqttV5PublishCodecTest {
         val msg =
             MqttV5Packet.Publish<JpegImage>(
                 header = MqttFixedHeader(0x30u),
-                remainingLength = 11u,
                 topic = "t/1",
                 packetId = null,
                 properties = emptyList(),
                 payload = JpegImage(1u, 1u, byteArrayOf(0x42)),
             )
-        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        codec.encode(buf, msg, EncodeContext.Empty)
-        buf.resetForRead()
+        val buf = codec.encode(msg, EncodeContext.Empty, BufferFactory.Default)
         val actual = buf.readByteArray(buf.remaining())
         val expected =
             byteArrayOf(
@@ -82,7 +79,6 @@ class MqttV5PublishCodecTest {
         val msg =
             MqttV5Packet.Publish<JpegImage>(
                 header = MqttFixedHeader(0x32u), // QoS=1
-                remainingLength = 31u,
                 topic = "t/1",
                 packetId = PacketId(0x002Au),
                 properties =
@@ -92,9 +88,7 @@ class MqttV5PublishCodecTest {
                     ),
                 payload = JpegImage(1u, 1u, byteArrayOf(0x42)),
             )
-        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        codec.encode(buf, msg, EncodeContext.Empty)
-        buf.resetForRead()
+        val buf = codec.encode(msg, EncodeContext.Empty, BufferFactory.Default)
         val actual = buf.readByteArray(buf.remaining())
         val expected =
             byteArrayOf(
@@ -142,15 +136,12 @@ class MqttV5PublishCodecTest {
             MqttV5Packet.Publish<JpegImage>(
                 header = MqttFixedHeader(0x30u),
                 // body = 2 (topic LP) + 12 (topic) + 1 (propLen=0) + 4+8 (jpeg)
-                remainingLength = 27u,
                 topic = "sensors/jpeg",
                 packetId = null,
                 properties = emptyList(),
                 payload = JpegImage(320u, 240u, ByteArray(8) { (it * 5).toByte() }),
             )
-        val buf = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
-        codec.encode(buf, original, EncodeContext.Empty)
-        buf.resetForRead()
+        val buf = codec.encode(original, EncodeContext.Empty, BufferFactory.Default)
         val decoded = codec.decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
@@ -162,7 +153,6 @@ class MqttV5PublishCodecTest {
             MqttV5Packet.Publish<JpegImage>(
                 header = MqttFixedHeader(0x32u),
                 // body = 2 + 12 + 2 + 1 (propLen=18) + 18 (props) + 4+8 = 47
-                remainingLength = 47u,
                 topic = "sensors/jpeg",
                 packetId = PacketId(0x0042u),
                 properties =
@@ -172,9 +162,7 @@ class MqttV5PublishCodecTest {
                     ),
                 payload = JpegImage(320u, 240u, ByteArray(8) { (it * 5).toByte() }),
             )
-        val buf = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
-        codec.encode(buf, original, EncodeContext.Empty)
-        buf.resetForRead()
+        val buf = codec.encode(original, EncodeContext.Empty, BufferFactory.Default)
         val decoded = codec.decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
@@ -241,16 +229,16 @@ class MqttV5PublishCodecTest {
                 header = MqttFixedHeader(0x32u),
                 // body = 2 (topic LP) + 1 (topic 't') + 2 (pid)
                 //      + 1 (propLen=5) + 5 (one MessageExpiryInterval) + 4+1 (jpeg)
-                remainingLength = 16u,
                 topic = "t",
                 packetId = PacketId(0x0007u),
                 properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 7u)),
                 payload = JpegImage(1u, 1u, byteArrayOf(0x42)),
             )
-        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        codec.encode(buf, original, EncodeContext.Empty)
-        val publishBytes = buf.position()
-        // Trailing bytes the dispatcher must NOT consume.
+        val encoded = codec.encode(original, EncodeContext.Empty, BufferFactory.Default)
+        val publishBytes = encoded.remaining()
+        // Materialize publish bytes + trailing bytes the dispatcher must NOT consume.
+        val buf = BufferFactory.Default.allocate(publishBytes + 2, ByteOrder.BIG_ENDIAN)
+        buf.writeBytes(encoded.readByteArray(publishBytes))
         buf.writeByte(0xCA.toByte())
         buf.writeByte(0xFE.toByte())
         buf.resetForRead()
@@ -268,15 +256,12 @@ class MqttV5PublishCodecTest {
         val msg =
             MqttV5Packet.Publish<JpegImage>(
                 header = MqttFixedHeader(0x30u),
-                remainingLength = 11u,
                 topic = "t/1",
                 packetId = null,
                 properties = emptyList(),
                 payload = JpegImage(1u, 1u, byteArrayOf(0x42)),
             )
-        val buf = BufferFactory.Default.allocate(32, ByteOrder.BIG_ENDIAN)
-        codec.encode(buf, msg, EncodeContext.Empty)
-        buf.resetForRead()
+        val buf = codec.encode(msg, EncodeContext.Empty, BufferFactory.Default)
         val totalBytes = buf.remaining()
 
         val pool = BufferPool()

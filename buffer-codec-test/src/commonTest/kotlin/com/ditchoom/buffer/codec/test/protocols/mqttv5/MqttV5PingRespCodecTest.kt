@@ -3,6 +3,7 @@ package com.ditchoom.buffer.codec.test.protocols.mqttv5
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
@@ -26,8 +27,7 @@ class MqttV5PingRespCodecTest {
     fun encodesPingRespAsTwoBytes() {
         val msg = MqttV5Packet.PingResp()
         val buf = encode(msg)
-        assertEquals(2, buf.position(), "encoded byte count matches §3.13.1 layout")
-        buf.resetForRead()
+        assertEquals(2, buf.remaining(), "encoded byte count matches §3.13.1 layout")
         val actual = buf.readByteArray(2)
         assertContentEquals(
             byteArrayOf(0xD0.toByte(), 0x00),
@@ -47,14 +47,12 @@ class MqttV5PingRespCodecTest {
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         val pingResp = assertIs<MqttV5Packet.PingResp>(decoded)
         assertEquals(MqttFixedHeader(0xD0u), pingResp.header)
-        assertEquals(0u, pingResp.remainingLength)
     }
 
     @Test
     fun roundTripsPingResp() {
         val msg = MqttV5Packet.PingResp()
         val buf = encode(msg)
-        buf.resetForRead()
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         assertEquals(msg, decoded)
     }
@@ -77,13 +75,8 @@ class MqttV5PingRespCodecTest {
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun encode(value: MqttV5Packet<*>) =
-        BufferFactory.Default
-            .allocate(64)
-            .also {
-                (jpegDispatcher() as com.ditchoom.buffer.codec.Codec<MqttV5Packet<*>>)
-                    .encode(it, value, EncodeContext.Empty)
-            }
+    private fun encode(value: MqttV5Packet<*>): ReadBuffer =
+        jpegDispatcher().encode(value as MqttV5Packet<JpegImage>, EncodeContext.Empty, BufferFactory.Default)
 
     private fun jpegDispatcher(): MqttV5PacketCodec<JpegImage> = MqttV5PacketCodec(JpegImageCodec)
 }

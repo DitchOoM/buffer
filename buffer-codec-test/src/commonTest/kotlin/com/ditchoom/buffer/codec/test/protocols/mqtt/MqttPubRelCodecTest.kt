@@ -3,11 +3,11 @@ package com.ditchoom.buffer.codec.test.protocols.mqtt
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -48,7 +48,6 @@ class MqttPubRelCodecTest {
         val buf = bigEndianBufferOf(wire)
         val decoded = PubRelCodec.decode(buf, DecodeContext.Empty)
         assertEquals(MqttFixedHeader(0x62u), decoded.header)
-        assertEquals(2u, decoded.remainingLength)
         assertEquals(0x1234u.toUShort(), decoded.packetIdentifier)
     }
 
@@ -91,14 +90,7 @@ class MqttPubRelCodecTest {
                 packetIdentifier = 0xCAFEu,
             )
         val buf = encode(original)
-        buf.resetForRead()
         assertEquals(original, PubRelCodec.decode(buf, DecodeContext.Empty))
-    }
-
-    @Test
-    fun wireSizeIsBackPatchWithUseCodecScalar() {
-        val msg = MqttPacket.PubRel(packetIdentifier = 1u)
-        assertEquals(WireSize.BackPatch, PubRelCodec.wireSize(msg, EncodeContext.Empty))
     }
 
     @Test
@@ -125,7 +117,6 @@ class MqttPubRelCodecTest {
         val pool = BufferPool()
         val original = MqttPacket.PubRel(packetIdentifier = 0x0042u)
         val encoded = encode(original)
-        encoded.resetForRead()
         val totalBytes = encoded.remaining()
         assertEquals(4, totalBytes)
 
@@ -158,8 +149,7 @@ class MqttPubRelCodecTest {
         expected: ByteArray,
     ) {
         val buf = encode(msg)
-        assertEquals(expected.size, buf.position(), "encoded byte count matches MQTT-3.1.1 §3.6 layout")
-        buf.resetForRead()
+        assertEquals(expected.size, buf.remaining(), "encoded byte count matches MQTT-3.1.1 §3.6 layout")
         val actual = buf.readByteArray(expected.size)
         assertContentEquals(expected, actual, "encoded bytes match MQTT-3.1.1 §3.6")
     }
@@ -170,8 +160,5 @@ class MqttPubRelCodecTest {
             .also { it.writeBytes(wire) }
             .also { it.resetForRead() }
 
-    private fun encode(value: MqttPacket.PubRel) =
-        BufferFactory.Default
-            .allocate(8, ByteOrder.BIG_ENDIAN)
-            .also { PubRelCodec.encode(it, value, EncodeContext.Empty) }
+    private fun encode(value: MqttPacket.PubRel): ReadBuffer = PubRelCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
 }

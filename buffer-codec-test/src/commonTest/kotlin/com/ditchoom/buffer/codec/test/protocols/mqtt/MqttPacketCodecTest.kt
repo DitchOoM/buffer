@@ -3,7 +3,7 @@ package com.ditchoom.buffer.codec.test.protocols.mqtt
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
@@ -64,7 +64,6 @@ class MqttPacketCodecTest {
         val msg =
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
-                remainingLength = 16u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0x02u),
@@ -131,7 +130,6 @@ class MqttPacketCodecTest {
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         val connect = assertIs<MqttPacket.Connect>(decoded)
         assertEquals(MqttFixedHeader(0x10u), connect.header)
-        assertEquals(16u, connect.remainingLength)
         assertEquals("MQTT", connect.protocolName)
         assertEquals(0x04u.toUByte(), connect.protocolLevel)
         assertEquals(MqttConnectFlags(0x02u), connect.connectFlags)
@@ -151,7 +149,6 @@ class MqttPacketCodecTest {
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         val disconnect = assertIs<MqttPacket.Disconnect>(decoded)
         assertEquals(MqttFixedHeader(0xE0u), disconnect.header)
-        assertEquals(0u, disconnect.remainingLength)
     }
 
     @Test
@@ -211,7 +208,6 @@ class MqttPacketCodecTest {
         val original =
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
-                remainingLength = 20u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0x02u),
@@ -219,7 +215,6 @@ class MqttPacketCodecTest {
                 clientId = "client-1",
             )
         val buf = encode(original)
-        buf.resetForRead()
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
@@ -228,7 +223,6 @@ class MqttPacketCodecTest {
     fun roundTripsDisconnect() {
         val original = MqttPacket.Disconnect(header = MqttFixedHeader(0xE0u))
         val buf = encode(original)
-        buf.resetForRead()
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
@@ -258,7 +252,6 @@ class MqttPacketCodecTest {
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         val pingReq = assertIs<MqttPacket.PingReq>(decoded)
         assertEquals(MqttFixedHeader(0xC0u), pingReq.header)
-        assertEquals(0u, pingReq.remainingLength)
     }
 
     @Test
@@ -272,14 +265,12 @@ class MqttPacketCodecTest {
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         val pingResp = assertIs<MqttPacket.PingResp>(decoded)
         assertEquals(MqttFixedHeader(0xD0u), pingResp.header)
-        assertEquals(0u, pingResp.remainingLength)
     }
 
     @Test
     fun roundTripsPingReqAndPingResp() {
         for (msg in listOf(MqttPacket.PingReq(), MqttPacket.PingResp())) {
             val buf = encode(msg)
-            buf.resetForRead()
             val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
             assertEquals(msg, decoded, "round-trip $msg")
         }
@@ -350,7 +341,6 @@ class MqttPacketCodecTest {
         val original =
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
-                remainingLength = 15u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0x02u),
@@ -358,7 +348,6 @@ class MqttPacketCodecTest {
                 clientId = "abc",
             )
         val encoded = encode(original)
-        encoded.resetForRead()
         val totalBytes = encoded.remaining()
 
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
@@ -392,20 +381,14 @@ class MqttPacketCodecTest {
         expected: ByteArray,
     ) {
         val buf = encode(msg)
-        assertEquals(expected.size, buf.position(), "encoded byte count matches spec layout")
-        buf.resetForRead()
+        assertEquals(expected.size, buf.remaining(), "encoded byte count matches spec layout")
         val actual = buf.readByteArray(expected.size)
         assertContentEquals(expected, actual, "encoded bytes match MQTT-3.1.1 §2.2 layout")
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun encode(value: MqttPacket<*>) =
-        BufferFactory.Default
-            .allocate(256)
-            .also {
-                (jpegDispatcher() as Codec<MqttPacket<*>>)
-                    .encode(it, value, EncodeContext.Empty)
-            }
+    private fun encode(value: MqttPacket<*>): ReadBuffer =
+        jpegDispatcher().encode(value as MqttPacket<JpegImage>, EncodeContext.Empty, BufferFactory.Default)
 
     // For payload-free variants the payload codec choice is irrelevant
     // — the dispatcher never invokes it. Use JpegImageCodec by
@@ -425,7 +408,6 @@ class MqttPacketCodecTest {
         val msg =
             MqttPacket.Publish<JpegImage>(
                 header = MqttFixedHeader(0x32u),
-                remainingLength = 15u,
                 topic = "t/1",
                 packetId = PacketId(0x002Au),
                 payload =
@@ -435,9 +417,7 @@ class MqttPacketCodecTest {
                         data = byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte()),
                     ),
             )
-        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        codec.encode(buf, msg, EncodeContext.Empty)
-        buf.resetForRead()
+        val buf = codec.encode(msg, EncodeContext.Empty, BufferFactory.Default)
         val actual = buf.readByteArray(buf.remaining())
         val expected =
             byteArrayOf(
@@ -473,7 +453,6 @@ class MqttPacketCodecTest {
         val msg =
             MqttPacket.Publish<JpegImage>(
                 header = MqttFixedHeader(0x30u),
-                remainingLength = 13u,
                 topic = "t/1",
                 packetId = null,
                 payload =
@@ -483,9 +462,7 @@ class MqttPacketCodecTest {
                         data = byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte()),
                     ),
             )
-        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        codec.encode(buf, msg, EncodeContext.Empty)
-        buf.resetForRead()
+        val buf = codec.encode(msg, EncodeContext.Empty, BufferFactory.Default)
         val actual = buf.readByteArray(buf.remaining())
         val expected =
             byteArrayOf(
@@ -547,15 +524,13 @@ class MqttPacketCodecTest {
         val msg =
             MqttPacket.Publish<JpegImage>(
                 header = MqttFixedHeader(0x32u),
-                remainingLength = 15u,
                 topic = "t/1",
                 packetId = null,
                 payload = JpegImage(1u, 1u, byteArrayOf(0x00)),
             )
-        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         val ex =
             assertFailsWith<com.ditchoom.buffer.codec.EncodeException> {
-                codec.encode(buf, msg, EncodeContext.Empty)
+                codec.encode(msg, EncodeContext.Empty, BufferFactory.Default)
             }
         assertEquals("Publish.packetId", ex.fieldPath)
     }
@@ -573,14 +548,11 @@ class MqttPacketCodecTest {
             MqttPacket.Publish<JpegImage>(
                 header = MqttFixedHeader(0x32u),
                 // body = 2 (topic LP) + 12 (topic) + 2 (pid) + 4+8 (jpeg)
-                remainingLength = 28u,
                 topic = "sensors/jpeg",
                 packetId = PacketId(0x0042u),
                 payload = JpegImage(320u, 240u, ByteArray(8) { (it * 5).toByte() }),
             )
-        val buf = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
-        codec.encode(buf, original, EncodeContext.Empty)
-        buf.resetForRead()
+        val buf = codec.encode(original, EncodeContext.Empty, BufferFactory.Default)
         val decoded = codec.decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
@@ -594,14 +566,11 @@ class MqttPacketCodecTest {
             MqttPacket.Publish<JpegImage>(
                 header = MqttFixedHeader(0x30u),
                 // body = 2 (topic LP) + 12 (topic) + 4+8 (jpeg) = 26 (no packetId)
-                remainingLength = 26u,
                 topic = "sensors/jpeg",
                 packetId = null,
                 payload = JpegImage(320u, 240u, ByteArray(8) { (it * 5).toByte() }),
             )
-        val buf = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
-        codec.encode(buf, original, EncodeContext.Empty)
-        buf.resetForRead()
+        val buf = codec.encode(original, EncodeContext.Empty, BufferFactory.Default)
         val decoded = codec.decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
@@ -617,15 +586,16 @@ class MqttPacketCodecTest {
         val original =
             MqttPacket.Publish<JpegImage>(
                 header = MqttFixedHeader(0x32u),
-                remainingLength = 10u, // 2 + 1 (topic "t") + 2 (pid) + 4+1 (jpeg)
+                // 2 + 1 (topic "t") + 2 (pid) + 4+1 (jpeg)
                 topic = "t",
                 packetId = PacketId(0x0007u),
                 payload = JpegImage(1u, 1u, byteArrayOf(0x42)),
             )
-        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        codec.encode(buf, original, EncodeContext.Empty)
-        val publishBytes = buf.position()
-        // Trailing bytes the dispatcher must NOT consume.
+        val encoded = codec.encode(original, EncodeContext.Empty, BufferFactory.Default)
+        val publishBytes = encoded.remaining()
+        // Materialize publish bytes + trailing bytes the dispatcher must NOT consume.
+        val buf = BufferFactory.Default.allocate(publishBytes + 2, ByteOrder.BIG_ENDIAN)
+        buf.writeBytes(encoded.readByteArray(publishBytes))
         buf.writeByte(0xCA.toByte())
         buf.writeByte(0xFE.toByte())
         buf.resetForRead()
@@ -648,14 +618,12 @@ class MqttPacketCodecTest {
         val original =
             MqttPacket.Publish<JpegImage>(
                 header = MqttFixedHeader(0x32u),
-                remainingLength = 12u, // 2 + 3 (topic) + 2 (pid) + 4 + 1 (jpeg data)
+                // 2 + 3 (topic) + 2 (pid) + 4 + 1 (jpeg data)
                 topic = "a/b",
                 packetId = PacketId(0x0001u),
                 payload = JpegImage(2u, 3u, byteArrayOf(0x55)),
             )
-        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        codec.encode(buf, original, EncodeContext.Empty)
-        buf.resetForRead()
+        val buf = codec.encode(original, EncodeContext.Empty, BufferFactory.Default)
         val outerLimitBefore = buf.limit()
         // Skip the discriminator route — exercise Partial directly on
         // the variant codec (the code path slice 10c emits, now with
@@ -678,16 +646,13 @@ class MqttPacketCodecTest {
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
                 // body = 6 (proto) + 1 (level) + 1 (flags) + 2 (keepalive) + 6 (clientId LP "abcd") = 16
-                remainingLength = 16u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0x02u),
                 keepAliveSeconds = 60u,
                 clientId = "abcd",
             )
-        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        codec.encode(buf, original, EncodeContext.Empty)
-        buf.resetForRead()
+        val buf = codec.encode(original, EncodeContext.Empty, BufferFactory.Default)
         assertEquals(original, codec.decode(buf, DecodeContext.Empty))
     }
 }

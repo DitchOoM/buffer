@@ -3,6 +3,7 @@ package com.ditchoom.buffer.codec.test.protocols.mqttv5
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
@@ -35,7 +36,6 @@ class MqttV5SubscribeFamilyCodecTest {
         // body = 2 (pid) + 1 (propLen=0) + 5 (topic LP "t/1": 2+3) + 1 (opts) = 9
         val msg =
             MqttV5Packet.Subscribe(
-                remainingLength = 9u,
                 packetIdentifier = 0x002Au,
                 properties = emptyList(),
                 topicFilters =
@@ -47,7 +47,6 @@ class MqttV5SubscribeFamilyCodecTest {
                     ),
             )
         val buf = encode(msg)
-        buf.resetForRead()
         val expected =
             byteArrayOf(
                 0x82.toByte(),
@@ -71,7 +70,6 @@ class MqttV5SubscribeFamilyCodecTest {
             MqttV5Packet.Subscribe(
                 // body = 2 (pid) + 1 (propLen=5) + 5 (MessageExpiry)
                 //      + 6 (LP "t/1": 2+3 + opts: 1) + 6 (LP "t/2" + opts) = 20
-                remainingLength = 20u,
                 packetIdentifier = 0x0042u,
                 properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 3_600u)),
                 topicFilters =
@@ -87,7 +85,6 @@ class MqttV5SubscribeFamilyCodecTest {
                     ),
             )
         val buf = encode(original)
-        buf.resetForRead()
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
@@ -97,13 +94,11 @@ class MqttV5SubscribeFamilyCodecTest {
         // body = 2 (pid) + 1 (propLen=0) + 1 (rc) = 4
         val msg =
             MqttV5Packet.SubAck(
-                remainingLength = 4u,
                 packetIdentifier = 0x002Au,
                 properties = emptyList(),
                 reasonCodes = listOf(V5SubAckReasonCode.GrantedQoS1()),
             )
         val buf = encode(msg)
-        buf.resetForRead()
         assertContentEquals(
             byteArrayOf(0x90.toByte(), 0x04, 0x00, 0x2A, 0x00, 0x01),
             buf.readByteArray(buf.remaining()),
@@ -115,7 +110,6 @@ class MqttV5SubscribeFamilyCodecTest {
         val original =
             MqttV5Packet.SubAck(
                 // body = 2 + 1 (propLen=5) + 5 (MessageExpiry) + 3 (rc list) = 11
-                remainingLength = 11u,
                 packetIdentifier = 0x0042u,
                 properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
                 reasonCodes =
@@ -126,7 +120,6 @@ class MqttV5SubscribeFamilyCodecTest {
                     ),
             )
         val buf = encode(original)
-        buf.resetForRead()
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
@@ -136,7 +129,6 @@ class MqttV5SubscribeFamilyCodecTest {
         val original =
             MqttV5Packet.Unsubscribe(
                 // body = 2 (pid) + 1 (propLen=0) + 5 (LP "t/1": 2+3) + 5 (LP "t/2") = 13
-                remainingLength = 13u,
                 packetIdentifier = 0x0042u,
                 properties = emptyList(),
                 topics =
@@ -146,7 +138,6 @@ class MqttV5SubscribeFamilyCodecTest {
                     ),
             )
         val buf = encode(original)
-        buf.resetForRead()
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
@@ -190,13 +181,11 @@ class MqttV5SubscribeFamilyCodecTest {
     fun peekFrameSizeForSubscribeCompletes() {
         val msg =
             MqttV5Packet.Subscribe(
-                remainingLength = 9u,
                 packetIdentifier = 0x0001u,
                 properties = emptyList(),
                 topicFilters = listOf(V5Subscription("t/1", V5SubscriptionOptions.of(qos = 0))),
             )
         val buf = encode(msg)
-        buf.resetForRead()
         val totalBytes = buf.remaining()
 
         val pool = BufferPool()
@@ -211,13 +200,8 @@ class MqttV5SubscribeFamilyCodecTest {
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun encode(value: MqttV5Packet<*>) =
-        BufferFactory.Default
-            .allocate(64, ByteOrder.BIG_ENDIAN)
-            .also {
-                (jpegDispatcher() as com.ditchoom.buffer.codec.Codec<MqttV5Packet<*>>)
-                    .encode(it, value, EncodeContext.Empty)
-            }
+    private fun encode(value: MqttV5Packet<*>): ReadBuffer =
+        jpegDispatcher().encode(value as MqttV5Packet<JpegImage>, EncodeContext.Empty, BufferFactory.Default)
 
     private fun jpegDispatcher(): MqttV5PacketCodec<JpegImage> = MqttV5PacketCodec(JpegImageCodec)
 }

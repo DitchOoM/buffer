@@ -37,7 +37,6 @@ class MqttV5InvariantsCodecTest {
         // a sanity check that audit-2d didn't tighten it accidentally.
         MqttV5Packet.Publish<com.ditchoom.buffer.codec.test.protocols.payload.JpegImage>(
             header = MqttFixedHeader(0x3Fu), // all flag bits set
-            remainingLength = 0u,
             topic = "t",
             properties = emptyList(),
             payload =
@@ -55,7 +54,6 @@ class MqttV5InvariantsCodecTest {
             assertFailsWith<IllegalArgumentException> {
                 MqttV5Packet.Publish<com.ditchoom.buffer.codec.test.protocols.payload.JpegImage>(
                     header = MqttFixedHeader(0x40u), // high nibble = 4 (PUBACK), not 3
-                    remainingLength = 0u,
                     topic = "t",
                     properties = emptyList(),
                     payload =
@@ -113,7 +111,6 @@ class MqttV5InvariantsCodecTest {
             assertFailsWith<IllegalArgumentException> {
                 MqttV5Packet.Subscribe(
                     header = MqttFixedHeader(0x80u),
-                    remainingLength = 0u,
                     packetIdentifier = 0x0001u,
                     properties = emptyList(),
                     topicFilters = listOf(V5Subscription("t/1", V5SubscriptionOptions.of(qos = 0))),
@@ -128,7 +125,6 @@ class MqttV5InvariantsCodecTest {
             assertFailsWith<IllegalArgumentException> {
                 MqttV5Packet.Unsubscribe(
                     header = MqttFixedHeader(0xA0u),
-                    remainingLength = 0u,
                     packetIdentifier = 0x0001u,
                     properties = emptyList(),
                     topics =
@@ -159,7 +155,6 @@ class MqttV5InvariantsCodecTest {
         val ex =
             assertFailsWith<IllegalArgumentException> {
                 MqttV5Packet.Subscribe(
-                    remainingLength = 0u,
                     packetIdentifier = 0x0001u,
                     properties = emptyList(),
                     topicFilters = emptyList(),

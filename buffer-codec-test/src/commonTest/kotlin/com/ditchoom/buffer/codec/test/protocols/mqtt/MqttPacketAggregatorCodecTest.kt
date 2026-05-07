@@ -1,7 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols.mqtt
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
@@ -57,14 +56,12 @@ class MqttPacketAggregatorCodecTest {
         val original =
             MqttPacket.Publish<JpegImage>(
                 header = MqttFixedHeader(0x32u),
-                remainingLength = 13u, // 2 + 1 (topic) + 2 (pid) + 4 + 4 (jpeg)
+                // 2 + 1 (topic) + 2 (pid) + 4 + 4 (jpeg)
                 topic = "x",
                 packetId = PacketId(42u),
                 payload = JpegImage(1u, 1u, byteArrayOf(0x10, 0x20, 0x30, 0x40)),
             )
-        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        publishCodec.encode(buf, original, EncodeContext.Empty)
-        buf.resetForRead()
+        val buf = publishCodec.encode(original, EncodeContext.Empty, BufferFactory.Default)
         val decoded =
             MqttPacketCodec.decodeAggregating<JpegImage>(
                 buf,
@@ -89,14 +86,12 @@ class MqttPacketAggregatorCodecTest {
         val original =
             MqttPacket.Publish<JpegImage>(
                 header = MqttFixedHeader(0x32u),
-                remainingLength = 22u, // 2 + 11 (topic) + 2 (pid) + 4 + 3 (jpeg)
+                // 2 + 11 (topic) + 2 (pid) + 4 + 3 (jpeg)
                 topic = "topic/foo/1",
                 packetId = PacketId(7u),
                 payload = JpegImage(2u, 3u, byteArrayOf(0x11, 0x22, 0x33)),
             )
-        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        publishCodec.encode(buf, original, EncodeContext.Empty)
-        buf.resetForRead()
+        val buf = publishCodec.encode(original, EncodeContext.Empty, BufferFactory.Default)
 
         var observedTopic: String? = null
         val decoded =
@@ -124,14 +119,11 @@ class MqttPacketAggregatorCodecTest {
         val original =
             MqttPacket.Publish<JpegImage>(
                 header = MqttFixedHeader(0x32u),
-                remainingLength = 13u,
                 topic = "x",
                 packetId = PacketId(42u),
                 payload = JpegImage(1u, 1u, byteArrayOf(0x10, 0x20, 0x30, 0x40)),
             )
-        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        publishCodec.encode(buf, original, EncodeContext.Empty)
-        buf.resetForRead()
+        val buf = publishCodec.encode(original, EncodeContext.Empty, BufferFactory.Default)
 
         val ex =
             assertFailsWith<DecodeException> {
@@ -154,16 +146,13 @@ class MqttPacketAggregatorCodecTest {
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
                 // body = 6 (proto) + 1 (level) + 1 (flags) + 2 (keepalive) + 6 (clientId LP "abcd") = 16
-                remainingLength = 16u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0x02u),
                 keepAliveSeconds = 60u,
                 clientId = "abcd",
             )
-        val buf = BufferFactory.Default.allocate(64)
-        publishCodec.encode(buf, original, EncodeContext.Empty)
-        buf.resetForRead()
+        val buf = publishCodec.encode(original, EncodeContext.Empty, BufferFactory.Default)
 
         // No onPublish — would throw if Publish arrived; Connect
         // routes through the standard <Nothing>-variant path.
@@ -180,7 +169,6 @@ class MqttPacketAggregatorCodecTest {
         val jpegPublish =
             MqttPacket.Publish<JpegImage>(
                 header = MqttFixedHeader(0x32u),
-                remainingLength = 13u,
                 topic = "x",
                 packetId = PacketId(1u),
                 payload = JpegImage(1u, 1u, byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte())),
@@ -188,15 +176,13 @@ class MqttPacketAggregatorCodecTest {
         val textPublish =
             MqttPacket.Publish<TextPayload>(
                 header = MqttFixedHeader(0x32u),
-                remainingLength = 23u, // 2 + 1 (topic) + 2 (pid) + 18 (text "hello, slice 10d.5")
+                // 2 + 1 (topic) + 2 (pid) + 18 (text "hello, slice 10d.5")
                 topic = "y",
                 packetId = PacketId(2u),
                 payload = TextPayload("hello, slice 10d.5"),
             )
 
-        val jpegBuf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        MqttPacketCodec(JpegImageCodec).encode(jpegBuf, jpegPublish, EncodeContext.Empty)
-        jpegBuf.resetForRead()
+        val jpegBuf = MqttPacketCodec(JpegImageCodec).encode(jpegPublish, EncodeContext.Empty, BufferFactory.Default)
         val jpegDecoded =
             MqttPacketCodec.decodeAggregating<JpegImage>(
                 jpegBuf,
@@ -205,9 +191,7 @@ class MqttPacketAggregatorCodecTest {
             )
         assertEquals(jpegPublish, jpegDecoded)
 
-        val textBuf = BufferFactory.Default.allocate(128, ByteOrder.BIG_ENDIAN)
-        MqttPacketCodec(TextPayloadCodec).encode(textBuf, textPublish, EncodeContext.Empty)
-        textBuf.resetForRead()
+        val textBuf = MqttPacketCodec(TextPayloadCodec).encode(textPublish, EncodeContext.Empty, BufferFactory.Default)
         val textDecoded =
             MqttPacketCodec.decodeAggregating<TextPayload>(
                 textBuf,
@@ -246,14 +230,11 @@ class MqttPacketAggregatorCodecTest {
         val original =
             MqttPacket.Publish<JpegImage>(
                 header = MqttFixedHeader(0x32u),
-                remainingLength = 13u,
                 topic = "x",
                 packetId = PacketId(99u),
                 payload = JpegImage(1u, 1u, byteArrayOf(0x01, 0x02, 0x03, 0x04)),
             )
-        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        publishCodec.encode(buf, original, EncodeContext.Empty)
-        buf.resetForRead()
+        val buf = publishCodec.encode(original, EncodeContext.Empty, BufferFactory.Default)
 
         val decoded: MqttPacket<JpegImage> =
             MqttPacketCodec.decodeAggregating<JpegImage>(

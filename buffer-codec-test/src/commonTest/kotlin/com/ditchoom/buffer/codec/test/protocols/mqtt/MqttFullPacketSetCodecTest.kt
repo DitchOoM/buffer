@@ -3,6 +3,7 @@ package com.ditchoom.buffer.codec.test.protocols.mqtt
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
@@ -56,7 +57,6 @@ class MqttFullPacketSetCodecTest {
                 header = MqttFixedHeader(0x10u),
                 // body = 6 (proto LP) + 1 (level) + 1 (flags) + 2 (keepalive) +
                 //        2 + 4 (clientId LP "abcd") = 16
-                remainingLength = 16u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0x02u),
@@ -83,7 +83,6 @@ class MqttFullPacketSetCodecTest {
         val original =
             MqttPacket.Publish(
                 header = MqttFixedHeader(0x30u),
-                remainingLength = 13u,
                 topic = "t/1",
                 packetId = null,
                 payload = JpegImage(2u, 3u, byteArrayOf(0x11, 0x22, 0x33, 0x44)),
@@ -98,7 +97,6 @@ class MqttFullPacketSetCodecTest {
         val original =
             MqttPacket.Publish(
                 header = MqttFixedHeader(0x32u),
-                remainingLength = 15u,
                 topic = "t/1",
                 packetId = PacketId(0x002Au),
                 payload = JpegImage(2u, 3u, byteArrayOf(0x11, 0x22, 0x33, 0x44)),
@@ -131,7 +129,6 @@ class MqttFullPacketSetCodecTest {
         // body = 2 (pid) + 2 + 3 (topic LP "t/1") + 1 (qos) = 8
         val original =
             MqttPacket.Subscribe(
-                remainingLength = 8u,
                 packetIdentifier = 0x000Au,
                 topicFilters = listOf(MqttTopicFilter(filter = "t/1", qos = 0x01u)),
             )
@@ -143,7 +140,6 @@ class MqttFullPacketSetCodecTest {
         // body = 2 (pid) + 3 (return codes) = 5
         val original =
             MqttPacket.SubAck(
-                remainingLength = 5u,
                 packetIdentifier = 0x000Au,
                 returnCodes = listOf(0x00u, 0x01u, 0x80u),
             )
@@ -155,7 +151,6 @@ class MqttFullPacketSetCodecTest {
         // body = 2 (pid) + 2 + 3 (topic LP "t/1") = 7
         val original =
             MqttPacket.Unsubscribe(
-                remainingLength = 7u,
                 packetIdentifier = 0x000Au,
                 topics = listOf(MqttUnsubscribeTopic("t/1")),
             )
@@ -187,7 +182,6 @@ class MqttFullPacketSetCodecTest {
         expectedTotalBytes: Int,
     ) {
         val encoded = encodeViaDispatcher(original)
-        encoded.resetForRead()
         assertEquals(
             expectedTotalBytes,
             encoded.remaining(),
@@ -203,7 +197,7 @@ class MqttFullPacketSetCodecTest {
         val pool = BufferPool()
         val fullStream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            fullStream.append(encodeViaDispatcher(original).also { it.resetForRead() })
+            fullStream.append(encodeViaDispatcher(original))
             assertEquals(
                 PeekResult.Complete(expectedTotalBytes),
                 dispatcher.peekFrameSize(fullStream),
@@ -218,7 +212,7 @@ class MqttFullPacketSetCodecTest {
         val dripPool = BufferPool()
         val dripStream = StreamProcessor.create(dripPool, ByteOrder.BIG_ENDIAN)
         try {
-            val dripSource = encodeViaDispatcher(original).also { it.resetForRead() }
+            val dripSource = encodeViaDispatcher(original)
             for (i in 0 until expectedTotalBytes - 1) {
                 val one = BufferFactory.Default.allocate(1)
                 one.writeByte(dripSource.readByte())
@@ -245,8 +239,6 @@ class MqttFullPacketSetCodecTest {
         }
     }
 
-    private fun encodeViaDispatcher(value: MqttPacket<JpegImage>) =
-        BufferFactory.Default
-            .allocate(128, ByteOrder.BIG_ENDIAN)
-            .also { dispatcher.encode(it, value, EncodeContext.Empty) }
+    private fun encodeViaDispatcher(value: MqttPacket<JpegImage>): ReadBuffer =
+        dispatcher.encode(value, EncodeContext.Empty, BufferFactory.Default)
 }

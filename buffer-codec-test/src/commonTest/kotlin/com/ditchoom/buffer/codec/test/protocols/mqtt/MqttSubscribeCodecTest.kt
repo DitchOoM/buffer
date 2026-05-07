@@ -3,11 +3,11 @@ package com.ditchoom.buffer.codec.test.protocols.mqtt
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -30,7 +30,6 @@ class MqttSubscribeCodecTest {
         val msg =
             MqttPacket.Subscribe(
                 header = MqttFixedHeader(0x82u),
-                remainingLength = 8u,
                 packetIdentifier = 0x000Au,
                 topicFilters = listOf(MqttTopicFilter(filter = "t/1", qos = 0x01u)),
             )
@@ -57,7 +56,6 @@ class MqttSubscribeCodecTest {
         val msg =
             MqttPacket.Subscribe(
                 header = MqttFixedHeader(0x82u),
-                remainingLength = 12u,
                 packetIdentifier = 0x0001u,
                 topicFilters =
                     listOf(
@@ -90,7 +88,6 @@ class MqttSubscribeCodecTest {
         // Default constructor must emit 0x82 — bottom-bit-2 set per §3.8.1.
         val msg =
             MqttPacket.Subscribe(
-                remainingLength = 8u,
                 packetIdentifier = 1u,
                 topicFilters = listOf(MqttTopicFilter("t/1", 0u)),
             )
@@ -116,7 +113,6 @@ class MqttSubscribeCodecTest {
         val buf = bigEndianBufferOf(wire)
         val decoded = SubscribeCodec.decode(buf, DecodeContext.Empty)
         assertEquals(MqttFixedHeader(0x82u), decoded.header)
-        assertEquals(8u, decoded.remainingLength)
         assertEquals(0x000Au.toUShort(), decoded.packetIdentifier)
         assertEquals(listOf(MqttTopicFilter("t/1", 0x01u)), decoded.topicFilters)
     }
@@ -169,7 +165,6 @@ class MqttSubscribeCodecTest {
         val original =
             MqttPacket.Subscribe(
                 header = MqttFixedHeader(0x82u),
-                remainingLength = 18u,
                 packetIdentifier = 0xCAFEu,
                 topicFilters =
                     listOf(
@@ -178,19 +173,7 @@ class MqttSubscribeCodecTest {
                     ),
             )
         val buf = encode(original)
-        buf.resetForRead()
         assertEquals(original, SubscribeCodec.decode(buf, DecodeContext.Empty))
-    }
-
-    @Test
-    fun wireSizeIsBackPatchWithUseCodecScalar() {
-        val msg =
-            MqttPacket.Subscribe(
-                remainingLength = 8u,
-                packetIdentifier = 1u,
-                topicFilters = listOf(MqttTopicFilter("t/1", 0u)),
-            )
-        assertEquals(WireSize.BackPatch, SubscribeCodec.wireSize(msg, EncodeContext.Empty))
     }
 
     @Test
@@ -217,12 +200,10 @@ class MqttSubscribeCodecTest {
         val pool = BufferPool()
         val original =
             MqttPacket.Subscribe(
-                remainingLength = 8u,
                 packetIdentifier = 0x000Au,
                 topicFilters = listOf(MqttTopicFilter("t/1", 0x01u)),
             )
         val encoded = encode(original)
-        encoded.resetForRead()
         val totalBytes = encoded.remaining()
         // 1 (header) + 1 (var-int) + 8 (body) = 10
         assertEquals(10, totalBytes)
@@ -256,8 +237,7 @@ class MqttSubscribeCodecTest {
         expected: ByteArray,
     ) {
         val buf = encode(msg)
-        assertEquals(expected.size, buf.position(), "encoded byte count matches MQTT-3.1.1 §3.8 layout")
-        buf.resetForRead()
+        assertEquals(expected.size, buf.remaining(), "encoded byte count matches MQTT-3.1.1 §3.8 layout")
         val actual = buf.readByteArray(expected.size)
         assertContentEquals(expected, actual, "encoded bytes match MQTT-3.1.1 §3.8")
     }
@@ -268,8 +248,5 @@ class MqttSubscribeCodecTest {
             .also { it.writeBytes(wire) }
             .also { it.resetForRead() }
 
-    private fun encode(value: MqttPacket.Subscribe) =
-        BufferFactory.Default
-            .allocate(value.remainingLength.toInt() + 8, ByteOrder.BIG_ENDIAN)
-            .also { SubscribeCodec.encode(it, value, EncodeContext.Empty) }
+    private fun encode(value: MqttPacket.Subscribe): ReadBuffer = SubscribeCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
 }

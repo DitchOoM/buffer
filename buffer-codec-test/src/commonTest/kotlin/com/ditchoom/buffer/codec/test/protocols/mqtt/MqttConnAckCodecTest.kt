@@ -3,11 +3,11 @@ package com.ditchoom.buffer.codec.test.protocols.mqtt
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -54,7 +54,6 @@ class MqttConnAckCodecTest {
         val buf = bigEndianBufferOf(wire)
         val decoded = ConnAckCodec.decode(buf, DecodeContext.Empty)
         assertEquals(MqttFixedHeader(0x20u), decoded.header)
-        assertEquals(2u, decoded.remainingLength)
         assertEquals(0x01u.toUByte(), decoded.connectAckFlags, "session-present bit")
         assertEquals(0x00u.toUByte(), decoded.returnCode, "accepted")
     }
@@ -100,14 +99,7 @@ class MqttConnAckCodecTest {
                 returnCode = 0x05u,
             )
         val buf = encode(original)
-        buf.resetForRead()
         assertEquals(original, ConnAckCodec.decode(buf, DecodeContext.Empty))
-    }
-
-    @Test
-    fun wireSizeIsBackPatchWithUseCodecScalar() {
-        val msg = MqttPacket.ConnAck(connectAckFlags = 0u, returnCode = 0u)
-        assertEquals(WireSize.BackPatch, ConnAckCodec.wireSize(msg, EncodeContext.Empty))
     }
 
     @Test
@@ -134,7 +126,6 @@ class MqttConnAckCodecTest {
         val pool = BufferPool()
         val original = MqttPacket.ConnAck(connectAckFlags = 0x01u, returnCode = 0x00u)
         val encoded = encode(original)
-        encoded.resetForRead()
         val totalBytes = encoded.remaining()
         assertEquals(4, totalBytes)
 
@@ -167,8 +158,7 @@ class MqttConnAckCodecTest {
         expected: ByteArray,
     ) {
         val buf = encode(msg)
-        assertEquals(expected.size, buf.position(), "encoded byte count matches MQTT-3.1.1 §3.2 layout")
-        buf.resetForRead()
+        assertEquals(expected.size, buf.remaining(), "encoded byte count matches MQTT-3.1.1 §3.2 layout")
         val actual = buf.readByteArray(expected.size)
         assertContentEquals(expected, actual, "encoded bytes match MQTT-3.1.1 §3.2")
     }
@@ -179,8 +169,5 @@ class MqttConnAckCodecTest {
             .also { it.writeBytes(wire) }
             .also { it.resetForRead() }
 
-    private fun encode(value: MqttPacket.ConnAck) =
-        BufferFactory.Default
-            .allocate(8, ByteOrder.BIG_ENDIAN)
-            .also { ConnAckCodec.encode(it, value, EncodeContext.Empty) }
+    private fun encode(value: MqttPacket.ConnAck): ReadBuffer = ConnAckCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
 }

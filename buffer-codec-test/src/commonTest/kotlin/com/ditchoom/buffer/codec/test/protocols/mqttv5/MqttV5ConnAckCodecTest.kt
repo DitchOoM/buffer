@@ -3,6 +3,7 @@ package com.ditchoom.buffer.codec.test.protocols.mqttv5
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
@@ -35,13 +36,11 @@ class MqttV5ConnAckCodecTest {
         // body = 1 (flags) + 1 (rc) + 1 (propLen=0) = 3
         val msg =
             MqttV5Packet.ConnAck(
-                remainingLength = 3u,
                 connectAckFlags = 0x00u,
                 reasonCode = V5ConnectReasonCode.Success(),
                 properties = emptyList(),
             )
         val buf = encode(msg)
-        buf.resetForRead()
         val actual = buf.readByteArray(buf.remaining())
         val expected =
             byteArrayOf(
@@ -60,13 +59,11 @@ class MqttV5ConnAckCodecTest {
         //      = 8
         val msg =
             MqttV5Packet.ConnAck(
-                remainingLength = 8u,
                 connectAckFlags = 0x01u, // session present = true
                 reasonCode = V5ConnectReasonCode.Success(),
                 properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
             )
         val buf = encode(msg)
-        buf.resetForRead()
         val actual = buf.readByteArray(buf.remaining())
         val expected =
             byteArrayOf(
@@ -114,7 +111,6 @@ class MqttV5ConnAckCodecTest {
         val original =
             MqttV5Packet.ConnAck(
                 // body = 1 + 1 + 1 (propLen=18) + 18 (Expiry + ContentType) = 21
-                remainingLength = 21u,
                 connectAckFlags = 0x01u,
                 reasonCode = V5ConnectReasonCode.Success(),
                 properties =
@@ -124,7 +120,6 @@ class MqttV5ConnAckCodecTest {
                     ),
             )
         val buf = encode(original)
-        buf.resetForRead()
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
@@ -133,13 +128,11 @@ class MqttV5ConnAckCodecTest {
     fun peekFrameSizeForConnAckCompletes() {
         val msg =
             MqttV5Packet.ConnAck(
-                remainingLength = 3u,
                 connectAckFlags = 0x00u,
                 reasonCode = V5ConnectReasonCode.Success(),
                 properties = emptyList(),
             )
         val buf = encode(msg)
-        buf.resetForRead()
         val totalBytes = buf.remaining()
 
         val pool = BufferPool()
@@ -153,14 +146,9 @@ class MqttV5ConnAckCodecTest {
         }
     }
 
-    private fun encode(value: MqttV5Packet<*>) =
-        BufferFactory.Default
-            .allocate(64, ByteOrder.BIG_ENDIAN)
-            .also {
-                @Suppress("UNCHECKED_CAST")
-                (jpegDispatcher() as com.ditchoom.buffer.codec.Codec<MqttV5Packet<*>>)
-                    .encode(it, value, EncodeContext.Empty)
-            }
+    @Suppress("UNCHECKED_CAST")
+    private fun encode(value: MqttV5Packet<*>): ReadBuffer =
+        jpegDispatcher().encode(value as MqttV5Packet<JpegImage>, EncodeContext.Empty, BufferFactory.Default)
 
     private fun jpegDispatcher(): MqttV5PacketCodec<JpegImage> = MqttV5PacketCodec(JpegImageCodec)
 }

@@ -49,23 +49,28 @@ class CodecConnectionSmokeTest {
             val (clientByteStream, serverByteStream) = inMemoryByteStreamPair()
             val pool = BufferPool()
             try {
+                val clientCodec = MqttPacketCodec(TextPayloadCodec)
                 val client =
-                    clientByteStream.asCodecConnection(
-                        codec = MqttPacketCodec(TextPayloadCodec),
+                    clientByteStream.asFramedCodecConnection<MqttPacket<TextPayload>>(
                         pool = pool,
                         scope = backgroundScope,
+                        encode = clientCodec::encode,
+                        decode = clientCodec::decode,
+                        peekFrameSize = clientCodec::peekFrameSize,
                     )
+                val serverCodec = MqttPacketCodec(TextPayloadCodec)
                 val server =
-                    serverByteStream.asCodecConnection(
-                        codec = MqttPacketCodec(TextPayloadCodec),
+                    serverByteStream.asFramedCodecConnection<MqttPacket<TextPayload>>(
                         pool = pool,
                         scope = backgroundScope,
+                        encode = serverCodec::encode,
+                        decode = serverCodec::decode,
+                        peekFrameSize = serverCodec::peekFrameSize,
                     )
                 val publish =
                     MqttPacket.Publish<TextPayload>(
                         header = MqttFixedHeader(0x32u),
                         // body = topic LP (2 + 7) + packetId (2) + payload "ping" (4) = 15
-                        remainingLength = 15u,
                         topic = "hello/1",
                         packetId = PacketId(7u),
                         payload = TextPayload("ping"),
@@ -88,23 +93,28 @@ class CodecConnectionSmokeTest {
             val (a, b) = inMemoryByteStreamPair()
             val pool = BufferPool()
             try {
+                val senderCodec = MqttPacketCodec(TextPayloadCodec)
                 val sender =
-                    a.asCodecConnection(
-                        codec = MqttPacketCodec(TextPayloadCodec),
+                    a.asFramedCodecConnection<MqttPacket<TextPayload>>(
                         pool = pool,
                         scope = backgroundScope,
+                        encode = senderCodec::encode,
+                        decode = senderCodec::decode,
+                        peekFrameSize = senderCodec::peekFrameSize,
                     )
+                val receiverCodec = MqttPacketCodec(TextPayloadCodec)
                 val receiver =
-                    b.asCodecConnection(
-                        codec = MqttPacketCodec(TextPayloadCodec),
+                    b.asFramedCodecConnection<MqttPacket<TextPayload>>(
                         pool = pool,
                         scope = backgroundScope,
+                        encode = receiverCodec::encode,
+                        decode = receiverCodec::decode,
+                        peekFrameSize = receiverCodec::peekFrameSize,
                     )
                 val connect =
                     MqttPacket.Connect(
                         header = MqttFixedHeader(0x10u),
                         // body = 6 (proto) + 1 (level) + 1 (flags) + 2 (keepalive) + 6 (clientId LP "abcd") = 16
-                        remainingLength = 16u,
                         protocolName = "MQTT",
                         protocolLevel = 0x04u,
                         connectFlags = MqttConnectFlags(0x02u),
@@ -133,28 +143,29 @@ class CodecConnectionSmokeTest {
             val (a, b) = inMemoryByteStreamPair()
             val pool = BufferPool()
             try {
+                val receiverCodec = MqttPacketCodec(TextPayloadCodec)
                 val receiver =
-                    b.asCodecConnection(
-                        codec = MqttPacketCodec(TextPayloadCodec),
+                    b.asFramedCodecConnection<MqttPacket<TextPayload>>(
                         pool = pool,
                         scope = backgroundScope,
+                        encode = receiverCodec::encode,
+                        decode = receiverCodec::decode,
+                        peekFrameSize = receiverCodec::peekFrameSize,
                     )
                 val publish =
                     MqttPacket.Publish<TextPayload>(
                         header = MqttFixedHeader(0x32u),
                         // body = topic LP (2 + 1) + packetId (2) + payload "hi" (2) = 7
-                        remainingLength = 7u,
                         topic = "x",
                         packetId = PacketId(1u),
                         payload = TextPayload("hi"),
                     )
-                val encodeBuf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-                MqttPacketCodec(TextPayloadCodec).encode(
-                    encodeBuf,
-                    publish,
-                    EncodeContext.Empty,
-                )
-                encodeBuf.resetForRead()
+                val encodeBuf =
+                    MqttPacketCodec(TextPayloadCodec).encode(
+                        publish,
+                        EncodeContext.Empty,
+                        BufferFactory.Default,
+                    )
 
                 while (encodeBuf.remaining() > 0) {
                     val one = BufferFactory.Default.allocate(1)
@@ -186,16 +197,18 @@ class CodecConnectionSmokeTest {
             val (a, b) = inMemoryByteStreamPair()
             val pool = BufferPool()
             try {
+                val senderCodec = MqttPacketCodec(TextPayloadCodec)
                 val sender =
-                    a.asCodecConnection(
-                        codec = MqttPacketCodec(TextPayloadCodec),
+                    a.asFramedCodecConnection<MqttPacket<TextPayload>>(
                         pool = pool,
                         scope = backgroundScope,
+                        encode = senderCodec::encode,
+                        decode = senderCodec::decode,
+                        peekFrameSize = senderCodec::peekFrameSize,
                     )
                 val publish =
                     MqttPacket.Publish<TextPayload>(
                         header = MqttFixedHeader(0x32u),
-                        remainingLength = 19u, // 2 + 7 (topic) + 2 (pid) + 8 (payload "byTopic!")
                         topic = "topic/A",
                         packetId = PacketId(99u),
                         payload = TextPayload("byTopic!"),

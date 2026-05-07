@@ -1858,6 +1858,7 @@ internal class CodecEmitter(
     private fun buildFramedByDecodeFun(
         shape: CodecShape,
         framedBy: FramedByConfig,
+        messageType: TypeName = shape.messageClassName,
     ): FunSpec {
         val afterField = framedByAfterField(shape, framedBy)
         val body = CodeBlock.builder()
@@ -1891,7 +1892,7 @@ internal class CodecEmitter(
         )
         body.endControlFlow()
         val ctorArgs = shape.fields.joinToString(", ") { "${it.name} = ${it.name}" }
-        body.addStatement("%T(%L)", shape.messageClassName, ctorArgs)
+        body.addStatement("%T(%L)", messageType, ctorArgs)
         body.nextControlFlow("finally")
         body.addStatement("buffer.setLimit(__framingOuterLimit)")
         body.endControlFlow()
@@ -1899,7 +1900,7 @@ internal class CodecEmitter(
             .builder("decode")
             .addParameter("buffer", READ_BUFFER_CN)
             .addParameter("context", DECODE_CONTEXT_CN)
-            .returns(shape.messageClassName)
+            .returns(messageType)
             .addCode(body.build())
             .build()
     }
@@ -1907,6 +1908,7 @@ internal class CodecEmitter(
     private fun buildFramedByEncodeFun(
         shape: CodecShape,
         framedBy: FramedByConfig,
+        messageType: TypeName = shape.messageClassName,
     ): FunSpec {
         val afterField = framedByAfterField(shape, framedBy)
         val headerWireWidth = afterField?.let(::framedByHeaderWireWidth) ?: 0
@@ -1933,7 +1935,7 @@ internal class CodecEmitter(
         body.endControlFlow()
         return FunSpec
             .builder("encode")
-            .addParameter("value", shape.messageClassName)
+            .addParameter("value", messageType)
             .addParameter("context", ENCODE_CONTEXT_CN)
             .addParameter("factory", BUFFER_FACTORY_CN)
             .returns(READ_BUFFER_CN)
@@ -1959,8 +1961,12 @@ internal class CodecEmitter(
             FunSpec
                 .builder("peekFrameSize")
                 .addParameter("stream", STREAM_PROCESSOR_CN)
-                .addParameter("baseOffset", INT)
-                .returns(PEEK_RESULT_CN)
+                .addParameter(
+                    com.squareup.kotlinpoet.ParameterSpec
+                        .builder("baseOffset", INT)
+                        .defaultValue("0")
+                        .build(),
+                ).returns(PEEK_RESULT_CN)
         val body = CodeBlock.builder()
         // Need at least the header bytes plus one prefix byte before
         // attempting the codec read. Wider VBI continuations are caught
@@ -2064,6 +2070,22 @@ internal class CodecEmitter(
         if (shape.framedBy != null && shape.payloadTypeParameter == null) {
             return buildFramedByFileSpec(shape, shape.framedBy)
         }
+        if (shape.framedBy != null && shape.payloadTypeParameter != null) {
+            // Phase J.M.5 slice 14c — generic variant inheriting `@FramedBy`
+            // from a sealed parent. Drops the `Codec<Variant<P>>`
+            // superinterface (the framed encode shape isn't a `Codec`),
+            // emits framed encode/decode/peek + the slice 10c `Partial<P>`
+            // companion (decode-only, framing-aware via shape.framedBy).
+            return FileSpec
+                .builder(shape.packageName, shape.codecSimpleName)
+                .addType(
+                    buildGenericFramedByCodecTypeSpec(
+                        shape,
+                        shape.payloadTypeParameter,
+                        shape.framedBy,
+                    ),
+                ).build()
+        }
         val codecType =
             if (shape.payloadTypeParameter != null) {
                 buildGenericCodecTypeSpec(shape, shape.payloadTypeParameter)
@@ -2136,6 +2158,49 @@ internal class CodecEmitter(
                 // WITHOUT instantiating the surrounding generic codec class
                 // (the whole point of slice 10b's Partial is to defer the
                 // codec choice past header decode).
+                if (shouldEmitPartial(shape)) {
+                    builder.addType(buildPartialClassTypeSpec(shape, payloadTypeParameter = binding))
+                    builder.addType(buildPartialCompanionObject(shape, payloadTypeParameter = binding))
+                }
+            }.build()
+    }
+
+    /**
+     * Phase J.M.5 slice 14c — generic variant inheriting `@FramedBy`
+     * from a sealed parent. Mirrors [buildGenericCodecTypeSpec]'s
+     * constructor-injected payload codec field, but emits the framed
+     * encode signature (`encode(value, context, factory): ReadBuffer`,
+     * no wireSize) and drops the `Codec<Variant<P>>` superinterface
+     * (the framed encode shape isn't a `Codec`). The slice 10c
+     * `Partial<P>` + companion `partial<P>(buffer, context)` still
+     * emits — those are decode-only, and the partial-flow machinery
+     * is framing-aware via [shape.framedBy].
+     */
+    private fun buildGenericFramedByCodecTypeSpec(
+        shape: CodecShape,
+        binding: PayloadTypeParameter,
+        framedBy: FramedByConfig,
+    ): TypeSpec {
+        val typeVar = TypeVariableName(binding.typeVariableName, binding.bound)
+        val parameterizedMessage = shape.messageClassName.parameterizedBy(typeVar)
+        val codecOfP = CODEC_CN.parameterizedBy(typeVar)
+        return TypeSpec
+            .classBuilder(shape.codecSimpleName)
+            .addTypeVariable(typeVar)
+            .primaryConstructor(
+                FunSpec
+                    .constructorBuilder()
+                    .addParameter(binding.codecParameterName, codecOfP)
+                    .build(),
+            ).addProperty(
+                com.squareup.kotlinpoet.PropertySpec
+                    .builder(binding.codecParameterName, codecOfP, KModifier.PRIVATE)
+                    .initializer(binding.codecParameterName)
+                    .build(),
+            ).addFunction(buildFramedByDecodeFun(shape, framedBy, parameterizedMessage))
+            .addFunction(buildFramedByEncodeFun(shape, framedBy, parameterizedMessage))
+            .addFunction(buildFramedByPeekFrameFun(shape, framedBy))
+            .also { builder ->
                 if (shouldEmitPartial(shape)) {
                     builder.addType(buildPartialClassTypeSpec(shape, payloadTypeParameter = binding))
                     builder.addType(buildPartialCompanionObject(shape, payloadTypeParameter = binding))
@@ -2308,7 +2373,10 @@ internal class CodecEmitter(
         // the partial decode mid-walk narrows `buffer.limit()` and
         // stashes the prior limit in `__<fieldName>OuterLimit`. Capture
         // that local on the Partial so `complete()` can restore it.
-        val hasBoundingField = shape.fields.any { it.isBoundingShape() }
+        // Phase J.M.5 slice 14c — `@FramedBy` inherited from the sealed
+        // parent supplies the bound externally (no in-shape field), so
+        // we treat it as effectively-bounding for Partial purposes.
+        val hasBoundingField = shape.fields.any { it.isBoundingShape() } || shape.framedBy != null
 
         val classBuilder = TypeSpec.classBuilder("Partial")
         val typeVar =
@@ -2480,17 +2548,45 @@ internal class CodecEmitter(
             .returns(returnType)
 
         val body = CodeBlock.builder()
-        for (field in headerFields) appendDecodeField(body, field)
+        // Phase J.M.5 slice 14c — when the parent supplies framing via
+        // `@FramedBy`, the variant's partial decode reads the after-field
+        // first, then applies the framing bound (capturing the outer
+        // limit), then walks the remaining header fields inside the
+        // narrowed bound. Mirrors [buildFramedByDecodeFun]'s field order
+        // so wire bytes line up.
+        val framedBy = shape.framedBy
+        val afterField = framedBy?.let { framedByAfterField(shape, it) }
+        if (framedBy != null) {
+            if (afterField != null) appendDecodeField(body, afterField)
+            body.addStatement("val __framingOuterLimit = buffer.limit()")
+            body.addStatement(
+                "val __framingLength = %T.decode(buffer, context)",
+                framedBy.codecClassName,
+            )
+            body.addStatement(
+                "%T.applyBound(buffer, __framingLength)",
+                framedBy.codecClassName,
+            )
+            for (field in headerFields) {
+                if (field === afterField) continue
+                appendDecodeField(body, field)
+            }
+        } else {
+            for (field in headerFields) appendDecodeField(body, field)
+        }
         val boundingField = shape.fields.firstOrNull { it.isBoundingShape() }
+        val outerLimitLocal =
+            boundingField?.let { "__${it.name}OuterLimit" }
+                ?: framedBy?.let { "__framingOuterLimit" }
         val outerLimitArgs =
-            if (boundingField != null) {
+            outerLimitLocal?.let {
                 // appendDecodeUseCodecScalar (Phase I.1 step 4) emits
                 // the outer-limit local as `__<fieldName>OuterLimit`;
-                // pass it through so the Partial can restore on complete.
-                listOf("outerLimit = __${boundingField.name}OuterLimit")
-            } else {
-                emptyList()
-            }
+                // the slice-14c framed branch emits `__framingOuterLimit`.
+                // Either way, hand it to the Partial so `complete()` can
+                // restore the outer buffer limit on finally.
+                listOf("outerLimit = $it")
+            } ?: emptyList()
         val ctorArgs =
             (
                 headerFields.map { "${it.name} = ${it.name}" } +
@@ -5396,19 +5492,39 @@ internal class CodecEmitter(
      * but every branch calls the variant codec's framed encode (which
      * itself returns `ReadBuffer`). No `OVERRIDE` modifier — the
      * dispatcher does not implement `Codec<T>`.
+     *
+     * Generic variants are smart-cast to their star-projected form
+     * (`is Foo.Data<*>`) and then explicitly cast to `Foo.Data<P>` at
+     * the call site so the variant codec's `<P : Payload>` accepts the
+     * value (mirrors [buildDispatchOnEncodeFun]'s slice 10d behaviour).
      */
     private fun buildFramedByDispatchOnEncodeFun(
         shape: DispatchOnDispatcherShape,
         parentTypeRef: TypeName,
     ): FunSpec {
         val body = CodeBlock.builder()
+        val anyGeneric = shape.variants.any { it.genericInstanceFieldName != null }
+        if (anyGeneric) {
+            body.add("@Suppress(%S)\n", "UNCHECKED_CAST")
+        }
         body.beginControlFlow("return when (value)")
         for (variant in shape.variants) {
-            body.addStatement(
-                "is %T -> %T.encode(value, context, factory)",
-                variant.className,
-                variant.codecClassName,
-            )
+            val branchType = variantBranchTypeName(variant, shape.payloadTypeParameter)
+            if (variant.genericInstanceFieldName != null) {
+                val typedRef = variantTypedRef(variant, shape.payloadTypeParameter)
+                body.addStatement(
+                    "is %T -> %L.encode(value as %T, context, factory)",
+                    branchType,
+                    variant.codecReceiver(),
+                    typedRef,
+                )
+            } else {
+                body.addStatement(
+                    "is %T -> %L.encode(value, context, factory)",
+                    branchType,
+                    variant.codecReceiver(),
+                )
+            }
         }
         body.endControlFlow()
         return FunSpec
@@ -5437,8 +5553,12 @@ internal class CodecEmitter(
             FunSpec
                 .builder("peekFrameSize")
                 .addParameter("stream", STREAM_PROCESSOR_CN)
-                .addParameter("baseOffset", INT)
-                .returns(PEEK_RESULT_CN)
+                .addParameter(
+                    com.squareup.kotlinpoet.ParameterSpec
+                        .builder("baseOffset", INT)
+                        .defaultValue("0")
+                        .build(),
+                ).returns(PEEK_RESULT_CN)
         val body = CodeBlock.builder()
         body.addStatement(
             "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
@@ -5523,7 +5643,15 @@ internal class CodecEmitter(
                         .builder(binding.codecParameterName, codecOfP, KModifier.PRIVATE)
                         .initializer(binding.codecParameterName)
                         .build(),
-                ).addSuperinterface(CODEC_CN.parameterizedBy(parentTypeRef))
+                )
+        // Phase J.M.5 slice 14c — generic dispatcher × `@FramedBy`
+        // drops `Codec<Parent<P>>`, emits framed encode + dispatcher-
+        // owned peek walker, and skips wireSize. The aggregator
+        // companion stays — slice 10c `Partial<P>` is decode-only and
+        // its framing-aware via the variant's own emit.
+        if (shape.framedBy == null) {
+            builder.addSuperinterface(CODEC_CN.parameterizedBy(parentTypeRef))
+        }
         for (variant in shape.variants) {
             val fieldName = variant.genericInstanceFieldName ?: continue
             // Variant codec is `class <VariantName>Codec<P : Payload>(
@@ -5537,11 +5665,16 @@ internal class CodecEmitter(
                     .build(),
             )
         }
+        builder.addFunction(buildDispatchOnDecodeFun(shape, parentTypeRef))
+        if (shape.framedBy != null) {
+            builder.addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
+            builder.addFunction(buildFramedByDispatchOnPeekFun(shape))
+        } else {
+            builder.addFunction(buildDispatchOnEncodeFun(shape, parentTypeRef))
+            builder.addFunction(buildDispatchOnWireSizeFun(shape, parentTypeRef))
+            builder.addFunction(buildDispatchOnPeekFun(shape))
+        }
         return builder
-            .addFunction(buildDispatchOnDecodeFun(shape, parentTypeRef))
-            .addFunction(buildDispatchOnEncodeFun(shape, parentTypeRef))
-            .addFunction(buildDispatchOnWireSizeFun(shape, parentTypeRef))
-            .addFunction(buildDispatchOnPeekFun(shape))
             .addType(buildDispatchOnAggregatorCompanion(shape, binding))
             .build()
     }

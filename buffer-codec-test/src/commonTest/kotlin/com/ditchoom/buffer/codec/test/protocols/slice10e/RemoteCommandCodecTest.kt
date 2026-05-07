@@ -84,7 +84,7 @@ class RemoteCommandCodecTest {
                 id = "x",
                 payload = RemoteCommandPayload(opcode = 0x12345678u, data = byteArrayOf()),
             )
-        val buf = BufferFactory.Default.allocate(32, ByteOrder.BIG_ENDIAN)
+        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
         RemoteCommandCodec.encode(buf, msg, EncodeContext.Empty)
         buf.resetForRead()
         val actual = buf.readByteArray(buf.remaining())
@@ -119,17 +119,14 @@ class RemoteCommandCodecTest {
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
                 // body = 6 (proto) + 1 (level) + 1 (flags) + 2 (keepalive) + 6 (clientId LP "abcd") = 16
-                remainingLength = 16u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0x02u),
                 keepAliveSeconds = 60u,
                 clientId = "abcd",
             )
-        val bufA = BufferFactory.Default.allocate(64).also { viaAlias.encode(it, msg, EncodeContext.Empty) }
-        val bufB = BufferFactory.Default.allocate(64).also { viaOriginal.encode(it, msg, EncodeContext.Empty) }
-        bufA.resetForRead()
-        bufB.resetForRead()
+        val bufA = viaAlias.encode(msg, EncodeContext.Empty, BufferFactory.Default)
+        val bufB = viaOriginal.encode(msg, EncodeContext.Empty, BufferFactory.Default)
         assertContentEquals(
             bufA.readByteArray(bufA.remaining()),
             bufB.readByteArray(bufB.remaining()),
@@ -150,14 +147,11 @@ class RemoteCommandCodecTest {
             MqttPacket.Publish<JpegImage>(
                 header = MqttFixedHeader(0x32u),
                 // 2 + 1 (topic "x") + 2 (pid) + 4 + 4 (jpeg)
-                remainingLength = 13u,
                 topic = "x",
                 packetId = PacketId(42u),
                 payload = JpegImage(1u, 1u, byteArrayOf(0x10, 0x20, 0x30, 0x40)),
             )
-        val buf = BufferFactory.Default.allocate(64, ByteOrder.BIG_ENDIAN)
-        codec.encode(buf, original, EncodeContext.Empty)
-        buf.resetForRead()
+        val buf = codec.encode(original, EncodeContext.Empty, BufferFactory.Default)
         assertEquals(original, codec.decode(buf, DecodeContext.Empty))
     }
 

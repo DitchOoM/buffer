@@ -3,6 +3,7 @@ package com.ditchoom.buffer.codec.test.protocols.mqttv5
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.annotations.DispatchOn
 import com.ditchoom.buffer.codec.annotations.Endianness
+import com.ditchoom.buffer.codec.annotations.FramedBy
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
@@ -55,6 +56,7 @@ import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
  * family's slice 10f lift.
  */
 @DispatchOn(MqttFixedHeader::class)
+@FramedBy(MqttRemainingLengthCodec::class, after = "header")
 @ProtocolMessage
 sealed interface MqttV5Packet<out P : Payload> {
     /**
@@ -104,7 +106,6 @@ sealed interface MqttV5Packet<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class Connect(
         val header: MqttFixedHeader = MqttFixedHeader(0x10u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         @LengthPrefixed val protocolName: String,
         val protocolLevel: UByte,
         val connectFlags: MqttConnectFlags,
@@ -159,7 +160,6 @@ sealed interface MqttV5Packet<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class ConnAck(
         val header: MqttFixedHeader = MqttFixedHeader(0x20u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         val connectAckFlags: UByte,
         val reasonCode: V5ConnectReasonCode,
         @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
@@ -224,7 +224,6 @@ sealed interface MqttV5Packet<out P : Payload> {
     @ProtocolMessage
     data class Publish<P : Payload>(
         val header: MqttFixedHeader = MqttFixedHeader(0x30u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         @LengthPrefixed val topic: String,
         @When("header.qosGreaterThanZero") val packetId: PacketId? = null,
         @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
@@ -273,7 +272,6 @@ sealed interface MqttV5Packet<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class PubAck(
         val header: MqttFixedHeader = MqttFixedHeader(0x40u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
         @When("remaining >= 1") val reasonCode: V5PubAckReasonCode? = null,
         @When("remaining >= 1")
@@ -317,7 +315,6 @@ sealed interface MqttV5Packet<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class PubRec(
         val header: MqttFixedHeader = MqttFixedHeader(0x50u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
         @When("remaining >= 1") val reasonCode: V5PubAckReasonCode? = null,
         @When("remaining >= 1")
@@ -350,7 +347,6 @@ sealed interface MqttV5Packet<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class PubRel(
         val header: MqttFixedHeader = MqttFixedHeader(0x62u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
         @When("remaining >= 1") val reasonCode: V5PubAckReasonCode? = null,
         @When("remaining >= 1")
@@ -385,7 +381,6 @@ sealed interface MqttV5Packet<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class PubComp(
         val header: MqttFixedHeader = MqttFixedHeader(0x70u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
         @When("remaining >= 1") val reasonCode: V5PubAckReasonCode? = null,
         @When("remaining >= 1")
@@ -433,7 +428,6 @@ sealed interface MqttV5Packet<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class Subscribe(
         val header: MqttFixedHeader = MqttFixedHeader(0x82u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         val packetIdentifier: UShort,
         @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
         val properties: List<MqttV5Property>,
@@ -472,7 +466,6 @@ sealed interface MqttV5Packet<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class SubAck(
         val header: MqttFixedHeader = MqttFixedHeader(0x90u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         val packetIdentifier: UShort,
         @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
         val properties: List<MqttV5Property>,
@@ -501,7 +494,6 @@ sealed interface MqttV5Packet<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class Unsubscribe(
         val header: MqttFixedHeader = MqttFixedHeader(0xA2u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         val packetIdentifier: UShort,
         @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class)
         val properties: List<MqttV5Property>,
@@ -528,7 +520,6 @@ sealed interface MqttV5Packet<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class UnsubAck(
         val header: MqttFixedHeader = MqttFixedHeader(0xB0u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
         @When("remaining >= 1") val reasonCode: V5UnsubAckReasonCode? = null,
         @When("remaining >= 1")
@@ -565,7 +556,6 @@ sealed interface MqttV5Packet<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class Disconnect(
         val header: MqttFixedHeader = MqttFixedHeader(0xE0u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
         @When("remaining >= 1") val reasonCode: V5DisconnectReasonCode? = null,
         @When("remaining >= 1")
         @LengthPrefixed
@@ -601,7 +591,6 @@ sealed interface MqttV5Packet<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class Auth(
         val header: MqttFixedHeader = MqttFixedHeader(0xF0u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
         @When("remaining >= 1") val reasonCode: V5AuthReasonCode? = null,
         @When("remaining >= 1")
         @LengthPrefixed
@@ -637,7 +626,6 @@ sealed interface MqttV5Packet<out P : Payload> {
     @ProtocolMessage
     data class PingReq(
         val header: MqttFixedHeader = MqttFixedHeader(0xC0u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
     ) : MqttV5Packet<Nothing> {
         init {
             // Phase J.M.5 audit-2d — header byte invariant per spec §3.12.1.
@@ -657,7 +645,6 @@ sealed interface MqttV5Packet<out P : Payload> {
     @ProtocolMessage
     data class PingResp(
         val header: MqttFixedHeader = MqttFixedHeader(0xD0u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
     ) : MqttV5Packet<Nothing> {
         init {
             // Phase J.M.5 audit-2d — header byte invariant per spec §3.13.1.

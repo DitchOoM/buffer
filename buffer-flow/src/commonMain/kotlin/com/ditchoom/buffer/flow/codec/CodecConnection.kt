@@ -3,6 +3,7 @@ package com.ditchoom.buffer.flow.codec
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
@@ -120,6 +121,115 @@ private class CodecConnection<T : Any>(
             buf.resetForRead()
             byteStream.write(buf)
         }
+    }
+
+    override suspend fun close() {
+        collector.cancel()
+        byteStream.close()
+    }
+}
+
+/**
+ * Phase J.M.5 slice 14c — wraps a [ByteStream] as a typed [Connection] using
+ * a `@FramedBy` codec's framed encode shape (`encode(value, context, factory):
+ * ReadBuffer`). Sibling to [asCodecConnection] for codecs that drop the
+ * `Codec<T>` superinterface — see slice 14c handoff Q3 option 3C.
+ *
+ * The receive loop uses [peekFrameSize] + `readBufferScoped(decode)` exactly
+ * as the standard [asCodecConnection]; the send path calls [encode] directly
+ * (the framed encoder allocates from [factory] backed by [pool]'s pooling
+ * factory) and writes the resulting [ReadBuffer] to the byte stream — no
+ * intermediate write buffer, no memcpy.
+ *
+ * Pass the dispatcher's methods as references:
+ *
+ * ```kotlin
+ * val codec = MqttPacketCodec(TextPayloadCodec)
+ * byteStream.asFramedCodecConnection(
+ *     pool = pool,
+ *     scope = scope,
+ *     encode = codec::encode,
+ *     decode = codec::decode,
+ *     peekFrameSize = codec::peekFrameSize,
+ * )
+ * ```
+ */
+fun <T : Any> ByteStream.asFramedCodecConnection(
+    pool: BufferPool,
+    scope: CoroutineScope,
+    encode: (T, EncodeContext, BufferFactory) -> ReadBuffer,
+    decode: (ReadBuffer, DecodeContext) -> T,
+    peekFrameSize: (StreamProcessor, Int) -> PeekResult,
+    id: Long = 0,
+    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
+): Connection<T> =
+    FramedCodecConnection(
+        byteStream = this,
+        pool = pool,
+        scope = scope,
+        encodeFn = encode,
+        decodeFn = decode,
+        peekFn = peekFrameSize,
+        id = id,
+        byteOrder = byteOrder,
+    )
+
+private class FramedCodecConnection<T : Any>(
+    private val byteStream: ByteStream,
+    private val pool: BufferPool,
+    scope: CoroutineScope,
+    private val encodeFn: (T, EncodeContext, BufferFactory) -> ReadBuffer,
+    private val decodeFn: (ReadBuffer, DecodeContext) -> T,
+    private val peekFn: (StreamProcessor, Int) -> PeekResult,
+    override val id: Long,
+    byteOrder: ByteOrder,
+) : Connection<T> {
+    private val sendFactory: BufferFactory = BufferFactory.Default.withPooling(pool)
+    private val inbound = Channel<T>(Channel.UNLIMITED)
+    private val collector: Job =
+        scope.launch {
+            val processor = StreamProcessor.create(pool, byteOrder)
+            try {
+                while (true) {
+                    when (val read = byteStream.read()) {
+                        is ReadResult.Data -> {
+                            processor.append(read.buffer)
+                            drainFrames(processor)
+                        }
+                        ReadResult.End, ReadResult.Reset -> break
+                    }
+                }
+            } finally {
+                processor.release()
+                inbound.close()
+            }
+        }
+
+    private fun drainFrames(processor: StreamProcessor) {
+        while (true) {
+            when (val peek = peekFn(processor, 0)) {
+                is PeekResult.Complete -> {
+                    val decoded =
+                        processor.readBufferScoped(peek.bytes) {
+                            decodeFn(this, DecodeContext.Empty)
+                        }
+                    inbound.trySend(decoded)
+                }
+                PeekResult.NeedsMoreData -> return
+                PeekResult.NoFraming ->
+                    error(
+                        "Framed codec reports NoFraming — cannot drive a streaming " +
+                            "receive loop.",
+                    )
+            }
+        }
+    }
+
+    override fun receive(): Flow<T> = inbound.receiveAsFlow()
+
+    override suspend fun send(message: T) {
+        val framed = encodeFn(message, EncodeContext.Empty, sendFactory)
+        byteStream.write(framed)
     }
 
     override suspend fun close() {

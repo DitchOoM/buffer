@@ -4,11 +4,11 @@ import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.annotations.DispatchOn
 import com.ditchoom.buffer.codec.annotations.DispatchValue
 import com.ditchoom.buffer.codec.annotations.Endianness
+import com.ditchoom.buffer.codec.annotations.FramedBy
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
-import com.ditchoom.buffer.codec.annotations.UseCodec
 import com.ditchoom.buffer.codec.annotations.When
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
 import kotlin.jvm.JvmInline
@@ -93,6 +93,7 @@ value class MqttFixedHeader(
  * ```
  */
 @DispatchOn(MqttFixedHeader::class)
+@FramedBy(MqttRemainingLengthCodec::class, after = "header")
 @ProtocolMessage
 sealed interface MqttPacket<out P : Payload> {
     /**
@@ -138,7 +139,6 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage
     data class Connect(
         val header: MqttFixedHeader = MqttFixedHeader(0x10u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         @LengthPrefixed val protocolName: String,
         val protocolLevel: UByte,
         val connectFlags: MqttConnectFlags,
@@ -168,7 +168,6 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class ConnAck(
         val header: MqttFixedHeader = MqttFixedHeader(0x20u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val connectAckFlags: UByte,
         val returnCode: UByte,
     ) : MqttPacket<Nothing>
@@ -209,7 +208,6 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage
     data class Publish<P : Payload>(
         val header: MqttFixedHeader = MqttFixedHeader(0x30u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         @LengthPrefixed val topic: String,
         @When("header.qosGreaterThanZero") val packetId: PacketId? = null,
         @RemainingBytes val payload: P,
@@ -227,7 +225,6 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class PubAck(
         val header: MqttFixedHeader = MqttFixedHeader(0x40u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
     ) : MqttPacket<Nothing>
 
@@ -240,7 +237,6 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class PubRec(
         val header: MqttFixedHeader = MqttFixedHeader(0x50u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
     ) : MqttPacket<Nothing>
 
@@ -259,7 +255,6 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class PubRel(
         val header: MqttFixedHeader = MqttFixedHeader(0x62u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
     ) : MqttPacket<Nothing>
 
@@ -272,7 +267,6 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class PubComp(
         val header: MqttFixedHeader = MqttFixedHeader(0x70u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
     ) : MqttPacket<Nothing>
 
@@ -304,7 +298,6 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class Subscribe(
         val header: MqttFixedHeader = MqttFixedHeader(0x82u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         val packetIdentifier: UShort,
         @RemainingBytes val topicFilters: List<MqttTopicFilter>,
     ) : MqttPacket<Nothing>
@@ -332,7 +325,6 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class SubAck(
         val header: MqttFixedHeader = MqttFixedHeader(0x90u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         val packetIdentifier: UShort,
         @RemainingBytes val returnCodes: List<UByte>,
     ) : MqttPacket<Nothing>
@@ -365,7 +357,6 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class Unsubscribe(
         val header: MqttFixedHeader = MqttFixedHeader(0xA2u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt,
         val packetIdentifier: UShort,
         @RemainingBytes val topics: List<MqttUnsubscribeTopic>,
     ) : MqttPacket<Nothing>
@@ -380,7 +371,6 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class UnsubAck(
         val header: MqttFixedHeader = MqttFixedHeader(0xB0u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 2u,
         val packetIdentifier: UShort,
     ) : MqttPacket<Nothing>
 
@@ -402,7 +392,6 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage
     data class PingReq(
         val header: MqttFixedHeader = MqttFixedHeader(0xC0u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
     ) : MqttPacket<Nothing>
 
     /** Type-13 PINGRESP per §3.13 — fixed header `0xD0` + RL `0`, total `D0 00`. */
@@ -410,7 +399,6 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage
     data class PingResp(
         val header: MqttFixedHeader = MqttFixedHeader(0xD0u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
     ) : MqttPacket<Nothing>
 
     /**
@@ -421,6 +409,5 @@ sealed interface MqttPacket<out P : Payload> {
     @ProtocolMessage
     data class Disconnect(
         val header: MqttFixedHeader = MqttFixedHeader(0xE0u),
-        @UseCodec(MqttRemainingLengthCodec::class) val remainingLength: UInt = 0u,
     ) : MqttPacket<Nothing>
 }

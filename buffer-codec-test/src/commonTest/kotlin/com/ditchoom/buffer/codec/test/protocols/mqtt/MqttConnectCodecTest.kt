@@ -3,10 +3,10 @@ package com.ditchoom.buffer.codec.test.protocols.mqtt
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -46,7 +46,6 @@ class MqttConnectCodecTest {
         val msg =
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
-                remainingLength = 15u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0x02u),
@@ -86,7 +85,6 @@ class MqttConnectCodecTest {
         val msg =
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
-                remainingLength = 28u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0xC2u),
@@ -139,7 +137,6 @@ class MqttConnectCodecTest {
         val msg =
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
-                remainingLength = 19u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0x26u),
@@ -184,7 +181,6 @@ class MqttConnectCodecTest {
         val msg =
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
-                remainingLength = 46u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0xE6u),
@@ -196,7 +192,6 @@ class MqttConnectCodecTest {
                 password = "secret",
             )
         val buf = encode(msg)
-        buf.resetForRead()
         val decoded = ConnectCodec.decode(buf, DecodeContext.Empty)
         assertEquals(msg, decoded)
     }
@@ -282,32 +277,11 @@ class MqttConnectCodecTest {
     }
 
     @Test
-    fun wireSizeIsBackPatchWithUseCodecScalar() {
-        // Phase I.1 step 9 — `@UseCodec(MqttRemainingLengthCodec)` collapses
-        // wireSize to BackPatch unconditionally (CodecEmitter.kt:1798).
-        // Runtime-Exact promotion via codec.wireSize forwarding is a
-        // deferred follow-on (PHASE_I_1_RESUME.md:426) — the slice-8
-        // `@RemainingLength`-driven Exact path is gone with the migration.
-        val msg =
-            MqttPacket.Connect(
-                header = MqttFixedHeader(0x10u),
-                remainingLength = 15u,
-                protocolName = "MQTT",
-                protocolLevel = 0x04u,
-                connectFlags = MqttConnectFlags(0x02u),
-                keepAliveSeconds = 60u,
-                clientId = "abc",
-            )
-        assertEquals(WireSize.BackPatch, ConnectCodec.wireSize(msg, EncodeContext.Empty))
-    }
-
-    @Test
     fun peekFrameSizeWalksToCompleteOnFullMessage() {
         val pool = BufferPool()
         val original =
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
-                remainingLength = 28u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0xC2u),
@@ -317,7 +291,6 @@ class MqttConnectCodecTest {
                 password = "pass",
             )
         val encoded = encode(original)
-        encoded.resetForRead()
         val totalBytes = encoded.remaining()
         // 1 (header) + 1 (var-int) + 28 (body) = 30
         assertEquals(30, totalBytes)
@@ -364,7 +337,6 @@ class MqttConnectCodecTest {
         val original =
             MqttPacket.Connect(
                 header = MqttFixedHeader(0x10u),
-                remainingLength = 15u,
                 protocolName = "MQTT",
                 protocolLevel = 0x04u,
                 connectFlags = MqttConnectFlags(0x02u),
@@ -372,7 +344,6 @@ class MqttConnectCodecTest {
                 clientId = "abc",
             )
         val encoded = encode(original)
-        encoded.resetForRead()
         val expectedTotal = encoded.remaining()
         // 1 (header) + 1 (var-int) + 15 (body) = 17
         assertEquals(17, expectedTotal)
@@ -397,8 +368,7 @@ class MqttConnectCodecTest {
         expected: ByteArray,
     ) {
         val buf = encode(original)
-        assertEquals(expected.size, buf.position(), "encoded byte count matches spec layout")
-        buf.resetForRead()
+        assertEquals(expected.size, buf.remaining(), "encoded byte count matches spec layout")
         val actual = buf.readByteArray(expected.size)
         assertContentEquals(expected, actual, "encoded bytes match MQTT-3.1.1 §3.1")
 
@@ -408,8 +378,5 @@ class MqttConnectCodecTest {
         assertEquals(original, decoded)
     }
 
-    private fun encode(value: MqttPacket.Connect) =
-        BufferFactory.Default
-            .allocate(512)
-            .also { ConnectCodec.encode(it, value, EncodeContext.Empty) }
+    private fun encode(value: MqttPacket.Connect): ReadBuffer = ConnectCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
 }

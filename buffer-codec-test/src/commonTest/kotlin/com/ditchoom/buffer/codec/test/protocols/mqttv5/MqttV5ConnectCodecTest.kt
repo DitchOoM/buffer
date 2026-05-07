@@ -3,6 +3,7 @@ package com.ditchoom.buffer.codec.test.protocols.mqttv5
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
@@ -35,7 +36,6 @@ class MqttV5ConnectCodecTest {
         //      + 1 (propLen=0) + 5 (clientId LP "abc": 2+3) = 16
         val msg =
             MqttV5Packet.Connect(
-                remainingLength = 16u,
                 protocolName = "MQTT",
                 protocolLevel = 0x05u,
                 connectFlags = MqttConnectFlags(0x02u), // clean start
@@ -44,7 +44,6 @@ class MqttV5ConnectCodecTest {
                 clientId = "abc",
             )
         val buf = encode(msg)
-        buf.resetForRead()
         val expected =
             byteArrayOf(
                 0x10,
@@ -75,7 +74,6 @@ class MqttV5ConnectCodecTest {
             MqttV5Packet.Connect(
                 // body = 6 + 1 + 1 + 2 + 1 (propLen=5) + 5 (MessageExpiry)
                 //      + 5 (clientId LP "abc": 2+3) = 21
-                remainingLength = 21u,
                 protocolName = "MQTT",
                 protocolLevel = 0x05u,
                 connectFlags = MqttConnectFlags(0x02u),
@@ -84,7 +82,6 @@ class MqttV5ConnectCodecTest {
                 clientId = "abc",
             )
         val buf = encode(original)
-        buf.resetForRead()
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
@@ -101,7 +98,6 @@ class MqttV5ConnectCodecTest {
                 //      + 5 (willTopic LP "w/1": 2+3) + 7 (willMsg LP "hello": 2+5)
                 //      + 5 (username LP "abc": 2+3) + 5 (password LP "pwd": 2+3)
                 //      = 39
-                remainingLength = 39u,
                 protocolName = "MQTT",
                 protocolLevel = 0x05u,
                 connectFlags = MqttConnectFlags(0xC4u),
@@ -115,7 +111,6 @@ class MqttV5ConnectCodecTest {
                 password = "pwd",
             )
         val buf = encode(original)
-        buf.resetForRead()
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
@@ -129,7 +124,6 @@ class MqttV5ConnectCodecTest {
                 //      + 1 (willPropLen=5) + 5 (MessageExpiry)
                 //      + 5 (willTopic LP "w/1") + 7 (willMsg LP "hello")
                 //      = 34
-                remainingLength = 34u,
                 protocolName = "MQTT",
                 protocolLevel = 0x05u,
                 connectFlags = MqttConnectFlags(0x04u),
@@ -141,7 +135,6 @@ class MqttV5ConnectCodecTest {
                 willMessage = "hello",
             )
         val buf = encode(original)
-        buf.resetForRead()
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
@@ -194,7 +187,6 @@ class MqttV5ConnectCodecTest {
     fun peekFrameSizeForConnectCompletes() {
         val msg =
             MqttV5Packet.Connect(
-                remainingLength = 16u,
                 protocolName = "MQTT",
                 protocolLevel = 0x05u,
                 connectFlags = MqttConnectFlags(0x02u),
@@ -203,7 +195,6 @@ class MqttV5ConnectCodecTest {
                 clientId = "abc",
             )
         val buf = encode(msg)
-        buf.resetForRead()
         val totalBytes = buf.remaining()
 
         val pool = BufferPool()
@@ -218,13 +209,8 @@ class MqttV5ConnectCodecTest {
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun encode(value: MqttV5Packet<*>) =
-        BufferFactory.Default
-            .allocate(128, ByteOrder.BIG_ENDIAN)
-            .also {
-                (jpegDispatcher() as com.ditchoom.buffer.codec.Codec<MqttV5Packet<*>>)
-                    .encode(it, value, EncodeContext.Empty)
-            }
+    private fun encode(value: MqttV5Packet<*>): ReadBuffer =
+        jpegDispatcher().encode(value as MqttV5Packet<JpegImage>, EncodeContext.Empty, BufferFactory.Default)
 
     private fun jpegDispatcher(): MqttV5PacketCodec<JpegImage> = MqttV5PacketCodec(JpegImageCodec)
 }

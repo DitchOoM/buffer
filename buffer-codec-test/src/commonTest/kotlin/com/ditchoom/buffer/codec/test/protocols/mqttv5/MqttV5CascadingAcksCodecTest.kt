@@ -3,6 +3,7 @@ package com.ditchoom.buffer.codec.test.protocols.mqttv5
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
@@ -43,12 +44,10 @@ class MqttV5CascadingAcksCodecTest {
         // properties". Caller signals "omit" with reasonCode = null.
         val msg =
             MqttV5Packet.PubAck(
-                remainingLength = 2u,
                 packetIdentifier = 0x002Au,
                 reasonCode = null,
             )
         val buf = encode(msg)
-        buf.resetForRead()
         assertContentEquals(
             byteArrayOf(0x40, 0x02, 0x00, 0x2A),
             buf.readByteArray(buf.remaining()),
@@ -59,12 +58,10 @@ class MqttV5CascadingAcksCodecTest {
     fun encodesPubAckWithExplicitReasonCode() {
         val msg =
             MqttV5Packet.PubAck(
-                remainingLength = 3u,
                 packetIdentifier = 0x002Au,
                 reasonCode = V5PubAckReasonCode.NoMatchingSubscribers(),
             )
         val buf = encode(msg)
-        buf.resetForRead()
         assertContentEquals(
             byteArrayOf(0x40, 0x03, 0x00, 0x2A, 0x10),
             buf.readByteArray(buf.remaining()),
@@ -106,16 +103,14 @@ class MqttV5CascadingAcksCodecTest {
     fun roundTripsPubAckBothCascadeForms() {
         val cases =
             listOf(
-                MqttV5Packet.PubAck(remainingLength = 2u, packetIdentifier = 0x0001u, reasonCode = null),
+                MqttV5Packet.PubAck(packetIdentifier = 0x0001u, reasonCode = null),
                 MqttV5Packet.PubAck(
-                    remainingLength = 3u,
                     packetIdentifier = 0x0001u,
                     reasonCode = V5PubAckReasonCode.ImplementationSpecificError(),
                 ),
             )
         for (msg in cases) {
             val buf = encode(msg)
-            buf.resetForRead()
             val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
             assertEquals(msg, decoded, "round-trip $msg")
         }
@@ -125,31 +120,26 @@ class MqttV5CascadingAcksCodecTest {
     fun pubRecPubRelPubCompShareTheSameShape() {
         val pubRec =
             MqttV5Packet.PubRec(
-                remainingLength = 3u,
                 packetIdentifier = 0x0007u,
                 reasonCode = V5PubAckReasonCode.UnspecifiedError(),
             )
         val pubRel =
             MqttV5Packet.PubRel(
-                remainingLength = 3u,
                 packetIdentifier = 0x0007u,
                 reasonCode = V5PubAckReasonCode.PacketIdentifierNotFound(),
             )
         val pubComp =
             MqttV5Packet.PubComp(
-                remainingLength = 3u,
                 packetIdentifier = 0x0007u,
                 reasonCode = V5PubAckReasonCode.PacketIdentifierNotFound(),
             )
         val unsubAck =
             MqttV5Packet.UnsubAck(
-                remainingLength = 3u,
                 packetIdentifier = 0x0007u,
                 reasonCode = V5UnsubAckReasonCode.PacketIdentifierInUse(),
             )
         for (msg in listOf(pubRec, pubRel, pubComp, unsubAck)) {
             val buf = encode(msg)
-            buf.resetForRead()
             val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
             assertEquals(msg, decoded, "round-trip $msg")
         }
@@ -159,9 +149,8 @@ class MqttV5CascadingAcksCodecTest {
     fun encodesDisconnectWithoutReasonCodeAsTwoBytes() {
         // §3.14.2.1 — DISCONNECT can be the bare `E0 00` (Normal,
         // no properties).
-        val msg = MqttV5Packet.Disconnect(remainingLength = 0u, reasonCode = null)
+        val msg = MqttV5Packet.Disconnect(reasonCode = null)
         val buf = encode(msg)
-        buf.resetForRead()
         assertContentEquals(byteArrayOf(0xE0.toByte(), 0x00), buf.readByteArray(buf.remaining()))
     }
 
@@ -169,11 +158,9 @@ class MqttV5CascadingAcksCodecTest {
     fun encodesDisconnectWithExplicitReasonCode() {
         val msg =
             MqttV5Packet.Disconnect(
-                remainingLength = 1u,
                 reasonCode = V5DisconnectReasonCode.KeepAliveTimeout(),
             )
         val buf = encode(msg)
-        buf.resetForRead()
         assertContentEquals(
             byteArrayOf(0xE0.toByte(), 0x01, 0x8D.toByte()),
             buf.readByteArray(buf.remaining()),
@@ -184,12 +171,11 @@ class MqttV5CascadingAcksCodecTest {
     fun roundTripsDisconnectBothCascadeForms() {
         val cases =
             listOf(
-                MqttV5Packet.Disconnect(remainingLength = 0u, reasonCode = null),
-                MqttV5Packet.Disconnect(remainingLength = 1u, reasonCode = V5DisconnectReasonCode.KeepAliveTimeout()),
+                MqttV5Packet.Disconnect(reasonCode = null),
+                MqttV5Packet.Disconnect(reasonCode = V5DisconnectReasonCode.KeepAliveTimeout()),
             )
         for (msg in cases) {
             val buf = encode(msg)
-            buf.resetForRead()
             val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
             assertEquals(msg, decoded, "round-trip $msg")
         }
@@ -199,12 +185,11 @@ class MqttV5CascadingAcksCodecTest {
     fun roundTripsAuthBothCascadeForms() {
         val cases =
             listOf(
-                MqttV5Packet.Auth(remainingLength = 0u, reasonCode = null),
-                MqttV5Packet.Auth(remainingLength = 1u, reasonCode = V5AuthReasonCode.ContinueAuthentication()),
+                MqttV5Packet.Auth(reasonCode = null),
+                MqttV5Packet.Auth(reasonCode = V5AuthReasonCode.ContinueAuthentication()),
             )
         for (msg in cases) {
             val buf = encode(msg)
-            buf.resetForRead()
             val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
             assertEquals(msg, decoded, "round-trip $msg")
         }
@@ -216,12 +201,10 @@ class MqttV5CascadingAcksCodecTest {
         // returns Complete(1 + vbi_width + rl).
         val msg =
             MqttV5Packet.PubAck(
-                remainingLength = 3u,
                 packetIdentifier = 0x0001u,
                 reasonCode = V5PubAckReasonCode.NoMatchingSubscribers(),
             )
         val buf = encode(msg)
-        buf.resetForRead()
         val totalBytes = buf.remaining()
 
         val pool = BufferPool()
@@ -241,13 +224,11 @@ class MqttV5CascadingAcksCodecTest {
         // Length byte (0x00 = empty bag).
         val msg =
             MqttV5Packet.PubAck(
-                remainingLength = 4u,
                 packetIdentifier = 0x002Au,
                 reasonCode = V5PubAckReasonCode.NoMatchingSubscribers(),
                 properties = emptyList(),
             )
         val buf = encode(msg)
-        buf.resetForRead()
         assertContentEquals(
             byteArrayOf(0x40, 0x04, 0x00, 0x2A, 0x10, 0x00),
             buf.readByteArray(buf.remaining()),
@@ -259,13 +240,11 @@ class MqttV5CascadingAcksCodecTest {
         // RL = 2 (pid) + 1 (rc) + 1 (propLen) + 5 (MessageExpiry) = 9
         val msg =
             MqttV5Packet.PubAck(
-                remainingLength = 9u,
                 packetIdentifier = 0x002Au,
                 reasonCode = V5PubAckReasonCode.Success(),
                 properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
             )
         val buf = encode(msg)
-        buf.resetForRead()
         assertContentEquals(
             byteArrayOf(
                 0x40,
@@ -289,23 +268,20 @@ class MqttV5CascadingAcksCodecTest {
         val cases =
             listOf(
                 // Form 1: bare PUBACK, no rc, no props
-                MqttV5Packet.PubAck(remainingLength = 2u, packetIdentifier = 0x0001u),
+                MqttV5Packet.PubAck(packetIdentifier = 0x0001u),
                 // Form 2: rc only (RL<4 elides propLen)
                 MqttV5Packet.PubAck(
-                    remainingLength = 3u,
                     packetIdentifier = 0x0001u,
                     reasonCode = V5PubAckReasonCode.NoMatchingSubscribers(),
                 ),
                 // Form 3: rc + empty property bag (RL=4)
                 MqttV5Packet.PubAck(
-                    remainingLength = 4u,
                     packetIdentifier = 0x0001u,
                     reasonCode = V5PubAckReasonCode.Success(),
                     properties = emptyList(),
                 ),
                 // Form 4: rc + non-empty property bag
                 MqttV5Packet.PubAck(
-                    remainingLength = 22u,
                     packetIdentifier = 0x0001u,
                     reasonCode = V5PubAckReasonCode.Success(),
                     properties =
@@ -317,7 +293,6 @@ class MqttV5CascadingAcksCodecTest {
             )
         for (msg in cases) {
             val buf = encode(msg)
-            buf.resetForRead()
             val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
             assertEquals(msg, decoded, "round-trip $msg")
         }
@@ -328,21 +303,18 @@ class MqttV5CascadingAcksCodecTest {
         // body = 1 (rc) + 1 (propLen=5) + 5 (MessageExpiry) = 7
         val original =
             MqttV5Packet.Disconnect(
-                remainingLength = 7u,
                 reasonCode = V5DisconnectReasonCode.NormalDisconnection(), // Normal disconnection (with reason for properties to attach)
                 properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
             )
         val buf = encode(original)
-        buf.resetForRead()
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         assertEquals(original, decoded)
     }
 
     @Test
     fun peekFrameSizeForDisconnectDripFed() {
-        val msg = MqttV5Packet.Disconnect(remainingLength = 1u, reasonCode = V5DisconnectReasonCode.KeepAliveTimeout())
+        val msg = MqttV5Packet.Disconnect(reasonCode = V5DisconnectReasonCode.KeepAliveTimeout())
         val buf = encode(msg)
-        buf.resetForRead()
         val totalBytes = buf.remaining()
 
         val pool = BufferPool()
@@ -380,13 +352,11 @@ class MqttV5CascadingAcksCodecTest {
         // Wire layout: 50 RL pid rc propLen <props...>
         val msg =
             MqttV5Packet.PubRec(
-                remainingLength = 9u,
                 packetIdentifier = 0x0099u,
                 reasonCode = V5PubAckReasonCode.UnspecifiedError(),
                 properties = listOf(MqttV5Property.ReasonString(value = "rate")),
             )
         val buf = encode(msg)
-        buf.resetForRead()
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         assertEquals(msg, decoded)
     }
@@ -395,13 +365,11 @@ class MqttV5CascadingAcksCodecTest {
     fun pubRelRoundTripsWithPropertyBag() {
         val msg =
             MqttV5Packet.PubRel(
-                remainingLength = 9u,
                 packetIdentifier = 0x00ABu,
                 reasonCode = V5PubAckReasonCode.PacketIdentifierNotFound(),
                 properties = listOf(MqttV5Property.ReasonString(value = "miss")),
             )
         val buf = encode(msg)
-        buf.resetForRead()
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         assertEquals(msg, decoded)
     }
@@ -410,13 +378,11 @@ class MqttV5CascadingAcksCodecTest {
     fun pubCompRoundTripsWithPropertyBag() {
         val msg =
             MqttV5Packet.PubComp(
-                remainingLength = 4u,
                 packetIdentifier = 0x00CDu,
                 reasonCode = V5PubAckReasonCode.Success(),
                 properties = emptyList(),
             )
         val buf = encode(msg)
-        buf.resetForRead()
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         assertEquals(msg, decoded)
     }
@@ -425,13 +391,11 @@ class MqttV5CascadingAcksCodecTest {
     fun unsubAckRoundTripsWithPropertyBag() {
         val msg =
             MqttV5Packet.UnsubAck(
-                remainingLength = 12u,
                 packetIdentifier = 0x00EFu,
                 reasonCode = V5UnsubAckReasonCode.NoSubscriptionExisted(),
                 properties = listOf(MqttV5Property.ReasonString(value = "no match")),
             )
         val buf = encode(msg)
-        buf.resetForRead()
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         assertEquals(msg, decoded)
     }
@@ -444,12 +408,10 @@ class MqttV5CascadingAcksCodecTest {
         // Tier C (multi-payload dispatcher).
         val msg =
             MqttV5Packet.Auth(
-                remainingLength = 18u,
                 reasonCode = V5AuthReasonCode.ContinueAuthentication(),
                 properties = listOf(MqttV5Property.AuthenticationMethod(value = "SCRAM-SHA-256")),
             )
         val buf = encode(msg)
-        buf.resetForRead()
         val decoded = jpegDispatcher().decode(buf, DecodeContext.Empty)
         assertEquals(msg, decoded)
     }
@@ -458,7 +420,6 @@ class MqttV5CascadingAcksCodecTest {
     fun pubRecRejectsPropertiesWithoutReasonCode() {
         assertFailsWith<IllegalArgumentException> {
             MqttV5Packet.PubRec(
-                remainingLength = 4u,
                 packetIdentifier = 0x0099u,
                 reasonCode = null,
                 properties = emptyList(),
@@ -470,7 +431,6 @@ class MqttV5CascadingAcksCodecTest {
     fun pubRelRejectsPropertiesWithoutReasonCode() {
         assertFailsWith<IllegalArgumentException> {
             MqttV5Packet.PubRel(
-                remainingLength = 4u,
                 packetIdentifier = 0x0099u,
                 reasonCode = null,
                 properties = emptyList(),
@@ -482,7 +442,6 @@ class MqttV5CascadingAcksCodecTest {
     fun pubCompRejectsPropertiesWithoutReasonCode() {
         assertFailsWith<IllegalArgumentException> {
             MqttV5Packet.PubComp(
-                remainingLength = 4u,
                 packetIdentifier = 0x0099u,
                 reasonCode = null,
                 properties = emptyList(),
@@ -494,7 +453,6 @@ class MqttV5CascadingAcksCodecTest {
     fun unsubAckRejectsPropertiesWithoutReasonCode() {
         assertFailsWith<IllegalArgumentException> {
             MqttV5Packet.UnsubAck(
-                remainingLength = 4u,
                 packetIdentifier = 0x0099u,
                 reasonCode = null,
                 properties = emptyList(),
@@ -506,7 +464,6 @@ class MqttV5CascadingAcksCodecTest {
     fun authRejectsPropertiesWithoutReasonCode() {
         assertFailsWith<IllegalArgumentException> {
             MqttV5Packet.Auth(
-                remainingLength = 2u,
                 reasonCode = null,
                 properties = emptyList(),
             )
@@ -522,7 +479,6 @@ class MqttV5CascadingAcksCodecTest {
         val ex =
             assertFailsWith<IllegalArgumentException> {
                 MqttV5Packet.PubAck(
-                    remainingLength = 4u,
                     packetIdentifier = 0x002Au,
                     reasonCode = null,
                     properties = emptyList(),
@@ -539,7 +495,6 @@ class MqttV5CascadingAcksCodecTest {
     fun pubAckRejectsNonEmptyPropertiesWithoutReasonCode() {
         assertFailsWith<IllegalArgumentException> {
             MqttV5Packet.PubAck(
-                remainingLength = 7u,
                 packetIdentifier = 0x002Au,
                 reasonCode = null,
                 properties = listOf(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
@@ -552,7 +507,6 @@ class MqttV5CascadingAcksCodecTest {
         val ex =
             assertFailsWith<IllegalArgumentException> {
                 MqttV5Packet.Disconnect(
-                    remainingLength = 2u,
                     reasonCode = null,
                     properties = emptyList(),
                 )
@@ -568,7 +522,6 @@ class MqttV5CascadingAcksCodecTest {
     fun disconnectRejectsNonEmptyPropertiesWithoutReasonCode() {
         assertFailsWith<IllegalArgumentException> {
             MqttV5Packet.Disconnect(
-                remainingLength = 5u,
                 reasonCode = null,
                 properties = listOf(MqttV5Property.ContentType(value = "application/json")),
             )
@@ -584,13 +537,8 @@ class MqttV5CascadingAcksCodecTest {
     // audit-2c's cascade invariant (orthogonal to typing).
 
     @Suppress("UNCHECKED_CAST")
-    private fun encode(value: MqttV5Packet<*>) =
-        BufferFactory.Default
-            .allocate(64, ByteOrder.BIG_ENDIAN)
-            .also {
-                (jpegDispatcher() as com.ditchoom.buffer.codec.Codec<MqttV5Packet<*>>)
-                    .encode(it, value, EncodeContext.Empty)
-            }
+    private fun encode(value: MqttV5Packet<*>): ReadBuffer =
+        jpegDispatcher().encode(value as MqttV5Packet<JpegImage>, EncodeContext.Empty, BufferFactory.Default)
 
     private fun jpegDispatcher(): MqttV5PacketCodec<JpegImage> = MqttV5PacketCodec(JpegImageCodec)
 }
