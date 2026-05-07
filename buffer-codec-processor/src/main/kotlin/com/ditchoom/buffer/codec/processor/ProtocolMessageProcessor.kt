@@ -140,6 +140,35 @@ class ProtocolMessageProcessor(
                 emitter.tryEmit(symbol)
                 continue
             }
+            // Issue #150 — `@ProtocolMessage data object` / `object`. No
+            // primary constructor, so the field-level validators below
+            // don't apply. `@DispatchOn` belongs on a sealed parent (it
+            // selects between variants), so an object carrying it is a
+            // shape error — emit a focused diagnostic that the codegen
+            // test pins on (PR #153 contract).
+            if (symbol.classKind == ClassKind.OBJECT) {
+                val hasDispatchOn =
+                    symbol.annotations.any { ann ->
+                        ann.shortName.asString() == DISPATCH_ON_SHORT &&
+                            ann.annotationType
+                                .resolve()
+                                .declaration.qualifiedName
+                                ?.asString() == DISPATCH_ON_QNAME
+                    }
+                if (hasDispatchOn) {
+                    val name = symbol.qualifiedName?.asString() ?: symbol.simpleName.asString()
+                    logger.error(
+                        "@DispatchOn is not valid on an object — it must annotate a sealed " +
+                            "interface parent that selects between variants. $name carries " +
+                            "@DispatchOn directly.",
+                        symbol,
+                    )
+                    continue
+                }
+                validateFramedBy(symbol)
+                emitter.tryEmit(symbol)
+                continue
+            }
             val ctor = symbol.primaryConstructor ?: continue
             for (param in ctor.parameters) {
                 walkType(
@@ -363,11 +392,15 @@ class ProtocolMessageProcessor(
         val seen = mutableMapOf<Int, String>()
         for (sub in parent.getSealedSubclasses()) {
             val subName = sub.qualifiedName?.asString() ?: sub.simpleName.asString()
-            if (Modifier.DATA !in sub.modifiers) {
+            // Issue #150 — `data object` / `object` variants are valid
+            // here (they emit empty-fields singleton codecs). Reject only
+            // non-data, non-object subclasses.
+            val isObjectVariant = sub.classKind == ClassKind.OBJECT
+            if (!isObjectVariant && Modifier.DATA !in sub.modifiers) {
                 logger.error(
-                    "@DispatchOn variant $subName must be a `data class`. Slice 6 doesn't yet " +
-                        "support `object` / non-data variants — those would need the consume + " +
-                        "forward-via-context model.",
+                    "@DispatchOn variant $subName must be a `data class` or `data object` / " +
+                        "`object`. Slice 6 doesn't yet support non-data class variants — those " +
+                        "would need the consume + forward-via-context model.",
                     sub,
                 )
                 continue
@@ -416,6 +449,13 @@ class ProtocolMessageProcessor(
                 )
                 continue
             }
+            // Issue #150 — `data object` / `object` variants have no
+            // primary constructor and cannot carry the discriminator
+            // field. PR #153's DataObjectCodegenTest only asserts
+            // compilation success on this shape; the dispatcher emit
+            // delegates to the variant's empty-fields codec without
+            // re-reading the discriminator.
+            if (isObjectVariant) continue
             val variantCtor = sub.primaryConstructor
             val firstParam = variantCtor?.parameters?.firstOrNull()
             val firstParamType = firstParam?.type?.resolve()

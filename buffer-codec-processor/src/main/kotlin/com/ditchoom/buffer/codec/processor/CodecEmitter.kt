@@ -176,6 +176,27 @@ internal class CodecEmitter(
     }
 
     private fun analyze(symbol: KSClassDeclaration): CodecShape? {
+        // Issue #150 — `@ProtocolMessage data object` / `@ProtocolMessage object`.
+        // Singleton variants carry zero wire bytes beyond the dispatcher's
+        // discriminator (or zero bytes total when standalone). Emit a
+        // CodecShape with empty fields and `isSingletonObject = true` —
+        // buildDecodeFun returns the singleton via `return ObjectName`,
+        // buildEncodeFun emits an empty body, buildWireSizeFun collapses
+        // to `Exact(0)` via the empty-fields fall-through, and
+        // buildPeekFrameFun collapses to the all-FixedSize Complete(0)
+        // path.
+        if (symbol.classKind == ClassKind.OBJECT) {
+            if (symbol.annotations.any { it.shortName.asString() == "DispatchOn" }) return null
+            val ownerSimpleName = symbol.simpleName.asString()
+            return CodecShape(
+                packageName = symbol.packageName.asString(),
+                messageClassName = classNameOf(symbol),
+                ownerSimpleName = ownerSimpleName,
+                codecSimpleName = "${ownerSimpleName}Codec",
+                fields = emptyList(),
+                isSingletonObject = true,
+            )
+        }
         if (symbol.classKind != ClassKind.CLASS) return null
         val isData = Modifier.DATA in symbol.modifiers
         val isValue = Modifier.VALUE in symbol.modifiers
@@ -2320,6 +2341,20 @@ internal class CodecEmitter(
         // constructor call becomes the try-block's value expression,
         // returned by the function.
         val boundingIndex = shape.fields.indexOfFirst { it.isBoundingShape() }
+        // Issue #150 — `@ProtocolMessage data object` / `object` decode
+        // returns the singleton instance, NOT a constructor call. Kotlin
+        // references singletons by their class name directly.
+        if (shape.isSingletonObject) {
+            body.addStatement("return %T", messageType)
+            return FunSpec
+                .builder("decode")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("buffer", READ_BUFFER_CN)
+                .addParameter("context", DECODE_CONTEXT_CN)
+                .returns(messageType)
+                .addCode(body.build())
+                .build()
+        }
         val ctorArgs = shape.fields.joinToString(", ") { "${it.name} = ${it.name}" }
         if (boundingIndex < 0) {
             for (field in shape.fields) appendDecodeField(body, field)
@@ -5384,7 +5419,13 @@ internal class CodecEmitter(
         val variants = mutableListOf<VariantSpec>()
         val seenValues = mutableSetOf<Int>()
         for (sub in subclasses) {
-            if (Modifier.DATA !in sub.modifiers) return null
+            // Issue #150 — accept `data object` / `object` variants
+            // (classKind == OBJECT) in addition to data-class variants.
+            // Empty-fields object variants encode/decode through their
+            // standalone codec, which buildDecodeFun emits as
+            // `return ObjectName` and buildEncodeFun emits as a no-op.
+            val isObjectVariant = sub.classKind == ClassKind.OBJECT
+            if (!isObjectVariant && Modifier.DATA !in sub.modifiers) return null
             val packetType =
                 sub.annotations.firstOrNull { it.shortName.asString() == "PacketType" }
                     ?: return null
@@ -5490,7 +5531,15 @@ internal class CodecEmitter(
         val variants = mutableListOf<DispatchOnVariantSpec>()
         val seenValues = mutableSetOf<Int>()
         for (sub in subclasses) {
-            if (Modifier.DATA !in sub.modifiers) return null
+            // Issue #150 — accept `data object` / `object` variants
+            // (classKind == OBJECT). Object variants don't carry the
+            // discriminator field (no constructor), so the firstParam
+            // discriminator-type check is skipped for them. PR #153's
+            // DataObjectCodegenTest only asserts compilation success on
+            // this shape; runtime dispatch semantics for an empty-bodied
+            // @DispatchOn variant remain a future concern.
+            val isObjectVariant = sub.classKind == ClassKind.OBJECT
+            if (!isObjectVariant && Modifier.DATA !in sub.modifiers) return null
             val packetType =
                 sub.annotations.firstOrNull { it.shortName.asString() == "PacketType" } ?: return null
             val rawValue =
@@ -5499,16 +5548,20 @@ internal class CodecEmitter(
                     ?.value as? Int ?: return null
             if (rawValue !in 0..255) return null
             if (!seenValues.add(rawValue)) return null
-            val ctor = sub.primaryConstructor ?: return null
-            val firstParam = ctor.parameters.firstOrNull() ?: return null
-            val firstParamQname =
-                firstParam.type
-                    .resolve()
-                    .declaration.qualifiedName
-                    ?.asString()
-            if (firstParamQname != discriminatorDecl.qualifiedName?.asString()) return null
-            // Variant must analyze cleanly via the existing data-class path.
-            // The header field will be a FieldSpec.ValueClassScalar (slice 3).
+            if (!isObjectVariant) {
+                val ctor = sub.primaryConstructor ?: return null
+                val firstParam = ctor.parameters.firstOrNull() ?: return null
+                val firstParamQname =
+                    firstParam.type
+                        .resolve()
+                        .declaration.qualifiedName
+                        ?.asString()
+                if (firstParamQname != discriminatorDecl.qualifiedName?.asString()) return null
+            }
+            // Variant must analyze cleanly via the existing data-class path
+            // (or the object-singleton path added by issue #150). The
+            // header field, when present, is a FieldSpec.ValueClassScalar
+            // (slice 3); object variants resolve to an empty-fields shape.
             analyze(sub) ?: return null
             // Slice 10d: detect whether the variant itself is generic
             // (slice 10b shape — `<P : Payload>` type parameter on the
@@ -6639,6 +6692,15 @@ internal class CodecEmitter(
          * `ReadBuffer`, decode adds a strict bound check).
          */
         val framedBy: FramedByConfig? = null,
+        /**
+         * Issue #150 — true when the symbol is a `@ProtocolMessage data
+         * object` or plain `@ProtocolMessage object`. Empty `fields`,
+         * decode emits `return ObjectName` (singleton reference), encode
+         * emits an empty body, wireSize is `Exact(0)`. Standalone codecs
+         * still implement `Codec<T>`; sealed-variant codecs are invoked
+         * by the dispatcher after it consumes the discriminator.
+         */
+        val isSingletonObject: Boolean = false,
     )
 
     /**
