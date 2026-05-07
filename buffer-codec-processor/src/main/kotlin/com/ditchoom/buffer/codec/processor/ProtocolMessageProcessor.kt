@@ -1652,11 +1652,13 @@ class ProtocolMessageProcessor(
             val fieldName = param.name?.asString() ?: "<unknown>"
             logger.error(
                 "@ProtocolMessage field $ownerName.$fieldName has raw-bytes type $qualified. " +
-                    "Section 8 of PHASE_10_DESIGN_NOTES.md forbids ReadBuffer / WriteBuffer / " +
-                    "PlatformBuffer / ByteArray / ByteBuffer in @ProtocolMessage data classes. " +
-                    "Wrap inside a `com.ditchoom.buffer.codec.Payload`-tagged type and copy " +
-                    "explicitly inside the consumer's decoder lambda, or model the field with " +
-                    "a typed shape and (if needed) `@UseCodec`.",
+                    "Section 8 of PHASE_10_DESIGN_NOTES.md and slice 15 D1 forbid ReadBuffer / " +
+                    "WriteBuffer / PlatformBuffer / ByteArray / ByteBuffer in @ProtocolMessage " +
+                    "data classes — raw buffer/bytes types leak ownership ambiguity (who frees, " +
+                    "when, aliased?). Wrap the bytes in a typed value class implementing " +
+                    "`com.ditchoom.buffer.codec.Payload` and reference its `Codec<T>` via " +
+                    "`@UseCodec` (slice 15 D2) so copy-vs-zero-copy is an explicit codec-author " +
+                    "choice at one well-defined boundary.",
                 param,
             )
             return

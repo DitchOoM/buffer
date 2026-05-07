@@ -167,6 +167,127 @@ class ProtocolMessagePayloadValidatorTest {
     }
 
     @Test
+    fun firesOnRawWriteBufferField() {
+        // Phase J.M.5 slice 15b — same §8/D1 ban applies to WriteBuffer.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+                @ProtocolMessage
+                data class RawWriteBufferField(val raw: WriteBuffer)
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertContainsRawBytesError(result, "RawWriteBufferField.raw", "com.ditchoom.buffer.WriteBuffer")
+    }
+
+    @Test
+    fun firesOnRawPlatformBufferField() {
+        // Phase J.M.5 slice 15b — same §8/D1 ban applies to PlatformBuffer.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.PlatformBuffer
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+                @ProtocolMessage
+                data class RawPlatformBufferField(val raw: PlatformBuffer)
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertContainsRawBytesError(
+            result,
+            "RawPlatformBufferField.raw",
+            "com.ditchoom.buffer.PlatformBuffer",
+        )
+    }
+
+    @Test
+    fun acceptsLengthPrefixedUseCodecPayloadValueClass() {
+        // Phase J.M.5 slice 15b — the recommended migration target for raw
+        // ByteArray-bearing fields: wrap bytes in a `Payload`-marked value
+        // class and reference the codec via `@LengthPrefixed @UseCodec`
+        // (slice 15a shape). The §8 walk halts at the Payload marker
+        // before descending into the value class's `ByteArray` inner.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.Codec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
+                import com.ditchoom.buffer.codec.Payload
+                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+
+                @JvmInline
+                value class Blob(val bytes: ByteArray) : Payload
+
+                object BlobCodec : Codec<Blob> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): Blob =
+                        Blob(buffer.readByteArray(buffer.remaining()))
+                    override fun encode(buffer: WriteBuffer, value: Blob, context: EncodeContext) {
+                        buffer.writeBytes(value.bytes)
+                    }
+                    override fun wireSize(value: Blob, context: EncodeContext): WireSize =
+                        WireSize.Exact(value.bytes.size)
+                }
+
+                @ProtocolMessage
+                data class FrameWithBlob(
+                    @LengthPrefixed @UseCodec(BlobCodec::class) val data: Blob,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+        assertFalse(
+            result.messages.contains("Section 8") || result.messages.contains("slice 15 D1"),
+            "wrapping bytes in a Payload value class is the documented migration target — " +
+                "no §8/D1 diagnostic should fire. Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
+    fun diagnosticReferencesSlice15Doctrine() {
+        // Phase J.M.5 slice 15b — the diagnostic must point at slice 15
+        // D1 (raw types forbidden) and D2 (Payload marker required) as
+        // the documented migration path, in addition to the existing §8
+        // citation.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+                @ProtocolMessage
+                data class StillRaw(val bytes: ByteArray)
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("slice 15 D1"),
+            "diagnostic should reference slice 15 D1. Messages:\n${result.messages}",
+        )
+        assertTrue(
+            result.messages.contains("slice 15 D2"),
+            "diagnostic should reference slice 15 D2 (the Payload-marker migration target). " +
+                "Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
     fun acceptsValueClassOverPayload() {
         // Value class wrapping a Payload-tagged inner — walk descends into
         // the inner type, hits Payload, and short-circuits. No diagnostic.
