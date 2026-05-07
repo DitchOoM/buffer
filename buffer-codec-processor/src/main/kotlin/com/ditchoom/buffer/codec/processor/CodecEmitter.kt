@@ -268,14 +268,32 @@ internal class CodecEmitter(
      * validator and only structurally extracts the annotation arguments.
      */
     private fun detectFramedBy(symbol: KSClassDeclaration): FramedByConfig? {
-        val ann =
-            symbol.annotations.firstOrNull { a ->
-                a.shortName.asString() == "FramedBy" &&
-                    a.annotationType
-                        .resolve()
-                        .declaration.qualifiedName
-                        ?.asString() == FRAMED_BY_QNAME
-            } ?: return null
+        // Direct annotation on this symbol.
+        symbol.annotations.firstOrNull(::isFramedByAnn)?.let { return parseFramedBy(it) }
+        // Phase J.M.5 slice 14c — inherited from a sealed parent. Per Q3 of
+        // the 14b handoff, every variant of a `@FramedBy` sealed parent
+        // inherits the framing rule. Walking declared `superTypes` (rather
+        // than `getAllSuperTypes`) keeps the lookup cheap and matches the
+        // narrow shape the validator already enforces: the framed parent
+        // is a direct sealed interface above the variant.
+        for (superType in symbol.superTypes) {
+            val superDecl = superType.resolve().declaration as? KSClassDeclaration ?: continue
+            if (Modifier.SEALED !in superDecl.modifiers) continue
+            if (superDecl.classKind != ClassKind.INTERFACE) continue
+            val ann = superDecl.annotations.firstOrNull(::isFramedByAnn) ?: continue
+            return parseFramedBy(ann)
+        }
+        return null
+    }
+
+    private fun isFramedByAnn(ann: KSAnnotation): Boolean =
+        ann.shortName.asString() == "FramedBy" &&
+            ann.annotationType
+                .resolve()
+                .declaration.qualifiedName
+                ?.asString() == FRAMED_BY_QNAME
+
+    private fun parseFramedBy(ann: KSAnnotation): FramedByConfig? {
         val codecKsType =
             ann.arguments.firstOrNull { it.name?.asString() == "codec" }?.value as? KSType
                 ?: return null
@@ -1804,7 +1822,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 14b — `@FramedBy` file spec. Emits an `object`
+     * Phase J.M.5 slice 14b/14c — `@FramedBy` file spec. Emits an `object`
      * codec with the new encode signature
      * (`encode(value, context, factory): ReadBuffer`) and the strict
      * decode (`decode(buffer, context): T` with bound assertion). The
@@ -1813,12 +1831,12 @@ internal class CodecEmitter(
      * spanning exactly the framed wire bytes (see the slice 14b handoff,
      * Q5).
      *
-     * The probe shape (slice14b) exercises `after = ""` only. The
-     * sealed-parent + `after = "<header>"` path that integrates with
-     * `@PacketType` dispatch is the natural domain of slice 14c (the
-     * MQTT v3/v5 substitution); this emit path leaves a hook for that
-     * by accepting [FramedByConfig.afterFieldName] but currently only
-     * implements the empty-string case.
+     * Slice 14c adds the `after = "<header>"` path: the named header
+     * field sits before the prefix on the wire, so decode reads it
+     * first and encode threads it through `FramedEncoder.writeHeader`.
+     * Decode + encode emit branches on `framedBy.afterFieldName`; the
+     * peek emit reuses the bounding-codec walker shape from slice 11
+     * (header bytes + observed prefix width + prefix value).
      */
     private fun buildFramedByFileSpec(
         shape: CodecShape,
@@ -1829,6 +1847,7 @@ internal class CodecEmitter(
                 .objectBuilder(shape.codecSimpleName)
                 .addFunction(buildFramedByDecodeFun(shape, framedBy))
                 .addFunction(buildFramedByEncodeFun(shape, framedBy))
+                .addFunction(buildFramedByPeekFrameFun(shape, framedBy))
                 .build()
         return FileSpec
             .builder(shape.packageName, shape.codecSimpleName)
@@ -1840,7 +1859,15 @@ internal class CodecEmitter(
         shape: CodecShape,
         framedBy: FramedByConfig,
     ): FunSpec {
+        val afterField = framedByAfterField(shape, framedBy)
         val body = CodeBlock.builder()
+        // Phase J.M.5 slice 14c — `after = "X"` reads the header field
+        // before the prefix. The local emitted by appendDecodeField is
+        // named after the field, so the constructor invocation below
+        // binds it positionally without any extra wiring.
+        if (afterField != null) {
+            appendDecodeField(body, afterField)
+        }
         body.addStatement("val __framingOuterLimit = buffer.limit()")
         body.addStatement(
             "val __framingLength = %T.decode(buffer, context)",
@@ -1850,7 +1877,10 @@ internal class CodecEmitter(
         body.addStatement("val __framingStart = buffer.position()")
         body.addStatement("val __framingBound = __framingStart + __framingLength.toInt()")
         body.beginControlFlow("return try")
-        for (field in shape.fields) appendDecodeField(body, field)
+        for (field in shape.fields) {
+            if (field === afterField) continue
+            appendDecodeField(body, field)
+        }
         body.beginControlFlow("if (buffer.position() != __framingBound)")
         body.addStatement(
             "throw %T(\n  fieldPath = %S,\n  bufferPosition = buffer.position(),\n" +
@@ -1878,34 +1908,27 @@ internal class CodecEmitter(
         shape: CodecShape,
         framedBy: FramedByConfig,
     ): FunSpec {
+        val afterField = framedByAfterField(shape, framedBy)
+        val headerWireWidth = afterField?.let(::framedByHeaderWireWidth) ?: 0
         val body = CodeBlock.builder()
-        body.add(
-            "return %T.encode(\n",
-            FRAMED_ENCODER_CN,
-        )
+        body.add("return %T.encode(\n", FRAMED_ENCODER_CN)
         body.indent()
         body.add("factory = factory,\n")
         body.add("framingCodec = %T,\n", framedBy.codecClassName)
         body.add("context = context,\n")
+        if (afterField != null) {
+            body.add("headerWireWidth = %L,\n", headerWireWidth)
+            body.add("writeHeader = { buffer ->\n")
+            body.indent()
+            appendEncodeField(body, afterField, shape)
+            body.unindent()
+            body.add("},\n")
+        }
         body.unindent()
         body.beginControlFlow(") { buffer ->")
         for (field in shape.fields) {
-            when (field) {
-                is FieldSpec.Scalar -> appendEncodeScalar(body, field, shape.ownerSimpleName)
-                is FieldSpec.LengthPrefixedMessage -> appendEncodeLengthPrefixed(body, field)
-                is FieldSpec.LengthPrefixedString -> appendEncodeLengthPrefixedString(body, field)
-                is FieldSpec.LengthFromString -> appendEncodeLengthFromString(body, field)
-                is FieldSpec.LengthFromList -> appendEncodeLengthFromList(body, field)
-                is FieldSpec.RemainingBytesScalarList -> appendEncodeRemainingBytesScalarList(body, field)
-                is FieldSpec.RemainingBytesProtocolMessageList ->
-                    appendEncodeRemainingBytesProtocolMessageList(body, field)
-                is FieldSpec.RemainingBytesPayload -> appendEncodeRemainingBytesPayload(body, field)
-                is FieldSpec.UseCodecScalar -> appendEncodeUseCodecScalar(body, field, shape)
-                is FieldSpec.LengthPrefixedUseCodecList -> appendEncodeLengthPrefixedUseCodecList(body, field)
-                is FieldSpec.ValueClassScalar -> appendEncodeValueClassScalar(body, field)
-                is FieldSpec.Conditional -> appendEncodeConditional(body, field)
-                is FieldSpec.ProtocolMessageScalar -> appendEncodeProtocolMessageScalar(body, field)
-            }
+            if (field === afterField) continue
+            appendEncodeField(body, field, shape)
         }
         body.endControlFlow()
         return FunSpec
@@ -1917,6 +1940,125 @@ internal class CodecEmitter(
             .addCode(body.build())
             .build()
     }
+
+    /**
+     * Phase J.M.5 slice 14c — emit `peekFrameSize` for an `@FramedBy`
+     * codec. Mirrors [appendPeekLengthPrefixedUseCodecList]: the prefix
+     * codec is `BoundingLengthCodec<UInt>` (validator-checked), so the
+     * walker drives its `decode` against a non-consuming peek view at
+     * `baseOffset + headerWireWidth` and computes total = headerWireWidth
+     * + observed-codec-width + decodedValue.toInt().
+     */
+    private fun buildFramedByPeekFrameFun(
+        shape: CodecShape,
+        framedBy: FramedByConfig,
+    ): FunSpec {
+        val afterField = framedByAfterField(shape, framedBy)
+        val headerWireWidth = afterField?.let(::framedByHeaderWireWidth) ?: 0
+        val builder =
+            FunSpec
+                .builder("peekFrameSize")
+                .addParameter("stream", STREAM_PROCESSOR_CN)
+                .addParameter("baseOffset", INT)
+                .returns(PEEK_RESULT_CN)
+        val body = CodeBlock.builder()
+        // Need at least the header bytes plus one prefix byte before
+        // attempting the codec read. Wider VBI continuations are caught
+        // by the codec's underflow → NeedsMoreData fallback below.
+        body.addStatement(
+            "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
+            headerWireWidth + 1,
+            PEEK_RESULT_CN,
+        )
+        // peekBuffer needs a budget large enough for the prefix codec's
+        // worst case. MqttRemainingLengthCodec is 1..4 bytes; allow 5 to
+        // mirror the slice-11 emit's UInt VBI peek budget.
+        val peekBudget = 5
+        body.addStatement(
+            "val __framingPeek = stream.peekBuffer(baseOffset + %L, %L) ?: return %T.NeedsMoreData",
+            headerWireWidth,
+            peekBudget,
+            PEEK_RESULT_CN,
+        )
+        body.beginControlFlow("try")
+        body.addStatement("val __framingPeekStart = __framingPeek.position()")
+        body.beginControlFlow("val __framingLength = try")
+        body.addStatement(
+            "%T.decode(__framingPeek, %T.Empty)",
+            framedBy.codecClassName,
+            DECODE_CONTEXT_CN,
+        )
+        body.nextControlFlow("catch (__e: %T)", ClassName("kotlin", "Throwable"))
+        body.beginControlFlow("when (__e::class.simpleName)")
+        body.addStatement(
+            "%S, %S, %S -> return %T.NeedsMoreData",
+            "BufferUnderflowException",
+            "IndexOutOfBoundsException",
+            "ArrayIndexOutOfBoundsException",
+            PEEK_RESULT_CN,
+        )
+        body.addStatement("else -> throw __e")
+        body.endControlFlow()
+        body.endControlFlow()
+        body.addStatement(
+            "val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart",
+        )
+        body.addStatement(
+            "val __total = %L + __framingPrefixWidth + __framingLength.toInt()",
+            headerWireWidth,
+        )
+        body.addStatement(
+            "return if (stream.available() - baseOffset >= __total) %T.Complete(__total) else %T.NeedsMoreData",
+            PEEK_RESULT_CN,
+            PEEK_RESULT_CN,
+        )
+        body.nextControlFlow("finally")
+        body.addStatement(
+            "(__framingPeek as? %T)?.freeNativeMemory()",
+            PLATFORM_BUFFER_CN,
+        )
+        body.endControlFlow()
+        builder.addCode(body.build())
+        return builder.build()
+    }
+
+    /**
+     * Phase J.M.5 slice 14c — resolve the `@FramedBy` `after`-named
+     * field to its [FieldSpec], or `null` when the name doesn't match
+     * an analyzed field OR the field shape cannot carry an Exact wire
+     * width (only Scalar / ValueClassScalar are accepted; this mirrors
+     * the validator's E3 acceptance set).
+     *
+     * Returning `null` for a non-Exact match is a graceful fallback: the
+     * validator already logged an `E3` error against the same shape, so
+     * KSP will fail the compile. The emitter just needs to avoid
+     * crashing while the validator's diagnostic flows through — silently
+     * degrading to the `after = ""` emit shape is enough.
+     */
+    private fun framedByAfterField(
+        shape: CodecShape,
+        framedBy: FramedByConfig,
+    ): FieldSpec? {
+        if (framedBy.afterFieldName.isEmpty()) return null
+        val field = shape.fields.firstOrNull { it.name == framedBy.afterFieldName } ?: return null
+        return when (field) {
+            is FieldSpec.Scalar, is FieldSpec.ValueClassScalar -> field
+            else -> null
+        }
+    }
+
+    /**
+     * Phase J.M.5 slice 14c — Exact wire width of the `@FramedBy`
+     * `after`-named header field. Only called for fields that
+     * [framedByAfterField] already filtered to Scalar / ValueClassScalar,
+     * so the `else` branch is structurally unreachable.
+     */
+    private fun framedByHeaderWireWidth(field: FieldSpec): Int =
+        when (field) {
+            is FieldSpec.Scalar -> field.wireBytes
+            is FieldSpec.ValueClassScalar -> field.wireBytes
+            else -> 0
+        }
 
     private fun buildFileSpec(shape: CodecShape): FileSpec {
         if (shape.framedBy != null && shape.payloadTypeParameter == null) {
@@ -2065,24 +2207,7 @@ internal class CodecEmitter(
         messageType: TypeName = shape.messageClassName,
     ): FunSpec {
         val body = CodeBlock.builder()
-        for (field in shape.fields) {
-            when (field) {
-                is FieldSpec.Scalar -> appendEncodeScalar(body, field, shape.ownerSimpleName)
-                is FieldSpec.LengthPrefixedMessage -> appendEncodeLengthPrefixed(body, field)
-                is FieldSpec.LengthPrefixedString -> appendEncodeLengthPrefixedString(body, field)
-                is FieldSpec.LengthFromString -> appendEncodeLengthFromString(body, field)
-                is FieldSpec.LengthFromList -> appendEncodeLengthFromList(body, field)
-                is FieldSpec.RemainingBytesScalarList -> appendEncodeRemainingBytesScalarList(body, field)
-                is FieldSpec.RemainingBytesProtocolMessageList ->
-                    appendEncodeRemainingBytesProtocolMessageList(body, field)
-                is FieldSpec.RemainingBytesPayload -> appendEncodeRemainingBytesPayload(body, field)
-                is FieldSpec.UseCodecScalar -> appendEncodeUseCodecScalar(body, field, shape)
-                is FieldSpec.LengthPrefixedUseCodecList -> appendEncodeLengthPrefixedUseCodecList(body, field)
-                is FieldSpec.ValueClassScalar -> appendEncodeValueClassScalar(body, field)
-                is FieldSpec.Conditional -> appendEncodeConditional(body, field)
-                is FieldSpec.ProtocolMessageScalar -> appendEncodeProtocolMessageScalar(body, field)
-            }
-        }
+        for (field in shape.fields) appendEncodeField(body, field, shape)
         return FunSpec
             .builder("encode")
             .addModifiers(KModifier.OVERRIDE)
@@ -2091,6 +2216,36 @@ internal class CodecEmitter(
             .addParameter("context", ENCODE_CONTEXT_CN)
             .addCode(body.build())
             .build()
+    }
+
+    /**
+     * Phase J.M.5 slice 14c — single-field encode dispatch shared by
+     * [buildEncodeFun], [buildFramedByEncodeFun]'s body lambda, and
+     * [buildFramedByEncodeFun]'s `writeHeader` lambda. Centralizing the
+     * `when` keeps the three call sites in lockstep when a new
+     * [FieldSpec] member lands.
+     */
+    private fun appendEncodeField(
+        body: CodeBlock.Builder,
+        field: FieldSpec,
+        shape: CodecShape,
+    ) {
+        when (field) {
+            is FieldSpec.Scalar -> appendEncodeScalar(body, field, shape.ownerSimpleName)
+            is FieldSpec.LengthPrefixedMessage -> appendEncodeLengthPrefixed(body, field)
+            is FieldSpec.LengthPrefixedString -> appendEncodeLengthPrefixedString(body, field)
+            is FieldSpec.LengthFromString -> appendEncodeLengthFromString(body, field)
+            is FieldSpec.LengthFromList -> appendEncodeLengthFromList(body, field)
+            is FieldSpec.RemainingBytesScalarList -> appendEncodeRemainingBytesScalarList(body, field)
+            is FieldSpec.RemainingBytesProtocolMessageList ->
+                appendEncodeRemainingBytesProtocolMessageList(body, field)
+            is FieldSpec.RemainingBytesPayload -> appendEncodeRemainingBytesPayload(body, field)
+            is FieldSpec.UseCodecScalar -> appendEncodeUseCodecScalar(body, field, shape)
+            is FieldSpec.LengthPrefixedUseCodecList -> appendEncodeLengthPrefixedUseCodecList(body, field)
+            is FieldSpec.ValueClassScalar -> appendEncodeValueClassScalar(body, field)
+            is FieldSpec.Conditional -> appendEncodeConditional(body, field)
+            is FieldSpec.ProtocolMessageScalar -> appendEncodeProtocolMessageScalar(body, field)
+        }
     }
 
     /**
@@ -4908,6 +5063,13 @@ internal class CodecEmitter(
         variants.sortBy { it.dispatchValue }
         val pkg = symbol.packageName.asString()
         val parentSimpleName = symbol.simpleName.asString()
+        // Phase J.M.5 slice 14c — capture parent `@FramedBy`. The
+        // dispatcher's emit path forks on this: when present, encode
+        // returns `ReadBuffer` (slicing scheme owned by FramedEncoder),
+        // the `Codec<Parent>` superinterface drops, peekFrameSize is
+        // a single header+prefix walker rather than per-variant
+        // dispatch, and `wireSize` is omitted.
+        val framedBy = symbol.annotations.firstOrNull(::isFramedByAnn)?.let(::parseFramedBy)
         return DispatchOnDispatcherShape(
             packageName = pkg,
             parentClassName = ClassName(pkg, parentSimpleName),
@@ -4924,6 +5086,7 @@ internal class CodecEmitter(
             dispatchValuePropertyName = dispatchValuePropertyName,
             variants = variants,
             payloadTypeParameter = payloadTypeParameter,
+            framedBy = framedBy,
         )
     }
 
@@ -5198,6 +5361,17 @@ internal class CodecEmitter(
         val codecType =
             if (shape.payloadTypeParameter != null) {
                 buildGenericDispatchOnDispatcherTypeSpec(shape, shape.payloadTypeParameter, parentTypeRef)
+            } else if (shape.framedBy != null) {
+                // Phase J.M.5 slice 14c — `@FramedBy` parent. Encode
+                // returns ReadBuffer, no Codec<Parent> superinterface,
+                // peek owned by the dispatcher (single walker), no
+                // wireSize.
+                TypeSpec
+                    .objectBuilder(shape.codecSimpleName)
+                    .addFunction(buildDispatchOnDecodeFun(shape, parentTypeRef))
+                    .addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
+                    .addFunction(buildFramedByDispatchOnPeekFun(shape))
+                    .build()
             } else {
                 TypeSpec
                     .objectBuilder(shape.codecSimpleName)
@@ -5212,6 +5386,112 @@ internal class CodecEmitter(
             .builder(shape.packageName, shape.codecSimpleName)
             .addType(codecType)
             .build()
+    }
+
+    /**
+     * Phase J.M.5 slice 14c — encode for an `@FramedBy` `@DispatchOn`
+     * dispatcher. The signature differs from [buildDispatchOnEncodeFun]
+     * by dropping the `WriteBuffer` parameter, adding `factory`, and
+     * returning `ReadBuffer`. The `when` body still routes by variant,
+     * but every branch calls the variant codec's framed encode (which
+     * itself returns `ReadBuffer`). No `OVERRIDE` modifier — the
+     * dispatcher does not implement `Codec<T>`.
+     */
+    private fun buildFramedByDispatchOnEncodeFun(
+        shape: DispatchOnDispatcherShape,
+        parentTypeRef: TypeName,
+    ): FunSpec {
+        val body = CodeBlock.builder()
+        body.beginControlFlow("return when (value)")
+        for (variant in shape.variants) {
+            body.addStatement(
+                "is %T -> %T.encode(value, context, factory)",
+                variant.className,
+                variant.codecClassName,
+            )
+        }
+        body.endControlFlow()
+        return FunSpec
+            .builder("encode")
+            .addParameter("value", parentTypeRef)
+            .addParameter("context", ENCODE_CONTEXT_CN)
+            .addParameter("factory", BUFFER_FACTORY_CN)
+            .returns(READ_BUFFER_CN)
+            .addCode(body.build())
+            .build()
+    }
+
+    /**
+     * Phase J.M.5 slice 14c — `peekFrameSize` for an `@FramedBy`
+     * `@DispatchOn` dispatcher. Every variant peeks identically (same
+     * header width, same prefix codec — that's the point of inheriting
+     * `@FramedBy` from the parent), so the per-variant dispatch
+     * collapses to a single header+prefix walker.
+     */
+    private fun buildFramedByDispatchOnPeekFun(shape: DispatchOnDispatcherShape): FunSpec {
+        val framedBy =
+            shape.framedBy
+                ?: error("buildFramedByDispatchOnPeekFun called on shape without @FramedBy")
+        val headerWireWidth = shape.discriminatorInnerKind.width
+        val builder =
+            FunSpec
+                .builder("peekFrameSize")
+                .addParameter("stream", STREAM_PROCESSOR_CN)
+                .addParameter("baseOffset", INT)
+                .returns(PEEK_RESULT_CN)
+        val body = CodeBlock.builder()
+        body.addStatement(
+            "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
+            headerWireWidth + 1,
+            PEEK_RESULT_CN,
+        )
+        val peekBudget = 5
+        body.addStatement(
+            "val __framingPeek = stream.peekBuffer(baseOffset + %L, %L) ?: return %T.NeedsMoreData",
+            headerWireWidth,
+            peekBudget,
+            PEEK_RESULT_CN,
+        )
+        body.beginControlFlow("try")
+        body.addStatement("val __framingPeekStart = __framingPeek.position()")
+        body.beginControlFlow("val __framingLength = try")
+        body.addStatement(
+            "%T.decode(__framingPeek, %T.Empty)",
+            framedBy.codecClassName,
+            DECODE_CONTEXT_CN,
+        )
+        body.nextControlFlow("catch (__e: %T)", ClassName("kotlin", "Throwable"))
+        body.beginControlFlow("when (__e::class.simpleName)")
+        body.addStatement(
+            "%S, %S, %S -> return %T.NeedsMoreData",
+            "BufferUnderflowException",
+            "IndexOutOfBoundsException",
+            "ArrayIndexOutOfBoundsException",
+            PEEK_RESULT_CN,
+        )
+        body.addStatement("else -> throw __e")
+        body.endControlFlow()
+        body.endControlFlow()
+        body.addStatement(
+            "val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart",
+        )
+        body.addStatement(
+            "val __total = %L + __framingPrefixWidth + __framingLength.toInt()",
+            headerWireWidth,
+        )
+        body.addStatement(
+            "return if (stream.available() - baseOffset >= __total) %T.Complete(__total) else %T.NeedsMoreData",
+            PEEK_RESULT_CN,
+            PEEK_RESULT_CN,
+        )
+        body.nextControlFlow("finally")
+        body.addStatement(
+            "(__framingPeek as? %T)?.freeNativeMemory()",
+            PLATFORM_BUFFER_CN,
+        )
+        body.endControlFlow()
+        builder.addCode(body.build())
+        return builder.build()
     }
 
     /**
@@ -5537,14 +5817,20 @@ internal class CodecEmitter(
         )
         body.endControlFlow()
         body.endControlFlow()
-        return FunSpec
-            .builder("decode")
-            .addModifiers(KModifier.OVERRIDE)
-            .addParameter("buffer", READ_BUFFER_CN)
-            .addParameter("context", DECODE_CONTEXT_CN)
-            .returns(parentTypeRef)
-            .addCode(body.build())
-            .build()
+        // Phase J.M.5 slice 14c — `@FramedBy` dispatchers don't
+        // implement `Codec<T>` (the encode contract differs), so
+        // `decode` is a plain object function rather than an override.
+        val builder =
+            FunSpec
+                .builder("decode")
+                .addParameter("buffer", READ_BUFFER_CN)
+                .addParameter("context", DECODE_CONTEXT_CN)
+                .returns(parentTypeRef)
+                .addCode(body.build())
+        if (shape.framedBy == null) {
+            builder.addModifiers(KModifier.OVERRIDE)
+        }
+        return builder.build()
     }
 
     private fun buildDispatchOnEncodeFun(
@@ -5727,6 +6013,27 @@ internal class CodecEmitter(
          * `Nothing`-typed variants use static codec refs as before.
          */
         val payloadTypeParameter: PayloadTypeParameter? = null,
+        /**
+         * Phase J.M.5 slice 14c — present when the sealed parent itself
+         * carries `@FramedBy`. The dispatcher then drops the `Codec<T>`
+         * superinterface (encode contract differs — returns a
+         * `ReadBuffer` slice), changes the encode signature to
+         * `(value, context, factory): ReadBuffer`, and owns
+         * `peekFrameSize` directly (every variant peeks identically
+         * under inherited framing, so a single header+prefix walker on
+         * the dispatcher subsumes the per-variant dispatch). `wireSize`
+         * is dropped — the slicing-scheme encode returns a sized slice
+         * and no caller needs an upfront size.
+         *
+         * The header wire width comes from the discriminator's inner
+         * kind (`discriminatorInnerKind.width`) — the validator's E3
+         * check ensures every variant's `after`-named field has Exact
+         * wire width, and per the `@DispatchOn` shape contract, the
+         * after-field IS the discriminator value class. So the header
+         * the framing emit needs to skip equals the discriminator's
+         * inner scalar width.
+         */
+        val framedBy: FramedByConfig? = null,
     )
 
     /**
