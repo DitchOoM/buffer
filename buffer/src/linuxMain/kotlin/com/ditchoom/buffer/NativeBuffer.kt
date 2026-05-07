@@ -128,57 +128,86 @@ class NativeBuffer private constructor(
 
     // === Read operations ===
 
+    private fun requireReadable(needed: Int) {
+        if (positionValue + needed > limitValue) {
+            throw IndexOutOfBoundsException(
+                "read of $needed byte(s) at position $positionValue exceeds limit $limitValue",
+            )
+        }
+    }
+
+    private fun requireIndex(
+        index: Int,
+        needed: Int,
+    ) {
+        if (index < 0 || index + needed > limitValue) {
+            throw IndexOutOfBoundsException(
+                "absolute read of $needed byte(s) at index $index exceeds limit $limitValue",
+            )
+        }
+    }
+
     override fun readByte(): Byte {
         checkOpen()
+        requireReadable(1)
         return ptr[positionValue++]
     }
 
     override fun get(index: Int): Byte {
         checkOpen()
+        requireIndex(index, 1)
         return ptr[index]
     }
 
     override fun readShort(): Short {
         checkOpen()
-        val result = getShort(positionValue)
+        requireReadable(2)
+        val raw = UnsafeMemory.getShort(nativeAddress + positionValue)
         positionValue += 2
-        return result
+        return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun getShort(index: Int): Short {
         checkOpen()
+        requireIndex(index, 2)
         val raw = UnsafeMemory.getShort(nativeAddress + index)
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun readInt(): Int {
         checkOpen()
-        val result = getInt(positionValue)
+        requireReadable(4)
+        val raw = UnsafeMemory.getInt(nativeAddress + positionValue)
         positionValue += 4
-        return result
+        return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun getInt(index: Int): Int {
         checkOpen()
+        requireIndex(index, 4)
         val raw = UnsafeMemory.getInt(nativeAddress + index)
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun readLong(): Long {
         checkOpen()
-        val result = getLong(positionValue)
+        requireReadable(8)
+        val raw = UnsafeMemory.getLong(nativeAddress + positionValue)
         positionValue += 8
-        return result
+        return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun getLong(index: Int): Long {
         checkOpen()
+        requireIndex(index, 8)
         val raw = UnsafeMemory.getLong(nativeAddress + index)
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun readByteArray(size: Int): ByteArray {
         checkOpen()
+        if (size < 1) return ByteArray(0)
+        requireReadable(size)
         val array = ByteArray(size)
         UnsafeMemory.copyMemoryToArray(nativeAddress + positionValue, array, 0, size)
         positionValue += size
@@ -193,6 +222,8 @@ class NativeBuffer private constructor(
         if (charset != Charset.UTF8) {
             throw UnsupportedOperationException("NativeBuffer only supports UTF-8 charset. Got: $charset")
         }
+        if (length == 0) return ""
+        requireReadable(length)
         val result = simdutfDecodeUtf8((ptr + positionValue)!!, length)
         positionValue += length
         return result
@@ -627,57 +658,86 @@ private class NativeBufferSlice(
         positionValue = 0
     }
 
+    private fun requireReadable(needed: Int) {
+        if (positionValue + needed > limitValue) {
+            throw IndexOutOfBoundsException(
+                "read of $needed byte(s) at position $positionValue exceeds limit $limitValue",
+            )
+        }
+    }
+
+    private fun requireIndex(
+        index: Int,
+        needed: Int,
+    ) {
+        if (index < 0 || index + needed > limitValue) {
+            throw IndexOutOfBoundsException(
+                "absolute read of $needed byte(s) at index $index exceeds limit $limitValue",
+            )
+        }
+    }
+
     override fun readByte(): Byte {
         checkOpen()
+        requireReadable(1)
         return UnsafeMemory.getByte(baseAddress + positionValue++)
     }
 
     override fun get(index: Int): Byte {
         checkOpen()
+        requireIndex(index, 1)
         return UnsafeMemory.getByte(baseAddress + index)
     }
 
     override fun readShort(): Short {
         checkOpen()
-        val result = getShort(positionValue)
+        requireReadable(2)
+        val raw = UnsafeMemory.getShort(baseAddress + positionValue)
         positionValue += 2
-        return result
+        return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun getShort(index: Int): Short {
         checkOpen()
+        requireIndex(index, 2)
         val raw = UnsafeMemory.getShort(baseAddress + index)
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun readInt(): Int {
         checkOpen()
-        val result = getInt(positionValue)
+        requireReadable(4)
+        val raw = UnsafeMemory.getInt(baseAddress + positionValue)
         positionValue += 4
-        return result
+        return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun getInt(index: Int): Int {
         checkOpen()
+        requireIndex(index, 4)
         val raw = UnsafeMemory.getInt(baseAddress + index)
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun readLong(): Long {
         checkOpen()
-        val result = getLong(positionValue)
+        requireReadable(8)
+        val raw = UnsafeMemory.getLong(baseAddress + positionValue)
         positionValue += 8
-        return result
+        return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun getLong(index: Int): Long {
         checkOpen()
+        requireIndex(index, 8)
         val raw = UnsafeMemory.getLong(baseAddress + index)
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun readByteArray(size: Int): ByteArray {
         checkOpen()
+        if (size < 1) return ByteArray(0)
+        requireReadable(size)
         val array = ByteArray(size)
         UnsafeMemory.copyMemoryToArray(baseAddress + positionValue, array, 0, size)
         positionValue += size
@@ -692,6 +752,8 @@ private class NativeBufferSlice(
         if (charset != Charset.UTF8) {
             throw UnsupportedOperationException("NativeBuffer only supports UTF-8 charset. Got: $charset")
         }
+        if (length == 0) return ""
+        requireReadable(length)
         val ptr = (baseAddress + positionValue).toCPointer<ByteVar>()!!
         val result = simdutfDecodeUtf8(ptr, length)
         positionValue += length

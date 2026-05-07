@@ -53,9 +53,34 @@ class ByteArrayBuffer(
         limitValue = length
     }
 
-    override fun readByte(): Byte = data[offset + positionValue++]
+    private fun requireReadable(needed: Int) {
+        if (positionValue + needed > limitValue) {
+            throw IndexOutOfBoundsException(
+                "read of $needed byte(s) at position $positionValue exceeds limit $limitValue",
+            )
+        }
+    }
 
-    override fun get(index: Int): Byte = data[offset + index]
+    private fun requireIndex(
+        index: Int,
+        needed: Int,
+    ) {
+        if (index < 0 || index + needed > limitValue) {
+            throw IndexOutOfBoundsException(
+                "absolute read of $needed byte(s) at index $index exceeds limit $limitValue",
+            )
+        }
+    }
+
+    override fun readByte(): Byte {
+        requireReadable(1)
+        return data[offset + positionValue++]
+    }
+
+    override fun get(index: Int): Byte {
+        requireIndex(index, 1)
+        return data[offset + index]
+    }
 
     override fun slice(byteOrder: ByteOrder): ByteArrayBuffer =
         ByteArrayBuffer(
@@ -66,6 +91,8 @@ class ByteArrayBuffer(
         )
 
     override fun readByteArray(size: Int): ByteArray {
+        if (size < 1) return ByteArray(0)
+        requireReadable(size)
         val absStart = offset + positionValue
         val result = data.copyOfRange(absStart, absStart + size)
         positionValue += size
@@ -73,12 +100,18 @@ class ByteArrayBuffer(
     }
 
     override fun readShort(): Short {
-        val result = getShort(positionValue)
+        requireReadable(Short.SIZE_BYTES)
+        val result = getShortUnchecked(positionValue)
         positionValue += Short.SIZE_BYTES
         return result
     }
 
     override fun getShort(index: Int): Short {
+        requireIndex(index, Short.SIZE_BYTES)
+        return getShortUnchecked(index)
+    }
+
+    private fun getShortUnchecked(index: Int): Short {
         val abs = offset + index
         val b0 = data[abs].toInt() and 0xFF
         val b1 = data[abs + 1].toInt() and 0xFF
@@ -90,12 +123,18 @@ class ByteArrayBuffer(
     }
 
     override fun readInt(): Int {
-        val result = getInt(positionValue)
+        requireReadable(Int.SIZE_BYTES)
+        val result = getIntUnchecked(positionValue)
         positionValue += Int.SIZE_BYTES
         return result
     }
 
     override fun getInt(index: Int): Int {
+        requireIndex(index, Int.SIZE_BYTES)
+        return getIntUnchecked(index)
+    }
+
+    private fun getIntUnchecked(index: Int): Int {
         val abs = offset + index
         val b0 = data[abs].toInt() and 0xFF
         val b1 = data[abs + 1].toInt() and 0xFF
@@ -109,14 +148,20 @@ class ByteArrayBuffer(
     }
 
     override fun readLong(): Long {
-        val result = getLong(positionValue)
+        requireReadable(Long.SIZE_BYTES)
+        val result = getLongUnchecked(positionValue)
         positionValue += Long.SIZE_BYTES
         return result
     }
 
     override fun getLong(index: Int): Long {
-        val first = getInt(index).toLong() and 0xFFFFFFFFL
-        val second = getInt(index + 4).toLong() and 0xFFFFFFFFL
+        requireIndex(index, Long.SIZE_BYTES)
+        return getLongUnchecked(index)
+    }
+
+    private fun getLongUnchecked(index: Int): Long {
+        val first = getIntUnchecked(index).toLong() and 0xFFFFFFFFL
+        val second = getIntUnchecked(index + 4).toLong() and 0xFFFFFFFFL
         return if (littleEndian) {
             (second shl 32) or first
         } else {
@@ -128,6 +173,8 @@ class ByteArrayBuffer(
         length: Int,
         charset: Charset,
     ): String {
+        if (length == 0) return ""
+        requireReadable(length)
         val absStart = offset + positionValue
         val result = decodeByteArrayToString(data, absStart, absStart + length, charset)
         positionValue += length

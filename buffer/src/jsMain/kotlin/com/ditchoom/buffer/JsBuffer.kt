@@ -110,6 +110,8 @@ class JsBuffer(
         )
 
     override fun readByteArray(size: Int): ByteArray {
+        if (size < 1) return ByteArray(0)
+        requireReadable(size)
         val subArray = buffer.subarray(positionValue, positionValue + size)
         val byteArray = Int8Array(subArray.buffer, subArray.byteOffset, size)
         positionValue += size
@@ -120,6 +122,8 @@ class JsBuffer(
         length: Int,
         charset: Charset,
     ): String {
+        if (length == 0) return ""
+        requireReadable(length)
         val encoding =
             when (charset) {
                 Charset.UTF8 -> "utf-8"

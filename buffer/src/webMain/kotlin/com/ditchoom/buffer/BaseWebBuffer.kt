@@ -65,38 +65,73 @@ abstract class BaseWebBuffer(
         limitValue = capacity
     }
 
+    protected fun requireReadable(needed: Int) {
+        if (positionValue + needed > limitValue) {
+            throw IndexOutOfBoundsException(
+                "read of $needed byte(s) at position $positionValue exceeds limit $limitValue",
+            )
+        }
+    }
+
+    protected fun requireIndex(
+        index: Int,
+        needed: Int,
+    ) {
+        if (index < 0 || index + needed > limitValue) {
+            throw IndexOutOfBoundsException(
+                "absolute read of $needed byte(s) at index $index exceeds limit $limitValue",
+            )
+        }
+    }
+
     // ReadBuffer implementation using abstract load methods
     override fun readByte(): Byte {
+        requireReadable(1)
         val value = loadByte(positionValue)
         positionValue++
         return value
     }
 
-    override fun get(index: Int): Byte = loadByte(index)
+    override fun get(index: Int): Byte {
+        requireIndex(index, 1)
+        return loadByte(index)
+    }
 
     override fun readShort(): Short {
+        requireReadable(Short.SIZE_BYTES)
         val value = loadShort(positionValue)
         positionValue += Short.SIZE_BYTES
         return value
     }
 
-    override fun getShort(index: Int): Short = loadShort(index)
+    override fun getShort(index: Int): Short {
+        requireIndex(index, Short.SIZE_BYTES)
+        return loadShort(index)
+    }
 
     override fun readInt(): Int {
+        requireReadable(Int.SIZE_BYTES)
         val value = loadInt(positionValue)
         positionValue += Int.SIZE_BYTES
         return value
     }
 
-    override fun getInt(index: Int): Int = loadInt(index)
+    override fun getInt(index: Int): Int {
+        requireIndex(index, Int.SIZE_BYTES)
+        return loadInt(index)
+    }
 
     override fun readLong(): Long {
+        requireReadable(Long.SIZE_BYTES)
         val value = loadLong(positionValue)
         positionValue += Long.SIZE_BYTES
         return value
     }
 
-    override fun getLong(index: Int): Long = loadLong(index)
+    override fun getLong(index: Int): Long {
+        requireIndex(index, Long.SIZE_BYTES)
+        return loadLong(index)
+    }
 
     // WriteBuffer implementation using abstract store methods
     override fun writeByte(byte: Byte): WriteBuffer {

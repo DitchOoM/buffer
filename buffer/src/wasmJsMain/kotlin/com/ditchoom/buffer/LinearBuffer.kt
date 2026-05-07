@@ -366,6 +366,8 @@ class LinearBuffer(
     }
 
     override fun readByteArray(size: Int): ByteArray {
+        if (size < 1) return ByteArray(0)
+        requireReadable(size)
         // Copy from linear memory to Kotlin ByteArray (Wasm GC heap)
         // This requires a copy - unavoidable due to separate memory spaces
         val result = ByteArray(size)
@@ -462,6 +464,8 @@ class LinearBuffer(
         length: Int,
         charset: Charset,
     ): String {
+        if (length == 0) return ""
+        requireReadable(length)
         val encoding =
             when (charset) {
                 Charset.UTF8 -> "utf-8"

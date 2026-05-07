@@ -106,29 +106,58 @@ class MutableDataBuffer private constructor(
         this.limit = limit
     }
 
-    override fun readByte(): Byte = bytePointer[position++]
+    private fun requireReadable(needed: Int) {
+        if (position + needed > limit) {
+            throw IndexOutOfBoundsException(
+                "read of $needed byte(s) at position $position exceeds limit $limit",
+            )
+        }
+    }
 
-    override fun get(index: Int): Byte = bytePointer[index]
+    private fun requireIndex(
+        index: Int,
+        needed: Int,
+    ) {
+        if (index < 0 || index + needed > limit) {
+            throw IndexOutOfBoundsException(
+                "absolute read of $needed byte(s) at index $index exceeds limit $limit",
+            )
+        }
+    }
+
+    override fun readByte(): Byte {
+        requireReadable(1)
+        return bytePointer[position++]
+    }
+
+    override fun get(index: Int): Byte {
+        requireIndex(index, 1)
+        return bytePointer[index]
+    }
 
     override fun getShort(index: Int): Short {
+        requireIndex(index, 2)
         val ptr = (bytePointer + index)!!.reinterpret<ShortVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun getInt(index: Int): Int {
+        requireIndex(index, 4)
         val ptr = (bytePointer + index)!!.reinterpret<IntVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun getLong(index: Int): Long {
+        requireIndex(index, 8)
         val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun readShort(): Short {
+        requireReadable(2)
         val ptr = (bytePointer + position)!!.reinterpret<ShortVar>()
         val value = ptr[0]
         position += 2
@@ -136,6 +165,7 @@ class MutableDataBuffer private constructor(
     }
 
     override fun readInt(): Int {
+        requireReadable(4)
         val ptr = (bytePointer + position)!!.reinterpret<IntVar>()
         val value = ptr[0]
         position += 4
@@ -143,6 +173,7 @@ class MutableDataBuffer private constructor(
     }
 
     override fun readLong(): Long {
+        requireReadable(8)
         val ptr = (bytePointer + position)!!.reinterpret<LongVar>()
         val value = ptr[0]
         position += 8
@@ -158,6 +189,7 @@ class MutableDataBuffer private constructor(
         if (size < 1) {
             return ByteArray(0)
         }
+        requireReadable(size)
         // Direct pointer read to avoid NSData allocation
         val result = (bytePointer + position)!!.readBytes(size)
         position += size
@@ -169,6 +201,7 @@ class MutableDataBuffer private constructor(
         charset: Charset,
     ): String {
         if (length == 0) return ""
+        requireReadable(length)
         if (!ownsData) {
             val bytes = (bytePointer + position)!!.readBytes(length)
             position += length
@@ -601,29 +634,58 @@ class MutableDataBufferSlice(
         this.limit = limit
     }
 
-    override fun readByte(): Byte = bytePointer[position++]
+    private fun requireReadable(needed: Int) {
+        if (position + needed > limit) {
+            throw IndexOutOfBoundsException(
+                "read of $needed byte(s) at position $position exceeds limit $limit",
+            )
+        }
+    }
 
-    override fun get(index: Int): Byte = bytePointer[index]
+    private fun requireIndex(
+        index: Int,
+        needed: Int,
+    ) {
+        if (index < 0 || index + needed > limit) {
+            throw IndexOutOfBoundsException(
+                "absolute read of $needed byte(s) at index $index exceeds limit $limit",
+            )
+        }
+    }
+
+    override fun readByte(): Byte {
+        requireReadable(1)
+        return bytePointer[position++]
+    }
+
+    override fun get(index: Int): Byte {
+        requireIndex(index, 1)
+        return bytePointer[index]
+    }
 
     override fun getShort(index: Int): Short {
+        requireIndex(index, 2)
         val ptr = (bytePointer + index)!!.reinterpret<ShortVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun getInt(index: Int): Int {
+        requireIndex(index, 4)
         val ptr = (bytePointer + index)!!.reinterpret<IntVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun getLong(index: Int): Long {
+        requireIndex(index, 8)
         val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun readShort(): Short {
+        requireReadable(2)
         val ptr = (bytePointer + position)!!.reinterpret<ShortVar>()
         val value = ptr[0]
         position += 2
@@ -631,6 +693,7 @@ class MutableDataBufferSlice(
     }
 
     override fun readInt(): Int {
+        requireReadable(4)
         val ptr = (bytePointer + position)!!.reinterpret<IntVar>()
         val value = ptr[0]
         position += 4
@@ -638,6 +701,7 @@ class MutableDataBufferSlice(
     }
 
     override fun readLong(): Long {
+        requireReadable(8)
         val ptr = (bytePointer + position)!!.reinterpret<LongVar>()
         val value = ptr[0]
         position += 8
@@ -651,6 +715,7 @@ class MutableDataBufferSlice(
         if (size < 1) {
             return ByteArray(0)
         }
+        requireReadable(size)
         val result = (bytePointer + position)!!.readBytes(size)
         position += size
         return result
@@ -661,6 +726,7 @@ class MutableDataBufferSlice(
         charset: Charset,
     ): String {
         if (length == 0) return ""
+        requireReadable(length)
         val parentData = parent.data
         if (!parent.ownsData) {
             // External pointer: no NSData available, use byte decoding
