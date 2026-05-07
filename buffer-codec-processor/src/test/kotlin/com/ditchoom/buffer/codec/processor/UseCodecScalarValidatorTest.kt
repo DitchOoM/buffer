@@ -136,10 +136,12 @@ class UseCodecScalarValidatorTest {
     }
 
     @Test
-    fun rejectsLengthPrefixedUseCodecOnNonListField() {
-        // Phase I.1 step 11 lifts `@LengthPrefixed @UseCodec` for the
-        // `List<@ProtocolMessage E>` shape; scalar field types still get a
-        // focused diagnostic naming the required field shape.
+    fun rejectsLengthPrefixedUseCodecOnNonListNonPayloadField() {
+        // Phase J.M.5 slice 15a — `@LengthPrefixed @UseCodec` accepts two
+        // shapes: `List<@ProtocolMessage E>` (slice 11) and
+        // `T : Payload` (slice 15a). A non-List, non-Payload field type
+        // (here: a bare `UInt`) is neither and gets a focused diagnostic
+        // naming both shapes.
         val result =
             compile(
                 """
@@ -175,9 +177,109 @@ class UseCodecScalarValidatorTest {
             )
         assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
         assertTrue(
-            result.messages.contains("must be applied to a `kotlin.collections.List<E>`"),
-            "@LengthPrefixed @UseCodec on a scalar field should report the required List<E> " +
-                "shape. Messages:\n${result.messages}",
+            result.messages.contains("neither a `kotlin.collections.List<E>`") &&
+                result.messages.contains("nor a type implementing `com.ditchoom.buffer.codec.Payload`"),
+            "@LengthPrefixed @UseCodec on a non-List, non-Payload field should report the " +
+                "dual-shape diagnostic naming both List<E> and Payload. Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
+    fun acceptsLengthPrefixedUseCodecOnPayloadScalar() {
+        // Phase J.M.5 slice 15a — `@LengthPrefixed @UseCodec(C::class) val: T`
+        // where `T : Payload` and `C` is `Codec<T>` (not a
+        // BoundingLengthCodec — the prefix is owned by the framework).
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.Codec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
+                import com.ditchoom.buffer.codec.Payload
+                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+
+                @JvmInline
+                value class Blob(val bytes: ByteArray) : Payload
+
+                object BlobCodec : Codec<Blob> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): Blob =
+                        Blob(buffer.readByteArray(buffer.remaining()))
+                    override fun encode(buffer: WriteBuffer, value: Blob, context: EncodeContext) {
+                        buffer.writeBytes(value.bytes)
+                    }
+                    override fun wireSize(value: Blob, context: EncodeContext): WireSize =
+                        WireSize.Exact(value.bytes.size)
+                }
+
+                @ProtocolMessage
+                data class HeaderWithLengthPrefixedPayload(
+                    @LengthPrefixed @UseCodec(BlobCodec::class) val data: Blob,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+        assertFalse(
+            result.messages.contains("@LengthPrefixed @UseCodec") &&
+                result.messages.contains("error"),
+            "no validator diagnostic should fire on the new Payload scalar shape. Messages:\n" +
+                result.messages,
+        )
+    }
+
+    @Test
+    fun rejectsLengthPrefixedUseCodecOnPayloadScalarWithMismatchedCodec() {
+        // The codec must implement `Codec<T>` for the field's declared
+        // Payload type. A `Codec<OtherPayload>` references on `T : Payload`
+        // produces a focused mismatch diagnostic.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.Codec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
+                import com.ditchoom.buffer.codec.Payload
+                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+
+                @JvmInline
+                value class Blob(val bytes: ByteArray) : Payload
+
+                @JvmInline
+                value class OtherBlob(val bytes: ByteArray) : Payload
+
+                object OtherBlobCodec : Codec<OtherBlob> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): OtherBlob =
+                        OtherBlob(buffer.readByteArray(buffer.remaining()))
+                    override fun encode(buffer: WriteBuffer, value: OtherBlob, context: EncodeContext) {
+                        buffer.writeBytes(value.bytes)
+                    }
+                    override fun wireSize(value: OtherBlob, context: EncodeContext): WireSize =
+                        WireSize.Exact(value.bytes.size)
+                }
+
+                @ProtocolMessage
+                data class HeaderWithMismatch(
+                    @LengthPrefixed @UseCodec(OtherBlobCodec::class) val data: Blob,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("does not implement") && result.messages.contains("Codec<Blob>"),
+            "Payload scalar codec mismatch should be reported. Messages:\n${result.messages}",
         )
     }
 

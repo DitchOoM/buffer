@@ -1082,6 +1082,7 @@ class ProtocolMessageProcessor(
                     fieldType = fieldType,
                     useCodecAnn = useCodec,
                     param = param,
+                    payloadType = payloadType,
                 )
                 continue
             }
@@ -1165,6 +1166,7 @@ class ProtocolMessageProcessor(
         fieldType: KSType,
         useCodecAnn: KSAnnotation,
         param: KSValueParameter,
+        payloadType: KSType,
     ) {
         val codecKsType =
             useCodecAnn.arguments
@@ -1183,6 +1185,41 @@ class ProtocolMessageProcessor(
             )
             return
         }
+        val fieldTypeQname = fieldType.declaration.qualifiedName?.asString()
+        // Phase J.M.5 slice 15a — scalar `T : Payload` shape. The codec is
+        // `Codec<T>` and the framework owns the prefix; the codec is NOT
+        // required to implement BoundingLengthCodec. Validates first
+        // because a non-List Payload field must not fall through to the
+        // list-shape diagnostics.
+        if (fieldTypeQname != LIST_QNAME) {
+            val isPayloadField = !fieldType.isMarkedNullable && payloadType.isAssignableFrom(fieldType)
+            if (!isPayloadField) {
+                logger.error(
+                    "@LengthPrefixed @UseCodec($codecName::class) on $ownerName.$fieldName has " +
+                        "field type `${fieldTypeQname ?: "<unresolved>"}`, which is neither a " +
+                        "`kotlin.collections.List<E>` (slice 11 list shape) nor a type " +
+                        "implementing `com.ditchoom.buffer.codec.Payload` (slice 15a scalar " +
+                        "shape). Wrap binary data in a `Payload`-marked value class and reference " +
+                        "its `Codec<T>` via `@UseCodec`, or use the list shape with a " +
+                        "`@ProtocolMessage` element type.",
+                    param,
+                )
+                return
+            }
+            if (!implementsCodecOf(codecDecl, fieldType)) {
+                val expectedSimpleName = fieldType.declaration.simpleName.asString()
+                logger.error(
+                    "@LengthPrefixed @UseCodec($codecName::class) on $ownerName.$fieldName " +
+                        "references object `$codecName`, which does not implement " +
+                        "`com.ditchoom.buffer.codec.Codec<$expectedSimpleName>`. The slice 15a " +
+                        "scalar Payload shape calls `$codecName.decode(...)` / `.encode(...)` " +
+                        "against the bound field's declared type.",
+                    param,
+                )
+                return
+            }
+            return
+        }
         if (!implementsBoundingLengthCodecOfUInt(codecDecl)) {
             logger.error(
                 "@LengthPrefixed @UseCodec($codecName::class) on $ownerName.$fieldName references " +
@@ -1191,18 +1228,6 @@ class ProtocolMessageProcessor(
                     "list shape requires a bounding length codec to drive `applyBound` and bound " +
                     "the element-decode region. Implement `BoundingLengthCodec<UInt>` (e.g. " +
                     "`MqttRemainingLengthCodec`).",
-                param,
-            )
-            return
-        }
-        val fieldTypeQname = fieldType.declaration.qualifiedName?.asString()
-        if (fieldTypeQname != LIST_QNAME) {
-            logger.error(
-                "@LengthPrefixed @UseCodec($codecName::class) on $ownerName.$fieldName must be " +
-                    "applied to a `kotlin.collections.List<E>` field where `E` is a " +
-                    "`@ProtocolMessage data class`, but the field's type is `${fieldTypeQname ?: "<unresolved>"}`. " +
-                    "The shape models a length-prefixed property bag of nested messages " +
-                    "(e.g. MQTT v5 properties).",
                 param,
             )
             return
