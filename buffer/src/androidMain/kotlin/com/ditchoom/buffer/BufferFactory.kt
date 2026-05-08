@@ -42,7 +42,33 @@ private val deterministicFactoryInstance: BufferFactory =
         override fun allocate(
             size: Int,
             byteOrder: ByteOrder,
-        ): PlatformBuffer = AndroidDeterministicUnsafeJvmBuffer.allocate(size, byteOrder)
+        ): PlatformBuffer {
+            // Tier 1 — `Unsafe.invokeCleaner` (host JVM 9+). The Android
+            // source set is loaded both in production (real Android, ART
+            // runtime) and in `testDebugUnitTest` / `testReleaseUnitTest`
+            // (the Android Gradle Plugin's host-JVM-with-`android.jar`-stubs
+            // unit-test environment that downstream library consumers use
+            // for fast-feedback testing). On real ART, `invokeCleanerFn`
+            // resolves to null because ART doesn't expose
+            // `Unsafe.invokeCleaner` (per the comment in
+            // `InvokeCleanerHelper.kt`), so device behavior falls through
+            // to Tier 2 unchanged. On host JDK 9+ (notably JDK 21 where
+            // the `(long, int)` `DirectByteBuffer` ctor used by Tier 2's
+            // reflection no longer exists), Tier 1 succeeds and dodges
+            // the broken reflection. Mirrors the JVM target's tiered
+            // factory; without it, downstream consumers running their
+            // Android source set against a modern host JDK hit
+            // `UnsupportedOperationException` from Tier 2's
+            // reflection lookup.
+            if (invokeCleanerFn != null) {
+                return AndroidDeterministicDirectJvmBuffer(
+                    ByteBuffer.allocateDirect(size).order(byteOrder.toJava()),
+                )
+            }
+            // Tier 2 — Unsafe.allocateMemory + DirectByteBuffer ctor
+            // reflection. The path real Android devices take.
+            return AndroidDeterministicUnsafeJvmBuffer.allocate(size, byteOrder)
+        }
 
         override fun wrap(
             array: ByteArray,
