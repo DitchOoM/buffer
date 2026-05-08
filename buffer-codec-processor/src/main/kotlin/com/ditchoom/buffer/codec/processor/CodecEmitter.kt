@@ -185,6 +185,17 @@ internal class CodecEmitter(
         // to `Exact(0)` via the empty-fields fall-through, and
         // buildPeekFrameFun collapses to the all-FixedSize Complete(0)
         // path.
+        //
+        // Phase J.M.5 slice 15h — when the singleton is a sealed
+        // subclass under `@DispatchOn(value class)`, capture the
+        // discriminator's inner scalar kind plus the variant's
+        // `@PacketType.value`. The dispatcher peeks-and-resets, so the
+        // variant codec must self-frame the discriminator the same way
+        // data-class variants do (their `id: ValueClass` first field
+        // round-trips the byte through the value-class scalar path).
+        // The simple-sealed dispatcher (no `@DispatchOn`) consumes the
+        // byte itself before delegating; that path remains unchanged
+        // (`detectSealedDispatchOnParentDiscriminator` returns null).
         if (symbol.classKind == ClassKind.OBJECT) {
             if (symbol.annotations.any { it.shortName.asString() == "DispatchOn" }) return null
             val ownerSimpleName = symbol.simpleName.asString()
@@ -195,6 +206,7 @@ internal class CodecEmitter(
                 codecSimpleName = "${ownerSimpleName}Codec",
                 fields = emptyList(),
                 isSingletonObject = true,
+                singletonDispatchDiscriminator = detectSealedDispatchOnParentDiscriminator(symbol),
             )
         }
         if (symbol.classKind != ClassKind.CLASS) return null
@@ -332,6 +344,53 @@ internal class CodecEmitter(
             payloadTypeParameter = payloadTypeParameter,
             framedBy = detectFramedBy(symbol),
         )
+    }
+
+    /**
+     * Phase J.M.5 slice 15h — when [symbol] is a sealed subclass under
+     * a parent annotated `@DispatchOn(value class)` AND carries
+     * `@PacketType(value = N)`, return the discriminator self-frame
+     * spec (inner scalar kind + literal value). Returns null when the
+     * symbol has no sealed parent, the parent isn't `@DispatchOn`-
+     * annotated, the discriminator type isn't a single-supported-scalar
+     * value class, the inner kind isn't peek-supported (UByte / Byte /
+     * UShort / UInt — same set as the dispatcher's peek path), or the
+     * variant lacks `@PacketType`.
+     *
+     * Walks declared `superTypes` (not `getAllSuperTypes`) to keep the
+     * lookup cheap and to match the shape contract: a `@DispatchOn`
+     * sealed parent is the variant's direct super, not a transitive
+     * one.
+     */
+    private fun detectSealedDispatchOnParentDiscriminator(symbol: KSClassDeclaration): SingletonDispatchDiscriminator? {
+        val packetTypeAnn =
+            symbol.annotations.firstOrNull { it.shortName.asString() == "PacketType" }
+                ?: return null
+        val literalValue =
+            packetTypeAnn.arguments
+                .firstOrNull { it.name?.asString() == "value" }
+                ?.value as? Int ?: return null
+        for (superType in symbol.superTypes) {
+            val superDecl = superType.resolve().declaration as? KSClassDeclaration ?: continue
+            if (Modifier.SEALED !in superDecl.modifiers) continue
+            val dispatchOn =
+                superDecl.annotations.firstOrNull { it.shortName.asString() == "DispatchOn" } ?: continue
+            val discriminatorType =
+                dispatchOn.arguments
+                    .firstOrNull { it.name?.asString() == "type" }
+                    ?.value as? KSType ?: continue
+            val discriminatorDecl = discriminatorType.declaration as? KSClassDeclaration ?: continue
+            if (Modifier.VALUE !in discriminatorDecl.modifiers) continue
+            val ctor = discriminatorDecl.primaryConstructor ?: continue
+            if (ctor.parameters.size != 1) continue
+            val innerType = ctor.parameters[0].type.resolve()
+            if (innerType.isError || innerType.isMarkedNullable) continue
+            val innerKind =
+                SUPPORTED_SCALARS[innerType.declaration.qualifiedName?.asString()] ?: continue
+            if (innerKind !in peekableDispatcherInnerKinds) continue
+            return SingletonDispatchDiscriminator(innerKind, literalValue)
+        }
+        return null
     }
 
     /**
@@ -2516,7 +2575,19 @@ internal class CodecEmitter(
         // Issue #150 — `@ProtocolMessage data object` / `object` decode
         // returns the singleton instance, NOT a constructor call. Kotlin
         // references singletons by their class name directly.
+        //
+        // Phase J.M.5 slice 15h — when the singleton is a sealed variant
+        // under `@DispatchOn(value class)`, consume (and discard) the
+        // discriminator's inner-scalar bytes first. The dispatcher's
+        // peek + reset hands control here at the original buffer
+        // position; data-class variants self-frame via their `id:
+        // ValueClass` first field, and singleton variants must do the
+        // same so the buffer position advances by the discriminator's
+        // wire width before the singleton is returned.
         if (shape.isSingletonObject) {
+            shape.singletonDispatchDiscriminator?.let { d ->
+                body.addStatement(naturalScalarReadExpr(d.innerKind))
+            }
             body.addStatement("return %T", messageType)
             return FunSpec
                 .builder("decode")
@@ -2582,6 +2653,17 @@ internal class CodecEmitter(
         messageType: TypeName = shape.messageClassName,
     ): FunSpec {
         val body = CodeBlock.builder()
+        // Phase J.M.5 slice 15h — singleton variant under
+        // `@DispatchOn(value class)` writes the discriminator literal
+        // (mirrors the data-class variant emit, where the variant's
+        // `id: ValueClass = ValueClass(byte)` first field round-trips
+        // the discriminator through the value-class scalar path).
+        // Other singletons (standalone or under simple sealed parents)
+        // emit nothing — their parent dispatcher writes the
+        // discriminator before delegating.
+        shape.singletonDispatchDiscriminator?.let { d ->
+            body.addStatement(naturalScalarWriteStatement(d.innerKind, singletonDiscriminatorLiteralAccessor(d)))
+        }
         for (field in shape.fields) appendEncodeField(body, field, shape)
         return FunSpec
             .builder("encode")
@@ -2591,6 +2673,26 @@ internal class CodecEmitter(
             .addParameter("context", ENCODE_CONTEXT_CN)
             .addCode(body.build())
             .build()
+    }
+
+    /**
+     * Phase J.M.5 slice 15h — accessor expression for a singleton
+     * variant's `@PacketType.value` literal, narrowed to the
+     * discriminator's inner scalar kind. Hex literals (e.g. `0x80`)
+     * exceed `Int` range only for kinds wider than 4 bytes; UInt is
+     * the widest kind in `peekableDispatcherInnerKinds`, so a hex
+     * `Int` literal narrowed via `.toX()` always fits.
+     */
+    private fun singletonDiscriminatorLiteralAccessor(d: SingletonDispatchDiscriminator): String {
+        val hex = "0x${d.literalValue.toString(16).uppercase()}"
+        return when (d.innerKind) {
+            ScalarKind.UByte -> "$hex.toUByte()"
+            ScalarKind.UShort -> "$hex.toUShort()"
+            ScalarKind.UInt -> "${hex}u"
+            ScalarKind.Byte -> "$hex.toByte()"
+            ScalarKind.Boolean, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long, ScalarKind.ULong ->
+                error("singleton dispatch discriminator restricted to peekableDispatcherInnerKinds")
+        }
     }
 
     /**
@@ -3189,7 +3291,15 @@ internal class CodecEmitter(
                         "indicates a missed early return.",
                 )
             else -> {
-                val total = shape.fields.sumOfFixedWireBytes()
+                // Phase J.M.5 slice 15h — singleton variant under
+                // `@DispatchOn(value class)` self-frames the
+                // discriminator (read in decode, write in encode), so
+                // its wire byte count is the discriminator's inner-
+                // scalar width. All other singletons keep `Exact(0)` —
+                // their parent dispatcher writes/reads the discriminator
+                // around the call.
+                val discriminatorBytes = shape.singletonDispatchDiscriminator?.innerKind?.width ?: 0
+                val total = shape.fields.sumOfFixedWireBytes() + discriminatorBytes
                 builder.addStatement("return %T.Exact(%L)", WIRE_SIZE_CN, total)
             }
         }
@@ -3336,8 +3446,15 @@ internal class CodecEmitter(
         // no walk needed, and the generated code is significantly tighter
         // than the sequential path (which would emit a per-field
         // availability check + offset advance).
+        //
+        // Phase J.M.5 slice 15h — empty-fields singletons fall into this
+        // branch (the `all { ... }` predicate is vacuously true). When
+        // the singleton self-frames a `@DispatchOn(value class)`
+        // discriminator, add the discriminator's inner-scalar width so
+        // the peek count matches what decode actually consumes.
         if (shape.fields.all { it is FieldSpec.FixedSize }) {
-            val total = shape.fields.sumOfFixedWireBytes()
+            val discriminatorBytes = shape.singletonDispatchDiscriminator?.innerKind?.width ?: 0
+            val total = shape.fields.sumOfFixedWireBytes() + discriminatorBytes
             builder.addStatement(
                 "return if (stream.available() - baseOffset >= %L) %T.Complete(%L) else %T.NeedsMoreData",
                 total,
@@ -7054,6 +7171,33 @@ internal class CodecEmitter(
          * by the dispatcher after it consumes the discriminator.
          */
         val isSingletonObject: Boolean = false,
+        /**
+         * Phase J.M.5 slice 15h — non-null when the symbol is a singleton
+         * object variant under a sealed parent annotated
+         * `@DispatchOn(value class)`. The parent dispatcher peeks the
+         * discriminator and resets the buffer position before delegating,
+         * so each variant codec must self-frame the discriminator (data-
+         * class variants do this naturally via their `id: ValueClass`
+         * first field; singleton variants have no field, so the codec
+         * emits a literal write on encode and a read-and-discard on
+         * decode of the discriminator's inner-scalar width). Width is
+         * captured for `wireSize`/`peekFrameSize`; the `@PacketType.value`
+         * literal drives the encode-side write.
+         */
+        val singletonDispatchDiscriminator: SingletonDispatchDiscriminator? = null,
+    )
+
+    /**
+     * Phase J.M.5 slice 15h — discriminator self-frame for a singleton
+     * sealed variant under `@DispatchOn(value class)`. [innerKind] is the
+     * value class's inner scalar (UByte for the in-scope MQTT v3 SUBACK
+     * fixture; UShort/UInt/Byte are also peekable and would round-trip
+     * via the same emit). [literalValue] is the variant's
+     * `@PacketType.value`, narrowed to the inner kind at write time.
+     */
+    private data class SingletonDispatchDiscriminator(
+        val innerKind: ScalarKind,
+        val literalValue: Int,
     )
 
     /**

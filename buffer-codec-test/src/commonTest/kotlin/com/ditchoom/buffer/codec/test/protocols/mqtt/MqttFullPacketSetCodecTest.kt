@@ -144,9 +144,9 @@ class MqttFullPacketSetCodecTest {
                 packetIdentifier = 0x000Au,
                 returnCodes =
                     listOf(
-                        MqttV3SubAckReturnCode.SuccessMaximumQoS0(),
-                        MqttV3SubAckReturnCode.SuccessMaximumQoS1(),
-                        MqttV3SubAckReturnCode.Failure(),
+                        MqttV3SubAckReturnCode.SuccessMaximumQoS0,
+                        MqttV3SubAckReturnCode.SuccessMaximumQoS1,
+                        MqttV3SubAckReturnCode.Failure,
                     ),
             )
         assertDispatcherRoundTrip(original, expectedTotalBytes = 7)

@@ -51,41 +51,30 @@ sealed interface MqttV3SubAckReturnCode {
     /**
      * §3.9.3 — `0x00` Success - Maximum QoS 0.
      *
-     * Variants are `data class` rather than `data object` to round-trip
-     * the discriminator byte through the value-class scalar path
-     * (each variant's `id` field is read/written by its generated
-     * codec). The data-object equivalent under `@DispatchOn(value
-     * class)` emits a 0-byte variant codec — the parent peeks +
-     * resets, and a data-object variant has no field to consume the
-     * discriminator on decode, so the position never advances. Fixing
-     * that emitter case is its own slice; for now data-class variants
-     * cost one allocation per decoded entry on JS but stay correct
-     * on every platform.
+     * Phase J.M.5 slice 15h — variants are `data object` singletons.
+     * Decoding N return codes reuses the same four instances regardless
+     * of N, so the per-element allocation cost (data-class variants
+     * with an `id` field) collapses to zero. The emitter generates a
+     * 1-byte self-framing codec per variant: the parent dispatcher
+     * peeks + resets, and the variant codec consumes the discriminator
+     * byte before returning the singleton.
      */
     @PacketType(value = 0x00)
     @ProtocolMessage
-    data class SuccessMaximumQoS0(
-        val id: MqttV3SubAckReturnCodeRaw = MqttV3SubAckReturnCodeRaw(0x00u),
-    ) : MqttV3SubAckReturnCode
+    data object SuccessMaximumQoS0 : MqttV3SubAckReturnCode
 
     /** §3.9.3 — `0x01` Success - Maximum QoS 1. */
     @PacketType(value = 0x01)
     @ProtocolMessage
-    data class SuccessMaximumQoS1(
-        val id: MqttV3SubAckReturnCodeRaw = MqttV3SubAckReturnCodeRaw(0x01u),
-    ) : MqttV3SubAckReturnCode
+    data object SuccessMaximumQoS1 : MqttV3SubAckReturnCode
 
     /** §3.9.3 — `0x02` Success - Maximum QoS 2. */
     @PacketType(value = 0x02)
     @ProtocolMessage
-    data class SuccessMaximumQoS2(
-        val id: MqttV3SubAckReturnCodeRaw = MqttV3SubAckReturnCodeRaw(0x02u),
-    ) : MqttV3SubAckReturnCode
+    data object SuccessMaximumQoS2 : MqttV3SubAckReturnCode
 
     /** §3.9.3 — `0x80` Failure. */
     @PacketType(value = 0x80)
     @ProtocolMessage
-    data class Failure(
-        val id: MqttV3SubAckReturnCodeRaw = MqttV3SubAckReturnCodeRaw(0x80u),
-    ) : MqttV3SubAckReturnCode
+    data object Failure : MqttV3SubAckReturnCode
 }
