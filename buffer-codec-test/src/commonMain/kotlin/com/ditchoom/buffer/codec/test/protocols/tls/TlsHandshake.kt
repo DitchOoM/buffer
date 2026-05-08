@@ -5,7 +5,10 @@ import com.ditchoom.buffer.codec.annotations.LengthFrom
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
+import com.ditchoom.buffer.codec.annotations.UseCodec
 import com.ditchoom.buffer.codec.annotations.WireBytes
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 
 /**
  * Issue #151 part 1 (J.M.6.b) fixture — TLS 1.3 handshake message header
@@ -32,15 +35,22 @@ data class TlsHandshake(
 )
 
 /**
- * Body shape: 2-byte legacy version + variable random bytes (the real
- * TLS ClientHello has a 32-byte fixed random + variable trailing fields;
- * the fixture keeps the shape "fixed prefix + variable tail" but stays
- * minimal to focus on the framing.)
+ * Body shape: 2-byte legacy version + variable trailing bytes (the real
+ * TLS ClientHello has a 32-byte fixed random + variable trailing
+ * fields; the fixture keeps the shape "fixed prefix + variable tail"
+ * but stays minimal to focus on the framing.)
+ *
+ * Phase J.M.5 slice 15g retyped the trailing tail from `List<UByte>`
+ * to `BinaryData` (slice 10a's `@RemainingBytes @UseCodec(C::class)
+ * val: P` shape). The fixture's purpose is `@LengthFrom`-bounded
+ * variable-tail framing, not per-byte structure inspection — opaque
+ * `BinaryData` matches that intent and avoids the per-byte JS-heap-
+ * object cost.
  */
 @ProtocolMessage(wireOrder = Endianness.Big)
 data class TlsHandshakeBody(
     val legacyVersion: UShort,
-    @RemainingBytes val random: List<UByte>,
+    @RemainingBytes @UseCodec(BinaryDataCodec::class) val random: BinaryData,
 )
 
 /**

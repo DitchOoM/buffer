@@ -11,6 +11,7 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import com.ditchoom.buffer.codec.annotations.UseCodec
 import com.ditchoom.buffer.codec.annotations.When
+import com.ditchoom.buffer.codec.test.protocols.mqtt.suback.MqttV3SubAckReturnCode
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
@@ -356,10 +357,10 @@ sealed interface MqttPacket<out P : Payload> {
      * dispatcher in Phase J.M step 3 — the standalone `MqttSubAck`
      * fixture's body shape lifts unchanged onto the `MqttPacket`
      * sealed family. The bounding `@UseCodec(MqttRemainingLengthCodec)`
-     * narrows the buffer limit so the trailing `@RemainingBytes
-     * List<UByte>` stops at the var-int's value rather than the raw
-     * buffer end (slice 7b + slice 8 composition, per the original
-     * fixture).
+     * narrows the buffer limit so the trailing
+     * `@RemainingBytes List<MqttV3SubAckReturnCode>` stops at the
+     * var-int's value rather than the raw buffer end (slice 7b + slice
+     * 8 composition + slice 11a sealed-element widening).
      *
      * Wire layout per §3.9.1:
      *
@@ -369,13 +370,23 @@ sealed interface MqttPacket<out P : Payload> {
      *   <pid_msb> <pid_lsb>      packet identifier (UShort BE)
      *   <rc_1> <rc_2> ... <rc_N> return codes (each 1 byte)
      * ```
+     *
+     * Phase J.M.5 slice 15g retyped `returnCodes` from `List<UByte>`
+     * to `List<MqttV3SubAckReturnCode>`. v3 §3.9.3 defines exactly
+     * four legal bytes (`0x00` / `0x01` / `0x02` / `0x80`); the sealed
+     * parent makes the value-space type-system enforced. Each
+     * variant is a singleton-equivalent `data class` with a default
+     * `id` field, so a `List<MqttV3SubAckReturnCode>` of N entries
+     * holds N references rather than N boxed scalar instances —
+     * eliminating the per-element JS-heap-object cost of the prior
+     * `List<UByte>` shape.
      */
     @PacketType(value = 9)
     @ProtocolMessage(wireOrder = Endianness.Big)
     data class SubAck(
         val header: MqttFixedHeader = MqttFixedHeader(0x90u),
         val packetIdentifier: UShort,
-        @RemainingBytes val returnCodes: List<UByte>,
+        @RemainingBytes val returnCodes: List<MqttV3SubAckReturnCode>,
     ) : MqttPacket<Nothing>
 
     /**

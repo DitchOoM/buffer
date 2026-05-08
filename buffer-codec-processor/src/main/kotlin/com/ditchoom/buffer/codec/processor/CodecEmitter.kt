@@ -2629,9 +2629,12 @@ internal class CodecEmitter(
 
     /**
      * Stage H slice 10c / 10f — gate for emitting the `Partial` decode
-     * pattern. Partial is emitted whenever a message carries a typed
-     * payload field (slice 10a `@UseCodec` shape or slice 10b `<P :
-     * Payload>` shape); `RemainingBytesPayload` is the marker for both.
+     * pattern. Partial is emitted only when [FieldSpec.RemainingBytesPayload]
+     * is the *last* field of the shape. The Partial flow is the
+     * streaming-style "decode the header now, defer the payload"
+     * contract — meaningful only when the payload is genuinely
+     * trailing (e.g. `MqttPacket.Publish<P>`, v3/v5 SUBSCRIBE/UNSUBSCRIBE
+     * bodies).
      *
      * Slice 10f / Phase I.1 step 9 — when a shape also carries a
      * bounding `@UseCodec(BoundingLengthCodec)` field (the MQTT v3
@@ -2644,8 +2647,16 @@ internal class CodecEmitter(
      * concerns the slice 10c carve-out flagged are handled by capturing
      * the outer limit on the Partial and restoring on completion — no
      * consumer-visible API change versus the unbounded path.
+     *
+     * Phase J.M.5 slice 15g — when [FieldSpec.RemainingBytesPayload]
+     * appears as a *non-terminal* field (e.g. `PngChunk.data: BinaryData`
+     * followed by a 4-byte CRC trailer per J.M.6.c), the embedded
+     * payload is just a bounded body inside the packet's structure,
+     * not a deferred-decode tail. Emit only the normal decode/encode;
+     * skip Partial. [buildPartialClassTypeSpec] would otherwise error
+     * because it expects the Payload field at `fields.lastOrNull()`.
      */
-    private fun shouldEmitPartial(shape: CodecShape): Boolean = shape.fields.any { it is FieldSpec.RemainingBytesPayload }
+    private fun shouldEmitPartial(shape: CodecShape): Boolean = shape.fields.lastOrNull() is FieldSpec.RemainingBytesPayload
 
     /**
      * Stage H slice 10c — emit the nested `Partial` class. The `Partial`

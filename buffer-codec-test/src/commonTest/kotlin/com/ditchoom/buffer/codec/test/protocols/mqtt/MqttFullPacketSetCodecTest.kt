@@ -7,6 +7,7 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.protocols.mqtt.suback.MqttV3SubAckReturnCode
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImage
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImageCodec
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
@@ -141,7 +142,12 @@ class MqttFullPacketSetCodecTest {
         val original =
             MqttPacket.SubAck(
                 packetIdentifier = 0x000Au,
-                returnCodes = listOf(0x00u, 0x01u, 0x80u),
+                returnCodes =
+                    listOf(
+                        MqttV3SubAckReturnCode.SuccessMaximumQoS0(),
+                        MqttV3SubAckReturnCode.SuccessMaximumQoS1(),
+                        MqttV3SubAckReturnCode.Failure(),
+                    ),
             )
         assertDispatcherRoundTrip(original, expectedTotalBytes = 7)
     }

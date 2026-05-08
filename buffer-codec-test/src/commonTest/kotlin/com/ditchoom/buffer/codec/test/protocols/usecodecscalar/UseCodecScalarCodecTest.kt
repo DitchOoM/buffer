@@ -6,9 +6,11 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -73,13 +75,15 @@ class UseCodecScalarCodecTest {
 
     @Test
     fun boundedFrameRoundTrips() {
-        val payload = listOf<Byte>(0x10, 0x20, 0x30)
-        val original = BoundedFrame(tag = 0x4242, length = payload.size.toUInt(), payload = payload)
+        val payload = byteArrayOf(0x10, 0x20, 0x30)
+        val original = BoundedFrame(tag = 0x4242, length = payload.size.toUInt(), payload = BinaryData(payload))
         val buffer = BufferFactory.Default.allocate(64)
         BoundedFrameCodec.encode(buffer, original, EncodeContext.Empty)
         buffer.resetForRead()
         val decoded = BoundedFrameCodec.decode(buffer, DecodeContext.Empty)
-        assertEquals(original, decoded)
+        assertEquals(original.tag, decoded.tag)
+        assertEquals(original.length, decoded.length)
+        assertContentEquals(original.payload.bytes, decoded.payload.bytes)
     }
 
     @Test
@@ -102,7 +106,7 @@ class UseCodecScalarCodecTest {
         val decoded = BoundedFrameCodec.decode(buffer, DecodeContext.Empty)
         assertEquals(0x0001.toShort(), decoded.tag)
         assertEquals(3u, decoded.length)
-        assertEquals(listOf<Byte>(0xAA.toByte(), 0xBB.toByte(), 0xCC.toByte()), decoded.payload)
+        assertContentEquals(byteArrayOf(0xAA.toByte(), 0xBB.toByte(), 0xCC.toByte()), decoded.payload.bytes)
     }
 
     @Test
@@ -135,7 +139,7 @@ class UseCodecScalarCodecTest {
         // Conservative collapse — runtime-Exact composition is a follow-on.
         assertEquals(
             WireSize.BackPatch,
-            BoundedFrameCodec.wireSize(BoundedFrame(0, 0u, emptyList()), EncodeContext.Empty),
+            BoundedFrameCodec.wireSize(BoundedFrame(0, 0u, BinaryData(byteArrayOf())), EncodeContext.Empty),
         )
     }
 

@@ -10,6 +10,8 @@ import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import com.ditchoom.buffer.codec.annotations.UseCodec
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 
 /**
  * Phase I.1 step 4 doctrine vector — exercises bare `@UseCodec val:
@@ -119,14 +121,15 @@ data class ZigZagFrame(
 
 /**
  * Wire layout `[tag BE Short | length 4-byte LE via Le32LengthCodec |
- * payload (length bytes, scalars)]`. Exercises the bounding emit
+ * payload (length bytes, opaque)]`. Exercises the bounding emit
  * path:
  *   1. `decode` reads `tag`, captures `__lengthOuterLimit =
  *      buffer.limit()`, reads `length` via `Le32LengthCodec.decode`,
  *      calls `Le32LengthCodec.applyBound(buffer, length)` (sets
  *      limit = position + length).
  *   2. `payload` decode runs inside the bounded buffer
- *      (`@RemainingBytes List<Byte>` reads until the new limit).
+ *      (`@RemainingBytes @UseCodec(BinaryDataCodec::class) val payload:
+ *      BinaryData` bulk-reads bytes until the new limit).
  *   3. `try { ... } finally { buffer.setLimit(__lengthOuterLimit) }`
  *      restores the caller's outer limit even if payload decode
  *      throws.
@@ -135,10 +138,16 @@ data class ZigZagFrame(
  * frame still produces the correct payload size — the user codec's
  * `applyBound` is what bounds the read, not the buffer's natural
  * remaining bytes.
+ *
+ * Phase J.M.5 slice 15g retyped `payload` from `List<Byte>` to
+ * `BinaryData` to retire the `@RemainingBytes List<scalar>` shape.
+ * The slice 10a `@RemainingBytes @UseCodec(C::class) val: P` path
+ * carries the same bounding semantics with explicit Payload-codec
+ * memory ownership.
  */
 @ProtocolMessage
 data class BoundedFrame(
     val tag: Short,
     @UseCodec(Le32LengthCodec::class) val length: UInt,
-    @RemainingBytes val payload: List<Byte>,
+    @RemainingBytes @UseCodec(BinaryDataCodec::class) val payload: BinaryData,
 )

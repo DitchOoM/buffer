@@ -188,6 +188,7 @@ class ProtocolMessageProcessor(
             validateFramedBy(symbol)
             validatePayloadTypeParameter(symbol, ctor.parameters)
             validateRemainingBytesTrailers(symbol, ctor.parameters)
+            validateRemainingBytesElementType(symbol, ctor.parameters)
             emitter.tryEmit(symbol)
         }
         return deferred
@@ -527,6 +528,110 @@ class ProtocolMessageProcessor(
                             "end of the constructor parameter list, or remove the " +
                             "@$annShortName trailer.",
                         trailing,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Phase J.M.5 slice 15g — reject `@RemainingBytes List<scalar>` and
+     * `@RemainingBytes <primitive-array>` (`ByteArray`, `UByteArray`,
+     * `ShortArray`, `UShortArray`, `IntArray`, `UIntArray`, `LongArray`,
+     * `ULongArray`).
+     *
+     * These shapes promote a copy-by-default model: the framework
+     * decode loop reads bytes one at a time and accumulates them into
+     * the boxed list / typed array, hiding the copy from the user
+     * codec author. On Kotlin/JS the per-element boxing dominates
+     * decode time for any non-trivial list size; on JVM the bulk
+     * allocation is cheaper but still a forced copy.
+     *
+     * The right shapes — both spec-faithful and explicit about memory
+     * ownership — are:
+     *
+     *   - For value-spaces with discrete spec-defined values
+     *     (e.g. MQTT v3 SUBACK return codes per §3.9.3):
+     *     `@RemainingBytes val xs: List<SealedParent>` where
+     *     `SealedParent` is a `@DispatchOn @ProtocolMessage`-annotated
+     *     sealed interface with one variant per legal byte. Slice 11a
+     *     emits per-element dispatch through the sealed parent's
+     *     generated codec; each list slot holds a singleton-equivalent
+     *     reference rather than a boxed scalar.
+     *
+     *   - For genuinely opaque bulk bytes (e.g. PNG chunk data, TLS
+     *     handshake tail, MQTT v5 binary properties):
+     *     `@RemainingBytes @UseCodec(YourCodec::class) val: YourPayload`
+     *     where `YourPayload` is a `@JvmInline value class` over
+     *     `ByteArray` (and implements `Payload`) with a hand-written
+     *     `Codec<YourPayload>` that owns the copy decision. The
+     *     `BinaryData` / `BinaryDataCodec` fixture pair in
+     *     `protocols.payload` is the canonical example.
+     */
+    private fun validateRemainingBytesElementType(
+        owner: KSClassDeclaration,
+        parameters: List<KSValueParameter>,
+    ) {
+        val ownerName = owner.qualifiedName?.asString() ?: owner.simpleName.asString()
+        for (param in parameters) {
+            val hasRemainingBytes =
+                param.annotations.any { ann ->
+                    ann.shortName.asString() == REMAINING_BYTES_SHORT &&
+                        ann.annotationType
+                            .resolve()
+                            .declaration.qualifiedName
+                            ?.asString() == REMAINING_BYTES_QNAME
+                }
+            if (!hasRemainingBytes) continue
+            val type = param.type.resolve()
+            if (type.isError) continue
+            val typeQname = type.declaration.qualifiedName?.asString() ?: continue
+            val fieldName = param.name?.asString() ?: "<unknown>"
+
+            // Primitive arrays — never supported, but a fresh user reaching
+            // for `ByteArray` (etc.) deserves the spec-faithful pointer.
+            if (typeQname in PRIMITIVE_ARRAY_QNAMES) {
+                logger.error(
+                    "@RemainingBytes on $ownerName.$fieldName has type `$typeQname`. Primitive " +
+                        "array element types are intentionally not supported — they hide a forced " +
+                        "buffer-to-array copy from the codec author and provide no spec-meaningful " +
+                        "structure. Wrap the bytes in a `@JvmInline value class T(val bytes: " +
+                        "ByteArray) : Payload` with a hand-written `Codec<T>` and use " +
+                        "`@RemainingBytes @UseCodec(<YourCodec>::class) val: T` (slice 10a). The " +
+                        "`BinaryData` / `BinaryDataCodec` fixture pair is the canonical example.",
+                    param,
+                )
+                continue
+            }
+
+            // List<scalar> — retired in slice 15g.
+            if (typeQname == "kotlin.collections.List") {
+                val elementType =
+                    type.arguments
+                        .firstOrNull()
+                        ?.type
+                        ?.resolve() ?: continue
+                if (elementType.isError) continue
+                val elementQname = elementType.declaration.qualifiedName?.asString() ?: continue
+                if (elementQname in SCALAR_QNAMES) {
+                    logger.error(
+                        "@RemainingBytes on $ownerName.$fieldName has type `List<$elementQname>`. " +
+                            "Scalar-element list shapes are retired — they decode by reading one " +
+                            "scalar at a time and boxing each into a `List` slot, which is " +
+                            "expensive on Kotlin/JS (every value-class scalar becomes a JS heap " +
+                            "object) and forces a copy regardless of platform. Use one of the " +
+                            "two explicit shapes instead:\n" +
+                            "  (1) For value-spaces with discrete spec-defined bytes " +
+                            "(e.g. MQTT SUBACK return codes per §3.9.3), define a " +
+                            "`@DispatchOn @ProtocolMessage` sealed parent with one variant per " +
+                            "legal byte and use `@RemainingBytes val: List<SealedParent>` " +
+                            "(slice 11a). See `MqttV3SubAckReturnCode` for the template.\n" +
+                            "  (2) For genuinely opaque bulk bytes (e.g. PNG chunk data, TLS " +
+                            "handshake tail), wrap in a `@JvmInline value class T(val bytes: " +
+                            "ByteArray) : Payload` with a hand-written `Codec<T>` and use " +
+                            "`@RemainingBytes @UseCodec(<YourCodec>::class) val: T` " +
+                            "(slice 10a). See `BinaryData` / `BinaryDataCodec`.",
+                        param,
                     )
                 }
             }
@@ -1888,6 +1993,41 @@ class ProtocolMessageProcessor(
         private const val STRING_QNAME = "kotlin.String"
         private const val LIST_QNAME = "kotlin.collections.List"
         private const val MAX_DEPTH = 16
+
+        // Slice 15g — qnames the [validateRemainingBytesElementType] check
+        // rejects. Scalar element types that promote a copy-by-default
+        // decode (every read boxes / allocates per element).
+        private val SCALAR_QNAMES =
+            setOf(
+                "kotlin.Byte",
+                "kotlin.UByte",
+                "kotlin.Short",
+                "kotlin.UShort",
+                "kotlin.Int",
+                "kotlin.UInt",
+                "kotlin.Long",
+                "kotlin.ULong",
+                "kotlin.Float",
+                "kotlin.Double",
+                "kotlin.Boolean",
+            )
+
+        // Primitive-array types — same rejection rationale; never supported
+        // as a `@RemainingBytes` field type.
+        private val PRIMITIVE_ARRAY_QNAMES =
+            setOf(
+                "kotlin.ByteArray",
+                "kotlin.UByteArray",
+                "kotlin.ShortArray",
+                "kotlin.UShortArray",
+                "kotlin.IntArray",
+                "kotlin.UIntArray",
+                "kotlin.LongArray",
+                "kotlin.ULongArray",
+                "kotlin.FloatArray",
+                "kotlin.DoubleArray",
+                "kotlin.BooleanArray",
+            )
 
         private val NUMERIC_SCALAR_QNAMES =
             setOf(

@@ -6,7 +6,9 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
 
@@ -23,7 +25,7 @@ class TlsHandshakeRoundTripTest {
         val body =
             TlsHandshakeBody(
                 legacyVersion = 0x0303u,
-                random = listOf<UByte>(0xDEu, 0xADu, 0xBEu, 0xEFu),
+                random = BinaryData(byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte())),
             )
         val bodyBytes = bodyWireBytes(body)
         val original =
@@ -33,14 +35,17 @@ class TlsHandshakeRoundTripTest {
                 body = body,
             )
         val decoded = roundTripHandshake(original, bodyBytes)
-        assertEquals(original, decoded)
+        assertEquals(original.msgType, decoded.msgType)
+        assertEquals(original.length, decoded.length)
+        assertEquals(original.body.legacyVersion, decoded.body.legacyVersion)
+        assertContentEquals(original.body.random.bytes, decoded.body.random.bytes)
     }
 
     @Test
     fun handshakeBodyStopsAtLengthBoundary() {
         // Append junk after the framed body; the body decode must not
         // consume past the length-bounded region.
-        val body = TlsHandshakeBody(legacyVersion = 0x0304u, random = listOf<UByte>(0x01u, 0x02u))
+        val body = TlsHandshakeBody(legacyVersion = 0x0304u, random = BinaryData(byteArrayOf(0x01, 0x02)))
         val bodyBytes = bodyWireBytes(body)
         val original = TlsHandshake(msgType = 0x01u, length = bodyBytes.toUInt(), body = body)
 
@@ -55,13 +60,15 @@ class TlsHandshakeRoundTripTest {
         buf.position(0)
 
         val decoded = TlsHandshakeCodec.decode(buf, DecodeContext.Empty)
-        assertEquals(original, decoded)
+        assertEquals(original.msgType, decoded.msgType)
+        assertEquals(original.length, decoded.length)
+        assertContentEquals(original.body.random.bytes, decoded.body.random.bytes)
         assertEquals(3, buf.remaining(), "junk must remain after length-bounded body decode")
     }
 
     @Test
     fun handshakeWireSizeIsHeaderPlusLength() {
-        val body = TlsHandshakeBody(legacyVersion = 0x0303u, random = listOf<UByte>(0x10u, 0x20u, 0x30u))
+        val body = TlsHandshakeBody(legacyVersion = 0x0303u, random = BinaryData(byteArrayOf(0x10, 0x20, 0x30)))
         val bodyBytes = bodyWireBytes(body)
         val handshake =
             TlsHandshake(msgType = 0x01u, length = bodyBytes.toUInt(), body = body)
@@ -103,7 +110,7 @@ class TlsHandshakeRoundTripTest {
         assertSame(TlsHandshakeSealedBody.HelloRequest, decoded.body)
     }
 
-    private fun bodyWireBytes(body: TlsHandshakeBody): Int = 2 + body.random.size
+    private fun bodyWireBytes(body: TlsHandshakeBody): Int = 2 + body.random.bytes.size
 
     private fun roundTripHandshake(
         sample: TlsHandshake,

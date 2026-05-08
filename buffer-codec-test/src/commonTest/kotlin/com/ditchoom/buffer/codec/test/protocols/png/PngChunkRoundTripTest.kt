@@ -6,7 +6,9 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 
 /**
@@ -23,17 +25,20 @@ class PngChunkRoundTripTest {
     @Test
     fun pngChunkRoundTripsAcrossNonTerminalBody() {
         // type "IDAT" = 0x49444154 (per PNG spec §11.2.4)
-        val data = listOf<UByte>(0x78u, 0x9Cu, 0x63u, 0x60u, 0x60u, 0x60u, 0x00u, 0x00u, 0x00u, 0x05u, 0x00u, 0x01u)
+        val data = byteArrayOf(0x78, 0x9C.toByte(), 0x63, 0x60, 0x60, 0x60, 0x00, 0x00, 0x00, 0x05, 0x00, 0x01)
         val original =
             PngChunk(
                 length = data.size.toUInt(),
                 type = 0x49444154u,
-                data = data,
+                data = BinaryData(data),
                 crc = 0xDEADBEEFu,
             )
         val totalBytes = 4 + 4 + data.size + 4
         val decoded = roundTripPngChunk(original, totalBytes)
-        assertEquals(original, decoded)
+        assertEquals(original.length, decoded.length)
+        assertEquals(original.type, decoded.type)
+        assertContentEquals(original.data.bytes, decoded.data.bytes)
+        assertEquals(original.crc, decoded.crc)
     }
 
     @Test
@@ -43,12 +48,15 @@ class PngChunkRoundTripTest {
             PngChunk(
                 length = 0u,
                 type = 0x49454E44u, // "IEND"
-                data = emptyList(),
+                data = BinaryData(byteArrayOf()),
                 crc = 0xAE426082u,
             )
         val decoded = roundTripPngChunk(original, totalBytes = 12)
-        assertEquals(original, decoded)
-        assertEquals(0, decoded.data.size)
+        assertEquals(original.length, decoded.length)
+        assertEquals(original.type, decoded.type)
+        assertContentEquals(original.data.bytes, decoded.data.bytes)
+        assertEquals(original.crc, decoded.crc)
+        assertEquals(0, decoded.data.bytes.size)
     }
 
     @Test
@@ -56,19 +64,19 @@ class PngChunkRoundTripTest {
         // Build a chunk whose data contains bytes that look CRC-like to
         // confirm the body loop's "position < limit - 4" bound is honoring
         // limit, not reading until the buffer end.
-        val data = listOf<UByte>(0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu)
+        val data = ByteArray(8) { 0xFF.toByte() }
         val original =
             PngChunk(
                 length = data.size.toUInt(),
                 type = 0x494D4147u, // "IMAG" (made up)
-                data = data,
+                data = BinaryData(data),
                 crc = 0x12345678u,
             )
         val totalBytes = 4 + 4 + data.size + 4
         val decoded = roundTripPngChunk(original, totalBytes)
-        assertEquals(8, decoded.data.size, "body must read exactly data.size bytes — CRC stays in trailer")
+        assertEquals(8, decoded.data.bytes.size, "body must read exactly data.size bytes — CRC stays in trailer")
         assertEquals(0x12345678u, decoded.crc, "CRC must survive the body loop's bound")
-        assertEquals(original, decoded)
+        assertContentEquals(original.data.bytes, decoded.data.bytes)
     }
 
     @Test
@@ -81,7 +89,7 @@ class PngChunkRoundTripTest {
             PngChunk(
                 length = 4u,
                 type = 0x49444154u,
-                data = listOf(0u, 1u, 2u, 3u),
+                data = BinaryData(byteArrayOf(0, 1, 2, 3)),
                 crc = 0xCAFEBABEu,
             )
         assertEquals(WireSize.BackPatch, PngChunkCodec.wireSize(chunk, EncodeContext.Empty))

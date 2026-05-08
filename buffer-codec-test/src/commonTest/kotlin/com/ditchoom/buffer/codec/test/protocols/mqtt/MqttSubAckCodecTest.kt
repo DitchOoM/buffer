@@ -8,6 +8,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.protocols.mqtt.suback.MqttV3SubAckReturnCode
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -41,7 +42,7 @@ class MqttSubAckCodecTest {
             MqttPacket.SubAck(
                 header = MqttFixedHeader(0x90u),
                 packetIdentifier = 1u,
-                returnCodes = listOf(0x00u),
+                returnCodes = listOf(MqttV3SubAckReturnCode.SuccessMaximumQoS0()),
             )
         val expected =
             byteArrayOf(
@@ -61,7 +62,12 @@ class MqttSubAckCodecTest {
             MqttPacket.SubAck(
                 header = MqttFixedHeader(0x90u),
                 packetIdentifier = 0x1234u,
-                returnCodes = listOf(0x00u, 0x01u, 0x80u),
+                returnCodes =
+                    listOf(
+                        MqttV3SubAckReturnCode.SuccessMaximumQoS0(),
+                        MqttV3SubAckReturnCode.SuccessMaximumQoS1(),
+                        MqttV3SubAckReturnCode.Failure(),
+                    ),
             )
         val expected =
             byteArrayOf(
@@ -83,7 +89,7 @@ class MqttSubAckCodecTest {
         val decoded = SubAckCodec.decode(buf, DecodeContext.Empty)
         assertEquals(MqttFixedHeader(0x90u), decoded.header)
         assertEquals(1u.toUShort(), decoded.packetIdentifier)
-        assertEquals(listOf(0x00u.toUByte()), decoded.returnCodes)
+        assertEquals(listOf(MqttV3SubAckReturnCode.SuccessMaximumQoS0()), decoded.returnCodes)
     }
 
     @Test
@@ -132,7 +138,12 @@ class MqttSubAckCodecTest {
             MqttPacket.SubAck(
                 header = MqttFixedHeader(0x90u),
                 packetIdentifier = 0xCAFEu,
-                returnCodes = listOf(0x00u, 0x02u, 0x80u),
+                returnCodes =
+                    listOf(
+                        MqttV3SubAckReturnCode.SuccessMaximumQoS0(),
+                        MqttV3SubAckReturnCode.SuccessMaximumQoS2(),
+                        MqttV3SubAckReturnCode.Failure(),
+                    ),
             )
         val buf = encode(original)
         assertEquals(original, SubAckCodec.decode(buf, DecodeContext.Empty))
@@ -188,28 +199,20 @@ class MqttSubAckCodecTest {
         // SUBACK requires remainingLength >= 2 (packet id) + 1 (at least one
         // return code per spec) = 3, so we test boundary values >= 3.
         // 127 (1 byte boundary), 128 (2 byte first), 16383 (2 byte boundary),
-        // 16384 (3 byte first).
+        // 16384 (3 byte first), 2097151 (3 byte boundary), 2097152 (4 byte
+        // first).
         //
-        // The 3→4 byte VBI transition (2_097_151 / 2_097_152) is intentionally
-        // omitted from the SUBACK composition test:
-        //
-        //  - It's covered for the codec directly by
-        //    [MqttRemainingLengthCodecTest.roundTripsAcrossAllByteWidths]
-        //    (which round-trips `UInt` through the VBI codec without
-        //    inflating a SUBACK body).
-        //  - It's covered on the SUBACK encode side by
-        //    [varIntEncodesAt4ByteBoundary].
-        //
-        // Hitting it here forces a 2 MB `List<UByte>` decode loop. On
-        // Kotlin/JS the cost isn't the ArrayList resizes (pre-sizing was
-        // measured to give 0% improvement) but boxing 2 M `UByte`s into
-        // JS heap objects — ~100 ms locally, ~500 ms on the slower GitHub
-        // Actions JS Node runner. With both 4-byte cases that's ~1 s of
-        // boxing, which combined with framework overhead trips Mocha's
-        // default 2 s timeout (`Error at node:internal/timers:505`). Real
-        // SUBACK packets carry < 100 return codes (one per matching topic
-        // filter); the 2 M-element body is purely synthetic test data.
-        for (rl in listOf(127u, 128u, 16383u, 16384u)) {
+        // The 4-byte boundary cases were briefly trimmed in commit 70490001
+        // because the prior `List<UByte>` decode boxed every byte into a JS
+        // heap object (~100 ms per case locally, ~500 ms on the slower
+        // GitHub Actions JS Node runner; combined with the second 4-byte
+        // case that tripped Mocha's default 2 s timeout). Slice 15g retyped
+        // the field to `List<MqttV3SubAckReturnCode>` (sealed parent per
+        // spec §3.9.3); each list slot now holds a reference to a sealed-
+        // variant data-class instance with a default `id` field — no
+        // per-element boxing of a value-class scalar — so the 4-byte cases
+        // are back in scope.
+        for (rl in listOf(127u, 128u, 16383u, 16384u, 2_097_151u, 2_097_152u)) {
             val msg = makeAckWithRemainingLength(rl)
             val buf = encode(msg)
             val decoded = SubAckCodec.decode(buf, DecodeContext.Empty)
@@ -247,7 +250,12 @@ class MqttSubAckCodecTest {
             MqttPacket.SubAck(
                 header = MqttFixedHeader(0x90u),
                 packetIdentifier = 1u,
-                returnCodes = listOf(0u, 1u, 0x80u),
+                returnCodes =
+                    listOf(
+                        MqttV3SubAckReturnCode.SuccessMaximumQoS0(),
+                        MqttV3SubAckReturnCode.SuccessMaximumQoS1(),
+                        MqttV3SubAckReturnCode.Failure(),
+                    ),
             )
         val encoded = encode(original)
         val totalBytes = encoded.remaining()
@@ -343,7 +351,7 @@ class MqttSubAckCodecTest {
             header = MqttFixedHeader(0x90u),
             packetIdentifier = 1u,
             // packetIdentifier is 2 bytes; pad return codes to fill the rest.
-            returnCodes = List((rl.toInt() - 2).coerceAtLeast(0)) { 0u.toUByte() },
+            returnCodes = List((rl.toInt() - 2).coerceAtLeast(0)) { MqttV3SubAckReturnCode.SuccessMaximumQoS0() },
         )
 
     private fun encodeAndAssertBytes(
