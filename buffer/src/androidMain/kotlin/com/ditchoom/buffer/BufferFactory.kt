@@ -42,26 +42,7 @@ private val deterministicFactoryInstance: BufferFactory =
         override fun allocate(
             size: Int,
             byteOrder: ByteOrder,
-        ): PlatformBuffer {
-            // Tier 1 — `Unsafe.invokeCleaner` (JVM 9+). On Android Debug
-            // unit tests (which run on the host JDK with the JVM-side
-            // `java.nio.DirectByteBuffer`, where the JDK 21 ctor signature
-            // `(long, int)` no longer exists), this is the only working
-            // path; the Unsafe + DirectByteBuffer reflection fallback
-            // below would throw `NoSuchMethodException` and surface as
-            // `UnsupportedOperationException`. On real Android (ART)
-            // `invokeCleanerFn` resolves to null because ART doesn't
-            // expose `Unsafe.invokeCleaner`, so device behavior falls
-            // through to Tier 2 unchanged.
-            if (invokeCleanerFn != null) {
-                return AndroidDeterministicDirectJvmBuffer(
-                    ByteBuffer.allocateDirect(size).order(byteOrder.toJava()),
-                )
-            }
-            // Tier 2 — Unsafe.allocateMemory + DirectByteBuffer ctor
-            // reflection. Path used on real Android devices.
-            return AndroidDeterministicUnsafeJvmBuffer.allocate(size, byteOrder)
-        }
+        ): PlatformBuffer = AndroidDeterministicUnsafeJvmBuffer.allocate(size, byteOrder)
 
         override fun wrap(
             array: ByteArray,
