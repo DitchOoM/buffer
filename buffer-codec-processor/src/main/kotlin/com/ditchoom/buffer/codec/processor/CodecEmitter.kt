@@ -4041,10 +4041,14 @@ internal class CodecEmitter(
                 ScalarKind.ULong -> accessor to "((1uL shl ${8 * field.wireBytes}) - 1uL)"
                 ScalarKind.UInt -> accessor to "((1u shl ${8 * field.wireBytes}) - 1u)"
                 ScalarKind.UShort -> "$accessor.toUInt()" to "((1u shl ${8 * field.wireBytes}) - 1u)"
-                ScalarKind.UByte -> return // wireBytes < 1 is rejected by analyzeField
-                ScalarKind.Byte, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long -> return // signed kinds reject @WireBytes narrowing in analyzeField
-                ScalarKind.Float, ScalarKind.Double -> return // Float/Double also reject @WireBytes narrowing
-                ScalarKind.Boolean -> return // analyzeField pins Boolean to natural width — never narrows
+                // wireBytes < 1 is rejected by analyzeField
+                ScalarKind.UByte -> return
+                // signed kinds reject @WireBytes narrowing in analyzeField
+                ScalarKind.Byte, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long -> return
+                // Float/Double also reject @WireBytes narrowing
+                ScalarKind.Float, ScalarKind.Double -> return
+                // analyzeField pins Boolean to natural width — never narrows
+                ScalarKind.Boolean -> return
             }
         val maxValue = (1L shl (8 * field.wireBytes)) - 1
         body.beginControlFlow("if (%L > %L)", lhs, maxLit)
@@ -7991,6 +7995,7 @@ internal class CodecEmitter(
         Short(2, true),
         Int(4, true),
         Long(8, true),
+
         // IEEE 754 floating point — wire form is the raw bit pattern of
         // toRawBits() / fromBits() at fixed natural width. Treated as
         // signed only insofar as @WireBytes narrowing is rejected (same
