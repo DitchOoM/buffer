@@ -208,7 +208,7 @@ annotation class RemainingBytes
  *     the whole nested wire form. Decode narrows `buffer.limit()` to the
  *     bounded extent and delegates to `<TCodec>.decode`; encode delegates
  *     to `<TCodec>.encode` and the user is responsible for sizing the
- *     sibling to the body's wire byte count (row 16 trust contract).
+ *     sibling to the body's wire byte count.
  *
  * ## When to prefer @LengthPrefixed
  *
@@ -217,8 +217,8 @@ annotation class RemainingBytes
  * [LengthPrefix.Int]. A field whose only purpose is to bound the
  * immediately following sibling is a redundant length carrier — modeling
  * it as an independent constructor parameter encodes the same quantity
- * twice (prefix vs. value's `wireSize`). The validator (Phase 10 rule
- * R1) rejects the redundant shape for `String` and `List<T>` bodies.
+ * twice (prefix vs. value's `wireSize`). The validator rejects the redundant
+ * shape for `String` and `List<T>` bodies.
  *
  * ## When @LengthFrom is the only option
  *
@@ -326,8 +326,7 @@ annotation class WireOrder(
  * The field must be nullable. Setting `= null` as the constructor default is conventional
  * (so the data class can be constructed without naming the field when the predicate
  * is false) but is **not** enforced — KSP cannot inspect default expression trees, so
- * any rule the validator can't actually check is not part of the contract
- * (Locked Decision row 19).
+ * any rule the validator can't actually check is not part of the contract.
  *
  * ## Grammar
  *
@@ -356,10 +355,9 @@ annotation class WireOrder(
  *
  * `"remaining <op> <int>"` where `<op> ∈ {>=, >, ==}` gates the slot on the bounded
  * decode buffer's `remaining()`. The identifier `remaining` is reserved/magic and
- * does not refer to a sibling field. Designed as the future replacement for the
- * never-introduced `@WhenRemaining(N)` annotation; lands as part of the v5
- * property-list work (Phase J.M.5). Until then, this grammar is documented but
- * not parsed — using it today produces the standard "sibling not found" diagnostic.
+ * does not refer to a sibling field. Reserved for a future release; until then,
+ * this grammar is documented but not parsed — using it today produces the
+ * standard "sibling not found" diagnostic.
  *
  * ## Compound conditions: use a value-class getter
  *
@@ -398,13 +396,13 @@ annotation class WireOrder(
  *
  * ## Semantics
  *
- * Encoder semantics (row 19): when the predicate is `false`, the entire slot is
- * skipped on the wire (zero bytes written, including any `@LengthPrefixed` prefix).
+ * Encoder semantics: when the predicate is `false`, the entire slot is skipped
+ * on the wire (zero bytes written, including any `@LengthPrefixed` prefix).
  * When the predicate is `true` and the field's value is `null`, encode throws
  * `EncodeException` with field-path attribution.
  *
  * @param predicate Grammar 1 (`"siblingField"` or `"siblingField.property"`) today;
- *   grammar 2 (`"remaining <op> <int>"`) reserved for Phase J.M.5.
+ *   grammar 2 (`"remaining <op> <int>"`) reserved for a future release.
  */
 @Target(AnnotationTarget.VALUE_PARAMETER)
 @Retention(AnnotationRetention.BINARY)
@@ -529,9 +527,8 @@ annotation class UseCodec(
  * The framework owns framing: the encode path emits the prefix carrying the
  * encoded body's byte count, the decode path reads the prefix, narrows
  * `buffer.limit()` to bound the body, and asserts strict consumption.
- * Replaces the slice 14a `@DerivedLength` annotation, which closed the
- * caller/framework desync only on a fixed-suffix shape; `@FramedBy` is
- * structural and handles fixed-suffix and BackPatch-suffix bodies uniformly.
+ * `@FramedBy` is structural and handles both fixed-size and variable-size
+ * bodies uniformly.
  *
  * Sealed-parent composition: when applied to a `@ProtocolMessage` sealed
  * parent, every variant inherits the framing rule. There is no per-variant

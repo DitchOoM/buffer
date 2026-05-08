@@ -6,8 +6,8 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 
 /**
- * Phase J.M.5 slice 14b — runtime entry point for the `@FramedBy` slicing-scheme
- * encode emit. The KSP-generated `@FramedBy` codec calls [encode], which:
+ * Runtime entry point for the `@FramedBy` slicing-scheme encode emit. The
+ * KSP-generated `@FramedBy` codec calls [encode], which:
  *
  *   1. Allocates a [GrowableWriteBuffer] with a slack region at the front sized
  *      to fit the worst-case header bytes plus the worst-case framing prefix.
@@ -22,7 +22,7 @@ import com.ditchoom.buffer.WriteBuffer
  * Body bytes are never moved — the slicing scheme leaves them at offset
  * `maxSlack` and writes the prefix backwards into the slack instead. This is
  * what makes the emit zero-memcpy for the body content (the design's headline
- * property — see slice 14b handoff Q5).
+ * property).
  *
  * For a class with `@FramedBy(codec, after = "")`, [headerWireWidth] is `0`
  * and [writeHeader] is `null`. For `after = "X"`, [headerWireWidth] is the
