@@ -121,7 +121,11 @@ class DispatchOnValidatorTest {
     }
 
     @Test
-    fun firesWhenDispatchValueReturnsNonInt() {
+    fun firesWhenDispatchValueReturnsUnsupportedKind() {
+        // Phase J.M.5 slice J.M.7.a — accepted return types are
+        // {Boolean, Byte, UByte, Short, UShort, Int, UInt}. Long
+        // (and ULong) stay rejected because `@PacketType.value` is
+        // an `Int` and can't address values beyond `Int.MAX_VALUE`.
         val result =
             compile(
                 """
@@ -134,7 +138,7 @@ class DispatchOnValidatorTest {
                 @ProtocolMessage
                 value class Header(val raw: UByte) {
                     @DispatchValue
-                    val type: UByte get() = raw  // wrong return type
+                    val type: Long get() = raw.toLong()  // unsupported return type
                 }
 
                 @DispatchOn(Header::class)
@@ -148,8 +152,8 @@ class DispatchOnValidatorTest {
             )
         assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
         assertTrue(
-            result.messages.contains("non-nullable `Int`"),
-            "diagnostic should name the Int return-type rule. Messages:\n${result.messages}",
+            result.messages.contains("must return one of {Boolean, Byte, UByte, Short, UShort, Int, UInt}"),
+            "diagnostic should list the accepted return types. Messages:\n${result.messages}",
         )
     }
 
@@ -253,6 +257,156 @@ class DispatchOnValidatorTest {
         assertTrue(
             result.messages.contains("duplicates"),
             "diagnostic should name the uniqueness rule. Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
+    fun acceptsBooleanReturnType() {
+        // Phase J.M.5 slice J.M.7.a — Boolean dispatch (e.g. QUIC
+        // long-header form bit). Validator accepts; range is 0..1.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.annotations.*
+                import kotlin.jvm.JvmInline
+
+                @JvmInline
+                @ProtocolMessage
+                value class Header(val raw: UByte) {
+                    @DispatchValue
+                    val highBit: Boolean get() = (raw.toUInt() and 0x80u) != 0u
+                }
+
+                @DispatchOn(Header::class)
+                @ProtocolMessage
+                sealed interface Packet {
+                    @PacketType(value = 0)
+                    @ProtocolMessage
+                    data class Low(val header: Header = Header(0x40u)) : Packet
+
+                    @PacketType(value = 1)
+                    @ProtocolMessage
+                    data class High(val header: Header = Header(0xC0u)) : Packet
+                }
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+        assertFalse(result.messages.contains("error:", ignoreCase = true), result.messages)
+    }
+
+    @Test
+    fun rejectsBooleanPacketTypeOutOfRange() {
+        // Boolean range is 0..1; 2 must trip the per-kind range check.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.annotations.*
+                import kotlin.jvm.JvmInline
+
+                @JvmInline
+                @ProtocolMessage
+                value class Header(val raw: UByte) {
+                    @DispatchValue
+                    val highBit: Boolean get() = (raw.toUInt() and 0x80u) != 0u
+                }
+
+                @DispatchOn(Header::class)
+                @ProtocolMessage
+                sealed interface Packet {
+                    @PacketType(value = 0)
+                    @ProtocolMessage
+                    data class Low(val header: Header = Header(0u)) : Packet
+
+                    @PacketType(value = 2)  // out of Boolean range
+                    @ProtocolMessage
+                    data class TooHigh(val header: Header = Header(0u)) : Packet
+                }
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("out of range") &&
+                result.messages.contains("kotlin.Boolean") &&
+                result.messages.contains("0..1"),
+            "diagnostic should name the Boolean range. Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
+    fun acceptsUShortReturnTypeWithWideValues() {
+        // Phase J.M.5 slice J.M.7.a — UShort dispatch (e.g. Ethernet
+        // EtherType). Discriminator inner is UShort (2 wire bytes);
+        // PacketType values exceed the old 0..255 cap and must be
+        // accepted now.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.annotations.*
+                import kotlin.jvm.JvmInline
+
+                @JvmInline
+                @ProtocolMessage
+                value class EtherType(val raw: UShort) {
+                    @DispatchValue
+                    val type: UShort get() = raw
+                }
+
+                @DispatchOn(EtherType::class)
+                @ProtocolMessage
+                sealed interface Frame {
+                    @PacketType(value = 0x0800)
+                    @ProtocolMessage
+                    data class Ipv4(val type: EtherType = EtherType(0x0800u)) : Frame
+
+                    @PacketType(value = 0x86DD)
+                    @ProtocolMessage
+                    data class Ipv6(val type: EtherType = EtherType(0x86DDu)) : Frame
+                }
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+        assertFalse(result.messages.contains("error:", ignoreCase = true), result.messages)
+    }
+
+    @Test
+    fun rejectsUShortPacketTypeOutOfRange() {
+        // UShort range is 0..65535; 0x10000 must trip the per-kind range check.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.annotations.*
+                import kotlin.jvm.JvmInline
+
+                @JvmInline
+                @ProtocolMessage
+                value class EtherType(val raw: UShort) {
+                    @DispatchValue
+                    val type: UShort get() = raw
+                }
+
+                @DispatchOn(EtherType::class)
+                @ProtocolMessage
+                sealed interface Frame {
+                    @PacketType(value = 0x10000)  // 65536 — out of UShort range
+                    @ProtocolMessage
+                    data class TooBig(val type: EtherType = EtherType(0u)) : Frame
+                }
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("out of range") &&
+                result.messages.contains("kotlin.UShort") &&
+                result.messages.contains("0..65535"),
+            "diagnostic should name the UShort range. Messages:\n${result.messages}",
         )
     }
 

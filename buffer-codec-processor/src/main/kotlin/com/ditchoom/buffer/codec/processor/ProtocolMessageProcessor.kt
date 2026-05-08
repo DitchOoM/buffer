@@ -378,18 +378,26 @@ class ProtocolMessageProcessor(
             return
         }
         val dispatchReturn = dispatchProp.type.resolve()
-        if (dispatchReturn.isMarkedNullable ||
-            dispatchReturn.declaration.qualifiedName?.asString() != "kotlin.Int"
-        ) {
-            val displayed = dispatchReturn.declaration.qualifiedName?.asString() ?: "<unresolved>"
+        val dispatchReturnQname = dispatchReturn.declaration.qualifiedName?.asString()
+        // Phase J.M.5 slice J.M.7.a — widen accepted return types from
+        // Int-only to {Boolean, Byte, UByte, Short, UShort, Int, UInt}.
+        // Long/ULong are excluded — `@PacketType.value` is `Int` so
+        // values beyond `Int.MAX_VALUE` can't be expressed in the
+        // annotation. Each kind gets its own valid `@PacketType.value`
+        // range (Boolean: 0..1, signed kinds: signed range, unsigned
+        // kinds: unsigned range).
+        if (dispatchReturn.isMarkedNullable || dispatchReturnQname !in DISPATCH_VALUE_RETURN_RANGES) {
+            val displayed = dispatchReturnQname ?: "<unresolved>"
             val nullableSuffix = if (dispatchReturn.isMarkedNullable) "?" else ""
             logger.error(
                 "@DispatchValue property `${dispatchProp.simpleName.asString()}` on $discriminatorName " +
-                    "must return non-nullable `Int`, but returns `$displayed$nullableSuffix`.",
+                    "must return one of {Boolean, Byte, UByte, Short, UShort, Int, UInt} (non-nullable), " +
+                    "but returns `$displayed$nullableSuffix`.",
                 dispatchProp,
             )
             return
         }
+        val dispatchValueRange = DISPATCH_VALUE_RETURN_RANGES.getValue(dispatchReturnQname!!)
 
         val seen = mutableMapOf<Int, String>()
         for (sub in parent.getSealedSubclasses()) {
@@ -435,9 +443,11 @@ class ProtocolMessageProcessor(
                 )
                 continue
             }
-            if (rawValue !in 0..255) {
+            if (rawValue !in dispatchValueRange) {
                 logger.error(
-                    "@PacketType($rawValue) on $subName is out of range — `value` must be in 0..255.",
+                    "@PacketType($rawValue) on $subName is out of range for the parent's " +
+                        "`@DispatchValue` return type `$dispatchReturnQname` — `value` must be in " +
+                        "${dispatchValueRange.first}..${dispatchValueRange.last}.",
                     sub,
                 )
                 continue
@@ -2027,6 +2037,24 @@ class ProtocolMessageProcessor(
                 "kotlin.FloatArray",
                 "kotlin.DoubleArray",
                 "kotlin.BooleanArray",
+            )
+
+        // Phase J.M.5 slice J.M.7.a — accepted return types for an
+        // `@DispatchValue`-annotated property, paired with the valid
+        // range of `@PacketType.value` literals for each kind. Long
+        // and ULong are intentionally absent — `@PacketType.value` is
+        // `Int` and can't represent values beyond `Int.MAX_VALUE`.
+        // For UInt the upper bound is `Int.MAX_VALUE` for the same
+        // reason (a UInt > 2^31-1 isn't expressible as an Int literal).
+        private val DISPATCH_VALUE_RETURN_RANGES =
+            mapOf(
+                "kotlin.Boolean" to 0..1,
+                "kotlin.Byte" to Byte.MIN_VALUE.toInt()..Byte.MAX_VALUE.toInt(),
+                "kotlin.UByte" to 0..0xFF,
+                "kotlin.Short" to Short.MIN_VALUE.toInt()..Short.MAX_VALUE.toInt(),
+                "kotlin.UShort" to 0..0xFFFF,
+                "kotlin.Int" to Int.MIN_VALUE..Int.MAX_VALUE,
+                "kotlin.UInt" to 0..Int.MAX_VALUE,
             )
 
         private val NUMERIC_SCALAR_QNAMES =

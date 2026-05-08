@@ -5972,7 +5972,15 @@ internal class CodecEmitter(
         if (dispatchProp.isMutable || dispatchProp.extensionReceiver != null) return null
         val returnType = dispatchProp.type.resolve()
         if (returnType.isMarkedNullable) return null
-        if (returnType.declaration.qualifiedName?.asString() != "kotlin.Int") return null
+        // Phase J.M.5 slice J.M.7.a — accept the widened set of return
+        // types ({Boolean, Byte, UByte, Short, UShort, Int, UInt}) and
+        // capture the kind so the dispatch emit site can pick the
+        // right Int-coercion expression. The validator surfaces the
+        // user-facing diagnostic for unsupported kinds; the analyzer
+        // keeps its silent-skip discipline.
+        val dispatchValueKind =
+            DISPATCH_VALUE_RETURN_KINDS[returnType.declaration.qualifiedName?.asString()]
+                ?: return null
         val dispatchValuePropertyName = dispatchProp.simpleName.asString()
 
         // Stage H slice 10d — detect whether the sealed parent declares
@@ -6004,7 +6012,12 @@ internal class CodecEmitter(
                 packetType.arguments
                     .firstOrNull { it.name?.asString() == "value" }
                     ?.value as? Int ?: return null
-            if (rawValue !in 0..255) return null
+            // Phase J.M.5 slice J.M.7.a — `@PacketType.value` range is
+            // per-kind now (Boolean: 0..1, Byte: -128..127, UByte:
+            // 0..255, Short: -32768..32767, UShort: 0..65535, Int /
+            // UInt: full Int range). Validator surfaces the user-facing
+            // diagnostic on out-of-range values; analyzer silent-skips.
+            if (rawValue !in dispatchValuePacketTypeRange(dispatchValueKind)) return null
             if (!seenValues.add(rawValue)) return null
             if (!isObjectVariant) {
                 val ctor = sub.primaryConstructor ?: return null
@@ -6080,6 +6093,7 @@ internal class CodecEmitter(
             discriminatorInnerKind = innerKind,
             discriminatorInnerWireOrder = discriminatorWireOrder,
             dispatchValuePropertyName = dispatchValuePropertyName,
+            dispatchValueKind = dispatchValueKind,
             variants = variants,
             payloadTypeParameter = payloadTypeParameter,
             framedBy = framedBy,
@@ -6715,8 +6729,11 @@ internal class CodecEmitter(
         )
         body.addStatement("buffer.position(discriminatorPosition)")
         body.addStatement(
-            "val __dispatchValue = __discriminator.%L",
-            shape.dispatchValuePropertyName,
+            "val __dispatchValue = %L",
+            dispatchValueIntCoercion(
+                shape.dispatchValueKind,
+                "__discriminator.${shape.dispatchValuePropertyName}",
+            ),
         )
         body.beginControlFlow("return when (__dispatchValue)")
         for (variant in shape.variants) {
@@ -6855,7 +6872,13 @@ internal class CodecEmitter(
         // Rewind so the variant codec re-reads the discriminator bytes
         // as its first FieldSpec.ValueClassScalar field.
         body.addStatement("buffer.position(discriminatorPosition)")
-        body.addStatement("val __dispatchValue = __discriminator.%L", shape.dispatchValuePropertyName)
+        body.addStatement(
+            "val __dispatchValue = %L",
+            dispatchValueIntCoercion(
+                shape.dispatchValueKind,
+                "__discriminator.${shape.dispatchValuePropertyName}",
+            ),
+        )
         body.beginControlFlow("return when (__dispatchValue)")
         for (variant in shape.variants) {
             body.addStatement(
@@ -7000,7 +7023,13 @@ internal class CodecEmitter(
             "val __discriminator = %T(__discRaw)",
             shape.discriminatorClassName,
         )
-        body.addStatement("val __dispatchValue = __discriminator.%L", shape.dispatchValuePropertyName)
+        body.addStatement(
+            "val __dispatchValue = %L",
+            dispatchValueIntCoercion(
+                shape.dispatchValueKind,
+                "__discriminator.${shape.dispatchValuePropertyName}",
+            ),
+        )
         body.beginControlFlow("return when (__dispatchValue)")
         for (variant in shape.variants) {
             // Variant.peek counts the discriminator bytes in its own header
@@ -7059,6 +7088,16 @@ internal class CodecEmitter(
         val discriminatorInnerKind: ScalarKind,
         val discriminatorInnerWireOrder: Endianness,
         val dispatchValuePropertyName: String,
+        /**
+         * Phase J.M.5 slice J.M.7.a — kind of the `@DispatchValue`
+         * property's return type. Drives the per-emit-site Int
+         * coercion at the dispatch site: Int returns flow through
+         * unchanged, Boolean lifts to `if (b) 1 else 0`, the other
+         * primitive numeric kinds use `.toInt()`. Defaults to
+         * `ScalarKind.Int` for backwards compatibility with the
+         * pre-widening Int-only contract.
+         */
+        val dispatchValueKind: ScalarKind = ScalarKind.Int,
         val variants: List<DispatchOnVariantSpec>,
         /**
          * Stage H slice 10d — present when the sealed parent declares
@@ -8019,6 +8058,52 @@ internal class CodecEmitter(
             is LengthSource.ValueClassProperty -> "$siblingName.$propertyName"
         }
 
+    /**
+     * Phase J.M.5 slice J.M.7.a — valid `@PacketType.value` range for
+     * a given `@DispatchValue` return kind. Mirror of the validator-
+     * side `DISPATCH_VALUE_RETURN_RANGES` map in
+     * [com.ditchoom.buffer.codec.processor.ProtocolMessageProcessor].
+     * Drives the analyzer's silent-skip on out-of-range values
+     * (validator surfaces the user-facing diagnostic).
+     */
+    private fun dispatchValuePacketTypeRange(kind: ScalarKind): IntRange =
+        when (kind) {
+            ScalarKind.Boolean -> 0..1
+            ScalarKind.Byte -> Byte.MIN_VALUE.toInt()..Byte.MAX_VALUE.toInt()
+            ScalarKind.UByte -> 0..0xFF
+            ScalarKind.Short -> Short.MIN_VALUE.toInt()..Short.MAX_VALUE.toInt()
+            ScalarKind.UShort -> 0..0xFFFF
+            ScalarKind.Int -> Int.MIN_VALUE..Int.MAX_VALUE
+            ScalarKind.UInt -> 0..Int.MAX_VALUE
+            ScalarKind.Long, ScalarKind.ULong ->
+                error("Long / ULong are not in DISPATCH_VALUE_RETURN_KINDS — analyze should have rejected this kind")
+        }
+
+    /**
+     * Phase J.M.5 slice J.M.7.a — Int-coercion for an `@DispatchValue`
+     * property's runtime value, lifting it into the `Int` domain that
+     * the dispatcher's `when (__dispatchValue)` branches use. Int
+     * returns flow through unchanged, Boolean lifts to a 0/1 ternary,
+     * the other primitive numeric kinds use `.toInt()` (sign-extending
+     * for Byte / Short, zero-extending for UByte / UShort / UInt).
+     * Long / ULong are unreachable — `DISPATCH_VALUE_RETURN_KINDS`
+     * filters them out at analyze time.
+     */
+    private fun dispatchValueIntCoercion(
+        kind: ScalarKind,
+        propertyAccess: String,
+    ): String =
+        when (kind) {
+            ScalarKind.Int -> propertyAccess
+            ScalarKind.Boolean -> "if ($propertyAccess) 1 else 0"
+            ScalarKind.Byte, ScalarKind.UByte,
+            ScalarKind.Short, ScalarKind.UShort,
+            ScalarKind.UInt,
+            -> "$propertyAccess.toInt()"
+            ScalarKind.Long, ScalarKind.ULong ->
+                error("Long / ULong are not in DISPATCH_VALUE_RETURN_KINDS — analyze should have rejected this kind")
+        }
+
     private enum class ScalarKind(
         val width: Int,
         val isSigned: Boolean,
@@ -8062,6 +8147,24 @@ internal class CodecEmitter(
                 "kotlin.Short" to ScalarKind.Short,
                 "kotlin.Int" to ScalarKind.Int,
                 "kotlin.Long" to ScalarKind.Long,
+            )
+
+        // Phase J.M.5 slice J.M.7.a — qnames accepted as `@DispatchValue`
+        // property return types, mapped to the kind that drives the
+        // dispatch-site Int coercion. Long / ULong are excluded — the
+        // `@PacketType.value` annotation parameter is `Int` and can't
+        // address values beyond `Int.MAX_VALUE`. Mirror of the
+        // ProtocolMessageProcessor `DISPATCH_VALUE_RETURN_RANGES`
+        // validator-side set.
+        private val DISPATCH_VALUE_RETURN_KINDS =
+            mapOf(
+                "kotlin.Boolean" to ScalarKind.Boolean,
+                "kotlin.Byte" to ScalarKind.Byte,
+                "kotlin.UByte" to ScalarKind.UByte,
+                "kotlin.Short" to ScalarKind.Short,
+                "kotlin.UShort" to ScalarKind.UShort,
+                "kotlin.Int" to ScalarKind.Int,
+                "kotlin.UInt" to ScalarKind.UInt,
             )
 
         private val READ_BUFFER_CN = ClassName("com.ditchoom.buffer", "ReadBuffer")
