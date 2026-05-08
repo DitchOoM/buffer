@@ -15,6 +15,8 @@ import com.squareup.kotlinpoet.BOOLEAN
 import com.squareup.kotlinpoet.BYTE
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
+import com.squareup.kotlinpoet.DOUBLE
+import com.squareup.kotlinpoet.FLOAT
 import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
 import com.squareup.kotlinpoet.INT
@@ -781,10 +783,11 @@ internal class CodecEmitter(
         // never references an out-of-bounds bit shift.
         if (wireBytes < 1 || wireBytes > 8) return null
         if (wireBytes > kind.width) return null
-        // Signed scalars only support the natural-width default-order path here.
-        // Manual byte assembly stays unsigned-only — sign extension on a partial
-        // read is its own design and not load-bearing for any –H vector.
-        if (kind.isSigned && (wireBytes != kind.width || resolved != Endianness.Default)) return null
+        // Signed scalars (and Float/Double, which carry a sign bit and never
+        // narrow) only support natural width — partial-read sign extension
+        // is its own design and out of scope. With explicit wireOrder they
+        // flow through the manual byte-by-byte assembly path below.
+        if (kind.isSigned && wireBytes != kind.width) return null
         return FieldSpec.Scalar(
             name = name,
             kind = kind,
@@ -2021,6 +2024,8 @@ internal class CodecEmitter(
             ScalarKind.Short -> SHORT
             ScalarKind.Int -> INT
             ScalarKind.Long -> LONG
+            ScalarKind.Float -> FLOAT
+            ScalarKind.Double -> DOUBLE
         }
 
     /**
@@ -2039,6 +2044,8 @@ internal class CodecEmitter(
             ScalarKind.Short -> "buffer.readShort()"
             ScalarKind.Int -> "buffer.readInt()"
             ScalarKind.Long -> "buffer.readLong()"
+            ScalarKind.Float -> "buffer.readFloat()"
+            ScalarKind.Double -> "buffer.readDouble()"
         }
 
     /**
@@ -2059,6 +2066,8 @@ internal class CodecEmitter(
             ScalarKind.Short -> "buffer.writeShort($accessor)"
             ScalarKind.Int -> "buffer.writeInt($accessor)"
             ScalarKind.Long -> "buffer.writeLong($accessor)"
+            ScalarKind.Float -> "buffer.writeFloat($accessor)"
+            ScalarKind.Double -> "buffer.writeDouble($accessor)"
         }
 
     private fun readMessageWireOrder(symbol: KSClassDeclaration): Endianness {
@@ -2636,7 +2645,9 @@ internal class CodecEmitter(
             ScalarKind.UShort -> "$hex.toUShort()"
             ScalarKind.UInt -> "${hex}u"
             ScalarKind.Byte -> "$hex.toByte()"
-            ScalarKind.Boolean, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long, ScalarKind.ULong ->
+            ScalarKind.Boolean, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long, ScalarKind.ULong,
+            ScalarKind.Float, ScalarKind.Double,
+            ->
                 error("singleton dispatch discriminator restricted to peekableDispatcherInnerKinds")
         }
     }
@@ -3957,6 +3968,14 @@ internal class CodecEmitter(
             body.addStatement("val %L = buffer.readUByte()", field.name)
             return
         }
+        if (field.kind == ScalarKind.Byte && width == 1) {
+            body.addStatement("val %L = buffer.readByte()", field.name)
+            return
+        }
+        // Assemble the wire bytes into a wide unsigned accumulator, then narrow
+        // to the field's declared kind. Signed kinds reinterpret the bit pattern
+        // via toShort()/toInt()/toLong() (Kotlin's UShort/UInt/ULong .toX() are
+        // bit-preserving). Float/Double go through fromBits().
         val accumulator = if (width >= 5) "toULong" else "toUInt"
         for (i in 0 until width) {
             body.addStatement(
@@ -3972,17 +3991,21 @@ internal class CodecEmitter(
                 if (shiftBits == 0) byteName else "($byteName shl $shiftBits)"
             }
         val combined = if (parts.size == 1) parts[0] else "(${parts.joinToString(" or ")})"
-        val narrow =
-            when (field.kind) {
-                ScalarKind.UByte -> ".toUByte()"
-                ScalarKind.UShort -> ".toUShort()"
-                ScalarKind.UInt, ScalarKind.ULong -> ""
-                ScalarKind.Byte, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long ->
-                    error("manual scalar decode is unsigned-only; analyzeField rejects signed manual-path fields")
-                ScalarKind.Boolean ->
-                    error("Boolean is pinned to the natural-read path; analyzeField rejects manual-path Boolean")
-            }
-        body.addStatement("val %L = %L%L", field.name, combined, narrow)
+        when (field.kind) {
+            ScalarKind.UByte -> body.addStatement("val %L = %L.toUByte()", field.name, combined)
+            ScalarKind.UShort -> body.addStatement("val %L = %L.toUShort()", field.name, combined)
+            ScalarKind.UInt, ScalarKind.ULong -> body.addStatement("val %L = %L", field.name, combined)
+            ScalarKind.Byte -> body.addStatement("val %L = %L.toByte()", field.name, combined)
+            ScalarKind.Short -> body.addStatement("val %L = %L.toShort()", field.name, combined)
+            ScalarKind.Int -> body.addStatement("val %L = %L.toInt()", field.name, combined)
+            ScalarKind.Long -> body.addStatement("val %L = %L.toLong()", field.name, combined)
+            ScalarKind.Float ->
+                body.addStatement("val %L = Float.fromBits(%L.toInt())", field.name, combined)
+            ScalarKind.Double ->
+                body.addStatement("val %L = Double.fromBits(%L.toLong())", field.name, combined)
+            ScalarKind.Boolean ->
+                error("Boolean is pinned to the natural-read path; analyzeField rejects manual-path Boolean")
+        }
     }
 
     private fun appendEncodeScalar(
@@ -4019,7 +4042,8 @@ internal class CodecEmitter(
                 ScalarKind.UInt -> accessor to "((1u shl ${8 * field.wireBytes}) - 1u)"
                 ScalarKind.UShort -> "$accessor.toUInt()" to "((1u shl ${8 * field.wireBytes}) - 1u)"
                 ScalarKind.UByte -> return // wireBytes < 1 is rejected by analyzeField
-                ScalarKind.Byte, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long -> return // signed kinds skip the manual path entirely
+                ScalarKind.Byte, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long -> return // signed kinds reject @WireBytes narrowing in analyzeField
+                ScalarKind.Float, ScalarKind.Double -> return // Float/Double also reject @WireBytes narrowing
                 ScalarKind.Boolean -> return // analyzeField pins Boolean to natural width — never narrows
             }
         val maxValue = (1L shl (8 * field.wireBytes)) - 1
@@ -4044,16 +4068,29 @@ internal class CodecEmitter(
             body.addStatement("buffer.writeUByte(%L)", accessor)
             return
         }
-        val widePromote =
+        if (field.kind == ScalarKind.Byte && width == 1) {
+            body.addStatement("buffer.writeByte(%L)", accessor)
+            return
+        }
+        // Convert the field value to a wide unsigned accumulator (UInt for
+        // ≤4 bytes, ULong for >4) and shift bytes off the high or low end
+        // per wire order. Signed kinds reinterpret via .toUInt()/.toULong()
+        // (bit-preserving). Float/Double go through toRawBits().
+        val wide =
             when (field.kind) {
-                ScalarKind.UByte, ScalarKind.UShort -> ".toUInt()"
-                ScalarKind.UInt, ScalarKind.ULong -> ""
-                ScalarKind.Byte, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long ->
-                    error("manual scalar encode is unsigned-only; analyzeField rejects signed manual-path fields")
+                ScalarKind.UByte -> "$accessor.toUInt()"
+                ScalarKind.UShort -> "$accessor.toUInt()"
+                ScalarKind.UInt -> accessor
+                ScalarKind.ULong -> accessor
+                ScalarKind.Byte -> "$accessor.toUByte().toUInt()"
+                ScalarKind.Short -> "$accessor.toUShort().toUInt()"
+                ScalarKind.Int -> "$accessor.toUInt()"
+                ScalarKind.Long -> "$accessor.toULong()"
+                ScalarKind.Float -> "$accessor.toRawBits().toUInt()"
+                ScalarKind.Double -> "$accessor.toRawBits().toULong()"
                 ScalarKind.Boolean ->
                     error("Boolean is pinned to the natural-write path; analyzeField rejects manual-path Boolean")
             }
-        val wide = "$accessor$widePromote"
         val maskLit = if (width >= 5) "0xFFuL" else "0xFFu"
         for (i in 0 until width) {
             val shiftBits = if (bigEndian) (width - 1 - i) * 8 else i * 8
@@ -4546,7 +4583,9 @@ internal class CodecEmitter(
                     }
                 body.addStatement("val %L = $narrow", targetVar, parts.joinToString(" or "))
             }
-            ScalarKind.ULong, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long ->
+            ScalarKind.ULong, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long,
+            ScalarKind.Float, ScalarKind.Double,
+            ->
                 error(
                     "peek-side reconstruction for value-class inner kind $kind not implemented; " +
                         "the analyzer should have rejected this shape until the wider peek path lands.",
@@ -5578,7 +5617,9 @@ internal class CodecEmitter(
                     }
                 body.addStatement("val %L = $narrow", targetVar, parts.joinToString(" or "))
             }
-            ScalarKind.ULong, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long ->
+            ScalarKind.ULong, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long,
+            ScalarKind.Float, ScalarKind.Double,
+            ->
                 error(
                     "peek-side reconstruction for sibling kind ${field.kind} not implemented; " +
                         "the analyzer should have rejected this shape until the wider peek path lands.",
@@ -5608,6 +5649,8 @@ internal class CodecEmitter(
                 ScalarKind.Long -> true
                 ScalarKind.Boolean ->
                     error("Boolean is rejected by analyzeLengthFromStringField; this branch is unreachable.")
+                ScalarKind.Float, ScalarKind.Double ->
+                    error("Float / Double are not valid @LengthFrom siblings; analyzeLengthFromStringField rejects them.")
             }
         if (!needsGuard) return
         val (cmp, actualExpr) =
@@ -7903,8 +7946,8 @@ internal class CodecEmitter(
             ScalarKind.UShort -> 0..0xFFFF
             ScalarKind.Int -> Int.MIN_VALUE..Int.MAX_VALUE
             ScalarKind.UInt -> 0..Int.MAX_VALUE
-            ScalarKind.Long, ScalarKind.ULong ->
-                error("Long / ULong are not in DISPATCH_VALUE_RETURN_KINDS — analyze should have rejected this kind")
+            ScalarKind.Long, ScalarKind.ULong, ScalarKind.Float, ScalarKind.Double ->
+                error("Long / ULong / Float / Double are not in DISPATCH_VALUE_RETURN_KINDS — analyze should have rejected this kind")
         }
 
     /**
@@ -7928,8 +7971,8 @@ internal class CodecEmitter(
             ScalarKind.Short, ScalarKind.UShort,
             ScalarKind.UInt,
             -> "$propertyAccess.toInt()"
-            ScalarKind.Long, ScalarKind.ULong ->
-                error("Long / ULong are not in DISPATCH_VALUE_RETURN_KINDS — analyze should have rejected this kind")
+            ScalarKind.Long, ScalarKind.ULong, ScalarKind.Float, ScalarKind.Double ->
+                error("Long / ULong / Float / Double are not in DISPATCH_VALUE_RETURN_KINDS — analyze should have rejected this kind")
         }
 
     private enum class ScalarKind(
@@ -7948,6 +7991,13 @@ internal class CodecEmitter(
         Short(2, true),
         Int(4, true),
         Long(8, true),
+        // IEEE 754 floating point — wire form is the raw bit pattern of
+        // toRawBits() / fromBits() at fixed natural width. Treated as
+        // signed only insofar as @WireBytes narrowing is rejected (same
+        // rule as integer signed types — partial-read sign extension is
+        // out of scope).
+        Float(4, true),
+        Double(8, true),
     }
 
     private enum class Endianness {
@@ -7975,6 +8025,8 @@ internal class CodecEmitter(
                 "kotlin.Short" to ScalarKind.Short,
                 "kotlin.Int" to ScalarKind.Int,
                 "kotlin.Long" to ScalarKind.Long,
+                "kotlin.Float" to ScalarKind.Float,
+                "kotlin.Double" to ScalarKind.Double,
             )
 
         // Slice — qnames accepted as `@DispatchValue`
