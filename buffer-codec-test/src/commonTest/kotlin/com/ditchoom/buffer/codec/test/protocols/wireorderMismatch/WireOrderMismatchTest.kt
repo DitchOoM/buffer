@@ -66,22 +66,53 @@ class WireOrderMismatchTest {
             // ubyte 0x9A
             0x9A.toByte(),
             // short 0x0102
-            0x01, 0x02,
+            0x01,
+            0x02,
             // ushort 0xCAFE
-            0xCA.toByte(), 0xFE.toByte(),
+            0xCA.toByte(),
+            0xFE.toByte(),
             // int 0x01020304
-            0x01, 0x02, 0x03, 0x04,
+            0x01,
+            0x02,
+            0x03,
+            0x04,
             // uint 0xFFEEDDCC
-            0xFF.toByte(), 0xEE.toByte(), 0xDD.toByte(), 0xCC.toByte(),
+            0xFF.toByte(),
+            0xEE.toByte(),
+            0xDD.toByte(),
+            0xCC.toByte(),
             // long 0x0102030405060708
-            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+            0x01,
+            0x02,
+            0x03,
+            0x04,
+            0x05,
+            0x06,
+            0x07,
+            0x08,
             // ulong 0xCAFEBABEDEADBEEF
-            0xCA.toByte(), 0xFE.toByte(), 0xBA.toByte(), 0xBE.toByte(),
-            0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte(),
+            0xCA.toByte(),
+            0xFE.toByte(),
+            0xBA.toByte(),
+            0xBE.toByte(),
+            0xDE.toByte(),
+            0xAD.toByte(),
+            0xBE.toByte(),
+            0xEF.toByte(),
             // float 0x40490FDB (≈ π as Float)
-            0x40, 0x49, 0x0F, 0xDB.toByte(),
+            0x40,
+            0x49,
+            0x0F,
+            0xDB.toByte(),
             // double 0x400921FB54442D18 (≈ π as Double)
-            0x40, 0x09, 0x21, 0xFB.toByte(), 0x54, 0x44, 0x2D, 0x18,
+            0x40,
+            0x09,
+            0x21,
+            0xFB.toByte(),
+            0x54,
+            0x44,
+            0x2D,
+            0x18,
         )
 
     private val expectedLittleWireBytes: ByteArray = expectedBigWireBytes.reversedFieldwise()
