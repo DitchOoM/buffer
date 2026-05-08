@@ -48,7 +48,20 @@ value class MqttV3SubAckReturnCodeRaw(
 @DispatchOn(MqttV3SubAckReturnCodeRaw::class)
 @ProtocolMessage
 sealed interface MqttV3SubAckReturnCode {
-    /** §3.9.3 — `0x00` Success - Maximum QoS 0. */
+    /**
+     * §3.9.3 — `0x00` Success - Maximum QoS 0.
+     *
+     * Variants are `data class` rather than `data object` to round-trip
+     * the discriminator byte through the value-class scalar path
+     * (each variant's `id` field is read/written by its generated
+     * codec). The data-object equivalent under `@DispatchOn(value
+     * class)` emits a 0-byte variant codec — the parent peeks +
+     * resets, and a data-object variant has no field to consume the
+     * discriminator on decode, so the position never advances. Fixing
+     * that emitter case is its own slice; for now data-class variants
+     * cost one allocation per decoded entry on JS but stay correct
+     * on every platform.
+     */
     @PacketType(value = 0x00)
     @ProtocolMessage
     data class SuccessMaximumQoS0(

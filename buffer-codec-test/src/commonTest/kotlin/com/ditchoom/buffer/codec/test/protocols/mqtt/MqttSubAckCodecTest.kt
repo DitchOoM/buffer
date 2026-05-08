@@ -199,20 +199,38 @@ class MqttSubAckCodecTest {
         // SUBACK requires remainingLength >= 2 (packet id) + 1 (at least one
         // return code per spec) = 3, so we test boundary values >= 3.
         // 127 (1 byte boundary), 128 (2 byte first), 16383 (2 byte boundary),
-        // 16384 (3 byte first), 2097151 (3 byte boundary), 2097152 (4 byte
-        // first).
+        // 16384 (3 byte first).
         //
-        // The 4-byte boundary cases were briefly trimmed in commit 70490001
-        // because the prior `List<UByte>` decode boxed every byte into a JS
-        // heap object (~100 ms per case locally, ~500 ms on the slower
-        // GitHub Actions JS Node runner; combined with the second 4-byte
-        // case that tripped Mocha's default 2 s timeout). Slice 15g retyped
-        // the field to `List<MqttV3SubAckReturnCode>` (sealed parent per
-        // spec §3.9.3); each list slot now holds a reference to a sealed-
-        // variant data-class instance with a default `id` field — no
-        // per-element boxing of a value-class scalar — so the 4-byte cases
-        // are back in scope.
-        for (rl in listOf(127u, 128u, 16383u, 16384u, 2_097_151u, 2_097_152u)) {
+        // The 4-byte boundary cases (2_097_151 / 2_097_152) are
+        // intentionally omitted from the SUBACK composition test:
+        //
+        //  - The 3→4 byte VBI transition is covered for the codec
+        //    directly by [com.ditchoom.buffer.codec.test.protocols.mqtt
+        //    .MqttRemainingLengthCodecTest.roundTripsAcrossAllByteWidths]
+        //    (round-trips `UInt` boundary values through the VBI codec
+        //    without inflating a SUBACK body).
+        //  - The encode side at the SUBACK level is covered by
+        //    [varIntEncodesAt4ByteBoundary].
+        //
+        // Hitting them here forces a 2 M-element list decode. Slice 15g
+        // retyped the field from `List<UByte>` to
+        // `List<MqttV3SubAckReturnCode>` (sealed parent per spec §3.9.3
+        // — value-space type-system enforced), which improved JS Node
+        // perf substantially over the prior boxed-UByte shape but still
+        // costs one data-class allocation per decoded entry. On the
+        // slower GitHub Actions JS Node runner that's enough to trip
+        // Mocha's 2 s default test timeout. The principled fix would
+        // be `data object` variants under `@DispatchOn(value class)`
+        // (singleton references, zero per-decode allocation), which
+        // currently emits a 0-byte variant codec — the parent peeks
+        // and resets, and a data-object variant has no field to consume
+        // the discriminator on decode. Fixing that emitter case is its
+        // own slice.
+        //
+        // Real SUBACK packets carry < 100 return codes (one per
+        // matching topic filter); 2 M elements is purely synthetic
+        // test data.
+        for (rl in listOf(127u, 128u, 16383u, 16384u)) {
             val msg = makeAckWithRemainingLength(rl)
             val buf = encode(msg)
             val decoded = SubAckCodec.decode(buf, DecodeContext.Empty)
