@@ -473,6 +473,28 @@ annotation class When(
  * // restore the outer limit on finally.
  * ```
  *
+ * ## Extension pattern — ship your own per-charset / per-format codec
+ *
+ * The library ships exactly one built-in string codec
+ * ([com.ditchoom.buffer.codec.AsciiStringCodec], 7-bit ASCII). Other charsets
+ * (Latin-1, UTF-16 BE/LE, Modified UTF-8) and binary formats (PNG, MQTT
+ * remaining-length, etc.) live in consumer code: each one carries
+ * charset-specific nuance (BOM policy, surrogate handling, JVM-class-file
+ * quirks for Modified UTF-8) the consumer can resolve better than the
+ * framework. Author a Kotlin `object` implementing `Codec<T>` and plug it in
+ * via `@UseCodec` — the `AsciiStringCodec` source is the canonical template:
+ *
+ * ```kotlin
+ * object Latin1StringCodec : Codec<String> {
+ *     override fun decode(buffer: ReadBuffer, context: DecodeContext): String =
+ *         buffer.readString(buffer.remaining(), Charset.ISOLatin1)
+ *     override fun encode(buffer: WriteBuffer, value: String, context: EncodeContext) {
+ *         buffer.writeString(value, Charset.ISOLatin1)
+ *     }
+ *     override fun wireSize(value: String, context: EncodeContext): WireSize = WireSize.Exact(value.length)
+ * }
+ * ```
+ *
  * ## When NOT to use @UseCodec
  *
  * For nested `@ProtocolMessage` types, attach length annotations directly to the field

@@ -1450,6 +1450,13 @@ class ProtocolMessageProcessor(
         // required to implement BoundingLengthCodec. Validates first
         // because a non-List Payload field must not fall through to the
         // list-shape diagnostics.
+        //
+        // J.M.7.b widening — `kotlin.String` is also accepted here so a
+        // user-supplied `Codec<String>` (e.g. AsciiStringCodec, or a
+        // consumer's Latin-1 / UTF-16 / Modified-UTF-8 codec) can plug in
+        // via `@LengthPrefixed @UseCodec val: String` and override the
+        // built-in UTF-8 reader. Same wire shape as the Payload variant
+        // (length prefix + body bytes).
         if (fieldTypeQname != LIST_QNAME) {
             // Phase J.M.5 slice 15a/15d — nullable types arrive here when
             // the field carries `@When` (slice 15d gates Connect.willPayload
@@ -1459,16 +1466,18 @@ class ProtocolMessageProcessor(
             // already runs against the non-null inner type.
             val nonNullableFieldType =
                 if (fieldType.isMarkedNullable) fieldType.makeNotNullable() else fieldType
+            val isStringField = fieldTypeQname == "kotlin.String"
             val isPayloadField = payloadType.isAssignableFrom(nonNullableFieldType)
-            if (!isPayloadField) {
+            if (!isPayloadField && !isStringField) {
                 logger.error(
                     "@LengthPrefixed @UseCodec($codecName::class) on $ownerName.$fieldName has " +
-                        "field type `${fieldTypeQname ?: "<unresolved>"}`, which is neither a " +
-                        "`kotlin.collections.List<E>` (slice 11 list shape) nor a type " +
-                        "implementing `com.ditchoom.buffer.codec.Payload` (slice 15a scalar " +
-                        "shape). Wrap binary data in a `Payload`-marked value class and reference " +
-                        "its `Codec<T>` via `@UseCodec`, or use the list shape with a " +
-                        "`@ProtocolMessage` element type.",
+                        "field type `${fieldTypeQname ?: "<unresolved>"}`, which is none of: " +
+                        "`kotlin.collections.List<E>` (slice 11 list shape), a type implementing " +
+                        "`com.ditchoom.buffer.codec.Payload` (slice 15a scalar shape), or " +
+                        "`kotlin.String` (J.M.7.b user-charset shape). Wrap binary data in a " +
+                        "`Payload`-marked value class and reference its `Codec<T>` via " +
+                        "`@UseCodec`, use the list shape with a `@ProtocolMessage` element " +
+                        "type, or supply a `Codec<String>` for a String-typed field.",
                     param,
                 )
                 return

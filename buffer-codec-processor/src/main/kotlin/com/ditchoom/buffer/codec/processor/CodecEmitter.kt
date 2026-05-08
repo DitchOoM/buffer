@@ -1345,7 +1345,11 @@ internal class CodecEmitter(
         prefixWireOrder: Endianness,
     ): FieldSpec.LengthPrefixedUseCodecPayload? {
         val name = param.name?.asString() ?: return null
-        if (!type.implementsPayload()) return null
+        // J.M.7.b — `kotlin.String` rides the same shape as `T : Payload`:
+        // prefix + body bytes, codec is `Codec<String>`. Validator surfaces
+        // any user-facing diagnostic.
+        val isString = type.declaration.qualifiedName?.asString() == "kotlin.String"
+        if (!isString && !type.implementsPayload()) return null
         val payloadDecl = type.declaration as? KSClassDeclaration ?: return null
         val codecKsType =
             useCodecAnn.arguments

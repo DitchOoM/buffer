@@ -136,12 +136,13 @@ class UseCodecScalarValidatorTest {
     }
 
     @Test
-    fun rejectsLengthPrefixedUseCodecOnNonListNonPayloadField() {
-        // Phase J.M.5 slice 15a — `@LengthPrefixed @UseCodec` accepts two
-        // shapes: `List<@ProtocolMessage E>` (slice 11) and
-        // `T : Payload` (slice 15a). A non-List, non-Payload field type
-        // (here: a bare `UInt`) is neither and gets a focused diagnostic
-        // naming both shapes.
+    fun rejectsLengthPrefixedUseCodecOnNonListNonPayloadNonStringField() {
+        // Phase J.M.5 slice 15a / J.M.7.b — `@LengthPrefixed @UseCodec`
+        // accepts three shapes: `List<@ProtocolMessage E>` (slice 11),
+        // `T : Payload` (slice 15a), and `kotlin.String` with a
+        // `Codec<String>` (J.M.7.b). A non-List, non-Payload, non-String
+        // field type (here: a bare `UInt`) is none of those and gets a
+        // focused diagnostic naming all three shapes.
         val result =
             compile(
                 """
@@ -177,10 +178,12 @@ class UseCodecScalarValidatorTest {
             )
         assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
         assertTrue(
-            result.messages.contains("neither a `kotlin.collections.List<E>`") &&
-                result.messages.contains("nor a type implementing `com.ditchoom.buffer.codec.Payload`"),
-            "@LengthPrefixed @UseCodec on a non-List, non-Payload field should report the " +
-                "dual-shape diagnostic naming both List<E> and Payload. Messages:\n${result.messages}",
+            result.messages.contains("`kotlin.collections.List<E>` (slice 11 list shape)") &&
+                result.messages.contains("`com.ditchoom.buffer.codec.Payload` (slice 15a scalar shape)") &&
+                result.messages.contains("`kotlin.String` (J.M.7.b user-charset shape)"),
+            "@LengthPrefixed @UseCodec on a non-List, non-Payload, non-String field should report " +
+                "the tri-shape diagnostic naming List<E>, Payload, and String. Messages:\n" +
+                result.messages,
         )
     }
 
@@ -230,6 +233,99 @@ class UseCodecScalarValidatorTest {
                 result.messages.contains("error"),
             "no validator diagnostic should fire on the new Payload scalar shape. Messages:\n" +
                 result.messages,
+        )
+    }
+
+    @Test
+    fun acceptsLengthPrefixedUseCodecOnStringField() {
+        // J.M.7.b — `@LengthPrefixed @UseCodec(C::class) val: String`
+        // where `C` is a Kotlin `object` implementing `Codec<String>`
+        // (built-in `AsciiStringCodec` or a consumer's per-charset
+        // codec). Same wire shape as the Payload variant: prefix +
+        // body bytes consumed by the user codec.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.Codec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
+                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+
+                object IdentityStringCodec : Codec<String> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): String =
+                        buffer.readString(buffer.remaining())
+                    override fun encode(buffer: WriteBuffer, value: String, context: EncodeContext) {
+                        buffer.writeString(value)
+                    }
+                    override fun wireSize(value: String, context: EncodeContext): WireSize =
+                        WireSize.Exact(value.length)
+                }
+
+                @ProtocolMessage
+                data class HeaderWithLengthPrefixedString(
+                    @LengthPrefixed @UseCodec(IdentityStringCodec::class) val name: String,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+        assertFalse(
+            result.messages.contains("@LengthPrefixed @UseCodec") &&
+                result.messages.contains("error"),
+            "no validator diagnostic should fire on the J.M.7.b String shape. Messages:\n" +
+                result.messages,
+        )
+    }
+
+    @Test
+    fun rejectsLengthPrefixedUseCodecOnStringWithMismatchedCodec() {
+        // The codec must implement `Codec<String>` for a String-typed
+        // field. A `Codec<Payload>`-style codec produces a mismatch.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.Codec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
+                import com.ditchoom.buffer.codec.Payload
+                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+
+                @JvmInline
+                value class Blob(val bytes: ByteArray) : Payload
+
+                object BlobCodec : Codec<Blob> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): Blob =
+                        Blob(buffer.readByteArray(buffer.remaining()))
+                    override fun encode(buffer: WriteBuffer, value: Blob, context: EncodeContext) {
+                        buffer.writeBytes(value.bytes)
+                    }
+                    override fun wireSize(value: Blob, context: EncodeContext): WireSize =
+                        WireSize.Exact(value.bytes.size)
+                }
+
+                @ProtocolMessage
+                data class HeaderWithStringCodecMismatch(
+                    @LengthPrefixed @UseCodec(BlobCodec::class) val name: String,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("does not implement") && result.messages.contains("Codec<String>"),
+            "String-typed field codec mismatch should be reported. Messages:\n${result.messages}",
         )
     }
 
