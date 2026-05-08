@@ -63,9 +63,12 @@ class FfmBuffer(
      *
      * After this call, the ByteBuffer's limit is set to 0, causing any subsequent
      * read/write operation to throw [java.nio.BufferUnderflowException] or
-     * [java.nio.BufferOverflowException]. With assertions enabled (`-ea`),
-     * lifecycle methods ([resetForRead], [resetForWrite], [slice]) will throw
-     * [AssertionError] before the ByteBuffer check.
+     * [java.nio.BufferOverflowException]. [BaseJvmBuffer] catches these and
+     * rethrows as [BufferUnderflowException] / [BufferOverflowException] —
+     * subclasses of the native nio types that carry a richer message. With
+     * assertions enabled (`-ea`), lifecycle methods ([resetForRead],
+     * [resetForWrite], [slice]) will throw [AssertionError] before the
+     * ByteBuffer check.
      *
      * This method is idempotent — calling it multiple times is safe.
      *

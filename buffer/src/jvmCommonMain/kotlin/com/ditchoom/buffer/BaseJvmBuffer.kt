@@ -34,33 +34,137 @@ abstract class BaseJvmBuffer(
 
     override val capacity = buffer.capacity()
 
-    override fun readByte() = byteBuffer.get()
+    override fun readByte(): Byte =
+        try {
+            byteBuffer.get()
+        } catch (e: java.nio.BufferUnderflowException) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read 1 byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
 
-    override fun get(index: Int): Byte = byteBuffer.get(index)
+    override fun get(index: Int): Byte =
+        try {
+            byteBuffer.get(index)
+        } catch (e: IndexOutOfBoundsException) {
+            throw BufferUnderflowException(
+                "Index out of bounds: cannot read 1 byte(s) at index $index (limit=${limit()})",
+            )
+        }
 
-    override fun readByteArray(size: Int) = byteBuffer.toArray(size)
+    override fun readByteArray(size: Int): ByteArray =
+        try {
+            byteBuffer.toArray(size)
+        } catch (e: java.nio.BufferUnderflowException) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read $size byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        } catch (e: IndexOutOfBoundsException) {
+            // Heap-backed path uses System.arraycopy which throws ArrayIndexOutOfBoundsException
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read $size byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
 
     abstract override fun slice(byteOrder: ByteOrder): PlatformBuffer
 
-    override fun readShort(): Short = byteBuffer.short
+    override fun readShort(): Short =
+        try {
+            byteBuffer.short
+        } catch (e: java.nio.BufferUnderflowException) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read 2 byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
 
-    override fun getShort(index: Int): Short = byteBuffer.getShort(index)
+    override fun getShort(index: Int): Short =
+        try {
+            byteBuffer.getShort(index)
+        } catch (e: IndexOutOfBoundsException) {
+            throw BufferUnderflowException(
+                "Index out of bounds: cannot read 2 byte(s) at index $index (limit=${limit()})",
+            )
+        }
 
-    override fun readInt() = byteBuffer.int
+    override fun readInt(): Int =
+        try {
+            byteBuffer.int
+        } catch (e: java.nio.BufferUnderflowException) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read 4 byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
 
-    override fun getInt(index: Int): Int = byteBuffer.getInt(index)
+    override fun getInt(index: Int): Int =
+        try {
+            byteBuffer.getInt(index)
+        } catch (e: IndexOutOfBoundsException) {
+            throw BufferUnderflowException(
+                "Index out of bounds: cannot read 4 byte(s) at index $index (limit=${limit()})",
+            )
+        }
 
-    override fun readLong() = byteBuffer.long
+    override fun readLong(): Long =
+        try {
+            byteBuffer.long
+        } catch (e: java.nio.BufferUnderflowException) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read 8 byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
 
-    override fun getLong(index: Int): Long = byteBuffer.getLong(index)
+    override fun getLong(index: Int): Long =
+        try {
+            byteBuffer.getLong(index)
+        } catch (e: IndexOutOfBoundsException) {
+            throw BufferUnderflowException(
+                "Index out of bounds: cannot read 8 byte(s) at index $index (limit=${limit()})",
+            )
+        }
 
-    override fun readFloat(): Float = byteBuffer.float
+    override fun readFloat(): Float =
+        try {
+            byteBuffer.float
+        } catch (e: java.nio.BufferUnderflowException) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read 4 byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
 
-    override fun getFloat(index: Int): Float = byteBuffer.getFloat(index)
+    override fun getFloat(index: Int): Float =
+        try {
+            byteBuffer.getFloat(index)
+        } catch (e: IndexOutOfBoundsException) {
+            throw BufferUnderflowException(
+                "Index out of bounds: cannot read 4 byte(s) at index $index (limit=${limit()})",
+            )
+        }
 
-    override fun readDouble(): Double = byteBuffer.double
+    override fun readDouble(): Double =
+        try {
+            byteBuffer.double
+        } catch (e: java.nio.BufferUnderflowException) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read 8 byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
 
-    override fun getDouble(index: Int): Double = byteBuffer.getDouble(index)
+    override fun getDouble(index: Int): Double =
+        try {
+            byteBuffer.getDouble(index)
+        } catch (e: IndexOutOfBoundsException) {
+            throw BufferUnderflowException(
+                "Index out of bounds: cannot read 8 byte(s) at index $index (limit=${limit()})",
+            )
+        }
 
     override fun writeFloat(float: Float): WriteBuffer {
         try {
