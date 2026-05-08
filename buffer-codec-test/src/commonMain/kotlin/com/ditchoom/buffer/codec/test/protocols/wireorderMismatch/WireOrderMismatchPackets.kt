@@ -56,3 +56,30 @@ data class LittleWirePacket(
     val float: Float,
     val double: Double,
 )
+
+/**
+ * Sealed-dispatch variant — exercises the same fix surface inside a
+ * `@PacketType` sealed parent. Each variant is its own
+ * `@ProtocolMessage` data class and goes through the same field
+ * analysis as a top-level message; the dispatcher prepends the
+ * 1-byte type discriminator.
+ */
+@ProtocolMessage(wireOrder = Endianness.Big)
+sealed interface BigWireFrame {
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    @com.ditchoom.buffer.codec.annotations.PacketType(0x01)
+    data class Sample(
+        val short: Short,
+        val int: Int,
+        val long: Long,
+        val float: Float,
+        val double: Double,
+    ) : BigWireFrame
+
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    @com.ditchoom.buffer.codec.annotations.PacketType(0x02)
+    data class Status(
+        val flags: UInt,
+        val ratio: Double,
+    ) : BigWireFrame
+}

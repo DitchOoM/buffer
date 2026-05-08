@@ -175,6 +175,45 @@ class WireOrderMismatchTest {
         buf.resetForRead()
         assertEquals(sampleLittle, LittleWirePacketCodec.decode(buf, DecodeContext.Empty))
     }
+
+    // ────────────────────────────────────────────────────────────
+    // BigWireFrame sealed dispatch — same fix surface inside a
+    // @PacketType variant
+    // ────────────────────────────────────────────────────────────
+
+    @Test
+    fun sealed_sampleVariant_roundTrip_throughLittleEndianBuffer() {
+        val sampleVariant: BigWireFrame =
+            BigWireFrame.Sample(
+                short = 0x0102.toShort(),
+                int = 0x01020304,
+                long = 0x0102030405060708L,
+                float = Float.fromBits(0x40490FDB),
+                double = Double.fromBits(0x400921FB54442D18L),
+            )
+        val capacity = 1 + 2 + 4 + 8 + 4 + 8 // discriminator + sample fields
+        val buf = BufferFactory.Default.allocate(capacity, ByteOrder.LITTLE_ENDIAN)
+        BigWireFrameCodec.encode(buf, sampleVariant, EncodeContext.Empty)
+        buf.resetForRead()
+        // First byte must be the @PacketType discriminator regardless of buffer.byteOrder
+        assertEquals(0x01.toByte(), buf.get(0), "discriminator byte for Sample")
+        assertEquals(sampleVariant, BigWireFrameCodec.decode(buf, DecodeContext.Empty))
+    }
+
+    @Test
+    fun sealed_statusVariant_roundTrip_throughLittleEndianBuffer() {
+        val statusVariant: BigWireFrame =
+            BigWireFrame.Status(
+                flags = 0xCAFEBABEu,
+                ratio = Double.fromBits(0x400921FB54442D18L),
+            )
+        val capacity = 1 + 4 + 8 // discriminator + flags + ratio
+        val buf = BufferFactory.Default.allocate(capacity, ByteOrder.LITTLE_ENDIAN)
+        BigWireFrameCodec.encode(buf, statusVariant, EncodeContext.Empty)
+        buf.resetForRead()
+        assertEquals(0x02.toByte(), buf.get(0), "discriminator byte for Status")
+        assertEquals(statusVariant, BigWireFrameCodec.decode(buf, DecodeContext.Empty))
+    }
 }
 
 /**
