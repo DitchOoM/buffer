@@ -16,7 +16,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 /**
- * Phase J.M step 5 first tranche — MQTT v3.1.1 §3.7 PUBCOMP packet.
+ * MQTT v3.1.1 §3.7 PUBCOMP packet.
  * Fixed-shape 4-byte ack: header `0x70` + remainingLength=2 +
  * packetIdentifier (UShort BE). Drives `PubCompCodec`.
  */

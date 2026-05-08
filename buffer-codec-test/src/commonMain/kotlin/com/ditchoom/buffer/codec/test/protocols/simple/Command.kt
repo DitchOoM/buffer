@@ -5,7 +5,7 @@ import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 
 /**
- * Stage D doctrine vector for simple `@PacketType` sealed dispatch.
+ * Doctrine vector for simple `@PacketType` sealed dispatch.
  *
  * `Ping` exercises the all-scalar variant path (dispatcher reports
  * `WireSize.Exact(1 + 8)`); `Echo` exercises the variable-terminal

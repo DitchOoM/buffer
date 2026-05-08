@@ -7,11 +7,11 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import kotlin.jvm.JvmInline
 
 /**
- * Phase J.M.5 slice 11b — typed reason code for v5 PUBACK / PUBREC /
+ * Typed reason code for v5 PUBACK / PUBREC /
  * PUBREL / PUBCOMP (§3.4.2.1, §3.5.2.1, §3.6.2.1, §3.7.2.1). Shared
  * parent — the spec lists the same union of codes across all four
  * packets (PUBACK / PUBREC have a 9-code superset, PUBREL / PUBCOMP
- * have a 2-code subset). The audit-2d per-packet allowlists are
+ * have a 2-code subset). The per-packet allowlists are
  * deleted as redundant on this typed parent.
  *
  * Per-packet validity (e.g. PUBACK rejecting 0x92, PUBREL rejecting

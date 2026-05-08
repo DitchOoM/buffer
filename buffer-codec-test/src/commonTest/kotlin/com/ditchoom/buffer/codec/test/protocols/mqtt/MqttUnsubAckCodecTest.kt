@@ -16,7 +16,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 /**
- * Phase J.M step 5 first tranche — MQTT v3.1.1 §3.11 UNSUBACK
+ * MQTT v3.1.1 §3.11 UNSUBACK
  * packet. Fixed-shape 4-byte ack: header `0xB0` + remainingLength=2
  * + packetIdentifier (UShort BE). Unlike SUBACK (which carries a
  * list of return codes), UNSUBACK in v3.1.1 has no body.

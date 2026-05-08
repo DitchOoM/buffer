@@ -27,7 +27,7 @@ import kotlin.jvm.JvmInline
  * 3=RST_STREAM, 4=SETTINGS, 5=PUSH_PROMISE, 6=PING, 7=GOAWAY,
  * 8=WINDOW_UPDATE, 9=CONTINUATION.
  *
- * Stage F slice 6.5 doctrine vector — exercises the `@DispatchOn`
+ * Doctrine vector — exercises the `@DispatchOn`
  * dispatcher with a multi-byte (UInt) discriminator, big-endian
  * peek-side reconstruction of the value class.
  */
@@ -83,10 +83,10 @@ value class Http2StreamId(
 }
 
 /**
- * Stage F slice 6.5 / Stage H slice 10d doctrine vector — sealed
+ * Doctrine vector — sealed
  * dispatcher over the HTTP/2 frame header (RFC 7540 §4.1).
  *
- * Slice 10d lifts this sealed parent to `<out P : Payload>` so a
+ * Lifts this sealed parent to `<out P: Payload>` so a
  * payload-bearing variant (`Data<P : Payload>`, RFC §6.1) can
  * coexist with payload-free variants (`Settings`, `Ping`,
  * `WindowUpdate`, all `: Http2Frame<Nothing>`). The generated
@@ -121,23 +121,23 @@ sealed interface Http2Frame<out P : Payload> {
     /**
      * DATA frame per RFC 7540 §6.1 — generic-bounded payload slot.
      *
-     * Slice 10d narrow:
+     * Narrow:
      *   - PADDED flag (bit 0x08) is ignored; the optional padding
-     *     length byte + trailing pad bytes are deferred. Slice 10d
+     * length byte + trailing pad bytes are deferred.
      *     assumes no padding (matches the simplest §6.1 wire shape).
      *   - END_STREAM flag (bit 0x01) is preserved on the wire (it's
      *     just a flag bit in the existing `flags: UByte` field) but
      *     carries no codec semantics.
      *   - The body's byte count is determined by the buffer's outer
-     *     limit (slice 10a/10b shape) — NOT by `header.length`. A
+     * limit (/10b shape) — NOT by `header.length`. A
      *     consumer wraps the codec with a `setLimit(header.length)`
      *     before delegating; a future slice will lift this so the
      *     dispatcher reads `header.length` and bounds the buffer
      *     before delegating to the variant codec.
      *
-     * Absorbed from the slice 10b standalone `Http2DataFrame<P>`
+     * Absorbed from the standalone `Http2DataFrame<P>`
      * fixture per the doctrine answer locked while landing 10b
-     * (sealed-parent generic-aware integration is slice 10d's job).
+     * (sealed-parent generic-aware integration is 's job).
      */
     @PacketType(value = 0)
     @ProtocolMessage(wireOrder = Endianness.Big)
@@ -185,9 +185,9 @@ sealed interface Http2Frame<out P : Payload> {
      * SETTINGS frame per RFC 7540 §6.5 — payload is a sequence of
      * 6-byte settings entries, count derived from `header.length / 6`.
      *
-     * Stage G slice 9 doctrine vector — exercises the dotted-form
+     * Doctrine vector — exercises the dotted-form
      * `@LengthFrom("header.length")` against the value-class header
-     * field. The dispatcher integration is what slice 7a's standalone
+     * field. The dispatcher integration is what 's standalone
      * `Http2SettingsFrame` couldn't deliver (simple-name `@LengthFrom`
      * couldn't reach into the value class). Both fixtures coexist:
      * `Http2SettingsFrame` covers simple-name `@LengthFrom("length")`

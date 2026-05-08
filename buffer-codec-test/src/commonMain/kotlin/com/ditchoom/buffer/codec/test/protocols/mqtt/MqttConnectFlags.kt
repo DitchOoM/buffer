@@ -8,7 +8,7 @@ import kotlin.jvm.JvmInline
  * codec reads/writes a single `UByte` and exposes the meaningful
  * boolean bits as `Boolean`-returning `val` properties so that
  * `@When("connectFlags.<bit>")` predicates resolve naturally
- * against the slice 3 dotted value-class predicate path.
+ * against the dotted value-class predicate path.
  *
  * Bit layout (LSB → MSB):
  *   0  reserved (must be 0)
@@ -25,7 +25,7 @@ import kotlin.jvm.JvmInline
  * routing information, not a presence bit.
  *
  * Lives in its own file rather than nested inside `MqttPacket.kt`
- * so the slice 3 value-class doctrine fixture stays load-bearing
+ * so the value-class doctrine fixture stays load-bearing
  * for emitter regression coverage independently of the sealed
  * dispatcher's lifecycle.
  */
@@ -41,11 +41,11 @@ value class MqttConnectFlags(
     val usernamePresent: Boolean get() = (raw.toInt() and 0x80) != 0
 
     init {
-        // Phase J.M.5 audit-2f — bit 0 is reserved per §3.1.2.3 [MQTT-3.1.2-3].
+        // Bit 0 is reserved per §3.1.2.3 [MQTT-3.1.2-3].
         require((raw.toInt() and 0x01) == 0) {
             "MqttConnectFlags reserved bit 0 must be zero (spec §3.1.2.3); got 0x" + raw.toString(16)
         }
-        // Phase J.M.5 audit-2f — willQoS bits 3-4 form a 2-bit QoS field; value 3
+        // WillQoS bits 3-4 form a 2-bit QoS field; value 3
         // is malformed per §3.1.2.6 [MQTT-3.1.2-13]. If !willPresent the bits MUST
         // be 0 [MQTT-3.1.2-14]. Shared between v3 and v5 — both spec sections
         // align here.

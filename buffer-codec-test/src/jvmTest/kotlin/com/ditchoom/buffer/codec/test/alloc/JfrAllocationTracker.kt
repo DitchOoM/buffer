@@ -10,7 +10,7 @@ import java.time.Duration
  * JVM-only helper that records `[B` (byte array) allocations via JFR
  * during a workload and returns the events whose immediate trigger
  * frame is in `com.ditchoom.buffer` or `com.ditchoom.buffer.codec`
- * (the "attributable" set per Locked Decision row 16).
+ * (the "attributable" set per ).
  *
  * Both `jdk.ObjectAllocationInNewTLAB` and
  * `jdk.ObjectAllocationOutsideTLAB` are enabled with zero threshold so

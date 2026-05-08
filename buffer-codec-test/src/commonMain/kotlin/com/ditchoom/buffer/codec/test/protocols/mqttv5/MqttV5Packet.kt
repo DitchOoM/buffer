@@ -25,7 +25,7 @@ import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
 
 /**
- * Phase J.M.5 — MQTT v5.0 control-packet sealed dispatcher.
+ * MQTT v5.0 control-packet sealed dispatcher.
  *
  * Sits alongside (NOT replacing) the v3.1.1 [com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket]
  * sealed family. v3.1.1 and v5.0 are distinct wire protocols selected at
@@ -43,19 +43,19 @@ import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
  *  - [MqttRemainingLengthCodec] — MQTT §1.5.5 variable-byte-integer
  *    length codec. v5's "remaining length" header field uses the same
  *    encoding as v3's; v5 also reuses the same VBI codec for the
- *    inner property-bag length prefix (the slice covered by Phase I.1
+ * inner property-bag length prefix (the slice covered by
  *    step 11's `@LengthPrefixed @UseCodec` shape).
  *
- * Slice 1 landed [PingReq] only — wire-bytewise identical to the v3
+ * Landed [PingReq] only — wire-bytewise identical to the v3
  * PINGREQ (`C0 00`); structural smoke test for the v5 sealed parent +
  * generated codec + peek path.
  *
- * Slice 2 (this commit) lifts the parent to `<out P : Payload>` and
+ * (this commit) lifts the parent to `<out P: Payload>` and
  * introduces [Publish] — composes step 11's `@LengthPrefixed @UseCodec`
- * property-bag shape with the slice 10c/10f `Partial` outer-limit
+ * property-bag shape with the /10f `Partial` outer-limit
  * machinery and `@RemainingBytes payload: P`. The dispatcher emits as a
  * generic class `MqttV5PacketCodec<P>(payloadCodec)`, mirroring the v3
- * family's slice 10f lift.
+ * family's lift.
  */
 @DispatchOn(MqttFixedHeader::class)
 @FramedBy(MqttRemainingLengthCodec::class, after = "header")
@@ -76,32 +76,32 @@ sealed interface MqttV5Packet<out P : Payload> {
      *   <willPropLen VBI>?      will properties — present iff flags.willPresent
      *   <will props...>?        will-property entries
      *   <will topic LP>?        present iff flags.willPresent
-     *   <will payload LP>?      present iff flags.willPresent (Phase J.M.5
-     *                           slice 15d retyped from String to BinaryData;
+     * <will payload LP>? present iff flags.willPresent (
+     * retyped from String to BinaryData;
      *                           §3.1.3.3 binary-data spec contract)
      *   <username LP>?          present iff flags.usernamePresent
-     *   <password LP>?          present iff flags.passwordPresent (Phase J.M.5
-     *                           slice 15d retyped to BinaryData per §3.1.3.5)
+     * <password LP>? present iff flags.passwordPresent (
+     * retyped to BinaryData per §3.1.3.5)
      * ```
      *
      * Composes:
-     *  - the always-present property bag (slice 2 shape) between
+     * the always-present property bag ( shape) between
      *    `keepAliveSeconds` and `clientId`,
-     *  - the conditional will-properties (slice 5 shape) between
+     * the conditional will-properties ( shape) between
      *    `clientId` and `willTopic` — grammar 1 predicate
      *    `flags.willPresent` (sibling value-class property),
      *  - the existing `@LengthPrefixed @When val: String?` shape
-     *    (slice 3.5) for will-topic / will-message / username /
+     * (.5) for will-topic / will-message / username /
      *    password — inherited from the v3 Connect fixture.
      *
      * Reuses `MqttConnectFlags` from the v3 fixtures — bit layout is
      * unchanged in v5 (§3.1.2.3).
      *
-     * Phase J.M.5 slice 15d retyped will-message and password from
+     * Retyped will-message and password from
      * `String?` to `BinaryData?` referenced via
-     * `@LengthPrefixed @UseCodec(BinaryDataCodec::class)` (slice 15a's
+     * `@LengthPrefixed @UseCodec(BinaryDataCodec::class)` ('s
      * scalar Payload shape). The multi-generic dispatcher lift
-     * mentioned in PHASE_J_M_BRIEF.md §4 is no longer needed — slice
+     * mentioned in §4 is no longer needed — slice
      * 15's typed Payload slots cover the binary-data contract via the
      * `Payload` marker without lifting the parent's type parameters.
      */
@@ -131,7 +131,7 @@ sealed interface MqttV5Packet<out P : Payload> {
         val password: BinaryData? = null,
     ) : MqttV5Packet<Nothing> {
         init {
-            // Phase J.M.5 audit-2d — header byte invariant per spec §3.1.1.
+            // Header byte invariant per spec §3.1.1.
             // CONNECT's fixed header is exactly 0x10; the low 4 bits are
             // reserved-and-must-be-zero [MQTT-2.1.3-1].
             require(header.raw.toInt() == 0x10) {
@@ -157,11 +157,11 @@ sealed interface MqttV5Packet<out P : Payload> {
      *   <properties...>       0..N MqttV5Property entries
      * ```
      *
-     * Slice 3 variant — exercises the always-present property bag
-     * without new emitter capability beyond what slice 2 lifted.
-     * Slice 11b substitutes the bare `UByte` reason code with
+     * Variant — exercises the always-present property bag
+     * without new emitter capability beyond what lifted.
+     * Substitutes the bare `UByte` reason code with
      * [V5ConnectReasonCode] — non-conditional bare `val: T` shape
-     * resolved by-name through the slice 11b non-conditional
+     * resolved by-name through the non-conditional
      * `ProtocolMessageScalar` analyzer branch.
      */
     @PacketType(value = 2)
@@ -174,12 +174,12 @@ sealed interface MqttV5Packet<out P : Payload> {
         val properties: V5PropertyBag = V5PropertyBag.EMPTY,
     ) : MqttV5Packet<Nothing> {
         init {
-            // Phase J.M.5 audit-2d — header byte invariant per spec §3.2.1.
+            // Header byte invariant per spec §3.2.1.
             require(header.raw.toInt() == 0x20) {
                 "v5 CONNACK header invariant: header.raw must be 0x20, got 0x" +
                     header.raw.toString(16) + " (spec §3.2.1)"
             }
-            // Phase J.M.5 audit-2f — §3.2.2.1 [MQTT-3.2.2-1]: bits 7-1 of the
+            // §3.2.2.1 [MQTT-3.2.2-1]: bits 7-1 of the
             // Connect Acknowledge Flags are reserved and MUST be 0; only bit
             // 0 (Session Present) is meaningful. A typed V5ConnAckFlags
             // value class would be cleaner; init-block fallback here.
@@ -209,7 +209,7 @@ sealed interface MqttV5Packet<out P : Payload> {
      *     `@When("header.qosGreaterThanZero")` against the
      *     value-class header property.
      *   - `properties` (VBI length prefix + properties, §3.3.2.3):
-     *     v5-specific property bag. Phase J.M.5 slice 15f replaced the
+     * v5-specific property bag. replaced the
      *     `List<MqttV5Property>` field with the typed [V5PropertyBag]
      *     wrapper; encoded as `@UseCodec(V5PropertyBagCodec::class) val:
      *     V5PropertyBag`. The codec self-frames its VBI prefix
@@ -223,12 +223,12 @@ sealed interface MqttV5Packet<out P : Payload> {
      *     `Codec<P>`.
      *
      * Composes:
-     *  - the slice 10d generic dispatcher (`<P : Payload>` variant),
-     *  - the slice 10f outer-limit `Partial` machinery (RL +
+     * the generic dispatcher (`<P: Payload>` variant),
+     * the outer-limit `Partial` machinery (RL +
      *    `@RemainingBytes payload`),
-     *  - the slice 10c `@When` value-class scalar predicate
+     * the `@When` value-class scalar predicate
      *    (`header.qosGreaterThanZero`),
-     *  - the Phase I.1 step 11 `@LengthPrefixed @UseCodec` shape
+     * the `@LengthPrefixed @UseCodec` shape
      *    for the property bag — the new capability this slice brings
      *    online.
      *
@@ -248,7 +248,7 @@ sealed interface MqttV5Packet<out P : Payload> {
         @RemainingBytes val payload: P,
     ) : MqttV5Packet<P> {
         init {
-            // Phase J.M.5 audit-2d — header byte invariant per spec §3.3.1.
+            // Header byte invariant per spec §3.3.1.
             // PUBLISH is the only variant whose low 4 bits are not reserved:
             // bit 3 = DUP, bits 1-2 = QoS, bit 0 = RETAIN. Only the high
             // nibble (packet type = 3) is fixed.
@@ -256,7 +256,7 @@ sealed interface MqttV5Packet<out P : Payload> {
                 "v5 PUBLISH header invariant: header.raw high nibble must be 3, got 0x" +
                     header.raw.toString(16) + " (spec §3.3.1)"
             }
-            // Phase J.M.5 audit-2f — §2.2.1: PUBLISH carries a packet
+            // §2.2.1: PUBLISH carries a packet
             // identifier iff QoS > 0. Same gap as v3 — see [MqttPacket.Publish.init].
             require(header.qosGreaterThanZero == (packetId != null)) {
                 "v5 PUBLISH invariant: packetId is required iff header.qosGreaterThanZero " +
@@ -303,12 +303,12 @@ sealed interface MqttV5Packet<out P : Payload> {
         val properties: V5PropertyBag? = null,
     ) : MqttV5Packet<Nothing> {
         init {
-            // Phase J.M.5 audit-2c — cascading-trailer invariant. Per spec
+            // Cascading-trailer invariant. Per spec
             // §3.4.2.2.1 the property bag is encoded only after the reason
             // code; if `properties` is set without `reasonCode` the wire
             // would lose its self-framing (the `propLen` byte would land
             // where `rc` should be on decode). Caller responsibility per
-            // row 20 doctrine. Option 2 (sum-type trailers) and option 3
+            // . Option 2 (sum-type trailers) and option 3
             // (factory overloads) were rejected: option 2 needs the
             // dispatcher to analyze a sealed `*Trailers` parent
             // (substantial emitter scope); option 3's primary constructor
@@ -317,13 +317,13 @@ sealed interface MqttV5Packet<out P : Payload> {
                 "v5 PUBACK cascade invariant: properties cannot be set without reasonCode " +
                     "(spec §3.4.2.2.1)"
             }
-            // Phase J.M.5 audit-2d — header byte invariant per spec §3.4.1.
+            // Header byte invariant per spec §3.4.1.
             require(header.raw.toInt() == 0x40) {
                 "v5 PUBACK header invariant: header.raw must be 0x40, got 0x" +
                     header.raw.toString(16) + " (spec §3.4.1)"
             }
-            // Phase J.M.5 slice 11b — reason-code value-space is now type-
-            // system enforced via [V5PubAckReasonCode]; the audit-2d
+            // Reason-code value-space is now type
+            // system enforced via [V5PubAckReasonCode]; the
             // allowlist was deleted in this commit. Per-packet validity
             // (e.g. PUBACK rejecting 0x92 PacketIdentifierNotFound) is
             // intentionally not enforced — see V5ReasonCodes.kt header.
@@ -345,17 +345,17 @@ sealed interface MqttV5Packet<out P : Payload> {
         val properties: V5PropertyBag? = null,
     ) : MqttV5Packet<Nothing> {
         init {
-            // Phase J.M.5 audit-2c — see [PubAck.init]. Spec §3.5.2.2.1.
+            // See [PubAck.init]. Spec §3.5.2.2.1.
             require(reasonCode != null || properties == null) {
                 "v5 PUBREC cascade invariant: properties cannot be set without reasonCode " +
                     "(spec §3.5.2.2.1)"
             }
-            // Phase J.M.5 audit-2d — header byte invariant per spec §3.5.1.
+            // Header byte invariant per spec §3.5.1.
             require(header.raw.toInt() == 0x50) {
                 "v5 PUBREC header invariant: header.raw must be 0x50, got 0x" +
                     header.raw.toString(16) + " (spec §3.5.1)"
             }
-            // Phase J.M.5 slice 11b — reason-code value-space type-system
+            // Reason-code value-space type-system
             // enforced via [V5PubAckReasonCode] (shared parent with PUBACK).
         }
     }
@@ -376,19 +376,19 @@ sealed interface MqttV5Packet<out P : Payload> {
         val properties: V5PropertyBag? = null,
     ) : MqttV5Packet<Nothing> {
         init {
-            // Phase J.M.5 audit-2c — see [PubAck.init]. Spec §3.6.2.2.1.
+            // See [PubAck.init]. Spec §3.6.2.2.1.
             require(reasonCode != null || properties == null) {
                 "v5 PUBREL cascade invariant: properties cannot be set without reasonCode " +
                     "(spec §3.6.2.2.1)"
             }
-            // Phase J.M.5 audit-2d — header byte invariant per spec §3.6.1.
+            // Header byte invariant per spec §3.6.1.
             // PUBREL's low nibble is 0010 reserved-and-must-be-set
             // [MQTT-3.6.1-1]; the canonical byte is 0x62.
             require(header.raw.toInt() == 0x62) {
                 "v5 PUBREL header invariant: header.raw must be 0x62, got 0x" +
                     header.raw.toString(16) + " (spec §3.6.1)"
             }
-            // Phase J.M.5 slice 11b — reason-code value-space type-system
+            // Reason-code value-space type-system
             // enforced via [V5PubAckReasonCode] (shared parent — PUBREL's
             // smaller spec set §3.6.2.1 not separately enforced).
         }
@@ -409,17 +409,17 @@ sealed interface MqttV5Packet<out P : Payload> {
         val properties: V5PropertyBag? = null,
     ) : MqttV5Packet<Nothing> {
         init {
-            // Phase J.M.5 audit-2c — see [PubAck.init]. Spec §3.7.2.2.1.
+            // See [PubAck.init]. Spec §3.7.2.2.1.
             require(reasonCode != null || properties == null) {
                 "v5 PUBCOMP cascade invariant: properties cannot be set without reasonCode " +
                     "(spec §3.7.2.2.1)"
             }
-            // Phase J.M.5 audit-2d — header byte invariant per spec §3.7.1.
+            // Header byte invariant per spec §3.7.1.
             require(header.raw.toInt() == 0x70) {
                 "v5 PUBCOMP header invariant: header.raw must be 0x70, got 0x" +
                     header.raw.toString(16) + " (spec §3.7.1)"
             }
-            // Phase J.M.5 slice 11b — reason-code value-space type-system
+            // Reason-code value-space type-system
             // enforced via [V5PubAckReasonCode] (shared parent with PUBREL).
         }
     }
@@ -439,8 +439,8 @@ sealed interface MqttV5Packet<out P : Payload> {
      *   …                      repeated for each filter
      * ```
      *
-     * Composes the always-present property bag (slice 2 shape) with
-     * the J.M.0 `@RemainingBytes List<@ProtocolMessage T>` shape. The
+     * Composes the always-present property bag ( shape) with
+     * the `@RemainingBytes List<@ProtocolMessage T>` shape. The
      * inner property-bag bound is restored before the trailing list
      * reads, and the list reads to the outer RL bound.
      */
@@ -454,14 +454,14 @@ sealed interface MqttV5Packet<out P : Payload> {
         @RemainingBytes val topicFilters: List<V5Subscription>,
     ) : MqttV5Packet<Nothing> {
         init {
-            // Phase J.M.5 audit-2d — header byte invariant per spec §3.8.1.
+            // Header byte invariant per spec §3.8.1.
             // SUBSCRIBE's low nibble is 0010 reserved-and-must-be-set
             // [MQTT-3.8.1-1]; the canonical byte is 0x82.
             require(header.raw.toInt() == 0x82) {
                 "v5 SUBSCRIBE header invariant: header.raw must be 0x82, got 0x" +
                     header.raw.toString(16) + " (spec §3.8.1)"
             }
-            // Phase J.M.5 audit-2d — §3.8.3 "The Payload of a SUBSCRIBE
+            // §3.8.3 "The Payload of a SUBSCRIBE
             // packet MUST contain at least one Topic Filter / Subscription
             // Options pair" [MQTT-3.8.3-2]. An empty list is wire-invalid.
             require(topicFilters.isNotEmpty()) {
@@ -476,8 +476,8 @@ sealed interface MqttV5Packet<out P : Payload> {
      * reason-code list (one byte per topic filter from the matching
      * SUBSCRIBE).
      *
-     * Slice 12 substitutes the bare `List<UByte>` with
-     * `List<V5SubAckReasonCode>` — uses the slice 11a
+     * Substitutes the bare `List<UByte>` with
+     * `List<V5SubAckReasonCode>` — uses the
      * `@RemainingBytes List<sealed parent>` widening. Per-element
      * dispatch on the raw byte routes to the matching
      * [V5SubAckReasonCode] variant.
@@ -492,12 +492,12 @@ sealed interface MqttV5Packet<out P : Payload> {
         @RemainingBytes val reasonCodes: List<V5SubAckReasonCode>,
     ) : MqttV5Packet<Nothing> {
         init {
-            // Phase J.M.5 audit-2d — header byte invariant per spec §3.9.1.
+            // Header byte invariant per spec §3.9.1.
             require(header.raw.toInt() == 0x90) {
                 "v5 SUBACK header invariant: header.raw must be 0x90, got 0x" +
                     header.raw.toString(16) + " (spec §3.9.1)"
             }
-            // Phase J.M.5 audit-2f — §3.9.3: SUBACK MUST contain one Reason
+            // §3.9.3: SUBACK MUST contain one Reason
             // Code per Topic Filter in the matching SUBSCRIBE; an empty
             // list is wire-invalid.
             require(reasonCodes.isNotEmpty()) {
@@ -526,14 +526,14 @@ sealed interface MqttV5Packet<out P : Payload> {
         @RemainingBytes val topics: List<MqttUnsubscribeTopic>,
     ) : MqttV5Packet<Nothing> {
         init {
-            // Phase J.M.5 audit-2d — header byte invariant per spec §3.10.1.
+            // Header byte invariant per spec §3.10.1.
             // UNSUBSCRIBE's low nibble is 0010 reserved-and-must-be-set
             // [MQTT-3.10.1-1]; the canonical byte is 0xA2.
             require(header.raw.toInt() == 0xA2) {
                 "v5 UNSUBSCRIBE header invariant: header.raw must be 0xA2, got 0x" +
                     header.raw.toString(16) + " (spec §3.10.1)"
             }
-            // Phase J.M.5 audit-2f — §3.10.3 [MQTT-3.10.3-2]: UNSUBSCRIBE's
+            // §3.10.3 [MQTT-3.10.3-2]: UNSUBSCRIBE's
             // payload MUST contain at least one Topic Filter; an empty list
             // is wire-invalid. Mirrors the [Subscribe.topicFilters] guard.
             require(topics.isNotEmpty()) {
@@ -560,17 +560,17 @@ sealed interface MqttV5Packet<out P : Payload> {
         val properties: V5PropertyBag? = null,
     ) : MqttV5Packet<Nothing> {
         init {
-            // Phase J.M.5 audit-2c — see [PubAck.init]. Spec §3.11.2.1.
+            // See [PubAck.init]. Spec §3.11.2.1.
             require(reasonCode != null || properties == null) {
                 "v5 UNSUBACK cascade invariant: properties cannot be set without reasonCode " +
                     "(spec §3.11.2.1)"
             }
-            // Phase J.M.5 audit-2d — header byte invariant per spec §3.11.1.
+            // Header byte invariant per spec §3.11.1.
             require(header.raw.toInt() == 0xB0) {
                 "v5 UNSUBACK header invariant: header.raw must be 0xB0, got 0x" +
                     header.raw.toString(16) + " (spec §3.11.1)"
             }
-            // Phase J.M.5 slice 11b — reason-code value-space type-system
+            // Reason-code value-space type-system
             // enforced via [V5UnsubAckReasonCode].
         }
     }
@@ -594,18 +594,18 @@ sealed interface MqttV5Packet<out P : Payload> {
         val properties: V5PropertyBag? = null,
     ) : MqttV5Packet<Nothing> {
         init {
-            // Phase J.M.5 audit-2c — cascading-trailer invariant per
+            // Cascading-trailer invariant per
             // spec §3.14.2.1; see [PubAck.init] for the doctrine note.
             require(reasonCode != null || properties == null) {
                 "v5 DISCONNECT cascade invariant: properties cannot be set without reasonCode " +
                     "(spec §3.14.2.1)"
             }
-            // Phase J.M.5 audit-2d — header byte invariant per spec §3.14.1.
+            // Header byte invariant per spec §3.14.1.
             require(header.raw.toInt() == 0xE0) {
                 "v5 DISCONNECT header invariant: header.raw must be 0xE0, got 0x" +
                     header.raw.toString(16) + " (spec §3.14.1)"
             }
-            // Phase J.M.5 slice 11b — reason-code value-space type-system
+            // Reason-code value-space type-system
             // enforced via [V5DisconnectReasonCode] (28 variants).
         }
     }
@@ -616,7 +616,7 @@ sealed interface MqttV5Packet<out P : Payload> {
      * authentication-method/data carried in the property bag are now
      * representable via [MqttV5Property.AuthenticationMethod] (slice
      * 10 Tier A); the binary `Authentication Data` (id 0x16) remains
-     * deferred until the multi-payload dispatcher (Tier C slice 14+).
+     * deferred until the multi-payload dispatcher (Tier C +).
      */
     @PacketType(value = 15)
     @ProtocolMessage(wireOrder = Endianness.Big)
@@ -628,17 +628,17 @@ sealed interface MqttV5Packet<out P : Payload> {
         val properties: V5PropertyBag? = null,
     ) : MqttV5Packet<Nothing> {
         init {
-            // Phase J.M.5 audit-2c — see [PubAck.init]. Spec §3.15.2.2.1.
+            // See [PubAck.init]. Spec §3.15.2.2.1.
             require(reasonCode != null || properties == null) {
                 "v5 AUTH cascade invariant: properties cannot be set without reasonCode " +
                     "(spec §3.15.2.2.1)"
             }
-            // Phase J.M.5 audit-2d — header byte invariant per spec §3.15.1.
+            // Header byte invariant per spec §3.15.1.
             require(header.raw.toInt() == 0xF0) {
                 "v5 AUTH header invariant: header.raw must be 0xF0, got 0x" +
                     header.raw.toString(16) + " (spec §3.15.1)"
             }
-            // Phase J.M.5 slice 11b — reason-code value-space type-system
+            // Reason-code value-space type-system
             // enforced via [V5AuthReasonCode] (3 variants: Success / Continue
             // / Re-Authenticate).
         }
@@ -658,7 +658,7 @@ sealed interface MqttV5Packet<out P : Payload> {
         val header: MqttFixedHeader = MqttFixedHeader(0xC0u),
     ) : MqttV5Packet<Nothing> {
         init {
-            // Phase J.M.5 audit-2d — header byte invariant per spec §3.12.1.
+            // Header byte invariant per spec §3.12.1.
             require(header.raw.toInt() == 0xC0) {
                 "v5 PINGREQ header invariant: header.raw must be 0xC0, got 0x" +
                     header.raw.toString(16) + " (spec §3.12.1)"
@@ -677,7 +677,7 @@ sealed interface MqttV5Packet<out P : Payload> {
         val header: MqttFixedHeader = MqttFixedHeader(0xD0u),
     ) : MqttV5Packet<Nothing> {
         init {
-            // Phase J.M.5 audit-2d — header byte invariant per spec §3.13.1.
+            // Header byte invariant per spec §3.13.1.
             require(header.raw.toInt() == 0xD0) {
                 "v5 PINGRESP header invariant: header.raw must be 0xD0, got 0x" +
                     header.raw.toString(16) + " (spec §3.13.1)"

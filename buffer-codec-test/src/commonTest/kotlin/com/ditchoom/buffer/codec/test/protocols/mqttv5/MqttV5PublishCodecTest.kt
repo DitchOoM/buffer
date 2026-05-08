@@ -19,12 +19,12 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 
 /**
- * Phase J.M.5 slice 2 — PUBLISH v5 + the v5 property bag (first two
+ * PUBLISH v5 + the v5 property bag (first two
  * variants). The high-coverage smoke test the handoff specified:
- * composes the slice 10d generic dispatcher, the slice 10c/10f
+ * composes the generic dispatcher, the /10f
  * outer-limit `Partial` machinery (RL + `@RemainingBytes payload`),
- * the slice 10c `@When` value-class predicate, and the
- * Phase I.1 step 11 `@LengthPrefixed @UseCodec` property-bag shape —
+ * the `@When` value-class predicate, and the
+ * `@LengthPrefixed @UseCodec` property-bag shape
  * the latter widened in this slice to accept sealed-parent elements
  * (`MqttV5Property` instead of a `data class` element).
  *
@@ -171,7 +171,7 @@ class MqttV5PublishCodecTest {
     @Test
     fun decodesPublishWithMixedPropertiesIntoTypedSlots() {
         // Spec §3.3.2.3 — properties may appear in any order on the wire.
-        // Slice 15f routes each unique-cardinality variant into its typed
+        // Routes each unique-cardinality variant into its typed
         // V5PropertyBag slot regardless of wire arrival order. Wire here is
         // ContentType first (13 bytes), then MessageExpiryInterval (5
         // bytes); both must end up in their respective typed slots.
@@ -221,7 +221,7 @@ class MqttV5PublishCodecTest {
 
     @Test
     fun publishCompleteRestoresOuterLimitFromPartialFlow() {
-        // The slice 10f Partial+@RemainingLength composition extended with
+        // The Partial+@RemainingLength composition extended with
         // step 11's inner property-bag bound. Both bounds must be restored
         // before the outer caller continues; trailing bytes must remain
         // visible after decode.

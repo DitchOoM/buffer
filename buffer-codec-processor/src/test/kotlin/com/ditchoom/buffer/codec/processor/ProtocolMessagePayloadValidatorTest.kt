@@ -61,10 +61,10 @@ class ProtocolMessagePayloadValidatorTest {
 
     @Test
     fun doesNotFireWhenFieldExtendsPayload() {
-        // Slice 10a tightened the contract: a Payload-typed field with no
+        // Tightened the contract: a Payload-typed field with no
         // resolution mechanism (no `@UseCodec`) is a hard error, not a
         // silent skip. The §8 short-circuit assertion still holds when the
-        // field uses the slice 10a composition `@RemainingBytes
+        // field uses the composition `@RemainingBytes
         // @UseCodec(...)` against a user-supplied Codec object — the walk
         // halts at the Payload marker before descending into OpaqueBlob's
         // ByteArray inner.
@@ -168,7 +168,7 @@ class ProtocolMessagePayloadValidatorTest {
 
     @Test
     fun firesOnRawWriteBufferField() {
-        // Phase J.M.5 slice 15b — same §8/D1 ban applies to WriteBuffer.
+        // Same §8/D1 ban applies to WriteBuffer.
         val result =
             compile(
                 """
@@ -187,7 +187,7 @@ class ProtocolMessagePayloadValidatorTest {
 
     @Test
     fun firesOnRawPlatformBufferField() {
-        // Phase J.M.5 slice 15b — same §8/D1 ban applies to PlatformBuffer.
+        // Same §8/D1 ban applies to PlatformBuffer.
         val result =
             compile(
                 """
@@ -210,10 +210,10 @@ class ProtocolMessagePayloadValidatorTest {
 
     @Test
     fun acceptsLengthPrefixedUseCodecPayloadValueClass() {
-        // Phase J.M.5 slice 15b — the recommended migration target for raw
+        // The recommended migration target for raw
         // ByteArray-bearing fields: wrap bytes in a `Payload`-marked value
         // class and reference the codec via `@LengthPrefixed @UseCodec`
-        // (slice 15a shape). The §8 walk halts at the Payload marker
+        // ( shape). The §8 walk halts at the Payload marker
         // before descending into the value class's `ByteArray` inner.
         val result =
             compile(
@@ -252,18 +252,16 @@ class ProtocolMessagePayloadValidatorTest {
             )
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
         assertFalse(
-            result.messages.contains("Section 8") || result.messages.contains("slice 15 D1"),
+            result.messages.contains("raw-bytes type") || result.messages.contains("forbidden"),
             "wrapping bytes in a Payload value class is the documented migration target — " +
-                "no §8/D1 diagnostic should fire. Messages:\n${result.messages}",
+                "no raw-bytes diagnostic should fire. Messages:\n${result.messages}",
         )
     }
 
     @Test
-    fun diagnosticReferencesSlice15Doctrine() {
-        // Phase J.M.5 slice 15b — the diagnostic must point at slice 15
-        // D1 (raw types forbidden) and D2 (Payload marker required) as
-        // the documented migration path, in addition to the existing §8
-        // citation.
+    fun diagnosticReferencesPayloadMigrationPath() {
+        // The diagnostic must point at the raw-types-forbidden rule and
+        // the Payload-marker migration target.
         val result =
             compile(
                 """
@@ -277,12 +275,12 @@ class ProtocolMessagePayloadValidatorTest {
             )
         assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
         assertTrue(
-            result.messages.contains("slice 15 D1"),
-            "diagnostic should reference slice 15 D1. Messages:\n${result.messages}",
+            result.messages.contains("raw-bytes type") && result.messages.contains("forbidden"),
+            "diagnostic should explain that raw-bytes types are forbidden. Messages:\n${result.messages}",
         )
         assertTrue(
-            result.messages.contains("slice 15 D2"),
-            "diagnostic should reference slice 15 D2 (the Payload-marker migration target). " +
+            result.messages.contains("Payload") && result.messages.contains("value class"),
+            "diagnostic should point at wrapping in a Payload-typed value class. " +
                 "Messages:\n${result.messages}",
         )
     }
@@ -329,8 +327,8 @@ class ProtocolMessagePayloadValidatorTest {
             "diagnostic should name the forbidden type $forbiddenType. Messages:\n${result.messages}",
         )
         assertTrue(
-            result.messages.contains("Section 8"),
-            "diagnostic should cite §8. Messages:\n${result.messages}",
+            result.messages.contains("ownership ambiguity"),
+            "diagnostic should explain the ownership-ambiguity rationale. Messages:\n${result.messages}",
         )
     }
 

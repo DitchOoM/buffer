@@ -5,7 +5,7 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
 
 /**
- * Phase J.M.0 doctrine vector — `@RemainingBytes` on
+ * Doctrine vector — `@RemainingBytes` on
  * `List<@ProtocolMessage T>`. The body's repeated nested-message
  * elements read until the buffer's limit is reached; the caller
  * is responsible for setting `buffer.setLimit(...)` externally
@@ -13,14 +13,14 @@ import com.ditchoom.buffer.codec.annotations.RemainingBytes
  * remaining-length variable-length integer that the dispatcher
  * uses to set the limit before delegating).
  *
- * Pairs the `slice 7a` (`@LengthFrom("sibling") List<T>`) and
- * `slice 7b` (`@RemainingBytes List<S>`) shapes:
+ * Pairs the (`@LengthFrom("sibling") List<T>`) and
+ * (`@RemainingBytes List<S>`) shapes:
  *
  * | Annotation         | Element        | Bound by        |
  * |--------------------|----------------|-----------------|
  * | `@LengthFrom`      | `@ProtocolMessage` | sibling field |
  * | `@RemainingBytes`  | scalar (UByte/Byte) | caller-set limit |
- * | `@RemainingBytes`  | `@ProtocolMessage` | caller-set limit |  ← J.M.0
+ * | `@RemainingBytes` | `@ProtocolMessage` | caller-set limit |
  *
  * Wire layout:
  *
@@ -39,7 +39,7 @@ import com.ditchoom.buffer.codec.annotations.RemainingBytes
  * caller-set limit, not at buffer end.
  *
  * Unblocks: MQTT v3.1.1 SUBSCRIBE / UNSUBSCRIBE topic-filter list
- * shapes (see `PHASE_J_M_BRIEF.md` step 1).
+ * shapes.
  */
 @ProtocolMessage(wireOrder = Endianness.Big)
 data class RepeatedBlock(

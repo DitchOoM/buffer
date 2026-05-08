@@ -17,7 +17,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * Phase J.M step 7 — end-to-end byte-exact regression suite for
+ * End-to-end byte-exact regression suite for
  * the full v3.1.1 sealed `MqttPacket` family.
  *
  * Drives every variant through three assertions routed via the

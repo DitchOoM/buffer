@@ -14,7 +14,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Phase I.1 step 11 — round-trip + peek tests for `@LengthPrefixed
+ * Round-trip + peek tests for `@LengthPrefixed
  * @UseCodec val: List<E>`. Two fixtures:
  *   - [PropertyBagFrame] — terminal property-bag (prefix + elements).
  *   - [TaggedPropertyBag] — prior fixed-size byte before the property
@@ -278,7 +278,7 @@ class LengthPrefixedUseCodecListCodecTest {
 
     @Test
     fun stringTaggedPropertyBagRoundTrips() {
-        // Phase J.M.5 audit-2b — element with `@LengthPrefixed val: String`
+        // Element with `@LengthPrefixed val: String`
         // has BackPatch wireSize. Pre-2b the analyzer set elementIsSealed
         // = false (because the element is `data class`, not `sealed`),
         // routing the encode through the pre-measure path; the

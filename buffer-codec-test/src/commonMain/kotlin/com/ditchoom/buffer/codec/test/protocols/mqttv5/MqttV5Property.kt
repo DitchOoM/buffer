@@ -16,7 +16,7 @@ import kotlin.jvm.JvmInline
  * property variant. Modeled as a `@JvmInline value class` over `UByte`
  * carrying the byte verbatim, with the `@DispatchValue` exposed as `Int`
  * so the codec emitter can route the sealed parent on it. Mirrors the
- * `MqttFixedHeader` pattern (Stage F slice 6 doctrine vector).
+ * `MqttFixedHeader` pattern ( doctrine vector).
  */
 @JvmInline
 @ProtocolMessage
@@ -28,7 +28,7 @@ value class MqttV5PropertyId(
 }
 
 /**
- * Phase J.M.5 audit-2e — `@DispatchValue` byte invariant. The variant's
+ * `@DispatchValue` byte invariant. The variant's
  * primary-constructor `id` field defaults to the variant's
  * `@PacketType.value`, but Kotlin lets callers override the default with
  * a non-matching byte:
@@ -43,7 +43,7 @@ value class MqttV5PropertyId(
  * That construction encodes the wrong dispatch byte; on decode the
  * dispatcher fails to find a matching variant. This helper fires the
  * `init { require }` at construction time, closing the impossible
- * state caller-side. Same pattern as audit-2d's `MqttFixedHeader`
+ * state caller-side. Same pattern as 's `MqttFixedHeader`
  * raw-byte invariant on each `MqttV5Packet` variant.
  *
  * Variant-codec emit reads/writes the byte through the value-class
@@ -64,16 +64,16 @@ private fun requireMatchingPropertyId(
 
 /**
  * Typed MQTT v5.0 property dispatcher. v5 §2.2.2 defines ~30 properties;
- * Phase J.M.5 slice 2 landed two (MessageExpiryInterval, ContentType)
- * as a smoke test, and Phase J.M.5 slice 10 (Tier A) lands the
+ * Landed two (MessageExpiryInterval, ContentType)
+ * as a smoke test, and (Tier A) lands the
  * remaining non-VBI / non-binary variants — covering scalar, boolean
  * (0/1-validated UByte), single-LP-string, and two-LP-string (User
  * Property) shapes.
  *
- * Slice 13 added 0x0B SubscriptionIdentifier via the VBI scalar codec
- * (`@UseCodec(VariableByteIntegerCodec)`). Slice 15c adds 0x09
+ * Added 0x0B SubscriptionIdentifier via the VBI scalar codec
+ * (`@UseCodec(VariableByteIntegerCodec)`). adds 0x09
  * CorrelationData and 0x16 AuthenticationData via the new
- * `@LengthPrefixed @UseCodec val: T : Payload` shape (slice 15a).
+ * `@LengthPrefixed @UseCodec val: T: Payload` shape.
  * No property variants stay deferred.
  *
  * Each variant carries the property-id byte as its first field; the
@@ -164,11 +164,11 @@ sealed interface MqttV5Property {
      * response style PUBLISH; the broker forwards it unchanged to
      * subscribers.
      *
-     * Phase J.M.5 slice 15c — first production-shaped use of the new
-     * `@LengthPrefixed @UseCodec val: T : Payload` (slice 15a) shape.
+     * First production-shaped use of the new
+     * `@LengthPrefixed @UseCodec val: T: Payload` shape.
      * The wire form is v5 §1.5.6 Binary Data: 2-byte UShort BE prefix
      * + body bytes. [BinaryData] is a `Payload`-marked value class
-     * over `ByteArray` (slice 15 D1/D2); [BinaryDataCodec] is the
+     * over `ByteArray` ( D1/D2); [BinaryDataCodec] is the
      * `Codec<BinaryData>` referenced via `@UseCodec`.
      */
     @PacketType(value = 0x09)
@@ -189,7 +189,7 @@ sealed interface MqttV5Property {
      * may be carried on a PUBLISH if the message matched several
      * subscriptions; the SUBSCRIBE form is single-valued.
      *
-     * Phase J.M.5 slice 13 lights up VBI-bodied properties via a
+     * Lights up VBI-bodied properties via a
      * non-bounding `Codec<UInt>` ([VariableByteIntegerCodec]) on the
      * bare-`@UseCodec val: <scalar>` path. Distinct from
      * `MqttRemainingLengthCodec` — the remaining-length codec
@@ -287,8 +287,8 @@ sealed interface MqttV5Property {
      * scheme name is carried separately in [AuthenticationMethod]
      * (id 0x15).
      *
-     * Phase J.M.5 slice 15c — second production-shaped use of the new
-     * `@LengthPrefixed @UseCodec val: T : Payload` (slice 15a) shape.
+     * Second production-shaped use of the new
+     * `@LengthPrefixed @UseCodec val: T: Payload` shape.
      * Wire form is v5 §1.5.6 Binary Data: 2-byte UShort BE prefix +
      * body bytes. Same shape as [CorrelationData]; the two variants
      * differ only in the property identifier byte.
@@ -415,7 +415,7 @@ sealed interface MqttV5Property {
     ) : MqttV5Property {
         init {
             requireMatchingPropertyId(id, 0x21, "ReceiveMaximum")
-            // Phase J.M.5 audit-2f — §3.1.2.11.3 [MQTT-3.1.2-32]: 0 is invalid.
+            // §3.1.2.11.3 [MQTT-3.1.2-32]: 0 is invalid.
             require(value > 0u) {
                 "ReceiveMaximum value must be > 0 (spec §3.1.2.11.3 [MQTT-3.1.2-32]); got $value"
             }
@@ -451,7 +451,7 @@ sealed interface MqttV5Property {
     ) : MqttV5Property {
         init {
             requireMatchingPropertyId(id, 0x23, "TopicAlias")
-            // Phase J.M.5 audit-2f — §3.3.2.3.4 [MQTT-3.3.2-8]: 0 is invalid.
+            // §3.3.2.3.4 [MQTT-3.3.2-8]: 0 is invalid.
             require(value > 0u) {
                 "TopicAlias value must be > 0 (spec §3.3.2.3.4 [MQTT-3.3.2-8]); got $value"
             }
@@ -525,7 +525,7 @@ sealed interface MqttV5Property {
     ) : MqttV5Property {
         init {
             requireMatchingPropertyId(id, 0x27, "MaximumPacketSize")
-            // Phase J.M.5 audit-2f — §3.1.2.11.4 [MQTT-3.1.2-31]: 0 is invalid.
+            // §3.1.2.11.4 [MQTT-3.1.2-31]: 0 is invalid.
             require(value > 0u) {
                 "MaximumPacketSize value must be > 0 (spec §3.1.2.11.4 [MQTT-3.1.2-31]); got $value"
             }

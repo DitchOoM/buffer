@@ -21,11 +21,11 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 
 /**
- * Stage F slice 6.5 + Stage H slice 10d doctrine vector. Exercises
+ * Doctrine vector. Exercises
  * the bit-packed `@DispatchOn(Http2LengthAndType::class)` dispatcher
  * with a 4-byte (UInt) discriminator big-endian per RFC 7540 §4.1.
  *
- * Slice 10d lifts the dispatcher to a generic class — the parent is
+ * Lifts the dispatcher to a generic class — the parent is
  * `Http2Frame<out P : Payload>`, the codec is `class Http2FrameCodec
  * <P : Payload>(payloadCodec: Codec<P>) : Codec<Http2Frame<P>>`. The
  * payload-free variants (`Settings`, `Ping`, `WindowUpdate`) are
@@ -457,7 +457,7 @@ class Http2FrameCodecTest {
         }
     }
 
-    // ----- Slice 10d Data variant via the generic dispatcher -----
+    // — - Data variant via the generic dispatcher — —
 
     @Test
     fun roundTripsDataVariantViaDispatcherWithBinaryPayload() {
@@ -613,7 +613,7 @@ class Http2FrameCodecTest {
     private fun binaryDispatcher(): Http2FrameCodec<Http2BinaryPayload> = Http2FrameCodec(Http2BinaryPayloadCodec)
 }
 
-/** Minimal binary `Payload` for the slice 10d HTTP/2 vector. */
+/** Minimal binary `Payload` for the HTTP/2 vector. */
 internal data class Http2BinaryPayload(
     val data: ByteArray,
 ) : Payload {

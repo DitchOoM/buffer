@@ -12,9 +12,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Compile-time validator coverage for `@When` (Stage E,
- * Locked Decision row 19). Slice 2 covers the simple-name form
- * (`"siblingField"`); slice 3 covers the dotted form
+ * Compile-time validator coverage for `@When` (,
+ * ). covers the simple-name form
+ * (`"siblingField"`); covers the dotted form
  * (`"sibling.property"`) where the sibling is a `value class`
  * exposing a `Boolean`-returning `val` property. The validator
  * surfaces user-facing diagnostics naming the offending field path
@@ -287,7 +287,7 @@ class WhenValidatorTest {
 
     @Test
     fun acceptsRemainingComparisonGrammar() {
-        // Phase J.M.5 grammar 2 — `"remaining <op> <int>"` for cascading
+        // Grammar 2 — `"remaining <op> <int>"` for cascading
         // optional trailing fields (MQTT v5 acks). The predicate
         // references no sibling; it expands to `buffer.remaining() <op>
         // <int>` at decode and `value.<field> != null` at encode.

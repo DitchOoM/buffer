@@ -16,11 +16,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 /**
- * Phase J.M step 5 third tranche — MQTT v3.1.1 §3.10 UNSUBSCRIBE
+ * MQTT v3.1.1 §3.10 UNSUBSCRIBE
  * packet. Variable-shape body: header `0xA2` + remainingLength +
  * packetIdentifier + a non-empty list of `MqttUnsubscribeTopic`
  * elements (each `<2-byte LP><name>` per element). Drives
- * `UnsubscribeCodec` over the J.M.0 emitter slice
+ * `UnsubscribeCodec` over the emitter slice
  * (`@RemainingBytes List<@ProtocolMessage T>`); the topic-element
  * data class wraps the LP string per the brief's gap-5 resolution.
  */

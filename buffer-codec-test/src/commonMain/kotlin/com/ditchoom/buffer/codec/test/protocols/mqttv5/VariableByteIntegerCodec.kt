@@ -9,7 +9,7 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.WireSize
 
 /**
- * Phase J.M.5 slice 13 — non-bounding VBI codec for v5
+ * Non-bounding VBI codec for v5
  * SubscriptionIdentifier (§2.2.2.2 + §3.8.2.1.2). Same wire shape as
  * [com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec]
  * (7-bit-per-byte continuation, LSB-first, max 4 bytes), but
@@ -17,14 +17,14 @@ import com.ditchoom.buffer.codec.WireSize
  *
  * The distinction matters: when a `@UseCodec` field carries a
  * `BoundingLengthCodec`, the emitter wraps subsequent fields in the
- * slice 10f outer-limit-restore try/finally template — the decoded
+ * outer-limit-restore try/finally template — the decoded
  * value is treated as a remaining-length narrowing the buffer for
  * the rest of the message. SubscriptionIdentifier is just a typed
  * UInt body, no buffer narrowing — plain `Codec<UInt>` skips the
  * `applyBound` wiring.
  *
  * Routes through the bare-`@UseCodec val: <scalar>` analyzer path
- * (Phase I.1). The generated emit is `val value = Codec.decode(...)`
+ * . The generated emit is `val value = Codec.decode(...)`
  * with no `__OuterLimit` capture or `applyBound` call.
  */
 object VariableByteIntegerCodec : Codec<UInt> {

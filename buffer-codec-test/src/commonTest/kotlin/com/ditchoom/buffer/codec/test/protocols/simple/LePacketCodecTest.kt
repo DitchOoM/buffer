@@ -13,7 +13,7 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 
 /**
- * Stage G follow-up doctrine vector — exercises the value-class
+ * Follow-up doctrine vector — exercises the value-class
  * field `wireOrder` propagation through the sequential peek walk.
  *
  * Without the fix, the peek-side byte assembly defaulted to

@@ -16,25 +16,24 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 /**
- * Stage E slice 5b + Stage G slice 8 doctrine vector. Validates
+ * + doctrine vector. Validates
  * the full MQTT v3.1.1 CONNECT packet byte-exactly against
- * MQTT-3.1.1 §3.1, exercising every Stage E + G annotation in
+ * MQTT-3.1.1 §3.1, exercising every annotation in
  * combination:
  *
- *   - `@RemainingLength` var-int header (slice 8) bounds decode.
- *   - Value-class fixed-header field (slice 3 / 6).
- *   - Non-terminal `@LengthPrefixed val: String` (slice 5a).
+ * `@RemainingLength` var-int header bounds decode.
+ * Value-class fixed-header field ( / 6).
+ * Non-terminal `@LengthPrefixed val: String`.
  *   - Value-class connectFlags field with bit-packed Boolean getters
- *     (slice 3).
  *   - Multiple `@LengthPrefixed @When("connectFlags.<bit>")
- *     val: String?` slots (slice 3 dotted form + slice 3.5
- *     LengthPrefixed inner + slice 5b non-terminal Conditional).
- *   - Sequential peek walk via the slice 8 RemainingLength fast
+ * val: String?` slots ( dotted form +.5
+ * LengthPrefixed inner + non-terminal Conditional).
+ * Sequential peek walk via the RemainingLength fast
  *     path (header byte + var-int + value covers the full message).
  *
- * Phase J.M step 4 — folded onto the `MqttPacket.Connect` sealed
+ * Folded onto the `MqttPacket.Connect` sealed
  * variant. Drives `ConnectCodec` (the per-variant codec object emitted
- * by the slice 6 dispatcher) per the brief's option 1: same byte-
+ * by the dispatcher) per the brief's option 1: same byte
  * exact assertions, same var-int boundary coverage, same drip-fed
  * peekFrameSize coverage. The standalone `MqttConnect` data class +
  * `MqttConnectCodec` are gone with this fold.
@@ -335,7 +334,7 @@ class MqttConnectCodecTest {
 
     @Test
     fun peekFrameSizeShortCircuitsAfterReadingHeaderAndVarInt() {
-        // With slice 8's RemainingLength fast path, peek can complete after
+        // With 's RemainingLength fast path, peek can complete after
         // reading just header (1 byte) + var-int (1-4 bytes) — it doesn't
         // need to walk the payload.
         val pool = BufferPool()
@@ -384,7 +383,7 @@ class MqttConnectCodecTest {
     }
 
     /**
-     * Phase J.M.5 slice 15d — `BinaryData` is a `@JvmInline value class`
+     * `BinaryData` is a `@JvmInline value class`
      * over `ByteArray` whose default `equals` is reference-based; data
      * class `equals` therefore can't recover round-trip equality on
      * Connect's willPayload / password fields. Compare each field

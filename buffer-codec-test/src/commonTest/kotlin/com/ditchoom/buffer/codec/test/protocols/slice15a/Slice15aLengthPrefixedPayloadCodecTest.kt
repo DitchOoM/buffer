@@ -17,7 +17,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
- * Phase J.M.5 slice 15a — round-trip + wire-byte + wireSize + peek
+ * Round-trip + wire-byte + wireSize + peek
  * coverage for the new `@LengthPrefixed @UseCodec(C::class) val: T :
  * Payload` shape. Pure capability slice; v5 substitution lands in
  * slices 15c/15d.
@@ -107,7 +107,7 @@ class Slice15aLengthPrefixedPayloadCodecTest {
     @Test
     fun wireSizeReportsBackPatchForTopLevelMessage() {
         // The containing message's wireSize collapses to BackPatch
-        // (slice 15a parallel of slices 10a/11 — the user codec's body
+        // ( parallel of slices 10a/11 — the user codec's body
         // size is opaque, conservative collapse).
         val msg = Slice15aLengthPrefixedPayload(data = BinaryData(byteArrayOf(0x42)))
         val ws = Slice15aLengthPrefixedPayloadCodec.wireSize(msg, EncodeContext.Empty)

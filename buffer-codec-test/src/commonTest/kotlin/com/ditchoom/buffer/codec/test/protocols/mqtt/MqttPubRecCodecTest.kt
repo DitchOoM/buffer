@@ -16,7 +16,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 /**
- * Phase J.M step 5 first tranche — MQTT v3.1.1 §3.5 PUBREC packet.
+ * MQTT v3.1.1 §3.5 PUBREC packet.
  * Fixed-shape 4-byte ack: header `0x50` + remainingLength=2 +
  * packetIdentifier (UShort BE). Drives `PubRecCodec`.
  */

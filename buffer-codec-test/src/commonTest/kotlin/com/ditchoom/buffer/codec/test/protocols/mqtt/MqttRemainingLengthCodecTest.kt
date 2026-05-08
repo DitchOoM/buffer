@@ -12,9 +12,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 /**
- * Phase I.1 step 7 — round-trip + byte-exact wire tests for
+ * Round-trip + byte-exact wire tests for
  * [MqttRemainingLengthCodec]. Verifies the user-codec produces the
- * same wire output that the slice 8 `appendDecodeRemainingLength` /
+ * same wire output that the `appendDecodeRemainingLength` /
  * `appendEncodeRemainingLength` emit produced for `@RemainingLength`,
  * so step 8's PingReq migration can be a pure annotation swap.
  *

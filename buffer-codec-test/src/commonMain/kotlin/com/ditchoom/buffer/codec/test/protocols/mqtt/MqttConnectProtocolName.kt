@@ -11,8 +11,8 @@ import kotlin.jvm.JvmInline
  * because there is exactly one field; the round-trip verification
  * covers the byte-exact spec encoding.
  *
- * Stage C real-spec fixture. Cross-coverage: confirms Stage B's
- * value-class top-level path composes with Stage C's String emission.
+ * Real-spec fixture. Cross-coverage: confirms 's
+ * value-class top-level path composes with 's String emission.
  */
 @JvmInline
 @ProtocolMessage

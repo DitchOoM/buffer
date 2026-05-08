@@ -19,9 +19,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 /**
- * Phase J.M.5 slice 6 — SUBSCRIBE / SUBACK / UNSUBSCRIBE v5. Each
- * variant composes the always-present property bag (slice 2 shape)
- * with a `@RemainingBytes List<...>` tail (J.M.0 shape):
+ * SUBSCRIBE / SUBACK / UNSUBSCRIBE v5. Each
+ * variant composes the always-present property bag ( shape)
+ * with a `@RemainingBytes List<...>` tail ( shape):
  *
  *   - SUBSCRIBE:    `@RemainingBytes List<V5Subscription>`
  *   - SUBACK:       `@RemainingBytes List<UByte>` (reason codes)

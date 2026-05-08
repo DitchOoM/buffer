@@ -13,7 +13,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
- * Phase J.M.5 slice J.M.7.a — Boolean-returning `@DispatchValue`
+ * Slice — Boolean-returning `@DispatchValue`
  * round-trip vector.
  *
  * Pins the dispatcher's 0/1 lift on a Boolean `@DispatchValue` (`if

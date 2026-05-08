@@ -14,7 +14,7 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 
 /**
- * Stage G slice 7a doctrine vector. Validates `@LengthFrom` on
+ * Doctrine vector. Validates `@LengthFrom` on
  * `List<@ProtocolMessage>`: the SETTINGS frame's `length` field
  * provides the byte count for the variable-length entries list.
  * The decoder bounds the buffer via `setLimit`, loops reading

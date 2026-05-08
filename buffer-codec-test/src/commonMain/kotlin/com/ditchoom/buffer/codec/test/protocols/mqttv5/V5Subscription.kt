@@ -16,7 +16,7 @@ data class V5Subscription(
 )
 
 /**
- * Phase J.M.5 slice 12 — typed subscription-options byte per §3.8.3.1.
+ * Typed subscription-options byte per §3.8.3.1.
  *
  * Wire form is a single `UByte` packing four fields:
  *
@@ -58,7 +58,7 @@ value class V5SubscriptionOptions(
 
     init {
         // [MQTT-3.8.3-1] — reserved bits 6-7 must be zero. Caller is
-        // responsible per row 16 trust contract; the require fires at
+        // responsible per; the require fires at
         // construction time.
         require(raw.toInt() and 0b1100_0000 == 0) {
             "v5 subscription options invariant: reserved bits 6-7 must be zero, " +

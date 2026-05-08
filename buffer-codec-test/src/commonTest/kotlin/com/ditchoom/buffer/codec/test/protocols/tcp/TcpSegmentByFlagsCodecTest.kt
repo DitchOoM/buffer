@@ -13,7 +13,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
- * Phase J.M.5 slice J.M.7.a — UByte-returning `@DispatchValue` round-
+ * Slice — UByte-returning `@DispatchValue` round
  * trip vector.
  *
  * Pins the dispatcher's `.toInt()` coercion on a UByte `@DispatchValue`

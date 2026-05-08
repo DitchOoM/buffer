@@ -11,7 +11,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Phase J.M.5 slice 14b — `@FramedBy` validator coverage. Four diagnostics
+ * `@FramedBy` validator coverage. Four diagnostics
  * exercised; **E6** (coexistence with `@DerivedLength`) is omitted because
  * `@DerivedLength` was removed in the same commit (Q6 — same-commit
  * cleanup), so the test fixture cannot construct the conflict scenario.

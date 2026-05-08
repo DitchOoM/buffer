@@ -6,12 +6,12 @@ import com.ditchoom.buffer.codec.annotations.UseCodec
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 
 /**
- * Phase I.1 step 11 doctrine vector — exercises `@LengthPrefixed
+ * Doctrine vector — exercises `@LengthPrefixed
  * @UseCodec(C::class) val xs: List<E>` where `C` is a
  * `BoundingLengthCodec<UInt>` (here [MqttRemainingLengthCodec], the v3
  * MQTT remaining-length variable-byte codec) and `E` is a
  * `@ProtocolMessage data class`. Drives the v5 MQTT property-list shape
- * standalone — no MQTT-packet integration yet (J.M.5 owns that).
+ * standalone — no MQTT-packet integration yet ( owns that).
  *
  * The codec reads/writes the body byte count via its var-byte-int wire
  * shape and applies the resulting bound to `buffer.limit()`; elements
@@ -54,13 +54,13 @@ data class TaggedPropertyBag(
 )
 
 /**
- * Phase J.M.5 audit-2b regression vector — a data class element whose
+ * Regression vector — a data class element whose
  * `wireSize` returns `BackPatch` (due to the `@LengthPrefixed val:
- * String` field, per row-15 doctrine). Before audit-2b the element was
+ * String` field, per row-15 doctrine). Before the element was
  * routed through the pre-measure encode path (because the analyzer's
  * `elementIsSealed` flag was driven solely by `Modifier.SEALED`), and
  * the `(ElementCodec.wireSize(it, context) as WireSize.Exact).bytes`
- * cast would `ClassCastException` at runtime. After audit-2b the
+ * cast would `ClassCastException` at runtime. After the
  * analyze-time predicate `detectElementBackPatch` walks the element's
  * primary-constructor params and routes any element with `@When` /
  * `@RemainingBytes` / `@UseCodec` / `@LengthPrefixed val: String`
@@ -77,7 +77,7 @@ data class StringTaggedProperty(
 )
 
 /**
- * Phase J.M.5 audit-2b regression vector — see [StringTaggedProperty].
+ * Regression vector — see [StringTaggedProperty].
  */
 @ProtocolMessage
 data class StringTaggedPropertyBag(

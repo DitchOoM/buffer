@@ -26,7 +26,7 @@ import kotlin.jvm.JvmInline
  * bits as `Int`) and `flags` as a free-form `UByte` getter for
  * per-variant interpretation.
  *
- * Stage F slice 6 doctrine vector — exercises the bit-packed
+ * Doctrine vector — exercises the bit-packed
  * `@DispatchOn` discriminator path.
  */
 @JvmInline
@@ -43,13 +43,13 @@ value class MqttFixedHeader(
      * MQTT v3.1.1 §3.3.2.2 — PUBLISH carries a packet identifier
      * only when QoS > 0 (QoS bits live in `flags & 0x06`). Exposed
      * as a `Boolean`-returning `val` so `Publish.packetId` can gate
-     * on `@When("header.qosGreaterThanZero")` via the slice-3
+     * on `@When("header.qosGreaterThanZero")` via the
      * dotted value-class predicate path.
      */
     val qosGreaterThanZero: Boolean get() = (raw.toUInt() and 0x06u) != 0u
 
     init {
-        // Phase J.M.5 audit-2f — PUBLISH QoS=3 is malformed per §3.3.1.2
+        // PUBLISH QoS=3 is malformed per §3.3.1.2
         // [MQTT-3.3.1-4]. Init-block fallback; cleaner future fix is a
         // typed V5PublishFlags companion to MqttFixedHeader.flags. Other
         // packet types' low-nibble invariants are caught by per-variant
@@ -63,25 +63,25 @@ value class MqttFixedHeader(
 }
 
 /**
- * Stage F slice 6 + Stage H slice 10f doctrine vector — sealed
+ * + doctrine vector — sealed
  * dispatcher over `MqttFixedHeader` exercising the `@DispatchOn`
  * value-class discriminator emit path.
  *
- * Slice 10f lifts the parent to `<out P : Payload>` so the new
+ * Lifts the parent to `<out P: Payload>` so the new
  * `Publish<P : Payload>` variant (MQTT v3.1.1 §3.3) can carry a
- * typed payload routed through the slice 10d generic dispatcher.
+ * typed payload routed through the generic dispatcher.
  * Payload-free variants stay `: MqttPacket<Nothing>`; covariance
  * makes them assignable to any `MqttPacket<P>` instantiation.
  *
  * Each variant carries the fixed header as its first field. The
- * slice 6 dispatcher peeks the header byte without consuming,
+ * dispatcher peeks the header byte without consuming,
  * extracts `header.packetType`, matches against `@PacketType.value`,
  * and delegates to the variant codec — which then reads the same
- * bytes (including the header field) via the slice 3
+ * bytes (including the header field) via the
  * `FieldSpec.ValueClassScalar` path.
  *
  * Wire layout per MQTT-3.1.1, with `@RemainingLength` var-int
- * between the fixed header and the body (slice 8 spec compliance):
+ * between the fixed header and the body ( spec compliance):
  *
  * ```text
  * Connect (type 1, header byte typically 0x10):
@@ -115,8 +115,8 @@ value class MqttFixedHeader(
 sealed interface MqttPacket<out P : Payload> {
     /**
      * Type-1 CONNECT per MQTT v3.1.1 §3.1 — full variable header
-     * and payload folded onto the slice-6 sealed dispatcher in
-     * Phase J.M step 4. The standalone `MqttConnect` data class is
+     * and payload folded onto the sealed dispatcher in
+     * . The standalone `MqttConnect` data class is
      * gone; this variant now carries the complete §3.1 body.
      *
      * Wire layout (variable header + payload):
@@ -135,19 +135,19 @@ sealed interface MqttPacket<out P : Payload> {
      *   <password LP>?            present iff connectFlags.passwordPresent
      * ```
      *
-     * Composes every Stage E + G annotation the standalone fixture
-     * exercised: `@LengthPrefixed val: String` (slice 5a non-terminal
-     * placement), value-class field (slice 3), dotted
-     * `@When("connectFlags.<bit>")` predicates (slice 3 dotted
-     * form + slice 3.5 LengthPrefixed inner + slice 5b non-terminal
-     * Conditional), and the `@RemainingLength` var-int header (slice 8)
+     * Composes every annotation the standalone fixture
+     * exercised: `@LengthPrefixed val: String` ( non-terminal
+     * placement), value-class field, dotted
+     * `@When("connectFlags.<bit>")` predicates ( dotted
+     * form +.5 LengthPrefixed inner + non-terminal
+     * Conditional), and the `@RemainingLength` var-int header
      * bounding decode of the optional payload tail. The dispatcher
      * peeks the fixed header byte without consuming, then the variant
-     * codec re-reads it through the slice 3 `FieldSpec.ValueClassScalar`
-     * path — same pattern slice 6's dispatcher uses for every other
+     * codec re-reads it through the `FieldSpec.ValueClassScalar`
+     * path — same pattern 's dispatcher uses for every other
      * variant in this sealed family.
      *
-     * Phase J.M.5 slice 15d retyped will-message and password from
+     * Retyped will-message and password from
      * `String?` to `BinaryData?` (a `Payload`-marked value class over
      * `ByteArray`) referenced via `@LengthPrefixed @UseCodec(
      * BinaryDataCodec::class)`. The wire form is unchanged (UShort BE
@@ -175,7 +175,7 @@ sealed interface MqttPacket<out P : Payload> {
         val password: BinaryData? = null,
     ) : MqttPacket<Nothing> {
         init {
-            // Phase J.M.5 audit-2f — v3.1.1 §3.1.2.9 [MQTT-3.1.2-22]: if the
+            // V3.1.1 §3.1.2.9 [MQTT-3.1.2-22]: if the
             // username flag is set to 0, the password flag MUST also be 0.
             // v5 dropped this rule (§3.1.3.5 allows password without
             // username), so the guard lives on the v3 Connect variant
@@ -195,7 +195,7 @@ sealed interface MqttPacket<out P : Payload> {
      * various failure modes). Total wire length is always 4 bytes:
      * `20 02 <flags> <rc>`.
      *
-     * Phase J.M step 5 second-tranche variant. Modeled with raw
+     * Second-tranche variant. Modeled with raw
      * `UByte` fields rather than a value-class wrapper — there's no
      * `@When` gate that needs to inspect `sessionPresent` as a
      * boolean, and the rest of the byte is reserved per spec, so the
@@ -227,17 +227,17 @@ sealed interface MqttPacket<out P : Payload> {
      *     Modeled with `@When("header.qosGreaterThanZero")`
      *     against the value-class header property; for QoS=0 the
      *     slot is skipped on the wire and the field reads back as
-     *     `null`. Phase J.M step 2 is the vector that lifts
+     * `null`. is the vector that lifts
      *     `ConditionalInner` to cover value-class scalars.
      *   - `@RemainingBytes payload: P` (variable, decoded by the
      *     user-supplied `Codec<P>`): consumes the remaining bytes
      *     of the var-int-bounded region.
      *
-     * Slice 10f exercises:
+     * Exercises:
      *   - The new generic `MqttPacket<out P : Payload>` shape with
      *     `Publish<P> : MqttPacket<P>`.
      *   - `@RemainingLength` + `@RemainingBytes payload: P` in the
-     *     same data class — the slice 10c carve-out lifts here.
+     * same data class — the carve-out lifts here.
      *   - `Partial.complete()` running inside the var-int-narrowed
      *     bound and restoring the outer limit on completion.
      */
@@ -250,7 +250,7 @@ sealed interface MqttPacket<out P : Payload> {
         @RemainingBytes val payload: P,
     ) : MqttPacket<P> {
         init {
-            // Phase J.M.5 audit-2f — §2.2.1 [MQTT-2.2.1-3]: PUBLISH carries
+            // §2.2.1 [MQTT-2.2.1-3]: PUBLISH carries
             // a packet identifier iff QoS > 0. The @When framework tolerates
             // a packetId set when the predicate is false; this init-block
             // closes the gap caller-side. Cleaner emitter-level fix is to
@@ -266,7 +266,7 @@ sealed interface MqttPacket<out P : Payload> {
     /**
      * Type-4 PUBACK per MQTT v3.1.1 §3.4 — fixed header `0x40` +
      * `remainingLength = 2` + `packetIdentifier`. Total wire length
-     * is always 4 bytes (`40 02 <pid_msb> <pid_lsb>`). Phase J.M
+     * is always 4 bytes (`40 02 <pid_msb> <pid_lsb>`).
      * step 5 first-tranche variant; one of five 2-byte-body acks
      * (PUBACK / PUBREC / PUBREL / PUBCOMP / UNSUBACK) that share the
      * same shape.
@@ -338,7 +338,7 @@ sealed interface MqttPacket<out P : Payload> {
      *   …                        repeated for each filter
      * ```
      *
-     * Phase J.M step 5 third-tranche variant. Rides the J.M.0
+     * Third-tranche variant. Rides the
      * emitter slice (`@RemainingBytes List<@ProtocolMessage T>`); the
      * outer `@UseCodec(MqttRemainingLengthCodec)` var-int bounds the
      * filter-list region so decode stops at the spec-mandated end of
@@ -354,13 +354,13 @@ sealed interface MqttPacket<out P : Payload> {
 
     /**
      * Type-9 SUBACK per MQTT v3.1.1 §3.9. Folded into the sealed
-     * dispatcher in Phase J.M step 3 — the standalone `MqttSubAck`
+     * dispatcher in — the standalone `MqttSubAck`
      * fixture's body shape lifts unchanged onto the `MqttPacket`
      * sealed family. The bounding `@UseCodec(MqttRemainingLengthCodec)`
      * narrows the buffer limit so the trailing
      * `@RemainingBytes List<MqttV3SubAckReturnCode>` stops at the
-     * var-int's value rather than the raw buffer end (slice 7b + slice
-     * 8 composition + slice 11a sealed-element widening).
+     * var-int's value rather than the raw buffer end ( + slice
+     * 8 composition + sealed-element widening).
      *
      * Wire layout per §3.9.1:
      *
@@ -371,7 +371,7 @@ sealed interface MqttPacket<out P : Payload> {
      *   <rc_1> <rc_2> ... <rc_N> return codes (each 1 byte)
      * ```
      *
-     * Phase J.M.5 slice 15g retyped `returnCodes` from `List<UByte>`
+     * Retyped `returnCodes` from `List<UByte>`
      * to `List<MqttV3SubAckReturnCode>`. v3 §3.9.3 defines exactly
      * four legal bytes (`0x00` / `0x01` / `0x02` / `0x80`); the sealed
      * parent makes the value-space type-system enforced. Each
@@ -408,7 +408,7 @@ sealed interface MqttPacket<out P : Payload> {
      *
      * The payload elements wrap as `MqttUnsubscribeTopic` (a single-
      * field data class around the LP string) so the list rides the
-     * J.M.0 emitter slice (`@RemainingBytes List<@ProtocolMessage
+     * Emitter slice (`@RemainingBytes List<@ProtocolMessage
      * T>`). The wrapper has no fixed overhead on the wire — bytes
      * are exactly `<2-byte LP><name bytes>` per element, matching
      * the spec.

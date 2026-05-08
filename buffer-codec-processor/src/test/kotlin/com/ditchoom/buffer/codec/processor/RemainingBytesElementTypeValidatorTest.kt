@@ -11,13 +11,13 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Phase J.M.5 slice 15g — validator coverage for the retired
+ * Validator coverage for the retired
  * `@RemainingBytes List<scalar>` and `@RemainingBytes <primitive-array>`
  * shapes. Both promote a copy-by-default decode and provide no spec-
  * meaningful element structure; the right shapes are
- * `@RemainingBytes List<SealedParent>` (slice 11a) for discrete
+ * `@RemainingBytes List<SealedParent>` for discrete
  * spec-defined value spaces or `@RemainingBytes @UseCodec(C::class)
- * val: P : Payload` (slice 10a) for opaque bulk bytes.
+ * val: P: Payload` for opaque bulk bytes.
  */
 class RemainingBytesElementTypeValidatorTest {
     @Test
@@ -151,7 +151,7 @@ class RemainingBytesElementTypeValidatorTest {
 
     @Test
     fun acceptsRemainingBytesListOfSealedParent() {
-        // Slice 11a — the spec-faithful replacement for `List<UByte>` when
+        // The spec-faithful replacement for `List<UByte>` when
         // each byte is a discrete value-space variant. This must continue
         // to compile cleanly.
         val result =
@@ -193,7 +193,7 @@ class RemainingBytesElementTypeValidatorTest {
 
     @Test
     fun acceptsRemainingBytesUseCodecPayload() {
-        // Slice 10a — the spec-faithful replacement for `List<UByte>` when
+        // The spec-faithful replacement for `List<UByte>` when
         // the body is genuinely opaque bytes. This must continue to
         // compile cleanly.
         val result =

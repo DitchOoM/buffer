@@ -125,13 +125,13 @@ class RemainingBytesStringValidatorTest {
     }
 
     /**
-     * J.M.6.c (issue #151 part 2) — `@RemainingBytes` followed by a
+     * (issue #151 part 2) — `@RemainingBytes` followed by a
      * fixed-size scalar trailer is now ACCEPTED. The analyzer subtracts
      * the trailer's wire bytes from `buffer.limit()` before the body
      * read, so the trailer survives intact.
      *
      * This is the shape PR #153's TrailingChecksum fixture pinned and
-     * the J.M.6.c PNG fixture exercises end-to-end (length + type +
+     * the PNG fixture exercises end-to-end (length + type +
      * `@RemainingBytes` data + 4-byte CRC).
      */
     @Test
@@ -159,7 +159,7 @@ class RemainingBytesStringValidatorTest {
     }
 
     /**
-     * J.M.6.c — `@RemainingBytes` followed by a *variable-size* trailer
+     * `@RemainingBytes` followed by a *variable-size* trailer
      * is rejected with a focused error naming both the body field and
      * the offending trailer. Variable-size trailers (here: a second
      * `@LengthPrefixed val: String`) leave the body decode with no way

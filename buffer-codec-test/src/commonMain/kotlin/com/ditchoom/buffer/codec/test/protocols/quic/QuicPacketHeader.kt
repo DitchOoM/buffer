@@ -7,7 +7,7 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import kotlin.jvm.JvmInline
 
 /**
- * Phase J.M.5 slice J.M.7.a — Boolean-returning `@DispatchValue` vector.
+ * Slice — Boolean-returning `@DispatchValue` vector.
  *
  * QUIC long-header form bit (RFC 9000 §17.2 / §17.3). The first byte
  * of every QUIC packet carries a `Header Form` bit at position 7 (the
@@ -16,7 +16,7 @@ import kotlin.jvm.JvmInline
  * short-header (1-RTT) packet (§17.3). The `Fixed Bit` at position 6
  * is set to 1 in both forms (a 0 here is a malformed packet per §17).
  *
- * Slice J.M.7.a widens `@DispatchValue` return types beyond `Int` to
+ * Slice widens `@DispatchValue` return types beyond `Int` to
  * include `Boolean`. The dispatcher emits an inline 0/1 lift
  * (`if (isLongHeader) 1 else 0`) at the dispatch site so the
  * `when (__dispatchValue)` branches stay Int-typed; variants declare

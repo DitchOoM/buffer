@@ -17,10 +17,10 @@ import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
 import kotlin.jvm.JvmInline
 
 /**
- * Stage H slice 10a doctrine vector — MQTT v3.1.1 §3.3 PUBLISH
+ * Doctrine vector — MQTT v3.1.1 §3.3 PUBLISH
  * concretely typed against `JpegImage` via `@UseCodec`.
  *
- * Wire layout (slice 10a narrow — no `@RemainingLength` field is
+ * Wire layout ( narrow — no `@RemainingLength` field is
  * surfaced in the data class; the buffer's `limit()` is set by the
  * caller before decode, so the trailing `payload` field consumes
  * everything left in the bounded region):
@@ -37,23 +37,23 @@ import kotlin.jvm.JvmInline
  *   +--------+--------+
  * ```
  *
- * Slice 10a's `MqttPublishV3Concrete` and slice 10b's generic
+ * The concrete `MqttPublishV3Concrete` and the generic
  * `MqttPublishV3<P : Payload>` (below) coexist — each captures a
  * real consumer pattern. Concrete shape suits protocols where one
  * message always carries a single specific payload type; generic
  * shape suits consumers who pick the payload type at the call site.
  *
- * Slice 10a deliberately narrows the spec shape to validate the
+ * Deliberately narrows the spec shape to validate the
  * typed-payload + `@UseCodec` emit path:
  *   - No QoS-conditional `packetId` (§3.3.2.2): packetId is always
  *     present (will lift to `@When("header.flags.qos > 0")` once
  *     QoS-bit dotted-form predicates exist).
  *   - No `@RemainingLength` var-int as a field (the outer dispatcher
- *     in slice 10d will own the var-int and `setLimit`).
- *   - No `MqttControlPacket`-sealed-parent membership (slice 10d
- *     promotes this into the dispatcher).
+ *     owns the var-int and `setLimit`).
+ *   - No `MqttControlPacket`-sealed-parent membership (the dispatcher
+ *     would promote this fixture into the larger sealed hierarchy).
  *
- * The `payload` field uses the slice 10a shape: `@RemainingBytes
+ * The `payload` field uses the shape: `@RemainingBytes
  * @UseCodec(JpegImageCodec::class) val: JpegImage`. Decode delegates
  * to `JpegImageCodec.decode(buffer, context)` against the buffer's
  * outer-set limit; encode delegates to
@@ -70,7 +70,7 @@ data class MqttPublishV3Concrete(
 )
 
 /**
- * Stage H slice 10b doctrine vector — MQTT v3.1.1 §3.3 PUBLISH with
+ * Doctrine vector — MQTT v3.1.1 §3.3 PUBLISH with
  * a generic-bounded payload slot. Same wire layout as
  * `MqttPublishV3Concrete`, but the payload's codec is supplied at
  * the call site instead of being baked in.
@@ -92,9 +92,9 @@ data class MqttPublishV3Concrete(
  * `<P : Payload>` type parameter on the data class plus the
  * `@RemainingBytes val payload: P` field with no `@UseCodec`. The
  * type parameter and the constructor-injected codec coexist with
- * slice 10a's `@UseCodec` path through the `PayloadCodecSource`
- * sealed (`UserCodecObject` for slice 10a, `ConstructorInjected`
- * for slice 10b).
+ * the `@UseCodec` path through the `PayloadCodecSource` sealed
+ * (`UserCodecObject` for the codec-on-the-field shape,
+ * `ConstructorInjected` for the generic-payload shape).
  */
 @ProtocolMessage(wireOrder = Endianness.Big)
 data class MqttPublishV3<P : Payload>(
@@ -105,7 +105,7 @@ data class MqttPublishV3<P : Payload>(
 )
 
 /**
- * Second user-supplied `Payload` for slice 10b — a UTF-8 text
+ * Second user-supplied `Payload` for — a UTF-8 text
  * payload. Pairing two distinct payload types confirms the generic
  * codec genuinely accepts arbitrary `Codec<P>` rather than
  * accidentally being JpegImage-specific.
@@ -139,7 +139,7 @@ object TextPayloadCodec : Codec<TextPayload> {
  * so it can later carry validation (non-zero per §2.3.1) without
  * leaking the raw `UShort` across the surrounding API.
  *
- * Phase J.M.5 audit-2f closed §2.2.1 [MQTT-2.2.1-3] caller-side: a
+ * Closed §2.2.1 [MQTT-2.2.1-3] caller-side: a
  * packet identifier of 0 is invalid in both v3 and v5; the init-block
  * `require` makes that impossible to construct.
  */
@@ -156,7 +156,7 @@ value class PacketId(
 }
 
 /**
- * User-supplied `Payload` for the slice 10a vector.
+ * User-supplied `Payload` for the vector.
  *
  * Stand-in for an arbitrary user-defined typed payload. The `width`
  * and `height` fields are decoded by `JpegImageCodec`; `data` is the
@@ -185,17 +185,17 @@ data class JpegImage(
 
 /**
  * Hand-written `Codec<JpegImage>` referenced by
- * `@UseCodec(JpegImageCodec::class)` on the slice 10a vector. The
+ * `@UseCodec(JpegImageCodec::class)` on the vector. The
  * generated `MqttPublishV3Codec` calls
  * `JpegImageCodec.encode(buffer, value.payload, context)` /
  * `JpegImageCodec.decode(buffer, context)` directly — the linker
- * resolution path that slice 10e formalizes for `expect`/`actual`
- * is a no-op for slice 10a's single-platform `object`.
+ * resolution path that formalizes for `expect`/`actual`
+ * is a no-op for 's single-platform `object`.
  *
  * Decode reads `width` (UShort BE), `height` (UShort BE), then
  * fills `data` from the remaining bytes in the buffer's bounded
  * region. The bound is set by the caller (`MqttPublishV3Codec`
- * does not set it — slice 10d's outer dispatcher will own the
+ * does not set it — 's outer dispatcher will own the
  * `@RemainingLength` var-int that drives the bound).
  *
  * Encode writes the four header bytes then the data bytes; total

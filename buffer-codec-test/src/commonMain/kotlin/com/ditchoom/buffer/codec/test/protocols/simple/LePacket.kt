@@ -6,7 +6,7 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import kotlin.jvm.JvmInline
 
 /**
- * Stage G follow-up doctrine vector — exercises the value-class
+ * Follow-up doctrine vector — exercises the value-class
  * field `wireOrder` propagation through the sequential peek walk.
  *
  * `LeHeader` declares `@ProtocolMessage(wireOrder = Endianness.Little)`

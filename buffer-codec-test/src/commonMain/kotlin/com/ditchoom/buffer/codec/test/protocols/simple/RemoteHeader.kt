@@ -4,8 +4,8 @@ import com.ditchoom.buffer.codec.annotations.LengthFrom
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 
 /**
- * Stage E slice 4 doctrine vector — `@LengthFrom("siblingField") val:
- * String` in its non-adjacent shape (Locked Decision row 18).
+ * Doctrine vector — `@LengthFrom("siblingField") val:
+ * String` in its non-adjacent shape.
  *
  * The `payloadLength` carrier sits at the head of the message;
  * intermediate non-length fields (`flags`, `correlationId`)

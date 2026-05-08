@@ -14,10 +14,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 /**
- * Stage E slice-2 doctrine vector. Validates round-trip across both
+ * Slice-2 doctrine vector. Validates round-trip across both
  * predicate values for `@When("hasExtra")`, encoder zero-byte
  * skip when the predicate is false, decoder nullness round-trip,
- * `WireSize.BackPatch` per Locked Decision row 19, and
+ * `WireSize.BackPatch` per, and
  * `peekFrameSize` walking from `NeedsMoreData` to `Complete` via
  * drip-feeding the boolean and the conditional body bytes.
  */
@@ -61,7 +61,7 @@ class WithOptionalCodecTest {
 
     @Test
     fun wireSizeIsBackPatch() {
-        // Locked Decision row 19: any @When field collapses message wireSize to BackPatch.
+        // Any @When field collapses message wireSize to BackPatch.
         assertEquals(
             WireSize.BackPatch,
             WithOptionalCodec.wireSize(WithOptional(hasExtra = true, extra = 1), EncodeContext.Empty),

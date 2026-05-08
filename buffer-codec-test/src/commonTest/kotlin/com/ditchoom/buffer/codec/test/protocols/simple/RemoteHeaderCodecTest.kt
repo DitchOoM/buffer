@@ -14,7 +14,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * Stage E slice 4 doctrine vector. Validates `@LengthFrom`'s
+ * Doctrine vector. Validates `@LengthFrom`'s
  * non-adjacent shape: round-trip across multiple body sizes,
  * decoder reads `payloadLength` UTF-8 bytes from the buffer,
  * encoder trusts the user's `payloadLength` and writes the body
@@ -101,7 +101,7 @@ class RemoteHeaderCodecTest {
 
     @Test
     fun wireSizeIsExactBasedOnPayloadLength() {
-        // Slice 4: wireSize.Exact = headerBytes + value.payloadLength.toInt().
+        // WireSize.Exact = headerBytes + value.payloadLength.toInt.
         val msg = RemoteHeader(payloadLength = 5u, flags = 0u, correlationId = 0u, payload = "12345")
         assertEquals(WireSize.Exact(2 + 1 + 4 + 5), RemoteHeaderCodec.wireSize(msg, EncodeContext.Empty))
     }

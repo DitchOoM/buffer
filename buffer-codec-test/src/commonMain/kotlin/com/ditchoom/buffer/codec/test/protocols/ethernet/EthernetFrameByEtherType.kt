@@ -7,7 +7,7 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import kotlin.jvm.JvmInline
 
 /**
- * Phase J.M.5 slice J.M.7.a — UShort-returning `@DispatchValue` vector.
+ * Slice — UShort-returning `@DispatchValue` vector.
  *
  * Ethernet `EtherType` field (IEEE 802.3) — a 16-bit big-endian value
  * at offset 12 of an Ethernet II frame that names the upper-layer
@@ -18,7 +18,7 @@ import kotlin.jvm.JvmInline
  *   - 0x86DD — IPv6 (RFC 8200)
  *   - 0x8100 — IEEE 802.1Q VLAN tag
  *
- * Slice J.M.7.a widens `@DispatchValue` return types to include
+ * Slice widens `@DispatchValue` return types to include
  * `UShort`. The dispatcher emits a `.toInt()` coercion at the
  * dispatch site so the `when (__dispatchValue)` branches stay Int-
  * typed. The discriminator's inner kind is also `UShort`, so the wire

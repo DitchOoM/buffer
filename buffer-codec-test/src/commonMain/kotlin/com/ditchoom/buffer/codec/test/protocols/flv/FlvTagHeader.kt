@@ -21,7 +21,7 @@ import com.ditchoom.buffer.codec.annotations.WireBytes
  * +---------------+---------------+---------------+
  * ```
  *
- * Stage B vector for `@WireBytes(N)` where the wire width is narrower
+ * Vector for `@WireBytes(N)` where the wire width is narrower
  * than the Kotlin type's natural size. Three independent 24-bit BE
  * fields land inside an 11-byte structure that cannot collapse into a
  * single 64-bit packed scalar — `@WireBytes(3)` genuinely earns its

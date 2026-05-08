@@ -12,7 +12,7 @@ import kotlin.jvm.JvmInline
  * packet — the codes describe the outcome of a CONNECT attempt.
  *
  * Substituted into [com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet.ConnAck.reasonCode]
- * via the slice 11b non-conditional `ProtocolMessageScalar` analyzer
+ * via the non-conditional `ProtocolMessageScalar` analyzer
  * branch (no `@When`, always-present field).
  */
 @JvmInline

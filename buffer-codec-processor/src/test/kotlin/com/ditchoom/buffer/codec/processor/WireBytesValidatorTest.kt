@@ -12,7 +12,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Compile-time validator coverage for `@WireBytes(N)` (Stage B, R4).
+ * Compile-time validator coverage for `@WireBytes(N)` (, R4).
  *
  * Rule R4: `@WireBytes(N)` declares a wire width narrower than (or
  * equal to) the Kotlin type's natural size. Out-of-range widths

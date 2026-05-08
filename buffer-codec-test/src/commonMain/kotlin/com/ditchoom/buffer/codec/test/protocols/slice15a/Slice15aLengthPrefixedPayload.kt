@@ -7,7 +7,7 @@ import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 
 /**
- * Phase J.M.5 slice 15a — capability probe for `@LengthPrefixed
+ * Capability probe for `@LengthPrefixed
  * @UseCodec(C::class) val: T : Payload`. Scalar counterpart of slice
  * 11's `@LengthPrefixed @UseCodec val: List<E>`.
  *
@@ -17,16 +17,16 @@ import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
  * `BoundingLengthCodec`) — the prefix tells the framework how many
  * bytes to hand to `C`.
  *
- * `T : Payload` is required by the validator (slice 15 D2 — clusters
+ * `T: Payload` is required by the validator ( D2 — clusters
  * the "typed binary data crossing the codec boundary" concept under
  * one marker).
  *
  * The [BinaryData] / [BinaryDataCodec] fixture initially landed here in
- * slice 15a; slice 15c promoted them to
+ * promoted them to
  * `com.ditchoom.buffer.codec.test.protocols.payload` so the v5 property
  * variants (CorrelationData / AuthenticationData) and the v3/v5
  * Connect.{willPayload, password} fields can reuse them without
- * coupling production fixtures onto the slice 15a probe package.
+ * coupling production fixtures onto the probe package.
  */
 @ProtocolMessage
 data class Slice15aLengthPrefixedPayload(

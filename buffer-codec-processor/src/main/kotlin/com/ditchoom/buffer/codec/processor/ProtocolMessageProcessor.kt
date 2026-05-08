@@ -21,9 +21,9 @@ import com.google.devtools.ksp.validate
  *
  * The KSP entry point is preserved so KSP wiring stays valid; every
  * code emitter has been removed. Capability returns one stage at a
- * time per the Stages A–H plan in `PHASE_9_RESET.md`.
+ * time per the Stages A–H plan in.
  *
- * Until Stage A lands, this processor enforces the rules that are
+ * Until lands, this processor enforces the rules that are
  * load-bearing right now:
  *
  *   - **§8 raw-bytes ban.** `@ProtocolMessage` data classes cannot
@@ -42,21 +42,21 @@ import com.google.devtools.ksp.validate
  *     has a viable `@LengthPrefixed` migration target**. Bound fields
  *     whose type extends the [com.ditchoom.buffer.codec.Payload]
  *     marker interface are skipped — `@LengthPrefixed` does not yet
- *     widen to cover Payload slots (Stage H deferral); R1 expands to
+ * widen to cover Payload slots ( deferral); R1 expands to
  *     cover them once that widening lands. `@LengthFrom` is otherwise
  *     reserved for genuine remote-prefix uses (length carried in a
  *     non-adjacent field, parsed elsewhere, or parent-passed via
  *     `@DispatchOn`).
  *
- *   - **Stage D dispatcher rules.** A `@ProtocolMessage sealed
+ * ** dispatcher rules.** A `@ProtocolMessage sealed
  *     interface` without `@DispatchOn` is a simple-dispatch parent.
  *     Every direct sealed subclass must carry `@PacketType(value =
  *     N)` with `N in 0..255`, and `value` must be unique within a
  *     parent. Missing/out-of-range/duplicate values are compile
  *     errors. Sealed parents carrying `@DispatchOn` are skipped
- *     (Stage F surface).
+ * ( surface).
  *
- *   - **Stage F `@DispatchOn` value-class discriminator (slice 6).**
+ * ** `@DispatchOn` value-class discriminator.**
  *     A `@ProtocolMessage sealed interface` parent carrying
  *     `@DispatchOn(<DiscriminatorType>::class)` is a bit-packed
  *     dispatch parent. The discriminator must be a
@@ -66,15 +66,15 @@ import com.google.devtools.ksp.validate
  *     a `data class` with `@PacketType(value = N)` (`N in 0..255`,
  *     unique within the parent), and must declare the
  *     DiscriminatorType as its first constructor parameter so the
- *     variant codec reads/writes the byte naturally (slice 6
+ * variant codec reads/writes the byte naturally (
  *     narrow — `object` and discriminator-from-context shapes are
  *     deferred).
  *
- *   - **Stage E `@LengthFrom` shape (Locked Decision row 18, slice
- *     4 + Stage G slice 7a).** For `@LengthFrom("siblingField") val
+ * ** `@LengthFrom` shape (, slice
+ * 4 + ).** For `@LengthFrom("siblingField") val
  *     payload: T`: the bound field type must be either `String`
- *     (slice 4) or `List<E>` where `E` is a `@ProtocolMessage data
- *     class` (slice 7a). The referenced parameter must exist as a
+ *  or `List<E>` where `E` is a `@ProtocolMessage data
+ * class`. The referenced parameter must exist as a
  *     sibling declared before the bound parameter, and must resolve
  *     to a numeric type (`Byte` / `Short` / `Int` / `Long` /
  *     `UByte` / `UShort` / `UInt` / `ULong`). Diagnostics list the
@@ -83,7 +83,7 @@ import com.google.devtools.ksp.validate
  *     and continues to fire when the referenced sibling is the
  *     immediately-preceding parameter.
  *
- *   - **Stage E `@When` shape (Locked Decision row 19, slices 2–3).**
+ * ** `@When` shape (, slices 2–3).**
  *     The bound parameter type must be nullable. Two source-expression
  *     forms are supported:
  *       - Simple-name form `@When("siblingField")`: the referenced
@@ -195,8 +195,8 @@ class ProtocolMessageProcessor(
     }
 
     private fun validateSealedDispatcher(parent: KSClassDeclaration) {
-        // @DispatchOn parents go through Stage F's value-class discriminator
-        // path; Stage D's @PacketType-uniqueness rules don't model the bit-
+        // @DispatchOn parents go through 's value-class discriminator
+        // path; 's @PacketType-uniqueness rules don't model the bit
         // packed shape and would produce false positives.
         if (parent.annotations.any { ann ->
                 ann.shortName.asString() == DISPATCH_ON_SHORT &&
@@ -261,9 +261,7 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Stage F slice 6 — `@DispatchOn` value-class discriminator dispatcher
-     * (Locked Decision row TBD; doctrine entry to be appended once the
-     * vector lands in PHASE_9_RESET).
+     * `@DispatchOn` value-class discriminator dispatcher.
      *
      * Validates the bit-packed dispatch shape:
      *   - Parent is a `@ProtocolMessage sealed interface` carrying
@@ -278,14 +276,14 @@ class ProtocolMessageProcessor(
      *     = N)` with `N in 0..255`. `value` uniqueness within the
      *     parent is enforced.
      *   - Each variant's first constructor parameter has the
-     *     `DiscriminatorType` (slice 6 narrow — variants without the
+     * `DiscriminatorType` ( narrow — variants without the
      *     header field would need the consume + forward-via-context
      *     model, deferred until a vector requires it).
      *
      * `@PacketType.wire` is permitted (the annotation declares it)
      * but unused at emit time: the variant's header field carries
      * the full byte on encode, so a separate `wire` is redundant.
-     * Slice 6 doesn't validate consistency between `value` and
+     * Doesn't validate consistency between `value` and
      * `wire`; users who set a non-default `wire` should know the
      * variant's header default value matches.
      */
@@ -341,7 +339,7 @@ class ProtocolMessageProcessor(
             val displayed = innerQname ?: "<unresolved>"
             logger.error(
                 "@DispatchOn($discriminatorName::class) on $parentName: discriminator's inner " +
-                    "parameter type is `$displayed`, but slice 6 limits it to a numeric scalar " +
+                    "parameter type is `$displayed`, but it must be a numeric scalar " +
                     "(Byte / Short / Int / Long / UByte / UShort / UInt / ULong).",
                 parent,
             )
@@ -379,7 +377,7 @@ class ProtocolMessageProcessor(
         }
         val dispatchReturn = dispatchProp.type.resolve()
         val dispatchReturnQname = dispatchReturn.declaration.qualifiedName?.asString()
-        // Phase J.M.5 slice J.M.7.a — widen accepted return types from
+        // Slice — widen accepted return types from
         // Int-only to {Boolean, Byte, UByte, Short, UShort, Int, UInt}.
         // Long/ULong are excluded — `@PacketType.value` is `Int` so
         // values beyond `Int.MAX_VALUE` can't be expressed in the
@@ -487,7 +485,7 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * J.M.6.c (issue #151 part 2) — non-terminal `@RemainingBytes` is
+     * (issue #151 part 2) — non-terminal `@RemainingBytes` is
      * allowed iff every trailing field is fixed-size on the wire (per
      * the analyzer's `FieldSpec.FixedSize` predicate, today: plain
      * scalars and value-class scalars). Variable-size trailers
@@ -545,7 +543,7 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Phase J.M.5 slice 15g — reject `@RemainingBytes List<scalar>` and
+     * Reject `@RemainingBytes List<scalar>` and
      * `@RemainingBytes <primitive-array>` (`ByteArray`, `UByteArray`,
      * `ShortArray`, `UShortArray`, `IntArray`, `UIntArray`, `LongArray`,
      * `ULongArray`).
@@ -564,7 +562,7 @@ class ProtocolMessageProcessor(
      *     (e.g. MQTT v3 SUBACK return codes per §3.9.3):
      *     `@RemainingBytes val xs: List<SealedParent>` where
      *     `SealedParent` is a `@DispatchOn @ProtocolMessage`-annotated
-     *     sealed interface with one variant per legal byte. Slice 11a
+     * sealed interface with one variant per legal byte.
      *     emits per-element dispatch through the sealed parent's
      *     generated codec; each list slot holds a singleton-equivalent
      *     reference rather than a boxed scalar.
@@ -607,14 +605,14 @@ class ProtocolMessageProcessor(
                         "buffer-to-array copy from the codec author and provide no spec-meaningful " +
                         "structure. Wrap the bytes in a `@JvmInline value class T(val bytes: " +
                         "ByteArray) : Payload` with a hand-written `Codec<T>` and use " +
-                        "`@RemainingBytes @UseCodec(<YourCodec>::class) val: T` (slice 10a). The " +
+                        "`@RemainingBytes @UseCodec(<YourCodec>::class) val: T`. The " +
                         "`BinaryData` / `BinaryDataCodec` fixture pair is the canonical example.",
                     param,
                 )
                 continue
             }
 
-            // List<scalar> — retired in slice 15g.
+            // List<scalar> — retired in.
             if (typeQname == "kotlin.collections.List") {
                 val elementType =
                     type.arguments
@@ -634,13 +632,13 @@ class ProtocolMessageProcessor(
                             "  (1) For value-spaces with discrete spec-defined bytes " +
                             "(e.g. MQTT SUBACK return codes per §3.9.3), define a " +
                             "`@DispatchOn @ProtocolMessage` sealed parent with one variant per " +
-                            "legal byte and use `@RemainingBytes val: List<SealedParent>` " +
-                            "(slice 11a). See `MqttV3SubAckReturnCode` for the template.\n" +
+                            "legal byte and use `@RemainingBytes val: List<SealedParent>`. " +
+                            "See `MqttV3SubAckReturnCode` for the template.\n" +
                             "  (2) For genuinely opaque bulk bytes (e.g. PNG chunk data, TLS " +
                             "handshake tail), wrap in a `@JvmInline value class T(val bytes: " +
                             "ByteArray) : Payload` with a hand-written `Codec<T>` and use " +
-                            "`@RemainingBytes @UseCodec(<YourCodec>::class) val: T` " +
-                            "(slice 10a). See `BinaryData` / `BinaryDataCodec`.",
+                            "`@RemainingBytes @UseCodec(<YourCodec>::class) val: T`. " +
+                            "See `BinaryData` / `BinaryDataCodec`.",
                         param,
                     )
                 }
@@ -692,7 +690,7 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Stage E slices 2–3 — `@When` shape validation (Locked Decision row 19).
+     * `@When` shape validation.
      *
      * The bound parameter type must always be nullable (`T?`); when the
      * predicate is false the decoder writes `null`, so absence has to be
@@ -736,13 +734,13 @@ class ProtocolMessageProcessor(
                     "@When(\"$expression\") on $ownerName.$fieldName requires the field type " +
                         "to be nullable (e.g., `Int?` not `Int`). When the predicate is false, the " +
                         "decoder needs to assign `null` to the slot — that is the only way to " +
-                        "represent absence uniformly across types (Locked Decision row 19).",
+                        "represent absence uniformly across types.",
                     param,
                 )
                 continue
             }
 
-            // Phase J.M.5 grammar 2 — `remaining <op> <int>`. Magic
+            // Grammar 2 — `remaining <op> <int>`. Magic
             // identifier `remaining` is reserved by the grammar; reject
             // any malformed shape here so the analyzer never sees an
             // ill-formed predicate. Caller-side error messages are
@@ -776,7 +774,7 @@ class ProtocolMessageProcessor(
             if (parts.size > 2) {
                 logger.error(
                     "@When(\"$expression\") on $ownerName.$fieldName uses a deeper-than-one-level " +
-                        "path. Locked Decision row 19 limits the dotted form to `<sibling>.<property>` " +
+                        "path. The dotted form is limited to `<sibling>.<property>` " +
                         "where `<sibling>` is a sibling constructor parameter and `<property>` is a " +
                         "`Boolean`-returning `val` on the sibling's `value class` type.",
                     param,
@@ -834,8 +832,8 @@ class ProtocolMessageProcessor(
                     logger.error(
                         "@When(\"$expression\") on $ownerName.$fieldName requires source " +
                             "`$ownerName.$siblingName` to be a non-nullable `Boolean`, but it is " +
-                            "`$displayed$nullableSuffix`. Locked Decision row 19 limits the simple " +
-                            "expression form to a sibling `Boolean` field.",
+                            "`$displayed$nullableSuffix`. The simple expression form requires " +
+                            "a sibling `Boolean` field.",
                         param,
                     )
                     continue
@@ -849,7 +847,7 @@ class ProtocolMessageProcessor(
                     logger.error(
                         "@When(\"$expression\") on $ownerName.$fieldName uses a dotted source " +
                             "but `$ownerName.$siblingName` resolves to `$displayed$nullableSuffix`, which " +
-                            "is not a `value class`. Locked Decision row 19 limits the dotted form to " +
+                            "is not a `value class`. The dotted form requires " +
                             "siblings whose type is a `@JvmInline value class` exposing a " +
                             "`Boolean`-returning `val` property.",
                         param,
@@ -893,11 +891,11 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Slice 7a — `@LengthFrom` on `List<T>` requires `T` to be a
+     * `@LengthFrom` on `List<T>` requires `T` to be a
      * `@ProtocolMessage data class`. Returns true when `listType`'s
      * single type argument resolves to such a declaration. Other
      * element shapes (scalar, value class, non-data class) are
-     * deferred — slice 7b's `@RemainingBytes` is the path for
+     * deferred — 's `@RemainingBytes` is the path for
      * scalar element lists.
      */
     private fun isListOfProtocolMessageDataClass(listType: KSType): Boolean {
@@ -917,7 +915,7 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * J.M.6.b — `@LengthFrom val: T` requires `T` to be a `@ProtocolMessage`
+     * `@LengthFrom val: T` requires `T` to be a `@ProtocolMessage`
      * data class or sealed parent (no type parameters — payload-generic
      * shapes have a constructor-injected codec, not a singleton object,
      * and the by-name `<T>Codec.decode(...)` form fails to resolve).
@@ -969,13 +967,13 @@ class ProtocolMessageProcessor(
 
             // Path B carve-out: skip when the bound field's type extends the
             // Payload marker interface. @LengthPrefixed does not yet widen to
-            // cover Payload slots (Stage H), so forbidding the adjacent shape
+            // cover Payload slots, so forbidding the adjacent shape
             // today would leave those fields with no migration target. R1
             // expands to cover this case once @LengthPrefixed widens.
             val boundFieldType = param.type.resolve()
             if (payloadType.isAssignableFrom(boundFieldType)) continue
 
-            // J.M.6.b carve-out: skip when the bound field's type is a nested
+            // Carve-out: skip when the bound field's type is a nested
             // `@ProtocolMessage` data class or sealed parent. The
             // `@LengthPrefixed` migration target (LengthPrefixedMessage) only
             // supports 1 / 2 / 4-byte prefixes (LengthPrefix.Byte / Short /
@@ -1004,10 +1002,10 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Stage E slice 4 — `@LengthFrom` shape validation (Locked Decision row 18).
+     * `@LengthFrom` shape validation.
      *
      * Independent from R1 (adjacent-`@LengthFrom` migration suggestion):
-     *   - Bound field type must be `String` — Stage E's field-type
+     * Bound field type must be `String` — 's field-type
      *     universe (row 18). `ByteArray`, nested `@ProtocolMessage`,
      *     and `@Payload` slots widen this in later stages.
      *   - Referenced sibling must exist as a sibling of the bound
@@ -1047,7 +1045,7 @@ class ProtocolMessageProcessor(
                 !type.isMarkedNullable &&
                     typeQname == LIST_QNAME &&
                     isListOfProtocolMessageDataClass(type)
-            // J.M.6.b — accept nested `@ProtocolMessage` data class or
+            // Accept nested `@ProtocolMessage` data class or
             // sealed parent (issue #151 part 1). The body's bytes are
             // bounded by the sibling-derived length; decode delegates to
             // `<TCodec>.decode` against the narrowed buffer.
@@ -1133,14 +1131,14 @@ class ProtocolMessageProcessor(
                         "@LengthFrom(\"$referenced\") on $ownerName.$fieldName requires source " +
                             "`$ownerName.$siblingName` to be a non-nullable numeric scalar " +
                             "(Byte / Short / Int / Long / UByte / UShort / UInt / ULong), but it " +
-                            "is `$displayed$nullableSuffix`. Locked Decision row 18 limits the simple " +
-                            "expression form to a numeric scalar sibling.",
+                            "is `$displayed$nullableSuffix`. The simple expression form requires " +
+                            "a numeric scalar sibling.",
                         param,
                     )
                     continue
                 }
             } else {
-                // Dotted form (slice 9): sibling must be a value class with a
+                // Dotted form: sibling must be a value class with a
                 // single supported-scalar inner; property must be a non-extension
                 // `val` returning non-nullable `Int`.
                 val siblingDecl = sourceType.declaration as? KSClassDeclaration
@@ -1200,10 +1198,10 @@ class ProtocolMessageProcessor(
      * `@UseCodec` shape validation.
      *
      * Currently supported compositions:
-     *   - Stage H slice 10a — `@RemainingBytes @UseCodec(C::class) val: P`
+     * `@RemainingBytes @UseCodec(C::class) val: P`
      *     where `P` extends `com.ditchoom.buffer.codec.Payload` and `C` is
      *     a Kotlin `object` implementing `Codec<P>`.
-     *   - Phase I.1 — bare `@UseCodec(C::class) val: <scalar>` (no framing
+     * bare `@UseCodec(C::class) val: <scalar>` (no framing
      *     annotation), where the field is a non-Payload, non-type-parameter
      *     scalar and `C` is a Kotlin `object` implementing `Codec<T>` for
      *     T matching the field type. Drives pluggable length-encoding via
@@ -1220,8 +1218,8 @@ class ProtocolMessageProcessor(
      *   - Field type extends `Payload` but the parameter has no
      *     `@UseCodec` annotation (no codec can be emitted).
      *   - Payload-typed field carries `@UseCodec` without `@RemainingBytes`
-     *     (slice 10a's Payload path requires the pair).
-     *   - `@RemainingBytes @UseCodec` on a non-Payload field (slice 10a
+     * ('s Payload path requires the pair).
+     * `@RemainingBytes @UseCodec` on a non-Payload field (
      *     restricts the bounded shape to Payload).
      *   - `@UseCodec` paired with `@LengthFrom` or `@LengthPrefixed`
      *     (deferred to a later slice).
@@ -1232,7 +1230,7 @@ class ProtocolMessageProcessor(
         payloadType: KSType,
     ) {
         val ownerName = owner.qualifiedName?.asString() ?: owner.simpleName.asString()
-        // Stage H slice 10b — when the data class declares a
+        // When the data class declares a
         // `<P : Payload>` type parameter, fields of type `P` are
         // resolved through the constructor-injected codec, not via
         // `@UseCodec`. Skip the "Payload field requires @UseCodec"
@@ -1268,7 +1266,7 @@ class ProtocolMessageProcessor(
                     fieldDecl.name.asString() in payloadTypeParameterNames
             val isPayloadField = !fieldType.isMarkedNullable && payloadType.isAssignableFrom(fieldType)
             if (isTypeParameterReference) {
-                // Slice 10b: constructor-injected codec resolves the
+                // Constructor-injected codec resolves the
                 // type-parameter-typed field. `@UseCodec` is mutually
                 // exclusive with this resolution mechanism.
                 if (useCodec != null) {
@@ -1323,14 +1321,14 @@ class ProtocolMessageProcessor(
                     "@UseCodec on $ownerName.$fieldName composed with `@LengthFrom` is not yet " +
                         "supported. Currently emitted compositions are `@RemainingBytes @UseCodec " +
                         "val: P` (P : Payload), bare `@UseCodec val: <scalar>`, and " +
-                        "`@LengthPrefixed @UseCodec(BoundingLengthCodec) val: List<E>` (Phase I.1 " +
-                        "step 11). The `@LengthFrom @UseCodec` shape is deferred to a later slice.",
+                        "`@LengthPrefixed @UseCodec(BoundingLengthCodec) val: List<E>`. " +
+                        "The `@LengthFrom @UseCodec` shape is deferred to a future release.",
                     param,
                 )
                 continue
             }
             if (hasLengthPrefixed) {
-                // Phase I.1 step 11 — `@LengthPrefixed @UseCodec(C::class) val xs: List<E>`
+                // `@LengthPrefixed @UseCodec(C::class) val xs: List<E>`
                 // where `C : BoundingLengthCodec<UInt>` and `E` is a `@ProtocolMessage data
                 // class`. Validate the new shape inline; subsequent generic checks (which
                 // expect `Codec<fieldType>`) don't apply because the codec's type arg is
@@ -1350,7 +1348,7 @@ class ProtocolMessageProcessor(
                     "@UseCodec on $ownerName.$fieldName must be paired with `@RemainingBytes` " +
                         "when the field's type extends `com.ditchoom.buffer.codec.Payload`. The " +
                         "current `@UseCodec` shapes are `@RemainingBytes @UseCodec val: P` " +
-                        "(P : Payload, slice 10a) and bare `@UseCodec val: <scalar>` (Phase I.1).",
+                        "(P : Payload) and bare `@UseCodec val: <scalar>`.",
                     param,
                 )
                 continue
@@ -1360,9 +1358,9 @@ class ProtocolMessageProcessor(
                 logger.error(
                     "@RemainingBytes @UseCodec on $ownerName.$fieldName requires the bound " +
                         "field's type to extend `com.ditchoom.buffer.codec.Payload`, but it " +
-                        "is `$displayed`. Slice 10a's typed-payload path is the only " +
+                        "is `$displayed`. The typed-payload path is the only " +
                         "`@UseCodec` composition wired up — wrap the value in a `Payload`-" +
-                        "tagged type or wait for a later slice that lifts this restriction.",
+                        "tagged type.",
                     param,
                 )
                 continue
@@ -1401,7 +1399,7 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Phase I.1 step 11 — `@LengthPrefixed @UseCodec(C::class) val xs:
+     * `@LengthPrefixed @UseCodec(C::class) val xs:
      * List<E>` validation. The codec drives the wire-format prefix
      * (var-byte-int, sentinel-extended length, etc.) and bounds the
      * element-decode region; elements are read element-by-element via
@@ -1445,24 +1443,24 @@ class ProtocolMessageProcessor(
             return
         }
         val fieldTypeQname = fieldType.declaration.qualifiedName?.asString()
-        // Phase J.M.5 slice 15a — scalar `T : Payload` shape. The codec is
+        // Scalar `T: Payload` shape. The codec is
         // `Codec<T>` and the framework owns the prefix; the codec is NOT
         // required to implement BoundingLengthCodec. Validates first
         // because a non-List Payload field must not fall through to the
         // list-shape diagnostics.
         //
-        // J.M.7.b widening — `kotlin.String` is also accepted here so a
+        // Widening — `kotlin.String` is also accepted here so a
         // user-supplied `Codec<String>` (e.g. AsciiStringCodec, or a
         // consumer's Latin-1 / UTF-16 / Modified-UTF-8 codec) can plug in
         // via `@LengthPrefixed @UseCodec val: String` and override the
         // built-in UTF-8 reader. Same wire shape as the Payload variant
         // (length prefix + body bytes).
         if (fieldTypeQname != LIST_QNAME) {
-            // Phase J.M.5 slice 15a/15d — nullable types arrive here when
-            // the field carries `@When` (slice 15d gates Connect.willPayload
-            // / password on connect-flag bits). Strip the nullability for
-            // the Payload-assignability check; the analyzer's conditional
-            // path (`analyzeConditionalLengthPrefixedUseCodecPayloadInner`)
+            // Nullable types arrive here when the field carries `@When`
+            // (which gates Connect.willPayload / password on connect-flag
+            // bits). Strip the nullability for the Payload-assignability
+            // check; the analyzer's conditional path
+            // (`analyzeConditionalLengthPrefixedUseCodecPayloadInner`)
             // already runs against the non-null inner type.
             val nonNullableFieldType =
                 if (fieldType.isMarkedNullable) fieldType.makeNotNullable() else fieldType
@@ -1472,9 +1470,9 @@ class ProtocolMessageProcessor(
                 logger.error(
                     "@LengthPrefixed @UseCodec($codecName::class) on $ownerName.$fieldName has " +
                         "field type `${fieldTypeQname ?: "<unresolved>"}`, which is none of: " +
-                        "`kotlin.collections.List<E>` (slice 11 list shape), a type implementing " +
-                        "`com.ditchoom.buffer.codec.Payload` (slice 15a scalar shape), or " +
-                        "`kotlin.String` (J.M.7.b user-charset shape). Wrap binary data in a " +
+                        "`kotlin.collections.List<E>` (list shape), a type implementing " +
+                        "`com.ditchoom.buffer.codec.Payload` (scalar Payload shape), or " +
+                        "`kotlin.String` (user-charset shape). Wrap binary data in a " +
                         "`Payload`-marked value class and reference its `Codec<T>` via " +
                         "`@UseCodec`, use the list shape with a `@ProtocolMessage` element " +
                         "type, or supply a `Codec<String>` for a String-typed field.",
@@ -1487,7 +1485,7 @@ class ProtocolMessageProcessor(
                 logger.error(
                     "@LengthPrefixed @UseCodec($codecName::class) on $ownerName.$fieldName " +
                         "references object `$codecName`, which does not implement " +
-                        "`com.ditchoom.buffer.codec.Codec<$expectedSimpleName>`. The slice 15a " +
+                        "`com.ditchoom.buffer.codec.Codec<$expectedSimpleName>`. The " +
                         "scalar Payload shape calls `$codecName.decode(...)` / `.encode(...)` " +
                         "against the bound field's declared type.",
                     param,
@@ -1556,8 +1554,8 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Phase J.M.5 — does `decl` carry a `<P : Payload>` type parameter?
-     * Mirrors the slice 10d `detectPayloadTypeParameter` rule used in
+     * Does `decl` carry a `<P: Payload>` type parameter?
+     * Mirrors the `detectPayloadTypeParameter` rule used in
      * `CodecEmitter.kt` for dispatcher-class detection. Used by the
      * `@LengthPrefixed @UseCodec(C) val: List<E>` validator to reject
      * element types whose generated codec would emit as a generic class
@@ -1575,7 +1573,7 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Phase I.1 step 11 — does `codecDecl` implement
+     * Does `codecDecl` implement
      * `com.ditchoom.buffer.codec.BoundingLengthCodec<UInt>`? Walks the
      * object's full super-type set and compares the single type argument
      * against `kotlin.UInt`. The `applyBound` method is what the emitter
@@ -1600,9 +1598,9 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Phase J.M.5 slice 14b — `@FramedBy` validator.
+     * `@FramedBy` validator.
      *
-     * `@FramedBy` is the structural replacement for slice 14a's
+     * `@FramedBy` is the structural replacement for 's
      * `@DerivedLength`: the framework owns framing, computing the prefix
      * from the encoded body's wire size and asserting strict consumption
      * on decode. The annotation is class-level and applies to data
@@ -1783,7 +1781,7 @@ class ProtocolMessageProcessor(
     }
 
     /**
-     * Stage H slice 10b — `<P : Payload>` type-parameter shape
+     * `<P: Payload>` type-parameter shape
      * validation.
      *
      * A `@ProtocolMessage` data class with a `<P : Payload>` type
@@ -1793,7 +1791,7 @@ class ProtocolMessageProcessor(
      * call sites, and the constructor-injected `Codec<P>` parameter
      * the emitter generates would have nothing to drive.
      *
-     * Slice 10b narrow: at most one type parameter per data class,
+     * Narrow: at most one type parameter per data class,
      * single `Payload` upper bound. Multiple type parameters or
      * non-`Payload` bounds are rejected here so the generic emit
      * path stays type-safe.
@@ -1808,8 +1806,8 @@ class ProtocolMessageProcessor(
         if (typeParams.size > 1) {
             logger.error(
                 "@ProtocolMessage `$ownerName` declares ${typeParams.size} type parameters; " +
-                    "slice 10b supports at most one (`<P : Payload>`). Multiple type parameters " +
-                    "are deferred — open a follow-up vector when a real protocol needs them.",
+                    "at most one (`<P : Payload>`) is supported. Multiple type parameters " +
+                    "are not yet supported.",
                 owner,
             )
             return
@@ -1820,8 +1818,8 @@ class ProtocolMessageProcessor(
         if (bounds.size != 1) {
             logger.error(
                 "@ProtocolMessage `$ownerName` type parameter `$tpName` must have exactly one " +
-                    "upper bound (`<$tpName : Payload>`), but has ${bounds.size}. Slice 10b " +
-                    "supports a single `Payload` bound only.",
+                    "upper bound (`<$tpName : Payload>`), but has ${bounds.size}. " +
+                    "A single `Payload` bound is supported.",
                 owner,
             )
             return
@@ -1835,7 +1833,7 @@ class ProtocolMessageProcessor(
             logger.error(
                 "@ProtocolMessage `$ownerName` type parameter `$tpName` must be bounded by " +
                     "`com.ditchoom.buffer.codec.Payload`, but is bounded by " +
-                    "`${boundQname ?: "<unresolved>"}`. Slice 10b's generic-bounded payload slot " +
+                    "`${boundQname ?: "<unresolved>"}`. The generic-bounded payload slot " +
                     "is the only generics path the emitter recognizes today.",
                 owner,
             )
@@ -1864,16 +1862,16 @@ class ProtocolMessageProcessor(
                     "no `@RemainingBytes val: $tpName` field uses it. The generic emit path " +
                     "exists to surface a constructor-injected `Codec<$tpName>` parameter — " +
                     "without a field consuming it, the parameter is unused. Either add " +
-                    "`@RemainingBytes val payload: $tpName` (slice 10b shape) or drop the " +
+                    "`@RemainingBytes val payload: $tpName` or drop the " +
                     "type parameter and use `@UseCodec(...)` against a concrete `Payload` " +
-                    "subtype (slice 10a shape).",
+                    "subtype.",
                 owner,
             )
         }
     }
 
     /**
-     * Stage H slice 10a — does `codecDecl` implement
+     * Does `codecDecl` implement
      * `com.ditchoom.buffer.codec.Codec<T>` where `T == fieldType`?
      * Walks the object's full super-type set and compares the single
      * type argument's qualified name and nullability against the bound
@@ -1920,7 +1918,7 @@ class ProtocolMessageProcessor(
     ) {
         if (depth > MAX_DEPTH) return
         if (type.isError) return
-        // Phase J.M.5 slice 15d — nullable Payload types arrive here when
+        // Nullable Payload types arrive here when
         // the field carries `@When` (e.g., `@When val: BinaryData?`).
         // Short-circuit on the non-nullable form so the §8 walk doesn't
         // descend into the value class's `ByteArray` inner.
@@ -1933,13 +1931,12 @@ class ProtocolMessageProcessor(
             val fieldName = param.name?.asString() ?: "<unknown>"
             logger.error(
                 "@ProtocolMessage field $ownerName.$fieldName has raw-bytes type $qualified. " +
-                    "Section 8 of PHASE_10_DESIGN_NOTES.md and slice 15 D1 forbid ReadBuffer / " +
-                    "WriteBuffer / PlatformBuffer / ByteArray / ByteBuffer in @ProtocolMessage " +
-                    "data classes — raw buffer/bytes types leak ownership ambiguity (who frees, " +
-                    "when, aliased?). Wrap the bytes in a typed value class implementing " +
-                    "`com.ditchoom.buffer.codec.Payload` and reference its `Codec<T>` via " +
-                    "`@UseCodec` (slice 15 D2) so copy-vs-zero-copy is an explicit codec-author " +
-                    "choice at one well-defined boundary.",
+                    "ReadBuffer / WriteBuffer / PlatformBuffer / ByteArray / ByteBuffer are " +
+                    "forbidden in @ProtocolMessage data classes — raw buffer/bytes types leak " +
+                    "ownership ambiguity (who frees, when, aliased?). Wrap the bytes in a typed " +
+                    "value class implementing `com.ditchoom.buffer.codec.Payload` and reference " +
+                    "its `Codec<T>` via `@UseCodec` so copy-vs-zero-copy is an explicit " +
+                    "codec-author choice at one well-defined boundary.",
                 param,
             )
             return
@@ -2013,7 +2010,7 @@ class ProtocolMessageProcessor(
         private const val LIST_QNAME = "kotlin.collections.List"
         private const val MAX_DEPTH = 16
 
-        // Slice 15g — qnames the [validateRemainingBytesElementType] check
+        // Qnames the [validateRemainingBytesElementType] check
         // rejects. Scalar element types that promote a copy-by-default
         // decode (every read boxes / allocates per element).
         private val SCALAR_QNAMES =
@@ -2048,7 +2045,7 @@ class ProtocolMessageProcessor(
                 "kotlin.BooleanArray",
             )
 
-        // Phase J.M.5 slice J.M.7.a — accepted return types for an
+        // Slice — accepted return types for an
         // `@DispatchValue`-annotated property, paired with the valid
         // range of `@PacketType.value` literals for each kind. Long
         // and ULong are intentionally absent — `@PacketType.value` is

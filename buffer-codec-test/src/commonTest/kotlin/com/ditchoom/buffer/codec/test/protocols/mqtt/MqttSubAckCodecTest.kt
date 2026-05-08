@@ -22,7 +22,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 /**
- * Stage G slice 8 doctrine vector — full MQTT v3.1.1 SUBACK packet
+ * Doctrine vector — full MQTT v3.1.1 SUBACK packet
  * per §3.9. Validates the `@RemainingLength` var-int field's
  * read/write behavior, the implicit `setLimit` bounding decode of
  * subsequent fields, and the var-int byte-count contribution to
@@ -31,9 +31,9 @@ import kotlin.test.assertFailsWith
  * Var-int boundary tests (§2.2.3) cover the 1→2, 2→3, 3→4 byte
  * transitions and the 0/max boundaries.
  *
- * Phase J.M step 3 — folded onto the `MqttPacket.SubAck` sealed
+ * Folded onto the `MqttPacket.SubAck` sealed
  * variant. Drives `SubAckCodec` (the per-variant codec object emitted
- * by the slice 6 dispatcher) per the brief's option 1: same byte-
+ * by the dispatcher) per the brief's option 1: same byte
  * exact assertions, same Partial / Aggregator / peekFrameSize
  * coverage, with the per-variant codec reachable directly. The
  * standalone `MqttSubAck` data class + `MqttSubAckCodec` are gone
@@ -208,7 +208,7 @@ class MqttSubAckCodecTest {
         // (4 byte first).
         //
         // The 4-byte VBI cases force a ~2 M-element list decode. Phase
-        // J.M.5 slice 15h flipped `MqttV3SubAckReturnCode` variants to
+        // Flipped `MqttV3SubAckReturnCode` variants to
         // `data object` singletons under `@DispatchOn(value class)`,
         // collapsing per-element allocation to zero (decoded list
         // entries reuse the same four singleton instances regardless
@@ -246,8 +246,8 @@ class MqttSubAckCodecTest {
             assertFailsWith<DecodeException> {
                 SubAckCodec.decode(buf, DecodeContext.Empty)
             }
-        // Phase I.1 step 9 — fieldPath is now controlled by the codec
-        // (`MqttRemainingLengthCodec.decode`'s own throw site); the slice-8
+        // FieldPath is now controlled by the codec
+        // (`MqttRemainingLengthCodec.decode`'s own throw site); the
         // emit's `<owner>.<field>` prefix is gone with the migration.
         assertEquals("MqttRemainingLength", ex.fieldPath)
     }
@@ -356,7 +356,7 @@ class MqttSubAckCodecTest {
     }
 
     /**
-     * Phase J.M.5 slice 15h — pin the per-variant codec emit shape for
+     * Pin the per-variant codec emit shape for
      * `data object` variants under `@DispatchOn(value class)`. Each
      * variant codec self-frames the discriminator: `wireSize =
      * Exact(1)`, `peekFrameSize` reports `Complete(1)` once one byte is

@@ -15,7 +15,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Phase I.1 step 4 — round-trip + behavior tests for the bare
+ * Round-trip + behavior tests for the bare
  * `@UseCodec val: <scalar>` emit path. Two fixtures:
  *   - [ZigZagFrame] — non-bounding `Codec<UInt>`.
  *   - [BoundedFrame] — `BoundingLengthCodec<UInt>` driving

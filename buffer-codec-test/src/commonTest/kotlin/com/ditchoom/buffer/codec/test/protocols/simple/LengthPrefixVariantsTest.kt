@@ -10,8 +10,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 /**
- * Stage C prefix-width coverage tests. Confirms the emitter handles
- * all three `LengthPrefix` widths (Locked Decision row 14: Byte /
+ * Prefix-width coverage tests. Confirms the emitter handles
+ * all three `LengthPrefix` widths (: Byte /
  * Short / Int — no widening), and that the encode-side overflow guard
  * fires when a UTF-8 body exceeds the prefix's representable range.
  *

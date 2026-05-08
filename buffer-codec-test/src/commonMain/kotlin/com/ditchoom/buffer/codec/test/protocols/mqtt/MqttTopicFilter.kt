@@ -11,7 +11,7 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
  * The wire layout is `<2-byte LP><filter bytes><qos>`, repeated for
  * each filter the SUBSCRIBE carries. SUBSCRIBE's variant wraps the
  * list with `@RemainingBytes List<MqttTopicFilter>` — bound by the
- * outer remaining-length var-int — to ride the J.M.0 emitter slice
+ * outer remaining-length var-int — to ride the emitter slice
  * (`@RemainingBytes List<@ProtocolMessage T>`).
  */
 @ProtocolMessage(wireOrder = Endianness.Big)

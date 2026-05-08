@@ -16,11 +16,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 /**
- * Phase J.M step 5 third tranche — MQTT v3.1.1 §3.8 SUBSCRIBE
+ * MQTT v3.1.1 §3.8 SUBSCRIBE
  * packet. Variable-shape body: header `0x82` + remainingLength +
  * packetIdentifier + a non-empty list of `MqttTopicFilter`
  * elements (`<2-byte LP><filter><qos>` per element). Drives
- * `SubscribeCodec` over the J.M.0 emitter slice
+ * `SubscribeCodec` over the emitter slice
  * (`@RemainingBytes List<@ProtocolMessage T>`).
  */
 class MqttSubscribeCodecTest {

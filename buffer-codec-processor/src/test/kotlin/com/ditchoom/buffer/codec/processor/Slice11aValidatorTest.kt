@@ -11,7 +11,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 
 /**
- * Phase J.M.5 slice 11a — validator-side coverage for the emitter
+ * Validator-side coverage for the emitter
  * widening on `@When @UseCodec val: T?` (sealed-parent inner) and
  * `@RemainingBytes val: List<E>` (sealed-parent element).
  *
@@ -20,10 +20,10 @@ import kotlin.test.assertFalse
  * widening adds an explicit branch in [analyzeConditionalInner] for
  * the `@When @UseCodec` case (mirror of [analyzeUseCodecScalarField])
  * and lifts [analyzeRemainingBytesProtocolMessageListField] to accept
- * sealed parents (mirror of audit-2a's
+ * sealed parents (mirror of 's
  * [analyzeLengthPrefixedListSpec]).
  *
- * Slice 11b substitutes typed `V5XReasonCode` parents into the v5
+ * Substitutes typed `V5XReasonCode` parents into the v5
  * fixture and lands the byte-level coverage.
  */
 class Slice11aValidatorTest {
@@ -32,7 +32,7 @@ class Slice11aValidatorTest {
         // Pre-slice this shape fell through `analyzeConditionalInner`'s
         // bare-scalar branch and returned null silently because the
         // analyzer required no `@UseCodec` annotation alongside `@When`
-        // on a scalar inner. Slice 11a adds the explicit branch.
+        // on a scalar inner. adds the explicit branch.
         val result =
             compile(
                 """
@@ -72,8 +72,8 @@ class Slice11aValidatorTest {
 
     @Test
     fun acceptsConditionalUseCodecOnSealedParentField() {
-        // The slice 11a widening's primary motivation: typed reason
-        // codes on the v5 acks (slice 11b lands the substitution).
+        // The widening's primary motivation: typed reason
+        // codes on the v5 acks ( lands the substitution).
         // Validator path is the same as the scalar case — only the
         // analyzer-side branch differs (it accepts the sealed parent
         // via the `KSClassDeclaration` fallback in the type resolver).
@@ -101,8 +101,8 @@ class Slice11aValidatorTest {
 
                 // Hand-written delegate: KSP-generated `ReasonCodeCodec`
                 // isn't visible to the round-1 analyzer that resolves
-                // `@UseCodec(...)` references. Slice 11b's v5 fixture
-                // uses the same hand-written-delegate pattern.
+                // `@UseCodec(...)` references. The v5 fixture uses the
+                // same hand-written-delegate pattern.
                 object ReasonCodeDelegateCodec : Codec<ReasonCode> {
                     override fun decode(buffer: ReadBuffer, context: DecodeContext): ReasonCode =
                         ReasonCodeCodec.decode(buffer, context)
@@ -130,7 +130,7 @@ class Slice11aValidatorTest {
     @Test
     fun acceptsRemainingBytesListOnSealedParentElement() {
         // Audit-2a lifted `@LengthPrefixed @UseCodec val: List<E>` to
-        // accept sealed-parent E. Slice 11a applies the same lift to
+        // accept sealed-parent E. applies the same lift to
         // `@RemainingBytes val: List<E>`. Element codec is auto-
         // generated and resolved internally by the emitter (no
         // `@UseCodec` reference, no chicken-and-egg).

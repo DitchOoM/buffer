@@ -18,7 +18,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 /**
- * Phase J.M.5 slice 3 — PINGRESP v5. Wire-bytewise identical to v3.1.1
+ * PINGRESP v5. Wire-bytewise identical to v3.1.1
  * PINGRESP (`D0 00`); v5 carries no reason code or property bag for
  * this packet. Adds the dispatcher symmetric pair to PINGREQ.
  */

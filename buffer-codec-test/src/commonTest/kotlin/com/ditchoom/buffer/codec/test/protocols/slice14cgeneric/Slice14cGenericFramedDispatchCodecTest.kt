@@ -17,7 +17,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
- * Phase J.M.5 slice 14c — generic-payload `@FramedBy` probe tests.
+ * Generic-payload `@FramedBy` probe tests.
  *
  * Six checks pin down the generic-emit shape before the v3/v5 substitution
  * touches a generic fixture:
@@ -29,7 +29,7 @@ import kotlin.test.assertTrue
  *      VBI; exercises generic-variant × inherited `@FramedBy` decode and
  *      generic-dispatcher framed encode.
  *   4. **WithPayload long round-trip** — generic variant with a 2-byte
- *      VBI (200-byte payload); confirms slice 14b right-flush behaviour
+ * VBI (200-byte payload); confirms right-flush behaviour
  *      survives the generic emit.
  *   5. **Dispatch correctness** — encoding a Headered then decoding the
  *      same bytes returns Headered, not WithPayload, through the generic

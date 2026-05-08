@@ -10,7 +10,7 @@ import kotlin.test.Test
 import kotlin.test.assertTrue
 
 /**
- * Locked Decision row 16 enforcement extended to Stage D's sealed
+ * Enforcement extended to 's sealed
  * dispatcher. The fixed-size `Ping` variant exercises the
  * all-scalar dispatch path; the `Echo` variant exercises the
  * BackPatch path through the dispatcher into the `@LengthPrefixed

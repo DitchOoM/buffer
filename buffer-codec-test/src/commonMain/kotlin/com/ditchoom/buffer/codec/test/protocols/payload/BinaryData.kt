@@ -12,13 +12,13 @@ import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.jvm.JvmInline
 
 /**
- * Phase J.M.5 slice 15a/15c/15d shared fixture — minimal `Payload`-
- * marked typed binary-data wrapper. Originally landed in slice 15a's
+ * /15c/15d shared fixture — minimal `Payload`
+ * marked typed binary-data wrapper. Originally landed in 's
  * probe (`slice15a/Slice15aLengthPrefixedPayload.kt`); promoted here in
- * slice 15c so the v5 property variants `CorrelationData` /
+ * so the v5 property variants `CorrelationData` /
  * `AuthenticationData` and the v3/v5 `Connect.willPayload` /
  * `Connect.password` fields can reuse it without coupling production
- * fixtures onto the slice 15a probe package.
+ * fixtures onto the probe package.
  *
  * `@JvmInline value class` over `ByteArray` — downstream consumers
  * (real MQTT library authors) wrap their own bytes in a similar value
@@ -38,7 +38,7 @@ value class BinaryData(
  * to position + length-prefix-value before calling `decode`); encode
  * just writes the bytes. wireSize is `Exact(bytes.size)` — the user
  * codec owns body sizing — but the containing message's wireSize
- * still collapses to BackPatch (slice 15a / slice 11 conservative
+ * still collapses to BackPatch ( / conservative
  * collapse).
  *
  * `peekFrameSize` returns `NoFraming` — framing is owned by the outer

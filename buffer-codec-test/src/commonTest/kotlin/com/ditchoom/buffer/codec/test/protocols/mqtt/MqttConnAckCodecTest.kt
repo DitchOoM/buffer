@@ -16,7 +16,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 /**
- * Phase J.M step 5 second tranche — MQTT v3.1.1 §3.2 CONNACK packet.
+ * MQTT v3.1.1 §3.2 CONNACK packet.
  * Fixed-shape 4-byte ack: header `0x20` + remainingLength=2 +
  * connectAckFlags (UByte; bit 0 carries Session Present per §3.2.2.1)
  * + returnCode (UByte per §3.2.2.3). Drives `ConnAckCodec`.

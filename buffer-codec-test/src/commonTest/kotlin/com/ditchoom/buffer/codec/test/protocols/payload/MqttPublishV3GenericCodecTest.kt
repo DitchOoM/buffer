@@ -12,7 +12,7 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 
 /**
- * Stage H slice 10b doctrine vector — generic-bounded
+ * Doctrine vector — generic-bounded
  * `MqttPublishV3<P : Payload>` with a constructor-injected
  * `Codec<P>`. Validates:
  *
@@ -23,7 +23,7 @@ import kotlin.test.assertEquals
  *      format with two distinct payload types (`JpegImage` and
  *      `TextPayload`) confirms it isn't accidentally JpegImage-
  *      specific.
- *   3. Wire bytes match the slice 10a concrete vector for the
+ * 3. Wire bytes match the concrete vector for the
  *      JpegImage instantiation — both shapes encode the same wire
  *      format; only the codec emit path differs.
  *   4. Round-trip succeeds for both payload types.
@@ -32,8 +32,8 @@ class MqttPublishV3GenericCodecTest {
     @Test
     fun jpegInstantiationByteExactMatchesConcreteVector() {
         // Wire bytes must match MqttPublishV3ConcreteCodecTest's
-        // `encodesByteExactWireFormat` exactly — slice 10a concrete
-        // and slice 10b generic emit the same wire format; only the
+        // `encodesByteExactWireFormat` exactly — concrete
+        // and generic emit the same wire format; only the
         // codec emit shape differs.
         val msg =
             MqttPublishV3<JpegImage>(
@@ -142,9 +142,9 @@ class MqttPublishV3GenericCodecTest {
                 packetId = PacketId(1u),
                 payload = JpegImage(0u, 0u, ByteArray(0)),
             )
-        // Same conservative-BackPatch contract as slice 10a — the
+        // Same conservative-BackPatch contract as — the
         // user codec might be Exact or BackPatch; we don't optimize
-        // the runtime cast in slice 10b.
+        // the runtime cast in.
         assertEquals(WireSize.BackPatch, codec.wireSize(msg, EncodeContext.Empty))
     }
 }

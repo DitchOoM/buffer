@@ -41,7 +41,7 @@ import kotlin.jvm.JvmInline
  * ### Dispatch shape on this branch
  *
  * `@DispatchOn` on the current branch requires a `@JvmInline value class` discriminator
- * (slice 6). Production code in the websocket repo uses the multi-field data-class form
+ * . Production code in the websocket repo uses the multi-field data-class form
  * `@DispatchOn(WsFrameHeader::class, framing = WsFraming::class)` — that variant ships
  * in `buffer-codec 4.3.0-SNAPSHOT`, which the websocket repo depends on but
  * `feature/directional-codec` (this branch) is upstream of.

@@ -7,7 +7,7 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import kotlin.jvm.JvmInline
 
 /**
- * Phase J.M.5 slice J.M.7.a — UByte-returning `@DispatchValue` vector.
+ * Slice — UByte-returning `@DispatchValue` vector.
  *
  * TCP control-bits byte (RFC 793 §3.1, byte offset 13 of the TCP
  * header). The 8-bit field carries (high to low) `CWR ECE URG ACK PSH
@@ -20,7 +20,7 @@ import kotlin.jvm.JvmInline
  * TCP implementation — real TCP carries arbitrary flag combinations
  * inside a single packet shape, not a sealed family.
  *
- * Slice J.M.7.a widens `@DispatchValue` return types to include
+ * Slice widens `@DispatchValue` return types to include
  * `UByte`. The dispatcher emits a `.toInt()` coercion at the dispatch
  * site so the `when (__dispatchValue)` branches stay Int-typed;
  * variants declare `@PacketType(value = N)` with `N` interpreted as

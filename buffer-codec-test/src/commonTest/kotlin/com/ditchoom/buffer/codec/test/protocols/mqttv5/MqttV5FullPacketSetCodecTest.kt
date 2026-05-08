@@ -22,7 +22,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * Phase J.M.5 slice 8 — end-to-end byte-exact regression suite for the
+ * End-to-end byte-exact regression suite for the
  * full v5.0 sealed [MqttV5Packet] family. Mirrors the v3 doctrine
  * vector at
  * `:buffer-codec-test/.../mqtt/MqttFullPacketSetCodecTest.kt` (Phase
@@ -45,7 +45,7 @@ import kotlin.test.assertEquals
  * NoFraming when their grammar-2 conditional fields are unbounded
  * upstream — but each ack carries an upstream `@UseCodec(MqttRemaining
  * LengthCodec)` bounding RL, so peek delegates to the bounding-codec
- * walker (slice 6) and `Complete(total)` is reachable.
+ * walker and `Complete(total)` is reachable.
  */
 class MqttV5FullPacketSetCodecTest {
     private val dispatcher = MqttV5PacketCodec(JpegImageCodec)

@@ -20,11 +20,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 /**
- * Phase J.M.5 slice 7 — CONNECT v5. Composes the always-present
- * property bag (slice 2 shape) and the conditional will-properties
- * (slice 5 shape, grammar 1 predicate `connectFlags.willPresent`)
+ * CONNECT v5. Composes the always-present
+ * property bag ( shape) and the conditional will-properties
+ * ( shape, grammar 1 predicate `connectFlags.willPresent`)
  * with the existing v3-shape will/username/password fields
- * (`@LengthPrefixed @When val: String?` from slice 3.5).
+ * (`@LengthPrefixed @When val: String?` from.5).
  *
  * Will-message / password are modeled as `String` (per §3.1.3.3 they
  * are technically arbitrary bytes; binary modeling via `@Payload WP /

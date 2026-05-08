@@ -33,41 +33,41 @@ import com.squareup.kotlinpoet.U_LONG
 import com.squareup.kotlinpoet.U_SHORT
 
 /**
- * Stage A + B + C + D emitter.
+ * Emitter.
  *
  * Generates a sibling `object ${MessageName}Codec : Codec<${MessageName}>`
  * for each `@ProtocolMessage`-annotated symbol whose shape fits the
  * supported surface:
  *
- *   - **Stage A — fixed-size unsigned scalar fields.** A `data class`
+ * ** — fixed-size unsigned scalar fields.** A `data class`
  *     (or `@JvmInline value class`) with one or more `UByte` /
  *     `UShort` / `UInt` / `ULong` fields, each with optional
  *     `@WireOrder` per-field overrides of the message-level wireOrder.
- *   - **Stage A — `@LengthPrefixed @ProtocolMessage`-typed body.** A
+ * ** — `@LengthPrefixed @ProtocolMessage`-typed body.** A
  *     trailing field of `@ProtocolMessage` data class type, length-
  *     prefixed by `LengthPrefix.{Byte|Short|Int}` in the message wire
  *     order; emitter generates `setLimit` + restore decode, prefix-
- *     peek `peekFrameSize`, and the slice-4 lock #4 `Int.MAX_VALUE`
+ * peek `peekFrameSize`, and the lock #4 `Int.MAX_VALUE`
  *     overflow guards.
- *   - **Stage B — `@WireBytes(N)` narrowing.** A scalar field whose
+ * ** — `@WireBytes(N)` narrowing.** A scalar field whose
  *     wire width is narrower than the Kotlin type's natural size.
  *     Always uses manual byte assembly; effective byte order falls
  *     back to `Big` (network) when neither the field nor the message
  *     declares one. Encode emits an `EncodeException` runtime guard
  *     when the value exceeds the narrowed range.
- *   - **Stage B — value-class wrapper at the top level.** A
+ * ** — value-class wrapper at the top level.** A
  *     `@JvmInline value class` with a single inner unsigned scalar is
  *     treated as a one-field shape. The codec wraps the read scalar
  *     into the value class on decode and unwraps it via the inner
  *     property name on encode. Bit-packed logical fields exposed as
  *     getters in user code are invisible to the emitter (they
  *     introduce no wire format).
- *   - **Stage C — signed scalar fields.** `Byte` / `Short` / `Int` /
+ * ** — signed scalar fields.** `Byte` / `Short` / `Int` /
  *     `Long` at their natural width and the message's default byte
  *     order. Manual byte assembly stays unsigned-only; signed scalars
  *     with `@WireBytes` or explicit `@WireOrder` are silently skipped
  *     until a vector justifies the sign-extension design.
- *   - **Stage C — `@LengthPrefixed val: String` terminal.** A
+ * ** — `@LengthPrefixed val: String` terminal.** A
  *     trailing `String` field with a `LengthPrefix.{Byte|Short|Int}`
  *     prefix in the message wire order. Encode reserves the prefix
  *     slot, writes the body via the runtime's `writeString(text,
@@ -77,7 +77,7 @@ import com.squareup.kotlinpoet.U_SHORT
  *     runtime guard when the UTF-8 byte length exceeds the prefix's
  *     range; for 4-byte prefixes the check is skipped because Int
  *     position deltas can never exceed UInt max.
- *   - **Stage D — simple sealed dispatch with `@PacketType`.** A
+ * ** — simple sealed dispatch with `@PacketType`.** A
  *     `@ProtocolMessage sealed interface` whose direct sealed
  *     subclasses each carry `@PacketType(value)` produces a
  *     dispatcher object: `decode` reads a 1-byte discriminator and
@@ -89,24 +89,24 @@ import com.squareup.kotlinpoet.U_SHORT
  *     `@LengthPrefixed @ProtocolMessage` body), and `peekFrameSize`
  *     peeks the discriminator and delegates to the variant's peek
  *     with `baseOffset + 1`. Unknown discriminator at decode or peek
- *     time throws `DecodeException` per Locked Decision row 17. Skips
- *     when the parent carries `@DispatchOn` (Stage F).
- *   - **Stage E slice 2 — `@When` against a sibling `Boolean`.**
+ * time throws `DecodeException` per. Skips
+ * when the parent carries `@DispatchOn`.
+ * ** — `@When` against a sibling `Boolean`.**
  *     A constructor parameter `@When("siblingField") val name: T?`
  *     where `siblingField` is a non-nullable `Boolean` parameter
  *     declared before this one. Decode emits
  *     `val name: T? = if (sibling) <readT> else null`; encode skips
  *     the slot entirely when the predicate is false (zero bytes),
  *     and throws `EncodeException` if the predicate is true and the
- *     field is null. Per Locked Decision row 19, any `@When`
+ * field is null. Per, any `@When`
  *     field collapses message-level `WireSize` to `BackPatch`.
  *     `peekFrameSize` walks scalar prefix fields, peeks the boolean
  *     source statically, and adds the inner field's bytes only when
- *     the predicate is true. Slice 2 also adds `Boolean` as a 1-byte
- *     scalar (no `@WireBytes` / `@WireOrder`); slice 2 inner is
+ * the predicate is true. also adds `Boolean` as a 1-byte
+ * scalar (no `@WireBytes` / `@WireOrder`); inner is
  *     restricted to natural-width Scalar — `@LengthPrefixed` inner
- *     lands in slice 5 alongside MQTT v3 CONNECT.
- *   - **Stage E slice 3 — dotted `@When("sibling.property")` plus
+ * lands in alongside MQTT v3 CONNECT.
+ * ** — dotted `@When("sibling.property")` plus
  *     value-class fields.** A constructor parameter whose type is a
  *     `value class` with a single supported-scalar primary
  *     constructor parameter is a first-class field shape: decode
@@ -120,7 +120,7 @@ import com.squareup.kotlinpoet.U_SHORT
  *     `peekFrameSize` peeks the value class's inner-scalar bytes at
  *     the sibling's offset, reconstructs the value class, and calls
  *     the predicate property. `@WireBytes` / `@WireOrder` on the
- *     outer parameter are out of scope for slice 3.
+ * outer parameter are out of scope for.
  *
  * Anything outside this surface — `@LengthFrom`, `@RemainingBytes`,
  * `@UseCodec`, `@DispatchOn`, signed scalars in the manual-byte-
@@ -136,8 +136,8 @@ internal class CodecEmitter(
     fun tryEmit(symbol: KSClassDeclaration) {
         val sourceFile = symbol.containingFile ?: return
         if (Modifier.SEALED in symbol.modifiers && symbol.classKind == ClassKind.INTERFACE) {
-            // Slice 6 — try the @DispatchOn dispatcher path first; if the
-            // parent doesn't carry the annotation, fall back to Stage D's
+            // Try the @DispatchOn dispatcher path first; if the
+            // parent doesn't carry the annotation, fall back to 's
             // simple dispatcher.
             val dispatchOnShape = analyzeDispatchOnSealedDispatcher(symbol)
             if (dispatchOnShape != null) {
@@ -186,7 +186,7 @@ internal class CodecEmitter(
         // buildPeekFrameFun collapses to the all-FixedSize Complete(0)
         // path.
         //
-        // Phase J.M.5 slice 15h — when the singleton is a sealed
+        // When the singleton is a sealed
         // subclass under `@DispatchOn(value class)`, capture the
         // discriminator's inner scalar kind plus the variant's
         // `@PacketType.value`. The dispatcher peeks-and-resets, so the
@@ -215,7 +215,7 @@ internal class CodecEmitter(
         if (!isData && !isValue) return null
         if (Modifier.SEALED in symbol.modifiers) return null
         if (symbol.annotations.any { it.shortName.asString() == "DispatchOn" }) return null
-        // `@PacketType` on a data class is a Stage D variant — emit its standalone
+        // `@PacketType` on a data class is a variant — emit its standalone
         // codec via the existing data-class path. The dispatcher (separate emit
         // path keyed on the sealed parent) calls `${VariantSimpleName}Codec`.
         val ctor = symbol.primaryConstructor ?: return null
@@ -244,12 +244,12 @@ internal class CodecEmitter(
                 ) ?: return null
             fields += field
         }
-        // Slice 4 / 7a restriction (still in force): LengthFromString and
-        // LengthFromList are terminal-only — their bodies consume a
-        // (possibly externally-bounded) trailing byte range and the emit
-        // logic doesn't model trailing fields after a variable-length tail.
-        // Slice 5b lifted the non-terminal-Conditional restriction.
-        // Phase I.1: at most one bounding field per message. A bounding
+        // Terminal-only restriction: LengthFromString and LengthFromList
+        // bodies consume a (possibly externally-bounded) trailing byte
+        // range and the emit logic doesn't model trailing fields after a
+        // variable-length tail. The non-terminal-Conditional restriction
+        // does not apply.
+        // At most one bounding field per message. A bounding
         // `UseCodecScalar` (codec implements `BoundingLengthCodec`) narrows
         // `buffer.limit()` mid-decode; multiple of them would have ambiguous
         // semantics (last-one-wins isn't a real protocol's wire shape).
@@ -257,12 +257,12 @@ internal class CodecEmitter(
         for ((index, field) in fields.withIndex()) {
             if (field is FieldSpec.LengthFromString && index != fields.lastIndex) return null
             if (field is FieldSpec.LengthFromList && index != fields.lastIndex) return null
-            // J.M.6.b — `@LengthFrom val: T : @ProtocolMessage` is terminal-only
+            // `@LengthFrom val: T: @ProtocolMessage` is terminal-only
             // (mirror of `LengthPrefixedMessage`'s terminal-only rule). Lifting
             // would require dispatcher-side wireSize composition that doesn't
             // exist yet for nested-message bodies sized by a sibling.
             if (field is FieldSpec.LengthFromMessage && index != fields.lastIndex) return null
-            // J.M.6.c (issue #151 part 2) — `@RemainingBytes` no longer has
+            // (issue #151 part 2) — `@RemainingBytes` no longer has
             // to be the last field. Trailing fields must all be
             // `FieldSpec.FixedSize` (Scalar + ValueClassScalar today, not
             // UseCodecScalar) so the decode emit can subtract a known byte
@@ -291,7 +291,7 @@ internal class CodecEmitter(
             }
         }
 
-        // J.M.6.c — fill in `reservedTrailingBytes` on every non-terminal
+        // Fill in `reservedTrailingBytes` on every non-terminal
         // `RemainingBytes*` field. Terminal cases (default 0) keep
         // existing emit behavior; non-terminal cases drive the decode
         // emit's `buffer.limit() - <reserved>` adjustment.
@@ -313,7 +313,7 @@ internal class CodecEmitter(
         }
 
         val pkg = symbol.packageName.asString()
-        // Slice 10b: if the data class declares <P : Payload> but no
+        // If the data class declares <P: Payload> but no
         // RemainingBytesPayload field uses it via ConstructorInjected,
         // the type parameter is unused — return null so the emitter
         // skips. The validator in ProtocolMessageProcessor surfaces
@@ -338,7 +338,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 15h — when [symbol] is a sealed subclass under
+     * When [symbol] is a sealed subclass under
      * a parent annotated `@DispatchOn(value class)` AND carries
      * `@PacketType(value = N)`, return the discriminator self-frame
      * spec (inner scalar kind + literal value). Returns null when the
@@ -385,7 +385,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 14b — detect `@FramedBy(codec, after)` on a
+     * Detect `@FramedBy(codec, after)` on a
      * `@ProtocolMessage` class. Returns null when the annotation is
      * absent. When present, captures the codec target's class name (so
      * the emit can reference it as `MqttRemainingLengthCodec.encode(...)`
@@ -399,7 +399,7 @@ internal class CodecEmitter(
     private fun detectFramedBy(symbol: KSClassDeclaration): FramedByConfig? {
         // Direct annotation on this symbol.
         symbol.annotations.firstOrNull(::isFramedByAnn)?.let { return parseFramedBy(it) }
-        // Phase J.M.5 slice 14c — inherited from a sealed parent. Per Q3 of
+        // Inherited from a sealed parent. Per Q3 of
         // the 14b handoff, every variant of a `@FramedBy` sealed parent
         // inherits the framing rule. Walking declared `superTypes` (rather
         // than `getAllSuperTypes`) keeps the lookup cheap and matches the
@@ -436,13 +436,13 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage H slice 10b — detect whether the `@ProtocolMessage` data
+     * Detect whether the `@ProtocolMessage` data
      * class declares a `<P : Payload>` type parameter. Returns the
      * binding (`typeVariableName`, derived `codecParameterName`,
      * `Payload` bound) when exactly one type parameter is present
      * and its upper bound is `com.ditchoom.buffer.codec.Payload`.
      *
-     * Slice 10b narrow: at most one type parameter, single Payload
+     * Narrow: at most one type parameter, single Payload
      * bound. Multiple type parameters and arbitrary bounds defer.
      */
     private fun detectPayloadTypeParameter(symbol: KSClassDeclaration): PayloadTypeParameter? {
@@ -469,7 +469,7 @@ internal class CodecEmitter(
      * Builds a `ClassName` that walks parent declarations so a nested
      * variant like `Command.Ping` is referenced correctly. Top-level
      * classes degrade to `ClassName(pkg, simpleName)` — same shape as
-     * before. Stage D variants are written nested inside the sealed
+     * before. variants are written nested inside the sealed
      * parent (matching the `@PacketType` kdoc), so this is required
      * for variant `messageClassName` references in the generated
      * `Codec<Command.Ping>` interface and the dispatcher's `is Ping`
@@ -487,7 +487,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * J.M.6.c — true when every field at index > `fromIndex` is a
+     * True when every field at index > `fromIndex` is a
      * `FieldSpec.FixedSize` (Scalar + ValueClassScalar). Used by the
      * non-terminal `@RemainingBytes` qualification check: such trailers
      * have a known wire-byte count, so the body decode can subtract that
@@ -507,7 +507,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * J.M.6.c — sum of `wireBytes` for every `FieldSpec.FixedSize` field
+     * Sum of `wireBytes` for every `FieldSpec.FixedSize` field
      * after `fromIndex`. Caller must have already verified via
      * [trailingFieldsAreFixedSize] that the tail qualifies; the
      * `filterIsInstance` is defensive (mirrors [sumOfFixedWireBytes]).
@@ -530,7 +530,7 @@ internal class CodecEmitter(
         index: Int,
         payloadTypeParameter: PayloadTypeParameter? = null,
     ): FieldSpec? {
-        // Stage E — `@When` opens a separate analysis path: nullability is
+        // `@When` opens a separate analysis path: nullability is
         // required, the inner shape is built from the non-null type, and the
         // result wraps in `FieldSpec.Conditional`. The non-conditional analysis
         // below stays unchanged for any field without `@When`.
@@ -568,15 +568,15 @@ internal class CodecEmitter(
         if (type.isMarkedNullable) return null
 
         if (remainingBytesAnn != null) {
-            // Stage G slice 7b — `@RemainingBytes val: List<S>` where S is
+            // `@RemainingBytes val: List<S>` where S is
             // a single-byte scalar. Mutually exclusive with @LengthFrom /
             // @LengthPrefixed / @WireBytes on the SAME parameter (a bounding
-            // sibling field — Phase I.1's `@UseCodec(BoundingLengthCodec)`
-            // — is expected and composes via the slice 10f Partial
+            // sibling field — 's `@UseCodec(BoundingLengthCodec)`
+            // is expected and composes via the Partial
             // outer-limit machinery).
-            // Stage H slice 10a — `@RemainingBytes @UseCodec val: P` where
+            // `@RemainingBytes @UseCodec val: P` where
             // P : Payload routes to RemainingBytesPayload.
-            // Stage H slice 10b — `@RemainingBytes val: P` where P is the
+            // `@RemainingBytes val: P` where P is the
             // type parameter `<P : Payload>` of the enclosing data class
             // routes to RemainingBytesPayload via ConstructorInjected.
             if (lengthFromAnn != null || lengthPrefixed != null || wireBytesAnn != null) return null
@@ -601,28 +601,27 @@ internal class CodecEmitter(
                 return FieldSpec.RemainingBytesString(name = name, ownerSimpleName = ownerSimpleName)
             }
             if (typeQname != "kotlin.collections.List") return null
-            // Phase J.M.0 — only the `@ProtocolMessage` element shape is
-            // accepted now; slice 15g retired the scalar-element fallback
+            // Only the `@ProtocolMessage` element shape is
+            // accepted now; retired the scalar-element fallback
             // (rejected at the validator with a focused diagnostic
             // pointing at the sealed-dispatcher / `BinaryData` paths).
             return analyzeRemainingBytesProtocolMessageListField(param, type, ownerSimpleName)
         }
 
         if (lengthFromAnn != null) {
-            // Stage E slice 4 / Stage G slice 7a / J.M.6.b — `@LengthFrom`
-            // field types:
-            //   - `String` (slice 4): body is a single UTF-8 string sized
-            //     by sibling.
-            //   - `List<T>` where T is a `@ProtocolMessage data class`
-            //     (slice 7a): body is a sequence of nested messages,
-            //     byte-bounded by sibling.
+            // `@LengthFrom` field types:
+            //   - `String`: body is a single UTF-8 string sized by the
+            //     sibling.
+            //   - `List<T>` where T is a `@ProtocolMessage` data class:
+            //     body is a sequence of nested messages, byte-bounded by
+            //     the sibling.
             //   - `T` where T is a `@ProtocolMessage` data class or sealed
-            //     parent (J.M.6.b — issue #151 part 1): body is a single
-            //     nested message; sibling length covers the whole nested
-            //     wire form. Mirrors `LengthPrefixedMessage` but draws the
+            //     parent (issue #151 part 1): body is a single nested
+            //     message; the sibling length covers the whole nested wire
+            //     form. Mirrors `LengthPrefixedMessage` but draws the
             //     length from a sibling rather than an inline prefix.
             // Mutually exclusive with `@LengthPrefixed` / `@WireBytes` on
-            // the same parameter. R1 (adjacent-LF migration suggestion) is
+            // the same parameter. The adjacent-LF migration suggestion is
             // independent.
             if (lengthPrefixed != null || wireBytesAnn != null) return null
             val typeQname = type.declaration.qualifiedName?.asString()
@@ -660,7 +659,7 @@ internal class CodecEmitter(
             // `@LengthPrefixed` and `@WireBytes` together is meaningless and
             // out of scope for this emitter; bail rather than try to interpret.
             if (wireBytesAnn != null) return null
-            // Phase I.1 step 11 — `@LengthPrefixed @UseCodec(C::class) val xs:
+            // `@LengthPrefixed @UseCodec(C::class) val xs:
             // List<E>` routes to LengthPrefixedUseCodecList. The codec drives
             // the wire-format prefix (var-byte-int, etc.) and bounds the
             // element-decode region via `applyBound`. The validator surfaces
@@ -668,8 +667,8 @@ internal class CodecEmitter(
             // @ProtocolMessage); analyzer returns null silently for shapes
             // outside the slice.
             if (useCodecAnn != null) {
-                // Try the list shape first (slice 11), then fall back to the
-                // scalar Payload shape (slice 15a). The list analyzer
+                // Try the list shape first, then fall back to the
+                // scalar Payload shape. The list analyzer
                 // returns null for non-`List<...>` field types, so the two
                 // shapes are mutually exclusive.
                 analyzeLengthPrefixedUseCodecListField(
@@ -690,7 +689,7 @@ internal class CodecEmitter(
             val prefixWidth = readLengthPrefix(lengthPrefixed)
             val qualified = type.declaration.qualifiedName?.asString()
             if (qualified == "kotlin.String") {
-                // Slice 5a: `@LengthPrefixed val: String` is now allowed at any
+                // `@LengthPrefixed val: String` is now allowed at any
                 // position. Decode reads prefix + body; encode uses BackPatch
                 // and restores position past the body, so subsequent fields
                 // emit cleanly. The sequential peek walk handles the prefix
@@ -730,7 +729,7 @@ internal class CodecEmitter(
         }
 
         if (useCodecAnn != null) {
-            // Phase I.1 — bare `@UseCodec` on a non-Payload, non-type-parameter
+            // Bare `@UseCodec` on a non-Payload, non-type-parameter
             // scalar (or value-class scalar). The validator (step 3) ensures
             // the codec target is a Kotlin `object` implementing `Codec<T>`
             // for T matching the field type; emit just records the codec
@@ -745,12 +744,12 @@ internal class CodecEmitter(
         val qualified = type.declaration.qualifiedName?.asString() ?: return null
         val kind = SUPPORTED_SCALARS[qualified]
         if (kind == null) {
-            // Stage E slice 3 — value-class field. Only the natural-width
+            // Value-class field. Only the natural-width
             // unannotated path is in scope; @WireBytes / @WireOrder on the
             // outer parameter widen this and are deferred to a later slice.
             if (wireBytesAnn != null) return null
             if (param.annotations.any { it.shortName.asString() == "WireOrder" }) return null
-            // Phase J.M.5 slice 11b — try the bare `val: T : @ProtocolMessage`
+            // Try the bare `val: T: @ProtocolMessage`
             // shape (data class or sealed parent) before the value-class
             // fallback. Value classes carry `Modifier.VALUE` and don't carry
             // `Modifier.DATA`/`Modifier.SEALED`, so the two branches are
@@ -784,7 +783,7 @@ internal class CodecEmitter(
         if (wireBytes > kind.width) return null
         // Signed scalars only support the natural-width default-order path here.
         // Manual byte assembly stays unsigned-only — sign extension on a partial
-        // read is its own design and not load-bearing for any Stage C–H vector.
+        // read is its own design and not load-bearing for any –H vector.
         if (kind.isSigned && (wireBytes != kind.width || resolved != Endianness.Default)) return null
         return FieldSpec.Scalar(
             name = name,
@@ -795,7 +794,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage E slice 3 — value-class field analysis for the parent
+     * Value-class field analysis for the parent
      * data class. The field's type must be a `value class` whose
      * primary constructor takes a single supported-scalar parameter.
      * Wire form is the inner scalar at natural width and
@@ -822,7 +821,7 @@ internal class CodecEmitter(
         if (innerType.isMarkedNullable) return null
         val innerQname = innerType.declaration.qualifiedName?.asString() ?: return null
         val innerKind = SUPPORTED_SCALARS[innerQname] ?: return null
-        // Slice 3 limits the inner scalar to its natural-width default-order
+        // Limits the inner scalar to its natural-width default-order
         // path. @WireBytes / @WireOrder on the inner property would widen the
         // shape and are deferred along with the same widening on direct
         // scalar fields.
@@ -840,28 +839,27 @@ internal class CodecEmitter(
             innerKind = innerKind,
             innerPropertyName = innerName,
             wireBytes = innerKind.width,
-            // Slice 9 follow-up: propagate the value class's own
+            // Follow-up: propagate the value class's own
             // `@ProtocolMessage(wireOrder)` so multi-byte inner kinds
             // (UShort/UInt) assemble bytes correctly during peek-side
             // reconstruction in the sequential walk. Defaults to
             // Endianness.Default (collapses to big-endian) when the
-            // value class doesn't declare an order, matching slice 3's
+            // value class doesn't declare an order, matching 's
             // prior behavior.
             valueClassWireOrder = readMessageWireOrder(decl),
         )
     }
 
     /**
-     * Stage E slice 4 / Stage G slice 9 — `@LengthFrom("ref") val:
-     * String`. Two source-expression forms:
-     *   - Simple-name `"sibling"` (slice 4): sibling is a numeric
-     *     `Scalar`; body byte count = `sibling.toInt()`.
-     *   - Dotted `"sibling.property"` (slice 9): sibling is a
-     *     value-class field; body byte count = `sibling.property`
-     *     (the property returns `Int` directly).
+     * `@LengthFrom("ref") val: String`. Two source-expression forms:
+     *   - Simple-name `"sibling"`: sibling is a numeric `Scalar`; body
+     *     byte count = `sibling.toInt()`.
+     *   - Dotted `"sibling.property"`: sibling is a value-class field;
+     *     body byte count = `sibling.property` (the property returns `Int`
+     *     directly).
      *
-     * Returns null silently for any shape the validator already
-     * names — the validator's diagnostic is the user-facing surface.
+     * Returns null silently for any shape the validator already names —
+     * the validator's diagnostic is the user-facing surface.
      */
     private fun analyzeLengthFromStringField(
         param: KSValueParameter,
@@ -889,14 +887,13 @@ internal class CodecEmitter(
     }
 
     /**
-     * Slice 4 / Stage G slice 9 — resolve a `@LengthFrom` annotation
-     * argument into a typed `LengthSource`. Simple-name `"sibling"`
-     * → `LengthSource.Sibling`; dotted `"sibling.property"` →
-     * `LengthSource.ValueClassProperty`. Returns null when the shape
-     * is out of scope (missing sibling, declared-after, simple form
-     * with non-numeric sibling, dotted form with non-value-class
-     * sibling or non-Int-returning property) — the validator's
-     * diagnostic is the user-facing surface.
+     * Resolve a `@LengthFrom` annotation argument into a typed
+     * `LengthSource`. Simple-name `"sibling"` → `LengthSource.Sibling`;
+     * dotted `"sibling.property"` → `LengthSource.ValueClassProperty`.
+     * Returns null when the shape is out of scope (missing sibling,
+     * declared-after, simple form with non-numeric sibling, dotted form
+     * with non-value-class sibling or non-Int-returning property) — the
+     * validator's diagnostic is the user-facing surface.
      */
     private fun analyzeLengthSource(
         referenced: String,
@@ -912,7 +909,7 @@ internal class CodecEmitter(
         if (siblingType.isError || siblingType.isMarkedNullable) return null
         if (propertyName == null) {
             // Simple form: sibling must be a numeric scalar in the peekable
-            // kind set (slice 4).
+            // kind set.
             val siblingQname = siblingType.declaration.qualifiedName?.asString() ?: return null
             val siblingKind = SUPPORTED_SCALARS[siblingQname] ?: return null
             if (siblingKind !in peekableLengthFromSiblingKinds) return null
@@ -949,7 +946,7 @@ internal class CodecEmitter(
         setOf(ScalarKind.UByte, ScalarKind.Byte, ScalarKind.UShort, ScalarKind.UInt)
 
     /**
-     * Stage G slice 7a — `@LengthFrom("siblingField") val: List<T>`
+     * `@LengthFrom("siblingField") val: List<T>`
      * where `T` is a `@ProtocolMessage data class`. Same sibling-
      * resolution rules as `analyzeLengthFromStringField`; the
      * difference is the bound field's wire shape (variable-count
@@ -1004,7 +1001,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * J.M.6.b (issue #151 part 1) — `@LengthFrom("siblingField") val: T`
+     * (issue #151 part 1) — `@LengthFrom("siblingField") val: T`
      * where `T` is a `@ProtocolMessage` data class or sealed parent. The
      * sibling resolves a length value (same `LengthSource` as
      * [analyzeLengthFromStringField] / [analyzeLengthFromListField]) that
@@ -1067,15 +1064,15 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.0 — `@RemainingBytes val: List<T>` where `T` is a
+     * `@RemainingBytes val: List<T>` where `T` is a
      * `@ProtocolMessage data class`. Sister of
-     * `analyzeLengthFromListField` (slice 7a, sibling-bounded) for the
+     * `analyzeLengthFromListField` (, sibling-bounded) for the
      * caller-bounded variant: instead of a sibling length carrier, the
      * outer protocol's framing sets `buffer.limit()` before delegating,
      * and the read loop runs `while (position < limit)`.
      *
      * Returns null silently when the list element isn't a
-     * `@ProtocolMessage data class` / sealed parent; slice 15g retired
+     * `@ProtocolMessage data class` / sealed parent; retired
      * the scalar-element fallback, so non-message element types are
      * rejected at the validator now.
      */
@@ -1090,8 +1087,8 @@ internal class CodecEmitter(
         val elementType = typeArgs[0].type?.resolve() ?: return null
         if (elementType.isError || elementType.isMarkedNullable) return null
         val elementDecl = elementType.declaration as? KSClassDeclaration ?: return null
-        // Phase J.M.5 slice 11a — widened to also accept a `@ProtocolMessage`
-        // sealed parent (with `@DispatchOn`). Mirrors the audit-2a widening
+        // Widened to also accept a `@ProtocolMessage`
+        // sealed parent (with `@DispatchOn`). Mirrors the widening
         // applied to `analyzeLengthPrefixedListSpec`. The encode emit
         // (`appendEncodeRemainingBytesProtocolMessageList`) calls the
         // element's `Codec.encode(...)` per element — for a sealed parent
@@ -1109,8 +1106,8 @@ internal class CodecEmitter(
                         ?.asString() == PROTOCOL_MESSAGE_QNAME
             }
         if (!isProtocolMessage) return null
-        // Phase J.M.5 slice 11a — same payload-generic reject as
-        // `analyzeLengthPrefixedListSpec` (slice 10d rule). A `<P :
+        // Same payload-generic reject as
+        // `analyzeLengthPrefixedListSpec` ( rule). A `<P:
         // Payload>` element generates a generic-class codec, not a
         // singleton object; the per-element `<E>Codec.encode(...)` call
         // requires the singleton form.
@@ -1129,7 +1126,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 11b — bare `val: T` where T is a `@ProtocolMessage`
+     * Bare `val: T` where T is a `@ProtocolMessage`
      * data class or sealed parent (with `@DispatchOn`). Mirrors
      * [analyzeRemainingBytesProtocolMessageListField] for element-type
      * requirements: data class OR sealed parent, `@ProtocolMessage`-
@@ -1179,7 +1176,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage H slice 10a — `@RemainingBytes @UseCodec(C::class) val: P`
+     * `@RemainingBytes @UseCodec(C::class) val: P`
      * where `P` extends `com.ditchoom.buffer.codec.Payload` and `C` is
      * a Kotlin `object` implementing `Codec<P>`. Returns null silently
      * for shapes the validator rejects (target not an `object`, target
@@ -1211,7 +1208,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase I.1 — bare `@UseCodec(C::class) val: <scalar>`. Resolves the
+     * Bare `@UseCodec(C::class) val: <scalar>`. Resolves the
      * field's declared `TypeName` (primitive scalar via [scalarTypeName]
      * or value-class via [classNameOf]) and inspects the codec's
      * supertype chain to decide whether `C` implements
@@ -1248,7 +1245,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase I.1 step 11 — `@LengthPrefixed @UseCodec(C::class) val xs:
+     * `@LengthPrefixed @UseCodec(C::class) val xs:
      * List<E>` analyzer. Returns the new shape when:
      *   - field type is `kotlin.collections.List<E>` with E a
      *     `@ProtocolMessage data class`,
@@ -1274,7 +1271,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 15a — `@LengthPrefixed @UseCodec(C::class) val:
+     * `@LengthPrefixed @UseCodec(C::class) val:
      * T` where `T` is a `Payload`-marked type and `C` is a Kotlin
      * `object` implementing `Codec<T>`. Scalar counterpart of
      * [analyzeLengthPrefixedUseCodecListField] / the
@@ -1293,7 +1290,7 @@ internal class CodecEmitter(
         prefixWireOrder: Endianness,
     ): FieldSpec.LengthPrefixedUseCodecPayload? {
         val name = param.name?.asString() ?: return null
-        // J.M.7.b — `kotlin.String` rides the same shape as `T : Payload`:
+        // `kotlin.String` rides the same shape as `T: Payload`:
         // prefix + body bytes, codec is `Codec<String>`. Validator surfaces
         // any user-facing diagnostic.
         val isString = type.declaration.qualifiedName?.asString() == "kotlin.String"
@@ -1317,17 +1314,17 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 audit-2a — shared element + codec validation for the
+     * Shared element + codec validation for the
      * VBI-prefixed list shape. Returns the shape `spec` or `null` if any
      * constraint fails (caller falls through, validator surfaces the
      * focused diagnostic).
      *
-     * Element must be either a `@ProtocolMessage data class` (slice 11)
+     * Element must be either a `@ProtocolMessage data class`
      * OR a `@ProtocolMessage` sealed parent with `@DispatchOn` (Phase
-     * J.M.5 widening). Both shapes emit a singleton-object codec whose
+     * Widening). Both shapes emit a singleton-object codec whose
      * `decode(buffer, context)` / `encode(buffer, value, context)`
      * signatures match the emit helpers' calls. Payload-generic elements
-     * reject (slice 10d detection rule) — the emitter's static call form
+     * reject ( detection rule) — the emitter's static call form
      * requires a singleton-object codec. Codec must implement
      * `BoundingLengthCodec<UInt>` (validator-checked diagnostic adds
      * the focused message; this analyzer rejects silently).
@@ -1375,7 +1372,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 audit-2b — analyze-time predicate driving the
+     * Analyze-time predicate driving the
      * scratch-vs-pre-measure path selection in
      * [appendEncodeLengthPrefixedListBody]. Returns `true` when the
      * element's variant codec will produce a `WireSize.BackPatch` at
@@ -1417,7 +1414,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage H slice 10a — does this type implement
+     * Does this type implement
      * `com.ditchoom.buffer.codec.Payload`? Used in `analyzeField` to
      * route `@RemainingBytes @UseCodec` on a Payload-typed field to
      * `RemainingBytesPayload` (the analyzer falls through to other
@@ -1432,7 +1429,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase I.1 — does this codec class implement
+     * Does this codec class implement
      * `com.ditchoom.buffer.codec.BoundingLengthCodec`? Used by the
      * bare-`@UseCodec` analyze path to mark scalar fields whose decoded
      * value should narrow `buffer.limit()` for subsequent decode. Walks
@@ -1446,7 +1443,7 @@ internal class CodecEmitter(
         }
 
     /**
-     * Phase I.1 step 5 — per-field-type peek-budget table.
+     * Per-field-type peek-budget table.
      *
      * The framework's generic `@UseCodec` peek walker (step 6) materializes
      * a non-consuming view via `stream.peekBuffer(offset, maxBytes)` and
@@ -1482,7 +1479,7 @@ internal class CodecEmitter(
         }
 
     /**
-     * Stage H slice 10b — does this type refer to the message's
+     * Does this type refer to the message's
      * declared `<P : Payload>` type parameter? KSP represents type-
      * parameter references as a `KSTypeParameter` declaration with
      * the parameter's simple name; the qualified name is null. The
@@ -1495,7 +1492,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage E slices 2–3 — `@When` analysis (Locked Decision row 19).
+     * `@When` analysis.
      *
      * Pipeline: parse the expression into a typed `WhenExpression`
      * → resolve the source against the prior siblings into a
@@ -1504,7 +1501,7 @@ internal class CodecEmitter(
      * abort silently when the shape is out-of-scope; the validator in
      * `ProtocolMessageProcessor` surfaces the user-facing diagnostic.
      *
-     * Slice 5 will grow [analyzeConditionalInner] to recognise
+     * Will grow [analyzeConditionalInner] to recognise
      * `@LengthPrefixed val: String` inners; nothing else in this
      * function changes for that step.
      */
@@ -1535,7 +1532,7 @@ internal class CodecEmitter(
     /**
      * Bound parameter must be nullable (so absence is representable
      * when the predicate is false). Annotations beyond `@When`
-     * itself are limited to `@LengthPrefixed` (slice 3.5);
+     * itself are limited to `@LengthPrefixed` (.5);
      * `@WireBytes` / `@WireOrder` widen the shape and land in a
      * later slice.
      */
@@ -1558,7 +1555,7 @@ internal class CodecEmitter(
      * Grammar 1 (sibling-based): `"siblingField"` or
      * `"siblingField.property"`.
      *
-     * Grammar 2 (Phase J.M.5): `"remaining <op> <int>"` where `<op>` is
+     * Grammar 2: `"remaining <op> <int>"` where `<op>` is
      * one of `>=`, `>`, `==`. Used for cascading optional trailing fields
      * in MQTT v5 (PUBACK / PUBREC / PUBREL / PUBCOMP / UNSUBACK /
      * DISCONNECT / AUTH §3.4.2.1 et al). The identifier `remaining` is
@@ -1653,7 +1650,7 @@ internal class CodecEmitter(
         if (sourceType.isError || sourceType.isMarkedNullable) return null
         val siblingDecl = sourceType.declaration as? KSClassDeclaration ?: return null
         if (Modifier.VALUE !in siblingDecl.modifiers) return null
-        // Slice 3 peek-side reconstructs the value class via its
+        // Peek-side reconstructs the value class via its
         // primary constructor, so the value class must have exactly
         // one supported-scalar inner. Without this guard, `analyzeField`
         // would refuse to model the sibling as `ValueClassScalar`,
@@ -1683,7 +1680,7 @@ internal class CodecEmitter(
     /**
      * Analyze the bound parameter's inner shape. Slices 2/3 supported
      * any natural-width supported scalar at `Endianness.Default`;
-     * slice 3.5 widens to `@LengthPrefixed val: String?` for the MQTT
+     * Widens to `@LengthPrefixed val: String?` for the MQTT
      * v3 CONNECT optional fields. The branch is on the presence of
      * `@LengthPrefixed` on the bound parameter; further widenings
      * (`@LengthPrefixed @ProtocolMessage` body, `@WireBytes`-narrowed
@@ -1701,9 +1698,9 @@ internal class CodecEmitter(
         val innerType = param.type.resolve().makeNotNullable()
         val qualified = innerType.declaration.qualifiedName?.asString() ?: return null
         if (lengthPrefixedAnn != null && useCodecAnn != null) {
-            // Phase J.M.5 — `@When @LengthPrefixed @UseCodec(C) val xs:
+            // `@When @LengthPrefixed @UseCodec(C) val xs:
             // List<E>?` cascading-trailer property bag for v5 acks
-            // (slice 11 list shape) OR slice 15d's
+            // ( list shape) OR 's
             // `@When @LengthPrefixed @UseCodec(C) val: T?` where
             // T : Payload (CONNECT will-payload + password). Try the
             // list path first; fall through to the payload path.
@@ -1719,7 +1716,7 @@ internal class CodecEmitter(
             )
         }
         if (useCodecAnn != null) {
-            // Phase J.M.5 slice 11a — `@When @UseCodec(C) val: T?`.
+            // `@When @UseCodec(C) val: T?`.
             // Pre-slice this fell through to the bare-scalar branch and
             // returned null silently for non-scalar T (sealed-parent
             // typed reason codes in the v5 PUBACK/etc. cascade). The
@@ -1728,7 +1725,7 @@ internal class CodecEmitter(
             return analyzeConditionalUseCodecInner(innerType, useCodecAnn)
         }
         if (lengthPrefixedAnn != null) {
-            // Slice 3.5 widens the inner universe to LengthPrefixed
+            // Widens the inner universe to LengthPrefixed
             // String only. LengthPrefixed @ProtocolMessage bodies are
             // doctrine-row-19 valid but defer until a vector requires
             // them.
@@ -1738,7 +1735,7 @@ internal class CodecEmitter(
                 prefixWireOrder = messageWireOrder,
             )
         }
-        // Phase J.M.5 slice 11b — bare `@When val: T?` where T is a
+        // Bare `@When val: T?` where T is a
         // `@ProtocolMessage` data class or sealed parent. The codec is
         // resolved by-name (`${T.simpleName}Codec` in T's package),
         // mirroring [analyzeRemainingBytesProtocolMessageListField].
@@ -1751,7 +1748,7 @@ internal class CodecEmitter(
         // is the only one that accepts them.
         val protocolMessageInner = analyzeConditionalProtocolMessageInner(innerType)
         if (protocolMessageInner != null) return protocolMessageInner
-        // Phase J.M step 2 — value-class-over-scalar Conditional inner
+        // Value-class-over-scalar Conditional inner
         // (MQTT v3.1.1 PUBLISH `packetId: PacketId?`). Detect before
         // the bare-scalar branch since value classes resolve to their
         // own qualified name (not in SUPPORTED_SCALARS).
@@ -1762,7 +1759,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 — analyze a conditional `@LengthPrefixed @UseCodec(C)
+     * Analyze a conditional `@LengthPrefixed @UseCodec(C)
      * val xs: List<E>?` field. Mirrors
      * [analyzeLengthPrefixedUseCodecListField] (the non-conditional
      * counterpart) for element-type requirements: data class OR sealed
@@ -1780,7 +1777,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 15d — analyze a conditional
+     * Analyze a conditional
      * `@When @LengthPrefixed @UseCodec(C) val: T?` where `T : Payload`.
      * Mirrors [analyzeLengthPrefixedUseCodecPayloadField] (the non-
      * conditional counterpart) for type / codec requirements. Returns
@@ -1811,7 +1808,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 11a — `@When @UseCodec(C) val: T?`. Mirror of
+     * `@When @UseCodec(C) val: T?`. Mirror of
      * the non-conditional [analyzeUseCodecScalarField]: the inner type
      * resolves to a [TypeName] via the supported-scalar table or the
      * `KSClassDeclaration` fallback (value classes, sealed parents),
@@ -1849,7 +1846,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 11b — `@When val: T?` where T is a
+     * `@When val: T?` where T is a
      * `@ProtocolMessage` data class or sealed parent (with
      * `@DispatchOn`). The codec class is resolved by-name
      * (`${T.simpleName}Codec` in T's package), mirroring the
@@ -1895,12 +1892,12 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M step 2 — detect a value-class-over-scalar inner for
+     * Detect a value-class-over-scalar inner for
      * `@When val: T?`. Mirrors the validity checks applied to
      * the non-conditional [analyzeValueClassScalarField] shape:
      * value class with exactly one primary-constructor parameter
      * over a supported non-nullable scalar, no `@WireBytes` /
-     * `@WireOrder` on the inner property (slice 3 narrow). Returns
+     * `@WireOrder` on the inner property ( narrow). Returns
      * `null` for any other shape so the caller falls through to the
      * bare-scalar branch.
      */
@@ -1945,10 +1942,10 @@ internal class CodecEmitter(
         }
 
     /**
-     * Slice 3 peek reconstructs the sibling value class by reading
+     * Peek reconstructs the sibling value class by reading
      * the inner scalar bytes and calling the value class's primary
      * constructor. Only the kinds wired into `appendPeekFixedScalar`
-     * are accepted; wider scalars need slice 5's order-aware peek
+     * are accepted; wider scalars need 's order-aware peek
      * path. Boolean is excluded because a value-class around a
      * Boolean is degenerate (the property accessor would just return
      * the wrapped value) and not load-bearing for any in-scope
@@ -1958,13 +1955,11 @@ internal class CodecEmitter(
         setOf(ScalarKind.UByte, ScalarKind.Byte)
 
     /**
-     * Slice 6.5 — peek-side reconstruction kinds for `@DispatchOn`
-     * value-class discriminators. Slice 6's narrow set was just
-     * single-byte; slice 6.5 widens to 2/4-byte unsigned kinds for
-     * real-spec multi-byte discriminators (e.g., HTTP/2's first 4
-     * bytes packed as `length<<8 | type`). `appendPeekFixedScalar`
-     * with the discriminator value class's `wireOrder` handles the
-     * byte assembly.
+     * Peek-side reconstruction kinds for `@DispatchOn` value-class
+     * discriminators. Accepts 1/2/4-byte unsigned kinds for real-spec
+     * multi-byte discriminators (e.g., HTTP/2's first 4 bytes packed as
+     * `length<<8 | type`). `appendPeekFixedScalar` with the discriminator
+     * value class's `wireOrder` handles the byte assembly.
      *
      * `ULong` and signed multi-byte kinds are still rejected — they
      * would need parallel peek paths (ULong promotion, signed
@@ -1975,7 +1970,7 @@ internal class CodecEmitter(
         setOf(ScalarKind.UByte, ScalarKind.Byte, ScalarKind.UShort, ScalarKind.UInt)
 
     /**
-     * Stage E — typed shape of the `@When("…")` expression
+     * Typed shape of the `@When("…")` expression
      * literal. Closed by doctrine row 19: only the simple-name and
      * one-level dotted forms are valid; deeper paths are a compile
      * error and never reach the analyzer.
@@ -1991,7 +1986,7 @@ internal class CodecEmitter(
         ) : WhenExpression
 
         /**
-         * Phase J.M.5 grammar 2 — `"remaining <op> <int>"`. References no
+         * Grammar 2 — `"remaining <op> <int>"`. References no
          * sibling; the resolver returns a `ConditionRef.RemainingCmp`
          * directly without walking prior parameters.
          */
@@ -2002,7 +1997,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 — comparison operator inside the `remaining <op> <int>`
+     * Comparison operator inside the `remaining <op> <int>`
      * grammar. Closed sealed (three values match the documented grammar).
      * `Equal` is rare in practice (one-byte sentinel checks) but
      * documented as part of the grammar.
@@ -2029,7 +2024,7 @@ internal class CodecEmitter(
         }
 
     /**
-     * Stage E slice 2 — read expression for a natural-width scalar. Used by
+     * Read expression for a natural-width scalar. Used by
      * the conditional emit path (which needs an expression, not a statement)
      * and by the existing non-conditional decode (refactored to share).
      */
@@ -2047,7 +2042,7 @@ internal class CodecEmitter(
         }
 
     /**
-     * Stage E slice 2 — write statement for a natural-width scalar given an
+     * Write statement for a natural-width scalar given an
      * accessor expression. Boolean encodes as `0x00` / `0x01`.
      */
     private fun naturalScalarWriteStatement(
@@ -2125,20 +2120,20 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 14b/14c — `@FramedBy` file spec. Emits an `object`
+     * /14c — `@FramedBy` file spec. Emits an `object`
      * codec with the new encode signature
      * (`encode(value, context, factory): ReadBuffer`) and the strict
      * decode (`decode(buffer, context): T` with bound assertion). The
      * codec does **not** implement `Codec<T>` — its encode contract
      * differs because the framework owns framing and returns a slice
-     * spanning exactly the framed wire bytes (see the slice 14b handoff,
+     * spanning exactly the framed wire bytes (see the handoff,
      * Q5).
      *
-     * Slice 14c adds the `after = "<header>"` path: the named header
+     * Adds the `after = "<header>"` path: the named header
      * field sits before the prefix on the wire, so decode reads it
      * first and encode threads it through `FramedEncoder.writeHeader`.
      * Decode + encode emit branches on `framedBy.afterFieldName`; the
-     * peek emit reuses the bounding-codec walker shape from slice 11
+     * peek emit reuses the bounding-codec walker shape from
      * (header bytes + observed prefix width + prefix value).
      */
     private fun buildFramedByFileSpec(
@@ -2165,7 +2160,7 @@ internal class CodecEmitter(
     ): FunSpec {
         val afterField = framedByAfterField(shape, framedBy)
         val body = CodeBlock.builder()
-        // Phase J.M.5 slice 14c — `after = "X"` reads the header field
+        // `after = "X"` reads the header field
         // before the prefix. The local emitted by appendDecodeField is
         // named after the field, so the constructor invocation below
         // binds it positionally without any extra wiring.
@@ -2247,7 +2242,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 14c — emit `peekFrameSize` for an `@FramedBy`
+     * Emit `peekFrameSize` for an `@FramedBy`
      * codec. Mirrors [appendPeekLengthPrefixedUseCodecList]: the prefix
      * codec is `BoundingLengthCodec<UInt>` (validator-checked), so the
      * walker drives its `decode` against a non-consuming peek view at
@@ -2281,7 +2276,7 @@ internal class CodecEmitter(
         )
         // peekBuffer needs a budget large enough for the prefix codec's
         // worst case. MqttRemainingLengthCodec is 1..4 bytes; allow 5 to
-        // mirror the slice-11 emit's UInt VBI peek budget.
+        // mirror the emit's UInt VBI peek budget.
         val peekBudget = 5
         body.addStatement(
             "val __framingPeek = stream.peekBuffer(baseOffset + %L, %L) ?: return %T.NeedsMoreData",
@@ -2332,7 +2327,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 14c — resolve the `@FramedBy` `after`-named
+     * Resolve the `@FramedByafter`-named
      * field to its [FieldSpec], or `null` when the name doesn't match
      * an analyzed field OR the field shape cannot carry an Exact wire
      * width (only Scalar / ValueClassScalar are accepted; this mirrors
@@ -2357,7 +2352,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 14c — Exact wire width of the `@FramedBy`
+     * Exact wire width of the `@FramedBy`
      * `after`-named header field. Only called for fields that
      * [framedByAfterField] already filtered to Scalar / ValueClassScalar,
      * so the `else` branch is structurally unreachable.
@@ -2374,10 +2369,10 @@ internal class CodecEmitter(
             return buildFramedByFileSpec(shape, shape.framedBy)
         }
         if (shape.framedBy != null && shape.payloadTypeParameter != null) {
-            // Phase J.M.5 slice 14c — generic variant inheriting `@FramedBy`
+            // Generic variant inheriting `@FramedBy`
             // from a sealed parent. Drops the `Codec<Variant<P>>`
             // superinterface (the framed encode shape isn't a `Codec`),
-            // emits framed encode/decode/peek + the slice 10c `Partial<P>`
+            // emits framed encode/decode/peek + the `Partial<P>`
             // companion (decode-only, framing-aware via shape.framedBy).
             return FileSpec
                 .builder(shape.packageName, shape.codecSimpleName)
@@ -2401,9 +2396,9 @@ internal class CodecEmitter(
                     .addFunction(buildWireSizeFun(shape))
                     .addFunction(buildPeekFrameFun(shape))
                     .also { builder ->
-                        // Slice 10c — every codec carrying a typed payload field
+                        // Every codec carrying a typed payload field
                         // gets a `Partial` nested class plus a `partial(buffer,
-                        // context)` decode entry. For the slice 10a (object)
+                        // context)` decode entry. For the (object)
                         // shape, `partial` is a member of the codec object.
                         if (shouldEmitPartial(shape)) {
                             builder.addType(buildPartialClassTypeSpec(shape, payloadTypeParameter = null))
@@ -2420,7 +2415,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage H slice 10b — emit
+     * Emit
      * `class FooCodec<P : Payload>(private val payloadCodec: Codec<P>)
      *  : Codec<Foo<P>>`
      * for shapes whose data class declares a `<P : Payload>` type
@@ -2453,13 +2448,13 @@ internal class CodecEmitter(
             .addFunction(buildWireSizeFun(shape, parameterizedMessage))
             .addFunction(buildPeekFrameFun(shape))
             .also { builder ->
-                // Slice 10c — for the slice 10b (class) shape, `Partial` is a
+                // For the (class) shape, `Partial` is a
                 // nested class (independent type parameter <P : Payload>) and
                 // `partial<P>(buffer, context)` lives on a companion object.
                 // Companion-side placement matters: consumers must be able to
                 // call `MqttPublishV3Codec.partial<JpegImage>(buffer, context)`
                 // WITHOUT instantiating the surrounding generic codec class
-                // (the whole point of slice 10b's Partial is to defer the
+                // (the whole point of 's Partial is to defer the
                 // codec choice past header decode).
                 if (shouldEmitPartial(shape)) {
                     builder.addType(buildPartialClassTypeSpec(shape, payloadTypeParameter = binding))
@@ -2469,12 +2464,12 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 14c — generic variant inheriting `@FramedBy`
+     * Generic variant inheriting `@FramedBy`
      * from a sealed parent. Mirrors [buildGenericCodecTypeSpec]'s
      * constructor-injected payload codec field, but emits the framed
      * encode signature (`encode(value, context, factory): ReadBuffer`,
      * no wireSize) and drops the `Codec<Variant<P>>` superinterface
-     * (the framed encode shape isn't a `Codec`). The slice 10c
+     * (the framed encode shape isn't a `Codec`). The
      * `Partial<P>` + companion `partial<P>(buffer, context)` still
      * emits — those are decode-only, and the partial-flow machinery
      * is framing-aware via [shape.framedBy].
@@ -2516,7 +2511,7 @@ internal class CodecEmitter(
         messageType: TypeName = shape.messageClassName,
     ): FunSpec {
         val body = CodeBlock.builder()
-        // Phase I.1 — when a bounding `@UseCodec(BoundingLengthCodec)`
+        // When a bounding `@UseCodec(BoundingLengthCodec)`
         // field is present, fields BEFORE it emit normally; the codec's
         // decode + applyBound emits at its position; fields AFTER it run
         // inside `try { ... } finally { setLimit(outer) }` so the
@@ -2528,7 +2523,7 @@ internal class CodecEmitter(
         // returns the singleton instance, NOT a constructor call. Kotlin
         // references singletons by their class name directly.
         //
-        // Phase J.M.5 slice 15h — when the singleton is a sealed variant
+        // When the singleton is a sealed variant
         // under `@DispatchOn(value class)`, consume (and discard) the
         // discriminator's inner-scalar bytes first. The dispatcher's
         // peek + reset hands control here at the original buffer
@@ -2604,7 +2599,7 @@ internal class CodecEmitter(
         messageType: TypeName = shape.messageClassName,
     ): FunSpec {
         val body = CodeBlock.builder()
-        // Phase J.M.5 slice 15h — singleton variant under
+        // Singleton variant under
         // `@DispatchOn(value class)` writes the discriminator literal
         // (mirrors the data-class variant emit, where the variant's
         // `id: ValueClass = ValueClass(byte)` first field round-trips
@@ -2627,7 +2622,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 15h — accessor expression for a singleton
+     * Accessor expression for a singleton
      * variant's `@PacketType.value` literal, narrowed to the
      * discriminator's inner scalar kind. Hex literals (e.g. `0x80`)
      * exceed `Int` range only for kinds wider than 4 bytes; UInt is
@@ -2647,7 +2642,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 14c — single-field encode dispatch shared by
+     * Single-field encode dispatch shared by
      * [buildEncodeFun], [buildFramedByEncodeFun]'s body lambda, and
      * [buildFramedByEncodeFun]'s `writeHeader` lambda. Centralizing the
      * `when` keeps the three call sites in lockstep when a new
@@ -2680,38 +2675,36 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage H slice 10c / 10f — gate for emitting the `Partial` decode
-     * pattern. Partial is emitted only when [FieldSpec.RemainingBytesPayload]
-     * is the *last* field of the shape. The Partial flow is the
-     * streaming-style "decode the header now, defer the payload"
-     * contract — meaningful only when the payload is genuinely
-     * trailing (e.g. `MqttPacket.Publish<P>`, v3/v5 SUBSCRIBE/UNSUBSCRIBE
-     * bodies).
+     * Gate for emitting the `Partial` decode pattern. Partial is emitted
+     * only when [FieldSpec.RemainingBytesPayload] is the *last* field of
+     * the shape. The Partial flow is the streaming-style "decode the
+     * header now, defer the payload" contract — meaningful only when the
+     * payload is genuinely trailing (e.g. `MqttPacket.Publish<P>`, v3/v5
+     * SUBSCRIBE/UNSUBSCRIBE bodies).
      *
-     * Slice 10f / Phase I.1 step 9 — when a shape also carries a
-     * bounding `@UseCodec(BoundingLengthCodec)` field (the MQTT v3
-     * PUBLISH §3.3 wire shape), the `Partial` captures the outer buffer
-     * limit at partial-decode time (the same local that
+     * When a shape also carries a bounding `@UseCodec(BoundingLengthCodec)`
+     * field (the MQTT v3 PUBLISH §3.3 wire shape), the `Partial` captures
+     * the outer buffer limit at partial-decode time (the same local that
      * `appendDecodeUseCodecScalar` emits as `__<fieldName>OuterLimit`);
      * `complete()` runs the payload decode inside the bounding-narrowed
      * limit (correct for payload bounding) and restores the outer limit
      * via `try/finally` (correct for caller cleanup). Both correctness
-     * concerns the slice 10c carve-out flagged are handled by capturing
-     * the outer limit on the Partial and restoring on completion — no
-     * consumer-visible API change versus the unbounded path.
+     * concerns are handled by capturing the outer limit on the Partial
+     * and restoring on completion — no consumer-visible API change versus
+     * the unbounded path.
      *
-     * Phase J.M.5 slice 15g — when [FieldSpec.RemainingBytesPayload]
-     * appears as a *non-terminal* field (e.g. `PngChunk.data: BinaryData`
-     * followed by a 4-byte CRC trailer per J.M.6.c), the embedded
-     * payload is just a bounded body inside the packet's structure,
-     * not a deferred-decode tail. Emit only the normal decode/encode;
-     * skip Partial. [buildPartialClassTypeSpec] would otherwise error
-     * because it expects the Payload field at `fields.lastOrNull()`.
+     * When [FieldSpec.RemainingBytesPayload] appears as a *non-terminal*
+     * field (e.g. `PngChunk.data: BinaryData` followed by a 4-byte CRC
+     * trailer), the embedded payload is just a bounded body inside the
+     * packet's structure, not a deferred-decode tail. Emit only the normal
+     * decode/encode; skip Partial. [buildPartialClassTypeSpec] would
+     * otherwise error because it expects the Payload field at
+     * `fields.lastOrNull()`.
      */
     private fun shouldEmitPartial(shape: CodecShape): Boolean = shape.fields.lastOrNull() is FieldSpec.RemainingBytesPayload
 
     /**
-     * Stage H slice 10c — emit the nested `Partial` class. The `Partial`
+     * Emit the nested `Partial` class. The `Partial`
      * captures the buffer and context so `complete(...)` can defer the
      * payload decode, and exposes the header fields as `val`s for
      * pre-payload inspection (the topic-keyed dispatch case from
@@ -2725,9 +2718,9 @@ internal class CodecEmitter(
      * the codec's own emit.
      *
      * Type-parameter shape:
-     *   - Slice 10a (concrete payload): no type parameter on `Partial`.
+     * (concrete payload): no type parameter on `Partial`.
      *     `complete(): MessageType` uses the `@UseCodec`-pinned codec.
-     *   - Slice 10b (generic payload `<P : Payload>`): `Partial<P :
+     * (generic payload `<P: Payload>`): `Partial<P:
      *     Payload>` carries its own type variable (independent of the
      *     surrounding generic codec class — the whole point of slice
      *     10b's Partial is that the payload codec is supplied at
@@ -2745,14 +2738,13 @@ internal class CodecEmitter(
             shape.fields.lastOrNull() as? FieldSpec.RemainingBytesPayload
                 ?: error("buildPartialClassTypeSpec called for shape without trailing RemainingBytesPayload")
         val headerFields = shape.fields.dropLast(1)
-        // Slice 10f / Phase I.1 — when the headers contain a bounding
-        // `@UseCodec` field (codec implements `BoundingLengthCodec`),
-        // the partial decode mid-walk narrows `buffer.limit()` and
-        // stashes the prior limit in `__<fieldName>OuterLimit`. Capture
-        // that local on the Partial so `complete()` can restore it.
-        // Phase J.M.5 slice 14c — `@FramedBy` inherited from the sealed
-        // parent supplies the bound externally (no in-shape field), so
-        // we treat it as effectively-bounding for Partial purposes.
+        // When the headers contain a bounding `@UseCodec` field (codec
+        // implements `BoundingLengthCodec`), the partial decode mid-walk
+        // narrows `buffer.limit()` and stashes the prior limit in
+        // `__<fieldName>OuterLimit`. Capture that local on the Partial so
+        // `complete()` can restore it. `@FramedBy` inherited from the
+        // sealed parent supplies the bound externally (no in-shape field),
+        // so we treat it as effectively-bounding for Partial purposes.
         val hasBoundingField = shape.fields.any { it.isBoundingShape() } || shape.framedBy != null
 
         val classBuilder = TypeSpec.classBuilder("Partial")
@@ -2811,11 +2803,11 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage H slice 10c — emit the `Partial.complete(...)` function.
+     * Emit the `Partial.complete(...)` function.
      *
-     * Slice 10a path: the codec is `@UseCodec`-pinned, so `complete()`
+     * Path: the codec is `@UseCodec`-pinned, so `complete`
      * takes no parameters and calls `<UserCodec>.decode(buffer, context)`
-     * directly. Slice 10b path: the codec is supplied at the call site,
+     * directly. path: the codec is supplied at the call site,
      * so `complete(payloadCodec: Decoder<P>)` accepts the decoder and
      * calls `payloadCodec.decode(buffer, context)`. Both branches share
      * the trailing constructor call.
@@ -2866,11 +2858,10 @@ internal class CodecEmitter(
         val ctorArgs = shape.fields.joinToString(", ") { "${it.name} = ${it.name}" }
         val body = CodeBlock.builder()
         if (hasBoundingField) {
-            // Slice 10f / Phase I.1 step 9 — payload decode runs inside
-            // the bounding-field-narrowed limit (correct for payload
-            // bounding); the outer limit is restored via try/finally so
-            // the caller's outer limit survives even if the user codec
-            // throws.
+            // Payload decode runs inside the bounding-field-narrowed
+            // limit (correct for payload bounding); the outer limit is
+            // restored via try/finally so the caller's outer limit
+            // survives even if the user codec throws.
             body.beginControlFlow("return try")
             body.add(payloadDecodeStmt)
             body.addStatement("%T(%L)", returnType, ctorArgs)
@@ -2886,9 +2877,9 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage H slice 10c — emit the `partial(buffer, context)` decode
-     * entry. Slice 10a places this as a member function on the codec
-     * `object`; slice 10b places it on the codec class's companion
+     * Emit the `partial(buffer, context)` decode
+     * entry. places this as a member function on the codec
+     * `object`; places it on the codec class's companion
      * object (with a fresh `<P : Payload>` type parameter so the call
      * site can choose the payload type without instantiating the
      * surrounding generic codec class).
@@ -2925,7 +2916,7 @@ internal class CodecEmitter(
             .returns(returnType)
 
         val body = CodeBlock.builder()
-        // Phase J.M.5 slice 14c — when the parent supplies framing via
+        // When the parent supplies framing via
         // `@FramedBy`, the variant's partial decode reads the after-field
         // first, then applies the framing bound (capturing the outer
         // limit), then walks the remaining header fields inside the
@@ -2957,9 +2948,9 @@ internal class CodecEmitter(
                 ?: framedBy?.let { "__framingOuterLimit" }
         val outerLimitArgs =
             outerLimitLocal?.let {
-                // appendDecodeUseCodecScalar (Phase I.1 step 4) emits
+                // appendDecodeUseCodecScalar emits
                 // the outer-limit local as `__<fieldName>OuterLimit`;
-                // the slice-14c framed branch emits `__framingOuterLimit`.
+                // the framed branch emits `__framingOuterLimit`.
                 // Either way, hand it to the Partial so `complete()` can
                 // restore the outer buffer limit on finally.
                 listOf("outerLimit = $it")
@@ -2976,11 +2967,11 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage H slice 10c — companion-object wrapper for the slice 10b
+     * Companion-object wrapper for the
      * `partial<P>(...)` entry. Companion-side placement is required:
      * a member-side `partial(...)` would force the consumer to first
      * construct `MqttPublishV3Codec(somePayloadCodec)` just to call
-     * `partial`, defeating the slice 10b purpose of deferring the
+     * `partial`, defeating the purpose of deferring the
      * codec choice past the header decode.
      */
     private fun buildPartialCompanionObject(
@@ -2993,7 +2984,7 @@ internal class CodecEmitter(
             .build()
 
     /**
-     * Stage H slice 10c — derive the property `TypeName` for a header
+     * Derive the property `TypeName` for a header
      * field on the `Partial` class. The `Partial` mirrors the data
      * class's header fields with their original Kotlin types, so this
      * map is a closed mirror of `FieldSpec`'s shape-to-type mapping.
@@ -3049,15 +3040,15 @@ internal class CodecEmitter(
                 .addParameter("value", messageType)
                 .addParameter("context", ENCODE_CONTEXT_CN)
                 .returns(WIRE_SIZE_CN)
-        // Locked Decision row 19: any `@When` field collapses the message
+        // Any `@When` field collapses the message
         // wireSize to BackPatch — we don't attempt conditional-Exact arithmetic.
         if (shape.fields.any { it is FieldSpec.Conditional }) {
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
             return builder.build()
         }
-        // Stage H slice 10a: a `@RemainingBytes @UseCodec val: P` field's
+        // A `@RemainingBytes @UseCodec val: P` field's
         // wireSize comes from the user codec, which may be Exact or
-        // BackPatch. Slice 10a takes the conservative BackPatch path
+        // BackPatch. takes the conservative BackPatch path
         // unconditionally — promoting to runtime-Exact-via-cast (mirroring
         // LengthPrefixedMessage) is a follow-on once we have a vector
         // where the size optimization actually matters.
@@ -3065,7 +3056,7 @@ internal class CodecEmitter(
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
             return builder.build()
         }
-        // Phase I.1: any `@UseCodec val: <scalar>` field's wireSize comes from
+        // Any `@UseCodec val: <scalar>` field's wireSize comes from
         // the user codec, which may be Exact or BackPatch. Collapse to
         // BackPatch unconditionally — runtime-Exact-via-cast (mirroring
         // LengthPrefixedMessage) is a follow-on once a vector measurably
@@ -3074,7 +3065,7 @@ internal class CodecEmitter(
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
             return builder.build()
         }
-        // Phase I.1 step 11: `@LengthPrefixed @UseCodec val: List<E>`
+        // `@LengthPrefixed @UseCodec val: List<E>`
         // wireSize composes the user codec's prefix size with the sum of
         // element wireSizes. Same conservative BackPatch collapse as the
         // bare-scalar case — runtime-Exact-via-cast is a follow-on.
@@ -3082,7 +3073,7 @@ internal class CodecEmitter(
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
             return builder.build()
         }
-        // Phase J.M.5 slice 15a: `@LengthPrefixed @UseCodec val: T : Payload`
+        // `@LengthPrefixed @UseCodec val: T: Payload`
         // wireSize composes a fixed prefix with the user codec's body size,
         // which is opaque. Same conservative BackPatch collapse as the
         // bare-scalar / list cases — runtime-Exact-via-cast is a follow-on.
@@ -3090,7 +3081,7 @@ internal class CodecEmitter(
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
             return builder.build()
         }
-        // Phase J.M.5 slice 11b: bare `val: T : @ProtocolMessage` wireSize
+        // Bare `val: T: @ProtocolMessage` wireSize
         // delegates to T's codec at runtime (RuntimeExact). Same conservative
         // BackPatch collapse on the parent — promoting to runtime-Exact-via-
         // cast is a follow-on once a vector benefits.
@@ -3098,10 +3089,10 @@ internal class CodecEmitter(
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
             return builder.build()
         }
-        // Locked Decision row 15: any `@LengthPrefixed val: String` collapses
+        // Any `@LengthPrefixed val: String` collapses
         // wireSize to BackPatch (pre-measuring the UTF-8 byte length is the
         // walk the BackPatch path collapses into the single writeString call).
-        // Slice 5a — the rule applies regardless of position now that LPS
+        // The rule applies regardless of position now that LPS
         // String can appear non-terminally.
         if (shape.fields.any { it is FieldSpec.LengthPrefixedString }) {
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
@@ -3115,15 +3106,14 @@ internal class CodecEmitter(
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
             return builder.build()
         }
-        // Phase J.M.5 slice 11a — `@RemainingBytes List<E>` where E is a
+        // `@RemainingBytes List<E>` where E is a
         // sealed parent (or otherwise BackPatch-element) collapses to
         // BackPatch. The runtime-Exact emit below sums element wireSizes
         // via `as WireSize.Exact` cast; sealed-parent variants carrying
         // `@LengthPrefixed val: String` or `@When` trailers produce
         // BackPatch wireSize and would CCE on that cast. No fixture trips
-        // this today (slice 11a is a pure capability slice — v5 fixture
-        // substitution is slice 11b/12), but the guard is required for
-        // correctness once a typed-RC list lands.
+        // this today, but the guard is required for correctness once a
+        // typed-RC list lands.
         if (shape.fields.any {
                 it is FieldSpec.RemainingBytesProtocolMessageList && it.elementIsBackPatch
             }
@@ -3131,7 +3121,7 @@ internal class CodecEmitter(
             builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
             return builder.build()
         }
-        // J.M.6.c — non-terminal `@RemainingBytes*` fields collapse the
+        // Non-terminal `@RemainingBytes*` fields collapse the
         // parent's wireSize to BackPatch. The terminal-`when` branches
         // below assume the body field IS the terminal (so they sum
         // header bytes + body bytes); when the body sits before a
@@ -3166,9 +3156,9 @@ internal class CodecEmitter(
                 )
             }
             is FieldSpec.LengthFromString -> {
-                // Slice 4 / 9 — body byte count comes from the
-                // resolved LengthSource (sibling.toInt() for simple,
-                // sibling.property for dotted). User-trusted (row 16).
+                // Body byte count comes from the resolved LengthSource
+                // (sibling.toInt() for simple, sibling.property for
+                // dotted). User-trusted.
                 val prefixBytes = scalarHeaderBytes(shape)
                 builder.addStatement(
                     "return %T.Exact(%L + %L)",
@@ -3178,7 +3168,7 @@ internal class CodecEmitter(
                 )
             }
             is FieldSpec.LengthFromList -> {
-                // Slice 7a / 9 — same Exact shape via LengthSource.
+                // Same Exact shape via LengthSource.
                 val prefixBytes = scalarHeaderBytes(shape)
                 builder.addStatement(
                     "return %T.Exact(%L + %L)",
@@ -3188,7 +3178,7 @@ internal class CodecEmitter(
                 )
             }
             is FieldSpec.LengthFromMessage -> {
-                // J.M.6.b — body byte count = sibling-resolved length
+                // Body byte count = sibling-resolved length
                 // (same row-16 user-trust contract as LengthFromString /
                 // LengthFromList). The nested message's own wireSize is
                 // RuntimeExact at runtime, but we don't query it here:
@@ -3203,7 +3193,7 @@ internal class CodecEmitter(
                 )
             }
             is FieldSpec.RemainingBytesProtocolMessageList -> {
-                // Phase J.M.0 — body byte count = sum of element wireSizes.
+                // Body byte count = sum of element wireSizes.
                 // Each element codec's wireSize is cast to Exact at runtime —
                 // same convention as LengthPrefixedMessage's `as Exact` cast
                 // above; BackPatch element codecs throw ClassCastException
@@ -3225,7 +3215,7 @@ internal class CodecEmitter(
                         "indicates a missed early return.",
                 )
             else -> {
-                // Phase J.M.5 slice 15h — singleton variant under
+                // Singleton variant under
                 // `@DispatchOn(value class)` self-frames the
                 // discriminator (read in decode, write in encode), so
                 // its wire byte count is the discriminator's inner-
@@ -3241,7 +3231,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage E slice 3 — sum the `wireBytes` of every `FixedSize` field
+     * Sum the `wireBytes` of every `FixedSize` field
      * in the list. Variable-length fields (`LengthPrefixed*`,
      * `Conditional`) contribute 0 and are filtered out by the
      * `filterIsInstance` step. Callers that require the result to
@@ -3257,7 +3247,7 @@ internal class CodecEmitter(
                 .addParameter("stream", STREAM_PROCESSOR_CN)
                 .addParameter("baseOffset", INT)
                 .returns(PEEK_RESULT_CN)
-        // Phase I.1 step 6 — generic `@UseCodec` peek walker. When a
+        // Generic `@UseCodec` peek walker. When a
         // bounding `UseCodecScalar` field is present, the framework drives
         // the user codec against a non-consuming `stream.peekBuffer(...)`
         // view to discover the value, then computes total = priorBytes +
@@ -3288,7 +3278,7 @@ internal class CodecEmitter(
             appendPeekUseCodecScalar(builder, shape, ucsField, budget)
             return builder.build()
         }
-        // Phase I.1 step 11 — `@LengthPrefixed @UseCodec val: List<E>`
+        // `@LengthPrefixed @UseCodec val: List<E>`
         // peek mirrors the bounding-`UseCodecScalar` walker: total =
         // priorBytes + observed-codec-width + decodedValue.toInt(). The
         // codec is `BoundingLengthCodec<UInt>` (validator-checked); peek
@@ -3313,7 +3303,7 @@ internal class CodecEmitter(
             appendPeekLengthPrefixedUseCodecList(builder, shape, lpUcField, peekBudget = 5)
             return builder.build()
         }
-        // Phase J.M.0 — `@RemainingBytes List<@ProtocolMessage T>` and
+        // `@RemainingBytes List<@ProtocolMessage T>` and
         // `@RemainingBytes val: String` collapse peek to NoFraming. The
         // body's byte count comes from the caller-set buffer limit,
         // which the stream-side peek can't see; consumers must use
@@ -3327,16 +3317,16 @@ internal class CodecEmitter(
             builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
             return builder.build()
         }
-        // Slice 10a — same NoFraming collapse for `@RemainingBytes
+        // Same NoFraming collapse for `@RemainingBytes
         // @UseCodec val: P`. Body byte count is whatever the user codec
-        // reads against the caller-set limit; slice 10d's outer
+        // reads against the caller-set limit; 's outer
         // dispatcher will own peek by reading the fixed header's
         // remaining-length first.
         if (shape.fields.any { it is FieldSpec.RemainingBytesPayload }) {
             builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
             return builder.build()
         }
-        // Phase J.M.5 slice 11b — bare `val: T : @ProtocolMessage` collapses
+        // Bare `val: T: @ProtocolMessage` collapses
         // peek to NoFraming. The body's byte count is determined by T's
         // codec at runtime (variable for sealed dispatchers, static for
         // data classes), and we don't invoke decoded codecs in peek.
@@ -3346,7 +3336,7 @@ internal class CodecEmitter(
             builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
             return builder.build()
         }
-        // Phase J.M.5 — `@When("remaining <op> <int>")` collapses peek to
+        // `@When("remaining <op> <int>")` collapses peek to
         // NoFraming when reached at this point. The grammar-2 predicate
         // tests the decode buffer's `remaining()` after the upstream
         // bounding `applyBound`; peek has no symmetric primitive, so the
@@ -3364,7 +3354,7 @@ internal class CodecEmitter(
         // branch is taken without buffer access. v5 ack peek is owned
         // by the bounding RL upstream (same as above).
         //
-        // Phase J.M.5 slice 11a — same collapse for `UseCodecScalar`
+        // Same collapse for `UseCodecScalar`
         // inners. The user codec's wire width is opaque to the framework
         // (could be a single byte for a typed RC, could be variable),
         // so peek can't size the field without invoking the codec. v5
@@ -3378,7 +3368,7 @@ internal class CodecEmitter(
         // than the sequential path (which would emit a per-field
         // availability check + offset advance).
         //
-        // Phase J.M.5 slice 15h — empty-fields singletons fall into this
+        // Empty-fields singletons fall into this
         // branch (the `all { ... }` predicate is vacuously true). When
         // the singleton self-frames a `@DispatchOn(value class)`
         // discriminator, add the discriminator's inner-scalar width so
@@ -3400,7 +3390,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase I.1 step 6 — emit peek for a shape carrying a bounding
+     * Emit peek for a shape carrying a bounding
      * `@UseCodec val: <scalar>` field. Materializes a non-consuming view
      * via `stream.peekBuffer(baseOffset + priorBytes, peekBudget)`, runs
      * `<codec>.decode` against the view, and computes total =
@@ -3499,7 +3489,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase I.1 step 11 — emit peek for a shape carrying a terminal
+     * Emit peek for a shape carrying a terminal
      * `@LengthPrefixed @UseCodec val: List<E>` field. Mirrors
      * [appendPeekUseCodecScalar]: drives the prefix codec against a
      * non-consuming `stream.peekBuffer(...)` view, measures observed
@@ -3580,7 +3570,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Slice 5a — general sequential peek walk.
+     * General sequential peek walk.
      *
      * Tracks a running `__offset` (relative to `baseOffset`) and per
      * field:
@@ -3598,7 +3588,7 @@ internal class CodecEmitter(
      *     `LengthFromString`, predicate-gated shape for
      *     `Conditional`.
      *
-     * Replaces the slice 2/3/3.5/4 specialized peek paths
+     * Replaces the /3/3.5/4 specialized peek paths
      * (single-LPS-terminal, single-Conditional-terminal,
      * single-LengthFromString-terminal). Equivalent results for those
      * shapes; previously-skipped shapes (multiple sequential
@@ -3625,7 +3615,7 @@ internal class CodecEmitter(
                     appendPeekAvailabilityCheck(body, field.wireBytes)
                     if (field.name in needsPeekStash) {
                         val rawVar = "${field.name}Raw"
-                        // Slice 9 follow-up: pass the value class's wireOrder
+                        // Follow-up: pass the value class's wireOrder
                         // so multi-byte inner kinds (UShort/UInt) assemble in
                         // the correct order on the peek side. Single-byte
                         // kinds ignore the parameter.
@@ -3676,7 +3666,7 @@ internal class CodecEmitter(
                         source = field.source,
                     )
                 is FieldSpec.LengthFromMessage ->
-                    // J.M.6.b — peek shape identical to LengthFromString /
+                    // Peek shape identical to LengthFromString /
                     // LengthFromList: body byte count comes from the
                     // sibling, regardless of nested-message contents.
                     appendSequentialPeekLengthFrom(
@@ -3705,17 +3695,17 @@ internal class CodecEmitter(
                     error(
                         "UseCodecScalar should be handled by buildPeekFrameFun's upfront " +
                             "NoFraming short-circuit before reaching the sequential walk; the " +
-                            "generic @UseCodec peek walker is Phase I.1 step 6.",
+                            "generic @UseCodec peek walker is not implemented in the sequential path.",
                     )
                 is FieldSpec.LengthPrefixedUseCodecList ->
                     error(
                         "LengthPrefixedUseCodecList should be handled by buildPeekFrameFun's " +
                             "upfront NoFraming short-circuit / dedicated peek emitter before " +
                             "reaching the sequential walk; the terminal-only peek walker is " +
-                            "Phase I.1 step 11.",
+                            "not implemented in the sequential path.",
                     )
                 is FieldSpec.LengthPrefixedUseCodecPayload ->
-                    // Phase J.M.5 slice 15a — peek walks the fixed-width
+                    // Peek walks the fixed-width
                     // prefix and advances by the body byte count without
                     // running the user codec. Same shape as
                     // [LengthPrefixedString] / [LengthPrefixedMessage]:
@@ -3784,7 +3774,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Slice 5a — peek a length-prefixed body (`@LengthPrefixed val:
+     * Peek a length-prefixed body (`@LengthPrefixed val:
      * String` or `@LengthPrefixed @ProtocolMessage`) inside the
      * sequential walk. The shape is identical for both: peek the
      * prefix at `__offset`, guard against `Int` overflow when
@@ -3822,14 +3812,13 @@ internal class CodecEmitter(
     }
 
     /**
-     * Slice 5a / 7a / 9 — peek a `@LengthFrom`-style slot (terminal
-     * `LengthFromString` or `LengthFromList`) inside the sequential
-     * walk. The sibling local was peek-stashed earlier (slice 4
-     * Scalar-sibling case) or the sibling value-class instance was
-     * peek-stashed and reconstructed (slice 9 dotted case); the
-     * `LengthSource.decodeAccessor()` produces the right Int
-     * expression for either form. The Int.MAX_VALUE guard only
-     * applies to the simple form (the dotted property returns Int).
+     * Peek a `@LengthFrom`-style slot (terminal `LengthFromString` or
+     * `LengthFromList`) inside the sequential walk. The sibling local was
+     * peek-stashed earlier (Scalar-sibling case) or the sibling
+     * value-class instance was peek-stashed and reconstructed (dotted
+     * case); the `LengthSource.decodeAccessor()` produces the right Int
+     * expression for either form. The Int.MAX_VALUE guard only applies to
+     * the simple form (the dotted property returns Int).
      */
     private fun appendSequentialPeekLengthFrom(
         body: CodeBlock.Builder,
@@ -3860,7 +3849,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Slice 5a — peek a `@When` slot inside the sequential walk.
+     * Peek a `@When` slot inside the sequential walk.
      * The predicate source has already been peek-stashed (added to
      * `needsPeekStash` and read when its field was visited); the
      * inner shape is gated on that stashed local.
@@ -3885,14 +3874,14 @@ internal class CodecEmitter(
                     prefixWireOrder = inner.prefixWireOrder,
                 )
             is ConditionalInner.ValueClassScalar -> {
-                // Phase J.M step 2 — peek consumes the inner scalar's
+                // Peek consumes the inner scalar's
                 // natural width when the predicate is true (the value
                 // class wraps with no extra wire bytes).
                 appendPeekAvailabilityCheck(body, inner.innerKind.width)
                 body.addStatement("__offset += %L", inner.innerKind.width)
             }
             is ConditionalInner.LengthPrefixedUseCodecList ->
-                // Phase J.M.5 — unreachable: any shape with this inner
+                // Unreachable: any shape with this inner
                 // collapses the whole frame to NoFraming via
                 // `buildPeekFrameFun`'s upfront short-circuit, so the
                 // sequential walk never reaches here.
@@ -3901,7 +3890,7 @@ internal class CodecEmitter(
                         "buildPeekFrameFun should have short-circuited the shape to NoFraming.",
                 )
             is ConditionalInner.LengthPrefixedUseCodecPayload ->
-                // Phase J.M.5 slice 15d — peek walks the fixed-width
+                // Peek walks the fixed-width
                 // prefix and advances by the body byte count. Same
                 // shape as [LengthPrefixedString] — the prefix tells
                 // the peek walker how many bytes to advance without
@@ -3914,7 +3903,7 @@ internal class CodecEmitter(
                     prefixWireOrder = inner.prefixWireOrder,
                 )
             is ConditionalInner.UseCodecScalar ->
-                // Phase J.M.5 slice 11a — same NoFraming short-circuit as
+                // Same NoFraming short-circuit as
                 // LengthPrefixedUseCodecList. The user codec's wire width
                 // is opaque, so `buildPeekFrameFun` collapses the whole
                 // frame; the sequential walk never visits this branch.
@@ -3923,7 +3912,7 @@ internal class CodecEmitter(
                         "buildPeekFrameFun should have short-circuited the shape to NoFraming.",
                 )
             is ConditionalInner.ProtocolMessageScalar ->
-                // Phase J.M.5 slice 11b — same NoFraming short-circuit. The
+                // Same NoFraming short-circuit. The
                 // generated `<T>Codec.peekFrameSize` could in principle size
                 // the inner field, but the cascading-trailer cases that drive
                 // this shape use grammar-2 `remaining >= N` predicates whose
@@ -4079,7 +4068,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage E slice 3 — emit decode for a `@JvmInline value class` field
+     * Emit decode for a `@JvmInline value class` field
      * with a single supported-scalar inner. Reads the inner scalar at
      * natural width and constructs the value class via its primary
      * constructor. The local is named after the outer parameter so
@@ -4098,7 +4087,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage E slice 3 — emit encode for a value-class field. Unwraps
+     * Emit encode for a value-class field. Unwraps
      * via the inner property name and writes the inner scalar at
      * natural width.
      */
@@ -4115,7 +4104,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage E slice 2 — emit a `@When` decode block.
+     * Emit a `@When` decode block.
      *
      * Generated shape:
      * ```
@@ -4125,8 +4114,8 @@ internal class CodecEmitter(
      * The source is a sibling `Boolean` local already in scope (decode visits
      * fields in constructor order, and analyzeConditionalField has verified
      * the source is declared before this field). `readExpr` is the natural-
-     * width scalar read for the inner kind (slice 2 restricts inner to a
-     * natural-width Scalar; slice 5 widens to LengthPrefixedString).
+     * width scalar read for the inner kind ( restricts inner to a
+     * natural-width Scalar; widens to LengthPrefixedString).
      */
     private fun appendDecodeConditional(
         body: CodeBlock.Builder,
@@ -4163,8 +4152,8 @@ internal class CodecEmitter(
                 body.endControlFlow()
             }
             is ConditionalInner.ValueClassScalar -> {
-                // Phase J.M step 2 — wrap the natural-width inner read
-                // in the value-class constructor (mirror of slice 3's
+                // Wrap the natural-width inner read
+                // in the value-class constructor (mirror of 's
                 // non-conditional `appendDecodeValueClassScalar`).
                 body.addStatement(
                     "val %L: %T = if (%L) %T(%L) else null",
@@ -4176,9 +4165,9 @@ internal class CodecEmitter(
                 )
             }
             is ConditionalInner.LengthPrefixedUseCodecList -> {
-                // Phase J.M.5 — `@When @LengthPrefixed @UseCodec(C) val
-                // xs: List<E>?` — predicate-true branch runs the slice 11
-                // inner-bag decode (audit-2a shared body). Else null.
+                // `@When @LengthPrefixed @UseCodec(C) val
+                // xs: List<E>?` — predicate-true branch runs the
+                // inner-bag decode ( shared body). Else null.
                 body.beginControlFlow(
                     "val %L: %T = if (%L)",
                     field.name,
@@ -4197,7 +4186,7 @@ internal class CodecEmitter(
                 body.endControlFlow()
             }
             is ConditionalInner.LengthPrefixedUseCodecPayload -> {
-                // Phase J.M.5 slice 15d — predicate-true branch reads the
+                // Predicate-true branch reads the
                 // fixed-width prefix, narrows `buffer.limit()` to position
                 // + length, runs `<C>.decode`, restores the outer limit.
                 // Mirrors [appendDecodeLengthPrefixedUseCodecPayload] but
@@ -4229,7 +4218,7 @@ internal class CodecEmitter(
                 body.endControlFlow()
             }
             is ConditionalInner.UseCodecScalar -> {
-                // Phase J.M.5 slice 11a — `@When @UseCodec(C) val: T?`.
+                // `@When @UseCodec(C) val: T?`.
                 // Predicate-true delegates to the codec object's
                 // `decode(buffer, context)`, just like the non-conditional
                 // `appendDecodeUseCodecScalar` path; predicate-false yields
@@ -4245,7 +4234,7 @@ internal class CodecEmitter(
                 )
             }
             is ConditionalInner.ProtocolMessageScalar -> {
-                // Phase J.M.5 slice 11b — bare `@When val: T?` for a
+                // Bare `@When val: T?` for a
                 // `@ProtocolMessage` data class or sealed parent. The
                 // codec class resolves to `${T.simpleName}Codec`
                 // by-name; the call shape is identical to UseCodecScalar.
@@ -4261,7 +4250,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage E slice 2/3 — emit a `@When` encode block.
+     * /3 — emit a `@When` encode block.
      *
      * Generated shape:
      * ```
@@ -4275,10 +4264,10 @@ internal class CodecEmitter(
      * `value.<sibling>.<property>` for the dotted form. The body is
      * a single-line scalar write for `ConditionalInner.Scalar` and
      * the BackPatch length-prefix sequence for
-     * `ConditionalInner.LengthPrefixedString` (slice 3.5).
+     * `ConditionalInner.LengthPrefixedString` (.5).
      *
      * Predicate-false branch writes nothing (zero bytes for the slot, per
-     * Locked Decision row 19). Predicate-true with `value.<name> == null`
+     * ). Predicate-true with `value.<name> == null`
      * throws `EncodeException` with field-path attribution (row 20).
      */
     private fun appendEncodeConditional(
@@ -4308,8 +4297,8 @@ internal class CodecEmitter(
                     accessor = localName,
                 )
             is ConditionalInner.ValueClassScalar ->
-                // Phase J.M step 2 — unwrap the value class via the
-                // inner property name (mirror of slice 3's
+                // Unwrap the value class via the
+                // inner property name (mirror of 's
                 // non-conditional `appendEncodeValueClassScalar`).
                 body.addStatement(
                     naturalScalarWriteStatement(
@@ -4325,7 +4314,7 @@ internal class CodecEmitter(
                     accessor = localName,
                 )
             is ConditionalInner.LengthPrefixedUseCodecPayload ->
-                // Phase J.M.5 slice 15d — BackPatch shape mirroring
+                // BackPatch shape mirroring
                 // [appendEncodeLengthPrefixedUseCodecPayload]: reserve
                 // prefix slot, run `<C>.encode`, measure body byte count,
                 // patch the prefix in place, restore position. Reads the
@@ -4338,7 +4327,7 @@ internal class CodecEmitter(
                     accessor = localName,
                 )
             is ConditionalInner.UseCodecScalar ->
-                // Phase J.M.5 slice 11a — mirror of the non-conditional
+                // Mirror of the non-conditional
                 // `appendEncodeUseCodecScalar`. Predicate-true with
                 // smart-cast non-null `<name>Value` (established above)
                 // delegates to the user codec's `encode`.
@@ -4348,7 +4337,7 @@ internal class CodecEmitter(
                     localName,
                 )
             is ConditionalInner.ProtocolMessageScalar ->
-                // Phase J.M.5 slice 11b — same encode shape as
+                // Same encode shape as
                 // UseCodecScalar; the only thing that differs is how the
                 // codec class name was resolved at analyze time.
                 body.addStatement(
@@ -4361,12 +4350,12 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 — encode a conditional `@LengthPrefixed @UseCodec(C)
+     * Encode a conditional `@LengthPrefixed @UseCodec(C)
      * val xs: List<E>?`. Audit-2a deduplication: delegates to the shared
      * `appendEncodeLengthPrefixedListBody` helper.
      *
      * `accessor` is the smart-cast non-null local established by the
-     * outer `appendEncodeConditional` (`<name>Value`). The slice 11
+     * outer `appendEncodeConditional` (`<name>Value`). The
      * non-conditional emit reads `value.<name>` instead — same shape,
      * different read expression (the helper takes `accessor` as a
      * parameter to absorb the difference).
@@ -4386,7 +4375,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 15d — encode a conditional `@LengthPrefixed
+     * Encode a conditional `@LengthPrefixed
      * @UseCodec(C) val: T?` where T : Payload. BackPatch shape mirroring
      * [appendEncodeLengthPrefixedUseCodecPayload]: reserve prefix slot,
      * run `<C>.encode(buffer, accessor, context)` against the
@@ -4487,9 +4476,9 @@ internal class CodecEmitter(
         }
 
     /**
-     * Slice 3 / 5a / 6.5 — value-class inner-scalar peek. Used for
-     * predicate-source reconstruction in `@When` (slice 3) and
-     * for discriminator reconstruction in `@DispatchOn` (slice 6.5).
+     * Value-class inner-scalar peek. Used for predicate-source
+     * reconstruction in `@When` and for discriminator reconstruction in
+     * `@DispatchOn`.
      *
      * `offsetExpr` is interpolated into
      * `stream.peekByte(baseOffset + <expr>)`; callers with a fixed
@@ -4660,7 +4649,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Slice 3.5 — emit the prefix read + Int.MAX_VALUE guard + length
+     * Emit the prefix read + Int.MAX_VALUE guard + length
      * Int conversion shared by length-prefixed-string field decode
      * and the conditional `@LengthPrefixed @When` decode path.
      * Returns the local variable name holding the resolved
@@ -4704,9 +4693,9 @@ internal class CodecEmitter(
     }
 
     /**
-     * Slice 3.5 — shared BackPatch encoder for length-prefixed-string
+     * Shared BackPatch encoder for length-prefixed-string
      * fields and the conditional `@LengthPrefixed @When` encode
-     * path (Locked Decision row 15).
+     * path.
      *
      * `accessor` is the expression that yields the string value;
      * field-form callers pass `value.<name>`, conditional-form
@@ -4723,12 +4712,12 @@ internal class CodecEmitter(
         prefixWireOrder: Endianness,
         accessor: String,
     ) {
-        // BackPatch pattern (Locked Decision row 15): reserve prefix slot, write
+        // BackPatch pattern: reserve prefix slot, write
         // the body via the runtime's UTF-8 path, measure byte count from the
         // position delta, patch the prefix in place, restore position past the
         // body. The runtime's `writeString(text, Charset.UTF8)` is zero-`ByteArray`
         // on JVM / Apple / JS; the WASM and nonJvm `writeString` paths still
-        // allocate one ByteArray per call (Locked Decision row 16, deferred to a
+        // allocate one ByteArray per call (, deferred to a
         // separate runtime task).
         val sizePosVar = "${name}SizePosition"
         val bodyStartVar = "${name}BodyStart"
@@ -4772,7 +4761,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage E slice 4 — emit decode for `@LengthFrom("siblingField")
+     * Emit decode for `@LengthFrom("siblingField")
      * val: String`. The sibling local is in scope (decode visits
      * fields in constructor order, and analyzeLengthFromStringField
      * has verified the sibling is declared before this field).
@@ -4819,7 +4808,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage E slice 4 — emit encode for `@LengthFrom("siblingField")
+     * Emit encode for `@LengthFrom("siblingField")
      * val: String`. The sibling field has already been encoded by
      * the prior field's emit step; this step writes only the body.
      * The user is responsible for keeping `value.<sibling>`
@@ -4839,7 +4828,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage G slice 7a — emit decode for `@LengthFrom("siblingField")
+     * Emit decode for `@LengthFrom("siblingField")
      * val: List<T>`. Bounds the buffer via `setLimit` to the
      * sibling-derived byte count, loops reading elements via the
      * element codec until the bounded position is reached, restores
@@ -4891,7 +4880,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage G slice 7a — emit encode for `@LengthFrom("siblingField")
+     * Emit encode for `@LengthFrom("siblingField")
      * val: List<T>`. Iterates the list and writes each element via
      * the element codec. The user is responsible for keeping
      * `value.<sibling>` consistent with the sum of element wire
@@ -4908,7 +4897,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * J.M.6.b (issue #151 part 1) — emit decode for
+     * (issue #151 part 1) — emit decode for
      * `@LengthFrom("siblingField") val: T : @ProtocolMessage`. Bounds the
      * buffer via `setLimit` to the sibling-derived end, delegates to
      * `<TCodec>.decode(buffer, context)`, restores the outer limit in a
@@ -4954,7 +4943,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * J.M.6.b — emit encode for `@LengthFrom("siblingField") val: T :
+     * Emit encode for `@LengthFrom("siblingField") val: T:
      * @ProtocolMessage`. Single delegation to `<TCodec>.encode`. The
      * sibling field has already been encoded by the prior field's emit
      * step; the user is responsible for keeping `value.<sibling>`
@@ -4972,7 +4961,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage H slice 10a — emit decode for
+     * Emit decode for
      * `@RemainingBytes @UseCodec(C::class) val: P`. Delegates to the
      * user-supplied `C.decode(buffer, context)` against whatever
      * `buffer.limit()` already says — same caller-bounds-buffer contract
@@ -4991,7 +4980,7 @@ internal class CodecEmitter(
             )
             return
         }
-        // J.M.6.c — non-terminal RemainingBytesPayload. Narrow the
+        // Non-terminal RemainingBytesPayload. Narrow the
         // buffer's limit to leave the trailing FixedSize fields in the
         // outer-limit region; restore the outer limit in a try/finally
         // so the trailing field emits run against the original limit.
@@ -5010,7 +4999,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage H slice 10a — emit encode for
+     * Emit encode for
      * `@RemainingBytes @UseCodec(C::class) val: P`. Delegates to the
      * user-supplied `C.encode(buffer, value.<name>, context)`. No length
      * carrier on the wire — the user codec writes its bytes against the
@@ -5047,7 +5036,7 @@ internal class CodecEmitter(
             )
             return
         }
-        // J.M.6.c — read the body byte count minus the reserved trailing
+        // Read the body byte count minus the reserved trailing
         // FixedSize bytes; the trailing field emits run normally after.
         body.addStatement(
             "val %L = buffer.readString(buffer.remaining() - %L, %T.UTF8)",
@@ -5076,7 +5065,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.0 — emit decode for `@RemainingBytes val: List<T>` where
+     * Emit decode for `@RemainingBytes val: List<T>` where
      * `T` is a `@ProtocolMessage data class`. Loops `while
      * (buffer.position() < buffer.limit())` reading each element via
      * the element's own codec. Caller-bounds-buffer contract: an outer
@@ -5099,7 +5088,7 @@ internal class CodecEmitter(
         if (field.reservedTrailingBytes == 0) {
             body.beginControlFlow("while (buffer.position() < buffer.limit())")
         } else {
-            // J.M.6.c — leave room for the trailing FixedSize fields.
+            // Leave room for the trailing FixedSize fields.
             body.beginControlFlow(
                 "while (buffer.position() < buffer.limit() - %L)",
                 field.reservedTrailingBytes,
@@ -5110,7 +5099,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.0 — emit encode for `@RemainingBytes val: List<T>` where
+     * Emit encode for `@RemainingBytes val: List<T>` where
      * `T` is a `@ProtocolMessage data class`. Iterates the list and
      * writes each element via the element codec. The encoded byte
      * count is implicit in the outer protocol's framing — same row 16
@@ -5126,7 +5115,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase I.1 — does this field narrow `buffer.limit()` mid-decode?
+     * Does this field narrow `buffer.limit` mid-decode?
      * A `UseCodecScalar` does iff its codec target implements
      * `BoundingLengthCodec`. Used by [buildDecodeFun] to decide whether
      * subsequent fields run inside `try { ... } finally {
@@ -5147,7 +5136,7 @@ internal class CodecEmitter(
      *  - inner is `LengthPrefixedUseCodecList` (variable-length bag),
      *  - inner is `UseCodecScalar` (opaque codec wire width),
      *  - inner is `ProtocolMessageScalar` (variable-width sealed dispatch /
-     *    nested message — slice 11b).
+     * nested message — ).
      *
      * v5 ack peek escapes this collapse because the bounding RL field
      * upstream is handled by `appendPeekUseCodecScalar` before the
@@ -5163,7 +5152,7 @@ internal class CodecEmitter(
             )
 
     /**
-     * Phase I.1 — emit decode for bare `@UseCodec val: <scalar>`.
+     * Emit decode for bare `@UseCodec val: <scalar>`.
      * Delegates to the user-supplied codec object's `decode(buffer,
      * context)`. When the codec implements [BoundingLengthCodec], the
      * outer buffer limit is captured into `__<name>OuterLimit` BEFORE
@@ -5171,7 +5160,7 @@ internal class CodecEmitter(
      * outer limit even if the user codec or `applyBound` throws), and
      * `applyBound(buffer, <name>)` runs after decode to narrow the
      * limit for subsequent fields — driven by interface inspection on
-     * the codec target (the slice 10f outer-limit-restore pattern).
+     * the codec target (the outer-limit-restore pattern).
      */
     private fun appendDecodeUseCodecScalar(
         body: CodeBlock.Builder,
@@ -5187,7 +5176,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase I.1 — emit encode for bare `@UseCodec val: <scalar>`.
+     * Emit encode for bare `@UseCodec val: <scalar>`.
      * Delegates to the user-supplied codec object's `encode(buffer,
      * value.<name>, context)`. The user codec owns the wire shape;
      * the framework neither validates nor measures the encoded width.
@@ -5202,7 +5191,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 11b — emit decode/encode for bare `val: T :
+     * Emit decode/encode for bare `val: T:
      * @ProtocolMessage`. Mirrors [appendEncodeUseCodecScalar] /
      * [appendDecodeUseCodecScalar] minus the bounding-codec branch:
      * the by-name-resolved codec is never a `BoundingLengthCodec` (those
@@ -5224,7 +5213,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase I.1 step 11 — emit decode for `@LengthPrefixed
+     * Emit decode for `@LengthPrefixed
      * @UseCodec(C::class) val xs: List<E>`. The codec drives the prefix
      * read and applies the resulting bound to `buffer.limit()`; the list
      * is read element-by-element via E's codec inside the bounded region.
@@ -5259,7 +5248,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 15a — emit decode for `@LengthPrefixed
+     * Emit decode for `@LengthPrefixed
      * @UseCodec(C::class) val: T : Payload`. Reads the fixed-width
      * unsigned-int prefix, narrows `buffer.limit()` to position + length,
      * delegates the body decode to `C.decode(buffer, context)`, and
@@ -5302,10 +5291,10 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 audit-2a — shared decode body for the VBI-prefixed
+     * Shared decode body for the VBI-prefixed
      * list shape. Emitted by both `FieldSpec.LengthPrefixedUseCodecList`
-     * (slice 11) and the conditional-inner branch in
-     * `appendDecodeConditional` (J.M.5 slice 5). Five-step sequence:
+     *  and the conditional-inner branch in
+     * `appendDecodeConditional`. Five-step sequence:
      * capture outer limit → codec.decode VBI prefix → applyBound →
      * mutableListOf → try-while-finally restore outer limit.
      *
@@ -5343,7 +5332,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase I.1 step 11 — emit encode for `@LengthPrefixed
+     * Emit encode for `@LengthPrefixed
      * @UseCodec(C::class) val xs: List<E>`. Pre-measures the body byte
      * count via the element codec's `wireSize` (cast to `Exact`), writes
      * the prefix via the user codec's `encode`, then iterates and encodes
@@ -5375,7 +5364,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 15a — emit encode for `@LengthPrefixed
+     * Emit encode for `@LengthPrefixed
      * @UseCodec(C::class) val: T : Payload`. BackPatch shape mirroring
      * [appendLengthPrefixedStringEncode]: reserve prefix slot, run
      * `C.encode(buffer, value.<name>, context)` against the accumulating
@@ -5426,10 +5415,10 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 audit-2a — shared encode body for the VBI-prefixed
+     * Shared encode body for the VBI-prefixed
      * list shape. Emitted by both `FieldSpec.LengthPrefixedUseCodecList`
-     * (slice 11) and `appendEncodeConditional`'s
-     * `LengthPrefixedUseCodecList` branch (J.M.5 slice 5).
+     *  and `appendEncodeConditional`'s
+     * `LengthPrefixedUseCodecList` branch.
      *
      * `accessor` is the read-side expression for the list — `value.
      * <name>` for the non-conditional path; the smart-cast non-null
@@ -5520,17 +5509,16 @@ internal class CodecEmitter(
     }
 
     /**
-     * Slice 4 / 5a — order-aware single-scalar peek for the prefix
-     * walk. Single-byte kinds (`UByte` / `Byte`) read directly;
-     * unsigned multi-byte kinds (`UShort` / `UInt`) assemble bytes
-     * BE/LE per the field's resolvedWireOrder. Wider and signed
-     * multi-byte kinds aren't required by any in-scope vector; they
-     * would need parallel peek paths (signed sign-extension, ULong
-     * promotion).
+     * Order-aware single-scalar peek for the prefix walk. Single-byte
+     * kinds (`UByte` / `Byte`) read directly; unsigned multi-byte kinds
+     * (`UShort` / `UInt`) assemble bytes BE/LE per the field's
+     * resolvedWireOrder. Wider and signed multi-byte kinds aren't required
+     * by any in-scope vector; they would need parallel peek paths (signed
+     * sign-extension, ULong promotion).
      *
      * `offsetExpr` is the Kotlin sub-expression interpolated into
      * `stream.peekByte(baseOffset + <offsetExpr>)`. Callers with a
-     * fixed offset pass `"0"` / `"7"`; the slice 5a sequential walk
+     * fixed offset pass `"0"` / `"7"`; the sequential walk
      * passes the running-offset variable (`"__offset"`).
      */
     private fun appendPeekScalar(
@@ -5599,7 +5587,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Slice 4 — Int.MAX_VALUE guard for `@LengthFrom` siblings whose
+     * Int.MAX_VALUE guard for `@LengthFrom` siblings whose
      * range exceeds `Int`. `UByte` (max 255), `UShort` (max 65535),
      * `Byte` (max 127), `Short` (max 32767), and `Int` (identity)
      * fit in a non-negative `Int` and skip the guard. `UInt`,
@@ -5684,11 +5672,10 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage C / 5a — peek-assemble a length-prefix as a `UInt`.
-     * `prefixOffsetExpr` is interpolated into
-     * `stream.peekByte(baseOffset + <expr>)`; callers with a fixed
-     * offset pass `"0"` / `"$N"`, the slice 5a sequential walk
-     * passes the running-offset variable.
+     * Peek-assemble a length-prefix as a `UInt`. `prefixOffsetExpr` is
+     * interpolated into `stream.peekByte(baseOffset + <expr>)`; callers
+     * with a fixed offset pass `"0"` / `"$N"`, the sequential walk passes
+     * the running-offset variable.
      */
     private fun appendPeekPrefixAssembly(
         body: CodeBlock.Builder,
@@ -5730,17 +5717,17 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage D — analyze a `@ProtocolMessage sealed interface` parent.
+     * Analyze a `@ProtocolMessage sealed interface` parent.
      *
      * Returns null (silently skip) when the parent carries
-     * `@DispatchOn` (Stage F surface), when the parent has zero
+     * `@DispatchOn` ( surface), when the parent has zero
      * sealed subclasses, or when any direct subclass fails to fit
-     * Stage A/B/C/D's variant shape (missing `@PacketType`,
+     * /B/C/D's variant shape (missing `@PacketType`,
      * out-of-range value, not a `data class`, or its own field shape
      * is not analyzable). The validator in `ProtocolMessageProcessor`
      * surfaces user-facing diagnostics for the missing-`@PacketType`
      * and duplicate-value cases; this method's silence keeps the
-     * emitter consistent with Stage A/B/C "out of shape, no codec".
+     * emitter consistent with /B/C "out of shape, no codec".
      */
     private fun analyzeSealedDispatcher(symbol: KSClassDeclaration): DispatcherShape? {
         if (symbol.annotations.any { it.shortName.asString() == "DispatchOn" }) return null
@@ -5796,7 +5783,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage F slice 6 — analyze a `@DispatchOn`-annotated sealed
+     * Analyze a `@DispatchOn`-annotated sealed
      * parent into a `DispatchOnDispatcherShape`.
      *
      * Returns null (silent skip) when the parent doesn't carry
@@ -5804,7 +5791,7 @@ internal class CodecEmitter(
      * with a single supported-scalar inner, when the discriminator
      * has zero or multiple `@DispatchValue` properties (the
      * validator names this case), or when any variant fails to fit
-     * the slice 6 shape (data class, has `@PacketType(value = N)`,
+     * the shape (data class, has `@PacketType(value = N)`,
      * first parameter is the discriminator type). The validator
      * surfaces user-facing diagnostics; the emitter's silence keeps
      * the "out of shape, no codec" pattern intact.
@@ -5825,12 +5812,12 @@ internal class CodecEmitter(
         if (innerType.isError || innerType.isMarkedNullable) return null
         val innerKind =
             SUPPORTED_SCALARS[innerType.declaration.qualifiedName?.asString()] ?: return null
-        // Slice 6.5: peek-side reconstruction supports single-byte kinds
-        // (slice 6) plus 2/4-byte unsigned kinds. ULong / signed multi-byte
+        // Peek-side reconstruction supports single-byte kinds
+        //  plus 2/4-byte unsigned kinds. ULong / signed multi-byte
         // discriminators aren't required by any in-scope vector and would
         // need parallel peek paths.
         if (innerKind !in peekableDispatcherInnerKinds) return null
-        // Slice 6.5: read the discriminator value class's `@ProtocolMessage(
+        // Read the discriminator value class's `@ProtocolMessage(
         // wireOrder = ...)` so multi-byte byte assembly during peek matches
         // the encode/decode wire layout. Single-byte kinds ignore this.
         val discriminatorWireOrder = readMessageWireOrder(discriminatorDecl)
@@ -5844,7 +5831,7 @@ internal class CodecEmitter(
         if (dispatchProp.isMutable || dispatchProp.extensionReceiver != null) return null
         val returnType = dispatchProp.type.resolve()
         if (returnType.isMarkedNullable) return null
-        // Phase J.M.5 slice J.M.7.a — accept the widened set of return
+        // Slice — accept the widened set of return
         // types ({Boolean, Byte, UByte, Short, UShort, Int, UInt}) and
         // capture the kind so the dispatch emit site can pick the
         // right Int-coercion expression. The validator surfaces the
@@ -5855,11 +5842,11 @@ internal class CodecEmitter(
                 ?: return null
         val dispatchValuePropertyName = dispatchProp.simpleName.asString()
 
-        // Stage H slice 10d — detect whether the sealed parent declares
+        // Detect whether the sealed parent declares
         // `<P : Payload>` / `<out P : Payload>`. When present, the
         // dispatcher emits as a generic class binding `P` and threads a
         // constructor-injected `payloadCodec: Codec<P>` to any variant
-        // that itself carries `<P : Payload>` (slice 10b shape).
+        // that itself carries `<P: Payload>` ( shape).
         // `<Nothing>`-typed variants don't need the codec — they keep
         // static-object references.
         val payloadTypeParameter = detectPayloadTypeParameter(symbol)
@@ -5884,7 +5871,7 @@ internal class CodecEmitter(
                 packetType.arguments
                     .firstOrNull { it.name?.asString() == "value" }
                     ?.value as? Int ?: return null
-            // Phase J.M.5 slice J.M.7.a — `@PacketType.value` range is
+            // Slice — `@PacketType.value` range is
             // per-kind now (Boolean: 0..1, Byte: -128..127, UByte:
             // 0..255, Short: -32768..32767, UShort: 0..65535, Int /
             // UInt: full Int range). Validator surfaces the user-facing
@@ -5904,10 +5891,10 @@ internal class CodecEmitter(
             // Variant must analyze cleanly via the existing data-class path
             // (or the object-singleton path added by issue #150). The
             // header field, when present, is a FieldSpec.ValueClassScalar
-            // (slice 3); object variants resolve to an empty-fields shape.
+            // object variants resolve to an empty-fields shape.
             analyze(sub) ?: return null
-            // Slice 10d: detect whether the variant itself is generic
-            // (slice 10b shape — `<P : Payload>` type parameter on the
+            // Detect whether the variant itself is generic
+            // ( shape — `<P: Payload>` type parameter on the
             // variant data class). If so, the dispatcher constructs the
             // variant codec via `VariantCodec(payloadCodec)` and stores
             // the instance under a derived field name (e.g.,
@@ -5944,7 +5931,7 @@ internal class CodecEmitter(
         variants.sortBy { it.dispatchValue }
         val pkg = symbol.packageName.asString()
         val parentSimpleName = symbol.simpleName.asString()
-        // Phase J.M.5 slice 14c — capture parent `@FramedBy`. The
+        // Capture parent `@FramedBy`. The
         // dispatcher's emit path forks on this: when present, encode
         // returns `ReadBuffer` (slicing scheme owned by FramedEncoder),
         // the `Codec<Parent>` superinterface drops, peekFrameSize is
@@ -5973,10 +5960,10 @@ internal class CodecEmitter(
     }
 
     private fun classifyVariantWireSize(shape: CodecShape): VariantWireSize {
-        // Locked Decision row 19: any `@When` field collapses wireSize to
+        // Any `@When` field collapses wireSize to
         // BackPatch — including inside a sealed variant.
         if (shape.fields.any { it is FieldSpec.Conditional }) return VariantWireSize.BackPatch
-        // Slice 5a: any `@LengthPrefixed val: String` (terminal or otherwise)
+        // Any `@LengthPrefixed val: String` (terminal or otherwise)
         // collapses wireSize to BackPatch per row 15. The variant codec's
         // own wireSize already produces BackPatch in this case (see
         // buildWireSizeFun); the dispatcher size table needs to know not to
@@ -5985,25 +5972,25 @@ internal class CodecEmitter(
         // Same BackPatch classification — `@RemainingBytes val: String` collapses
         // wireSize per the buildWireSizeFun early-return rule.
         if (shape.fields.any { it is FieldSpec.RemainingBytesString }) return VariantWireSize.BackPatch
-        // Slice 10a: same BackPatch classification — variant codec's own
+        // Same BackPatch classification — variant codec's own
         // wireSize is BackPatch (see buildWireSizeFun's RemainingBytesPayload
         // early-return); the dispatcher must skip the runtime-Exact cast.
         if (shape.fields.any { it is FieldSpec.RemainingBytesPayload }) return VariantWireSize.BackPatch
-        // Phase I.1: same shape — buildWireSizeFun collapses any
+        // Same shape — buildWireSizeFun collapses any
         // UseCodecScalar-bearing shape to BackPatch, so the dispatcher must
         // also skip the runtime-Exact cast. Promote later if a vector
         // benefits from runtime-Exact via codec.wireSize forwarding.
         if (shape.fields.any { it is FieldSpec.UseCodecScalar }) return VariantWireSize.BackPatch
-        // Phase I.1 step 11: same — buildWireSizeFun collapses
+        // Same — buildWireSizeFun collapses
         // LengthPrefixedUseCodecList-bearing shapes to BackPatch.
         if (shape.fields.any { it is FieldSpec.LengthPrefixedUseCodecList }) return VariantWireSize.BackPatch
-        // Phase J.M.5 slice 15a: same — buildWireSizeFun collapses
+        // Same — buildWireSizeFun collapses
         // LengthPrefixedUseCodecPayload-bearing shapes to BackPatch.
         if (shape.fields.any { it is FieldSpec.LengthPrefixedUseCodecPayload }) return VariantWireSize.BackPatch
-        // Phase J.M.5 slice 11b: same — buildWireSizeFun collapses bare
+        // Same — buildWireSizeFun collapses bare
         // `val: T : @ProtocolMessage` shapes to BackPatch.
         if (shape.fields.any { it is FieldSpec.ProtocolMessageScalar }) return VariantWireSize.BackPatch
-        // Phase J.M.5 slice 11a: `@RemainingBytes List<E>` with sealed-parent
+        // `@RemainingBytes List<E>` with sealed-parent
         // (or otherwise BackPatch-element) collapses to BackPatch — see
         // [buildWireSizeFun] for the rationale (the runtime `as Exact` cast
         // would CCE on BackPatch element variants).
@@ -6013,7 +6000,7 @@ internal class CodecEmitter(
         ) {
             return VariantWireSize.BackPatch
         }
-        // J.M.6.c: non-terminal `@RemainingBytes*` collapses the variant
+        // Non-terminal `@RemainingBytes*` collapses the variant
         // codec's wireSize to BackPatch (see [buildWireSizeFun] above);
         // the dispatcher's per-variant size table mirrors that.
         if (shape.fields.any {
@@ -6024,38 +6011,38 @@ internal class CodecEmitter(
         }
         return when (shape.fields.lastOrNull()) {
             is FieldSpec.LengthPrefixedMessage -> VariantWireSize.RuntimeExact
-            // Slice 4: a LengthFromString variant's body byte count is the
+            // A LengthFromString variant's body byte count is the
             // sibling value at encode time — same shape as a runtime-Exact
             // length-prefixed-message body. Dispatcher size emission walks
             // the variant codec's wireSize, which is already Exact for this
             // shape.
             is FieldSpec.LengthFromString -> VariantWireSize.RuntimeExact
-            // Slice 7a: same Exact-via-sibling shape as LengthFromString.
+            // Same Exact-via-sibling shape as LengthFromString.
             is FieldSpec.LengthFromList -> VariantWireSize.RuntimeExact
-            // J.M.6.b: same Exact-via-sibling shape as LengthFromString.
+            // Same Exact-via-sibling shape as LengthFromString.
             is FieldSpec.LengthFromMessage -> VariantWireSize.RuntimeExact
-            // Phase J.M.0: variant codec's own wireSize is Exact (priorBytes +
+            // Variant codec's own wireSize is Exact (priorBytes +
             // sum of element wireSizes via runtime `as Exact` cast); the
             // dispatcher forwards without re-deriving.
             is FieldSpec.RemainingBytesProtocolMessageList -> VariantWireSize.RuntimeExact
             is FieldSpec.Scalar, is FieldSpec.ValueClassScalar, null ->
                 VariantWireSize.LiteralExact(shape.fields.sumOfFixedWireBytes())
             is FieldSpec.LengthPrefixedString, is FieldSpec.Conditional -> VariantWireSize.BackPatch
-            // Slice 10a: handled by the upfront BackPatch short-circuit; this
+            // Handled by the upfront BackPatch short-circuit; this
             // branch is unreachable because the early return collapses any
             // shape carrying a RemainingBytesPayload field before the
             // terminal-shape `when` runs.
             is FieldSpec.RemainingBytesPayload -> VariantWireSize.BackPatch
-            // Phase I.1: same — handled by the upfront BackPatch short-circuit
+            // Same — handled by the upfront BackPatch short-circuit
             // above; defensive branch keeps the `when` exhaustive.
             is FieldSpec.UseCodecScalar -> VariantWireSize.BackPatch
-            // Phase I.1 step 11: same — handled by the upfront BackPatch
+            // Same — handled by the upfront BackPatch
             // short-circuit above.
             is FieldSpec.LengthPrefixedUseCodecList -> VariantWireSize.BackPatch
-            // Phase J.M.5 slice 15a: same — handled by the upfront BackPatch
+            // Same — handled by the upfront BackPatch
             // short-circuit above.
             is FieldSpec.LengthPrefixedUseCodecPayload -> VariantWireSize.BackPatch
-            // Phase J.M.5 slice 11b: same — handled by the upfront BackPatch
+            // Same — handled by the upfront BackPatch
             // short-circuit above.
             is FieldSpec.ProtocolMessageScalar -> VariantWireSize.BackPatch
             // `@RemainingBytes val: String` — handled by the upfront BackPatch
@@ -6242,13 +6229,13 @@ internal class CodecEmitter(
     }
 
     /**
-     * Slice 6 — emit the bit-packed dispatcher codec. Uses the
+     * Emit the bit-packed dispatcher codec. Uses the
      * peek-without-consume model on decode (save position, decode
      * discriminator via its codec, restore position, dispatch);
      * the variant codec then reads from the original position with
      * its first field being the discriminator value class.
      *
-     * Stage H slice 10d — when the sealed parent is generic
+     * When the sealed parent is generic
      * (`<out P : Payload>`), the dispatcher emits as a class
      * `class FooCodec<P : Payload>(payloadCodec: Codec<P>)` instead
      * of `object FooCodec`. Generic variants have their codec
@@ -6263,7 +6250,7 @@ internal class CodecEmitter(
             if (shape.payloadTypeParameter != null) {
                 buildGenericDispatchOnDispatcherTypeSpec(shape, shape.payloadTypeParameter, parentTypeRef)
             } else if (shape.framedBy != null) {
-                // Phase J.M.5 slice 14c — `@FramedBy` parent. Encode
+                // `@FramedBy` parent. Encode
                 // returns ReadBuffer, no Codec<Parent> superinterface,
                 // peek owned by the dispatcher (single walker), no
                 // wireSize.
@@ -6290,7 +6277,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 14c — encode for an `@FramedBy` `@DispatchOn`
+     * Encode for an `@FramedBy@DispatchOn`
      * dispatcher. The signature differs from [buildDispatchOnEncodeFun]
      * by dropping the `WriteBuffer` parameter, adding `factory`, and
      * returning `ReadBuffer`. The `when` body still routes by variant,
@@ -6301,7 +6288,7 @@ internal class CodecEmitter(
      * Generic variants are smart-cast to their star-projected form
      * (`is Foo.Data<*>`) and then explicitly cast to `Foo.Data<P>` at
      * the call site so the variant codec's `<P : Payload>` accepts the
-     * value (mirrors [buildDispatchOnEncodeFun]'s slice 10d behaviour).
+     * value (mirrors [buildDispatchOnEncodeFun]'s behaviour).
      */
     private fun buildFramedByDispatchOnEncodeFun(
         shape: DispatchOnDispatcherShape,
@@ -6343,7 +6330,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 slice 14c — `peekFrameSize` for an `@FramedBy`
+     * `peekFrameSize` for an `@FramedBy`
      * `@DispatchOn` dispatcher. Every variant peeks identically (same
      * header width, same prefix codec — that's the point of inheriting
      * `@FramedBy` from the parent), so the per-variant dispatch
@@ -6420,7 +6407,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage H slice 10d — `class FooCodec<P : Payload>(payloadCodec:
+     * `class FooCodec<P: Payload>(payloadCodec:
      * Codec<P>) : Codec<Foo<P>>` shape. Each generic variant gets a
      * private property initialized to `<VariantCodec>(payloadCodec)`
      * in the primary constructor; the encode/decode/wireSize/peek
@@ -6449,10 +6436,10 @@ internal class CodecEmitter(
                         .initializer(binding.codecParameterName)
                         .build(),
                 )
-        // Phase J.M.5 slice 14c — generic dispatcher × `@FramedBy`
+        // Generic dispatcher × `@FramedBy`
         // drops `Codec<Parent<P>>`, emits framed encode + dispatcher-
         // owned peek walker, and skips wireSize. The aggregator
-        // companion stays — slice 10c `Partial<P>` is decode-only and
+        // companion stays — `Partial<P>` is decode-only and
         // its framing-aware via the variant's own emit.
         if (shape.framedBy == null) {
             builder.addSuperinterface(CODEC_CN.parameterizedBy(parentTypeRef))
@@ -6460,7 +6447,7 @@ internal class CodecEmitter(
         for (variant in shape.variants) {
             val fieldName = variant.genericInstanceFieldName ?: continue
             // Variant codec is `class <VariantName>Codec<P : Payload>(
-            //   payloadCodec: Codec<P>)` per slice 10b. Construct it
+            // payloadCodec: Codec<P>)` per. Construct it
             // once with the dispatcher's codec.
             val fieldType = variant.codecClassName.parameterizedBy(typeVar)
             builder.addProperty(
@@ -6485,7 +6472,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage H slice 10d.5 — companion object hosting
+     * Companion object hosting
      * `decodeAggregating(buffer, context, on<Variant>: (...) -> ...,
      * ...)`. The aggregator is a parallel decode pathway that lets
      * the consumer pick the payload codec per call (and per
@@ -6497,7 +6484,7 @@ internal class CodecEmitter(
      * only the variants they expect to receive; un-overridden
      * payload-bearing variants throw at runtime if they arrive.
      *
-     * Companion-side placement matches slice 10b/10c's `partial<P>(
+     * Companion-side placement matches /10c's `partial<P>(
      * ...)` convention: the aggregator's `<P : Payload>` is a
      * function-level type variable, decoupled from any surrounding
      * dispatcher class instantiation. Consumers call
@@ -6521,7 +6508,7 @@ internal class CodecEmitter(
             .build()
 
     /**
-     * Stage H slice 10d.5 — emit `decodeAggregating(...)` on the
+     * Emit `decodeAggregating(...)` on the
      * generic dispatcher's companion. Same routing logic as
      * `decode(buffer, context)` — but for payload-bearing variants
      * the dispatcher invokes the consumer's lambda with the variant
@@ -6640,7 +6627,7 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage H slice 10d.5 — derive the lambda parameter name for a
+     * Derive the lambda parameter name for a
      * payload-bearing variant. Convention: `on<VariantName>` (camel-
      * case lowering of the leading character). Disambiguates lambdas
      * across multiple payload-bearing variants without ambiguity.
@@ -6648,7 +6635,7 @@ internal class CodecEmitter(
     private fun aggregatorLambdaParameterName(variant: DispatchOnVariantSpec): String = "on${variant.simpleName}"
 
     /**
-     * Stage H slice 10d — return the parent's TypeName as it should
+     * Return the parent's TypeName as it should
      * appear in the codec's `Codec<...>` superinterface, encode/decode
      * signatures, and constructor calls.
      *
@@ -6666,7 +6653,7 @@ internal class CodecEmitter(
         }
 
     /**
-     * Stage H slice 10d — return the Kotlin code-block that yields
+     * Return the Kotlin code-block that yields
      * the variant's codec receiver for `<receiver>.decode(...)` /
      * `.encode(...)` / `.wireSize(...)` / `.peekFrameSize(...)` calls.
      *
@@ -6684,7 +6671,7 @@ internal class CodecEmitter(
         }
 
     /**
-     * Stage H slice 10d — encode-side `is` check for a variant. For
+     * Encode-side `is` check for a variant. For
      * a generic variant, the smart cast uses star projection
      * (`Foo.Data<*>`) since the dispatcher's `value: Foo<P>` doesn't
      * tell us the runtime variant's `P` is the same `P`. The variant
@@ -6705,7 +6692,7 @@ internal class CodecEmitter(
         }
 
     /**
-     * Stage H slice 10d — typed cast TypeName for the variant codec
+     * Typed cast TypeName for the variant codec
      * call. Generic variants need `value as Foo.Data<P>` so the
      * variant codec's `<P : Payload>` accepts the value; non-generic
      * variants pass the `value` parameter directly without a cast.
@@ -6764,7 +6751,7 @@ internal class CodecEmitter(
         )
         body.endControlFlow()
         body.endControlFlow()
-        // Phase J.M.5 slice 14c — `@FramedBy` dispatchers don't
+        // `@FramedBy` dispatchers don't
         // implement `Codec<T>` (the encode contract differs), so
         // `decode` is a plain object function rather than an override.
         val builder =
@@ -6785,7 +6772,7 @@ internal class CodecEmitter(
         parentTypeRef: TypeName,
     ): FunSpec {
         val body = CodeBlock.builder()
-        // Slice 10d — generic variants are smart-cast to their
+        // Generic variants are smart-cast to their
         // star-projected form (`is Foo.Data<*>`) and then explicitly
         // cast to `Foo.Data<P>` at the call site so the variant codec's
         // `<P : Payload>` accepts the value. The cast is statically
@@ -6875,9 +6862,9 @@ internal class CodecEmitter(
             PEEK_RESULT_CN,
         )
         // Peek the discriminator's inner-scalar bytes at baseOffset and
-        // reconstruct the value class. Slice 6 supports natural-width
+        // reconstruct the value class. supports natural-width
         // single-byte kinds via appendPeekFixedScalar — the same path the
-        // slice 3 value-class @When source uses. Wider discriminators
+        // value-class @When source uses. Wider discriminators
         // would route through appendPeekScalar's order-aware assembly.
         appendPeekFixedScalar(
             body = body,
@@ -6936,14 +6923,14 @@ internal class CodecEmitter(
     )
 
     /**
-     * Stage F slice 6 — bit-packed dispatcher shape.
+     * Bit-packed dispatcher shape.
      *
      * The discriminator is a `@JvmInline value class` whose
      * `@DispatchValue`-annotated property produces an `Int` to match
      * against `@PacketType.value`. Variants are data classes whose
      * first constructor parameter is the discriminator type, so the
      * variant codec naturally reads/writes the discriminator byte
-     * via the slice 3 `FieldSpec.ValueClassScalar` path.
+     * via the `FieldSpec.ValueClassScalar` path.
      */
     private data class DispatchOnDispatcherShape(
         val packageName: String,
@@ -6956,7 +6943,7 @@ internal class CodecEmitter(
         val discriminatorInnerWireOrder: Endianness,
         val dispatchValuePropertyName: String,
         /**
-         * Phase J.M.5 slice J.M.7.a — kind of the `@DispatchValue`
+         * Slice — kind of the `@DispatchValue`
          * property's return type. Drives the per-emit-site Int
          * coercion at the dispatch site: Int returns flow through
          * unchanged, Boolean lifts to `if (b) 1 else 0`, the other
@@ -6967,7 +6954,7 @@ internal class CodecEmitter(
         val dispatchValueKind: ScalarKind = ScalarKind.Int,
         val variants: List<DispatchOnVariantSpec>,
         /**
-         * Stage H slice 10d — present when the sealed parent declares
+         * Present when the sealed parent declares
          * `<out P : Payload>` (or `<P : Payload>`). Causes the
          * dispatcher to emit as a generic class
          * `class FooCodec<P : Payload>(payloadCodec: Codec<P>) :
@@ -6977,7 +6964,7 @@ internal class CodecEmitter(
          */
         val payloadTypeParameter: PayloadTypeParameter? = null,
         /**
-         * Phase J.M.5 slice 14c — present when the sealed parent itself
+         * Present when the sealed parent itself
          * carries `@FramedBy`. The dispatcher then drops the `Codec<T>`
          * superinterface (encode contract differs — returns a
          * `ReadBuffer` slice), changes the encode signature to
@@ -7005,8 +6992,8 @@ internal class CodecEmitter(
      * `wireSize` — the variant codec's own `wireSize` is the source
      * of truth, since the variant's bytes are exactly its body).
      *
-     * Stage H slice 10d adds `genericInstanceFieldName`: when the
-     * variant data class declares `<P : Payload>` (slice 10b shape),
+     * Adds `genericInstanceFieldName`: when the
+     * variant data class declares `<P: Payload>` ( shape),
      * the variant's codec is a generic class that needs a constructor-
      * injected `payloadCodec`. The dispatcher constructs the variant
      * codec instance once in its primary constructor and stores it as
@@ -7048,7 +7035,7 @@ internal class CodecEmitter(
         val codecSimpleName: String,
         val fields: List<FieldSpec>,
         /**
-         * Stage H slice 10b — when the @ProtocolMessage data class
+         * When the @ProtocolMessage data class
          * carries a `<P : Payload>` type parameter and a
          * `RemainingBytesPayload` field whose source is
          * `ConstructorInjected`, this is the type-parameter name
@@ -7060,7 +7047,7 @@ internal class CodecEmitter(
          */
         val payloadTypeParameter: PayloadTypeParameter? = null,
         /**
-         * Phase J.M.5 slice 14b — when the @ProtocolMessage class is
+         * When the @ProtocolMessage class is
          * also annotated with `@FramedBy(codec, after)`, this captures
          * the framing codec's class name and the optional `after` field
          * name. When non-null, the emitter routes to a different file
@@ -7078,7 +7065,7 @@ internal class CodecEmitter(
          */
         val isSingletonObject: Boolean = false,
         /**
-         * Phase J.M.5 slice 15h — non-null when the symbol is a singleton
+         * Non-null when the symbol is a singleton
          * object variant under a sealed parent annotated
          * `@DispatchOn(value class)`. The parent dispatcher peeks the
          * discriminator and resets the buffer position before delegating,
@@ -7094,7 +7081,7 @@ internal class CodecEmitter(
     )
 
     /**
-     * Phase J.M.5 slice 15h — discriminator self-frame for a singleton
+     * Discriminator self-frame for a singleton
      * sealed variant under `@DispatchOn(value class)`. [innerKind] is the
      * value class's inner scalar (UByte for the in-scope MQTT v3 SUBACK
      * fixture; UShort/UInt/Byte are also peekable and would round-trip
@@ -7107,12 +7094,12 @@ internal class CodecEmitter(
     )
 
     /**
-     * Phase J.M.5 slice 14b — `@FramedBy` configuration captured during
+     * `@FramedBy` configuration captured during
      * analyze. The emitter consumes this to switch the file spec to the
      * slicing-scheme encode + strict-decode shape. `afterFieldName` is
      * empty for prefix-at-offset-0 (the standalone probe case);
      * non-empty values are reserved for sealed-parent + @PacketType
-     * dispatch (slice 14c).
+     * dispatch.
      */
     private data class FramedByConfig(
         val codecClassName: ClassName,
@@ -7120,11 +7107,11 @@ internal class CodecEmitter(
     )
 
     /**
-     * Stage H slice 10b — type-parameter binding for a generic-bounded
+     * Type-parameter binding for a generic-bounded
      * codec class. `typeVariableName` is the Kotlin type variable
      * (e.g., `P`); `codecParameterName` is the constructor parameter
      * holding the user-supplied codec (e.g., `payloadCodec`); `bound`
-     * is the upper bound (always `Payload` for slice 10b).
+     * is the upper bound (always `Payload` for ).
      */
     private data class PayloadTypeParameter(
         val typeVariableName: String,
@@ -7168,13 +7155,13 @@ internal class CodecEmitter(
         val name: String
 
         /**
-         * Stage A onward — fields whose wire byte count is fixed at
+         * Onward — fields whose wire byte count is fixed at
          * compile time. The `peekFrameSize` prefix walk and the
          * fixed-size variant `wireSize` summation type-narrow to this
          * shape so they no longer need runtime casts to read
          * `wireBytes`.
          *
-         * Slice 5 keeps this interface unchanged: the variable-length
+         * Keeps this interface unchanged: the variable-length
          * prefix walk for MQTT v3 CONNECT lives on a separate branch,
          * not as a third member here.
          */
@@ -7199,7 +7186,7 @@ internal class CodecEmitter(
         ) : FieldSpec
 
         /**
-         * J.M.6.b (issue #151 part 1) — `@LengthFrom("siblingField") val: T`
+         * (issue #151 part 1) — `@LengthFrom("siblingField") val: T`
          * where `T` is a `@ProtocolMessage` data class or sealed parent.
          * Sister of [LengthPrefixedMessage] for the sibling-bounded variant:
          * the body's byte count comes from the sibling's `LengthSource`
@@ -7225,7 +7212,7 @@ internal class CodecEmitter(
         ) : FieldSpec
 
         /**
-         * Phase J.M.5 slice 11b — bare `val: T` where T is a
+         * Bare `val: T` where T is a
          * `@ProtocolMessage` data class or sealed parent. The codec
          * resolves to `${T.simpleName}Codec` by-name in T's package.
          * Decode: `<codecType>.decode(buffer, context)`. Encode:
@@ -7260,7 +7247,7 @@ internal class CodecEmitter(
         ) : FieldSpec
 
         /**
-         * Phase I.1 — `@UseCodec(C::class) val: <scalar>` (no framing
+         * `@UseCodec(C::class) val: <scalar>` (no framing
          * annotation), where `C` is a Kotlin `object` implementing
          * `Codec<T>` for `T` matching the field type. The decoded value
          * is whatever the user codec produces; encode delegates to
@@ -7272,7 +7259,7 @@ internal class CodecEmitter(
          * `__<name>OuterLimit`, calls `C.applyBound(buffer, <name>)`
          * after decode, and the surrounding `buildDecodeFun` wraps every
          * subsequent field in `try { ... } finally { buffer.setLimit(
-         * __<name>OuterLimit) }` — the slice 10f outer-limit-restore
+         * __<name>OuterLimit) }` — the outer-limit-restore
          * template, driven by interface inspection on the codec target.
          *
          * `fieldType` carries the field's declared `TypeName` so the
@@ -7280,7 +7267,7 @@ internal class CodecEmitter(
          * exact source type (UInt / Int / value class wrapper / etc.).
          * `codecType` is the user-supplied codec object's `ClassName`,
          * referenced directly (`<codecType>.decode(buffer, context)`)
-         * — Locked Decision row 21: Kotlin linker resolves
+         * Kotlin linker resolves
          * `expect`/`actual` codecs.
          */
         data class UseCodecScalar(
@@ -7306,7 +7293,7 @@ internal class CodecEmitter(
             override val name: String,
             val ownerSimpleName: String,
             /**
-             * J.M.6.c — sum of `wireBytes` for trailing FixedSize fields
+             * Sum of `wireBytes` for trailing FixedSize fields
              * after this one. 0 when terminal; non-zero only when the
              * shape carries fixed-size scalars / value classes after the
              * `@RemainingBytes` body. Decode emit subtracts this from
@@ -7316,21 +7303,21 @@ internal class CodecEmitter(
         ) : FieldSpec
 
         /**
-         * Stage H slice 10a — `@RemainingBytes @UseCodec(C::class) val:
+         * `@RemainingBytes @UseCodec(C::class) val:
          * P` where `P` extends `com.ditchoom.buffer.codec.Payload` and
          * `C` is a Kotlin `object` implementing `Codec<P>`. Decode
          * delegates to `C.decode(buffer, context)` against the bounded
          * buffer; encode delegates to `C.encode(buffer, value.<name>,
          * context)`. Caller-bounds-buffer contract: an outer dispatcher
-         * (slice 10d for MQTT) sets `buffer.limit()` to bound the
+         * (for example MQTT) sets `buffer.limit` to bound the
          * payload region before this codec runs.
          *
-         * Slice 10a narrow: terminal-only (no fields after the
-         * payload), no generics on the outer message (slice 10b),
+         * Narrow: terminal-only (no fields after the
+         * payload), no generics on the outer message,
          * concrete `Payload`-typed field (no `<P : Payload>`
-         * type parameter), no `Partial` decode pattern (slice 10c),
-         * no aggregator (slice 10d), no `expect`/`actual` resolution
-         * across platforms (slice 10e — single-platform `object`
+         * type parameter), no `Partial` decode pattern,
+         * no aggregator, no `expect`/`actual` resolution
+         * across platforms (single-platform `object`
          * declaration only).
          */
         data class RemainingBytesPayload(
@@ -7338,12 +7325,12 @@ internal class CodecEmitter(
             val ownerSimpleName: String,
             val payloadType: TypeName,
             val source: PayloadCodecSource,
-            /** J.M.6.c — see [RemainingBytesString.reservedTrailingBytes]. */
+            /** See [RemainingBytesString.reservedTrailingBytes]. */
             val reservedTrailingBytes: Int = 0,
         ) : FieldSpec
 
         /**
-         * Phase I.1 step 11 — `@LengthPrefixed @UseCodec(C::class) val xs:
+         * `@LengthPrefixed @UseCodec(C::class) val xs:
          * List<E>` where `C` is a Kotlin `object` implementing
          * `BoundingLengthCodec<UInt>` and `E` is a `@ProtocolMessage data
          * class`. The codec reads/writes the body byte count via its own
@@ -7383,7 +7370,7 @@ internal class CodecEmitter(
         }
 
         /**
-         * Phase J.M.5 slice 15a — `@LengthPrefixed @UseCodec(C::class) val:
+         * `@LengthPrefixed @UseCodec(C::class) val:
          * T` where `T` is a `Payload`-marked type and `C` is a Kotlin
          * `object` implementing `Codec<T>`. The scalar counterpart of
          * [LengthPrefixedUseCodecList].
@@ -7403,10 +7390,10 @@ internal class CodecEmitter(
          * accumulating buffer, measure the body byte count from the
          * position delta, patch the prefix in place.
          *
-         * The `T : Payload` marker is enforced by the validator (slice 15
+         * The `T: Payload` marker is enforced by the validator (
          * D2) — typed binary data crossing the codec boundary clusters
          * under one marker, mirroring the existing `@RemainingBytes
-         * @UseCodec val: P : Payload` (slice 10a/10b/10d/10f) shape.
+         * @UseCodec val: P: Payload` (/10b/10d/10f) shape.
          *
          * wireSize collapses the containing message to BackPatch (mirror
          * of [UseCodecScalar] / [LengthPrefixedString]): the user codec's
@@ -7426,9 +7413,9 @@ internal class CodecEmitter(
         ) : FieldSpec
 
         /**
-         * Phase J.M.0 — `@RemainingBytes val: List<T>` where `T` is a
+         * `@RemainingBytes val: List<T>` where `T` is a
          * `@ProtocolMessage data class` (or a sealed parent with
-         * `@DispatchOn`, post-slice-11a). The decoder reads elements
+         * `@DispatchOn`). The decoder reads elements
          * while `buffer.position() < buffer.limit()`, dispatching each
          * iteration to the element's own codec; the caller is
          * responsible for setting `buffer.limit()` externally (typical:
@@ -7439,45 +7426,43 @@ internal class CodecEmitter(
          * Encode iterates the list and writes each element via the
          * element codec — same shape as `LengthFromList`'s encode loop,
          * minus the sibling-bound length carrier; the byte count is
-         * implicit in the outer protocol's framing (row 16 trust
-         * contract).
+         * implicit in the outer protocol's framing.
          *
          * `wireSize` is `Exact(headerBytes + sumOf elements' wireSize)`
          * via the same runtime `as Exact` cast that
          * `LengthPrefixedMessage` uses. Element wireSize must be Exact
-         * at runtime; BackPatch elements throw `ClassCastException` —
-         * matches the existing convention and is the fixture-design
-         * contract for this slice.
+         * at runtime; BackPatch elements throw `ClassCastException`,
+         * matching the existing convention.
          *
-         * Slice narrow: element must be a `@ProtocolMessage data class`
-         * or sealed parent. Slice 15g retired the scalar-element path
-         * (rejected at the validator); typed binary blobs use
+         * Element must be a `@ProtocolMessage data class` or sealed
+         * parent. The scalar-element path is rejected at the validator;
+         * typed binary blobs use
          * `@RemainingBytes @UseCodec(C::class) val: T : Payload`
-         * (slice 10a) instead.
+         * instead.
          *
          * Unblocks: MQTT v3.1.1 SUBSCRIBE / UNSUBSCRIBE topic-filter
-         * lists (see `PHASE_J_M_BRIEF.md` step 1).
+         * lists.
          */
         data class RemainingBytesProtocolMessageList(
             override val name: String,
             val ownerSimpleName: String,
             val elementClassName: ClassName,
             val elementCodecClassName: ClassName,
-            // Phase J.M.5 slice 11a — analyze-time predicate driving the
+            // Analyze-time predicate driving the
             // outer message's wireSize / variant-classification short-
             // circuit. Mirrors `LengthPrefixedListSpec.elementIsBackPatch`
-            // (audit-2b). When `true`, [buildWireSizeFun] and
+            // . When `true`, [buildWireSizeFun] and
             // [classifyVariantWireSize] collapse the containing message
             // to BackPatch — without it, the runtime `as Exact` cast on
             // each element wireSize CCEs for sealed-parent variants
             // carrying `@LengthPrefixed val: String` or `@When` trailers.
             val elementIsBackPatch: Boolean,
-            /** J.M.6.c — see [RemainingBytesString.reservedTrailingBytes]. */
+            /** See [RemainingBytesString.reservedTrailingBytes]. */
             val reservedTrailingBytes: Int = 0,
         ) : FieldSpec
 
         /**
-         * Stage G slice 7a — `@LengthFrom("siblingField") val: List<T>`
+         * `@LengthFrom("siblingField") val: List<T>`
          * where `T` is a `@ProtocolMessage data class`. The sibling
          * provides the body byte count; the decoder bounds the buffer
          * via `setLimit` and reads elements via the element's own
@@ -7488,12 +7473,12 @@ internal class CodecEmitter(
          * sibling consistent with the encoded byte count (same row 16
          * trust contract as `LengthFromString`).
          *
-         * Slice 7a narrow: element must be a `@ProtocolMessage data
+         * Narrow: element must be a `@ProtocolMessage data
          * class`. List of scalar (`List<UByte>` / `List<Int>` etc.)
-         * is the slice 7b shape with `@RemainingBytes`.
+         * is the shape with `@RemainingBytes`.
          *
-         * `source` carries the resolved length carrier: slice 4's
-         * sibling-Scalar form (`LengthSource.Sibling`) or slice 9's
+         * `source` carries the resolved length carrier: 's
+         * sibling-Scalar form (`LengthSource.Sibling`) or 's
          * dotted value-class-property form
          * (`LengthSource.ValueClassProperty`).
          */
@@ -7506,16 +7491,16 @@ internal class CodecEmitter(
         ) : FieldSpec
 
         /**
-         * Stage E slice 4 / Stage G slice 9 —
+         * /
          * `@LengthFrom("ref") val: String`. The body wire bytes are
          * determined by a non-adjacent length carrier decoded
          * earlier. Decode reads `source.localAccessor` UTF-8 bytes;
          * encode writes the body without a prefix slot — the user
          * is responsible for setting the carrier to the correct
-         * UTF-8 byte count (row 16 trust contract).
+         * UTF-8 byte count.
          *
          * `source` carries the resolved length carrier. See
-         * `LengthSource` — slice 4's sibling-Scalar form and slice
+         * `LengthSource` — 's sibling-Scalar form and slice
          * 9's dotted value-class-property form share this field
          * type.
          */
@@ -7526,7 +7511,7 @@ internal class CodecEmitter(
         ) : FieldSpec
 
         /**
-         * Stage E slice 3 — a `@JvmInline value class` field whose primary
+         * A `@JvmInline value class` field whose primary
          * constructor takes a single supported scalar. Wire form is the
          * inner scalar at its natural width.
          *
@@ -7556,15 +7541,15 @@ internal class CodecEmitter(
         ) : FixedSize
 
         /**
-         * Stage E — `@When` conditional wrapper. Slice 2/3 support
+         * `@When` conditional wrapper. /3 support
          * `ConditionalInner.Scalar` at natural width (no `@WireBytes`,
-         * no `@WireOrder`); slice 3.5 widens `inner` to
+         * no `@WireOrder`);.5 widens `inner` to
          * `ConditionalInner.LengthPrefixedString` for the MQTT v3
          * CONNECT optional-field shape (`@LengthPrefixed @When
          * val: String?`).
          *
-         * `condition` carries the resolved source: slice 2's sibling-
-         * Boolean form (`ConditionRef.Sibling`) and slice 3's dotted
+         * `condition` carries the resolved source: 's sibling
+         * Boolean form (`ConditionRef.Sibling`) and 's dotted
          * value-class-property form (`ConditionRef.ValueClassProperty`).
          */
         data class Conditional(
@@ -7577,15 +7562,15 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage E — typed shape of a `@When` field's bound (inner)
+     * Typed shape of a `@When` field's bound (inner)
      * type. Doctrine row 19 lists the slot's underlying type universe
      * as anything Stages A/B/C/D already emit; the emitter implements
      * that universe one shape at a time:
      *   - `Scalar`: any natural-width supported scalar (slices 2/3).
      *   - `LengthPrefixedString`: `@LengthPrefixed val: String?`
-     *     (slice 3.5).
+     * (.5).
      *   - `ValueClassScalar`: `val: T?` where `T` is a `@JvmInline
-     *     value class` over a single supported scalar (Phase J.M
+     * value class` over a single supported scalar (
      *     step 2 — the MQTT v3.1.1 PUBLISH `packetId: PacketId?`
      *     QoS-conditional shape). Decode reads the inner scalar at
      *     natural width and wraps via the value-class constructor;
@@ -7593,7 +7578,7 @@ internal class CodecEmitter(
      *     and writes the inner scalar. `@WireBytes` / `@WireOrder`
      *     on the inner property are out of scope (matches the
      *     narrowing applied to the non-conditional `ValueClassScalar`
-     *     field shape — slice 3).
+     * field shape — ).
      * Future widenings (`@WireBytes`-narrowed scalars, `@LengthPrefixed
      * @ProtocolMessage` body) are additional members; the existing
      * branches stay closed by the sealed.
@@ -7615,11 +7600,11 @@ internal class CodecEmitter(
         ) : ConditionalInner
 
         /**
-         * Phase J.M.5 — conditional `@LengthPrefixed @UseCodec(C) val:
+         * Conditional `@LengthPrefixed @UseCodec(C) val:
          * List<E>?`. The cascading-trailer property bag for v5 acks
          * (PUBACK et al. §3.4.2.2.1). When the predicate is true (and
          * for grammar 2, when `value.<name> != null` at encode time),
-         * the inner shape is the slice 11 length-prefixed property-bag
+         * the inner shape is the length-prefixed property-bag
          * decode/encode. Mirrors `FieldSpec.LengthPrefixedUseCodecList`'s
          * fields one-for-one — the same emit is used inside the
          * conditional `if` block.
@@ -7633,7 +7618,7 @@ internal class CodecEmitter(
         }
 
         /**
-         * Phase J.M.5 slice 15d — conditional `@When @LengthPrefixed
+         * Conditional `@When @LengthPrefixed
          * @UseCodec(C) val: T?` where `T : Payload`. Mirrors
          * [FieldSpec.LengthPrefixedUseCodecPayload]'s emit one-for-one
          * inside the predicate-true branch.
@@ -7641,7 +7626,7 @@ internal class CodecEmitter(
          * Drives the v3/v5 CONNECT will-payload + password slots
          * (gated on `connectFlags.willPresent` / `passwordPresent`).
          * The cascading-trailer cases use predicate truthfulness from
-         * the connect-flag value class properties (slice 3 dotted
+         * the connect-flag value class properties ( dotted
          * value-class-property predicates).
          */
         data class LengthPrefixedUseCodecPayload(
@@ -7652,7 +7637,7 @@ internal class CodecEmitter(
         ) : ConditionalInner
 
         /**
-         * Phase J.M.5 slice 11a — conditional `@When @UseCodec(C) val: T?`.
+         * Conditional `@When @UseCodec(C) val: T?`.
          * Mirrors the non-conditional [FieldSpec.UseCodecScalar] emit one-
          * for-one inside the predicate-true branch. `T` is any type the
          * referenced codec object implements `Codec<T>` for — supported
@@ -7679,7 +7664,7 @@ internal class CodecEmitter(
         ) : ConditionalInner
 
         /**
-         * Phase J.M.5 slice 11b — bare `@When val: T?` where T is a
+         * Bare `@When val: T?` where T is a
          * `@ProtocolMessage` data class or sealed parent. The codec is
          * resolved by-name from T's package (`${T.simpleName}Codec`),
          * not from a `@UseCodec` annotation, so first-round KSP can wire
@@ -7699,11 +7684,11 @@ internal class CodecEmitter(
     }
 
     /**
-     * Phase J.M.5 audit-2a — single source of truth for the
+     * Single source of truth for the
      * "VBI-prefixed list of typed elements" wire shape.
      *
-     * Both `FieldSpec.LengthPrefixedUseCodecList` (slice 11) and
-     * `ConditionalInner.LengthPrefixedUseCodecList` (J.M.5 slice 5)
+     * Both `FieldSpec.LengthPrefixedUseCodecList` and
+     * `ConditionalInner.LengthPrefixedUseCodecList`
      * compose this spec. A future shape change (e.g., promoting the
      * codec value type beyond `UInt`) now lands in one place.
      *
@@ -7714,7 +7699,7 @@ internal class CodecEmitter(
      *  - `false` → pre-measure encode via element codec's `wireSize as
      *    Exact`. Cheaper but requires Exact-measured elements.
      *
-     * Phase J.M.5 audit-2b — the flag is set by
+     * The flag is set by
      * [detectElementBackPatch] which mirrors the message-wide BackPatch
      * short-circuits in [classifyVariantWireSize] / [buildWireSizeFun]:
      * any of `@When`, `@RemainingBytes`, `@UseCodec`, or `@LengthPrefixed
@@ -7722,10 +7707,10 @@ internal class CodecEmitter(
      * encode path. Sealed parents stay conservatively BackPatch (defer
      * the all-variants-Exact promotion until a fixture wants it).
      *
-     * Before audit-2b the flag was named `elementIsSealed` and was
+     * Before the flag was named `elementIsSealed` and was
      * driven solely by the source-language `Modifier.SEALED` check —
      * which would `ClassCastException` at runtime on a data class with
-     * a BackPatch-shaped field (no fixture tripped it because slice 2's
+     * a BackPatch-shaped field (no fixture tripped it because 's
      * v5 property bag wraps such elements under a sealed parent).
      */
     private data class LengthPrefixedListSpec(
@@ -7736,13 +7721,13 @@ internal class CodecEmitter(
     )
 
     /**
-     * Stage E — resolved source of a `@When` predicate.
+     * Resolved source of a `@When` predicate.
      *
-     * Slice 2's `Sibling` form names a sibling `Boolean` constructor
-     * parameter declared before the bound field. Slice 3's
-     * `ValueClassProperty` form names a sibling parameter (a value
-     * class with a single supported-scalar inner) plus a `Boolean`-
-     * returning `val` property declared on that value class.
+     * The `Sibling` form names a sibling `Boolean` constructor parameter
+     * declared before the bound field. The `ValueClassProperty` form
+     * names a sibling parameter (a value class with a single
+     * supported-scalar inner) plus a `Boolean`-returning `val` property
+     * declared on that value class.
      */
     private sealed interface ConditionRef {
         data class Sibling(
@@ -7763,7 +7748,7 @@ internal class CodecEmitter(
         ) : ConditionRef
 
         /**
-         * Phase J.M.5 grammar 2 — `remaining <op> <int>`. References
+         * Grammar 2 — `remaining <op> <int>`. References
          * no sibling; the decode emit expands to `buffer.remaining()
          * <op> <threshold>` and the encode emit expands to
          * `value.<field> != null` (cascading-trailer semantics).
@@ -7775,10 +7760,10 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage G slice 9 — typed source of a `@LengthFrom` byte count.
+     * Typed source of a `@LengthFrom` byte count.
      *
      * Closed sealed: row 18 lists the simple-name sibling form
-     * (slice 4) and the dotted `<sibling>.<property>` form (slice 9)
+     *  and the dotted `<sibling>.<property>` form
      * as the only two valid sources. The type system enforces
      * exhaustive `when` at every emit site, removing the implicit
      * "if propertyName non-null ignore the kind" relationship the
@@ -7795,7 +7780,7 @@ internal class CodecEmitter(
         val siblingName: String
 
         /**
-         * Slice 4 simple form: sibling is a `Scalar` field. Body
+         * Simple form: sibling is a `Scalar` field. Body
          * byte count = `<sibling>.toInt()`. Decode applies an
          * `Int.MAX_VALUE` guard for kinds whose range exceeds Int
          * (UInt / ULong / Long).
@@ -7806,7 +7791,7 @@ internal class CodecEmitter(
         ) : LengthSource
 
         /**
-         * Slice 9 dotted form: sibling is a `value class` wrapping
+         * Dotted form: sibling is a `value class` wrapping
          * a numeric scalar; body byte count = `<sibling>.<property>`.
          * The property must return non-nullable `Int`, so the byte
          * count is `Int` directly — no `.toInt()` conversion or
@@ -7821,9 +7806,8 @@ internal class CodecEmitter(
          * itself the field being walked. The wireOrder propagation
          * for the value class's inner-byte assembly is a known
          * limitation: today's emit defaults to big-endian (correct
-         * for HTTP/2 SETTINGS, the slice 9 vector); little-endian
-         * value-class siblings would need additional plumbing —
-         * tracked in PHASE_9_RESET's deferred-decisions table.
+         * for HTTP/2 SETTINGS, the vector); little-endian
+         * value-class siblings would need additional plumbing.
          */
         data class ValueClassProperty(
             override val siblingName: String,
@@ -7833,17 +7817,17 @@ internal class CodecEmitter(
     }
 
     /**
-     * Stage H — typed source of a `Codec<T>` instance for a
-     * `RemainingBytesPayload` field. Mirrors the slice 9 `LengthSource`
+     * Typed source of a `Codec<T>` instance for a
+     * `RemainingBytesPayload` field. Mirrors the `LengthSource`
      * pattern (doctrine #2: no nullable fields representing form
      * distinction; the type system enforces exhaustive `when`).
      *
      * Two forms:
-     *   - `UserCodecObject` (slice 10a): the field carries
+     * `UserCodecObject`: the field carries
      *     `@UseCodec(Foo::class)` referencing a Kotlin `object`
      *     declaration. Emit calls `Foo.decode(...)` /
      *     `Foo.encode(...)` directly.
-     *   - `ConstructorInjected` (slice 10b): the message has a
+     * `ConstructorInjected`: the message has a
      *     `<P : Payload>` type parameter and the field type IS that
      *     parameter. The codec is supplied as a constructor parameter
      *     of the generated codec class; emit calls
@@ -7866,9 +7850,9 @@ internal class CodecEmitter(
     }
 
     /**
-     * Slice 10a/10b — emit-side accessor for the user codec. Returns
-     * the receiver Kotlin sub-expression for `<receiver>.decode(...)`
-     * / `<receiver>.encode(...)` / `<receiver>.wireSize(...)` calls.
+     * Emit-side accessor for the user codec. Returns the receiver Kotlin
+     * sub-expression for `<receiver>.decode(...)` / `<receiver>.encode(...)`
+     * / `<receiver>.wireSize(...)` calls.
      */
     private fun PayloadCodecSource.codecReceiver(): CodeBlock =
         when (this) {
@@ -7877,7 +7861,7 @@ internal class CodecEmitter(
         }
 
     /**
-     * Slice 9 — encode-side accessor for a LengthSource. Returns the
+     * Encode-side accessor for a LengthSource. Returns the
      * Kotlin sub-expression that yields the body byte count as an
      * `Int` when prefixed with `value.`. Used by `wireSize` and the
      * @LengthFrom encode path.
@@ -7889,7 +7873,7 @@ internal class CodecEmitter(
         }
 
     /**
-     * Slice 9 — decode-side accessor for a LengthSource. Returns the
+     * Decode-side accessor for a LengthSource. Returns the
      * Kotlin sub-expression that yields the body byte count as an
      * `Int` against locals already in scope. The simple form
      * accesses the sibling local directly; the dotted form accesses
@@ -7903,7 +7887,7 @@ internal class CodecEmitter(
         }
 
     /**
-     * Phase J.M.5 slice J.M.7.a — valid `@PacketType.value` range for
+     * Slice — valid `@PacketType.value` range for
      * a given `@DispatchValue` return kind. Mirror of the validator-
      * side `DISPATCH_VALUE_RETURN_RANGES` map in
      * [com.ditchoom.buffer.codec.processor.ProtocolMessageProcessor].
@@ -7924,7 +7908,7 @@ internal class CodecEmitter(
         }
 
     /**
-     * Phase J.M.5 slice J.M.7.a — Int-coercion for an `@DispatchValue`
+     * Slice — Int-coercion for an `@DispatchValue`
      * property's runtime value, lifting it into the `Int` domain that
      * the dispatcher's `when (__dispatchValue)` branches use. Int
      * returns flow through unchanged, Boolean lifts to a 0/1 ternary,
@@ -7953,7 +7937,7 @@ internal class CodecEmitter(
         val isSigned: Boolean,
     ) {
         // Boolean is a 1-byte scalar with no byte order and no `@WireBytes` narrowing.
-        // Stage E precondition for `@When` (Locked Decision row 19 mandates a
+        // Precondition for `@When` ( mandates a
         // `Boolean`-typed source field).
         Boolean(1, false),
         UByte(1, false),
@@ -7993,7 +7977,7 @@ internal class CodecEmitter(
                 "kotlin.Long" to ScalarKind.Long,
             )
 
-        // Phase J.M.5 slice J.M.7.a — qnames accepted as `@DispatchValue`
+        // Slice — qnames accepted as `@DispatchValue`
         // property return types, mapped to the kind that drives the
         // dispatch-site Int coercion. Long / ULong are excluded — the
         // `@PacketType.value` annotation parameter is `Int` and can't

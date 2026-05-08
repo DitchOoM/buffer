@@ -12,12 +12,11 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Phase I.1 step 3 — `@UseCodec` validator coverage for the bare-scalar
- * shape (no framing annotation). The bare shape unblocks user-supplied
- * length codecs like `MqttRemainingLengthCodec`. Slice 10a's
- * `@RemainingBytes @UseCodec val: P` shape and the deferred
- * `@LengthPrefixed @UseCodec` / `@LengthFrom @UseCodec` shapes still produce
- * the same diagnostics as before.
+ * `@UseCodec` validator coverage for the bare-scalar shape (no framing
+ * annotation). The bare shape unblocks user-supplied length codecs like
+ * `MqttRemainingLengthCodec`. The `@RemainingBytes @UseCodec val: P` shape
+ * and the deferred `@LengthPrefixed @UseCodec` / `@LengthFrom @UseCodec`
+ * shapes still produce the same diagnostics as before.
  */
 class UseCodecScalarValidatorTest {
     @Test
@@ -137,10 +136,9 @@ class UseCodecScalarValidatorTest {
 
     @Test
     fun rejectsLengthPrefixedUseCodecOnNonListNonPayloadNonStringField() {
-        // Phase J.M.5 slice 15a / J.M.7.b — `@LengthPrefixed @UseCodec`
-        // accepts three shapes: `List<@ProtocolMessage E>` (slice 11),
-        // `T : Payload` (slice 15a), and `kotlin.String` with a
-        // `Codec<String>` (J.M.7.b). A non-List, non-Payload, non-String
+        // `@LengthPrefixed @UseCodec` accepts three shapes:
+        // `List<@ProtocolMessage E>`, `T: Payload`, and `kotlin.String`
+        // with a `Codec<String>`. A non-List, non-Payload, non-String
         // field type (here: a bare `UInt`) is none of those and gets a
         // focused diagnostic naming all three shapes.
         val result =
@@ -178,9 +176,9 @@ class UseCodecScalarValidatorTest {
             )
         assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
         assertTrue(
-            result.messages.contains("`kotlin.collections.List<E>` (slice 11 list shape)") &&
-                result.messages.contains("`com.ditchoom.buffer.codec.Payload` (slice 15a scalar shape)") &&
-                result.messages.contains("`kotlin.String` (J.M.7.b user-charset shape)"),
+            result.messages.contains("`kotlin.collections.List<E>` (list shape)") &&
+                result.messages.contains("`com.ditchoom.buffer.codec.Payload` (scalar Payload shape)") &&
+                result.messages.contains("`kotlin.String` (user-charset shape)"),
             "@LengthPrefixed @UseCodec on a non-List, non-Payload, non-String field should report " +
                 "the tri-shape diagnostic naming List<E>, Payload, and String. Messages:\n" +
                 result.messages,
@@ -189,7 +187,7 @@ class UseCodecScalarValidatorTest {
 
     @Test
     fun acceptsLengthPrefixedUseCodecOnPayloadScalar() {
-        // Phase J.M.5 slice 15a — `@LengthPrefixed @UseCodec(C::class) val: T`
+        // `@LengthPrefixed @UseCodec(C::class) val: T`
         // where `T : Payload` and `C` is `Codec<T>` (not a
         // BoundingLengthCodec — the prefix is owned by the framework).
         val result =
@@ -238,7 +236,7 @@ class UseCodecScalarValidatorTest {
 
     @Test
     fun acceptsLengthPrefixedUseCodecOnStringField() {
-        // J.M.7.b — `@LengthPrefixed @UseCodec(C::class) val: String`
+        // `@LengthPrefixed @UseCodec(C::class) val: String`
         // where `C` is a Kotlin `object` implementing `Codec<String>`
         // (built-in `AsciiStringCodec` or a consumer's per-charset
         // codec). Same wire shape as the Payload variant: prefix +
@@ -278,7 +276,7 @@ class UseCodecScalarValidatorTest {
         assertFalse(
             result.messages.contains("@LengthPrefixed @UseCodec") &&
                 result.messages.contains("error"),
-            "no validator diagnostic should fire on the J.M.7.b String shape. Messages:\n" +
+            "no validator diagnostic should fire on the user-charset String shape. Messages:\n" +
                 result.messages,
         )
     }
@@ -381,7 +379,7 @@ class UseCodecScalarValidatorTest {
 
     @Test
     fun acceptsLengthPrefixedUseCodecOnProtocolMessageList() {
-        // Phase I.1 step 11 acceptance — `@LengthPrefixed @UseCodec(C::class)
+        // Acceptance — `@LengthPrefixed @UseCodec(C::class)
         // val xs: List<E>` where `C : BoundingLengthCodec<UInt>` and `E` is a
         // `@ProtocolMessage data class`. Drives the v5 property-list shape.
         val result =
@@ -519,7 +517,7 @@ class UseCodecScalarValidatorTest {
 
     @Test
     fun acceptsLengthPrefixedUseCodecOnSealedParentList() {
-        // Phase J.M.5 widening — `@LengthPrefixed @UseCodec(C) val xs: List<E>`
+        // Widening — `@LengthPrefixed @UseCodec(C) val xs: List<E>`
         // also accepts `E` being a `@ProtocolMessage` sealed parent with
         // `@DispatchOn`. The MQTT v5 property bag is exactly this shape:
         // a polymorphic list of typed properties dispatched on the property
@@ -589,9 +587,9 @@ class UseCodecScalarValidatorTest {
 
     @Test
     fun rejectsLengthPrefixedUseCodecOnPayloadGenericSealedParentElement() {
-        // Phase J.M.5 — sealed-parent elements with `<P : Payload>` are
+        // Sealed-parent elements with `<P: Payload>` are
         // rejected because their generated codec emits as a generic class
-        // (slice 10d detection rule), not a singleton object. The emitter
+        // ( detection rule), not a singleton object. The emitter
         // calls `<E>Codec.decode(...)` directly, which requires the
         // singleton form.
         val result =

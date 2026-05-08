@@ -24,13 +24,13 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
  *   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
  *   ```
  *
- * Twelve bytes, all big-endian (network byte order). Stage B vector for
+ * Twelve bytes, all big-endian (network byte order). vector for
  * pure-BE multi-scalar `@ProtocolMessage` shapes — exercises message-
  * level `wireOrder = Endianness.Big` across six successive `UShort`
  * fields with no per-field overrides.
  *
  * The `flags` field is bit-packed (`QR`, `Opcode`, `AA`, `TC`, `RD`,
- * `RA`, `Z`, `RCODE`); modeling it as a single `UShort` keeps Stage B
+ * `RA`, `Z`, `RCODE`); modeling it as a single `UShort` keeps
  * focused on the multi-scalar shape and defers bit-packed logical-field
  * accessors to a value-class wrapper if the consumer wants them. The
  * `MySqlPacketHeader` value-class fixture in this module shows that

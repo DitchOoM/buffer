@@ -21,7 +21,7 @@ import kotlin.test.assertTrue
  * data class type). Bound fields whose type extends the Payload
  * marker interface (`com.ditchoom.buffer.codec.Payload`) are skipped
  * — `@LengthPrefixed` does not yet widen to cover Payload slots
- * (Stage H deferral), and forbidding the adjacent shape today would
+ * ( deferral), and forbidding the adjacent shape today would
  * leave those fields with no migration path. `@LengthFrom` is
  * otherwise reserved for genuine remote-prefix uses (length carried
  * in a non-adjacent field, parsed elsewhere).
@@ -55,7 +55,7 @@ class LengthFromValidatorTest {
 
     @Test
     fun acceptsAdjacentLengthFromOnNestedProtocolMessageBody() {
-        // J.M.6.b carve-out (issue #151 part 1): R1 stays silent when the
+        // Carve-out (issue #151 part 1): R1 stays silent when the
         // bound field's type is a nested `@ProtocolMessage` data class or
         // sealed parent. The `@LengthPrefixed` migration target only
         // supports 1 / 2 / 4-byte prefixes (LengthPrefix.Byte / Short /
@@ -122,9 +122,9 @@ class LengthFromValidatorTest {
     @Test
     fun acceptsAdjacentLengthFromOnPayloadField() {
         // Bound field's type extends the Payload marker interface, which has
-        // no @LengthPrefixed migration target until Stage H widens the
+        // no @LengthPrefixed migration target until widens the
         // annotation. R1 must stay silent here — firing would leave Payload
-        // slots with no migration path. (See PHASE_10_RESUME.md Stage-H
+        // slots with no migration path. (See Stage-H
         // follow-up note.)
         val result =
             compile(

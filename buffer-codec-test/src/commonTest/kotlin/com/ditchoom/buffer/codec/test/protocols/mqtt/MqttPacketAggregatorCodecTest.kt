@@ -16,7 +16,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 
 /**
- * Stage H slice 10d.5 doctrine vector — `decodeAggregating(buffer,
+ * Doctrine vector — `decodeAggregating(buffer,
  * context, on<Variant> = ...)` companion-object overload on the
  * generic dispatcher.
  *
@@ -80,8 +80,7 @@ class MqttPacketAggregatorCodecTest {
     fun aggregatorAllowsHeaderInspectionBeforePayloadDecode() {
         // The aggregator's lambda receives a Partial — the consumer
         // can inspect headers before deciding the payload codec.
-        // This is the topic-keyed dispatch shape that motivates
-        // slice 10d.5 (acceptance #4 in PHASE_9_RESET §Stage H).
+        // This is the topic-keyed dispatch shape.
         val publishCodec = MqttPacketCodec(JpegImageCodec)
         val original =
             MqttPacket.Publish<JpegImage>(
@@ -176,7 +175,7 @@ class MqttPacketAggregatorCodecTest {
         val textPublish =
             MqttPacket.Publish<TextPayload>(
                 header = MqttFixedHeader(0x32u),
-                // 2 + 1 (topic) + 2 (pid) + 18 (text "hello, slice 10d.5")
+                // 2 + 1 (topic) + 2 (pid) + 18 (text "hello,.5")
                 topic = "y",
                 packetId = PacketId(2u),
                 payload = TextPayload("hello, slice 10d.5"),
@@ -204,7 +203,7 @@ class MqttPacketAggregatorCodecTest {
     @Test
     fun aggregatorPropagatesUnknownDiscriminatorThrow() {
         // Header byte 0xF0: type=15, reserved-and-forbidden per MQTT
-        // v3.1.1 §2.2.1. After Phase J.M step 5 tranche 3 every
+        // v3.1.1 §2.2.1. After every
         // spec-defined v3.1.1 packet type (1–14) is folded into the
         // dispatcher; type 15 is the only remaining unknown vector
         // that will never gain a sealed variant. The aggregator's

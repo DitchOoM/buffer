@@ -13,7 +13,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertSame
 
 /**
- * Issue #151 part 1 (J.M.6.b) — `@LengthFrom("sibling") val: T`
+ * Issue #151 part 1 — `@LengthFrom("sibling") val: T`
  * round-trips for both nested data-class bodies and sealed-parent
  * bodies. The length sibling is a TLS uint24 (`@WireBytes(3) val
  * length: UInt`) which `@LengthPrefixed` cannot express, so

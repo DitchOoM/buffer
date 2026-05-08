@@ -11,7 +11,7 @@ import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 import com.ditchoom.buffer.codec.test.protocols.slice14c.Slice14cTinyHeader
 
 /**
- * Phase J.M.5 slice 14c — generic-payload `@FramedBy` probe.
+ * Generic-payload `@FramedBy` probe.
  *
  * The non-generic 14c-prep probe ([com.ditchoom.buffer.codec.test.protocols.slice14c.Slice14cFramedDispatch])
  * pinned down the dispatcher-integration emit for sealed parents without
@@ -19,7 +19,7 @@ import com.ditchoom.buffer.codec.test.protocols.slice14c.Slice14cTinyHeader
  * generic shape: a sealed parent `<out P : Payload>` carrying `@FramedBy`
  * inherited by both a non-generic variant ([Headered]) and a generic
  * variant ([WithPayload]) with a constructor-injected payload codec
- * (the slice-10b shape). Lands the emit changes that the v3/v5
+ * (the shape). Lands the emit changes that the v3/v5
  * substitution leans on, isolated from the 28 MQTT fixtures so a
  * regression in the generic-dispatcher / generic-variant framed paths
  * surfaces here as a focused failure.

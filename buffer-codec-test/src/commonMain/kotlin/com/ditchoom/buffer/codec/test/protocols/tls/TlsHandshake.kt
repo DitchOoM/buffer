@@ -11,7 +11,7 @@ import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 
 /**
- * Issue #151 part 1 (J.M.6.b) fixture — TLS 1.3 handshake message header
+ * Issue #151 part 1 fixture — TLS 1.3 handshake message header
  * (RFC 8446 §4):
  *
  * ```
@@ -40,8 +40,8 @@ data class TlsHandshake(
  * fields; the fixture keeps the shape "fixed prefix + variable tail"
  * but stays minimal to focus on the framing.)
  *
- * Phase J.M.5 slice 15g retyped the trailing tail from `List<UByte>`
- * to `BinaryData` (slice 10a's `@RemainingBytes @UseCodec(C::class)
+ * Retyped the trailing tail from `List<UByte>`
+ * to `BinaryData` ('s `@RemainingBytes @UseCodec(C::class)
  * val: P` shape). The fixture's purpose is `@LengthFrom`-bounded
  * variable-tail framing, not per-byte structure inspection — opaque
  * `BinaryData` matches that intent and avoids the per-byte JS-heap-

@@ -12,12 +12,12 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Compile-time validator coverage for Stage D's simple sealed
+ * Compile-time validator coverage for 's simple sealed
  * dispatch (`@ProtocolMessage sealed interface` + `@PacketType` on
  * each variant). Every direct sealed subclass must carry
  * `@PacketType(value = N)` with `N in 0..255`, and `value` must be
  * unique within a parent. Sealed parents carrying `@DispatchOn` are
- * skipped (Stage F surface).
+ * skipped ( surface).
  */
 class SealedDispatcherValidatorTest {
     @Test

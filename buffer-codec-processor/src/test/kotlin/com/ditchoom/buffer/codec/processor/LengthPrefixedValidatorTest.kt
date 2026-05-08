@@ -20,7 +20,7 @@ import kotlin.test.assertFalse
  * bounds inner decode. The processor must accept both shapes silently.
  *
  * R3 stays scoped to `String` + `@ProtocolMessage`. Payload-typed
- * widening is Stage H — when that lands, R1's Payload exclusion is
+ * widening is — when that lands, R1's Payload exclusion is
  * removed and R3 expands to accept `@Payload`-typed type parameters.
  */
 class LengthPrefixedValidatorTest {
@@ -50,7 +50,7 @@ class LengthPrefixedValidatorTest {
     @Test
     fun acceptsLengthPrefixedOnProtocolMessageField() {
         // R3 widening: `@LengthPrefixed` accepts a `@ProtocolMessage` data
-        // class field. The validator must stay silent — slice 4's
+        // class field. The validator must stay silent — 's
         // redesign-2 (`WavFmtChunk` → `WavFmtBody`) depends on this shape.
         val result =
             compile(

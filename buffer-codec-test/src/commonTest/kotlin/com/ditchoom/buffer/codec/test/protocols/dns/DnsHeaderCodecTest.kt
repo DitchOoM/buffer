@@ -13,7 +13,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * Stage B vector — pure-BE multi-scalar.
+ * Vector — pure-BE multi-scalar.
  *
  * Wire vector: a real DNS query header for `example.com IN A`:
  *   `id = 0x4D2A`, `flags = 0x0100` (standard query, RD set),

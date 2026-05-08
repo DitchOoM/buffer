@@ -17,9 +17,9 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
- * Phase J.M.5 slice 15f — [V5PropertyBag] / [V5PropertyBagCodec] direct
+ * [V5PropertyBag] / [V5PropertyBagCodec] direct
  * tests. Closes the cross-property-uniqueness gap that v5_audit_gaps.md
- * tracked as the deferred slice 15e (renamed slice 15f after 15e was
+ * tracked as the deferred (renamed after 15e was
  * reused for `@RemainingBytes String`).
  *
  * Coverage:

@@ -14,7 +14,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 /**
- * Stage B vector — value-class-of-raw shape (bit-packed-header
+ * Vector — value-class-of-raw shape (bit-packed-header
  * ergonomic alternative to per-field `@WireBytes`).
  *
  * Wire vector: a small MySQL packet header with 5-byte payload and

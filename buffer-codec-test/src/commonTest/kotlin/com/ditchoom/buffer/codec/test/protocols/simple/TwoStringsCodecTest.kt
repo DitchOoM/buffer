@@ -13,11 +13,11 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * Stage E slice 5a doctrine vector. Validates the sequential peek
+ * Doctrine vector. Validates the sequential peek
  * walk and non-terminal `@LengthPrefixed val: String` support: two
  * consecutive LPS String fields round-trip correctly, encode
  * BackPatches both prefixes in sequence, decode reads both
- * sequentially, `WireSize.BackPatch` per Locked Decision row 15
+ * sequentially, `WireSize.BackPatch` per
  * (any LPS String → BackPatch), and `peekFrameSize` walks both
  * variable-length bodies via the running offset.
  */
@@ -57,7 +57,7 @@ class TwoStringsCodecTest {
 
     @Test
     fun wireSizeIsBackPatch() {
-        // Locked Decision row 15: any @LengthPrefixed val: String collapses to BackPatch.
+        // Any @LengthPrefixed val: String collapses to BackPatch.
         assertEquals(
             WireSize.BackPatch,
             TwoStringsCodec.wireSize(TwoStrings("hi", "yo"), EncodeContext.Empty),

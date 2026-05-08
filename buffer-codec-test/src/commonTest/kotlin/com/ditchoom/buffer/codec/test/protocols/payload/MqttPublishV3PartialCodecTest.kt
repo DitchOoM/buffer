@@ -10,15 +10,15 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * Stage H slice 10c doctrine vector — `Partial` decode pattern over
- * the slice 10a (`MqttPublishV3Concrete`) and slice 10b
+ * Doctrine vector — `Partial` decode pattern over
+ * the (`MqttPublishV3Concrete`) and
  * (`MqttPublishV3<P>`) data classes already in this package.
  *
  * What `Partial` adds over the existing `decode`:
- *   - **Slice 10a `Partial`** lets a consumer decode the headers
+ * ** `Partial`** lets a consumer decode the headers
  *     (header / topic / packetId), inspect them, and only then
  *     complete the payload via the `@UseCodec`-pinned codec.
- *   - **Slice 10b `Partial`** lets a consumer decode the headers
+ * ** `Partial`** lets a consumer decode the headers
  *     **without instantiating the surrounding generic codec class**
  *     (`MqttPublishV3Codec(...)`), then choose the payload codec
  *     at the call site by passing it to `complete(payloadCodec)`.
@@ -84,7 +84,7 @@ class MqttPublishV3PartialCodecTest {
 
     @Test
     fun slice10bPartialDoesNotRequireSurroundingCodecInstance() {
-        // The whole point of slice 10b's Partial: no need to construct
+        // The whole point of 's Partial: no need to construct
         // MqttPublishV3Codec(somePayloadCodec) just to decode the headers.
         // The static `partial<P>(...)` entry is on the codec class's
         // companion and takes its own type parameter.
@@ -111,7 +111,7 @@ class MqttPublishV3PartialCodecTest {
     fun slice10bPartialAcceptsArbitraryPayloadCodecAtCompleteTime() {
         // The same Partial-decode shape works for any Codec<P> the
         // consumer plumbs in — this is exactly the per-call codec
-        // selection slice 10b's Partial unlocks for the :buffer-flow
+        // selection 's Partial unlocks for the:buffer-flow
         // smoke test.
         val original =
             MqttPublishV3<TextPayload>(

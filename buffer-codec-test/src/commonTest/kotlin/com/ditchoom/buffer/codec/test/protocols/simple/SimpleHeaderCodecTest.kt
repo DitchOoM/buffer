@@ -13,7 +13,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * Stage C doctrine vector. Validates round-trip across the empty,
+ * Doctrine vector. Validates round-trip across the empty,
  * ASCII, and multi-byte UTF-8 cases for `@LengthPrefixed val: String`,
  * confirms `wireSize` returns `BackPatch` (locked decision row 15),
  * and walks `peekFrameSize` from `NeedsMoreData` through `Complete`

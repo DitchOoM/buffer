@@ -22,9 +22,9 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 
 /**
- * Phase J.M.5 slice 4 — cascading-trailing-reason-code v5 acks. Drives
+ * Cascading-trailing-reason-code v5 acks. Drives
  * the new `@When("remaining >= 1")` grammar-2 predicate end-to-end. The
- * `[properties]` half of the cascade is deferred to slice 5+ (lifting
+ * `[properties]` half of the cascade is deferred to + (lifting
  * the conditional inner shape to accept `@LengthPrefixed @UseCodec val:
  * List<E>?`).
  *
@@ -347,8 +347,8 @@ class MqttV5CascadingAcksCodecTest {
 
     @Test
     fun pubRecRoundTripsWithPropertyBag() {
-        // Phase J.M.5 slice 10 Tier A — PUBREC now carries the optional
-        // trailing property bag (slice 5 cascade shape extended to PUBREC).
+        // Tier A — PUBREC now carries the optional
+        // trailing property bag ( cascade shape extended to PUBREC).
         // Wire layout: 50 RL pid rc propLen <props...>
         val msg =
             MqttV5Packet.PubRec(
@@ -472,7 +472,7 @@ class MqttV5CascadingAcksCodecTest {
 
     @Test
     fun pubAckRejectsPropertiesWithoutReasonCode() {
-        // Phase J.M.5 audit-2c — caller cannot construct `(rc=null,
+        // Caller cannot construct `(rc=null,
         // properties=non-null)` because the wire would misframe (the
         // propLen byte would land where rc should be on decode).
         // The init-block require fires immediately at construction.
@@ -528,13 +528,13 @@ class MqttV5CascadingAcksCodecTest {
         }
     }
 
-    // Phase J.M.5 slice 11b — the audit-2d *RejectsInvalidReasonCode tests
+    // The *RejectsInvalidReasonCode tests
     // that exercised the per-packet UByte allowlists are deleted: the typed
     // V5{PubAck,UnsubAck,Disconnect,Auth,Connect}ReasonCode sealed parents
     // make the bogus-byte construction (e.g. `reasonCode = 0xFFu`) a
     // compile-time error rather than a runtime require failure. The
     // *RejectsPropertiesWithoutReasonCode tests stay — those exercise
-    // audit-2c's cascade invariant (orthogonal to typing).
+    // the cascade invariant (orthogonal to typing).
 
     @Suppress("UNCHECKED_CAST")
     private fun encode(value: MqttV5Packet<*>): ReadBuffer =

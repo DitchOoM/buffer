@@ -13,7 +13,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
- * Phase J.M.5 slice 14c-prep — sealed-parent + `@FramedBy(after = "header")`
+ * -prep — sealed-parent + `@FramedBy(after = "header")`
  * probe tests.
  *
  * Five checks pin down the emit before the v3/v5 substitution lands:

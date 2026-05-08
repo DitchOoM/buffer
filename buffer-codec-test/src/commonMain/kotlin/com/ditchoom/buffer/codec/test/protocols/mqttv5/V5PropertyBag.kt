@@ -13,7 +13,7 @@ import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.utf8Length
 
 /**
- * Phase J.M.5 slice 15f — typed v5 property bag.
+ * Typed v5 property bag.
  *
  * Wraps the property-bag region every v5 control packet carries between
  * its variable header and payload (CONNECT / CONNACK / PUBLISH / PUBACK
@@ -37,7 +37,7 @@ import com.ditchoom.buffer.utf8Length
  * (§2.2.2.2). Wire-order on encode matches via [toList].
  *
  * Closes the cross-property-uniqueness gap that [`v5_audit_gaps.md`]
- * tracked as the deferred slice 15e — renamed slice 15f after slice 15e
+ * tracked as the deferred — renamed after
  * was reused for `@RemainingBytes String` (commit `bb7cca77`).
  */
 data class V5PropertyBag(
@@ -370,7 +370,7 @@ private fun dupMsg(
  *
  * On the decode side, raises [DecodeException] for any
  * unique-cardinality property that appears more than once in a single
- * bag — closes the spec gap that motivated slice 15f. Repeats of
+ * bag — closes the spec gap that motivated. Repeats of
  * [MqttV5Property.UserProperty] and
  * [MqttV5Property.SubscriptionIdentifier] are accepted and accumulated
  * into the bag's lists in wire order.
@@ -379,7 +379,7 @@ private fun dupMsg(
  * `@UseCodec(V5PropertyBagCodec::class) val properties: V5PropertyBag`
  * (no `@LengthPrefixed`). For cascading-trailer packets (PUBACK / PUBREC
  * / PUBREL / PUBCOMP / UNSUBACK / DISCONNECT / AUTH) the field is
- * nullable and gated by `@When("remaining >= 1")` — slice 11a's
+ * nullable and gated by `@When("remaining >= 1")` — the
  * `@When @UseCodec val: T?` shape passes the same self-framing codec
  * call through.
  *

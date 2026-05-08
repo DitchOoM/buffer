@@ -16,7 +16,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 /**
- * Phase J.M step 5 first tranche — MQTT v3.1.1 §3.6 PUBREL packet.
+ * MQTT v3.1.1 §3.6 PUBREL packet.
  * Fixed-shape 4-byte ack: header `0x62` + remainingLength=2 +
  * packetIdentifier (UShort BE). Per §3.6.1 the bottom-bit-2 flag
  * (0x02) is mandatory; the variant defaults the header byte to

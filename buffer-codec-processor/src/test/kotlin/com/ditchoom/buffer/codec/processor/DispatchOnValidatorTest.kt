@@ -12,7 +12,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Compile-time validator coverage for `@DispatchOn` (Stage F slice 6).
+ * Compile-time validator coverage for `@DispatchOn`.
  *
  * The bit-packed dispatch shape requires a `@JvmInline value class`
  * discriminator with exactly one `@DispatchValue`-annotated `Int`-
@@ -122,7 +122,7 @@ class DispatchOnValidatorTest {
 
     @Test
     fun firesWhenDispatchValueReturnsUnsupportedKind() {
-        // Phase J.M.5 slice J.M.7.a — accepted return types are
+        // Slice — accepted return types are
         // {Boolean, Byte, UByte, Short, UShort, Int, UInt}. Long
         // (and ULong) stay rejected because `@PacketType.value` is
         // an `Int` and can't address values beyond `Int.MAX_VALUE`.
@@ -262,7 +262,7 @@ class DispatchOnValidatorTest {
 
     @Test
     fun acceptsBooleanReturnType() {
-        // Phase J.M.5 slice J.M.7.a — Boolean dispatch (e.g. QUIC
+        // Slice — Boolean dispatch (e.g. QUIC
         // long-header form bit). Validator accepts; range is 0..1.
         val result =
             compile(
@@ -338,7 +338,7 @@ class DispatchOnValidatorTest {
 
     @Test
     fun acceptsUShortReturnTypeWithWideValues() {
-        // Phase J.M.5 slice J.M.7.a — UShort dispatch (e.g. Ethernet
+        // Slice — UShort dispatch (e.g. Ethernet
         // EtherType). Discriminator inner is UShort (2 wire bytes);
         // PacketType values exceed the old 0..255 cap and must be
         // accepted now.

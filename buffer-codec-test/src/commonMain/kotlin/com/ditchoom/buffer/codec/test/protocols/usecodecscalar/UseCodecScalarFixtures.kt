@@ -14,7 +14,7 @@ import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 
 /**
- * Phase I.1 step 4 doctrine vector — exercises bare `@UseCodec val:
+ * Doctrine vector — exercises bare `@UseCodec val:
  * <scalar>` (no framing annotation) against:
  *   - a plain `Codec<UInt>` user codec ([ZigZagUIntCodec]) — non-bounding
  *     emit path: `decode` reads via the codec, `encode` writes via the
@@ -139,9 +139,9 @@ data class ZigZagFrame(
  * `applyBound` is what bounds the read, not the buffer's natural
  * remaining bytes.
  *
- * Phase J.M.5 slice 15g retyped `payload` from `List<Byte>` to
+ * Retyped `payload` from `List<Byte>` to
  * `BinaryData` to retire the `@RemainingBytes List<scalar>` shape.
- * The slice 10a `@RemainingBytes @UseCodec(C::class) val: P` path
+ * The `@RemainingBytes @UseCodec(C::class) val: P` path
  * carries the same bounding semantics with explicit Payload-codec
  * memory ownership.
  */

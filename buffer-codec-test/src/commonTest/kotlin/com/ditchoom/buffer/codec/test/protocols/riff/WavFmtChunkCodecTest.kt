@@ -16,7 +16,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
- * Slice 4 type-check vector. Validates that the hand-emitted
+ * Type-check vector. Validates that the hand-emitted
  * [WavFmtChunkCodec] round-trips byte-exact, that the body codec sees a
  * `setLimit`-bounded view of the buffer (so `remaining()` matches the
  * `@LengthPrefixed` resolved length), that the outer limit is restored
@@ -81,7 +81,7 @@ class WavFmtChunkCodecTest {
         // constructor parameter — the body's bound is expressed by
         // `@LengthPrefixed` on the body field, not by an independent
         // length carrier that could disagree with `body.wireSize()`. Slice
-        // 4 redesign-2 (Phase 10 R3 widening) requires arity == 2.
+        // 4 redesign-2 ( R3 widening) requires arity == 2.
         //
         // Compile-time lock: pinning `::WavFmtChunk` to a 2-parameter
         // function type. If a third constructor parameter is reintroduced
@@ -143,7 +143,7 @@ class WavFmtChunkCodecTest {
         // Compose: chunk + 3 trailing bytes. The decode must consume only the
         // chunk's bytes (8 header + chunkSize body), leaving the outer limit
         // unchanged so subsequent reads see the trailing bytes — this is the
-        // slice 4 lock #2 contract for the composition case (RIFF chunk
+        // lock #2 contract for the composition case (RIFF chunk
         // inside a RIFF LIST).
         val totalSize = 8 + pcmBodyWireSize
         val composite = BufferFactory.Default.allocate(totalSize + 3)
@@ -202,7 +202,7 @@ class WavFmtChunkCodecTest {
             WavFmtChunkCodec.wireSize(makeChunk(), EncodeContext.Empty),
             "wireSize is Exact(8 + 16) for a PCM fmt chunk",
         )
-        // Slice 4 lock #3 — body codec independently reports Exact, parent
+        // Lock #3 — body codec independently reports Exact, parent
         // sums to Exact, framework takes the pool.withBuffer fast path.
         assertEquals(
             WireSize.Exact(pcmBodyWireSize),
@@ -329,7 +329,7 @@ class WavFmtChunkCodecTest {
 
     @Test
     fun decodeOfChunkSizeAboveIntMaxThrowsDecodeException() {
-        // Slice 4 lock #4: chunkSize > Int.MAX_VALUE cannot be honored as a
+        // Lock #4: chunkSize > Int.MAX_VALUE cannot be honored as a
         // setLimit bound (Ints), so decode throws DecodeException early.
         // Build a header by hand: 'fmt ', then chunkSize = 0x80_00_00_00 LE.
         val header =

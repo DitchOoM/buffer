@@ -12,12 +12,12 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 
 /**
- * Issue #151 part 2 (J.M.6.c) — non-terminal `@RemainingBytes` round-trip.
+ * Issue #151 part 2 — non-terminal `@RemainingBytes` round-trip.
  *
  * The PNG fixture's `@RemainingBytes val data` sits before a fixed
- * 4-byte CRC trailer. Without J.M.6.c the body loop would consume the
+ * 4-byte CRC trailer. Without the body loop would consume the
  * CRC bytes (loop bound `position < limit`) and the trailer's
- * `readUInt` would underflow. With J.M.6.c the analyzer detects the
+ * `readUInt` would underflow. With the analyzer detects the
  * fixed trailer (Scalar `crc: UInt` → 4 wire bytes) and emits the
  * loop with `position < limit - 4` so the CRC survives intact.
  */

@@ -12,7 +12,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 /**
- * Phase J.M.5 slice 11a — round-trip + wire-byte + wireSize coverage
+ * Round-trip + wire-byte + wireSize coverage
  * for the emitter widening on `@When @UseCodec val: T?` (sealed inner)
  * and `@RemainingBytes val: List<E>` (sealed element). The fixtures
  * are in [Slice11aProbe.kt] — pure capability slice, byte-identical
@@ -62,7 +62,7 @@ class Slice11aProbeCodecTest {
     @Test
     fun probeRemainingBytesListRoundTripsMixedVariants() {
         // Both Exact and BackPatch sealed variants in the same list. The
-        // wireSize short-circuit slice 11a adds collapses to BackPatch —
+        // wireSize short-circuit adds collapses to BackPatch
         // without it, the runtime `as Exact` cast on Tag2's wireSize CCEs.
         val original =
             ProbeRemainingBytesList(
@@ -96,7 +96,7 @@ class Slice11aProbeCodecTest {
 
     @Test
     fun probeRemainingBytesListWireSizeReportsBackPatchForSealedElements() {
-        // The slice 11a guard in `buildWireSizeFun` returns BackPatch when
+        // The guard in `buildWireSizeFun` returns BackPatch when
         // any RemainingBytesProtocolMessageList field has a BackPatch
         // element. ProbeSealed.Tag2 is BackPatch (carries
         // @LengthPrefixed val: String), so the collapse fires.

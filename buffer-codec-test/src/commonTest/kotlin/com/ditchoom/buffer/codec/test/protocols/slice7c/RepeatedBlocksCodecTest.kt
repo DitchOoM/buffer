@@ -14,7 +14,7 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 
 /**
- * Phase J.M.0 doctrine vector. Validates `@RemainingBytes` on
+ * Doctrine vector. Validates `@RemainingBytes` on
  * `List<@ProtocolMessage T>`: the body's repeated nested-message
  * elements read until the buffer's limit is reached. Caller-bounded
  * — the test sets `buffer.setLimit` before calling decode to simulate

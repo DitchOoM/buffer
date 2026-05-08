@@ -14,7 +14,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
- * Phase J.M.5 slice J.M.7.a — UShort-returning `@DispatchValue`
+ * Slice — UShort-returning `@DispatchValue`
  * round-trip vector.
  *
  * Pins the dispatcher's `.toInt()` coercion on a UShort `@DispatchValue`

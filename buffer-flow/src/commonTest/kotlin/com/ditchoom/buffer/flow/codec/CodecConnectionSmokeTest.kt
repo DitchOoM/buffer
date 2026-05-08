@@ -31,16 +31,15 @@ import kotlin.test.assertIs
 import kotlin.time.Duration
 
 /**
- * Stage H acceptance #4 (PHASE_9_RESET §"Stage H — Payload SAM via MQTT v5
- * PUBLISH"): pushes PUBLISH frames through `Connection<MqttPacket<TextPayload>>`
+ * Pushes PUBLISH frames through `Connection<MqttPacket<TextPayload>>`
  * and pulls them out the other side via the codec-emitter API surface.
  *
  * Uses `TextPayload` rather than `JpegImage` because `JpegImage.data` decodes
  * to a `ByteArray` — fine for a worked-vector test, but it would muddy the
  * "no `ByteArray` allocations on the hot path" claim in this smoke test.
  * `TextPayloadCodec` decodes via `readString` and encodes via `writeString`,
- * which is zero-`ByteArray` on JVM/Apple/JS (Locked Decision row 16 calls
- * out the WASM/`nonJvm` `writeString` carve-out).
+ * which is zero-`ByteArray` on JVM/Apple/JS (the WASM/`nonJvm` `writeString`
+ * has a carve-out).
  */
 class CodecConnectionSmokeTest {
     @Test
@@ -185,7 +184,7 @@ class CodecConnectionSmokeTest {
     @Test
     fun aggregatorPathTopicKeyed() =
         runTest {
-            // Slice 10d.5 seam at the Connection boundary: instead of using
+            // Seam at the Connection boundary: instead of using
             // the dispatcher's standard decode, the receive side could call
             // decodeAggregating and pick a payload codec by topic per call.
             // The bridge today wires Codec.decode (constructor-injected

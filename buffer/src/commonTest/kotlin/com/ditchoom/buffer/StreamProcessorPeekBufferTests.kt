@@ -10,7 +10,7 @@ import kotlin.test.assertNull
 
 /**
  * Tests for [StreamProcessor.peekBuffer] — the non-consuming view used by
- * `@UseCodec`-driven peek (Phase I.1 step 1).
+ * `@UseCodec`-driven peek.
  */
 class StreamProcessorPeekBufferTests {
     @Test

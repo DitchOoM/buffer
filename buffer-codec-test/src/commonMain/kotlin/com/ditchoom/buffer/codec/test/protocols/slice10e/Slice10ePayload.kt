@@ -14,7 +14,7 @@ import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import com.ditchoom.buffer.codec.annotations.UseCodec
 
 /**
- * Stage H slice 10e doctrine vector — `@UseCodec` against an
+ * Doctrine vector — `@UseCodec` against an
  * `expect object` codec declaration.
  *
  * Locked decision: the cross-platform resolution path for
@@ -31,7 +31,7 @@ import com.ditchoom.buffer.codec.annotations.UseCodec
  *   - **No KSP burden.** KSP processes commonMain metadata; it has
  *     no view of platform actuals. Forcing the processor to verify
  *     each actual exists would require parallel KSP runs per
- *     platform (defeats the slice 0 doctrine of "single KSP run on
+ * platform (defeats the doctrine of "single KSP run on
  *     commonMain metadata, generated codecs in commonMain").
  *   - **Symmetric with hand-written multiplatform code.** Kotlin
  *     consumers writing `Foo.decode(...)` in commonMain rely on the
@@ -68,7 +68,7 @@ data class RemoteCommand(
 )
 
 /**
- * Slice 10e payload — a 4-byte opcode followed by an arbitrary
+ * Payload — a 4-byte opcode followed by an arbitrary
  * binary blob. Implements `Payload` so the §8 raw-bytes ban carves
  * it out (the marker is the documented escape hatch for "the
  * consumer takes responsibility for the bytes it holds").

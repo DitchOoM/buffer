@@ -16,7 +16,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
- * Stage D doctrine vector. Validates simple `@PacketType` sealed
+ * Doctrine vector. Validates simple `@PacketType` sealed
  * dispatch round-trip across both variants, the per-variant
  * `wireSize` shape (literal `Exact` for all-scalar `Ping`, `BackPatch`
  * for `Echo` whose terminal is `@LengthPrefixed val: String`),
@@ -68,7 +68,7 @@ class CommandCodecTest {
 
     @Test
     fun wireSizeEchoIsBackPatch() {
-        // Echo's terminal is @LengthPrefixed val: String — Locked Decision row 15
+        // Echo's terminal is @LengthPrefixed val: String
         // forces BackPatch on that field shape; the dispatcher propagates.
         assertEquals(
             WireSize.BackPatch,
@@ -112,7 +112,7 @@ class CommandCodecTest {
             one.writeByte(0xFF.toByte())
             one.resetForRead()
             stream.append(one)
-            // Per Locked Decision row 17 the dispatcher peek throws on unknown
+            // Per the dispatcher peek throws on unknown
             // discriminator — peeking a malformed stream isn't recoverable by
             // reading more bytes, so NoFraming would be a misleading signal.
             val ex =

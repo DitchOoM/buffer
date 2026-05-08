@@ -111,8 +111,7 @@ interface Codec<T> :
  * Generic-bounded payload slots (`<P : Payload>`) accept any type that
  * implements this interface plus `Nothing` (covariance). `ByteArray`,
  * `ReadBuffer`, `String`, etc. cannot be used as a payload type — consumers
- * wrap and copy explicitly inside their decoder lambda. See Section 8 of
- * `PHASE_10_DESIGN.md` (and `PHASE_10_DESIGN_NOTES.md` for derivation) for the full rationale.
+ * wrap and copy explicitly inside their decoder lambda.
  */
 interface Payload
 

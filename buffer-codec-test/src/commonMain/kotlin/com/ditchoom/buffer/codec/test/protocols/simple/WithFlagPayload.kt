@@ -6,10 +6,10 @@ import com.ditchoom.buffer.codec.annotations.When
 import kotlin.jvm.JvmInline
 
 /**
- * Stage E slice 3 + 3.5 doctrine vector — `@When` against the
+ * + 3.5 doctrine vector — `@When` against the
  * dotted `<sibling>.<property>` form, where `<sibling>` is a
  * `@JvmInline value class` exposing a `Boolean`-returning `val`
- * property (Locked Decision row 19, dotted clause), composed with
+ * property (, dotted clause), composed with
  * the `@LengthPrefixed val: String?` inner-shape widening (row 19,
  * inner type universe).
  *
@@ -31,7 +31,7 @@ import kotlin.jvm.JvmInline
  *   - `WithFlagPayload(flags = SmallFlags(1), payload = "hi")` → `01 00 02 68 69`
  *
  * Predicate-false collapses the entire slot (prefix included) to
- * zero bytes per Locked Decision row 19.
+ * zero bytes per.
  */
 @JvmInline
 @ProtocolMessage

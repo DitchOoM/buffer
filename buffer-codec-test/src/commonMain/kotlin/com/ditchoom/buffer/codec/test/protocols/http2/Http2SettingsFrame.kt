@@ -17,7 +17,7 @@ import com.ditchoom.buffer.codec.annotations.WireBytes
  *   - 0x5 SETTINGS_MAX_FRAME_SIZE
  *   - 0x6 SETTINGS_MAX_HEADER_LIST_SIZE
  *
- * Stage G slice 7a element type — the slice 7a vector
+ * Element type — the vector
  * (`Http2SettingsFrame`) carries a `List<Http2Setting>` whose byte
  * count is determined by the frame header's `length` field via
  * `@LengthFrom`.
@@ -33,9 +33,9 @@ data class Http2Setting(
  * of 6-byte settings entries, count derived from the frame's
  * `length` field divided by 6.
  *
- * Stage G slice 7a doctrine vector — exercises `@LengthFrom` on
+ * Doctrine vector — exercises `@LengthFrom` on
  * `List<@ProtocolMessage>`. Standalone codec; integrating into the
- * `Http2Frame` dispatcher (slice 6.5) requires `@LengthFrom`
+ * `Http2Frame` dispatcher (.5) requires `@LengthFrom`
  * dotted-form (`@LengthFrom("header.length")`) which is a future
  * widening. This fixture splits length and type into separate
  * scalar fields so the simple-name `@LengthFrom("length")` works.
@@ -57,7 +57,7 @@ data class Http2Setting(
  *
  * The codec trusts the user to keep `length == entries.size * 6`
  * (per spec each entry is exactly 6 bytes); a runtime cross-check
- * would not be in slice 7a's scope.
+ * would not be in 's scope.
  */
 @ProtocolMessage(wireOrder = Endianness.Big)
 data class Http2SettingsFrame(

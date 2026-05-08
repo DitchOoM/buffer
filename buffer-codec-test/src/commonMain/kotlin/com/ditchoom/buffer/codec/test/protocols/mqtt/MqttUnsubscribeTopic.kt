@@ -11,7 +11,7 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
  * topic.
  *
  * Modeled as a `@ProtocolMessage data class` wrapping the LP string
- * because the J.M.0 emitter slice
+ * because the emitter slice
  * (`@RemainingBytes List<@ProtocolMessage T>`) accepts only
  * data-class elements — bare `List<@LengthPrefixed String>` is not
  * yet supported. The wrapper costs nothing on the wire (the data

@@ -4,7 +4,7 @@ import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 
 /**
- * Stage E slice 5a doctrine vector — two consecutive
+ * Doctrine vector — two consecutive
  * `@LengthPrefixed val: String` fields. The smallest shape that
  * forces the sequential peek walk: a single LPS String would
  * collapse to the existing terminal-LPS peek; two require a true

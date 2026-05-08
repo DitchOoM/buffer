@@ -7,8 +7,8 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import kotlin.jvm.JvmInline
 
 /**
- * Phase J.M.5 slice 15g — typed return code for MQTT v3.1.1 SUBACK
- * (§3.9.3). Mirrors slice 12's
+ * Typed return code for MQTT v3.1.1 SUBACK
+ * (§3.9.3). Mirrors 's
  * [com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode]
  * pattern: a [JvmInline] value-class raw byte holder with a
  * [DispatchValue], plus a sealed parent dispatching on it.
@@ -23,11 +23,11 @@ import kotlin.jvm.JvmInline
  * Modeling them as a sealed parent makes the value-space type-system
  * enforced — no per-byte `init { require }` invariant needed — and
  * substitutes into [com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket.SubAck.returnCodes]
- * via slice 11a's `@RemainingBytes List<sealed parent>` widening, no
+ * via 's `@RemainingBytes List<sealed parent>` widening, no
  * emitter work beyond what already landed.
  *
  * Replaces the previous `@RemainingBytes List<UByte>` shape — that path
- * is being retired (slice 15g principle: don't promote copy-based byte
+ * is being retired ( principle: don't promote copy-based byte
  * handling). On Kotlin/JS the prior shape boxed every UByte into a
  * heap object during decode; with sealed-variant elements each list
  * slot is just a reference, no per-element box.
@@ -51,7 +51,7 @@ sealed interface MqttV3SubAckReturnCode {
     /**
      * §3.9.3 — `0x00` Success - Maximum QoS 0.
      *
-     * Phase J.M.5 slice 15h — variants are `data object` singletons.
+     * Variants are `data object` singletons.
      * Decoding N return codes reuses the same four instances regardless
      * of N, so the per-element allocation cost (data-class variants
      * with an `id` field) collapses to zero. The emitter generates a

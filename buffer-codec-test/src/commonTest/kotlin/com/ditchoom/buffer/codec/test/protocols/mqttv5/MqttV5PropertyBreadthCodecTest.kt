@@ -13,10 +13,10 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 
 /**
- * Phase J.M.5 slice 10 (Tier A) — round-trip + edge-cases for each
+ * (Tier A) — round-trip + edge-cases for each
  * MQTT v5.0 property variant landed in this slice.
  *
- * Variants from slice 2 (MessageExpiryInterval, ContentType) are
+ * Variants from (MessageExpiryInterval, ContentType) are
  * exercised by [MqttV5PublishCodecTest] already; this suite covers the
  * remaining 22 non-VBI / non-binary variants. The `assertRoundTrip`
  * helper drives each property through [MqttV5PropertyCodec] (the
@@ -208,7 +208,7 @@ class MqttV5PropertyBreadthCodecTest {
         }
     }
 
-    // Phase J.M.5 slice 13 — VBI-bodied SubscriptionIdentifier (§3.8.2.1.2).
+    // VBI-bodied SubscriptionIdentifier (§3.8.2.1.2).
 
     @Test
     fun subscriptionIdentifierRoundTripsAcrossVbiWidths() {
@@ -243,7 +243,7 @@ class MqttV5PropertyBreadthCodecTest {
 
     @Test
     fun correlationDataRoundTripsNonEmpty() {
-        // Phase J.M.5 slice 15c — `@LengthPrefixed @UseCodec val: T : Payload`.
+        // `@LengthPrefixed @UseCodec val: T: Payload`.
         // Wire form: id(0x09) + UShort BE prefix + body bytes.
         val bytes = byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte())
         val original = MqttV5Property.CorrelationData(data = BinaryData(bytes))
@@ -287,7 +287,7 @@ class MqttV5PropertyBreadthCodecTest {
 
     @Test
     fun authenticationDataRoundTrips() {
-        // Phase J.M.5 slice 15c — same shape as CorrelationData with a
+        // Same shape as CorrelationData with a
         // different property identifier (0x16). SCRAM-SHA-256 challenge-
         // shaped opaque body.
         val bytes = ByteArray(32) { (it and 0xFF).toByte() }
@@ -317,7 +317,7 @@ class MqttV5PropertyBreadthCodecTest {
 
     @Test
     fun correlationDataRejectsMismatchedId() {
-        // audit-2e id-byte invariant carries through to the new variant.
+        // id-byte invariant carries through to the new variant.
         assertFailsWith<IllegalArgumentException> {
             MqttV5Property.CorrelationData(
                 id = MqttV5PropertyId(0x00u),

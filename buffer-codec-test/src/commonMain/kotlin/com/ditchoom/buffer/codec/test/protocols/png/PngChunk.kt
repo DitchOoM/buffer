@@ -8,7 +8,7 @@ import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 
 /**
- * Issue #151 part 2 (J.M.6.c) fixture — PNG chunk (W3C PNG 2nd ed §5):
+ * Issue #151 part 2 fixture — PNG chunk (W3C PNG 2nd ed §5):
  *
  * ```
  * +-----------+-----------+----------+----------+
@@ -21,17 +21,17 @@ import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
  * `@RemainingBytes` followed by a fixed 4-byte CRC trailer — the
  * analyzer subtracts the trailer's wire bytes from `buffer.limit()`
  * before the body loop so the body stops where the CRC begins. Without
- * J.M.6.c the body loop would consume the CRC bytes and the trailer's
+ * The body loop would consume the CRC bytes and the trailer's
  * read would underflow.
  *
  * The user supplies `length` to match `data.bytes.size` and `crc` to
  * match the CRC32 of `type + data` — the codec doesn't recompute
- * either (row 16 trust contract). The caller bounds the buffer to the
+ * either. The caller bounds the buffer to the
  * chunk's extent (typically via an outer reader that reads `length`
  * first).
  *
- * Phase J.M.5 slice 15g retyped `data` from `List<UByte>` to
- * `BinaryData` (slice 10a's `@RemainingBytes @UseCodec(C::class)
+ * Retyped `data` from `List<UByte>` to
+ * `BinaryData` ('s `@RemainingBytes @UseCodec(C::class)
  * val: P` shape). PNG chunk data is genuinely opaque bytes from the
  * outer codec's perspective (the data structure is determined by the
  * `type` byte and is interpreted by chunk-specific decoders, not by

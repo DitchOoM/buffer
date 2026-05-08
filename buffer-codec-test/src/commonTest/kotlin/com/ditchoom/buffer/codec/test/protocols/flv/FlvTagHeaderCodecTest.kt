@@ -13,7 +13,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * Stage B vector — `@WireBytes(3)` BE on a non-natural-width field.
+ * Vector — `@WireBytes(3)` BE on a non-natural-width field.
  *
  * Wire vector: an FLV audio tag header for a 22-byte body with a
  * 100 ms timestamp:

@@ -16,15 +16,14 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Stage H slice 10a doctrine vector — full round-trip for
- * `MqttPublishV3Concrete` with a typed `JpegImage` payload routed through
- * the user-supplied `JpegImageCodec`.
+ * Full round-trip for `MqttPublishV3Concrete` with a typed `JpegImage`
+ * payload routed through the user-supplied `JpegImageCodec`.
  *
- * Acceptance points (mapped to PHASE_9_RESET §Stage H):
- *   1. Typed-payload PUBLISH round-trips byte-exact (acceptance #1).
- *   2. `wireSize` is `BackPatch` for slice 10a's conservative path.
- *   3. `peekFrameSize` is `NoFraming` — slice 10d's outer dispatcher
- *      will own peek via the fixed header's `@RemainingLength`.
+ * Acceptance points:
+ *   1. Typed-payload PUBLISH round-trips byte-exact.
+ *   2. `wireSize` is `BackPatch` for the conservative path.
+ *   3. `peekFrameSize` is `NoFraming` — the outer dispatcher owns peek
+ *      via the fixed header's `@RemainingLength`.
  *   4. Caller-set `buffer.limit()` bounds the payload region; trailing
  *      bytes after the bounded region are not consumed.
  */
@@ -97,8 +96,8 @@ class MqttPublishV3ConcreteCodecTest {
     @Test
     fun decodeRespectsCallerLimitForPayloadRegion() {
         // Caller writes a publish + trailing junk. The buffer's outer
-        // limit covers everything; slice 10a relies on the caller
-        // narrowing the limit before decode (slice 10d's outer
+        // limit covers everything; relies on the caller
+        // narrowing the limit before decode ('s outer
         // dispatcher will do this via the @RemainingLength var-int).
         val original =
             MqttPublishV3Concrete(
@@ -117,7 +116,7 @@ class MqttPublishV3ConcreteCodecTest {
         buf.writeByte(0xBE.toByte())
         buf.resetForRead()
         // Caller narrows the limit to the publish bytes only; equivalent
-        // to slice 10d's outer dispatcher reading @RemainingLength and
+        // to 's outer dispatcher reading @RemainingLength and
         // calling setLimit before delegating.
         buf.setLimit(publishBytes)
         val decoded = MqttPublishV3ConcreteCodec.decode(buf, DecodeContext.Empty)
@@ -134,7 +133,7 @@ class MqttPublishV3ConcreteCodecTest {
                 packetId = PacketId(1u),
                 payload = JpegImage(0u, 0u, ByteArray(0)),
             )
-        // Slice 10a unconditionally returns BackPatch when a
+        // Unconditionally returns BackPatch when a
         // RemainingBytesPayload field is present, regardless of whether
         // the user codec itself returns Exact (JpegImageCodec does).
         // Promotion to runtime-Exact is a follow-on with a vector that
@@ -144,8 +143,8 @@ class MqttPublishV3ConcreteCodecTest {
 
     @Test
     fun peekFrameSizeIsNoFraming() {
-        // Slice 10a deliberately does not peek the publish frame.
-        // The outer dispatcher (slice 10d) will own peek via the
+        // Deliberately does not peek the publish frame.
+        // The outer dispatcher will own peek via the
         // fixed-header @RemainingLength var-int. peekFrameSize stays
         // NoFraming regardless of what the underlying stream contains.
         val pool = BufferPool()

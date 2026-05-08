@@ -130,10 +130,10 @@ private class CodecConnection<T : Any>(
 }
 
 /**
- * Phase J.M.5 slice 14c — wraps a [ByteStream] as a typed [Connection] using
+ * Wraps a [ByteStream] as a typed [Connection] using
  * a `@FramedBy` codec's framed encode shape (`encode(value, context, factory):
  * ReadBuffer`). Sibling to [asCodecConnection] for codecs that drop the
- * `Codec<T>` superinterface — see slice 14c handoff Q3 option 3C.
+ * `Codec<T>` superinterface — see handoff Q3 option 3C.
  *
  * The receive loop uses [peekFrameSize] + `readBufferScoped(decode)` exactly
  * as the standard [asCodecConnection]; the send path calls [encode] directly

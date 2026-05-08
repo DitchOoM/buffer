@@ -20,11 +20,11 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 
 /**
- * Stage F slice 6 + Stage H slice 10f doctrine vector. Validates
+ * + doctrine vector. Validates
  * the bit-packed `@DispatchOn(MqttFixedHeader::class)` dispatcher,
  * lifted to a generic class `MqttPacketCodec<P : Payload>(payload
  * Codec: Codec<P>)` so the new `Publish<P : Payload>` variant
- * (slice 10f) can route through the typed payload codec.
+ *  can route through the typed payload codec.
  *
  * Payload-free variants (`Connect`, `PingReq`, `PingResp`,
  * `Disconnect`) are `: MqttPacket<Nothing>` — covariance makes
@@ -46,7 +46,7 @@ class MqttPacketCodecTest {
 
     @Test
     fun fixedHeaderQosGreaterThanZeroFlagsQosBits() {
-        // Phase J.M step 2 — predicate for `Publish.packetId`. Bits
+        // Predicate for `Publish.packetId`. Bits
         // 1 and 2 of `flags` carry QoS per §3.3.1; the property
         // returns true iff either bit is set.
         assertEquals(false, MqttFixedHeader(0x30u).qosGreaterThanZero, "QoS=0 (flags=0x0)")
@@ -188,7 +188,7 @@ class MqttPacketCodecTest {
     @Test
     fun decodeThrowsOnUnknownDispatchValue() {
         // Header byte 0xF0: type=15, reserved-and-forbidden per
-        // MQTT v3.1.1 §2.2.1. After Phase J.M step 5 tranche 3,
+        // MQTT v3.1.1 §2.2.1. After,
         // every spec-defined v3.1.1 packet type (1–14) is folded
         // into the dispatcher — type 15 is the only remaining
         // unknown vector that will never gain a sealed variant.
@@ -396,7 +396,7 @@ class MqttPacketCodecTest {
     // explicitly per payload type.
     private fun jpegDispatcher(): MqttPacketCodec<JpegImage> = MqttPacketCodec(JpegImageCodec)
 
-    // ----- Slice 10f Publish variant via the generic dispatcher -----
+    // — - Publish variant via the generic dispatcher — —
 
     @Test
     fun encodesPublishVariantByteExactAtQos1() {
@@ -445,7 +445,7 @@ class MqttPacketCodecTest {
 
     @Test
     fun encodesPublishVariantByteExactAtQos0OmitsPacketId() {
-        // Phase J.M step 2 — header byte 0x30 = QoS=0, packetId field
+        // Header byte 0x30 = QoS=0, packetId field
         // is skipped on the wire per §3.3.2.2. body = 2 (topic LP) +
         // 3 (topic) + payload (4 jpeg header + 4 jpeg data) = 13 bytes.
         // Compare to the QoS=1 case which adds 2 bytes for packetId.
@@ -516,7 +516,7 @@ class MqttPacketCodecTest {
 
     @Test
     fun constructThrowsWhenQos1AndPacketIdIsNull() {
-        // Phase J.M.5 audit-2f closed the row-20 failure mode caller-side:
+        // Closed the row-20 failure mode caller-side:
         // the §2.2.1 cross-bit invariant (header.qosGreaterThanZero ==
         // (packetId != null)) now fires from the data class init-block at
         // construction time, before the codec ever sees the message.
@@ -533,10 +533,10 @@ class MqttPacketCodecTest {
 
     @Test
     fun roundTripsPublishVariantViaDispatcherAtQos1() {
-        // The slice 10f integration test — Publish<P> routes through
+        // The integration test — Publish<P> routes through
         // the dispatcher's generic class with the supplied payload
         // codec. Confirms @RemainingLength + RemainingBytesPayload
-        // composition lifts the slice 10c carve-out correctly. Run
+        // composition lifts the carve-out correctly. Run
         // at QoS=1 (header byte 0x32) so the packetId slot is on the
         // wire and round-trips through the dispatcher.
         val codec = MqttPacketCodec(JpegImageCodec)
@@ -555,7 +555,7 @@ class MqttPacketCodecTest {
 
     @Test
     fun roundTripsPublishVariantAtQos0WithNullPacketId() {
-        // Phase J.M step 2 — QoS=0 round-trip drops packetId from the
+        // QoS=0 round-trip drops packetId from the
         // wire and reads back as null on the decoded side.
         val codec = MqttPacketCodec(JpegImageCodec)
         val original =
@@ -573,11 +573,10 @@ class MqttPacketCodecTest {
 
     @Test
     fun publishCompleteRestoresOuterLimitFromPartialFlow() {
-        // Slice 10f's Partial+@RemainingLength composition: append
-        // trailing bytes that the publish decode must NOT read. After
-        // Partial.complete() runs (inside the var-int-narrowed bound),
-        // the outer limit must be restored so the trailing bytes are
-        // visible to the next caller.
+        // Partial+@RemainingLength composition: append trailing bytes that
+        // the publish decode must NOT read. After Partial.complete() runs
+        // (inside the var-int-narrowed bound), the outer limit must be
+        // restored so the trailing bytes are visible to the next caller.
         val codec = MqttPacketCodec(JpegImageCodec)
         val original =
             MqttPacket.Publish<JpegImage>(
@@ -607,8 +606,8 @@ class MqttPacketCodecTest {
         // Direct Partial flow for the variant codec: the consumer
         // decodes headers via PublishCodec.partial<P>(...), inspects
         // the topic, then completes with the payload codec selected
-        // at the call site. Verifies the slice 10c Partial machinery
-        // composes with slice 10f's @RemainingLength outer-limit
+        // at the call site. Verifies the Partial machinery
+        // composes with 's @RemainingLength outer-limit
         // capture.
         val codec = MqttPacketCodec(JpegImageCodec)
         val original =
@@ -622,8 +621,8 @@ class MqttPacketCodecTest {
         val buf = codec.encode(original, EncodeContext.Empty, BufferFactory.Default)
         val outerLimitBefore = buf.limit()
         // Skip the discriminator route — exercise Partial directly on
-        // the variant codec (the code path slice 10c emits, now with
-        // slice 10f's outer-limit capture).
+        // the variant codec (the code path that emits the outer-limit
+        // capture).
         val partial = PublishCodec.partial<JpegImage>(buf, DecodeContext.Empty)
         assertEquals("a/b", partial.topic)
         val full = partial.complete(JpegImageCodec)

@@ -13,7 +13,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
- * Phase J.M.5 slice 14b — `@FramedBy` capability probe.
+ * `@FramedBy` capability probe.
  *
  * Five checks:
  *   1. **Fixed wire bytes** — encode of `(payload=0x42, tail=0xABCD)`

@@ -17,7 +17,7 @@ import kotlin.jvm.JvmInline
  * +---------------+---------------+---------------+---------------+
  * ```
  *
- * Stage B vector for the **value-class-of-raw** ergonomic, modeled on
+ * Vector for the **value-class-of-raw** ergonomic, modeled on
  * the existing `MqttFixedHeader` pattern. The whole 4-byte header is
  * one `UInt` on the wire; `payloadLength` and `sequenceId` are derived
  * via bit-shift getters in user code, so the codec only ever sees a

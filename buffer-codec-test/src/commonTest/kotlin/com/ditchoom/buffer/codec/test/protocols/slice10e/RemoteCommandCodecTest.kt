@@ -19,7 +19,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertSame
 
 /**
- * Stage H slice 10e doctrine vector — `@UseCodec` against an
+ * Doctrine vector — `@UseCodec` against an
  * `expect object` codec, plus the `MqttCodec` convenience alias
  * for the MQTT dispatcher class.
  *
@@ -48,7 +48,7 @@ class RemoteCommandCodecTest {
         // emits `RemoteCommandPayloadCodec.decode(buffer, context)` in
         // commonMain. The JVM compilation links that call against the
         // jvmMain `actual object RemoteCommandPayloadCodec` — proving
-        // the slice 10e doctrine ("direct call, linker resolves").
+        // the doctrine ("direct call, linker resolves").
         val original =
             RemoteCommand(
                 id = "cmd/restart",
@@ -65,7 +65,7 @@ class RemoteCommandCodecTest {
         assertEquals(21, written)
         buf.resetForRead()
         // Caller bounds the buffer so the @RemainingBytes payload
-        // field stops at the encoded byte count (slice 10a/10b
+        // field stops at the encoded byte count (/10b
         // contract).
         buf.setLimit(written)
         assertEquals(original, RemoteCommandCodec.decode(buf, DecodeContext.Empty))

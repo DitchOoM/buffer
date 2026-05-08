@@ -8,7 +8,7 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.WireSize
 
 /**
- * JVM `actual` for the slice 10e expect codec. Delegates to
+ * JVM `actual` for the expect codec. Delegates to
  * `RemoteCommandPayloadCodecImpl` so wire bytes match the other
  * platform actuals; the `actual object` declaration is what the
  * Kotlin linker resolves the generated code's

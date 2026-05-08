@@ -7,11 +7,11 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import kotlin.jvm.JvmInline
 
 /**
- * Phase J.M.5 slice 12 — typed reason code for v5 SUBACK (§3.9.3).
+ * Typed reason code for v5 SUBACK (§3.9.3).
  *
  * Substituted into
  * [com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet.SubAck.reasonCodes]
- * as `List<V5SubAckReasonCode>` via slice 11a's `@RemainingBytes
+ * as `List<V5SubAckReasonCode>` via 's `@RemainingBytes
  * List<sealed parent>` widening — no emitter work needed beyond what
  * already landed.
  *

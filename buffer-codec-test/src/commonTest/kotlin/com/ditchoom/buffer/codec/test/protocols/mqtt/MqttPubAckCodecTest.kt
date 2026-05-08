@@ -16,10 +16,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 /**
- * Phase J.M step 5 first tranche — MQTT v3.1.1 §3.4 PUBACK packet.
+ * MQTT v3.1.1 §3.4 PUBACK packet.
  * Fixed-shape 4-byte ack: header `0x40` + remainingLength=2 +
  * packetIdentifier (UShort BE). Drives the per-variant `PubAckCodec`
- * object emitted by the slice 6 dispatcher (option 1 from the brief).
+ * object emitted by the dispatcher (option 1 from the brief).
  */
 class MqttPubAckCodecTest {
     @Test

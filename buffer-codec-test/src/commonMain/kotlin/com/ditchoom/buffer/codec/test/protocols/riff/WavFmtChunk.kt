@@ -12,7 +12,7 @@ import com.ditchoom.buffer.codec.annotations.WireOrder
  * size; the PCM-form body is fixed at 16 bytes, so a typical PCM `fmt `
  * chunk is 24 bytes on the wire (4 fourCC + 4 prefix + 16 body).
  *
- * Slice 4 vector for `@LengthPrefixed` on a `@ProtocolMessage` field
+ * Vector for `@LengthPrefixed` on a `@ProtocolMessage` field
  * (R3 widening). Encode emits the prefix carrying `WavFmtBodyCodec`'s
  * `wireSize`; decode reads the prefix, `setLimit`-bounds, decodes the
  * body, and restores the outer limit so a chunk embedded inside a RIFF
@@ -27,7 +27,7 @@ import com.ditchoom.buffer.codec.annotations.WireOrder
  * No `ReadBuffer` / `ByteArray` field appears on a `@ProtocolMessage`
  * data class anywhere in the slice — Section 8 of the design doctrine
  * forbids accidental raw-bytes payloads, and a typed body keeps the
- * `Payload` machinery (Stage H) out of slice 4's charter.
+ * `Payload` machinery out of 's charter.
  */
 @ProtocolMessage(wireOrder = Endianness.Little)
 data class WavFmtChunk(

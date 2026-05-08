@@ -10,9 +10,9 @@ import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 import kotlin.jvm.JvmInline
 
 /**
- * Phase J.M.5 slice 14c-prep — sealed-parent + `@FramedBy(after = "header")`
+ * -prep — sealed-parent + `@FramedBy(after = "header")`
  * probe. Exercises the emitter prep work that the v3/v5 substitution
- * (slice 14c proper) leans on, isolated from the 28 MQTT fixtures so a
+ * ( proper) leans on, isolated from the 28 MQTT fixtures so a
  * regression in the inherited-detection / after-X / peekFrameSize /
  * dispatcher-integration emit shows up as a focused failure here rather
  * than a wave of round-trip breaks.

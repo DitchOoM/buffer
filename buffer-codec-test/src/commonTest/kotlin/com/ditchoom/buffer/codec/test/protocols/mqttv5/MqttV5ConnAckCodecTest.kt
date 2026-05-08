@@ -19,16 +19,16 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 /**
- * Phase J.M.5 slice 3 — ConnAck v5. Wire layout per MQTT-5.0 §3.2:
+ * ConnAck v5. Wire layout per MQTT-5.0 §3.2:
  *
  * ```text
  *   20 <RL> <flags> <rc> <propLen> <properties...>
  * ```
  *
- * Always-present property bag — exercises slice 2's
+ * Always-present property bag — exercises 's
  * `@LengthPrefixed @UseCodec(MqttRemainingLengthCodec) val:
  * List<MqttV5Property>` shape on a non-Publish variant. No new emitter
- * capability beyond slice 2.
+ * capability beyond.
  */
 class MqttV5ConnAckCodecTest {
     @Test

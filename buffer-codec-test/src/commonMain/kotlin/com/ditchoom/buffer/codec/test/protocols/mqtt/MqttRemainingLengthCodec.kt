@@ -9,15 +9,15 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.WireSize
 
 /**
- * Phase I.1 step 7 — reference user codec for MQTT v3.1.1 §2.2.3
+ * Reference user codec for MQTT v3.1.1 §2.2.3
  * Remaining Length encoding (7 data bits + continuation bit per byte,
  * LSB-first, max 4 bytes).
  *
  * Implements [BoundingLengthCodec] so the processor wraps subsequent
- * fields in the slice 10f outer-limit-capture try/finally pattern,
+ * fields in the outer-limit-capture try/finally pattern,
  * driven by interface inspection rather than the legacy
  * `@RemainingLength` annotation. Produces byte-exact wire output
- * matching the slice 8 `appendDecodeRemainingLength` /
+ * matching the `appendDecodeRemainingLength` /
  * `appendEncodeRemainingLength` emit.
  *
  * Lives with the MQTT fixtures (not in `:buffer-codec`) because it's

@@ -14,16 +14,16 @@ import com.ditchoom.buffer.codec.annotations.UseCodec
 import com.ditchoom.buffer.codec.annotations.When
 
 /**
- * Phase J.M.5 slice 11a — capability probe for the emitter widening
+ * Capability probe for the emitter widening
  * that lifts `@When @UseCodec val: T?` (sealed-parent inner) and
  * `@RemainingBytes val: List<E>` (sealed-parent element). Pure
- * fixture: no v5 substitution lands until slice 11b/12.
+ * fixture: no v5 substitution lands until /12.
  *
  * The sealed parent [ProbeSealed] mixes one Exact-wireSize variant
  * ([Tag1]: a single `UByte` body) with one BackPatch-wireSize variant
  * ([Tag2]: `@LengthPrefixed val: String`). The BackPatch variant
  * exercises [ProbeRemainingBytesList]'s `elementIsBackPatch=true`
- * path — without the slice 11a guard added to `buildWireSizeFun` /
+ * path — without the guard added to `buildWireSizeFun` /
  * `classifyVariantWireSize`, encoding the list would CCE on the
  * runtime `as WireSize.Exact` cast for [Tag2]'s wireSize.
  */
@@ -48,9 +48,9 @@ sealed interface ProbeSealed {
  * KSP processor can resolve in the same round as the sources that
  * reference it; the auto-generated dispatcher object isn't visible
  * from the conditional-field analyzer's first-round resolve, so the
- * probe goes through this hand-written delegate. Slice 11b's v5
- * substitution exercises the auto-generated-codec reference shape
- * directly via `@UseCodec(V5XReasonCodeCodec::class)`.
+ * probe goes through this hand-written delegate. The v5 substitution
+ * exercises the auto-generated-codec reference shape directly via
+ * `@UseCodec(V5XReasonCodeCodec::class)`.
  */
 object ProbeSealedDelegateCodec : Codec<ProbeSealed> {
     override fun decode(

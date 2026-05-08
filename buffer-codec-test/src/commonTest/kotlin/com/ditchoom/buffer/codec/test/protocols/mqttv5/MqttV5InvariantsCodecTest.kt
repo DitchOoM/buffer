@@ -7,8 +7,8 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
- * Phase J.M.5 audit-2d — fixture-level invariants beyond the
- * cascading-trailer rule (audit-2c) and the reason-code allowlists
+ * Fixture-level invariants beyond the
+ * cascading-trailer rule and the reason-code allowlists
  * (covered in [MqttV5CascadingAcksCodecTest]).
  *
  * Two impossible-state classes are validated here:
@@ -32,10 +32,10 @@ class MqttV5InvariantsCodecTest {
     @Test
     fun publishAcceptsVariableLowNibble() {
         // PUBLISH's low 4 bits encode DUP/QoS/RETAIN per §3.3.1; the
-        // header invariant only fixes the high nibble (and the audit-2f
+        // header invariant only fixes the high nibble (and the
         // QoS=3 ban added on MqttFixedHeader). 0x3D = DUP + QoS=2 + RETAIN
         // exercises every legal flag bit, but not the reserved QoS=3
-        // pattern banned by audit-2f.
+        // pattern banned by.
         MqttV5Packet.Publish<com.ditchoom.buffer.codec.test.protocols.payload.JpegImage>(
             header = MqttFixedHeader(0x3Du),
             topic = "t",
@@ -170,7 +170,7 @@ class MqttV5InvariantsCodecTest {
         )
     }
 
-    // Phase J.M.5 slice 12 — V5SubscriptionOptions impossible-state guards
+    // V5SubscriptionOptions impossible-state guards
     // per §3.8.3.1.
 
     @Test
@@ -213,7 +213,7 @@ class MqttV5InvariantsCodecTest {
         )
     }
 
-    // Phase J.M.5 audit-2e — MqttV5PropertyId invariant per §2.2.2.2.
+    // MqttV5PropertyId invariant per §2.2.2.2.
     // Spot-checks a representative variant from each shape category
     // (scalar / boolean / string / VBI / two-string). The full breadth
     // (~25 variants) is structurally identical via
@@ -281,7 +281,7 @@ class MqttV5InvariantsCodecTest {
         }
     }
 
-    // Phase J.M.5 audit-2f — pre-slice-15 impossible-state sweep.
+    // Impossible-state sweep.
     // FIX-TODAY findings + NEEDS-EMITTER-WORK init-block fallbacks.
 
     @Test

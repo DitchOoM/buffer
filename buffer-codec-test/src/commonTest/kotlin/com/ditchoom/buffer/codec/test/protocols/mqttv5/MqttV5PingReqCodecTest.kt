@@ -18,12 +18,12 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 /**
- * Phase J.M.5 slice 1 — smoke test for the [MqttV5Packet] sealed
+ * Smoke test for the [MqttV5Packet] sealed
  * dispatcher. PINGREQ v5 is wire-bytewise identical to v3.1.1 PINGREQ
  * (`C0 00`); the value here is purely structural — proves the v5 sealed
  * parent + generated codec + peek path land cleanly.
  *
- * As of slice 2 the parent is `<out P : Payload>`, so the dispatcher
+ * As of the parent is `<out P: Payload>`, so the dispatcher
  * is the generic class `MqttV5PacketCodec<P>(payloadCodec)`. Payload-free
  * variants are `: MqttV5Packet<Nothing>` — covariance makes them
  * assignable to any `MqttV5Packet<P>` instantiation, so tests for those

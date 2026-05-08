@@ -10,8 +10,8 @@ import kotlin.test.Test
 import kotlin.test.assertTrue
 
 /**
- * Locked Decision row 16 enforcement: zero per-call `[B` allocations
- * attributable to encode/decode of a Stage C codec on JVM. The build
+ * Enforcement: zero per-call `[B` allocations
+ * attributable to encode/decode of a codec on JVM. The build
  * runs `:jvmTest` with `-XX:-UseTLAB` so every allocation flows
  * through `jdk.ObjectAllocationOutsideTLAB` and the count is
  * deterministic per allocation rather than per-TLAB-rotation.
