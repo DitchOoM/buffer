@@ -71,7 +71,7 @@ class NSDataBuffer(
 
     private fun requireReadable(needed: Int) {
         if (position + needed > limit) {
-            throw IndexOutOfBoundsException(
+            throw BufferUnderflowException(
                 "read of $needed byte(s) at position $position exceeds limit $limit",
             )
         }
@@ -82,7 +82,7 @@ class NSDataBuffer(
         needed: Int,
     ) {
         if (index < 0 || index + needed > limit) {
-            throw IndexOutOfBoundsException(
+            throw BufferUnderflowException(
                 "absolute read of $needed byte(s) at index $index exceeds limit $limit",
             )
         }
@@ -282,7 +282,7 @@ internal class NSDataBufferSlice(
 
     private fun requireReadable(needed: Int) {
         if (position + needed > limit) {
-            throw IndexOutOfBoundsException(
+            throw BufferUnderflowException(
                 "read of $needed byte(s) at position $position exceeds limit $limit",
             )
         }
@@ -293,7 +293,7 @@ internal class NSDataBufferSlice(
         needed: Int,
     ) {
         if (index < 0 || index + needed > limit) {
-            throw IndexOutOfBoundsException(
+            throw BufferUnderflowException(
                 "absolute read of $needed byte(s) at index $index exceeds limit $limit",
             )
         }

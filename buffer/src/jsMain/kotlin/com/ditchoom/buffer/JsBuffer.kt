@@ -152,6 +152,8 @@ class JsBuffer(
         offset: Int,
         length: Int,
     ): WriteBuffer {
+        if (length == 0) return this
+        checkWriteBounds(length)
         val int8Array = bytes.unsafeCast<Int8Array>().subarray(offset, offset + length)
         this.buffer.set(int8Array, positionValue)
         positionValue += int8Array.length
@@ -160,6 +162,8 @@ class JsBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
+        if (size == 0) return
+        checkWriteBounds(size)
         val actual = buffer.unwrapFully()
         if (actual is JsBuffer) {
             // Zero-copy: copy only the remaining portion using subarray

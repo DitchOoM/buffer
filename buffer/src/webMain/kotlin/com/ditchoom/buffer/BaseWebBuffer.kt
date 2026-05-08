@@ -67,7 +67,7 @@ abstract class BaseWebBuffer(
 
     protected fun requireReadable(needed: Int) {
         if (positionValue + needed > limitValue) {
-            throw IndexOutOfBoundsException(
+            throw BufferUnderflowException(
                 "read of $needed byte(s) at position $positionValue exceeds limit $limitValue",
             )
         }
@@ -78,7 +78,7 @@ abstract class BaseWebBuffer(
         needed: Int,
     ) {
         if (index < 0 || index + needed > limitValue) {
-            throw IndexOutOfBoundsException(
+            throw BufferUnderflowException(
                 "absolute read of $needed byte(s) at index $index exceeds limit $limitValue",
             )
         }
@@ -135,6 +135,7 @@ abstract class BaseWebBuffer(
 
     // WriteBuffer implementation using abstract store methods
     override fun writeByte(byte: Byte): WriteBuffer {
+        checkWriteBounds(1)
         storeByte(positionValue, byte)
         positionValue++
         return this
@@ -144,11 +145,13 @@ abstract class BaseWebBuffer(
         index: Int,
         byte: Byte,
     ): WriteBuffer {
+        checkIndexBounds(index, 1)
         storeByte(index, byte)
         return this
     }
 
     override fun writeShort(short: Short): WriteBuffer {
+        checkWriteBounds(Short.SIZE_BYTES)
         storeShort(positionValue, short)
         positionValue += Short.SIZE_BYTES
         return this
@@ -158,11 +161,13 @@ abstract class BaseWebBuffer(
         index: Int,
         short: Short,
     ): WriteBuffer {
+        checkIndexBounds(index, Short.SIZE_BYTES)
         storeShort(index, short)
         return this
     }
 
     override fun writeInt(int: Int): WriteBuffer {
+        checkWriteBounds(Int.SIZE_BYTES)
         storeInt(positionValue, int)
         positionValue += Int.SIZE_BYTES
         return this
@@ -172,11 +177,13 @@ abstract class BaseWebBuffer(
         index: Int,
         int: Int,
     ): WriteBuffer {
+        checkIndexBounds(index, Int.SIZE_BYTES)
         storeInt(index, int)
         return this
     }
 
     override fun writeLong(long: Long): WriteBuffer {
+        checkWriteBounds(Long.SIZE_BYTES)
         storeLong(positionValue, long)
         positionValue += Long.SIZE_BYTES
         return this
@@ -186,6 +193,7 @@ abstract class BaseWebBuffer(
         index: Int,
         long: Long,
     ): WriteBuffer {
+        checkIndexBounds(index, Long.SIZE_BYTES)
         storeLong(index, long)
         return this
     }
