@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.pool
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
 
@@ -21,6 +22,21 @@ internal class SingleThreadedBufferPool(
     private var poolHits = 0L
     private var poolMisses = 0L
     private var peakPoolSize = 0
+
+    override fun allocate(
+        size: Int,
+        byteOrder: ByteOrder,
+    ): PlatformBuffer {
+        val buffer = acquire(size)
+        if (buffer is PlatformBuffer && buffer.byteOrder == byteOrder) return buffer
+        release(buffer)
+        return factory.allocate(size, byteOrder)
+    }
+
+    override fun wrap(
+        array: ByteArray,
+        byteOrder: ByteOrder,
+    ): PlatformBuffer = factory.wrap(array, byteOrder)
 
     override fun acquire(minSize: Int): ReadWriteBuffer {
         totalAllocations++
