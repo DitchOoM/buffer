@@ -213,7 +213,7 @@ internal class CodecEmitter(
         }
         if (symbol.classKind != ClassKind.CLASS) return null
         val isData = Modifier.DATA in symbol.modifiers
-        val isValue = Modifier.VALUE in symbol.modifiers
+        val isValue = symbol.isValueClassDecl()
         if (!isData && !isValue) return null
         if (Modifier.SEALED in symbol.modifiers) return null
         if (symbol.annotations.any { it.shortName.asString() == "DispatchOn" }) return null
@@ -373,7 +373,7 @@ internal class CodecEmitter(
                     .firstOrNull { it.name?.asString() == "type" }
                     ?.value as? KSType ?: continue
             val discriminatorDecl = discriminatorType.declaration as? KSClassDeclaration ?: continue
-            if (Modifier.VALUE !in discriminatorDecl.modifiers) continue
+            if (!discriminatorDecl.isValueClassDecl()) continue
             val ctor = discriminatorDecl.primaryConstructor ?: continue
             if (ctor.parameters.size != 1) continue
             val innerType = ctor.parameters[0].type.resolve()
@@ -814,7 +814,7 @@ internal class CodecEmitter(
         if (type.isError) return null
         if (type.isMarkedNullable) return null
         val decl = type.declaration as? KSClassDeclaration ?: return null
-        if (Modifier.VALUE !in decl.modifiers) return null
+        if (!decl.isValueClassDecl()) return null
         val ctor = decl.primaryConstructor ?: return null
         if (ctor.parameters.size != 1) return null
         val innerParam = ctor.parameters[0]
@@ -922,7 +922,7 @@ internal class CodecEmitter(
         // peekable-scalar inner; property must be a non-extension `val`
         // returning non-nullable `Int`.
         val siblingDecl = siblingType.declaration as? KSClassDeclaration ?: return null
-        if (Modifier.VALUE !in siblingDecl.modifiers) return null
+        if (!siblingDecl.isValueClassDecl()) return null
         val ctor = siblingDecl.primaryConstructor ?: return null
         if (ctor.parameters.size != 1) return null
         val innerType = ctor.parameters[0].type.resolve()
@@ -1652,7 +1652,7 @@ internal class CodecEmitter(
         val sourceType = sibling.type.resolve()
         if (sourceType.isError || sourceType.isMarkedNullable) return null
         val siblingDecl = sourceType.declaration as? KSClassDeclaration ?: return null
-        if (Modifier.VALUE !in siblingDecl.modifiers) return null
+        if (!siblingDecl.isValueClassDecl()) return null
         // Peek-side reconstructs the value class via its
         // primary constructor, so the value class must have exactly
         // one supported-scalar inner. Without this guard, `analyzeField`
@@ -1906,7 +1906,7 @@ internal class CodecEmitter(
      */
     private fun analyzeConditionalValueClassInner(innerType: KSType): ConditionalInner.ValueClassScalar? {
         val decl = innerType.declaration as? KSClassDeclaration ?: return null
-        if (Modifier.VALUE !in decl.modifiers) return null
+        if (!decl.isValueClassDecl()) return null
         val ctor = decl.primaryConstructor ?: return null
         if (ctor.parameters.size != 1) return null
         val innerParam = ctor.parameters[0]
@@ -5852,7 +5852,7 @@ internal class CodecEmitter(
                 .firstOrNull { it.name?.asString() == "type" }
                 ?.value as? KSType ?: return null
         val discriminatorDecl = discriminatorType.declaration as? KSClassDeclaration ?: return null
-        if (Modifier.VALUE !in discriminatorDecl.modifiers) return null
+        if (!discriminatorDecl.isValueClassDecl()) return null
         val discriminatorCtor = discriminatorDecl.primaryConstructor ?: return null
         if (discriminatorCtor.parameters.size != 1) return null
         val innerType = discriminatorCtor.parameters[0].type.resolve()

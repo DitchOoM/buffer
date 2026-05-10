@@ -306,12 +306,12 @@ class ProtocolMessageProcessor(
         val discriminatorDecl = discriminatorType.declaration as? KSClassDeclaration ?: return
         val discriminatorName = discriminatorDecl.qualifiedName?.asString() ?: discriminatorDecl.simpleName.asString()
 
-        if (Modifier.VALUE !in discriminatorDecl.modifiers) {
+        if (!discriminatorDecl.isValueClassDecl()) {
             logger.error(
                 "@DispatchOn($discriminatorName::class) on $parentName references a type that is " +
-                    "not a `value class`. Slice 6 requires the discriminator to be a " +
-                    "`@JvmInline value class` whose primary constructor takes a single supported " +
-                    "scalar (UByte/Byte/UShort/UInt/etc.).",
+                    "not a `value class`. The discriminator must be a `@JvmInline value class` " +
+                    "whose primary constructor takes a single supported scalar " +
+                    "(UByte/Byte/UShort/UInt/etc.).",
                 parent,
             )
             return
@@ -407,8 +407,7 @@ class ProtocolMessageProcessor(
             if (!isObjectVariant && Modifier.DATA !in sub.modifiers) {
                 logger.error(
                     "@DispatchOn variant $subName must be a `data class` or `data object` / " +
-                        "`object`. Slice 6 doesn't yet support non-data class variants — those " +
-                        "would need the consume + forward-via-context model.",
+                        "`object`. Non-data class variants are not supported.",
                     sub,
                 )
                 continue
@@ -475,9 +474,8 @@ class ProtocolMessageProcessor(
                 logger.error(
                     "@DispatchOn variant $subName must declare its first constructor parameter " +
                         "as the discriminator type `$discriminatorName`, but it is `$displayed`. " +
-                        "Slice 6 requires the variant to carry the discriminator field so its " +
-                        "codec reads/writes the byte naturally; the `object` and " +
-                        "discriminator-from-context shapes are deferred.",
+                        "The variant must carry the discriminator field so its codec reads / " +
+                        "writes the byte naturally.",
                     sub,
                 )
             }
@@ -840,7 +838,7 @@ class ProtocolMessageProcessor(
                 }
             } else {
                 val siblingDecl = sourceType.declaration as? KSClassDeclaration
-                if (siblingDecl == null || Modifier.VALUE !in siblingDecl.modifiers) {
+                if (siblingDecl == null || !siblingDecl.isValueClassDecl()) {
                     val displayed =
                         sourceType.declaration.qualifiedName?.asString() ?: "<unresolved>"
                     val nullableSuffix = if (sourceType.isMarkedNullable) "?" else ""
@@ -1142,7 +1140,7 @@ class ProtocolMessageProcessor(
                 // single supported-scalar inner; property must be a non-extension
                 // `val` returning non-nullable `Int`.
                 val siblingDecl = sourceType.declaration as? KSClassDeclaration
-                if (siblingDecl == null || Modifier.VALUE !in siblingDecl.modifiers) {
+                if (siblingDecl == null || !siblingDecl.isValueClassDecl()) {
                     val displayed = sourceType.declaration.qualifiedName?.asString() ?: "<unresolved>"
                     logger.error(
                         "@LengthFrom(\"$referenced\") on $ownerName.$fieldName uses a dotted source " +
@@ -1751,9 +1749,7 @@ class ProtocolMessageProcessor(
             val targetType = target.type.resolve()
             val targetTypeQname = targetType.declaration.qualifiedName?.asString()
             val targetIsValueClass =
-                (targetType.declaration as? KSClassDeclaration)?.let { td ->
-                    Modifier.VALUE in td.modifiers
-                } ?: false
+                (targetType.declaration as? KSClassDeclaration)?.isValueClassDecl() ?: false
             val isFixedScalar = targetTypeQname in NATURAL_WIDTHS
             if (!isFixedScalar && !targetIsValueClass) {
                 logger.error(
@@ -1947,7 +1943,7 @@ class ProtocolMessageProcessor(
         if (!visited.add(fingerprint)) return
 
         val decl = type.declaration as? KSClassDeclaration
-        if (decl != null && Modifier.VALUE in decl.modifiers) {
+        if (decl != null && decl.isValueClassDecl()) {
             val inner =
                 decl.primaryConstructor
                     ?.parameters
