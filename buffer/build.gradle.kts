@@ -36,7 +36,11 @@ val isArm64 = System.getProperty("os.arch") == "aarch64"
 
 @Suppress("UNCHECKED_CAST")
 val getNextVersion = project.extra["getNextVersion"] as (Boolean) -> Any
-project.version = getNextVersion(!isRunningOnGithub).toString()
+// Honor -Pversion so local publishes can pin a version (e.g. -Pversion=4.3.0-SNAPSHOT)
+// without being clobbered by Maven Central's getNextVersion auto-increment.
+if (!project.hasProperty("version") || project.version == "unspecified") {
+    project.version = getNextVersion(!isRunningOnGithub).toString()
+}
 
 // Get simdutf build tasks and libs directory from simdutf.gradle.kts
 @Suppress("UNCHECKED_CAST")
@@ -169,6 +173,10 @@ kotlin {
             }
         } else if (HostManager.hostIsLinux) {
             linuxX64()
+            // Register linuxArm64 on local Linux dev too (was previously CI-only). K/N
+            // ships an aarch64 cross-compiler; required for downstream consumers
+            // (socket, mqtt) that target linuxArm64 to resolve buffer's umbrella metadata.
+            linuxArm64()
         }
     }
     targets.withType<org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget>().configureEach {

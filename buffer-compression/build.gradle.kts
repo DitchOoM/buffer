@@ -29,7 +29,11 @@ apply(from = "../gradle/setup.gradle.kts")
 
 @Suppress("UNCHECKED_CAST")
 val getNextVersion = project.extra["getNextVersion"] as (Boolean) -> Any
-project.version = getNextVersion(!isRunningOnGithub).toString()
+// Honor -Pversion so local publishes can pin a version (e.g. -Pversion=4.3.0-SNAPSHOT)
+// without being clobbered by Maven Central's getNextVersion auto-increment.
+if (!project.hasProperty("version") || project.version == "unspecified") {
+    project.version = getNextVersion(!isRunningOnGithub).toString()
+}
 
 repositories {
     google()
@@ -99,6 +103,10 @@ kotlin {
                     associateWith(this@linuxX64.compilations.getByName("main"))
                 }
             }
+            // Register linuxArm64 on local Linux dev too (was previously CI-only). K/N
+            // ships an aarch64 cross-compiler; required for downstream consumers
+            // (socket, mqtt) that target linuxArm64 to resolve buffer's umbrella metadata.
+            linuxArm64()
         }
     }
     // Link against simdutf (transitive dependency via :buffer module)
