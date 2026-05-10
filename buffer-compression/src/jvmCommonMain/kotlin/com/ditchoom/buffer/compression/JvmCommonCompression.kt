@@ -11,7 +11,10 @@ actual val supportsSyncCompression: Boolean = true
 actual val supportsRawDeflate: Boolean = true
 actual val supportsStatefulFlush: Boolean = true
 
-// java.util.zip.Deflater does not accept a windowBits parameter.
+// java.util.zip.{Deflater,Inflater} expose only (level, nowrap) — no windowBits
+// or memLevel surface. The bundled native zlib supports both via deflateInit2,
+// but the JNI bridge hardcodes windowBits magnitude to 15 (nowrap toggles the
+// sign: +15 zlib-format, -15 raw-deflate). No public JDK API reaches it.
 actual val supportsCustomWindowBits: Boolean = false
 
 /**
