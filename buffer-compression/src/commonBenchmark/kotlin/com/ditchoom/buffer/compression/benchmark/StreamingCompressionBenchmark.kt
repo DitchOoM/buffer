@@ -5,7 +5,6 @@ import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.StreamingCompressor
@@ -55,9 +54,8 @@ open class StreamingCompressionBenchmark {
 
     @Setup
     fun setup() {
-        val allocator = BufferAllocator.Direct
-        compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, allocator)
-        decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, allocator)
+        compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, BufferFactory.Default)
+        decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferFactory.Default)
 
         // Generate compressible text data (simulates WebSocket text messages)
         val text16B = "Hello, WebSocket!" // ~16 bytes

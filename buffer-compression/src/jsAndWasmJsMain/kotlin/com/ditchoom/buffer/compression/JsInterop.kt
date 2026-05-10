@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 
 // ============================================================================
@@ -44,7 +46,7 @@ internal expect fun combineJsByteArrays(
 internal expect fun emptyJsByteArray(): JsByteArray
 
 /** Convert a [JsByteArray] to a [ReadBuffer] ready for reading (position=0, limit=length). */
-internal expect fun JsByteArray.toPlatformBuffer(allocator: BufferAllocator = BufferAllocator.Default): ReadBuffer
+internal expect fun JsByteArray.toPlatformBuffer(bufferFactory: BufferFactory = BufferFactory.Default): ReadBuffer
 
 // ============================================================================
 // Node.js sync zlib operations

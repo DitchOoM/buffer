@@ -2,6 +2,7 @@
 
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.NativeMemoryAccess
 import com.ditchoom.buffer.ReadBuffer
 import kotlinx.coroutines.await
@@ -172,15 +173,15 @@ private external fun jsCopyToWasmMemory(
     dstOffset: Int,
 )
 
-internal actual fun JsByteArray.toPlatformBuffer(allocator: BufferAllocator): ReadBuffer {
+internal actual fun JsByteArray.toPlatformBuffer(bufferFactory: BufferFactory): ReadBuffer {
     val length = byteLength()
     if (length == 0) {
-        return allocator.allocate(0)
+        return bufferFactory.allocate(0)
     }
-    // Allocate via the provided allocator (supports pool, direct, heap).
+    // Allocate via the provided factory (supports pool, direct, heap).
     // If the buffer has native memory access (LinearBuffer), copy JS data directly
     // into its WASM linear memory region. Single copy, no ByteArray intermediate.
-    val buf = allocator.allocate(length)
+    val buf = bufferFactory.allocate(length)
     val native = (buf as? NativeMemoryAccess)
     if (native != null) {
         jsCopyToWasmMemory(ref, native.nativeAddress.toInt())
