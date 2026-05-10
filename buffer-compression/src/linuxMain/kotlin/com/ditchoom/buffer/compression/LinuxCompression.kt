@@ -45,6 +45,9 @@ actual val supportsSyncCompression: Boolean = true
 actual val supportsRawDeflate: Boolean = true
 actual val supportsStatefulFlush: Boolean = true
 
+// Linux native zlib's deflateInit2 honors the windowBits argument.
+actual val supportsCustomWindowBits: Boolean = true
+
 /**
  * Helper to copy memory with platform-appropriate size_t conversion.
  */

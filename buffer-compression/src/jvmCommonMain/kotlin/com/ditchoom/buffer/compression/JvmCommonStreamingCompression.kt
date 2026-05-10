@@ -25,7 +25,7 @@ actual fun StreamingCompressor.Companion.create(
     level: CompressionLevel,
     bufferFactory: BufferFactory,
     outputBufferSize: Int,
-    windowBits: Int,
+    windowBits: WindowBits,
 ): StreamingCompressor =
     when (algorithm) {
         CompressionAlgorithm.Gzip -> JvmGzipStreamingCompressor(level, bufferFactory, outputBufferSize)

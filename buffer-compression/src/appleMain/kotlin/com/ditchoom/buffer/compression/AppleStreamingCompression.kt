@@ -43,7 +43,7 @@ actual fun StreamingCompressor.Companion.create(
     level: CompressionLevel,
     bufferFactory: BufferFactory,
     outputBufferSize: Int,
-    windowBits: Int,
+    windowBits: WindowBits,
 ): StreamingCompressor = AppleZlibStreamingCompressor(algorithm, level, bufferFactory, outputBufferSize)
 
 /**

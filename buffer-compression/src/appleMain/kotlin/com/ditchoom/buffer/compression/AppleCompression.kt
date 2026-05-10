@@ -43,6 +43,11 @@ actual val supportsSyncCompression: Boolean = true
 actual val supportsRawDeflate: Boolean = true
 actual val supportsStatefulFlush: Boolean = true
 
+// Apple compressor currently does not wire windowBits through to deflateInit2 — the
+// argument is silently ignored and the default (15-bit / 32 KB) window is used.
+// TODO: thread customWindowBits + resolveWindowBits through AppleZlibStreaming{Compressor,Decompressor}.
+actual val supportsCustomWindowBits: Boolean = false
+
 /**
  * Helper to copy memory with platform-appropriate size_t conversion.
  * Uses UnsafeNumber to handle different bit widths across Apple platforms

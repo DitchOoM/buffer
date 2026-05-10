@@ -11,6 +11,9 @@ actual val supportsSyncCompression: Boolean = true
 actual val supportsRawDeflate: Boolean = true
 actual val supportsStatefulFlush: Boolean = true
 
+// java.util.zip.Deflater does not accept a windowBits parameter.
+actual val supportsCustomWindowBits: Boolean = false
+
 /**
  * JVM/Android implementation delegating to streaming compression.
  */

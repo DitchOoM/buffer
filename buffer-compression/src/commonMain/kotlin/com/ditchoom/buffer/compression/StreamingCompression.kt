@@ -212,17 +212,18 @@ suspend inline fun <R> StreamingDecompressor.useSuspending(
  * @param level The compression level.
  * @param bufferFactory Factory for allocating output buffers.
  * @param outputBufferSize Size of output buffers (default 32KB).
- * @param windowBits The zlib window size (log2 of the LZ77 window size).
- *   When 0 (the default), uses the algorithm's default: 15 for Deflate/Zlib, -15 for Raw, 31 for Gzip.
- *   When non-zero, the value is passed directly to deflateInit2(). Valid range depends on the algorithm.
- *   Note: JVM's java.util.zip.Deflater does not support custom window sizes; this parameter is ignored on JVM.
+ * @param windowBits Log2 size of the LZ77 sliding window. [WindowBits.Default] selects the
+ *   algorithm default (15-bit / 32 KB window). The platform applies the algorithm-appropriate
+ *   sign/offset to zlib's `deflateInit2` (see [resolveWindowBits]).
+ *   Note: JVM's java.util.zip.Deflater does not support custom window sizes; this parameter
+ *   is silently ignored on JVM. Apple and JS/Wasm also currently ignore it.
  */
 expect fun StreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Deflate,
     level: CompressionLevel = CompressionLevel.Default,
     bufferFactory: BufferFactory = BufferFactory.Default,
     outputBufferSize: Int = 32768,
-    windowBits: Int = 0,
+    windowBits: WindowBits = WindowBits.Default,
 ): StreamingCompressor
 
 /**

@@ -143,6 +143,24 @@ expect val supportsRawDeflate: Boolean
  */
 expect val supportsStatefulFlush: Boolean
 
+/**
+ * Whether the current platform's [StreamingCompressor.create] honors a
+ * non-default [WindowBits] argument.
+ *
+ * - Linux native: `true` - native zlib `deflateInit2` accepts the windowBits.
+ * - JVM, Android: `false` - `java.util.zip.Deflater` does not expose a window-size
+ *   parameter; the value is silently ignored and the deflater always uses the
+ *   algorithm default (15-bit / 32 KB window).
+ * - Apple, JS, Wasm: `false` - currently not wired through to the underlying
+ *   compressor; the value is silently ignored. (Tracked as a follow-up.)
+ *
+ * Round-trip tests pass on all platforms because both compressor and decompressor
+ * fall back to the algorithm default when [WindowBits] is ignored. Use this flag
+ * to gate assertions that expect a specific window size to be reflected in the
+ * encoded output.
+ */
+expect val supportsCustomWindowBits: Boolean
+
 // =============================================================================
 // Suspending One-Shot API (works on all platforms including browser JS)
 // =============================================================================

@@ -47,7 +47,7 @@ actual fun StreamingCompressor.Companion.create(
     level: CompressionLevel,
     bufferFactory: BufferFactory,
     outputBufferSize: Int,
-    windowBits: Int,
+    windowBits: WindowBits,
 ): StreamingCompressor = LinuxZlibStreamingCompressor(algorithm, level, bufferFactory, outputBufferSize, windowBits)
 
 /**
@@ -129,7 +129,7 @@ private class LinuxZlibStreamingCompressor(
     private val level: CompressionLevel,
     override val bufferFactory: BufferFactory,
     private val outputBufferSize: Int,
-    private val customWindowBits: Int = 0,
+    private val customWindowBits: WindowBits = WindowBits.Default,
 ) : StreamingCompressor {
     private var streamPtr: CPointer<z_stream>? = null
     private var closed = false
@@ -153,16 +153,7 @@ private class LinuxZlibStreamingCompressor(
         s.next_out = null
         s.avail_out = 0u
 
-        val windowBits =
-            if (customWindowBits != 0) {
-                customWindowBits
-            } else {
-                when (algorithm) {
-                    CompressionAlgorithm.Deflate -> WINDOW_BITS_ZLIB
-                    CompressionAlgorithm.Raw -> WINDOW_BITS_RAW
-                    CompressionAlgorithm.Gzip -> WINDOW_BITS_GZIP
-                }
-            }
+        val windowBits = resolveWindowBits(algorithm, customWindowBits)
 
         val result =
             deflateInit2(
