@@ -1,15 +1,13 @@
 package com.ditchoom.buffer.codec.test.protocols.websocket
 
+import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.annotations.DispatchOn
 import com.ditchoom.buffer.codec.annotations.DispatchValue
 import com.ditchoom.buffer.codec.annotations.Endianness
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
-import com.ditchoom.buffer.codec.annotations.UseCodec
 import com.ditchoom.buffer.codec.annotations.When
-import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
-import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import kotlin.jvm.JvmInline
 
 /*
@@ -38,24 +36,43 @@ import kotlin.jvm.JvmInline
  * +-------------------------------+ - - - - - - - - - - - - - - - +
  * ```
  *
- * ### Dispatch shape on this branch
+ * ### Dispatch shape
  *
- * `@DispatchOn` on the current branch requires a `@JvmInline value class` discriminator
- * . Production code in the websocket repo uses the multi-field data-class form
- * `@DispatchOn(WsFrameHeader::class, framing = WsFraming::class)` — that variant ships
- * in `buffer-codec 4.3.0-SNAPSHOT`, which the websocket repo depends on but
- * `feature/directional-codec` (this branch) is upstream of.
+ * `@DispatchOn` requires a `@JvmInline value class` discriminator. The discriminator is
+ * [FrameHeaderByte1] (single-byte value class); [FrameHeaderByte1.opcode] is the
+ * `@DispatchValue`. Each variant inlines the rest of the header structure (byte2,
+ * optional extended length, optional masking key) rather than nesting a shared
+ * [WsFrameHeader] field — the dispatcher self-frames the discriminator byte, then each
+ * variant's codec re-reads byte 1 alongside the trailing header fields. The duplication
+ * is intentional: it pins down the exact `@When`-grammar-1 predicates
+ * (`byte2.extended16` / `byte2.masked`) inside every variant.
  *
- * To get genuine sealed dispatch on this branch the discriminator is [FrameHeaderByte1]
- * (single-byte value class). Each variant inlines the rest of the header structure
- * (byte2, optional extended length, optional masking key) rather than nesting a shared
- * [WsFrameHeader] field. The duplication is intentional: it lets the dispatcher land on
- * the value-class shape it supports today, and pins down the exact `@When`-grammar-1
- * predicates (`byte2.extended16` / `byte2.masked`) inside every variant — which is what
- * the websocket repo's per-variant codecs each contain anyway.
- *
- * [WsFrameHeader] is kept as a separate `@ProtocolMessage` for header-shape isolation
+ * [WsFrameHeader] survives as a separate `@ProtocolMessage` for header-shape isolation
  * tests; it does not participate in the dispatch.
+ *
+ * ### Payload shape — `<out P : Payload>` on the parent, `<P : Payload>` on data variants
+ *
+ * `@ProtocolMessage` model fields must not be `ByteArray`/`ReadBuffer`/`PlatformBuffer` —
+ * a buffer field forces a copy at the codec boundary, taking the choice away from the
+ * consumer. The framework's design principle (per `Codec.kt:108-116`) is that
+ * **zero-copy is the easy path; copies are explicit and the consumer decides when to
+ * make them**. So data-bearing variants ([Text], [Binary], [Continuation], [Ping],
+ * [Pong]) carry `<P : Payload>` + `@RemainingBytes val payload: P`; the consumer
+ * supplies a `Codec<P>` to the constructor-injected `WsFrameCodec<P>` and the framework
+ * decodes payload bytes directly into the consumer's typed model. [Close] has no
+ * generic payload (only [WsCloseBody]), so it extends `WsFrame<Nothing>`.
+ *
+ * Same shape `MqttPacket<out P : Payload>` uses for `Publish<P : Payload>` (mqtt
+ * fixture, `MqttPacket.kt:115-264`) and `Slice14cGenericFramedDispatch<out P : Payload>`
+ * uses for `WithPayload<P : Payload>`. The generated codec is a class:
+ *
+ * ```kotlin
+ * class WsFrameCodec<P : Payload>(private val payloadCodec: Codec<P>) : Codec<WsFrame<P>>
+ * ```
+ *
+ * Consumers instantiate per payload type: `WsFrameCodec(TextPayloadCodec)` to decode
+ * text frames into `TextPayload`; `WsFrameCodec(BinaryDataCodec)` to decode binary
+ * frames into `BinaryData`. Wire bytes are identical across instantiations.
  *
  * ### What this fixture pins down
  *
@@ -70,25 +87,23 @@ import kotlin.jvm.JvmInline
  * - **`@When("byte2.masked")` grammar 1** — same shape gates the optional 4-byte mask.
  * - **`@When("remaining >= 2")` grammar 2** on the close variant — close body absent for
  *   empty payload, present when ≥2 bytes follow.
- * - **`@RemainingBytes` with mixed slot types** — `String` (text frame, UTF-8 validity
- *   gate is built into `String` decode) and `BinaryData` via `@UseCodec(BinaryDataCodec)`
- *   (zero-boxing opaque payload — the same shape MQTT v5 `CorrelationData` /
- *   `AuthenticationData` use).
+ * - **`<out P : Payload>` sealed parent with mixed payload-bearing and `<Nothing>`
+ *   variants** — same shape MQTT v3.1.1 PUBLISH + the no-payload control packets use.
  *
  * ### What this fixture deliberately does NOT cover
  *
  * - **Variable-frame-size peek.** RFC 6455 frames carry payload length inside the header
  *   (byte 2 + 16/64-bit extension), not as a body-length prefix. Generic `@DispatchOn`
- *   framing cannot infer that without a custom peek; the websocket repo does it via the
- *   `framing = WsFraming::class` parameter (a future buffer-codec feature). Tests
- *   pre-bound the buffer to known frame sizes before calling the codec, mirroring how
- *   `WebSocketCodec.readNextFrame` reads `stream.readBuffer(totalFrameSize)` after a
- *   handwritten peek.
+ *   framing cannot infer that without a custom peek; the websocket repo does it in
+ *   `WebSocketCodec.readNextFrame` via a hand-written peek + `stream.readBuffer(size)`.
+ *   Tests here pre-bound the buffer to known frame sizes before calling the codec.
  * - **Masking-XOR application.** A per-byte transform that runs in the connection layer
  *   (`buffer.xorMask(key)`); the codec round-trips the masking key and raw masked bytes,
  *   the unmask happens off-codec. Demonstrated explicitly in the masked-pong test.
  * - **Stateful policy** (fragmentation rules, control-frame ≤125, close-handshake
- *   choreography, ping echo). These cross frame boundaries; codecs are pure per-frame.
+ *   choreography, ping echo, fragmented-Text UTF-8 reassembly). These cross frame
+ *   boundaries; codecs are pure per-frame. Fragmented-Text reassembly across multiple
+ *   `Continuation<P>` frames lives in the websocket repo's `MessageAssembler`.
  */
 
 /**
@@ -242,48 +257,55 @@ data class WsCloseBody(
  * protocol-error rule.
  *
  * Each variant inlines the full header structure (byte1 + byte2 + optional ext lengths
- * + optional masking key) before its payload. Nesting `header: WsFrameHeader` instead
- * would require the data-class-discriminator form of `@DispatchOn` from a future
- * buffer-codec snapshot.
+ * + optional masking key) before its payload. The data-bearing variants ([Text],
+ * [Binary], [Continuation], [Ping], [Pong]) carry a generic `<P : Payload>` slot
+ * decoded by a consumer-supplied `Codec<P>`; [Close] carries the structured
+ * [WsCloseBody] and extends `WsFrame<Nothing>`.
  */
 @DispatchOn(FrameHeaderByte1::class)
 @ProtocolMessage(wireOrder = Endianness.Big)
-sealed interface WsFrame {
-    /** Text frame (opcode 0x1). RFC 6455 §5.6 — payload MUST be valid UTF-8 (the `String` decoder gates this). */
+sealed interface WsFrame<out P : Payload> {
+    /**
+     * Text frame (opcode 0x1). RFC 6455 §5.6 — payload bytes are UTF-8 application data.
+     * Per-frame UTF-8 validation is the consumer-codec's responsibility (a
+     * `Codec<TextPayload>` that calls `buffer.readString(remaining, Charset.UTF8)`
+     * throws on malformed input); fragmented-text reassembly across [Continuation]
+     * frames lives in the consumer's assembler, not at the codec layer.
+     */
     @PacketType(0x1)
     @ProtocolMessage(wireOrder = Endianness.Big)
-    data class Text(
+    data class Text<P : Payload>(
         val byte1: FrameHeaderByte1,
         val byte2: WsHeaderByte2,
         @When("byte2.extended16") val extendedLength16: UShort? = null,
         @When("byte2.extended64") val extendedLength64: Long? = null,
         @When("byte2.masked") val maskingKey: WsMaskingKey? = null,
-        @RemainingBytes val payload: String,
-    ) : WsFrame
+        @RemainingBytes val payload: P,
+    ) : WsFrame<P>
 
     /** Binary frame (opcode 0x2). RFC 6455 §5.6 — opaque application bytes. */
     @PacketType(0x2)
     @ProtocolMessage(wireOrder = Endianness.Big)
-    data class Binary(
+    data class Binary<P : Payload>(
         val byte1: FrameHeaderByte1,
         val byte2: WsHeaderByte2,
         @When("byte2.extended16") val extendedLength16: UShort? = null,
         @When("byte2.extended64") val extendedLength64: Long? = null,
         @When("byte2.masked") val maskingKey: WsMaskingKey? = null,
-        @RemainingBytes @UseCodec(BinaryDataCodec::class) val payload: BinaryData,
-    ) : WsFrame
+        @RemainingBytes val payload: P,
+    ) : WsFrame<P>
 
     /** Continuation frame (opcode 0x0). RFC 6455 §5.4 fragment payload. */
     @PacketType(0x0)
     @ProtocolMessage(wireOrder = Endianness.Big)
-    data class Continuation(
+    data class Continuation<P : Payload>(
         val byte1: FrameHeaderByte1,
         val byte2: WsHeaderByte2,
         @When("byte2.extended16") val extendedLength16: UShort? = null,
         @When("byte2.extended64") val extendedLength64: Long? = null,
         @When("byte2.masked") val maskingKey: WsMaskingKey? = null,
-        @RemainingBytes @UseCodec(BinaryDataCodec::class) val payload: BinaryData,
-    ) : WsFrame
+        @RemainingBytes val payload: P,
+    ) : WsFrame<P>
 
     /** Close frame (opcode 0x8). Body absent for empty payload, present when ≥2 bytes follow. */
     @PacketType(0x8)
@@ -295,29 +317,29 @@ sealed interface WsFrame {
         @When("byte2.extended64") val extendedLength64: Long? = null,
         @When("byte2.masked") val maskingKey: WsMaskingKey? = null,
         @When("remaining >= 2") val body: WsCloseBody? = null,
-    ) : WsFrame
+    ) : WsFrame<Nothing>
 
     /** Ping frame (opcode 0x9). RFC 6455 §5.5.2 — payload is application data. */
     @PacketType(0x9)
     @ProtocolMessage(wireOrder = Endianness.Big)
-    data class Ping(
+    data class Ping<P : Payload>(
         val byte1: FrameHeaderByte1,
         val byte2: WsHeaderByte2,
         @When("byte2.extended16") val extendedLength16: UShort? = null,
         @When("byte2.extended64") val extendedLength64: Long? = null,
         @When("byte2.masked") val maskingKey: WsMaskingKey? = null,
-        @RemainingBytes @UseCodec(BinaryDataCodec::class) val payload: BinaryData,
-    ) : WsFrame
+        @RemainingBytes val payload: P,
+    ) : WsFrame<P>
 
     /** Pong frame (opcode 0xA). RFC 6455 §5.5.3 — must echo the corresponding Ping's payload. */
     @PacketType(0xA)
     @ProtocolMessage(wireOrder = Endianness.Big)
-    data class Pong(
+    data class Pong<P : Payload>(
         val byte1: FrameHeaderByte1,
         val byte2: WsHeaderByte2,
         @When("byte2.extended16") val extendedLength16: UShort? = null,
         @When("byte2.extended64") val extendedLength64: Long? = null,
         @When("byte2.masked") val maskingKey: WsMaskingKey? = null,
-        @RemainingBytes @UseCodec(BinaryDataCodec::class) val payload: BinaryData,
-    ) : WsFrame
+        @RemainingBytes val payload: P,
+    ) : WsFrame<P>
 }

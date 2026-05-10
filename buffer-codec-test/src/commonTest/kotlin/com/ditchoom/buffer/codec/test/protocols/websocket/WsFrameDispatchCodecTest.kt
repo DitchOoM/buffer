@@ -5,6 +5,9 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
+import com.ditchoom.buffer.codec.test.protocols.payload.TextPayload
+import com.ditchoom.buffer.codec.test.protocols.payload.TextPayloadCodec
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -22,6 +25,12 @@ import kotlin.test.assertTrue
  * frame size via `WsFraming`, then hands `WsFrameCodec.decode` a buffer whose limit is
  * the frame end. The codec itself does not infer frame size from the variable-length
  * header; that's `WsFraming`'s handwritten job.
+ *
+ * `WsFrameCodec<P>` is a constructor-injected class — consumers pick the payload type
+ * by instantiating the codec with their `Codec<P>`. Tests below instantiate either
+ * `WsFrameCodec(TextPayloadCodec)` (for the UTF-8 text vectors, where `TextPayloadCodec`
+ * gates malformed UTF-8) or `WsFrameCodec(BinaryDataCodec)` (for opaque-bytes vectors).
+ * Wire bytes are identical across instantiations; only the payload decoder differs.
  */
 class WsFrameDispatchCodecTest {
     /**
@@ -34,18 +43,19 @@ class WsFrameDispatchCodecTest {
      */
     @Test
     fun unmaskedTextHelloRoundTripsByteExact() {
+        val codec = WsFrameCodec(TextPayloadCodec)
         val wire = byteArrayOf(0x81.toByte(), 0x05, 0x48, 0x65, 0x6c, 0x6c, 0x6f)
         val frame =
             WsFrame.Text(
                 byte1 = FrameHeaderByte1.pack(true, rsv1 = false, rsv2 = false, rsv3 = false, opcode = 0x1),
                 byte2 = WsHeaderByte2.pack(payloadSize = 5L, masked = false),
-                payload = "Hello",
+                payload = TextPayload("Hello"),
             )
 
-        roundTripFrameByteExact(frame, wire)
-        val decoded = decodeBounded(wire)
-        assertTrue(decoded is WsFrame.Text, "dispatched to Text by opcode 0x1")
-        assertEquals("Hello", decoded.payload)
+        roundTripFrameByteExact(codec, frame, wire)
+        val decoded = decodeBounded(codec, wire)
+        assertTrue(decoded is WsFrame.Text<TextPayload>, "dispatched to Text by opcode 0x1")
+        assertEquals("Hello", decoded.payload.text)
         assertTrue(decoded.byte1.fin)
         assertEquals(5, decoded.byte2.lengthIndicator)
     }
@@ -61,12 +71,17 @@ class WsFrameDispatchCodecTest {
      */
     @Test
     fun fragmentedTextHelloEachFrameRoundTrips() {
+        // Both fragments decoded with BinaryDataCodec — assembler-layer UTF-8 decoding is
+        // deliberately out of scope here (per the fixture's "does NOT cover" note in
+        // WsFrame.kt). Each fragment round-trips as opaque bytes; the websocket repo's
+        // MessageAssembler is responsible for stitching them into a String at FIN=1.
+        val codec = WsFrameCodec(BinaryDataCodec)
         val frame1Wire = byteArrayOf(0x01, 0x03, 0x48, 0x65, 0x6c)
         val frame1 =
             WsFrame.Text(
                 byte1 = FrameHeaderByte1.pack(false, rsv1 = false, rsv2 = false, rsv3 = false, opcode = 0x1),
                 byte2 = WsHeaderByte2.pack(payloadSize = 3L, masked = false),
-                payload = "Hel",
+                payload = BinaryData(byteArrayOf(0x48, 0x65, 0x6c)),
             )
         val frame2Wire = byteArrayOf(0x80.toByte(), 0x02, 0x6c, 0x6f)
         val frame2 =
@@ -76,15 +91,15 @@ class WsFrameDispatchCodecTest {
                 payload = BinaryData(byteArrayOf(0x6c, 0x6f)),
             )
 
-        roundTripFrameByteExact(frame1, frame1Wire)
-        val decoded1 = decodeBounded(frame1Wire)
-        assertTrue(decoded1 is WsFrame.Text)
+        roundTripFrameByteExact(codec, frame1, frame1Wire)
+        val decoded1 = decodeBounded(codec, frame1Wire)
+        assertTrue(decoded1 is WsFrame.Text<BinaryData>)
         assertTrue(!decoded1.byte1.fin, "first fragment must have FIN=0")
-        assertEquals("Hel", decoded1.payload)
+        assertContentEquals(byteArrayOf(0x48, 0x65, 0x6c), decoded1.payload.bytes)
 
-        roundTripFrameByteExact(frame2, frame2Wire)
-        val decoded2 = decodeBounded(frame2Wire)
-        assertTrue(decoded2 is WsFrame.Continuation, "0x0 → Continuation")
+        roundTripFrameByteExact(codec, frame2, frame2Wire)
+        val decoded2 = decodeBounded(codec, frame2Wire)
+        assertTrue(decoded2 is WsFrame.Continuation<BinaryData>, "0x0 → Continuation")
         assertTrue(decoded2.byte1.fin, "final fragment must have FIN=1")
         assertContentEquals(byteArrayOf(0x6c, 0x6f), decoded2.payload.bytes)
     }
@@ -96,6 +111,7 @@ class WsFrameDispatchCodecTest {
      */
     @Test
     fun unmaskedPingHelloDispatchesAndRoundTrips() {
+        val codec = WsFrameCodec(BinaryDataCodec)
         val wire = byteArrayOf(0x89.toByte(), 0x05, 0x48, 0x65, 0x6c, 0x6c, 0x6f)
         val frame =
             WsFrame.Ping(
@@ -103,9 +119,9 @@ class WsFrameDispatchCodecTest {
                 byte2 = WsHeaderByte2.pack(payloadSize = 5L, masked = false),
                 payload = BinaryData("Hello".encodeToByteArray()),
             )
-        roundTripFrameByteExact(frame, wire)
-        val decoded = decodeBounded(wire)
-        assertTrue(decoded is WsFrame.Ping, "0x9 → Ping")
+        roundTripFrameByteExact(codec, frame, wire)
+        val decoded = decodeBounded(codec, wire)
+        assertTrue(decoded is WsFrame.Ping<BinaryData>, "0x9 → Ping")
         assertContentEquals("Hello".encodeToByteArray(), decoded.payload.bytes)
     }
 
@@ -123,6 +139,7 @@ class WsFrameDispatchCodecTest {
      */
     @Test
     fun maskedPongHelloRoundTripsAndUnmasksToPlainHello() {
+        val codec = WsFrameCodec(BinaryDataCodec)
         val wire =
             byteArrayOf(
                 0x8a.toByte(),
@@ -144,10 +161,10 @@ class WsFrameDispatchCodecTest {
                 maskingKey = WsMaskingKey(0x37fa213du),
                 payload = BinaryData(byteArrayOf(0x7f, 0x9f.toByte(), 0x4d, 0x51, 0x58)),
             )
-        roundTripFrameByteExact(frame, wire)
+        roundTripFrameByteExact(codec, frame, wire)
 
-        val decoded = decodeBounded(wire)
-        assertTrue(decoded is WsFrame.Pong, "0xA → Pong")
+        val decoded = decodeBounded(codec, wire)
+        assertTrue(decoded is WsFrame.Pong<BinaryData>, "0xA → Pong")
         assertEquals(WsMaskingKey(0x37fa213du), decoded.maskingKey)
 
         // Apply xorMask off-codec — recovers "Hello".
@@ -167,6 +184,7 @@ class WsFrameDispatchCodecTest {
      */
     @Test
     fun extended16BinaryRoundTrips() {
+        val codec = WsFrameCodec(BinaryDataCodec)
         val payloadBytes = ByteArray(256) { it.toByte() }
         val frame =
             WsFrame.Binary(
@@ -178,7 +196,7 @@ class WsFrameDispatchCodecTest {
 
         val totalSize = 4 + 256
         val encoded = BufferFactory.Default.allocate(totalSize)
-        WsFrameCodec.encode(encoded, frame, EncodeContext.Empty)
+        codec.encode(encoded, frame, EncodeContext.Empty)
         assertEquals(totalSize, encoded.position())
         encoded.resetForRead()
         assertEquals(0x82.toByte(), encoded.readByte())
@@ -191,8 +209,8 @@ class WsFrameDispatchCodecTest {
 
         encoded.resetForRead()
         encoded.setLimit(totalSize)
-        val decoded = WsFrameCodec.decode(encoded, DecodeContext.Empty)
-        assertTrue(decoded is WsFrame.Binary)
+        val decoded = codec.decode(encoded, DecodeContext.Empty)
+        assertTrue(decoded is WsFrame.Binary<BinaryData>)
         assertEquals(256u.toUShort(), decoded.extendedLength16)
         assertContentEquals(payloadBytes, decoded.payload.bytes)
     }
@@ -208,18 +226,19 @@ class WsFrameDispatchCodecTest {
      */
     @Test
     fun reservedOpcodesFailDispatch() {
+        val codec = WsFrameCodec(BinaryDataCodec)
         val wire3 = byteArrayOf(0x83.toByte(), 0x00)
         val buf3 = BufferFactory.Default.wrap(wire3)
         buf3.setLimit(2)
         assertFails("reserved opcode 0x3 must be rejected") {
-            WsFrameCodec.decode(buf3, DecodeContext.Empty)
+            codec.decode(buf3, DecodeContext.Empty)
         }
 
         val wireB = byteArrayOf(0x8B.toByte(), 0x00)
         val bufB = BufferFactory.Default.wrap(wireB)
         bufB.setLimit(2)
         assertFails("reserved opcode 0xB must be rejected") {
-            WsFrameCodec.decode(bufB, DecodeContext.Empty)
+            codec.decode(bufB, DecodeContext.Empty)
         }
     }
 
@@ -232,6 +251,7 @@ class WsFrameDispatchCodecTest {
      */
     @Test
     fun emptyCloseHasNoBody() {
+        val codec = WsFrameCodec(BinaryDataCodec)
         val wire = byteArrayOf(0x88.toByte(), 0x00)
         val frame =
             WsFrame.Close(
@@ -239,8 +259,8 @@ class WsFrameDispatchCodecTest {
                 byte2 = WsHeaderByte2.pack(payloadSize = 0L, masked = false),
                 body = null,
             )
-        roundTripFrameByteExact(frame, wire)
-        val decoded = decodeBounded(wire)
+        roundTripFrameByteExact(codec, frame, wire)
+        val decoded = decodeBounded(codec, wire)
         assertTrue(decoded is WsFrame.Close)
         assertNull(decoded.body, "remaining < 2 → body absent")
     }
@@ -254,6 +274,7 @@ class WsFrameDispatchCodecTest {
      */
     @Test
     fun closeWithStatusAndReasonRoundTrips() {
+        val codec = WsFrameCodec(BinaryDataCodec)
         val wire = byteArrayOf(0x88.toByte(), 0x05, 0x03, 0xE8.toByte(), 0x62, 0x79, 0x65)
         val frame =
             WsFrame.Close(
@@ -261,8 +282,8 @@ class WsFrameDispatchCodecTest {
                 byte2 = WsHeaderByte2.pack(payloadSize = 5L, masked = false),
                 body = WsCloseBody(statusCode = 1000u.toUShort(), reason = "bye"),
             )
-        roundTripFrameByteExact(frame, wire)
-        val decoded = decodeBounded(wire)
+        roundTripFrameByteExact(codec, frame, wire)
+        val decoded = decodeBounded(codec, wire)
         assertTrue(decoded is WsFrame.Close)
         val body = decoded.body
         assertTrue(body != null, "remaining >= 2 → body present")
@@ -272,22 +293,24 @@ class WsFrameDispatchCodecTest {
 
     /**
      * RFC 6455 §8.1 — A receiver of a Text frame MUST Fail the WebSocket Connection
-     * if the payload contains malformed UTF-8. The codec layer enforces this via the
-     * `String` decoder: feeding 0x80 (a lone continuation byte, never legal as a
-     * start byte) into a Text frame must throw at decode.
-     *
-     * Pinning this down at the fixture level catches a regression in
-     * `Charset.UTF8` decoding — the same gate guards the close-frame `reason` in
-     * [closeReasonInvalidUtf8Rejected].
+     * if the payload contains malformed UTF-8. With `<P : Payload>` the codec layer
+     * itself is payload-shape-agnostic; UTF-8 validation lives in the consumer's
+     * `Codec<TextPayload>`. `TextPayloadCodec` calls
+     * `buffer.readString(remaining, Charset.UTF8)` which throws on malformed input —
+     * so a `WsFrameCodec(TextPayloadCodec)` decode of an invalid-UTF-8 Text payload
+     * propagates that failure. Decoding the same wire bytes through
+     * `WsFrameCodec(BinaryDataCodec)` would succeed (raw bytes are always legal);
+     * the choice of validation belongs to the consumer.
      */
     @Test
     fun invalidUtf8InTextPayloadIsRejected() {
+        val codec = WsFrameCodec(TextPayloadCodec)
         // 0x81 0x01 0x80  →  FIN | Text, len=1, payload = 0x80 (lone continuation byte)
         val wire = byteArrayOf(0x81.toByte(), 0x01, 0x80.toByte())
         val buf = BufferFactory.Default.wrap(wire)
         buf.setLimit(wire.size)
         assertFails("malformed UTF-8 in Text payload must reject") {
-            WsFrameCodec.decode(buf, DecodeContext.Empty)
+            codec.decode(buf, DecodeContext.Empty)
         }
     }
 
@@ -307,10 +330,11 @@ class WsFrameDispatchCodecTest {
      */
     @Test
     fun oneBytePayloadCloseIsUnderConsumedKnownGap() {
+        val codec = WsFrameCodec(BinaryDataCodec)
         val wire = byteArrayOf(0x88.toByte(), 0x01, 0x03)
         val buf = BufferFactory.Default.wrap(wire)
         buf.setLimit(wire.size)
-        val decoded = WsFrameCodec.decode(buf, DecodeContext.Empty)
+        val decoded = codec.decode(buf, DecodeContext.Empty)
         assertTrue(decoded is WsFrame.Close)
         assertNull(decoded.body, "remaining == 1 falls through `remaining >= 2`")
         // The 1 stray byte sits past the codec's reach. RFC mandates this be a
@@ -323,12 +347,13 @@ class WsFrameDispatchCodecTest {
 
     // ──────────────────────── helpers ────────────────────────
 
-    private fun roundTripFrameByteExact(
-        frame: WsFrame,
+    private fun <P : com.ditchoom.buffer.codec.Payload> roundTripFrameByteExact(
+        codec: WsFrameCodec<P>,
+        frame: WsFrame<P>,
         expectedWire: ByteArray,
     ) {
         val buf = BufferFactory.Default.allocate(expectedWire.size)
-        WsFrameCodec.encode(buf, frame, EncodeContext.Empty)
+        codec.encode(buf, frame, EncodeContext.Empty)
         assertEquals(expectedWire.size, buf.position(), "encoded size")
         buf.resetForRead()
         for (i in expectedWire.indices) {
@@ -336,9 +361,12 @@ class WsFrameDispatchCodecTest {
         }
     }
 
-    private fun decodeBounded(wire: ByteArray): WsFrame {
+    private fun <P : com.ditchoom.buffer.codec.Payload> decodeBounded(
+        codec: WsFrameCodec<P>,
+        wire: ByteArray,
+    ): WsFrame<P> {
         val buf = BufferFactory.Default.wrap(wire)
         buf.setLimit(wire.size)
-        return WsFrameCodec.decode(buf, DecodeContext.Empty)
+        return codec.decode(buf, DecodeContext.Empty)
     }
 }
