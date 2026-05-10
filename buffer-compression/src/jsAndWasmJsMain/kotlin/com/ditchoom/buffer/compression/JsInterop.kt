@@ -57,6 +57,7 @@ internal expect fun nodeZlibSync(
     input: JsByteArray,
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
+    windowBits: WindowBits = WindowBits.Default,
 ): JsByteArray
 
 /** Synchronous Node.js zlib compression with Z_SYNC_FLUSH. */
@@ -64,6 +65,7 @@ internal expect fun nodeZlibSyncFlush(
     input: JsByteArray,
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
+    windowBits: WindowBits = WindowBits.Default,
 ): JsByteArray
 
 /** Synchronous Node.js zlib decompression. */

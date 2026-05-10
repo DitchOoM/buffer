@@ -14,10 +14,11 @@ actual val supportsRawDeflate: Boolean by lazy { isNodeJs }
 
 actual val supportsStatefulFlush: Boolean = false
 
-// JS/Wasm Node zlib options support windowBits, but the streaming compressor here
-// does not currently forward it. Browser CompressionStream has no windowBits knob.
-// TODO: thread customWindowBits through JsNodeStreamingCompressor + Node Transform paths.
-actual val supportsCustomWindowBits: Boolean = false
+// Node sync zlib options accept windowBits and JsNodeStreamingCompressor now threads it.
+// Browser CompressionStream has no windowBits knob, so this stays false in the browser.
+// The Node Transform suspending path doesn't yet forward windowBits — its expect signature
+// (SuspendingStreamingCompressor.Companion.create) doesn't take it; future API expansion.
+actual val supportsCustomWindowBits: Boolean by lazy { isNodeJs }
 
 actual fun compress(
     buffer: ReadBuffer,

@@ -44,7 +44,7 @@ actual fun StreamingCompressor.Companion.create(
     bufferFactory: BufferFactory,
     outputBufferSize: Int,
     windowBits: WindowBits,
-): StreamingCompressor = AppleZlibStreamingCompressor(algorithm, level, bufferFactory, outputBufferSize)
+): StreamingCompressor = AppleZlibStreamingCompressor(algorithm, level, bufferFactory, outputBufferSize, windowBits)
 
 /**
  * Apple streaming decompressor factory using z_stream for true incremental decompression.
@@ -57,16 +57,6 @@ actual fun StreamingDecompressor.Companion.create(
 ): StreamingDecompressor = AppleZlibStreamingDecompressor(algorithm, bufferFactory, outputBufferSize)
 
 /**
- * Window bits for different compression formats:
- * - 15: zlib format (default)
- * - -15: raw deflate (no header/trailer)
- * - 15 + 16 = 31: gzip format
- */
-private const val WINDOW_BITS_ZLIB = 15
-private const val WINDOW_BITS_RAW = -15
-private const val WINDOW_BITS_GZIP = 31
-
-/**
  * Apple streaming compressor using zlib z_stream for true incremental compression.
  * Zero-copy: writes directly to output buffers via native pointers.
  * Supports all bufferFactory types including heap-allocated buffers.
@@ -77,6 +67,7 @@ private class AppleZlibStreamingCompressor(
     private val level: CompressionLevel,
     override val bufferFactory: BufferFactory,
     private val outputBufferSize: Int,
+    private val customWindowBits: WindowBits,
 ) : StreamingCompressor {
     private var streamPtr: CPointer<z_stream>? = null
     private var closed = false
@@ -95,12 +86,7 @@ private class AppleZlibStreamingCompressor(
         s.next_out = null
         s.avail_out = 0u
 
-        val windowBits =
-            when (algorithm) {
-                CompressionAlgorithm.Deflate -> WINDOW_BITS_ZLIB
-                CompressionAlgorithm.Raw -> WINDOW_BITS_RAW
-                CompressionAlgorithm.Gzip -> WINDOW_BITS_GZIP
-            }
+        val windowBits = resolveWindowBits(algorithm, customWindowBits)
 
         val result =
             deflateInit2(
@@ -274,12 +260,7 @@ private class AppleZlibStreamingDecompressor(
         s.next_out = null
         s.avail_out = 0u
 
-        val windowBits =
-            when (algorithm) {
-                CompressionAlgorithm.Deflate -> WINDOW_BITS_ZLIB
-                CompressionAlgorithm.Raw -> WINDOW_BITS_RAW
-                CompressionAlgorithm.Gzip -> WINDOW_BITS_GZIP
-            }
+        val windowBits = resolveWindowBits(algorithm, WindowBits.Default)
 
         val result = inflateInit2(s.ptr, windowBits)
 

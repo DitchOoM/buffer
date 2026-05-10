@@ -210,10 +210,11 @@ internal actual fun JsByteArray.toPlatformBuffer(bufferFactory: BufferFactory): 
 
 @JsFun(
     """
-(input, algorithm, level) => {
+(input, algorithm, level, windowBits) => {
     const m = 'zl' + 'ib';
     const zlib = require(m);
     const options = { level: level };
+    if (windowBits !== 0) options.windowBits = windowBits;
     switch (algorithm) {
         case 0: return zlib.deflateSync(input, options);
         case 1: return zlib.gzipSync(input, options);
@@ -227,20 +228,23 @@ private external fun jsZlibSync(
     input: JsAny,
     algorithm: Int,
     level: Int,
+    windowBits: Int,
 ): JsAny
 
 internal actual fun nodeZlibSync(
     input: JsByteArray,
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-): JsByteArray = JsByteArray(jsZlibSync(input.ref, algorithm.toOrdinal(), level.value))
+    windowBits: WindowBits,
+): JsByteArray = JsByteArray(jsZlibSync(input.ref, algorithm.toOrdinal(), level.value, windowBits.sizeLog2))
 
 @JsFun(
     """
-(input, algorithm, level) => {
+(input, algorithm, level, windowBits) => {
     const m = 'zl' + 'ib';
     const zlib = require(m);
     const options = { level: level, finishFlush: zlib.constants.Z_SYNC_FLUSH };
+    if (windowBits !== 0) options.windowBits = windowBits;
     switch (algorithm) {
         case 0: return zlib.deflateSync(input, options);
         case 1: return zlib.gzipSync(input, options);
@@ -254,13 +258,15 @@ private external fun jsZlibSyncFlush(
     input: JsAny,
     algorithm: Int,
     level: Int,
+    windowBits: Int,
 ): JsAny
 
 internal actual fun nodeZlibSyncFlush(
     input: JsByteArray,
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-): JsByteArray = JsByteArray(jsZlibSyncFlush(input.ref, algorithm.toOrdinal(), level.value))
+    windowBits: WindowBits,
+): JsByteArray = JsByteArray(jsZlibSyncFlush(input.ref, algorithm.toOrdinal(), level.value, windowBits.sizeLog2))
 
 @JsFun(
     """

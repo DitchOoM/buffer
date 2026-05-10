@@ -18,7 +18,7 @@ actual fun StreamingCompressor.Companion.create(
     windowBits: WindowBits,
 ): StreamingCompressor =
     if (isNodeJs) {
-        JsNodeStreamingCompressor(algorithm, level, bufferFactory)
+        JsNodeStreamingCompressor(algorithm, level, bufferFactory, windowBits)
     } else {
         throw UnsupportedOperationException(
             "Synchronous streaming compression not supported in browser. " +
@@ -70,6 +70,7 @@ private class JsNodeStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
     private val level: CompressionLevel,
     override val bufferFactory: BufferFactory,
+    private val customWindowBits: WindowBits,
 ) : StreamingCompressor {
     private val accumulatedChunks = mutableListOf<JsByteArray>()
     private var totalBytes = 0
@@ -90,12 +91,12 @@ private class JsNodeStreamingCompressor(
     override fun flush(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Compressor is closed" }
         if (totalBytes == 0) {
-            val result = nodeZlibSyncFlush(emptyJsByteArray(), algorithm, level)
+            val result = nodeZlibSyncFlush(emptyJsByteArray(), algorithm, level, customWindowBits)
             onOutput(result.toPlatformBuffer(bufferFactory))
             return
         }
         val combined = combineJsByteArrays(accumulatedChunks, totalBytes)
-        val result = nodeZlibSyncFlush(combined, algorithm, level)
+        val result = nodeZlibSyncFlush(combined, algorithm, level, customWindowBits)
         onOutput(result.toPlatformBuffer(bufferFactory))
         accumulatedChunks.clear()
         totalBytes = 0
@@ -106,7 +107,7 @@ private class JsNodeStreamingCompressor(
         val input = if (totalBytes == 0) emptyJsByteArray() else combineJsByteArrays(accumulatedChunks, totalBytes)
         // Call nodeZlibSync directly — avoids allocating an intermediate pool buffer
         // that compress() would create via toPlatformBuffer then immediately consume.
-        val compressed = nodeZlibSync(input, algorithm, level)
+        val compressed = nodeZlibSync(input, algorithm, level, customWindowBits)
         onOutput(compressed.toPlatformBuffer(bufferFactory))
     }
 

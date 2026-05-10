@@ -69,13 +69,6 @@ private inline fun copyMemory(
 private inline fun getCompressBound(size: Int): Int = compressBound(size.convert()).convert()
 
 /**
- * Window bits for different compression formats.
- */
-private const val WINDOW_BITS_ZLIB = 15
-private const val WINDOW_BITS_RAW = -15
-private const val WINDOW_BITS_GZIP = 31
-
-/**
  * Linux implementation using system zlib with direct buffer access.
  */
 @OptIn(ExperimentalForeignApi::class)
@@ -137,12 +130,7 @@ private fun compressWithZStream(
         s.zfree = null
         s.opaque = null
 
-        val windowBits =
-            when (algorithm) {
-                CompressionAlgorithm.Deflate -> WINDOW_BITS_ZLIB
-                CompressionAlgorithm.Raw -> WINDOW_BITS_RAW
-                CompressionAlgorithm.Gzip -> WINDOW_BITS_GZIP
-            }
+        val windowBits = resolveWindowBits(algorithm, WindowBits.Default)
 
         var result =
             deflateInit2(
@@ -203,12 +191,7 @@ private fun decompressWithZStream(
         s.zfree = null
         s.opaque = null
 
-        val windowBits =
-            when (algorithm) {
-                CompressionAlgorithm.Deflate -> WINDOW_BITS_ZLIB
-                CompressionAlgorithm.Raw -> WINDOW_BITS_RAW
-                CompressionAlgorithm.Gzip -> WINDOW_BITS_GZIP
-            }
+        val windowBits = resolveWindowBits(algorithm, WindowBits.Default)
 
         var result = inflateInit2(s.ptr, windowBits)
 

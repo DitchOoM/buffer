@@ -105,10 +105,17 @@ internal actual fun nodeZlibSync(
     input: JsByteArray,
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
+    windowBits: WindowBits,
 ): JsByteArray {
     val zlib = getNodeZlib()
     val options = js("{}")
     options["level"] = level.value
+    if (windowBits != WindowBits.Default) {
+        // Node's zlib options take windowBits as the log2 size (9..15). The function
+        // name (gzipSync / deflateSync / deflateRawSync) selects the format; Node
+        // applies the raw negation / gzip +16 internally.
+        options["windowBits"] = windowBits.sizeLog2
+    }
     val inputArray = input.array
     val result: Uint8Array =
         when (algorithm) {
@@ -123,11 +130,15 @@ internal actual fun nodeZlibSyncFlush(
     input: JsByteArray,
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
+    windowBits: WindowBits,
 ): JsByteArray {
     val zlib = getNodeZlib()
     val options = js("{}")
     options["level"] = level.value
     options["finishFlush"] = zlib.constants.Z_SYNC_FLUSH
+    if (windowBits != WindowBits.Default) {
+        options["windowBits"] = windowBits.sizeLog2
+    }
     val inputArray = input.array
     val result: Uint8Array =
         when (algorithm) {
