@@ -193,9 +193,12 @@ class RemainingBytesElementTypeValidatorTest {
 
     @Test
     fun acceptsRemainingBytesUseCodecPayload() {
-        // The spec-faithful replacement for `List<UByte>` when
-        // the body is genuinely opaque bytes. This must continue to
-        // compile cleanly.
+        // `@RemainingBytes @UseCodec` composition against a self-contained
+        // typed Payload — the trailing field decodes via the consumer's
+        // supplied codec. Updated for buffer-codec lockdown v1: the
+        // Payload's declared shape must NOT carry raw bytes (no ByteArray
+        // inside), so this example uses a `String` Payload — the canonical
+        // typed-value shape.
         val result =
             compile(
                 """
@@ -214,17 +217,16 @@ class RemainingBytesElementTypeValidatorTest {
                 import com.ditchoom.buffer.codec.annotations.UseCodec
                 import com.ditchoom.buffer.stream.StreamProcessor
 
-                @JvmInline
-                value class OpaqueBytes(val bytes: ByteArray) : Payload
+                data class TextBody(val text: String) : Payload
 
-                object OpaqueBytesCodec : Codec<OpaqueBytes> {
-                    override fun decode(buffer: ReadBuffer, context: DecodeContext): OpaqueBytes =
-                        OpaqueBytes(buffer.readByteArray(buffer.remaining()))
-                    override fun encode(buffer: WriteBuffer, value: OpaqueBytes, context: EncodeContext) {
-                        buffer.writeBytes(value.bytes)
+                object TextBodyCodec : Codec<TextBody> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): TextBody =
+                        TextBody(buffer.readString(buffer.remaining()))
+                    override fun encode(buffer: WriteBuffer, value: TextBody, context: EncodeContext) {
+                        buffer.writeString(value.text)
                     }
-                    override fun wireSize(value: OpaqueBytes, context: EncodeContext): WireSize =
-                        WireSize.Exact(value.bytes.size)
+                    override fun wireSize(value: TextBody, context: EncodeContext): WireSize =
+                        WireSize.Exact(value.text.length)
                     override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult =
                         PeekResult.NoFraming
                 }
@@ -232,7 +234,7 @@ class RemainingBytesElementTypeValidatorTest {
                 @ProtocolMessage
                 data class M(
                     val tag: UByte,
-                    @RemainingBytes @UseCodec(OpaqueBytesCodec::class) val data: OpaqueBytes,
+                    @RemainingBytes @UseCodec(TextBodyCodec::class) val body: TextBody,
                 )
                 """.trimIndent(),
             )

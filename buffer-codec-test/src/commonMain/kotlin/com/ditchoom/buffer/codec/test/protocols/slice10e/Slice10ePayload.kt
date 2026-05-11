@@ -12,6 +12,14 @@ import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import com.ditchoom.buffer.codec.annotations.UseCodec
+import com.ditchoom.buffer.codec.test.protocols.payload.OpaqueBytesHandle
+import com.ditchoom.buffer.codec.test.protocols.payload.asReadBuffer
+import com.ditchoom.buffer.codec.test.protocols.payload.bufferFactoryOrDefault
+import com.ditchoom.buffer.codec.test.protocols.payload.byteSize
+import com.ditchoom.buffer.codec.test.protocols.payload.handleEquals
+import com.ditchoom.buffer.codec.test.protocols.payload.handleHashCode
+import com.ditchoom.buffer.codec.test.protocols.payload.opaqueBytesFrom
+import com.ditchoom.buffer.codec.test.protocols.payload.opaqueBytesOf
 
 /**
  * Doctrine vector — `@UseCodec` against an
@@ -69,21 +77,35 @@ data class RemoteCommand(
 
 /**
  * Payload — a 4-byte opcode followed by an arbitrary
- * binary blob. Implements `Payload` so the §8 raw-bytes ban carves
- * it out (the marker is the documented escape hatch for "the
- * consumer takes responsibility for the bytes it holds").
+ * binary blob. Reshaped under buffer-codec lockdown v1 (Change 1): the
+ * trailing bytes live in an [OpaqueBytesHandle] (Pattern #2 — consumer-owned
+ * [com.ditchoom.buffer.PlatformBuffer]). The walker stops at the handle;
+ * no raw `ByteArray` appears anywhere in the Payload's declared shape.
  */
 data class RemoteCommandPayload(
     val opcode: UInt,
-    val data: ByteArray,
+    val data: OpaqueBytesHandle,
 ) : Payload {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is RemoteCommandPayload) return false
-        return opcode == other.opcode && data.contentEquals(other.data)
+        return opcode == other.opcode && data.handleEquals(other.data)
     }
 
-    override fun hashCode(): Int = opcode.hashCode() * 31 + data.contentHashCode()
+    override fun hashCode(): Int = opcode.hashCode() * 31 + data.handleHashCode()
+
+    companion object {
+        /**
+         * Test convenience: construct from a `ByteArray` literal. Wraps via
+         * [opaqueBytesOf] so the existing test syntax `RemoteCommandPayload(
+         * opcode = ..., data = byteArrayOf(...))` keeps working without
+         * passing through an explicit `opaqueBytesFrom(...)` call.
+         */
+        operator fun invoke(
+            opcode: UInt,
+            data: ByteArray,
+        ): RemoteCommandPayload = RemoteCommandPayload(opcode, opaqueBytesOf(data))
+    }
 }
 
 /**
@@ -92,10 +114,10 @@ data class RemoteCommandPayload(
  * a single source of truth — only the linker-resolution path
  * differs across platforms.
  *
- * `internal` is the right visibility: the impl is an implementation
- * detail of the actuals, not a consumer-facing API. The actuals are
- * what consumers reference (and what `@UseCodec` annotations point
- * to via the expect declaration).
+ * Decode allocates a consumer-owned [com.ditchoom.buffer.PlatformBuffer]
+ * via the [BufferFactoryKey] factory (defaults to [testFixtureFactory]) and
+ * copies trailing bytes into it — the canonical Pattern #2 from the
+ * lockdown plan, no intermediate `ByteArray`.
  */
 internal object RemoteCommandPayloadCodecImpl : Codec<RemoteCommandPayload> {
     override fun decode(
@@ -103,8 +125,11 @@ internal object RemoteCommandPayloadCodecImpl : Codec<RemoteCommandPayload> {
         context: DecodeContext,
     ): RemoteCommandPayload {
         val opcode = buffer.readUInt()
-        val data = buffer.readByteArray(buffer.remaining())
-        return RemoteCommandPayload(opcode, data)
+        val factory = context.bufferFactoryOrDefault()
+        val dst = factory.allocate(buffer.remaining())
+        dst.write(buffer)
+        dst.resetForRead()
+        return RemoteCommandPayload(opcode, opaqueBytesFrom(dst))
     }
 
     override fun encode(
@@ -113,13 +138,13 @@ internal object RemoteCommandPayloadCodecImpl : Codec<RemoteCommandPayload> {
         context: EncodeContext,
     ) {
         buffer.writeUInt(value.opcode)
-        buffer.writeBytes(value.data)
+        buffer.write(value.data.asReadBuffer())
     }
 
     override fun wireSize(
         value: RemoteCommandPayload,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(4 + value.data.size)
+    ): WireSize = WireSize.Exact(4 + value.data.byteSize())
 }
 
 /**

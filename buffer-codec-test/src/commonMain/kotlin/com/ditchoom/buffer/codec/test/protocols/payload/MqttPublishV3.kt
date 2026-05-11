@@ -156,60 +156,71 @@ value class PacketId(
 }
 
 /**
- * User-supplied `Payload` for the vector.
+ * User-supplied `Payload` for the vector. Reshaped under buffer-codec
+ * lockdown v1 (Change 1) to demonstrate the canonical "decode straight
+ * into a platform-native handle" pattern.
  *
- * Stand-in for an arbitrary user-defined typed payload. The `width`
- * and `height` fields are decoded by `JpegImageCodec`; `data` is the
- * raw image bytes that fill the rest of the bounded region.
+ * The wire shape (width UShort + height UShort + pixel bytes) is unchanged,
+ * but the storage is now an opaque [PlatformBitmap] handle. The KSP walker
+ * sees the property `nativeBitmap: PlatformBitmap`, finds it is not a
+ * forbidden type / Payload / value class — and stops. Whatever the platform
+ * actual stores internally (a `BufferedImage`, `android.graphics.Bitmap`,
+ * `UIImage`, `web.images.ImageBitmap`) is invisible to the rule.
  *
- * Implements `com.ditchoom.buffer.codec.Payload` so the §8 raw-bytes
- * walk in `ProtocolMessageProcessor` carves out fields of this type
- * (the marker is the documented escape hatch for "the consumer takes
- * responsibility for the bytes it holds"). User code is free to use
- * `ByteArray` internally — the §8 ban applies only to
- * `@ProtocolMessage` data class fields.
+ * The companion `invoke` shim and computed `width` / `height` / `data`
+ * properties preserve the call shape `JpegImage(widthUShort, heightUShort,
+ * byteArrayOf(...))` and accessors `decoded.width` / `decoded.data` used
+ * across the existing test suite.
  */
-data class JpegImage(
-    val width: UShort,
-    val height: UShort,
-    val data: ByteArray,
+class JpegImage internal constructor(
+    val nativeBitmap: PlatformBitmap,
 ) : Payload {
+    val width: UShort get() = nativeBitmap.bitmapWidth().toUShort()
+    val height: UShort get() = nativeBitmap.bitmapHeight().toUShort()
+    val data: ByteArray
+        get() {
+            val pixels = nativeBitmap.bitmapPixels()
+            return pixels.copyToByteArray(pixels.remaining())
+        }
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is JpegImage) return false
-        return width == other.width && height == other.height && data.contentEquals(other.data)
+        return nativeBitmap.bitmapEquals(other.nativeBitmap)
     }
 
-    override fun hashCode(): Int = (width.hashCode() * 31 + height.hashCode()) * 31 + data.contentHashCode()
+    override fun hashCode(): Int = nativeBitmap.bitmapHashCode()
+
+    companion object {
+        operator fun invoke(
+            width: UShort,
+            height: UShort,
+            data: ByteArray,
+        ): JpegImage = JpegImage(platformBitmapOf(width.toInt(), height.toInt(), data))
+    }
 }
 
 /**
  * Hand-written `Codec<JpegImage>` referenced by
- * `@UseCodec(JpegImageCodec::class)` on the vector. The
- * generated `MqttPublishV3Codec` calls
- * `JpegImageCodec.encode(buffer, value.payload, context)` /
- * `JpegImageCodec.decode(buffer, context)` directly — the linker
- * resolution path that formalizes for `expect`/`actual`
- * is a no-op for 's single-platform `object`.
- *
- * Decode reads `width` (UShort BE), `height` (UShort BE), then
- * fills `data` from the remaining bytes in the buffer's bounded
- * region. The bound is set by the caller (`MqttPublishV3Codec`
- * does not set it — 's outer dispatcher will own the
- * `@RemainingLength` var-int that drives the bound).
- *
- * Encode writes the four header bytes then the data bytes; total
- * wire size is `4 + data.size`.
+ * `@UseCodec(JpegImageCodec::class)`. Decode reads width / height as UShort
+ * BE then materializes pixel bytes into a consumer-owned [PlatformBuffer]
+ * via the factory injected through [BufferFactoryKey] (defaults to
+ * [testFixtureFactory]) — the canonical Pattern #2 buffer-to-buffer copy,
+ * no intermediate `ByteArray`. Encode walks back via the platform handle's
+ * pixel buffer accessor.
  */
 object JpegImageCodec : Codec<JpegImage> {
     override fun decode(
         buffer: ReadBuffer,
         context: DecodeContext,
     ): JpegImage {
-        val width = buffer.readUnsignedShort()
-        val height = buffer.readUnsignedShort()
-        val data = buffer.readByteArray(buffer.remaining())
-        return JpegImage(width, height, data)
+        val width = buffer.readUnsignedShort().toInt()
+        val height = buffer.readUnsignedShort().toInt()
+        val factory = context.bufferFactoryOrDefault()
+        val pixels = factory.allocate(buffer.remaining())
+        pixels.write(buffer)
+        pixels.resetForRead()
+        return JpegImage(bitmapFrom(width, height, pixels))
     }
 
     override fun encode(
@@ -219,11 +230,11 @@ object JpegImageCodec : Codec<JpegImage> {
     ) {
         buffer.writeUShort(value.width)
         buffer.writeUShort(value.height)
-        buffer.writeBytes(value.data)
+        buffer.write(value.nativeBitmap.bitmapPixels())
     }
 
     override fun wireSize(
         value: JpegImage,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(4 + value.data.size)
+    ): WireSize = WireSize.Exact(4 + value.nativeBitmap.bitmapPixelSize())
 }

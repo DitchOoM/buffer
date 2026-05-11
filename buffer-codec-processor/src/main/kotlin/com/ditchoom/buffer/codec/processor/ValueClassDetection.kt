@@ -33,7 +33,10 @@ internal fun KSClassDeclaration.isValueClassDecl(): Boolean {
     // class targeting JVM bytecode).
     return annotations.any { ann ->
         ann.shortName.asString() == "JvmInline" &&
-            ann.annotationType.resolve().declaration.qualifiedName?.asString() == "kotlin.jvm.JvmInline"
+            ann.annotationType
+                .resolve()
+                .declaration.qualifiedName
+                ?.asString() == "kotlin.jvm.JvmInline"
     }
 }
 

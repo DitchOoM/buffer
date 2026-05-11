@@ -1914,12 +1914,7 @@ class ProtocolMessageProcessor(
     ) {
         if (depth > MAX_DEPTH) return
         if (type.isError) return
-        // Nullable Payload types arrive here when
-        // the field carries `@When` (e.g., `@When val: BinaryData?`).
-        // Short-circuit on the non-nullable form so the §8 walk doesn't
-        // descend into the value class's `ByteArray` inner.
         val nonNullableType = if (type.isMarkedNullable) type.makeNotNullable() else type
-        if (payloadType.isAssignableFrom(nonNullableType)) return
 
         val qualified = type.declaration.qualifiedName?.asString()
         if (qualified != null && qualified in FORBIDDEN_TYPES) {
@@ -1927,12 +1922,16 @@ class ProtocolMessageProcessor(
             val fieldName = param.name?.asString() ?: "<unknown>"
             logger.error(
                 "@ProtocolMessage field $ownerName.$fieldName has raw-bytes type $qualified. " +
-                    "ReadBuffer / WriteBuffer / PlatformBuffer / ByteArray / ByteBuffer are " +
-                    "forbidden in @ProtocolMessage data classes — raw buffer/bytes types leak " +
-                    "ownership ambiguity (who frees, when, aliased?). Wrap the bytes in a typed " +
-                    "value class implementing `com.ditchoom.buffer.codec.Payload` and reference " +
-                    "its `Codec<T>` via `@UseCodec` so copy-vs-zero-copy is an explicit " +
-                    "codec-author choice at one well-defined boundary.",
+                    "ReadBuffer / WriteBuffer / PlatformBuffer / ByteArray / primitive arrays / " +
+                    "ByteBuffer are forbidden in @ProtocolMessage data classes — raw buffer/bytes " +
+                    "types leak ownership ambiguity (who frees, when, aliased?). Decode into a " +
+                    "self-contained typed value: a `Payload` marker over a domain object, " +
+                    "`String`, scalars, or a platform-native handle (e.g. `Bitmap` via " +
+                    "`buffer.toNativeData()` → platform decoder), wired via `@UseCodec`. For raw " +
+                    "bytes (IPC forwarding, persistence), step outside `Payload`: a non-`Payload` " +
+                    "result type decoded by a hand-written `Codec<YourType>` (see " +
+                    "`ReadBuffer.copyToByteArray` for heap bytes; " +
+                    "`factory.allocate().write(source)` for consumer-owned `PlatformBuffer`).",
                 param,
             )
             return
@@ -1943,15 +1942,29 @@ class ProtocolMessageProcessor(
         if (!visited.add(fingerprint)) return
 
         val decl = type.declaration as? KSClassDeclaration
-        if (decl != null && decl.isValueClassDecl()) {
-            val inner =
-                decl.primaryConstructor
-                    ?.parameters
-                    ?.firstOrNull()
-                    ?.type
-                    ?.resolve()
-            if (inner != null) {
-                walkType(inner, owner, param, payloadType, depth + 1, visited)
+        if (decl != null) {
+            // When the type implements `Payload` (but isn't the bare interface itself),
+            // enforce the strict transitive rule: no raw-bytes types anywhere in its
+            // declared shape, including through value-class wrappers and sealed trees.
+            // This closes the buffer-codec lockdown v1 bug class — a `BufferPayload(val
+            // buffer: ReadBuffer) : Payload` slips past the outer FORBIDDEN_TYPES check
+            // today because the walk used to short-circuit at Payload.
+            val isPayload = qualified != PAYLOAD_QNAME && payloadType.isAssignableFrom(nonNullableType)
+            if (isPayload) {
+                validatePayloadShape(decl, payloadType, mutableSetOf())
+                // validatePayloadShape handles the value-class descent for Payload
+                // types itself; skip walkType's own value-class step to avoid
+                // double-firing for `value class X(val raw: ReadBuffer) : Payload`.
+            } else if (decl.isValueClassDecl()) {
+                val inner =
+                    decl.primaryConstructor
+                        ?.parameters
+                        ?.firstOrNull()
+                        ?.type
+                        ?.resolve()
+                if (inner != null) {
+                    walkType(inner, owner, param, payloadType, depth + 1, visited)
+                }
             }
         }
 
@@ -1959,6 +1972,140 @@ class ProtocolMessageProcessor(
             val argType = arg.type?.resolve() ?: continue
             walkType(argType, owner, param, payloadType, depth + 1, visited)
         }
+    }
+
+    /**
+     * Walks every declared property of a `Payload`-implementing class
+     * (recursively through value-class wrappers, sealed trees, and nested
+     * Payload references) and emits a Payload-flavored diagnostic for any
+     * raw-bytes type found. Called by [walkType] when it encounters a
+     * concrete `Payload` type as a field or type argument.
+     *
+     * Bug class closed: `data class BytesPayload(val a: Int, val b: ByteArray)
+     * : Payload` would compile today — `Payload` is a marker for self-contained
+     * typed values, and the type system can't verify that raw bytes inside a
+     * Payload are safe to retain past the codec's scope.
+     */
+    private fun validatePayloadShape(
+        payloadClass: KSClassDeclaration,
+        payloadType: KSType,
+        payloadVisited: MutableSet<String>,
+    ) {
+        val qname = payloadClass.qualifiedName?.asString() ?: return
+        if (!payloadVisited.add(qname)) return
+
+        if (Modifier.SEALED in payloadClass.modifiers) {
+            for (sub in payloadClass.getSealedSubclasses()) {
+                validatePayloadShape(sub, payloadType, payloadVisited)
+            }
+            return
+        }
+        val ctor = payloadClass.primaryConstructor ?: return
+        for (property in ctor.parameters) {
+            validatePayloadProperty(
+                payloadClass = payloadClass,
+                property = property,
+                type = property.type.resolve(),
+                payloadType = payloadType,
+                payloadVisited = payloadVisited,
+                depth = 0,
+            )
+        }
+    }
+
+    /**
+     * Inner recursion for [validatePayloadShape]. Checks a property's resolved
+     * [type] against [FORBIDDEN_TYPES]; descends through value-class wrappers,
+     * generic type arguments, and nested Payload references.
+     *
+     * The Payload-framed error always blames `payloadClass.property` — the
+     * declared site of the raw-bytes leak — even when discovered via a chain
+     * of wrappers. The owner @ProtocolMessage field is unrelated to the rule;
+     * the violation lives inside the Payload type itself.
+     */
+    private fun validatePayloadProperty(
+        payloadClass: KSClassDeclaration,
+        property: KSValueParameter,
+        type: KSType,
+        payloadType: KSType,
+        payloadVisited: MutableSet<String>,
+        depth: Int,
+    ) {
+        if (depth > MAX_DEPTH) return
+        if (type.isError) return
+        val nonNullable = if (type.isMarkedNullable) type.makeNotNullable() else type
+        val qname = type.declaration.qualifiedName?.asString()
+
+        if (qname != null && qname in FORBIDDEN_TYPES) {
+            emitPayloadViolation(payloadClass, property, qname)
+            return
+        }
+
+        val decl = type.declaration as? KSClassDeclaration
+        if (decl != null) {
+            // Value-class wrappers: peel and recurse on the inner.
+            if (decl.isValueClassDecl()) {
+                val inner =
+                    decl.primaryConstructor
+                        ?.parameters
+                        ?.firstOrNull()
+                        ?.type
+                        ?.resolve()
+                if (inner != null) {
+                    validatePayloadProperty(
+                        payloadClass,
+                        property,
+                        inner,
+                        payloadType,
+                        payloadVisited,
+                        depth + 1,
+                    )
+                }
+            }
+            // Nested Payload reference: validate that Payload's shape too, via
+            // validatePayloadShape (which dedupes via payloadVisited).
+            if (qname != PAYLOAD_QNAME && payloadType.isAssignableFrom(nonNullable)) {
+                validatePayloadShape(decl, payloadType, payloadVisited)
+            }
+        }
+
+        // Generic type arguments (e.g. List<Foo>, Map<K, V>).
+        for (arg in type.arguments) {
+            val argType = arg.type?.resolve() ?: continue
+            validatePayloadProperty(
+                payloadClass,
+                property,
+                argType,
+                payloadType,
+                payloadVisited,
+                depth + 1,
+            )
+        }
+    }
+
+    private fun emitPayloadViolation(
+        payloadClass: KSClassDeclaration,
+        property: KSValueParameter,
+        forbiddenQname: String,
+    ) {
+        val pName = payloadClass.qualifiedName?.asString() ?: payloadClass.simpleName.asString()
+        val fName = property.name?.asString() ?: "<unknown>"
+        logger.error(
+            "Payload types must not embed raw buffer or array types ($pName.$fName: $forbiddenQname).\n\n" +
+                "Payload is a marker for self-contained typed values. Raw bytes (ReadBuffer, " +
+                "ByteArray, ByteBuffer, primitive arrays) carry implicit ownership/lifetime " +
+                "obligations the type system can't verify — a captured buffer outlives the " +
+                "codec's scope and reads reclaimed pool memory; a JS-aliased ByteArray inside a " +
+                "Payload escapes the same way through a different door.\n\n" +
+                "Decode into a self-contained typed value: a value class, String, domain object, " +
+                "or platform-native handle (e.g. Bitmap via buffer.toNativeData() → platform " +
+                "decoder).\n\n" +
+                "For raw bytes (IPC forwarding, persistence), step outside the Payload " +
+                "abstraction: define a non-Payload result type and decode through a hand-written " +
+                "Codec<YourType>. See ReadBuffer.copyToByteArray for heap bytes; " +
+                "factory.allocate().write(source) for consumer-owned PlatformBuffer.",
+            property,
+        )
     }
 
     private fun KSType.toFingerprint(): String {
@@ -2076,8 +2223,20 @@ class ProtocolMessageProcessor(
                 "com.ditchoom.buffer.ReadBuffer",
                 "com.ditchoom.buffer.WriteBuffer",
                 "com.ditchoom.buffer.PlatformBuffer",
-                "kotlin.ByteArray",
                 "java.nio.ByteBuffer",
+                // Raw arrays — banned alongside ReadBuffer at the @ProtocolMessage
+                // boundary and (transitively) inside Payload-implementing types
+                // (see buffer-codec lockdown v1).
+                "kotlin.ByteArray",
+                "kotlin.ShortArray",
+                "kotlin.IntArray",
+                "kotlin.LongArray",
+                "kotlin.FloatArray",
+                "kotlin.DoubleArray",
+                "kotlin.UByteArray",
+                "kotlin.UShortArray",
+                "kotlin.UIntArray",
+                "kotlin.ULongArray",
             )
 
         private val NATURAL_WIDTHS =

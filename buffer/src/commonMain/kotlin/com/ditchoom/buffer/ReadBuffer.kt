@@ -80,20 +80,24 @@ interface ReadBuffer : PositionBuffer {
     operator fun get(index: Int): Byte
 
     /**
-     * Creates a new read-only view of this buffer's remaining content.
+     * **Zero-copy view** of this buffer's remaining content. The slice shares
+     * the underlying storage; mutations to either are visible in both.
      *
-     * The slice shares the underlying memory but has independent position/limit:
      * - Slice position: 0
      * - Slice limit: this.remaining()
-     * - Changes to data are visible in both buffers
+     * - **Does not change this buffer's position.**
      *
-     * **Does not change this buffer's position.**
+     * **Lifetime contract**: the slice MUST NOT outlive this buffer's scope.
+     * If the underlying buffer is pooled and the slice is held past pool
+     * release, the slice reads reclaimed memory. For internal-codec staging
+     * (read a sub-region, decode within it, discard) this is the right
+     * primitive. For consumer-bound bytes that need to survive past decode,
+     * see [copyToByteArray] (fresh heap `ByteArray`) or
+     * `factory.allocate(n).write(source)` (consumer-owned `PlatformBuffer`).
      *
      * The slice's [byteOrder] defaults to this buffer's [byteOrder]; pass an
-     * explicit value to override (useful when handing a sub-region to a codec
-     * whose wire byte order differs from the parent's). All built-in backends
-     * implement byte-order propagation consistently — see
-     * `BufferSliceByteOrderTests` in commonTest.
+     * explicit value to override (useful when handing a sub-region to a
+     * codec whose wire byte order differs from the parent's).
      *
      * ```kotlin
      * buffer.position(10)
@@ -104,15 +108,20 @@ interface ReadBuffer : PositionBuffer {
      * ```
      *
      * @param byteOrder Byte order for the returned slice. Defaults to this buffer's order.
-     * @return A new ReadBuffer viewing the remaining bytes
+     * @return A zero-copy ReadBuffer view of the remaining bytes
      */
     fun slice(byteOrder: ByteOrder = this.byteOrder): ReadBuffer
 
     /**
-     * Reads [size] bytes as a new buffer and advances position.
+     * Reads [size] bytes as a **zero-copy view** and advances position. The
+     * returned buffer shares storage with this buffer; the aliasing contract
+     * of [slice] applies — must not outlive this buffer's scope.
+     *
+     * For consumer-bound bytes that need to outlive the decode scope, use
+     * [copyToByteArray] or `factory.allocate(size).write(this)`.
      *
      * @param size Number of bytes to read
-     * @return A new ReadBuffer containing the bytes, or [EMPTY_BUFFER] if size < 1
+     * @return A zero-copy ReadBuffer view of the bytes, or [EMPTY_BUFFER] if size < 1
      */
     fun readBytes(size: Int): ReadBuffer {
         if (size < 1) {

@@ -60,7 +60,23 @@ interface Encoder<in T> {
     ): WireSize = WireSize.BackPatch
 }
 
-/** Reads [T] synchronously from a pre-bounded [ReadBuffer]. */
+/**
+ * Reads [T] synchronously from a pre-bounded [ReadBuffer].
+ *
+ * Codecs must not retain the buffer/slice past return. The framework releases
+ * the slice on normal exit or exception via lexical `slice().use { }` /
+ * `withBuffer { }` semantics. To produce a value that outlives the decode
+ * scope, the codec copies bytes out at the boundary:
+ *
+ * - [ReadBuffer.copyToByteArray] — fresh heap `ByteArray`, safe to retain.
+ * - `factory.allocate(remaining).also { it.write(buffer); it.resetForRead() }`
+ *   — consumer-owned `PlatformBuffer`.
+ * - `buffer.toNativeData()` → platform decoder → typed value (e.g. `Bitmap`
+ *   wrapping `PlatformBitmap`) — zero-copy into a typed handle.
+ *
+ * See `buffer-codec/CLAUDE.md` "Canonical decode patterns" for worked
+ * examples of each.
+ */
 interface Decoder<out T> {
     fun decode(
         buffer: ReadBuffer,
@@ -73,7 +89,8 @@ interface Decoder<out T> {
  *
  * Codecs must not retain the buffer/slice past return. The framework releases
  * the slice on normal exit, exception, or cancellation via lexical
- * `slice().use { }` / `withBuffer { }` semantics.
+ * `slice().use { }` / `withBuffer { }` semantics. The same consumer-boundary
+ * copy primitives apply as on [Decoder.decode] — see that interface's kdoc.
  */
 interface SuspendingDecoder<out T> {
     suspend fun decode(
@@ -106,12 +123,34 @@ interface Codec<T> :
     FrameDetector
 
 /**
- * Empty marker interface for `@Payload` slot types.
+ * Marker interface for self-contained typed payload slot types.
  *
  * Generic-bounded payload slots (`<P : Payload>`) accept any type that
- * implements this interface plus `Nothing` (covariance). `ByteArray`,
- * `ReadBuffer`, `String`, etc. cannot be used as a payload type — consumers
- * wrap and copy explicitly inside their decoder lambda.
+ * implements this interface plus `Nothing` (covariance).
+ *
+ * **Strict transitive shape rule** (buffer-codec lockdown v1, Change 1): the
+ * KSP processor walks the declared shape of every concrete `Payload`-
+ * implementing type referenced from an `@ProtocolMessage` data class and
+ * rejects raw-bytes types anywhere in that shape — `ReadBuffer`,
+ * `WriteBuffer`, `PlatformBuffer`, `ByteArray`, primitive arrays,
+ * `java.nio.ByteBuffer`. The walk descends through value-class wrappers and
+ * sealed `Payload` trees.
+ *
+ * Why: a `Payload` outlives the codec's decode scope, but a raw-bytes
+ * member can reference reclaimed pool memory (the JS-aliased `ByteArray`
+ * case) or carry implicit ownership obligations the type system can't
+ * verify. Self-contained typed values close the bug class at compile time.
+ *
+ * Decode into a self-contained typed value:
+ * - a value class around a scalar / `String` / domain object
+ * - a platform-native handle (e.g. `Bitmap` over `PlatformBitmap` via
+ *   `buffer.toNativeData()` → platform decoder)
+ *
+ * For consumers who genuinely need raw bytes (IPC forwarding, persistence,
+ * debug capture), step outside the `Payload` abstraction: a non-`Payload`
+ * result type decoded by a hand-written `Codec<YourType>`. Inside that
+ * codec, use `ReadBuffer.copyToByteArray` for heap bytes, or
+ * `factory.allocate().write(source)` for a consumer-owned `PlatformBuffer`.
  */
 interface Payload
 

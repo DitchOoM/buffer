@@ -190,6 +190,9 @@ class UseCodecScalarValidatorTest {
         // `@LengthPrefixed @UseCodec(C::class) val: T`
         // where `T : Payload` and `C` is `Codec<T>` (not a
         // BoundingLengthCodec — the prefix is owned by the framework).
+        // Updated for buffer-codec lockdown v1: the Payload's declared
+        // shape must NOT carry raw bytes; this example uses a self-contained
+        // value-class Payload over scalars.
         val result =
             compile(
                 """
@@ -207,21 +210,21 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.annotations.UseCodec
 
                 @JvmInline
-                value class Blob(val bytes: ByteArray) : Payload
+                value class Timestamp(val epochMillis: Long) : Payload
 
-                object BlobCodec : Codec<Blob> {
-                    override fun decode(buffer: ReadBuffer, context: DecodeContext): Blob =
-                        Blob(buffer.readByteArray(buffer.remaining()))
-                    override fun encode(buffer: WriteBuffer, value: Blob, context: EncodeContext) {
-                        buffer.writeBytes(value.bytes)
+                object TimestampCodec : Codec<Timestamp> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): Timestamp =
+                        Timestamp(buffer.readLong())
+                    override fun encode(buffer: WriteBuffer, value: Timestamp, context: EncodeContext) {
+                        buffer.writeLong(value.epochMillis)
                     }
-                    override fun wireSize(value: Blob, context: EncodeContext): WireSize =
-                        WireSize.Exact(value.bytes.size)
+                    override fun wireSize(value: Timestamp, context: EncodeContext): WireSize =
+                        WireSize.Exact(8)
                 }
 
                 @ProtocolMessage
                 data class HeaderWithLengthPrefixedPayload(
-                    @LengthPrefixed @UseCodec(BlobCodec::class) val data: Blob,
+                    @LengthPrefixed @UseCodec(TimestampCodec::class) val data: Timestamp,
                 )
                 """.trimIndent(),
             )

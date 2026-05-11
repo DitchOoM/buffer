@@ -12,12 +12,20 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Compile-time validator coverage for the Section 8 rule: raw-bytes
- * types (`ReadBuffer`, `WriteBuffer`, `PlatformBuffer`, `ByteArray`,
- * `ByteBuffer`) cannot appear in the fields of a `@ProtocolMessage`
- * data class. The walk recurses through `@JvmInline value class`
- * wrappers and generic type arguments, and short-circuits at any node
- * whose type extends `com.ditchoom.buffer.codec.Payload`.
+ * Compile-time validator coverage for the raw-bytes ban:
+ *
+ * 1. **Outer rule** (§8): raw-bytes types (`ReadBuffer`, `WriteBuffer`,
+ *    `PlatformBuffer`, `ByteArray`, primitive arrays, `ByteBuffer`) cannot
+ *    appear in the fields of a `@ProtocolMessage` data class. The walk
+ *    recurses through `@JvmInline value class` wrappers and generic type
+ *    arguments. Outer-rule diagnostic blames the @ProtocolMessage field.
+ *
+ * 2. **Transitive Payload rule** (buffer-codec lockdown v1, Change 1):
+ *    when the walk encounters a concrete `Payload`-implementing type, it
+ *    descends into the Payload's declared properties (recursively through
+ *    value-class wrappers and sealed trees) and rejects the same set of
+ *    raw-bytes types. Payload-rule diagnostic blames the Payload's
+ *    declared property, since the Payload type itself is unsound.
  */
 class ProtocolMessagePayloadValidatorTest {
     @Test
@@ -60,14 +68,12 @@ class ProtocolMessagePayloadValidatorTest {
     }
 
     @Test
-    fun doesNotFireWhenFieldExtendsPayload() {
-        // Tightened the contract: a Payload-typed field with no
-        // resolution mechanism (no `@UseCodec`) is a hard error, not a
-        // silent skip. The §8 short-circuit assertion still holds when the
-        // field uses the composition `@RemainingBytes
-        // @UseCodec(...)` against a user-supplied Codec object — the walk
-        // halts at the Payload marker before descending into OpaqueBlob's
-        // ByteArray inner.
+    fun firesOnDataClassPayloadWithByteArrayProperty() {
+        // Buffer-codec lockdown v1, Change 1: the walk no longer short-circuits
+        // at Payload — it descends into the Payload's declared properties and
+        // rejects raw-bytes types. A `data class OpaqueBlob(val bytes: ByteArray)
+        // : Payload` is structurally unsound (the bytes outlive the codec
+        // scope ambiguously), so the violation is the Payload type itself.
         val result =
             compile(
                 """
@@ -102,13 +108,8 @@ class ProtocolMessagePayloadValidatorTest {
                 )
                 """.trimIndent(),
             )
-        // The Payload short-circuit must fire BEFORE we descend into OpaqueBlob's
-        // ByteArray field — that's the consumer's documented escape hatch.
-        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
-        assertFalse(
-            result.messages.contains("Section 8"),
-            "Payload-tagged field should not trigger the §8 diagnostic. Messages:\n${result.messages}",
-        )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertContainsPayloadShapeError(result, "OpaqueBlob.bytes", "kotlin.ByteArray")
     }
 
     @Test
@@ -209,12 +210,13 @@ class ProtocolMessagePayloadValidatorTest {
     }
 
     @Test
-    fun acceptsLengthPrefixedUseCodecPayloadValueClass() {
-        // The recommended migration target for raw
-        // ByteArray-bearing fields: wrap bytes in a `Payload`-marked value
-        // class and reference the codec via `@LengthPrefixed @UseCodec`
-        // ( shape). The §8 walk halts at the Payload marker
-        // before descending into the value class's `ByteArray` inner.
+    fun firesOnValueClassPayloadWithByteArrayInner() {
+        // Buffer-codec lockdown v1, Change 1: even a value-class Payload
+        // cannot wrap raw bytes — the bytes still escape the codec scope
+        // unsoundly. Was previously the documented migration target; is
+        // now itself a rejection case. Migration moves further: wrap the
+        // bytes in a domain type (Bitmap via native handle), or step
+        // outside Payload via a hand-written Codec<NonPayloadType>.
         val result =
             compile(
                 """
@@ -250,18 +252,16 @@ class ProtocolMessagePayloadValidatorTest {
                 )
                 """.trimIndent(),
             )
-        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
-        assertFalse(
-            result.messages.contains("raw-bytes type") || result.messages.contains("forbidden"),
-            "wrapping bytes in a Payload value class is the documented migration target — " +
-                "no raw-bytes diagnostic should fire. Messages:\n${result.messages}",
-        )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertContainsPayloadShapeError(result, "Blob.bytes", "kotlin.ByteArray")
     }
 
     @Test
-    fun diagnosticReferencesPayloadMigrationPath() {
-        // The diagnostic must point at the raw-types-forbidden rule and
-        // the Payload-marker migration target.
+    fun diagnosticReferencesCanonicalEscapePrimitives() {
+        // The diagnostic must explain the rule and point at the canonical
+        // migration targets — both the typed-value Payload path (string,
+        // scalars, native handle) and the step-outside-Payload primitives
+        // (copyToByteArray, factory.allocate().write) for the raw-bytes case.
         val result =
             compile(
                 """
@@ -279,16 +279,25 @@ class ProtocolMessagePayloadValidatorTest {
             "diagnostic should explain that raw-bytes types are forbidden. Messages:\n${result.messages}",
         )
         assertTrue(
-            result.messages.contains("Payload") && result.messages.contains("value class"),
-            "diagnostic should point at wrapping in a Payload-typed value class. " +
+            result.messages.contains("Payload") && result.messages.contains("@UseCodec"),
+            "diagnostic should point at the Payload + @UseCodec composition. " +
                 "Messages:\n${result.messages}",
+        )
+        assertTrue(
+            result.messages.contains("copyToByteArray") &&
+                result.messages.contains("factory.allocate"),
+            "diagnostic should name the step-outside-Payload primitives for the raw-bytes " +
+                "consumer case. Messages:\n${result.messages}",
         )
     }
 
     @Test
-    fun acceptsValueClassOverPayload() {
-        // Value class wrapping a Payload-tagged inner — walk descends into
-        // the inner type, hits Payload, and short-circuits. No diagnostic.
+    fun firesOnNestedValueClassReachingPayloadWithByteArray() {
+        // Buffer-codec lockdown v1, Change 1: the Payload-shape walk runs
+        // wherever the outer walk reaches a Payload type — including through
+        // an outer value-class wrapper. WrappedPayload → OpaqueBlob (Payload)
+        // → bytes: ByteArray fires the Payload-flavored diagnostic against
+        // `OpaqueBlob.bytes` (the structural offender), not the outer field.
         val result =
             compile(
                 """
@@ -306,11 +315,187 @@ class ProtocolMessagePayloadValidatorTest {
                 data class ChunkWithWrappedPayload(val body: WrappedPayload)
                 """.trimIndent(),
             )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertContainsPayloadShapeError(result, "OpaqueBlob.bytes", "kotlin.ByteArray")
+    }
+
+    // ========================================================================
+    // Change 1 (buffer-codec lockdown v1) — Payload-shape rule positive cases
+    // ========================================================================
+
+    @Test
+    fun acceptsDataClassPayloadOfBenignScalars() {
+        // Self-contained typed-value Payload — no raw-bytes anywhere in the
+        // declared shape — passes.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.Codec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
+                import com.ditchoom.buffer.codec.Payload
+                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+
+                data class Dimensions(val width: UShort, val height: UShort) : Payload
+
+                object DimensionsCodec : Codec<Dimensions> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): Dimensions =
+                        Dimensions(buffer.readUShort(), buffer.readUShort())
+                    override fun encode(buffer: WriteBuffer, value: Dimensions, context: EncodeContext) {
+                        buffer.writeUShort(value.width); buffer.writeUShort(value.height)
+                    }
+                    override fun wireSize(value: Dimensions, context: EncodeContext): WireSize = WireSize.Exact(4)
+                }
+
+                @ProtocolMessage
+                data class HeaderWithDimensions(
+                    @LengthPrefixed @UseCodec(DimensionsCodec::class) val dim: Dimensions,
+                )
+                """.trimIndent(),
+            )
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
         assertFalse(
-            result.messages.contains("Section 8"),
-            "Payload short-circuit should apply at every walk depth, including value-class inner types",
+            result.messages.contains("raw-bytes type") || result.messages.contains("Payload types must not"),
+            "scalar-only Payload should pass. Messages:\n${result.messages}",
         )
+    }
+
+    @Test
+    fun acceptsDataClassPayloadCarryingString() {
+        // `kotlin.String` is a typed value, not a raw-bytes type — Payload OK.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.Codec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
+                import com.ditchoom.buffer.codec.Payload
+                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+
+                data class TextPayload(val text: String) : Payload
+
+                object TextCodec : Codec<TextPayload> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): TextPayload =
+                        TextPayload(buffer.readString(buffer.remaining()))
+                    override fun encode(buffer: WriteBuffer, value: TextPayload, context: EncodeContext) {
+                        buffer.writeString(value.text)
+                    }
+                    override fun wireSize(value: TextPayload, context: EncodeContext): WireSize =
+                        WireSize.Exact(value.text.length)
+                }
+
+                @ProtocolMessage
+                data class MessageWithText(
+                    @LengthPrefixed @UseCodec(TextCodec::class) val text: TextPayload,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+        assertFalse(
+            result.messages.contains("raw-bytes type") || result.messages.contains("Payload types must not"),
+            "String-carrying Payload should pass. Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
+    fun firesOnSealedPayloadWithOneBadVariant() {
+        // Sealed Payload tree: every variant must satisfy the rule. One
+        // variant carrying ByteArray fails the whole tree at that variant.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.Codec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
+                import com.ditchoom.buffer.codec.Payload
+                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+
+                sealed interface Event : Payload {
+                    data class Tick(val seq: UInt) : Event
+                    data class Snapshot(val image: ByteArray) : Event
+                }
+
+                object EventCodec : Codec<Event> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): Event = Event.Tick(0u)
+                    override fun encode(buffer: WriteBuffer, value: Event, context: EncodeContext) {}
+                    override fun wireSize(value: Event, context: EncodeContext): WireSize = WireSize.Exact(4)
+                }
+
+                @ProtocolMessage
+                data class Stream(@LengthPrefixed @UseCodec(EventCodec::class) val event: Event)
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertContainsPayloadShapeError(result, "Event.Snapshot.image", "kotlin.ByteArray")
+    }
+
+    @Test
+    fun firesOnNestedNonValueWrapperReachingForbiddenByteArray() {
+        // Plan template case: `data class Outer(val inner: HasBuffer) : Payload`
+        // where HasBuffer wraps a forbidden type. The walk descends through the
+        // value-class wrapper inside the Payload and rejects the inner bytes.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.Payload
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+                @JvmInline
+                value class HasBuffer(val bytes: ByteArray)
+
+                data class Outer(val inner: HasBuffer) : Payload
+
+                @ProtocolMessage
+                data class Frame(val payload: Outer)
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertContainsPayloadShapeError(result, "Outer.inner", "kotlin.ByteArray")
+    }
+
+    @Test
+    fun firesOnPayloadCarryingIntArray() {
+        // Primitive arrays (extended FORBIDDEN_TYPES) are rejected the same
+        // way as ByteArray.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.Payload
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+                data class IntPayload(val values: IntArray) : Payload
+
+                @ProtocolMessage
+                data class FrameWithInts(val payload: IntPayload)
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertContainsPayloadShapeError(result, "IntPayload.values", "kotlin.IntArray")
     }
 
     private fun assertContainsRawBytesError(
@@ -329,6 +514,26 @@ class ProtocolMessagePayloadValidatorTest {
         assertTrue(
             result.messages.contains("ownership ambiguity"),
             "diagnostic should explain the ownership-ambiguity rationale. Messages:\n${result.messages}",
+        )
+    }
+
+    private fun assertContainsPayloadShapeError(
+        result: JvmCompilationResult,
+        payloadDotProperty: String,
+        forbiddenType: String,
+    ) {
+        assertTrue(
+            result.messages.contains("Payload types must not embed raw buffer or array types"),
+            "diagnostic should fire the Payload-shape rule. Messages:\n${result.messages}",
+        )
+        assertTrue(
+            result.messages.contains("test.$payloadDotProperty: $forbiddenType"),
+            "diagnostic should pin the offending property `test.$payloadDotProperty: $forbiddenType`. " +
+                "Messages:\n${result.messages}",
+        )
+        assertTrue(
+            result.messages.contains("copyToByteArray") || result.messages.contains("factory.allocate"),
+            "diagnostic should point at the canonical escape primitives. Messages:\n${result.messages}",
         )
     }
 
