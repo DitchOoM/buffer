@@ -131,11 +131,10 @@ actual fun PlatformBuffer.Companion.wrapNativeAddress(
     size: Int,
     byteOrder: ByteOrder,
 ): PlatformBuffer {
-    val byteBuffer =
-        UnsafeMemory.tryWrapAsDirectByteBuffer(address, size)
-            ?: throw UnsupportedOperationException(
-                "Cannot wrap native address: DirectByteBuffer reflection is not available on this Android version.",
-            )
+    // JNI NewDirectByteBuffer is the supported Android path; reflective
+    // DirectByteBuffer(long, int) is hidden-API-gated on non-debuggable
+    // test APKs from API 28+.
+    val byteBuffer = JniDirectByteBufferAllocator.newDirectByteBuffer(address, size)
     byteBuffer.order(byteOrder.toJava())
     return DirectJvmBuffer(byteBuffer)
 }

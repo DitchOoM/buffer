@@ -97,12 +97,10 @@ actual fun PlatformBuffer.Companion.wrapNativeAddress(
     // Try FFM first (JVM 21+ at runtime, even if compiled against jvmMain)
     tryWrapViaFfm(address, size, byteOrder)?.let { return it }
 
-    // Fall back to Unsafe DirectByteBuffer reflection
-    val byteBuffer =
-        UnsafeMemory.tryWrapAsDirectByteBuffer(address, size)
-            ?: throw UnsupportedOperationException(
-                "Cannot wrap native address: neither FFM (JVM 21+) nor DirectByteBuffer reflection is available.",
-            )
+    // Fall back to Unsafe DirectByteBuffer reflection. wrapAsDirectByteBuffer throws an
+    // UnsupportedOperationException with the underlying cause chained when reflection isn't
+    // available — no need to manufacture our own generic message here.
+    val byteBuffer = UnsafeMemory.wrapAsDirectByteBuffer(address, size)
     byteBuffer.order(byteOrder.toJava())
     return DirectJvmBuffer(byteBuffer)
 }

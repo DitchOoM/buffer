@@ -348,12 +348,33 @@ android {
         aidl = true
     }
     compileSdk = 36
+    ndkVersion = "28.2.13676358"
     defaultConfig {
         minSdk = 19
         testInstrumentationRunner = "androidx.benchmark.junit4.AndroidBenchmarkRunner"
         testInstrumentationRunnerArguments["androidx.benchmark.output.enable"] = "true"
+        externalNativeBuild {
+            cmake {
+                cppFlags("-std=c++17")
+            }
+        }
+        // NDK 28 requires minSdk >= 21. We keep the library's minSdk at 19 so
+        // Kotlin/Java code still runs on older Android, and gate the native
+        // load: JniDirectByteBufferAllocator.isAvailable returns false on those
+        // devices and the deterministic factory falls back to the reflective
+        // path (which itself fails gracefully where DirectByteBuffer reflection
+        // isn't accessible). API <21 was minimal hidden-API enforcement anyway.
+        @Suppress("UnstableApiUsage")
+        experimentalProperties["android.ndk.suppressMinSdkVersionError"] = "21"
     }
     namespace = "com.ditchoom.buffer"
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/androidMain/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 
     // Use Java 1.8 for Android to maintain maximum compatibility
     compileOptions {
