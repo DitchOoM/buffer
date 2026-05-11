@@ -196,6 +196,19 @@ class MutableDataBuffer private constructor(
         return result
     }
 
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        if (length == 0) return
+        requireReadable(length)
+        dst.usePinned { pinned ->
+            memcpy(pinned.addressOf(offset), (bytePointer + position)!!, length.convert())
+        }
+        position += length
+    }
+
     override fun readString(
         length: Int,
         charset: Charset,
@@ -730,6 +743,19 @@ class MutableDataBufferSlice(
         val result = (bytePointer + position)!!.readBytes(size)
         position += size
         return result
+    }
+
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        if (length == 0) return
+        requireReadable(length)
+        dst.usePinned { pinned ->
+            memcpy(pinned.addressOf(offset), (bytePointer + position)!!, length.convert())
+        }
+        position += length
     }
 
     override fun readString(

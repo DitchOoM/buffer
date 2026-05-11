@@ -128,12 +128,67 @@ interface ReadBuffer : PositionBuffer {
     }
 
     /**
-     * Reads [size] bytes into a new ByteArray and advances position.
+     * Reads [size] bytes and advances position. **May return a view sharing
+     * storage with this buffer on some platforms** (e.g. JS returns an
+     * `Int8Array` over the same underlying `ArrayBuffer`). The returned array
+     * must NOT be retained past this buffer's scope when independence matters.
+     *
+     * For consumer-bound bytes that must outlive the buffer's scope, use
+     * [copyToByteArray] — it carries an explicit copy contract on every
+     * platform.
      *
      * @param size Number of bytes to read
-     * @return A new ByteArray containing the bytes
+     * @return A ByteArray containing the bytes (may alias this buffer)
      */
     fun readByteArray(size: Int): ByteArray
+
+    /**
+     * Reads [length] bytes from this buffer into [dst] starting at [offset]
+     * and advances position by [length]. Bytes are **copied** into [dst];
+     * the destination array is independent of this buffer's storage.
+     *
+     * Use this primitive when the caller wants to reuse a scratch ByteArray
+     * across decode calls, or pack the read bytes into an existing array at
+     * a specific offset. For the common "give me a fresh ByteArray" case,
+     * prefer [copyToByteArray].
+     *
+     * @param dst Destination array
+     * @param offset Starting index in [dst] (default 0)
+     * @param length Number of bytes to read (default: fill [dst] from [offset])
+     */
+    fun readInto(
+        dst: ByteArray,
+        offset: Int = 0,
+        length: Int = dst.size - offset,
+    ) {
+        for (i in 0 until length) dst[offset + i] = readByte()
+    }
+
+    /**
+     * Reads [size] bytes into a **new, independently-allocated** ByteArray and
+     * advances position. The returned ByteArray does not share storage with
+     * this buffer; mutations to the buffer or its underlying pool after this
+     * call do not affect the returned ByteArray. Safe to outlive this buffer's
+     * scope.
+     *
+     * Use this primitive at the consumer boundary when the caller wants to
+     * hold bytes past the decoding scope. The verb `copy` in the name signals
+     * the cost — there is no way to convey raw bytes across the scope without
+     * copying, on the platforms that matter.
+     *
+     * For zero-copy access during the decode call itself (no consumer
+     * escape), prefer [slice] / [readBytes] (zero-copy views — see those
+     * methods for the aliasing contract) or `toNativeData()` (zero-copy
+     * native handle). For scratch-array reuse, see [readInto].
+     *
+     * @param size Number of bytes to read
+     * @return A new independently-allocated ByteArray containing the bytes
+     */
+    fun copyToByteArray(size: Int): ByteArray {
+        val dst = ByteArray(size)
+        readInto(dst, 0, size)
+        return dst
+    }
 
     /**
      * Reads a single byte as unsigned (0-255) and advances position by 1.

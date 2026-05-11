@@ -69,6 +69,36 @@ abstract class BaseJvmBuffer(
             )
         }
 
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        if (length == 0) return
+        try {
+            if (byteBuffer.hasArray()) {
+                // Heap-backed: skip the JNI hop with direct System.arraycopy.
+                val src = byteBuffer.array()
+                val srcPos = byteBuffer.arrayOffset() + position()
+                System.arraycopy(src, srcPos, dst, offset, length)
+                (byteBuffer as Buffer).position(position() + length)
+            } else {
+                // ByteBuffer.get(byte[], int, int) copies into dst and advances position.
+                byteBuffer.get(dst, offset, length)
+            }
+        } catch (e: java.nio.BufferUnderflowException) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read $length byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        } catch (e: IndexOutOfBoundsException) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read $length byte(s) at position ${position()} " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
+    }
+
     abstract override fun slice(byteOrder: ByteOrder): PlatformBuffer
 
     override fun readShort(): Short =

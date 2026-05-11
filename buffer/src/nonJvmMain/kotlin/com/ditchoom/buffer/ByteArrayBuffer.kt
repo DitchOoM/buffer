@@ -99,6 +99,18 @@ class ByteArrayBuffer(
         return result
     }
 
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        if (length == 0) return
+        requireReadable(length)
+        val absStart = this.offset + positionValue
+        data.copyInto(dst, destinationOffset = offset, startIndex = absStart, endIndex = absStart + length)
+        positionValue += length
+    }
+
     override fun readShort(): Short {
         requireReadable(Short.SIZE_BYTES)
         val result = getShortUnchecked(positionValue)

@@ -214,6 +214,18 @@ class NativeBuffer private constructor(
         return array
     }
 
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        checkOpen()
+        if (length == 0) return
+        requireReadable(length)
+        UnsafeMemory.copyMemoryToArray(nativeAddress + positionValue, dst, offset, length)
+        positionValue += length
+    }
+
     override fun readString(
         length: Int,
         charset: Charset,
@@ -754,6 +766,18 @@ private class NativeBufferSlice(
         UnsafeMemory.copyMemoryToArray(baseAddress + positionValue, array, 0, size)
         positionValue += size
         return array
+    }
+
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        checkOpen()
+        if (length == 0) return
+        requireReadable(length)
+        UnsafeMemory.copyMemoryToArray(baseAddress + positionValue, dst, offset, length)
+        positionValue += length
     }
 
     override fun readString(

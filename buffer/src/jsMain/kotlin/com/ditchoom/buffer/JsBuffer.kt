@@ -118,6 +118,20 @@ class JsBuffer(
         return byteArray.unsafeCast<ByteArray>()
     }
 
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        if (length == 0) return
+        requireReadable(length)
+        // ByteArray on Kotlin/JS IS Int8Array at runtime — typed-array .set is a
+        // bulk memcpy between the underlying ArrayBuffers, honoring dstOffset.
+        val subArray = buffer.subarray(positionValue, positionValue + length)
+        dst.unsafeCast<Int8Array>().set(subArray, offset)
+        positionValue += length
+    }
+
     override fun readString(
         length: Int,
         charset: Charset,

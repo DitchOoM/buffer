@@ -22,6 +22,7 @@ import platform.Foundation.create
 import platform.Foundation.subdataWithRange
 import platform.posix.memchr
 import platform.posix.memcmp
+import platform.posix.memcpy
 
 /**
  * Read-only buffer backed by NSData (Apple native memory).
@@ -156,6 +157,20 @@ class NSDataBuffer(
         val result = (bytePointer + position)!!.readBytes(size)
         position += size
         return result
+    }
+
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        if (length == 0) return
+        requireReadable(length)
+        // memcpy from NSData-backed native memory into the pinned ByteArray.
+        dst.usePinned { pinned ->
+            memcpy(pinned.addressOf(offset), (bytePointer + position)!!, length.convert())
+        }
+        position += length
     }
 
     override fun readString(
@@ -365,6 +380,19 @@ internal class NSDataBufferSlice(
         val result = (bytePointer + position)!!.readBytes(size)
         position += size
         return result
+    }
+
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        if (length == 0) return
+        requireReadable(length)
+        dst.usePinned { pinned ->
+            memcpy(pinned.addressOf(offset), (bytePointer + position)!!, length.convert())
+        }
+        position += length
     }
 
     override fun readString(

@@ -109,6 +109,15 @@ internal class PooledBuffer(
         return inner.readByteArray(size)
     }
 
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        checkNotFreed()
+        inner.readInto(dst, offset, length)
+    }
+
     override fun readShort(): Short {
         checkNotFreed()
         return inner.readShort()
