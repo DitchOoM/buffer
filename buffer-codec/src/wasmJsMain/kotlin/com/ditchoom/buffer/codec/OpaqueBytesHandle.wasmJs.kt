@@ -1,4 +1,4 @@
-package com.ditchoom.buffer.codec.test.protocols.payload
+package com.ditchoom.buffer.codec
 
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer

@@ -1,52 +1,13 @@
 package com.ditchoom.buffer.codec.test.protocols.payload
 
-import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.ReadBuffer
-
-/**
- * Opaque, platform-typed handle for "this Payload carries some opaque bytes
- * — IPC forwarding, persistence, debug capture — and decode-side code
- * shouldn't know the byte layout". Used by [BinaryData] (PNG chunks, TLS
- * handshake tails, MQTT v5 BinaryData properties — all spec'd as "some
- * bytes, opaque to the framework").
- *
- * Same shielding trick as [PlatformBitmap]: KSP's transitive Payload-shape
- * walk descends into the Payload, sees the property typed as
- * [OpaqueBytesHandle], finds the type is not forbidden, not Payload, not a
- * value class — and stops. The handle's actual stores a [PlatformBuffer]
- * internally on every platform — the canonical Pattern #2 from the
- * buffer-codec lockdown plan (consumer-owned `PlatformBuffer` allocated via
- * `factory.allocate(...).write(source)`).
- *
- * Distinct from [PlatformBitmap] only for clarity — the underlying mechanism
- * is identical. Two named types keep the semantic intent visible at the call
- * site (Bitmap is a *bitmap*; OpaqueBytesHandle is *opaque bytes*).
- */
-expect class OpaqueBytesHandle
-
-/**
- * Construct from a consumer-owned [PlatformBuffer]. The platform actual
- * takes ownership of [bytes] and is responsible for its lifetime.
- *
- * Named `opaqueBytesFrom` rather than `OpaqueBytesHandle` to avoid a
- * constructor / top-level-fun ambiguity in the actuals.
- */
-expect fun opaqueBytesFrom(bytes: PlatformBuffer): OpaqueBytesHandle
-
-/**
- * Returns a [ReadBuffer] view over the bytes storage, position reset to 0.
- */
-expect fun OpaqueBytesHandle.asReadBuffer(): ReadBuffer
-
-expect fun OpaqueBytesHandle.byteSize(): Int
-
-expect fun OpaqueBytesHandle.handleEquals(other: OpaqueBytesHandle): Boolean
-
-expect fun OpaqueBytesHandle.handleHashCode(): Int
+import com.ditchoom.buffer.codec.OpaqueBytesHandle
+import com.ditchoom.buffer.codec.asReadBuffer
+import com.ditchoom.buffer.codec.opaqueBytesFrom
 
 /**
  * Test convenience: wraps [bytes] into a fresh buffer via
- * [testFixtureFactory] and constructs the handle.
+ * [testFixtureFactory] and constructs the handle. Production code constructs
+ * via [opaqueBytesFrom] with an explicit `PlatformBuffer` allocator.
  */
 fun opaqueBytesOf(bytes: ByteArray): OpaqueBytesHandle {
     val buf = testFixtureFactory.allocate(bytes.size)

@@ -1,9 +1,14 @@
-package com.ditchoom.buffer.codec.test.protocols.payload
+package com.ditchoom.buffer.codec
 
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.bufferHashCode
 
+/**
+ * JVM + Android actual for [OpaqueBytesHandle]. See common kdoc for design
+ * rationale; both jvm and androidTarget source-sets dependsOn `jvmCommonMain`
+ * so this single file serves both.
+ */
 actual class OpaqueBytesHandle internal constructor(
     internal val buffer: PlatformBuffer,
 )

@@ -1,7 +1,7 @@
 package com.ditchoom.buffer.codec.test.protocols.payload
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.codec.CodecKey
+import com.ditchoom.buffer.codec.BufferFactoryKey
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 
@@ -23,18 +23,10 @@ import com.ditchoom.buffer.codec.EncodeContext
 internal expect val testFixtureFactory: BufferFactory
 
 /**
- * `DecodeContext` / `EncodeContext` key for the consumer-supplied
- * [BufferFactory] codecs should use when allocating consumer-owned
- * buffers. Read in [BitmapCodec] and [BinaryDataCodec]; defaults to
- * [testFixtureFactory] when absent.
- *
- * Canonical context key for the buffer-codec lockdown's Pattern #2 (the
- * consumer picks the factory; the codec allocates via it). Lives in the
- * test-fixture module for now; promote to `buffer-codec` if it gets used
- * more widely.
+ * Test-side fallback to [testFixtureFactory] when [BufferFactoryKey] is absent.
+ * Production codecs in `buffer-codec` fall back to `BufferFactory.Default`; tests
+ * fall back to [testFixtureFactory] to dodge Linux's leak-prone default.
  */
-object BufferFactoryKey : CodecKey<BufferFactory>
-
 internal fun DecodeContext.bufferFactoryOrDefault(): BufferFactory = get(BufferFactoryKey) ?: testFixtureFactory
 
 internal fun EncodeContext.bufferFactoryOrDefault(): BufferFactory = get(BufferFactoryKey) ?: testFixtureFactory

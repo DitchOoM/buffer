@@ -1,10 +1,9 @@
-package com.ditchoom.buffer.codec.test.protocols.payload
+package com.ditchoom.buffer.codec
 
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.bufferHashCode
 
-/** JVM actual for [OpaqueBytesHandle]. See common kdoc for design rationale. */
 actual class OpaqueBytesHandle internal constructor(
     internal val buffer: PlatformBuffer,
 )

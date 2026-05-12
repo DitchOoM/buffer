@@ -5,6 +5,7 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.OpaqueBytesHandle
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.annotations.Endianness
@@ -12,13 +13,12 @@ import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import com.ditchoom.buffer.codec.annotations.UseCodec
-import com.ditchoom.buffer.codec.test.protocols.payload.OpaqueBytesHandle
-import com.ditchoom.buffer.codec.test.protocols.payload.asReadBuffer
+import com.ditchoom.buffer.codec.asReadBuffer
+import com.ditchoom.buffer.codec.byteSize
+import com.ditchoom.buffer.codec.handleEquals
+import com.ditchoom.buffer.codec.handleHashCode
+import com.ditchoom.buffer.codec.opaqueBytesFrom
 import com.ditchoom.buffer.codec.test.protocols.payload.bufferFactoryOrDefault
-import com.ditchoom.buffer.codec.test.protocols.payload.byteSize
-import com.ditchoom.buffer.codec.test.protocols.payload.handleEquals
-import com.ditchoom.buffer.codec.test.protocols.payload.handleHashCode
-import com.ditchoom.buffer.codec.test.protocols.payload.opaqueBytesFrom
 import com.ditchoom.buffer.codec.test.protocols.payload.opaqueBytesOf
 
 /**
