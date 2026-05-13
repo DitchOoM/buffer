@@ -24,6 +24,12 @@ import com.ditchoom.buffer.WriteBuffer
  * type, etc.) supply their own thin wrapper that does the Payload marker
  * duty. The companion codec [OwnedBytesHandleCodec] implements the
  * canonical decode/encode flow that those wrappers' codecs delegate to.
+ *
+ * **Equality**: every platform actual overrides `equals` / `hashCode` to
+ * delegate to [handleEquals] / [handleHashCode] (byte-content comparison).
+ * Two handles with the same bytes are `==`, so `data class` containers
+ * that carry an `OwnedBytesHandle` field get structural equality "for
+ * free" without each declaring custom `equals` themselves.
  */
 expect class OwnedBytesHandle
 

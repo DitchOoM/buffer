@@ -6,7 +6,11 @@ import com.ditchoom.buffer.bufferHashCode
 
 actual class OwnedBytesHandle internal constructor(
     internal val buffer: PlatformBuffer,
-)
+) {
+    override fun equals(other: Any?): Boolean = other is OwnedBytesHandle && this.handleEquals(other)
+
+    override fun hashCode(): Int = this.handleHashCode()
+}
 
 actual fun ownedBytesFrom(bytes: PlatformBuffer): OwnedBytesHandle = OwnedBytesHandle(bytes)
 
