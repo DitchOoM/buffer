@@ -21,6 +21,44 @@ tasks.register("allTests") {
     dependsOn(":buffer:allTests", ":buffer-compression:allTests", ":buffer-flow:allTests", ":buffer-codec:allTests", ":buffer-codec-processor:test", ":buffer-codec-test:allTests")
 }
 
+// Pre-publish gate: superset of `allTests` that also covers Android-host JVM unit tests
+// (testDebugUnitTest) and JS browser tests (jsBrowserTest) — the two suites that
+// `allTests` skips and that have historically masked Android-only / browser-only bugs
+// (e.g. WrapNativeAddressTest JNI lookup, AllocatorLeakSharedTest SharedArrayBuffer + TextDecoder).
+// Run before publishToMavenLocal to surface those classes of bug at publish time.
+tasks.register("prePublishCheck") {
+    description = "allTests + Android-host unit tests + JS browser tests. Run before publishToMavenLocal."
+    group = "verification"
+    dependsOn("allTests")
+    dependsOn(
+        ":buffer:testDebugUnitTest",
+        ":buffer-compression:testDebugUnitTest",
+        ":buffer-flow:testDebugUnitTest",
+        ":buffer-codec:testDebugUnitTest",
+    )
+    dependsOn(
+        ":buffer:jsBrowserTest",
+        ":buffer-compression:jsBrowserTest",
+        ":buffer-flow:jsBrowserTest",
+        ":buffer-codec:jsBrowserTest",
+        ":buffer-codec-test:jsBrowserTest",
+    )
+}
+
+// Android instrumented variant of prePublishCheck — requires a connected emulator/device.
+// Separate task so developers without an emulator aren't blocked by the cheaper gate.
+tasks.register("prePublishCheckAndroid") {
+    description = "prePublishCheck + Android instrumented tests. Requires a connected emulator/device."
+    group = "verification"
+    dependsOn("prePublishCheck")
+    dependsOn(":buffer:connectedBenchmarkAndroidTest")
+    dependsOn(
+        ":buffer-compression:connectedDebugAndroidTest",
+        ":buffer-flow:connectedDebugAndroidTest",
+        ":buffer-codec:connectedDebugAndroidTest",
+    )
+}
+
 tasks.register("buildAll") {
     description = "Build all modules"
     group = "build"
