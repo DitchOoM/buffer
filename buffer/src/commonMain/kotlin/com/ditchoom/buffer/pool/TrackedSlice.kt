@@ -30,6 +30,14 @@ internal class TrackedSlice(
         }
     }
 
+    // PlatformBuffer-by-delegation would resolve freeNativeMemory() to inner.slice()'s
+    // freeNativeMemory, which is detached from the parent's refcount and would never
+    // return the underlying pooled buffer to the pool. Route through releaseToPool()
+    // instead so consumer-facing `freeNativeMemory()` decrements the parent refcount.
+    override fun freeNativeMemory() {
+        releaseToPool()
+    }
+
     override fun slice(byteOrder: ByteOrder): PlatformBuffer {
         parent.addRef()
         return TrackedSlice(inner.slice(byteOrder), parent)

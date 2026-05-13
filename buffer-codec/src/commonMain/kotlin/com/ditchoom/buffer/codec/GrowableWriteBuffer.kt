@@ -18,49 +18,78 @@ import com.ditchoom.buffer.WriteBuffer
  * leaked. Bytes `[0, position)` are preserved across reallocations, which
  * keeps the slack region at offset 0 intact across growth — required by the
  * slicing scheme's right-flush of the prefix.
+ *
+ * Instances are recyclable via [GrowableWriteBufferPool]: [attach] sets up
+ * state from a fresh factory + initial size, [detach] clears the inner
+ * reference (without freeing — the FramedEncoder transfers ownership to the
+ * returned slice before recycling the wrapper). This cuts one heap object per
+ * encode call out of the hot wire-write path.
  */
-internal class GrowableWriteBuffer(
-    private val factory: BufferFactory,
-    initialSize: Int = 256,
-    byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
-) : WriteBuffer {
-    private var inner: PlatformBuffer = factory.allocate(initialSize, byteOrder)
+internal class GrowableWriteBuffer : WriteBuffer {
+    private var factory: BufferFactory? = null
+    private var inner: PlatformBuffer? = null
 
-    override val byteOrder: ByteOrder get() = inner.byteOrder
+    private fun requireInner(): PlatformBuffer = inner ?: throw IllegalStateException("GrowableWriteBuffer used before attach()")
 
-    override fun limit(): Int = inner.limit()
-
-    override fun setLimit(limit: Int) {
-        inner.setLimit(limit)
+    fun attach(
+        factory: BufferFactory,
+        initialSize: Int = 256,
+        byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
+    ) {
+        check(inner == null) { "GrowableWriteBuffer already attached; detach() before reuse" }
+        this.factory = factory
+        this.inner = factory.allocate(initialSize, byteOrder)
     }
 
-    override fun position(): Int = inner.position()
+    /**
+     * Clears the wrapper's state without freeing the inner buffer. Used by
+     * [FramedEncoder] after ownership of the inner has been transferred to
+     * the returned slice — the slice's refcount / chunk will free the inner.
+     */
+    fun detach() {
+        inner = null
+        factory = null
+    }
+
+    override val byteOrder: ByteOrder get() = requireInner().byteOrder
+
+    override fun limit(): Int = requireInner().limit()
+
+    override fun setLimit(limit: Int) {
+        requireInner().setLimit(limit)
+    }
+
+    override fun position(): Int = requireInner().position()
 
     override fun position(newPosition: Int) {
-        if (newPosition > inner.limit()) {
-            ensureCapacity(newPosition - inner.position())
+        val buf = requireInner()
+        if (newPosition > buf.limit()) {
+            ensureCapacity(newPosition - buf.position())
         }
-        inner.position(newPosition)
+        requireInner().position(newPosition)
     }
 
     /** Returns the inner buffer positioned for reading (position=0, limit=bytesWritten). */
     fun toReadBuffer(): ReadBuffer {
-        inner.resetForRead()
-        return inner
+        val buf = requireInner()
+        buf.resetForRead()
+        return buf
     }
 
     /** Returns the inner buffer for caller-controlled positioning (used by the slicing scheme). */
-    fun innerBuffer(): PlatformBuffer = inner
+    fun innerBuffer(): PlatformBuffer = requireInner()
 
     private fun ensureCapacity(additionalBytes: Int) {
-        if (inner.remaining() >= additionalBytes) return
-        val needed = inner.position() + additionalBytes
-        var newCapacity = inner.capacity * 2
+        val buf = requireInner()
+        if (buf.remaining() >= additionalBytes) return
+        val needed = buf.position() + additionalBytes
+        var newCapacity = buf.capacity * 2
         while (newCapacity < needed) newCapacity *= 2
-        val old = inner
-        val pos = old.position()
+        val old = buf
         old.resetForRead()
-        val newBuffer = factory.allocate(newCapacity, byteOrder)
+        val newBuffer =
+            checkNotNull(factory) { "factory cleared before grow" }
+                .allocate(newCapacity, buf.byteOrder)
         newBuffer.write(old)
         old.freeNativeMemory()
         inner = newBuffer
@@ -68,37 +97,37 @@ internal class GrowableWriteBuffer(
 
     override fun writeByte(byte: Byte): WriteBuffer {
         ensureCapacity(1)
-        inner.writeByte(byte)
+        requireInner().writeByte(byte)
         return this
     }
 
     override fun writeShort(short: Short): WriteBuffer {
         ensureCapacity(2)
-        inner.writeShort(short)
+        requireInner().writeShort(short)
         return this
     }
 
     override fun writeInt(int: Int): WriteBuffer {
         ensureCapacity(4)
-        inner.writeInt(int)
+        requireInner().writeInt(int)
         return this
     }
 
     override fun writeLong(long: Long): WriteBuffer {
         ensureCapacity(8)
-        inner.writeLong(long)
+        requireInner().writeLong(long)
         return this
     }
 
     override fun writeFloat(float: Float): WriteBuffer {
         ensureCapacity(4)
-        inner.writeFloat(float)
+        requireInner().writeFloat(float)
         return this
     }
 
     override fun writeDouble(double: Double): WriteBuffer {
         ensureCapacity(8)
-        inner.writeDouble(double)
+        requireInner().writeDouble(double)
         return this
     }
 
@@ -108,7 +137,7 @@ internal class GrowableWriteBuffer(
         length: Int,
     ): WriteBuffer {
         ensureCapacity(length)
-        inner.writeBytes(bytes, offset, length)
+        requireInner().writeBytes(bytes, offset, length)
         return this
     }
 
@@ -117,24 +146,24 @@ internal class GrowableWriteBuffer(
         charset: Charset,
     ): WriteBuffer {
         ensureCapacity((text.length * charset.maxBytesPerChar).toInt())
-        inner.writeString(text, charset)
+        requireInner().writeString(text, charset)
         return this
     }
 
     override fun write(buffer: ReadBuffer) {
         ensureCapacity(buffer.remaining())
-        inner.write(buffer)
+        requireInner().write(buffer)
     }
 
     override fun set(
         index: Int,
         byte: Byte,
     ): WriteBuffer {
-        inner[index] = byte
+        requireInner()[index] = byte
         return this
     }
 
     override fun resetForWrite() {
-        inner.resetForWrite()
+        requireInner().resetForWrite()
     }
 }

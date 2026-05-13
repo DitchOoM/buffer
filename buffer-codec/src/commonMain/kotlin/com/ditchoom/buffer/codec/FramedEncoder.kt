@@ -1,9 +1,11 @@
 package com.ditchoom.buffer.codec
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.CloseableBuffer
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
+import com.ditchoom.buffer.pool.PoolReleasable
 
 /**
  * Runtime entry point for the `@FramedBy` slicing-scheme encode emit. The
@@ -42,22 +44,48 @@ public object FramedEncoder {
         writeBody: (WriteBuffer) -> Unit,
     ): ReadBuffer {
         val maxSlack = headerWireWidth + framingCodec.maxWireSize
-        val growable = GrowableWriteBuffer(factory, initialSize = maxSlack + initialBodyEstimate)
-        growable.position(maxSlack)
-        writeBody(growable)
-        val bodyBytes = growable.position() - maxSlack
-        val prefixWireSize = framingCodec.wireSize(bodyBytes.toUInt(), context)
-        require(prefixWireSize is WireSize.Exact) {
-            "framing codec ${framingCodec::class.simpleName} returned non-Exact wire size for prefix"
+        val growable = GrowableWriteBufferPool.acquire()
+        try {
+            growable.attach(factory, initialSize = maxSlack + initialBodyEstimate)
+            growable.position(maxSlack)
+            writeBody(growable)
+            val bodyBytes = growable.position() - maxSlack
+            val prefixWireSize = framingCodec.wireSize(bodyBytes.toUInt(), context)
+            require(prefixWireSize is WireSize.Exact) {
+                "framing codec ${framingCodec::class.simpleName} returned non-Exact wire size for prefix"
+            }
+            val actualPrefixWidth = prefixWireSize.bytes
+            val sliceStart = maxSlack - actualPrefixWidth - headerWireWidth
+            val buffer: PlatformBuffer = growable.innerBuffer()
+            buffer.position(sliceStart)
+            writeHeader?.invoke(buffer)
+            framingCodec.encode(buffer, bodyBytes.toUInt(), context)
+            buffer.position(sliceStart)
+            buffer.setLimit(maxSlack + bodyBytes)
+            val result = buffer.slice()
+            return when {
+                // Pooled: slice() bumped refcount; transfer the chunk's
+                // initial reference to the returned slice so consumer's
+                // `freeNativeMemory()` recycles the buffer.
+                result is PoolReleasable -> {
+                    buffer.freeNativeMemory()
+                    result
+                }
+                // Deterministic / WASM-LinearBuffer / Native: chunk has an
+                // explicit lifecycle but its slice's `freeNativeMemory()` is
+                // a no-op (by design — slices share parent memory). Without
+                // intervention the chunk's native memory leaks, since the
+                // GrowableWriteBuffer wrapper goes out of scope here without
+                // ever calling chunk.freeNativeMemory(). Wrap the slice in
+                // an owner-transferring view so consumer's
+                // `freeNativeMemory()` on the slice releases the chunk.
+                buffer is CloseableBuffer && result !is OwnerTransferringSlice ->
+                    OwnerTransferringSlice(result, buffer)
+                else -> result
+            }
+        } finally {
+            growable.detach()
+            GrowableWriteBufferPool.release(growable)
         }
-        val actualPrefixWidth = prefixWireSize.bytes
-        val sliceStart = maxSlack - actualPrefixWidth - headerWireWidth
-        val buffer: PlatformBuffer = growable.innerBuffer()
-        buffer.position(sliceStart)
-        writeHeader?.invoke(buffer)
-        framingCodec.encode(buffer, bodyBytes.toUInt(), context)
-        buffer.position(sliceStart)
-        buffer.setLimit(maxSlack + bodyBytes)
-        return buffer.slice()
     }
 }
