@@ -59,6 +59,15 @@ tasks.register("prePublishCheckAndroid") {
     )
 }
 
+// Every publishToMavenLocal across the repo must run the prePublishCheck gate first,
+// so the test suites that historically masked Android-only / browser-only bugs run
+// before any artifact lands in the local Maven cache.
+subprojects {
+    tasks.matching { it.name == "publishToMavenLocal" }.configureEach {
+        dependsOn(rootProject.tasks.named("prePublishCheck"))
+    }
+}
+
 tasks.register("buildAll") {
     description = "Build all modules"
     group = "build"
