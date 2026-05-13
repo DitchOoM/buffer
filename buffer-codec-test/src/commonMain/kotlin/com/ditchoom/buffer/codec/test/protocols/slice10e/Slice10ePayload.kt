@@ -5,7 +5,7 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.OpaqueBytesHandle
+import com.ditchoom.buffer.codec.OwnedBytesHandle
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.annotations.Endianness
@@ -17,9 +17,9 @@ import com.ditchoom.buffer.codec.asReadBuffer
 import com.ditchoom.buffer.codec.byteSize
 import com.ditchoom.buffer.codec.handleEquals
 import com.ditchoom.buffer.codec.handleHashCode
-import com.ditchoom.buffer.codec.opaqueBytesFrom
+import com.ditchoom.buffer.codec.ownedBytesFrom
 import com.ditchoom.buffer.codec.test.protocols.payload.bufferFactoryOrDefault
-import com.ditchoom.buffer.codec.test.protocols.payload.opaqueBytesOf
+import com.ditchoom.buffer.codec.test.protocols.payload.ownedBytesOf
 
 /**
  * Doctrine vector — `@UseCodec` against an
@@ -78,13 +78,13 @@ data class RemoteCommand(
 /**
  * Payload — a 4-byte opcode followed by an arbitrary
  * binary blob. Reshaped under buffer-codec lockdown v1 (Change 1): the
- * trailing bytes live in an [OpaqueBytesHandle] (Pattern #2 — consumer-owned
+ * trailing bytes live in an [OwnedBytesHandle] (Pattern #2 — consumer-owned
  * [com.ditchoom.buffer.PlatformBuffer]). The walker stops at the handle;
  * no raw `ByteArray` appears anywhere in the Payload's declared shape.
  */
 data class RemoteCommandPayload(
     val opcode: UInt,
-    val data: OpaqueBytesHandle,
+    val data: OwnedBytesHandle,
 ) : Payload {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -97,14 +97,14 @@ data class RemoteCommandPayload(
     companion object {
         /**
          * Test convenience: construct from a `ByteArray` literal. Wraps via
-         * [opaqueBytesOf] so the existing test syntax `RemoteCommandPayload(
+         * [ownedBytesOf] so the existing test syntax `RemoteCommandPayload(
          * opcode = ..., data = byteArrayOf(...))` keeps working without
-         * passing through an explicit `opaqueBytesFrom(...)` call.
+         * passing through an explicit `ownedBytesFrom(...)` call.
          */
         operator fun invoke(
             opcode: UInt,
             data: ByteArray,
-        ): RemoteCommandPayload = RemoteCommandPayload(opcode, opaqueBytesOf(data))
+        ): RemoteCommandPayload = RemoteCommandPayload(opcode, ownedBytesOf(data))
     }
 }
 
@@ -129,7 +129,7 @@ internal object RemoteCommandPayloadCodecImpl : Codec<RemoteCommandPayload> {
         val dst = factory.allocate(buffer.remaining())
         dst.write(buffer)
         dst.resetForRead()
-        return RemoteCommandPayload(opcode, opaqueBytesFrom(dst))
+        return RemoteCommandPayload(opcode, ownedBytesFrom(dst))
     }
 
     override fun encode(

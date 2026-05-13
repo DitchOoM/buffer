@@ -4,21 +4,21 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.bufferHashCode
 
-actual class OpaqueBytesHandle internal constructor(
+actual class OwnedBytesHandle internal constructor(
     internal val buffer: PlatformBuffer,
 )
 
-actual fun opaqueBytesFrom(bytes: PlatformBuffer): OpaqueBytesHandle = OpaqueBytesHandle(bytes)
+actual fun ownedBytesFrom(bytes: PlatformBuffer): OwnedBytesHandle = OwnedBytesHandle(bytes)
 
-actual fun OpaqueBytesHandle.asReadBuffer(): ReadBuffer {
+actual fun OwnedBytesHandle.asReadBuffer(): ReadBuffer {
     buffer.position(0)
     buffer.setLimit(buffer.capacity)
     return buffer
 }
 
-actual fun OpaqueBytesHandle.byteSize(): Int = buffer.capacity
+actual fun OwnedBytesHandle.byteSize(): Int = buffer.capacity
 
-actual fun OpaqueBytesHandle.handleEquals(other: OpaqueBytesHandle): Boolean {
+actual fun OwnedBytesHandle.handleEquals(other: OwnedBytesHandle): Boolean {
     buffer.position(0)
     buffer.setLimit(buffer.capacity)
     other.buffer.position(0)
@@ -26,7 +26,7 @@ actual fun OpaqueBytesHandle.handleEquals(other: OpaqueBytesHandle): Boolean {
     return buffer.contentEquals(other.buffer)
 }
 
-actual fun OpaqueBytesHandle.handleHashCode(): Int {
+actual fun OwnedBytesHandle.handleHashCode(): Int {
     buffer.position(0)
     buffer.setLimit(buffer.capacity)
     return bufferHashCode(buffer)

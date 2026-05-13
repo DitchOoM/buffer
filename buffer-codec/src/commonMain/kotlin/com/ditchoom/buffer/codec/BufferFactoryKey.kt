@@ -8,7 +8,7 @@ import com.ditchoom.buffer.BufferFactory
  *
  * Read by codecs implementing the buffer-codec lockdown's **Pattern #2**
  * (consumer-owned [com.ditchoom.buffer.PlatformBuffer] — see
- * [OpaqueBytesHandleCodec]) and **Pattern #3** (consumer-owned ByteArray).
+ * [OwnedBytesHandleCodec]) and **Pattern #3** (consumer-owned ByteArray).
  * When the key is absent, the canonical fallback is [BufferFactory.Default]
  * (codecs may choose a different fallback when documented — e.g. test
  * fixtures fall back to a managed-heap factory to dodge Linux's leak-prone

@@ -92,7 +92,7 @@ kotlin {
     applyDefaultHierarchyTemplate()
     sourceSets {
         // Shared source set for JVM and Android — both consume the same
-        // OpaqueBytesHandle actual since `PlatformBuffer` is itself the
+        // OwnedBytesHandle actual since `PlatformBuffer` is itself the
         // platform boundary, and the handle is a thin internal wrapper.
         val jvmCommonMain by creating {
             dependsOn(commonMain.get())

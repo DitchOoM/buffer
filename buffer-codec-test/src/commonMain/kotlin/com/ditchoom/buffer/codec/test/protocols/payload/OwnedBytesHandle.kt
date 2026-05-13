@@ -1,19 +1,19 @@
 package com.ditchoom.buffer.codec.test.protocols.payload
 
-import com.ditchoom.buffer.codec.OpaqueBytesHandle
+import com.ditchoom.buffer.codec.OwnedBytesHandle
 import com.ditchoom.buffer.codec.asReadBuffer
-import com.ditchoom.buffer.codec.opaqueBytesFrom
+import com.ditchoom.buffer.codec.ownedBytesFrom
 
 /**
  * Test convenience: wraps [bytes] into a fresh buffer via
  * [testFixtureFactory] and constructs the handle. Production code constructs
- * via [opaqueBytesFrom] with an explicit `PlatformBuffer` allocator.
+ * via [ownedBytesFrom] with an explicit `PlatformBuffer` allocator.
  */
-fun opaqueBytesOf(bytes: ByteArray): OpaqueBytesHandle {
+fun ownedBytesOf(bytes: ByteArray): OwnedBytesHandle {
     val buf = testFixtureFactory.allocate(bytes.size)
     buf.writeBytes(bytes)
     buf.resetForRead()
-    return opaqueBytesFrom(buf)
+    return ownedBytesFrom(buf)
 }
 
 /**
@@ -21,7 +21,7 @@ fun opaqueBytesOf(bytes: ByteArray): OpaqueBytesHandle {
  * via `copyToByteArray`. The `copy` in the called primitive's name makes
  * the cost visible.
  */
-fun OpaqueBytesHandle.toBytes(): ByteArray {
+fun OwnedBytesHandle.toBytes(): ByteArray {
     val buf = asReadBuffer()
     return buf.copyToByteArray(buf.remaining())
 }
@@ -32,4 +32,4 @@ fun OpaqueBytesHandle.toBytes(): ByteArray {
  * read — production code should prefer [asReadBuffer] for the zero-copy
  * view.
  */
-val OpaqueBytesHandle.bytes: ByteArray get() = toBytes()
+val OwnedBytesHandle.bytes: ByteArray get() = toBytes()
