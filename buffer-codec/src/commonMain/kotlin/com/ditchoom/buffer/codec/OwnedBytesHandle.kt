@@ -1,7 +1,6 @@
 package com.ditchoom.buffer.codec
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
@@ -53,11 +52,38 @@ expect fun OwnedBytesHandle.handleEquals(other: OwnedBytesHandle): Boolean
 expect fun OwnedBytesHandle.handleHashCode(): Int
 
 /**
+ * Platform-safe fallback [BufferFactory] for [OwnedBytesHandleCodec] when
+ * the [DecodeContext] does not carry a [BufferFactoryKey]. Picks the
+ * fastest factory whose returned [PlatformBuffer] doesn't leak when the
+ * handle goes out of scope without explicit cleanup:
+ *
+ *  - **JVM / Android** → [BufferFactory.Default] (Direct ByteBuffer; GC reclaims).
+ *  - **JS / WasmJs** → [BufferFactory.Default] (ArrayBuffer / LinearBuffer; GC reclaims).
+ *  - **Apple** → [BufferFactory.Default] (NSMutableData; ARC reclaims).
+ *  - **Linux native** → [BufferFactory.managed] (heap ByteArrayBuffer; GC reclaims).
+ *
+ * Linux's [BufferFactory.Default] uses `malloc`/`free`-backed `NativeBuffer`,
+ * which leaks if the handle never gets explicit cleanup — switching to
+ * [BufferFactory.managed] there trades the native-FFI ergonomic (which the
+ * fallback consumer didn't ask for anyway) for memory safety. The pattern
+ * mirrors the test-fixture factory in `buffer-codec-test` and matches the
+ * "per-platform expect/actual fallback over uniform-but-degraded common
+ * design" doctrine.
+ *
+ * Production consumers that care about the allocation strategy supply
+ * their own factory via `DecodeContext.with(BufferFactoryKey, myFactory)`
+ * — this fallback only fires when no key is bound.
+ */
+expect fun ownedBytesFallbackFactory(): BufferFactory
+
+/**
  * Canonical [Codec] for [OwnedBytesHandle]. Implements buffer-v1 Pattern #2:
  * decode allocates a consumer-owned [PlatformBuffer] via the factory bound
- * to [BufferFactoryKey] (falling back to [BufferFactory.Default] when
- * absent), copies the remaining wire bytes into it, and wraps the result in
- * an [OwnedBytesHandle]. Encode writes the handle's bytes into the target
+ * to [BufferFactoryKey] (falling back to [ownedBytesFallbackFactory] —
+ * which is [BufferFactory.Default] on GC/ARC-reclaimed platforms and
+ * [BufferFactory.managed] on Linux native to avoid the malloc/free leak),
+ * copies the remaining wire bytes into it, and wraps the result in an
+ * [OwnedBytesHandle]. Encode writes the handle's bytes into the target
  * buffer; [wireSize] is [WireSize.Exact] of the carried byte count.
  *
  * Use as the default codec on a missing-codec path (e.g., MqttCodec's
@@ -70,7 +96,7 @@ object OwnedBytesHandleCodec : Codec<OwnedBytesHandle> {
         buffer: ReadBuffer,
         context: DecodeContext,
     ): OwnedBytesHandle {
-        val factory = context[BufferFactoryKey] ?: BufferFactory.Default
+        val factory = context[BufferFactoryKey] ?: ownedBytesFallbackFactory()
         val remaining = buffer.remaining()
         val dst = factory.allocate(remaining)
         dst.write(buffer)
