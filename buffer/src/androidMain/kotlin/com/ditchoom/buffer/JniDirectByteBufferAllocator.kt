@@ -14,10 +14,15 @@ import java.nio.ByteBuffer
  * `src/androidMain/cpp/buffer_jni.cpp`. Consumers who ship the published
  * Android artifact inherit the four common ABIs by default; consumers who
  * strip ABIs must include `arm64-v8a`, `armeabi-v7a`, `x86`, or `x86_64`
- * matching their target. If the .so is unavailable at runtime,
- * [System.loadLibrary] throws [UnsatisfiedLinkError] at class init —
- * intentionally fatal, since the deterministic-buffer factory cannot
- * function without it.
+ * matching their target.
+ *
+ * If [System.loadLibrary] fails at class init it throws [UnsatisfiedLinkError].
+ * On real Android this is fatal — wrapNativeAddress / deterministic buffers
+ * cannot work without it. On the host-JVM unit-test environment
+ * (`testDebugUnitTest` / `testReleaseUnitTest`), the .so isn't on
+ * `java.library.path` at all; callers of `wrapNativeAddress` must catch the
+ * resulting error themselves. `BufferFactoryAndroid.wrapNativeAddress`
+ * converts the error to `UnsupportedOperationException` for that reason.
  */
 internal object JniDirectByteBufferAllocator {
     init {

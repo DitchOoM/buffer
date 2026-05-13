@@ -99,13 +99,49 @@ actual object UnsafeMemory {
         unsafe!!.arrayBaseOffset(ByteArray::class.java).toLong()
     }
 
+    // The 5-arg `Unsafe.copyMemory(Object, long, Object, long, long)` is JDK
+    // 6+ on the desktop JVM but is missing from Android's `sun.misc.Unsafe`
+    // (ART only ships the 3-arg pointer-to-pointer variant). Reflectively
+    // probe once at class init so array <-> native copies short-circuit on
+    // Android with a clear error instead of `NoSuchMethodError`.
+    private val arrayCopyAvailable: Boolean by lazy {
+        if (unsafe == null) return@lazy false
+        try {
+            Unsafe::class.java.getMethod(
+                "copyMemory",
+                Any::class.java,
+                Long::class.javaPrimitiveType,
+                Any::class.java,
+                Long::class.javaPrimitiveType,
+                Long::class.javaPrimitiveType,
+            )
+            true
+        } catch (_: NoSuchMethodException) {
+            false
+        }
+    }
+
+    private fun checkArrayCopySupported() {
+        if (!arrayCopyAvailable) {
+            throw UnsupportedOperationException(
+                "UnsafeMemory.copyMemoryFromArray / copyMemoryToArray rely on the 5-arg " +
+                    "sun.misc.Unsafe.copyMemory(Object, long, Object, long, long), which is not " +
+                    "available on Android. Use JNI's NewDirectByteBuffer + ByteBuffer.put/get " +
+                    "for array <-> native copies on Android, or BufferFactory.Default's " +
+                    "DirectJvmBuffer which handles this internally.",
+            )
+        }
+    }
+
     actual fun copyMemoryToArray(
         srcAddress: Long,
         dest: ByteArray,
         destOffset: Int,
         length: Int,
     ) {
+        if (length == 0) return
         checkSupported()
+        checkArrayCopySupported()
         unsafe!!.copyMemory(
             null,
             srcAddress,
@@ -121,7 +157,9 @@ actual object UnsafeMemory {
         dstAddress: Long,
         length: Int,
     ) {
+        if (length == 0) return
         checkSupported()
+        checkArrayCopySupported()
         unsafe!!.copyMemory(
             src,
             BYTE_ARRAY_BASE_OFFSET + srcOffset,

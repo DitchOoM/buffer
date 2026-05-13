@@ -134,7 +134,31 @@ actual fun PlatformBuffer.Companion.wrapNativeAddress(
     // JNI NewDirectByteBuffer is the supported Android path; reflective
     // DirectByteBuffer(long, int) is hidden-API-gated on non-debuggable
     // test APKs from API 28+.
-    val byteBuffer = JniDirectByteBufferAllocator.newDirectByteBuffer(address, size)
+    //
+    // On the host JVM (testDebugUnitTest / testReleaseUnitTest — the AGP
+    // unit-test environment that loads the Android source set against
+    // android.jar stubs), libditchoom_buffer_jni isn't on java.library.path
+    // — it's only packaged for real Android ABIs. Surface that as
+    // UnsupportedOperationException so callers can detect "wrap not available
+    // here" without distinguishing Android-host-JVM from JS.
+    //
+    // JniDirectByteBufferAllocator's `init { System.loadLibrary(...) }` block
+    // can fail in three observable ways depending on the call ordinal:
+    //   - first call  → ExceptionInInitializerError (wrapping UnsatisfiedLinkError)
+    //   - retries     → NoClassDefFoundError (class-init failed earlier)
+    //   - direct .so resolution failure (rare) → UnsatisfiedLinkError
+    // All three share LinkageError as their nearest common supertype.
+    val byteBuffer =
+        try {
+            JniDirectByteBufferAllocator.newDirectByteBuffer(address, size)
+        } catch (e: LinkageError) {
+            throw UnsupportedOperationException(
+                "wrapNativeAddress requires libditchoom_buffer_jni, which is not loadable on the " +
+                    "current runtime (typically the AGP host-JVM unit-test environment). Use a " +
+                    "real Android device or emulator via connectedAndroidTest for this code path.",
+                e,
+            )
+        }
     byteBuffer.order(byteOrder.toJava())
     return DirectJvmBuffer(byteBuffer)
 }

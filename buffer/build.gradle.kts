@@ -353,6 +353,12 @@ android {
         minSdk = 19
         testInstrumentationRunner = "androidx.benchmark.junit4.AndroidBenchmarkRunner"
         testInstrumentationRunnerArguments["androidx.benchmark.output.enable"] = "true"
+        // Allow benchmarks to run on an emulator. Real timings still aren't representative
+        // of physical devices, but the alternative is the runner failing every benchmark
+        // assertion with "ERRORS (not suppressed): EMULATOR" — masking real test failures
+        // among them. The dev contract: emulator runs are correctness checks, not perf
+        // measurement. CI on a physical device drops the suppression.
+        testInstrumentationRunnerArguments["androidx.benchmark.suppressErrors"] = "EMULATOR,LOW-BATTERY"
         externalNativeBuild {
             cmake {
                 cppFlags("-std=c++17")
