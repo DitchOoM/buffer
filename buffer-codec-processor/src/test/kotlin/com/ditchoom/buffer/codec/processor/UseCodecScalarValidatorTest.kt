@@ -136,11 +136,12 @@ class UseCodecScalarValidatorTest {
 
     @Test
     fun rejectsLengthPrefixedUseCodecOnNonListNonPayloadNonStringField() {
-        // `@LengthPrefixed @UseCodec` accepts three shapes:
-        // `List<@ProtocolMessage E>`, `T: Payload`, and `kotlin.String`
-        // with a `Codec<String>`. A non-List, non-Payload, non-String
-        // field type (here: a bare `UInt`) is none of those and gets a
-        // focused diagnostic naming all three shapes.
+        // `@LengthPrefixed @UseCodec` accepts four shapes:
+        // `List<@ProtocolMessage E>`, `T: Payload`, `kotlin.String` with
+        // a `Codec<String>`, and `com.ditchoom.buffer.codec.OwnedBytesHandle`
+        // with `Codec<OwnedBytesHandle>`. A non-List, non-Payload, non-String,
+        // non-OwnedBytesHandle field type (here: a bare `UInt`) is none of
+        // those and gets a focused diagnostic naming all four shapes.
         val result =
             compile(
                 """
@@ -178,10 +179,13 @@ class UseCodecScalarValidatorTest {
         assertTrue(
             result.messages.contains("`kotlin.collections.List<E>` (list shape)") &&
                 result.messages.contains("`com.ditchoom.buffer.codec.Payload` (scalar Payload shape)") &&
-                result.messages.contains("`kotlin.String` (user-charset shape)"),
-            "@LengthPrefixed @UseCodec on a non-List, non-Payload, non-String field should report " +
-                "the tri-shape diagnostic naming List<E>, Payload, and String. Messages:\n" +
-                result.messages,
+                result.messages.contains("`kotlin.String` (user-charset shape)") &&
+                result.messages.contains(
+                    "`com.ditchoom.buffer.codec.OwnedBytesHandle` (canonical owned-bytes shape)",
+                ),
+            "@LengthPrefixed @UseCodec on a non-List, non-Payload, non-String, non-OwnedBytesHandle " +
+                "field should report the four-shape diagnostic naming List<E>, Payload, String, and " +
+                "OwnedBytesHandle. Messages:\n" + result.messages,
         )
     }
 
@@ -280,6 +284,41 @@ class UseCodecScalarValidatorTest {
             result.messages.contains("@LengthPrefixed @UseCodec") &&
                 result.messages.contains("error"),
             "no validator diagnostic should fire on the user-charset String shape. Messages:\n" +
+                result.messages,
+        )
+    }
+
+    @Test
+    fun acceptsLengthPrefixedUseCodecOnOwnedBytesHandleField() {
+        // `@LengthPrefixed @UseCodec(OwnedBytesHandleCodec::class) val: OwnedBytesHandle`
+        // — the framework's canonical opaque-bytes carrier. Recognized
+        // alongside Payload + String so protocol authors don't need to wrap
+        // auth / opaque-bytes slots in a phantom `: Payload` marker. The
+        // codec's `decode` is allocator-aware via
+        // `DecodeContext[BufferFactoryKey]` and performs the Pattern #2
+        // safe single-copy at the wire boundary.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.OwnedBytesHandle
+                import com.ditchoom.buffer.codec.OwnedBytesHandleCodec
+                import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+
+                @ProtocolMessage
+                data class HeaderWithLengthPrefixedOwnedBytes(
+                    @LengthPrefixed @UseCodec(OwnedBytesHandleCodec::class) val data: OwnedBytesHandle,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+        assertFalse(
+            result.messages.contains("@LengthPrefixed @UseCodec") &&
+                result.messages.contains("error"),
+            "no validator diagnostic should fire on the OwnedBytesHandle scalar shape. Messages:\n" +
                 result.messages,
         )
     }

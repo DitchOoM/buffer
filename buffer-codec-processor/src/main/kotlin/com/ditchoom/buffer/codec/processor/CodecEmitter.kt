@@ -1293,11 +1293,18 @@ internal class CodecEmitter(
         prefixWireOrder: Endianness,
     ): FieldSpec.LengthPrefixedUseCodecPayload? {
         val name = param.name?.asString() ?: return null
-        // `kotlin.String` rides the same shape as `T: Payload`:
-        // prefix + body bytes, codec is `Codec<String>`. Validator surfaces
-        // any user-facing diagnostic.
-        val isString = type.declaration.qualifiedName?.asString() == "kotlin.String"
-        if (!isString && !type.implementsPayload()) return null
+        // `kotlin.String` and `com.ditchoom.buffer.codec.OwnedBytesHandle`
+        // ride the same shape as `T: Payload`: prefix + body bytes, codec is
+        // `Codec<T>`. The `OwnedBytesHandle` admission is the framework's
+        // canonical opaque-bytes carrier — the codec
+        // (`OwnedBytesHandleCodec`) is allocator-aware via
+        // `DecodeContext[BufferFactoryKey]` and performs the safe Pattern #2
+        // copy at the wire boundary. Validator surfaces any user-facing
+        // diagnostic on type/codec mismatches.
+        val qname = type.declaration.qualifiedName?.asString()
+        val isString = qname == "kotlin.String"
+        val isOwnedBytesHandle = qname == OWNED_BYTES_HANDLE_QNAME
+        if (!isString && !isOwnedBytesHandle && !type.implementsPayload()) return null
         val payloadDecl = type.declaration as? KSClassDeclaration ?: return null
         val codecKsType =
             useCodecAnn.arguments
@@ -1793,7 +1800,15 @@ internal class CodecEmitter(
         prefixWidth: Int,
         prefixWireOrder: Endianness,
     ): ConditionalInner.LengthPrefixedUseCodecPayload? {
-        if (!innerType.implementsPayload()) return null
+        // Mirrors `analyzeLengthPrefixedUseCodecPayloadField`: accept
+        // `T: Payload` plus the framework's canonical opaque-bytes carrier
+        // `com.ditchoom.buffer.codec.OwnedBytesHandle`. The latter widens
+        // the `@When @LengthPrefixed @UseCodec val: T?` shape to non-Payload
+        // bytes slots (e.g. mqtt CONNECT password §3.1.3.5) without forcing
+        // a phantom `: Payload` wrapper.
+        val qname = innerType.declaration.qualifiedName?.asString()
+        val isOwnedBytesHandle = qname == OWNED_BYTES_HANDLE_QNAME
+        if (!isOwnedBytesHandle && !innerType.implementsPayload()) return null
         val payloadDecl = innerType.declaration as? KSClassDeclaration ?: return null
         val codecKsType =
             useCodecAnn.arguments
@@ -8016,6 +8031,7 @@ internal class CodecEmitter(
         private const val PAYLOAD_QNAME = "com.ditchoom.buffer.codec.Payload"
         private const val PAYLOAD_PKG = "com.ditchoom.buffer.codec"
         private const val PAYLOAD_SIMPLE = "Payload"
+        private const val OWNED_BYTES_HANDLE_QNAME = "com.ditchoom.buffer.codec.OwnedBytesHandle"
         private const val BOUNDING_LENGTH_CODEC_QNAME = "com.ditchoom.buffer.codec.BoundingLengthCodec"
         private const val FRAMED_BY_QNAME = "com.ditchoom.buffer.codec.annotations.FramedBy"
 

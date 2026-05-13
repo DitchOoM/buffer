@@ -1462,18 +1462,29 @@ class ProtocolMessageProcessor(
             // already runs against the non-null inner type.
             val nonNullableFieldType =
                 if (fieldType.isMarkedNullable) fieldType.makeNotNullable() else fieldType
-            val isStringField = fieldTypeQname == "kotlin.String"
+            val isStringField = fieldTypeQname == STRING_QNAME
             val isPayloadField = payloadType.isAssignableFrom(nonNullableFieldType)
-            if (!isPayloadField && !isStringField) {
+            // `com.ditchoom.buffer.codec.OwnedBytesHandle` — the buffer-codec
+            // canonical consumer-owned bytes carrier. Recognized alongside
+            // Payload + String so `@LengthPrefixed @UseCodec(OwnedBytesHandleCodec)
+            // val: OwnedBytesHandle?` works without forcing protocol authors to
+            // wrap auth / opaque-bytes slots in a phantom Payload marker. The
+            // codec is allocator-aware via `DecodeContext[BufferFactoryKey]`
+            // and performs Pattern #2's safe single-copy at the wire boundary.
+            val isOwnedBytesHandleField = fieldTypeQname == OWNED_BYTES_HANDLE_QNAME
+            if (!isPayloadField && !isStringField && !isOwnedBytesHandleField) {
                 logger.error(
                     "@LengthPrefixed @UseCodec($codecName::class) on $ownerName.$fieldName has " +
                         "field type `${fieldTypeQname ?: "<unresolved>"}`, which is none of: " +
                         "`kotlin.collections.List<E>` (list shape), a type implementing " +
-                        "`com.ditchoom.buffer.codec.Payload` (scalar Payload shape), or " +
-                        "`kotlin.String` (user-charset shape). Wrap binary data in a " +
-                        "`Payload`-marked value class and reference its `Codec<T>` via " +
-                        "`@UseCodec`, use the list shape with a `@ProtocolMessage` element " +
-                        "type, or supply a `Codec<String>` for a String-typed field.",
+                        "`com.ditchoom.buffer.codec.Payload` (scalar Payload shape), " +
+                        "`kotlin.String` (user-charset shape), or " +
+                        "`com.ditchoom.buffer.codec.OwnedBytesHandle` (canonical owned-bytes " +
+                        "shape). Wrap binary data in a `Payload`-marked value class and " +
+                        "reference its `Codec<T>` via `@UseCodec`, use the list shape with a " +
+                        "`@ProtocolMessage` element type, supply a `Codec<String>` for a " +
+                        "String-typed field, or use `OwnedBytesHandle` for opaque consumer-" +
+                        "owned bytes.",
                     param,
                 )
                 return
@@ -2150,6 +2161,7 @@ class ProtocolMessageProcessor(
         private const val BOUNDING_LENGTH_CODEC_QNAME = "com.ditchoom.buffer.codec.BoundingLengthCodec"
         private const val BOOLEAN_QNAME = "kotlin.Boolean"
         private const val STRING_QNAME = "kotlin.String"
+        private const val OWNED_BYTES_HANDLE_QNAME = "com.ditchoom.buffer.codec.OwnedBytesHandle"
         private const val LIST_QNAME = "kotlin.collections.List"
         private const val MAX_DEPTH = 16
 
