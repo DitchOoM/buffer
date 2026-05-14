@@ -66,6 +66,10 @@ internal class LockFreeBufferPool(
                 buffer
             } else {
                 poolMisses.incrementAndGet()
+                // A too-small popped buffer was removed from the pool; free its native
+                // memory before allocating fresh, otherwise it leaks (Arena.ofShared
+                // never closes, FfmAutoBuffer waits on GC).
+                buffer?.freeNativeMemory()
                 factory.allocate(size)
             }
         return PooledBuffer(raw, this)
