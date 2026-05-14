@@ -377,8 +377,7 @@ internal actual fun createCompressStream(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
     windowBits: WindowBits,
-): NodeTransformHandle =
-    NodeTransformHandle(jsCreateCompressStream(algorithm.toOrdinal(), level.value, windowBits.sizeLog2))
+): NodeTransformHandle = NodeTransformHandle(jsCreateCompressStream(algorithm.toOrdinal(), level.value, windowBits.sizeLog2))
 
 @JsFun(
     """
@@ -405,8 +404,7 @@ private external fun jsCreateDecompressStream(
 internal actual fun createDecompressStream(
     algorithm: CompressionAlgorithm,
     windowBits: WindowBits,
-): NodeTransformHandle =
-    NodeTransformHandle(jsCreateDecompressStream(algorithm.toOrdinal(), windowBits.sizeLog2))
+): NodeTransformHandle = NodeTransformHandle(jsCreateDecompressStream(algorithm.toOrdinal(), windowBits.sizeLog2))
 
 @JsFun(
     """

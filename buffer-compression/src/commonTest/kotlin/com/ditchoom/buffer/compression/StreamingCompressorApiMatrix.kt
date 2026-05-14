@@ -4,7 +4,6 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.managed
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -29,7 +28,10 @@ class StreamingCompressorApiMatrix {
     // keeps cross-platform behavior identical (deflate is deterministic at fixed params).
     private val factory: BufferFactory = BufferFactory.managed()
 
-    private data class Lifecycle(val name: String, val drive: (StreamingCompressor, StreamingDecompressor, ByteArray) -> ByteArray)
+    private data class Lifecycle(
+        val name: String,
+        val drive: (StreamingCompressor, StreamingDecompressor, ByteArray) -> ByteArray,
+    )
 
     private val algorithms = listOf(CompressionAlgorithm.Deflate, CompressionAlgorithm.Gzip, CompressionAlgorithm.Raw)
     private val levels =
@@ -66,8 +68,7 @@ class StreamingCompressorApiMatrix {
     }
 
     /** Varying-byte payload — compresses moderately but not trivially. */
-    private fun varyingPayload(size: Int): ByteArray =
-        ByteArray(size) { i -> ((i * 31 + 7) and 0xFF).toByte() }
+    private fun varyingPayload(size: Int): ByteArray = ByteArray(size) { i -> ((i * 31 + 7) and 0xFF).toByte() }
 
     // ---------------------------------------------------------------- Helpers
 
@@ -98,7 +99,10 @@ class StreamingCompressorApiMatrix {
     }
 
     /** Drives compressor.compress(...) + lifecycle, returns compressed bytes. */
-    private fun compressOneShot(input: ByteArray, compressor: StreamingCompressor): ByteArray {
+    private fun compressOneShot(
+        input: ByteArray,
+        compressor: StreamingCompressor,
+    ): ByteArray {
         val chunks = mutableListOf<ReadBuffer>()
         if (input.isNotEmpty()) {
             compressor.compress(input.toReadBuffer()) { chunks.add(it) }
@@ -108,7 +112,10 @@ class StreamingCompressorApiMatrix {
     }
 
     /** Drives decompressor.decompress(...) + finish, returns decompressed bytes. */
-    private fun decompressOneShot(compressed: ByteArray, decompressor: StreamingDecompressor): ByteArray {
+    private fun decompressOneShot(
+        compressed: ByteArray,
+        decompressor: StreamingDecompressor,
+    ): ByteArray {
         val chunks = mutableListOf<ReadBuffer>()
         if (compressed.isNotEmpty()) {
             decompressor.decompress(compressed.toReadBuffer()) { chunks.add(it) }
@@ -177,7 +184,10 @@ class StreamingCompressorApiMatrix {
         runMatrix(lifecycleFlushResetCycle(iterations = 100), payloadFilter = { it.first != "empty" })
     }
 
-    private fun runMatrix(lifecycle: Lifecycle, payloadFilter: (Pair<String, ByteArray>) -> Boolean = { true }) {
+    private fun runMatrix(
+        lifecycle: Lifecycle,
+        payloadFilter: (Pair<String, ByteArray>) -> Boolean = { true },
+    ) {
         var combos = 0
         for (alg in algorithms) {
             if (alg == CompressionAlgorithm.Raw && !supportsRawDeflate) continue
@@ -201,7 +211,11 @@ class StreamingCompressorApiMatrix {
         assertTrue(combos > 0, "matrix executed zero combinations — platform may not support any algorithm")
     }
 
-    private fun assertContentEquals(expected: ByteArray, actual: ByteArray, message: String) {
+    private fun assertContentEquals(
+        expected: ByteArray,
+        actual: ByteArray,
+        message: String,
+    ) {
         if (!expected.contentEquals(actual)) {
             // Truncate large diffs for readability.
             val expHex = expected.take(32).joinToString(" ") { ((it.toInt() and 0xFF)).toString(16).padStart(2, '0') }

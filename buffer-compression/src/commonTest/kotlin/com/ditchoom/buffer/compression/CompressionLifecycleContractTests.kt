@@ -39,7 +39,10 @@ class CompressionLifecycleContractTests {
         return out
     }
 
-    private fun roundTrip(input: ByteArray, alg: CompressionAlgorithm = CompressionAlgorithm.Deflate): ByteArray {
+    private fun roundTrip(
+        input: ByteArray,
+        alg: CompressionAlgorithm = CompressionAlgorithm.Deflate,
+    ): ByteArray {
         val compressor = StreamingCompressor.create(alg, CompressionLevel.Default, factory)
         val cChunks = mutableListOf<ReadBuffer>()
         if (input.isNotEmpty()) {
@@ -189,7 +192,7 @@ class CompressionLifecycleContractTests {
     fun large_payload_repeated_compress_flush_roundtrips() {
         if (!supportsSyncCompression) return
         val payloadSize = 32 * 1024 // forces multi-iteration writeSync on a 16 KB outBuffer
-        val iterations = 16          // small but plenty to hit any boundary alignment
+        val iterations = 16 // small but plenty to hit any boundary alignment
         val payload = ByteArray(payloadSize) { (it and 0xFF).toByte() }
 
         for (alg in listOf(CompressionAlgorithm.Deflate, CompressionAlgorithm.Raw)) {
