@@ -120,6 +120,14 @@ internal expect suspend fun NodeTransformHandle.writeAndEnd(inputs: List<JsByteA
 internal expect fun NodeTransformHandle.destroy()
 
 /**
+ * Reset the underlying zlib handle's internal state in place via `stream.reset()`
+ * (delegates to zlib's `deflateReset` / `inflateReset` C API). Cheaper than
+ * destroying and recreating the stream — no new C++ handle allocation, no JS
+ * Transform-stream re-setup. Used per-message under `no_context_takeover`.
+ */
+internal expect fun NodeTransformHandle.resetState()
+
+/**
  * Synchronously process [input] through a persistent Node.js zlib stream's C++ handle.
  *
  * Replicates Node's internal `processChunkSync` writeSync loop but does NOT close the

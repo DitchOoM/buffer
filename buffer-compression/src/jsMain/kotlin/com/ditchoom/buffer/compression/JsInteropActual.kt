@@ -325,6 +325,10 @@ internal actual fun NodeTransformHandle.destroy() {
     stream.destroy()
 }
 
+internal actual fun NodeTransformHandle.resetState() {
+    stream.reset()
+}
+
 internal actual fun NodeTransformHandle.processSync(
     input: JsByteArray,
     flushFlag: Int,
@@ -338,10 +342,14 @@ internal actual fun NodeTransformHandle.processSync(
  * `writeSync()` method directly. Replicates Node's internal `processChunkSync` but does NOT
  * close the handle afterwards, preserving the LZ77 sliding window for context takeover.
  *
- * Exits the loop on `availInAfter <= 0` instead of `Z_STREAM_END` — Node v24+ sets `closed_`
- * inside `writeSync` once inflate reaches Z_STREAM_END, and any subsequent invocation hits
- * an assertion. Z_SYNC_FLUSH guarantees all output is produced once input is consumed, so
- * the early exit is safe.
+ * Exit logic mirrors Node's `processChunkSync`: break when `availOutAfter > 0` (output buffer
+ * has room left ⇒ all pending output has been drained, including the Z_SYNC_FLUSH trailer
+ * `00 00 FF FF`). Breaking earlier on `availInAfter <= 0` is incorrect when the output buffer
+ * fills exactly at input exhaustion — the trailer bytes are still pending and would be lost,
+ * producing truncated frames the peer can't decode (caught by Autobahn 12.2.8+).
+ *
+ * Z_FINISH/Z_STREAM_END handling stays in [processSyncOneShot], which delegates to Node's own
+ * `_processChunk` so the v24+ `closed_` assertion is handled internally.
  */
 private fun processSyncPersistent(
     stream: dynamic,
@@ -363,23 +371,27 @@ private fun processSyncPersistent(
         handle.writeSync(flushFlag, chunk, inOff, availInBefore, buffer, offset, availOutBefore)
         val availOutAfter: Int = state[0] as Int
         val availInAfter: Int = state[1] as Int
+        val inDelta = availInBefore - availInAfter
         val have = availOutBefore - availOutAfter
         if (have > 0) {
             buffers.push(buffer.slice(offset, offset + have))
             offset += have
             nread += have
         }
-        if (availInAfter <= 0) break
-        if (availOutAfter == 0) {
+        if (availOutAfter == 0 || offset >= chunkSize) {
             availOutBefore = chunkSize
             offset = 0
             buffer = js("Buffer").allocUnsafe(chunkSize)
         }
-        inOff += availInBefore - availInAfter
-        availInBefore = availInAfter
+        if (availOutAfter == 0) {
+            inOff += inDelta
+            availInBefore = availInAfter
+            continue
+        }
+        break
     }
-    stream._outBuffer = js("Buffer").allocUnsafe(chunkSize)
-    stream._outOffset = 0
+    stream._outBuffer = buffer
+    stream._outOffset = offset
 
     if (nread == 0) return Uint8Array(0)
     val result = js("Buffer").concat(buffers, nread)

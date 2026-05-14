@@ -131,10 +131,18 @@ private class JsNodeStreamingCompressor(
     }
 
     override fun reset() {
-        stream?.destroy()
         accumulatedChunks.clear()
         totalBytes = 0
-        stream = createCompressStream(algorithm, level, customWindowBits)
+        // In-place handle reset (deflateReset) avoids destroying and reallocating the
+        // C++ zlib handle on every message — critical under `no_context_takeover`
+        // where the websocket layer calls reset() per message. Only allocate a fresh
+        // stream if `finish()` already destroyed it (`stream == null`).
+        val s = stream
+        if (s != null) {
+            s.resetState()
+        } else {
+            stream = createCompressStream(algorithm, level, customWindowBits)
+        }
     }
 
     override fun close() {
@@ -202,10 +210,15 @@ private class JsNodeStreamingDecompressor(
     }
 
     override fun reset() {
-        stream?.destroy()
         accumulatedChunks.clear()
         totalBytes = 0
-        stream = createDecompressStream(algorithm)
+        // Cheap in-place inflateReset — see JsNodeStreamingCompressor.reset for rationale.
+        val s = stream
+        if (s != null) {
+            s.resetState()
+        } else {
+            stream = createDecompressStream(algorithm)
+        }
     }
 
     override fun close() {

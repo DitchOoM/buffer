@@ -489,6 +489,11 @@ private external fun jsDestroyStream(stream: JsAny)
 
 internal actual fun NodeTransformHandle.destroy() = jsDestroyStream(ref)
 
+@JsFun("(stream) => stream.reset()")
+private external fun jsResetStream(stream: JsAny)
+
+internal actual fun NodeTransformHandle.resetState() = jsResetStream(ref)
+
 // ============================================================================
 // Persistent sync zlib (writeSync loop on the stream's C++ handle)
 // ============================================================================
@@ -496,6 +501,10 @@ internal actual fun NodeTransformHandle.destroy() = jsDestroyStream(ref)
 @JsFun(
     """
 (stream, chunk, flushFlag) => {
+    // Mirrors Node's internal processChunkSync but preserves the handle (no _close()).
+    // Exits when output buffer has room left (availOutAfter > 0), ensuring the
+    // Z_SYNC_FLUSH trailer is fully drained even when output fills exactly at input
+    // exhaustion. See JS-side processSyncPersistent for full notes.
     const handle = stream._handle;
     if (handle == null) throw new Error('zlib handle is null — stream was closed or finished');
     const chunkSize = stream._chunkSize;
@@ -511,25 +520,27 @@ internal actual fun NodeTransformHandle.destroy() = jsDestroyStream(ref)
         handle.writeSync(flushFlag, chunk, inOff, availInBefore, buffer, offset, availOutBefore);
         const availOutAfter = state[0];
         const availInAfter = state[1];
+        const inDelta = availInBefore - availInAfter;
         const have = availOutBefore - availOutAfter;
         if (have > 0) {
             buffers.push(buffer.slice(offset, offset + have));
             offset += have;
             nread += have;
         }
-        // Z_SYNC_FLUSH guarantees all output flushed once input is consumed.
-        // Break before Node v24+'s Z_STREAM_END assertion can fire on inflate.
-        if (availInAfter <= 0) break;
-        if (availOutAfter === 0) {
+        if (availOutAfter === 0 || offset >= chunkSize) {
             availOutBefore = chunkSize;
             offset = 0;
             buffer = Buffer.allocUnsafe(chunkSize);
         }
-        inOff += availInBefore - availInAfter;
-        availInBefore = availInAfter;
+        if (availOutAfter === 0) {
+            inOff += inDelta;
+            availInBefore = availInAfter;
+            continue;
+        }
+        break;
     }
-    stream._outBuffer = Buffer.allocUnsafe(chunkSize);
-    stream._outOffset = 0;
+    stream._outBuffer = buffer;
+    stream._outOffset = offset;
     if (nread === 0) return new Uint8Array(0);
     const result = Buffer.concat(buffers, nread);
     return new Uint8Array(result.buffer, result.byteOffset, result.length);
