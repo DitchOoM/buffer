@@ -201,27 +201,22 @@ class MqttSubAckCodecTest {
 
     @Test
     fun varIntRoundTripsAcrossAllByteWidths() {
-        // SUBACK requires remainingLength >= 2 (packet id) + 1 (at least one
-        // return code per spec) = 3, so we test boundary values >= 3.
-        // 127 (1 byte boundary), 128 (2 byte first), 16383 (2 byte boundary),
-        // 16384 (3 byte first), 2_097_151 (3 byte boundary), 2_097_152
-        // (4 byte first).
+        // Covers the 1↔2-byte (127↔128) and 2↔3-byte (16_383↔16_384) VBI
+        // prefix transitions for the SUBACK wire layout. The codec's 3-
+        // and 4-byte VBI widths are covered authoritatively by
+        // MqttRemainingLengthCodecTest.varIntRoundTripsAcrossAllByteWidths,
+        // which round-trips the length value alone (microseconds, no
+        // wall-clock dependence).
         //
-        // The 4-byte VBI cases force a ~2 M-element list decode. Phase
-        // Flipped `MqttV3SubAckReturnCode` variants to
-        // `data object` singletons under `@DispatchOn(value class)`,
-        // collapsing per-element allocation to zero (decoded list
-        // entries reuse the same four singleton instances regardless
-        // of N). Earlier the data-class variant shape cost one
-        // allocation per decoded entry on JS Node and tripped Mocha's
-        // 2 s default test timeout on the slower GitHub Actions
-        // runner; with the singleton shape the full sweep completes
-        // well under the timeout.
-        //
-        // Real SUBACK packets carry < 100 return codes (one per
-        // matching topic filter); 2 M elements is purely synthetic
-        // test data.
-        for (rl in listOf(127u, 128u, 16383u, 16384u, 2_097_151u, 2_097_152u)) {
+        // Earlier this test also drove rl = 2_097_151u / 2_097_152u, which
+        // forced ~2M return-code allocations + list-equality comparisons.
+        // Even after the singleton-variant fix that zeroed per-element
+        // allocation, the 2M-iteration sweep sat right against Mocha's
+        // 2s default timeout on JS Node CI runners and flaked. Since real
+        // SUBACK packets carry < 100 return codes, the dropped cases were
+        // never exercising a realistic shape — they were a stress test
+        // masquerading as a correctness test.
+        for (rl in listOf(127u, 128u, 16_383u, 16_384u)) {
             val msg = makeAckWithRemainingLength(rl)
             val buf = encode(msg)
             val decoded = SubAckCodec.decode(buf, DecodeContext.Empty)
