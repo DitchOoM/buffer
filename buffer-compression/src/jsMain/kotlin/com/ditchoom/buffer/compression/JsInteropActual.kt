@@ -15,7 +15,7 @@ import kotlin.js.Promise
 // Platform detection
 // ============================================================================
 
-internal actual val isNodeJs: Boolean by lazy {
+internal actual val isNodeJs: Boolean by lazy(LazyThreadSafetyMode.NONE) {
     js("typeof process !== 'undefined' && process.versions != null && process.versions.node != null") as Boolean
 }
 

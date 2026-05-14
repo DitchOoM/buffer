@@ -16,7 +16,7 @@ import kotlin.js.Promise
 @JsFun("() => typeof process !== 'undefined' && process.versions != null && process.versions.node != null")
 private external fun jsIsNodeJs(): Boolean
 
-internal actual val isNodeJs: Boolean by lazy { jsIsNodeJs() }
+internal actual val isNodeJs: Boolean by lazy(LazyThreadSafetyMode.NONE) { jsIsNodeJs() }
 
 // ============================================================================
 // JsByteArray — wraps a JS Uint8Array as opaque JsAny

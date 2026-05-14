@@ -8,17 +8,17 @@ import com.ditchoom.buffer.ReadBuffer
  * Dispatches to Node.js sync APIs or returns browser-unsupported errors.
  */
 
-actual val supportsSyncCompression: Boolean by lazy { isNodeJs }
+actual val supportsSyncCompression: Boolean by lazy(LazyThreadSafetyMode.NONE) { isNodeJs }
 
-actual val supportsRawDeflate: Boolean by lazy { isNodeJs }
+actual val supportsRawDeflate: Boolean by lazy(LazyThreadSafetyMode.NONE) { isNodeJs }
 
-actual val supportsStatefulFlush: Boolean by lazy { isNodeJs }
+actual val supportsStatefulFlush: Boolean by lazy(LazyThreadSafetyMode.NONE) { isNodeJs }
 
 // Node sync zlib options accept windowBits and JsNodeStreamingCompressor now threads it.
 // Browser CompressionStream has no windowBits knob, so this stays false in the browser.
 // The Node Transform suspending path doesn't yet forward windowBits — its expect signature
 // (SuspendingStreamingCompressor.Companion.create) doesn't take it; future API expansion.
-actual val supportsCustomWindowBits: Boolean by lazy { isNodeJs }
+actual val supportsCustomWindowBits: Boolean by lazy(LazyThreadSafetyMode.NONE) { isNodeJs }
 
 actual fun compress(
     buffer: ReadBuffer,
