@@ -101,10 +101,14 @@ internal expect class NodeTransformHandle
 internal expect fun createCompressStream(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
+    windowBits: WindowBits = WindowBits.Default,
 ): NodeTransformHandle
 
 /** Create a decompression Transform stream. */
-internal expect fun createDecompressStream(algorithm: CompressionAlgorithm): NodeTransformHandle
+internal expect fun createDecompressStream(
+    algorithm: CompressionAlgorithm,
+    windowBits: WindowBits = WindowBits.Default,
+): NodeTransformHandle
 
 /** Write chunks and flush with Z_SYNC_FLUSH. Returns output chunks. */
 internal expect suspend fun NodeTransformHandle.writeAndFlush(inputs: List<JsByteArray>): List<JsByteArray>
@@ -114,6 +118,34 @@ internal expect suspend fun NodeTransformHandle.writeAndEnd(inputs: List<JsByteA
 
 /** Destroy the Transform stream. */
 internal expect fun NodeTransformHandle.destroy()
+
+/**
+ * Synchronously process [input] through a persistent Node.js zlib stream's C++ handle.
+ *
+ * Replicates Node's internal `processChunkSync` writeSync loop but does NOT close the
+ * handle afterwards, preserving the LZ77 sliding window across calls (context takeover).
+ * Pair with [zlibSyncFlushFlag] — Z_SYNC_FLUSH guarantees all output is produced once
+ * input is consumed, allowing a safe loop exit before Node v24+'s Z_STREAM_END assertion.
+ */
+internal expect fun NodeTransformHandle.processSync(
+    input: JsByteArray,
+    flushFlag: Int,
+): JsByteArray
+
+/**
+ * One-shot synchronous processing via Node's `_processChunk`. DESTROYS the C++ handle
+ * after completing — only use for `finish()` where the stream won't be reused.
+ */
+internal expect fun NodeTransformHandle.processSyncOneShot(
+    input: JsByteArray,
+    flushFlag: Int,
+): JsByteArray
+
+/** Node.js zlib `Z_SYNC_FLUSH` constant. */
+internal expect fun zlibSyncFlushFlag(): Int
+
+/** Node.js zlib `Z_FINISH` constant. */
+internal expect fun zlibFinishFlag(): Int
 
 // ============================================================================
 // One-shot async Transform stream (stateless — creates and destroys stream)

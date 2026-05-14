@@ -12,7 +12,7 @@ actual val supportsSyncCompression: Boolean by lazy { isNodeJs }
 
 actual val supportsRawDeflate: Boolean by lazy { isNodeJs }
 
-actual val supportsStatefulFlush: Boolean = false
+actual val supportsStatefulFlush: Boolean by lazy { isNodeJs }
 
 // Node sync zlib options accept windowBits and JsNodeStreamingCompressor now threads it.
 // Browser CompressionStream has no windowBits knob, so this stays false in the browser.
