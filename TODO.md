@@ -5,9 +5,9 @@ Remove or update entries as they're resolved. Older entries first.
 
 ## buffer-compression — multiplatform coverage gaps for the JS persistent zlib changes
 
-Today's commits (`8ced89ff`, `c31b130e`, `049b2a51`) reworked the JS / wasmJs persistent zlib path and added a parameterized API parity matrix in commonTest. The matrix runs against any KMP target you exercise, but the following weren't run on this Linux host today:
+Today's commits (`8ced89ff`, `c31b130e`, `049b2a51`, `4453b555`) reworked the JS / wasmJs persistent zlib path and added a parameterized API parity matrix in commonTest. The matrix runs against any KMP target you exercise.
 
-- [ ] Run `:buffer-compression:macosX64Test` (and `:macosArm64Test` / `:iosSimulatorArm64Test`) on a Mac host to confirm `StreamingCompressorApiMatrix` + `CompressionLifecycleContractTests` pass on the Apple zlib impl (`AppleStreamingCompression.kt`). The Apple path uses `deflateReset` / `inflateReset` on a native `z_stream` — same shape as Linux, but never validated by the new tests here.
+- [x] **Apple targets**: PR #149's `build-apple` job ran the new `StreamingCompressorApiMatrix` + `CompressionLifecycleContractTests` against the Apple zlib impl (`AppleStreamingCompression.kt`) and went green.
 - [ ] Run `:buffer-compression:jsBrowserTest` so the browser `CompressionStream` / `DecompressionStream` path is exercised by the new tests. Existing tests already gate on `supportsSyncCompression`, so the matrix should mostly skip — but the contract tests for `close()` / `reset()` semantics should still hit.
 - [ ] Run `:buffer:connectedCheck` (Android instrumented) so the Android compressor implementation is covered by the new matrix.
 
