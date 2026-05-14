@@ -103,7 +103,9 @@ class MutableDataBuffer private constructor(
     }
 
     override fun setLimit(limit: Int) {
+        checkLimitBounds(limit, capacity)
         this.limit = limit
+        if (position > limit) position = limit
     }
 
     private fun requireReadable(needed: Int) {
@@ -389,6 +391,7 @@ class MutableDataBuffer private constructor(
     override fun position(): Int = position
 
     override fun position(newPosition: Int) {
+        checkPositionBounds(newPosition, limit)
         position = newPosition
     }
 
@@ -655,7 +658,9 @@ class MutableDataBufferSlice(
     }
 
     override fun setLimit(limit: Int) {
+        checkLimitBounds(limit, capacity)
         this.limit = limit
+        if (position > limit) position = limit
     }
 
     private fun requireReadable(needed: Int) {
@@ -789,6 +794,7 @@ class MutableDataBufferSlice(
     override fun position(): Int = position
 
     override fun position(newPosition: Int) {
+        checkPositionBounds(newPosition, limit)
         position = newPosition
     }
 

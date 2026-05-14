@@ -67,7 +67,9 @@ class NSDataBuffer(
     }
 
     override fun setLimit(limit: Int) {
+        checkLimitBounds(limit, capacity)
         this.limit = limit
+        if (position > limit) position = limit
     }
 
     private fun requireReadable(needed: Int) {
@@ -202,6 +204,7 @@ class NSDataBuffer(
     override fun position(): Int = position
 
     override fun position(newPosition: Int) {
+        checkPositionBounds(newPosition, limit)
         position = newPosition
     }
 
@@ -292,7 +295,9 @@ internal class NSDataBufferSlice(
     }
 
     override fun setLimit(limit: Int) {
+        checkLimitBounds(limit, capacity)
         this.limit = limit
+        if (position > limit) position = limit
     }
 
     private fun requireReadable(needed: Int) {
@@ -420,6 +425,7 @@ internal class NSDataBufferSlice(
     override fun position(): Int = position
 
     override fun position(newPosition: Int) {
+        checkPositionBounds(newPosition, limit)
         position = newPosition
     }
 
