@@ -57,18 +57,6 @@ interface EncodeContext : CodecContext {
     }
 }
 
-/** Returns the value for [key], or [default] when absent. */
-fun <T : Any> DecodeContext.getOrDefault(
-    key: DecodeKey<T>,
-    default: T,
-): T = get(key) ?: default
-
-/** Returns the value for [key], or [default] when absent. */
-fun <T : Any> EncodeContext.getOrDefault(
-    key: EncodeKey<T>,
-    default: T,
-): T = get(key) ?: default
-
 private class DecodeMapContext(
     private val elements: Map<DecodeKey<*>, Any>,
 ) : DecodeContext {
