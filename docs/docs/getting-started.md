@@ -127,13 +127,14 @@ data class DeviceReport(
     @LengthPrefixed val deviceName: String,
 )
 
-// Generated codec — batch-optimized, with round-trip testing
-val buffer = DeviceReportCodec.encodeToBuffer(report)
-val decoded = DeviceReportCodec.decode(buffer)
-DeviceReportCodec.testRoundTrip(report)
+// Generated codec — type-safe encode/decode at compile time
+val buffer = BufferFactory.Default.allocate(64)
+DeviceReportCodec.encode(buffer, report, EncodeContext.Empty)
+buffer.resetForRead()
+val decoded = DeviceReportCodec.decode(buffer, DecodeContext.Empty)
 ```
 
-No manual read/write matching for 10 fields. No sizeOf arithmetic. No field-order bugs.
+No manual read/write matching for 10 fields. No manual size calculation. No field-order bugs.
 
 See [Protocol Codecs](./recipes/protocol-codecs) for annotations, sealed dispatch, value classes, and the SPI.
 
