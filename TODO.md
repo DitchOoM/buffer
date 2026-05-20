@@ -8,7 +8,7 @@ Remove or update entries as they're resolved. Older entries first.
 Today's commits (`8ced89ff`, `c31b130e`, `049b2a51`, `4453b555`) reworked the JS / wasmJs persistent zlib path and added a parameterized API parity matrix in commonTest. The matrix runs against any KMP target you exercise.
 
 - [x] **Apple targets**: PR #149's `build-apple` job ran the new `StreamingCompressorApiMatrix` + `CompressionLifecycleContractTests` against the Apple zlib impl (`AppleStreamingCompression.kt`) and went green.
-- [ ] Run `:buffer-compression:jsBrowserTest` so the browser `CompressionStream` / `DecompressionStream` path is exercised by the new tests. Existing tests already gate on `supportsSyncCompression`, so the matrix should mostly skip — but the contract tests for `close()` / `reset()` semantics should still hit.
+- [x] Run `:buffer-compression:jsBrowserTest` — now part of `prePublishCheck`; the browser `CompressionStream` / `DecompressionStream` path runs the matrix + `close()` / `reset()` contract tests and is green (PR #149 `build-linux`).
 - [ ] Run `:buffer:connectedCheck` (Android instrumented) so the Android compressor implementation is covered by the new matrix.
 
 ## buffer-compression — `supportsStatefulFlush` on `SuspendingStreamingCompressor`
