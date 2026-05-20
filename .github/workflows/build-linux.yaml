@@ -81,21 +81,21 @@ jobs:
           ./gradlew :buffer-codec-processor:test
           --no-build-cache ${{ inputs.gradle-args }}
 
-      - name: Run JVM / JS / WASM tests
-        # Android coverage comes from the dedicated Android Emulator
-        # Integration Test workflow (connected*AndroidTest on a real
-        # emulator with ART). The host-JVM-with-android-stubs tasks
-        # (testDebugUnitTest / testReleaseUnitTest) used to be wired
-        # in here, but they don't reflect real Android behavior — Android
-        # ships its own Unsafe / libcore surface, ART's
-        # java.nio.DirectByteBuffer keeps the legacy `(long, int)` ctor
-        # the JDK 21 host removed, and `Unsafe.invokeCleaner` resolves
-        # differently. Running those tasks against the host JDK 21 (as
-        # the Linux CI runner does) produced false negatives that
-        # weren't reproducible on a device.
+      - name: Run JVM / JS / WASM / Android-host tests
+        # The host-JVM Android unit tasks (testDebugUnitTest /
+        # testReleaseUnitTest) run here so contributors can reproduce
+        # them on the desktop without an emulator — a convenience signal.
+        # They are NOT authoritative for Android: the host JDK 21 differs
+        # from ART (its own Unsafe / libcore surface, the legacy
+        # java.nio.DirectByteBuffer `(long, int)` ctor, different
+        # `Unsafe.invokeCleaner` resolution). The dedicated "Android
+        # Emulator Integration Test" workflow runs the full suite on a
+        # real emulator (ART, API 19 + 29) and is the source of truth
+        # for Android behavior.
         run: >-
           ./gradlew ktlintCheck
           jvmTest jsNodeTest jsBrowserTest wasmJsNodeTest wasmJsBrowserTest
+          testDebugUnitTest testReleaseUnitTest
           --no-build-cache ${{ inputs.gradle-args }}
 
       - name: Run Linux x64 tests

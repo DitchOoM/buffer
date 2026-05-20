@@ -2,6 +2,7 @@
 
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSetTree
 import org.jetbrains.kotlin.konan.target.HostManager
 
 plugins {
@@ -39,6 +40,11 @@ kotlin {
         publishLibraryVariants("release")
         // Use JVM 1.8 for Android to maintain maximum compatibility
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
+        // Include commonTest in Android instrumented tests so the full
+        // suite runs on a real emulator (ART), not just the host JVM.
+        instrumentedTestVariant {
+            sourceSetTree.set(KotlinSourceSetTree.test)
+        }
     }
     jvm {
         // Keep Java 8 bytecode for maximum compatibility

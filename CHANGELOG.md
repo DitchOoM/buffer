@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. This project adheres
 to [Semantic Versioning](https://semver.org/).
 
-## [4.3.0]
+## [5.0.0]
 
 This release reworks the `buffer-codec` framing API and unifies the buffer
 bounds-checking / exception model across platforms. The codec changes are
@@ -91,4 +91,4 @@ migration notes below.
   window across flushes; negative `windowBits` normalized for Node.js;
   Node v24+ `Z_STREAM_END` assertion avoided.
 
-[4.3.0]: https://github.com/DitchOoM/buffer/releases/tag/v4.3.0
+[5.0.0]: https://github.com/DitchOoM/buffer/releases/tag/v5.0.0
