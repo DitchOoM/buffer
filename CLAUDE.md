@@ -374,7 +374,7 @@ sealed interface MqttPacket {
 
 Key rules: `@DispatchValue` must return `Int`. `wire` values are validated at compile time against the discriminator's inner type range (e.g., UByte 0-255). Duplicate `@PacketType` values are compile errors.
 
-For protocols that mix byte orders within a single message, use `@WireOrder(Endianness.Big)` or `@WireOrder(Endianness.Little)` on individual fields. This overrides the message-level `@ProtocolMessage(wireOrder = ...)`. Combines with `@WireBytes` for custom-width little-endian fields (e.g., BLE ATT 3-byte LE lengths).
+For protocols that mix byte orders within a single message, use `@WireOrder(Endianness.Big)` or `@WireOrder(Endianness.Little)` on individual fields. This overrides the message-level `@ProtocolMessage(wireOrder = ...)`. It composes with `@WireBytes` when a custom-width field's byte order also differs from the message default.
 
 ### `peekFrameSize` — Generated Stream Framing
 

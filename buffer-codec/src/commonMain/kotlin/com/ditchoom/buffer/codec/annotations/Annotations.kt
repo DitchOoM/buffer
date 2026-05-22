@@ -368,28 +368,28 @@ annotation class WireOrder(
  * returns `Boolean` is fair game (bit tests on the inner scalar, comparisons
  * against constants, two-flag conjunctions, …).
  *
- * Example — HTTP/2 DATA frame's pad-length field is present only when both
- * `PADDED` is set in the flags AND the payload has bytes left:
+ * Example — a `keyId` field present only when a frame is both encrypted and
+ * carries a header extension:
  *
  * ```kotlin
  * @JvmInline
  * @ProtocolMessage
- * value class Http2Flags(val raw: UByte) {
- *     val padded: Boolean get() = (raw.toInt() and 0x08) != 0
- *     val endStream: Boolean get() = (raw.toInt() and 0x01) != 0
+ * value class FrameFlags(val raw: UByte) {
+ *     val encrypted: Boolean get() = (raw.toInt() and 0x01) != 0
+ *     val hasHeaderExtension: Boolean get() = (raw.toInt() and 0x02) != 0
  *     // Compound predicate composed in Kotlin, exposed as a single Boolean val:
- *     val paddedWithBody: Boolean get() = padded && (raw.toInt() and 0xF0) != 0
+ *     val carriesKeyId: Boolean get() = encrypted && hasHeaderExtension
  * }
  *
- * @ProtocolMessage(wireOrder = Endianness.Big)
- * data class Http2DataFrame(
- *     val flags: Http2Flags,
- *     @When("flags.paddedWithBody") val padLength: UByte? = null,
+ * @ProtocolMessage
+ * data class SecureFrame(
+ *     val flags: FrameFlags,
+ *     @When("flags.carriesKeyId") val keyId: UInt? = null,
  *     // … rest of the frame
  * )
  * ```
  *
- * The validator only sees `flags.paddedWithBody` returning `Boolean` — the
+ * The validator only sees `flags.carriesKeyId` returning `Boolean` — the
  * combined logic stays in code where it's testable and refactorable, and the
  * predicate language stays narrow enough to keep the validator's diagnostics
  * actionable.
@@ -578,7 +578,7 @@ annotation class FramedBy(
  * value class MqttFixedHeader(val raw: UByte) {
  *     @DispatchValue
  *     val packetType: Int get() = raw.toUInt().shr(4).toInt()
- *     val flags: UByte get() = (raw and 0x0Fu)
+ *     val flags: UByte get() = (raw.toUInt() and 0x0Fu).toUByte()
  * }
  *
  * @DispatchOn(MqttFixedHeader::class)
@@ -614,7 +614,7 @@ annotation class DispatchOn(
  *     @DispatchValue
  *     val packetType: Int get() = raw.toUInt().shr(4).toInt()
  *
- *     val flags: UByte get() = (raw and 0x0Fu)
+ *     val flags: UByte get() = (raw.toUInt() and 0x0Fu).toUByte()
  * }
  * ```
  *
