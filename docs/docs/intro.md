@@ -17,7 +17,7 @@ Buffer gives you one `ReadBuffer`/`WriteBuffer` API that delegates to platform-n
 - **Stream Processing**: Parse protocols that span chunk boundaries without manual accumulator code
 - **Protocol Codecs**: Pair encode/decode logic in a single `Codec<T>` with built-in round-trip testing
 - **Compression**: `compress()`/`decompress()` on any `ReadBuffer` across all platforms
-- **Flow Extensions**: `mapBuffer()`, `asStringFlow()`, `lines()` — compose streaming transforms with Kotlin Flow
+- **Flow & Connections**: Flow operators (`mapBuffer`, `lines`, `asStringFlow`) plus transport abstractions — `ByteStream`, `Connection<T>`, `StreamMux<T>` — for protocol layering
 - **SIMD-Accelerated Operations**: Bulk comparison, search (`indexOf`), fill, and XOR masking
 - **7 Platforms**: Same API on JVM, Android, iOS, macOS, Linux, JS, WASM
 
@@ -107,7 +107,7 @@ dependencies {
     // Optional: Compression (gzip, deflate)
     implementation("com.ditchoom:buffer-compression:<latest-version>")
 
-    // Optional: Flow extensions (lines, mapBuffer, asStringFlow)
+    // Optional: Flow operators + transport abstractions (Connection, ByteStream)
     implementation("com.ditchoom:buffer-flow:<latest-version>")
 }
 ```
@@ -118,4 +118,5 @@ dependencies {
 - [Buffer Pooling](./recipes/buffer-pooling) - Eliminate allocation overhead
 - [Stream Processing](./recipes/stream-processing) - Handle chunked network data
 - [Protocol Codecs](./recipes/protocol-codecs) - Type-safe encode/decode
+- [Flow & Connections](./recipes/flow) - Streaming transforms and transport abstractions
 - [Performance](./performance) - Optimization tips

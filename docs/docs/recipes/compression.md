@@ -440,47 +440,82 @@ processor.release()
 
 ## Memory Management
 
-### Using BufferAllocator
+### Choosing a Buffer Factory
 
-Control how output buffers are allocated:
+Compressor and decompressor output buffers are allocated through a `BufferFactory`.
+Pass `bufferFactory` to control the allocation strategy — every `create` function
+accepts it, including the suspending variants:
 
 ```kotlin
-// Use direct memory (default) - best for I/O
+// Direct/native memory (default) - best for I/O
 SuspendingStreamingCompressor.create(
     algorithm = CompressionAlgorithm.Gzip,
-    allocator = BufferAllocator.Direct
+    bufferFactory = BufferFactory.Default,
 )
 
-// Use heap memory - faster allocation
+// Heap memory - faster allocation, no native cleanup
 SuspendingStreamingCompressor.create(
     algorithm = CompressionAlgorithm.Gzip,
-    allocator = BufferAllocator.Heap
-)
-
-// Use heap allocation
-SuspendingStreamingCompressor.create(
-    algorithm = CompressionAlgorithm.Gzip,
-    allocator = BufferAllocator.Heap
+    bufferFactory = BufferFactory.managed(),
 )
 ```
 
 ### Output Buffer Size
 
-Tune the output chunk size for your use case:
+The synchronous `StreamingCompressor` / `StreamingDecompressor` let you tune the
+output chunk size (the suspending variants do not expose this):
 
 ```kotlin
 // Smaller chunks - lower latency, more overhead
-SuspendingStreamingCompressor.create(
+StreamingCompressor.create(
     algorithm = CompressionAlgorithm.Gzip,
-    outputBufferSize = 4096
+    outputBufferSize = 4096,
 )
 
 // Larger chunks - higher throughput, more memory
-SuspendingStreamingCompressor.create(
+StreamingCompressor.create(
     algorithm = CompressionAlgorithm.Gzip,
-    outputBufferSize = 65536
+    outputBufferSize = 65536,
 )
 ```
+
+### Window Size (`WindowBits`)
+
+`StreamingCompressor.create` accepts a `windowBits` argument that sets the log2 size
+of zlib's LZ77 sliding window. A smaller window uses less memory at some cost to the
+compression ratio.
+
+```kotlin
+// Algorithm default - 15-bit / 32 KB window
+StreamingCompressor.create(algorithm = CompressionAlgorithm.Raw)
+
+// Smaller 512-byte window (9 bits) - lower memory
+StreamingCompressor.create(
+    algorithm = CompressionAlgorithm.Raw,
+    windowBits = WindowBits(9),
+)
+```
+
+`WindowBits` is range-checked: only `WindowBits.Default` or `WindowBits(9..15)` are
+representable (`WindowBits.Min` is 9, `WindowBits.Max` is 15). zlib rejects a window
+size of 8, so it is unrepresentable by construction.
+
+:::warning Platform support
+Only **Linux native** currently honors a custom `windowBits`. `java.util.zip.Deflater`
+(JVM/Android) has no window-size knob, and Apple/JS/Wasm don't yet wire it through — on
+those platforms the argument is **silently ignored** and the algorithm default is used.
+Round-trips still succeed everywhere because the decompressor also falls back to the
+default. Check `supportsCustomWindowBits` before relying on a specific window size:
+
+```kotlin
+if (supportsCustomWindowBits) {
+    StreamingCompressor.create(
+        algorithm = CompressionAlgorithm.Raw,
+        windowBits = WindowBits(12),
+    )
+}
+```
+:::
 
 ---
 

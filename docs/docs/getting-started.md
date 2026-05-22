@@ -22,7 +22,7 @@ dependencies {
     // Optional: Compression (gzip, deflate)
     implementation("com.ditchoom:buffer-compression:<latest-version>")
 
-    // Optional: Flow extensions (lines, mapBuffer, asStringFlow)
+    // Optional: Flow operators + transport abstractions (Connection, ByteStream)
     implementation("com.ditchoom:buffer-flow:<latest-version>")
 }
 ```
@@ -165,6 +165,9 @@ bufferFlow
     .lines()
     .collect { line -> process(line) }
 ```
+
+See [Flow & Connections](./recipes/flow) for the full operator set and the
+`ByteStream` / `Connection<T>` / `StreamMux<T>` transport abstractions.
 
 ---
 
