@@ -58,12 +58,19 @@ actual fun PlatformBuffer.Companion.allocateNative(
 
 /**
  * Allocates a buffer with shared memory support.
- * On Linux, falls back to native allocation (no cross-process shared memory).
+ *
+ * Linux has no cross-process shared memory primitive in this library — falls
+ * back to a heap-backed `ByteArrayBuffer` (GC-cleaned). Previously routed to
+ * `NativeBuffer.allocate` (malloc/free), which leaks unless the caller
+ * explicitly closes; that behavior is preserved under the explicit-lifecycle
+ * `PlatformBuffer.Companion.allocateNative` and `deterministic()`. Aligns
+ * `allocateShared` with `BufferFactory.shared()` (already managed-backed via
+ * `sharedBufferFactory = managedBufferFactory`).
  */
 actual fun PlatformBuffer.Companion.allocateShared(
     size: Int,
     byteOrder: ByteOrder,
-): PlatformBuffer = NativeBuffer.allocate(size, byteOrder)
+): PlatformBuffer = sharedBufferFactory.allocate(size, byteOrder)
 
 actual fun PlatformBuffer.Companion.wrapNativeAddress(
     address: Long,

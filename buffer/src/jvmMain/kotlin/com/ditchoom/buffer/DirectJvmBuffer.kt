@@ -30,5 +30,5 @@ class DirectJvmBuffer(
      */
     override val nativeSize: Long get() = capacity.toLong()
 
-    override fun slice() = DirectJvmBuffer(byteBuffer.slice())
+    override fun slice(byteOrder: ByteOrder): DirectJvmBuffer = DirectJvmBuffer(byteBuffer.slice().order(byteOrder.toJava()))
 }

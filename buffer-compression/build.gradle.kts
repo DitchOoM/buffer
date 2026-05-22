@@ -2,6 +2,7 @@
 
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSetTree
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import org.jetbrains.kotlin.konan.target.HostManager
 
@@ -29,7 +30,11 @@ apply(from = "../gradle/setup.gradle.kts")
 
 @Suppress("UNCHECKED_CAST")
 val getNextVersion = project.extra["getNextVersion"] as (Boolean) -> Any
-project.version = getNextVersion(!isRunningOnGithub).toString()
+// Honor -Pversion so local publishes can pin a version (e.g. -Pversion=4.3.0-SNAPSHOT)
+// without being clobbered by Maven Central's getNextVersion auto-increment.
+if (!project.hasProperty("version") || project.version == "unspecified") {
+    project.version = getNextVersion(!isRunningOnGithub).toString()
+}
 
 repositories {
     google()
@@ -45,6 +50,11 @@ kotlin {
         publishLibraryVariants("release")
         // Use JVM 1.8 for Android to maintain maximum compatibility
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
+        // Include commonTest in Android instrumented tests so the full
+        // suite runs on a real emulator (ART), not just the host JVM.
+        instrumentedTestVariant {
+            sourceSetTree.set(KotlinSourceSetTree.test)
+        }
     }
     jvm {
         // Keep Java 8 bytecode for maximum compatibility
@@ -99,6 +109,10 @@ kotlin {
                     associateWith(this@linuxX64.compilations.getByName("main"))
                 }
             }
+            // Register linuxArm64 on local Linux dev too (was previously CI-only). K/N
+            // ships an aarch64 cross-compiler; required for downstream consumers
+            // (socket, mqtt) that target linuxArm64 to resolve buffer's umbrella metadata.
+            linuxArm64()
         }
     }
     // Link against simdutf (transitive dependency via :buffer module)

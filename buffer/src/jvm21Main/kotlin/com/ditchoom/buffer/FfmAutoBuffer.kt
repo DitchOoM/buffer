@@ -32,10 +32,10 @@ class FfmAutoBuffer(
     /** No-op — memory is GC-managed via [java.lang.foreign.Arena.ofAuto]. */
     override fun freeNativeMemory() {}
 
-    override fun slice(): PlatformBuffer {
+    override fun slice(byteOrder: ByteOrder): PlatformBuffer {
         val slicedSegment = segment.asSlice(position().toLong(), remaining().toLong())
         val globalView = MemorySegment.ofAddress(slicedSegment.address()).reinterpret(slicedSegment.byteSize())
-        val sliceByteBuffer = globalView.asByteBuffer().order(byteBuffer.order())
+        val sliceByteBuffer = globalView.asByteBuffer().order(byteOrder.toJava())
         return FfmSliceBuffer(slicedSegment, sliceByteBuffer)
     }
 }

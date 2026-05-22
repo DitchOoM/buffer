@@ -38,6 +38,18 @@ class BufferTests {
     }
 
     @Test
+    fun sharedMemoryReadString() {
+        // Regression: JS browser TextDecoder.decode() rejects SharedArrayBuffer-backed
+        // views (concurrent-mutation hazard) — JsBuffer.readString must copy out first.
+        val text = "Hello, shared world!"
+        val bytes = text.encodeToByteArray()
+        val buffer = BufferFactory.shared().allocate(bytes.size)
+        buffer.writeBytes(bytes)
+        buffer.resetForRead()
+        assertEquals(text, buffer.readString(bytes.size, Charset.UTF8))
+    }
+
+    @Test
     fun absolute() {
         val platformBuffer =
             BufferFactory.managed().allocate(

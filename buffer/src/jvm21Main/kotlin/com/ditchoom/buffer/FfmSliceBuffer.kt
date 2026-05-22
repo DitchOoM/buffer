@@ -46,10 +46,10 @@ class FfmSliceBuffer(
     /** No-op — this slice does not own the Arena. */
     override fun freeNativeMemory() {}
 
-    override fun slice(): PlatformBuffer {
+    override fun slice(byteOrder: ByteOrder): PlatformBuffer {
         val sliced = segment.asSlice(position().toLong(), remaining().toLong())
         val globalView = MemorySegment.ofAddress(sliced.address()).reinterpret(sliced.byteSize())
-        val bb = globalView.asByteBuffer().order(byteBuffer.order())
+        val bb = globalView.asByteBuffer().order(byteOrder.toJava())
         return FfmSliceBuffer(sliced, bb)
     }
 }

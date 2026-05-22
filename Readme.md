@@ -85,11 +85,14 @@ data class SensorReading(
 )
 ```
 
-The KSP processor generates a full `Codec<SensorReading>` — encode, decode, and sizeOf — at compile time:
+The KSP processor generates a full `Codec<SensorReading>` — encode, decode, and wireSize — at compile time:
 
 ```kotlin
-val buffer = SensorReadingCodec.encodeToBuffer(reading)
-val decoded = SensorReadingCodec.decode(buffer)
+val buffer = BufferFactory.Default.allocate(64)
+SensorReadingCodec.encode(buffer, reading, EncodeContext.Empty)
+buffer.resetForRead()
+
+val decoded = SensorReadingCodec.decode(buffer, DecodeContext.Empty)
 ```
 
 Annotations cover common binary protocol patterns:
@@ -99,7 +102,7 @@ Annotations cover common binary protocol patterns:
 - `@LengthFrom("field")` — string length from a preceding numeric field
 - `@WireBytes(n)` — custom wire width for numeric fields (e.g., 3-byte integers)
 - `@WireOrder(order)` — per-field byte order override (big/little endian)
-- `@WhenTrue("expr")` — conditional nullable fields
+- `@When("expr")` — conditional nullable fields
 - `@UseCodec(codec)` — delegate to an existing `Codec` object
 - `@Payload` — generic payload type parameter
 - `@PacketType(value, wire)` on sealed interface variants — auto-dispatched decode; `wire` for spec-compliant encode values

@@ -102,7 +102,7 @@ class JsBuffer(
     }
 
     // Zero-copy slice using subarray
-    override fun slice(): ReadBuffer =
+    override fun slice(byteOrder: ByteOrder): JsBuffer =
         JsBuffer(
             buffer.subarray(positionValue, limitValue),
             byteOrder,
@@ -110,16 +110,34 @@ class JsBuffer(
         )
 
     override fun readByteArray(size: Int): ByteArray {
+        if (size < 1) return ByteArray(0)
+        requireReadable(size)
         val subArray = buffer.subarray(positionValue, positionValue + size)
         val byteArray = Int8Array(subArray.buffer, subArray.byteOffset, size)
         positionValue += size
         return byteArray.unsafeCast<ByteArray>()
     }
 
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        if (length == 0) return
+        requireReadable(length)
+        // ByteArray on Kotlin/JS IS Int8Array at runtime — typed-array .set is a
+        // bulk memcpy between the underlying ArrayBuffers, honoring dstOffset.
+        val subArray = buffer.subarray(positionValue, positionValue + length)
+        dst.unsafeCast<Int8Array>().set(subArray, offset)
+        positionValue += length
+    }
+
     override fun readString(
         length: Int,
         charset: Charset,
     ): String {
+        if (length == 0) return ""
+        requireReadable(length)
         val encoding =
             when (charset) {
                 Charset.UTF8 -> "utf-8"
@@ -135,10 +153,16 @@ class JsBuffer(
 
         @Suppress("UNCHECKED_CAST_TO_EXTERNAL_INTERFACE")
         val textDecoder = TextDecoder(encoding, js("{fatal: true}") as TextDecoderOptions)
-        val result =
-            textDecoder.decode(
-                buffer.subarray(positionValue, positionValue + length).unsafeCast<BufferSource>(),
-            )
+        val sourceView = buffer.subarray(positionValue, positionValue + length)
+        val decodeView =
+            if (isShared) {
+                // Chrome forbids TextDecoder.decode() on SharedArrayBuffer-backed views
+                // (concurrent-mutation hazard); copy into a fresh non-shared Int8Array first.
+                Int8Array(length).also { it.set(sourceView, 0) }
+            } else {
+                sourceView
+            }
+        val result = textDecoder.decode(decodeView.unsafeCast<BufferSource>())
         position(positionValue + length)
         return result
     }
@@ -148,6 +172,8 @@ class JsBuffer(
         offset: Int,
         length: Int,
     ): WriteBuffer {
+        if (length == 0) return this
+        checkWriteBounds(length)
         val int8Array = bytes.unsafeCast<Int8Array>().subarray(offset, offset + length)
         this.buffer.set(int8Array, positionValue)
         positionValue += int8Array.length
@@ -156,6 +182,8 @@ class JsBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
+        if (size == 0) return
+        checkWriteBounds(size)
         val actual = buffer.unwrapFully()
         if (actual is JsBuffer) {
             // Zero-copy: copy only the remaining portion using subarray

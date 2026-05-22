@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.pool
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
@@ -52,7 +53,7 @@ import com.ditchoom.buffer.ReadWriteBuffer
  * @see withBuffer for auto-releasing buffer usage
  * @see withPool for scoped pool creation
  */
-sealed interface BufferPool {
+sealed interface BufferPool : BufferFactory {
     /**
      * Acquires a buffer of at least the specified size.
      * The returned buffer is a [PooledBuffer] wrapper whose [freeNativeMemory][PlatformBuffer.freeNativeMemory]
@@ -60,6 +61,28 @@ sealed interface BufferPool {
      * The buffer may be larger than requested.
      */
     fun acquire(minSize: Int = 0): ReadWriteBuffer
+
+    /**
+     * Allocates a buffer with the requested byte order via the pool when possible,
+     * otherwise via the pool's seed factory.
+     *
+     * When a cached buffer matches [byteOrder] this avoids allocation; on byte-order
+     * mismatch or non-[PlatformBuffer] cache content, the cached entry is returned to
+     * the pool and a fresh buffer is allocated from the seed factory.
+     */
+    override fun allocate(
+        size: Int,
+        byteOrder: ByteOrder,
+    ): PlatformBuffer
+
+    /**
+     * Wraps an existing byte array. Pools do not cache wrapped arrays — this delegates
+     * to the seed factory used to construct the pool.
+     */
+    override fun wrap(
+        array: ByteArray,
+        byteOrder: ByteOrder,
+    ): PlatformBuffer
 
     /**
      * Releases a buffer back to the pool for reuse.

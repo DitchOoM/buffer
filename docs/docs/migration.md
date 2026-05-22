@@ -1,11 +1,152 @@
 ---
 sidebar_position: 3
-title: Migration Guide (v3 → v4)
+title: Migration Guide
 ---
 
 # Migration Guide
 
-This guide covers breaking changes from buffer v3.x to v4.x. The v4 release modernizes the API around three themes: **factory-based allocation**, **deterministic memory management**, and **zero-copy platform interop**.
+This guide covers breaking changes between major releases. The [v4 → v5](#v4-v5)
+section is newest; the v3 → v4 guide follows below.
+
+## v4 → v5 {#v4-v5}
+
+v5 reworks the `buffer-codec` framing API and unifies buffer bounds-checking across
+platforms. The codec changes are **source-breaking** for code that consumed
+`buffer-codec` 4.2.x. The core `buffer` module has no breaking API changes — only new
+portable behavior (see [Portable overflow exceptions](#portable-exceptions)).
+
+If you do not use `buffer-codec`, the only thing to know is that
+`BufferOverflowException` / `BufferUnderflowException` are now common types you can
+`catch` in `commonMain`.
+
+### Codec quick reference
+
+| v4 (old) | v5 (new) |
+|----------|----------|
+| `Codec<T>` (single interface) | `Codec<T>` = `Encoder<in T>` + `Decoder<out T>` + `FrameDetector` |
+| `fun sizeOf(value): SizeEstimate` | `fun wireSize(value, context): WireSize` |
+| `SizeEstimate.Exact` / `.UnableToPrecalculate` | `WireSize.Exact(bytes)` / `WireSize.BackPatch` |
+| `PeekResult` in `com.ditchoom.buffer.stream` | `PeekResult` in `com.ditchoom.buffer.codec` |
+| `PeekResult.Size(n)` | `PeekResult.Complete(n)` |
+| `CodecContext.Key<T>` | `DecodeKey<T>` / `EncodeKey<T>` / `CodecKey<T>` |
+| `@WhenTrue` | `@When` |
+| `context.getOrDefault(key, default)` | `context[key] ?: default` |
+
+### `Codec` split into directional interfaces
+
+`Codec<T>` is now the intersection of three interfaces — `Encoder<in T>`,
+`Decoder<out T>`, and `FrameDetector`. A type that declares `Codec<T>` and implements
+`encode` / `decode` keeps compiling unchanged. The benefit: send-only or receive-only
+code can now depend on just `Encoder<T>` or `Decoder<T>` instead of the full codec.
+
+### `sizeOf` → `wireSize`
+
+`Encoder.sizeOf` is replaced by `Encoder.wireSize`, and the `SizeEstimate` sealed type
+is removed.
+
+**Before (v4)**
+
+```kotlin
+override fun sizeOf(value: MyMessage): SizeEstimate =
+    SizeEstimate.Exact(4 + value.payload.length)
+```
+
+**After (v5)**
+
+```kotlin
+override fun wireSize(value: MyMessage, context: EncodeContext): WireSize =
+    WireSize.Exact(4 + value.payload.length)
+```
+
+Return `WireSize.Exact(n)` for fixed-size codecs. For variable-length codecs that
+cannot precompute the size, return `WireSize.BackPatch` — the framework encodes into a
+`GrowableWriteBuffer` and back-patches length prefixes afterward (`WireSize.BackPatch`
+replaces `SizeEstimate.UnableToPrecalculate`). Generated codecs handle this for you.
+
+### `PeekResult` moved and reshaped
+
+`PeekResult` moved from `com.ditchoom.buffer.stream` to `com.ditchoom.buffer.codec`,
+and its variants changed:
+
+- `PeekResult.Size(n)` → `PeekResult.Complete(n)`
+- `NeedsMoreData` — unchanged
+- `NoFraming` — new. A codec at a streaming boundary that cannot frame now fails
+  loudly at startup instead of silently hanging the receive loop.
+
+Update the import and replace any `PeekResult.Size(n)` with `PeekResult.Complete(n)`.
+
+### Context keys are now directional
+
+The single nested `CodecContext.Key<T>` is split into `DecodeKey<T>`, `EncodeKey<T>`,
+and `CodecKey<T>` (the last extends both). `DecodeContext.with` / `EncodeContext.with`
+take the matching directional key.
+
+**Before (v4)**
+
+```kotlin
+object MaxSizeKey : CodecContext.Key<Int>
+```
+
+**After (v5)**
+
+```kotlin
+// readable during decode only
+object MaxSizeKey : DecodeKey<Int>
+
+// available to both directions
+object AllocatorKey : CodecKey<BufferFactory>
+```
+
+### `@WhenTrue` → `@When`
+
+Renamed; semantics unchanged. Rename the annotation at every use site.
+
+### `@WireOrder` now overrides buffer byte order
+
+A field annotated `@WireOrder(Endianness.Little)` is now encoded/decoded little-endian
+**regardless** of the `ReadBuffer`/`WriteBuffer` byte order. Previously the buffer's
+`byteOrder` could leak through for some scalar shapes (issue #154). If you compensated
+for the old bug by flipping `byteOrder` globally, that workaround will now
+double-correct — remove it.
+
+### `getOrDefault` removed
+
+`DecodeContext.getOrDefault` / `EncodeContext.getOrDefault` are removed. Use
+`context[key] ?: default` at the call site.
+
+### `buffer-flow` bridge API removed
+
+The unused bridge API is gone: `Connection.asByteStream`, `ByteStream.asCodecConnection`,
+`ByteStream.asFramedCodecConnection`, `Sender.contramap`, `Receiver.map`,
+`Receiver.mapNotNull`, and `Connection.map`. The dual-direction
+`Connection.mapNotNull(encode, decode)` used for protocol layering is **retained** —
+see [Flow & Connections](./recipes/flow).
+
+### Portable overflow / underflow exceptions {#portable-exceptions}
+
+`BufferOverflowException` / `BufferUnderflowException` are now common `expect class`
+types. On JVM/Android the actuals still subclass `java.nio.BufferOverflowException` /
+`java.nio.BufferUnderflowException`, so existing `catch (e: java.nio.BufferOverflowException)`
+keeps matching. Non-JVM targets previously threw platform-native exceptions (or, on
+Apple/Linux native, segfaulted on overflow) — they now throw the common type.
+`commonMain` code can now portably `catch (e: BufferOverflowException)`. No migration
+needed; this change is strictly additive.
+
+### v5 checklist
+
+- [ ] Implement `wireSize` instead of `sizeOf`; replace `SizeEstimate` with `WireSize`
+- [ ] Update `PeekResult` import to `com.ditchoom.buffer.codec`; `Size(n)` → `Complete(n)`
+- [ ] Replace `CodecContext.Key<T>` with `DecodeKey` / `EncodeKey` / `CodecKey`
+- [ ] Rename `@WhenTrue` → `@When`
+- [ ] Remove any global `byteOrder` workaround for `@WireOrder` fields
+- [ ] Replace `context.getOrDefault(key, default)` → `context[key] ?: default`
+- [ ] Remove use of deleted `buffer-flow` bridge functions
+
+---
+
+## v3 → v4
+
+The v4 release modernizes the API around three themes: **factory-based allocation**, **deterministic memory management**, and **zero-copy platform interop**.
 
 ## Why v4?
 

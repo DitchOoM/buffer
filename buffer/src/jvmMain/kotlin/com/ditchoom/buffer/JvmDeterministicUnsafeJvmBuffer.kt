@@ -10,9 +10,9 @@ internal class JvmDeterministicUnsafeJvmBuffer(
     byteBuffer: ByteBuffer,
     unsafeAddress: Long,
 ) : DeterministicUnsafeJvmBuffer(byteBuffer, unsafeAddress) {
-    override fun sliceImpl(): PlatformBuffer =
+    override fun sliceImpl(byteOrder: ByteOrder): PlatformBuffer =
         JvmDeterministicSliceBuffer(
-            super.byteBuffer.slice().order(super.byteBuffer.order()),
+            super.byteBuffer.slice().order(byteOrder.toJava()),
             ::isFreed,
         )
 
@@ -24,12 +24,7 @@ internal class JvmDeterministicUnsafeJvmBuffer(
             val address = UnsafeAllocator.allocateMemory(size.toLong())
             try {
                 UnsafeMemory.setMemory(address, size.toLong(), 0)
-                val byteBuffer =
-                    UnsafeMemory.tryWrapAsDirectByteBuffer(address, size)
-                        ?: throw UnsupportedOperationException(
-                            "Cannot create DeterministicUnsafeJvmBuffer: " +
-                                "DirectByteBuffer reflection is not available.",
-                        )
+                val byteBuffer = UnsafeMemory.wrapAsDirectByteBuffer(address, size)
                 byteBuffer.order(byteOrder.toJava())
                 return JvmDeterministicUnsafeJvmBuffer(byteBuffer, address)
             } catch (e: Throwable) {

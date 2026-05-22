@@ -103,32 +103,63 @@ class MutableDataBuffer private constructor(
     }
 
     override fun setLimit(limit: Int) {
+        checkLimitBounds(limit, capacity)
         this.limit = limit
+        if (position > limit) position = limit
     }
 
-    override fun readByte(): Byte = bytePointer[position++]
+    private fun requireReadable(needed: Int) {
+        if (position + needed > limit) {
+            throw BufferUnderflowException(
+                "read of $needed byte(s) at position $position exceeds limit $limit",
+            )
+        }
+    }
 
-    override fun get(index: Int): Byte = bytePointer[index]
+    private fun requireIndex(
+        index: Int,
+        needed: Int,
+    ) {
+        if (index < 0 || index + needed > limit) {
+            throw BufferUnderflowException(
+                "absolute read of $needed byte(s) at index $index exceeds limit $limit",
+            )
+        }
+    }
+
+    override fun readByte(): Byte {
+        requireReadable(1)
+        return bytePointer[position++]
+    }
+
+    override fun get(index: Int): Byte {
+        requireIndex(index, 1)
+        return bytePointer[index]
+    }
 
     override fun getShort(index: Int): Short {
+        requireIndex(index, 2)
         val ptr = (bytePointer + index)!!.reinterpret<ShortVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun getInt(index: Int): Int {
+        requireIndex(index, 4)
         val ptr = (bytePointer + index)!!.reinterpret<IntVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun getLong(index: Int): Long {
+        requireIndex(index, 8)
         val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun readShort(): Short {
+        requireReadable(2)
         val ptr = (bytePointer + position)!!.reinterpret<ShortVar>()
         val value = ptr[0]
         position += 2
@@ -136,6 +167,7 @@ class MutableDataBuffer private constructor(
     }
 
     override fun readInt(): Int {
+        requireReadable(4)
         val ptr = (bytePointer + position)!!.reinterpret<IntVar>()
         val value = ptr[0]
         position += 4
@@ -143,25 +175,40 @@ class MutableDataBuffer private constructor(
     }
 
     override fun readLong(): Long {
+        requireReadable(8)
         val ptr = (bytePointer + position)!!.reinterpret<LongVar>()
         val value = ptr[0]
         position += 8
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
-    override fun slice(): ReadBuffer {
+    override fun slice(byteOrder: ByteOrder): MutableDataBufferSlice {
         // Zero-copy slice using pointer arithmetic
-        return MutableDataBufferSlice(this, position, limit - position)
+        return MutableDataBufferSlice(this, position, limit - position, byteOrder)
     }
 
     override fun readByteArray(size: Int): ByteArray {
         if (size < 1) {
             return ByteArray(0)
         }
+        requireReadable(size)
         // Direct pointer read to avoid NSData allocation
         val result = (bytePointer + position)!!.readBytes(size)
         position += size
         return result
+    }
+
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        if (length == 0) return
+        requireReadable(length)
+        dst.usePinned { pinned ->
+            memcpy(pinned.addressOf(offset), (bytePointer + position)!!, length.convert())
+        }
+        position += length
     }
 
     override fun readString(
@@ -169,6 +216,7 @@ class MutableDataBuffer private constructor(
         charset: Charset,
     ): String {
         if (length == 0) return ""
+        requireReadable(length)
         if (!ownsData) {
             val bytes = (bytePointer + position)!!.readBytes(length)
             position += length
@@ -194,6 +242,7 @@ class MutableDataBuffer private constructor(
     }
 
     override fun writeByte(byte: Byte): WriteBuffer {
+        checkWriteBounds(1)
         bytePointer[position++] = byte
         return this
     }
@@ -202,11 +251,13 @@ class MutableDataBuffer private constructor(
         index: Int,
         byte: Byte,
     ): WriteBuffer {
+        checkIndexBounds(index, 1)
         bytePointer[index] = byte
         return this
     }
 
     override fun writeShort(short: Short): WriteBuffer {
+        checkWriteBounds(2)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) short.reverseBytes() else short
         (bytePointer + position)!!.reinterpret<ShortVar>()[0] = value
         position += 2
@@ -217,12 +268,14 @@ class MutableDataBuffer private constructor(
         index: Int,
         short: Short,
     ): WriteBuffer {
+        checkIndexBounds(index, 2)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) short.reverseBytes() else short
         (bytePointer + index)!!.reinterpret<ShortVar>()[0] = value
         return this
     }
 
     override fun writeInt(int: Int): WriteBuffer {
+        checkWriteBounds(4)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) int.reverseBytes() else int
         (bytePointer + position)!!.reinterpret<IntVar>()[0] = value
         position += 4
@@ -233,12 +286,14 @@ class MutableDataBuffer private constructor(
         index: Int,
         int: Int,
     ): WriteBuffer {
+        checkIndexBounds(index, 4)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) int.reverseBytes() else int
         (bytePointer + index)!!.reinterpret<IntVar>()[0] = value
         return this
     }
 
     override fun writeLong(long: Long): WriteBuffer {
+        checkWriteBounds(8)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) long.reverseBytes() else long
         (bytePointer + position)!!.reinterpret<LongVar>()[0] = value
         position += 8
@@ -249,6 +304,7 @@ class MutableDataBuffer private constructor(
         index: Int,
         long: Long,
     ): WriteBuffer {
+        checkIndexBounds(index, 8)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) long.reverseBytes() else long
         (bytePointer + index)!!.reinterpret<LongVar>()[0] = value
         return this
@@ -262,6 +318,7 @@ class MutableDataBuffer private constructor(
         if (length < 1) {
             return this
         }
+        checkWriteBounds(length)
         if (ownsData) {
             val range = NSMakeRange(position.convert(), length.convert())
             bytes.usePinned { pin ->
@@ -279,6 +336,7 @@ class MutableDataBuffer private constructor(
     override fun write(buffer: ReadBuffer) {
         val bytesToCopy = buffer.remaining()
         if (bytesToCopy == 0) return
+        checkWriteBounds(bytesToCopy)
         val srcNative = buffer.nativeMemoryAccess
         if (srcNative != null) {
             val srcPtr = srcNative.nativeAddress.toCPointer<ByteVar>()!! + buffer.position()
@@ -318,6 +376,7 @@ class MutableDataBuffer private constructor(
         val stringBytes = stringData.bytes as CPointer<ByteVar>
         val stringLength = stringData.length.toInt()
 
+        checkWriteBounds(stringLength)
         memcpy(bytePointer + position, stringBytes, stringLength.convert())
         position += stringLength
         return this
@@ -332,6 +391,7 @@ class MutableDataBuffer private constructor(
     override fun position(): Int = position
 
     override fun position(newPosition: Int) {
+        checkPositionBounds(newPosition, limit)
         position = newPosition
     }
 
@@ -578,8 +638,10 @@ class MutableDataBufferSlice(
     private val parent: MutableDataBuffer,
     private val sliceOffset: Int,
     private val sliceLength: Int,
-) : ReadBuffer,
+    override val byteOrder: ByteOrder = parent.byteOrder,
+) : PlatformBuffer,
     NativeMemoryAccess {
+    override val capacity: Int get() = sliceLength
     private var position: Int = 0
     private var limit: Int = sliceLength
 
@@ -590,40 +652,69 @@ class MutableDataBufferSlice(
 
     override val nativeSize: Long get() = sliceLength.toLong()
 
-    override val byteOrder: ByteOrder get() = parent.byteOrder
-
     override fun resetForRead() {
         limit = position
         position = 0
     }
 
     override fun setLimit(limit: Int) {
+        checkLimitBounds(limit, capacity)
         this.limit = limit
+        if (position > limit) position = limit
     }
 
-    override fun readByte(): Byte = bytePointer[position++]
+    private fun requireReadable(needed: Int) {
+        if (position + needed > limit) {
+            throw BufferUnderflowException(
+                "read of $needed byte(s) at position $position exceeds limit $limit",
+            )
+        }
+    }
 
-    override fun get(index: Int): Byte = bytePointer[index]
+    private fun requireIndex(
+        index: Int,
+        needed: Int,
+    ) {
+        if (index < 0 || index + needed > limit) {
+            throw BufferUnderflowException(
+                "absolute read of $needed byte(s) at index $index exceeds limit $limit",
+            )
+        }
+    }
+
+    override fun readByte(): Byte {
+        requireReadable(1)
+        return bytePointer[position++]
+    }
+
+    override fun get(index: Int): Byte {
+        requireIndex(index, 1)
+        return bytePointer[index]
+    }
 
     override fun getShort(index: Int): Short {
+        requireIndex(index, 2)
         val ptr = (bytePointer + index)!!.reinterpret<ShortVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun getInt(index: Int): Int {
+        requireIndex(index, 4)
         val ptr = (bytePointer + index)!!.reinterpret<IntVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun getLong(index: Int): Long {
+        requireIndex(index, 8)
         val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun readShort(): Short {
+        requireReadable(2)
         val ptr = (bytePointer + position)!!.reinterpret<ShortVar>()
         val value = ptr[0]
         position += 2
@@ -631,6 +722,7 @@ class MutableDataBufferSlice(
     }
 
     override fun readInt(): Int {
+        requireReadable(4)
         val ptr = (bytePointer + position)!!.reinterpret<IntVar>()
         val value = ptr[0]
         position += 4
@@ -638,21 +730,37 @@ class MutableDataBufferSlice(
     }
 
     override fun readLong(): Long {
+        requireReadable(8)
         val ptr = (bytePointer + position)!!.reinterpret<LongVar>()
         val value = ptr[0]
         position += 8
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
-    override fun slice(): ReadBuffer = MutableDataBufferSlice(parent, sliceOffset + position, limit - position)
+    override fun slice(byteOrder: ByteOrder): MutableDataBufferSlice =
+        MutableDataBufferSlice(parent, sliceOffset + position, limit - position, byteOrder)
 
     override fun readByteArray(size: Int): ByteArray {
         if (size < 1) {
             return ByteArray(0)
         }
+        requireReadable(size)
         val result = (bytePointer + position)!!.readBytes(size)
         position += size
         return result
+    }
+
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        if (length == 0) return
+        requireReadable(length)
+        dst.usePinned { pinned ->
+            memcpy(pinned.addressOf(offset), (bytePointer + position)!!, length.convert())
+        }
+        position += length
     }
 
     override fun readString(
@@ -660,6 +768,7 @@ class MutableDataBufferSlice(
         charset: Charset,
     ): String {
         if (length == 0) return ""
+        requireReadable(length)
         val parentData = parent.data
         if (!parent.ownsData) {
             // External pointer: no NSData available, use byte decoding
@@ -685,6 +794,7 @@ class MutableDataBufferSlice(
     override fun position(): Int = position
 
     override fun position(newPosition: Int) {
+        checkPositionBounds(newPosition, limit)
         position = newPosition
     }
 
@@ -703,4 +813,131 @@ class MutableDataBufferSlice(
             ((result as CPointer<ByteVar>).toLong() - (bytePointer + position).toLong()).toInt()
         }
     }
+
+    // region Write operations — slice writes propagate to parent's NSMutableData
+    // because bytePointer aliases parent.bytePointer + sliceOffset.
+
+    override fun resetForWrite() {
+        position = 0
+        limit = sliceLength
+    }
+
+    override fun writeByte(byte: Byte): WriteBuffer {
+        checkWriteBounds(1)
+        bytePointer[position++] = byte
+        return this
+    }
+
+    override fun set(
+        index: Int,
+        byte: Byte,
+    ): WriteBuffer {
+        checkIndexBounds(index, 1)
+        bytePointer[index] = byte
+        return this
+    }
+
+    override fun set(
+        index: Int,
+        short: Short,
+    ): WriteBuffer {
+        checkIndexBounds(index, 2)
+        val value = if (byteOrder == ByteOrder.BIG_ENDIAN) short.reverseBytes() else short
+        (bytePointer + index)!!.reinterpret<ShortVar>()[0] = value
+        return this
+    }
+
+    override fun set(
+        index: Int,
+        int: Int,
+    ): WriteBuffer {
+        checkIndexBounds(index, 4)
+        val value = if (byteOrder == ByteOrder.BIG_ENDIAN) int.reverseBytes() else int
+        (bytePointer + index)!!.reinterpret<IntVar>()[0] = value
+        return this
+    }
+
+    override fun set(
+        index: Int,
+        long: Long,
+    ): WriteBuffer {
+        checkIndexBounds(index, 8)
+        val value = if (byteOrder == ByteOrder.BIG_ENDIAN) long.reverseBytes() else long
+        (bytePointer + index)!!.reinterpret<LongVar>()[0] = value
+        return this
+    }
+
+    override fun writeBytes(
+        bytes: ByteArray,
+        offset: Int,
+        length: Int,
+    ): WriteBuffer {
+        if (length < 1) return this
+        checkWriteBounds(length)
+        bytes.usePinned { pin ->
+            memcpy((bytePointer + position)!!, pin.addressOf(offset), length.convert())
+        }
+        position += length
+        return this
+    }
+
+    override fun write(buffer: ReadBuffer) {
+        val bytesToCopy = buffer.remaining()
+        if (bytesToCopy == 0) return
+        checkWriteBounds(bytesToCopy)
+        val srcNative = buffer.nativeMemoryAccess
+        if (srcNative != null) {
+            val srcPtr = srcNative.nativeAddress.toCPointer<ByteVar>()!! + buffer.position()
+            memcpy(bytePointer + position, srcPtr, bytesToCopy.convert())
+        } else {
+            val srcManaged = buffer.managedMemoryAccess
+            if (srcManaged != null) {
+                srcManaged.backingArray.usePinned { pinned ->
+                    memcpy(
+                        bytePointer + position,
+                        pinned.addressOf(srcManaged.arrayOffset + buffer.position()),
+                        bytesToCopy.convert(),
+                    )
+                }
+            } else {
+                writeBytes(buffer.readByteArray(bytesToCopy))
+                return
+            }
+        }
+        position += bytesToCopy
+        buffer.position(buffer.position() + bytesToCopy)
+    }
+
+    override fun writeString(
+        text: CharSequence,
+        charset: Charset,
+    ): WriteBuffer {
+        val string =
+            if (text is String) {
+                @Suppress("CAST_NEVER_SUCCEEDS")
+                text as NSString
+            } else {
+                @Suppress("CAST_NEVER_SUCCEEDS")
+                text.toString() as NSString
+            }
+        val charsetEncoding = charset.toEncoding()
+        val stringData = string.dataUsingEncoding(charsetEncoding)!!
+
+        @Suppress("UNCHECKED_CAST")
+        val stringBytes = stringData.bytes as CPointer<ByteVar>
+        val stringLength = stringData.length.toInt()
+
+        checkWriteBounds(stringLength)
+        memcpy(bytePointer + position, stringBytes, stringLength.convert())
+        position += stringLength
+        return this
+    }
+
+    fun close() = Unit
+
+    // endregion
+
+    override fun equals(other: Any?): Boolean = bufferEquals(this, other)
+
+    override fun hashCode(): Int = bufferHashCode(this)
 }

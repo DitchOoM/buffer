@@ -99,13 +99,49 @@ actual object UnsafeMemory {
         unsafe!!.arrayBaseOffset(ByteArray::class.java).toLong()
     }
 
+    // The 5-arg `Unsafe.copyMemory(Object, long, Object, long, long)` is JDK
+    // 6+ on the desktop JVM but is missing from Android's `sun.misc.Unsafe`
+    // (ART only ships the 3-arg pointer-to-pointer variant). Reflectively
+    // probe once at class init so array <-> native copies short-circuit on
+    // Android with a clear error instead of `NoSuchMethodError`.
+    private val arrayCopyAvailable: Boolean by lazy {
+        if (unsafe == null) return@lazy false
+        try {
+            Unsafe::class.java.getMethod(
+                "copyMemory",
+                Any::class.java,
+                Long::class.javaPrimitiveType,
+                Any::class.java,
+                Long::class.javaPrimitiveType,
+                Long::class.javaPrimitiveType,
+            )
+            true
+        } catch (_: NoSuchMethodException) {
+            false
+        }
+    }
+
+    private fun checkArrayCopySupported() {
+        if (!arrayCopyAvailable) {
+            throw UnsupportedOperationException(
+                "UnsafeMemory.copyMemoryFromArray / copyMemoryToArray rely on the 5-arg " +
+                    "sun.misc.Unsafe.copyMemory(Object, long, Object, long, long), which is not " +
+                    "available on Android. Use JNI's NewDirectByteBuffer + ByteBuffer.put/get " +
+                    "for array <-> native copies on Android, or BufferFactory.Default's " +
+                    "DirectJvmBuffer which handles this internally.",
+            )
+        }
+    }
+
     actual fun copyMemoryToArray(
         srcAddress: Long,
         dest: ByteArray,
         destOffset: Int,
         length: Int,
     ) {
+        if (length == 0) return
         checkSupported()
+        checkArrayCopySupported()
         unsafe!!.copyMemory(
             null,
             srcAddress,
@@ -121,7 +157,9 @@ actual object UnsafeMemory {
         dstAddress: Long,
         length: Int,
     ) {
+        if (length == 0) return
         checkSupported()
+        checkArrayCopySupported()
         unsafe!!.copyMemory(
             src,
             BYTE_ARRAY_BASE_OFFSET + srcOffset,
@@ -131,9 +169,22 @@ actual object UnsafeMemory {
         )
     }
 
-    // DirectByteBuffer wrapper - tested once per process, falls back gracefully
-    // Uses default SYNCHRONIZED mode since this singleton could be accessed from multiple threads
-    private val directByteBufferConstructor: java.lang.reflect.Constructor<*>? by lazy {
+    // DirectByteBuffer reflective wrap path. The constructor lookup runs once per
+    // process under the lazy's default SYNCHRONIZED mode. We capture both the
+    // resolved Constructor on success and the underlying Throwable on failure so
+    // callers can attach the real cause to the exception they raise — instead of
+    // swallowing it behind a generic "not available" message.
+    private sealed class DirectByteBufferAccess {
+        data class Available(
+            val constructor: java.lang.reflect.Constructor<*>,
+        ) : DirectByteBufferAccess()
+
+        data class Unavailable(
+            val cause: Throwable,
+        ) : DirectByteBufferAccess()
+    }
+
+    private val directByteBufferAccess: DirectByteBufferAccess by lazy {
         try {
             val clazz = Class.forName("java.nio.DirectByteBuffer")
             val constructor =
@@ -142,25 +193,48 @@ actual object UnsafeMemory {
                     Int::class.javaPrimitiveType,
                 )
             constructor.isAccessible = true
-            constructor
-        } catch (e: Exception) {
-            null // Reflection not available on this platform
+            DirectByteBufferAccess.Available(constructor)
+        } catch (e: Throwable) {
+            DirectByteBufferAccess.Unavailable(e)
         }
     }
 
     /**
-     * Attempts to create a DirectByteBuffer wrapping the given native memory.
-     * Uses reflection (tested once per process). Returns null if not supported.
+     * Creates a DirectByteBuffer wrapping the given native memory via reflection.
+     *
+     * On Android API 28+ this can fail because `java.nio.DirectByteBuffer` is a
+     * non-SDK class subject to hidden-API enforcement on non-debuggable test
+     * APKs. The underlying [Throwable] (NoSuchMethodException,
+     * IllegalAccessException, or whatever the runtime emitted) is chained as
+     * the `cause` of the thrown [UnsupportedOperationException] so callers can
+     * see the real reason.
+     *
+     * Callers wanting a non-reflective Android path should prefer JNI's
+     * `NewDirectByteBuffer` instead — that's a public, supported entry point.
      */
-    fun tryWrapAsDirectByteBuffer(
+    fun wrapAsDirectByteBuffer(
         address: Long,
         capacity: Int,
-    ): java.nio.ByteBuffer? {
-        val constructor = directByteBufferConstructor ?: return null
-        return try {
-            constructor.newInstance(address, capacity) as java.nio.ByteBuffer
-        } catch (e: Exception) {
-            null
+    ): java.nio.ByteBuffer =
+        when (val state = directByteBufferAccess) {
+            is DirectByteBufferAccess.Available ->
+                try {
+                    state.constructor.newInstance(address, capacity) as java.nio.ByteBuffer
+                } catch (e: Throwable) {
+                    throw UnsupportedOperationException(
+                        "Reflective DirectByteBuffer constructor invocation failed " +
+                            "(address=$address, capacity=$capacity): ${e.message ?: e::class.qualifiedName}",
+                        e,
+                    )
+                }
+            is DirectByteBufferAccess.Unavailable ->
+                throw UnsupportedOperationException(
+                    "Reflective DirectByteBuffer constructor is not accessible on this runtime " +
+                        "(java.nio.DirectByteBuffer(long, int) lookup failed). On Android API 28+, " +
+                        "non-SDK classes are gated by hidden-API enforcement on non-debuggable test " +
+                        "APKs; use JNI's NewDirectByteBuffer instead. Cause: " +
+                        "${state.cause.message ?: state.cause::class.qualifiedName}",
+                    state.cause,
+                )
         }
-    }
 }

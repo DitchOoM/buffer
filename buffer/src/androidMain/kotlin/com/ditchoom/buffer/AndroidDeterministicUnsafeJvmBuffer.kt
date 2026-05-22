@@ -22,9 +22,9 @@ class AndroidDeterministicUnsafeJvmBuffer private constructor(
                 "Use BufferFactory.shared().allocate() for parcelable buffers.",
         )
 
-    override fun sliceImpl(): PlatformBuffer =
+    override fun sliceImpl(byteOrder: ByteOrder): PlatformBuffer =
         AndroidDeterministicSliceBuffer(
-            super.byteBuffer.slice().order(super.byteBuffer.order()),
+            super.byteBuffer.slice().order(byteOrder.toJava()),
             ::isFreed,
         )
 
@@ -36,12 +36,7 @@ class AndroidDeterministicUnsafeJvmBuffer private constructor(
             val address = UnsafeAllocator.allocateMemory(size.toLong())
             try {
                 UnsafeMemory.setMemory(address, size.toLong(), 0)
-                val byteBuffer =
-                    UnsafeMemory.tryWrapAsDirectByteBuffer(address, size)
-                        ?: throw UnsupportedOperationException(
-                            "Cannot create DeterministicUnsafeJvmBuffer: " +
-                                "DirectByteBuffer reflection is not available on this Android version.",
-                        )
+                val byteBuffer = JniDirectByteBufferAllocator.newDirectByteBuffer(address, size)
                 byteBuffer.order(byteOrder.toJava())
                 return AndroidDeterministicUnsafeJvmBuffer(byteBuffer, address)
             } catch (e: Throwable) {

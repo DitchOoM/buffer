@@ -48,10 +48,10 @@ internal class PooledBuffer(
         }
     }
 
-    override fun slice(): ReadBuffer {
+    override fun slice(byteOrder: ByteOrder): PlatformBuffer {
         checkNotFreed()
         addRef()
-        return TrackedSlice(inner.slice(), this)
+        return TrackedSlice(inner.slice(byteOrder), this)
     }
 
     fun close() {
@@ -107,6 +107,15 @@ internal class PooledBuffer(
     override fun readByteArray(size: Int): ByteArray {
         checkNotFreed()
         return inner.readByteArray(size)
+    }
+
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        checkNotFreed()
+        inner.readInto(dst, offset, length)
     }
 
     override fun readShort(): Short {

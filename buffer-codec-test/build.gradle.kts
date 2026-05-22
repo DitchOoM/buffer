@@ -12,6 +12,13 @@ plugins {
 
 group = "com.ditchoom"
 
+// Mirror :buffer-codec / :buffer-flow / :buffer-compression: on CI, expand
+// the native target list so consumers can resolve this module's variants
+// for every target they declare. :buffer-flow's commonTest depends on this
+// module, and its iOS / tvOS / watchOS test compilations otherwise fail
+// with `No matching variant of project :buffer-codec-test was found`.
+val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
+
 repositories {
     google()
     mavenCentral()
@@ -31,11 +38,33 @@ kotlin {
         browser()
         nodejs()
     }
-    if (HostManager.hostIsMac) {
-        val osArch = System.getProperty("os.arch")
-        if (osArch == "aarch64") macosArm64() else macosX64()
-    } else if (HostManager.hostIsLinux) {
-        linuxX64()
+    if (isRunningOnGithub) {
+        // CI: register the same Apple / Linux target list that downstream
+        // consumers (:buffer-flow, :buffer-compression) declare.
+        if (HostManager.hostIsMac) {
+            macosX64()
+            macosArm64()
+            iosArm64()
+            iosSimulatorArm64()
+            iosX64()
+            watchosArm64()
+            watchosSimulatorArm64()
+            watchosX64()
+            tvosArm64()
+            tvosSimulatorArm64()
+            tvosX64()
+        }
+        if (HostManager.hostIsLinux) {
+            linuxX64()
+            linuxArm64()
+        }
+    } else {
+        if (HostManager.hostIsMac) {
+            val osArch = System.getProperty("os.arch")
+            if (osArch == "aarch64") macosArm64() else macosX64()
+        } else if (HostManager.hostIsLinux) {
+            linuxX64()
+        }
     }
 
     applyDefaultHierarchyTemplate()
@@ -51,12 +80,24 @@ kotlin {
     }
 }
 
-kotlin.targets.configureEach {
-    if (name != "metadata") {
-        dependencies.add("ksp${name.replaceFirstChar { it.uppercase() }}", project(":buffer-codec-processor"))
-        dependencies.add("ksp${name.replaceFirstChar { it.uppercase() }}", project(":buffer-codec-test-spi"))
-        // Ensure KSP can resolve annotations from buffer-codec (needed for new annotations on clean builds)
-        dependencies.add("ksp${name.replaceFirstChar { it.uppercase() }}", project(":buffer-codec"))
+// Run KSP once on the common metadata compilation so generated codecs land
+// in commonMain and every target compilation sees the same symbols. This is
+// the KSP2 common-multiplatform shape; per-target KSP runs would scatter
+// generated sources across `jvmMain`/`jsMain`/etc. and break references
+// from commonMain (e.g., `WavFmtChunkCodec` → `WavFmtBodyCodec`) and from
+// commonTest.
+dependencies {
+    add("kspCommonMainMetadata", project(":buffer-codec-processor"))
+    add("kspCommonMainMetadata", project(":buffer-codec"))
+}
+
+kotlin.sourceSets.named("commonMain") {
+    kotlin.srcDir("build/generated/ksp/metadata/commonMain/kotlin")
+}
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().configureEach {
+    if (name != "kspCommonMainKotlinMetadata") {
+        dependsOn("kspCommonMainKotlinMetadata")
     }
 }
 
@@ -68,4 +109,26 @@ ktlint {
         exclude("**/build/**")
         exclude { it.file.path.contains("/generated/") || it.file.path.contains("/build/") }
     }
+}
+
+// `commonMain` includes the KSP-generated `build/generated/ksp/metadata/commonMain/kotlin`
+// srcDir (see above). Ktlint filters those files out of the actual lint pass, but Gradle
+// still sees the task as reading from a directory written by `kspCommonMainKotlinMetadata`
+// and reports an implicit-dependency validation error. Declare the dependency explicitly.
+tasks
+    .matching {
+        it.name == "runKtlintCheckOverCommonMainSourceSet" ||
+            it.name == "runKtlintFormatOverCommonMainSourceSet"
+    }.configureEach {
+        dependsOn("kspCommonMainKotlinMetadata")
+    }
+
+// JVM tests use JFR allocation tracking (see SimpleHeaderAllocationTest) to
+// enforce Locked Decision row 16: zero `[B` allocations attributable to the
+// codec on JVM. Disabling TLAB makes every allocation flow through
+// `jdk.ObjectAllocationOutsideTLAB`, which is reported per-allocation rather
+// than per-TLAB-rotation — without this, byte[] allocations that fit inside
+// an existing TLAB never trigger an event and the assertion is non-deterministic.
+tasks.named<Test>("jvmTest") {
+    jvmArgs("-XX:-UseTLAB")
 }

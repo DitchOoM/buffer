@@ -14,7 +14,11 @@ apply(from = "../gradle/setup.gradle.kts")
 
 @Suppress("UNCHECKED_CAST")
 val getNextVersion = project.extra["getNextVersion"] as (Boolean) -> Any
-project.version = getNextVersion(!isRunningOnGithub).toString()
+// Honor -Pversion so local publishes can pin a version (e.g. -Pversion=4.3.0-SNAPSHOT)
+// without being clobbered by Maven Central's getNextVersion auto-increment.
+if (!project.hasProperty("version") || project.version == "unspecified") {
+    project.version = getNextVersion(!isRunningOnGithub).toString()
+}
 
 repositories {
     google()
@@ -44,6 +48,18 @@ dependencies {
     implementation(project(":buffer-codec"))
     testImplementation(kotlin("test"))
     testImplementation(libs.kctfork.ksp)
+
+    // kctfork 0.12.0-alpha01 transitively requests 2.3.0-RC; force the
+    // embedded test compiler to the same 2.3.0 final the rest of the
+    // project is built with.
+    constraints {
+        testImplementation("org.jetbrains.kotlin:kotlin-compiler-embeddable") {
+            version { strictly("2.3.0") }
+        }
+        testImplementation("org.jetbrains.kotlin:kotlin-annotation-processing-embeddable") {
+            version { strictly("2.3.0") }
+        }
+    }
 }
 
 val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {

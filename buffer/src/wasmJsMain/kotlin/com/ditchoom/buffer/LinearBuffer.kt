@@ -355,7 +355,7 @@ class LinearBuffer(
         }
     }
 
-    override fun slice(): ReadBuffer {
+    override fun slice(byteOrder: ByteOrder): LinearBuffer {
         // Create a new LinearBuffer view of the remaining portion
         // This is zero-copy - just creates a new view with different base offset
         return LinearBuffer(
@@ -365,38 +365,44 @@ class LinearBuffer(
         )
     }
 
-    override fun readByteArray(size: Int): ByteArray {
-        // Copy from linear memory to Kotlin ByteArray (Wasm GC heap)
-        // This requires a copy - unavoidable due to separate memory spaces
-        val result = ByteArray(size)
+    override fun readByteArray(size: Int): ByteArray = copyToByteArray(size)
+
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        if (length == 0) return
+        requireReadable(length)
+        // Linear memory and Wasm-GC heap are separate address spaces — the
+        // payload is always physically copied into dst.
         var srcOffset = positionValue
-        var dstOffset = 0
+        var dstOffset = offset
+        val end = offset + length
 
         // Copy 8 bytes at a time using Long operations
-        while (dstOffset + 8 <= size) {
+        while (dstOffset + 8 <= end) {
             val value = ptr(srcOffset).loadLong()
-            // Manually unpack Long to bytes (faster than 8 separate loadByte calls)
-            result[dstOffset] = value.toByte()
-            result[dstOffset + 1] = (value shr 8).toByte()
-            result[dstOffset + 2] = (value shr 16).toByte()
-            result[dstOffset + 3] = (value shr 24).toByte()
-            result[dstOffset + 4] = (value shr 32).toByte()
-            result[dstOffset + 5] = (value shr 40).toByte()
-            result[dstOffset + 6] = (value shr 48).toByte()
-            result[dstOffset + 7] = (value shr 56).toByte()
+            dst[dstOffset] = value.toByte()
+            dst[dstOffset + 1] = (value shr 8).toByte()
+            dst[dstOffset + 2] = (value shr 16).toByte()
+            dst[dstOffset + 3] = (value shr 24).toByte()
+            dst[dstOffset + 4] = (value shr 32).toByte()
+            dst[dstOffset + 5] = (value shr 40).toByte()
+            dst[dstOffset + 6] = (value shr 48).toByte()
+            dst[dstOffset + 7] = (value shr 56).toByte()
             srcOffset += 8
             dstOffset += 8
         }
 
         // Copy remaining bytes
-        while (dstOffset < size) {
-            result[dstOffset] = loadByte(srcOffset)
+        while (dstOffset < end) {
+            dst[dstOffset] = loadByte(srcOffset)
             srcOffset++
             dstOffset++
         }
 
-        positionValue += size
-        return result
+        positionValue += length
     }
 
     override fun writeBytes(
@@ -404,6 +410,7 @@ class LinearBuffer(
         offset: Int,
         length: Int,
     ): WriteBuffer {
+        checkWriteBounds(length)
         // Copy from Kotlin ByteArray (Wasm GC heap) to linear memory
         var srcOffset = offset
         var dstOffset = positionValue
@@ -438,6 +445,7 @@ class LinearBuffer(
 
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
+        checkWriteBounds(size)
         val actual = buffer.unwrapFully()
         when (actual) {
             is LinearBuffer -> {
@@ -462,6 +470,8 @@ class LinearBuffer(
         length: Int,
         charset: Charset,
     ): String {
+        if (length == 0) return ""
+        requireReadable(length)
         val encoding =
             when (charset) {
                 Charset.UTF8 -> "utf-8"

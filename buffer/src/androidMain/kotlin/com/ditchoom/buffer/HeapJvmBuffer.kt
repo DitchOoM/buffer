@@ -22,5 +22,5 @@ class HeapJvmBuffer(
 
     override val arrayOffset: Int get() = (byteBuffer as Buffer).arrayOffset()
 
-    override fun slice() = HeapJvmBuffer(byteBuffer.slice())
+    override fun slice(byteOrder: ByteOrder): HeapJvmBuffer = HeapJvmBuffer(byteBuffer.slice().order(byteOrder.toJava()))
 }

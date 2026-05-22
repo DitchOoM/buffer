@@ -63,9 +63,12 @@ class FfmBuffer(
      *
      * After this call, the ByteBuffer's limit is set to 0, causing any subsequent
      * read/write operation to throw [java.nio.BufferUnderflowException] or
-     * [java.nio.BufferOverflowException]. With assertions enabled (`-ea`),
-     * lifecycle methods ([resetForRead], [resetForWrite], [slice]) will throw
-     * [AssertionError] before the ByteBuffer check.
+     * [java.nio.BufferOverflowException]. [BaseJvmBuffer] catches these and
+     * rethrows as [BufferUnderflowException] / [BufferOverflowException] —
+     * subclasses of the native nio types that carry a richer message. With
+     * assertions enabled (`-ea`), lifecycle methods ([resetForRead],
+     * [resetForWrite], [slice]) will throw [AssertionError] before the
+     * ByteBuffer check.
      *
      * This method is idempotent — calling it multiple times is safe.
      *
@@ -99,11 +102,11 @@ class FfmBuffer(
      * Returns an [FfmSliceBuffer] slice with a global-scope ByteBuffer view.
      * The slice retains the arena-scoped segment for lifecycle checking via [FfmSliceBuffer.checkAlive].
      */
-    override fun slice(): PlatformBuffer {
+    override fun slice(byteOrder: ByteOrder): PlatformBuffer {
         assertAlive()
         val slicedSegment = segment.asSlice(position().toLong(), remaining().toLong())
         val globalView = MemorySegment.ofAddress(slicedSegment.address()).reinterpret(slicedSegment.byteSize())
-        val sliceByteBuffer = globalView.asByteBuffer().order(byteBuffer.order())
+        val sliceByteBuffer = globalView.asByteBuffer().order(byteOrder.toJava())
         return FfmSliceBuffer(slicedSegment, sliceByteBuffer)
     }
 }

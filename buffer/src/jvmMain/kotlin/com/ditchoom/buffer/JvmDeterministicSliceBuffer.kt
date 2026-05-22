@@ -10,9 +10,9 @@ internal class JvmDeterministicSliceBuffer(
     byteBuffer: ByteBuffer,
     isParentFreed: () -> Boolean,
 ) : DeterministicSliceBuffer(byteBuffer, isParentFreed) {
-    override fun slice() =
+    override fun slice(byteOrder: ByteOrder): PlatformBuffer =
         JvmDeterministicSliceBuffer(
-            byteBuffer.slice().order(byteBuffer.order()),
+            byteBuffer.slice().order(byteOrder.toJava()),
             isParentFreed,
         )
 }

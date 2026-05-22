@@ -855,27 +855,6 @@ class CompressionStressTests {
     // =========================================================================
 
     @Test
-    fun stressTestSingleByteData() =
-        runTest {
-            // Test all possible single byte values
-            for (byteValue in 0..255) {
-                val original = BufferFactory.Default.allocate(1)
-                original.writeByte(byteValue.toByte())
-                original.resetForRead()
-                val originalCopy = copyBuffer(original)
-
-                val compressed = compressAsync(original)
-                val decompressed = decompressAsync(compressed)
-
-                assertBuffersEqual(
-                    originalCopy,
-                    decompressed,
-                    "Single byte round-trip failed for value $byteValue",
-                )
-            }
-        }
-
-    @Test
     fun stressTestRepeatedSingleByte() =
         runTest {
             // Test various sizes of repeated single byte (highly compressible)

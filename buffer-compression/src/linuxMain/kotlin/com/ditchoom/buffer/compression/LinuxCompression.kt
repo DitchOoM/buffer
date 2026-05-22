@@ -45,6 +45,9 @@ actual val supportsSyncCompression: Boolean = true
 actual val supportsRawDeflate: Boolean = true
 actual val supportsStatefulFlush: Boolean = true
 
+// Linux native zlib's deflateInit2 honors the windowBits argument.
+actual val supportsCustomWindowBits: Boolean = true
+
 /**
  * Helper to copy memory with platform-appropriate size_t conversion.
  */
@@ -64,13 +67,6 @@ private inline fun copyMemory(
 @Suppress("NOTHING_TO_INLINE")
 @OptIn(ExperimentalForeignApi::class, UnsafeNumber::class)
 private inline fun getCompressBound(size: Int): Int = compressBound(size.convert()).convert()
-
-/**
- * Window bits for different compression formats.
- */
-private const val WINDOW_BITS_ZLIB = 15
-private const val WINDOW_BITS_RAW = -15
-private const val WINDOW_BITS_GZIP = 31
 
 /**
  * Linux implementation using system zlib with direct buffer access.
@@ -134,12 +130,7 @@ private fun compressWithZStream(
         s.zfree = null
         s.opaque = null
 
-        val windowBits =
-            when (algorithm) {
-                CompressionAlgorithm.Deflate -> WINDOW_BITS_ZLIB
-                CompressionAlgorithm.Raw -> WINDOW_BITS_RAW
-                CompressionAlgorithm.Gzip -> WINDOW_BITS_GZIP
-            }
+        val windowBits = resolveWindowBits(algorithm, WindowBits.Default)
 
         var result =
             deflateInit2(
@@ -200,12 +191,7 @@ private fun decompressWithZStream(
         s.zfree = null
         s.opaque = null
 
-        val windowBits =
-            when (algorithm) {
-                CompressionAlgorithm.Deflate -> WINDOW_BITS_ZLIB
-                CompressionAlgorithm.Raw -> WINDOW_BITS_RAW
-                CompressionAlgorithm.Gzip -> WINDOW_BITS_GZIP
-            }
+        val windowBits = resolveWindowBits(algorithm, WindowBits.Default)
 
         var result = inflateInit2(s.ptr, windowBits)
 
@@ -293,16 +279,17 @@ private inline fun <R> withBufferPointer(
                 throw CompressionException("Cannot get pointer to empty buffer")
             }
             array.usePinned { pinned ->
-                block(pinned.addressOf(0))
+                block(pinned.addressOf(buffer.arrayOffset))
             }
         }
         buffer.managedMemoryAccess != null -> {
-            val array = buffer.managedMemoryAccess!!.backingArray
+            val managed = buffer.managedMemoryAccess!!
+            val array = managed.backingArray
             if (array.isEmpty()) {
                 throw CompressionException("Cannot get pointer to empty buffer")
             }
             array.usePinned { pinned ->
-                block(pinned.addressOf(0))
+                block(pinned.addressOf(managed.arrayOffset))
             }
         }
         else -> throw CompressionException(

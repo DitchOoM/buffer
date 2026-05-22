@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteArrayBuffer
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
@@ -44,30 +45,20 @@ import platform.zlib.z_stream
 actual fun StreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
     outputBufferSize: Int,
-    windowBits: Int,
-): StreamingCompressor = LinuxZlibStreamingCompressor(algorithm, level, allocator, outputBufferSize, windowBits)
+    windowBits: WindowBits,
+): StreamingCompressor = LinuxZlibStreamingCompressor(algorithm, level, bufferFactory, outputBufferSize, windowBits)
 
 /**
  * Linux streaming decompressor factory using z_stream for true incremental decompression.
  */
 actual fun StreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
     outputBufferSize: Int,
     expectedSize: Int,
-): StreamingDecompressor = LinuxZlibStreamingDecompressor(algorithm, allocator, outputBufferSize)
-
-/**
- * Window bits for different compression formats:
- * - 15: zlib format (default)
- * - -15: raw deflate (no header/trailer)
- * - 15 + 16 = 31: gzip format
- */
-private const val WINDOW_BITS_ZLIB = 15
-private const val WINDOW_BITS_RAW = -15
-private const val WINDOW_BITS_GZIP = 31
+): StreamingDecompressor = LinuxZlibStreamingDecompressor(algorithm, bufferFactory, outputBufferSize)
 
 /**
  * Holds an output buffer and its native address.
@@ -87,11 +78,11 @@ private class OutputBuffer(
 }
 
 /**
- * Allocates an output buffer from the allocator and resolves its native address.
+ * Allocates an output buffer from the bufferFactory and resolves its native address.
  * Supports NativeMemoryAccess (direct pointer) and ManagedMemoryAccess (pinned ByteArray).
  */
 @OptIn(ExperimentalForeignApi::class)
-private fun BufferAllocator.allocateOutputBuffer(size: Int): OutputBuffer {
+private fun BufferFactory.allocateOutputBuffer(size: Int): OutputBuffer {
     val buffer = allocate(size)
     val readBuf = buffer as ReadBuffer
 
@@ -109,7 +100,7 @@ private fun BufferAllocator.allocateOutputBuffer(size: Int): OutputBuffer {
             throw CompressionException("Cannot get pointer to empty buffer")
         }
         val pinned = array.pin()
-        val address = pinned.addressOf(0).rawValue.toLong()
+        val address = pinned.addressOf(managed.arrayOffset).rawValue.toLong()
         return OutputBuffer(buffer, address, pinned)
     }
 
@@ -126,9 +117,9 @@ private fun BufferAllocator.allocateOutputBuffer(size: Int): OutputBuffer {
 private class LinuxZlibStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
     private val level: CompressionLevel,
-    override val allocator: BufferAllocator,
+    override val bufferFactory: BufferFactory,
     private val outputBufferSize: Int,
-    private val customWindowBits: Int = 0,
+    private val customWindowBits: WindowBits = WindowBits.Default,
 ) : StreamingCompressor {
     private var streamPtr: CPointer<z_stream>? = null
     private var closed = false
@@ -152,16 +143,7 @@ private class LinuxZlibStreamingCompressor(
         s.next_out = null
         s.avail_out = 0u
 
-        val windowBits =
-            if (customWindowBits != 0) {
-                customWindowBits
-            } else {
-                when (algorithm) {
-                    CompressionAlgorithm.Deflate -> WINDOW_BITS_ZLIB
-                    CompressionAlgorithm.Raw -> WINDOW_BITS_RAW
-                    CompressionAlgorithm.Gzip -> WINDOW_BITS_GZIP
-                }
-            }
+        val windowBits = resolveWindowBits(algorithm, customWindowBits)
 
         val result =
             deflateInit2(
@@ -183,7 +165,7 @@ private class LinuxZlibStreamingCompressor(
 
     private fun ensureOutput() {
         if (currentOutput == null) {
-            currentOutput = allocator.allocateOutputBuffer(outputBufferSize)
+            currentOutput = bufferFactory.allocateOutputBuffer(outputBufferSize)
             currentOutputWritten = 0
         }
     }
@@ -356,7 +338,7 @@ private class LinuxZlibStreamingCompressor(
 @OptIn(ExperimentalForeignApi::class)
 private class LinuxZlibStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
-    override val allocator: BufferAllocator,
+    override val bufferFactory: BufferFactory,
     private val outputBufferSize: Int,
 ) : StreamingDecompressor {
     private var streamPtr: CPointer<z_stream>? = null
@@ -381,12 +363,7 @@ private class LinuxZlibStreamingDecompressor(
         s.next_out = null
         s.avail_out = 0u
 
-        val windowBits =
-            when (algorithm) {
-                CompressionAlgorithm.Deflate -> WINDOW_BITS_ZLIB
-                CompressionAlgorithm.Raw -> WINDOW_BITS_RAW
-                CompressionAlgorithm.Gzip -> WINDOW_BITS_GZIP
-            }
+        val windowBits = resolveWindowBits(algorithm, WindowBits.Default)
 
         val result = inflateInit2(s.ptr, windowBits)
 
@@ -401,7 +378,7 @@ private class LinuxZlibStreamingDecompressor(
 
     private fun ensureOutput() {
         if (currentOutput == null) {
-            currentOutput = allocator.allocateOutputBuffer(outputBufferSize)
+            currentOutput = bufferFactory.allocateOutputBuffer(outputBufferSize)
             currentOutputWritten = 0
         }
     }
@@ -577,16 +554,17 @@ private inline fun <R> withInputPointer(
                 throw CompressionException("Cannot get pointer to empty buffer")
             }
             array.usePinned { pinned ->
-                block(pinned.addressOf(0))
+                block(pinned.addressOf(buffer.arrayOffset))
             }
         }
         buffer.managedMemoryAccess != null -> {
-            val array = buffer.managedMemoryAccess!!.backingArray
+            val managed = buffer.managedMemoryAccess!!
+            val array = managed.backingArray
             if (array.isEmpty()) {
                 throw CompressionException("Cannot get pointer to empty buffer")
             }
             array.usePinned { pinned ->
-                block(pinned.addressOf(0))
+                block(pinned.addressOf(managed.arrayOffset))
             }
         }
         else -> throw CompressionException(
@@ -601,16 +579,16 @@ private inline fun <R> withInputPointer(
 actual fun SuspendingStreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
 ): SuspendingStreamingCompressor =
     SyncWrappingSuspendingCompressor(
-        StreamingCompressor.create(algorithm, level, allocator),
+        StreamingCompressor.create(algorithm, level, bufferFactory),
     )
 
 actual fun SuspendingStreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
-    allocator: BufferAllocator,
+    bufferFactory: BufferFactory,
 ): SuspendingStreamingDecompressor =
     SyncWrappingSuspendingDecompressor(
-        StreamingDecompressor.create(algorithm, allocator),
+        StreamingDecompressor.create(algorithm, bufferFactory),
     )

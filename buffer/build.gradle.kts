@@ -36,7 +36,11 @@ val isArm64 = System.getProperty("os.arch") == "aarch64"
 
 @Suppress("UNCHECKED_CAST")
 val getNextVersion = project.extra["getNextVersion"] as (Boolean) -> Any
-project.version = getNextVersion(!isRunningOnGithub).toString()
+// Honor -Pversion so local publishes can pin a version (e.g. -Pversion=4.3.0-SNAPSHOT)
+// without being clobbered by Maven Central's getNextVersion auto-increment.
+if (!project.hasProperty("version") || project.version == "unspecified") {
+    project.version = getNextVersion(!isRunningOnGithub).toString()
+}
 
 // Get simdutf build tasks and libs directory from simdutf.gradle.kts
 @Suppress("UNCHECKED_CAST")
@@ -169,6 +173,10 @@ kotlin {
             }
         } else if (HostManager.hostIsLinux) {
             linuxX64()
+            // Register linuxArm64 on local Linux dev too (was previously CI-only). K/N
+            // ships an aarch64 cross-compiler; required for downstream consumers
+            // (socket, mqtt) that target linuxArm64 to resolve buffer's umbrella metadata.
+            linuxArm64()
         }
     }
     targets.withType<org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget>().configureEach {
@@ -340,12 +348,39 @@ android {
         aidl = true
     }
     compileSdk = 36
+    ndkVersion = "28.2.13676358"
     defaultConfig {
         minSdk = 19
         testInstrumentationRunner = "androidx.benchmark.junit4.AndroidBenchmarkRunner"
         testInstrumentationRunnerArguments["androidx.benchmark.output.enable"] = "true"
+        // Allow benchmarks to run on an emulator. Real timings still aren't representative
+        // of physical devices, but the alternative is the runner failing every benchmark
+        // assertion with "ERRORS (not suppressed): EMULATOR" — masking real test failures
+        // among them. The dev contract: emulator runs are correctness checks, not perf
+        // measurement. CI on a physical device drops the suppression.
+        testInstrumentationRunnerArguments["androidx.benchmark.suppressErrors"] = "EMULATOR,LOW-BATTERY"
+        externalNativeBuild {
+            cmake {
+                cppFlags("-std=c++17")
+            }
+        }
+        // NDK 28 requires minSdk >= 21. We keep the library's minSdk at 19 so
+        // Kotlin/Java code still runs on older Android, and gate the native
+        // load: JniDirectByteBufferAllocator.isAvailable returns false on those
+        // devices and the deterministic factory falls back to the reflective
+        // path (which itself fails gracefully where DirectByteBuffer reflection
+        // isn't accessible). API <21 was minimal hidden-API enforcement anyway.
+        @Suppress("UnstableApiUsage")
+        experimentalProperties["android.ndk.suppressMinSdkVersionError"] = "21"
     }
     namespace = "com.ditchoom.buffer"
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/androidMain/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 
     // Use Java 1.8 for Android to maintain maximum compatibility
     compileOptions {

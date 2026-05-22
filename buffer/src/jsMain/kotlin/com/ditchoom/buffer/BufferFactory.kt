@@ -41,6 +41,15 @@ internal actual val sharedBufferFactory: BufferFactory =
             size: Int,
             byteOrder: ByteOrder,
         ): PlatformBuffer {
+            // SharedArrayBuffer.slice(0, 0) hits a V8 species-constructor edge case
+            // ("TypeError: SharedArrayBuffer subclass returned this from species
+            // constructor") because the engine returns `this` for zero-length slices,
+            // violating the spec requirement that the species constructor return a
+            // fresh instance. Empty shared buffers carry no semantic value anyway —
+            // fall through to the non-shared empty-buffer path.
+            if (size == 0) {
+                return JsBuffer(Int8Array(0), byteOrder)
+            }
             val sharedArrayBuffer =
                 try {
                     SharedArrayBuffer(size)

@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.pool
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
 
@@ -22,6 +23,21 @@ internal class SingleThreadedBufferPool(
     private var poolMisses = 0L
     private var peakPoolSize = 0
 
+    override fun allocate(
+        size: Int,
+        byteOrder: ByteOrder,
+    ): PlatformBuffer {
+        val buffer = acquire(size)
+        if (buffer is PlatformBuffer && buffer.byteOrder == byteOrder) return buffer
+        release(buffer)
+        return factory.allocate(size, byteOrder)
+    }
+
+    override fun wrap(
+        array: ByteArray,
+        byteOrder: ByteOrder,
+    ): PlatformBuffer = factory.wrap(array, byteOrder)
+
     override fun acquire(minSize: Int): ReadWriteBuffer {
         totalAllocations++
         val size = maxOf(minSize, defaultBufferSize)
@@ -35,6 +51,10 @@ internal class SingleThreadedBufferPool(
                 buffer
             } else {
                 poolMisses++
+                // A too-small popped buffer was removed from the pool; free its native
+                // memory before allocating fresh, otherwise it leaks (Arena.ofShared
+                // never closes, FfmAutoBuffer waits on GC).
+                buffer?.freeNativeMemory()
                 factory.allocate(size)
             }
         return PooledBuffer(raw, this)

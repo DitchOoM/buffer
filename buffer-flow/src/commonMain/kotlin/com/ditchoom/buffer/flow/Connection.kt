@@ -3,6 +3,10 @@ package com.ditchoom.buffer.flow
 /**
  * A typed, bidirectional message connection with a stable identity.
  *
+ * **Thread safety:** Implementations are NOT assumed to be thread-safe. Concurrent
+ * calls to [send] or concurrent collectors of [receive] require external synchronization.
+ * In coroutine code, confine send/receive to their respective coroutines or use a `Mutex`.
+ *
  * Combines [Sender] and [Receiver] with lifecycle management. This is the primary
  * interface that protocol libraries code against -- they don't need to know whether
  * the underlying transport is TCP, WebSocket, QUIC, or in-memory.

@@ -66,13 +66,13 @@ abstract class DeterministicUnsafeJvmBuffer(
 
     // --- Slicing ---
 
-    override fun slice(): PlatformBuffer {
+    override fun slice(byteOrder: ByteOrder): PlatformBuffer {
         // Check here too for a clear error message (vs generic byteBuffer guard)
         if (freed) throw IllegalStateException("Buffer has been freed")
-        return sliceImpl()
+        return sliceImpl(byteOrder)
     }
 
-    protected abstract fun sliceImpl(): PlatformBuffer
+    protected abstract fun sliceImpl(byteOrder: ByteOrder): PlatformBuffer
 
     companion object
 }

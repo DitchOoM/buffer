@@ -22,6 +22,7 @@ import platform.Foundation.create
 import platform.Foundation.subdataWithRange
 import platform.posix.memchr
 import platform.posix.memcmp
+import platform.posix.memcpy
 
 /**
  * Read-only buffer backed by NSData (Apple native memory).
@@ -66,32 +67,63 @@ class NSDataBuffer(
     }
 
     override fun setLimit(limit: Int) {
+        checkLimitBounds(limit, capacity)
         this.limit = limit
+        if (position > limit) position = limit
     }
 
-    override fun readByte(): Byte = bytePointer[position++]
+    private fun requireReadable(needed: Int) {
+        if (position + needed > limit) {
+            throw BufferUnderflowException(
+                "read of $needed byte(s) at position $position exceeds limit $limit",
+            )
+        }
+    }
 
-    override fun get(index: Int): Byte = bytePointer[index]
+    private fun requireIndex(
+        index: Int,
+        needed: Int,
+    ) {
+        if (index < 0 || index + needed > limit) {
+            throw BufferUnderflowException(
+                "absolute read of $needed byte(s) at index $index exceeds limit $limit",
+            )
+        }
+    }
+
+    override fun readByte(): Byte {
+        requireReadable(1)
+        return bytePointer[position++]
+    }
+
+    override fun get(index: Int): Byte {
+        requireIndex(index, 1)
+        return bytePointer[index]
+    }
 
     override fun getShort(index: Int): Short {
+        requireIndex(index, 2)
         val ptr = (bytePointer + index)!!.reinterpret<ShortVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun getInt(index: Int): Int {
+        requireIndex(index, 4)
         val ptr = (bytePointer + index)!!.reinterpret<IntVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun getLong(index: Int): Long {
+        requireIndex(index, 8)
         val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun readShort(): Short {
+        requireReadable(2)
         val ptr = (bytePointer + position)!!.reinterpret<ShortVar>()
         val value = ptr[0]
         position += 2
@@ -99,6 +131,7 @@ class NSDataBuffer(
     }
 
     override fun readInt(): Int {
+        requireReadable(4)
         val ptr = (bytePointer + position)!!.reinterpret<IntVar>()
         val value = ptr[0]
         position += 4
@@ -106,24 +139,40 @@ class NSDataBuffer(
     }
 
     override fun readLong(): Long {
+        requireReadable(8)
         val ptr = (bytePointer + position)!!.reinterpret<LongVar>()
         val value = ptr[0]
         position += 8
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
-    override fun slice(): ReadBuffer {
+    override fun slice(byteOrder: ByteOrder): ReadBuffer {
         // Zero-copy slice using pointer arithmetic
-        return NSDataBufferSlice(this, position, limit - position)
+        return NSDataBufferSlice(this, position, limit - position, byteOrder)
     }
 
     override fun readByteArray(size: Int): ByteArray {
         if (size < 1) {
             return ByteArray(0)
         }
+        requireReadable(size)
         val result = (bytePointer + position)!!.readBytes(size)
         position += size
         return result
+    }
+
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        if (length == 0) return
+        requireReadable(length)
+        // memcpy from NSData-backed native memory into the pinned ByteArray.
+        dst.usePinned { pinned ->
+            memcpy(pinned.addressOf(offset), (bytePointer + position)!!, length.convert())
+        }
+        position += length
     }
 
     override fun readString(
@@ -131,6 +180,7 @@ class NSDataBuffer(
         charset: Charset,
     ): String {
         if (length == 0) return ""
+        requireReadable(length)
         val subdata =
             data.subdataWithRange(
                 NSMakeRange(position.convert(), length.convert()),
@@ -154,6 +204,7 @@ class NSDataBuffer(
     override fun position(): Int = position
 
     override fun position(newPosition: Int) {
+        checkPositionBounds(newPosition, limit)
         position = newPosition
     }
 
@@ -225,6 +276,7 @@ internal class NSDataBufferSlice(
     private val parent: NSDataBuffer,
     private val sliceOffset: Int,
     val capacity: Int,
+    override val byteOrder: ByteOrder = parent.byteOrder,
 ) : ReadBuffer,
     NativeMemoryAccess {
     private var position: Int = 0
@@ -232,8 +284,6 @@ internal class NSDataBufferSlice(
 
     // Pointer to the start of this slice's data
     val bytePointer: CPointer<ByteVar> = (parent.data.bytes as CPointer<ByteVar> + sliceOffset)!!
-
-    override val byteOrder: ByteOrder get() = parent.byteOrder
 
     override val nativeAddress: Long get() = bytePointer.toLong()
 
@@ -245,32 +295,63 @@ internal class NSDataBufferSlice(
     }
 
     override fun setLimit(limit: Int) {
+        checkLimitBounds(limit, capacity)
         this.limit = limit
+        if (position > limit) position = limit
     }
 
-    override fun readByte(): Byte = bytePointer[position++]
+    private fun requireReadable(needed: Int) {
+        if (position + needed > limit) {
+            throw BufferUnderflowException(
+                "read of $needed byte(s) at position $position exceeds limit $limit",
+            )
+        }
+    }
 
-    override fun get(index: Int): Byte = bytePointer[index]
+    private fun requireIndex(
+        index: Int,
+        needed: Int,
+    ) {
+        if (index < 0 || index + needed > limit) {
+            throw BufferUnderflowException(
+                "absolute read of $needed byte(s) at index $index exceeds limit $limit",
+            )
+        }
+    }
+
+    override fun readByte(): Byte {
+        requireReadable(1)
+        return bytePointer[position++]
+    }
+
+    override fun get(index: Int): Byte {
+        requireIndex(index, 1)
+        return bytePointer[index]
+    }
 
     override fun getShort(index: Int): Short {
+        requireIndex(index, 2)
         val ptr = (bytePointer + index)!!.reinterpret<ShortVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun getInt(index: Int): Int {
+        requireIndex(index, 4)
         val ptr = (bytePointer + index)!!.reinterpret<IntVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun getLong(index: Int): Long {
+        requireIndex(index, 8)
         val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun readShort(): Short {
+        requireReadable(2)
         val ptr = (bytePointer + position)!!.reinterpret<ShortVar>()
         val value = ptr[0]
         position += 2
@@ -278,6 +359,7 @@ internal class NSDataBufferSlice(
     }
 
     override fun readInt(): Int {
+        requireReadable(4)
         val ptr = (bytePointer + position)!!.reinterpret<IntVar>()
         val value = ptr[0]
         position += 4
@@ -285,21 +367,37 @@ internal class NSDataBufferSlice(
     }
 
     override fun readLong(): Long {
+        requireReadable(8)
         val ptr = (bytePointer + position)!!.reinterpret<LongVar>()
         val value = ptr[0]
         position += 8
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
-    override fun slice(): ReadBuffer = NSDataBufferSlice(parent, sliceOffset + position, limit - position)
+    override fun slice(byteOrder: ByteOrder): ReadBuffer =
+        NSDataBufferSlice(parent, sliceOffset + position, limit - position, byteOrder)
 
     override fun readByteArray(size: Int): ByteArray {
         if (size < 1) {
             return ByteArray(0)
         }
+        requireReadable(size)
         val result = (bytePointer + position)!!.readBytes(size)
         position += size
         return result
+    }
+
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        if (length == 0) return
+        requireReadable(length)
+        dst.usePinned { pinned ->
+            memcpy(pinned.addressOf(offset), (bytePointer + position)!!, length.convert())
+        }
+        position += length
     }
 
     override fun readString(
@@ -307,6 +405,7 @@ internal class NSDataBufferSlice(
         charset: Charset,
     ): String {
         if (length == 0) return ""
+        requireReadable(length)
         val subdata =
             parent.data.subdataWithRange(
                 NSMakeRange((sliceOffset + position).convert(), length.convert()),
@@ -326,6 +425,7 @@ internal class NSDataBufferSlice(
     override fun position(): Int = position
 
     override fun position(newPosition: Int) {
+        checkPositionBounds(newPosition, limit)
         position = newPosition
     }
 

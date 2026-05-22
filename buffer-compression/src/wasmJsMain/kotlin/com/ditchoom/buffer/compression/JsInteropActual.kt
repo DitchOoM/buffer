@@ -2,6 +2,7 @@
 
 package com.ditchoom.buffer.compression
 
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.NativeMemoryAccess
 import com.ditchoom.buffer.ReadBuffer
 import kotlinx.coroutines.await
@@ -15,7 +16,7 @@ import kotlin.js.Promise
 @JsFun("() => typeof process !== 'undefined' && process.versions != null && process.versions.node != null")
 private external fun jsIsNodeJs(): Boolean
 
-internal actual val isNodeJs: Boolean by lazy { jsIsNodeJs() }
+internal actual val isNodeJs: Boolean by lazy(LazyThreadSafetyMode.NONE) { jsIsNodeJs() }
 
 // ============================================================================
 // JsByteArray — wraps a JS Uint8Array as opaque JsAny
@@ -172,15 +173,15 @@ private external fun jsCopyToWasmMemory(
     dstOffset: Int,
 )
 
-internal actual fun JsByteArray.toPlatformBuffer(allocator: BufferAllocator): ReadBuffer {
+internal actual fun JsByteArray.toPlatformBuffer(bufferFactory: BufferFactory): ReadBuffer {
     val length = byteLength()
     if (length == 0) {
-        return allocator.allocate(0)
+        return bufferFactory.allocate(0)
     }
-    // Allocate via the provided allocator (supports pool, direct, heap).
+    // Allocate via the provided factory (supports pool, direct, heap).
     // If the buffer has native memory access (LinearBuffer), copy JS data directly
     // into its WASM linear memory region. Single copy, no ByteArray intermediate.
-    val buf = allocator.allocate(length)
+    val buf = bufferFactory.allocate(length)
     val native = (buf as? NativeMemoryAccess)
     if (native != null) {
         jsCopyToWasmMemory(ref, native.nativeAddress.toInt())
@@ -209,10 +210,11 @@ internal actual fun JsByteArray.toPlatformBuffer(allocator: BufferAllocator): Re
 
 @JsFun(
     """
-(input, algorithm, level) => {
+(input, algorithm, level, windowBits) => {
     const m = 'zl' + 'ib';
     const zlib = require(m);
     const options = { level: level };
+    if (windowBits !== 0) options.windowBits = windowBits;
     switch (algorithm) {
         case 0: return zlib.deflateSync(input, options);
         case 1: return zlib.gzipSync(input, options);
@@ -226,20 +228,23 @@ private external fun jsZlibSync(
     input: JsAny,
     algorithm: Int,
     level: Int,
+    windowBits: Int,
 ): JsAny
 
 internal actual fun nodeZlibSync(
     input: JsByteArray,
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-): JsByteArray = JsByteArray(jsZlibSync(input.ref, algorithm.toOrdinal(), level.value))
+    windowBits: WindowBits,
+): JsByteArray = JsByteArray(jsZlibSync(input.ref, algorithm.toOrdinal(), level.value, windowBits.sizeLog2))
 
 @JsFun(
     """
-(input, algorithm, level) => {
+(input, algorithm, level, windowBits) => {
     const m = 'zl' + 'ib';
     const zlib = require(m);
     const options = { level: level, finishFlush: zlib.constants.Z_SYNC_FLUSH };
+    if (windowBits !== 0) options.windowBits = windowBits;
     switch (algorithm) {
         case 0: return zlib.deflateSync(input, options);
         case 1: return zlib.gzipSync(input, options);
@@ -253,13 +258,15 @@ private external fun jsZlibSyncFlush(
     input: JsAny,
     algorithm: Int,
     level: Int,
+    windowBits: Int,
 ): JsAny
 
 internal actual fun nodeZlibSyncFlush(
     input: JsByteArray,
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-): JsByteArray = JsByteArray(jsZlibSyncFlush(input.ref, algorithm.toOrdinal(), level.value))
+    windowBits: WindowBits,
+): JsByteArray = JsByteArray(jsZlibSyncFlush(input.ref, algorithm.toOrdinal(), level.value, windowBits.sizeLog2))
 
 @JsFun(
     """
@@ -346,10 +353,11 @@ internal actual class NodeTransformHandle(
 
 @JsFun(
     """
-(algorithm, level) => {
+(algorithm, level, windowBits) => {
     const m = 'zl' + 'ib';
     const zlib = require(m);
     const options = { level: level };
+    if (windowBits !== 0) options.windowBits = windowBits;
     switch (algorithm) {
         case 0: return zlib.createDeflate(options);
         case 1: return zlib.createGzip(options);
@@ -362,20 +370,23 @@ internal actual class NodeTransformHandle(
 private external fun jsCreateCompressStream(
     algorithm: Int,
     level: Int,
+    windowBits: Int,
 ): JsAny
 
 internal actual fun createCompressStream(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
-): NodeTransformHandle = NodeTransformHandle(jsCreateCompressStream(algorithm.toOrdinal(), level.value))
+    windowBits: WindowBits,
+): NodeTransformHandle = NodeTransformHandle(jsCreateCompressStream(algorithm.toOrdinal(), level.value, windowBits.sizeLog2))
 
 @JsFun(
     """
-(algorithm) => {
+(algorithm, windowBits) => {
     const m = 'zl' + 'ib';
     const zlib = require(m);
     const options = {};
     if (algorithm === 2) options.finishFlush = zlib.constants.Z_SYNC_FLUSH;
+    if (windowBits !== 0) options.windowBits = windowBits;
     switch (algorithm) {
         case 0: return zlib.createInflate(options);
         case 1: return zlib.createGunzip(options);
@@ -385,10 +396,15 @@ internal actual fun createCompressStream(
 }
 """,
 )
-private external fun jsCreateDecompressStream(algorithm: Int): JsAny
+private external fun jsCreateDecompressStream(
+    algorithm: Int,
+    windowBits: Int,
+): JsAny
 
-internal actual fun createDecompressStream(algorithm: CompressionAlgorithm): NodeTransformHandle =
-    NodeTransformHandle(jsCreateDecompressStream(algorithm.toOrdinal()))
+internal actual fun createDecompressStream(
+    algorithm: CompressionAlgorithm,
+    windowBits: WindowBits,
+): NodeTransformHandle = NodeTransformHandle(jsCreateDecompressStream(algorithm.toOrdinal(), windowBits.sizeLog2))
 
 @JsFun(
     """
@@ -470,6 +486,105 @@ internal actual suspend fun NodeTransformHandle.writeAndEnd(inputs: List<JsByteA
 private external fun jsDestroyStream(stream: JsAny)
 
 internal actual fun NodeTransformHandle.destroy() = jsDestroyStream(ref)
+
+@JsFun("(stream) => stream.reset()")
+private external fun jsResetStream(stream: JsAny)
+
+internal actual fun NodeTransformHandle.resetState() = jsResetStream(ref)
+
+// ============================================================================
+// Persistent sync zlib (writeSync loop on the stream's C++ handle)
+// ============================================================================
+
+@JsFun(
+    """
+(stream, chunk, flushFlag) => {
+    // Mirrors Node's internal processChunkSync but preserves the handle (no _close()).
+    // Exits when output buffer has room left (availOutAfter > 0), ensuring the
+    // Z_SYNC_FLUSH trailer is fully drained even when output fills exactly at input
+    // exhaustion. See JS-side processSyncPersistent for full notes.
+    const handle = stream._handle;
+    if (handle == null) throw new Error('zlib handle is null — stream was closed or finished');
+    const chunkSize = stream._chunkSize;
+    const state = stream._writeState;
+    const buffers = [];
+    let nread = 0;
+    let availInBefore = chunk.length;
+    let inOff = 0;
+    let buffer = stream._outBuffer;
+    let offset = stream._outOffset;
+    let availOutBefore = chunkSize - offset;
+    for (;;) {
+        handle.writeSync(flushFlag, chunk, inOff, availInBefore, buffer, offset, availOutBefore);
+        const availOutAfter = state[0];
+        const availInAfter = state[1];
+        const inDelta = availInBefore - availInAfter;
+        const have = availOutBefore - availOutAfter;
+        if (have > 0) {
+            buffers.push(buffer.slice(offset, offset + have));
+            offset += have;
+            nread += have;
+        }
+        if (availOutAfter === 0 || offset >= chunkSize) {
+            availOutBefore = chunkSize;
+            offset = 0;
+            buffer = Buffer.allocUnsafe(chunkSize);
+        }
+        if (availOutAfter === 0) {
+            inOff += inDelta;
+            availInBefore = availInAfter;
+            continue;
+        }
+        break;
+    }
+    stream._outBuffer = buffer;
+    stream._outOffset = offset;
+    if (nread === 0) return new Uint8Array(0);
+    const result = Buffer.concat(buffers, nread);
+    return new Uint8Array(result.buffer, result.byteOffset, result.length);
+}
+""",
+)
+private external fun jsProcessSyncPersistent(
+    stream: JsAny,
+    chunk: JsAny,
+    flushFlag: Int,
+): JsAny
+
+internal actual fun NodeTransformHandle.processSync(
+    input: JsByteArray,
+    flushFlag: Int,
+): JsByteArray = JsByteArray(jsProcessSyncPersistent(ref, input.ref, flushFlag))
+
+@JsFun(
+    """
+(stream, chunk, flushFlag) => {
+    // `_processChunk` without a callback is synchronous; it runs the writeSync loop
+    // internally and `_close()`s the C++ handle when finished.
+    return stream._processChunk(chunk, flushFlag);
+}
+""",
+)
+private external fun jsProcessSyncOneShot(
+    stream: JsAny,
+    chunk: JsAny,
+    flushFlag: Int,
+): JsAny
+
+internal actual fun NodeTransformHandle.processSyncOneShot(
+    input: JsByteArray,
+    flushFlag: Int,
+): JsByteArray = JsByteArray(jsProcessSyncOneShot(ref, input.ref, flushFlag))
+
+@JsFun("() => require('zl' + 'ib').constants.Z_SYNC_FLUSH")
+private external fun jsZSyncFlush(): Int
+
+@JsFun("() => require('zl' + 'ib').constants.Z_FINISH")
+private external fun jsZFinish(): Int
+
+internal actual fun zlibSyncFlushFlag(): Int = jsZSyncFlush()
+
+internal actual fun zlibFinishFlag(): Int = jsZFinish()
 
 // ============================================================================
 // One-shot Transform stream

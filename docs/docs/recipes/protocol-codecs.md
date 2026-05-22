@@ -5,7 +5,7 @@ title: Protocol Codecs
 
 # Protocol Codecs
 
-Annotate a data class, get a type-safe codec at compile time — with batch-optimized reads, round-trip testing, and zero manual field wiring.
+Annotate a data class, get a type-safe codec at compile time — round-trip-safe, with zero manual field wiring.
 
 ## Why Protocol Codecs?
 
@@ -52,13 +52,24 @@ data class DeviceReport(
 )
 ```
 
-That's it. The KSP processor generates `DeviceReportCodec` with `decode`, `encode`, and `sizeOf` — all type-safe and batch-optimized:
+The KSP processor generates `DeviceReportCodec` — an `object` implementing
+`Codec<DeviceReport>` with `encode`, `decode`, `wireSize`, and (when the wire
+format allows it) `peekFrameSize`:
 
 ```kotlin
-val buffer = DeviceReportCodec.encodeToBuffer(report)
-val decoded = DeviceReportCodec.decode(buffer)
-DeviceReportCodec.testRoundTrip(report) // verify correctness in one call
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.codec.DecodeContext
+import com.ditchoom.buffer.codec.EncodeContext
+
+val buffer = BufferFactory.Default.allocate(128)
+DeviceReportCodec.encode(buffer, report, EncodeContext.Empty)
+buffer.resetForRead()
+val decoded = DeviceReportCodec.decode(buffer, DecodeContext.Empty)
 ```
+
+`EncodeContext.Empty` / `DecodeContext.Empty` are the no-configuration
+contexts. See [CodecContext](#codeccontext--runtime-configuration) for passing
+typed runtime configuration through the codec chain.
 
 > **Note:** Generated code appears after `./gradlew build`. IDE autocomplete for generated codecs requires an initial build.
 
@@ -67,22 +78,31 @@ DeviceReportCodec.testRoundTrip(report) // verify correctness in one call
 Without code gen, this 10-field message requires writing every field in exact order — twice. One mismatch (e.g., swapping `latitude`/`longitude`, or reading a `Float` where you wrote a `Double`) silently corrupts data:
 
 ```kotlin
+import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.WriteBuffer
+import com.ditchoom.buffer.codec.*
+
 // 30+ lines of error-prone boilerplate
 object DeviceReportCodec : Codec<DeviceReport> {
-    override fun decode(buffer: ReadBuffer) = DeviceReport(
-        protocolVersion = buffer.readUnsignedByte(),
-        deviceType = buffer.readUnsignedShort(),
-        sequenceNumber = buffer.readUnsignedInt(),
-        timestamp = buffer.readLong(),
-        latitude = buffer.readDouble(),
-        longitude = buffer.readDouble(),
-        altitude = buffer.readFloat(),
-        batteryLevel = buffer.readUnsignedByte(),
-        signalStrength = buffer.readShort(),
-        deviceName = buffer.readLengthPrefixedUtf8String().second,
-    )
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): DeviceReport {
+        val protocolVersion = buffer.readUByte()
+        val deviceType = buffer.readUShort()
+        val sequenceNumber = buffer.readUInt()
+        val timestamp = buffer.readLong()
+        val latitude = buffer.readDouble()
+        val longitude = buffer.readDouble()
+        val altitude = buffer.readFloat()
+        val batteryLevel = buffer.readUByte()
+        val signalStrength = buffer.readShort()
+        val nameLength = buffer.readUShort().toInt()
+        val deviceName = buffer.readString(nameLength)
+        return DeviceReport(
+            protocolVersion, deviceType, sequenceNumber, timestamp,
+            latitude, longitude, altitude, batteryLevel, signalStrength, deviceName,
+        )
+    }
 
-    override fun encode(buffer: WriteBuffer, value: DeviceReport) {
+    override fun encode(buffer: WriteBuffer, value: DeviceReport, context: EncodeContext) {
         buffer.writeUByte(value.protocolVersion)
         buffer.writeUShort(value.deviceType)
         buffer.writeUInt(value.sequenceNumber)
@@ -92,23 +112,28 @@ object DeviceReportCodec : Codec<DeviceReport> {
         buffer.writeFloat(value.altitude)
         buffer.writeUByte(value.batteryLevel)
         buffer.writeShort(value.signalStrength)
-        buffer.writeLengthPrefixedUtf8String(value.deviceName)
+        val nameBytes = value.deviceName.encodeToByteArray()
+        buffer.writeUShort(nameBytes.size.toUShort())
+        buffer.writeString(value.deviceName)
     }
 
-    override fun sizeOf(value: DeviceReport): Int {
+    override fun wireSize(value: DeviceReport, context: EncodeContext): WireSize {
         val nameBytes = value.deviceName.encodeToByteArray().size
-        return 1 + 2 + 4 + 8 + 8 + 8 + 4 + 1 + 2 + 2 + nameBytes
+        return WireSize.Exact(1 + 2 + 4 + 8 + 8 + 8 + 4 + 1 + 2 + 2 + nameBytes)
     }
 }
 ```
 
-The generated version is identical but also applies **batch optimization** — consecutive fixed-size fields are grouped into bulk reads, reducing the number of read/write calls in the hot path.
+The generated version writes the same fields in the same order — but the order is derived from the constructor, so encode and decode can never drift apart.
 
 ### Round-Trip Testing
 
-Verify that encode → decode produces the original value:
+There is no built-in test helper. Verify that encode → decode reproduces the original value with a plain assertion:
 
 ```kotlin
+import kotlin.test.Test
+import kotlin.test.assertEquals
+
 @Test
 fun deviceReportRoundTrip() {
     val report = DeviceReport(
@@ -123,76 +148,132 @@ fun deviceReportRoundTrip() {
         signalStrength = -65,
         deviceName = "sensor-north-1",
     )
-    val decoded = DeviceReportCodec.testRoundTrip(report)
+
+    val buffer = BufferFactory.Default.allocate(128)
+    DeviceReportCodec.encode(buffer, report, EncodeContext.Empty)
+    buffer.resetForRead()
+    val decoded = DeviceReportCodec.decode(buffer, DecodeContext.Empty)
+
     assertEquals(report, decoded)
 }
-
-// Or verify exact wire bytes
-DeviceReportCodec.testRoundTrip(report, expectedBytes = wireBytes)
 ```
+
+To pin the exact wire bytes, compare the encoded buffer against a known
+`ByteArray` (`buffer.readByteArray(buffer.remaining())` after `resetForRead()`).
 
 ## Annotation Reference
 
 ### `@LengthPrefixed` — Length-Prefixed Data
 
-Reads/writes a length prefix followed by that many bytes. Works on both `String` fields and `@Payload` type parameters. Default is 2-byte big-endian prefix.
+Reads/writes a length prefix followed by that many bytes. Default is a 2-byte big-endian prefix.
 
 ```kotlin
+import com.ditchoom.buffer.codec.annotations.LengthPrefix
+
 @ProtocolMessage
 data class GreetingMessage(
     @LengthPrefixed val name: String,                          // 2-byte prefix (default)
     @LengthPrefixed(LengthPrefix.Byte) val nickname: String,   // 1-byte prefix (max 255 bytes)
     @LengthPrefixed(LengthPrefix.Int) val bio: String,         // 4-byte prefix
 )
-
-// Also works with @Payload — the codec reads the prefix, then passes
-// that many bytes to the caller's decode lambda
-@ProtocolMessage
-data class TlvMessage<@Payload P>(
-    val tag: UByte,
-    @LengthPrefixed val value: P,  // 2-byte length prefix + payload bytes
-)
 ```
+
+Accepted on `String` fields, on nested `@ProtocolMessage` fields (the prefix
+carries the nested body's wire size), and on typed payloads via `@UseCodec`
+(see [Typed Payloads](#typed-payloads-and-the-payload-marker)). All prefix
+widths are big-endian (network byte order).
+
+For a length carrier that sits immediately before its data, **prefer
+`@LengthPrefixed` over a separate length field plus `@LengthFrom`** — a
+standalone length field encodes the same quantity twice (the prefix and the
+value's own `wireSize`), an impossible-state class the validator rejects.
 
 ### `@RemainingBytes` — Consume Remaining Bytes
 
-Reads all remaining bytes as a UTF-8 string (or passes them to a `@Payload` decode lambda). Must be the last constructor parameter.
+Consumes the rest of the bounded buffer.
 
 ```kotlin
+import com.ditchoom.buffer.codec.annotations.RemainingBytes
+
 @ProtocolMessage
 data class LogEntry(
     val level: UByte,
-    @RemainingBytes val message: String,  // reads everything after level byte
-)
-
-// With @Payload — all remaining bytes are passed to the decode lambda
-@ProtocolMessage
-data class RawPacket<@Payload P>(
-    val header: UInt,
-    @RemainingBytes val body: P,
+    @RemainingBytes val message: String,  // reads everything after the level byte
 )
 ```
 
-### `@LengthFrom("field")` — Length from Preceding Field
+Accepted on:
 
-The byte length is determined by a preceding numeric field instead of a prefix in the wire format. Works on both `String` fields and `@Payload` type parameters.
+- `String` — UTF-8 body consuming the rest of the buffer.
+- `List<T>` where `T` is a `@ProtocolMessage` data class — loops, decoding
+  nested-message bodies until the bound is reached.
+- A typed payload via `@RemainingBytes @UseCodec(C::class)` — see
+  [Typed Payloads](#typed-payloads-and-the-payload-marker).
+
+`@RemainingBytes` is normally the last constructor parameter, but it may appear
+**before trailing fixed-size fields** — the decoder subtracts the trailers'
+summed wire bytes from `buffer.limit()` before reading the body:
 
 ```kotlin
 @ProtocolMessage
-data class NamedRecord(
-    val nameLength: UShort,
-    @LengthFrom("nameLength") val name: String,  // reads nameLength bytes as UTF-8
-    val value: Int,
-)
-
-// With @Payload — reads payloadLength bytes and passes to decode lambda
-@ProtocolMessage
-data class DataPacket<@Payload P>(
-    val sequenceId: UInt,
-    val payloadLength: Int,
-    @LengthFrom("payloadLength") val payload: P,
+data class TextWithChecksum(
+    val tag: UByte,
+    @RemainingBytes val text: String,   // bounded to limit() - 4 (the crc)
+    val crc: UInt,                      // 4-byte fixed-size trailer
 )
 ```
+
+Variable-size trailers (`@LengthPrefixed`, `@LengthFrom`, another
+`@RemainingBytes`, `@When`, `@UseCodec`) after a `@RemainingBytes` field are
+rejected by the validator — the body decode would have no way to find its end.
+
+The decoder reads against `buffer.limit()`. When the body byte count is carried
+by framing outside the codec's view (MQTT's remaining-length variable-byte
+integer, an HTTP/2 frame-length header), the caller — or an outer codec — is
+responsible for narrowing `buffer.limit()` to the body's extent before decode.
+
+### `@LengthFrom("field")` — Length from a Preceding Field
+
+The byte length is determined by a numeric sibling field rather than an inline prefix.
+
+```kotlin
+import com.ditchoom.buffer.codec.annotations.LengthFrom
+
+@ProtocolMessage
+data class RemoteHeader(
+    val payloadLength: UShort,     // consumer-visible — flow control, routing
+    val flags: UByte,
+    val correlationId: UInt,
+    @LengthFrom("payloadLength") val payload: String,
+)
+```
+
+Accepted on `String` fields, `List<T>` of `@ProtocolMessage` data classes, and
+nested `@ProtocolMessage` fields. The referenced field must exist, come before
+the annotated field, and resolve to a non-nullable numeric scalar — or, in the
+dotted form `"sibling.property"`, to a `val` returning non-nullable `Int` on a
+sibling value class.
+
+`@LengthFrom` is the right tool when the length is **non-adjacent** (the
+consumer cares about it as a number, or it is parsed by a different layer), or
+when the prefix width is one `@LengthPrefixed` cannot express. Example: a TLS
+1.3 handshake header (RFC 8446 §4) carries a 3-byte big-endian length:
+
+```kotlin
+import com.ditchoom.buffer.codec.annotations.Endianness
+import com.ditchoom.buffer.codec.annotations.WireBytes
+
+@ProtocolMessage(wireOrder = Endianness.Big)
+data class TlsHandshake(
+    val msgType: UByte,
+    @WireBytes(3) val length: UInt,                 // uint24
+    @LengthFrom("length") val body: TlsHandshakeBody,
+)
+```
+
+For an adjacent length carrier whose width is 1, 2, or 4 bytes, use
+`@LengthPrefixed` instead — the validator rejects the redundant separate-field
+shape for `String` and `List<T>` bodies.
 
 ### `@WireBytes(n)` — Custom Wire Width
 
@@ -201,67 +282,72 @@ Override the default wire size of a numeric field. Useful for protocols that use
 ```kotlin
 @ProtocolMessage
 data class CompactHeader(
-    @WireBytes(3) val length: Int,    // 3 bytes on the wire, read into Int
-    @WireBytes(6) val offset: Long,   // 6 bytes on the wire, read into Long
+    @WireBytes(3) val length: Int,    // 3 bytes on the wire, decoded into Int
+    @WireBytes(6) val offset: Long,   // 6 bytes on the wire, decoded into Long
 )
 ```
 
-Only applies to integer types. Not allowed on `Float`, `Double`, or `Boolean`.
+Only applies to integer types. The width must be 1–8 and must not exceed the Kotlin type's natural size. Not allowed on `Float`, `Double`, or `Boolean`.
 
 ### `@WireOrder(order)` — Per-Field Byte Order
 
-Overrides the byte order for a single field, taking precedence over the message-level `@ProtocolMessage(wireOrder = ...)` setting. Use when a protocol mixes byte orders within a single message (e.g., big-endian magic number + little-endian length fields).
+Overrides the byte order for a single field, taking precedence over the
+message-level `@ProtocolMessage(wireOrder = ...)` setting. A field annotated
+`@WireOrder` is encoded/decoded in that order **regardless of the
+`ReadBuffer`/`WriteBuffer` byte order** — use it when a protocol mixes byte
+orders within a single message (e.g., a big-endian magic number followed by
+little-endian length fields).
 
 ```kotlin
 @ProtocolMessage(wireOrder = Endianness.Little)
 data class MixedHeader(
     @WireOrder(Endianness.Big) val magic: UInt,  // overrides to big-endian
-    val length: UInt,                              // inherits little-endian
+    val length: UInt,                            // inherits little-endian
 )
 ```
 
-Works with `@WireBytes` for custom-width fields:
+A real example: the RIFF container family (WAV, AVI, WebP) is little-endian,
+but each chunk's 4-byte FourCC is four ASCII characters whose byte order must
+be preserved on the wire — so the FourCC is read big-endian while the sizes
+stay little-endian:
 
 ```kotlin
-@ProtocolMessage
-data class BleAttHeader(
-    val tag: UByte,
-    @WireOrder(Endianness.Little) @WireBytes(3) val leLength: UInt,  // 3-byte little-endian
-    @WireOrder(Endianness.Little) @WireBytes(2) val leFlags: Int,    // 2-byte little-endian
+@ProtocolMessage(wireOrder = Endianness.Little)
+data class RiffChunkHeader(
+    @WireOrder(Endianness.Big) val fourCC: UInt,  // e.g. "fmt " — bytes in file order
+    val chunkSize: UInt,                          // little-endian, per the RIFF spec
 )
 ```
+
+`@WireOrder` composes with `@WireBytes`: a custom-width field can carry a
+per-field order too — e.g. `@WireOrder(Endianness.Little) @WireBytes(3)` for a
+3-byte little-endian integer.
 
 Only applies to multi-byte numeric types (`Short`, `UShort`, `Int`, `UInt`, `Long`, `ULong`, `Float`, `Double`). Single-byte types (`Byte`, `UByte`, `Boolean`) are unaffected.
 
-The message-level `wireOrder` parameter on `@ProtocolMessage` sets the default for all fields. On sealed interfaces, variants inherit the parent's `wireOrder` unless they override it.
+The message-level `wireOrder` parameter on `@ProtocolMessage` sets the default for all fields, and defaults to `Endianness.Default` (use the buffer's byte order). On sealed interfaces, variants inherit the parent's `wireOrder` unless they override it.
 
-### `@UseCodec(codec)` — Custom Codec Reference
+### `@UseCodec(codec)` — Delegate to a Hand-Written Codec
 
-Delegates field encoding/decoding to an existing `Codec` object, without needing an SPI module. The referenced codec must be a Kotlin `object` implementing `Codec<T>`.
+Delegates a field to an existing `Codec` object. Use it for encodings the
+built-in annotations don't cover — variable-byte integers, image-bitmap
+parsers, per-charset string codecs, and the like. The referenced codec must be
+a Kotlin `object` implementing `Codec<T>` (or `BoundingLengthCodec<UInt>` for
+the length-prefixed-list shape).
 
-**Without a length annotation** — the codec reads directly from the buffer:
+**Bare scalar** — the codec reads directly from the buffer:
 
 ```kotlin
-object RgbCodec : Codec<Rgb> {
-    override fun decode(buffer: ReadBuffer) = Rgb(
-        buffer.readUnsignedByte(), buffer.readUnsignedByte(), buffer.readUnsignedByte()
-    )
-    override fun encode(buffer: WriteBuffer, value: Rgb) {
-        buffer.writeUByte(value.r); buffer.writeUByte(value.g); buffer.writeUByte(value.b)
-    }
-    override fun sizeOf(value: Rgb) = 3
-}
+import com.ditchoom.buffer.codec.annotations.UseCodec
 
 @ProtocolMessage
-data class ColoredPoint(
-    val x: Int,
-    val y: Int,
-    @UseCodec(RgbCodec::class) val color: Rgb,
+data class Message(
+    @UseCodec(VariableIntCodec::class) val length: Int,
 )
-// Generated: val color = RgbCodec.decode(buffer)
+// Generated: val length = VariableIntCodec.decode(buffer, context)
 ```
 
-**With a length annotation** — the codec receives a size-limited slice:
+**With a length annotation** — the codec receives a size-limited slice. Composes with `@LengthPrefixed`, `@RemainingBytes`, and `@LengthFrom`:
 
 ```kotlin
 @ProtocolMessage
@@ -270,41 +356,89 @@ data class TaggedValue(
     val dataLength: Int,
     @UseCodec(RgbCodec::class) @LengthFrom("dataLength") val color: Rgb,
 )
-// Generated: val color = RgbCodec.decode(buffer.readBytes(dataLength))
+// Generated: narrow buffer.limit() by dataLength, run RgbCodec.decode, restore the limit
 ```
 
-Composes with `@LengthPrefixed`, `@RemainingBytes`, and `@LengthFrom`. This replaces the SPI `CodecFieldProvider` approach for most use cases — no extra Gradle module, no META-INF/services, no ServiceLoader.
+When the field's type is itself a `@ProtocolMessage`, **do not** use
+`@UseCodec` — declare the field with that type directly and the processor
+generates and wires the codec by convention. `@UseCodec` cannot
+forward-reference a codec generated in the same compilation round.
 
-### `@WhenTrue("expression")` — Conditional Fields
+`expect`/`actual` codec objects are supported: the processor emits a call by
+simple name and the Kotlin linker resolves the platform actual.
 
-A field that is only present on the wire when a preceding Boolean field is `true`. The annotated field must be nullable with a default of `null`.
+See [Manual Codecs](#manual-codecs) for how to write the codec object itself.
+
+### `@When("predicate")` — Conditional Fields
+
+A field that is only present on the wire when a preceding Boolean predicate holds. The field must be nullable; `= null` as the constructor default is conventional.
 
 ```kotlin
+import com.ditchoom.buffer.codec.annotations.When
+
 @ProtocolMessage
 data class OptionalPayload(
     val hasExtra: Boolean,
-    @WhenTrue("hasExtra") val extra: Int? = null,
+    @When("hasExtra") val extra: Int? = null,
 )
 ```
 
-### `@Payload` + Type Parameter — Generic Payloads
+The predicate grammar is deliberately narrow — no `&&` / `||`, no `!=`, no
+method calls. Two forms are accepted:
 
-Mark a type parameter with `@Payload` to create a codec that is generic over its payload. A context class is generated to carry the non-payload fields needed for payload decoding.
+- `"siblingField"` — a prior sibling `Boolean` constructor parameter.
+- `"siblingField.property"` — a `Boolean`-returning `val` on a sibling
+  `@JvmInline value class`.
+
+The dotted form is how real protocols gate optional fields on a bit-packed
+flags byte. MQTT v3.1.1 CONNECT (§3.1.2.3) packs presence bits into one byte —
+model it as a value class whose getters name each bit:
 
 ```kotlin
+@JvmInline
 @ProtocolMessage
-data class Packet<@Payload P>(
-    val version: UByte,
-    val payloadLength: UShort,
-    val payload: P,
+value class MqttConnectFlags(val raw: UByte) {
+    val cleanSession: Boolean get() = (raw.toInt() and 0x02) != 0
+    val willPresent: Boolean get() = (raw.toInt() and 0x04) != 0
+    val passwordPresent: Boolean get() = (raw.toInt() and 0x40) != 0
+    val usernamePresent: Boolean get() = (raw.toInt() and 0x80) != 0
+}
+
+// CONNECT (§3.1) carries the Will topic and user name only when the matching
+// flag bit is set.
+@ProtocolMessage
+data class MqttConnect(
+    @LengthPrefixed val protocolName: String,     // "MQTT"
+    val protocolLevel: UByte,                     // 4 = v3.1.1
+    val connectFlags: MqttConnectFlags,
+    val keepAliveSeconds: UShort,
+    @LengthPrefixed val clientId: String,
+    @LengthPrefixed @When("connectFlags.willPresent") val willTopic: String? = null,
+    @LengthPrefixed @When("connectFlags.usernamePresent") val username: String? = null,
 )
 ```
+
+The real CONNECT also gates a Will payload and a password the same way — both
+binary, via `@When` combined with `@UseCodec` (see [Typed Payloads](#typed-payloads-and-the-payload-marker)).
+
+A value-class getter is plain Kotlin: it can be a single-bit test, a
+comparison, or a compound `&&` / `||` expression. The validator only sees a
+`Boolean`-returning `val`, so conditions the narrow predicate grammar can't
+express belong there.
+
+When the predicate is `false`, the entire slot is skipped on the wire (zero
+bytes, including any `@LengthPrefixed` prefix). When the predicate is `true`
+and the value is `null`, encode throws `EncodeException`.
+
+> Renamed from `@WhenTrue` in 5.0.0. Semantics unchanged.
 
 ### `@PacketType` + Sealed Interfaces — Auto-Dispatched Decode
 
 Annotate a sealed interface with `@ProtocolMessage` and each variant with `@PacketType(value)` to generate a dispatch codec. The processor reads the type discriminator and delegates to the correct variant codec. Duplicate values are rejected at compile time.
 
 ```kotlin
+import com.ditchoom.buffer.codec.annotations.PacketType
+
 @ProtocolMessage
 sealed interface Command {
     @ProtocolMessage
@@ -320,146 +454,130 @@ sealed interface Command {
 ```
 
 The processor generates:
+
 - `PingCodec` and `EchoCodec` for each variant
 - `CommandCodec` that reads one byte, dispatches to the correct variant codec, and writes the type byte + variant on encode
 
 ```kotlin
-val cmd: Command = CommandCodec.decode(buffer)
-CommandCodec.encode(outputBuffer, Command.Ping(System.currentTimeMillis()))
+val cmd: Command = CommandCodec.decode(buffer, DecodeContext.Empty)
+CommandCodec.encode(outputBuffer, Command.Ping(timestampMillis), EncodeContext.Empty)
 ```
 
 ### `@DispatchOn` + `@DispatchValue` — Custom Discriminator Dispatch
 
-Many protocols don't use a plain byte as their type discriminator. MQTT packs the packet type into the top 4 bits of a byte. PNG puts the chunk length *before* the chunk type. RIFF uses 4-byte ASCII chunk IDs. `@DispatchOn` handles all of these by letting you define a custom discriminator type.
+Many protocols don't use a plain byte as their type discriminator. MQTT packs the packet type into the top 4 bits of a byte. PNG puts the chunk length *before* the chunk type. `@DispatchOn` handles these by letting you define a custom discriminator type.
 
 **Step 1:** Define the discriminator as a `@ProtocolMessage` value class (or data class) with one `@DispatchValue` property that returns `Int`:
 
 ```kotlin
+import com.ditchoom.buffer.codec.annotations.DispatchOn
+import com.ditchoom.buffer.codec.annotations.DispatchValue
+
 @JvmInline
 @ProtocolMessage
 value class MqttFixedHeader(val raw: UByte) {
     @DispatchValue
-    val packetType: Int get() = raw.toUInt().shr(4).toInt()
+    val packetType: Int get() = raw.toUInt().shr(4).toInt()        // top 4 bits — §2.2
 
-    val flags: UByte get() = (raw and 0x0Fu)
+    val flags: UByte get() = (raw.toUInt() and 0x0Fu).toUByte()    // bottom 4 bits
+
+    // PUBLISH carries a packet identifier only when QoS > 0 (§3.3.2.2).
+    val qosGreaterThanZero: Boolean get() = (raw.toUInt() and 0x06u) != 0u
 }
 ```
 
-**Step 2:** Annotate the sealed interface with `@DispatchOn` and use `@PacketType(value, wire)` on each variant. `value` is what `@DispatchValue` returns; `wire` is the raw byte(s) written during encode:
+**Step 2:** Annotate the sealed interface with `@DispatchOn` and give each variant a `@PacketType(value)` matching what `@DispatchValue` returns. Every MQTT variant carries the discriminator as its `header` field:
 
 ```kotlin
 @DispatchOn(MqttFixedHeader::class)
+@FramedBy(MqttRemainingLengthCodec::class, after = "header")
 @ProtocolMessage
-sealed interface MqttPacket {
-    @ProtocolMessage @PacketType(value = 1, wire = 0x10)
-    data class Connect(val header: MqttFixedHeader, val protocolLevel: UByte, val keepAlive: UShort) : MqttPacket
+sealed interface MqttPacket<out P : Payload> {
+    @PacketType(value = 2)
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    data class ConnAck(
+        val header: MqttFixedHeader = MqttFixedHeader(0x20u),
+        val connectAckFlags: UByte,   // bit 0 = Session Present (§3.2.2.1)
+        val returnCode: UByte,        // §3.2.2.3
+    ) : MqttPacket<Nothing>
 
-    @ProtocolMessage @PacketType(value = 2, wire = 0x20)
-    data class ConnAck(val header: MqttFixedHeader, val sessionPresent: UByte, val returnCode: UByte) : MqttPacket
+    @PacketType(value = 14)
+    @ProtocolMessage
+    data class Disconnect(
+        val header: MqttFixedHeader = MqttFixedHeader(0xE0u),
+    ) : MqttPacket<Nothing>
 }
 ```
 
-**Decode flow:** Read discriminator → evaluate `@DispatchValue` → `when` match on `value` → delegate to variant codec. The discriminator is forwarded via `CodecContext` so variants can access it (e.g., flags) without re-reading from the buffer.
+The `out P : Payload` type parameter lets a variant carry a typed payload —
+MQTT PUBLISH does; CONNACK and DISCONNECT don't, so they are `MqttPacket<Nothing>`
+(see [Typed Payloads](#typed-payloads-and-the-payload-marker)). `@FramedBy` adds
+the MQTT remaining-length framing — see [`@FramedBy`](#framedby--framework-owned-length-framing).
 
-**Encode flow:** Construct discriminator from `wire` value → encode via discriminator codec → encode variant fields.
+**Decode flow:** the dispatcher peeks the `MqttFixedHeader` byte without
+consuming it, evaluates `@DispatchValue`, `when`-matches the result against each
+`@PacketType(value)`, and delegates to that variant's codec — which reads the
+header into its own `header` field. **Encode flow:** the variant's `header`
+field is written directly, then its remaining fields.
+
+Because each variant carries a field of the discriminator's type, no `wire`
+byte needs to be declared. For a protocol whose variants do **not** carry the
+discriminator, give `@PacketType` a `wire` argument so the framework knows the
+raw bytes to write: `@PacketType(value = 1, wire = 0x10)`. The processor
+validates at compile time that a `wire` value fits the discriminator's type —
+`@PacketType(wire = 300)` against a `UByte` discriminator is a compile error.
+Duplicate `value`s are rejected at compile time.
 
 #### Multi-byte discriminators
 
-For protocols with 4-byte type IDs (RIFF, PNG), the discriminator's inner type determines the wire width. The processor validates at compile time that `wire` fits the type — `@PacketType(wire=300)` on a `UByte` discriminator is a compile error.
+The discriminator's inner type sets the wire width. HTTP/2 (RFC 7540 §4.1)
+packs a 24-bit length and an 8-bit type into one 32-bit word — a `UInt`-backed
+discriminator:
 
 ```kotlin
 @JvmInline
-@ProtocolMessage
-value class RiffChunkId(val id: UInt) {
+@ProtocolMessage(wireOrder = Endianness.Big)
+value class Http2LengthAndType(val raw: UInt) {
+    val length: Int get() = (raw shr 8).toInt()    // top 24 bits
+
     @DispatchValue
-    val chunkType: Int get() = id.toInt()
-}
-
-@DispatchOn(RiffChunkId::class)
-@ProtocolMessage
-sealed interface RiffChunk {
-    @ProtocolMessage @PacketType(value = 0x666D7420, wire = 0x666D7420)  // "fmt "
-    data class Fmt(val chunkId: RiffChunkId, val audioFormat: UShort, ...) : RiffChunk
+    val type: Int get() = (raw and 0xFFu).toInt()  // bottom 8 bits — RFC 7540 §11.2
 }
 ```
 
-#### Prefix-before-type (data class discriminators)
+A data-class discriminator (instead of a value class) handles formats that must
+read several fields before the dispatch value is known.
 
-Some formats (PNG) put the length *before* the type on the wire. Use a data class discriminator that reads both fields:
+### `@FramedBy` — Framework-Owned Length Framing
+
+`@FramedBy` marks a `@ProtocolMessage` class (typically a sealed parent) with a
+length prefix that is **computed from, and bounds, the body's wire size**. The
+framework owns the framing: encode emits the prefix carrying the encoded body's
+byte count; decode reads the prefix, narrows `buffer.limit()` to bound the
+body, and asserts strict consumption.
 
 ```kotlin
+import com.ditchoom.buffer.codec.annotations.FramedBy
+
 @ProtocolMessage
-data class PngChunkHeader(val length: UInt, val type: UInt) {
-    @DispatchValue
-    val chunkType: Int get() = type.toInt()
-}
-
-@DispatchOn(PngChunkHeader::class)
-@ProtocolMessage
-sealed interface PngChunk {
-    @ProtocolMessage @PacketType(value = 0x49484452, wire = 0x49484452)  // "IHDR"
-    data class Ihdr(val header: PngChunkHeader, val width: UInt, val height: UInt, ...) : PngChunk
+@DispatchOn(MqttFixedHeader::class)
+@FramedBy(MqttRemainingLengthCodec::class, after = "header")
+sealed interface MqttPacket<out P : Payload> {
+    // Each variant carries the `header` field; the framework writes the MQTT
+    // remaining-length variable-byte integer between `header` and the body,
+    // computed from the encoded body's byte count (MQTT v3.1.1 §2.2.3).
 }
 ```
 
-When a variant has a field whose type matches the `@DispatchOn` discriminator, the generated codec populates it from context during decode (no double-read) and encodes it normally during encode.
+The `codec` argument is a Kotlin `object` implementing
+`BoundingLengthCodec<UInt>` — it drives the prefix wire format (variable-byte
+integer, fixed width, …) and reports `maxWireSize`. The `after` argument names
+the sibling field the prefix sits immediately after on the wire; the default
+(empty) puts the prefix at offset 0. When applied to a sealed parent, every
+variant inherits the framing rule — there is no per-variant override.
 
-> **Note:** The lambda-based `decode(buffer, ...)` overload does not accept or forward an outer `DecodeContext`. If you need to pass runtime context through sealed dispatch, use the context-based `decode(buffer, context)` overload instead.
-
-### `peekFrameSize` — Stream Framing Without Boilerplate
-
-The processor automatically generates `peekFrameSize(stream, baseOffset): Int?` on every codec where the frame size is determinable from the wire format. This method peeks at a `StreamProcessor` to determine the total number of bytes the codec will read, without consuming any data.
-
-```kotlin
-// Generated on every codec that supports it:
-object PacketCodec {
-    const val MIN_HEADER_BYTES: Int = 3  // minimum bytes to determine frame size
-
-    fun peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): Int?
-    suspend fun peekFrameSize(stream: SuspendingStreamProcessor, baseOffset: Int = 0): Int?
-}
-```
-
-This eliminates the manual peek boilerplate in streaming decode loops:
-
-```kotlin
-// Before: manual offset math, easy to get wrong
-while (stream.available() >= 3) {
-    val type = stream.peekByte(0)
-    val length = stream.peekShort(1).toInt() and 0xFFFF  // hope the offset is right...
-    val frameSize = 3 + length
-    if (stream.available() < frameSize) break
-    val msg = stream.readBufferScoped(frameSize) { PacketCodec.decode(this) }
-}
-
-// After: generated, always correct
-while (stream.available() >= PacketCodec.MIN_HEADER_BYTES) {
-    val frameSize = PacketCodec.peekFrameSize(stream) ?: break
-    if (stream.available() < frameSize) break
-    val msg = stream.readBufferScoped(frameSize) { PacketCodec.decode(this) }
-}
-```
-
-**What the generator handles:**
-
-- Fixed-size fields — accumulated into constant offsets
-- `@LengthPrefixed` — peeks the prefix (1/2/4 bytes), always treated as unsigned
-- `@LengthFrom("field")` — peeks the referenced field's value at its known offset
-- `@WhenTrue` conditions — peeks the boolean (or value class property), branches to include/exclude conditional fields
-- `@Payload` with length annotation — same as the corresponding length type
-- `@UseCodec` with length annotation — same
-- `@WireBytes` custom widths (3, 5, 6, 7 bytes) — byte-by-byte assembly
-- Multiple variable-length fields — sequential peek with dynamic offset tracking
-- Sealed dispatch — peeks discriminator, branches per variant, delegates
-- `@DispatchOn` with value class — peeks inner type, constructs value class, calls `@DispatchValue`
-- `@DispatchOn` with data class — peeks all constructor parameters, constructs discriminator
-- Nested `@ProtocolMessage` — delegates to nested codec's `peekFrameSize`
-
-**When generation is skipped** (the codec compiles but without `peekFrameSize`):
-
-- `@RemainingBytes` at top level — no length on wire
-- `@UseCodec` without a length annotation — opaque codec
-- `@CollectionField` — element iteration can't be peeked
+See [Length Codecs](#length-codecs-boundinglengthcodec) for the
+`BoundingLengthCodec` contract.
 
 ### Value Classes — Zero-Overhead Typed Wrappers
 
@@ -481,6 +599,103 @@ data class Acknowledgement(
 )
 ```
 
+### List Fields
+
+A `List<T>` field where `T` is a `@ProtocolMessage` data class is decoded as a
+repeated sequence. The list's extent must be bounded — by `@RemainingBytes`, by
+`@LengthFrom`, or by a `@LengthPrefixed` prefix driven by a `BoundingLengthCodec`:
+
+```kotlin
+// Bounded by the rest of the buffer
+@ProtocolMessage
+data class RepeatedBlocks(
+    val streamId: UShort,
+    @RemainingBytes val blocks: List<RepeatedBlock>,
+)
+
+// Bounded by a sibling byte-count field
+@ProtocolMessage(wireOrder = Endianness.Big)
+data class Http2SettingsFrame(
+    @WireBytes(3) val length: UInt,
+    val type: UByte,
+    val flags: UByte,
+    val streamId: Http2StreamId,
+    @LengthFrom("length") val entries: List<Http2Setting>,
+)
+
+// Bounded by a variable-width length prefix
+@ProtocolMessage
+data class PropertyBagFrame(
+    @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class) val properties: List<PropertyEntry>,
+)
+```
+
+### Typed Payloads and the `Payload` Marker
+
+`Payload` is a marker interface for self-contained typed payload values. A
+generic-over-payload codec bounds its type parameter with it (`<P : Payload>`),
+and any concrete payload type implements it.
+
+The processor enforces a **strict transitive shape rule**: it walks the
+declared shape of every `Payload`-implementing type and rejects raw-bytes
+members anywhere inside it — `ReadBuffer`, `WriteBuffer`, `PlatformBuffer`,
+`ByteArray`, primitive arrays, `java.nio.ByteBuffer`. A `Payload` outlives the
+codec's decode scope, and a raw-bytes member could reference reclaimed pool
+memory. Decode into a self-contained value instead: a value class around a
+scalar, `String`, or domain object; or a platform-native handle.
+
+A typed payload field is decoded by a hand-written `Codec` referenced through
+`@UseCodec`, with a length annotation supplying the body extent:
+
+```kotlin
+import com.ditchoom.buffer.codec.Payload
+
+data class RemoteCommandPayload(
+    val opcode: UInt,
+    val parameters: String,
+) : Payload
+
+@ProtocolMessage(wireOrder = Endianness.Big)
+data class RemoteCommand(
+    @LengthPrefixed val id: String,
+    @RemainingBytes @UseCodec(RemoteCommandPayloadCodec::class) val payload: RemoteCommandPayload,
+)
+```
+
+To make a protocol generic over its payload, give a `@DispatchOn` sealed
+interface an `out P : Payload` type parameter and let a variant carry `P`
+directly in a `@RemainingBytes` (or length-annotated) field:
+
+```kotlin
+@DispatchOn(MqttFixedHeader::class)
+@FramedBy(MqttRemainingLengthCodec::class, after = "header")
+@ProtocolMessage
+sealed interface MqttPacket<out P : Payload> {
+    @PacketType(value = 3)
+    @ProtocolMessage
+    data class Publish<P : Payload>(
+        val header: MqttFixedHeader = MqttFixedHeader(0x30u),
+        @LengthPrefixed val topic: String,
+        @When("header.qosGreaterThanZero") val packetId: PacketId? = null,  // PacketId wraps UShort
+        @RemainingBytes val payload: P,
+    ) : MqttPacket<P>
+    // … payload-free variants are declared `: MqttPacket<Nothing>`
+}
+```
+
+The generated codec for a payload-generic dispatcher is a **class**, not an
+`object` — construct it with the payload's `Codec<P>`:
+
+```kotlin
+val codec = MqttPacketCodec(JpegImageCodec)   // JpegImageCodec : Codec<JpegImage>
+val packet = codec.decode(buffer, DecodeContext.Empty)
+```
+
+For consumers who genuinely need raw bytes (IPC forwarding, persistence, debug
+capture), step outside the `Payload` abstraction: decode into a non-`Payload`
+type with a hand-written `Codec` that copies bytes out at the boundary — see
+[Manual Codecs](#manual-codecs).
+
 ### Supported Types
 
 | Kotlin Type | Default Wire Size | Signed |
@@ -498,293 +713,313 @@ data class Acknowledgement(
 | `Boolean` | 1 | — |
 | `String` | Variable | — |
 
-### Batch Optimization
+A `String` field always needs one of `@LengthPrefixed`, `@RemainingBytes`, or
+`@LengthFrom` — a bare `String` has no wire extent. `String` bodies are UTF-8.
+For other charsets, write a `Codec<String>` and attach it with `@UseCodec`; the
+library ships `AsciiStringCodec` as a 7-bit-ASCII reference implementation.
 
-The generated code automatically groups consecutive fixed-size fields into single bulk reads where possible (e.g., reading a `Long` and splitting it into two `Int` fields), reducing the number of read/write calls in the hot path.
+## Stream Framing with `peekFrameSize`
 
----
-
-## Custom Annotations (SPI)
-
-When the built-in annotations don't cover your protocol's encoding (e.g., variable-byte integers, repeated fields, TLV property bags), register custom annotations via the codec SPI.
-
-The SPI lets you:
-- Define your own annotation (e.g., `@VariableByteInteger`)
-- Write the read/write/sizeOf functions in plain Kotlin
-- Register a `CodecFieldProvider` that maps the annotation to those functions
-- The generated codec calls your functions — type-safe, debuggable, no string templates
-
-### Step 1: Define Your Annotation
+The processor generates `peekFrameSize(stream, baseOffset): PeekResult` on
+every codec whose frame size is determinable from the wire format. It inspects
+a `StreamProcessor` to determine the total bytes the codec will read, without
+consuming any data.
 
 ```kotlin
-package com.example.myprotocol.annotations
+import com.ditchoom.buffer.codec.PeekResult
 
-@Target(AnnotationTarget.VALUE_PARAMETER)
-@Retention(AnnotationRetention.BINARY)
-annotation class VariableByteInteger
+sealed interface PeekResult {
+    value class Complete(val bytes: Int) : PeekResult  // a full frame is buffered
+    data object NeedsMoreData : PeekResult             // wait for the next chunk
+    data object NoFraming : PeekResult                 // this codec can't peek
+}
 ```
 
-### Step 2: Write Your Functions
+This eliminates the manual offset math in streaming decode loops:
 
 ```kotlin
-package com.example.myprotocol.codec
+// Before: manual offset math, easy to get wrong
+while (stream.available() >= 3) {
+    val type = stream.peekByte(0)
+    val length = stream.peekShort(1).toInt() and 0xFFFF  // hope the offset is right...
+    val frameSize = 3 + length
+    if (stream.available() < frameSize) break
+    val msg = stream.readBufferScoped(frameSize) { PacketCodec.decode(this, DecodeContext.Empty) }
+}
 
-import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.WriteBuffer
-
-fun ReadBuffer.readVariableByteInteger(): Int { /* ... */ }
-fun WriteBuffer.writeVariableByteInteger(value: Int) { /* ... */ }
-fun variableByteSizeInt(value: Int): Int { /* ... */ }
-```
-
-### Step 3: Create a CodecFieldProvider
-
-```kotlin
-package com.example.myprotocol.spi
-
-import com.ditchoom.buffer.codec.processor.spi.*
-
-class VariableByteIntegerProvider : CodecFieldProvider {
-    override val annotationFqn = "com.example.myprotocol.annotations.VariableByteInteger"
-
-    override fun describe(context: FieldContext): CustomFieldDescriptor {
-        require(context.typeName == "kotlin.Int") {
-            "@VariableByteInteger can only be applied to Int fields"
+// After: generated, always correct
+while (true) {
+    when (val frame = PacketCodec.peekFrameSize(stream)) {
+        is PeekResult.Complete -> {
+            val msg = stream.readBufferScoped(frame.bytes) {
+                PacketCodec.decode(this, DecodeContext.Empty)
+            }
+            handleMessage(msg)
         }
-        return CustomFieldDescriptor(
-            readFunction = FunctionRef("com.example.myprotocol.codec", "readVariableByteInteger"),
-            writeFunction = FunctionRef("com.example.myprotocol.codec", "writeVariableByteInteger"),
-            sizeOfFunction = FunctionRef("com.example.myprotocol.codec", "variableByteSizeInt"),
-        )
+        PeekResult.NeedsMoreData -> break          // wait for more bytes
+        PeekResult.NoFraming -> error("PacketCodec does not support stream framing")
     }
 }
 ```
 
-### Step 4: Create a KSP Provider Module
+A codec that does not participate in framing returns `NoFraming` — the default.
+This makes a codec used at a streaming boundary fail loudly instead of silently
+hanging the receive loop.
 
-Custom providers run at **build time** on the KSP processor classpath. Create a JVM-only module:
+**What the generator handles** (the codec emits a real `peekFrameSize`):
+
+- Fixed-size fields — accumulated into constant offsets
+- `@LengthPrefixed` — peeks the prefix (1/2/4 bytes), always treated as unsigned
+- `@LengthFrom("field")` — peeks the referenced field's value at its known offset
+- `@When` conditions — peeks the boolean (or value-class property) and branches
+- `@WireBytes` custom widths — byte-by-byte assembly
+- `@UseCodec` with a length annotation — bounded the same as the length type
+- Multiple variable-length fields — sequential peek with dynamic offset tracking
+- Sealed dispatch — peeks the discriminator, branches per variant, delegates
+- `@DispatchOn` — peeks the value-class or data-class discriminator
+- `@FramedBy` — peeks the framing length prefix
+- Nested `@ProtocolMessage` — delegates to the nested codec's `peekFrameSize`
+
+**When generation is skipped** (the codec compiles, `peekFrameSize` returns `NoFraming`):
+
+- `@RemainingBytes` at top level — no length on the wire
+- `@UseCodec` without a length annotation, or delegating to a hand-written codec
+  that itself returns `NoFraming`
+
+## The Codec Interface
+
+`Codec<T>` is the union of three smaller interfaces. Send-only consumers can
+depend on just `Encoder<T>`; receive-only consumers on just `Decoder<T>`.
+Generated and hand-written codecs implement the same interfaces and compose
+freely.
 
 ```kotlin
-// my-protocol-ksp/build.gradle.kts
-plugins {
-    kotlin("jvm")
+interface Encoder<in T> {
+    fun encode(buffer: WriteBuffer, value: T, context: EncodeContext)
+    fun wireSize(value: T, context: EncodeContext): WireSize = WireSize.BackPatch
 }
-dependencies {
-    implementation("com.ditchoom:buffer-codec-processor:<version>")
+
+interface Decoder<out T> {
+    fun decode(buffer: ReadBuffer, context: DecodeContext): T
 }
-```
 
-Register via `META-INF/services/com.ditchoom.buffer.codec.processor.spi.CodecFieldProvider`:
-
-```
-com.example.myprotocol.spi.VariableByteIntegerProvider
-```
-
-### Step 5: Wire KSP Dependencies
-
-```kotlin
-dependencies {
-    ksp("com.ditchoom:buffer-codec-processor:<version>")
-    ksp(project(":my-protocol-ksp"))  // your providers
+interface FrameDetector {
+    fun peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): PeekResult = PeekResult.NoFraming
 }
+
+interface Codec<T> : Encoder<T>, Decoder<T>, FrameDetector
 ```
 
-### Step 6: Use It
+`wireSize` reports the on-wire byte count so the framework can pre-allocate:
 
 ```kotlin
-@ProtocolMessage
-data class FrameHeader(
-    val packetType: UByte,
-    @VariableByteInteger val remainingLength: Int,
-)
-// Generates FrameHeaderCodec with buffer.readVariableByteInteger() calls
-```
-
-### Context Fields — Dependent Parsing
-
-Some custom fields need values from previously decoded fields. Use `contextFields` to pass them as extra arguments to your read/write functions:
-
-```kotlin
-class RepeatedShortsProvider : CodecFieldProvider {
-    override val annotationFqn = "com.example.annotations.RepeatedShorts"
-
-    override fun describe(context: FieldContext): CustomFieldDescriptor {
-        val countField = context.annotationArguments["countField"] as String
-        return CustomFieldDescriptor(
-            readFunction = FunctionRef("com.example.codec", "readRepeatedShorts"),
-            writeFunction = FunctionRef("com.example.codec", "writeRepeatedShorts"),
-            contextFields = listOf(countField),
-        )
-    }
+sealed interface WireSize {
+    value class Exact(val bytes: Int) : WireSize  // size known up front
+    data object BackPatch : WireSize              // variable — framework grows + back-patches
 }
 ```
 
-Generated code passes the context field:
-```kotlin
-// decode: buffer.readRepeatedShorts(count)
-// encode: buffer.writeRepeatedShorts(value.items, value.count)
-```
+Return `WireSize.Exact(n)` from a fixed-size codec. Variable-length codecs
+(UTF-8 strings, sealed dispatch with variable variants, generic payloads)
+return `WireSize.BackPatch`: the framework encodes into a `GrowableWriteBuffer`
+and patches any preceding length prefix once the body size is known.
 
-### SPI Restrictions
-
-- Cannot override built-in annotations (`@LengthPrefixed`, `@WireBytes`, etc.)
-- Custom fields break batch optimization (each custom field is read/written individually)
-- Two providers cannot register the same annotation FQN
-
----
+A `Decoder` must not retain the buffer past `decode` — the framework releases
+the slice on return. To produce a value that outlives the decode scope, copy
+bytes out at the boundary (`ReadBuffer.copyToByteArray`, a consumer-owned
+`PlatformBuffer`, or a platform-native handle).
 
 ## CodecContext — Runtime Configuration
 
-Pass typed configuration through the entire codec chain without global state. Useful for allocator hints, compression config, security policies, or protocol version negotiation.
-
-### The Context Hierarchy
+Pass typed configuration through the entire codec chain without global state — allocator hints, size limits, protocol-version pins, and so on.
 
 ```kotlin
-interface CodecContext          // shared keys (version, endianness)
-interface DecodeContext : CodecContext   // decode-only keys (allocator, size limits)
-interface EncodeContext : CodecContext   // encode-only keys (compression, format)
+interface CodecContext                       // marker
+interface DecodeContext : CodecContext       // passed to decode
+interface EncodeContext : CodecContext       // passed to encode
 ```
 
 ### Define Typed Keys
 
-```kotlin
-object MyCodec : Codec<Bitmap> {
-    data object AllocatorKey : CodecContext.Key<BufferAllocator>()
-    data object MaxSizeKey : CodecContext.Key<Int>()
+Keys are interfaces parameterized by their value type. Direction is encoded in the key, and keys are declared as Kotlin `object`s (compared by identity):
 
-    override fun decode(buffer: ReadBuffer, context: DecodeContext): Bitmap {
-        val allocator = context[AllocatorKey] ?: BufferAllocator.Default
-        val maxSize = context[MaxSizeKey] ?: Int.MAX_VALUE
-        require(buffer.remaining() <= maxSize) { "Payload too large" }
-        return decodeBitmap(buffer, allocator)
+```kotlin
+import com.ditchoom.buffer.codec.DecodeKey
+import com.ditchoom.buffer.codec.EncodeKey
+import com.ditchoom.buffer.codec.CodecKey
+
+object MaxFrameBytesKey : DecodeKey<Int>      // visible only to DecodeContext
+object StrictModeKey : EncodeKey<Boolean>     // visible only to EncodeContext
+object ProtocolVersionKey : CodecKey<Int>     // visible in both directions
+```
+
+A `DecodeKey` is readable only from a `DecodeContext`, an `EncodeKey` only from
+an `EncodeContext`, and a `CodecKey` from both. The `buffer-codec` module ships
+one such key, `BufferFactoryKey : CodecKey<BufferFactory>`, for codecs that
+allocate consumer-owned buffers.
+
+### Read a Key Inside a Codec
+
+```kotlin
+object FrameCodec : Codec<Frame> {
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): Frame {
+        val maxBytes = context[MaxFrameBytesKey] ?: Int.MAX_VALUE
+        if (buffer.remaining() > maxBytes) {
+            throw DecodeException(
+                fieldPath = "Frame",
+                bufferPosition = buffer.position(),
+                expected = "<= $maxBytes bytes",
+                actual = "${buffer.remaining()} bytes",
+            )
+        }
+        // … decode the frame …
     }
+
+    override fun encode(buffer: WriteBuffer, value: Frame, context: EncodeContext) { /* … */ }
 }
 ```
 
+`context[key]` returns `T?` — `null` when the key is absent. Apply a default at
+the call site with `?:`.
+
 ### Pass Context at the Call Site
+
+Contexts are immutable; `with` returns a new context:
 
 ```kotlin
 val ctx = DecodeContext.Empty
-    .with(MyCodec.AllocatorKey, hardwareAllocator)
-    .with(MyCodec.MaxSizeKey, 1_000_000)
+    .with(MaxFrameBytesKey, 1_048_576)
+    .with(ProtocolVersionKey, 5)
 
-// Context flows automatically through sealed dispatch → @UseCodec → nested codecs
 val result = TopLevelCodec.decode(buffer, ctx)
 ```
 
 ### How Context Flows
 
-Context is forwarded automatically by generated code:
+Generated code forwards the context automatically:
 
-- **Sealed dispatch codecs** forward context to every sub-codec
-- **`@UseCodec` fields** forward context to the referenced codec
-- **Nested `@ProtocolMessage` fields** forward context to the nested codec
-- **`@Payload` lambdas** access context via closure capture (no generated plumbing)
+- **Sealed dispatch codecs** forward the context to every variant codec
+- **`@UseCodec` fields** forward it to the referenced codec
+- **Nested `@ProtocolMessage` fields** forward it to the nested codec
 
-Codecs that don't read from context ignore it — the `Codec` interface defaults call the context-free overload:
-
-```kotlin
-interface Codec<T> {
-    fun decode(buffer: ReadBuffer): T
-    fun decode(buffer: ReadBuffer, context: DecodeContext): T = decode(buffer)  // default ignores
-}
-```
-
-### Shared Keys
-
-Keys defined with `CodecContext.Key` work in both `DecodeContext` and `EncodeContext`:
-
-```kotlin
-data object VersionKey : CodecContext.Key<Int>()
-
-val dCtx = DecodeContext.Empty.with(VersionKey, 2)
-val eCtx = EncodeContext.Empty.with(VersionKey, 2)
-```
-
-### When to Use Context vs @Payload
-
-| Need | Use |
-|------|-----|
-| Caller provides decode/encode logic | `@Payload` with lambdas |
-| Caller provides runtime config (allocator, limits) | `CodecContext` |
-| Both | `@Payload` lambda captures `CodecContext` via closure |
-
----
+A codec that doesn't read from the context simply ignores it.
 
 ## Manual Codecs
 
-When you need full control — custom encoding logic, protocol-level optimizations, or formats that don't map to annotations — implement `Codec<T>` directly.
-
-### The Codec Interface
-
-```kotlin
-interface Codec<T> {
-    fun decode(buffer: ReadBuffer): T
-    fun encode(buffer: WriteBuffer, value: T)
-    fun sizeOf(value: T): Int? = null
-}
-```
-
-- **`decode`** reads fields from a `ReadBuffer` and constructs the value
-- **`encode`** writes fields to a `WriteBuffer`
-- **`sizeOf`** returns the encoded byte size if known, or `null` for variable-length encodings
-
-Generated and manual codecs implement the same interface — they compose freely.
+When you need full control — a custom encoding, a protocol-level optimization, or a format that doesn't map to annotations — implement `Codec<T>` directly.
 
 ### Simple Example
 
 ```kotlin
+import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.WriteBuffer
+import com.ditchoom.buffer.codec.*
+
 data class SensorReading(val sensorId: UShort, val temperature: Int)
 
 object SensorReadingCodec : Codec<SensorReading> {
-    override fun decode(buffer: ReadBuffer) =
-        SensorReading(buffer.readUnsignedShort(), buffer.readInt())
+    override fun decode(buffer: ReadBuffer, context: DecodeContext) =
+        SensorReading(buffer.readUShort(), buffer.readInt())
 
-    override fun encode(buffer: WriteBuffer, value: SensorReading) {
+    override fun encode(buffer: WriteBuffer, value: SensorReading, context: EncodeContext) {
         buffer.writeUShort(value.sensorId)
         buffer.writeInt(value.temperature)
     }
 
-    override fun sizeOf(value: SensorReading) = 6
+    override fun wireSize(value: SensorReading, context: EncodeContext) = WireSize.Exact(6)
 }
 ```
 
-### Length-Prefixed Strings
+### A String Codec — `AsciiStringCodec`
 
-Use `readLengthPrefixedUtf8String()` and `writeLengthPrefixedUtf8String()` for strings with a 2-byte big-endian length prefix:
+The library's built-in `AsciiStringCodec` is the canonical template for a
+hand-written codec. It is a 7-bit-ASCII `Codec<String>` you can attach with
+`@UseCodec`, and a model for per-charset codecs of your own:
 
 ```kotlin
-data class ConnectMessage(val clientId: String, val username: String)
+object AsciiStringCodec : Codec<String> {
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): String =
+        buffer.readString(buffer.remaining(), Charset.UTF8)
 
-object ConnectMessageCodec : Codec<ConnectMessage> {
-    override fun decode(buffer: ReadBuffer) = ConnectMessage(
-        clientId = buffer.readLengthPrefixedUtf8String().second,
-        username = buffer.readLengthPrefixedUtf8String().second,
-    )
-
-    override fun encode(buffer: WriteBuffer, value: ConnectMessage) {
-        buffer.writeLengthPrefixedUtf8String(value.clientId)
-        buffer.writeLengthPrefixedUtf8String(value.username)
+    override fun encode(buffer: WriteBuffer, value: String, context: EncodeContext) {
+        for (i in value.indices) {
+            val code = value[i].code
+            if (code > 0x7F) {
+                throw EncodeException(
+                    fieldPath = "AsciiStringCodec",
+                    reason = "non-ASCII character at index $i",
+                )
+            }
+        }
+        buffer.writeString(value, Charset.UTF8)
     }
+
+    override fun wireSize(value: String, context: EncodeContext): WireSize =
+        WireSize.Exact(value.length)
+
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult =
+        PeekResult.NoFraming
 }
 ```
 
-### Variable-Length Integers
+### Length Codecs (`BoundingLengthCodec`)
 
-`readVariableByteInteger()` and `writeVariableByteInteger()` handle variable-byte integers (1-4 bytes, max value 268,435,455):
+`@FramedBy` and the `@LengthPrefixed @UseCodec` list shape need a codec that not
+only encodes/decodes a length value but also **bounds the buffer** by it.
+`BoundingLengthCodec<T>` extends `Codec<T>` with two extra members:
 
 ```kotlin
-data class PublishHeader(val topicLength: Int, val payloadLength: Int)
+interface BoundingLengthCodec<T : Any> : Codec<T> {
+    val maxWireSize: Int                                  // widest the prefix can be
+    fun applyBound(buffer: ReadBuffer, decodedValue: T)   // narrow limit() by the decoded length
+}
+```
 
-object PublishHeaderCodec : Codec<PublishHeader> {
-    override fun decode(buffer: ReadBuffer) = PublishHeader(
-        topicLength = buffer.readVariableByteInteger(),
-        payloadLength = buffer.readVariableByteInteger(),
-    )
+An MQTT remaining-length codec (variable-byte integer, 1–4 bytes) implements it like this:
 
-    override fun encode(buffer: WriteBuffer, value: PublishHeader) {
-        buffer.writeVariableByteInteger(value.topicLength)
-        buffer.writeVariableByteInteger(value.payloadLength)
+```kotlin
+object MqttRemainingLengthCodec : BoundingLengthCodec<UInt> {
+    override val maxWireSize: Int = 4
+
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): UInt {
+        var value = 0u
+        var multiplier = 1u
+        repeat(4) {
+            val encoded = buffer.readUnsignedByte().toUInt()
+            value += (encoded and 0x7Fu) * multiplier
+            if ((encoded and 0x80u) == 0u) return value
+            multiplier *= 128u
+        }
+        throw DecodeException(
+            fieldPath = "MqttRemainingLength",
+            bufferPosition = buffer.position(),
+            expected = "continuation bit clear within 4 bytes",
+            actual = "5th continuation byte",
+        )
+    }
+
+    override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
+        var remaining = value
+        do {
+            var encodedByte = remaining and 0x7Fu
+            remaining = remaining shr 7
+            if (remaining > 0u) encodedByte = encodedByte or 0x80u
+            buffer.writeByte(encodedByte.toByte())
+        } while (remaining > 0u)
+    }
+
+    override fun wireSize(value: UInt, context: EncodeContext): WireSize =
+        WireSize.Exact(
+            when {
+                value < 128u -> 1
+                value < 16_384u -> 2
+                value < 2_097_152u -> 3
+                else -> 4
+            },
+        )
+
+    override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
+        buffer.setLimit(buffer.position() + decodedValue.toInt())
     }
 }
 ```
@@ -797,19 +1032,19 @@ Use one codec inside another for nested structures:
 data class Envelope(val version: UByte, val sensor: SensorReading)
 
 object EnvelopeCodec : Codec<Envelope> {
-    override fun decode(buffer: ReadBuffer) = Envelope(
-        version = buffer.readUnsignedByte(),
-        sensor = SensorReadingCodec.decode(buffer),
+    override fun decode(buffer: ReadBuffer, context: DecodeContext) = Envelope(
+        version = buffer.readUByte(),
+        sensor = SensorReadingCodec.decode(buffer, context),
     )
 
-    override fun encode(buffer: WriteBuffer, value: Envelope) {
+    override fun encode(buffer: WriteBuffer, value: Envelope, context: EncodeContext) {
         buffer.writeUByte(value.version)
-        SensorReadingCodec.encode(buffer, value.sensor)
+        SensorReadingCodec.encode(buffer, value.sensor, context)
     }
 
-    override fun sizeOf(value: Envelope): Int? {
-        val sensorSize = SensorReadingCodec.sizeOf(value.sensor) ?: return null
-        return 1 + sensorSize
+    override fun wireSize(value: Envelope, context: EncodeContext): WireSize {
+        val inner = SensorReadingCodec.wireSize(value.sensor, context)
+        return if (inner is WireSize.Exact) WireSize.Exact(1 + inner.bytes) else WireSize.BackPatch
     }
 }
 ```
@@ -817,113 +1052,117 @@ object EnvelopeCodec : Codec<Envelope> {
 ### Manual Sealed Interface Dispatch
 
 ```kotlin
-sealed interface Message { val typeCode: Byte }
-
-data class PingMessage(val timestamp: Long) : Message {
-    override val typeCode: Byte = 0x01
-}
-data class DataMessage(val payload: String) : Message {
-    override val typeCode: Byte = 0x02
-}
+sealed interface Message
+data class PingMessage(val timestamp: Long) : Message
+data class DataMessage(val payload: Int) : Message
 
 object MessageCodec : Codec<Message> {
-    override fun decode(buffer: ReadBuffer): Message =
-        when (val type = buffer.readByte()) {
-            0x01.toByte() -> PingMessage(buffer.readLong())
-            0x02.toByte() -> DataMessage(buffer.readLengthPrefixedUtf8String().second)
-            else -> throw IllegalArgumentException("Unknown type: $type")
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): Message =
+        when (val type = buffer.readByte().toInt()) {
+            0x01 -> PingMessage(buffer.readLong())
+            0x02 -> DataMessage(buffer.readInt())
+            else -> throw DecodeException(
+                fieldPath = "Message.type",
+                bufferPosition = buffer.position(),
+                expected = "0x01 or 0x02",
+                actual = "0x${type.toString(16)}",
+            )
         }
 
-    override fun encode(buffer: WriteBuffer, value: Message) {
-        buffer.writeByte(value.typeCode)
+    override fun encode(buffer: WriteBuffer, value: Message, context: EncodeContext) {
         when (value) {
-            is PingMessage -> buffer.writeLong(value.timestamp)
-            is DataMessage -> buffer.writeLengthPrefixedUtf8String(value.payload)
+            is PingMessage -> { buffer.writeByte(0x01); buffer.writeLong(value.timestamp) }
+            is DataMessage -> { buffer.writeByte(0x02); buffer.writeInt(value.payload) }
         }
     }
 }
 ```
 
-Compare this to the `@PacketType` approach above — the generated version eliminates the manual dispatch boilerplate and catches duplicate type codes at compile time.
-
----
-
-## PayloadReader
-
-When your protocol has a length-delimited payload section to hand off to application code:
-
-```kotlin
-val payloadReader = ReadBufferPayloadReader(payloadBuffer)
-val id = payloadReader.readInt()
-val name = payloadReader.readString(nameLength)
-
-// Or copy/transfer
-val copy = payloadReader.copyToBuffer(BufferFactory.managed())
-payloadReader.transferTo(writeBuffer)
-```
-
-`PayloadReader` tracks release state — use-after-release throws `IllegalStateException`.
+Compare this to the `@PacketType` approach — the generated version eliminates the manual dispatch and catches duplicate type codes at compile time.
 
 ## Streaming Integration
 
-For streaming scenarios where data arrives in chunks, use `StreamProcessor` to accumulate bytes, then decode with any codec:
+For data that arrives in chunks, use `StreamProcessor` to accumulate bytes, then decode with any codec:
 
 ```kotlin
+import com.ditchoom.buffer.pool.withPool
+import com.ditchoom.buffer.stream.StreamProcessor
+
 withPool { pool ->
     val processor = StreamProcessor.create(pool)
+    try {
+        for (chunk in networkChannel) {
+            processor.append(chunk)
 
-    for (chunk in networkChannel) {
-        processor.append(chunk)
-
-        while (processor.available() >= HEADER_SIZE) {
-            val headerBuffer = processor.readBuffer(HEADER_SIZE)
-            val message = MessageCodec.decode(headerBuffer)
-            handleMessage(message)
+            while (true) {
+                when (val frame = MessageCodec.peekFrameSize(processor)) {
+                    is PeekResult.Complete -> {
+                        val message = processor.readBufferScoped(frame.bytes) {
+                            MessageCodec.decode(this, DecodeContext.Empty)
+                        }
+                        handleMessage(message)
+                    }
+                    PeekResult.NeedsMoreData -> break
+                    PeekResult.NoFraming -> error("MessageCodec cannot frame a stream")
+                }
+            }
         }
+    } finally {
+        processor.release()
     }
 }
 ```
 
 ### Handling Incomplete Data (Buffer Underflow)
 
-Generated codecs trust that their input buffer contains enough bytes — they don't validate `remaining()` before every read. This is by design: the **framing layer** owns the "do I have enough data?" question, not the codec.
+Generated codecs trust that their input buffer contains a complete message —
+they don't validate `remaining()` before every read. This is by design: the
+**framing layer** owns the "do I have enough data?" question, not the codec.
 
 `StreamProcessor` is the framing layer:
 
-- **`available()`** — reports total buffered bytes without consuming
-- **`peekInt(offset)`** — reads a value without consuming (e.g., to read a length field before committing)
-- **`readBuffer(size)`** — throws `IllegalArgumentException` if `available() < size`
+- **`available()`** — total buffered bytes, without consuming
+- **`peekByte(offset)` / `peekInt(offset)`** — read a value without consuming it
+- **`readBuffer(size)`** / **`readBufferScoped(size) { … }`** — hand a complete
+  frame to a codec; `readBufferScoped` releases the frame buffer back to the
+  pool when the block returns
 
-The pattern: check `available()` first, then decode only when you have a complete message:
+`peekFrameSize` is the preferred gate (above). When you must frame by hand,
+peek the length, then check `available()` before reading:
 
 ```kotlin
 while (processor.available() >= 5) {  // 1 byte type + 4 byte length
-    val type = processor.peekByte(0)
     val length = processor.peekInt(1)
     val totalSize = 5 + length
     if (processor.available() < totalSize) break  // wait for more data
 
-    val frame = processor.readBuffer(totalSize)
-    val message = MessageCodec.decode(frame)
+    val message = processor.readBufferScoped(totalSize) {
+        MessageCodec.decode(this, DecodeContext.Empty)
+    }
     handleMessage(message)
 }
 ```
 
-For protocols where you want automatic refilling (e.g., reading from a socket), use `AutoFillingSuspendingStreamProcessor` — it calls your refill callback when more bytes are needed, eliminating the manual `available()` loop:
+For protocols where you want automatic refilling (e.g., reading from a socket),
+wrap a `SuspendingStreamProcessor` in `AutoFillingSuspendingStreamProcessor` —
+it calls your refill callback whenever a read needs more bytes:
 
 ```kotlin
-val processor = AutoFillingSuspendingStreamProcessor(delegate) {
-    val chunk = socket.read()
-    if (chunk == null) throw EndOfStreamException()
-    delegate.append(chunk)
+import com.ditchoom.buffer.stream.AutoFillingSuspendingStreamProcessor
+
+val processor = AutoFillingSuspendingStreamProcessor(delegate) { p ->
+    val chunk = socket.read() ?: throw EndOfStreamException()
+    p.append(chunk)
 }
-// Just decode — the processor auto-fills when it needs more bytes
-val message = MessageCodec.decode(processor.readBuffer(frameSize))
+// Reads auto-fill when they need more bytes.
+val message = processor.readBufferScoped(frameSize) {
+    MessageCodec.decode(this, DecodeContext.Empty)
+}
 ```
 
 ## Real-World Example: Zero-Copy RIFF Image Decoder
 
-This example decodes a custom RIFF-like image container and renders the bitmap in Jetpack Compose — without copying pixel data during parsing.
+This example decodes an image stored in a RIFF container — a custom `IMG ` form alongside RIFF's standard `WAVE` and `AVI ` forms — and renders the bitmap in Jetpack Compose without copying pixel data during parsing. RIFF is little-endian; its 4-byte FourCC tags are read big-endian so each tag's bytes stay in file order.
 
 ### Wire Format
 
@@ -944,34 +1183,39 @@ This example decodes a custom RIFF-like image container and renders the bitmap i
 Use `@ProtocolMessage` for all structured headers. The binary pixel payload is **not** a codec field — it's extracted manually with `readBytes()` for zero-copy.
 
 ```kotlin
-@ProtocolMessage
+@ProtocolMessage(wireOrder = Endianness.Little)
 data class FileHeader(
-    val magic: Int,       // "RIFF" = 0x52494646
-    val fileSize: UInt,   // total size after this field
-    val format: Int,      // "IMG " = 0x494D4720
+    @WireOrder(Endianness.Big) val magic: Int,    // "RIFF" = 0x52494646
+    val fileSize: UInt,                           // little-endian, per the RIFF spec
+    @WireOrder(Endianness.Big) val format: Int,   // "IMG " = 0x494D4720
 )
 
-@ProtocolMessage
+@ProtocolMessage(wireOrder = Endianness.Little)
 data class ChunkHeader(
-    val chunkId: Int,     // 4-byte ASCII chunk ID
-    val chunkSize: UInt,  // byte count of chunk data
+    @WireOrder(Endianness.Big) val chunkId: Int,  // 4-byte ASCII chunk ID
+    val chunkSize: UInt,                          // little-endian byte count
 )
 
-@ProtocolMessage
+@ProtocolMessage(wireOrder = Endianness.Little)
 data class ImageMetadata(
     val width: UInt,
     val height: UInt,
-    val colorDepth: UShort,              // bits per pixel (32 = ARGB_8888)
+    val colorDepth: UShort,              // bits per pixel (32 = RGBA_8888)
     @LengthPrefixed val title: String,
 )
 ```
 
 :::tip Why not put pixel data in the codec?
-`@ProtocolMessage` fields must be primitives, strings, or codec-composed types — not raw byte blobs. For binary payloads:
+A `@ProtocolMessage` field must be a primitive, a `String`, or a codec-composed
+type — not a raw byte blob. For binary payloads:
 
-- **Hybrid (shown here)**: codec for headers, manual `readBytes()` for the blob — simplest approach
-- **Custom SPI annotation**: create a `@BinarySlice("sizeField")` annotation with a `CodecFieldProvider` that generates `readBytes()` calls — fully codec-managed, reusable across protocols (see [Custom Annotations (SPI)](#custom-annotations-spi))
-- **`@Payload` type parameter**: for payloads that have their own structure and codec, not for raw bytes
+- **Hybrid (shown here)**: a codec for the headers, manual `readBytes()` for the
+  blob — the simplest approach
+- **Hand-written `Codec` via `@UseCodec`**: write a `Codec<YourBlobType>` and
+  attach it with `@RemainingBytes @UseCodec(...)` — fully codec-managed and
+  reusable across protocols (see [`@UseCodec`](#usecodeccodec--delegate-to-a-hand-written-codec))
+- **A `Payload`-marked type**: for payloads that carry their own structure — see
+  [Typed Payloads](#typed-payloads-and-the-payload-marker)
 :::
 
 ### Decode with Zero-Copy Pixel Extraction
@@ -989,18 +1233,18 @@ object RiffImageDecoder {
     private const val CHUNK_PXLS = 0x70786C73  // "pxls"
 
     fun decode(buffer: ReadBuffer): RiffImage {
-        // Generated codecs parse the structured headers — type-safe, batch-optimized
-        val header = FileHeaderCodec.decode(buffer)
+        // Generated codecs parse the structured headers — type-safe, field-order-safe.
+        val header = FileHeaderCodec.decode(buffer, DecodeContext.Empty)
         require(header.magic == MAGIC_RIFF && header.format == FORMAT_IMG)
 
-        val metaChunk = ChunkHeaderCodec.decode(buffer)
+        val metaChunk = ChunkHeaderCodec.decode(buffer, DecodeContext.Empty)
         require(metaChunk.chunkId == CHUNK_META)
-        val metadata = ImageMetadataCodec.decode(buffer)
+        val metadata = ImageMetadataCodec.decode(buffer, DecodeContext.Empty)
 
-        val pxlsChunk = ChunkHeaderCodec.decode(buffer)
+        val pxlsChunk = ChunkHeaderCodec.decode(buffer, DecodeContext.Empty)
         require(pxlsChunk.chunkId == CHUNK_PXLS)
 
-        // Zero-copy: readBytes() returns a slice backed by the same memory
+        // Zero-copy: readBytes() returns a slice backed by the same memory.
         val pixelData = buffer.readBytes(pxlsChunk.chunkSize.toInt())
 
         return RiffImage(metadata, pixelData)
@@ -1017,7 +1261,7 @@ Use `nativeAddress` to create a Skia `Pixmap` that wraps the buffer's memory dir
 ```kotlin
 @Composable
 fun RiffBitmap(buffer: ReadBuffer, modifier: Modifier = Modifier) {
-    // Hold a reference to the decoded image so the backing buffer stays alive
+    // Hold a reference to the decoded image so the backing buffer stays alive.
     val (imageBitmap, imageRef) = remember(buffer) {
         val img = RiffImageDecoder.decode(buffer)
         val w = img.metadata.width.toInt()
@@ -1027,7 +1271,7 @@ fun RiffBitmap(buffer: ReadBuffer, modifier: Modifier = Modifier) {
             ?: error("Use BufferFactory.Default for zero-copy Skia rendering")
 
         val info = ImageInfo(w, h, ColorType.RGBA_8888, ColorAlphaType.PREMUL)
-        // Zero-copy: Pixmap wraps the buffer's native memory directly
+        // Zero-copy: Pixmap wraps the buffer's native memory directly.
         val pixmap = Pixmap(info, nma.nativeAddress, info.minRowBytes)
         Image.makeFromPixmap(pixmap).toComposeImageBitmap() to img
     }
@@ -1039,70 +1283,21 @@ fun RiffBitmap(buffer: ReadBuffer, modifier: Modifier = Modifier) {
 `Pixmap` does not own the memory — it borrows the buffer's native address. The original buffer (or pool) must stay alive while the image is in use. In the example above, `imageRef` keeps the `RiffImage` (and its backing `ReadBuffer` slice) alive alongside the `ImageBitmap` inside `remember`.
 :::
 
-### Android: Decompress Directly into HardwareBuffer (API 26+)
-
-For the fastest path to the GPU, lock a `HardwareBuffer`, wrap the locked pointer with `BufferFactory.wrapNativeAddress`, and decompress directly into GPU-accessible memory — zero intermediate buffers:
-
-```kotlin
-@Composable
-fun RiffBitmap(buffer: ReadBuffer, modifier: Modifier = Modifier) {
-    val imageBitmap = remember(buffer) {
-        val img = RiffImageDecoder.decode(buffer)
-        val w = img.metadata.width.toInt()
-        val h = img.metadata.height.toInt()
-        val pixelSize = w * h * 4
-
-        val hwBuffer = HardwareBuffer.create(
-            w, h, HardwareBuffer.RGBA_8888, 1,
-            HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE or HardwareBuffer.USAGE_CPU_WRITE_OFTEN,
-        )
-
-        // Lock HardwareBuffer → get GPU-mapped memory address (JNI)
-        val gpuAddr = NativeRenderer.lockHardwareBuffer(hwBuffer)
-
-        // Wrap the GPU memory as a PlatformBuffer — zero-copy, non-owning
-        val dst = BufferFactory.wrapNativeAddress(gpuAddr, pixelSize)
-
-        // Decompress directly from source buffer into GPU memory
-        StreamingDecompressor.create(CompressionAlgorithm.Raw).use(
-            onOutput = { chunk -> dst.write(chunk) }
-        ) { decompress -> decompress(img.pixelData) }
-
-        // Unlock → pixels are in GPU memory, ready to render
-        NativeRenderer.unlockHardwareBuffer(hwBuffer)
-
-        Bitmap.wrapHardwareBuffer(hwBuffer, ColorSpace.get(ColorSpace.Named.SRGB))!!
-            .asImageBitmap()
-    }
-    Image(bitmap = imageBitmap, contentDescription = null, modifier = modifier)
-}
-```
-
-The JNI helper is just lock/unlock — two small functions:
-
-```c
-#include <android/hardware_buffer_jni.h>
-
-JNIEXPORT jlong JNICALL
-Java_com_example_NativeRenderer_lockHardwareBuffer(JNIEnv *env, jclass clazz, jobject hw_buffer) {
-    AHardwareBuffer *ahb = AHardwareBuffer_fromHardwareBuffer(env, hw_buffer);
-    void *dst = NULL;
-    AHardwareBuffer_lock(ahb, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, NULL, &dst);
-    return (jlong)dst;
-}
-
-JNIEXPORT void JNICALL
-Java_com_example_NativeRenderer_unlockHardwareBuffer(JNIEnv *env, jclass clazz, jobject hw_buffer) {
-    AHardwareBuffer *ahb = AHardwareBuffer_fromHardwareBuffer(env, hw_buffer);
-    AHardwareBuffer_unlock(ahb, NULL);
-}
-```
-
 ### Writing the Container
+
+Codecs with a variable-length field (here, `ImageMetadata`'s `@LengthPrefixed`
+title) report `WireSize.BackPatch` from `wireSize` — their size isn't known up
+front. Encode the metadata into a scratch buffer first and measure its
+`position()`:
 
 ```kotlin
 fun encodeRiffImage(metadata: ImageMetadata, pixels: ReadBuffer): PlatformBuffer {
-    val metadataSize = ImageMetadataCodec.sizeOf(metadata)!!
+    // Encode the variable-length metadata once to learn its byte count.
+    val metaScratch = BufferFactory.Default.allocate(256)
+    ImageMetadataCodec.encode(metaScratch, metadata, EncodeContext.Empty)
+    val metadataSize = metaScratch.position()
+    metaScratch.resetForRead()
+
     val pixelSize = pixels.remaining()
     val totalSize = 4 + 8 + metadataSize + 8 + pixelSize  // format + 2 chunk headers + data
 
@@ -1113,14 +1308,14 @@ fun encodeRiffImage(metadata: ImageMetadata, pixels: ReadBuffer): PlatformBuffer
         magic = 0x52494646,
         fileSize = totalSize.toUInt(),
         format = 0x494D4720,
-    ))
+    ), EncodeContext.Empty)
 
     // Metadata chunk
-    ChunkHeaderCodec.encode(buffer, ChunkHeader(0x6D657461, metadataSize.toUInt()))
-    ImageMetadataCodec.encode(buffer, metadata)
+    ChunkHeaderCodec.encode(buffer, ChunkHeader(0x6D657461, metadataSize.toUInt()), EncodeContext.Empty)
+    buffer.write(metaScratch)
 
-    // Pixel data chunk — bulk copy from source buffer
-    ChunkHeaderCodec.encode(buffer, ChunkHeader(0x70786C73, pixelSize.toUInt()))
+    // Pixel data chunk — bulk copy from the source buffer
+    ChunkHeaderCodec.encode(buffer, ChunkHeader(0x70786C73, pixelSize.toUInt()), EncodeContext.Empty)
     buffer.write(pixels)
 
     buffer.resetForRead()
@@ -1130,22 +1325,11 @@ fun encodeRiffImage(metadata: ImageMetadata, pixels: ReadBuffer): PlatformBuffer
 
 ### Copy Budget
 
-| Step | Skia (`Pixmap`) | Android (`HardwareBuffer` + `wrapNativeAddress`) | Naive (`ByteArray`) |
-|------|-----------------|--------------------------------------------------|---------------------|
-| Parse headers (codec) | Zero-copy | Zero-copy | Zero-copy |
-| Extract compressed data (`readBytes`) | Zero-copy (slice) | Zero-copy (slice) | 1 copy (`readByteArray`) |
-| Decompress | → Direct buffer | → GPU memory (`wrapNativeAddress`) | → `ByteArray` |
-| Render | Zero-copy (`Pixmap` borrows memory) | Zero-copy (GPU reads `HardwareBuffer`) | 1 copy (`wrap` + `copyPixels`) |
-| **Intermediate copies** | **0** | **0** | **2** |
+| Step | Skia (`Pixmap`) | Naive (`ByteArray`) |
+|------|-----------------|---------------------|
+| Parse headers (codec) | Zero-copy | Zero-copy |
+| Extract pixel data (`readBytes`) | Zero-copy (slice) | 1 copy (`copyToByteArray`) |
+| Render | Zero-copy (`Pixmap` borrows memory) | 1 copy (`wrap` + `copyPixels`) |
+| **Intermediate copies** | **0** | **2** |
 
-Both the Skia and HardwareBuffer paths achieve **zero intermediate copies** of pixel data. Decompressed pixels exist in exactly one place — either the Skia-wrapped Direct buffer or the GPU-mapped HardwareBuffer memory. `BufferFactory.wrapNativeAddress` is what makes the HardwareBuffer path possible from pure Kotlin.
-
----
-
-## Extension Functions Reference
-
-| Function | Description |
-|----------|-------------|
-| `codec.encodeToBuffer(value)` | Allocate a new buffer, encode, and return it ready for reading |
-| `codec.testRoundTrip(value)` | Encode then decode, returning the decoded value |
-| `codec.testRoundTrip(value, expectedBytes)` | Same, but also verifies the wire bytes match |
+The Skia path achieves **zero intermediate copies** of pixel data — the decoded pixels exist in exactly one place, the Skia-wrapped native buffer.

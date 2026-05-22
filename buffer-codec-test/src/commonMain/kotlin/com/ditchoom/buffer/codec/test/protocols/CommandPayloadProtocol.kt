@@ -5,8 +5,12 @@ import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 
 /**
- * Protocol using `data object` and `object` sealed variants for type-only commands
- * (e.g., ping, reset) alongside normal data-class variants with payload.
+ * Issue #150 fixture (restored from PR #153).
+ *
+ * Protocol using `data object` and `object` sealed variants for type-only
+ * commands (e.g. ping, reset) alongside normal data-class variants with
+ * payload. Singleton variants carry zero wire bytes beyond the
+ * `@PacketType` discriminator; decode returns the singleton instance.
  */
 @ProtocolMessage(wireOrder = Endianness.Little)
 sealed interface CommandPayload {
@@ -28,9 +32,10 @@ sealed interface CommandPayload {
 }
 
 /**
- * A data class whose nested `@ProtocolMessage` field is a sealed interface that
- * contains `data object` variants — exercises nested decode/encode of the singleton
- * variants, not just compile-time acceptance.
+ * Outer data class whose nested `@ProtocolMessage` field is a sealed
+ * interface containing `data object` variants — exercises nested
+ * decode/encode of the singleton variants, not just compile-time
+ * acceptance.
  */
 @ProtocolMessage(wireOrder = Endianness.Little)
 data class DeviceState(

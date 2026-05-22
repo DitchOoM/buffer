@@ -184,7 +184,10 @@ class FfmBufferTest {
         val buffer = createFfmBuffer(64)
         buffer.writeInt(42)
         buffer.freeNativeMemory()
-        assertFailsWith<IndexOutOfBoundsException> { buffer.get(0) }
+        // BaseJvmBuffer wraps the native IndexOutOfBoundsException as
+        // BufferUnderflowException for cross-platform consistency with
+        // ByteArrayBuffer / MutableDataBuffer / NativeBuffer absolute reads.
+        assertFailsWith<BufferUnderflowException> { buffer.get(0) }
     }
 
     @Test

@@ -72,23 +72,6 @@ annotation class PacketType(
 )
 
 /**
- * Marks a type parameter as the application payload.
- * The generated codec will provide a scoped `PayloadReader` for decoding.
- *
- * ```kotlin
- * @ProtocolMessage
- * data class Packet<@Payload P>(
- *     val version: UByte,
- *     @LengthPrefixed val payload: P,
- * )
- * // Generates PacketCodec with a PayloadReader context for decoding P
- * ```
- */
-@Target(AnnotationTarget.TYPE_PARAMETER)
-@Retention(AnnotationRetention.BINARY)
-annotation class Payload
-
-/**
  * Length prefix encoding for [LengthPrefixed] fields.
  * All variants use big-endian (network) byte order.
  */
@@ -104,8 +87,22 @@ enum class LengthPrefix {
 }
 
 /**
- * Marks a String or payload field as length-prefixed: prefix bytes followed by UTF-8 data.
- * Default is 2-byte big-endian (`UShort`) prefix.
+ * Marks a length-prefixed field: prefix bytes carrying the value's wire size,
+ * followed by the value's bytes. Default prefix width is 2-byte big-endian
+ * (`UShort`).
+ *
+ * Accepted on:
+ *   - `String` fields — the value is the field's UTF-8 bytes.
+ *   - `@ProtocolMessage` data class fields — the value is the message body's
+ *     wire bytes; encode emits the prefix carrying the body's `wireSize`,
+ *     decode reads the prefix, bounds inner decode, restores the outer limit.
+ *
+ * For adjacent length carriers, prefer `@LengthPrefixed` over modeling the
+ * length as a separate constructor parameter and a `@LengthFrom` reference —
+ * a redundant length carrier is an impossible-state class (the prefix and
+ * `body.wireSize()` independently encode the same quantity). `@LengthFrom`
+ * is reserved for genuine remote-prefix uses (length carried in a non-
+ * adjacent field).
  *
  * ```kotlin
  * @ProtocolMessage
@@ -113,6 +110,15 @@ enum class LengthPrefix {
  *     @LengthPrefixed val name: String,                         // 2-byte prefix (default)
  *     @LengthPrefixed(LengthPrefix.Byte) val nickname: String,  // 1-byte prefix (max 255)
  *     @LengthPrefixed(LengthPrefix.Int) val bio: String,        // 4-byte prefix
+ * )
+ *
+ * @ProtocolMessage
+ * data class WavFmtBody(val audioFormat: UShort, /* ... */)
+ *
+ * @ProtocolMessage(wireOrder = Endianness.Little)
+ * data class WavFmtChunk(
+ *     val fourCC: UInt,
+ *     @LengthPrefixed(LengthPrefix.Int) val body: WavFmtBody,   // 4-byte LE prefix carries body.wireSize
  * )
  * ```
  */
@@ -123,8 +129,33 @@ annotation class LengthPrefixed(
 )
 
 /**
- * Marks a String field to consume all remaining bytes as UTF-8.
- * Must be the last non-conditional field in the constructor.
+ * Marks a field that consumes the remaining bytes of the bounded buffer.
+ *
+ * Accepted on:
+ *   - `String` — UTF-8 body consuming the rest of the buffer.
+ *   - `List<T>` where `T` is a `@ProtocolMessage` data class — loop
+ *     reads nested-message bodies until the bound is reached.
+ *   - Typed binary payload via `@RemainingBytes @UseCodec(C::class) val: P`
+ *     — the user codec consumes the bounded region in one call. Use this
+ *     instead of a raw scalar list when the bytes are opaque (an image,
+ *     a compressed blob, an encrypted payload). See [UseCodec].
+ *
+ * For protocols that genuinely need a typed list of single bytes the
+ * scalar-list shape (`List<UByte>` / `List<Byte>`) is also accepted, but
+ * the typed-payload pattern above is the preferred way to model a binary
+ * blob.
+ *
+ * ## Bounding the body
+ *
+ * The decoder reads against `buffer.limit()`. Callers (or an outer
+ * codec) are responsible for narrowing `buffer.limit()` to the body's
+ * extent before invoking decode — typical for protocols whose framing
+ * carries the body byte count outside the codec's view (MQTT's
+ * fixed-header remaining-length variable-byte-integer, parsed by an
+ * outer dispatcher; HTTP/2 payload length, parsed by the frame
+ * header).
+ *
+ * ## Simplest case (terminal)
  *
  * ```kotlin
  * @ProtocolMessage
@@ -133,25 +164,100 @@ annotation class LengthPrefixed(
  *     @RemainingBytes val message: String,  // reads everything after level byte
  * )
  * ```
+ *
+ * ## Trailing FixedSize fields
+ *
+ * `@RemainingBytes` may appear before the last constructor parameter,
+ * provided every trailing field is fixed-size on the wire (a plain
+ * scalar or a value-class scalar). The decoder subtracts the trailers'
+ * summed wire bytes from `buffer.limit()` before the body read so the
+ * trailers survive intact:
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * data class TextWithChecksum(
+ *     val tag: UByte,
+ *     @RemainingBytes val text: String,   // bounded to limit() - 4 (the crc)
+ *     val crc: UInt,                       // 4-byte FixedSize trailer
+ * )
+ * ```
+ *
+ * Variable-size trailers (`@LengthPrefixed`, `@LengthFrom`, another
+ * `@RemainingBytes`, `@When`, `@UseCodec`) are rejected by the
+ * validator with a focused error: the body decode would have no way
+ * to know its end without re-encoding. Move `@RemainingBytes` to the
+ * end of the constructor parameter list, or remove the trailer.
  */
 @Target(AnnotationTarget.VALUE_PARAMETER)
 @Retention(AnnotationRetention.BINARY)
 annotation class RemainingBytes
 
 /**
- * Marks a String field whose byte length is determined by a preceding numeric field.
- * The referenced field must exist, come before this field, and be a numeric type.
+ * Marks a field whose byte length is determined by a numeric sibling
+ * elsewhere in the message — the length is carried as a separate
+ * constructor parameter because the consumer cares about it as a number
+ * (flow control, routing) or because the on-wire prefix shape is one
+ * `@LengthPrefixed` cannot express (e.g. TLS uint24).
+ *
+ * Accepted on:
+ *   - `String` fields — body is a single UTF-8 string sized by the sibling.
+ *   - `List<T>` where `T` is a `@ProtocolMessage` data class — body is a
+ *     sequence of nested-message bodies, byte-bounded by the sibling.
+ *   - `T` where `T` is a `@ProtocolMessage` data class or sealed parent —
+ *     body is a single nested message; the sibling-derived length covers
+ *     the whole nested wire form. Decode narrows `buffer.limit()` to the
+ *     bounded extent and delegates to `<TCodec>.decode`; encode delegates
+ *     to `<TCodec>.encode` and the user is responsible for sizing the
+ *     sibling to the body's wire byte count.
+ *
+ * ## When to prefer @LengthPrefixed
+ *
+ * **For adjacent length carriers, prefer `@LengthPrefixed`** when the
+ * prefix shape matches one of [LengthPrefix.Byte] / [LengthPrefix.Short] /
+ * [LengthPrefix.Int]. A field whose only purpose is to bound the
+ * immediately following sibling is a redundant length carrier — modeling
+ * it as an independent constructor parameter encodes the same quantity
+ * twice (prefix vs. value's `wireSize`). The validator rejects the redundant
+ * shape for `String` and `List<T>` bodies.
+ *
+ * ## When @LengthFrom is the only option
+ *
+ * Adjacent siblings remain valid for nested `@ProtocolMessage` bodies
+ * because `@LengthPrefixed` only supports 1 / 2 / 4-byte prefixes —
+ * protocols with non-standard prefix widths cannot express their wire
+ * shape via `@LengthPrefixed`. Example: TLS 1.3 handshake header (RFC
+ * 8446 §4) uses a 3-byte big-endian length:
  *
  * ```kotlin
- * @ProtocolMessage
- * data class NamedRecord(
- *     val nameLength: UShort,
- *     @LengthFrom("nameLength") val name: String,  // reads nameLength bytes as UTF-8
- *     val value: Int,
+ * @ProtocolMessage(wireOrder = Endianness.Big)
+ * data class TlsHandshake(
+ *     val msgType: UByte,
+ *     @WireBytes(3) val length: UInt,                // uint24
+ *     @LengthFrom("length") val body: TlsHandshakeBody,
  * )
  * ```
  *
- * @param field The name of the preceding numeric field that holds the byte length.
+ * Genuine remote-prefix: length carried in a non-adjacent field, often
+ * parsed by a different codec or sitting several positions away
+ * (MQTT-style header-bounded payloads, parent-passed bounds via
+ * `@DispatchOn`, etc.):
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * data class RemoteHeader(
+ *     val payloadLength: UShort,     // consumer-visible — flow control, routing
+ *     val flags: UByte,
+ *     val correlationId: UInt,
+ *     @LengthFrom("payloadLength") val payload: String,
+ * )
+ * ```
+ *
+ * @param field The name of the sibling field that holds the byte length.
+ *   Must exist, come before this field, and resolve to either a
+ *   non-nullable numeric scalar (`Byte`/`Short`/`Int`/`Long`/`UByte`/
+ *   `UShort`/`UInt`/`ULong`) for the simple form `"siblingName"`, or a
+ *   value class with a `val` property returning non-nullable `Int` for
+ *   the dotted form `"siblingName.property"`.
  */
 @Target(AnnotationTarget.VALUE_PARAMETER)
 @Retention(AnnotationRetention.BINARY)
@@ -216,81 +322,243 @@ annotation class WireOrder(
 )
 
 /**
- * Conditional field: only present on the wire when the referenced expression is `true`.
- * The field must be nullable with a default value of `null`.
+ * Conditional field: only present on the wire when the [predicate] holds.
+ * The field must be nullable. Setting `= null` as the constructor default is conventional
+ * (so the data class can be constructed without naming the field when the predicate
+ * is false) but is **not** enforced — KSP cannot inspect default expression trees, so
+ * any rule the validator can't actually check is not part of the contract.
+ *
+ * ## Grammar
+ *
+ * The predicate language is **deliberately narrow**: the validator parses literal
+ * forms only — no `&&` / `||`, no `!=`, no field-to-field comparisons, no method calls.
+ * If a use case doesn't fit, model it with `@UseCodec` and a custom codec instead.
+ * Two forms are accepted:
+ *
+ * ### 1. Dotted Boolean path on a prior sibling
+ *
+ * `"<siblingField>"` resolves to a sibling `Boolean` constructor parameter declared
+ * before the bound parameter; `"<siblingField>.<property>"` resolves to a `Boolean`-
+ * returning `val` on a sibling `@JvmInline value class`.
  *
  * ```kotlin
  * @ProtocolMessage
  * data class OptionalPayload(
  *     val hasExtra: Boolean,
- *     @WhenTrue("hasExtra") val extra: Int? = null,  // only read/written when hasExtra == true
+ *     @When("hasExtra") val extra: Int? = null,
+ * )
+ *
+ * @When("flags.willFlag") val willTopic: String? = null
+ * ```
+ *
+ * ### 2. `remaining <op> <int-literal>` *(reserved — not yet implemented)*
+ *
+ * `"remaining <op> <int>"` where `<op> ∈ {>=, >, ==}` gates the slot on the bounded
+ * decode buffer's `remaining()`. The identifier `remaining` is reserved/magic and
+ * does not refer to a sibling field. Reserved for a future release; until then,
+ * this grammar is documented but not parsed — using it today produces the
+ * standard "sibling not found" diagnostic.
+ *
+ * ## Compound conditions: use a value-class getter
+ *
+ * The grammar is intentionally minimal — no `&&` / `||` / cross-field comparisons.
+ * For predicates that combine multiple flags, model the combined condition as a
+ * `val` property on a sibling `@JvmInline value class` and reference it through
+ * grammar 1's dotted form. The property is plain Kotlin: any expression that
+ * returns `Boolean` is fair game (bit tests on the inner scalar, comparisons
+ * against constants, two-flag conjunctions, …).
+ *
+ * Example — a `keyId` field present only when a frame is both encrypted and
+ * carries a header extension:
+ *
+ * ```kotlin
+ * @JvmInline
+ * @ProtocolMessage
+ * value class FrameFlags(val raw: UByte) {
+ *     val encrypted: Boolean get() = (raw.toInt() and 0x01) != 0
+ *     val hasHeaderExtension: Boolean get() = (raw.toInt() and 0x02) != 0
+ *     // Compound predicate composed in Kotlin, exposed as a single Boolean val:
+ *     val carriesKeyId: Boolean get() = encrypted && hasHeaderExtension
+ * }
+ *
+ * @ProtocolMessage
+ * data class SecureFrame(
+ *     val flags: FrameFlags,
+ *     @When("flags.carriesKeyId") val keyId: UInt? = null,
+ *     // … rest of the frame
  * )
  * ```
  *
- * Dotted expressions access properties on value class fields:
+ * The validator only sees `flags.carriesKeyId` returning `Boolean` — the
+ * combined logic stays in code where it's testable and refactorable, and the
+ * predicate language stays narrow enough to keep the validator's diagnostics
+ * actionable.
  *
- * ```kotlin
- * @WhenTrue("flags.willFlag") val willTopic: String? = null
- * ```
+ * ## Semantics
  *
- * @param expression `"fieldName"` for a Boolean field, or `"fieldName.property"` for a
- *   property on a value class field.
+ * Encoder semantics: when the predicate is `false`, the entire slot is skipped
+ * on the wire (zero bytes written, including any `@LengthPrefixed` prefix).
+ * When the predicate is `true` and the field's value is `null`, encode throws
+ * `EncodeException` with field-path attribution.
+ *
+ * @param predicate Grammar 1 (`"siblingField"` or `"siblingField.property"`) today;
+ *   grammar 2 (`"remaining <op> <int>"`) reserved for a future release.
  */
 @Target(AnnotationTarget.VALUE_PARAMETER)
 @Retention(AnnotationRetention.BINARY)
-annotation class WhenTrue(
-    val expression: String,
+annotation class When(
+    val predicate: String,
 )
 
 /**
- * Delegates field decoding/encoding to an existing [Codec][com.ditchoom.buffer.codec.Codec] object.
+ * Delegates field decoding/encoding to an existing [Codec][com.ditchoom.buffer.codec.Codec]
+ * object.
  *
- * **Use this only for custom, hand-written codecs** (for example, variable-byte-integer encoders
- * or image-bitmap parsers). If the field's type is itself annotated with [@ProtocolMessage],
- * declare the field with that type directly instead — the processor generates the codec by
- * convention and wires it up automatically, including sealed dispatch and forward references
- * to codecs generated in the same compilation round. `@UseCodec` cannot forward-reference a
- * KSP-generated codec class.
+ * **Use this only for custom, hand-written codecs** — variable-byte-integer encoders,
+ * image-bitmap parsers, var-byte-int reason-code encodings, and the like. If the field's
+ * type is itself annotated with [ProtocolMessage], declare the field with that type
+ * directly instead — the processor generates the codec by convention and wires it up
+ * automatically, including sealed dispatch and forward references to codecs generated
+ * in the same compilation round. `@UseCodec` cannot forward-reference a KSP-generated
+ * codec class.
  *
- * The referenced [codec] must be a Kotlin `object` implementing `Codec<T>`.
+ * The referenced [codec] must be a Kotlin `object` implementing `Codec<T>` (or, for
+ * the bounding shape, [BoundingLengthCodec][com.ditchoom.buffer.codec.BoundingLengthCodec]).
+ * Standalone `expect`/`actual` codecs are supported (Kotlin linker resolves the
+ * platform-side actual at the call site).
  *
- * **Without a length annotation** — the codec reads directly from the buffer:
+ * ## Bare scalar — codec reads directly from the buffer
+ *
  * ```kotlin
  * @ProtocolMessage
  * data class Message(
  *     @UseCodec(VariableIntCodec::class) val length: Int,
  * )
- * // Generated: val length = VariableIntCodec.decode(buffer)
+ * // Generated: val length = VariableIntCodec.decode(buffer, context)
  * ```
  *
- * **With a length annotation** — the codec receives a size-limited slice:
+ * ## Length-prefixed payload — typed binary slot framed by an inline prefix
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * data class V5Properties(
+ *     @LengthPrefixed @UseCodec(JpegBitmapCodec::class) val bitmap: ImageBitmap,
+ * )
+ * // Generated: read 2-byte UShort prefix, narrow buffer.limit() by the prefix value,
+ * // run JpegBitmapCodec.decode(buffer, context), restore the outer limit on finally.
+ * ```
+ *
+ * ## Length-prefixed list — codec is `BoundingLengthCodec<UInt>` driving a var-width prefix
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * data class V5Connect(
+ *     @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class) val properties: List<V5Property>,
+ * )
+ * // Generated: prefix codec writes a variable-byte-integer header carrying the
+ * // body byte count; element loop runs against the bounded region.
+ * ```
+ *
+ * ## Bounded by a sibling — `@LengthFrom` provides the byte count
+ *
  * ```kotlin
  * @ProtocolMessage
  * data class ImageFrame(
  *     val bitmapLength: Int,
  *     @UseCodec(PngBitmapCodec::class) @LengthFrom("bitmapLength") val bitmap: ImageBitmap,
  * )
- * // Generated: val _slice = buffer.readBytes(bitmapLength); val bitmap = PngBitmapCodec.decode(_slice)
+ * // Generated: narrow buffer.limit() by bitmapLength.toInt(), call PngBitmapCodec.decode,
+ * // restore the outer limit on finally.
  * ```
  *
- * **For nested @ProtocolMessage types, skip @UseCodec entirely.** Length annotations attach
- * directly to the nested field:
+ * ## Extension pattern — ship your own per-charset / per-format codec
+ *
+ * The library ships exactly one built-in string codec
+ * ([com.ditchoom.buffer.codec.AsciiStringCodec], 7-bit ASCII). Other charsets
+ * (Latin-1, UTF-16 BE/LE, Modified UTF-8) and binary formats (PNG, MQTT
+ * remaining-length, etc.) live in consumer code: each one carries
+ * charset-specific nuance (BOM policy, surrogate handling, JVM-class-file
+ * quirks for Modified UTF-8) the consumer can resolve better than the
+ * framework. Author a Kotlin `object` implementing `Codec<T>` and plug it in
+ * via `@UseCodec` — the `AsciiStringCodec` source is the canonical template:
+ *
  * ```kotlin
+ * object Latin1StringCodec : Codec<String> {
+ *     override fun decode(buffer: ReadBuffer, context: DecodeContext): String =
+ *         buffer.readString(buffer.remaining(), Charset.ISOLatin1)
+ *     override fun encode(buffer: WriteBuffer, value: String, context: EncodeContext) {
+ *         buffer.writeString(value, Charset.ISOLatin1)
+ *     }
+ *     override fun wireSize(value: String, context: EncodeContext): WireSize = WireSize.Exact(value.length)
+ * }
+ * ```
+ *
+ * ## When NOT to use @UseCodec
+ *
+ * For nested `@ProtocolMessage` types, attach length annotations directly to the field
+ * — `@UseCodec` is unnecessary and forward-reference-incompatible:
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * data class Body(@LengthPrefixed val name: String)
+ *
  * @ProtocolMessage
  * data class Frame(
  *     val length: UShort,
- *     @LengthFrom("length") val body: BodyMessage,  // BodyMessage has @ProtocolMessage — no @UseCodec
+ *     @LengthFrom("length") val body: Body,  // Body has @ProtocolMessage — no @UseCodec
  * )
  * ```
  *
- * Composes with [@LengthPrefixed], [@RemainingBytes], and [@LengthFrom].
+ * Composes with [LengthPrefixed], [RemainingBytes], and [LengthFrom].
  *
- * @param codec A `KClass` referencing a Kotlin `object` that implements `Codec<T>`.
+ * @param codec A `KClass` referencing a Kotlin `object` that implements `Codec<T>`
+ *   (or `BoundingLengthCodec<UInt>` when paired with `@LengthPrefixed` on a `List<T>`).
  */
 @Target(AnnotationTarget.VALUE_PARAMETER)
 @Retention(AnnotationRetention.BINARY)
 annotation class UseCodec(
     val codec: kotlin.reflect.KClass<*>,
+)
+
+/**
+ * Marks a `@ProtocolMessage` class (typically a sealed parent) with a framing
+ * length prefix that is computed from — and bounds — the body's wire size.
+ *
+ * The framework owns framing: the encode path emits the prefix carrying the
+ * encoded body's byte count, the decode path reads the prefix, narrows
+ * `buffer.limit()` to bound the body, and asserts strict consumption.
+ * `@FramedBy` is structural and handles both fixed-size and variable-size
+ * bodies uniformly.
+ *
+ * Sealed-parent composition: when applied to a `@ProtocolMessage` sealed
+ * parent, every variant inherits the framing rule. There is no per-variant
+ * override — protocols whose framing varies by variant are out of scope for
+ * this annotation. Validator enforces that every variant of a `@FramedBy`
+ * parent has the named [after] field as a FixedSize discriminator.
+ *
+ * @param codec A `KClass` referencing a Kotlin `object` that implements
+ *   `BoundingLengthCodec<UInt>`. The codec drives prefix wire format
+ *   (var-byte-int, fixed-width, etc.) and provides `maxWireSize` so the
+ *   emitter can size the slack region for the slicing scheme.
+ * @param after Names a sibling constructor field that the prefix sits
+ *   immediately *after* on the wire. Empty (default) means the prefix is at
+ *   offset 0. The named field must exist, have Exact wire width, and — when
+ *   the class carries `@PacketType` — be the discriminator.
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * @FramedBy(MqttRemainingLengthCodec::class, after = "header")
+ * sealed interface MqttPacket {
+ *     // Each variant declares its own header field; the framework writes
+ *     // the prefix between header and body, computed from body bytes.
+ * }
+ * ```
+ */
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.BINARY)
+annotation class FramedBy(
+    val codec: kotlin.reflect.KClass<out com.ditchoom.buffer.codec.BoundingLengthCodec<UInt>>,
+    val after: String = "",
 )
 
 /**
@@ -310,7 +578,7 @@ annotation class UseCodec(
  * value class MqttFixedHeader(val raw: UByte) {
  *     @DispatchValue
  *     val packetType: Int get() = raw.toUInt().shr(4).toInt()
- *     val flags: UByte get() = (raw and 0x0Fu)
+ *     val flags: UByte get() = (raw.toUInt() and 0x0Fu).toUByte()
  * }
  *
  * @DispatchOn(MqttFixedHeader::class)
@@ -346,7 +614,7 @@ annotation class DispatchOn(
  *     @DispatchValue
  *     val packetType: Int get() = raw.toUInt().shr(4).toInt()
  *
- *     val flags: UByte get() = (raw and 0x0Fu)
+ *     val flags: UByte get() = (raw.toUInt() and 0x0Fu).toUByte()
  * }
  * ```
  *

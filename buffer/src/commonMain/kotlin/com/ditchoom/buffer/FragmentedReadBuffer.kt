@@ -22,10 +22,11 @@ class FragmentedReadBuffer(
     private var currentPosition = 0
     private var currentLimit = firstInitialLimit + secondInitialLimit
 
-    override val byteOrder: ByteOrder
-        get() {
-            throw IllegalStateException("Byte order is undefined for FragmentedReadBuffer")
-        }
+    // The two halves come from the same wire stream in practice and share
+    // a byte order. We surface `first.byteOrder` rather than throwing so
+    // that interface defaults like `slice(byteOrder = this.byteOrder)`
+    // work without callers having to special-case this deprecated class.
+    override val byteOrder: ByteOrder get() = first.byteOrder
 
     override fun setLimit(limit: Int) {
         if (limit <= firstInitialLimit + secondInitialLimit) {
@@ -86,14 +87,14 @@ class FragmentedReadBuffer(
         return buffer
     }
 
-    override fun slice(): ReadBuffer {
+    override fun slice(byteOrder: ByteOrder): ReadBuffer {
         if (first.position() == 0 && first.limit() == 0) {
             return second
         } else if (second.position() == 0 && second.limit() == 0) {
             return first
         }
-        val first = first.slice()
-        val second = second.slice()
+        val first = first.slice(byteOrder)
+        val second = second.slice(byteOrder)
         val buffer = BufferFactory.managed().allocate(first.limit() + second.limit())
         buffer.write(first)
         buffer.write(second)

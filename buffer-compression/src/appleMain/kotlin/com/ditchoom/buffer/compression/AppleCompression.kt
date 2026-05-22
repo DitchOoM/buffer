@@ -43,6 +43,10 @@ actual val supportsSyncCompression: Boolean = true
 actual val supportsRawDeflate: Boolean = true
 actual val supportsStatefulFlush: Boolean = true
 
+// Apple system zlib's deflateInit2 honors the windowBits argument; threaded through
+// AppleZlibStreamingCompressor.
+actual val supportsCustomWindowBits: Boolean = true
+
 /**
  * Helper to copy memory with platform-appropriate size_t conversion.
  * Uses UnsafeNumber to handle different bit widths across Apple platforms
@@ -69,9 +73,6 @@ private inline fun getCompressBound(size: Int): Int = compressBound(size.convert
 /**
  * Window bits for different compression formats.
  */
-private const val WINDOW_BITS_ZLIB = 15
-private const val WINDOW_BITS_RAW = -15
-private const val WINDOW_BITS_GZIP = 31
 
 /**
  * Apple implementation using system zlib with direct buffer access.
@@ -137,12 +138,7 @@ private fun compressWithZStream(
         s.zfree = null
         s.opaque = null
 
-        val windowBits =
-            when (algorithm) {
-                CompressionAlgorithm.Deflate -> WINDOW_BITS_ZLIB
-                CompressionAlgorithm.Raw -> WINDOW_BITS_RAW
-                CompressionAlgorithm.Gzip -> WINDOW_BITS_GZIP
-            }
+        val windowBits = resolveWindowBits(algorithm, WindowBits.Default)
 
         var result =
             deflateInit2(
@@ -203,12 +199,7 @@ private fun decompressWithZStream(
         s.zfree = null
         s.opaque = null
 
-        val windowBits =
-            when (algorithm) {
-                CompressionAlgorithm.Deflate -> WINDOW_BITS_ZLIB
-                CompressionAlgorithm.Raw -> WINDOW_BITS_RAW
-                CompressionAlgorithm.Gzip -> WINDOW_BITS_GZIP
-            }
+        val windowBits = resolveWindowBits(algorithm, WindowBits.Default)
 
         var result = inflateInit2(s.ptr, windowBits)
 

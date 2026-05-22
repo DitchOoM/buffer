@@ -81,7 +81,17 @@ jobs:
           ./gradlew :buffer-codec-processor:test
           --no-build-cache ${{ inputs.gradle-args }}
 
-      - name: Run JVM / JS / WASM / Android tests
+      - name: Run JVM / JS / WASM / Android-host tests
+        # The host-JVM Android unit tasks (testDebugUnitTest /
+        # testReleaseUnitTest) run here so contributors can reproduce
+        # them on the desktop without an emulator — a convenience signal.
+        # They are NOT authoritative for Android: the host JDK 21 differs
+        # from ART (its own Unsafe / libcore surface, the legacy
+        # java.nio.DirectByteBuffer `(long, int)` ctor, different
+        # `Unsafe.invokeCleaner` resolution). The dedicated "Android
+        # Emulator Integration Test" workflow runs the full suite on a
+        # real emulator (ART, API 19 + 29) and is the source of truth
+        # for Android behavior.
         run: >-
           ./gradlew ktlintCheck
           jvmTest jsNodeTest jsBrowserTest wasmJsNodeTest wasmJsBrowserTest
@@ -97,7 +107,7 @@ jobs:
       - name: Build ARM64 test binaries
         run: >-
           ./gradlew :buffer:linkDebugTestLinuxArm64 :buffer-compression:linkDebugTestLinuxArm64 :buffer-flow:linkDebugTestLinuxArm64
-          :buffer-codec:linkDebugTestLinuxArm64
+          :buffer-codec-test:linkDebugTestLinuxArm64
           --no-build-cache ${{ inputs.gradle-args }}
 
       - name: Run buffer ARM64 tests via QEMU
@@ -109,8 +119,8 @@ jobs:
       - name: Run buffer-flow ARM64 tests via QEMU
         run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-flow/build/bin/linuxArm64/debugTest/test.kexe
 
-      - name: Run buffer-codec ARM64 tests via QEMU
-        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-codec/build/bin/linuxArm64/debugTest/test.kexe
+      - name: Run buffer-codec-test ARM64 tests via QEMU
+        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-codec-test/build/bin/linuxArm64/debugTest/test.kexe
 
       - name: Publish to Maven Local
         run: ./gradlew publishToMavenLocal --no-build-cache ${{ inputs.gradle-args }}

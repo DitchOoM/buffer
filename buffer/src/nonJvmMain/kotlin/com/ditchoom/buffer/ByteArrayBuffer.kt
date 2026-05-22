@@ -13,13 +13,21 @@ package com.ditchoom.buffer
 class ByteArrayBuffer(
     internal val data: ByteArray,
     override val byteOrder: ByteOrder,
+    internal val offset: Int = 0,
+    internal val length: Int = data.size,
 ) : PlatformBuffer,
     ManagedMemoryAccess {
+    init {
+        require(offset >= 0 && length >= 0 && offset + length <= data.size) {
+            "ByteArrayBuffer offset/length out of range: offset=$offset length=$length data.size=${data.size}"
+        }
+    }
+
     override val backingArray: ByteArray get() = data
-    override val arrayOffset: Int get() = 0
+    override val arrayOffset: Int get() = offset
     private var positionValue: Int = 0
-    private var limitValue: Int = data.size
-    override val capacity: Int = data.size
+    private var limitValue: Int = length
+    override val capacity: Int = length
 
     private val littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN
 
@@ -42,33 +50,83 @@ class ByteArrayBuffer(
 
     override fun resetForWrite() {
         positionValue = 0
-        limitValue = data.size
+        limitValue = length
     }
 
-    override fun readByte(): Byte = data[positionValue++]
-
-    override fun get(index: Int): Byte = data[index]
-
-    override fun slice(): ReadBuffer {
-        val sliced = data.sliceArray(positionValue until limitValue)
-        return ByteArrayBuffer(sliced, byteOrder)
+    private fun requireReadable(needed: Int) {
+        if (positionValue + needed > limitValue) {
+            throw BufferUnderflowException(
+                "read of $needed byte(s) at position $positionValue exceeds limit $limitValue",
+            )
+        }
     }
+
+    private fun requireIndex(
+        index: Int,
+        needed: Int,
+    ) {
+        if (index < 0 || index + needed > limitValue) {
+            throw BufferUnderflowException(
+                "absolute read of $needed byte(s) at index $index exceeds limit $limitValue",
+            )
+        }
+    }
+
+    override fun readByte(): Byte {
+        requireReadable(1)
+        return data[offset + positionValue++]
+    }
+
+    override fun get(index: Int): Byte {
+        requireIndex(index, 1)
+        return data[offset + index]
+    }
+
+    override fun slice(byteOrder: ByteOrder): ByteArrayBuffer =
+        ByteArrayBuffer(
+            data,
+            byteOrder,
+            offset = offset + positionValue,
+            length = limitValue - positionValue,
+        )
 
     override fun readByteArray(size: Int): ByteArray {
-        val result = data.copyOfRange(positionValue, positionValue + size)
+        if (size < 1) return ByteArray(0)
+        requireReadable(size)
+        val absStart = offset + positionValue
+        val result = data.copyOfRange(absStart, absStart + size)
         positionValue += size
         return result
     }
 
+    override fun readInto(
+        dst: ByteArray,
+        offset: Int,
+        length: Int,
+    ) {
+        if (length == 0) return
+        requireReadable(length)
+        val absStart = this.offset + positionValue
+        data.copyInto(dst, destinationOffset = offset, startIndex = absStart, endIndex = absStart + length)
+        positionValue += length
+    }
+
     override fun readShort(): Short {
-        val result = getShort(positionValue)
+        requireReadable(Short.SIZE_BYTES)
+        val result = getShortUnchecked(positionValue)
         positionValue += Short.SIZE_BYTES
         return result
     }
 
     override fun getShort(index: Int): Short {
-        val b0 = data[index].toInt() and 0xFF
-        val b1 = data[index + 1].toInt() and 0xFF
+        requireIndex(index, Short.SIZE_BYTES)
+        return getShortUnchecked(index)
+    }
+
+    private fun getShortUnchecked(index: Int): Short {
+        val abs = offset + index
+        val b0 = data[abs].toInt() and 0xFF
+        val b1 = data[abs + 1].toInt() and 0xFF
         return if (littleEndian) {
             (b0 or (b1 shl 8)).toShort()
         } else {
@@ -77,16 +135,23 @@ class ByteArrayBuffer(
     }
 
     override fun readInt(): Int {
-        val result = getInt(positionValue)
+        requireReadable(Int.SIZE_BYTES)
+        val result = getIntUnchecked(positionValue)
         positionValue += Int.SIZE_BYTES
         return result
     }
 
     override fun getInt(index: Int): Int {
-        val b0 = data[index].toInt() and 0xFF
-        val b1 = data[index + 1].toInt() and 0xFF
-        val b2 = data[index + 2].toInt() and 0xFF
-        val b3 = data[index + 3].toInt() and 0xFF
+        requireIndex(index, Int.SIZE_BYTES)
+        return getIntUnchecked(index)
+    }
+
+    private fun getIntUnchecked(index: Int): Int {
+        val abs = offset + index
+        val b0 = data[abs].toInt() and 0xFF
+        val b1 = data[abs + 1].toInt() and 0xFF
+        val b2 = data[abs + 2].toInt() and 0xFF
+        val b3 = data[abs + 3].toInt() and 0xFF
         return if (littleEndian) {
             b0 or (b1 shl 8) or (b2 shl 16) or (b3 shl 24)
         } else {
@@ -95,14 +160,20 @@ class ByteArrayBuffer(
     }
 
     override fun readLong(): Long {
-        val result = getLong(positionValue)
+        requireReadable(Long.SIZE_BYTES)
+        val result = getLongUnchecked(positionValue)
         positionValue += Long.SIZE_BYTES
         return result
     }
 
     override fun getLong(index: Int): Long {
-        val first = getInt(index).toLong() and 0xFFFFFFFFL
-        val second = getInt(index + 4).toLong() and 0xFFFFFFFFL
+        requireIndex(index, Long.SIZE_BYTES)
+        return getLongUnchecked(index)
+    }
+
+    private fun getLongUnchecked(index: Int): Long {
+        val first = getIntUnchecked(index).toLong() and 0xFFFFFFFFL
+        val second = getIntUnchecked(index + 4).toLong() and 0xFFFFFFFFL
         return if (littleEndian) {
             (second shl 32) or first
         } else {
@@ -114,13 +185,17 @@ class ByteArrayBuffer(
         length: Int,
         charset: Charset,
     ): String {
-        val result = decodeByteArrayToString(data, positionValue, positionValue + length, charset)
+        if (length == 0) return ""
+        requireReadable(length)
+        val absStart = offset + positionValue
+        val result = decodeByteArrayToString(data, absStart, absStart + length, charset)
         positionValue += length
         return result
     }
 
     override fun writeByte(byte: Byte): WriteBuffer {
-        data[positionValue++] = byte
+        checkWriteBounds(1)
+        data[offset + positionValue++] = byte
         return this
     }
 
@@ -128,12 +203,14 @@ class ByteArrayBuffer(
         index: Int,
         byte: Byte,
     ): WriteBuffer {
-        data[index] = byte
+        checkIndexBounds(index, 1)
+        data[offset + index] = byte
         return this
     }
 
     override fun writeShort(short: Short): WriteBuffer {
-        set(positionValue, short)
+        checkWriteBounds(Short.SIZE_BYTES)
+        setShortUnchecked(positionValue, short)
         positionValue += Short.SIZE_BYTES
         return this
     }
@@ -142,19 +219,29 @@ class ByteArrayBuffer(
         index: Int,
         short: Short,
     ): WriteBuffer {
-        val v = short.toInt()
-        if (littleEndian) {
-            data[index] = v.toByte()
-            data[index + 1] = (v shr 8).toByte()
-        } else {
-            data[index] = (v shr 8).toByte()
-            data[index + 1] = v.toByte()
-        }
+        checkIndexBounds(index, Short.SIZE_BYTES)
+        setShortUnchecked(index, short)
         return this
     }
 
+    private fun setShortUnchecked(
+        index: Int,
+        short: Short,
+    ) {
+        val v = short.toInt()
+        val abs = offset + index
+        if (littleEndian) {
+            data[abs] = v.toByte()
+            data[abs + 1] = (v shr 8).toByte()
+        } else {
+            data[abs] = (v shr 8).toByte()
+            data[abs + 1] = v.toByte()
+        }
+    }
+
     override fun writeInt(int: Int): WriteBuffer {
-        set(positionValue, int)
+        checkWriteBounds(Int.SIZE_BYTES)
+        setIntUnchecked(positionValue, int)
         positionValue += Int.SIZE_BYTES
         return this
     }
@@ -163,22 +250,32 @@ class ByteArrayBuffer(
         index: Int,
         int: Int,
     ): WriteBuffer {
-        if (littleEndian) {
-            data[index] = int.toByte()
-            data[index + 1] = (int shr 8).toByte()
-            data[index + 2] = (int shr 16).toByte()
-            data[index + 3] = (int shr 24).toByte()
-        } else {
-            data[index] = (int shr 24).toByte()
-            data[index + 1] = (int shr 16).toByte()
-            data[index + 2] = (int shr 8).toByte()
-            data[index + 3] = int.toByte()
-        }
+        checkIndexBounds(index, Int.SIZE_BYTES)
+        setIntUnchecked(index, int)
         return this
     }
 
+    private fun setIntUnchecked(
+        index: Int,
+        int: Int,
+    ) {
+        val abs = offset + index
+        if (littleEndian) {
+            data[abs] = int.toByte()
+            data[abs + 1] = (int shr 8).toByte()
+            data[abs + 2] = (int shr 16).toByte()
+            data[abs + 3] = (int shr 24).toByte()
+        } else {
+            data[abs] = (int shr 24).toByte()
+            data[abs + 1] = (int shr 16).toByte()
+            data[abs + 2] = (int shr 8).toByte()
+            data[abs + 3] = int.toByte()
+        }
+    }
+
     override fun writeLong(long: Long): WriteBuffer {
-        set(positionValue, long)
+        checkWriteBounds(Long.SIZE_BYTES)
+        setLongUnchecked(positionValue, long)
         positionValue += Long.SIZE_BYTES
         return this
     }
@@ -187,14 +284,22 @@ class ByteArrayBuffer(
         index: Int,
         long: Long,
     ): WriteBuffer {
-        if (littleEndian) {
-            set(index, long.toInt())
-            set(index + 4, (long shr 32).toInt())
-        } else {
-            set(index, (long shr 32).toInt())
-            set(index + 4, long.toInt())
-        }
+        checkIndexBounds(index, Long.SIZE_BYTES)
+        setLongUnchecked(index, long)
         return this
+    }
+
+    private fun setLongUnchecked(
+        index: Int,
+        long: Long,
+    ) {
+        if (littleEndian) {
+            setIntUnchecked(index, long.toInt())
+            setIntUnchecked(index + 4, (long shr 32).toInt())
+        } else {
+            setIntUnchecked(index, (long shr 32).toInt())
+            setIntUnchecked(index + 4, long.toInt())
+        }
     }
 
     override fun writeBytes(
@@ -202,16 +307,24 @@ class ByteArrayBuffer(
         offset: Int,
         length: Int,
     ): WriteBuffer {
-        bytes.copyInto(data, positionValue, offset, offset + length)
+        checkWriteBounds(length)
+        bytes.copyInto(data, this.offset + positionValue, offset, offset + length)
         positionValue += length
         return this
     }
 
     override fun write(buffer: ReadBuffer) {
         val size = buffer.remaining()
+        if (size == 0) return
+        checkWriteBounds(size)
         val actual = buffer.unwrapFully()
         if (actual is ByteArrayBuffer) {
-            actual.data.copyInto(data, positionValue, actual.positionValue, actual.positionValue + size)
+            actual.data.copyInto(
+                destination = data,
+                destinationOffset = offset + positionValue,
+                startIndex = actual.offset + actual.positionValue,
+                endIndex = actual.offset + actual.positionValue + size,
+            )
         } else {
             // readByteArray() already advances buffer position, don't increment again
             writeBytes(buffer.readByteArray(size))
@@ -246,6 +359,7 @@ class ByteArrayBuffer(
         val lim = limitValue
         val size = lim - pos
         if (size == 0) return
+        val basePos = offset + pos
 
         // Rotate mask so byte at (maskOffset % 4) becomes byte 0
         val shift = (maskOffset and 3) * 8
@@ -259,10 +373,10 @@ class ByteArrayBuffer(
         var i = 0
         // Process 4 bytes at a time with rotated mask
         while (i + 4 <= size) {
-            data[pos + i] = (data[pos + i].toInt() xor rb0.toInt()).toByte()
-            data[pos + i + 1] = (data[pos + i + 1].toInt() xor rb1.toInt()).toByte()
-            data[pos + i + 2] = (data[pos + i + 2].toInt() xor rb2.toInt()).toByte()
-            data[pos + i + 3] = (data[pos + i + 3].toInt() xor rb3.toInt()).toByte()
+            data[basePos + i] = (data[basePos + i].toInt() xor rb0.toInt()).toByte()
+            data[basePos + i + 1] = (data[basePos + i + 1].toInt() xor rb1.toInt()).toByte()
+            data[basePos + i + 2] = (data[basePos + i + 2].toInt() xor rb2.toInt()).toByte()
+            data[basePos + i + 3] = (data[basePos + i + 3].toInt() xor rb3.toInt()).toByte()
             i += 4
         }
         // Handle remaining bytes (at most 3)
@@ -274,7 +388,7 @@ class ByteArrayBuffer(
                     2 -> rb2
                     else -> rb3
                 }
-            data[pos + i] = (data[pos + i].toInt() xor maskByte.toInt()).toByte()
+            data[basePos + i] = (data[basePos + i].toInt() xor maskByte.toInt()).toByte()
             i++
         }
     }
@@ -298,8 +412,9 @@ class ByteArrayBuffer(
         val actual = source.unwrapFully()
         if (actual is ByteArrayBuffer) {
             val srcData = actual.data
-            val srcPos = actual.positionValue
-            val dstPos = positionValue
+            val srcSliceRelativePos = actual.positionValue
+            val srcAbsPos = actual.offset + srcSliceRelativePos
+            val dstAbsPos = offset + positionValue
 
             // Rotate mask so byte at (maskOffset % 4) becomes byte 0
             val shift = (maskOffset and 3) * 8
@@ -313,10 +428,10 @@ class ByteArrayBuffer(
             var i = 0
             // Process 4 bytes at a time with rotated mask
             while (i + 4 <= size) {
-                data[dstPos + i] = (srcData[srcPos + i].toInt() xor rb0.toInt()).toByte()
-                data[dstPos + i + 1] = (srcData[srcPos + i + 1].toInt() xor rb1.toInt()).toByte()
-                data[dstPos + i + 2] = (srcData[srcPos + i + 2].toInt() xor rb2.toInt()).toByte()
-                data[dstPos + i + 3] = (srcData[srcPos + i + 3].toInt() xor rb3.toInt()).toByte()
+                data[dstAbsPos + i] = (srcData[srcAbsPos + i].toInt() xor rb0.toInt()).toByte()
+                data[dstAbsPos + i + 1] = (srcData[srcAbsPos + i + 1].toInt() xor rb1.toInt()).toByte()
+                data[dstAbsPos + i + 2] = (srcData[srcAbsPos + i + 2].toInt() xor rb2.toInt()).toByte()
+                data[dstAbsPos + i + 3] = (srcData[srcAbsPos + i + 3].toInt() xor rb3.toInt()).toByte()
                 i += 4
             }
             // Handle remaining bytes
@@ -328,12 +443,12 @@ class ByteArrayBuffer(
                         2 -> rb2
                         else -> rb3
                     }
-                data[dstPos + i] = (srcData[srcPos + i].toInt() xor maskByte.toInt()).toByte()
+                data[dstAbsPos + i] = (srcData[srcAbsPos + i].toInt() xor maskByte.toInt()).toByte()
                 i++
             }
 
             positionValue += size
-            source.position(srcPos + size)
+            source.position(srcSliceRelativePos + size)
         } else {
             // Fallback to default bulk Long-based implementation
             super.xorMaskCopy(source, mask, maskOffset)
@@ -346,7 +461,8 @@ class ByteArrayBuffer(
     override fun fill(value: Byte): WriteBuffer {
         val count = remaining()
         if (count == 0) return this
-        data.fill(value, positionValue, positionValue + count)
+        val abs = offset + positionValue
+        data.fill(value, abs, abs + count)
         positionValue += count
         return this
     }

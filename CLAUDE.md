@@ -374,7 +374,7 @@ sealed interface MqttPacket {
 
 Key rules: `@DispatchValue` must return `Int`. `wire` values are validated at compile time against the discriminator's inner type range (e.g., UByte 0-255). Duplicate `@PacketType` values are compile errors.
 
-For protocols that mix byte orders within a single message, use `@WireOrder(Endianness.Big)` or `@WireOrder(Endianness.Little)` on individual fields. This overrides the message-level `@ProtocolMessage(wireOrder = ...)`. Combines with `@WireBytes` for custom-width little-endian fields (e.g., BLE ATT 3-byte LE lengths).
+For protocols that mix byte orders within a single message, use `@WireOrder(Endianness.Big)` or `@WireOrder(Endianness.Little)` on individual fields. This overrides the message-level `@ProtocolMessage(wireOrder = ...)`. It composes with `@WireBytes` when a custom-width field's byte order also differs from the message default.
 
 ### `peekFrameSize` — Generated Stream Framing
 
@@ -406,23 +406,93 @@ Context is forwarded automatically by generated code through sealed dispatch, `@
 
 ### Avoid Unnecessary Memory Copies
 
-- **Use `slice()` or `readBytes()`** instead of `readByteArray()` + `wrap()` for zero-copy views
-- **Use `toNativeData()`/`toMutableNativeData()`** for platform interop instead of converting to ByteArray first
-- **Use `BufferFactory.wrapNativeAddress()`** to write directly into externally-owned memory (HardwareBuffer, mmap, Skia surface) instead of copying through an intermediate buffer
-- **Use `writeString()` directly** instead of `payload.encodeToByteArray()` + `writeBytes()`
-- **Use `BufferPool`** in hot paths to reuse buffers instead of allocating per request
-- **Accept `ReadBuffer`/`WriteBuffer`** in function signatures, not `ByteArray`
+**Internal-codec staging** (read a sub-region inside one decode call, discard at end):
+- `slice()` / `readBytes(n)` — zero-copy views. **Aliasing contract**: the view shares storage with the parent buffer; mutations are visible in both. **MUST NOT** outlive the parent buffer's scope.
+- `readByteArray(n)` — **platform-dependent**. JVM / Apple / Linux / WASM / `ByteArrayBuffer` copy into a fresh `ByteArray`; JS aliases via `Int8Array(srcBuffer, srcOffset, n)`. Use only for internal staging when you don't need cross-platform independence guarantees.
+
+**Consumer boundary** (decode produces a value the caller retains past the buffer's scope):
+- `copyToByteArray(n)` — fresh, independently-allocated heap `ByteArray`. Explicit copy contract on every platform.
+- `readInto(dst, offset, length)` — scratch-array reuse. Caller supplies the `ByteArray`; bytes are bulk-copied into the requested window.
+- `factory.allocate(n).also { it.write(source); it.resetForRead() }` — consumer-owned `PlatformBuffer` with the caller's allocator.
+
+Other zero-copy / no-copy primitives:
+- `toNativeData()` / `toMutableNativeData()` for platform interop instead of converting to `ByteArray` first.
+- `BufferFactory.wrapNativeAddress()` to write directly into externally-owned memory (HardwareBuffer, mmap, Skia surface).
+- `writeString()` directly instead of `payload.encodeToByteArray()` + `writeBytes()`.
+- `BufferPool` in hot paths to reuse buffers instead of allocating per request.
+- Accept `ReadBuffer` / `WriteBuffer` in function signatures, not `ByteArray`.
 
 ```kotlin
 // WRONG — unnecessary copies
-val bytes = buffer.readByteArray(length)  // copy to ByteArray
-val newBuffer = BufferFactory.Default.wrap(bytes)  // wrap again
-processBytes(bytes)  // works on ByteArray instead of buffer
+val bytes = buffer.readByteArray(length)  // platform-dependent: may alias on JS
+val newBuffer = BufferFactory.Default.wrap(bytes)  // copies again on managed backends
+processBytes(bytes)  // forces ByteArray view of data that's already in a buffer
 
-// CORRECT — zero-copy
-val slice = buffer.readBytes(length)  // zero-copy slice
-processBuffer(slice)  // works directly on buffer
+// CORRECT — zero-copy view for internal staging
+val slice = buffer.readBytes(length)
+processBuffer(slice)  // works directly on the buffer; slice is discarded with parent
+
+// CORRECT — explicit copy at the consumer boundary
+val owned = buffer.copyToByteArray(length)  // safe to retain past `buffer`'s scope
+return OpaqueBytes(owned)
 ```
+
+### Canonical decode patterns
+
+The buffer-codec lockdown (v1) makes the consumer boundary explicit. Three canonical patterns, ordered from preferred to fallback:
+
+**Pattern 1 — Zero-copy decode into a typed value (preferred).**
+
+```kotlin
+@JvmInline value class Bitmap(val nativeBitmap: PlatformBitmap) : Payload
+// expect/actual: PlatformBitmap = UIImage / ImageBitmap / BufferedImage / android.graphics.Bitmap
+
+object BitmapCodec : Codec<Bitmap> {
+    override fun decode(buffer: ReadBuffer, ctx: DecodeContext): Bitmap {
+        val nativeData = buffer.toNativeData()    // zero-copy native handle
+        return Bitmap(decodeJpegToNative(nativeData))  // platform decoder → typed value
+    }
+}
+```
+
+No copy. The buffer's native handle (NSData / ArrayBuffer / ByteBuffer) is handed straight to the platform's decoder; the output is a typed value decoupled from the input buffer. The `Payload` marker holds — `Bitmap.nativeBitmap` is a typed platform handle, not a raw buffer or ByteArray.
+
+**Pattern 2 — Consumer-owned `PlatformBuffer` via existing `write(source)`.**
+
+For consumers who want bytes in their own buffer (shared memory for IPC, deterministic-cleanup buffer for hardware FFI, etc.):
+
+```kotlin
+data class IpcBuffer(val buffer: PlatformBuffer)   // NOT Payload (contains a buffer)
+
+object IpcBufferCodec : Codec<IpcBuffer> {
+    override fun decode(buffer: ReadBuffer, ctx: DecodeContext): IpcBuffer {
+        val factory = ctx[BufferFactoryKey] ?: BufferFactory.managed()
+        val dst = factory.allocate(buffer.remaining())
+        dst.write(buffer)              // copies bytes into consumer-owned dst
+        dst.resetForRead()
+        return IpcBuffer(dst)
+    }
+}
+```
+
+Consumer picks their factory (via `DecodeContext` key, or fixed at codec construction). `dst.write(source)` is the existing buffer-to-buffer copy primitive — Phase 0 verifies it copies (rather than aliases) on every platform. The `Payload` marker is NOT applied because `IpcBuffer` holds a buffer; the consumer steps outside the Payload abstraction.
+
+**Pattern 3 — Consumer-owned `ByteArray` via `copyToByteArray(n)`.**
+
+For consumers who want a heap `ByteArray` (SQL BLOB persistence, base64 encoding, debug capture):
+
+```kotlin
+data class OpaqueBytes(val bytes: ByteArray)      // NOT Payload (contains a ByteArray)
+
+object OpaqueBytesCodec : Codec<OpaqueBytes> {
+    override fun decode(buffer: ReadBuffer, ctx: DecodeContext): OpaqueBytes =
+        OpaqueBytes(buffer.copyToByteArray(buffer.remaining()))
+}
+```
+
+`copyToByteArray(n)` carries an explicit copy contract on every platform — guaranteed safe to retain past the buffer's scope. The verb `copy` makes the cost visible at the call site.
+
+`readByteArray(n)` retains its existing (platform-dependent) semantics and is appropriate only for internal-codec staging where independence is not required.
 
 ### Accept Factory as a Parameter in Library Code
 
