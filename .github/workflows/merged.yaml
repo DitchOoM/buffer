@@ -49,8 +49,13 @@ jobs:
             exit 0
           fi
 
-          # Check if only non-code files changed
-          changed_files=$(gh pr diff ${{ github.event.pull_request.number }} --name-only)
+          # Check if only non-code files changed.
+          # Use the paginated "list PR files" API rather than `gh pr diff`: the
+          # latter hits the .diff endpoint, which GitHub caps at 300 files and
+          # returns HTTP 406 for larger PRs.
+          changed_files=$(gh api --paginate \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[].path')
           for file in $changed_files; do
             case "$file" in
               .github/*|*.md|.gitignore|.editorconfig|CLAUDE.md|LICENSE|*.txt)
