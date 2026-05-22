@@ -4,6 +4,24 @@ on:
     branches: [ main ]
     types:
       - closed
+  workflow_dispatch:
+    inputs:
+      version-bump:
+        description: "Version bump"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+      flow:
+        description: "Release flow"
+        type: choice
+        options:
+          - release
+          - draft
+          - dry-run
+        default: release
 
 permissions:
   contents: write
@@ -15,7 +33,7 @@ concurrency:
 jobs:
   check-release:
     name: Check if release is needed
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     outputs:
       flow: ${{ steps.check.outputs.flow }}
@@ -29,6 +47,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Manual dispatch has no PR to inspect — take flow and version
+          # bump straight from the workflow inputs.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            case "${{ inputs.version-bump }}" in
+              major) echo "gradle-args=-PincrementMajor=true" >> $GITHUB_OUTPUT ;;
+              minor) echo "gradle-args=-PincrementMinor=true" >> $GITHUB_OUTPUT ;;
+              *)     echo "gradle-args=" >> $GITHUB_OUTPUT ;;
+            esac
+            echo "flow=${{ inputs.flow }}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
           gradle_args=""
           if ${{ contains(github.event.pull_request.labels.*.name, 'major') }}; then
             gradle_args="-PincrementMajor=true"
@@ -49,8 +79,13 @@ jobs:
             exit 0
           fi
 
-          # Check if only non-code files changed
-          changed_files=$(gh pr diff ${{ github.event.pull_request.number }} --name-only)
+          # Check if only non-code files changed.
+          # Use the paginated "list PR files" API rather than `gh pr diff`: the
+          # latter hits the .diff endpoint, which GitHub caps at 300 files and
+          # returns HTTP 406 for larger PRs.
+          changed_files=$(gh api --paginate \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[].path')
           for file in $changed_files; do
             case "$file" in
               .github/*|*.md|.gitignore|.editorconfig|CLAUDE.md|LICENSE|*.txt)
@@ -112,8 +147,8 @@ jobs:
         if: needs.check-release.outputs.flow == 'draft' && needs.publish.result == 'success'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_TITLE: ${{ github.event.pull_request.title || 'Manual release' }}
+          PR_URL: ${{ github.event.pull_request.html_url || format('{0}/{1}', github.server_url, github.repository) }}
         run: |
           version="${{ needs.build-linux.outputs.version }}"
           deployment_id="${{ needs.publish.outputs.deployment-id }}"
@@ -143,8 +178,8 @@ jobs:
         if: needs.check-release.outputs.flow == 'release' && needs.publish.result == 'success'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_TITLE: ${{ github.event.pull_request.title || 'Manual release' }}
+          PR_URL: ${{ github.event.pull_request.html_url || format('{0}/{1}', github.server_url, github.repository) }}
         run: |
           version="${{ needs.build-linux.outputs.version }}"
           tag="v${version}"
