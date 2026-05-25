@@ -32,7 +32,7 @@ import kotlin.test.assertNull
  *     path (header byte + var-int + value covers the full message).
  *
  * Folded onto the `MqttPacket.Connect` sealed
- * variant. Drives `ConnectCodec` (the per-variant codec object emitted
+ * variant. Drives `MqttPacketConnectCodec` (the per-variant codec object emitted
  * by the dispatcher) per the brief's option 1: same byte
  * exact assertions, same var-int boundary coverage, same drip-fed
  * peekFrameSize coverage. The standalone `MqttConnect` data class +
@@ -192,7 +192,7 @@ class MqttConnectCodecTest {
                 password = BinaryData("secret".encodeToByteArray()),
             )
         val buf = encode(msg)
-        val decoded = ConnectCodec.decode(buf, DecodeContext.Empty)
+        val decoded = MqttPacketConnectCodec.decode(buf, DecodeContext.Empty)
         assertEquals(msg.clientId, decoded.clientId)
         assertEquals(msg.willTopic, decoded.willTopic)
         assertContentEquals(msg.willPayload!!.bytes, decoded.willPayload!!.bytes)
@@ -238,7 +238,7 @@ class MqttConnectCodecTest {
             )
         val buf = BufferFactory.Default.allocate(wire.size).also { it.writeBytes(wire) }
         buf.resetForRead()
-        val decoded = ConnectCodec.decode(buf, DecodeContext.Empty)
+        val decoded = MqttPacketConnectCodec.decode(buf, DecodeContext.Empty)
         assertEquals("test", decoded.clientId)
         assertNull(decoded.willTopic, "willPresent bit not set → willTopic should be null")
         assertNull(decoded.willPayload, "willPresent bit not set → willPayload should be null")
@@ -275,7 +275,7 @@ class MqttConnectCodecTest {
             )
         val buf = BufferFactory.Default.allocate(wire.size).also { it.writeBytes(wire) }
         buf.resetForRead()
-        val decoded = ConnectCodec.decode(buf, DecodeContext.Empty)
+        val decoded = MqttPacketConnectCodec.decode(buf, DecodeContext.Empty)
         assertEquals("abc", decoded.clientId)
         assertEquals(2, buf.remaining(), "trailing 2 bytes (next packet) left in buffer")
     }
@@ -301,7 +301,7 @@ class MqttConnectCodecTest {
 
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, ConnectCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.NeedsMoreData, MqttPacketConnectCodec.peekFrameSize(stream))
 
             for (i in 0 until totalBytes - 1) {
                 val one = BufferFactory.Default.allocate(1)
@@ -310,7 +310,7 @@ class MqttConnectCodecTest {
                 stream.append(one)
                 assertEquals(
                     PeekResult.NeedsMoreData,
-                    ConnectCodec.peekFrameSize(stream),
+                    MqttPacketConnectCodec.peekFrameSize(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -318,11 +318,11 @@ class MqttConnectCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), ConnectCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.Complete(totalBytes), MqttPacketConnectCodec.peekFrameSize(stream))
 
             val decoded =
                 stream.readBufferScoped(totalBytes) {
-                    ConnectCodec.decode(this, DecodeContext.Empty)
+                    MqttPacketConnectCodec.decode(this, DecodeContext.Empty)
                 }
             assertConnectEquals(original, decoded)
             assertEquals(0, stream.available(), "stream should be drained")
@@ -360,7 +360,7 @@ class MqttConnectCodecTest {
                     it.resetForRead()
                 },
             )
-            assertEquals(PeekResult.Complete(expectedTotal), ConnectCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.Complete(expectedTotal), MqttPacketConnectCodec.peekFrameSize(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -378,7 +378,7 @@ class MqttConnectCodecTest {
 
         val readBuf = BufferFactory.Default.allocate(expected.size).also { it.writeBytes(expected) }
         readBuf.resetForRead()
-        val decoded = ConnectCodec.decode(readBuf, DecodeContext.Empty)
+        val decoded = MqttPacketConnectCodec.decode(readBuf, DecodeContext.Empty)
         assertConnectEquals(original, decoded)
     }
 
@@ -405,5 +405,6 @@ class MqttConnectCodecTest {
         assertEquals(original.password?.bytes?.toList(), decoded.password?.bytes?.toList())
     }
 
-    private fun encode(value: MqttPacket.Connect): ReadBuffer = ConnectCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
+    private fun encode(value: MqttPacket.Connect): ReadBuffer =
+        MqttPacketConnectCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
 }

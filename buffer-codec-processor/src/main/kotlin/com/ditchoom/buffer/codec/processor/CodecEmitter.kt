@@ -205,7 +205,7 @@ internal class CodecEmitter(
                 packageName = symbol.packageName.asString(),
                 messageClassName = classNameOf(symbol),
                 ownerSimpleName = ownerSimpleName,
-                codecSimpleName = "${ownerSimpleName}Codec",
+                codecSimpleName = symbol.flattenedCodecName(),
                 fields = emptyList(),
                 isSingletonObject = true,
                 singletonDispatchDiscriminator = detectSealedDispatchOnParentDiscriminator(symbol),
@@ -332,7 +332,7 @@ internal class CodecEmitter(
             packageName = pkg,
             messageClassName = classNameOf(symbol),
             ownerSimpleName = ownerSimpleName,
-            codecSimpleName = "${ownerSimpleName}Codec",
+            codecSimpleName = symbol.flattenedCodecName(),
             fields = fields,
             payloadTypeParameter = payloadTypeParameter,
             framedBy = detectFramedBy(symbol),
@@ -724,7 +724,7 @@ internal class CodecEmitter(
                 name = name,
                 ownerSimpleName = ownerSimpleName,
                 messageType = classNameOf(decl),
-                codecType = ClassName(decl.packageName.asString(), "${decl.simpleName.asString()}Codec"),
+                codecType = ClassName(decl.packageName.asString(), decl.flattenedCodecName()),
                 prefixWidth = prefixWidth,
                 prefixWireOrder = messageWireOrder,
             )
@@ -998,7 +998,7 @@ internal class CodecEmitter(
             elementCodecClassName =
                 ClassName(
                     elementDecl.packageName.asString(),
-                    "${elementDecl.simpleName.asString()}Codec",
+                    elementDecl.flattenedCodecName(),
                 ),
         )
     }
@@ -1061,7 +1061,7 @@ internal class CodecEmitter(
             codecType =
                 ClassName(
                     decl.packageName.asString(),
-                    "${decl.simpleName.asString()}Codec",
+                    decl.flattenedCodecName(),
                 ),
         )
     }
@@ -1122,7 +1122,7 @@ internal class CodecEmitter(
             elementCodecClassName =
                 ClassName(
                     elementDecl.packageName.asString(),
-                    "${elementDecl.simpleName.asString()}Codec",
+                    elementDecl.flattenedCodecName(),
                 ),
             elementIsBackPatch = detectElementBackPatch(elementDecl),
         )
@@ -1173,7 +1173,7 @@ internal class CodecEmitter(
             codecType =
                 ClassName(
                     decl.packageName.asString(),
-                    "${decl.simpleName.asString()}Codec",
+                    decl.flattenedCodecName(),
                 ),
         )
     }
@@ -1375,7 +1375,7 @@ internal class CodecEmitter(
             elementCodecClassName =
                 ClassName(
                     elementDecl.packageName.asString(),
-                    "${elementDecl.simpleName.asString()}Codec",
+                    elementDecl.flattenedCodecName(),
                 ),
             elementIsBackPatch = detectElementBackPatch(elementDecl),
         )
@@ -1904,7 +1904,7 @@ internal class CodecEmitter(
             codecType =
                 ClassName(
                     decl.packageName.asString(),
-                    "${decl.simpleName.asString()}Codec",
+                    decl.flattenedCodecName(),
                 ),
         )
     }
@@ -5823,7 +5823,7 @@ internal class CodecEmitter(
                     codecClassName =
                         ClassName(
                             sub.packageName.asString(),
-                            "${sub.simpleName.asString()}Codec",
+                            sub.flattenedCodecName(),
                         ),
                     packetTypeValue = rawValue,
                     wireSize = variantWireSize,
@@ -5839,7 +5839,7 @@ internal class CodecEmitter(
             packageName = pkg,
             parentClassName = ClassName(pkg, parentSimpleName),
             parentSimpleName = parentSimpleName,
-            codecSimpleName = "${parentSimpleName}Codec",
+            codecSimpleName = symbol.flattenedCodecName(),
             variants = variants,
         )
     }
@@ -5984,7 +5984,7 @@ internal class CodecEmitter(
                     codecClassName =
                         ClassName(
                             sub.packageName.asString(),
-                            "${variantSimpleName}Codec",
+                            sub.flattenedCodecName(),
                         ),
                     dispatchValue = rawValue,
                     genericInstanceFieldName = genericInstanceFieldName,
@@ -6004,12 +6004,12 @@ internal class CodecEmitter(
             packageName = pkg,
             parentClassName = ClassName(pkg, parentSimpleName),
             parentSimpleName = parentSimpleName,
-            codecSimpleName = "${parentSimpleName}Codec",
+            codecSimpleName = symbol.flattenedCodecName(),
             discriminatorClassName = classNameOf(discriminatorDecl),
             discriminatorCodecClassName =
                 ClassName(
                     discriminatorDecl.packageName.asString(),
-                    "${discriminatorDecl.simpleName.asString()}Codec",
+                    discriminatorDecl.flattenedCodecName(),
                 ),
             discriminatorInnerKind = innerKind,
             discriminatorInnerWireOrder = discriminatorWireOrder,

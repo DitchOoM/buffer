@@ -20,7 +20,7 @@ import kotlin.test.assertFailsWith
  * packet. Variable-shape body: header `0xA2` + remainingLength +
  * packetIdentifier + a non-empty list of `MqttUnsubscribeTopic`
  * elements (each `<2-byte LP><name>` per element). Drives
- * `UnsubscribeCodec` over the emitter slice
+ * `MqttPacketUnsubscribeCodec` over the emitter slice
  * (`@RemainingBytes List<@ProtocolMessage T>`); the topic-element
  * data class wraps the LP string per the brief's gap-5 resolution.
  */
@@ -107,7 +107,7 @@ class MqttUnsubscribeCodecTest {
                 '1'.code.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
-        val decoded = UnsubscribeCodec.decode(buf, DecodeContext.Empty)
+        val decoded = MqttPacketUnsubscribeCodec.decode(buf, DecodeContext.Empty)
         assertEquals(MqttFixedHeader(0xA2u), decoded.header)
         assertEquals(0x000Au.toUShort(), decoded.packetIdentifier)
         assertEquals(listOf(MqttUnsubscribeTopic("t/1")), decoded.topics)
@@ -132,7 +132,7 @@ class MqttUnsubscribeCodecTest {
                 0xAD.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
-        val decoded = UnsubscribeCodec.decode(buf, DecodeContext.Empty)
+        val decoded = MqttPacketUnsubscribeCodec.decode(buf, DecodeContext.Empty)
         assertEquals(1, decoded.topics.size, "decode bounded by remainingLength, not buffer remaining")
         assertEquals(7, buf.position(), "decode advanced exactly through UNSUBSCRIBE")
         assertEquals(4, buf.remaining(), "trailing 4 bytes left in buffer for next packet")
@@ -148,7 +148,7 @@ class MqttUnsubscribeCodecTest {
         buf.writeByte('x'.code.toByte())
         buf.resetForRead()
         val originalLimit = buf.limit()
-        UnsubscribeCodec.decode(buf, DecodeContext.Empty)
+        MqttPacketUnsubscribeCodec.decode(buf, DecodeContext.Empty)
         assertEquals(originalLimit, buf.limit(), "decode restored the outer limit")
     }
 
@@ -166,7 +166,7 @@ class MqttUnsubscribeCodecTest {
                     ),
             )
         val buf = encode(original)
-        assertEquals(original, UnsubscribeCodec.decode(buf, DecodeContext.Empty))
+        assertEquals(original, MqttPacketUnsubscribeCodec.decode(buf, DecodeContext.Empty))
     }
 
     @Test
@@ -183,7 +183,7 @@ class MqttUnsubscribeCodecTest {
         val buf = bigEndianBufferOf(wire)
         val ex =
             assertFailsWith<DecodeException> {
-                UnsubscribeCodec.decode(buf, DecodeContext.Empty)
+                MqttPacketUnsubscribeCodec.decode(buf, DecodeContext.Empty)
             }
         assertEquals("MqttRemainingLength", ex.fieldPath)
     }
@@ -210,7 +210,7 @@ class MqttUnsubscribeCodecTest {
                 stream.append(one)
                 assertEquals(
                     PeekResult.NeedsMoreData,
-                    UnsubscribeCodec.peekFrameSize(stream),
+                    MqttPacketUnsubscribeCodec.peekFrameSize(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -218,7 +218,7 @@ class MqttUnsubscribeCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), UnsubscribeCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.Complete(totalBytes), MqttPacketUnsubscribeCodec.peekFrameSize(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -242,5 +242,5 @@ class MqttUnsubscribeCodecTest {
             .also { it.resetForRead() }
 
     private fun encode(value: MqttPacket.Unsubscribe): ReadBuffer =
-        UnsubscribeCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
+        MqttPacketUnsubscribeCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
 }

@@ -18,7 +18,7 @@ import kotlin.test.assertFailsWith
 /**
  * MQTT v3.1.1 §3.5 PUBREC packet.
  * Fixed-shape 4-byte ack: header `0x50` + remainingLength=2 +
- * packetIdentifier (UShort BE). Drives `PubRecCodec`.
+ * packetIdentifier (UShort BE). Drives `MqttPacketPubRecCodec`.
  */
 class MqttPubRecCodecTest {
     @Test
@@ -36,7 +36,7 @@ class MqttPubRecCodecTest {
     fun decodesFromSpecBytes() {
         val wire = byteArrayOf(0x50, 0x02, 0x12, 0x34)
         val buf = bigEndianBufferOf(wire)
-        val decoded = PubRecCodec.decode(buf, DecodeContext.Empty)
+        val decoded = MqttPacketPubRecCodec.decode(buf, DecodeContext.Empty)
         assertEquals(MqttFixedHeader(0x50u), decoded.header)
         assertEquals(0x1234u.toUShort(), decoded.packetIdentifier)
     }
@@ -55,7 +55,7 @@ class MqttPubRecCodecTest {
                 0xAD.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
-        PubRecCodec.decode(buf, DecodeContext.Empty)
+        MqttPacketPubRecCodec.decode(buf, DecodeContext.Empty)
         assertEquals(4, buf.position(), "decode advanced exactly through PUBREC")
         assertEquals(4, buf.remaining(), "trailing 4 bytes left in buffer for next packet")
     }
@@ -68,7 +68,7 @@ class MqttPubRecCodecTest {
         buf.writeShort(0x0001.toShort())
         buf.resetForRead()
         val originalLimit = buf.limit()
-        PubRecCodec.decode(buf, DecodeContext.Empty)
+        MqttPacketPubRecCodec.decode(buf, DecodeContext.Empty)
         assertEquals(originalLimit, buf.limit(), "decode restored the outer limit")
     }
 
@@ -80,7 +80,7 @@ class MqttPubRecCodecTest {
                 packetIdentifier = 0xCAFEu,
             )
         val buf = encode(original)
-        assertEquals(original, PubRecCodec.decode(buf, DecodeContext.Empty))
+        assertEquals(original, MqttPacketPubRecCodec.decode(buf, DecodeContext.Empty))
     }
 
     @Test
@@ -97,7 +97,7 @@ class MqttPubRecCodecTest {
         val buf = bigEndianBufferOf(wire)
         val ex =
             assertFailsWith<DecodeException> {
-                PubRecCodec.decode(buf, DecodeContext.Empty)
+                MqttPacketPubRecCodec.decode(buf, DecodeContext.Empty)
             }
         assertEquals("MqttRemainingLength", ex.fieldPath)
     }
@@ -119,7 +119,7 @@ class MqttPubRecCodecTest {
                 stream.append(one)
                 assertEquals(
                     PeekResult.NeedsMoreData,
-                    PubRecCodec.peekFrameSize(stream),
+                    MqttPacketPubRecCodec.peekFrameSize(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -127,7 +127,7 @@ class MqttPubRecCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), PubRecCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.Complete(totalBytes), MqttPacketPubRecCodec.peekFrameSize(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -150,5 +150,6 @@ class MqttPubRecCodecTest {
             .also { it.writeBytes(wire) }
             .also { it.resetForRead() }
 
-    private fun encode(value: MqttPacket.PubRec): ReadBuffer = PubRecCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
+    private fun encode(value: MqttPacket.PubRec): ReadBuffer =
+        MqttPacketPubRecCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
 }

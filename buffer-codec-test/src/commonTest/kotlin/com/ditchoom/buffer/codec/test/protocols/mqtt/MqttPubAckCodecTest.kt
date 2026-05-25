@@ -18,7 +18,7 @@ import kotlin.test.assertFailsWith
 /**
  * MQTT v3.1.1 §3.4 PUBACK packet.
  * Fixed-shape 4-byte ack: header `0x40` + remainingLength=2 +
- * packetIdentifier (UShort BE). Drives the per-variant `PubAckCodec`
+ * packetIdentifier (UShort BE). Drives the per-variant `MqttPacketPubAckCodec`
  * object emitted by the dispatcher (option 1 from the brief).
  */
 class MqttPubAckCodecTest {
@@ -37,7 +37,7 @@ class MqttPubAckCodecTest {
     fun decodesFromSpecBytes() {
         val wire = byteArrayOf(0x40, 0x02, 0x12, 0x34)
         val buf = bigEndianBufferOf(wire)
-        val decoded = PubAckCodec.decode(buf, DecodeContext.Empty)
+        val decoded = MqttPacketPubAckCodec.decode(buf, DecodeContext.Empty)
         assertEquals(MqttFixedHeader(0x40u), decoded.header)
         assertEquals(0x1234u.toUShort(), decoded.packetIdentifier)
     }
@@ -57,7 +57,7 @@ class MqttPubAckCodecTest {
                 0xAD.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
-        PubAckCodec.decode(buf, DecodeContext.Empty)
+        MqttPacketPubAckCodec.decode(buf, DecodeContext.Empty)
         assertEquals(4, buf.position(), "decode advanced exactly through PUBACK")
         assertEquals(4, buf.remaining(), "trailing 4 bytes left in buffer for next packet")
     }
@@ -70,7 +70,7 @@ class MqttPubAckCodecTest {
         buf.writeShort(0x0001.toShort())
         buf.resetForRead()
         val originalLimit = buf.limit()
-        PubAckCodec.decode(buf, DecodeContext.Empty)
+        MqttPacketPubAckCodec.decode(buf, DecodeContext.Empty)
         assertEquals(originalLimit, buf.limit(), "decode restored the outer limit")
     }
 
@@ -82,7 +82,7 @@ class MqttPubAckCodecTest {
                 packetIdentifier = 0xCAFEu,
             )
         val buf = encode(original)
-        assertEquals(original, PubAckCodec.decode(buf, DecodeContext.Empty))
+        assertEquals(original, MqttPacketPubAckCodec.decode(buf, DecodeContext.Empty))
     }
 
     @Test
@@ -100,7 +100,7 @@ class MqttPubAckCodecTest {
         val buf = bigEndianBufferOf(wire)
         val ex =
             assertFailsWith<DecodeException> {
-                PubAckCodec.decode(buf, DecodeContext.Empty)
+                MqttPacketPubAckCodec.decode(buf, DecodeContext.Empty)
             }
         assertEquals("MqttRemainingLength", ex.fieldPath)
     }
@@ -122,7 +122,7 @@ class MqttPubAckCodecTest {
                 stream.append(one)
                 assertEquals(
                     PeekResult.NeedsMoreData,
-                    PubAckCodec.peekFrameSize(stream),
+                    MqttPacketPubAckCodec.peekFrameSize(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -130,7 +130,7 @@ class MqttPubAckCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), PubAckCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.Complete(totalBytes), MqttPacketPubAckCodec.peekFrameSize(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -153,5 +153,6 @@ class MqttPubAckCodecTest {
             .also { it.writeBytes(wire) }
             .also { it.resetForRead() }
 
-    private fun encode(value: MqttPacket.PubAck): ReadBuffer = PubAckCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
+    private fun encode(value: MqttPacket.PubAck): ReadBuffer =
+        MqttPacketPubAckCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
 }

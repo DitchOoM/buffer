@@ -20,7 +20,7 @@ import kotlin.test.assertFailsWith
  * packet. Variable-shape body: header `0x82` + remainingLength +
  * packetIdentifier + a non-empty list of `MqttTopicFilter`
  * elements (`<2-byte LP><filter><qos>` per element). Drives
- * `SubscribeCodec` over the emitter slice
+ * `MqttPacketSubscribeCodec` over the emitter slice
  * (`@RemainingBytes List<@ProtocolMessage T>`).
  */
 class MqttSubscribeCodecTest {
@@ -111,7 +111,7 @@ class MqttSubscribeCodecTest {
                 0x01,
             )
         val buf = bigEndianBufferOf(wire)
-        val decoded = SubscribeCodec.decode(buf, DecodeContext.Empty)
+        val decoded = MqttPacketSubscribeCodec.decode(buf, DecodeContext.Empty)
         assertEquals(MqttFixedHeader(0x82u), decoded.header)
         assertEquals(0x000Au.toUShort(), decoded.packetIdentifier)
         assertEquals(listOf(MqttTopicFilter("t/1", 0x01u)), decoded.topicFilters)
@@ -137,7 +137,7 @@ class MqttSubscribeCodecTest {
                 0xAD.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
-        val decoded = SubscribeCodec.decode(buf, DecodeContext.Empty)
+        val decoded = MqttPacketSubscribeCodec.decode(buf, DecodeContext.Empty)
         assertEquals(1, decoded.topicFilters.size, "decode bounded by remainingLength, not buffer remaining")
         assertEquals(8, buf.position(), "decode advanced exactly through SUBSCRIBE")
         assertEquals(4, buf.remaining(), "trailing 4 bytes left in buffer for next packet")
@@ -154,7 +154,7 @@ class MqttSubscribeCodecTest {
         buf.writeByte(0x00)
         buf.resetForRead()
         val originalLimit = buf.limit()
-        SubscribeCodec.decode(buf, DecodeContext.Empty)
+        MqttPacketSubscribeCodec.decode(buf, DecodeContext.Empty)
         assertEquals(originalLimit, buf.limit(), "decode restored the outer limit")
     }
 
@@ -173,7 +173,7 @@ class MqttSubscribeCodecTest {
                     ),
             )
         val buf = encode(original)
-        assertEquals(original, SubscribeCodec.decode(buf, DecodeContext.Empty))
+        assertEquals(original, MqttPacketSubscribeCodec.decode(buf, DecodeContext.Empty))
     }
 
     @Test
@@ -190,7 +190,7 @@ class MqttSubscribeCodecTest {
         val buf = bigEndianBufferOf(wire)
         val ex =
             assertFailsWith<DecodeException> {
-                SubscribeCodec.decode(buf, DecodeContext.Empty)
+                MqttPacketSubscribeCodec.decode(buf, DecodeContext.Empty)
             }
         assertEquals("MqttRemainingLength", ex.fieldPath)
     }
@@ -217,7 +217,7 @@ class MqttSubscribeCodecTest {
                 stream.append(one)
                 assertEquals(
                     PeekResult.NeedsMoreData,
-                    SubscribeCodec.peekFrameSize(stream),
+                    MqttPacketSubscribeCodec.peekFrameSize(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -225,7 +225,7 @@ class MqttSubscribeCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), SubscribeCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.Complete(totalBytes), MqttPacketSubscribeCodec.peekFrameSize(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -248,5 +248,6 @@ class MqttSubscribeCodecTest {
             .also { it.writeBytes(wire) }
             .also { it.resetForRead() }
 
-    private fun encode(value: MqttPacket.Subscribe): ReadBuffer = SubscribeCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
+    private fun encode(value: MqttPacket.Subscribe): ReadBuffer =
+        MqttPacketSubscribeCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
 }
