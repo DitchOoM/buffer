@@ -46,7 +46,7 @@ class MqttPubRelCodecTest {
     fun decodesFromSpecBytes() {
         val wire = byteArrayOf(0x62, 0x02, 0x12, 0x34)
         val buf = bigEndianBufferOf(wire)
-        val decoded = PubRelCodec.decode(buf, DecodeContext.Empty)
+        val decoded = MqttPacketPubRelCodec.decode(buf, DecodeContext.Empty)
         assertEquals(MqttFixedHeader(0x62u), decoded.header)
         assertEquals(0x1234u.toUShort(), decoded.packetIdentifier)
     }
@@ -65,7 +65,7 @@ class MqttPubRelCodecTest {
                 0xAD.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
-        PubRelCodec.decode(buf, DecodeContext.Empty)
+        MqttPacketPubRelCodec.decode(buf, DecodeContext.Empty)
         assertEquals(4, buf.position(), "decode advanced exactly through PUBREL")
         assertEquals(4, buf.remaining(), "trailing 4 bytes left in buffer for next packet")
     }
@@ -78,7 +78,7 @@ class MqttPubRelCodecTest {
         buf.writeShort(0x0001.toShort())
         buf.resetForRead()
         val originalLimit = buf.limit()
-        PubRelCodec.decode(buf, DecodeContext.Empty)
+        MqttPacketPubRelCodec.decode(buf, DecodeContext.Empty)
         assertEquals(originalLimit, buf.limit(), "decode restored the outer limit")
     }
 
@@ -90,7 +90,7 @@ class MqttPubRelCodecTest {
                 packetIdentifier = 0xCAFEu,
             )
         val buf = encode(original)
-        assertEquals(original, PubRelCodec.decode(buf, DecodeContext.Empty))
+        assertEquals(original, MqttPacketPubRelCodec.decode(buf, DecodeContext.Empty))
     }
 
     @Test
@@ -107,7 +107,7 @@ class MqttPubRelCodecTest {
         val buf = bigEndianBufferOf(wire)
         val ex =
             assertFailsWith<DecodeException> {
-                PubRelCodec.decode(buf, DecodeContext.Empty)
+                MqttPacketPubRelCodec.decode(buf, DecodeContext.Empty)
             }
         assertEquals("MqttRemainingLength", ex.fieldPath)
     }
@@ -129,7 +129,7 @@ class MqttPubRelCodecTest {
                 stream.append(one)
                 assertEquals(
                     PeekResult.NeedsMoreData,
-                    PubRelCodec.peekFrameSize(stream),
+                    MqttPacketPubRelCodec.peekFrameSize(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -137,7 +137,7 @@ class MqttPubRelCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), PubRelCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.Complete(totalBytes), MqttPacketPubRelCodec.peekFrameSize(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -160,5 +160,6 @@ class MqttPubRelCodecTest {
             .also { it.writeBytes(wire) }
             .also { it.resetForRead() }
 
-    private fun encode(value: MqttPacket.PubRel): ReadBuffer = PubRelCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
+    private fun encode(value: MqttPacket.PubRel): ReadBuffer =
+        MqttPacketPubRelCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
 }

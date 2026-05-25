@@ -604,7 +604,7 @@ class MqttPacketCodecTest {
     @Test
     fun roundTripsPublishVariantThroughVariantPartial() {
         // Direct Partial flow for the variant codec: the consumer
-        // decodes headers via PublishCodec.partial<P>(...), inspects
+        // decodes headers via MqttPacketPublishCodec.partial<P>(...), inspects
         // the topic, then completes with the payload codec selected
         // at the call site. Verifies the Partial machinery
         // composes with 's @RemainingLength outer-limit
@@ -623,7 +623,7 @@ class MqttPacketCodecTest {
         // Skip the discriminator route — exercise Partial directly on
         // the variant codec (the code path that emits the outer-limit
         // capture).
-        val partial = PublishCodec.partial<JpegImage>(buf, DecodeContext.Empty)
+        val partial = MqttPacketPublishCodec.partial<JpegImage>(buf, DecodeContext.Empty)
         assertEquals("a/b", partial.topic)
         val full = partial.complete(JpegImageCodec)
         assertEquals(original, full)

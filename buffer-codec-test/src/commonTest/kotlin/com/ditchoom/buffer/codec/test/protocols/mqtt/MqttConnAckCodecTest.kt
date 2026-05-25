@@ -19,7 +19,7 @@ import kotlin.test.assertFailsWith
  * MQTT v3.1.1 §3.2 CONNACK packet.
  * Fixed-shape 4-byte ack: header `0x20` + remainingLength=2 +
  * connectAckFlags (UByte; bit 0 carries Session Present per §3.2.2.1)
- * + returnCode (UByte per §3.2.2.3). Drives `ConnAckCodec`.
+ * + returnCode (UByte per §3.2.2.3). Drives `MqttPacketConnAckCodec`.
  */
 class MqttConnAckCodecTest {
     @Test
@@ -52,7 +52,7 @@ class MqttConnAckCodecTest {
     fun decodesFromSpecBytes() {
         val wire = byteArrayOf(0x20, 0x02, 0x01, 0x00)
         val buf = bigEndianBufferOf(wire)
-        val decoded = ConnAckCodec.decode(buf, DecodeContext.Empty)
+        val decoded = MqttPacketConnAckCodec.decode(buf, DecodeContext.Empty)
         assertEquals(MqttFixedHeader(0x20u), decoded.header)
         assertEquals(0x01u.toUByte(), decoded.connectAckFlags, "session-present bit")
         assertEquals(0x00u.toUByte(), decoded.returnCode, "accepted")
@@ -72,7 +72,7 @@ class MqttConnAckCodecTest {
                 0xAD.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
-        ConnAckCodec.decode(buf, DecodeContext.Empty)
+        MqttPacketConnAckCodec.decode(buf, DecodeContext.Empty)
         assertEquals(4, buf.position(), "decode advanced exactly through CONNACK")
         assertEquals(4, buf.remaining(), "trailing 4 bytes left in buffer for next packet")
     }
@@ -86,7 +86,7 @@ class MqttConnAckCodecTest {
         buf.writeByte(0x00)
         buf.resetForRead()
         val originalLimit = buf.limit()
-        ConnAckCodec.decode(buf, DecodeContext.Empty)
+        MqttPacketConnAckCodec.decode(buf, DecodeContext.Empty)
         assertEquals(originalLimit, buf.limit(), "decode restored the outer limit")
     }
 
@@ -99,7 +99,7 @@ class MqttConnAckCodecTest {
                 returnCode = 0x05u,
             )
         val buf = encode(original)
-        assertEquals(original, ConnAckCodec.decode(buf, DecodeContext.Empty))
+        assertEquals(original, MqttPacketConnAckCodec.decode(buf, DecodeContext.Empty))
     }
 
     @Test
@@ -116,7 +116,7 @@ class MqttConnAckCodecTest {
         val buf = bigEndianBufferOf(wire)
         val ex =
             assertFailsWith<DecodeException> {
-                ConnAckCodec.decode(buf, DecodeContext.Empty)
+                MqttPacketConnAckCodec.decode(buf, DecodeContext.Empty)
             }
         assertEquals("MqttRemainingLength", ex.fieldPath)
     }
@@ -138,7 +138,7 @@ class MqttConnAckCodecTest {
                 stream.append(one)
                 assertEquals(
                     PeekResult.NeedsMoreData,
-                    ConnAckCodec.peekFrameSize(stream),
+                    MqttPacketConnAckCodec.peekFrameSize(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -146,7 +146,7 @@ class MqttConnAckCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), ConnAckCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.Complete(totalBytes), MqttPacketConnAckCodec.peekFrameSize(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -169,5 +169,6 @@ class MqttConnAckCodecTest {
             .also { it.writeBytes(wire) }
             .also { it.resetForRead() }
 
-    private fun encode(value: MqttPacket.ConnAck): ReadBuffer = ConnAckCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
+    private fun encode(value: MqttPacket.ConnAck): ReadBuffer =
+        MqttPacketConnAckCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
 }

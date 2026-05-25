@@ -37,7 +37,7 @@ class MqttUnsubAckCodecTest {
     fun decodesFromSpecBytes() {
         val wire = byteArrayOf(0xB0.toByte(), 0x02, 0x12, 0x34)
         val buf = bigEndianBufferOf(wire)
-        val decoded = UnsubAckCodec.decode(buf, DecodeContext.Empty)
+        val decoded = MqttPacketUnsubAckCodec.decode(buf, DecodeContext.Empty)
         assertEquals(MqttFixedHeader(0xB0u), decoded.header)
         assertEquals(0x1234u.toUShort(), decoded.packetIdentifier)
     }
@@ -56,7 +56,7 @@ class MqttUnsubAckCodecTest {
                 0xAD.toByte(),
             )
         val buf = bigEndianBufferOf(wire)
-        UnsubAckCodec.decode(buf, DecodeContext.Empty)
+        MqttPacketUnsubAckCodec.decode(buf, DecodeContext.Empty)
         assertEquals(4, buf.position(), "decode advanced exactly through UNSUBACK")
         assertEquals(4, buf.remaining(), "trailing 4 bytes left in buffer for next packet")
     }
@@ -69,7 +69,7 @@ class MqttUnsubAckCodecTest {
         buf.writeShort(0x0001.toShort())
         buf.resetForRead()
         val originalLimit = buf.limit()
-        UnsubAckCodec.decode(buf, DecodeContext.Empty)
+        MqttPacketUnsubAckCodec.decode(buf, DecodeContext.Empty)
         assertEquals(originalLimit, buf.limit(), "decode restored the outer limit")
     }
 
@@ -81,7 +81,7 @@ class MqttUnsubAckCodecTest {
                 packetIdentifier = 0xCAFEu,
             )
         val buf = encode(original)
-        assertEquals(original, UnsubAckCodec.decode(buf, DecodeContext.Empty))
+        assertEquals(original, MqttPacketUnsubAckCodec.decode(buf, DecodeContext.Empty))
     }
 
     @Test
@@ -98,7 +98,7 @@ class MqttUnsubAckCodecTest {
         val buf = bigEndianBufferOf(wire)
         val ex =
             assertFailsWith<DecodeException> {
-                UnsubAckCodec.decode(buf, DecodeContext.Empty)
+                MqttPacketUnsubAckCodec.decode(buf, DecodeContext.Empty)
             }
         assertEquals("MqttRemainingLength", ex.fieldPath)
     }
@@ -120,7 +120,7 @@ class MqttUnsubAckCodecTest {
                 stream.append(one)
                 assertEquals(
                     PeekResult.NeedsMoreData,
-                    UnsubAckCodec.peekFrameSize(stream),
+                    MqttPacketUnsubAckCodec.peekFrameSize(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -128,7 +128,7 @@ class MqttUnsubAckCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), UnsubAckCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.Complete(totalBytes), MqttPacketUnsubAckCodec.peekFrameSize(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -151,5 +151,6 @@ class MqttUnsubAckCodecTest {
             .also { it.writeBytes(wire) }
             .also { it.resetForRead() }
 
-    private fun encode(value: MqttPacket.UnsubAck): ReadBuffer = UnsubAckCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
+    private fun encode(value: MqttPacket.UnsubAck): ReadBuffer =
+        MqttPacketUnsubAckCodec.encode(value, EncodeContext.Empty, BufferFactory.Default)
 }
