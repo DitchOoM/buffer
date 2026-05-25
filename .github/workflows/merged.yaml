@@ -83,9 +83,12 @@ jobs:
           # Use the paginated "list PR files" API rather than `gh pr diff`: the
           # latter hits the .diff endpoint, which GitHub caps at 300 files and
           # returns HTTP 406 for larger PRs.
+          # The PR-files API returns objects with a `filename` field, not `path`.
+          # The earlier `gh pr diff --name-only` shortcut emitted bare filenames;
+          # switching to the API silently broke the loop when this used `.path`.
           changed_files=$(gh api --paginate \
             "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-            --jq '.[].path')
+            --jq '.[].filename')
           for file in $changed_files; do
             case "$file" in
               .github/*|*.md|.gitignore|.editorconfig|CLAUDE.md|LICENSE|*.txt)
