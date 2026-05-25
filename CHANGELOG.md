@@ -3,6 +3,61 @@
 All notable changes to this project are documented here. This project adheres
 to [Semantic Versioning](https://semver.org/).
 
+## [5.0.x] — Silent breaking changes from 4.x not documented in the 5.0.0 notes
+
+The 5.0.0 release went through a strip-and-rebuild of `buffer-codec-processor`.
+A handful of v4 behaviors were silently lost in that rebuild and were not
+called out in the breaking-changes list below. Documenting them here so users
+upgrading from 4.x know what to look for.
+
+- **SPI extension system removed (`buffer-codec-processor/.../spi/CodecFieldProvider`).**
+  v4 exposed a `CodecFieldProvider` interface, discovered via ServiceLoader,
+  that let external users plug custom field strategies into KSP code
+  generation. The whole `spi/` package was deleted in the v5 rebuild and not
+  replaced. Source-incompatible for any project that shipped a custom
+  `CodecFieldProvider`. **No drop-in replacement.** If you need custom field
+  handling in v5, model it as a hand-written `Codec<T>` referenced via
+  `@UseCodec` instead. Tracking restoration as a separate decision — file an
+  issue if you depended on this.
+
+- **`@Payload` annotation replaced by `Payload` interface.**
+  - v4: `data class Packet<@Payload P>(...)` — type-parameter annotation
+    from `com.ditchoom.buffer.codec.annotations`.
+  - v5: `data class Packet<P : Payload>(...)` — marker interface bound from
+    `com.ditchoom.buffer.codec`.
+  - Migration: drop the `@Payload` annotation on the type parameter and add
+    `: Payload` as the type bound; have your payload type extend
+    `Payload`.
+
+- **Nested-class codec naming convention regressed in 5.0.0, restored in 5.1.0
+  (issue #156).** v4 generated codec object names with the enclosing-type
+  chain flattened: `MqttPacket.SubAck` → `MqttPacketSubAckCodec`. v5.0.0
+  silently dropped the flattening and generated `SubAckCodec`, which made
+  any two same-named nested classes in the same package collide at KSP file
+  write time with `kotlin.io.FileAlreadyExistsException`. **5.1.0 restores
+  the v4 always-flatten convention** — if you upgraded a v4 project to v5.0.0
+  and updated references to simple names, you will need to flatten them
+  again when moving to 5.1.0. Wire format is unchanged.
+
+- **Batching read/write coalescing removed (perf regression, not source-breaking).**
+  v4's `BatchOptimizer` fused adjacent fixed-width scalar reads/writes into
+  single bulk operations (e.g. four `readUByte()` → one `readInt()` + shift
+  decompose). The optimizer was deleted in the v5 rebuild. Generated code
+  still works correctly, just emits one read/write per scalar field — a
+  measurable throughput regression on hot decode paths. Restoration is in
+  flight; track via the perf branch.
+
+- **Test coverage gap from the rebuild.** 55 v4 test/fixture files were
+  deleted in the v5 strip. Some were renamed (e.g. v4's
+  `MqttPacketRoundTripTest` is covered today by `MqttPacketCodecTest` +
+  per-variant `MqttConnectCodecTest`, `MqttSubAckCodecTest`, etc.); others
+  are not re-tested anywhere. The codec naming regression above only
+  surfaced because an external user (issue #156) hit it in production —
+  v4 had `AnimChunkRoundTripTest.kt` guarding that behavior, and it was
+  deleted in the rebuild. We're auditing the full deletion list to identify
+  v4 behaviors that are no longer regression-tested in v5; results will be
+  filed as follow-up issues.
+
 ## [5.0.0]
 
 This release reworks the `buffer-codec` framing API and unifies the buffer
