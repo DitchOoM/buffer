@@ -107,7 +107,12 @@ ktlint {
     filter {
         exclude("**/generated/**")
         exclude("**/build/**")
-        exclude { it.file.path.contains("/generated/") || it.file.path.contains("/build/") }
+        exclude("**/codec-snapshots/**")
+        exclude {
+            it.file.path.contains("/generated/") ||
+                it.file.path.contains("/build/") ||
+                it.file.path.contains("/codec-snapshots/")
+        }
     }
 }
 
@@ -131,4 +136,25 @@ tasks
 // an existing TLAB never trigger an event and the assertion is non-deterministic.
 tasks.named<Test>("jvmTest") {
     jvmArgs("-XX:-UseTLAB")
+    // CodecSnapshotTest reads KSP-generated output and compares against
+    // the checked-in baseline tree. Hand it the two roots so the test does
+    // not need build-time path knowledge.
+    systemProperty(
+        "codec.snapshot.generated",
+        layout.buildDirectory
+            .dir("generated/ksp/metadata/commonMain/kotlin")
+            .get()
+            .asFile.absolutePath,
+    )
+    systemProperty(
+        "codec.snapshot.baseline",
+        layout.projectDirectory
+            .dir("codec-snapshots")
+            .asFile.absolutePath,
+    )
+    // Forward the regen flag from the gradle command line into the test JVM.
+    systemProperty(
+        "update.snapshots",
+        providers.systemProperty("update.snapshots").getOrElse("false"),
+    )
 }
