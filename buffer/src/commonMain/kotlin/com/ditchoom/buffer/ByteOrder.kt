@@ -16,26 +16,17 @@ enum class ByteOrder {
 
 // Endian-swap helpers — used by generated codec code when a batched read/write
 // must canonicalize bytes between the wire order and the buffer's runtime byte
-// order. Kotlin stdlib's `Long.reverseBytes()` is JVM-only; these top-level
-// functions are common-source and resolve unambiguously from generated imports.
+// order. Delegates to Kotlin stdlib's `reverseBytes()` extension (common-stdlib
+// since 1.5), which compiles to a platform intrinsic where one is available:
+//   - JVM: `java.lang.{Short,Integer,Long}.reverseBytes()` → BSWAP / REV
+//   - Native: Kotlin/Native intrinsic → BSWAP / REV
+//   - JS / WASM: pure shift/or (no hardware byte-swap)
+// Top-level wrappers keep the codec-facing call sites stable (`swapBytes(x)`)
+// independent of stdlib evolution and avoid any extension-resolution ambiguity
+// at the generated-import site.
 
-fun swapBytes(value: Short): Short {
-    val v = value.toInt() and 0xFFFF
-    return (((v and 0xFF) shl 8) or ((v ushr 8) and 0xFF)).toShort()
-}
+fun swapBytes(value: Short): Short = value.reverseBytes()
 
-fun swapBytes(value: Int): Int =
-    ((value and 0xFF) shl 24) or
-        (((value ushr 8) and 0xFF) shl 16) or
-        (((value ushr 16) and 0xFF) shl 8) or
-        ((value ushr 24) and 0xFF)
+fun swapBytes(value: Int): Int = value.reverseBytes()
 
-fun swapBytes(value: Long): Long =
-    ((value and 0xFFL) shl 56) or
-        (((value ushr 8) and 0xFFL) shl 48) or
-        (((value ushr 16) and 0xFFL) shl 40) or
-        (((value ushr 24) and 0xFFL) shl 32) or
-        (((value ushr 32) and 0xFFL) shl 24) or
-        (((value ushr 40) and 0xFFL) shl 16) or
-        (((value ushr 48) and 0xFFL) shl 8) or
-        ((value ushr 56) and 0xFFL)
+fun swapBytes(value: Long): Long = value.reverseBytes()

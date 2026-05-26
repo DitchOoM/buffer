@@ -14,12 +14,12 @@ import kotlin.Int
 
 public object LittleHeaderCodec : Codec<LittleHeader> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): LittleHeader {
-    val __batch26Raw = buffer.readLong()
-    val __batch26 = if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch26Raw else swapBytes(__batch26Raw)
-    val type = (__batch26 and 0xFFL).toUByte()
-    val version = (__batch26 ushr 8 and 0xFFL).toUByte()
-    val flags = (__batch26 ushr 16 and 0xFFFFL).toUShort()
-    val length = (__batch26 ushr 32 and 0xFFFFFFFFL).toUInt()
+    val __batch1Raw = buffer.readLong()
+    val __batch1 = if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch1Raw else swapBytes(__batch1Raw)
+    val type = (__batch1 and 0xFFL).toUByte()
+    val version = (__batch1 ushr 8 and 0xFFL).toUByte()
+    val flags = (__batch1 ushr 16 and 0xFFFFL).toUShort()
+    val length = (__batch1 ushr 32 and 0xFFFFFFFFL).toUInt()
     return LittleHeader(type = type, version = version, flags = flags, length = length)
   }
 
@@ -28,8 +28,8 @@ public object LittleHeaderCodec : Codec<LittleHeader> {
     `value`: LittleHeader,
     context: EncodeContext,
   ) {
-    val __batch27 = ((value.type.toLong() and 0xFFL) or ((value.version.toLong() and 0xFFL) shl 8) or ((value.flags.toLong() and 0xFFFFL) shl 16) or ((value.length.toLong() and 0xFFFFFFFFL) shl 32)).toLong()
-    buffer.writeLong(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch27 else swapBytes(__batch27))
+    val __batch2 = ((value.type.toLong() and 0xFFL) or ((value.version.toLong() and 0xFFL) shl 8) or ((value.flags.toLong() and 0xFFFFL) shl 16) or ((value.length.toLong() and 0xFFFFFFFFL) shl 32)).toLong()
+    buffer.writeLong(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch2 else swapBytes(__batch2))
   }
 
   override fun wireSize(`value`: LittleHeader, context: EncodeContext): WireSize = WireSize.Exact(8)

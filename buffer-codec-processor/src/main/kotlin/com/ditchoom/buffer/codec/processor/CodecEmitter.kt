@@ -2165,6 +2165,8 @@ internal class CodecEmitter(
         shape: CodecShape,
         framedBy: FramedByConfig,
     ): FileSpec {
+        // Reset per-file — see note on buildFileSpec.
+        batchCounter = 0
         val typeSpec =
             TypeSpec
                 .objectBuilder(shape.codecSimpleName)
@@ -2384,6 +2386,11 @@ internal class CodecEmitter(
         }
 
     private fun buildFileSpec(shape: CodecShape): FileSpec {
+        // Reset per-file so __batchN locals are stable across builds.
+        // Otherwise the monotonic counter shifts when KSP processes shapes
+        // in a different order between runs — the snapshot baseline would
+        // drift on every unrelated edit.
+        batchCounter = 0
         if (shape.framedBy != null && shape.payloadTypeParameter == null) {
             return buildFramedByFileSpec(shape, shape.framedBy)
         }

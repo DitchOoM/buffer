@@ -13,21 +13,21 @@ import kotlin.Int
 
 public object MixedNaturalScalarsCodec : Codec<MixedNaturalScalars> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): MixedNaturalScalars {
-    val __batch21 = buffer.readLong()
+    val __batch1 = buffer.readLong()
     val flags: kotlin.UByte
     val tag: kotlin.UByte
     val length: kotlin.UShort
     val checksum: kotlin.UInt
     if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
-      flags = (__batch21 ushr 56 and 0xFFL).toUByte()
-      tag = (__batch21 ushr 48 and 0xFFL).toUByte()
-      length = (__batch21 ushr 32 and 0xFFFFL).toUShort()
-      checksum = (__batch21 and 0xFFFFFFFFL).toUInt()
+      flags = (__batch1 ushr 56 and 0xFFL).toUByte()
+      tag = (__batch1 ushr 48 and 0xFFL).toUByte()
+      length = (__batch1 ushr 32 and 0xFFFFL).toUShort()
+      checksum = (__batch1 and 0xFFFFFFFFL).toUInt()
     } else {
-      flags = (__batch21 and 0xFFL).toUByte()
-      tag = (__batch21 ushr 8 and 0xFFL).toUByte()
-      length = (__batch21 ushr 16 and 0xFFFFL).toUShort()
-      checksum = (__batch21 ushr 32 and 0xFFFFFFFFL).toUInt()
+      flags = (__batch1 and 0xFFL).toUByte()
+      tag = (__batch1 ushr 8 and 0xFFL).toUByte()
+      length = (__batch1 ushr 16 and 0xFFFFL).toUShort()
+      checksum = (__batch1 ushr 32 and 0xFFFFFFFFL).toUInt()
     }
     return MixedNaturalScalars(flags = flags, tag = tag, length = length, checksum = checksum)
   }

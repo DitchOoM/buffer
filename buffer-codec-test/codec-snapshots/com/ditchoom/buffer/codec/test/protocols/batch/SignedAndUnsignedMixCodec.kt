@@ -13,18 +13,18 @@ import kotlin.Int
 
 public object SignedAndUnsignedMixCodec : Codec<SignedAndUnsignedMix> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): SignedAndUnsignedMix {
-    val __batch23 = buffer.readInt()
+    val __batch1 = buffer.readInt()
     val signed: kotlin.Byte
     val unsigned: kotlin.UByte
     val signedShort: kotlin.Short
     if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
-      signed = (__batch23 ushr 24 and 0xFF).toByte()
-      unsigned = (__batch23 ushr 16 and 0xFF).toUByte()
-      signedShort = (__batch23 and 0xFFFF).toShort()
+      signed = (__batch1 ushr 24 and 0xFF).toByte()
+      unsigned = (__batch1 ushr 16 and 0xFF).toUByte()
+      signedShort = (__batch1 and 0xFFFF).toShort()
     } else {
-      signed = (__batch23 and 0xFF).toByte()
-      unsigned = (__batch23 ushr 8 and 0xFF).toUByte()
-      signedShort = (__batch23 ushr 16 and 0xFFFF).toShort()
+      signed = (__batch1 and 0xFF).toByte()
+      unsigned = (__batch1 ushr 8 and 0xFF).toUByte()
+      signedShort = (__batch1 ushr 16 and 0xFFFF).toShort()
     }
     return SignedAndUnsignedMix(signed = signed, unsigned = unsigned, signedShort = signedShort)
   }

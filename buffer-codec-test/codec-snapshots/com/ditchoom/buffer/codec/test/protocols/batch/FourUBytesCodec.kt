@@ -13,21 +13,21 @@ import kotlin.Int
 
 public object FourUBytesCodec : Codec<FourUBytes> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): FourUBytes {
-    val __batch19 = buffer.readInt()
+    val __batch1 = buffer.readInt()
     val a: kotlin.UByte
     val b: kotlin.UByte
     val c: kotlin.UByte
     val d: kotlin.UByte
     if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
-      a = (__batch19 ushr 24 and 0xFF).toUByte()
-      b = (__batch19 ushr 16 and 0xFF).toUByte()
-      c = (__batch19 ushr 8 and 0xFF).toUByte()
-      d = (__batch19 and 0xFF).toUByte()
+      a = (__batch1 ushr 24 and 0xFF).toUByte()
+      b = (__batch1 ushr 16 and 0xFF).toUByte()
+      c = (__batch1 ushr 8 and 0xFF).toUByte()
+      d = (__batch1 and 0xFF).toUByte()
     } else {
-      a = (__batch19 and 0xFF).toUByte()
-      b = (__batch19 ushr 8 and 0xFF).toUByte()
-      c = (__batch19 ushr 16 and 0xFF).toUByte()
-      d = (__batch19 ushr 24 and 0xFF).toUByte()
+      a = (__batch1 and 0xFF).toUByte()
+      b = (__batch1 ushr 8 and 0xFF).toUByte()
+      c = (__batch1 ushr 16 and 0xFF).toUByte()
+      d = (__batch1 ushr 24 and 0xFF).toUByte()
     }
     return FourUBytes(a = a, b = b, c = c, d = d)
   }

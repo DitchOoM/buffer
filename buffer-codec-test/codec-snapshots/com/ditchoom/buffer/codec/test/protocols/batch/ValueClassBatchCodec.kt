@@ -13,15 +13,15 @@ import kotlin.Int
 
 public object ValueClassBatchCodec : Codec<ValueClassBatch> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): ValueClassBatch {
-    val __batch22 = buffer.readShort().toInt() and 0xFFFF
+    val __batch1 = buffer.readShort().toInt() and 0xFFFF
     val header: com.ditchoom.buffer.codec.test.protocols.batch.HeaderByte
     val tail: com.ditchoom.buffer.codec.test.protocols.batch.HeaderByte
     if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
-      header = HeaderByte((__batch22 ushr 8 and 0xFF).toUByte())
-      tail = HeaderByte((__batch22 and 0xFF).toUByte())
+      header = HeaderByte((__batch1 ushr 8 and 0xFF).toUByte())
+      tail = HeaderByte((__batch1 and 0xFF).toUByte())
     } else {
-      header = HeaderByte((__batch22 and 0xFF).toUByte())
-      tail = HeaderByte((__batch22 ushr 8 and 0xFF).toUByte())
+      header = HeaderByte((__batch1 and 0xFF).toUByte())
+      tail = HeaderByte((__batch1 ushr 8 and 0xFF).toUByte())
     }
     return ValueClassBatch(header = header, tail = tail)
   }

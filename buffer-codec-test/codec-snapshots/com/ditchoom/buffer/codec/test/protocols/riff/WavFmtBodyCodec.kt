@@ -14,16 +14,16 @@ import kotlin.Int
 
 public object WavFmtBodyCodec : Codec<WavFmtBody> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): WavFmtBody {
-    val __batch12Raw = buffer.readLong()
-    val __batch12 = if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch12Raw else swapBytes(__batch12Raw)
-    val audioFormat = (__batch12 and 0xFFFFL).toUShort()
-    val numChannels = (__batch12 ushr 16 and 0xFFFFL).toUShort()
-    val sampleRate = (__batch12 ushr 32 and 0xFFFFFFFFL).toUInt()
-    val __batch13Raw = buffer.readLong()
-    val __batch13 = if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch13Raw else swapBytes(__batch13Raw)
-    val byteRate = (__batch13 and 0xFFFFFFFFL).toUInt()
-    val blockAlign = (__batch13 ushr 32 and 0xFFFFL).toUShort()
-    val bitsPerSample = (__batch13 ushr 48 and 0xFFFFL).toUShort()
+    val __batch1Raw = buffer.readLong()
+    val __batch1 = if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch1Raw else swapBytes(__batch1Raw)
+    val audioFormat = (__batch1 and 0xFFFFL).toUShort()
+    val numChannels = (__batch1 ushr 16 and 0xFFFFL).toUShort()
+    val sampleRate = (__batch1 ushr 32 and 0xFFFFFFFFL).toUInt()
+    val __batch2Raw = buffer.readLong()
+    val __batch2 = if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch2Raw else swapBytes(__batch2Raw)
+    val byteRate = (__batch2 and 0xFFFFFFFFL).toUInt()
+    val blockAlign = (__batch2 ushr 32 and 0xFFFFL).toUShort()
+    val bitsPerSample = (__batch2 ushr 48 and 0xFFFFL).toUShort()
     return WavFmtBody(audioFormat = audioFormat, numChannels = numChannels, sampleRate = sampleRate, byteRate = byteRate, blockAlign = blockAlign, bitsPerSample = bitsPerSample)
   }
 
@@ -32,10 +32,10 @@ public object WavFmtBodyCodec : Codec<WavFmtBody> {
     `value`: WavFmtBody,
     context: EncodeContext,
   ) {
-    val __batch14 = ((value.audioFormat.toLong() and 0xFFFFL) or ((value.numChannels.toLong() and 0xFFFFL) shl 16) or ((value.sampleRate.toLong() and 0xFFFFFFFFL) shl 32)).toLong()
-    buffer.writeLong(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch14 else swapBytes(__batch14))
-    val __batch15 = ((value.byteRate.toLong() and 0xFFFFFFFFL) or ((value.blockAlign.toLong() and 0xFFFFL) shl 32) or ((value.bitsPerSample.toLong() and 0xFFFFL) shl 48)).toLong()
-    buffer.writeLong(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch15 else swapBytes(__batch15))
+    val __batch3 = ((value.audioFormat.toLong() and 0xFFFFL) or ((value.numChannels.toLong() and 0xFFFFL) shl 16) or ((value.sampleRate.toLong() and 0xFFFFFFFFL) shl 32)).toLong()
+    buffer.writeLong(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch3 else swapBytes(__batch3))
+    val __batch4 = ((value.byteRate.toLong() and 0xFFFFFFFFL) or ((value.blockAlign.toLong() and 0xFFFFL) shl 32) or ((value.bitsPerSample.toLong() and 0xFFFFL) shl 48)).toLong()
+    buffer.writeLong(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch4 else swapBytes(__batch4))
   }
 
   override fun wireSize(`value`: WavFmtBody, context: EncodeContext): WireSize = WireSize.Exact(16)

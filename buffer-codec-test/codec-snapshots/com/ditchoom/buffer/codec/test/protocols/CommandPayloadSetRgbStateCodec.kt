@@ -13,15 +13,15 @@ import kotlin.Int
 
 public object CommandPayloadSetRgbStateCodec : Codec<CommandPayload.SetRgbState> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): CommandPayload.SetRgbState {
-    val __batch9 = buffer.readShort().toInt() and 0xFFFF
+    val __batch1 = buffer.readShort().toInt() and 0xFFFF
     val r: kotlin.UByte
     val g: kotlin.UByte
     if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
-      r = (__batch9 ushr 8 and 0xFF).toUByte()
-      g = (__batch9 and 0xFF).toUByte()
+      r = (__batch1 ushr 8 and 0xFF).toUByte()
+      g = (__batch1 and 0xFF).toUByte()
     } else {
-      r = (__batch9 and 0xFF).toUByte()
-      g = (__batch9 ushr 8 and 0xFF).toUByte()
+      r = (__batch1 and 0xFF).toUByte()
+      g = (__batch1 ushr 8 and 0xFF).toUByte()
     }
     val b = buffer.readUByte()
     return CommandPayload.SetRgbState(r = r, g = g, b = b)

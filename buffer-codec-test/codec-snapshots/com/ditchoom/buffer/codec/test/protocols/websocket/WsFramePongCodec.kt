@@ -20,15 +20,15 @@ public class WsFramePongCodec<P : Payload>(
   private val payloadCodec: Codec<P>,
 ) : Codec<WsFrame.Pong<P>> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): WsFrame.Pong<P> {
-    val __batch23 = buffer.readShort().toInt() and 0xFFFF
+    val __batch1 = buffer.readShort().toInt() and 0xFFFF
     val byte1: com.ditchoom.buffer.codec.test.protocols.websocket.FrameHeaderByte1
     val byte2: com.ditchoom.buffer.codec.test.protocols.websocket.WsHeaderByte2
     if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
-      byte1 = FrameHeaderByte1((__batch23 ushr 8 and 0xFF).toUByte())
-      byte2 = WsHeaderByte2((__batch23 and 0xFF).toUByte())
+      byte1 = FrameHeaderByte1((__batch1 ushr 8 and 0xFF).toUByte())
+      byte2 = WsHeaderByte2((__batch1 and 0xFF).toUByte())
     } else {
-      byte1 = FrameHeaderByte1((__batch23 and 0xFF).toUByte())
-      byte2 = WsHeaderByte2((__batch23 ushr 8 and 0xFF).toUByte())
+      byte1 = FrameHeaderByte1((__batch1 and 0xFF).toUByte())
+      byte2 = WsHeaderByte2((__batch1 ushr 8 and 0xFF).toUByte())
     }
     val extendedLength16: UShort? = if (byte2.extended16) buffer.readUShort() else null
     val extendedLength64: Long? = if (byte2.extended64) buffer.readLong() else null
@@ -83,15 +83,15 @@ public class WsFramePongCodec<P : Payload>(
 
   public companion object {
     public fun <P : Payload> partial(buffer: ReadBuffer, context: DecodeContext): Partial<P> {
-      val __batch24 = buffer.readShort().toInt() and 0xFFFF
+      val __batch2 = buffer.readShort().toInt() and 0xFFFF
       val byte1: com.ditchoom.buffer.codec.test.protocols.websocket.FrameHeaderByte1
       val byte2: com.ditchoom.buffer.codec.test.protocols.websocket.WsHeaderByte2
       if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
-        byte1 = FrameHeaderByte1((__batch24 ushr 8 and 0xFF).toUByte())
-        byte2 = WsHeaderByte2((__batch24 and 0xFF).toUByte())
+        byte1 = FrameHeaderByte1((__batch2 ushr 8 and 0xFF).toUByte())
+        byte2 = WsHeaderByte2((__batch2 and 0xFF).toUByte())
       } else {
-        byte1 = FrameHeaderByte1((__batch24 and 0xFF).toUByte())
-        byte2 = WsHeaderByte2((__batch24 ushr 8 and 0xFF).toUByte())
+        byte1 = FrameHeaderByte1((__batch2 and 0xFF).toUByte())
+        byte2 = WsHeaderByte2((__batch2 ushr 8 and 0xFF).toUByte())
       }
       val extendedLength16: UShort? = if (byte2.extended16) buffer.readUShort() else null
       val extendedLength64: Long? = if (byte2.extended64) buffer.readLong() else null

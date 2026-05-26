@@ -35,18 +35,18 @@ public object MqttPacketConnectCodec {
       }
       val protocolNameLength = protocolNamePrefix.toInt()
       val protocolName = buffer.readString(protocolNameLength, Charset.UTF8)
-      val __batch10 = buffer.readInt()
+      val __batch1 = buffer.readInt()
       val protocolLevel: kotlin.UByte
       val connectFlags: com.ditchoom.buffer.codec.test.protocols.mqtt.MqttConnectFlags
       val keepAliveSeconds: kotlin.UShort
       if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
-        protocolLevel = (__batch10 ushr 24 and 0xFF).toUByte()
-        connectFlags = MqttConnectFlags((__batch10 ushr 16 and 0xFF).toUByte())
-        keepAliveSeconds = (__batch10 and 0xFFFF).toUShort()
+        protocolLevel = (__batch1 ushr 24 and 0xFF).toUByte()
+        connectFlags = MqttConnectFlags((__batch1 ushr 16 and 0xFF).toUByte())
+        keepAliveSeconds = (__batch1 and 0xFFFF).toUShort()
       } else {
-        protocolLevel = (__batch10 and 0xFF).toUByte()
-        connectFlags = MqttConnectFlags((__batch10 ushr 8 and 0xFF).toUByte())
-        keepAliveSeconds = (__batch10 ushr 16 and 0xFFFF).toUShort()
+        protocolLevel = (__batch1 and 0xFF).toUByte()
+        connectFlags = MqttConnectFlags((__batch1 ushr 8 and 0xFF).toUByte())
+        keepAliveSeconds = (__batch1 ushr 16 and 0xFFFF).toUShort()
       }
       val clientIdPrefixB0 = buffer.readUByte().toUInt()
       val clientIdPrefixB1 = buffer.readUByte().toUInt()
