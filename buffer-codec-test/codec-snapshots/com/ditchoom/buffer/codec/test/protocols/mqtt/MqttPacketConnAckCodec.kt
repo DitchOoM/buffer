@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.codec.test.protocols.mqtt
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
@@ -9,6 +10,7 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.swapBytes
 import kotlin.Int
 import kotlin.Throwable
 
@@ -21,8 +23,10 @@ public object MqttPacketConnAckCodec {
     val __framingStart = buffer.position()
     val __framingBound = __framingStart + __framingLength.toInt()
     return try {
-      val connectAckFlags = buffer.readUByte()
-      val returnCode = buffer.readUByte()
+      val __batch17Raw = buffer.readShort().toInt() and 0xFFFF
+      val __batch17 = if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch17Raw else swapBytes(__batch17Raw.toShort()).toInt() and 0xFFFF
+      val connectAckFlags = (__batch17 ushr 8 and 0xFF).toUByte()
+      val returnCode = (__batch17 and 0xFF).toUByte()
       if (buffer.position() != __framingBound) {
         throw DecodeException(
               fieldPath = "ConnAck.@FramedBy",
@@ -50,8 +54,8 @@ public object MqttPacketConnAckCodec {
       buffer.writeUByte(value.header.raw)
     },
   ) { buffer ->
-    buffer.writeUByte(value.connectAckFlags)
-    buffer.writeUByte(value.returnCode)
+    val __batch18 = (((value.connectAckFlags.toInt() and 0xFF) shl 8) or (value.returnCode.toInt() and 0xFF)).toShort()
+    buffer.writeShort(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch18 else swapBytes(__batch18))
   }
 
   public fun peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): PeekResult {

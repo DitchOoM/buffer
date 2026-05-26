@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols.wireorderMismatch
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
@@ -8,29 +9,24 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.swapBytes
 import kotlin.Int
 
 public object BigWirePacketCodec : Codec<BigWirePacket> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): BigWirePacket {
     val bool = buffer.readByte() != 0.toByte()
-    val byte = buffer.readByte()
-    val ubyte = buffer.readUByte()
-    val shortB0 = buffer.readUByte().toUInt()
-    val shortB1 = buffer.readUByte().toUInt()
-    val short = ((shortB0 shl 8) or shortB1).toShort()
+    val __batch3Raw = buffer.readInt()
+    val __batch3 = if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch3Raw else swapBytes(__batch3Raw)
+    val byte = (__batch3 ushr 24 and 0xFF).toByte()
+    val ubyte = (__batch3 ushr 16 and 0xFF).toUByte()
+    val short = (__batch3 and 0xFFFF).toShort()
     val ushortB0 = buffer.readUByte().toUInt()
     val ushortB1 = buffer.readUByte().toUInt()
     val ushort = ((ushortB0 shl 8) or ushortB1).toUShort()
-    val intB0 = buffer.readUByte().toUInt()
-    val intB1 = buffer.readUByte().toUInt()
-    val intB2 = buffer.readUByte().toUInt()
-    val intB3 = buffer.readUByte().toUInt()
-    val int = ((intB0 shl 24) or (intB1 shl 16) or (intB2 shl 8) or intB3).toInt()
-    val uintB0 = buffer.readUByte().toUInt()
-    val uintB1 = buffer.readUByte().toUInt()
-    val uintB2 = buffer.readUByte().toUInt()
-    val uintB3 = buffer.readUByte().toUInt()
-    val uint = ((uintB0 shl 24) or (uintB1 shl 16) or (uintB2 shl 8) or uintB3)
+    val __batch4Raw = buffer.readLong()
+    val __batch4 = if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch4Raw else swapBytes(__batch4Raw)
+    val int = (__batch4 ushr 32 and 0xFFFFFFFFL).toInt()
+    val uint = (__batch4 and 0xFFFFFFFFL).toUInt()
     val longB0 = buffer.readUByte().toULong()
     val longB1 = buffer.readUByte().toULong()
     val longB2 = buffer.readUByte().toULong()
@@ -72,20 +68,12 @@ public object BigWirePacketCodec : Codec<BigWirePacket> {
     context: EncodeContext,
   ) {
     buffer.writeByte(if (value.bool) 1.toByte() else 0.toByte())
-    buffer.writeByte(value.byte)
-    buffer.writeUByte(value.ubyte)
-    buffer.writeUByte(((value.short.toUShort().toUInt() shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.short.toUShort().toUInt() and 0xFFu).toUByte())
+    val __batch5 = (((value.byte.toInt() and 0xFF) shl 24) or ((value.ubyte.toInt() and 0xFF) shl 16) or (value.short.toInt() and 0xFFFF)).toInt()
+    buffer.writeInt(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch5 else swapBytes(__batch5))
     buffer.writeUByte(((value.ushort.toUInt() shr 8) and 0xFFu).toUByte())
     buffer.writeUByte((value.ushort.toUInt() and 0xFFu).toUByte())
-    buffer.writeUByte(((value.int.toUInt() shr 24) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.int.toUInt() shr 16) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.int.toUInt() shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.int.toUInt() and 0xFFu).toUByte())
-    buffer.writeUByte(((value.uint shr 24) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.uint shr 16) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.uint shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.uint and 0xFFu).toUByte())
+    val __batch6 = (((value.int.toLong() and 0xFFFFFFFFL) shl 32) or (value.uint.toLong() and 0xFFFFFFFFL)).toLong()
+    buffer.writeLong(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch6 else swapBytes(__batch6))
     buffer.writeUByte(((value.long.toULong() shr 56) and 0xFFuL).toUByte())
     buffer.writeUByte(((value.long.toULong() shr 48) and 0xFFuL).toUByte())
     buffer.writeUByte(((value.long.toULong() shr 40) and 0xFFuL).toUByte())

@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.codec.test.protocols.mqtt
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
@@ -34,9 +35,19 @@ public object MqttPacketConnectCodec {
       }
       val protocolNameLength = protocolNamePrefix.toInt()
       val protocolName = buffer.readString(protocolNameLength, Charset.UTF8)
-      val protocolLevel = buffer.readUByte()
-      val connectFlags = MqttConnectFlags(buffer.readUByte())
-      val keepAliveSeconds = buffer.readUShort()
+      val __batch16 = buffer.readInt()
+      val protocolLevel: kotlin.UByte
+      val connectFlags: com.ditchoom.buffer.codec.test.protocols.mqtt.MqttConnectFlags
+      val keepAliveSeconds: kotlin.UShort
+      if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
+        protocolLevel = (__batch16 ushr 24 and 0xFF).toUByte()
+        connectFlags = MqttConnectFlags((__batch16 ushr 16 and 0xFF).toUByte())
+        keepAliveSeconds = (__batch16 and 0xFFFF).toUShort()
+      } else {
+        protocolLevel = (__batch16 and 0xFF).toUByte()
+        connectFlags = MqttConnectFlags((__batch16 ushr 8 and 0xFF).toUByte())
+        keepAliveSeconds = (__batch16 ushr 16 and 0xFFFF).toUShort()
+      }
       val clientIdPrefixB0 = buffer.readUByte().toUInt()
       val clientIdPrefixB1 = buffer.readUByte().toUInt()
       val clientIdPrefix = ((clientIdPrefixB0 shl 8) or clientIdPrefixB1)
@@ -146,9 +157,11 @@ public object MqttPacketConnectCodec {
     buffer.writeUByte(((protocolNamePrefix shr 8) and 0xFFu).toUByte())
     buffer.writeUByte((protocolNamePrefix and 0xFFu).toUByte())
     buffer.position(protocolNameEndPosition)
-    buffer.writeUByte(value.protocolLevel)
-    buffer.writeUByte(value.connectFlags.raw)
-    buffer.writeUShort(value.keepAliveSeconds)
+    if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
+      buffer.writeInt((((value.protocolLevel.toInt() and 0xFF) shl 24) or ((value.connectFlags.raw.toInt() and 0xFF) shl 16) or (value.keepAliveSeconds.toInt() and 0xFFFF)).toInt())
+    } else {
+      buffer.writeInt(((value.protocolLevel.toInt() and 0xFF) or ((value.connectFlags.raw.toInt() and 0xFF) shl 8) or ((value.keepAliveSeconds.toInt() and 0xFFFF) shl 16)).toInt())
+    }
     val clientIdSizePosition = buffer.position()
     buffer.position(clientIdSizePosition + 2)
     val clientIdBodyStart = buffer.position()

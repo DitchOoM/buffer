@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols.websocket
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
@@ -15,8 +16,16 @@ import kotlin.UShort
 
 public object WsFrameCloseCodec : Codec<WsFrame.Close> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): WsFrame.Close {
-    val byte1 = FrameHeaderByte1(buffer.readUByte())
-    val byte2 = WsHeaderByte2(buffer.readUByte())
+    val __batch39 = buffer.readShort().toInt() and 0xFFFF
+    val byte1: com.ditchoom.buffer.codec.test.protocols.websocket.FrameHeaderByte1
+    val byte2: com.ditchoom.buffer.codec.test.protocols.websocket.WsHeaderByte2
+    if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
+      byte1 = FrameHeaderByte1((__batch39 ushr 8 and 0xFF).toUByte())
+      byte2 = WsHeaderByte2((__batch39 and 0xFF).toUByte())
+    } else {
+      byte1 = FrameHeaderByte1((__batch39 and 0xFF).toUByte())
+      byte2 = WsHeaderByte2((__batch39 ushr 8 and 0xFF).toUByte())
+    }
     val extendedLength16: UShort? = if (byte2.extended16) buffer.readUShort() else null
     val extendedLength64: Long? = if (byte2.extended64) buffer.readLong() else null
     val maskingKey: WsMaskingKey? = if (byte2.masked) WsMaskingKey(buffer.readUInt()) else null
@@ -29,8 +38,11 @@ public object WsFrameCloseCodec : Codec<WsFrame.Close> {
     `value`: WsFrame.Close,
     context: EncodeContext,
   ) {
-    buffer.writeUByte(value.byte1.raw)
-    buffer.writeUByte(value.byte2.raw)
+    if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
+      buffer.writeShort((((value.byte1.raw.toInt() and 0xFF) shl 8) or (value.byte2.raw.toInt() and 0xFF)).toShort())
+    } else {
+      buffer.writeShort(((value.byte1.raw.toInt() and 0xFF) or ((value.byte2.raw.toInt() and 0xFF) shl 8)).toShort())
+    }
     if (value.byte2.extended16) {
       val extendedLength16Value = value.extendedLength16 ?: throw EncodeException(fieldPath = "Close.extendedLength16", reason = "@When(\"byte2.extended16\") predicate is true but field is null")
       buffer.writeUShort(extendedLength16Value)

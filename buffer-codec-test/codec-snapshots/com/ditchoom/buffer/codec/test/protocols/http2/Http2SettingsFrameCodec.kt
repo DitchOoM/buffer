@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols.http2
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
@@ -10,6 +11,7 @@ import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.swapBytes
 import kotlin.Int
 
 public object Http2SettingsFrameCodec : Codec<Http2SettingsFrame> {
@@ -18,8 +20,10 @@ public object Http2SettingsFrameCodec : Codec<Http2SettingsFrame> {
     val lengthB1 = buffer.readUByte().toUInt()
     val lengthB2 = buffer.readUByte().toUInt()
     val length = ((lengthB0 shl 16) or (lengthB1 shl 8) or lengthB2)
-    val type = buffer.readUByte()
-    val flags = buffer.readUByte()
+    val __batch44Raw = buffer.readShort().toInt() and 0xFFFF
+    val __batch44 = if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch44Raw else swapBytes(__batch44Raw.toShort()).toInt() and 0xFFFF
+    val type = (__batch44 ushr 8 and 0xFF).toUByte()
+    val flags = (__batch44 and 0xFF).toUByte()
     val streamId = Http2StreamId(buffer.readUInt())
     if (length > Int.MAX_VALUE.toUInt()) {
       throw DecodeException(fieldPath = "Http2SettingsFrame.entries", bufferPosition = -1, expected = "@LengthFrom source <= ${'$'}{Int.MAX_VALUE}", actual = length.toString())
@@ -49,8 +53,8 @@ public object Http2SettingsFrameCodec : Codec<Http2SettingsFrame> {
     buffer.writeUByte(((value.length shr 16) and 0xFFu).toUByte())
     buffer.writeUByte(((value.length shr 8) and 0xFFu).toUByte())
     buffer.writeUByte((value.length and 0xFFu).toUByte())
-    buffer.writeUByte(value.type)
-    buffer.writeUByte(value.flags)
+    val __batch45 = (((value.type.toInt() and 0xFF) shl 8) or (value.flags.toInt() and 0xFF)).toShort()
+    buffer.writeShort(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch45 else swapBytes(__batch45))
     buffer.writeUInt(value.streamId.raw)
     for (__elem in value.entries) {
       Http2SettingCodec.encode(buffer, __elem, context)

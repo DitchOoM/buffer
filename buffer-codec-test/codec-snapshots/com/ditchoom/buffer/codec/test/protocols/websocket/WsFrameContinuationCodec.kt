@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols.websocket
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
@@ -19,8 +20,16 @@ public class WsFrameContinuationCodec<P : Payload>(
   private val payloadCodec: Codec<P>,
 ) : Codec<WsFrame.Continuation<P>> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): WsFrame.Continuation<P> {
-    val byte1 = FrameHeaderByte1(buffer.readUByte())
-    val byte2 = WsHeaderByte2(buffer.readUByte())
+    val __batch37 = buffer.readShort().toInt() and 0xFFFF
+    val byte1: com.ditchoom.buffer.codec.test.protocols.websocket.FrameHeaderByte1
+    val byte2: com.ditchoom.buffer.codec.test.protocols.websocket.WsHeaderByte2
+    if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
+      byte1 = FrameHeaderByte1((__batch37 ushr 8 and 0xFF).toUByte())
+      byte2 = WsHeaderByte2((__batch37 and 0xFF).toUByte())
+    } else {
+      byte1 = FrameHeaderByte1((__batch37 and 0xFF).toUByte())
+      byte2 = WsHeaderByte2((__batch37 ushr 8 and 0xFF).toUByte())
+    }
     val extendedLength16: UShort? = if (byte2.extended16) buffer.readUShort() else null
     val extendedLength64: Long? = if (byte2.extended64) buffer.readLong() else null
     val maskingKey: WsMaskingKey? = if (byte2.masked) WsMaskingKey(buffer.readUInt()) else null
@@ -33,8 +42,11 @@ public class WsFrameContinuationCodec<P : Payload>(
     `value`: WsFrame.Continuation<P>,
     context: EncodeContext,
   ) {
-    buffer.writeUByte(value.byte1.raw)
-    buffer.writeUByte(value.byte2.raw)
+    if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
+      buffer.writeShort((((value.byte1.raw.toInt() and 0xFF) shl 8) or (value.byte2.raw.toInt() and 0xFF)).toShort())
+    } else {
+      buffer.writeShort(((value.byte1.raw.toInt() and 0xFF) or ((value.byte2.raw.toInt() and 0xFF) shl 8)).toShort())
+    }
     if (value.byte2.extended16) {
       val extendedLength16Value = value.extendedLength16 ?: throw EncodeException(fieldPath = "Continuation.extendedLength16", reason = "@When(\"byte2.extended16\") predicate is true but field is null")
       buffer.writeUShort(extendedLength16Value)
@@ -71,8 +83,16 @@ public class WsFrameContinuationCodec<P : Payload>(
 
   public companion object {
     public fun <P : Payload> partial(buffer: ReadBuffer, context: DecodeContext): Partial<P> {
-      val byte1 = FrameHeaderByte1(buffer.readUByte())
-      val byte2 = WsHeaderByte2(buffer.readUByte())
+      val __batch38 = buffer.readShort().toInt() and 0xFFFF
+      val byte1: com.ditchoom.buffer.codec.test.protocols.websocket.FrameHeaderByte1
+      val byte2: com.ditchoom.buffer.codec.test.protocols.websocket.WsHeaderByte2
+      if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
+        byte1 = FrameHeaderByte1((__batch38 ushr 8 and 0xFF).toUByte())
+        byte2 = WsHeaderByte2((__batch38 and 0xFF).toUByte())
+      } else {
+        byte1 = FrameHeaderByte1((__batch38 and 0xFF).toUByte())
+        byte2 = WsHeaderByte2((__batch38 ushr 8 and 0xFF).toUByte())
+      }
       val extendedLength16: UShort? = if (byte2.extended16) buffer.readUShort() else null
       val extendedLength64: Long? = if (byte2.extended64) buffer.readLong() else null
       val maskingKey: WsMaskingKey? = if (byte2.masked) WsMaskingKey(buffer.readUInt()) else null

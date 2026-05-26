@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols.wireorderMismatch
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
@@ -8,29 +9,24 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.swapBytes
 import kotlin.Int
 
 public object LittleWirePacketCodec : Codec<LittleWirePacket> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): LittleWirePacket {
     val bool = buffer.readByte() != 0.toByte()
-    val byte = buffer.readByte()
-    val ubyte = buffer.readUByte()
-    val shortB0 = buffer.readUByte().toUInt()
-    val shortB1 = buffer.readUByte().toUInt()
-    val short = (shortB0 or (shortB1 shl 8)).toShort()
+    val __batch7Raw = buffer.readInt()
+    val __batch7 = if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch7Raw else swapBytes(__batch7Raw)
+    val byte = (__batch7 and 0xFF).toByte()
+    val ubyte = (__batch7 ushr 8 and 0xFF).toUByte()
+    val short = (__batch7 ushr 16 and 0xFFFF).toShort()
     val ushortB0 = buffer.readUByte().toUInt()
     val ushortB1 = buffer.readUByte().toUInt()
     val ushort = (ushortB0 or (ushortB1 shl 8)).toUShort()
-    val intB0 = buffer.readUByte().toUInt()
-    val intB1 = buffer.readUByte().toUInt()
-    val intB2 = buffer.readUByte().toUInt()
-    val intB3 = buffer.readUByte().toUInt()
-    val int = (intB0 or (intB1 shl 8) or (intB2 shl 16) or (intB3 shl 24)).toInt()
-    val uintB0 = buffer.readUByte().toUInt()
-    val uintB1 = buffer.readUByte().toUInt()
-    val uintB2 = buffer.readUByte().toUInt()
-    val uintB3 = buffer.readUByte().toUInt()
-    val uint = (uintB0 or (uintB1 shl 8) or (uintB2 shl 16) or (uintB3 shl 24))
+    val __batch8Raw = buffer.readLong()
+    val __batch8 = if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch8Raw else swapBytes(__batch8Raw)
+    val int = (__batch8 and 0xFFFFFFFFL).toInt()
+    val uint = (__batch8 ushr 32 and 0xFFFFFFFFL).toUInt()
     val longB0 = buffer.readUByte().toULong()
     val longB1 = buffer.readUByte().toULong()
     val longB2 = buffer.readUByte().toULong()
@@ -72,20 +68,12 @@ public object LittleWirePacketCodec : Codec<LittleWirePacket> {
     context: EncodeContext,
   ) {
     buffer.writeByte(if (value.bool) 1.toByte() else 0.toByte())
-    buffer.writeByte(value.byte)
-    buffer.writeUByte(value.ubyte)
-    buffer.writeUByte((value.short.toUShort().toUInt() and 0xFFu).toUByte())
-    buffer.writeUByte(((value.short.toUShort().toUInt() shr 8) and 0xFFu).toUByte())
+    val __batch9 = ((value.byte.toInt() and 0xFF) or ((value.ubyte.toInt() and 0xFF) shl 8) or ((value.short.toInt() and 0xFFFF) shl 16)).toInt()
+    buffer.writeInt(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch9 else swapBytes(__batch9))
     buffer.writeUByte((value.ushort.toUInt() and 0xFFu).toUByte())
     buffer.writeUByte(((value.ushort.toUInt() shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.int.toUInt() and 0xFFu).toUByte())
-    buffer.writeUByte(((value.int.toUInt() shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.int.toUInt() shr 16) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.int.toUInt() shr 24) and 0xFFu).toUByte())
-    buffer.writeUByte((value.uint and 0xFFu).toUByte())
-    buffer.writeUByte(((value.uint shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.uint shr 16) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.uint shr 24) and 0xFFu).toUByte())
+    val __batch10 = ((value.int.toLong() and 0xFFFFFFFFL) or ((value.uint.toLong() and 0xFFFFFFFFL) shl 32)).toLong()
+    buffer.writeLong(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch10 else swapBytes(__batch10))
     buffer.writeUByte((value.long.toULong() and 0xFFuL).toUByte())
     buffer.writeUByte(((value.long.toULong() shr 8) and 0xFFuL).toUByte())
     buffer.writeUByte(((value.long.toULong() shr 16) and 0xFFuL).toUByte())
