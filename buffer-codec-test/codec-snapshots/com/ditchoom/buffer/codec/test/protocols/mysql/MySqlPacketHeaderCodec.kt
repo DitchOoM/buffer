@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols.mysql
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
@@ -8,15 +9,13 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.swapBytes
 import kotlin.Int
 
 public object MySqlPacketHeaderCodec : Codec<MySqlPacketHeader> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): MySqlPacketHeader {
-    val rawB0 = buffer.readUByte().toUInt()
-    val rawB1 = buffer.readUByte().toUInt()
-    val rawB2 = buffer.readUByte().toUInt()
-    val rawB3 = buffer.readUByte().toUInt()
-    val raw = (rawB0 or (rawB1 shl 8) or (rawB2 shl 16) or (rawB3 shl 24))
+    val rawRaw = buffer.readInt()
+    val raw = (if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) rawRaw else swapBytes(rawRaw)).toUInt()
     return MySqlPacketHeader(raw = raw)
   }
 
@@ -25,10 +24,8 @@ public object MySqlPacketHeaderCodec : Codec<MySqlPacketHeader> {
     `value`: MySqlPacketHeader,
     context: EncodeContext,
   ) {
-    buffer.writeUByte((value.raw and 0xFFu).toUByte())
-    buffer.writeUByte(((value.raw shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.raw shr 16) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.raw shr 24) and 0xFFu).toUByte())
+    val rawRaw = value.raw.toInt()
+    buffer.writeInt(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) rawRaw else swapBytes(rawRaw))
   }
 
   override fun wireSize(`value`: MySqlPacketHeader, context: EncodeContext): WireSize = WireSize.Exact(4)

@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols.tls
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
@@ -9,14 +10,14 @@ import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.swapBytes
 import kotlin.Int
 import kotlin.UShort
 
 public object TlsHandshakeBodyCodec : Codec<TlsHandshakeBody> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): TlsHandshakeBody {
-    val legacyVersionB0 = buffer.readUByte().toUInt()
-    val legacyVersionB1 = buffer.readUByte().toUInt()
-    val legacyVersion = ((legacyVersionB0 shl 8) or legacyVersionB1).toUShort()
+    val legacyVersionRaw = buffer.readShort()
+    val legacyVersion = (if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) legacyVersionRaw else swapBytes(legacyVersionRaw)).toUShort()
     val random = BinaryDataCodec.decode(buffer, context)
     return TlsHandshakeBody(legacyVersion = legacyVersion, random = random)
   }
@@ -26,8 +27,8 @@ public object TlsHandshakeBodyCodec : Codec<TlsHandshakeBody> {
     `value`: TlsHandshakeBody,
     context: EncodeContext,
   ) {
-    buffer.writeUByte(((value.legacyVersion.toUInt() shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.legacyVersion.toUInt() and 0xFFu).toUByte())
+    val legacyVersionRaw = value.legacyVersion.toShort()
+    buffer.writeShort(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) legacyVersionRaw else swapBytes(legacyVersionRaw))
     BinaryDataCodec.encode(buffer, value.random, context)
   }
 
@@ -36,9 +37,8 @@ public object TlsHandshakeBodyCodec : Codec<TlsHandshakeBody> {
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 
   public fun partial(buffer: ReadBuffer, context: DecodeContext): Partial {
-    val legacyVersionB0 = buffer.readUByte().toUInt()
-    val legacyVersionB1 = buffer.readUByte().toUInt()
-    val legacyVersion = ((legacyVersionB0 shl 8) or legacyVersionB1).toUShort()
+    val legacyVersionRaw = buffer.readShort()
+    val legacyVersion = (if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) legacyVersionRaw else swapBytes(legacyVersionRaw)).toUShort()
     return Partial(legacyVersion = legacyVersion, buffer = buffer, context = context)
   }
 

@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
@@ -12,8 +13,16 @@ import kotlin.Int
 
 public object CommandPayloadSetRgbStateCodec : Codec<CommandPayload.SetRgbState> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): CommandPayload.SetRgbState {
-    val r = buffer.readUByte()
-    val g = buffer.readUByte()
+    val __batch1 = buffer.readShort().toInt() and 0xFFFF
+    val r: kotlin.UByte
+    val g: kotlin.UByte
+    if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
+      r = (__batch1 ushr 8 and 0xFF).toUByte()
+      g = (__batch1 and 0xFF).toUByte()
+    } else {
+      r = (__batch1 and 0xFF).toUByte()
+      g = (__batch1 ushr 8 and 0xFF).toUByte()
+    }
     val b = buffer.readUByte()
     return CommandPayload.SetRgbState(r = r, g = g, b = b)
   }
@@ -23,8 +32,11 @@ public object CommandPayloadSetRgbStateCodec : Codec<CommandPayload.SetRgbState>
     `value`: CommandPayload.SetRgbState,
     context: EncodeContext,
   ) {
-    buffer.writeUByte(value.r)
-    buffer.writeUByte(value.g)
+    if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
+      buffer.writeShort((((value.r.toInt() and 0xFF) shl 8) or (value.g.toInt() and 0xFF)).toShort())
+    } else {
+      buffer.writeShort(((value.r.toInt() and 0xFF) or ((value.g.toInt() and 0xFF) shl 8)).toShort())
+    }
     buffer.writeUByte(value.b)
   }
 

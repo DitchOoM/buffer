@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols.http2
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
@@ -10,6 +11,7 @@ import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.swapBytes
 import kotlin.Int
 import kotlin.UByte
 
@@ -17,7 +19,8 @@ public class Http2FrameDataCodec<P : Payload>(
   private val payloadCodec: Codec<P>,
 ) : Codec<Http2Frame.Data<P>> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): Http2Frame.Data<P> {
-    val header = Http2LengthAndType(buffer.readUInt())
+    val headerRaw = buffer.readInt()
+    val header = Http2LengthAndType((if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) headerRaw else swapBytes(headerRaw)).toUInt())
     val flags = buffer.readUByte()
     val streamId = Http2StreamId(buffer.readUInt())
     val payload = payloadCodec.decode(buffer, context)
@@ -29,7 +32,8 @@ public class Http2FrameDataCodec<P : Payload>(
     `value`: Http2Frame.Data<P>,
     context: EncodeContext,
   ) {
-    buffer.writeUInt(value.header.raw)
+    val headerRaw = value.header.raw.toInt()
+    buffer.writeInt(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) headerRaw else swapBytes(headerRaw))
     buffer.writeUByte(value.flags)
     buffer.writeUInt(value.streamId.raw)
     payloadCodec.encode(buffer, value.payload, context)
@@ -54,7 +58,8 @@ public class Http2FrameDataCodec<P : Payload>(
 
   public companion object {
     public fun <P : Payload> partial(buffer: ReadBuffer, context: DecodeContext): Partial<P> {
-      val header = Http2LengthAndType(buffer.readUInt())
+      val headerRaw = buffer.readInt()
+      val header = Http2LengthAndType((if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) headerRaw else swapBytes(headerRaw)).toUInt())
       val flags = buffer.readUByte()
       val streamId = Http2StreamId(buffer.readUInt())
       return Partial<P>(header = header, flags = flags, streamId = streamId, buffer = buffer, context = context)

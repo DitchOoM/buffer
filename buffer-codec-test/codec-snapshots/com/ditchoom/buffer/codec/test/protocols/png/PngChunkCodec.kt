@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols.png
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
@@ -9,20 +10,15 @@ import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.swapBytes
 import kotlin.Int
 
 public object PngChunkCodec : Codec<PngChunk> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): PngChunk {
-    val lengthB0 = buffer.readUByte().toUInt()
-    val lengthB1 = buffer.readUByte().toUInt()
-    val lengthB2 = buffer.readUByte().toUInt()
-    val lengthB3 = buffer.readUByte().toUInt()
-    val length = ((lengthB0 shl 24) or (lengthB1 shl 16) or (lengthB2 shl 8) or lengthB3)
-    val typeB0 = buffer.readUByte().toUInt()
-    val typeB1 = buffer.readUByte().toUInt()
-    val typeB2 = buffer.readUByte().toUInt()
-    val typeB3 = buffer.readUByte().toUInt()
-    val type = ((typeB0 shl 24) or (typeB1 shl 16) or (typeB2 shl 8) or typeB3)
+    val __batch1Raw = buffer.readLong()
+    val __batch1 = if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch1Raw else swapBytes(__batch1Raw)
+    val length = (__batch1 ushr 32 and 0xFFFFFFFFL).toUInt()
+    val type = (__batch1 and 0xFFFFFFFFL).toUInt()
     val __dataOuterLimit = buffer.limit()
     buffer.setLimit(__dataOuterLimit - 4)
     val data = try {
@@ -30,11 +26,8 @@ public object PngChunkCodec : Codec<PngChunk> {
     } finally {
       buffer.setLimit(__dataOuterLimit)
     }
-    val crcB0 = buffer.readUByte().toUInt()
-    val crcB1 = buffer.readUByte().toUInt()
-    val crcB2 = buffer.readUByte().toUInt()
-    val crcB3 = buffer.readUByte().toUInt()
-    val crc = ((crcB0 shl 24) or (crcB1 shl 16) or (crcB2 shl 8) or crcB3)
+    val crcRaw = buffer.readInt()
+    val crc = (if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) crcRaw else swapBytes(crcRaw)).toUInt()
     return PngChunk(length = length, type = type, data = data, crc = crc)
   }
 
@@ -43,19 +36,11 @@ public object PngChunkCodec : Codec<PngChunk> {
     `value`: PngChunk,
     context: EncodeContext,
   ) {
-    buffer.writeUByte(((value.length shr 24) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.length shr 16) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.length shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.length and 0xFFu).toUByte())
-    buffer.writeUByte(((value.type shr 24) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.type shr 16) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.type shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.type and 0xFFu).toUByte())
+    val __batch2 = ((value.length.toLong() and 0xFFFFFFFFL) shl 32) or (value.type.toLong() and 0xFFFFFFFFL)
+    buffer.writeLong(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch2 else swapBytes(__batch2))
     BinaryDataCodec.encode(buffer, value.data, context)
-    buffer.writeUByte(((value.crc shr 24) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.crc shr 16) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.crc shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.crc and 0xFFu).toUByte())
+    val crcRaw = value.crc.toInt()
+    buffer.writeInt(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) crcRaw else swapBytes(crcRaw))
   }
 
   override fun wireSize(`value`: PngChunk, context: EncodeContext): WireSize = WireSize.BackPatch

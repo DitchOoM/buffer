@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols.dns
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
@@ -8,28 +9,21 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.swapBytes
 import kotlin.Int
 
 public object DnsHeaderCodec : Codec<DnsHeader> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): DnsHeader {
-    val idB0 = buffer.readUByte().toUInt()
-    val idB1 = buffer.readUByte().toUInt()
-    val id = ((idB0 shl 8) or idB1).toUShort()
-    val flagsB0 = buffer.readUByte().toUInt()
-    val flagsB1 = buffer.readUByte().toUInt()
-    val flags = ((flagsB0 shl 8) or flagsB1).toUShort()
-    val qdCountB0 = buffer.readUByte().toUInt()
-    val qdCountB1 = buffer.readUByte().toUInt()
-    val qdCount = ((qdCountB0 shl 8) or qdCountB1).toUShort()
-    val anCountB0 = buffer.readUByte().toUInt()
-    val anCountB1 = buffer.readUByte().toUInt()
-    val anCount = ((anCountB0 shl 8) or anCountB1).toUShort()
-    val nsCountB0 = buffer.readUByte().toUInt()
-    val nsCountB1 = buffer.readUByte().toUInt()
-    val nsCount = ((nsCountB0 shl 8) or nsCountB1).toUShort()
-    val arCountB0 = buffer.readUByte().toUInt()
-    val arCountB1 = buffer.readUByte().toUInt()
-    val arCount = ((arCountB0 shl 8) or arCountB1).toUShort()
+    val __batch1Raw = buffer.readLong()
+    val __batch1 = if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch1Raw else swapBytes(__batch1Raw)
+    val id = (__batch1 ushr 48 and 0xFFFFL).toUShort()
+    val flags = (__batch1 ushr 32 and 0xFFFFL).toUShort()
+    val qdCount = (__batch1 ushr 16 and 0xFFFFL).toUShort()
+    val anCount = (__batch1 and 0xFFFFL).toUShort()
+    val __batch2Raw = buffer.readInt()
+    val __batch2 = if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch2Raw else swapBytes(__batch2Raw)
+    val nsCount = (__batch2 ushr 16 and 0xFFFF).toUShort()
+    val arCount = (__batch2 and 0xFFFF).toUShort()
     return DnsHeader(id = id, flags = flags, qdCount = qdCount, anCount = anCount, nsCount = nsCount, arCount = arCount)
   }
 
@@ -38,18 +32,10 @@ public object DnsHeaderCodec : Codec<DnsHeader> {
     `value`: DnsHeader,
     context: EncodeContext,
   ) {
-    buffer.writeUByte(((value.id.toUInt() shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.id.toUInt() and 0xFFu).toUByte())
-    buffer.writeUByte(((value.flags.toUInt() shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.flags.toUInt() and 0xFFu).toUByte())
-    buffer.writeUByte(((value.qdCount.toUInt() shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.qdCount.toUInt() and 0xFFu).toUByte())
-    buffer.writeUByte(((value.anCount.toUInt() shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.anCount.toUInt() and 0xFFu).toUByte())
-    buffer.writeUByte(((value.nsCount.toUInt() shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.nsCount.toUInt() and 0xFFu).toUByte())
-    buffer.writeUByte(((value.arCount.toUInt() shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.arCount.toUInt() and 0xFFu).toUByte())
+    val __batch3 = ((value.id.toLong() and 0xFFFFL) shl 48) or ((value.flags.toLong() and 0xFFFFL) shl 32) or ((value.qdCount.toLong() and 0xFFFFL) shl 16) or (value.anCount.toLong() and 0xFFFFL)
+    buffer.writeLong(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch3 else swapBytes(__batch3))
+    val __batch4 = ((value.nsCount.toInt() and 0xFFFF) shl 16) or (value.arCount.toInt() and 0xFFFF)
+    buffer.writeInt(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch4 else swapBytes(__batch4))
   }
 
   override fun wireSize(`value`: DnsHeader, context: EncodeContext): WireSize = WireSize.Exact(12)

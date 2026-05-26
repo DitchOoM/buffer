@@ -23,6 +23,7 @@ import com.squareup.kotlinpoet.INT
 import com.squareup.kotlinpoet.KModifier
 import com.squareup.kotlinpoet.LONG
 import com.squareup.kotlinpoet.LambdaTypeName
+import com.squareup.kotlinpoet.MemberName
 import com.squareup.kotlinpoet.ParameterSpec
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 import com.squareup.kotlinpoet.SHORT
@@ -1765,7 +1766,7 @@ internal class CodecEmitter(
         val valueClassInner = analyzeConditionalValueClassInner(innerType)
         if (valueClassInner != null) return valueClassInner
         val kind = SUPPORTED_SCALARS[qualified] ?: return null
-        return ConditionalInner.Scalar(kind = kind)
+        return ConditionalInner.Scalar(kind = kind, wireOrder = messageWireOrder)
     }
 
     /**
@@ -1941,6 +1942,7 @@ internal class CodecEmitter(
             valueClassType = classNameOf(decl),
             innerKind = innerKind,
             innerPropertyName = innerName,
+            valueClassWireOrder = readMessageWireOrder(decl),
         )
     }
 
@@ -2164,6 +2166,8 @@ internal class CodecEmitter(
         shape: CodecShape,
         framedBy: FramedByConfig,
     ): FileSpec {
+        // Reset per-file — see note on buildFileSpec.
+        batchCounter = 0
         val typeSpec =
             TypeSpec
                 .objectBuilder(shape.codecSimpleName)
@@ -2200,10 +2204,7 @@ internal class CodecEmitter(
         body.addStatement("val __framingStart = buffer.position()")
         body.addStatement("val __framingBound = __framingStart + __framingLength.toInt()")
         body.beginControlFlow("return try")
-        for (field in shape.fields) {
-            if (field === afterField) continue
-            appendDecodeField(body, field)
-        }
+        appendDecodeFields(body, shape.fields.filter { it !== afterField })
         body.beginControlFlow("if (buffer.position() != __framingBound)")
         body.addStatement(
             "throw %T(\n  fieldPath = %S,\n  bufferPosition = buffer.position(),\n" +
@@ -2250,10 +2251,7 @@ internal class CodecEmitter(
         }
         body.unindent()
         body.beginControlFlow(") { buffer ->")
-        for (field in shape.fields) {
-            if (field === afterField) continue
-            appendEncodeField(body, field, shape)
-        }
+        appendEncodeFields(body, shape.fields.filter { it !== afterField }, shape)
         body.endControlFlow()
         return FunSpec
             .builder("encode")
@@ -2389,6 +2387,11 @@ internal class CodecEmitter(
         }
 
     private fun buildFileSpec(shape: CodecShape): FileSpec {
+        // Reset per-file so __batchN locals are stable across builds.
+        // Otherwise the monotonic counter shifts when KSP processes shapes
+        // in a different order between runs — the snapshot baseline would
+        // drift on every unrelated edit.
+        batchCounter = 0
         if (shape.framedBy != null && shape.payloadTypeParameter == null) {
             return buildFramedByFileSpec(shape, shape.framedBy)
         }
@@ -2571,12 +2574,12 @@ internal class CodecEmitter(
         }
         val ctorArgs = shape.fields.joinToString(", ") { "${it.name} = ${it.name}" }
         if (boundingIndex < 0) {
-            for (field in shape.fields) appendDecodeField(body, field)
+            appendDecodeFields(body, shape.fields)
             body.addStatement("return %T(%L)", messageType, ctorArgs)
         } else {
-            for (i in 0..boundingIndex) appendDecodeField(body, shape.fields[i])
+            appendDecodeFields(body, shape.fields.subList(0, boundingIndex + 1))
             body.beginControlFlow("return try")
-            for (i in (boundingIndex + 1) until shape.fields.size) appendDecodeField(body, shape.fields[i])
+            appendDecodeFields(body, shape.fields.subList(boundingIndex + 1, shape.fields.size))
             body.addStatement("%T(%L)", messageType, ctorArgs)
             body.nextControlFlow("finally")
             val boundingName = shape.fields[boundingIndex].name
@@ -2634,7 +2637,7 @@ internal class CodecEmitter(
         shape.singletonDispatchDiscriminator?.let { d ->
             body.addStatement(naturalScalarWriteStatement(d.innerKind, singletonDiscriminatorLiteralAccessor(d)))
         }
-        for (field in shape.fields) appendEncodeField(body, field, shape)
+        appendEncodeFields(body, shape.fields, shape)
         return FunSpec
             .builder("encode")
             .addModifiers(KModifier.OVERRIDE)
@@ -2699,6 +2702,517 @@ internal class CodecEmitter(
             is FieldSpec.ProtocolMessageScalar -> appendEncodeProtocolMessageScalar(body, field)
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Batching: coalesces adjacent natural-width scalar reads/writes into
+    // one wider read/write plus shift+mask extraction. A measurable
+    // hot-path win on header-rich protocols (MQTT, DNS, TCP/IP, TLS) that
+    // v5.0.0 regressed when the v4 BatchOptimizer was dropped during the
+    // strip-and-rebuild.
+    //
+    // Gate (case 1 + case 2): the entire candidate group must share one
+    // resolved wire order — Default, all-Big, or all-Little. Mixed orders
+    // break the batch. Boolean is never batched (it has no byte order; the
+    // single-scalar path handles it cleanly).
+    //
+    // Generated emit shape depends on the group's shared order:
+    //
+    // - `Default` (follow buffer.byteOrder): the wire's per-field
+    //   interpretation depends on buffer.byteOrder, so emit a single outer
+    //   `if (buffer.byteOrder == BIG_ENDIAN) { ... } else { ... }` branch
+    //   with two arms — BE arm extracts the first field from high bits,
+    //   LE arm extracts from low bits. Both arms read into the same
+    //   accumulator. This matches single-scalar `Default` semantics on
+    //   both buffer orders (the pre-fix `Default` batching silently
+    //   field-swapped on LITTLE_ENDIAN buffers — latent since v4, unfixed
+    //   in v5's worktree port).
+    //
+    // - `Big`: canonicalize to a big-endian accumulator (no-op when
+    //   buffer.byteOrder == BIG_ENDIAN, else `swapBytes(raw)`), then
+    //   extract first field from high bits. Matches single-scalar `Big`,
+    //   which produces big-endian wire bytes regardless of buffer order.
+    //
+    // - `Little`: canonicalize to a little-endian accumulator (no-op when
+    //   buffer.byteOrder == LITTLE_ENDIAN, else `swapBytes(raw)`), then
+    //   extract first field from low bits. Matches single-scalar `Little`.
+    private data class BatchablePart(
+        val name: String,
+        val sizeBytes: Int,
+        val kind: ScalarKind,
+        val wireOrder: Endianness,
+        // null for plain Scalar; populated for ValueClassScalar so
+        // decode can wrap and encode can unwrap via the inner property.
+        val valueClass: ClassName?,
+        val innerPropertyName: String?,
+    )
+
+    private data class BatchGroup(
+        val parts: List<BatchablePart>,
+        val totalBytes: Int,
+        val wireOrder: Endianness,
+    )
+
+    private sealed interface BatchItem {
+        data class Batched(
+            val group: BatchGroup,
+        ) : BatchItem
+
+        data class Single(
+            val field: FieldSpec,
+        ) : BatchItem
+    }
+
+    private fun batchablePartOrNull(field: FieldSpec): BatchablePart? =
+        when (field) {
+            is FieldSpec.Scalar ->
+                if (field.wireBytes == field.kind.width && field.kind != ScalarKind.Boolean) {
+                    BatchablePart(field.name, field.wireBytes, field.kind, field.resolvedWireOrder, null, null)
+                } else {
+                    null
+                }
+            is FieldSpec.ValueClassScalar ->
+                if (field.wireBytes == field.innerKind.width && field.innerKind != ScalarKind.Boolean) {
+                    BatchablePart(
+                        name = field.name,
+                        sizeBytes = field.wireBytes,
+                        kind = field.innerKind,
+                        wireOrder = field.valueClassWireOrder,
+                        valueClass = field.valueClassType,
+                        innerPropertyName = field.innerPropertyName,
+                    )
+                } else {
+                    null
+                }
+            else -> null
+        }
+
+    private fun coalesceBatches(fields: List<FieldSpec>): List<BatchItem> {
+        val result = mutableListOf<BatchItem>()
+        val current = mutableListOf<Pair<FieldSpec, BatchablePart>>()
+        var currentBytes = 0
+
+        fun flush() {
+            while (current.size >= 2) {
+                var prefixSize = 0
+                var bestCount = 0
+                var bestSize = 0
+                for (i in current.indices) {
+                    prefixSize += current[i].second.sizeBytes
+                    val count = i + 1
+                    if (count >= 2 && prefixSize in BATCH_ALIGNMENTS) {
+                        bestCount = count
+                        bestSize = prefixSize
+                    }
+                    if (prefixSize >= 8) break
+                }
+                if (bestCount >= 2) {
+                    val groupParts = current.subList(0, bestCount).map { it.second }
+                    result.add(
+                        BatchItem.Batched(
+                            BatchGroup(groupParts.toList(), bestSize, groupParts[0].wireOrder),
+                        ),
+                    )
+                    val remaining = current.subList(bestCount, current.size).toMutableList()
+                    current.clear()
+                    current.addAll(remaining)
+                    currentBytes = current.sumOf { it.second.sizeBytes }
+                } else {
+                    val removed = current.removeAt(0)
+                    currentBytes -= removed.second.sizeBytes
+                    result.add(BatchItem.Single(removed.first))
+                }
+            }
+            for ((field, _) in current) result.add(BatchItem.Single(field))
+            current.clear()
+            currentBytes = 0
+        }
+
+        for (field in fields) {
+            val part = batchablePartOrNull(field)
+            if (part == null) {
+                flush()
+                result.add(BatchItem.Single(field))
+                continue
+            }
+            val groupOrder = current.firstOrNull()?.second?.wireOrder
+            val orderMismatch = groupOrder != null && groupOrder != part.wireOrder
+            if (currentBytes + part.sizeBytes > 8 || orderMismatch) flush()
+            current.add(field to part)
+            currentBytes += part.sizeBytes
+        }
+        flush()
+        return result
+    }
+
+    private fun appendDecodeFields(
+        body: CodeBlock.Builder,
+        fields: List<FieldSpec>,
+    ) {
+        for (item in coalesceBatches(fields)) {
+            when (item) {
+                is BatchItem.Single -> appendDecodeField(body, item.field)
+                is BatchItem.Batched -> appendBatchedDecode(body, item.group)
+            }
+        }
+    }
+
+    private fun appendEncodeFields(
+        body: CodeBlock.Builder,
+        fields: List<FieldSpec>,
+        shape: CodecShape,
+    ) {
+        for (item in coalesceBatches(fields)) {
+            when (item) {
+                is BatchItem.Single -> appendEncodeField(body, item.field, shape)
+                is BatchItem.Batched -> appendBatchedEncode(body, item.group)
+            }
+        }
+    }
+
+    private fun batchReadInfo(totalBytes: Int): Triple<String, String, Int> =
+        when (totalBytes) {
+            2 -> Triple("readShort", "Int", 16)
+            4 -> Triple("readInt", "Int", 32)
+            8 -> Triple("readLong", "Long", 64)
+            else -> error("unsupported batch size $totalBytes")
+        }
+
+    /**
+     * Decode-side emitter. Two emit shapes depending on the group's wire
+     * order:
+     *
+     * - `Big` or `Little`: single canonicalizing val. Generated shape:
+     *   `val __batchN = if (buffer.byteOrder == ByteOrder.<WIRE>) raw else swapBytes(raw)`,
+     *   followed by per-field extraction in the fixed direction the wire
+     *   order dictates (first field = high bits for Big, low for Little).
+     *
+     * - `Default`: single outer `if (buffer.byteOrder == ...) { ... } else { ... }`
+     *   branch with two arms. Both arms share the same accumulator val; each
+     *   declares the field locals up-front and assigns inside the arm. JIT
+     *   sees one boolean check per group, not one per field.
+     */
+    private fun appendBatchedDecode(
+        body: CodeBlock.Builder,
+        group: BatchGroup,
+    ) {
+        val (readMethod, accumulatorType, accumulatorBits) = batchReadInfo(group.totalBytes)
+        val accumulatorVar = "__batch${++batchCounter}"
+        when (group.wireOrder) {
+            Endianness.Big, Endianness.Little -> {
+                val canonicalOrder =
+                    if (group.wireOrder == Endianness.Big) "BIG_ENDIAN" else "LITTLE_ENDIAN"
+                val rawVar = "${accumulatorVar}Raw"
+                if (accumulatorType == "Int" && readMethod == "readShort") {
+                    body.addStatement("val %L = buffer.%L().toInt() and 0xFFFF", rawVar, readMethod)
+                    body.addStatement(
+                        "val %L = if (buffer.byteOrder == %T.%L) %L else %M(%L.toShort()).toInt() and 0xFFFF",
+                        accumulatorVar,
+                        BYTE_ORDER_CN,
+                        canonicalOrder,
+                        rawVar,
+                        SWAP_BYTES_MN,
+                        rawVar,
+                    )
+                } else {
+                    body.addStatement("val %L = buffer.%L()", rawVar, readMethod)
+                    body.addStatement(
+                        "val %L = if (buffer.byteOrder == %T.%L) %L else %M(%L)",
+                        accumulatorVar,
+                        BYTE_ORDER_CN,
+                        canonicalOrder,
+                        rawVar,
+                        SWAP_BYTES_MN,
+                        rawVar,
+                    )
+                }
+                val firstFieldAtHigh = group.wireOrder == Endianness.Big
+                appendBatchedDecodeExtractions(
+                    body,
+                    group,
+                    accumulatorVar,
+                    accumulatorType,
+                    accumulatorBits,
+                    firstFieldAtHigh,
+                )
+            }
+            Endianness.Default -> {
+                if (accumulatorType == "Int" && readMethod == "readShort") {
+                    body.addStatement(
+                        "val %L = buffer.%L().toInt() and 0xFFFF",
+                        accumulatorVar,
+                        readMethod,
+                    )
+                } else {
+                    body.addStatement("val %L = buffer.%L()", accumulatorVar, readMethod)
+                }
+                for (part in group.parts) {
+                    val typeName = batchPartTypeRender(part)
+                    body.addStatement("val %L: %L", part.name, typeName)
+                }
+                body.beginControlFlow("if (buffer.byteOrder == %T.BIG_ENDIAN)", BYTE_ORDER_CN)
+                appendBatchedDecodeAssignments(body, group, accumulatorVar, accumulatorType, accumulatorBits, true)
+                body.nextControlFlow("else")
+                appendBatchedDecodeAssignments(body, group, accumulatorVar, accumulatorType, accumulatorBits, false)
+                body.endControlFlow()
+            }
+        }
+    }
+
+    private fun appendBatchedDecodeExtractions(
+        body: CodeBlock.Builder,
+        group: BatchGroup,
+        accumulatorVar: String,
+        accumulatorType: String,
+        accumulatorBits: Int,
+        firstFieldAtHigh: Boolean,
+    ) {
+        var highBitOffset = group.totalBytes * 8
+        var lowBitOffset = 0
+        for (part in group.parts) {
+            val fieldBits = part.sizeBytes * 8
+            val bitOffset: Int
+            if (firstFieldAtHigh) {
+                highBitOffset -= fieldBits
+                bitOffset = highBitOffset
+            } else {
+                bitOffset = lowBitOffset
+                lowBitOffset += fieldBits
+            }
+            val raw = batchExtractExpr(accumulatorVar, accumulatorType, accumulatorBits, bitOffset, fieldBits)
+            val casted = castFromBatchAccumulator(part.kind, accumulatorType, raw)
+            if (part.valueClass != null) {
+                body.addStatement("val %L = %T(%L)", part.name, part.valueClass, casted)
+            } else {
+                body.addStatement("val %L = %L", part.name, casted)
+            }
+        }
+    }
+
+    private fun appendBatchedDecodeAssignments(
+        body: CodeBlock.Builder,
+        group: BatchGroup,
+        accumulatorVar: String,
+        accumulatorType: String,
+        accumulatorBits: Int,
+        firstFieldAtHigh: Boolean,
+    ) {
+        var highBitOffset = group.totalBytes * 8
+        var lowBitOffset = 0
+        for (part in group.parts) {
+            val fieldBits = part.sizeBytes * 8
+            val bitOffset: Int
+            if (firstFieldAtHigh) {
+                highBitOffset -= fieldBits
+                bitOffset = highBitOffset
+            } else {
+                bitOffset = lowBitOffset
+                lowBitOffset += fieldBits
+            }
+            val raw = batchExtractExpr(accumulatorVar, accumulatorType, accumulatorBits, bitOffset, fieldBits)
+            val casted = castFromBatchAccumulator(part.kind, accumulatorType, raw)
+            if (part.valueClass != null) {
+                body.addStatement("%L = %T(%L)", part.name, part.valueClass, casted)
+            } else {
+                body.addStatement("%L = %L", part.name, casted)
+            }
+        }
+    }
+
+    private fun batchPartTypeRender(part: BatchablePart): String {
+        if (part.valueClass != null) {
+            val pkg = part.valueClass.packageName
+            return if (pkg.isEmpty()) part.valueClass.simpleName else "$pkg.${part.valueClass.simpleNames.joinToString(".")}"
+        }
+        return when (part.kind) {
+            ScalarKind.Boolean -> "kotlin.Boolean"
+            ScalarKind.UByte -> "kotlin.UByte"
+            ScalarKind.Byte -> "kotlin.Byte"
+            ScalarKind.UShort -> "kotlin.UShort"
+            ScalarKind.Short -> "kotlin.Short"
+            ScalarKind.UInt -> "kotlin.UInt"
+            ScalarKind.Int -> "kotlin.Int"
+            ScalarKind.ULong -> "kotlin.ULong"
+            ScalarKind.Long -> "kotlin.Long"
+            ScalarKind.Float -> "kotlin.Float"
+            ScalarKind.Double -> "kotlin.Double"
+        }
+    }
+
+    private fun batchExtractExpr(
+        accumulatorVar: String,
+        accumulatorType: String,
+        accumulatorBits: Int,
+        bitOffset: Int,
+        fieldBits: Int,
+    ): String {
+        val mask =
+            if (fieldBits >= accumulatorBits) {
+                ""
+            } else {
+                " and " + hexMaskLiteral(fieldBits, accumulatorType)
+            }
+        val shift = if (bitOffset > 0) " ushr $bitOffset" else ""
+        return "($accumulatorVar$shift$mask)"
+    }
+
+    private fun hexMaskLiteral(
+        bits: Int,
+        accumulatorType: String,
+    ): String {
+        val hexBytes = bits / 8
+        val hex = "FF".repeat(hexBytes)
+        return if (accumulatorType == "Long") "0x${hex}L" else "0x$hex"
+    }
+
+    private fun castFromBatchAccumulator(
+        kind: ScalarKind,
+        accumulatorType: String,
+        rawExpr: String,
+    ): String =
+        when (kind) {
+            ScalarKind.UByte -> "$rawExpr.toUByte()"
+            ScalarKind.Byte -> "$rawExpr.toByte()"
+            ScalarKind.UShort -> "$rawExpr.toUShort()"
+            ScalarKind.Short -> "$rawExpr.toShort()"
+            ScalarKind.UInt -> "$rawExpr.toUInt()"
+            ScalarKind.Int -> if (accumulatorType == "Long") "$rawExpr.toInt()" else rawExpr
+            ScalarKind.ULong -> "$rawExpr.toULong()"
+            ScalarKind.Long -> rawExpr
+            ScalarKind.Float -> if (accumulatorType == "Long") "Float.fromBits($rawExpr.toInt())" else "Float.fromBits($rawExpr)"
+            ScalarKind.Double -> "Double.fromBits($rawExpr)"
+            ScalarKind.Boolean -> error("Boolean is not batchable")
+        }
+
+    /**
+     * Encode-side emitter. Symmetric to [appendBatchedDecode]:
+     *
+     * - `Big` / `Little`: build the canonical (BE / LE) accumulator from
+     *   field accessors, then write with conditional `swapBytes` when the
+     *   buffer's runtime order differs.
+     *
+     * - `Default`: branch the entire assembly+write on `buffer.byteOrder`
+     *   so each arm orders bits per the buffer's natural single-scalar
+     *   interpretation.
+     */
+    private fun appendBatchedEncode(
+        body: CodeBlock.Builder,
+        group: BatchGroup,
+    ) {
+        val (_, accumulatorType, _) = batchReadInfo(group.totalBytes)
+        val writeMethod =
+            when (group.totalBytes) {
+                2 -> "writeShort"
+                4 -> "writeInt"
+                8 -> "writeLong"
+                else -> error("unsupported batch size ${group.totalBytes}")
+            }
+        when (group.wireOrder) {
+            Endianness.Big, Endianness.Little -> {
+                val combined = batchEncodeCombineExpr(group, accumulatorType, group.wireOrder == Endianness.Big)
+                val converted = convertBatchAccumulatorForWrite(combined, group.totalBytes)
+                val canonicalOrder =
+                    if (group.wireOrder == Endianness.Big) "BIG_ENDIAN" else "LITTLE_ENDIAN"
+                val combinedVar = "__batch${++batchCounter}"
+                body.addStatement("val %L = %L", combinedVar, converted)
+                body.addStatement(
+                    "buffer.%L(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+                    writeMethod,
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    combinedVar,
+                    SWAP_BYTES_MN,
+                    combinedVar,
+                )
+            }
+            Endianness.Default -> {
+                body.beginControlFlow("if (buffer.byteOrder == %T.BIG_ENDIAN)", BYTE_ORDER_CN)
+                val combinedBe = batchEncodeCombineExpr(group, accumulatorType, true)
+                val convertedBe = convertBatchAccumulatorForWrite(combinedBe, group.totalBytes)
+                body.addStatement("buffer.%L(%L)", writeMethod, convertedBe)
+                body.nextControlFlow("else")
+                val combinedLe = batchEncodeCombineExpr(group, accumulatorType, false)
+                val convertedLe = convertBatchAccumulatorForWrite(combinedLe, group.totalBytes)
+                body.addStatement("buffer.%L(%L)", writeMethod, convertedLe)
+                body.endControlFlow()
+            }
+        }
+    }
+
+    private fun batchEncodeCombineExpr(
+        group: BatchGroup,
+        accumulatorType: String,
+        firstFieldAtHigh: Boolean,
+    ): String {
+        var highBitOffset = group.totalBytes * 8
+        var lowBitOffset = 0
+        val accumulatorBits = if (accumulatorType == "Long") 64 else 32
+        val terms = mutableListOf<String>()
+        for (part in group.parts) {
+            val fieldBits = part.sizeBytes * 8
+            val bitOffset: Int
+            if (firstFieldAtHigh) {
+                highBitOffset -= fieldBits
+                bitOffset = highBitOffset
+            } else {
+                bitOffset = lowBitOffset
+                lowBitOffset += fieldBits
+            }
+            val accessor =
+                if (part.valueClass != null) {
+                    "value.${part.name}.${part.innerPropertyName}"
+                } else {
+                    "value.${part.name}"
+                }
+            val asAccumulator = encodeToBatchAccumulator(part.kind, accumulatorType, accessor)
+            val masked =
+                if (fieldBits >= accumulatorBits) {
+                    asAccumulator
+                } else {
+                    "($asAccumulator and ${hexMaskLiteral(fieldBits, accumulatorType)})"
+                }
+            terms.add(if (bitOffset > 0) "($masked shl $bitOffset)" else masked)
+        }
+        return terms.joinToString(" or ")
+    }
+
+    private fun convertBatchAccumulatorForWrite(
+        combined: String,
+        totalBytes: Int,
+    ): String =
+        when (totalBytes) {
+            // size-2 batches use an Int accumulator (so shift/or arithmetic
+            // stays in Int) but writeShort takes Short — narrow at the call.
+            2 -> "($combined).toShort()"
+            // size-4 / size-8 accumulators are already Int / Long, so emit
+            // bare expressions. Wrapping in .toInt()/.toLong() triggers the
+            // "Redundant call of conversion method" compiler warning.
+            4 -> combined
+            8 -> combined
+            else -> error("unsupported batch size $totalBytes")
+        }
+
+    private fun encodeToBatchAccumulator(
+        kind: ScalarKind,
+        accumulatorType: String,
+        accessor: String,
+    ): String {
+        val intLike = accumulatorType == "Int"
+        return when (kind) {
+            ScalarKind.UByte -> if (intLike) "$accessor.toInt()" else "$accessor.toLong()"
+            ScalarKind.Byte -> if (intLike) "$accessor.toInt()" else "$accessor.toLong()"
+            ScalarKind.UShort -> if (intLike) "$accessor.toInt()" else "$accessor.toLong()"
+            ScalarKind.Short -> if (intLike) "$accessor.toInt()" else "$accessor.toLong()"
+            ScalarKind.UInt -> if (intLike) "$accessor.toInt()" else "$accessor.toLong()"
+            ScalarKind.Int -> if (intLike) accessor else "$accessor.toLong()"
+            ScalarKind.ULong -> "$accessor.toLong()"
+            ScalarKind.Long -> accessor
+            ScalarKind.Float -> if (intLike) "$accessor.toRawBits()" else "$accessor.toRawBits().toLong()"
+            ScalarKind.Double -> "$accessor.toRawBits()"
+            ScalarKind.Boolean -> error("Boolean is not batchable")
+        }
+    }
+
+    private var batchCounter = 0
 
     /**
      * Gate for emitting the `Partial` decode pattern. Partial is emitted
@@ -2961,12 +3475,9 @@ internal class CodecEmitter(
                 "%T.applyBound(buffer, __framingLength)",
                 framedBy.codecClassName,
             )
-            for (field in headerFields) {
-                if (field === afterField) continue
-                appendDecodeField(body, field)
-            }
+            appendDecodeFields(body, headerFields.filter { it !== afterField })
         } else {
-            for (field in headerFields) appendDecodeField(body, field)
+            appendDecodeFields(body, headerFields)
         }
         val boundingField = shape.fields.firstOrNull { it.isBoundingShape() }
         val outerLimitLocal =
@@ -3959,10 +4470,22 @@ internal class CodecEmitter(
         body: CodeBlock.Builder,
         field: FieldSpec.Scalar,
     ) {
-        val needsManual =
-            field.wireBytes != field.kind.width || field.resolvedWireOrder != Endianness.Default
-        if (!needsManual) {
+        val widthMatches = field.wireBytes == field.kind.width
+        val explicitOrder = field.resolvedWireOrder != Endianness.Default
+        // Natural-width Default — trust buffer.byteOrder.
+        if (widthMatches && !explicitOrder) {
             body.addStatement("val %L = %L", field.name, naturalScalarReadExpr(field.kind))
+            return
+        }
+        // Natural-width explicit Big/Little on a multi-byte scalar. Read at
+        // the natural width and canonicalize via swapBytes when buffer.byteOrder
+        // differs from the wire order. Matches the batched single-field code
+        // shape — single readShort/readInt/readLong instead of N readUByte +
+        // shift/or assembly. (1-byte scalars fall through to the manual path
+        // since they have no byte order; the manual path emits a single byte
+        // read for that case.)
+        if (widthMatches && explicitOrder && field.kind.width > 1) {
+            appendNaturalReadWithSwap(body, field)
             return
         }
         val bigEndian =
@@ -3971,6 +4494,76 @@ internal class CodecEmitter(
                 Endianness.Big, Endianness.Default -> true
             }
         appendManualScalarDecode(body, field, bigEndian)
+    }
+
+    private fun appendNaturalReadWithSwap(
+        body: CodeBlock.Builder,
+        field: FieldSpec.Scalar,
+    ) {
+        val canonicalOrder =
+            if (field.resolvedWireOrder == Endianness.Big) "BIG_ENDIAN" else "LITTLE_ENDIAN"
+        val readMethod =
+            when (field.kind.width) {
+                2 -> "readShort"
+                4 -> "readInt"
+                8 -> "readLong"
+                else -> error("unsupported natural width ${field.kind.width}")
+            }
+        val rawVar = "${field.name}Raw"
+        body.addStatement("val %L = buffer.%L()", rawVar, readMethod)
+        when (field.kind) {
+            ScalarKind.Short, ScalarKind.Int, ScalarKind.Long ->
+                body.addStatement(
+                    "val %L = if (buffer.byteOrder == %T.%L) %L else %M(%L)",
+                    field.name,
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                )
+            ScalarKind.UShort, ScalarKind.UInt, ScalarKind.ULong -> {
+                val toUnsigned =
+                    when (field.kind) {
+                        ScalarKind.UShort -> "toUShort"
+                        ScalarKind.UInt -> "toUInt"
+                        ScalarKind.ULong -> "toULong"
+                        else -> error("unreachable")
+                    }
+                body.addStatement(
+                    "val %L = (if (buffer.byteOrder == %T.%L) %L else %M(%L)).%L()",
+                    field.name,
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                    toUnsigned,
+                )
+            }
+            ScalarKind.Float ->
+                body.addStatement(
+                    "val %L = Float.fromBits(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+                    field.name,
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                )
+            ScalarKind.Double ->
+                body.addStatement(
+                    "val %L = Double.fromBits(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+                    field.name,
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                )
+            ScalarKind.UByte, ScalarKind.Byte, ScalarKind.Boolean ->
+                error("1-byte scalar should not take the natural-read-with-swap path")
+        }
     }
 
     private fun appendManualScalarDecode(
@@ -4030,10 +4623,16 @@ internal class CodecEmitter(
     ) {
         appendEncodeGuard(body, field, ownerSimpleName)
         val accessor = "value.${field.name}"
-        val needsManual =
-            field.wireBytes != field.kind.width || field.resolvedWireOrder != Endianness.Default
-        if (!needsManual) {
+        val widthMatches = field.wireBytes == field.kind.width
+        val explicitOrder = field.resolvedWireOrder != Endianness.Default
+        if (widthMatches && !explicitOrder) {
             body.addStatement(naturalScalarWriteStatement(field.kind, accessor))
+            return
+        }
+        // Natural-width explicit Big/Little on a multi-byte scalar. Convert
+        // to the natural integer type, conditionally swapBytes, write.
+        if (widthMatches && explicitOrder && field.kind.width > 1) {
+            appendNaturalWriteWithSwap(body, field, accessor)
             return
         }
         val bigEndian =
@@ -4042,6 +4641,44 @@ internal class CodecEmitter(
                 Endianness.Big, Endianness.Default -> true
             }
         appendManualScalarEncode(body, field, accessor, bigEndian)
+    }
+
+    private fun appendNaturalWriteWithSwap(
+        body: CodeBlock.Builder,
+        field: FieldSpec.Scalar,
+        accessor: String,
+    ) {
+        val canonicalOrder =
+            if (field.resolvedWireOrder == Endianness.Big) "BIG_ENDIAN" else "LITTLE_ENDIAN"
+        val writeMethod =
+            when (field.kind.width) {
+                2 -> "writeShort"
+                4 -> "writeInt"
+                8 -> "writeLong"
+                else -> error("unsupported natural width ${field.kind.width}")
+            }
+        val rawExpr =
+            when (field.kind) {
+                ScalarKind.Short, ScalarKind.Int, ScalarKind.Long -> accessor
+                ScalarKind.UShort -> "$accessor.toShort()"
+                ScalarKind.UInt -> "$accessor.toInt()"
+                ScalarKind.ULong -> "$accessor.toLong()"
+                ScalarKind.Float -> "$accessor.toRawBits()"
+                ScalarKind.Double -> "$accessor.toRawBits()"
+                ScalarKind.UByte, ScalarKind.Byte, ScalarKind.Boolean ->
+                    error("1-byte scalar should not take the natural-write-with-swap path")
+            }
+        val rawVar = "${field.name}Raw"
+        body.addStatement("val %L = %L", rawVar, rawExpr)
+        body.addStatement(
+            "buffer.%L(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+            writeMethod,
+            BYTE_ORDER_CN,
+            canonicalOrder,
+            rawVar,
+            SWAP_BYTES_MN,
+            rawVar,
+        )
     }
 
     private fun appendEncodeGuard(
@@ -4134,6 +4771,15 @@ internal class CodecEmitter(
         body: CodeBlock.Builder,
         field: FieldSpec.ValueClassScalar,
     ) {
+        // Honor the value class's declared @ProtocolMessage(wireOrder) the
+        // same way plain Scalars honor @WireOrder / parent wireOrder: explicit
+        // Big / Little wins over buffer.byteOrder. Multi-byte inner kinds get
+        // the swapBytes fast path (matches the single-scalar Scalar emit).
+        // 1-byte inner kinds have no byte order — the natural read suffices.
+        if (field.valueClassWireOrder != Endianness.Default && field.innerKind.width > 1) {
+            appendValueClassNaturalReadWithSwap(body, field)
+            return
+        }
         body.addStatement(
             "val %L = %T(%L)",
             field.name,
@@ -4145,17 +4791,108 @@ internal class CodecEmitter(
     /**
      * Emit encode for a value-class field. Unwraps
      * via the inner property name and writes the inner scalar at
-     * natural width.
+     * natural width — or, when the value class declares an explicit
+     * wireOrder, takes the swap fast path so the wire bytes match
+     * the value class's contract regardless of buffer.byteOrder.
      */
     private fun appendEncodeValueClassScalar(
         body: CodeBlock.Builder,
         field: FieldSpec.ValueClassScalar,
     ) {
+        if (field.valueClassWireOrder != Endianness.Default && field.innerKind.width > 1) {
+            appendValueClassNaturalWriteWithSwap(body, field)
+            return
+        }
         body.addStatement(
             naturalScalarWriteStatement(
                 field.innerKind,
                 "value.${field.name}.${field.innerPropertyName}",
             ),
+        )
+    }
+
+    private fun appendValueClassNaturalReadWithSwap(
+        body: CodeBlock.Builder,
+        field: FieldSpec.ValueClassScalar,
+    ) {
+        val canonicalOrder =
+            if (field.valueClassWireOrder == Endianness.Big) "BIG_ENDIAN" else "LITTLE_ENDIAN"
+        val readMethod =
+            when (field.innerKind.width) {
+                2 -> "readShort"
+                4 -> "readInt"
+                8 -> "readLong"
+                else -> error("unsupported value-class inner width ${field.innerKind.width}")
+            }
+        val rawVar = "${field.name}Raw"
+        body.addStatement("val %L = buffer.%L()", rawVar, readMethod)
+        val toUnsigned =
+            when (field.innerKind) {
+                ScalarKind.UShort -> "toUShort"
+                ScalarKind.UInt -> "toUInt"
+                ScalarKind.ULong -> "toULong"
+                else -> null
+            }
+        if (toUnsigned != null) {
+            body.addStatement(
+                "val %L = %T((if (buffer.byteOrder == %T.%L) %L else %M(%L)).%L())",
+                field.name,
+                field.valueClassType,
+                BYTE_ORDER_CN,
+                canonicalOrder,
+                rawVar,
+                SWAP_BYTES_MN,
+                rawVar,
+                toUnsigned,
+            )
+        } else {
+            body.addStatement(
+                "val %L = %T(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+                field.name,
+                field.valueClassType,
+                BYTE_ORDER_CN,
+                canonicalOrder,
+                rawVar,
+                SWAP_BYTES_MN,
+                rawVar,
+            )
+        }
+    }
+
+    private fun appendValueClassNaturalWriteWithSwap(
+        body: CodeBlock.Builder,
+        field: FieldSpec.ValueClassScalar,
+    ) {
+        val canonicalOrder =
+            if (field.valueClassWireOrder == Endianness.Big) "BIG_ENDIAN" else "LITTLE_ENDIAN"
+        val writeMethod =
+            when (field.innerKind.width) {
+                2 -> "writeShort"
+                4 -> "writeInt"
+                8 -> "writeLong"
+                else -> error("unsupported value-class inner width ${field.innerKind.width}")
+            }
+        val accessor = "value.${field.name}.${field.innerPropertyName}"
+        val rawExpr =
+            when (field.innerKind) {
+                ScalarKind.Short, ScalarKind.Int, ScalarKind.Long -> accessor
+                ScalarKind.UShort -> "$accessor.toShort()"
+                ScalarKind.UInt -> "$accessor.toInt()"
+                ScalarKind.ULong -> "$accessor.toLong()"
+                ScalarKind.Float -> "$accessor.toRawBits()"
+                ScalarKind.Double -> "$accessor.toRawBits()"
+                else -> error("inner kind ${field.innerKind} cannot reach the swap path")
+            }
+        val rawVar = "${field.name}Raw"
+        body.addStatement("val %L = %L", rawVar, rawExpr)
+        body.addStatement(
+            "buffer.%L(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+            writeMethod,
+            BYTE_ORDER_CN,
+            canonicalOrder,
+            rawVar,
+            SWAP_BYTES_MN,
+            rawVar,
         )
     }
 
@@ -4179,13 +4916,25 @@ internal class CodecEmitter(
     ) {
         when (val inner = field.inner) {
             is ConditionalInner.Scalar -> {
-                body.addStatement(
-                    "val %L: %T = if (%L) %L else null",
-                    field.name,
-                    field.nullableTypeName,
-                    decodeConditionExpr(field.condition),
-                    naturalScalarReadExpr(inner.kind),
-                )
+                if (inner.wireOrder != Endianness.Default && inner.kind.width > 1) {
+                    appendConditionalScalarSwapDecode(
+                        body = body,
+                        fieldName = field.name,
+                        nullableTypeName = field.nullableTypeName,
+                        condition = decodeConditionExpr(field.condition),
+                        kind = inner.kind,
+                        wireOrder = inner.wireOrder,
+                        wrapValueClass = null,
+                    )
+                } else {
+                    body.addStatement(
+                        "val %L: %T = if (%L) %L else null",
+                        field.name,
+                        field.nullableTypeName,
+                        decodeConditionExpr(field.condition),
+                        naturalScalarReadExpr(inner.kind),
+                    )
+                }
             }
             is ConditionalInner.LengthPrefixedString -> {
                 body.beginControlFlow(
@@ -4211,14 +4960,26 @@ internal class CodecEmitter(
                 // Wrap the natural-width inner read
                 // in the value-class constructor (mirror of 's
                 // non-conditional `appendDecodeValueClassScalar`).
-                body.addStatement(
-                    "val %L: %T = if (%L) %T(%L) else null",
-                    field.name,
-                    field.nullableTypeName,
-                    decodeConditionExpr(field.condition),
-                    inner.valueClassType,
-                    naturalScalarReadExpr(inner.innerKind),
-                )
+                if (inner.valueClassWireOrder != Endianness.Default && inner.innerKind.width > 1) {
+                    appendConditionalScalarSwapDecode(
+                        body = body,
+                        fieldName = field.name,
+                        nullableTypeName = field.nullableTypeName,
+                        condition = decodeConditionExpr(field.condition),
+                        kind = inner.innerKind,
+                        wireOrder = inner.valueClassWireOrder,
+                        wrapValueClass = inner.valueClassType,
+                    )
+                } else {
+                    body.addStatement(
+                        "val %L: %T = if (%L) %T(%L) else null",
+                        field.name,
+                        field.nullableTypeName,
+                        decodeConditionExpr(field.condition),
+                        inner.valueClassType,
+                        naturalScalarReadExpr(inner.innerKind),
+                    )
+                }
             }
             is ConditionalInner.LengthPrefixedUseCodecList -> {
                 // `@When @LengthPrefixed @UseCodec(C) val
@@ -4342,7 +5103,17 @@ internal class CodecEmitter(
         )
         when (val inner = field.inner) {
             is ConditionalInner.Scalar ->
-                body.addStatement(naturalScalarWriteStatement(inner.kind, localName))
+                if (inner.wireOrder != Endianness.Default && inner.kind.width > 1) {
+                    appendConditionalScalarSwapEncode(
+                        body = body,
+                        accessor = localName,
+                        kind = inner.kind,
+                        wireOrder = inner.wireOrder,
+                        valueClassInnerProperty = null,
+                    )
+                } else {
+                    body.addStatement(naturalScalarWriteStatement(inner.kind, localName))
+                }
             is ConditionalInner.LengthPrefixedString ->
                 appendLengthPrefixedStringEncode(
                     body = body,
@@ -4356,12 +5127,22 @@ internal class CodecEmitter(
                 // Unwrap the value class via the
                 // inner property name (mirror of 's
                 // non-conditional `appendEncodeValueClassScalar`).
-                body.addStatement(
-                    naturalScalarWriteStatement(
-                        inner.innerKind,
-                        "$localName.${inner.innerPropertyName}",
-                    ),
-                )
+                if (inner.valueClassWireOrder != Endianness.Default && inner.innerKind.width > 1) {
+                    appendConditionalScalarSwapEncode(
+                        body = body,
+                        accessor = localName,
+                        kind = inner.innerKind,
+                        wireOrder = inner.valueClassWireOrder,
+                        valueClassInnerProperty = inner.innerPropertyName,
+                    )
+                } else {
+                    body.addStatement(
+                        naturalScalarWriteStatement(
+                            inner.innerKind,
+                            "$localName.${inner.innerPropertyName}",
+                        ),
+                    )
+                }
             is ConditionalInner.LengthPrefixedUseCodecList ->
                 appendEncodeConditionalLengthPrefixedUseCodecList(
                     body = body,
@@ -4403,6 +5184,156 @@ internal class CodecEmitter(
                 )
         }
         body.endControlFlow()
+    }
+
+    // Shared helper for the @When + explicit-wireOrder case. Generates a
+    // block-expression if/else where the `if` arm reads the natural-width
+    // wire value and canonicalizes via swapBytes; matches the contract
+    // explicit wire order should beat buffer.byteOrder, mirroring the
+    // non-conditional Scalar / ValueClassScalar swap path. `wrapValueClass`
+    // routes the swapped value through the value class's constructor when
+    // present (ValueClassScalar conditional path).
+    private fun appendConditionalScalarSwapDecode(
+        body: CodeBlock.Builder,
+        fieldName: String,
+        nullableTypeName: TypeName,
+        condition: String,
+        kind: ScalarKind,
+        wireOrder: Endianness,
+        wrapValueClass: ClassName?,
+    ) {
+        val canonicalOrder =
+            if (wireOrder == Endianness.Big) "BIG_ENDIAN" else "LITTLE_ENDIAN"
+        val readMethod =
+            when (kind.width) {
+                2 -> "readShort"
+                4 -> "readInt"
+                8 -> "readLong"
+                else -> error("unsupported conditional width ${kind.width}")
+            }
+        val rawVar = "${fieldName}Raw"
+        body.beginControlFlow(
+            "val %L: %T = if (%L)",
+            fieldName,
+            nullableTypeName,
+            condition,
+        )
+        body.addStatement("val %L = buffer.%L()", rawVar, readMethod)
+        // Emit the swap + cast (+ optional value-class wrap) as the if-block's
+        // value expression via KotlinPoet placeholders so ByteOrder and
+        // swapBytes resolve through the file's imports (not as FQNs).
+        val unsignedCast =
+            when (kind) {
+                ScalarKind.UShort -> "toUShort"
+                ScalarKind.UInt -> "toUInt"
+                ScalarKind.ULong -> "toULong"
+                else -> null
+            }
+        when {
+            wrapValueClass != null && unsignedCast != null ->
+                body.addStatement(
+                    "%T((if (buffer.byteOrder == %T.%L) %L else %M(%L)).%L())",
+                    wrapValueClass,
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                    unsignedCast,
+                )
+            wrapValueClass != null ->
+                body.addStatement(
+                    "%T(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+                    wrapValueClass,
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                )
+            unsignedCast != null ->
+                body.addStatement(
+                    "(if (buffer.byteOrder == %T.%L) %L else %M(%L)).%L()",
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                    unsignedCast,
+                )
+            kind == ScalarKind.Float ->
+                body.addStatement(
+                    "Float.fromBits(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                )
+            kind == ScalarKind.Double ->
+                body.addStatement(
+                    "Double.fromBits(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                )
+            else ->
+                body.addStatement(
+                    "if (buffer.byteOrder == %T.%L) %L else %M(%L)",
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                )
+        }
+        body.nextControlFlow("else")
+        body.addStatement("null")
+        body.endControlFlow()
+    }
+
+    private fun appendConditionalScalarSwapEncode(
+        body: CodeBlock.Builder,
+        accessor: String,
+        kind: ScalarKind,
+        wireOrder: Endianness,
+        valueClassInnerProperty: String?,
+    ) {
+        val canonicalOrder =
+            if (wireOrder == Endianness.Big) "BIG_ENDIAN" else "LITTLE_ENDIAN"
+        val writeMethod =
+            when (kind.width) {
+                2 -> "writeShort"
+                4 -> "writeInt"
+                8 -> "writeLong"
+                else -> error("unsupported conditional width ${kind.width}")
+            }
+        val resolvedAccessor =
+            if (valueClassInnerProperty != null) "$accessor.$valueClassInnerProperty" else accessor
+        val rawExpr =
+            when (kind) {
+                ScalarKind.Short, ScalarKind.Int, ScalarKind.Long -> resolvedAccessor
+                ScalarKind.UShort -> "$resolvedAccessor.toShort()"
+                ScalarKind.UInt -> "$resolvedAccessor.toInt()"
+                ScalarKind.ULong -> "$resolvedAccessor.toLong()"
+                ScalarKind.Float -> "$resolvedAccessor.toRawBits()"
+                ScalarKind.Double -> "$resolvedAccessor.toRawBits()"
+                ScalarKind.UByte, ScalarKind.Byte, ScalarKind.Boolean ->
+                    error("1-byte kind should not take the conditional swap path")
+            }
+        val rawVar = "${accessor}Raw"
+        body.addStatement("val %L = %L", rawVar, rawExpr)
+        body.addStatement(
+            "buffer.%L(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+            writeMethod,
+            BYTE_ORDER_CN,
+            canonicalOrder,
+            rawVar,
+            SWAP_BYTES_MN,
+            rawVar,
+        )
     }
 
     /**
@@ -7648,6 +8579,12 @@ internal class CodecEmitter(
     private sealed interface ConditionalInner {
         data class Scalar(
             val kind: ScalarKind,
+            // Wire order resolved from the parent's @ProtocolMessage(wireOrder)
+            // (or Default if absent). Honored on the decode/encode emit via the
+            // same swap pattern Scalar / ValueClassScalar use, so a multi-byte
+            // conditional field inside a non-Default parent produces the right
+            // wire bytes regardless of buffer.byteOrder.
+            val wireOrder: Endianness,
         ) : ConditionalInner
 
         data class LengthPrefixedString(
@@ -7659,6 +8596,9 @@ internal class CodecEmitter(
             val valueClassType: ClassName,
             val innerKind: ScalarKind,
             val innerPropertyName: String,
+            // Mirror of Scalar.wireOrder — for value-class conditionals, use the
+            // value class's own @ProtocolMessage(wireOrder).
+            val valueClassWireOrder: Endianness,
         ) : ConditionalInner
 
         /**
@@ -8034,6 +8974,14 @@ internal class CodecEmitter(
         private const val OWNED_BYTES_HANDLE_QNAME = "com.ditchoom.buffer.codec.OwnedBytesHandle"
         private const val BOUNDING_LENGTH_CODEC_QNAME = "com.ditchoom.buffer.codec.BoundingLengthCodec"
         private const val FRAMED_BY_QNAME = "com.ditchoom.buffer.codec.annotations.FramedBy"
+
+        // Batching gate. A coalesced read targets exactly 2, 4, or 8 bytes —
+        // the natural-width reads on `ReadBuffer`. 3/5/6/7 prefixes are
+        // never emitted; the coalescer keeps them as individual reads.
+        private val BATCH_ALIGNMENTS = setOf(2, 4, 8)
+
+        private val BYTE_ORDER_CN = ClassName("com.ditchoom.buffer", "ByteOrder")
+        private val SWAP_BYTES_MN = MemberName("com.ditchoom.buffer", "swapBytes")
 
         private val SUPPORTED_SCALARS =
             mapOf(

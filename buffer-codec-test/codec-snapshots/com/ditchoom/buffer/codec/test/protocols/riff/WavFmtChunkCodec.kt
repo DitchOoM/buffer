@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols.riff
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
@@ -9,15 +10,13 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.swapBytes
 import kotlin.Int
 
 public object WavFmtChunkCodec : Codec<WavFmtChunk> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): WavFmtChunk {
-    val fourCCB0 = buffer.readUByte().toUInt()
-    val fourCCB1 = buffer.readUByte().toUInt()
-    val fourCCB2 = buffer.readUByte().toUInt()
-    val fourCCB3 = buffer.readUByte().toUInt()
-    val fourCC = ((fourCCB0 shl 24) or (fourCCB1 shl 16) or (fourCCB2 shl 8) or fourCCB3)
+    val fourCCRaw = buffer.readInt()
+    val fourCC = (if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) fourCCRaw else swapBytes(fourCCRaw)).toUInt()
     val bodyPrefixB0 = buffer.readUByte().toUInt()
     val bodyPrefixB1 = buffer.readUByte().toUInt()
     val bodyPrefixB2 = buffer.readUByte().toUInt()
@@ -42,10 +41,8 @@ public object WavFmtChunkCodec : Codec<WavFmtChunk> {
     `value`: WavFmtChunk,
     context: EncodeContext,
   ) {
-    buffer.writeUByte(((value.fourCC shr 24) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.fourCC shr 16) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.fourCC shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.fourCC and 0xFFu).toUByte())
+    val fourCCRaw = value.fourCC.toInt()
+    buffer.writeInt(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) fourCCRaw else swapBytes(fourCCRaw))
     val bodyPrefix = (WavFmtBodyCodec.wireSize(value.body, context) as WireSize.Exact).bytes.toUInt()
     buffer.writeUByte((bodyPrefix and 0xFFu).toUByte())
     buffer.writeUByte(((bodyPrefix shr 8) and 0xFFu).toUByte())
