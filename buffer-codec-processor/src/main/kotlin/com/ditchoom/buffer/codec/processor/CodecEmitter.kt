@@ -1766,7 +1766,7 @@ internal class CodecEmitter(
         val valueClassInner = analyzeConditionalValueClassInner(innerType)
         if (valueClassInner != null) return valueClassInner
         val kind = SUPPORTED_SCALARS[qualified] ?: return null
-        return ConditionalInner.Scalar(kind = kind)
+        return ConditionalInner.Scalar(kind = kind, wireOrder = messageWireOrder)
     }
 
     /**
@@ -1942,6 +1942,7 @@ internal class CodecEmitter(
             valueClassType = classNameOf(decl),
             innerKind = innerKind,
             innerPropertyName = innerName,
+            valueClassWireOrder = readMessageWireOrder(decl),
         )
     }
 
@@ -4915,13 +4916,25 @@ internal class CodecEmitter(
     ) {
         when (val inner = field.inner) {
             is ConditionalInner.Scalar -> {
-                body.addStatement(
-                    "val %L: %T = if (%L) %L else null",
-                    field.name,
-                    field.nullableTypeName,
-                    decodeConditionExpr(field.condition),
-                    naturalScalarReadExpr(inner.kind),
-                )
+                if (inner.wireOrder != Endianness.Default && inner.kind.width > 1) {
+                    appendConditionalScalarSwapDecode(
+                        body = body,
+                        fieldName = field.name,
+                        nullableTypeName = field.nullableTypeName,
+                        condition = decodeConditionExpr(field.condition),
+                        kind = inner.kind,
+                        wireOrder = inner.wireOrder,
+                        wrapValueClass = null,
+                    )
+                } else {
+                    body.addStatement(
+                        "val %L: %T = if (%L) %L else null",
+                        field.name,
+                        field.nullableTypeName,
+                        decodeConditionExpr(field.condition),
+                        naturalScalarReadExpr(inner.kind),
+                    )
+                }
             }
             is ConditionalInner.LengthPrefixedString -> {
                 body.beginControlFlow(
@@ -4947,14 +4960,26 @@ internal class CodecEmitter(
                 // Wrap the natural-width inner read
                 // in the value-class constructor (mirror of 's
                 // non-conditional `appendDecodeValueClassScalar`).
-                body.addStatement(
-                    "val %L: %T = if (%L) %T(%L) else null",
-                    field.name,
-                    field.nullableTypeName,
-                    decodeConditionExpr(field.condition),
-                    inner.valueClassType,
-                    naturalScalarReadExpr(inner.innerKind),
-                )
+                if (inner.valueClassWireOrder != Endianness.Default && inner.innerKind.width > 1) {
+                    appendConditionalScalarSwapDecode(
+                        body = body,
+                        fieldName = field.name,
+                        nullableTypeName = field.nullableTypeName,
+                        condition = decodeConditionExpr(field.condition),
+                        kind = inner.innerKind,
+                        wireOrder = inner.valueClassWireOrder,
+                        wrapValueClass = inner.valueClassType,
+                    )
+                } else {
+                    body.addStatement(
+                        "val %L: %T = if (%L) %T(%L) else null",
+                        field.name,
+                        field.nullableTypeName,
+                        decodeConditionExpr(field.condition),
+                        inner.valueClassType,
+                        naturalScalarReadExpr(inner.innerKind),
+                    )
+                }
             }
             is ConditionalInner.LengthPrefixedUseCodecList -> {
                 // `@When @LengthPrefixed @UseCodec(C) val
@@ -5078,7 +5103,17 @@ internal class CodecEmitter(
         )
         when (val inner = field.inner) {
             is ConditionalInner.Scalar ->
-                body.addStatement(naturalScalarWriteStatement(inner.kind, localName))
+                if (inner.wireOrder != Endianness.Default && inner.kind.width > 1) {
+                    appendConditionalScalarSwapEncode(
+                        body = body,
+                        accessor = localName,
+                        kind = inner.kind,
+                        wireOrder = inner.wireOrder,
+                        valueClassInnerProperty = null,
+                    )
+                } else {
+                    body.addStatement(naturalScalarWriteStatement(inner.kind, localName))
+                }
             is ConditionalInner.LengthPrefixedString ->
                 appendLengthPrefixedStringEncode(
                     body = body,
@@ -5092,12 +5127,22 @@ internal class CodecEmitter(
                 // Unwrap the value class via the
                 // inner property name (mirror of 's
                 // non-conditional `appendEncodeValueClassScalar`).
-                body.addStatement(
-                    naturalScalarWriteStatement(
-                        inner.innerKind,
-                        "$localName.${inner.innerPropertyName}",
-                    ),
-                )
+                if (inner.valueClassWireOrder != Endianness.Default && inner.innerKind.width > 1) {
+                    appendConditionalScalarSwapEncode(
+                        body = body,
+                        accessor = localName,
+                        kind = inner.innerKind,
+                        wireOrder = inner.valueClassWireOrder,
+                        valueClassInnerProperty = inner.innerPropertyName,
+                    )
+                } else {
+                    body.addStatement(
+                        naturalScalarWriteStatement(
+                            inner.innerKind,
+                            "$localName.${inner.innerPropertyName}",
+                        ),
+                    )
+                }
             is ConditionalInner.LengthPrefixedUseCodecList ->
                 appendEncodeConditionalLengthPrefixedUseCodecList(
                     body = body,
@@ -5139,6 +5184,156 @@ internal class CodecEmitter(
                 )
         }
         body.endControlFlow()
+    }
+
+    // Shared helper for the @When + explicit-wireOrder case. Generates a
+    // block-expression if/else where the `if` arm reads the natural-width
+    // wire value and canonicalizes via swapBytes; matches the contract
+    // explicit wire order should beat buffer.byteOrder, mirroring the
+    // non-conditional Scalar / ValueClassScalar swap path. `wrapValueClass`
+    // routes the swapped value through the value class's constructor when
+    // present (ValueClassScalar conditional path).
+    private fun appendConditionalScalarSwapDecode(
+        body: CodeBlock.Builder,
+        fieldName: String,
+        nullableTypeName: TypeName,
+        condition: String,
+        kind: ScalarKind,
+        wireOrder: Endianness,
+        wrapValueClass: ClassName?,
+    ) {
+        val canonicalOrder =
+            if (wireOrder == Endianness.Big) "BIG_ENDIAN" else "LITTLE_ENDIAN"
+        val readMethod =
+            when (kind.width) {
+                2 -> "readShort"
+                4 -> "readInt"
+                8 -> "readLong"
+                else -> error("unsupported conditional width ${kind.width}")
+            }
+        val rawVar = "${fieldName}Raw"
+        body.beginControlFlow(
+            "val %L: %T = if (%L)",
+            fieldName,
+            nullableTypeName,
+            condition,
+        )
+        body.addStatement("val %L = buffer.%L()", rawVar, readMethod)
+        // Emit the swap + cast (+ optional value-class wrap) as the if-block's
+        // value expression via KotlinPoet placeholders so ByteOrder and
+        // swapBytes resolve through the file's imports (not as FQNs).
+        val unsignedCast =
+            when (kind) {
+                ScalarKind.UShort -> "toUShort"
+                ScalarKind.UInt -> "toUInt"
+                ScalarKind.ULong -> "toULong"
+                else -> null
+            }
+        when {
+            wrapValueClass != null && unsignedCast != null ->
+                body.addStatement(
+                    "%T((if (buffer.byteOrder == %T.%L) %L else %M(%L)).%L())",
+                    wrapValueClass,
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                    unsignedCast,
+                )
+            wrapValueClass != null ->
+                body.addStatement(
+                    "%T(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+                    wrapValueClass,
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                )
+            unsignedCast != null ->
+                body.addStatement(
+                    "(if (buffer.byteOrder == %T.%L) %L else %M(%L)).%L()",
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                    unsignedCast,
+                )
+            kind == ScalarKind.Float ->
+                body.addStatement(
+                    "Float.fromBits(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                )
+            kind == ScalarKind.Double ->
+                body.addStatement(
+                    "Double.fromBits(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                )
+            else ->
+                body.addStatement(
+                    "if (buffer.byteOrder == %T.%L) %L else %M(%L)",
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                )
+        }
+        body.nextControlFlow("else")
+        body.addStatement("null")
+        body.endControlFlow()
+    }
+
+    private fun appendConditionalScalarSwapEncode(
+        body: CodeBlock.Builder,
+        accessor: String,
+        kind: ScalarKind,
+        wireOrder: Endianness,
+        valueClassInnerProperty: String?,
+    ) {
+        val canonicalOrder =
+            if (wireOrder == Endianness.Big) "BIG_ENDIAN" else "LITTLE_ENDIAN"
+        val writeMethod =
+            when (kind.width) {
+                2 -> "writeShort"
+                4 -> "writeInt"
+                8 -> "writeLong"
+                else -> error("unsupported conditional width ${kind.width}")
+            }
+        val resolvedAccessor =
+            if (valueClassInnerProperty != null) "$accessor.$valueClassInnerProperty" else accessor
+        val rawExpr =
+            when (kind) {
+                ScalarKind.Short, ScalarKind.Int, ScalarKind.Long -> resolvedAccessor
+                ScalarKind.UShort -> "$resolvedAccessor.toShort()"
+                ScalarKind.UInt -> "$resolvedAccessor.toInt()"
+                ScalarKind.ULong -> "$resolvedAccessor.toLong()"
+                ScalarKind.Float -> "$resolvedAccessor.toRawBits()"
+                ScalarKind.Double -> "$resolvedAccessor.toRawBits()"
+                ScalarKind.UByte, ScalarKind.Byte, ScalarKind.Boolean ->
+                    error("1-byte kind should not take the conditional swap path")
+            }
+        val rawVar = "${accessor}Raw"
+        body.addStatement("val %L = %L", rawVar, rawExpr)
+        body.addStatement(
+            "buffer.%L(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+            writeMethod,
+            BYTE_ORDER_CN,
+            canonicalOrder,
+            rawVar,
+            SWAP_BYTES_MN,
+            rawVar,
+        )
     }
 
     /**
@@ -8384,6 +8579,12 @@ internal class CodecEmitter(
     private sealed interface ConditionalInner {
         data class Scalar(
             val kind: ScalarKind,
+            // Wire order resolved from the parent's @ProtocolMessage(wireOrder)
+            // (or Default if absent). Honored on the decode/encode emit via the
+            // same swap pattern Scalar / ValueClassScalar use, so a multi-byte
+            // conditional field inside a non-Default parent produces the right
+            // wire bytes regardless of buffer.byteOrder.
+            val wireOrder: Endianness,
         ) : ConditionalInner
 
         data class LengthPrefixedString(
@@ -8395,6 +8596,9 @@ internal class CodecEmitter(
             val valueClassType: ClassName,
             val innerKind: ScalarKind,
             val innerPropertyName: String,
+            // Mirror of Scalar.wireOrder — for value-class conditionals, use the
+            // value class's own @ProtocolMessage(wireOrder).
+            val valueClassWireOrder: Endianness,
         ) : ConditionalInner
 
         /**

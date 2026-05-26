@@ -1,9 +1,12 @@
 package com.ditchoom.buffer.codec.test.protocols.batch
 
 import com.ditchoom.buffer.codec.annotations.Endianness
+import com.ditchoom.buffer.codec.annotations.FramedBy
+import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.When
 import com.ditchoom.buffer.codec.annotations.WireOrder
+import com.ditchoom.buffer.codec.test.protocols.usecodecscalar.Le32LengthCodec
 import kotlin.jvm.JvmInline
 
 @ProtocolMessage
@@ -149,3 +152,77 @@ data class MixedOrderPartialBatch(
     val bigB: UShort,
     @WireOrder(Endianness.Little) val trailingLittle: UInt,
 )
+
+// ─────────────────────────────────────────────────────────────────────
+// Interaction coverage (sandwich / framed-by / sealed-dispatch + batching).
+// Each exercises an emit-side composition that the simpler same-order
+// fixtures above don't reach. Snapshot audit + round-trip + exact-wire
+// assertions catch any structural drift in these less-common paths.
+
+/**
+ * Sandwich: two batchable groups separated by a `Boolean` + conditional.
+ * Expected emit shape: `a+b` batches into one readInt; `gate` is a
+ * single readByte (Boolean is non-batchable); the conditional `middle`
+ * emits its own readInt when present; `c+d` batches into a second
+ * readInt. A gate bug that merged across the Boolean / conditional
+ * would produce a single readLong covering [a,b,gate,middle?] and
+ * mis-decode `c` and `d`. Wire-byte tests on both present and absent
+ * arms catch both directions.
+ */
+@ProtocolMessage(wireOrder = Endianness.Big)
+data class SandwichBatch(
+    val a: UShort,
+    val b: UShort,
+    val gate: Boolean,
+    @When("gate") val middle: UInt? = null,
+    val c: UShort,
+    val d: UShort,
+)
+
+/**
+ * `@FramedBy` body whose fields are batchable. Exercises the
+ * `appendDecodeFields` / `appendEncodeFields` calls inside
+ * `buildFramedByDecodeFun` / `buildFramedByEncodeFun` (touched in the
+ * batching commit). The framed-decode helper narrows `buffer.limit()`
+ * to the bounded region before reading body fields; if batching's
+ * bulk readInt overshoots the bound or doesn't fit, decode throws.
+ * Round-trip plus exact-wire assertion under both buffer orders
+ * confirm the bulk read lives inside the framed scope.
+ */
+@ProtocolMessage(wireOrder = Endianness.Big)
+@FramedBy(Le32LengthCodec::class)
+data class FramedBatchedBody(
+    val a: UShort,
+    val b: UShort,
+    val c: UInt,
+)
+
+/**
+ * Sealed dispatch where each variant body has explicit-Big batchable
+ * scalars. Confirms case-2 batching fires inside dispatch arms — the
+ * discriminator byte is emitted before the variant's field loop, so
+ * the variant's batchable fields are the first thing
+ * `appendDecodeFields` sees. Variant A has a 4-byte aligned batch
+ * (a+b+c = readInt); variant B has a partial batch (x+y = readShort,
+ * z+w = readLong).
+ */
+@ProtocolMessage
+sealed interface BigDispatchFrame {
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    @PacketType(0x01)
+    data class TypeA(
+        val a: UByte,
+        val b: UByte,
+        val c: UShort,
+        val d: UInt,
+    ) : BigDispatchFrame
+
+    @ProtocolMessage(wireOrder = Endianness.Big)
+    @PacketType(0x02)
+    data class TypeB(
+        val x: UByte,
+        val y: UByte,
+        val z: UShort,
+        val w: UInt,
+    ) : BigDispatchFrame
+}

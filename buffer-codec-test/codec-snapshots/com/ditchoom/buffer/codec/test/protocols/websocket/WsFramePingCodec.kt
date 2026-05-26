@@ -12,6 +12,7 @@ import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.swapBytes
 import kotlin.Int
 import kotlin.Long
 import kotlin.UShort
@@ -30,8 +31,18 @@ public class WsFramePingCodec<P : Payload>(
       byte1 = FrameHeaderByte1((__batch1 and 0xFF).toUByte())
       byte2 = WsHeaderByte2((__batch1 ushr 8 and 0xFF).toUByte())
     }
-    val extendedLength16: UShort? = if (byte2.extended16) buffer.readUShort() else null
-    val extendedLength64: Long? = if (byte2.extended64) buffer.readLong() else null
+    val extendedLength16: UShort? = if (byte2.extended16) {
+      val extendedLength16Raw = buffer.readShort()
+      (if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) extendedLength16Raw else swapBytes(extendedLength16Raw)).toUShort()
+    } else {
+      null
+    }
+    val extendedLength64: Long? = if (byte2.extended64) {
+      val extendedLength64Raw = buffer.readLong()
+      if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) extendedLength64Raw else swapBytes(extendedLength64Raw)
+    } else {
+      null
+    }
     val maskingKey: WsMaskingKey? = if (byte2.masked) WsMaskingKey(buffer.readUInt()) else null
     val payload = payloadCodec.decode(buffer, context)
     return WsFrame.Ping<P>(byte1 = byte1, byte2 = byte2, extendedLength16 = extendedLength16, extendedLength64 = extendedLength64, maskingKey = maskingKey, payload = payload)
@@ -49,11 +60,13 @@ public class WsFramePingCodec<P : Payload>(
     }
     if (value.byte2.extended16) {
       val extendedLength16Value = value.extendedLength16 ?: throw EncodeException(fieldPath = "Ping.extendedLength16", reason = "@When(\"byte2.extended16\") predicate is true but field is null")
-      buffer.writeUShort(extendedLength16Value)
+      val extendedLength16ValueRaw = extendedLength16Value.toShort()
+      buffer.writeShort(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) extendedLength16ValueRaw else swapBytes(extendedLength16ValueRaw))
     }
     if (value.byte2.extended64) {
       val extendedLength64Value = value.extendedLength64 ?: throw EncodeException(fieldPath = "Ping.extendedLength64", reason = "@When(\"byte2.extended64\") predicate is true but field is null")
-      buffer.writeLong(extendedLength64Value)
+      val extendedLength64ValueRaw = extendedLength64Value
+      buffer.writeLong(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) extendedLength64ValueRaw else swapBytes(extendedLength64ValueRaw))
     }
     if (value.byte2.masked) {
       val maskingKeyValue = value.maskingKey ?: throw EncodeException(fieldPath = "Ping.maskingKey", reason = "@When(\"byte2.masked\") predicate is true but field is null")
@@ -93,8 +106,18 @@ public class WsFramePingCodec<P : Payload>(
         byte1 = FrameHeaderByte1((__batch2 and 0xFF).toUByte())
         byte2 = WsHeaderByte2((__batch2 ushr 8 and 0xFF).toUByte())
       }
-      val extendedLength16: UShort? = if (byte2.extended16) buffer.readUShort() else null
-      val extendedLength64: Long? = if (byte2.extended64) buffer.readLong() else null
+      val extendedLength16: UShort? = if (byte2.extended16) {
+        val extendedLength16Raw = buffer.readShort()
+        (if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) extendedLength16Raw else swapBytes(extendedLength16Raw)).toUShort()
+      } else {
+        null
+      }
+      val extendedLength64: Long? = if (byte2.extended64) {
+        val extendedLength64Raw = buffer.readLong()
+        if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) extendedLength64Raw else swapBytes(extendedLength64Raw)
+      } else {
+        null
+      }
       val maskingKey: WsMaskingKey? = if (byte2.masked) WsMaskingKey(buffer.readUInt()) else null
       return Partial<P>(byte1 = byte1, byte2 = byte2, extendedLength16 = extendedLength16, extendedLength64 = extendedLength64, maskingKey = maskingKey, buffer = buffer, context = context)
     }

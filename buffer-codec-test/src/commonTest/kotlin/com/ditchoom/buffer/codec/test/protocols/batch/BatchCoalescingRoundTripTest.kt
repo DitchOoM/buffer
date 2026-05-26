@@ -421,4 +421,233 @@ class BatchCoalescingRoundTripTest {
         val src = decodeBytes(partialBatchWire, ByteOrder.LITTLE_ENDIAN)
         assertEquals(partialBatchSample, MixedOrderPartialBatchCodec.decode(src, DecodeContext.Empty))
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Interaction coverage: sandwich (batch / conditional / batch),
+    // @FramedBy + batching, sealed dispatch with batchable variant bodies.
+
+    private val sandwichPresentSample =
+        SandwichBatch(
+            a = 0x1111u,
+            b = 0x2222u,
+            gate = true,
+            middle = 0xDEADBEEFu,
+            c = 0x3333u,
+            d = 0x4444u,
+        )
+
+    private val sandwichPresentWire: ByteArray =
+        byteArrayOf(
+            // a+b batched, Big: 11 11 22 22
+            0x11,
+            0x11,
+            0x22,
+            0x22,
+            // gate=true
+            0x01,
+            // middle=0xDEADBEEF Big: DE AD BE EF
+            0xDE.toByte(),
+            0xAD.toByte(),
+            0xBE.toByte(),
+            0xEF.toByte(),
+            // c+d batched, Big: 33 33 44 44
+            0x33,
+            0x33,
+            0x44,
+            0x44,
+        )
+
+    private val sandwichAbsentSample =
+        SandwichBatch(
+            a = 0x1111u,
+            b = 0x2222u,
+            gate = false,
+            middle = null,
+            c = 0x3333u,
+            d = 0x4444u,
+        )
+
+    private val sandwichAbsentWire: ByteArray =
+        byteArrayOf(
+            0x11,
+            0x11,
+            0x22,
+            0x22,
+            0x00,
+            0x33,
+            0x33,
+            0x44,
+            0x44,
+        )
+
+    @Test
+    fun sandwich_present_wireBytes_BigBuffer() {
+        val buf =
+            encodeIntoOrder(13, ByteOrder.BIG_ENDIAN) {
+                SandwichBatchCodec.encode(it, sandwichPresentSample, EncodeContext.Empty)
+            }
+        assertContentEquals(sandwichPresentWire, buf.readByteArray(13))
+    }
+
+    @Test
+    fun sandwich_present_wireBytes_LittleBuffer() {
+        val buf =
+            encodeIntoOrder(13, ByteOrder.LITTLE_ENDIAN) {
+                SandwichBatchCodec.encode(it, sandwichPresentSample, EncodeContext.Empty)
+            }
+        assertContentEquals(
+            sandwichPresentWire,
+            buf.readByteArray(13),
+            "wireOrder=Big must beat buffer.byteOrder=Little, sandwich shape",
+        )
+    }
+
+    @Test
+    fun sandwich_absent_wireBytes_BigBuffer() {
+        val buf =
+            encodeIntoOrder(9, ByteOrder.BIG_ENDIAN) {
+                SandwichBatchCodec.encode(it, sandwichAbsentSample, EncodeContext.Empty)
+            }
+        assertContentEquals(sandwichAbsentWire, buf.readByteArray(9))
+    }
+
+    @Test
+    fun sandwich_decode_present_BigBuffer() {
+        val src = decodeBytes(sandwichPresentWire, ByteOrder.BIG_ENDIAN)
+        assertEquals(sandwichPresentSample, SandwichBatchCodec.decode(src, DecodeContext.Empty))
+    }
+
+    @Test
+    fun sandwich_decode_present_LittleBuffer() {
+        val src = decodeBytes(sandwichPresentWire, ByteOrder.LITTLE_ENDIAN)
+        assertEquals(sandwichPresentSample, SandwichBatchCodec.decode(src, DecodeContext.Empty))
+    }
+
+    @Test
+    fun sandwich_decode_absent_BigBuffer() {
+        val src = decodeBytes(sandwichAbsentWire, ByteOrder.BIG_ENDIAN)
+        assertEquals(sandwichAbsentSample, SandwichBatchCodec.decode(src, DecodeContext.Empty))
+    }
+
+    // ─── @FramedBy + batching ────────────────────────────────────────────
+
+    private val framedBatchSample =
+        FramedBatchedBody(
+            a = 0x1234u,
+            b = 0x5678u,
+            c = 0x9ABCDEF0u,
+        )
+
+    private val framedBatchBodyBytes: ByteArray =
+        byteArrayOf(
+            // a+b batched, Big: 12 34 56 78
+            0x12,
+            0x34,
+            0x56,
+            0x78,
+            // c, Big: 9A BC DE F0
+            0x9A.toByte(),
+            0xBC.toByte(),
+            0xDE.toByte(),
+            0xF0.toByte(),
+        )
+
+    private val framedBatchWire: ByteArray =
+        byteArrayOf(
+            // Le32 length prefix: 8 bytes body, LE: 08 00 00 00
+            0x08,
+            0x00,
+            0x00,
+            0x00,
+        ) + framedBatchBodyBytes
+
+    @Test
+    fun framedBatched_wireBytes_BigBuffer() {
+        // FramedBatchedBody encode allocates a new buffer through factory,
+        // so we use the codec's encode(value, context, factory) path via
+        // the standalone-codec wrapper. Easiest: encode via the codec's
+        // generated encode entry, which in framed mode returns a fresh
+        // buffer rather than writing into a pre-allocated one.
+        val readBuf =
+            FramedBatchedBodyCodec.encode(
+                value = framedBatchSample,
+                context = EncodeContext.Empty,
+                factory = BufferFactory.Default,
+            )
+        // The returned ReadBuffer is positioned at 0 ready to read.
+        val actual = ByteArray(framedBatchWire.size) { readBuf.readByte() }
+        assertContentEquals(framedBatchWire, actual)
+    }
+
+    @Test
+    fun framedBatched_decode_BigBuffer() {
+        val src = decodeBytes(framedBatchWire, ByteOrder.BIG_ENDIAN)
+        assertEquals(framedBatchSample, FramedBatchedBodyCodec.decode(src, DecodeContext.Empty))
+    }
+
+    @Test
+    fun framedBatched_decode_LittleBuffer() {
+        val src = decodeBytes(framedBatchWire, ByteOrder.LITTLE_ENDIAN)
+        assertEquals(framedBatchSample, FramedBatchedBodyCodec.decode(src, DecodeContext.Empty))
+    }
+
+    // ─── Sealed dispatch with explicit-Big batchable variant body ───────
+
+    private val typeASample =
+        BigDispatchFrame.TypeA(
+            a = 0x12u,
+            b = 0x34u,
+            c = 0x5678u,
+            d = 0x9ABCDEF0u,
+        )
+
+    private val typeAWire: ByteArray =
+        byteArrayOf(
+            // dispatch discriminator
+            0x01,
+            // batched a+b+c = readInt, Big: 12 34 56 78
+            0x12,
+            0x34,
+            0x56,
+            0x78,
+            // d single-scalar swap, Big: 9A BC DE F0
+            0x9A.toByte(),
+            0xBC.toByte(),
+            0xDE.toByte(),
+            0xF0.toByte(),
+        )
+
+    @Test
+    fun bigDispatch_typeA_wireBytes_BigBuffer() {
+        val buf =
+            encodeIntoOrder(9, ByteOrder.BIG_ENDIAN) {
+                BigDispatchFrameCodec.encode(it, typeASample, EncodeContext.Empty)
+            }
+        assertContentEquals(typeAWire, buf.readByteArray(9))
+    }
+
+    @Test
+    fun bigDispatch_typeA_wireBytes_LittleBuffer() {
+        val buf =
+            encodeIntoOrder(9, ByteOrder.LITTLE_ENDIAN) {
+                BigDispatchFrameCodec.encode(it, typeASample, EncodeContext.Empty)
+            }
+        assertContentEquals(
+            typeAWire,
+            buf.readByteArray(9),
+            "sealed-variant explicit Big must beat buffer.byteOrder=Little",
+        )
+    }
+
+    @Test
+    fun bigDispatch_typeA_decode_BigBuffer() {
+        val src = decodeBytes(typeAWire, ByteOrder.BIG_ENDIAN)
+        assertEquals(typeASample, BigDispatchFrameCodec.decode(src, DecodeContext.Empty))
+    }
+
+    @Test
+    fun bigDispatch_typeA_decode_LittleBuffer() {
+        val src = decodeBytes(typeAWire, ByteOrder.LITTLE_ENDIAN)
+        assertEquals(typeASample, BigDispatchFrameCodec.decode(src, DecodeContext.Empty))
+    }
 }
