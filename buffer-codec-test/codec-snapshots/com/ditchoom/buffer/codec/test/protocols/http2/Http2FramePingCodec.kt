@@ -14,7 +14,8 @@ import kotlin.Int
 
 public object Http2FramePingCodec : Codec<Http2Frame.Ping> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): Http2Frame.Ping {
-    val header = Http2LengthAndType(buffer.readUInt())
+    val headerRaw = buffer.readInt()
+    val header = Http2LengthAndType((if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) headerRaw else swapBytes(headerRaw)).toUInt())
     val flags = buffer.readUByte()
     val streamId = Http2StreamId(buffer.readUInt())
     val opaqueDataRaw = buffer.readLong()
@@ -27,7 +28,8 @@ public object Http2FramePingCodec : Codec<Http2Frame.Ping> {
     `value`: Http2Frame.Ping,
     context: EncodeContext,
   ) {
-    buffer.writeUInt(value.header.raw)
+    val headerRaw = value.header.raw.toInt()
+    buffer.writeInt(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) headerRaw else swapBytes(headerRaw))
     buffer.writeUByte(value.flags)
     buffer.writeUInt(value.streamId.raw)
     val opaqueDataRaw = value.opaqueData.toLong()

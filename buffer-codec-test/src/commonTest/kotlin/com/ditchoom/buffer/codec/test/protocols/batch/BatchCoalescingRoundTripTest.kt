@@ -264,4 +264,161 @@ class BatchCoalescingRoundTripTest {
             }
         assertEquals(original, MixedNaturalScalarsCodec.decode(buf, DecodeContext.Empty))
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Mixed-wire-order gate coverage. Each test asserts exact wire bytes
+    // against a hand-derived spec layout under both buffer orders. A gate
+    // bug that batched across order boundaries would byte-swap the middle
+    // field and fail these.
+
+    private val mixedFlushSample =
+        MixedOrderFlush(
+            leadingBig = 0x1234u,
+            middleLittle = 0xABCDu,
+            trailingBig = 0x56789ABCu,
+        )
+
+    private val mixedFlushWire: ByteArray =
+        byteArrayOf(
+            // leadingBig = 0x1234 (Big): 12 34
+            0x12,
+            0x34,
+            // middleLittle = 0xABCD (Little): CD AB
+            0xCD.toByte(),
+            0xAB.toByte(),
+            // trailingBig = 0x56789ABC (Big): 56 78 9A BC
+            0x56,
+            0x78,
+            0x9A.toByte(),
+            0xBC.toByte(),
+        )
+
+    @Test
+    fun mixedOrderFlush_wireBytes_BigBuffer() {
+        val buf =
+            encodeIntoOrder(8, ByteOrder.BIG_ENDIAN) {
+                MixedOrderFlushCodec.encode(it, mixedFlushSample, EncodeContext.Empty)
+            }
+        assertContentEquals(mixedFlushWire, buf.readByteArray(8))
+    }
+
+    @Test
+    fun mixedOrderFlush_wireBytes_LittleBuffer() {
+        val buf =
+            encodeIntoOrder(8, ByteOrder.LITTLE_ENDIAN) {
+                MixedOrderFlushCodec.encode(it, mixedFlushSample, EncodeContext.Empty)
+            }
+        assertContentEquals(
+            mixedFlushWire,
+            buf.readByteArray(8),
+            "field-level @WireOrder overrides must beat buffer.byteOrder regardless",
+        )
+    }
+
+    @Test
+    fun mixedOrderFlush_decode_BigBuffer() {
+        val src = decodeBytes(mixedFlushWire, ByteOrder.BIG_ENDIAN)
+        assertEquals(mixedFlushSample, MixedOrderFlushCodec.decode(src, DecodeContext.Empty))
+    }
+
+    @Test
+    fun mixedOrderFlush_decode_LittleBuffer() {
+        val src = decodeBytes(mixedFlushWire, ByteOrder.LITTLE_ENDIAN)
+        assertEquals(mixedFlushSample, MixedOrderFlushCodec.decode(src, DecodeContext.Empty))
+    }
+
+    private val mixedValueClassSample =
+        MixedOrderValueClass(
+            leadingBig = 0x1234u,
+            littleTag = LittleTag(0xABCDu),
+            trailingBig = 0x56789ABCu,
+        )
+
+    @Test
+    fun mixedOrderValueClass_wireBytes_BigBuffer() {
+        // Same wire layout as MixedOrderFlush: parent Big + middle Little
+        // (carried via the value class's own wireOrder) + trailing Big.
+        val buf =
+            encodeIntoOrder(8, ByteOrder.BIG_ENDIAN) {
+                MixedOrderValueClassCodec.encode(it, mixedValueClassSample, EncodeContext.Empty)
+            }
+        assertContentEquals(mixedFlushWire, buf.readByteArray(8))
+    }
+
+    @Test
+    fun mixedOrderValueClass_wireBytes_LittleBuffer() {
+        val buf =
+            encodeIntoOrder(8, ByteOrder.LITTLE_ENDIAN) {
+                MixedOrderValueClassCodec.encode(it, mixedValueClassSample, EncodeContext.Empty)
+            }
+        assertContentEquals(
+            mixedFlushWire,
+            buf.readByteArray(8),
+            "value-class wireOrder must beat parent's order and buffer.byteOrder",
+        )
+    }
+
+    @Test
+    fun mixedOrderValueClass_decode_BigBuffer() {
+        val src = decodeBytes(mixedFlushWire, ByteOrder.BIG_ENDIAN)
+        assertEquals(mixedValueClassSample, MixedOrderValueClassCodec.decode(src, DecodeContext.Empty))
+    }
+
+    @Test
+    fun mixedOrderValueClass_decode_LittleBuffer() {
+        val src = decodeBytes(mixedFlushWire, ByteOrder.LITTLE_ENDIAN)
+        assertEquals(mixedValueClassSample, MixedOrderValueClassCodec.decode(src, DecodeContext.Empty))
+    }
+
+    private val partialBatchSample =
+        MixedOrderPartialBatch(
+            bigA = 0x1234u,
+            bigB = 0x5678u,
+            trailingLittle = 0x9ABCDEF0u,
+        )
+
+    private val partialBatchWire: ByteArray =
+        byteArrayOf(
+            // bigA = 0x1234 (Big): 12 34
+            0x12,
+            0x34,
+            // bigB = 0x5678 (Big): 56 78  (batched with bigA → readInt)
+            0x56,
+            0x78,
+            // trailingLittle = 0x9ABCDEF0 (Little): F0 DE BC 9A
+            0xF0.toByte(),
+            0xDE.toByte(),
+            0xBC.toByte(),
+            0x9A.toByte(),
+        )
+
+    @Test
+    fun partialBatch_wireBytes_BigBuffer() {
+        val buf =
+            encodeIntoOrder(8, ByteOrder.BIG_ENDIAN) {
+                MixedOrderPartialBatchCodec.encode(it, partialBatchSample, EncodeContext.Empty)
+            }
+        assertContentEquals(partialBatchWire, buf.readByteArray(8))
+    }
+
+    @Test
+    fun partialBatch_wireBytes_LittleBuffer() {
+        val buf =
+            encodeIntoOrder(8, ByteOrder.LITTLE_ENDIAN) {
+                MixedOrderPartialBatchCodec.encode(it, partialBatchSample, EncodeContext.Empty)
+            }
+        assertContentEquals(partialBatchWire, buf.readByteArray(8))
+    }
+
+    @Test
+    fun partialBatch_decode_BigBuffer() {
+        val src = decodeBytes(partialBatchWire, ByteOrder.BIG_ENDIAN)
+        assertEquals(partialBatchSample, MixedOrderPartialBatchCodec.decode(src, DecodeContext.Empty))
+    }
+
+    @Test
+    fun partialBatch_decode_LittleBuffer() {
+        val src = decodeBytes(partialBatchWire, ByteOrder.LITTLE_ENDIAN)
+        assertEquals(partialBatchSample, MixedOrderPartialBatchCodec.decode(src, DecodeContext.Empty))
+    }
 }

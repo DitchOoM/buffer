@@ -50,9 +50,9 @@ public object EightUBytesCodec : Codec<EightUBytes> {
     context: EncodeContext,
   ) {
     if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
-      buffer.writeLong((((value.a.toLong() and 0xFFL) shl 56) or ((value.b.toLong() and 0xFFL) shl 48) or ((value.c.toLong() and 0xFFL) shl 40) or ((value.d.toLong() and 0xFFL) shl 32) or ((value.e.toLong() and 0xFFL) shl 24) or ((value.f.toLong() and 0xFFL) shl 16) or ((value.g.toLong() and 0xFFL) shl 8) or (value.h.toLong() and 0xFFL)).toLong())
+      buffer.writeLong(((value.a.toLong() and 0xFFL) shl 56) or ((value.b.toLong() and 0xFFL) shl 48) or ((value.c.toLong() and 0xFFL) shl 40) or ((value.d.toLong() and 0xFFL) shl 32) or ((value.e.toLong() and 0xFFL) shl 24) or ((value.f.toLong() and 0xFFL) shl 16) or ((value.g.toLong() and 0xFFL) shl 8) or (value.h.toLong() and 0xFFL))
     } else {
-      buffer.writeLong(((value.a.toLong() and 0xFFL) or ((value.b.toLong() and 0xFFL) shl 8) or ((value.c.toLong() and 0xFFL) shl 16) or ((value.d.toLong() and 0xFFL) shl 24) or ((value.e.toLong() and 0xFFL) shl 32) or ((value.f.toLong() and 0xFFL) shl 40) or ((value.g.toLong() and 0xFFL) shl 48) or ((value.h.toLong() and 0xFFL) shl 56)).toLong())
+      buffer.writeLong((value.a.toLong() and 0xFFL) or ((value.b.toLong() and 0xFFL) shl 8) or ((value.c.toLong() and 0xFFL) shl 16) or ((value.d.toLong() and 0xFFL) shl 24) or ((value.e.toLong() and 0xFFL) shl 32) or ((value.f.toLong() and 0xFFL) shl 40) or ((value.g.toLong() and 0xFFL) shl 48) or ((value.h.toLong() and 0xFFL) shl 56))
     }
   }
 

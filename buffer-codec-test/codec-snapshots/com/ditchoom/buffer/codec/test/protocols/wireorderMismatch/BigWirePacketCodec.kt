@@ -43,11 +43,11 @@ public object BigWirePacketCodec : Codec<BigWirePacket> {
     context: EncodeContext,
   ) {
     buffer.writeByte(if (value.bool) 1.toByte() else 0.toByte())
-    val __batch3 = (((value.byte.toInt() and 0xFF) shl 24) or ((value.ubyte.toInt() and 0xFF) shl 16) or (value.short.toInt() and 0xFFFF)).toInt()
+    val __batch3 = ((value.byte.toInt() and 0xFF) shl 24) or ((value.ubyte.toInt() and 0xFF) shl 16) or (value.short.toInt() and 0xFFFF)
     buffer.writeInt(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch3 else swapBytes(__batch3))
     val ushortRaw = value.ushort.toShort()
     buffer.writeShort(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) ushortRaw else swapBytes(ushortRaw))
-    val __batch4 = (((value.int.toLong() and 0xFFFFFFFFL) shl 32) or (value.uint.toLong() and 0xFFFFFFFFL)).toLong()
+    val __batch4 = ((value.int.toLong() and 0xFFFFFFFFL) shl 32) or (value.uint.toLong() and 0xFFFFFFFFL)
     buffer.writeLong(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch4 else swapBytes(__batch4))
     val longRaw = value.long
     buffer.writeLong(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) longRaw else swapBytes(longRaw))

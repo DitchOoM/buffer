@@ -43,11 +43,11 @@ public object LittleWirePacketCodec : Codec<LittleWirePacket> {
     context: EncodeContext,
   ) {
     buffer.writeByte(if (value.bool) 1.toByte() else 0.toByte())
-    val __batch3 = ((value.byte.toInt() and 0xFF) or ((value.ubyte.toInt() and 0xFF) shl 8) or ((value.short.toInt() and 0xFFFF) shl 16)).toInt()
+    val __batch3 = (value.byte.toInt() and 0xFF) or ((value.ubyte.toInt() and 0xFF) shl 8) or ((value.short.toInt() and 0xFFFF) shl 16)
     buffer.writeInt(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch3 else swapBytes(__batch3))
     val ushortRaw = value.ushort.toShort()
     buffer.writeShort(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) ushortRaw else swapBytes(ushortRaw))
-    val __batch4 = ((value.int.toLong() and 0xFFFFFFFFL) or ((value.uint.toLong() and 0xFFFFFFFFL) shl 32)).toLong()
+    val __batch4 = (value.int.toLong() and 0xFFFFFFFFL) or ((value.uint.toLong() and 0xFFFFFFFFL) shl 32)
     buffer.writeLong(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch4 else swapBytes(__batch4))
     val longRaw = value.long
     buffer.writeLong(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) longRaw else swapBytes(longRaw))

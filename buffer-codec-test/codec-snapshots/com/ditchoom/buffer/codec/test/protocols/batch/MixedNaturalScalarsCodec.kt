@@ -38,9 +38,9 @@ public object MixedNaturalScalarsCodec : Codec<MixedNaturalScalars> {
     context: EncodeContext,
   ) {
     if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
-      buffer.writeLong((((value.flags.toLong() and 0xFFL) shl 56) or ((value.tag.toLong() and 0xFFL) shl 48) or ((value.length.toLong() and 0xFFFFL) shl 32) or (value.checksum.toLong() and 0xFFFFFFFFL)).toLong())
+      buffer.writeLong(((value.flags.toLong() and 0xFFL) shl 56) or ((value.tag.toLong() and 0xFFL) shl 48) or ((value.length.toLong() and 0xFFFFL) shl 32) or (value.checksum.toLong() and 0xFFFFFFFFL))
     } else {
-      buffer.writeLong(((value.flags.toLong() and 0xFFL) or ((value.tag.toLong() and 0xFFL) shl 8) or ((value.length.toLong() and 0xFFFFL) shl 16) or ((value.checksum.toLong() and 0xFFFFFFFFL) shl 32)).toLong())
+      buffer.writeLong((value.flags.toLong() and 0xFFL) or ((value.tag.toLong() and 0xFFL) shl 8) or ((value.length.toLong() and 0xFFFFL) shl 16) or ((value.checksum.toLong() and 0xFFFFFFFFL) shl 32))
     }
   }
 

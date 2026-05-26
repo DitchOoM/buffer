@@ -3179,9 +3179,14 @@ internal class CodecEmitter(
         totalBytes: Int,
     ): String =
         when (totalBytes) {
+            // size-2 batches use an Int accumulator (so shift/or arithmetic
+            // stays in Int) but writeShort takes Short — narrow at the call.
             2 -> "($combined).toShort()"
-            4 -> "($combined).toInt()"
-            8 -> "($combined).toLong()"
+            // size-4 / size-8 accumulators are already Int / Long, so emit
+            // bare expressions. Wrapping in .toInt()/.toLong() triggers the
+            // "Redundant call of conversion method" compiler warning.
+            4 -> combined
+            8 -> combined
             else -> error("unsupported batch size $totalBytes")
         }
 
@@ -4765,6 +4770,15 @@ internal class CodecEmitter(
         body: CodeBlock.Builder,
         field: FieldSpec.ValueClassScalar,
     ) {
+        // Honor the value class's declared @ProtocolMessage(wireOrder) the
+        // same way plain Scalars honor @WireOrder / parent wireOrder: explicit
+        // Big / Little wins over buffer.byteOrder. Multi-byte inner kinds get
+        // the swapBytes fast path (matches the single-scalar Scalar emit).
+        // 1-byte inner kinds have no byte order — the natural read suffices.
+        if (field.valueClassWireOrder != Endianness.Default && field.innerKind.width > 1) {
+            appendValueClassNaturalReadWithSwap(body, field)
+            return
+        }
         body.addStatement(
             "val %L = %T(%L)",
             field.name,
@@ -4776,17 +4790,108 @@ internal class CodecEmitter(
     /**
      * Emit encode for a value-class field. Unwraps
      * via the inner property name and writes the inner scalar at
-     * natural width.
+     * natural width — or, when the value class declares an explicit
+     * wireOrder, takes the swap fast path so the wire bytes match
+     * the value class's contract regardless of buffer.byteOrder.
      */
     private fun appendEncodeValueClassScalar(
         body: CodeBlock.Builder,
         field: FieldSpec.ValueClassScalar,
     ) {
+        if (field.valueClassWireOrder != Endianness.Default && field.innerKind.width > 1) {
+            appendValueClassNaturalWriteWithSwap(body, field)
+            return
+        }
         body.addStatement(
             naturalScalarWriteStatement(
                 field.innerKind,
                 "value.${field.name}.${field.innerPropertyName}",
             ),
+        )
+    }
+
+    private fun appendValueClassNaturalReadWithSwap(
+        body: CodeBlock.Builder,
+        field: FieldSpec.ValueClassScalar,
+    ) {
+        val canonicalOrder =
+            if (field.valueClassWireOrder == Endianness.Big) "BIG_ENDIAN" else "LITTLE_ENDIAN"
+        val readMethod =
+            when (field.innerKind.width) {
+                2 -> "readShort"
+                4 -> "readInt"
+                8 -> "readLong"
+                else -> error("unsupported value-class inner width ${field.innerKind.width}")
+            }
+        val rawVar = "${field.name}Raw"
+        body.addStatement("val %L = buffer.%L()", rawVar, readMethod)
+        val toUnsigned =
+            when (field.innerKind) {
+                ScalarKind.UShort -> "toUShort"
+                ScalarKind.UInt -> "toUInt"
+                ScalarKind.ULong -> "toULong"
+                else -> null
+            }
+        if (toUnsigned != null) {
+            body.addStatement(
+                "val %L = %T((if (buffer.byteOrder == %T.%L) %L else %M(%L)).%L())",
+                field.name,
+                field.valueClassType,
+                BYTE_ORDER_CN,
+                canonicalOrder,
+                rawVar,
+                SWAP_BYTES_MN,
+                rawVar,
+                toUnsigned,
+            )
+        } else {
+            body.addStatement(
+                "val %L = %T(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+                field.name,
+                field.valueClassType,
+                BYTE_ORDER_CN,
+                canonicalOrder,
+                rawVar,
+                SWAP_BYTES_MN,
+                rawVar,
+            )
+        }
+    }
+
+    private fun appendValueClassNaturalWriteWithSwap(
+        body: CodeBlock.Builder,
+        field: FieldSpec.ValueClassScalar,
+    ) {
+        val canonicalOrder =
+            if (field.valueClassWireOrder == Endianness.Big) "BIG_ENDIAN" else "LITTLE_ENDIAN"
+        val writeMethod =
+            when (field.innerKind.width) {
+                2 -> "writeShort"
+                4 -> "writeInt"
+                8 -> "writeLong"
+                else -> error("unsupported value-class inner width ${field.innerKind.width}")
+            }
+        val accessor = "value.${field.name}.${field.innerPropertyName}"
+        val rawExpr =
+            when (field.innerKind) {
+                ScalarKind.Short, ScalarKind.Int, ScalarKind.Long -> accessor
+                ScalarKind.UShort -> "$accessor.toShort()"
+                ScalarKind.UInt -> "$accessor.toInt()"
+                ScalarKind.ULong -> "$accessor.toLong()"
+                ScalarKind.Float -> "$accessor.toRawBits()"
+                ScalarKind.Double -> "$accessor.toRawBits()"
+                else -> error("inner kind ${field.innerKind} cannot reach the swap path")
+            }
+        val rawVar = "${field.name}Raw"
+        body.addStatement("val %L = %L", rawVar, rawExpr)
+        body.addStatement(
+            "buffer.%L(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+            writeMethod,
+            BYTE_ORDER_CN,
+            canonicalOrder,
+            rawVar,
+            SWAP_BYTES_MN,
+            rawVar,
         )
     }
 

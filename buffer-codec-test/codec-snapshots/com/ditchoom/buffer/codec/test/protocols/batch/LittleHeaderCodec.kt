@@ -28,7 +28,7 @@ public object LittleHeaderCodec : Codec<LittleHeader> {
     `value`: LittleHeader,
     context: EncodeContext,
   ) {
-    val __batch2 = ((value.type.toLong() and 0xFFL) or ((value.version.toLong() and 0xFFL) shl 8) or ((value.flags.toLong() and 0xFFFFL) shl 16) or ((value.length.toLong() and 0xFFFFFFFFL) shl 32)).toLong()
+    val __batch2 = (value.type.toLong() and 0xFFL) or ((value.version.toLong() and 0xFFL) shl 8) or ((value.flags.toLong() and 0xFFFFL) shl 16) or ((value.length.toLong() and 0xFFFFFFFFL) shl 32)
     buffer.writeLong(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch2 else swapBytes(__batch2))
   }
 

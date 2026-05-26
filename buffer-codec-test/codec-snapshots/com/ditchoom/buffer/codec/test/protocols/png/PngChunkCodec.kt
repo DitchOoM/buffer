@@ -36,7 +36,7 @@ public object PngChunkCodec : Codec<PngChunk> {
     `value`: PngChunk,
     context: EncodeContext,
   ) {
-    val __batch2 = (((value.length.toLong() and 0xFFFFFFFFL) shl 32) or (value.type.toLong() and 0xFFFFFFFFL)).toLong()
+    val __batch2 = ((value.length.toLong() and 0xFFFFFFFFL) shl 32) or (value.type.toLong() and 0xFFFFFFFFL)
     buffer.writeLong(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch2 else swapBytes(__batch2))
     BinaryDataCodec.encode(buffer, value.data, context)
     val crcRaw = value.crc.toInt()

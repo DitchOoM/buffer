@@ -38,9 +38,9 @@ public object FourUBytesCodec : Codec<FourUBytes> {
     context: EncodeContext,
   ) {
     if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
-      buffer.writeInt((((value.a.toInt() and 0xFF) shl 24) or ((value.b.toInt() and 0xFF) shl 16) or ((value.c.toInt() and 0xFF) shl 8) or (value.d.toInt() and 0xFF)).toInt())
+      buffer.writeInt(((value.a.toInt() and 0xFF) shl 24) or ((value.b.toInt() and 0xFF) shl 16) or ((value.c.toInt() and 0xFF) shl 8) or (value.d.toInt() and 0xFF))
     } else {
-      buffer.writeInt(((value.a.toInt() and 0xFF) or ((value.b.toInt() and 0xFF) shl 8) or ((value.c.toInt() and 0xFF) shl 16) or ((value.d.toInt() and 0xFF) shl 24)).toInt())
+      buffer.writeInt((value.a.toInt() and 0xFF) or ((value.b.toInt() and 0xFF) shl 8) or ((value.c.toInt() and 0xFF) shl 16) or ((value.d.toInt() and 0xFF) shl 24))
     }
   }
 

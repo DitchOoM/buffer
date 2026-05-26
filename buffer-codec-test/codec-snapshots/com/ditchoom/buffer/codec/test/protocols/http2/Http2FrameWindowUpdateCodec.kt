@@ -14,7 +14,8 @@ import kotlin.Int
 
 public object Http2FrameWindowUpdateCodec : Codec<Http2Frame.WindowUpdate> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): Http2Frame.WindowUpdate {
-    val header = Http2LengthAndType(buffer.readUInt())
+    val headerRaw = buffer.readInt()
+    val header = Http2LengthAndType((if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) headerRaw else swapBytes(headerRaw)).toUInt())
     val flags = buffer.readUByte()
     val streamId = Http2StreamId(buffer.readUInt())
     val windowSizeIncrementRaw = buffer.readInt()
@@ -27,7 +28,8 @@ public object Http2FrameWindowUpdateCodec : Codec<Http2Frame.WindowUpdate> {
     `value`: Http2Frame.WindowUpdate,
     context: EncodeContext,
   ) {
-    buffer.writeUInt(value.header.raw)
+    val headerRaw = value.header.raw.toInt()
+    buffer.writeInt(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) headerRaw else swapBytes(headerRaw))
     buffer.writeUByte(value.flags)
     buffer.writeUInt(value.streamId.raw)
     val windowSizeIncrementRaw = value.windowSizeIncrement.toInt()

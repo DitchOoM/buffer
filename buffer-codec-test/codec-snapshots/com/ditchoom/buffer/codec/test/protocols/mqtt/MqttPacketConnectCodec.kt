@@ -158,9 +158,9 @@ public object MqttPacketConnectCodec {
     buffer.writeUByte((protocolNamePrefix and 0xFFu).toUByte())
     buffer.position(protocolNameEndPosition)
     if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
-      buffer.writeInt((((value.protocolLevel.toInt() and 0xFF) shl 24) or ((value.connectFlags.raw.toInt() and 0xFF) shl 16) or (value.keepAliveSeconds.toInt() and 0xFFFF)).toInt())
+      buffer.writeInt(((value.protocolLevel.toInt() and 0xFF) shl 24) or ((value.connectFlags.raw.toInt() and 0xFF) shl 16) or (value.keepAliveSeconds.toInt() and 0xFFFF))
     } else {
-      buffer.writeInt(((value.protocolLevel.toInt() and 0xFF) or ((value.connectFlags.raw.toInt() and 0xFF) shl 8) or ((value.keepAliveSeconds.toInt() and 0xFFFF) shl 16)).toInt())
+      buffer.writeInt((value.protocolLevel.toInt() and 0xFF) or ((value.connectFlags.raw.toInt() and 0xFF) shl 8) or ((value.keepAliveSeconds.toInt() and 0xFFFF) shl 16))
     }
     val clientIdSizePosition = buffer.position()
     buffer.position(clientIdSizePosition + 2)

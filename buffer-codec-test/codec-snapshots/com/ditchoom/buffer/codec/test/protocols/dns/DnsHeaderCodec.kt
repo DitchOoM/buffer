@@ -32,9 +32,9 @@ public object DnsHeaderCodec : Codec<DnsHeader> {
     `value`: DnsHeader,
     context: EncodeContext,
   ) {
-    val __batch3 = (((value.id.toLong() and 0xFFFFL) shl 48) or ((value.flags.toLong() and 0xFFFFL) shl 32) or ((value.qdCount.toLong() and 0xFFFFL) shl 16) or (value.anCount.toLong() and 0xFFFFL)).toLong()
+    val __batch3 = ((value.id.toLong() and 0xFFFFL) shl 48) or ((value.flags.toLong() and 0xFFFFL) shl 32) or ((value.qdCount.toLong() and 0xFFFFL) shl 16) or (value.anCount.toLong() and 0xFFFFL)
     buffer.writeLong(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch3 else swapBytes(__batch3))
-    val __batch4 = (((value.nsCount.toInt() and 0xFFFF) shl 16) or (value.arCount.toInt() and 0xFFFF)).toInt()
+    val __batch4 = ((value.nsCount.toInt() and 0xFFFF) shl 16) or (value.arCount.toInt() and 0xFFFF)
     buffer.writeInt(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch4 else swapBytes(__batch4))
   }
 

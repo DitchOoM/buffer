@@ -35,9 +35,9 @@ public object SignedAndUnsignedMixCodec : Codec<SignedAndUnsignedMix> {
     context: EncodeContext,
   ) {
     if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
-      buffer.writeInt((((value.signed.toInt() and 0xFF) shl 24) or ((value.unsigned.toInt() and 0xFF) shl 16) or (value.signedShort.toInt() and 0xFFFF)).toInt())
+      buffer.writeInt(((value.signed.toInt() and 0xFF) shl 24) or ((value.unsigned.toInt() and 0xFF) shl 16) or (value.signedShort.toInt() and 0xFFFF))
     } else {
-      buffer.writeInt(((value.signed.toInt() and 0xFF) or ((value.unsigned.toInt() and 0xFF) shl 8) or ((value.signedShort.toInt() and 0xFFFF) shl 16)).toInt())
+      buffer.writeInt((value.signed.toInt() and 0xFF) or ((value.unsigned.toInt() and 0xFF) shl 8) or ((value.signedShort.toInt() and 0xFFFF) shl 16))
     }
   }
 

@@ -28,7 +28,7 @@ public object BigHeaderCodec : Codec<BigHeader> {
     `value`: BigHeader,
     context: EncodeContext,
   ) {
-    val __batch2 = (((value.type.toLong() and 0xFFL) shl 56) or ((value.version.toLong() and 0xFFL) shl 48) or ((value.flags.toLong() and 0xFFFFL) shl 32) or (value.length.toLong() and 0xFFFFFFFFL)).toLong()
+    val __batch2 = ((value.type.toLong() and 0xFFL) shl 56) or ((value.version.toLong() and 0xFFL) shl 48) or ((value.flags.toLong() and 0xFFFFL) shl 32) or (value.length.toLong() and 0xFFFFFFFFL)
     buffer.writeLong(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch2 else swapBytes(__batch2))
   }
 

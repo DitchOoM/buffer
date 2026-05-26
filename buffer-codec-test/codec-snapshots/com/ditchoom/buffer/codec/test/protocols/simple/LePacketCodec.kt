@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols.simple
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
@@ -9,11 +10,13 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.swapBytes
 import kotlin.Int
 
 public object LePacketCodec : Codec<LePacket> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): LePacket {
-    val header = LeHeader(buffer.readUShort())
+    val headerRaw = buffer.readShort()
+    val header = LeHeader((if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) headerRaw else swapBytes(headerRaw)).toUShort())
     val payload = buffer.readString(header.length, Charset.UTF8)
     return LePacket(header = header, payload = payload)
   }
@@ -23,7 +26,8 @@ public object LePacketCodec : Codec<LePacket> {
     `value`: LePacket,
     context: EncodeContext,
   ) {
-    buffer.writeUShort(value.header.raw)
+    val headerRaw = value.header.raw.toShort()
+    buffer.writeShort(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) headerRaw else swapBytes(headerRaw))
     buffer.writeString(value.payload, Charset.UTF8)
   }
 

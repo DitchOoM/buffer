@@ -32,9 +32,9 @@ public object WavFmtBodyCodec : Codec<WavFmtBody> {
     `value`: WavFmtBody,
     context: EncodeContext,
   ) {
-    val __batch3 = ((value.audioFormat.toLong() and 0xFFFFL) or ((value.numChannels.toLong() and 0xFFFFL) shl 16) or ((value.sampleRate.toLong() and 0xFFFFFFFFL) shl 32)).toLong()
+    val __batch3 = (value.audioFormat.toLong() and 0xFFFFL) or ((value.numChannels.toLong() and 0xFFFFL) shl 16) or ((value.sampleRate.toLong() and 0xFFFFFFFFL) shl 32)
     buffer.writeLong(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch3 else swapBytes(__batch3))
-    val __batch4 = ((value.byteRate.toLong() and 0xFFFFFFFFL) or ((value.blockAlign.toLong() and 0xFFFFL) shl 32) or ((value.bitsPerSample.toLong() and 0xFFFFL) shl 48)).toLong()
+    val __batch4 = (value.byteRate.toLong() and 0xFFFFFFFFL) or ((value.blockAlign.toLong() and 0xFFFFL) shl 32) or ((value.bitsPerSample.toLong() and 0xFFFFL) shl 48)
     buffer.writeLong(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) __batch4 else swapBytes(__batch4))
   }
 
