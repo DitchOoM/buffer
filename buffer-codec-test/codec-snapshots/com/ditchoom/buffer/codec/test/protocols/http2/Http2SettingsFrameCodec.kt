@@ -20,10 +20,10 @@ public object Http2SettingsFrameCodec : Codec<Http2SettingsFrame> {
     val lengthB1 = buffer.readUByte().toUInt()
     val lengthB2 = buffer.readUByte().toUInt()
     val length = ((lengthB0 shl 16) or (lengthB1 shl 8) or lengthB2)
-    val __batch44Raw = buffer.readShort().toInt() and 0xFFFF
-    val __batch44 = if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch44Raw else swapBytes(__batch44Raw.toShort()).toInt() and 0xFFFF
-    val type = (__batch44 ushr 8 and 0xFF).toUByte()
-    val flags = (__batch44 and 0xFF).toUByte()
+    val __batch25Raw = buffer.readShort().toInt() and 0xFFFF
+    val __batch25 = if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch25Raw else swapBytes(__batch25Raw.toShort()).toInt() and 0xFFFF
+    val type = (__batch25 ushr 8 and 0xFF).toUByte()
+    val flags = (__batch25 and 0xFF).toUByte()
     val streamId = Http2StreamId(buffer.readUInt())
     if (length > Int.MAX_VALUE.toUInt()) {
       throw DecodeException(fieldPath = "Http2SettingsFrame.entries", bufferPosition = -1, expected = "@LengthFrom source <= ${'$'}{Int.MAX_VALUE}", actual = length.toString())
@@ -53,8 +53,8 @@ public object Http2SettingsFrameCodec : Codec<Http2SettingsFrame> {
     buffer.writeUByte(((value.length shr 16) and 0xFFu).toUByte())
     buffer.writeUByte(((value.length shr 8) and 0xFFu).toUByte())
     buffer.writeUByte((value.length and 0xFFu).toUByte())
-    val __batch45 = (((value.type.toInt() and 0xFF) shl 8) or (value.flags.toInt() and 0xFF)).toShort()
-    buffer.writeShort(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch45 else swapBytes(__batch45))
+    val __batch26 = (((value.type.toInt() and 0xFF) shl 8) or (value.flags.toInt() and 0xFF)).toShort()
+    buffer.writeShort(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch26 else swapBytes(__batch26))
     buffer.writeUInt(value.streamId.raw)
     for (__elem in value.entries) {
       Http2SettingCodec.encode(buffer, __elem, context)

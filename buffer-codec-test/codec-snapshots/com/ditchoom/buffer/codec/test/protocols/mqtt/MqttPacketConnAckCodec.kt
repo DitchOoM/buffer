@@ -23,10 +23,10 @@ public object MqttPacketConnAckCodec {
     val __framingStart = buffer.position()
     val __framingBound = __framingStart + __framingLength.toInt()
     return try {
-      val __batch17Raw = buffer.readShort().toInt() and 0xFFFF
-      val __batch17 = if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch17Raw else swapBytes(__batch17Raw.toShort()).toInt() and 0xFFFF
-      val connectAckFlags = (__batch17 ushr 8 and 0xFF).toUByte()
-      val returnCode = (__batch17 and 0xFF).toUByte()
+      val __batch11Raw = buffer.readShort().toInt() and 0xFFFF
+      val __batch11 = if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch11Raw else swapBytes(__batch11Raw.toShort()).toInt() and 0xFFFF
+      val connectAckFlags = (__batch11 ushr 8 and 0xFF).toUByte()
+      val returnCode = (__batch11 and 0xFF).toUByte()
       if (buffer.position() != __framingBound) {
         throw DecodeException(
               fieldPath = "ConnAck.@FramedBy",
@@ -54,8 +54,8 @@ public object MqttPacketConnAckCodec {
       buffer.writeUByte(value.header.raw)
     },
   ) { buffer ->
-    val __batch18 = (((value.connectAckFlags.toInt() and 0xFF) shl 8) or (value.returnCode.toInt() and 0xFF)).toShort()
-    buffer.writeShort(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch18 else swapBytes(__batch18))
+    val __batch12 = (((value.connectAckFlags.toInt() and 0xFF) shl 8) or (value.returnCode.toInt() and 0xFF)).toShort()
+    buffer.writeShort(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch12 else swapBytes(__batch12))
   }
 
   public fun peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): PeekResult {

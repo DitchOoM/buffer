@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.codec.test.protocols.mqtt
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
@@ -9,6 +10,7 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.swapBytes
 import kotlin.Int
 import kotlin.Throwable
 
@@ -21,9 +23,8 @@ public object MqttPacketUnsubscribeCodec {
     val __framingStart = buffer.position()
     val __framingBound = __framingStart + __framingLength.toInt()
     return try {
-      val packetIdentifierB0 = buffer.readUByte().toUInt()
-      val packetIdentifierB1 = buffer.readUByte().toUInt()
-      val packetIdentifier = ((packetIdentifierB0 shl 8) or packetIdentifierB1).toUShort()
+      val packetIdentifierRaw = buffer.readShort()
+      val packetIdentifier = (if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) packetIdentifierRaw else swapBytes(packetIdentifierRaw)).toUShort()
       val topics = mutableListOf<MqttUnsubscribeTopic>()
       while (buffer.position() < buffer.limit()) {
         topics += MqttUnsubscribeTopicCodec.decode(buffer, context)
@@ -55,8 +56,8 @@ public object MqttPacketUnsubscribeCodec {
       buffer.writeUByte(value.header.raw)
     },
   ) { buffer ->
-    buffer.writeUByte(((value.packetIdentifier.toUInt() shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.packetIdentifier.toUInt() and 0xFFu).toUByte())
+    val packetIdentifierRaw = value.packetIdentifier.toShort()
+    buffer.writeShort(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) packetIdentifierRaw else swapBytes(packetIdentifierRaw))
     for (__elem in value.topics) {
       MqttUnsubscribeTopicCodec.encode(buffer, __elem, context)
     }

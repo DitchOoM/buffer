@@ -16,15 +16,15 @@ import kotlin.UShort
 
 public object WsFrameHeaderCodec : Codec<WsFrameHeader> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): WsFrameHeader {
-    val __batch32 = buffer.readShort().toInt() and 0xFFFF
+    val __batch13 = buffer.readShort().toInt() and 0xFFFF
     val byte1: com.ditchoom.buffer.codec.test.protocols.websocket.FrameHeaderByte1
     val byte2: com.ditchoom.buffer.codec.test.protocols.websocket.WsHeaderByte2
     if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
-      byte1 = FrameHeaderByte1((__batch32 ushr 8 and 0xFF).toUByte())
-      byte2 = WsHeaderByte2((__batch32 and 0xFF).toUByte())
+      byte1 = FrameHeaderByte1((__batch13 ushr 8 and 0xFF).toUByte())
+      byte2 = WsHeaderByte2((__batch13 and 0xFF).toUByte())
     } else {
-      byte1 = FrameHeaderByte1((__batch32 and 0xFF).toUByte())
-      byte2 = WsHeaderByte2((__batch32 ushr 8 and 0xFF).toUByte())
+      byte1 = FrameHeaderByte1((__batch13 and 0xFF).toUByte())
+      byte2 = WsHeaderByte2((__batch13 ushr 8 and 0xFF).toUByte())
     }
     val extendedLength16: UShort? = if (byte2.extended16) buffer.readUShort() else null
     val extendedLength64: Long? = if (byte2.extended64) buffer.readLong() else null

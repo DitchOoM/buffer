@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.codec.test.protocols.mqttv5
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
@@ -16,6 +17,7 @@ import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.swapBytes
 import kotlin.Int
 import kotlin.String
 import kotlin.Throwable
@@ -39,9 +41,8 @@ public object MqttV5PacketConnectCodec {
       val protocolName = buffer.readString(protocolNameLength, Charset.UTF8)
       val protocolLevel = buffer.readUByte()
       val connectFlags = MqttConnectFlags(buffer.readUByte())
-      val keepAliveSecondsB0 = buffer.readUByte().toUInt()
-      val keepAliveSecondsB1 = buffer.readUByte().toUInt()
-      val keepAliveSeconds = ((keepAliveSecondsB0 shl 8) or keepAliveSecondsB1).toUShort()
+      val keepAliveSecondsRaw = buffer.readShort()
+      val keepAliveSeconds = (if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) keepAliveSecondsRaw else swapBytes(keepAliveSecondsRaw)).toUShort()
       val properties = V5PropertyBagCodec.decode(buffer, context)
       val clientIdPrefixB0 = buffer.readUByte().toUInt()
       val clientIdPrefixB1 = buffer.readUByte().toUInt()
@@ -155,8 +156,8 @@ public object MqttV5PacketConnectCodec {
     buffer.position(protocolNameEndPosition)
     buffer.writeUByte(value.protocolLevel)
     buffer.writeUByte(value.connectFlags.raw)
-    buffer.writeUByte(((value.keepAliveSeconds.toUInt() shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.keepAliveSeconds.toUInt() and 0xFFu).toUByte())
+    val keepAliveSecondsRaw = value.keepAliveSeconds.toShort()
+    buffer.writeShort(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) keepAliveSecondsRaw else swapBytes(keepAliveSecondsRaw))
     V5PropertyBagCodec.encode(buffer, value.properties, context)
     val clientIdSizePosition = buffer.position()
     buffer.position(clientIdSizePosition + 2)

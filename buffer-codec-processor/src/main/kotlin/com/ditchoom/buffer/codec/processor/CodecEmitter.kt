@@ -4457,10 +4457,22 @@ internal class CodecEmitter(
         body: CodeBlock.Builder,
         field: FieldSpec.Scalar,
     ) {
-        val needsManual =
-            field.wireBytes != field.kind.width || field.resolvedWireOrder != Endianness.Default
-        if (!needsManual) {
+        val widthMatches = field.wireBytes == field.kind.width
+        val explicitOrder = field.resolvedWireOrder != Endianness.Default
+        // Natural-width Default — trust buffer.byteOrder.
+        if (widthMatches && !explicitOrder) {
             body.addStatement("val %L = %L", field.name, naturalScalarReadExpr(field.kind))
+            return
+        }
+        // Natural-width explicit Big/Little on a multi-byte scalar. Read at
+        // the natural width and canonicalize via swapBytes when buffer.byteOrder
+        // differs from the wire order. Matches the batched single-field code
+        // shape — single readShort/readInt/readLong instead of N readUByte +
+        // shift/or assembly. (1-byte scalars fall through to the manual path
+        // since they have no byte order; the manual path emits a single byte
+        // read for that case.)
+        if (widthMatches && explicitOrder && field.kind.width > 1) {
+            appendNaturalReadWithSwap(body, field)
             return
         }
         val bigEndian =
@@ -4469,6 +4481,76 @@ internal class CodecEmitter(
                 Endianness.Big, Endianness.Default -> true
             }
         appendManualScalarDecode(body, field, bigEndian)
+    }
+
+    private fun appendNaturalReadWithSwap(
+        body: CodeBlock.Builder,
+        field: FieldSpec.Scalar,
+    ) {
+        val canonicalOrder =
+            if (field.resolvedWireOrder == Endianness.Big) "BIG_ENDIAN" else "LITTLE_ENDIAN"
+        val readMethod =
+            when (field.kind.width) {
+                2 -> "readShort"
+                4 -> "readInt"
+                8 -> "readLong"
+                else -> error("unsupported natural width ${field.kind.width}")
+            }
+        val rawVar = "${field.name}Raw"
+        body.addStatement("val %L = buffer.%L()", rawVar, readMethod)
+        when (field.kind) {
+            ScalarKind.Short, ScalarKind.Int, ScalarKind.Long ->
+                body.addStatement(
+                    "val %L = if (buffer.byteOrder == %T.%L) %L else %M(%L)",
+                    field.name,
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                )
+            ScalarKind.UShort, ScalarKind.UInt, ScalarKind.ULong -> {
+                val toUnsigned =
+                    when (field.kind) {
+                        ScalarKind.UShort -> "toUShort"
+                        ScalarKind.UInt -> "toUInt"
+                        ScalarKind.ULong -> "toULong"
+                        else -> error("unreachable")
+                    }
+                body.addStatement(
+                    "val %L = (if (buffer.byteOrder == %T.%L) %L else %M(%L)).%L()",
+                    field.name,
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                    toUnsigned,
+                )
+            }
+            ScalarKind.Float ->
+                body.addStatement(
+                    "val %L = Float.fromBits(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+                    field.name,
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                )
+            ScalarKind.Double ->
+                body.addStatement(
+                    "val %L = Double.fromBits(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+                    field.name,
+                    BYTE_ORDER_CN,
+                    canonicalOrder,
+                    rawVar,
+                    SWAP_BYTES_MN,
+                    rawVar,
+                )
+            ScalarKind.UByte, ScalarKind.Byte, ScalarKind.Boolean ->
+                error("1-byte scalar should not take the natural-read-with-swap path")
+        }
     }
 
     private fun appendManualScalarDecode(
@@ -4528,10 +4610,16 @@ internal class CodecEmitter(
     ) {
         appendEncodeGuard(body, field, ownerSimpleName)
         val accessor = "value.${field.name}"
-        val needsManual =
-            field.wireBytes != field.kind.width || field.resolvedWireOrder != Endianness.Default
-        if (!needsManual) {
+        val widthMatches = field.wireBytes == field.kind.width
+        val explicitOrder = field.resolvedWireOrder != Endianness.Default
+        if (widthMatches && !explicitOrder) {
             body.addStatement(naturalScalarWriteStatement(field.kind, accessor))
+            return
+        }
+        // Natural-width explicit Big/Little on a multi-byte scalar. Convert
+        // to the natural integer type, conditionally swapBytes, write.
+        if (widthMatches && explicitOrder && field.kind.width > 1) {
+            appendNaturalWriteWithSwap(body, field, accessor)
             return
         }
         val bigEndian =
@@ -4540,6 +4628,44 @@ internal class CodecEmitter(
                 Endianness.Big, Endianness.Default -> true
             }
         appendManualScalarEncode(body, field, accessor, bigEndian)
+    }
+
+    private fun appendNaturalWriteWithSwap(
+        body: CodeBlock.Builder,
+        field: FieldSpec.Scalar,
+        accessor: String,
+    ) {
+        val canonicalOrder =
+            if (field.resolvedWireOrder == Endianness.Big) "BIG_ENDIAN" else "LITTLE_ENDIAN"
+        val writeMethod =
+            when (field.kind.width) {
+                2 -> "writeShort"
+                4 -> "writeInt"
+                8 -> "writeLong"
+                else -> error("unsupported natural width ${field.kind.width}")
+            }
+        val rawExpr =
+            when (field.kind) {
+                ScalarKind.Short, ScalarKind.Int, ScalarKind.Long -> accessor
+                ScalarKind.UShort -> "$accessor.toShort()"
+                ScalarKind.UInt -> "$accessor.toInt()"
+                ScalarKind.ULong -> "$accessor.toLong()"
+                ScalarKind.Float -> "$accessor.toRawBits()"
+                ScalarKind.Double -> "$accessor.toRawBits()"
+                ScalarKind.UByte, ScalarKind.Byte, ScalarKind.Boolean ->
+                    error("1-byte scalar should not take the natural-write-with-swap path")
+            }
+        val rawVar = "${field.name}Raw"
+        body.addStatement("val %L = %L", rawVar, rawExpr)
+        body.addStatement(
+            "buffer.%L(if (buffer.byteOrder == %T.%L) %L else %M(%L))",
+            writeMethod,
+            BYTE_ORDER_CN,
+            canonicalOrder,
+            rawVar,
+            SWAP_BYTES_MN,
+            rawVar,
+        )
     }
 
     private fun appendEncodeGuard(

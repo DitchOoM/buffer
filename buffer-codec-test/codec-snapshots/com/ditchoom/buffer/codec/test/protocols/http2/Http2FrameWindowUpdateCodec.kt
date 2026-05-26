@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols.http2
 
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
@@ -8,6 +9,7 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.swapBytes
 import kotlin.Int
 
 public object Http2FrameWindowUpdateCodec : Codec<Http2Frame.WindowUpdate> {
@@ -15,11 +17,8 @@ public object Http2FrameWindowUpdateCodec : Codec<Http2Frame.WindowUpdate> {
     val header = Http2LengthAndType(buffer.readUInt())
     val flags = buffer.readUByte()
     val streamId = Http2StreamId(buffer.readUInt())
-    val windowSizeIncrementB0 = buffer.readUByte().toUInt()
-    val windowSizeIncrementB1 = buffer.readUByte().toUInt()
-    val windowSizeIncrementB2 = buffer.readUByte().toUInt()
-    val windowSizeIncrementB3 = buffer.readUByte().toUInt()
-    val windowSizeIncrement = ((windowSizeIncrementB0 shl 24) or (windowSizeIncrementB1 shl 16) or (windowSizeIncrementB2 shl 8) or windowSizeIncrementB3)
+    val windowSizeIncrementRaw = buffer.readInt()
+    val windowSizeIncrement = (if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) windowSizeIncrementRaw else swapBytes(windowSizeIncrementRaw)).toUInt()
     return Http2Frame.WindowUpdate(header = header, flags = flags, streamId = streamId, windowSizeIncrement = windowSizeIncrement)
   }
 
@@ -31,10 +30,8 @@ public object Http2FrameWindowUpdateCodec : Codec<Http2Frame.WindowUpdate> {
     buffer.writeUInt(value.header.raw)
     buffer.writeUByte(value.flags)
     buffer.writeUInt(value.streamId.raw)
-    buffer.writeUByte(((value.windowSizeIncrement shr 24) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.windowSizeIncrement shr 16) and 0xFFu).toUByte())
-    buffer.writeUByte(((value.windowSizeIncrement shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte((value.windowSizeIncrement and 0xFFu).toUByte())
+    val windowSizeIncrementRaw = value.windowSizeIncrement.toInt()
+    buffer.writeInt(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) windowSizeIncrementRaw else swapBytes(windowSizeIncrementRaw))
   }
 
   override fun wireSize(`value`: Http2Frame.WindowUpdate, context: EncodeContext): WireSize = WireSize.Exact(13)
