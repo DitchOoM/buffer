@@ -48,6 +48,17 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: Pin Android debug keystore
+        # The runner otherwise auto-generates a fresh ~/.android/debug.keystore per
+        # run. Combined with the cached AVD (whose userdata retains a previously
+        # installed, differently-signed test APK), a cache hit then fails to install
+        # with INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES before any test runs.
+        # Pinning a committed debug key makes the APK signature deterministic, so a
+        # stale cached install always matches and the install is idempotent.
+        run: |
+          mkdir -p ~/.android
+          cp .ci/debug.keystore ~/.android/debug.keystore
+
       - name: AVD cache
         uses: actions/cache@v5
         id: avd-cache
