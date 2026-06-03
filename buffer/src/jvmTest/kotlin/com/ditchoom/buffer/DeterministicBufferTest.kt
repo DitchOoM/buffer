@@ -281,7 +281,7 @@ class DeterministicBufferTest {
         BufferFactory.deterministic().allocate(64).use { buffer ->
             buffer.writeInt(42)
             buffer.resetForRead()
-            val slice = buffer.slice() as PlatformBuffer
+            val slice = buffer.slice()
 
             // freeNativeMemory on slice is no-op
             slice.freeNativeMemory()
@@ -424,9 +424,8 @@ class DeterministicBufferTest {
         assertFailsWith<IllegalStateException> { slice.readShort() }
         assertFailsWith<IllegalStateException> { slice.readInt() }
         assertFailsWith<IllegalStateException> { slice.readLong() }
-        val writeSlice = slice as PlatformBuffer
-        assertFailsWith<IllegalStateException> { writeSlice.writeByte(0) }
-        assertFailsWith<IllegalStateException> { writeSlice.writeInt(0) }
+        assertFailsWith<IllegalStateException> { slice.writeByte(0) }
+        assertFailsWith<IllegalStateException> { slice.writeInt(0) }
     }
 
     @Test
