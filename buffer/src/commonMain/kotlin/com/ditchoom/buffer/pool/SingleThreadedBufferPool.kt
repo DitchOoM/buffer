@@ -15,6 +15,7 @@ internal class SingleThreadedBufferPool(
     private val maxPoolSize: Int,
     private val defaultBufferSize: Int,
     private val factory: BufferFactory,
+    private val byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
 ) : BufferPool {
     private val pool = ArrayDeque<PlatformBuffer>(maxPoolSize)
 
@@ -55,7 +56,7 @@ internal class SingleThreadedBufferPool(
                 // memory before allocating fresh, otherwise it leaks (Arena.ofShared
                 // never closes, FfmAutoBuffer waits on GC).
                 buffer?.freeNativeMemory()
-                factory.allocate(size)
+                factory.allocate(size, byteOrder)
             }
         return PooledBuffer(raw, this)
     }

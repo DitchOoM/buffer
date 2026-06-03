@@ -35,6 +35,53 @@ class BufferPoolTests {
             }
         }
 
+    // ============================================================================
+    // Byte order configuration (issue #167)
+    // ============================================================================
+
+    @Test
+    fun acquiredBuffersDefaultToBigEndian() =
+        withPool { pool ->
+            pool.withBuffer(8) { buffer ->
+                assertEquals(ByteOrder.BIG_ENDIAN, buffer.byteOrder)
+                buffer.writeShort(0x0102)
+                buffer.resetForRead()
+                assertEquals(0x01.toByte(), buffer.readByte())
+                assertEquals(0x02.toByte(), buffer.readByte())
+            }
+        }
+
+    @Test
+    fun acquiredBuffersHonorConfiguredLittleEndian() =
+        withPool(byteOrder = ByteOrder.LITTLE_ENDIAN) { pool ->
+            pool.withBuffer(8) { buffer ->
+                assertEquals(ByteOrder.LITTLE_ENDIAN, buffer.byteOrder)
+                buffer.writeShort(0x0102)
+                buffer.resetForRead()
+                assertEquals(0x02.toByte(), buffer.readByte())
+                assertEquals(0x01.toByte(), buffer.readByte())
+            }
+        }
+
+    @Test
+    fun multiThreadedPoolHonorsConfiguredByteOrder() =
+        withPool(threadingMode = ThreadingMode.MultiThreaded, byteOrder = ByteOrder.LITTLE_ENDIAN) { pool ->
+            pool.withBuffer(8) { buffer ->
+                assertEquals(ByteOrder.LITTLE_ENDIAN, buffer.byteOrder)
+            }
+        }
+
+    @Test
+    fun reusedBuffersKeepConfiguredByteOrder() =
+        withPool(byteOrder = ByteOrder.LITTLE_ENDIAN) { pool ->
+            // Acquire + release to seed the pool, then re-acquire the same buffer.
+            val first = pool.acquire(8)
+            pool.release(first)
+            pool.withBuffer(8) { reused ->
+                assertEquals(ByteOrder.LITTLE_ENDIAN, reused.byteOrder)
+            }
+        }
+
     @Test
     fun createPoolWithCustomMaxSize() =
         withPool(maxPoolSize = 2, defaultBufferSize = 1024) { pool ->
