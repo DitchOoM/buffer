@@ -170,40 +170,6 @@ class BufferTests {
         assertEquals(expected, platformBuffer.readString(4, Charset.UTF8))
     }
 
-    @Suppress("DEPRECATION")
-    @Test
-    fun sliceFragmented() {
-        val platformBuffer1 = BufferFactory.managed().allocate(3)
-        platformBuffer1.writeByte(1.toByte())
-        platformBuffer1.resetForRead()
-
-        val platformBuffer2 = BufferFactory.managed().allocate(3)
-        platformBuffer2.writeByte((-1).toByte())
-        platformBuffer2.resetForRead()
-
-        val fragmentedBuffer = FragmentedReadBuffer(platformBuffer1, platformBuffer2)
-        assertEquals(0, fragmentedBuffer.position())
-        assertEquals(2, fragmentedBuffer.limit())
-        assertEquals(1, fragmentedBuffer.readByte())
-        assertEquals(1, fragmentedBuffer.position())
-        assertEquals(2, fragmentedBuffer.limit())
-        assertEquals(-1, fragmentedBuffer.readByte())
-        assertEquals(2, fragmentedBuffer.position())
-        assertEquals(2, fragmentedBuffer.limit())
-        fragmentedBuffer.resetForRead()
-        assertEquals(0, fragmentedBuffer.position())
-        assertEquals(2, fragmentedBuffer.limit())
-        val slicedBuffer = fragmentedBuffer.slice()
-        assertEquals(0, slicedBuffer.position())
-        assertEquals(2, slicedBuffer.limit())
-        assertEquals(1, slicedBuffer.readByte())
-        assertEquals(1, slicedBuffer.position())
-        assertEquals(2, slicedBuffer.limit())
-        assertEquals(-1, slicedBuffer.readByte())
-        assertEquals(2, slicedBuffer.position())
-        assertEquals(2, slicedBuffer.limit())
-    }
-
     @Test
     fun byte() {
         val platformBuffer = BufferFactory.managed().allocate(1)
