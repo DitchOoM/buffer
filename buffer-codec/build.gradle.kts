@@ -117,6 +117,19 @@ kotlin {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
         }
+
+        // AGP 9 no longer auto-provides the default instrumentation runner;
+        // declare androidx.test.runner (AndroidJUnitRunner) explicitly so it is
+        // packaged into the androidTest APK (otherwise connectedDebugAndroidTest
+        // crashes with ClassNotFoundException: androidx.test.runner.AndroidJUnitRunner).
+        val androidInstrumentedTest by getting {
+            dependencies {
+                implementation(libs.androidx.test.runner)
+                implementation(libs.androidx.test.rules)
+                implementation(libs.androidx.test.core.ktx)
+                implementation(libs.androidx.test.ext.junit)
+            }
+        }
     }
 }
 
