@@ -1,0 +1,98 @@
+name: "Nightly Dependency Update (Claude)"
+
+# Complements Dependabot. Dependabot (.github/dependabot.yml) handles GitHub
+# Actions and the independently-versioned Gradle libraries. This job owns the
+# pieces Dependabot cannot: the Gradle wrapper, and the tightly-coupled
+# toolchain (Kotlin / KSP / kotlin-wrappers / AGP / kctfork) that must move in
+# lockstep and needs a real build to validate. Claude applies a coordinated
+# bump, validates it, and only then opens a PR.
+#
+# Requires repository secret ANTHROPIC_API_KEY.
+
+on:
+  schedule:
+    - cron: "0 7 * * *" # 07:00 UTC nightly
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: nightly-dependency-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: "zulu"
+          java-version: "21"
+          cache: gradle
+
+      - name: Cache Konan
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-${{ runner.os }}-
+
+      - name: Claude — coordinated toolchain update
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: "--allowedTools Bash,Edit,Write,Read,Glob,Grep --max-turns 60"
+          prompt: |
+            You are maintaining the ByteBuffer Kotlin Multiplatform library. Check for and apply
+            updates to ONLY the parts of the build that Dependabot does not manage, validate them
+            with a real build, and open a pull request only if at least one update applies cleanly
+            and the build passes. JAVA_HOME points at JDK 21 (do not change the build toolchain).
+
+            ## Scope you OWN (everything else is Dependabot's — do not touch it)
+            In gradle/libs.versions.toml: `kotlin`, `ksp`, `kotlinWrappers`, `androidGradlePlugin`, `kctfork`.
+            Plus the Gradle wrapper version in gradle/wrapper/gradle-wrapper.properties.
+            Do NOT change coroutines, kotlinpoet, dokka, kover, atomicfu, ktlint, mavenPublish,
+            kotlinx-benchmark, androidx-test, foojay, develocity, or any GitHub Action versions.
+
+            ## Find latest STABLE versions (ignore alpha/beta/rc/dev/Beta/Snapshot)
+            - Gradle:   curl -s https://services.gradle.org/versions/current
+            - Kotlin:   https://api.github.com/repos/JetBrains/kotlin/releases (stable tags only)
+            - KSP:      https://api.github.com/repos/google/ksp/releases
+            - AGP:      https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/maven-metadata.xml
+            - wrappers: https://repo1.maven.org/maven2/org/jetbrains/kotlin-wrappers/kotlin-web/maven-metadata.xml
+            - kctfork:  https://repo1.maven.org/maven2/dev/zacsweers/kctfork/ksp/maven-metadata.xml
+
+            ## Hard compatibility rules (a wrong bump breaks the build)
+            - KSP's version tracks Kotlin's MINOR: KSP 2.3.x ⇒ Kotlin 2.3.x. NEVER bump `kotlin` to a
+              minor that has no matching `ksp` stable release — the codec processor depends on KSP.
+            - `kotlinWrappers` and `kctfork` must target the chosen Kotlin version. Verify by reading
+              their POM's kotlin dependency (kotlin-web-<v>.pom / ksp-<v>.pom on Maven Central) before bumping.
+            - Move `kotlin`, `ksp`, `kotlinWrappers` together as one coordinated change.
+            - AGP majors can require build-script migration; apply only if you can make the build pass.
+
+            ## Apply + validate
+            1. Edit only the files in scope.
+            2. If you changed the Kotlin/JS toolchain, run `./gradlew kotlinUpgradeYarnLock` and stage
+               the updated kotlin-js-store/yarn.lock.
+            3. Validate (fix any migration breakage you reasonably can):
+                 ./gradlew help
+                 ./gradlew ktlintCheck
+                 ./gradlew :buffer-codec-processor:test
+                 ./gradlew allTests
+               (Apple targets cannot build on this Linux runner — that is expected and not a failure.)
+
+            ## Open a PR — only on success
+            - If you applied >= 1 update AND every command above passed: open a PR against `main`
+              titled "build: nightly toolchain/Gradle update", body listing each old -> new version and
+              the exact validation commands you ran. Add the label "dependencies".
+            - If nothing is out of date, OR you cannot make the build pass: do NOT open a PR. State why and stop.
+            - Never open a PR with a failing or unvalidated build.
