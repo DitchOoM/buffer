@@ -19,6 +19,25 @@ interface ReadWriteBuffer :
     val capacity: Int
 
     /**
+     * Returns a writable view over `[position, limit)`, optionally reinterpreted
+     * in a different [byteOrder]. The view shares storage with this buffer — writes
+     * are visible in both — so it is the zero-copy way to work in a non-default
+     * byte order (e.g. a little-endian protocol over a network-order pooled buffer):
+     *
+     * ```kotlin
+     * pool.withBuffer(1024) { buffer ->
+     *     val le = buffer.slice(ByteOrder.LITTLE_ENDIAN)
+     *     le.writeShort(0x0102)
+     * }
+     * ```
+     *
+     * Narrows [ReadBuffer.slice]'s return type to a writable buffer.
+     *
+     * @param byteOrder Byte order for the returned slice. Defaults to this buffer's order.
+     */
+    override fun slice(byteOrder: ByteOrder): ReadWriteBuffer
+
+    /**
      * XORs bytes in `[position, limit)` in-place with a repeating 4-byte mask.
      *
      * The mask is applied in big-endian order: mask byte 0 (MSB) is applied to

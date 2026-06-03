@@ -35,6 +35,72 @@ class BufferPoolTests {
             }
         }
 
+    // ============================================================================
+    // Byte order (issue #167)
+    //
+    // The pool itself is byte-order-agnostic: it always hands out buffers in the
+    // factory default (big-endian / network order). A caller that needs a
+    // different order slices the pooled buffer with the desired order. slice()
+    // is a zero-copy, writable view over the same storage (ReadWriteBuffer), so
+    // byte order is a per-view property and writes propagate to the underlying
+    // buffer. This keeps the pool free of mixed-order buffers, so reuse never
+    // hands a caller the wrong order.
+    // ============================================================================
+
+    @Test
+    fun acquiredBuffersDefaultToBigEndian() =
+        withPool { pool ->
+            pool.withBuffer(8) { buffer ->
+                assertEquals(ByteOrder.BIG_ENDIAN, buffer.byteOrder)
+                buffer.writeShort(0x0102)
+                buffer.resetForRead()
+                assertEquals(0x01.toByte(), buffer.readByte())
+                assertEquals(0x02.toByte(), buffer.readByte())
+            }
+        }
+
+    @Test
+    fun sliceToLittleEndianWritesLittleEndianBytes() =
+        withPool { pool ->
+            pool.withBuffer(8) { buffer ->
+                // Slice right after acquire (covers the full buffer) with the
+                // desired order, then write through the writable slice.
+                val le = buffer.slice(ByteOrder.LITTLE_ENDIAN)
+                assertEquals(ByteOrder.LITTLE_ENDIAN, le.byteOrder)
+                le.writeShort(0x0102)
+                le.resetForRead()
+                // little-endian wire bytes: low byte first.
+                assertEquals(0x02.toByte(), le.readByte())
+                assertEquals(0x01.toByte(), le.readByte())
+            }
+        }
+
+    @Test
+    fun sliceToLittleEndianRoundTripsShort() =
+        withPool { pool ->
+            pool.withBuffer(8) { buffer ->
+                val le = buffer.slice(ByteOrder.LITTLE_ENDIAN)
+                le.writeShort(0x0102)
+                le.resetForRead()
+                assertEquals(0x0102.toShort(), le.readShort())
+            }
+        }
+
+    @Test
+    fun sliceByteOrderIsAZeroCopyViewOfParent() =
+        withPool { pool ->
+            pool.withBuffer(8) { buffer ->
+                // Write in little-endian (wire bytes: 02 01)...
+                val le = buffer.slice(ByteOrder.LITTLE_ENDIAN)
+                le.writeShort(0x0102)
+                // ...then read the same shared bytes through a big-endian view.
+                // Same storage, opposite order → 0x0201, proving slice() is a
+                // zero-copy view and byte order is a per-view property.
+                val be = buffer.slice(ByteOrder.BIG_ENDIAN)
+                assertEquals(0x0201.toShort(), be.readShort())
+            }
+        }
+
     @Test
     fun createPoolWithCustomMaxSize() =
         withPool(maxPoolSize = 2, defaultBufferSize = 1024) { pool ->

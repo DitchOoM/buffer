@@ -78,6 +78,18 @@ val WriteBuffer.nativeMemoryAccess: NativeMemoryAccess?
     }
 
 /**
+ * Extension for ReadWriteBuffer to access native memory if available.
+ * Resolves ambiguity between ReadBuffer and WriteBuffer extensions for
+ * read/write buffers (e.g. pool-acquired buffers) that aren't statically
+ * typed as PlatformBuffer.
+ */
+val ReadWriteBuffer.nativeMemoryAccess: NativeMemoryAccess?
+    get() {
+        if (this is NativeMemoryAccess) return this
+        return unwrapFully() as? NativeMemoryAccess
+    }
+
+/**
  * Extension for PlatformBuffer to access native memory if available.
  * Resolves ambiguity between ReadBuffer and WriteBuffer extensions.
  */
@@ -172,6 +184,18 @@ val WriteBuffer.managedMemoryAccess: ManagedMemoryAccess?
         if (this is ManagedMemoryAccess) return this
         if (this is ReadBuffer) return unwrapFully() as? ManagedMemoryAccess
         return null
+    }
+
+/**
+ * Extension for ReadWriteBuffer to access managed memory if available.
+ * Resolves ambiguity between ReadBuffer and WriteBuffer extensions for
+ * read/write buffers (e.g. pool-acquired buffers) that aren't statically
+ * typed as PlatformBuffer.
+ */
+val ReadWriteBuffer.managedMemoryAccess: ManagedMemoryAccess?
+    get() {
+        if (this is ManagedMemoryAccess) return this
+        return unwrapFully() as? ManagedMemoryAccess
     }
 
 /**
