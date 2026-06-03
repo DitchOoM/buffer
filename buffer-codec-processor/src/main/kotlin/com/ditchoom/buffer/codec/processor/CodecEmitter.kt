@@ -3233,15 +3233,34 @@ internal class CodecEmitter(
      * and restoring on completion — no consumer-visible API change versus
      * the unbounded path.
      *
-     * When [FieldSpec.RemainingBytesPayload] appears as a *non-terminal*
-     * field (e.g. `PngChunk.data: BinaryData` followed by a 4-byte CRC
-     * trailer), the embedded payload is just a bounded body inside the
-     * packet's structure, not a deferred-decode tail. Emit only the normal
-     * decode/encode; skip Partial. [buildPartialClassTypeSpec] would
-     * otherwise error because it expects the Payload field at
-     * `fields.lastOrNull()`.
+     * Non-terminal payload (issue #168): when [FieldSpec.RemainingBytesPayload]
+     * is followed only by fixed-size trailers (e.g. a `checksum: UShort` after
+     * `@RemainingBytes val payload: P`), Partial still applies — `partial(...)`
+     * reads the header *and* the trailer eagerly (the payload's wire extent is
+     * `limit - reservedTrailingBytes`, computable without decoding it), and
+     * `complete(...)` re-seeks to the payload region and decodes it. This is
+     * gated to the unframed / unbounded case: combining a non-terminal payload
+     * with `@FramedBy` or a bounding `@UseCodec` stays terminal-only (the
+     * payload-region math would have to compose with the external bound, out of
+     * scope here), so those shapes fall back to normal decode/encode.
      */
-    private fun shouldEmitPartial(shape: CodecShape): Boolean = shape.fields.lastOrNull() is FieldSpec.RemainingBytesPayload
+    private fun shouldEmitPartial(shape: CodecShape): Boolean {
+        val payloadIndex = shape.fields.indexOfFirst { it is FieldSpec.RemainingBytesPayload }
+        if (payloadIndex < 0) return false
+        val trailing = shape.fields.subList(payloadIndex + 1, shape.fields.size)
+        // Terminal payload — the original streaming-defer shape.
+        if (trailing.isEmpty()) return true
+        // Non-terminal payload: only when the trailer is fixed-size (so the
+        // payload's end is computable without decoding) and the payload isn't
+        // also externally bounded.
+        if (!trailing.all { it is FieldSpec.FixedSize }) return false
+        if (shape.framedBy != null) return false
+        if (shape.fields.any { it.isBoundingShape() }) return false
+        return true
+    }
+
+    /** Index of the (single) `RemainingBytesPayload` field, or -1. */
+    private fun payloadFieldIndex(shape: CodecShape): Int = shape.fields.indexOfFirst { it is FieldSpec.RemainingBytesPayload }
 
     /**
      * Emit the nested `Partial` class. The `Partial`
@@ -3274,10 +3293,18 @@ internal class CodecEmitter(
         shape: CodecShape,
         payloadTypeParameter: PayloadTypeParameter?,
     ): TypeSpec {
+        val payloadIndex = payloadFieldIndex(shape)
         val payloadField =
-            shape.fields.lastOrNull() as? FieldSpec.RemainingBytesPayload
-                ?: error("buildPartialClassTypeSpec called for shape without trailing RemainingBytesPayload")
-        val headerFields = shape.fields.dropLast(1)
+            (shape.fields.getOrNull(payloadIndex) as? FieldSpec.RemainingBytesPayload)
+                ?: error("buildPartialClassTypeSpec called for shape without a RemainingBytesPayload")
+        // Fields before the payload (decoded eagerly in `partial`) and the
+        // fixed-size trailer after it (also decoded eagerly — non-terminal
+        // payload, issue #168). For the terminal shape `afterFields` is empty
+        // and the behavior is unchanged.
+        val beforeFields = shape.fields.subList(0, payloadIndex)
+        val afterFields = shape.fields.subList(payloadIndex + 1, shape.fields.size)
+        val nonTerminal = afterFields.isNotEmpty()
+        val exposedFields = beforeFields + afterFields
         // When the headers contain a bounding `@UseCodec` field (codec
         // implements `BoundingLengthCodec`), the partial decode mid-walk
         // narrows `buffer.limit()` and stashes the prior limit in
@@ -3285,6 +3312,7 @@ internal class CodecEmitter(
         // `complete()` can restore it. `@FramedBy` inherited from the
         // sealed parent supplies the bound externally (no in-shape field),
         // so we treat it as effectively-bounding for Partial purposes.
+        // (Non-terminal shapes are gated out of both by `shouldEmitPartial`.)
         val hasBoundingField = shape.fields.any { it.isBoundingShape() } || shape.framedBy != null
 
         val classBuilder = TypeSpec.classBuilder("Partial")
@@ -3295,7 +3323,7 @@ internal class CodecEmitter(
         if (typeVar != null) classBuilder.addTypeVariable(typeVar)
 
         val ctorBuilder = FunSpec.constructorBuilder().addModifiers(KModifier.INTERNAL)
-        for (field in headerFields) {
+        for (field in exposedFields) {
             val typeName = partialFieldTypeName(field)
             ctorBuilder.addParameter(field.name, typeName)
             classBuilder.addProperty(
@@ -3307,6 +3335,13 @@ internal class CodecEmitter(
         }
         if (hasBoundingField) {
             ctorBuilder.addParameter("outerLimit", INT)
+        }
+        // Non-terminal payload: capture the payload's wire region so
+        // `complete()` can re-seek to it (the trailer was already consumed
+        // in `partial`, so the buffer position no longer sits at the payload).
+        if (nonTerminal) {
+            ctorBuilder.addParameter("payloadStart", INT)
+            ctorBuilder.addParameter("payloadEnd", INT)
         }
         ctorBuilder.addParameter("buffer", READ_BUFFER_CN)
         ctorBuilder.addParameter("context", DECODE_CONTEXT_CN)
@@ -3320,6 +3355,20 @@ internal class CodecEmitter(
                 com.squareup.kotlinpoet.PropertySpec
                     .builder("outerLimit", INT, KModifier.PRIVATE)
                     .initializer("outerLimit")
+                    .build(),
+            )
+        }
+        if (nonTerminal) {
+            classBuilder.addProperty(
+                com.squareup.kotlinpoet.PropertySpec
+                    .builder("payloadStart", INT, KModifier.PRIVATE)
+                    .initializer("payloadStart")
+                    .build(),
+            )
+            classBuilder.addProperty(
+                com.squareup.kotlinpoet.PropertySpec
+                    .builder("payloadEnd", INT, KModifier.PRIVATE)
+                    .initializer("payloadEnd")
                     .build(),
             )
         }
@@ -3337,7 +3386,7 @@ internal class CodecEmitter(
         )
 
         classBuilder.addFunction(
-            buildPartialCompleteFun(shape, payloadTypeParameter, payloadField, hasBoundingField),
+            buildPartialCompleteFun(shape, payloadTypeParameter, payloadField, hasBoundingField, nonTerminal),
         )
         return classBuilder.build()
     }
@@ -3357,6 +3406,7 @@ internal class CodecEmitter(
         payloadTypeParameter: PayloadTypeParameter?,
         payloadField: FieldSpec.RemainingBytesPayload,
         hasBoundingField: Boolean,
+        nonTerminal: Boolean = false,
     ): FunSpec {
         val funBuilder = FunSpec.builder("complete")
         val returnType =
@@ -3397,7 +3447,21 @@ internal class CodecEmitter(
             }
         val ctorArgs = shape.fields.joinToString(", ") { "${it.name} = ${it.name}" }
         val body = CodeBlock.builder()
-        if (hasBoundingField) {
+        if (nonTerminal) {
+            // The trailer was consumed eagerly in `partial`, so the buffer
+            // position no longer sits at the payload. Re-seek to the captured
+            // payload region, narrow the limit to it, decode, then restore the
+            // limit. `payloadStart`/`payloadEnd` were captured at partial time.
+            body.addStatement("buffer.position(payloadStart)")
+            body.addStatement("val __payloadSavedLimit = buffer.limit()")
+            body.addStatement("buffer.setLimit(payloadEnd)")
+            body.beginControlFlow("return try")
+            body.add(payloadDecodeStmt)
+            body.addStatement("%T(%L)", returnType, ctorArgs)
+            body.nextControlFlow("finally")
+            body.addStatement("buffer.setLimit(__payloadSavedLimit)")
+            body.endControlFlow()
+        } else if (hasBoundingField) {
             // Payload decode runs inside the bounding-field-narrowed
             // limit (correct for payload bounding); the outer limit is
             // restored via try/finally so the caller's outer limit
@@ -3436,7 +3500,11 @@ internal class CodecEmitter(
         shape: CodecShape,
         payloadTypeParameter: PayloadTypeParameter?,
     ): FunSpec {
-        val headerFields = shape.fields.dropLast(1)
+        val payloadIndex = payloadFieldIndex(shape)
+        val payloadField = shape.fields[payloadIndex] as FieldSpec.RemainingBytesPayload
+        val beforeFields = shape.fields.subList(0, payloadIndex)
+        val afterFields = shape.fields.subList(payloadIndex + 1, shape.fields.size)
+        val nonTerminal = afterFields.isNotEmpty()
         val partialClassName = ClassName(shape.packageName, shape.codecSimpleName, "Partial")
         val funBuilder = FunSpec.builder("partial")
         val returnType =
@@ -3456,7 +3524,34 @@ internal class CodecEmitter(
             .returns(returnType)
 
         val body = CodeBlock.builder()
-        // When the parent supplies framing via
+        if (nonTerminal) {
+            // Non-terminal payload (issue #168): read the leading fields, then
+            // skip the payload region (its end is `limit - reservedTrailingBytes`,
+            // computable without decoding) and read the fixed-size trailer
+            // eagerly. `complete()` re-seeks to [payloadStart, payloadEnd) to
+            // decode the deferred payload. Gated to the unframed/unbounded case
+            // by `shouldEmitPartial`, so no framing/bounding handling here.
+            appendDecodeFields(body, beforeFields)
+            body.addStatement("val __payloadStart = buffer.position()")
+            body.addStatement("val __payloadEnd = buffer.limit() - %L", payloadField.reservedTrailingBytes)
+            body.addStatement("buffer.position(__payloadEnd)")
+            appendDecodeFields(body, afterFields)
+            val ctorArgs =
+                (
+                    beforeFields.map { "${it.name} = ${it.name}" } +
+                        afterFields.map { "${it.name} = ${it.name}" } +
+                        listOf(
+                            "payloadStart = __payloadStart",
+                            "payloadEnd = __payloadEnd",
+                            "buffer = buffer",
+                            "context = context",
+                        )
+                ).joinToString(", ")
+            body.addStatement("return %T(%L)", returnType, ctorArgs)
+            funBuilder.addCode(body.build())
+            return funBuilder.build()
+        }
+        // Terminal payload. When the parent supplies framing via
         // `@FramedBy`, the variant's partial decode reads the after-field
         // first, then applies the framing bound (capturing the outer
         // limit), then walks the remaining header fields inside the
@@ -3475,9 +3570,9 @@ internal class CodecEmitter(
                 "%T.applyBound(buffer, __framingLength)",
                 framedBy.codecClassName,
             )
-            appendDecodeFields(body, headerFields.filter { it !== afterField })
+            appendDecodeFields(body, beforeFields.filter { it !== afterField })
         } else {
-            appendDecodeFields(body, headerFields)
+            appendDecodeFields(body, beforeFields)
         }
         val boundingField = shape.fields.firstOrNull { it.isBoundingShape() }
         val outerLimitLocal =
@@ -3494,7 +3589,7 @@ internal class CodecEmitter(
             } ?: emptyList()
         val ctorArgs =
             (
-                headerFields.map { "${it.name} = ${it.name}" } +
+                beforeFields.map { "${it.name} = ${it.name}" } +
                     outerLimitArgs +
                     listOf("buffer = buffer", "context = context")
             ).joinToString(", ")

@@ -71,10 +71,6 @@ private inline fun copyMemory(
 private inline fun getCompressBound(size: Int): Int = compressBound(size.convert()).convert()
 
 /**
- * Window bits for different compression formats.
- */
-
-/**
  * Apple implementation using system zlib with direct buffer access.
  */
 @OptIn(ExperimentalForeignApi::class)
