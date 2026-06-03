@@ -14,6 +14,7 @@ jobs:
       # Force-kill emulator after 1 second instead of waiting 20 seconds for graceful shutdown
       ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL: 1
     strategy:
+      fail-fast: false
       matrix:
         # API 21 + 35 cover every distinct java.util.zip code path the compression module
         # takes (verified against the SDK's api-versions.xml):
@@ -24,7 +25,15 @@ jobs:
         # A mid level (e.g. 29) only re-tests the combination of branches already covered
         # by 21 and 35 independently, so it is omitted as redundant.
         # (AGP 9 made KMP commonTest actually run on the emulator; AGP 8 ran 0 of them.)
-        api-level: [21, 35]
+        # target/arch are explicit: API 35 has no 32-bit/`default` image (google_apis;x86_64
+        # only), and the action otherwise defaults to the nonexistent default;x86.
+        include:
+          - api-level: 21
+            target: default
+            arch: x86_64
+          - api-level: 35
+            target: google_apis
+            arch: x86_64
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -46,13 +55,15 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-${{ matrix.api-level }}
+          key: avd-${{ matrix.api-level }}-${{ matrix.target }}-${{ matrix.arch }}
 
       - name: create AVD and generate snapshot for caching
         if: steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api-level }}
+          target: ${{ matrix.target }}
+          arch: ${{ matrix.arch }}
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: false
@@ -62,6 +73,8 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api-level }}
+          target: ${{ matrix.target }}
+          arch: ${{ matrix.arch }}
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
