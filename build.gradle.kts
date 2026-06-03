@@ -31,7 +31,9 @@ tasks.register("prePublishCheck") {
     group = "verification"
     dependsOn("allTests")
     dependsOn(
-        ":buffer:testDebugUnitTest",
+        // :buffer pins testBuildType = "benchmark", so its only Android-host unit-test
+        // task is testBenchmarkUnitTest (AGP 9 no longer generates testDebugUnitTest for it).
+        ":buffer:testBenchmarkUnitTest",
         ":buffer-compression:testDebugUnitTest",
         ":buffer-flow:testDebugUnitTest",
         ":buffer-codec:testDebugUnitTest",
