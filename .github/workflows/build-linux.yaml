@@ -82,9 +82,12 @@ jobs:
           --no-build-cache ${{ inputs.gradle-args }}
 
       - name: Run JVM / JS / WASM / Android-host tests
-        # The host-JVM Android unit tasks (testDebugUnitTest /
-        # testReleaseUnitTest) run here so contributors can reproduce
+        # The host-JVM Android unit tasks run here so contributors can reproduce
         # them on the desktop without an emulator — a convenience signal.
+        # Under AGP 9, a KMP androidTarget creates a unit-test task only for its
+        # testBuildType: compression/flow/codec default to "debug"
+        # (testDebugUnitTest), while :buffer pins testBuildType="benchmark"
+        # (testBenchmarkUnitTest). There is no testReleaseUnitTest.
         # They are NOT authoritative for Android: the host JDK 21 differs
         # from ART (its own Unsafe / libcore surface, the legacy
         # java.nio.DirectByteBuffer `(long, int)` ctor, different
@@ -95,7 +98,7 @@ jobs:
         run: >-
           ./gradlew ktlintCheck
           jvmTest jsNodeTest jsBrowserTest wasmJsNodeTest wasmJsBrowserTest
-          testDebugUnitTest testReleaseUnitTest
+          testDebugUnitTest testBenchmarkUnitTest
           --no-build-cache ${{ inputs.gradle-args }}
 
       - name: Run Linux x64 tests
