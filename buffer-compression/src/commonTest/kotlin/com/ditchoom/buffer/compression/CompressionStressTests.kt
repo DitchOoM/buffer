@@ -399,7 +399,11 @@ class CompressionStressTests {
         runTest {
             if (!supportsSyncCompression) return@runTest
 
-            val dataSize = 100_000
+            // Bounded data size: with 1-byte chunks this materializes one buffer per
+            // byte, so 100 KB would allocate ~100k live buffers and OOM ART's small heap
+            // on the emulator. 16 KB still exercises every chunk-size boundary below;
+            // bulk-volume roundtrips are covered by the large-data stress tests.
+            val dataSize = 16_384
             val original = generateMixedBuffer(dataSize)
             val originalCopy = copyBuffer(original)
             val chunkSizes = listOf(1, 7, 8, 9, 15, 16, 17, 64, 128, 256, 512, 1024, 4096, 8192, 32768)
@@ -446,7 +450,10 @@ class CompressionStressTests {
         runTest {
             if (!supportsSyncCompression) return@runTest
 
-            val dataSize = 100_000
+            // Bounded data size: 1-byte chunks split the compressed buffer into one
+            // buffer per byte, so 100 KB would allocate ~100k live buffers and OOM ART's
+            // small heap on the emulator. 16 KB still exercises every chunk-size boundary.
+            val dataSize = 16_384
             val original = generateMixedBuffer(dataSize)
             val originalCopy = copyBuffer(original)
 

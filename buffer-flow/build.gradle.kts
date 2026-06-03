@@ -171,6 +171,19 @@ kotlin {
             implementation(project(":buffer-codec-test"))
         }
 
+        // AGP 9 no longer auto-provides the default instrumentation runner;
+        // declare androidx.test.runner (AndroidJUnitRunner) explicitly so it is
+        // packaged into the androidTest APK (otherwise connectedDebugAndroidTest
+        // crashes with ClassNotFoundException: androidx.test.runner.AndroidJUnitRunner).
+        val androidInstrumentedTest by getting {
+            dependencies {
+                implementation(libs.androidx.test.runner)
+                implementation(libs.androidx.test.rules)
+                implementation(libs.androidx.test.core.ktx)
+                implementation(libs.androidx.test.ext.junit)
+            }
+        }
+
         // Benchmark source sets - all share the same source directory
         val jvmBenchmark by getting {
             kotlin.srcDir("src/commonBenchmark/kotlin")
@@ -192,7 +205,7 @@ kotlin {
 android {
     compileSdk = 36
     defaultConfig {
-        minSdk = 19
+        minSdk = 21
     }
     namespace = "$group.buffer.flow"
 

@@ -95,17 +95,32 @@ private fun Deflater.deflateInto(
 
     // Fallback: use array if available
     if (buffer.hasArray()) {
-        val count = deflate(buffer.array(), buffer.arrayOffset() + buffer.position(), buffer.remaining(), flushMode)
+        val count = deflateArray(buffer.array(), buffer.arrayOffset() + buffer.position(), buffer.remaining(), flushMode)
         (buffer as Buffer).position(buffer.position() + count)
         return count
     }
 
     // Fallback: use temp array
     val temp = ByteArray(buffer.remaining())
-    val count = deflate(temp, 0, temp.size, flushMode)
+    val count = deflateArray(temp, 0, temp.size, flushMode)
     buffer.put(temp, 0, count)
     return count
 }
+
+/**
+ * Array-based deflate that sidesteps an Android <= 21 ART quirk: the 4-arg
+ * `deflate(b, off, len, NO_FLUSH)` overload does not drain buffered data during the
+ * finish phase on old ART (it emits only the header), whereas the 3-arg
+ * `deflate(b, off, len)` does. On the JDK and ART >= API 29 the two are identical, so
+ * this only changes behavior on the affected old devices. The explicit flush overload
+ * is still used for SYNC_FLUSH, which the 3-arg form cannot express.
+ */
+private fun Deflater.deflateArray(
+    b: ByteArray,
+    off: Int,
+    len: Int,
+    flushMode: Int,
+): Int = if (flushMode == Deflater.NO_FLUSH) deflate(b, off, len) else deflate(b, off, len, flushMode)
 
 /**
  * Sets inflater input from a ReadBuffer, using ByteBuffer when available.

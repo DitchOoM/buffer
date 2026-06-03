@@ -2,7 +2,7 @@
 
 import groovy.util.Node
 import groovy.xml.XmlParser
-import java.net.URL
+import java.net.URI
 
 class Version(
     val major: UInt,
@@ -40,15 +40,15 @@ private var latestVersion: Version? = Version(0u, 0u, 0u, true)
 
 @Suppress("UNCHECKED_CAST")
 fun getLatestVersion(): Version {
-    val latestVersion = latestVersion
-    if (latestVersion != null && !latestVersion.isVersionZero()) {
-        return latestVersion
+    val cached = latestVersion
+    if (cached != null && !cached.isVersionZero()) {
+        return cached
     }
-    val xml = URL("https://repo1.maven.org/maven2/com/ditchoom/${rootProject.name}/maven-metadata.xml").readText()
+    val xml = URI("https://repo1.maven.org/maven2/com/ditchoom/${rootProject.name}/maven-metadata.xml").toURL().readText()
     val versioning = XmlParser().parseText(xml)["versioning"] as List<Node>
     val latestStringList = versioning.first()["latest"] as List<Node>
     val result = Version((latestStringList.first().value() as List<*>).first().toString(), false)
-    this.latestVersion = result
+    latestVersion = result
     return result
 }
 
@@ -65,4 +65,4 @@ fun getNextVersion(snapshot: Boolean): Version {
     return v.incrementPatch()
 }
 
-project.extra.set("getNextVersion", this::getNextVersion)
+project.extra.set("getNextVersion", { snapshot: Boolean -> getNextVersion(snapshot) })
