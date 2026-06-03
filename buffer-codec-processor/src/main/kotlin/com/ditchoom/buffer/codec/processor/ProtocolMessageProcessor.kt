@@ -137,6 +137,7 @@ class ProtocolMessageProcessor(
                 validateSealedDispatcher(symbol)
                 validateDispatchOnSealed(symbol)
                 validateFramedBy(symbol)
+                validateForwardCompatible(symbol)
                 emitter.tryEmit(symbol)
                 continue
             }
@@ -400,6 +401,12 @@ class ProtocolMessageProcessor(
         val seen = mutableMapOf<Int, String>()
         for (sub in parent.getSealedSubclasses()) {
             val subName = sub.qualifiedName?.asString() ?: sub.simpleName.asString()
+            // The `@ForwardCompatible` unknown-variant sink is the `else`
+            // arm of dispatch — it carries no `@PacketType` and its first
+            // constructor parameter is `opcode: Int`, not the
+            // discriminator. The dispatch-shape rules below don't apply
+            // to it; `validateForwardCompatible` checks its shape instead.
+            if (sub.hasAnnotation(UNKNOWN_VARIANT_SHORT, UNKNOWN_VARIANT_QNAME)) continue
             // Issue #150 — `data object` / `object` variants are valid
             // here (they emit empty-fields singleton codecs). Reject only
             // non-data, non-object subclasses.
@@ -1737,9 +1744,15 @@ class ProtocolMessageProcessor(
         // E2/E3 — `after = "X"`: X exists with Exact wire width on every primary constructor.
         val targets: List<Pair<KSClassDeclaration, List<KSValueParameter>>> =
             if (isSealedParent) {
-                owner.getSealedSubclasses().toList().mapNotNull { variant ->
-                    variant.primaryConstructor?.let { variant to it.parameters }
-                }
+                // The `@ForwardCompatible` unknown-variant sink carries no
+                // discriminator/header field — the dispatcher writes the
+                // discriminator itself on the preserve path — so it is
+                // exempt from the `after`-field requirement.
+                val dispatchVariants =
+                    owner.getSealedSubclasses().toList().filterNot {
+                        it.hasAnnotation(UNKNOWN_VARIANT_SHORT, UNKNOWN_VARIANT_QNAME)
+                    }
+                dispatchVariants.mapNotNull { variant -> variant.primaryConstructor?.let { variant to it.parameters } }
             } else {
                 listOf(owner to (ctor?.parameters ?: emptyList()))
             }
@@ -1784,6 +1797,179 @@ class ProtocolMessageProcessor(
                     target,
                 )
             }
+        }
+    }
+
+    private fun KSClassDeclaration.hasAnnotation(
+        short: String,
+        qname: String,
+    ): Boolean =
+        annotations.any { ann ->
+            ann.shortName.asString() == short &&
+                ann.annotationType
+                    .resolve()
+                    .declaration.qualifiedName
+                    ?.asString() == qname
+        }
+
+    /**
+     * `@ForwardCompatible` validator. Enforces the skip-and-preserve
+     * contract's compile-time rules (spec §"Compile-time rules"):
+     *
+     *   - **F1** — requires `@FramedBy` on the same type. You cannot
+     *     skip an unknown variant without a framing length to measure
+     *     its payload.
+     *   - **F2** — requires `@DispatchOn` with a single-byte
+     *     discriminator. Framed sealed dispatch routes exclusively
+     *     through `@DispatchOn`; a single-byte discriminator guarantees
+     *     the preserved opcode re-encodes byte-identically (the design's
+     *     byte-identity requirement).
+     *   - **F3** — exactly one `@UnknownVariant` sealed member, and it
+     *     must be the type named by `unknown`.
+     *   - **F4** — the `@UnknownVariant` member must not carry
+     *     `@PacketType` (it is the `else` sink, never value-matched).
+     *   - **F5** — the `@UnknownVariant` member's primary constructor
+     *     must be shaped `(opcode: Int, raw: PlatformBuffer)` (a
+     *     `ReadBuffer`-typed `raw` is also accepted).
+     *
+     * Only runs on sealed interfaces (the dispatch parents); a
+     * `@ForwardCompatible` on any other target is a no-op here (the
+     * annotation `@Target(CLASS)` admits it, but it has no meaning
+     * without sealed dispatch — caught as F2's missing `@DispatchOn`).
+     */
+    private fun validateForwardCompatible(owner: KSClassDeclaration) {
+        val ann =
+            owner.annotations.firstOrNull { a ->
+                a.shortName.asString() == FORWARD_COMPATIBLE_SHORT &&
+                    a.annotationType
+                        .resolve()
+                        .declaration.qualifiedName
+                        ?.asString() == FORWARD_COMPATIBLE_QNAME
+            } ?: return
+        val ownerName = owner.qualifiedName?.asString() ?: owner.simpleName.asString()
+
+        // F1 — requires @FramedBy.
+        if (!owner.hasAnnotation(FRAMED_BY_SHORT, FRAMED_BY_QNAME)) {
+            logger.error(
+                "@ForwardCompatible on $ownerName requires @FramedBy on the same type: cannot " +
+                    "skip an unknown variant without a framing length. Add " +
+                    "@FramedBy(<LengthCodec>::class, after = \"<discriminatorField>\").",
+                owner,
+            )
+        }
+
+        // F2 — requires @DispatchOn with a single-byte discriminator.
+        val dispatchOn =
+            owner.annotations.firstOrNull { a ->
+                a.shortName.asString() == DISPATCH_ON_SHORT &&
+                    a.annotationType
+                        .resolve()
+                        .declaration.qualifiedName
+                        ?.asString() == DISPATCH_ON_QNAME
+            }
+        if (dispatchOn == null) {
+            logger.error(
+                "@ForwardCompatible on $ownerName requires @DispatchOn dispatch with a single-byte " +
+                    "discriminator. Framed sealed dispatch routes through @DispatchOn; wrap the " +
+                    "opcode in a `@JvmInline value class` carrying a @DispatchValue and annotate the " +
+                    "parent with @DispatchOn(<OpCode>::class).",
+                owner,
+            )
+        } else {
+            val discriminatorType =
+                dispatchOn.arguments
+                    .firstOrNull { it.name?.asString() == "type" }
+                    ?.value as? KSType
+            val discriminatorDecl = discriminatorType?.declaration as? KSClassDeclaration
+            val innerQname =
+                discriminatorDecl
+                    ?.primaryConstructor
+                    ?.parameters
+                    ?.singleOrNull()
+                    ?.type
+                    ?.resolve()
+                    ?.declaration
+                    ?.qualifiedName
+                    ?.asString()
+            // Single-byte inner scalars only (Byte / UByte). Wider
+            // discriminators would need a multi-byte opcode store + a
+            // byte-order-aware re-encode, neither of which the preserve
+            // path emits today.
+            if (innerQname != null && innerQname !in SINGLE_BYTE_SCALAR_QNAMES) {
+                logger.error(
+                    "@ForwardCompatible on $ownerName requires a single-byte @DispatchOn " +
+                        "discriminator (Byte / UByte inner scalar), but the discriminator's inner " +
+                        "type is `$innerQname`. The preserved opcode is stored as one byte and " +
+                        "re-encoded with writeUByte, so a wider discriminator cannot round-trip " +
+                        "byte-identically.",
+                    owner,
+                )
+            }
+        }
+
+        // F3 — exactly one @UnknownVariant sealed member, matching `unknown`.
+        val unknownMembers =
+            owner.getSealedSubclasses().filter { it.hasAnnotation(UNKNOWN_VARIANT_SHORT, UNKNOWN_VARIANT_QNAME) }.toList()
+        if (unknownMembers.size != 1) {
+            logger.error(
+                "@ForwardCompatible on $ownerName requires exactly one sealed member marked " +
+                    "@UnknownVariant, but found ${unknownMembers.size}. The unknown variant is the " +
+                    "single sink that unrecognized discriminators are preserved into.",
+                owner,
+            )
+            return
+        }
+        val sink = unknownMembers[0]
+        val sinkName = sink.qualifiedName?.asString() ?: sink.simpleName.asString()
+
+        val declaredUnknown =
+            ann.arguments
+                .firstOrNull { it.name?.asString() == "unknown" }
+                ?.value as? KSType
+        val declaredUnknownQname = declaredUnknown?.declaration?.qualifiedName?.asString()
+        if (declaredUnknownQname != null && declaredUnknownQname != sink.qualifiedName?.asString()) {
+            logger.error(
+                "@ForwardCompatible(unknown = ...) on $ownerName names `$declaredUnknownQname`, but " +
+                    "the @UnknownVariant member is `$sinkName`. `unknown` must name the " +
+                    "@UnknownVariant-marked member.",
+                owner,
+            )
+        }
+
+        // F4 — @UnknownVariant must not carry @PacketType.
+        if (sink.hasAnnotation(PACKET_TYPE_SHORT, PACKET_TYPE_QNAME)) {
+            logger.error(
+                "@UnknownVariant $sinkName must not carry @PacketType — it is the `else` sink of " +
+                    "forward-compatible dispatch and is never matched by discriminator value.",
+                sink,
+            )
+        }
+
+        // F5 — (opcode: Int, raw: PlatformBuffer | ReadBuffer).
+        val params = sink.primaryConstructor?.parameters.orEmpty()
+        val hasInt =
+            params.any {
+                it.type
+                    .resolve()
+                    .declaration.qualifiedName
+                    ?.asString() == INT_QNAME
+            }
+        val hasRawBuffer =
+            params.any {
+                it.type
+                    .resolve()
+                    .declaration.qualifiedName
+                    ?.asString() in
+                    setOf(PLATFORM_BUFFER_QNAME, READ_BUFFER_QNAME)
+            }
+        if (params.size != 2 || !hasInt || !hasRawBuffer) {
+            logger.error(
+                "@UnknownVariant $sinkName must have a primary constructor shaped " +
+                    "`(opcode: Int, raw: PlatformBuffer)` (a ReadBuffer-typed `raw` is also " +
+                    "accepted): `opcode` carries the discriminator byte and `raw` carries the " +
+                    "opaque preserved payload.",
+                sink,
+            )
         }
     }
 
@@ -2155,6 +2341,14 @@ class ProtocolMessageProcessor(
         private const val DERIVED_LENGTH_SHORT = "DerivedLength"
         private const val FRAMED_BY_QNAME = "com.ditchoom.buffer.codec.annotations.FramedBy"
         private const val FRAMED_BY_SHORT = "FramedBy"
+        private const val FORWARD_COMPATIBLE_QNAME = "com.ditchoom.buffer.codec.annotations.ForwardCompatible"
+        private const val FORWARD_COMPATIBLE_SHORT = "ForwardCompatible"
+        private const val UNKNOWN_VARIANT_QNAME = "com.ditchoom.buffer.codec.annotations.UnknownVariant"
+        private const val UNKNOWN_VARIANT_SHORT = "UnknownVariant"
+        private const val PLATFORM_BUFFER_QNAME = "com.ditchoom.buffer.PlatformBuffer"
+        private const val READ_BUFFER_QNAME = "com.ditchoom.buffer.ReadBuffer"
+        private const val INT_QNAME = "kotlin.Int"
+        private val SINGLE_BYTE_SCALAR_QNAMES = setOf("kotlin.Byte", "kotlin.UByte")
         private const val REMAINING_BYTES_QNAME = "com.ditchoom.buffer.codec.annotations.RemainingBytes"
         private const val REMAINING_BYTES_SHORT = "RemainingBytes"
         private const val CODEC_QNAME = "com.ditchoom.buffer.codec.Codec"
