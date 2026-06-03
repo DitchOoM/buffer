@@ -83,6 +83,34 @@ class BufferPoolTests {
         }
 
     @Test
+    fun sliceOfPooledBufferInheritsConfiguredByteOrder() =
+        withPool(byteOrder = ByteOrder.LITTLE_ENDIAN) { pool ->
+            pool.withBuffer(8) { buffer ->
+                buffer.writeShort(0x0102)
+                buffer.resetForRead()
+                val slice = buffer.slice()
+                // slice() defaults to the parent's order, which is the
+                // pool-configured little-endian.
+                assertEquals(ByteOrder.LITTLE_ENDIAN, slice.byteOrder)
+                // Same order as the write → value round-trips.
+                assertEquals(0x0102.toShort(), slice.readShort())
+            }
+        }
+
+    @Test
+    fun sliceOfPooledBufferHonorsExplicitByteOrderOverride() =
+        withPool(byteOrder = ByteOrder.LITTLE_ENDIAN) { pool ->
+            pool.withBuffer(8) { buffer ->
+                buffer.writeShort(0x0102) // little-endian wire bytes: 02 01
+                buffer.resetForRead()
+                val slice = buffer.slice(ByteOrder.BIG_ENDIAN)
+                assertEquals(ByteOrder.BIG_ENDIAN, slice.byteOrder)
+                // Re-reading the LE wire bytes (02 01) as big-endian → 0x0201.
+                assertEquals(0x0201.toShort(), slice.readShort())
+            }
+        }
+
+    @Test
     fun createPoolWithCustomMaxSize() =
         withPool(maxPoolSize = 2, defaultBufferSize = 1024) { pool ->
             val buffers = (1..5).map { pool.acquire(512) }
