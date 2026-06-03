@@ -6941,9 +6941,26 @@ internal class CodecEmitter(
 
         val subclasses = symbol.getSealedSubclasses().toList()
         if (subclasses.isEmpty()) return null
+
+        // `@ForwardCompatible` capture. The unknown-variant sink carries
+        // `@UnknownVariant` (not `@PacketType`), so it is excluded from
+        // the dispatch table and drives the skip+preserve emit instead.
+        // Only wired alongside `@FramedBy` — the validator errors on
+        // `@ForwardCompatible` without framing, and without a framing
+        // length there is no payload boundary to skip.
+        val forwardCompatible =
+            symbol.annotations
+                .firstOrNull { it.shortName.asString() == "ForwardCompatible" }
+                ?.takeIf { symbol.annotations.any(::isFramedByAnn) }
+                ?.let { resolveForwardCompatibleConfig(subclasses) }
+
         val variants = mutableListOf<DispatchOnVariantSpec>()
         val seenValues = mutableSetOf<Int>()
         for (sub in subclasses) {
+            // The `@UnknownVariant` sink is handled by the dispatcher's
+            // skip+preserve arms, not the variant table — skip it here so
+            // its missing `@PacketType` doesn't fail dispatcher analysis.
+            if (sub.annotations.any { it.shortName.asString() == "UnknownVariant" }) continue
             // Issue #150 — accept `data object` / `object` variants
             // (classKind == OBJECT). Object variants don't carry the
             // discriminator field (no constructor), so the firstParam
@@ -7044,6 +7061,49 @@ internal class CodecEmitter(
             variants = variants,
             payloadTypeParameter = payloadTypeParameter,
             framedBy = framedBy,
+            forwardCompatible = forwardCompatible,
+        )
+    }
+
+    /**
+     * Resolve the `@ForwardCompatible` unknown-variant sink among the
+     * sealed parent's subclasses: the (single) subclass carrying
+     * `@UnknownVariant`, with its `(Int, PlatformBuffer | ReadBuffer)`
+     * constructor parameter names resolved by type. Returns null when
+     * the shape is malformed (no/duplicate sink, wrong arity, missing
+     * either typed parameter) — the validator surfaces the user-facing
+     * diagnostic; the analyzer stays silent and simply emits the
+     * non-forward-compatible (throwing) dispatcher.
+     */
+    private fun resolveForwardCompatibleConfig(subclasses: List<KSClassDeclaration>): ForwardCompatibleConfig? {
+        val sink =
+            subclasses
+                .filter { sub -> sub.annotations.any { it.shortName.asString() == "UnknownVariant" } }
+                .singleOrNull() ?: return null
+        val ctor = sink.primaryConstructor ?: return null
+        val params = ctor.parameters
+        if (params.size != 2) return null
+        val opcodeParam =
+            params.firstOrNull {
+                it.type
+                    .resolve()
+                    .declaration.qualifiedName
+                    ?.asString() == "kotlin.Int"
+            } ?: return null
+        val rawParam =
+            params.firstOrNull {
+                it.type
+                    .resolve()
+                    .declaration.qualifiedName
+                    ?.asString() in FORWARD_COMPATIBLE_RAW_QNAMES
+            } ?: return null
+        val opcodeName = opcodeParam.name?.asString() ?: return null
+        val rawName = rawParam.name?.asString() ?: return null
+        if (opcodeName == rawName) return null
+        return ForwardCompatibleConfig(
+            unknownClassName = classNameOf(sink),
+            opcodeFieldName = opcodeName,
+            rawFieldName = rawName,
         )
     }
 
@@ -7406,6 +7466,7 @@ internal class CodecEmitter(
                 )
             }
         }
+        shape.forwardCompatible?.let { fc -> appendForwardCompatibleEncodeArm(body, shape, fc) }
         body.endControlFlow()
         return FunSpec
             .builder("encode")
@@ -7801,6 +7862,95 @@ internal class CodecEmitter(
     private fun expectedDispatchValueSet(shape: DispatchOnDispatcherShape): String =
         shape.variants.joinToString(prefix = "one of {", postfix = "}") { it.dispatchValue.toString() }
 
+    /**
+     * Emit the `@ForwardCompatible` decode `else` arm: skip an
+     * unrecognized discriminator's framed payload and preserve it
+     * verbatim into the unknown variant, instead of throwing.
+     *
+     * Position on entry is `discriminatorPosition` (the decode rewinds
+     * there before dispatching). We re-read the single discriminator
+     * byte as the opcode — capturing the *full* wire byte rather than
+     * the (possibly sub-byte) dispatch value, which is what makes
+     * re-encode byte-identical — then read the inherited framing prefix
+     * to bound the payload, copy the payload into a caller-controlled
+     * buffer (default `managed()`), and restore the outer limit so the
+     * cursor lands exactly past the op.
+     *
+     * The copy is mandatory (the design's lifetime contract): the
+     * preserved bytes outlive the often-pooled frame buffer, so a
+     * non-consuming `slice()` would dangle. `factory.allocate + write`
+     * gives an independently-owned buffer.
+     */
+    private fun appendForwardCompatibleDecodeElse(
+        body: CodeBlock.Builder,
+        shape: DispatchOnDispatcherShape,
+        fc: ForwardCompatibleConfig,
+    ) {
+        val framedBy =
+            shape.framedBy
+                ?: error("@ForwardCompatible requires @FramedBy; analyzer should not have set forwardCompatible")
+        body.beginControlFlow("else ->")
+        // Cursor is at discriminatorPosition (rewound by decode); set it
+        // explicitly so the read is robust to future reordering.
+        body.addStatement("buffer.position(discriminatorPosition)")
+        body.addStatement("val __fcOpcode = buffer.readUByte().toInt()")
+        body.addStatement(
+            "val __fcLength = %T.decode(buffer, context)",
+            framedBy.codecClassName,
+        )
+        body.addStatement("val __fcFrameEnd = buffer.position() + __fcLength.toInt()")
+        body.addStatement(
+            "val __fcFactory = context[%T] ?: %T.%M()",
+            FORWARD_COMPATIBLE_FACTORY_KEY_CN,
+            BUFFER_FACTORY_CN,
+            BUFFER_FACTORY_MANAGED_MN,
+        )
+        body.addStatement("val __fcRaw = __fcFactory.allocate(__fcLength.toInt())")
+        body.addStatement("val __fcSavedLimit = buffer.limit()")
+        body.addStatement("buffer.setLimit(__fcFrameEnd)")
+        body.addStatement("__fcRaw.write(buffer)")
+        body.addStatement("buffer.setLimit(__fcSavedLimit)")
+        body.addStatement("__fcRaw.resetForRead()")
+        body.addStatement(
+            "%T(%L = __fcOpcode, %L = __fcRaw)",
+            fc.unknownClassName,
+            fc.opcodeFieldName,
+            fc.rawFieldName,
+        )
+        body.endControlFlow()
+    }
+
+    /**
+     * Emit the `@ForwardCompatible` encode arm for an unknown variant:
+     * re-frame the preserved payload with the same inherited framing
+     * codec the known variants use (via [FramedEncoder]), writing the
+     * stored opcode as the single-byte discriminator. Byte-identical to
+     * the original wire bytes — same framing codec re-derives the prefix,
+     * the discriminator is one byte, and the payload is reproduced
+     * verbatim. `raw.slice()` is non-consuming and zero-copy: we own
+     * `raw`, and the slice is transient within the encode call.
+     */
+    private fun appendForwardCompatibleEncodeArm(
+        body: CodeBlock.Builder,
+        shape: DispatchOnDispatcherShape,
+        fc: ForwardCompatibleConfig,
+    ) {
+        val framedBy =
+            shape.framedBy
+                ?: error("@ForwardCompatible requires @FramedBy; analyzer should not have set forwardCompatible")
+        body.add("is %T -> %T.encode(\n", fc.unknownClassName, FRAMED_ENCODER_CN)
+        body.indent()
+        body.add("factory = factory,\n")
+        body.add("framingCodec = %T,\n", framedBy.codecClassName)
+        body.add("context = context,\n")
+        body.add("headerWireWidth = 1,\n")
+        body.add("writeHeader = { __fcBuf -> __fcBuf.writeUByte(value.%L.toUByte()) },\n", fc.opcodeFieldName)
+        body.unindent()
+        body.beginControlFlow(") { __fcBuf ->")
+        body.addStatement("__fcBuf.write(value.%L.slice())", fc.rawFieldName)
+        body.endControlFlow()
+    }
+
     private fun buildDispatchOnDecodeFun(
         shape: DispatchOnDispatcherShape,
         parentTypeRef: TypeName,
@@ -7829,15 +7979,20 @@ internal class CodecEmitter(
                 variant.codecReceiver(),
             )
         }
-        body.beginControlFlow("else ->")
-        body.addStatement(
-            "throw %T(fieldPath = %S, bufferPosition = discriminatorPosition, expected = %S, actual = %P)",
-            DECODE_EXCEPTION_CN,
-            "${shape.parentSimpleName}.discriminator",
-            expectedDispatchValueSet(shape),
-            "\${__dispatchValue}",
-        )
-        body.endControlFlow()
+        val fc = shape.forwardCompatible
+        if (fc != null) {
+            appendForwardCompatibleDecodeElse(body, shape, fc)
+        } else {
+            body.beginControlFlow("else ->")
+            body.addStatement(
+                "throw %T(fieldPath = %S, bufferPosition = discriminatorPosition, expected = %S, actual = %P)",
+                DECODE_EXCEPTION_CN,
+                "${shape.parentSimpleName}.discriminator",
+                expectedDispatchValueSet(shape),
+                "\${__dispatchValue}",
+            )
+            body.endControlFlow()
+        }
         body.endControlFlow()
         // `@FramedBy` dispatchers don't
         // implement `Codec<T>` (the encode contract differs), so
@@ -8072,6 +8227,17 @@ internal class CodecEmitter(
          * inner scalar width.
          */
         val framedBy: FramedByConfig? = null,
+        /**
+         * Present when the sealed parent carries `@ForwardCompatible`
+         * (only meaningful alongside [framedBy]). When set, the decode
+         * `else` arm skips an unrecognized discriminator's framed
+         * payload and preserves it into the unknown variant rather than
+         * throwing, and the framed encode gains an `is <Unknown> ->` arm
+         * that re-frames the preserved bytes with the inherited framing
+         * codec. The discriminator is validator-constrained to a single
+         * byte so the stored opcode re-encodes byte-identically.
+         */
+        val forwardCompatible: ForwardCompatibleConfig? = null,
     )
 
     /**
@@ -8192,6 +8358,25 @@ internal class CodecEmitter(
     private data class FramedByConfig(
         val codecClassName: ClassName,
         val afterFieldName: String,
+    )
+
+    /**
+     * `@ForwardCompatible` configuration captured off a `@DispatchOn`
+     * framed sealed parent. The unknown-variant sink is excluded from
+     * the dispatcher's variant table (it carries no `@PacketType`) and
+     * instead drives the decode `else` (skip + preserve) and encode
+     * (`is Unknown ->` re-frame) arms.
+     *
+     * [opcodeFieldName] / [rawFieldName] are the unknown variant's
+     * constructor parameter names — the validator guarantees the shape
+     * `(Int, PlatformBuffer | ReadBuffer)`, the analyzer resolves the
+     * names by type so emission references `value.<opcode>` /
+     * `value.<raw>` regardless of the consumer's chosen identifiers.
+     */
+    private data class ForwardCompatibleConfig(
+        val unknownClassName: ClassName,
+        val opcodeFieldName: String,
+        val rawFieldName: String,
     )
 
     /**
@@ -9129,6 +9314,17 @@ internal class CodecEmitter(
         private val DECODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "DecodeException")
         private val ENCODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "EncodeException")
         private val FRAMED_ENCODER_CN = ClassName("com.ditchoom.buffer.codec", "FramedEncoder")
+        private val FORWARD_COMPATIBLE_FACTORY_KEY_CN =
+            ClassName("com.ditchoom.buffer.codec", "ForwardCompatibleFactoryKey")
+        private val BUFFER_FACTORY_MANAGED_MN =
+            com.squareup.kotlinpoet.MemberName("com.ditchoom.buffer", "managed")
+
+        // Accepted types for the `@UnknownVariant` `raw` parameter — the
+        // opaque preserved payload. `factory.allocate(...)` yields a
+        // `PlatformBuffer` (assignable to a `ReadBuffer`-typed field too),
+        // so both are valid declared types.
+        private val FORWARD_COMPATIBLE_RAW_QNAMES =
+            setOf("com.ditchoom.buffer.PlatformBuffer", "com.ditchoom.buffer.ReadBuffer")
         private val CHARSET_CN = ClassName("com.ditchoom.buffer", "Charset")
         private val STRING_NULLABLE_TN = ClassName("kotlin", "String").copy(nullable = true)
     }

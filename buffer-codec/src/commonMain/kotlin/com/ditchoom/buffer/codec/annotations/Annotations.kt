@@ -623,3 +623,72 @@ annotation class DispatchOn(
 @Target(AnnotationTarget.PROPERTY)
 @Retention(AnnotationRetention.BINARY)
 annotation class DispatchValue
+
+/**
+ * Marks a `@ProtocolMessage` sealed dispatch parent as **forward compatible**:
+ * a decoder that hits a discriminator it does not recognize **skips** the
+ * unknown variant's framed payload and **preserves** it verbatim into the
+ * [unknown] variant, instead of throwing `DecodeException`.
+ *
+ * This lets newer protocol ops survive a round-trip through an older decoder
+ * (relay) or an on-disk frame (persistence): the bytes are read into an opaque
+ * buffer on decode and re-emitted byte-for-byte on encode.
+ *
+ * ## Requirements (enforced at compile time)
+ *
+ * 1. The annotated type must also carry [FramedBy] — you cannot skip a variant
+ *    whose length you cannot measure. The framing prefix bounds the payload the
+ *    decoder skips.
+ * 2. The annotated type must use [DispatchOn] dispatch with a **single-byte**
+ *    discriminator. (Framed sealed dispatch routes exclusively through
+ *    `@DispatchOn`; a single-byte discriminator guarantees the preserved
+ *    opcode re-encodes byte-identically.)
+ * 3. [unknown] must name a member of the sealed type marked [UnknownVariant],
+ *    whose primary constructor is shaped `(opcode: Int, raw: PlatformBuffer)`
+ *    (a `ReadBuffer`-typed `raw` is also accepted). `opcode` carries the
+ *    discriminator byte (the only place it can survive — `raw` is the payload
+ *    only); `raw` carries the opaque framed payload, excluding the opcode and
+ *    length prefix.
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * @DispatchOn(OpCode::class)
+ * @FramedBy(OpLengthCodec::class, after = "header")
+ * @ForwardCompatible(unknown = Op.Unknown::class)
+ * sealed interface Op {
+ *     @ProtocolMessage @PacketType(value = 0x12, wire = 0x12)
+ *     data class Scroll(val header: OpCode, /* ... */) : Op
+ *
+ *     @UnknownVariant
+ *     data class Unknown(val opcode: Int, val raw: PlatformBuffer) : Op
+ * }
+ * ```
+ *
+ * Preserved bytes are allocated through [ForwardCompatibleFactoryKey] (default
+ * `BufferFactory.managed()` — GC lifetime, no manual free). A caller wanting
+ * native/pooled memory injects a pool-backed factory via that context key and
+ * owns freeing.
+ *
+ * @param unknown The [UnknownVariant]-marked member of the sealed type that
+ *   receives skipped-and-preserved ops.
+ * @see UnknownVariant
+ * @see ForwardCompatibleFactoryKey
+ */
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.BINARY)
+annotation class ForwardCompatible(
+    val unknown: kotlin.reflect.KClass<*>,
+)
+
+/**
+ * Marks the single sealed-variant sink that a [ForwardCompatible] union skips
+ * unknown discriminators into. The marked variant must **not** carry
+ * [PacketType] — it is the `else` arm of dispatch, never matched by value — and
+ * its primary constructor must be `(opcode: Int, raw: PlatformBuffer)` (or
+ * `(opcode: Int, raw: ReadBuffer)`).
+ *
+ * @see ForwardCompatible
+ */
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.BINARY)
+annotation class UnknownVariant
