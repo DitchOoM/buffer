@@ -15,11 +15,11 @@ jobs:
       ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL: 1
     strategy:
       matrix:
-        # API 29 only: Android <= 21 ships an old ART zlib that fails the streaming
-        # compression suite (DataFormatException / deflate size mismatches). That is a
-        # pre-existing compatibility gap surfaced once AGP 9 made KMP commonTest actually
-        # run on the emulator (AGP 8 ran 0 of them) — tracked separately, not by this PR.
-        api-level: [29]
+        # API 21 (minSdk floor) + 29. AGP 9 made KMP commonTest actually run on the
+        # emulator (AGP 8 ran 0 of them), which exposed an old-ART deflate drain bug —
+        # fixed in JvmCommonStreamingCompression (3-arg deflate for NO_FLUSH); API 21 is
+        # kept here to guard against regression.
+        api-level: [21, 29]
     steps:
       - name: checkout
         uses: actions/checkout@v4
