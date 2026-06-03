@@ -15,11 +15,16 @@ jobs:
       ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL: 1
     strategy:
       matrix:
-        # API 21 (minSdk floor) + 29. AGP 9 made KMP commonTest actually run on the
-        # emulator (AGP 8 ran 0 of them), which exposed an old-ART deflate drain bug —
-        # fixed in JvmCommonStreamingCompression (3-arg deflate for NO_FLUSH); API 21 is
-        # kept here to guard against regression.
-        api-level: [21, 29]
+        # API 21 + 35 cover every distinct java.util.zip code path the compression module
+        # takes (verified against the SDK's api-versions.xml):
+        #   21  -> array deflate/inflate + array CRC32 (ByteBuffer overloads are since=35,
+        #          CRC32.update(ByteBuffer) since=26); also the worst-case old ART that
+        #          exposed the NO_FLUSH drain bug, so it guards the 3-arg-deflate fix.
+        #   35  -> ByteBuffer fast path for deflate/inflate/setInput + CRC32 (all since=35).
+        # A mid level (e.g. 29) only re-tests the combination of branches already covered
+        # by 21 and 35 independently, so it is omitted as redundant.
+        # (AGP 9 made KMP commonTest actually run on the emulator; AGP 8 ran 0 of them.)
+        api-level: [21, 35]
     steps:
       - name: checkout
         uses: actions/checkout@v4
