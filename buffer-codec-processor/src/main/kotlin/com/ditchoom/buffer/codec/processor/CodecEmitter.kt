@@ -7742,6 +7742,11 @@ internal class CodecEmitter(
                     body.addStatement("%T.Exact(1 + inner)", WIRE_SIZE_CN)
                     body.endControlFlow()
                 }
+                // Delegated is produced only by the @DispatchOn adapter
+                // (ReReadByVariant). Simple @PacketType variants are always
+                // classified concretely, so this is unreachable here.
+                VariantWireSize.Delegated ->
+                    error("simple @PacketType variant ${variant.simpleName} is never Delegated")
             }
         }
         body.endControlFlow()

@@ -41,68 +41,51 @@ Frozen-for-byte-identity (cosmetic but golden-visible): `when`-label radix (hex
 `0x01` vs decimal `1`), expected-set format, local var names (`discriminator` vs
 `__discriminator`/`__dispatchValue`), and large-decimal underscoring (`2_048`).
 
-## Unified IR (in CodecIr.kt)
+## Unified IR (in CodecIr.kt) — as built (stages 1–2)
+
+Per the no-nullable principle, every optional/variant dimension is an explicit
+sum type, not a nullable field. `Discriminator` exposes `ownership`,
+`labelFormat`, and `wireWidth` (computed). Feature dimensions are
+`Genericity` (Monomorphic | Generic), `Framing` (Unframed | Framed),
+`ForwardCompat` (Disabled | Enabled), and `CodecVisibility` (Public | Internal).
+A variant's codec reference is `VariantCodecRef` (StaticObject | GenericInstance),
+and a `ReReadByVariant` variant's dispatcher-side size is the explicit
+`VariantWireSize.Delegated` rather than an ignored value.
 
 ```kotlin
 internal data class DispatchShape(
-    val packageName: String,
-    val parentClassName: ClassName,
-    val parentSimpleName: String,
-    val codecSimpleName: String,
+    val packageName: String, val parentClassName: ClassName,
+    val parentSimpleName: String, val codecSimpleName: String,
     val discriminator: Discriminator,
     val variants: List<DispatchVariant>,
-    val payloadTypeParameter: PayloadTypeParameter? = null, // orthogonal
-    val framedBy: FramedByConfig? = null,                   // orthogonal
-    val forwardCompatible: ForwardCompatibleConfig? = null, // orthogonal
-    val visibility: KModifier? = null,
+    val genericity: Genericity,        // Monomorphic | Generic(binding)
+    val framing: Framing,              // Unframed | Framed(config)
+    val forwardCompat: ForwardCompat,  // Disabled | Enabled(config)
+    val visibility: CodecVisibility,   // Public | Internal
 )
 
 internal data class DispatchVariant(
-    val simpleName: String,
-    val className: ClassName,
-    val codecClassName: ClassName,
+    val simpleName: String, val className: ClassName, val codecClassName: ClassName,
     val dispatchValue: Int,
-    val genericInstanceFieldName: String? = null,
-    // Consulted ONLY when ownership == ConsumedByDispatcher (dispatcher aggregates
-    // the discriminator into the variant size). Ignored for ReReadByVariant.
-    val wireSize: VariantWireSize,
+    val codecRef: VariantCodecRef,     // StaticObject | GenericInstance(fieldName)
+    val wireSize: VariantWireSize,     // Delegated for ReReadByVariant
 )
 
-internal sealed interface Discriminator {
-    val labelFormat: LabelFormat
-    val wireWidth: WireWidth
-    val ownership: DiscriminatorOwnership
-
-    data class FixedByte(                       // simple @PacketType
-        override val labelFormat: LabelFormat = LabelFormat.Hex,
-        override val ownership: DiscriminatorOwnership = DiscriminatorOwnership.ConsumedByDispatcher,
-    ) : Discriminator { override val wireWidth get() = WireWidth.Fixed(1) }
-
-    data class ValueClass(                      // @DispatchOn(value class)
-        val className: ClassName,
-        val codecClassName: ClassName,
-        val innerKind: ScalarKind,
-        val innerWireOrder: Endianness,
-        val dispatchValueProperty: String,
-        val dispatchValueKind: ScalarKind = ScalarKind.Int,
-        override val labelFormat: LabelFormat = LabelFormat.Decimal,
-        override val ownership: DiscriminatorOwnership = DiscriminatorOwnership.ReReadByVariant,
-    ) : Discriminator { override val wireWidth get() = innerKind.wireWidth }
-
-    data class Varint(                          // reserved — HTTP/3
-        val dispatchValueProperty: String,
-        val dispatchValueKind: ScalarKind = ScalarKind.Int,
-        override val labelFormat: LabelFormat = LabelFormat.Decimal,
-        override val ownership: DiscriminatorOwnership = DiscriminatorOwnership.ReReadByVariant,
-    ) : Discriminator { override val wireWidth get() = WireWidth.Variable }
+internal sealed interface Discriminator {           // ownership/labelFormat/wireWidth
+    data object FixedByte : Discriminator            // Hex, ConsumedByDispatcher, Fixed(1)
+    data class ValueClass(className, codecClassName, innerKind, innerWireOrder,
+        dispatchValueProperty, dispatchValueKind) : Discriminator  // Decimal, ReReadByVariant
+    data class Varint(dispatchValueProperty, dispatchValueKind) : Discriminator // Variable, reserved
 }
-
 internal enum class DiscriminatorOwnership { ConsumedByDispatcher, ReReadByVariant }
 internal enum class LabelFormat { Hex, Decimal }
 ```
 
-`DispatcherShape` → `FixedByte`; `DispatchOnDispatcherShape` → `ValueClass`
-(feature fields copy across one-for-one).
+Adapters `DispatcherShape.toDispatchShape()` / `DispatchOnDispatcherShape.toDispatchShape()`
+normalize the legacy nullable fields into these states; they vanish when the
+analyzers are collapsed (stage 8). `DispatcherShape` → `FixedByte` + Monomorphic +
+Unframed + Disabled; `DispatchOnDispatcherShape` → `ValueClass` with feature
+fields mapped one-for-one.
 
 ## Staged migration (each stage byte-identical; gate = `codec-snapshots/` unchanged)
 
