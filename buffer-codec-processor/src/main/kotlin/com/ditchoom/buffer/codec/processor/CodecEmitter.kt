@@ -7890,6 +7890,108 @@ internal class CodecEmitter(
             .build()
     }
 
+    /**
+     * THE unified NON-framed dispatch wireSize builder. Reproduces the
+     * (now-removed) simple-@PacketType and non-framed @DispatchOn wireSize
+     * output byte-for-byte by forking on [Discriminator] ownership — the
+     * discriminator-counted-once invariant (plan risk #1).
+     *
+     * - [DiscriminatorOwnership.ConsumedByDispatcher] (FixedByte): the
+     *   DISPATCHER aggregates the discriminator byte — `1 +` the variant body
+     *   size. Per variant, fork on [VariantWireSize]: LiteralExact →
+     *   `Exact(1 + bytes)`, RuntimeExact → runtime `Exact(1 + inner)`, BackPatch
+     *   → `BackPatch`. Delegated is unreachable here (FixedByte variants are
+     *   classified concretely).
+     * - [DiscriminatorOwnership.ReReadByVariant] (ValueClass): the dispatcher
+     *   PURE-DELEGATES (NO `1 +`) — the variant already counts its self-framed
+     *   re-read discriminator. `variant.wireSize` is ignored (it's Delegated).
+     *   Generic variants get star-projected `is X<*>` branches, a `value as X<P>`
+     *   cast, and the function gets `@Suppress("UNCHECKED_CAST")` when any
+     *   variant is generic (plan risk #5).
+     *
+     * Does NOT cover the framed (`@FramedBy`) dispatchers — those OMIT wireSize
+     * entirely (plan risk #6); this builder is only routed at the non-framed
+     * call sites.
+     */
+    private fun buildDispatchWireSizeFun(shape: DispatchShape): FunSpec {
+        val parentTypeRef = shape.parentTypeRef()
+        val body = CodeBlock.builder()
+
+        when (shape.discriminator.ownership) {
+            DiscriminatorOwnership.ConsumedByDispatcher -> {
+                body.beginControlFlow("return when (value)")
+                for (variant in shape.variants) {
+                    when (val ws = variant.wireSize) {
+                        is VariantWireSize.LiteralExact ->
+                            body.addStatement(
+                                "is %T -> %T.Exact(%L)",
+                                variant.className,
+                                WIRE_SIZE_CN,
+                                1 + ws.bytes,
+                            )
+                        is VariantWireSize.BackPatch ->
+                            body.addStatement(
+                                "is %T -> %T.BackPatch",
+                                variant.className,
+                                WIRE_SIZE_CN,
+                            )
+                        is VariantWireSize.RuntimeExact -> {
+                            body.beginControlFlow("is %T ->", variant.className)
+                            body.addStatement(
+                                "val inner = (%T.wireSize(value, context) as %T.Exact).bytes",
+                                variant.codecClassName,
+                                WIRE_SIZE_CN,
+                            )
+                            body.addStatement("%T.Exact(1 + inner)", WIRE_SIZE_CN)
+                            body.endControlFlow()
+                        }
+                        // Delegated is produced only by the @DispatchOn adapter
+                        // (ReReadByVariant). ConsumedByDispatcher variants are
+                        // always classified concretely, so this is unreachable.
+                        VariantWireSize.Delegated ->
+                            error("ConsumedByDispatcher variant ${variant.simpleName} is never Delegated")
+                    }
+                }
+                body.endControlFlow()
+            }
+            DiscriminatorOwnership.ReReadByVariant -> {
+                val anyGeneric =
+                    shape.variants.any { it.codecRef is VariantCodecRef.GenericInstance }
+                if (anyGeneric) {
+                    body.add("@Suppress(%S)\n", "UNCHECKED_CAST")
+                }
+                body.beginControlFlow("return when (value)")
+                for (variant in shape.variants) {
+                    val branchType = variant.branchTypeName(shape.genericity)
+                    if (variant.codecRef is VariantCodecRef.GenericInstance) {
+                        body.addStatement(
+                            "is %T -> %L.wireSize(value as %T, context)",
+                            branchType,
+                            variant.codecReceiver(),
+                            variant.typedRef(shape.genericity),
+                        )
+                    } else {
+                        body.addStatement(
+                            "is %T -> %L.wireSize(value, context)",
+                            branchType,
+                            variant.codecReceiver(),
+                        )
+                    }
+                }
+                body.endControlFlow()
+            }
+        }
+
+        return FunSpec
+            .builder("wireSize")
+            .addModifiers(KModifier.OVERRIDE)
+            .addParameter("value", parentTypeRef)
+            .addParameter("context", ENCODE_CONTEXT_CN)
+            .returns(WIRE_SIZE_CN)
+            .addCode(body.build())
+            .build()
+    }
+
     private fun buildSealedDispatcherFileSpec(shape: DispatcherShape): FileSpec {
         val codecType =
             TypeSpec
@@ -7898,7 +8000,7 @@ internal class CodecEmitter(
                 .addSuperinterface(CODEC_CN.parameterizedBy(shape.parentClassName))
                 .addFunction(buildDispatchDecodeFun(shape.toDispatchShape()))
                 .addFunction(buildDispatchEncodeFun(shape.toDispatchShape()))
-                .addFunction(buildDispatcherWireSizeFun(shape))
+                .addFunction(buildDispatchWireSizeFun(shape.toDispatchShape()))
                 .addFunction(buildDispatcherPeekFrameFun(shape))
                 .build()
         return FileSpec
@@ -7911,52 +8013,6 @@ internal class CodecEmitter(
         shape.variants.joinToString(prefix = "one of {", postfix = "}") {
             "0x${it.packetTypeValue.toString(16).padStart(2, '0').uppercase()}"
         }
-
-    private fun buildDispatcherWireSizeFun(shape: DispatcherShape): FunSpec {
-        val body = CodeBlock.builder()
-        body.beginControlFlow("return when (value)")
-        for (variant in shape.variants) {
-            when (val ws = variant.wireSize) {
-                is VariantWireSize.LiteralExact ->
-                    body.addStatement(
-                        "is %T -> %T.Exact(%L)",
-                        variant.className,
-                        WIRE_SIZE_CN,
-                        1 + ws.bytes,
-                    )
-                is VariantWireSize.BackPatch ->
-                    body.addStatement(
-                        "is %T -> %T.BackPatch",
-                        variant.className,
-                        WIRE_SIZE_CN,
-                    )
-                is VariantWireSize.RuntimeExact -> {
-                    body.beginControlFlow("is %T ->", variant.className)
-                    body.addStatement(
-                        "val inner = (%T.wireSize(value, context) as %T.Exact).bytes",
-                        variant.codecClassName,
-                        WIRE_SIZE_CN,
-                    )
-                    body.addStatement("%T.Exact(1 + inner)", WIRE_SIZE_CN)
-                    body.endControlFlow()
-                }
-                // Delegated is produced only by the @DispatchOn adapter
-                // (ReReadByVariant). Simple @PacketType variants are always
-                // classified concretely, so this is unreachable here.
-                VariantWireSize.Delegated ->
-                    error("simple @PacketType variant ${variant.simpleName} is never Delegated")
-            }
-        }
-        body.endControlFlow()
-        return FunSpec
-            .builder("wireSize")
-            .addModifiers(KModifier.OVERRIDE)
-            .addParameter("value", shape.parentClassName)
-            .addParameter("context", ENCODE_CONTEXT_CN)
-            .returns(WIRE_SIZE_CN)
-            .addCode(body.build())
-            .build()
-    }
 
     private fun buildDispatcherPeekFrameFun(shape: DispatcherShape): FunSpec {
         val body = CodeBlock.builder()
@@ -8049,7 +8105,7 @@ internal class CodecEmitter(
                     .addSuperinterface(CODEC_CN.parameterizedBy(parentTypeRef))
                     .addFunction(buildDispatchDecodeFun(shape.toDispatchShape()))
                     .addFunction(buildDispatchEncodeFun(shape.toDispatchShape()))
-                    .addFunction(buildDispatchOnWireSizeFun(shape, parentTypeRef))
+                    .addFunction(buildDispatchWireSizeFun(shape.toDispatchShape()))
                     .addFunction(buildDispatchOnPeekFun(shape))
                     .build()
             }
@@ -8249,7 +8305,7 @@ internal class CodecEmitter(
             builder.addFunction(buildFramedByDispatchOnPeekFun(shape))
         } else {
             builder.addFunction(buildDispatchEncodeFun(shape.toDispatchShape()))
-            builder.addFunction(buildDispatchOnWireSizeFun(shape, parentTypeRef))
+            builder.addFunction(buildDispatchWireSizeFun(shape.toDispatchShape()))
             builder.addFunction(buildDispatchOnPeekFun(shape))
         }
         return builder
@@ -8583,45 +8639,6 @@ internal class CodecEmitter(
         body.beginControlFlow(") { __fcBuf ->")
         body.addStatement("__fcBuf.write(value.%L.slice())", fc.rawFieldName)
         body.endControlFlow()
-    }
-
-    private fun buildDispatchOnWireSizeFun(
-        shape: DispatchOnDispatcherShape,
-        parentTypeRef: TypeName,
-    ): FunSpec {
-        val body = CodeBlock.builder()
-        val anyGeneric = shape.variants.any { it.genericInstanceFieldName != null }
-        if (anyGeneric) {
-            body.add("@Suppress(%S)\n", "UNCHECKED_CAST")
-        }
-        body.beginControlFlow("return when (value)")
-        for (variant in shape.variants) {
-            val branchType = variantBranchTypeName(variant, shape.payloadTypeParameter)
-            if (variant.genericInstanceFieldName != null) {
-                val typedRef = variantTypedRef(variant, shape.payloadTypeParameter)
-                body.addStatement(
-                    "is %T -> %L.wireSize(value as %T, context)",
-                    branchType,
-                    variant.codecReceiver(),
-                    typedRef,
-                )
-            } else {
-                body.addStatement(
-                    "is %T -> %L.wireSize(value, context)",
-                    branchType,
-                    variant.codecReceiver(),
-                )
-            }
-        }
-        body.endControlFlow()
-        return FunSpec
-            .builder("wireSize")
-            .addModifiers(KModifier.OVERRIDE)
-            .addParameter("value", parentTypeRef)
-            .addParameter("context", ENCODE_CONTEXT_CN)
-            .returns(WIRE_SIZE_CN)
-            .addCode(body.build())
-            .build()
     }
 
     private fun buildDispatchOnPeekFun(shape: DispatchOnDispatcherShape): FunSpec {
