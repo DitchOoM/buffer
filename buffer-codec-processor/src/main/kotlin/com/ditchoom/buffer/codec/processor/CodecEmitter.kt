@@ -140,28 +140,20 @@ internal class CodecEmitter(
     fun tryEmit(symbol: KSClassDeclaration) {
         val sourceFile = symbol.containingFile ?: return
         if (Modifier.SEALED in symbol.modifiers && symbol.classKind == ClassKind.INTERFACE) {
-            // Try the @DispatchOn dispatcher path first; if the
-            // parent doesn't carry the annotation, fall back to 's
-            // simple dispatcher.
-            val dispatchOnShape = analyzeDispatchOnSealedDispatcher(symbol)
-            if (dispatchOnShape != null) {
-                val file = buildDispatchOnDispatcherFileSpec(dispatchOnShape)
-                codeGenerator
-                    .createNewFile(
-                        Dependencies(aggregating = false, sourceFile),
-                        dispatchOnShape.packageName,
-                        dispatchOnShape.codecSimpleName,
-                    ).bufferedWriter()
-                    .use { writer -> file.writeTo(writer) }
-                return
-            }
-            val dispatcher = analyzeSealedDispatcher(symbol) ?: return
-            val file = buildSealedDispatcherFileSpec(dispatcher)
+            // Compute the unified dispatch shape once: try the @DispatchOn
+            // dispatcher path first; if the parent doesn't carry the
+            // annotation, fall back to the simple @PacketType dispatcher.
+            // Both analyzers normalize into one DispatchShape (plan stage 7).
+            val shape =
+                analyzeDispatchOnSealedDispatcher(symbol)?.toDispatchShape()
+                    ?: analyzeSealedDispatcher(symbol)?.toDispatchShape()
+                    ?: return
+            val file = buildDispatchFileSpec(shape)
             codeGenerator
                 .createNewFile(
                     Dependencies(aggregating = false, sourceFile),
-                    dispatcher.packageName,
-                    dispatcher.codecSimpleName,
+                    shape.packageName,
+                    shape.codecSimpleName,
                 ).bufferedWriter()
                 .use { writer -> file.writeTo(writer) }
             return
@@ -213,6 +205,13 @@ internal class CodecEmitter(
     /** Apply the source class's visibility (issue #175); no-op when public. */
     private fun TypeSpec.Builder.withVisibility(modifier: KModifier?): TypeSpec.Builder =
         if (modifier != null) addModifiers(modifier) else this
+
+    /** Apply the unified [CodecVisibility]; Internal → INTERNAL, Public → no-op. */
+    private fun TypeSpec.Builder.withVisibility(visibility: CodecVisibility): TypeSpec.Builder =
+        when (visibility) {
+            CodecVisibility.Internal -> addModifiers(KModifier.INTERNAL)
+            CodecVisibility.Public -> this
+        }
 
     private fun analyze(symbol: KSClassDeclaration): AnalysisResult {
         // Issue #150 — `@ProtocolMessage data object` / `@ProtocolMessage object`.
@@ -7641,8 +7640,9 @@ internal class CodecEmitter(
 
     /**
      * The parent type the decode returns: bare for [Genericity.Monomorphic],
-     * parameterized by the type variable for [Genericity.Generic]. Mirror of
-     * [dispatcherParentTypeRef] over the unified shape.
+     * parameterized by the type variable for [Genericity.Generic]. This is the
+     * type used in the codec's `Codec<...>` superinterface, the encode/decode
+     * signatures, and the generic variant-codec constructor calls.
      */
     private fun DispatchShape.parentTypeRef(): TypeName =
         when (val g = genericity) {
@@ -7781,7 +7781,6 @@ internal class CodecEmitter(
      * Generic variants smart-cast to their star-projected form
      * (`Foo.Data<*>`) — the dispatcher's `value: Foo<P>` doesn't prove the
      * runtime variant's `P` matches; non-generic variants use the bare class.
-     * Mirror of [variantBranchTypeName] over [DispatchVariant].
      */
     private fun DispatchVariant.branchTypeName(genericity: Genericity): TypeName =
         when (codecRef) {
@@ -7797,7 +7796,7 @@ internal class CodecEmitter(
     /**
      * The typed cast TypeName for the variant codec call on the unified shape.
      * Generic variants need `value as Foo.Data<P>` so the variant codec's
-     * `<P : Payload>` accepts the value. Mirror of [variantTypedRef].
+     * `<P : Payload>` accepts the value.
      */
     private fun DispatchVariant.typedRef(genericity: Genericity): TypeName =
         when (codecRef) {
@@ -8120,66 +8119,100 @@ internal class CodecEmitter(
             .build()
     }
 
-    private fun buildSealedDispatcherFileSpec(shape: DispatcherShape): FileSpec {
-        val codecType =
-            TypeSpec
-                .objectBuilder(shape.codecSimpleName)
-                .withVisibility(shape.visibility)
-                .addSuperinterface(CODEC_CN.parameterizedBy(shape.parentClassName))
-                .addFunction(buildDispatchDecodeFun(shape.toDispatchShape()))
-                .addFunction(buildDispatchEncodeFun(shape.toDispatchShape()))
-                .addFunction(buildDispatchWireSizeFun(shape.toDispatchShape()))
-                .addFunction(buildDispatchPeekFun(shape.toDispatchShape()))
-                .build()
-        return FileSpec
-            .builder(shape.packageName, shape.codecSimpleName)
-            .addType(codecType)
-            .build()
-    }
-
     /**
-     * Emit the bit-packed dispatcher codec. Uses the
-     * peek-without-consume model on decode (save position, decode
-     * discriminator via its codec, restore position, dispatch);
-     * the variant codec then reads from the original position with
-     * its first field being the discriminator value class.
+     * THE unified dispatch file-spec builder (plan stage 7). Reproduces all
+     * four shell variants from one [DispatchShape] by forking on
+     * [Genericity] × [Framing]:
      *
-     * When the sealed parent is generic
-     * (`<out P : Payload>`), the dispatcher emits as a class
-     * `class FooCodec<P : Payload>(payloadCodec: Codec<P>)` instead
-     * of `object FooCodec`. Generic variants have their codec
-     * instances constructed once in the primary constructor and
-     * stored as private properties; emit sites reference those
-     * fields. `Nothing`-typed variants are unchanged — they keep
-     * the static-object reference path.
+     * - **Monomorphic + Unframed** — `object FooCodec : Codec<Parent>` with
+     *   decode/encode/wireSize/peek (the unified fun builders, each carrying
+     *   `OVERRIDE`). Covers the simple `@PacketType` path and the non-generic
+     *   non-framed `@DispatchOn` path. No `Partial` member (neither legacy
+     *   path emitted one here).
+     * - **Monomorphic + Framed** — `object FooCodec` with NO `Codec<Parent>`
+     *   superinterface, decode + framed encode + framed peek (single walker),
+     *   NO wireSize (plan risk #6 triple-coupling).
+     * - **Generic + Unframed** — `class FooCodec<P : Payload>(private val
+     *   payloadCodec: Codec<P>) : Codec<Parent<P>>` + one private
+     *   `val <field> = <VariantCodec>(payloadCodec)` per generic variant +
+     *   decode/encode/wireSize/peek + the aggregator companion (`Partial<P>`).
+     * - **Generic + Framed** — `class FooCodec<P>(payloadCodec)` with NO
+     *   `Codec<Parent<P>>` superinterface + decode + framed encode + framed
+     *   peek + aggregator companion, NO wireSize.
+     *
+     * Visibility comes from [DispatchShape.visibility] via [withVisibility].
+     * `OVERRIDE` on the funs is handled inside the fun builders (Unframed →
+     * override; framed encode/peek → none), so this shell never re-applies it.
      */
-    private fun buildDispatchOnDispatcherFileSpec(shape: DispatchOnDispatcherShape): FileSpec {
-        val parentTypeRef = dispatcherParentTypeRef(shape)
+    private fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
+        val parentTypeRef = shape.parentTypeRef()
+        val framed = shape.framing is Framing.Framed
         val codecType =
-            if (shape.payloadTypeParameter != null) {
-                buildGenericDispatchOnDispatcherTypeSpec(shape, shape.payloadTypeParameter, parentTypeRef)
-            } else if (shape.framedBy != null) {
-                // `@FramedBy` parent. Encode
-                // returns ReadBuffer, no Codec<Parent> superinterface,
-                // peek owned by the dispatcher (single walker), no
-                // wireSize.
-                TypeSpec
-                    .objectBuilder(shape.codecSimpleName)
-                    .withVisibility(shape.visibility)
-                    .addFunction(buildDispatchDecodeFun(shape.toDispatchShape()))
-                    .addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
-                    .addFunction(buildFramedByDispatchOnPeekFun(shape))
-                    .build()
-            } else {
-                TypeSpec
-                    .objectBuilder(shape.codecSimpleName)
-                    .withVisibility(shape.visibility)
-                    .addSuperinterface(CODEC_CN.parameterizedBy(parentTypeRef))
-                    .addFunction(buildDispatchDecodeFun(shape.toDispatchShape()))
-                    .addFunction(buildDispatchEncodeFun(shape.toDispatchShape()))
-                    .addFunction(buildDispatchWireSizeFun(shape.toDispatchShape()))
-                    .addFunction(buildDispatchPeekFun(shape.toDispatchShape()))
-                    .build()
+            when (val genericity = shape.genericity) {
+                Genericity.Monomorphic -> {
+                    val builder =
+                        TypeSpec
+                            .objectBuilder(shape.codecSimpleName)
+                            .withVisibility(shape.visibility)
+                    if (!framed) {
+                        builder.addSuperinterface(CODEC_CN.parameterizedBy(parentTypeRef))
+                    }
+                    builder.addFunction(buildDispatchDecodeFun(shape))
+                    if (framed) {
+                        builder.addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
+                        builder.addFunction(buildFramedByDispatchOnPeekFun(shape))
+                    } else {
+                        builder.addFunction(buildDispatchEncodeFun(shape))
+                        builder.addFunction(buildDispatchWireSizeFun(shape))
+                        builder.addFunction(buildDispatchPeekFun(shape))
+                    }
+                    builder.build()
+                }
+                is Genericity.Generic -> {
+                    val binding = genericity.binding
+                    val typeVar = TypeVariableName(binding.typeVariableName, binding.bound)
+                    val codecOfP = CODEC_CN.parameterizedBy(typeVar)
+                    val builder =
+                        TypeSpec
+                            .classBuilder(shape.codecSimpleName)
+                            .withVisibility(shape.visibility)
+                            .addTypeVariable(typeVar)
+                            .primaryConstructor(
+                                FunSpec
+                                    .constructorBuilder()
+                                    .addParameter(binding.codecParameterName, codecOfP)
+                                    .build(),
+                            ).addProperty(
+                                com.squareup.kotlinpoet.PropertySpec
+                                    .builder(binding.codecParameterName, codecOfP, KModifier.PRIVATE)
+                                    .initializer(binding.codecParameterName)
+                                    .build(),
+                            )
+                    if (!framed) {
+                        builder.addSuperinterface(CODEC_CN.parameterizedBy(parentTypeRef))
+                    }
+                    for (variant in shape.variants) {
+                        val ref = variant.codecRef as? VariantCodecRef.GenericInstance ?: continue
+                        val fieldType = variant.codecClassName.parameterizedBy(typeVar)
+                        builder.addProperty(
+                            com.squareup.kotlinpoet.PropertySpec
+                                .builder(ref.fieldName, fieldType, KModifier.PRIVATE)
+                                .initializer("%T(%L)", variant.codecClassName, binding.codecParameterName)
+                                .build(),
+                        )
+                    }
+                    builder.addFunction(buildDispatchDecodeFun(shape))
+                    if (framed) {
+                        builder.addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
+                        builder.addFunction(buildFramedByDispatchOnPeekFun(shape))
+                    } else {
+                        builder.addFunction(buildDispatchEncodeFun(shape))
+                        builder.addFunction(buildDispatchWireSizeFun(shape))
+                        builder.addFunction(buildDispatchPeekFun(shape))
+                    }
+                    builder.addType(buildDispatchOnAggregatorCompanion(shape, binding))
+                    builder.build()
+                }
             }
         return FileSpec
             .builder(shape.packageName, shape.codecSimpleName)
@@ -8203,19 +8236,19 @@ internal class CodecEmitter(
      * value (mirrors [buildDispatchEncodeFun]'s behaviour).
      */
     private fun buildFramedByDispatchOnEncodeFun(
-        shape: DispatchOnDispatcherShape,
+        shape: DispatchShape,
         parentTypeRef: TypeName,
     ): FunSpec {
         val body = CodeBlock.builder()
-        val anyGeneric = shape.variants.any { it.genericInstanceFieldName != null }
+        val anyGeneric = shape.variants.any { it.codecRef is VariantCodecRef.GenericInstance }
         if (anyGeneric) {
             body.add("@Suppress(%S)\n", "UNCHECKED_CAST")
         }
         body.beginControlFlow("return when (value)")
         for (variant in shape.variants) {
-            val branchType = variantBranchTypeName(variant, shape.payloadTypeParameter)
-            if (variant.genericInstanceFieldName != null) {
-                val typedRef = variantTypedRef(variant, shape.payloadTypeParameter)
+            val branchType = variant.branchTypeName(shape.genericity)
+            if (variant.codecRef is VariantCodecRef.GenericInstance) {
+                val typedRef = variant.typedRef(shape.genericity)
                 body.addStatement(
                     "is %T -> %L.encode(value as %T, context, factory)",
                     branchType,
@@ -8230,7 +8263,15 @@ internal class CodecEmitter(
                 )
             }
         }
-        shape.forwardCompatible?.let { fc -> appendForwardCompatibleEncodeArm(body, shape, fc) }
+        when (val fc = shape.forwardCompat) {
+            is ForwardCompat.Enabled -> {
+                val framedBy =
+                    (shape.framing as? Framing.Framed)?.config
+                        ?: error("@ForwardCompatible requires @FramedBy; analyzer should not have set forwardCompat")
+                appendForwardCompatibleEncodeArm(body, framedBy, fc.config)
+            }
+            ForwardCompat.Disabled -> Unit
+        }
         body.endControlFlow()
         return FunSpec
             .builder("encode")
@@ -8249,11 +8290,11 @@ internal class CodecEmitter(
      * `@FramedBy` from the parent), so the per-variant dispatch
      * collapses to a single header+prefix walker.
      */
-    private fun buildFramedByDispatchOnPeekFun(shape: DispatchOnDispatcherShape): FunSpec {
+    private fun buildFramedByDispatchOnPeekFun(shape: DispatchShape): FunSpec {
         val framedBy =
-            shape.framedBy
+            (shape.framing as? Framing.Framed)?.config
                 ?: error("buildFramedByDispatchOnPeekFun called on shape without @FramedBy")
-        val headerWireWidth = shape.discriminatorWireWidth.requireFixed("dispatchOnDiscriminator")
+        val headerWireWidth = shape.discriminator.wireWidth.requireFixed("dispatchOnDiscriminator")
         val builder =
             FunSpec
                 .builder("peekFrameSize")
@@ -8320,72 +8361,6 @@ internal class CodecEmitter(
     }
 
     /**
-     * `class FooCodec<P: Payload>(payloadCodec:
-     * Codec<P>) : Codec<Foo<P>>` shape. Each generic variant gets a
-     * private property initialized to `<VariantCodec>(payloadCodec)`
-     * in the primary constructor; the encode/decode/wireSize/peek
-     * emit sites then reference the field instead of the static
-     * codec class.
-     */
-    private fun buildGenericDispatchOnDispatcherTypeSpec(
-        shape: DispatchOnDispatcherShape,
-        binding: PayloadTypeParameter,
-        parentTypeRef: TypeName,
-    ): TypeSpec {
-        val typeVar = TypeVariableName(binding.typeVariableName, binding.bound)
-        val codecOfP = CODEC_CN.parameterizedBy(typeVar)
-        val builder =
-            TypeSpec
-                .classBuilder(shape.codecSimpleName)
-                .withVisibility(shape.visibility)
-                .addTypeVariable(typeVar)
-                .primaryConstructor(
-                    FunSpec
-                        .constructorBuilder()
-                        .addParameter(binding.codecParameterName, codecOfP)
-                        .build(),
-                ).addProperty(
-                    com.squareup.kotlinpoet.PropertySpec
-                        .builder(binding.codecParameterName, codecOfP, KModifier.PRIVATE)
-                        .initializer(binding.codecParameterName)
-                        .build(),
-                )
-        // Generic dispatcher × `@FramedBy`
-        // drops `Codec<Parent<P>>`, emits framed encode + dispatcher-
-        // owned peek walker, and skips wireSize. The aggregator
-        // companion stays — `Partial<P>` is decode-only and
-        // its framing-aware via the variant's own emit.
-        if (shape.framedBy == null) {
-            builder.addSuperinterface(CODEC_CN.parameterizedBy(parentTypeRef))
-        }
-        for (variant in shape.variants) {
-            val fieldName = variant.genericInstanceFieldName ?: continue
-            // Variant codec is `class <VariantName>Codec<P : Payload>(
-            // payloadCodec: Codec<P>)` per. Construct it
-            // once with the dispatcher's codec.
-            val fieldType = variant.codecClassName.parameterizedBy(typeVar)
-            builder.addProperty(
-                com.squareup.kotlinpoet.PropertySpec
-                    .builder(fieldName, fieldType, KModifier.PRIVATE)
-                    .initializer("%T(%L)", variant.codecClassName, binding.codecParameterName)
-                    .build(),
-            )
-        }
-        builder.addFunction(buildDispatchDecodeFun(shape.toDispatchShape()))
-        if (shape.framedBy != null) {
-            builder.addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
-            builder.addFunction(buildFramedByDispatchOnPeekFun(shape))
-        } else {
-            builder.addFunction(buildDispatchEncodeFun(shape.toDispatchShape()))
-            builder.addFunction(buildDispatchWireSizeFun(shape.toDispatchShape()))
-            builder.addFunction(buildDispatchPeekFun(shape.toDispatchShape()))
-        }
-        return builder
-            .addType(buildDispatchOnAggregatorCompanion(shape, binding))
-            .build()
-    }
-
-    /**
      * Companion object hosting
      * `decodeAggregating(buffer, context, on<Variant>: (...) -> ...,
      * ...)`. The aggregator is a parallel decode pathway that lets
@@ -8413,7 +8388,7 @@ internal class CodecEmitter(
      * aggregator would have no lambdas).
      */
     private fun buildDispatchOnAggregatorCompanion(
-        shape: DispatchOnDispatcherShape,
+        shape: DispatchShape,
         binding: PayloadTypeParameter,
     ): TypeSpec =
         TypeSpec
@@ -8441,9 +8416,12 @@ internal class CodecEmitter(
      * call.
      */
     private fun buildDispatchOnDecodeAggregatingFun(
-        shape: DispatchOnDispatcherShape,
+        shape: DispatchShape,
         binding: PayloadTypeParameter,
     ): FunSpec {
+        val disc =
+            shape.discriminator as? Discriminator.ValueClass
+                ?: error("decodeAggregating requires a ValueClass discriminator")
         val typeVar = TypeVariableName(binding.typeVariableName, binding.bound)
         val parentTypeRef = shape.parentClassName.parameterizedBy(typeVar)
 
@@ -8456,7 +8434,7 @@ internal class CodecEmitter(
                 .returns(parentTypeRef)
 
         for (variant in shape.variants) {
-            if (variant.genericInstanceFieldName == null) continue
+            if (variant.codecRef !is VariantCodecRef.GenericInstance) continue
             val partialType =
                 variant.codecClassName
                     .nestedClass("Partial")
@@ -8493,19 +8471,19 @@ internal class CodecEmitter(
         body.addStatement("val discriminatorPosition = buffer.position()")
         body.addStatement(
             "val __discriminator = %T.decode(buffer, context)",
-            shape.discriminatorCodecClassName,
+            disc.codecClassName,
         )
         body.addStatement("buffer.position(discriminatorPosition)")
         body.addStatement(
             "val __dispatchValue = %L",
             dispatchValueIntCoercion(
-                shape.dispatchValueKind,
-                "__discriminator.${shape.dispatchValuePropertyName}",
+                disc.dispatchValueKind,
+                "__discriminator.${disc.dispatchValueProperty}",
             ),
         )
         body.beginControlFlow("return when (__dispatchValue)")
         for (variant in shape.variants) {
-            if (variant.genericInstanceFieldName != null) {
+            if (variant.codecRef is VariantCodecRef.GenericInstance) {
                 // Payload-bearing variant: dispatch via the consumer's
                 // lambda. The aggregator passes the variant codec's
                 // Partial<P> — the lambda completes the decode with the
@@ -8531,7 +8509,7 @@ internal class CodecEmitter(
             "throw %T(fieldPath = %S, bufferPosition = discriminatorPosition, expected = %S, actual = %P)",
             DECODE_EXCEPTION_CN,
             "${shape.parentSimpleName}.discriminator",
-            expectedDispatchValueSet(shape),
+            expectedDispatchSet(shape),
             "\${__dispatchValue}",
         )
         body.endControlFlow()
@@ -8546,86 +8524,7 @@ internal class CodecEmitter(
      * case lowering of the leading character). Disambiguates lambdas
      * across multiple payload-bearing variants without ambiguity.
      */
-    private fun aggregatorLambdaParameterName(variant: DispatchOnVariantSpec): String = "on${variant.simpleName}"
-
-    /**
-     * Return the parent's TypeName as it should
-     * appear in the codec's `Codec<...>` superinterface, encode/decode
-     * signatures, and constructor calls.
-     *
-     * For a non-generic sealed parent, this is `parentClassName`
-     * (e.g., `MqttPacket`). For a generic sealed parent, this is
-     * `parentClassName.parameterizedBy(P)` (e.g., `Http2Frame<P>`).
-     */
-    private fun dispatcherParentTypeRef(shape: DispatchOnDispatcherShape): TypeName =
-        if (shape.payloadTypeParameter != null) {
-            shape.parentClassName.parameterizedBy(
-                TypeVariableName(shape.payloadTypeParameter.typeVariableName),
-            )
-        } else {
-            shape.parentClassName
-        }
-
-    /**
-     * Return the Kotlin code-block that yields
-     * the variant's codec receiver for `<receiver>.decode(...)` /
-     * `.encode(...)` / `.wireSize(...)` / `.peekFrameSize(...)` calls.
-     *
-     * Generic variants reference the dispatcher's private property
-     * (an instance constructed once with `payloadCodec`); non-generic
-     * variants reference the static codec class directly. The two
-     * cases are syntactically distinct (`%L` vs `%T`) — the helper
-     * keeps the emit sites symmetric.
-     */
-    private fun DispatchOnVariantSpec.codecReceiver(): CodeBlock =
-        if (genericInstanceFieldName != null) {
-            CodeBlock.of("%L", genericInstanceFieldName)
-        } else {
-            CodeBlock.of("%T", codecClassName)
-        }
-
-    /**
-     * Encode-side `is` check for a variant. For
-     * a generic variant, the smart cast uses star projection
-     * (`Foo.Data<*>`) since the dispatcher's `value: Foo<P>` doesn't
-     * tell us the runtime variant's `P` is the same `P`. The variant
-     * codec call site needs the typed `Foo.Data<P>` cast — see
-     * `variantCastTypeName`.
-     */
-    private fun variantBranchTypeName(
-        variant: DispatchOnVariantSpec,
-        binding: PayloadTypeParameter?,
-    ): TypeName =
-        if (variant.genericInstanceFieldName != null) {
-            requireNotNull(binding) {
-                "Generic variant ${variant.simpleName} requires the dispatcher to bind a payload type parameter"
-            }
-            variant.className.parameterizedBy(com.squareup.kotlinpoet.STAR)
-        } else {
-            variant.className
-        }
-
-    /**
-     * Typed cast TypeName for the variant codec
-     * call. Generic variants need `value as Foo.Data<P>` so the
-     * variant codec's `<P : Payload>` accepts the value; non-generic
-     * variants pass the `value` parameter directly without a cast.
-     */
-    private fun variantTypedRef(
-        variant: DispatchOnVariantSpec,
-        binding: PayloadTypeParameter?,
-    ): TypeName =
-        if (variant.genericInstanceFieldName != null) {
-            requireNotNull(binding)
-            variant.className.parameterizedBy(
-                TypeVariableName(binding.typeVariableName),
-            )
-        } else {
-            variant.className
-        }
-
-    private fun expectedDispatchValueSet(shape: DispatchOnDispatcherShape): String =
-        shape.variants.joinToString(prefix = "one of {", postfix = "}") { it.dispatchValue.toString() }
+    private fun aggregatorLambdaParameterName(variant: DispatchVariant): String = "on${variant.simpleName}"
 
     /**
      * Emit the `@ForwardCompatible` decode `else` arm: skip an
@@ -8694,12 +8593,9 @@ internal class CodecEmitter(
      */
     private fun appendForwardCompatibleEncodeArm(
         body: CodeBlock.Builder,
-        shape: DispatchOnDispatcherShape,
+        framedBy: FramedByConfig,
         fc: ForwardCompatibleConfig,
     ) {
-        val framedBy =
-            shape.framedBy
-                ?: error("@ForwardCompatible requires @FramedBy; analyzer should not have set forwardCompatible")
         body.add("is %T -> %T.encode(\n", fc.unknownClassName, FRAMED_ENCODER_CN)
         body.indent()
         body.add("factory = factory,\n")
