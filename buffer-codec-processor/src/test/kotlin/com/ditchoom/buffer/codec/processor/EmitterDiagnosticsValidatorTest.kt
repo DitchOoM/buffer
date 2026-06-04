@@ -433,6 +433,75 @@ class EmitterDiagnosticsValidatorTest {
         )
     }
 
+    // 16. Simple @PacketType dispatch with a non-data, non-object variant.
+    // validateSealedDispatcher (unlike the @DispatchOn validator) never
+    // checks variant class kind, so this was a silent gap until the
+    // dispatcher analyzer started returning Rejected (plan stage 9).
+    @Test
+    fun firesOnSimpleDispatchNonDataVariant() {
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.annotations.PacketType
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+                @ProtocolMessage
+                sealed interface Cmd {
+                    @ProtocolMessage
+                    @PacketType(1)
+                    class Ping(val x: Int) : Cmd
+                }
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("under simple sealed dispatch parent"),
+            "expected simple-dispatch non-data-variant diagnostic. Messages:\n${result.messages}",
+        )
+    }
+
+    // 17. @DispatchOn with a non-peekable discriminator inner kind (Short).
+    // validateDispatchOnSealed accepts any numeric inner, so signed
+    // multi-byte / ULong / Int discriminators passed validation and were
+    // then silently dropped until the analyzer started returning Rejected
+    // (plan stage 9).
+    @Test
+    fun firesOnDispatchOnNonPeekableDiscriminator() {
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.annotations.DispatchOn
+                import com.ditchoom.buffer.codec.annotations.DispatchValue
+                import com.ditchoom.buffer.codec.annotations.PacketType
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+                @JvmInline
+                @ProtocolMessage
+                value class ShortDisc(val raw: Short) {
+                    @DispatchValue
+                    val v: Int get() = raw.toInt()
+                }
+
+                @DispatchOn(ShortDisc::class)
+                @ProtocolMessage
+                sealed interface P {
+                    @ProtocolMessage
+                    @PacketType(1)
+                    data class A(val d: ShortDisc, val x: Int) : P
+                }
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("is not a supported dispatch discriminator width"),
+            "expected @DispatchOn non-peekable-discriminator diagnostic. Messages:\n${result.messages}",
+        )
+    }
+
     private fun compile(
         @Language("kotlin") source: String,
     ): JvmCompilationResult =

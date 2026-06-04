@@ -59,6 +59,35 @@ internal sealed interface FieldAnalysis {
     ) : FieldAnalysis
 }
 
+/**
+ * Result of analyzing a sealed `@ProtocolMessage` parent into a
+ * [DispatchShape]. The dispatcher mirror of [AnalysisResult], replacing
+ * the prior `DispatchShape?` return so the two dispatcher analyzers
+ * (`analyzeSealedDispatcher` / `analyzeDispatchOnSealedDispatcher`) model
+ * their outcomes as an explicit sum type rather than nullable-as-state:
+ *   - [Supported] — a dispatcher codec is generated from [shape].
+ *   - [Rejected] — the shape is a SILENT GAP with no paired validator
+ *     diagnostic (e.g. a non-data/object variant under a simple
+ *     `@PacketType` parent, or a non-peekable discriminator inner kind
+ *     under `@DispatchOn`); [CodecEmitter.tryEmit] turns the
+ *     [diagnostics] into KSP errors so the build fails loudly.
+ *   - [NotApplicable] — not this analyzer's concern (the `@DispatchOn`
+ *     analyzer falls back to the simple path) OR already rejected by a
+ *     `ProtocolMessageProcessor` validator diagnostic, so the analyzer
+ *     stays silent to avoid double-reporting.
+ */
+internal sealed interface DispatchAnalysisResult {
+    data class Supported(
+        val shape: DispatchShape,
+    ) : DispatchAnalysisResult
+
+    data class Rejected(
+        val diagnostics: List<Diagnostic>,
+    ) : DispatchAnalysisResult
+
+    data object NotApplicable : DispatchAnalysisResult
+}
+
 internal sealed interface VariantWireSize {
     data class LiteralExact(
         val bytes: Int,

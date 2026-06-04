@@ -22,17 +22,25 @@ unchanged) and committed:
   `analyzeDispatchOnSealedDispatcher`) now return `DispatchShape` directly; the
   legacy `DispatcherShape` / `DispatchOnDispatcherShape` / `DispatchOnVariantSpec`
   / `VariantSpec` and their `toDispatchShape()` / `toDispatchVariant()` adapters
-  are deleted. Byte-identical (305 goldens unchanged).
+  are deleted. Byte-identical (305 goldens unchanged). (`4ec0d5aa`)
+- **Stage 9 done** — both analyzers now return `DispatchAnalysisResult`
+  (Supported | Rejected | NotApplicable), the dispatcher mirror of
+  `AnalysisResult`. Each former `?: return null` is classified explicitly:
+  validator-paired / fall-through / variant-self-reported cases → `NotApplicable`
+  (stay silent, no double-report); the two true silent gaps → `Rejected` (loud):
+  (1) a non-`data`/non-`object` variant under a simple `@PacketType` parent
+  (`validateSealedDispatcher` never checks variant class kind), and (2) a
+  non-peekable `@DispatchOn` discriminator inner kind — signed multi-byte
+  (Short/Long), Int, or ULong (`validateDispatchOnSealed` accepts any numeric
+  inner). `tryEmit` forwards `Rejected` diagnostics to `logger.error`. Existing
+  goldens unchanged; two negative tests added to `EmitterDiagnosticsValidatorTest`
+  (#16, #17).
 
-The two dispatch emit paths are now ONE builder set on `DispatchShape`, fed by
-two analyzers that emit it directly. **Remaining:**
+All dispatch stages complete. Both analyzers feed ONE builder set on
+`DispatchShape` and model their outcomes as an explicit sum type.
 
-- **Stage 9 (next)** — fold dispatcher analysis into `AnalysisResult` (the `?: return null`
-  dispatcher silent-skips become `Rejected` diagnostics). Existing goldens
-  unchanged; adds new diagnostics + negative tests for the previously-silent
-  dispatcher gaps.
-
-After stage 9: varint/H3 = a new `Discriminator.Varint` case (see §5).
+**Next: varint/H3** — a new `Discriminator.Varint` case (see §"How varint slots
+in afterward"). The peek min-bytes guard becomes the one runtime-measured branch.
 
 ## The key insight
 
@@ -134,10 +142,17 @@ fields mapped one-for-one.
 7. **Migrate the file/TypeSpec shell** — one builder choosing object / class<P> /
    framed / aggregator. Old two builders become wrappers, then deleted.
 8. **Collapse the analyzers** — both produce `DispatchShape` directly.
-9. **Fold dispatcher analysis into `AnalysisResult`** — the `?: return null`
-   dispatcher silent-skips become `Rejected` diagnostics (closes unify-dispatch
-   backlog #3–6, #22–25). Existing goldens unchanged (rejected shapes emitted
-   nothing before); add negative tests for the previously-silent gaps.
+9. **Fold dispatcher analysis into a result sum type** — both analyzers return
+   `DispatchAnalysisResult` (the dispatcher mirror of `AnalysisResult`, since
+   `AnalysisResult.Supported` wraps a `CodecShape`, not a `DispatchShape`). The
+   `?: return null` silent-skips split into `NotApplicable` (validator-paired /
+   fall-through / variant-self-reported) and `Rejected` (the two true silent
+   gaps: simple-path non-data/object variant; non-peekable `@DispatchOn`
+   discriminator inner). Existing goldens unchanged (rejected shapes emitted
+   nothing before); negative tests added to `EmitterDiagnosticsValidatorTest`.
+   The broken-codegen `unify-dispatch` rows (#4/#6 generic-parent simple
+   dispatch, #22/#23 peek/wireSize asymmetry) were addressed structurally by
+   stages 3–8 (one builder set), not by this diagnostics pass.
 
 Order rationale: zero-risk IR/adapters first, then one byte-emit concern per
 stage from most-isolated (decode) to most-error-prone (wireSize), so any golden

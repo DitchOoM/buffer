@@ -142,20 +142,37 @@ internal class CodecEmitter(
         if (Modifier.SEALED in symbol.modifiers && symbol.classKind == ClassKind.INTERFACE) {
             // Compute the unified dispatch shape once: try the @DispatchOn
             // dispatcher path first; if the parent doesn't carry the
-            // annotation, fall back to the simple @PacketType dispatcher.
-            // Both analyzers produce one DispatchShape directly (plan stage 8).
-            val shape =
-                analyzeDispatchOnSealedDispatcher(symbol)
-                    ?: analyzeSealedDispatcher(symbol)
-                    ?: return
-            val file = buildDispatchFileSpec(shape)
-            codeGenerator
-                .createNewFile(
-                    Dependencies(aggregating = false, sourceFile),
-                    shape.packageName,
-                    shape.codecSimpleName,
-                ).bufferedWriter()
-                .use { writer -> file.writeTo(writer) }
+            // annotation (NotApplicable), fall back to the simple @PacketType
+            // dispatcher. Both analyzers produce one DispatchShape directly
+            // (plan stage 8) wrapped in a DispatchAnalysisResult (plan stage 9):
+            // a Rejected from the @DispatchOn path is NOT retried on the simple
+            // path — it means the parent IS @DispatchOn but malformed.
+            val result =
+                when (val onResult = analyzeDispatchOnSealedDispatcher(symbol)) {
+                    DispatchAnalysisResult.NotApplicable -> analyzeSealedDispatcher(symbol)
+                    else -> onResult
+                }
+            when (result) {
+                is DispatchAnalysisResult.Supported -> {
+                    val shape = result.shape
+                    val file = buildDispatchFileSpec(shape)
+                    codeGenerator
+                        .createNewFile(
+                            Dependencies(aggregating = false, sourceFile),
+                            shape.packageName,
+                            shape.codecSimpleName,
+                        ).bufferedWriter()
+                        .use { writer -> file.writeTo(writer) }
+                }
+                // A recognized-but-unsupported dispatcher shape with no paired
+                // validator diagnostic — emit the diagnostic(s) so the build
+                // fails loudly instead of silently producing no codec.
+                is DispatchAnalysisResult.Rejected ->
+                    result.diagnostics.forEach { logger.error(it.message, it.node) }
+                // Not a dispatcher target, or already rejected by a validator
+                // diagnostic — stay silent to avoid double-reporting.
+                DispatchAnalysisResult.NotApplicable -> return
+            }
             return
         }
         when (val r = analyze(symbol)) {
@@ -7227,20 +7244,27 @@ internal class CodecEmitter(
     /**
      * Analyze a `@ProtocolMessage sealed interface` parent.
      *
-     * Returns null (silently skip) when the parent carries
-     * `@DispatchOn` ( surface), when the parent has zero
-     * sealed subclasses, or when any direct subclass fails to fit
-     * /B/C/D's variant shape (missing `@PacketType`,
-     * out-of-range value, not a `data class`, or its own field shape
-     * is not analyzable). The validator in `ProtocolMessageProcessor`
-     * surfaces user-facing diagnostics for the missing-`@PacketType`
-     * and duplicate-value cases; this method's silence keeps the
-     * emitter consistent with /B/C "out of shape, no codec".
+     * Returns [DispatchAnalysisResult.NotApplicable] (fall through to the
+     * `@DispatchOn` path or stay silent) when the parent carries
+     * `@DispatchOn`, has zero sealed subclasses, or hits a variant-shape
+     * gap that `ProtocolMessageProcessor.validateSealedDispatcher` already
+     * reports (missing `@PacketType`, missing `value`, out-of-range value,
+     * duplicate value) or that the variant's own `analyze` reports
+     * separately (its field shape is not analyzable). Staying silent there
+     * avoids double-reporting.
+     *
+     * Returns [DispatchAnalysisResult.Rejected] for the one true silent
+     * gap with no paired validator diagnostic: a variant that is neither a
+     * `data class` nor an `object`/`data object`. The simple-dispatch
+     * validator (unlike the `@DispatchOn` validator) never checks variant
+     * class kind, so without this the codec is silently dropped.
      */
-    private fun analyzeSealedDispatcher(symbol: KSClassDeclaration): DispatchShape? {
-        if (symbol.annotations.any { it.shortName.asString() == "DispatchOn" }) return null
+    private fun analyzeSealedDispatcher(symbol: KSClassDeclaration): DispatchAnalysisResult {
+        if (symbol.annotations.any { it.shortName.asString() == "DispatchOn" }) {
+            return DispatchAnalysisResult.NotApplicable
+        }
         val subclasses = symbol.getSealedSubclasses().toList()
-        if (subclasses.isEmpty()) return null
+        if (subclasses.isEmpty()) return DispatchAnalysisResult.NotApplicable
         val variants = mutableListOf<DispatchVariant>()
         val seenValues = mutableSetOf<Int>()
         for (sub in subclasses) {
@@ -7250,21 +7274,37 @@ internal class CodecEmitter(
             // standalone codec, which buildDecodeFun emits as
             // `return ObjectName` and buildEncodeFun emits as a no-op.
             val isObjectVariant = sub.classKind == ClassKind.OBJECT
-            if (!isObjectVariant && Modifier.DATA !in sub.modifiers) return null
+            // True silent gap: validateSealedDispatcher does not check the
+            // variant's class kind (the @DispatchOn validator does, at
+            // ProtocolMessageProcessor.kt:417), so a non-data, non-object
+            // variant passes validation and is then silently dropped here.
+            if (!isObjectVariant && Modifier.DATA !in sub.modifiers) {
+                return DispatchAnalysisResult.Rejected(
+                    listOf(
+                        Diagnostic(
+                            "@PacketType variant ${sub.qualifiedName?.asString() ?: sub.simpleName.asString()} " +
+                                "under simple sealed dispatch parent ${symbol.simpleName.asString()} must be a " +
+                                "`data class` or `data object` / `object`. Non-data class variants are not supported.",
+                            sub,
+                        ),
+                    ),
+                )
+            }
             val packetType =
                 sub.annotations.firstOrNull { it.shortName.asString() == "PacketType" }
-                    ?: return null
+                    ?: return DispatchAnalysisResult.NotApplicable
             val rawValue =
                 packetType.arguments
                     .firstOrNull { it.name?.asString() == "value" }
-                    ?.value as? Int ?: return null
-            if (rawValue !in 0..255) return null
-            if (!seenValues.add(rawValue)) return null
-            // The dispatcher analyzers are out of scope for the
-            // AnalysisResult migration this commit; adapt at the call site
-            // to preserve the prior `?: return null` silent-skip semantics.
+                    ?.value as? Int ?: return DispatchAnalysisResult.NotApplicable
+            if (rawValue !in 0..255) return DispatchAnalysisResult.NotApplicable
+            if (!seenValues.add(rawValue)) return DispatchAnalysisResult.NotApplicable
+            // The variant carries `@ProtocolMessage` and is analyzed
+            // separately by `tryEmit(sub)`; if its own field shape is not
+            // analyzable, that pass emits the diagnostic. Stay silent here.
             val variantShape =
-                (analyze(sub) as? AnalysisResult.Supported)?.shape ?: return null
+                (analyze(sub) as? AnalysisResult.Supported)?.shape
+                    ?: return DispatchAnalysisResult.NotApplicable
             val variantWireSize = classifyVariantWireSize(variantShape)
             variants +=
                 DispatchVariant(
@@ -7286,17 +7326,19 @@ internal class CodecEmitter(
         variants.sortBy { it.dispatchValue }
         val pkg = symbol.packageName.asString()
         val parentSimpleName = symbol.simpleName.asString()
-        return DispatchShape(
-            packageName = pkg,
-            parentClassName = ClassName(pkg, parentSimpleName),
-            parentSimpleName = parentSimpleName,
-            codecSimpleName = symbol.flattenedCodecName(),
-            discriminator = Discriminator.FixedByte,
-            variants = variants,
-            genericity = Genericity.Monomorphic,
-            framing = Framing.Unframed,
-            forwardCompat = ForwardCompat.Disabled,
-            visibility = codecVisibilityModifier(symbol).toCodecVisibility(),
+        return DispatchAnalysisResult.Supported(
+            DispatchShape(
+                packageName = pkg,
+                parentClassName = ClassName(pkg, parentSimpleName),
+                parentSimpleName = parentSimpleName,
+                codecSimpleName = symbol.flattenedCodecName(),
+                discriminator = Discriminator.FixedByte,
+                variants = variants,
+                genericity = Genericity.Monomorphic,
+                framing = Framing.Unframed,
+                forwardCompat = ForwardCompat.Disabled,
+                visibility = codecVisibilityModifier(symbol).toCodecVisibility(),
+            ),
         )
     }
 
@@ -7304,37 +7346,67 @@ internal class CodecEmitter(
      * Analyze a `@DispatchOn`-annotated sealed
      * parent into a `DispatchShape` (ValueClass discriminator).
      *
-     * Returns null (silent skip) when the parent doesn't carry
-     * `@DispatchOn`, when the discriminator type isn't a value class
-     * with a single supported-scalar inner, when the discriminator
-     * has zero or multiple `@DispatchValue` properties (the
-     * validator names this case), or when any variant fails to fit
-     * the shape (data class, has `@PacketType(value = N)`,
-     * first parameter is the discriminator type). The validator
-     * surfaces user-facing diagnostics; the emitter's silence keeps
-     * the "out of shape, no codec" pattern intact.
+     * Returns [DispatchAnalysisResult.NotApplicable] when the parent
+     * doesn't carry `@DispatchOn` (so [tryEmit] falls back to the simple
+     * `@PacketType` path), and also for every malformed-shape case that
+     * `ProtocolMessageProcessor.validateDispatchOnSealed` already reports
+     * (discriminator not a value class / wrong arity / nullable or
+     * non-numeric inner / zero-or-multiple `@DispatchValue` / bad
+     * `@DispatchValue` return type; per-variant: non-data/object class,
+     * missing/out-of-range/duplicate `@PacketType`, first param not the
+     * discriminator) or that the variant's own `analyze` reports
+     * separately, or that `validateGenericPayloadVariantShape` reports
+     * (generic variant under a non-generic parent). Staying silent there
+     * avoids double-reporting.
+     *
+     * Returns [DispatchAnalysisResult.Rejected] for the one true silent
+     * gap with no paired validator diagnostic: a discriminator whose
+     * inner scalar kind is not peekable (signed multi-byte Short/Long, or
+     * ULong/Int). `validateDispatchOnSealed` accepts any numeric inner, so
+     * without this the codec is silently dropped.
      */
-    private fun analyzeDispatchOnSealedDispatcher(symbol: KSClassDeclaration): DispatchShape? {
+    private fun analyzeDispatchOnSealedDispatcher(symbol: KSClassDeclaration): DispatchAnalysisResult {
         val dispatchOn =
             symbol.annotations.firstOrNull { it.shortName.asString() == "DispatchOn" }
-                ?: return null
+                ?: return DispatchAnalysisResult.NotApplicable
         val discriminatorType =
             dispatchOn.arguments
                 .firstOrNull { it.name?.asString() == "type" }
-                ?.value as? KSType ?: return null
-        val discriminatorDecl = discriminatorType.declaration as? KSClassDeclaration ?: return null
-        if (!discriminatorDecl.isValueClassDecl()) return null
-        val discriminatorCtor = discriminatorDecl.primaryConstructor ?: return null
-        if (discriminatorCtor.parameters.size != 1) return null
+                ?.value as? KSType ?: return DispatchAnalysisResult.NotApplicable
+        val discriminatorDecl =
+            discriminatorType.declaration as? KSClassDeclaration
+                ?: return DispatchAnalysisResult.NotApplicable
+        if (!discriminatorDecl.isValueClassDecl()) return DispatchAnalysisResult.NotApplicable
+        val discriminatorCtor =
+            discriminatorDecl.primaryConstructor ?: return DispatchAnalysisResult.NotApplicable
+        if (discriminatorCtor.parameters.size != 1) return DispatchAnalysisResult.NotApplicable
         val innerType = discriminatorCtor.parameters[0].type.resolve()
-        if (innerType.isError || innerType.isMarkedNullable) return null
+        if (innerType.isError || innerType.isMarkedNullable) return DispatchAnalysisResult.NotApplicable
         val innerKind =
-            SUPPORTED_SCALARS[innerType.declaration.qualifiedName?.asString()] ?: return null
-        // Peek-side reconstruction supports single-byte kinds
-        //  plus 2/4-byte unsigned kinds. ULong / signed multi-byte
-        // discriminators aren't required by any in-scope vector and would
-        // need parallel peek paths.
-        if (innerKind !in peekableDispatcherInnerKinds) return null
+            SUPPORTED_SCALARS[innerType.declaration.qualifiedName?.asString()]
+                ?: return DispatchAnalysisResult.NotApplicable
+        // True silent gap: validateDispatchOnSealed accepts any numeric
+        // inner (NUMERIC_SCALAR_QNAMES), but peek-side reconstruction only
+        // supports single-byte kinds plus 2/4-byte unsigned kinds. ULong,
+        // Int, and signed multi-byte (Short/Long) discriminators aren't
+        // required by any in-scope vector and would need parallel peek
+        // paths — so they pass validation and are then silently dropped.
+        if (innerKind !in peekableDispatcherInnerKinds) {
+            val innerName =
+                innerType.declaration.simpleName.asString()
+            val peekable = peekableDispatcherInnerKinds.joinToString(", ") { it.name }
+            return DispatchAnalysisResult.Rejected(
+                listOf(
+                    Diagnostic(
+                        "@DispatchOn discriminator on ${symbol.simpleName.asString()} has inner scalar " +
+                            "`$innerName`, which is not a supported dispatch discriminator width. The peek " +
+                            "path supports only single-byte and 2/4-byte unsigned kinds ($peekable); signed " +
+                            "multi-byte (Short/Long), Int, and ULong discriminators are not yet supported.",
+                        symbol,
+                    ),
+                ),
+            )
+        }
         // Read the discriminator value class's `@ProtocolMessage(
         // wireOrder = ...)` so multi-byte byte assembly during peek matches
         // the encode/decode wire layout. Single-byte kinds ignore this.
@@ -7345,19 +7417,21 @@ internal class CodecEmitter(
                 .getDeclaredProperties()
                 .singleOrNull { prop ->
                     prop.annotations.any { it.shortName.asString() == "DispatchValue" }
-                } ?: return null
-        if (dispatchProp.isMutable || dispatchProp.extensionReceiver != null) return null
+                } ?: return DispatchAnalysisResult.NotApplicable
+        if (dispatchProp.isMutable || dispatchProp.extensionReceiver != null) {
+            return DispatchAnalysisResult.NotApplicable
+        }
         val returnType = dispatchProp.type.resolve()
-        if (returnType.isMarkedNullable) return null
+        if (returnType.isMarkedNullable) return DispatchAnalysisResult.NotApplicable
         // Slice — accept the widened set of return
         // types ({Boolean, Byte, UByte, Short, UShort, Int, UInt}) and
         // capture the kind so the dispatch emit site can pick the
         // right Int-coercion expression. The validator surfaces the
         // user-facing diagnostic for unsupported kinds; the analyzer
-        // keeps its silent-skip discipline.
+        // stays silent (NotApplicable) to avoid double-reporting.
         val dispatchValueKind =
             DISPATCH_VALUE_RETURN_KINDS[returnType.declaration.qualifiedName?.asString()]
-                ?: return null
+                ?: return DispatchAnalysisResult.NotApplicable
         val dispatchValuePropertyName = dispatchProp.simpleName.asString()
 
         // Detect whether the sealed parent declares
@@ -7370,7 +7444,7 @@ internal class CodecEmitter(
         val payloadTypeParameter = detectPayloadTypeParameter(symbol)
 
         val subclasses = symbol.getSealedSubclasses().toList()
-        if (subclasses.isEmpty()) return null
+        if (subclasses.isEmpty()) return DispatchAnalysisResult.NotApplicable
 
         // `@ForwardCompatible` capture. The unknown-variant sink carries
         // `@UnknownVariant` (not `@PacketType`), so it is excluded from
@@ -7399,37 +7473,48 @@ internal class CodecEmitter(
             // this shape; runtime dispatch semantics for an empty-bodied
             // @DispatchOn variant remain a future concern.
             val isObjectVariant = sub.classKind == ClassKind.OBJECT
-            if (!isObjectVariant && Modifier.DATA !in sub.modifiers) return null
+            // All per-variant shape failures below are reported by
+            // validateDispatchOnSealed (non-data/object :417, missing
+            // @PacketType :433, missing value :446, out-of-range :453,
+            // duplicate :462, first param not discriminator :482) — stay
+            // silent (NotApplicable) here to avoid double-reporting.
+            if (!isObjectVariant && Modifier.DATA !in sub.modifiers) return DispatchAnalysisResult.NotApplicable
             val packetType =
-                sub.annotations.firstOrNull { it.shortName.asString() == "PacketType" } ?: return null
+                sub.annotations.firstOrNull { it.shortName.asString() == "PacketType" }
+                    ?: return DispatchAnalysisResult.NotApplicable
             val rawValue =
                 packetType.arguments
                     .firstOrNull { it.name?.asString() == "value" }
-                    ?.value as? Int ?: return null
+                    ?.value as? Int ?: return DispatchAnalysisResult.NotApplicable
             // Slice — `@PacketType.value` range is
             // per-kind now (Boolean: 0..1, Byte: -128..127, UByte:
             // 0..255, Short: -32768..32767, UShort: 0..65535, Int /
             // UInt: full Int range). Validator surfaces the user-facing
-            // diagnostic on out-of-range values; analyzer silent-skips.
-            if (rawValue !in dispatchValuePacketTypeRange(dispatchValueKind)) return null
-            if (!seenValues.add(rawValue)) return null
+            // diagnostic on out-of-range values; analyzer stays silent.
+            if (rawValue !in dispatchValuePacketTypeRange(dispatchValueKind)) {
+                return DispatchAnalysisResult.NotApplicable
+            }
+            if (!seenValues.add(rawValue)) return DispatchAnalysisResult.NotApplicable
             if (!isObjectVariant) {
-                val ctor = sub.primaryConstructor ?: return null
-                val firstParam = ctor.parameters.firstOrNull() ?: return null
+                val ctor = sub.primaryConstructor ?: return DispatchAnalysisResult.NotApplicable
+                val firstParam = ctor.parameters.firstOrNull() ?: return DispatchAnalysisResult.NotApplicable
                 val firstParamQname =
                     firstParam.type
                         .resolve()
                         .declaration.qualifiedName
                         ?.asString()
-                if (firstParamQname != discriminatorDecl.qualifiedName?.asString()) return null
+                if (firstParamQname != discriminatorDecl.qualifiedName?.asString()) {
+                    return DispatchAnalysisResult.NotApplicable
+                }
             }
             // Variant must analyze cleanly via the existing data-class path
             // (or the object-singleton path added by issue #150). The
-            // header field, when present, is a FieldSpec.ValueClassScalar
-            // object variants resolve to an empty-fields shape.
-            // Dispatcher analyzers are out of scope this commit; adapt at the
-            // call site to preserve the prior `?: return null` silent-skip.
-            if (analyze(sub) !is AnalysisResult.Supported) return null
+            // header field, when present, is a FieldSpec.ValueClassScalar;
+            // object variants resolve to an empty-fields shape. The variant
+            // carries `@ProtocolMessage` and is analyzed separately by
+            // `tryEmit(sub)`, which emits any field-shape diagnostic — stay
+            // silent here.
+            if (analyze(sub) !is AnalysisResult.Supported) return DispatchAnalysisResult.NotApplicable
             // Detect whether the variant itself is generic
             // ( shape — `<P: Payload>` type parameter on the
             // variant data class). If so, the dispatcher constructs the
@@ -7444,10 +7529,9 @@ internal class CodecEmitter(
                     // Outer dispatcher must be generic to thread the
                     // codec — a `<P : Payload>` variant under a
                     // non-generic parent has no codec source and is a
-                    // shape error caught by the validator (see
-                    // ProtocolMessageProcessor's payload-type-parameter
-                    // checks).
-                    if (payloadTypeParameter == null) return null
+                    // shape error reported by validateGenericPayloadVariantShape
+                    // (ProtocolMessageProcessor.kt:402,1613). Stay silent here.
+                    if (payloadTypeParameter == null) return DispatchAnalysisResult.NotApplicable
                     "${variantSimpleName.replaceFirstChar { it.lowercase() }}Codec"
                 } else {
                     null
@@ -7479,35 +7563,37 @@ internal class CodecEmitter(
         // a single header+prefix walker rather than per-variant
         // dispatch, and `wireSize` is omitted.
         val framedBy = symbol.annotations.firstOrNull(::isFramedByAnn)?.let(::parseFramedBy)
-        return DispatchShape(
-            packageName = pkg,
-            parentClassName = ClassName(pkg, parentSimpleName),
-            parentSimpleName = parentSimpleName,
-            codecSimpleName = symbol.flattenedCodecName(),
-            discriminator =
-                Discriminator.ValueClass(
-                    className = classNameOf(discriminatorDecl),
-                    codecClassName =
-                        ClassName(
-                            discriminatorDecl.packageName.asString(),
-                            discriminatorDecl.flattenedCodecName(),
-                        ),
-                    innerKind = innerKind,
-                    innerWireOrder = discriminatorWireOrder,
-                    dispatchValueProperty = dispatchValuePropertyName,
-                    dispatchValueKind = dispatchValueKind,
-                ),
-            variants = variants,
-            genericity =
-                payloadTypeParameter
-                    ?.let { Genericity.Generic(it) }
-                    ?: Genericity.Monomorphic,
-            framing = framedBy?.let { Framing.Framed(it) } ?: Framing.Unframed,
-            forwardCompat =
-                forwardCompatible
-                    ?.let { ForwardCompat.Enabled(it) }
-                    ?: ForwardCompat.Disabled,
-            visibility = codecVisibilityModifier(symbol).toCodecVisibility(),
+        return DispatchAnalysisResult.Supported(
+            DispatchShape(
+                packageName = pkg,
+                parentClassName = ClassName(pkg, parentSimpleName),
+                parentSimpleName = parentSimpleName,
+                codecSimpleName = symbol.flattenedCodecName(),
+                discriminator =
+                    Discriminator.ValueClass(
+                        className = classNameOf(discriminatorDecl),
+                        codecClassName =
+                            ClassName(
+                                discriminatorDecl.packageName.asString(),
+                                discriminatorDecl.flattenedCodecName(),
+                            ),
+                        innerKind = innerKind,
+                        innerWireOrder = discriminatorWireOrder,
+                        dispatchValueProperty = dispatchValuePropertyName,
+                        dispatchValueKind = dispatchValueKind,
+                    ),
+                variants = variants,
+                genericity =
+                    payloadTypeParameter
+                        ?.let { Genericity.Generic(it) }
+                        ?: Genericity.Monomorphic,
+                framing = framedBy?.let { Framing.Framed(it) } ?: Framing.Unframed,
+                forwardCompat =
+                    forwardCompatible
+                        ?.let { ForwardCompat.Enabled(it) }
+                        ?: ForwardCompat.Disabled,
+                visibility = codecVisibilityModifier(symbol).toCodecVisibility(),
+            ),
         )
     }
 
