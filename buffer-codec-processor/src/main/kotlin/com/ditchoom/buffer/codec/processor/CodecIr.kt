@@ -1,8 +1,63 @@
 package com.ditchoom.buffer.codec.processor
 
+import com.google.devtools.ksp.symbol.KSNode
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.KModifier
 import com.squareup.kotlinpoet.TypeName
+
+/**
+ * A diagnostic produced by the emitter's analysis pass. [message]
+ * describes why a shape is unsupported; [node] is the offending
+ * source element to anchor a KSP error on.
+ *
+ * Note: in the byte-identical threading commit these diagnostics are
+ * constructed but NOT emitted — [CodecEmitter.tryEmit] silently skips
+ * `Rejected`/`NotApplicable` results. Emission is wired up in the
+ * follow-on diagnostics pass.
+ */
+internal data class Diagnostic(
+    val message: String,
+    val node: KSNode,
+)
+
+/**
+ * Result of analyzing a top-level `@ProtocolMessage` symbol into a
+ * [CodecShape]. Replaces the prior `CodecShape?` return:
+ *   - [Supported] — a codec is generated from [shape].
+ *   - [Rejected] — the shape is a SILENT GAP (per SUPPORT_MATRIX §2.5/§2.6);
+ *     the follow-on pass will turn the [diagnostics] into KSP errors.
+ *   - [NotApplicable] — the symbol is genuinely not this analyzer's
+ *     concern (handled elsewhere) OR is already rejected by a validator
+ *     diagnostic, so the analyzer stays silent.
+ */
+internal sealed interface AnalysisResult {
+    data class Supported(
+        val shape: CodecShape,
+    ) : AnalysisResult
+
+    data class Rejected(
+        val diagnostics: List<Diagnostic>,
+    ) : AnalysisResult
+
+    data object NotApplicable : AnalysisResult
+}
+
+/**
+ * Result of analyzing a single constructor parameter into a
+ * [FieldSpec]. Replaces the prior `FieldSpec?` return:
+ *   - [Ok] — the field is supported.
+ *   - [Err] — the field is unsupported; [diagnostic] explains why and
+ *     anchors on the offending parameter.
+ */
+internal sealed interface FieldAnalysis {
+    data class Ok(
+        val field: FieldSpec,
+    ) : FieldAnalysis
+
+    data class Err(
+        val diagnostic: Diagnostic,
+    ) : FieldAnalysis
+}
 
 internal data class DispatcherShape(
     val packageName: String,

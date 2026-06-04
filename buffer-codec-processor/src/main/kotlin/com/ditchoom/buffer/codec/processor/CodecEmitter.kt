@@ -166,17 +166,26 @@ internal class CodecEmitter(
                 .use { writer -> file.writeTo(writer) }
             return
         }
-        val shape = analyze(symbol) ?: return
-        val file = buildFileSpec(shape)
-        codeGenerator
-            .createNewFile(
-                Dependencies(aggregating = false, sourceFile),
-                shape.packageName,
-                shape.codecSimpleName,
-            ).bufferedWriter()
-            .use { writer ->
-                file.writeTo(writer)
+        when (val r = analyze(symbol)) {
+            is AnalysisResult.Supported -> {
+                val shape = r.shape
+                val file = buildFileSpec(shape)
+                codeGenerator
+                    .createNewFile(
+                        Dependencies(aggregating = false, sourceFile),
+                        shape.packageName,
+                        shape.codecSimpleName,
+                    ).bufferedWriter()
+                    .use { writer ->
+                        file.writeTo(writer)
+                    }
             }
+            // Byte-identical commit: Rejected diagnostics are NOT
+            // emitted yet (that is the follow-on diagnostics pass). Both
+            // Rejected and NotApplicable map to the prior silent-skip,
+            // so behavior is preserved.
+            else -> return
+        }
     }
 
     /**
@@ -202,7 +211,7 @@ internal class CodecEmitter(
     private fun TypeSpec.Builder.withVisibility(modifier: KModifier?): TypeSpec.Builder =
         if (modifier != null) addModifiers(modifier) else this
 
-    private fun analyze(symbol: KSClassDeclaration): CodecShape? {
+    private fun analyze(symbol: KSClassDeclaration): AnalysisResult {
         // Issue #150 — `@ProtocolMessage data object` / `@ProtocolMessage object`.
         // Singleton variants carry zero wire bytes beyond the dispatcher's
         // discriminator (or zero bytes total when standalone). Emit a
@@ -224,33 +233,50 @@ internal class CodecEmitter(
         // byte itself before delegating; that path remains unchanged
         // (`detectSealedDispatchOnParentDiscriminator` returns null).
         if (symbol.classKind == ClassKind.OBJECT) {
-            if (symbol.annotations.any { it.shortName.asString() == "DispatchOn" }) return null
+            // `@DispatchOn` on an object is handled by the dispatcher path,
+            // not the data-class path — not this analyzer's concern.
+            if (symbol.annotations.any { it.shortName.asString() == "DispatchOn" }) {
+                return AnalysisResult.NotApplicable
+            }
             val ownerSimpleName = symbol.simpleName.asString()
-            return CodecShape(
-                packageName = symbol.packageName.asString(),
-                messageClassName = classNameOf(symbol),
-                ownerSimpleName = ownerSimpleName,
-                codecSimpleName = symbol.flattenedCodecName(),
-                fields = emptyList(),
-                visibility = codecVisibilityModifier(symbol),
-                isSingletonObject = true,
-                singletonDispatchDiscriminator = detectSealedDispatchOnParentDiscriminator(symbol),
+            return AnalysisResult.Supported(
+                CodecShape(
+                    packageName = symbol.packageName.asString(),
+                    messageClassName = classNameOf(symbol),
+                    ownerSimpleName = ownerSimpleName,
+                    codecSimpleName = symbol.flattenedCodecName(),
+                    fields = emptyList(),
+                    visibility = codecVisibilityModifier(symbol),
+                    isSingletonObject = true,
+                    singletonDispatchDiscriminator = detectSealedDispatchOnParentDiscriminator(symbol),
+                ),
             )
         }
-        if (symbol.classKind != ClassKind.CLASS) return null
+        // Not a class kind we model here (enum, interface, annotation, …).
+        if (symbol.classKind != ClassKind.CLASS) return AnalysisResult.NotApplicable
         val isData = Modifier.DATA in symbol.modifiers
         val isValue = symbol.isValueClassDecl()
-        if (!isData && !isValue) return null
-        if (Modifier.SEALED in symbol.modifiers) return null
-        if (symbol.annotations.any { it.shortName.asString() == "DispatchOn" }) return null
+        // Plain (non-data, non-value) classes are out of scope; handled
+        // by a validator diagnostic, so stay silent.
+        if (!isData && !isValue) return AnalysisResult.NotApplicable
+        // Sealed parents go through the dispatcher path, not here.
+        if (Modifier.SEALED in symbol.modifiers) return AnalysisResult.NotApplicable
+        // A data class carrying `@DispatchOn` is rejected by the validator
+        // (`@DispatchOn` is only valid on sealed parents) — stay silent.
+        if (symbol.annotations.any { it.shortName.asString() == "DispatchOn" }) {
+            return AnalysisResult.NotApplicable
+        }
         // `@PacketType` on a data class is a variant — emit its standalone
         // codec via the existing data-class path. The dispatcher (separate emit
         // path keyed on the sealed parent) calls `${VariantSimpleName}Codec`.
-        val ctor = symbol.primaryConstructor ?: return null
-        if (ctor.parameters.isEmpty()) return null
+        val ctor = symbol.primaryConstructor ?: return AnalysisResult.NotApplicable
+        // Empty parameter list: no codifiable fields. Validator-paired
+        // (SUPPORT_MATRIX §2.6 lists this as validator-silent today, but it
+        // is genuinely not a message shape) — stay silent to preserve behavior.
+        if (ctor.parameters.isEmpty()) return AnalysisResult.NotApplicable
         // Value class must have exactly one primary constructor parameter (Kotlin
         // already enforces this, but we add a defensive guard rather than relying on it).
-        if (isValue && ctor.parameters.size != 1) return null
+        if (isValue && ctor.parameters.size != 1) return AnalysisResult.NotApplicable
 
         val ownerSimpleName = symbol.simpleName.asString()
         val messageWireOrder = readMessageWireOrder(symbol)
@@ -260,17 +286,21 @@ internal class CodecEmitter(
         val params = ctor.parameters
         for ((index, param) in params.withIndex()) {
             val isTerminal = index == params.lastIndex
-            val field =
-                analyzeField(
-                    param = param,
-                    messageWireOrder = messageWireOrder,
-                    ownerSimpleName = ownerSimpleName,
-                    isTerminal = isTerminal,
-                    params = params,
-                    index = index,
-                    payloadTypeParameter = payloadTypeParameter,
-                ) ?: return null
-            fields += field
+            when (
+                val fa =
+                    analyzeField(
+                        param = param,
+                        messageWireOrder = messageWireOrder,
+                        ownerSimpleName = ownerSimpleName,
+                        isTerminal = isTerminal,
+                        params = params,
+                        index = index,
+                        payloadTypeParameter = payloadTypeParameter,
+                    )
+            ) {
+                is FieldAnalysis.Ok -> fields += fa.field
+                is FieldAnalysis.Err -> return AnalysisResult.Rejected(listOf(fa.diagnostic))
+            }
         }
         // Terminal-only restriction: LengthFromString and LengthFromList
         // bodies consume a (possibly externally-bounded) trailing byte
@@ -281,15 +311,56 @@ internal class CodecEmitter(
         // `UseCodecScalar` (codec implements `BoundingLengthCodec`) narrows
         // `buffer.limit()` mid-decode; multiple of them would have ambiguous
         // semantics (last-one-wins isn't a real protocol's wire shape).
-        if (fields.count { it.isBoundingShape() } > 1) return null
+        // §2.6 Silent Gap (#13, HIGH): the validator never checks for
+        // multiple bounding-codec fields, so this is an emitter-only
+        // rejection → Rejected (loud in the next pass).
+        if (fields.count { it.isBoundingShape() } > 1) {
+            return AnalysisResult.Rejected(
+                listOf(
+                    Diagnostic(
+                        "at most one bounding (@UseCodec BoundingLengthCodec) field is supported per @ProtocolMessage",
+                        symbol,
+                    ),
+                ),
+            )
+        }
         for ((index, field) in fields.withIndex()) {
-            if (field is FieldSpec.LengthFromString && index != fields.lastIndex) return null
-            if (field is FieldSpec.LengthFromList && index != fields.lastIndex) return null
+            // §2.6 Silent Gaps (#8/#9/#10/#35): @LengthFrom* on a non-terminal
+            // field has no validator terminal-position check → Rejected.
+            if (field is FieldSpec.LengthFromString && index != fields.lastIndex) {
+                return AnalysisResult.Rejected(
+                    listOf(
+                        Diagnostic(
+                            "@LengthFrom val: String must be the last field (terminal-only)",
+                            symbol,
+                        ),
+                    ),
+                )
+            }
+            if (field is FieldSpec.LengthFromList && index != fields.lastIndex) {
+                return AnalysisResult.Rejected(
+                    listOf(
+                        Diagnostic(
+                            "@LengthFrom val: List<@ProtocolMessage> must be the last field (terminal-only)",
+                            symbol,
+                        ),
+                    ),
+                )
+            }
             // `@LengthFrom val: T: @ProtocolMessage` is terminal-only
             // (mirror of `LengthPrefixedMessage`'s terminal-only rule). Lifting
             // would require dispatcher-side wireSize composition that doesn't
             // exist yet for nested-message bodies sized by a sibling.
-            if (field is FieldSpec.LengthFromMessage && index != fields.lastIndex) return null
+            if (field is FieldSpec.LengthFromMessage && index != fields.lastIndex) {
+                return AnalysisResult.Rejected(
+                    listOf(
+                        Diagnostic(
+                            "@LengthFrom val: @ProtocolMessage must be the last field (terminal-only)",
+                            symbol,
+                        ),
+                    ),
+                )
+            }
             // (issue #151 part 2) — `@RemainingBytes` no longer has
             // to be the last field. Trailing fields must all be
             // `FieldSpec.FixedSize` (Scalar + ValueClassScalar today, not
@@ -299,23 +370,27 @@ internal class CodecEmitter(
             // would leave the body with no way to know its end without
             // re-encoding — surfaced as a focused validator error in
             // ProtocolMessageProcessor.validateRemainingBytesTrailers.
+            // §2.5 / SUPPORT_MATRIX: non-terminal @RemainingBytes with a
+            // variable-size trailer is *legitimately paired* with the
+            // validator diagnostic (validateRemainingBytesTrailers) → stay
+            // silent here (NotApplicable) so we don't double-report.
             if (field is FieldSpec.RemainingBytesProtocolMessageList &&
                 index != fields.lastIndex &&
                 !trailingFieldsAreFixedSize(fields, index)
             ) {
-                return null
+                return AnalysisResult.NotApplicable
             }
             if (field is FieldSpec.RemainingBytesPayload &&
                 index != fields.lastIndex &&
                 !trailingFieldsAreFixedSize(fields, index)
             ) {
-                return null
+                return AnalysisResult.NotApplicable
             }
             if (field is FieldSpec.RemainingBytesString &&
                 index != fields.lastIndex &&
                 !trailingFieldsAreFixedSize(fields, index)
             ) {
-                return null
+                return AnalysisResult.NotApplicable
             }
         }
 
@@ -346,23 +421,38 @@ internal class CodecEmitter(
         // the type parameter is unused — return null so the emitter
         // skips. The validator in ProtocolMessageProcessor surfaces
         // the user-facing diagnostic.
+        // §2.5 Silent Gap (#34): the prior comment claims the validator
+        // surfaces this, but per SUPPORT_MATRIX the validator's
+        // declared-unused check only fires for data classes via different
+        // control flow and does NOT cover this exact emitter path — so this
+        // is a true silent gap → Rejected (loud in the next pass).
         if (payloadTypeParameter != null &&
             fields.none { f ->
                 f is FieldSpec.RemainingBytesPayload &&
                     f.source is PayloadCodecSource.ConstructorInjected
             }
         ) {
-            return null
+            return AnalysisResult.Rejected(
+                listOf(
+                    Diagnostic(
+                        "declares <${payloadTypeParameter.typeVariableName} : Payload> but no " +
+                            "@RemainingBytes val: ${payloadTypeParameter.typeVariableName} field uses it",
+                        symbol,
+                    ),
+                ),
+            )
         }
-        return CodecShape(
-            packageName = pkg,
-            messageClassName = classNameOf(symbol),
-            ownerSimpleName = ownerSimpleName,
-            codecSimpleName = symbol.flattenedCodecName(),
-            fields = fields,
-            visibility = codecVisibilityModifier(symbol),
-            payloadTypeParameter = payloadTypeParameter,
-            framedBy = detectFramedBy(symbol),
+        return AnalysisResult.Supported(
+            CodecShape(
+                packageName = pkg,
+                messageClassName = classNameOf(symbol),
+                ownerSimpleName = ownerSimpleName,
+                codecSimpleName = symbol.flattenedCodecName(),
+                fields = fields,
+                visibility = codecVisibilityModifier(symbol),
+                payloadTypeParameter = payloadTypeParameter,
+                framedBy = detectFramedBy(symbol),
+            ),
         )
     }
 
@@ -558,7 +648,7 @@ internal class CodecEmitter(
         params: List<KSValueParameter>,
         index: Int,
         payloadTypeParameter: PayloadTypeParameter? = null,
-    ): FieldSpec? {
+    ): FieldAnalysis {
         // `@When` opens a separate analysis path: nullability is
         // required, the inner shape is built from the non-null type, and the
         // result wraps in `FieldSpec.Conditional`. The non-conditional analysis
@@ -588,13 +678,27 @@ internal class CodecEmitter(
                 "RemainingBytes" -> remainingBytesAnn = ann
                 "WireBytes" -> wireBytesAnn = ann
                 "UseCodec" -> useCodecAnn = ann
-                else -> return null
+                else ->
+                    return FieldAnalysis.Err(
+                        Diagnostic(
+                            "unknown/unsupported annotation @${ann.shortName.asString()} on field",
+                            param,
+                        ),
+                    )
             }
         }
-        val name = param.name?.asString() ?: return null
+        val name =
+            param.name?.asString()
+                ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
         val type = param.type.resolve()
-        if (type.isError) return null
-        if (type.isMarkedNullable) return null
+        if (type.isError) {
+            return FieldAnalysis.Err(Diagnostic("field type does not resolve", param))
+        }
+        if (type.isMarkedNullable) {
+            return FieldAnalysis.Err(
+                Diagnostic("nullable field type requires @When (T? without @When is unsupported)", param),
+            )
+        }
 
         if (remainingBytesAnn != null) {
             // `@RemainingBytes val: List<S>` where S is
@@ -608,17 +712,25 @@ internal class CodecEmitter(
             // `@RemainingBytes val: P` where P is the
             // type parameter `<P : Payload>` of the enclosing data class
             // routes to RemainingBytesPayload via ConstructorInjected.
-            if (lengthFromAnn != null || lengthPrefixed != null || wireBytesAnn != null) return null
+            if (lengthFromAnn != null || lengthPrefixed != null || wireBytesAnn != null) {
+                return FieldAnalysis.Err(
+                    Diagnostic(
+                        "@RemainingBytes cannot be combined with @LengthFrom/@LengthPrefixed/@WireBytes",
+                        param,
+                    ),
+                )
+            }
             if (useCodecAnn != null && type.implementsPayload()) {
                 return analyzeRemainingBytesPayloadField(param, type, useCodecAnn, ownerSimpleName)
             }
             if (useCodecAnn == null && payloadTypeParameter != null && type.matchesTypeParameter(payloadTypeParameter)) {
-                val name = param.name?.asString() ?: return null
-                return FieldSpec.RemainingBytesPayload(
-                    name = name,
-                    ownerSimpleName = ownerSimpleName,
-                    payloadType = TypeVariableName(payloadTypeParameter.typeVariableName),
-                    source = PayloadCodecSource.ConstructorInjected(payloadTypeParameter.codecParameterName),
+                return FieldAnalysis.Ok(
+                    FieldSpec.RemainingBytesPayload(
+                        name = name,
+                        ownerSimpleName = ownerSimpleName,
+                        payloadType = TypeVariableName(payloadTypeParameter.typeVariableName),
+                        source = PayloadCodecSource.ConstructorInjected(payloadTypeParameter.codecParameterName),
+                    ),
                 )
             }
             val typeQname = type.declaration.qualifiedName?.asString()
@@ -626,10 +738,18 @@ internal class CodecEmitter(
             // bounded buffer. Documented in the annotation kdoc since
             // `@RemainingBytes` was introduced; the emitter branch landed here.
             if (typeQname == "kotlin.String") {
-                val name = param.name?.asString() ?: return null
-                return FieldSpec.RemainingBytesString(name = name, ownerSimpleName = ownerSimpleName)
+                return FieldAnalysis.Ok(
+                    FieldSpec.RemainingBytesString(name = name, ownerSimpleName = ownerSimpleName),
+                )
             }
-            if (typeQname != "kotlin.collections.List") return null
+            if (typeQname != "kotlin.collections.List") {
+                return FieldAnalysis.Err(
+                    Diagnostic(
+                        "@RemainingBytes supports only String, List<@ProtocolMessage>, or @UseCodec val: Payload",
+                        param,
+                    ),
+                )
+            }
             // Only the `@ProtocolMessage` element shape is
             // accepted now; retired the scalar-element fallback
             // (rejected at the validator with a focused diagnostic
@@ -652,7 +772,11 @@ internal class CodecEmitter(
             // Mutually exclusive with `@LengthPrefixed` / `@WireBytes` on
             // the same parameter. The adjacent-LF migration suggestion is
             // independent.
-            if (lengthPrefixed != null || wireBytesAnn != null) return null
+            if (lengthPrefixed != null || wireBytesAnn != null) {
+                return FieldAnalysis.Err(
+                    Diagnostic("@LengthFrom cannot be combined with @LengthPrefixed/@WireBytes", param),
+                )
+            }
             val typeQname = type.declaration.qualifiedName?.asString()
             return when (typeQname) {
                 "kotlin.String" ->
@@ -687,7 +811,11 @@ internal class CodecEmitter(
         if (lengthPrefixed != null) {
             // `@LengthPrefixed` and `@WireBytes` together is meaningless and
             // out of scope for this emitter; bail rather than try to interpret.
-            if (wireBytesAnn != null) return null
+            if (wireBytesAnn != null) {
+                return FieldAnalysis.Err(
+                    Diagnostic("@LengthPrefixed cannot be combined with @WireBytes", param),
+                )
+            }
             // `@LengthPrefixed @UseCodec(C::class) val xs:
             // List<E>` routes to LengthPrefixedUseCodecList. The codec drives
             // the wire-format prefix (var-byte-int, etc.) and bounds the
@@ -698,14 +826,17 @@ internal class CodecEmitter(
             if (useCodecAnn != null) {
                 // Try the list shape first, then fall back to the
                 // scalar Payload shape. The list analyzer
-                // returns null for non-`List<...>` field types, so the two
-                // shapes are mutually exclusive.
-                analyzeLengthPrefixedUseCodecListField(
-                    param = param,
-                    listType = type,
-                    useCodecAnn = useCodecAnn,
-                    ownerSimpleName = ownerSimpleName,
-                )?.let { return it }
+                // returns Err for non-`List<...>` field types, so the two
+                // shapes are mutually exclusive; an Err falls through to the
+                // payload analyzer (preserving the prior `?.let` fallthrough).
+                val listResult =
+                    analyzeLengthPrefixedUseCodecListField(
+                        param = param,
+                        listType = type,
+                        useCodecAnn = useCodecAnn,
+                        ownerSimpleName = ownerSimpleName,
+                    )
+                if (listResult is FieldAnalysis.Ok) return listResult
                 return analyzeLengthPrefixedUseCodecPayloadField(
                     param = param,
                     type = type,
@@ -723,11 +854,13 @@ internal class CodecEmitter(
                 // and restores position past the body, so subsequent fields
                 // emit cleanly. The sequential peek walk handles the prefix
                 // chase.
-                return FieldSpec.LengthPrefixedString(
-                    name = name,
-                    ownerSimpleName = ownerSimpleName,
-                    prefixWidth = prefixWidth,
-                    prefixWireOrder = messageWireOrder,
+                return FieldAnalysis.Ok(
+                    FieldSpec.LengthPrefixedString(
+                        name = name,
+                        ownerSimpleName = ownerSimpleName,
+                        prefixWidth = prefixWidth,
+                        prefixWireOrder = messageWireOrder,
+                    ),
                 )
             }
             // `@LengthPrefixed @ProtocolMessage` body stays terminal-only:
@@ -735,8 +868,18 @@ internal class CodecEmitter(
             // and the dispatcher table needs the body to be the last field
             // for runtime-Exact size composition. Lifting this requires
             // extending the dispatcher / wireSize emit path too.
-            if (!isTerminal) return null
-            val decl = type.declaration as? KSClassDeclaration ?: return null
+            // §2.3 Silent Gap: non-terminal @LengthPrefixed @ProtocolMessage
+            // has no paired validator diagnostic → Rejected.
+            if (!isTerminal) {
+                return FieldAnalysis.Err(
+                    Diagnostic("@LengthPrefixed val: @ProtocolMessage must be the last field (terminal-only)", param),
+                )
+            }
+            val decl =
+                type.declaration as? KSClassDeclaration
+                    ?: return FieldAnalysis.Err(
+                        Diagnostic("@LengthPrefixed body type is not a class declaration", param),
+                    )
             val isProtocolMessage =
                 decl.annotations.any { ann ->
                     ann.shortName.asString() == "ProtocolMessage" &&
@@ -745,15 +888,25 @@ internal class CodecEmitter(
                             .declaration.qualifiedName
                             ?.asString() == PROTOCOL_MESSAGE_QNAME
                 }
-            if (!isProtocolMessage) return null
-            if (Modifier.DATA !in decl.modifiers) return null
-            return FieldSpec.LengthPrefixedMessage(
-                name = name,
-                ownerSimpleName = ownerSimpleName,
-                messageType = classNameOf(decl),
-                codecType = ClassName(decl.packageName.asString(), decl.flattenedCodecName()),
-                prefixWidth = prefixWidth,
-                prefixWireOrder = messageWireOrder,
+            if (!isProtocolMessage) {
+                return FieldAnalysis.Err(
+                    Diagnostic("@LengthPrefixed body must be a String or @ProtocolMessage data class", param),
+                )
+            }
+            if (Modifier.DATA !in decl.modifiers) {
+                return FieldAnalysis.Err(
+                    Diagnostic("@LengthPrefixed @ProtocolMessage body must be a data class", param),
+                )
+            }
+            return FieldAnalysis.Ok(
+                FieldSpec.LengthPrefixedMessage(
+                    name = name,
+                    ownerSimpleName = ownerSimpleName,
+                    messageType = classNameOf(decl),
+                    codecType = ClassName(decl.packageName.asString(), decl.flattenedCodecName()),
+                    prefixWidth = prefixWidth,
+                    prefixWireOrder = messageWireOrder,
+                ),
             )
         }
 
@@ -765,26 +918,46 @@ internal class CodecEmitter(
             // class + bounding bit. Mutually exclusive with @WireBytes /
             // @WireOrder on the same parameter — the user codec owns the
             // wire shape.
-            if (wireBytesAnn != null) return null
-            if (param.annotations.any { it.shortName.asString() == "WireOrder" }) return null
+            if (wireBytesAnn != null) {
+                return FieldAnalysis.Err(
+                    Diagnostic("@UseCodec cannot be combined with @WireBytes (codec owns the wire shape)", param),
+                )
+            }
+            if (param.annotations.any { it.shortName.asString() == "WireOrder" }) {
+                return FieldAnalysis.Err(
+                    Diagnostic("@UseCodec cannot be combined with @WireOrder (codec owns the wire shape)", param),
+                )
+            }
             return analyzeUseCodecScalarField(param, type, useCodecAnn, ownerSimpleName)
         }
 
-        val qualified = type.declaration.qualifiedName?.asString() ?: return null
+        val qualified =
+            type.declaration.qualifiedName?.asString()
+                ?: return FieldAnalysis.Err(Diagnostic("field type has no qualified name", param))
         val kind = SUPPORTED_SCALARS[qualified]
         if (kind == null) {
             // Value-class field. Only the natural-width
             // unannotated path is in scope; @WireBytes / @WireOrder on the
             // outer parameter widen this and are deferred to a later slice.
-            if (wireBytesAnn != null) return null
-            if (param.annotations.any { it.shortName.asString() == "WireOrder" }) return null
+            if (wireBytesAnn != null) {
+                return FieldAnalysis.Err(
+                    Diagnostic("@WireBytes on a value-class field is not yet supported", param),
+                )
+            }
+            if (param.annotations.any { it.shortName.asString() == "WireOrder" }) {
+                return FieldAnalysis.Err(
+                    Diagnostic("@WireOrder on a value-class field is not yet supported", param),
+                )
+            }
             // Try the bare `val: T: @ProtocolMessage`
             // shape (data class or sealed parent) before the value-class
             // fallback. Value classes carry `Modifier.VALUE` and don't carry
             // `Modifier.DATA`/`Modifier.SEALED`, so the two branches are
-            // mutually exclusive on the modifier check.
-            analyzeBareProtocolMessageField(param, type, ownerSimpleName)
-                ?.let { return it }
+            // mutually exclusive on the modifier check. A bare-message Err
+            // falls through to the value-class analyzer (preserving the prior
+            // `?.let` fallthrough).
+            val bareResult = analyzeBareProtocolMessageField(param, type, ownerSimpleName)
+            if (bareResult is FieldAnalysis.Ok) return bareResult
             return analyzeValueClassScalarField(param, ownerSimpleName)
         }
 
@@ -793,13 +966,19 @@ internal class CodecEmitter(
         // path (which has no Boolean support) is never reachable. Forces resolved =
         // Default regardless of the message-level wire order.
         if (kind == ScalarKind.Boolean) {
-            if (wireBytesAnn != null) return null
-            if (param.annotations.any { it.shortName.asString() == "WireOrder" }) return null
-            return FieldSpec.Scalar(
-                name = name,
-                kind = kind,
-                resolvedWireOrder = Endianness.Default,
-                wireBytes = 1,
+            if (wireBytesAnn != null) {
+                return FieldAnalysis.Err(Diagnostic("@WireBytes is meaningless on a Boolean field", param))
+            }
+            if (param.annotations.any { it.shortName.asString() == "WireOrder" }) {
+                return FieldAnalysis.Err(Diagnostic("@WireOrder is meaningless on a Boolean field", param))
+            }
+            return FieldAnalysis.Ok(
+                FieldSpec.Scalar(
+                    name = name,
+                    kind = kind,
+                    resolvedWireOrder = Endianness.Default,
+                    wireBytes = 1,
+                ),
             )
         }
 
@@ -808,18 +987,28 @@ internal class CodecEmitter(
         // R4 narrows what the emitter accepts; the validator emits the actual
         // diagnostic. Skip emission for unsupported widths so generated code
         // never references an out-of-bounds bit shift.
-        if (wireBytes < 1 || wireBytes > 8) return null
-        if (wireBytes > kind.width) return null
+        if (wireBytes < 1 || wireBytes > 8) {
+            return FieldAnalysis.Err(Diagnostic("@WireBytes width must be in 1..8", param))
+        }
+        if (wireBytes > kind.width) {
+            return FieldAnalysis.Err(Diagnostic("@WireBytes width exceeds the natural width of the field type", param))
+        }
         // Signed scalars (and Float/Double, which carry a sign bit and never
         // narrow) only support natural width — partial-read sign extension
         // is its own design and out of scope. With explicit wireOrder they
         // flow through the manual byte-by-byte assembly path below.
-        if (kind.isSigned && wireBytes != kind.width) return null
-        return FieldSpec.Scalar(
-            name = name,
-            kind = kind,
-            resolvedWireOrder = resolved,
-            wireBytes = wireBytes,
+        if (kind.isSigned && wireBytes != kind.width) {
+            return FieldAnalysis.Err(
+                Diagnostic("signed scalars only support natural width (narrowed @WireBytes is unsupported)", param),
+            )
+        }
+        return FieldAnalysis.Ok(
+            FieldSpec.Scalar(
+                name = name,
+                kind = kind,
+                resolvedWireOrder = resolved,
+                wireBytes = wireBytes,
+            ),
         )
     }
 
@@ -835,22 +1024,46 @@ internal class CodecEmitter(
     private fun analyzeValueClassScalarField(
         param: KSValueParameter,
         ownerSimpleName: String,
-    ): FieldSpec.ValueClassScalar? {
-        val name = param.name?.asString() ?: return null
+    ): FieldAnalysis {
+        val name =
+            param.name?.asString()
+                ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
         val type = param.type.resolve()
-        if (type.isError) return null
-        if (type.isMarkedNullable) return null
-        val decl = type.declaration as? KSClassDeclaration ?: return null
-        if (!decl.isValueClassDecl()) return null
-        val ctor = decl.primaryConstructor ?: return null
-        if (ctor.parameters.size != 1) return null
+        if (type.isError) return FieldAnalysis.Err(Diagnostic("field type does not resolve", param))
+        if (type.isMarkedNullable) {
+            return FieldAnalysis.Err(Diagnostic("value-class field must be non-nullable (use @When for T?)", param))
+        }
+        val decl =
+            type.declaration as? KSClassDeclaration
+                ?: return FieldAnalysis.Err(Diagnostic("field type is not a class declaration", param))
+        if (!decl.isValueClassDecl()) {
+            return FieldAnalysis.Err(Diagnostic("unsupported field type (not a scalar or @JvmInline value class)", param))
+        }
+        val ctor =
+            decl.primaryConstructor
+                ?: return FieldAnalysis.Err(Diagnostic("value class has no primary constructor", param))
+        if (ctor.parameters.size != 1) {
+            return FieldAnalysis.Err(Diagnostic("value class must have exactly one constructor parameter", param))
+        }
         val innerParam = ctor.parameters[0]
-        val innerName = innerParam.name?.asString() ?: return null
+        val innerName =
+            innerParam.name?.asString()
+                ?: return FieldAnalysis.Err(Diagnostic("value class inner parameter has no name", param))
         val innerType = innerParam.type.resolve()
-        if (innerType.isError) return null
-        if (innerType.isMarkedNullable) return null
-        val innerQname = innerType.declaration.qualifiedName?.asString() ?: return null
-        val innerKind = SUPPORTED_SCALARS[innerQname] ?: return null
+        if (innerType.isError) {
+            return FieldAnalysis.Err(Diagnostic("value class inner type does not resolve", param))
+        }
+        if (innerType.isMarkedNullable) {
+            return FieldAnalysis.Err(Diagnostic("value class inner scalar must be non-nullable", param))
+        }
+        val innerQname =
+            innerType.declaration.qualifiedName?.asString()
+                ?: return FieldAnalysis.Err(Diagnostic("value class inner type has no qualified name", param))
+        val innerKind =
+            SUPPORTED_SCALARS[innerQname]
+                ?: return FieldAnalysis.Err(
+                    Diagnostic("value class inner type is not a supported scalar", param),
+                )
         // Limits the inner scalar to its natural-width default-order
         // path. @WireBytes / @WireOrder on the inner property would widen the
         // shape and are deferred along with the same widening on direct
@@ -860,23 +1073,27 @@ internal class CodecEmitter(
                 n == "WireBytes" || n == "WireOrder"
             }
         ) {
-            return null
+            return FieldAnalysis.Err(
+                Diagnostic("@WireBytes/@WireOrder on a value class inner property is not yet supported", param),
+            )
         }
-        return FieldSpec.ValueClassScalar(
-            name = name,
-            ownerSimpleName = ownerSimpleName,
-            valueClassType = classNameOf(decl),
-            innerKind = innerKind,
-            innerPropertyName = innerName,
-            wireBytes = innerKind.width,
-            // Follow-up: propagate the value class's own
-            // `@ProtocolMessage(wireOrder)` so multi-byte inner kinds
-            // (UShort/UInt) assemble bytes correctly during peek-side
-            // reconstruction in the sequential walk. Defaults to
-            // Endianness.Default (collapses to big-endian) when the
-            // value class doesn't declare an order, matching 's
-            // prior behavior.
-            valueClassWireOrder = readMessageWireOrder(decl),
+        return FieldAnalysis.Ok(
+            FieldSpec.ValueClassScalar(
+                name = name,
+                ownerSimpleName = ownerSimpleName,
+                valueClassType = classNameOf(decl),
+                innerKind = innerKind,
+                innerPropertyName = innerName,
+                wireBytes = innerKind.width,
+                // Follow-up: propagate the value class's own
+                // `@ProtocolMessage(wireOrder)` so multi-byte inner kinds
+                // (UShort/UInt) assemble bytes correctly during peek-side
+                // reconstruction in the sequential walk. Defaults to
+                // Endianness.Default (collapses to big-endian) when the
+                // value class doesn't declare an order, matching 's
+                // prior behavior.
+                valueClassWireOrder = readMessageWireOrder(decl),
+            ),
         )
     }
 
@@ -897,22 +1114,34 @@ internal class CodecEmitter(
         ownerSimpleName: String,
         params: List<KSValueParameter>,
         index: Int,
-    ): FieldSpec.LengthFromString? {
-        val name = param.name?.asString() ?: return null
+    ): FieldAnalysis {
+        val name =
+            param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
         val type = param.type.resolve()
-        if (type.isError) return null
-        if (type.isMarkedNullable) return null
-        if (type.declaration.qualifiedName?.asString() != "kotlin.String") return null
+        if (type.isError) return FieldAnalysis.Err(Diagnostic("field type does not resolve", param))
+        if (type.isMarkedNullable) {
+            return FieldAnalysis.Err(Diagnostic("@LengthFrom val: String must be non-nullable", param))
+        }
+        if (type.declaration.qualifiedName?.asString() != "kotlin.String") {
+            return FieldAnalysis.Err(Diagnostic("@LengthFrom String analyzer requires a String field", param))
+        }
 
         val referenced =
             lengthFromAnn.arguments
                 .firstOrNull { it.name?.asString() == "field" }
-                ?.value as? String ?: return null
-        val source = analyzeLengthSource(referenced, params, index) ?: return null
-        return FieldSpec.LengthFromString(
-            name = name,
-            ownerSimpleName = ownerSimpleName,
-            source = source,
+                ?.value as? String
+                ?: return FieldAnalysis.Err(Diagnostic("@LengthFrom is missing its field argument", param))
+        val source =
+            analyzeLengthSource(referenced, params, index)
+                ?: return FieldAnalysis.Err(
+                    Diagnostic("@LengthFrom(\"$referenced\") does not resolve to a supported length carrier", param),
+                )
+        return FieldAnalysis.Ok(
+            FieldSpec.LengthFromString(
+                name = name,
+                ownerSimpleName = ownerSimpleName,
+                source = source,
+            ),
         )
     }
 
@@ -993,14 +1222,25 @@ internal class CodecEmitter(
         ownerSimpleName: String,
         params: List<KSValueParameter>,
         index: Int,
-    ): FieldSpec.LengthFromList? {
-        val name = param.name?.asString() ?: return null
+    ): FieldAnalysis {
+        val name =
+            param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
         val typeArgs = listType.arguments
-        if (typeArgs.size != 1) return null
-        val elementType = typeArgs[0].type?.resolve() ?: return null
-        if (elementType.isError || elementType.isMarkedNullable) return null
-        val elementDecl = elementType.declaration as? KSClassDeclaration ?: return null
-        if (Modifier.DATA !in elementDecl.modifiers) return null
+        if (typeArgs.size != 1) {
+            return FieldAnalysis.Err(Diagnostic("@LengthFrom List must have exactly one type argument", param))
+        }
+        val elementType =
+            typeArgs[0].type?.resolve()
+                ?: return FieldAnalysis.Err(Diagnostic("@LengthFrom List element type does not resolve", param))
+        if (elementType.isError || elementType.isMarkedNullable) {
+            return FieldAnalysis.Err(Diagnostic("@LengthFrom List element must be a resolvable non-nullable type", param))
+        }
+        val elementDecl =
+            elementType.declaration as? KSClassDeclaration
+                ?: return FieldAnalysis.Err(Diagnostic("@LengthFrom List element is not a class declaration", param))
+        if (Modifier.DATA !in elementDecl.modifiers) {
+            return FieldAnalysis.Err(Diagnostic("@LengthFrom List element must be a @ProtocolMessage data class", param))
+        }
         val isProtocolMessage =
             elementDecl.annotations.any { ann ->
                 ann.shortName.asString() == "ProtocolMessage" &&
@@ -1009,24 +1249,33 @@ internal class CodecEmitter(
                         .declaration.qualifiedName
                         ?.asString() == PROTOCOL_MESSAGE_QNAME
             }
-        if (!isProtocolMessage) return null
+        if (!isProtocolMessage) {
+            return FieldAnalysis.Err(Diagnostic("@LengthFrom List element must be annotated @ProtocolMessage", param))
+        }
 
         val referenced =
             lengthFromAnn.arguments
                 .firstOrNull { it.name?.asString() == "field" }
-                ?.value as? String ?: return null
-        val source = analyzeLengthSource(referenced, params, index) ?: return null
+                ?.value as? String
+                ?: return FieldAnalysis.Err(Diagnostic("@LengthFrom is missing its field argument", param))
+        val source =
+            analyzeLengthSource(referenced, params, index)
+                ?: return FieldAnalysis.Err(
+                    Diagnostic("@LengthFrom(\"$referenced\") does not resolve to a supported length carrier", param),
+                )
 
-        return FieldSpec.LengthFromList(
-            name = name,
-            ownerSimpleName = ownerSimpleName,
-            source = source,
-            elementClassName = classNameOf(elementDecl),
-            elementCodecClassName =
-                ClassName(
-                    elementDecl.packageName.asString(),
-                    elementDecl.flattenedCodecName(),
-                ),
+        return FieldAnalysis.Ok(
+            FieldSpec.LengthFromList(
+                name = name,
+                ownerSimpleName = ownerSimpleName,
+                source = source,
+                elementClassName = classNameOf(elementDecl),
+                elementCodecClassName =
+                    ClassName(
+                        elementDecl.packageName.asString(),
+                        elementDecl.flattenedCodecName(),
+                    ),
+            ),
         )
     }
 
@@ -1051,10 +1300,15 @@ internal class CodecEmitter(
         ownerSimpleName: String,
         params: List<KSValueParameter>,
         index: Int,
-    ): FieldSpec.LengthFromMessage? {
-        val name = param.name?.asString() ?: return null
-        if (type.isError || type.isMarkedNullable) return null
-        val decl = type.declaration as? KSClassDeclaration ?: return null
+    ): FieldAnalysis {
+        val name =
+            param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
+        if (type.isError || type.isMarkedNullable) {
+            return FieldAnalysis.Err(Diagnostic("@LengthFrom field must be a resolvable non-nullable type", param))
+        }
+        val decl =
+            type.declaration as? KSClassDeclaration
+                ?: return FieldAnalysis.Err(Diagnostic("@LengthFrom field type is not a class declaration", param))
         val isProtocolMessage =
             decl.annotations.any { ann ->
                 ann.shortName.asString() == "ProtocolMessage" &&
@@ -1063,33 +1317,52 @@ internal class CodecEmitter(
                         .declaration.qualifiedName
                         ?.asString() == PROTOCOL_MESSAGE_QNAME
             }
-        if (!isProtocolMessage) return null
+        if (!isProtocolMessage) {
+            return FieldAnalysis.Err(
+                Diagnostic("@LengthFrom requires the field to be String, List<@ProtocolMessage>, or @ProtocolMessage", param),
+            )
+        }
         // Accept both data-class and sealed-parent shapes — the by-name
         // codec resolution is identical (`<TCodec>.decode/encode`); the
         // sealed parent's codec is the dispatcher object.
         val isDataClass = Modifier.DATA in decl.modifiers
         val isSealed = Modifier.SEALED in decl.modifiers
-        if (!isDataClass && !isSealed) return null
+        if (!isDataClass && !isSealed) {
+            return FieldAnalysis.Err(
+                Diagnostic("@LengthFrom @ProtocolMessage field must be a data class or sealed parent", param),
+            )
+        }
         // Payload-generic types reject (their codec is a class with
         // constructor-injected codec, not a singleton object).
-        if (decl.typeParameters.isNotEmpty()) return null
+        if (decl.typeParameters.isNotEmpty()) {
+            return FieldAnalysis.Err(
+                Diagnostic("@LengthFrom @ProtocolMessage field type cannot carry a <P : Payload> type parameter", param),
+            )
+        }
 
         val referenced =
             lengthFromAnn.arguments
                 .firstOrNull { it.name?.asString() == "field" }
-                ?.value as? String ?: return null
-        val source = analyzeLengthSource(referenced, params, index) ?: return null
+                ?.value as? String
+                ?: return FieldAnalysis.Err(Diagnostic("@LengthFrom is missing its field argument", param))
+        val source =
+            analyzeLengthSource(referenced, params, index)
+                ?: return FieldAnalysis.Err(
+                    Diagnostic("@LengthFrom(\"$referenced\") does not resolve to a supported length carrier", param),
+                )
 
-        return FieldSpec.LengthFromMessage(
-            name = name,
-            ownerSimpleName = ownerSimpleName,
-            source = source,
-            messageType = classNameOf(decl),
-            codecType =
-                ClassName(
-                    decl.packageName.asString(),
-                    decl.flattenedCodecName(),
-                ),
+        return FieldAnalysis.Ok(
+            FieldSpec.LengthFromMessage(
+                name = name,
+                ownerSimpleName = ownerSimpleName,
+                source = source,
+                messageType = classNameOf(decl),
+                codecType =
+                    ClassName(
+                        decl.packageName.asString(),
+                        decl.flattenedCodecName(),
+                    ),
+            ),
         )
     }
 
@@ -1110,13 +1383,24 @@ internal class CodecEmitter(
         param: KSValueParameter,
         listType: KSType,
         ownerSimpleName: String,
-    ): FieldSpec.RemainingBytesProtocolMessageList? {
-        val name = param.name?.asString() ?: return null
+    ): FieldAnalysis {
+        val name =
+            param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
         val typeArgs = listType.arguments
-        if (typeArgs.size != 1) return null
-        val elementType = typeArgs[0].type?.resolve() ?: return null
-        if (elementType.isError || elementType.isMarkedNullable) return null
-        val elementDecl = elementType.declaration as? KSClassDeclaration ?: return null
+        if (typeArgs.size != 1) {
+            return FieldAnalysis.Err(Diagnostic("@RemainingBytes List must have exactly one type argument", param))
+        }
+        val elementType =
+            typeArgs[0].type?.resolve()
+                ?: return FieldAnalysis.Err(Diagnostic("@RemainingBytes List element type does not resolve", param))
+        if (elementType.isError || elementType.isMarkedNullable) {
+            return FieldAnalysis.Err(
+                Diagnostic("@RemainingBytes List element must be a resolvable non-nullable type", param),
+            )
+        }
+        val elementDecl =
+            elementType.declaration as? KSClassDeclaration
+                ?: return FieldAnalysis.Err(Diagnostic("@RemainingBytes List element is not a class declaration", param))
         // Widened to also accept a `@ProtocolMessage`
         // sealed parent (with `@DispatchOn`). Mirrors the widening
         // applied to `analyzeLengthPrefixedListSpec`. The encode emit
@@ -1126,7 +1410,11 @@ internal class CodecEmitter(
         // internally via its own scratch logic.
         val isDataClass = Modifier.DATA in elementDecl.modifiers
         val isSealed = Modifier.SEALED in elementDecl.modifiers
-        if (!isDataClass && !isSealed) return null
+        if (!isDataClass && !isSealed) {
+            return FieldAnalysis.Err(
+                Diagnostic("@RemainingBytes List element must be a @ProtocolMessage data class or sealed parent", param),
+            )
+        }
         val isProtocolMessage =
             elementDecl.annotations.any { ann ->
                 ann.shortName.asString() == "ProtocolMessage" &&
@@ -1135,23 +1423,33 @@ internal class CodecEmitter(
                         .declaration.qualifiedName
                         ?.asString() == PROTOCOL_MESSAGE_QNAME
             }
-        if (!isProtocolMessage) return null
+        if (!isProtocolMessage) {
+            return FieldAnalysis.Err(
+                Diagnostic("@RemainingBytes List element must be annotated @ProtocolMessage", param),
+            )
+        }
         // Same payload-generic reject as
         // `analyzeLengthPrefixedListSpec` ( rule). A `<P:
         // Payload>` element generates a generic-class codec, not a
         // singleton object; the per-element `<E>Codec.encode(...)` call
         // requires the singleton form.
-        if (detectPayloadTypeParameter(elementDecl) != null) return null
-        return FieldSpec.RemainingBytesProtocolMessageList(
-            name = name,
-            ownerSimpleName = ownerSimpleName,
-            elementClassName = classNameOf(elementDecl),
-            elementCodecClassName =
-                ClassName(
-                    elementDecl.packageName.asString(),
-                    elementDecl.flattenedCodecName(),
-                ),
-            elementIsBackPatch = detectElementBackPatch(elementDecl),
+        if (detectPayloadTypeParameter(elementDecl) != null) {
+            return FieldAnalysis.Err(
+                Diagnostic("@RemainingBytes List element cannot carry a <P : Payload> type parameter", param),
+            )
+        }
+        return FieldAnalysis.Ok(
+            FieldSpec.RemainingBytesProtocolMessageList(
+                name = name,
+                ownerSimpleName = ownerSimpleName,
+                elementClassName = classNameOf(elementDecl),
+                elementCodecClassName =
+                    ClassName(
+                        elementDecl.packageName.asString(),
+                        elementDecl.flattenedCodecName(),
+                    ),
+                elementIsBackPatch = detectElementBackPatch(elementDecl),
+            ),
         )
     }
 
@@ -1176,13 +1474,22 @@ internal class CodecEmitter(
         param: KSValueParameter,
         type: KSType,
         ownerSimpleName: String,
-    ): FieldSpec.ProtocolMessageScalar? {
-        if (type.isError || type.isMarkedNullable) return null
-        val name = param.name?.asString() ?: return null
-        val decl = type.declaration as? KSClassDeclaration ?: return null
+    ): FieldAnalysis {
+        if (type.isError || type.isMarkedNullable) {
+            return FieldAnalysis.Err(Diagnostic("bare @ProtocolMessage field must be a resolvable non-nullable type", param))
+        }
+        val name =
+            param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
+        val decl =
+            type.declaration as? KSClassDeclaration
+                ?: return FieldAnalysis.Err(Diagnostic("field type is not a class declaration", param))
         val isDataClass = Modifier.DATA in decl.modifiers
         val isSealed = Modifier.SEALED in decl.modifiers
-        if (!isDataClass && !isSealed) return null
+        if (!isDataClass && !isSealed) {
+            return FieldAnalysis.Err(
+                Diagnostic("bare nested message field must be a @ProtocolMessage data class or sealed parent", param),
+            )
+        }
         val isProtocolMessage =
             decl.annotations.any { ann ->
                 ann.shortName.asString() == "ProtocolMessage" &&
@@ -1191,17 +1498,27 @@ internal class CodecEmitter(
                         .declaration.qualifiedName
                         ?.asString() == PROTOCOL_MESSAGE_QNAME
             }
-        if (!isProtocolMessage) return null
-        if (detectPayloadTypeParameter(decl) != null) return null
-        return FieldSpec.ProtocolMessageScalar(
-            name = name,
-            ownerSimpleName = ownerSimpleName,
-            fieldType = classNameOf(decl),
-            codecType =
-                ClassName(
-                    decl.packageName.asString(),
-                    decl.flattenedCodecName(),
-                ),
+        if (!isProtocolMessage) {
+            return FieldAnalysis.Err(
+                Diagnostic("bare nested message field type must be annotated @ProtocolMessage", param),
+            )
+        }
+        if (detectPayloadTypeParameter(decl) != null) {
+            return FieldAnalysis.Err(
+                Diagnostic("bare nested message field type cannot carry a <P : Payload> type parameter", param),
+            )
+        }
+        return FieldAnalysis.Ok(
+            FieldSpec.ProtocolMessageScalar(
+                name = name,
+                ownerSimpleName = ownerSimpleName,
+                fieldType = classNameOf(decl),
+                codecType =
+                    ClassName(
+                        decl.packageName.asString(),
+                        decl.flattenedCodecName(),
+                    ),
+            ),
         )
     }
 
@@ -1218,22 +1535,32 @@ internal class CodecEmitter(
         type: KSType,
         useCodecAnn: KSAnnotation,
         ownerSimpleName: String,
-    ): FieldSpec.RemainingBytesPayload? {
-        val name = param.name?.asString() ?: return null
-        val payloadDecl = type.declaration as? KSClassDeclaration ?: return null
+    ): FieldAnalysis {
+        val name =
+            param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
+        val payloadDecl =
+            type.declaration as? KSClassDeclaration
+                ?: return FieldAnalysis.Err(Diagnostic("@RemainingBytes @UseCodec field type is not a class declaration", param))
         val codecKsType =
             useCodecAnn.arguments
                 .firstOrNull { it.name?.asString() == "codec" }
-                ?.value as? KSType ?: return null
-        val codecDecl = codecKsType.declaration as? KSClassDeclaration ?: return null
-        if (codecDecl.classKind != ClassKind.OBJECT) return null
+                ?.value as? KSType
+                ?: return FieldAnalysis.Err(Diagnostic("@UseCodec is missing its codec argument", param))
+        val codecDecl =
+            codecKsType.declaration as? KSClassDeclaration
+                ?: return FieldAnalysis.Err(Diagnostic("@UseCodec codec target is not a class declaration", param))
+        if (codecDecl.classKind != ClassKind.OBJECT) {
+            return FieldAnalysis.Err(Diagnostic("@UseCodec codec target must be a Kotlin object declaration", param))
+        }
         val codecPkg = codecDecl.packageName.asString()
         val codecSimple = codecDecl.simpleName.asString()
-        return FieldSpec.RemainingBytesPayload(
-            name = name,
-            ownerSimpleName = ownerSimpleName,
-            payloadType = classNameOf(payloadDecl),
-            source = PayloadCodecSource.UserCodecObject(ClassName(codecPkg, codecSimple)),
+        return FieldAnalysis.Ok(
+            FieldSpec.RemainingBytesPayload(
+                name = name,
+                ownerSimpleName = ownerSimpleName,
+                payloadType = classNameOf(payloadDecl),
+                source = PayloadCodecSource.UserCodecObject(ClassName(codecPkg, codecSimple)),
+            ),
         )
     }
 
@@ -1251,26 +1578,36 @@ internal class CodecEmitter(
         type: KSType,
         useCodecAnn: KSAnnotation,
         ownerSimpleName: String,
-    ): FieldSpec.UseCodecScalar? {
-        val name = param.name?.asString() ?: return null
+    ): FieldAnalysis {
+        val name =
+            param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
         val codecKsType =
             useCodecAnn.arguments
                 .firstOrNull { it.name?.asString() == "codec" }
-                ?.value as? KSType ?: return null
-        val codecDecl = codecKsType.declaration as? KSClassDeclaration ?: return null
-        if (codecDecl.classKind != ClassKind.OBJECT) return null
+                ?.value as? KSType
+                ?: return FieldAnalysis.Err(Diagnostic("@UseCodec is missing its codec argument", param))
+        val codecDecl =
+            codecKsType.declaration as? KSClassDeclaration
+                ?: return FieldAnalysis.Err(Diagnostic("@UseCodec codec target is not a class declaration", param))
+        if (codecDecl.classKind != ClassKind.OBJECT) {
+            return FieldAnalysis.Err(Diagnostic("@UseCodec codec target must be a Kotlin object declaration", param))
+        }
         val fieldTypeName: TypeName =
             SUPPORTED_SCALARS[type.declaration.qualifiedName?.asString()]
                 ?.let { scalarTypeName(it) }
                 ?: (type.declaration as? KSClassDeclaration)?.let { classNameOf(it) }
-                ?: return null
+                ?: return FieldAnalysis.Err(
+                    Diagnostic("@UseCodec field type is neither a supported scalar nor a classifiable type", param),
+                )
         val codecClassName = ClassName(codecDecl.packageName.asString(), codecDecl.simpleName.asString())
-        return FieldSpec.UseCodecScalar(
-            name = name,
-            ownerSimpleName = ownerSimpleName,
-            fieldType = fieldTypeName,
-            codecType = codecClassName,
-            isBounding = codecDecl.implementsBoundingLengthCodec(),
+        return FieldAnalysis.Ok(
+            FieldSpec.UseCodecScalar(
+                name = name,
+                ownerSimpleName = ownerSimpleName,
+                fieldType = fieldTypeName,
+                codecType = codecClassName,
+                isBounding = codecDecl.implementsBoundingLengthCodec(),
+            ),
         )
     }
 
@@ -1290,13 +1627,23 @@ internal class CodecEmitter(
         listType: KSType,
         useCodecAnn: KSAnnotation,
         ownerSimpleName: String,
-    ): FieldSpec.LengthPrefixedUseCodecList? {
-        val name = param.name?.asString() ?: return null
-        val spec = analyzeLengthPrefixedListSpec(listType, useCodecAnn) ?: return null
-        return FieldSpec.LengthPrefixedUseCodecList(
-            name = name,
-            ownerSimpleName = ownerSimpleName,
-            spec = spec,
+    ): FieldAnalysis {
+        val name =
+            param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
+        // Err here is benign: the caller (`analyzeField`) only treats an Ok
+        // as a match and otherwise falls through to the payload analyzer,
+        // preserving the prior nullable-fallthrough.
+        val spec =
+            analyzeLengthPrefixedListSpec(listType, useCodecAnn)
+                ?: return FieldAnalysis.Err(
+                    Diagnostic("@LengthPrefixed @UseCodec field is not a supported List<@ProtocolMessage> shape", param),
+                )
+        return FieldAnalysis.Ok(
+            FieldSpec.LengthPrefixedUseCodecList(
+                name = name,
+                ownerSimpleName = ownerSimpleName,
+                spec = spec,
+            ),
         )
     }
 
@@ -1318,8 +1665,9 @@ internal class CodecEmitter(
         ownerSimpleName: String,
         prefixWidth: Int,
         prefixWireOrder: Endianness,
-    ): FieldSpec.LengthPrefixedUseCodecPayload? {
-        val name = param.name?.asString() ?: return null
+    ): FieldAnalysis {
+        val name =
+            param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
         // `kotlin.String` and `com.ditchoom.buffer.codec.OwnedBytesHandle`
         // ride the same shape as `T: Payload`: prefix + body bytes, codec is
         // `Codec<T>`. The `OwnedBytesHandle` admission is the framework's
@@ -1331,22 +1679,35 @@ internal class CodecEmitter(
         val qname = type.declaration.qualifiedName?.asString()
         val isString = qname == "kotlin.String"
         val isOwnedBytesHandle = qname == OWNED_BYTES_HANDLE_QNAME
-        if (!isString && !isOwnedBytesHandle && !type.implementsPayload()) return null
-        val payloadDecl = type.declaration as? KSClassDeclaration ?: return null
+        if (!isString && !isOwnedBytesHandle && !type.implementsPayload()) {
+            return FieldAnalysis.Err(
+                Diagnostic("@LengthPrefixed @UseCodec field type must be String, OwnedBytesHandle, or a Payload", param),
+            )
+        }
+        val payloadDecl =
+            type.declaration as? KSClassDeclaration
+                ?: return FieldAnalysis.Err(Diagnostic("@LengthPrefixed @UseCodec field type is not a class declaration", param))
         val codecKsType =
             useCodecAnn.arguments
                 .firstOrNull { it.name?.asString() == "codec" }
-                ?.value as? KSType ?: return null
-        val codecDecl = codecKsType.declaration as? KSClassDeclaration ?: return null
-        if (codecDecl.classKind != ClassKind.OBJECT) return null
+                ?.value as? KSType
+                ?: return FieldAnalysis.Err(Diagnostic("@UseCodec is missing its codec argument", param))
+        val codecDecl =
+            codecKsType.declaration as? KSClassDeclaration
+                ?: return FieldAnalysis.Err(Diagnostic("@UseCodec codec target is not a class declaration", param))
+        if (codecDecl.classKind != ClassKind.OBJECT) {
+            return FieldAnalysis.Err(Diagnostic("@UseCodec codec target must be a Kotlin object declaration", param))
+        }
         val codecClassName = ClassName(codecDecl.packageName.asString(), codecDecl.simpleName.asString())
-        return FieldSpec.LengthPrefixedUseCodecPayload(
-            name = name,
-            ownerSimpleName = ownerSimpleName,
-            payloadType = classNameOf(payloadDecl),
-            payloadCodecType = codecClassName,
-            prefixWidth = prefixWidth,
-            prefixWireOrder = prefixWireOrder,
+        return FieldAnalysis.Ok(
+            FieldSpec.LengthPrefixedUseCodecPayload(
+                name = name,
+                ownerSimpleName = ownerSimpleName,
+                payloadType = classNameOf(payloadDecl),
+                payloadCodecType = codecClassName,
+                prefixWidth = prefixWidth,
+                prefixWireOrder = prefixWireOrder,
+            ),
         )
     }
 
@@ -1549,20 +1910,37 @@ internal class CodecEmitter(
         ownerSimpleName: String,
         params: List<KSValueParameter>,
         index: Int,
-    ): FieldSpec? {
-        if (!boundParameterIsConditionalShape(param)) return null
-        val name = param.name?.asString() ?: return null
+    ): FieldAnalysis {
+        if (!boundParameterIsConditionalShape(param)) {
+            return FieldAnalysis.Err(
+                Diagnostic("@When field must be nullable and carry only @When/@LengthPrefixed/@UseCodec", param),
+            )
+        }
+        val name =
+            param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
 
-        val expression = parseWhenExpression(whenAnn) ?: return null
-        val condition = resolveCondition(expression, params, index) ?: return null
-        val inner = analyzeConditionalInner(param, messageWireOrder) ?: return null
+        val expression =
+            parseWhenExpression(whenAnn)
+                ?: return FieldAnalysis.Err(Diagnostic("@When predicate is malformed", param))
+        val condition =
+            resolveCondition(expression, params, index)
+                ?: return FieldAnalysis.Err(
+                    Diagnostic("@When predicate does not resolve to a supported condition source", param),
+                )
+        val inner =
+            analyzeConditionalInner(param, messageWireOrder)
+                ?: return FieldAnalysis.Err(
+                    Diagnostic("@When field's inner shape is not supported", param),
+                )
 
-        return FieldSpec.Conditional(
-            name = name,
-            ownerSimpleName = ownerSimpleName,
-            condition = condition,
-            nullableTypeName = conditionalInnerNullableTypeName(inner),
-            inner = inner,
+        return FieldAnalysis.Ok(
+            FieldSpec.Conditional(
+                name = name,
+                ownerSimpleName = ownerSimpleName,
+                condition = condition,
+                nullableTypeName = conditionalInnerNullableTypeName(inner),
+                inner = inner,
+            ),
         )
     }
 
@@ -6868,7 +7246,11 @@ internal class CodecEmitter(
                     ?.value as? Int ?: return null
             if (rawValue !in 0..255) return null
             if (!seenValues.add(rawValue)) return null
-            val variantShape = analyze(sub) ?: return null
+            // The dispatcher analyzers are out of scope for the
+            // AnalysisResult migration this commit; adapt at the call site
+            // to preserve the prior `?: return null` silent-skip semantics.
+            val variantShape =
+                (analyze(sub) as? AnalysisResult.Supported)?.shape ?: return null
             val variantWireSize = classifyVariantWireSize(variantShape)
             variants +=
                 VariantSpec(
@@ -7026,7 +7408,9 @@ internal class CodecEmitter(
             // (or the object-singleton path added by issue #150). The
             // header field, when present, is a FieldSpec.ValueClassScalar
             // object variants resolve to an empty-fields shape.
-            analyze(sub) ?: return null
+            // Dispatcher analyzers are out of scope this commit; adapt at the
+            // call site to preserve the prior `?: return null` silent-skip.
+            if (analyze(sub) !is AnalysisResult.Supported) return null
             // Detect whether the variant itself is generic
             // ( shape — `<P: Payload>` type parameter on the
             // variant data class). If so, the dispatcher constructs the
