@@ -2234,7 +2234,9 @@ internal class CodecEmitter(
         messageType: TypeName = shape.messageClassName,
     ): FunSpec {
         val afterField = framedByAfterField(shape, framedBy)
-        val headerWireWidth = afterField?.let(::framedByHeaderWireWidth) ?: 0
+        val headerWireWidth =
+            (afterField?.let(::framedByHeaderWireWidth) ?: WireWidth.Zero)
+                .requireFixed("framedByHeaderWireWidth")
         val body = CodeBlock.builder()
         body.add("return %T.encode(\n", FRAMED_ENCODER_CN)
         body.indent()
@@ -2276,7 +2278,9 @@ internal class CodecEmitter(
         framedBy: FramedByConfig,
     ): FunSpec {
         val afterField = framedByAfterField(shape, framedBy)
-        val headerWireWidth = afterField?.let(::framedByHeaderWireWidth) ?: 0
+        val headerWireWidth =
+            (afterField?.let(::framedByHeaderWireWidth) ?: WireWidth.Zero)
+                .requireFixed("framedByHeaderWireWidth")
         val builder =
             FunSpec
                 .builder("peekFrameSize")
@@ -2379,11 +2383,11 @@ internal class CodecEmitter(
      * [framedByAfterField] already filtered to Scalar / ValueClassScalar,
      * so the `else` branch is structurally unreachable.
      */
-    private fun framedByHeaderWireWidth(field: FieldSpec): Int =
+    private fun framedByHeaderWireWidth(field: FieldSpec): WireWidth =
         when (field) {
-            is FieldSpec.Scalar -> field.wireBytes
-            is FieldSpec.ValueClassScalar -> field.wireBytes
-            else -> 0
+            is FieldSpec.Scalar -> field.wireWidth
+            is FieldSpec.ValueClassScalar -> field.wireWidth
+            else -> WireWidth.Zero
         }
 
     private fun buildFileSpec(shape: CodecShape): FileSpec {
@@ -3854,8 +3858,10 @@ internal class CodecEmitter(
                 // scalar width. All other singletons keep `Exact(0)` —
                 // their parent dispatcher writes/reads the discriminator
                 // around the call.
-                val discriminatorBytes = shape.singletonDispatchDiscriminator?.innerKind?.width ?: 0
-                val total = shape.fields.sumOfFixedWireBytes() + discriminatorBytes
+                val discriminatorBytes =
+                    (shape.singletonDispatchDiscriminator?.wireWidth ?: WireWidth.Zero)
+                        .requireFixed("singletonDiscriminator")
+                val total = shape.fields.sumOfFixedWireBytes().requireFixed("sumOfFixedWireBytes") + discriminatorBytes
                 builder.addStatement("return %T.Exact(%L)", WIRE_SIZE_CN, total)
             }
         }
@@ -3869,7 +3875,10 @@ internal class CodecEmitter(
      * `filterIsInstance` step. Callers that require the result to
      * cover every field gate on terminal shape before calling.
      */
-    private fun List<FieldSpec>.sumOfFixedWireBytes(): Int = filterIsInstance<FieldSpec.FixedSize>().sumOf { it.wireBytes }
+    private fun List<FieldSpec>.sumOfFixedWireBytes(): WireWidth =
+        filterIsInstance<FieldSpec.FixedSize>()
+            .map { it.wireWidth }
+            .fold(WireWidth.Zero as WireWidth) { a, b -> a + b }
 
     private fun buildPeekFrameFun(shape: CodecShape): FunSpec {
         val builder =
@@ -4006,8 +4015,10 @@ internal class CodecEmitter(
         // discriminator, add the discriminator's inner-scalar width so
         // the peek count matches what decode actually consumes.
         if (shape.fields.all { it is FieldSpec.FixedSize }) {
-            val discriminatorBytes = shape.singletonDispatchDiscriminator?.innerKind?.width ?: 0
-            val total = shape.fields.sumOfFixedWireBytes() + discriminatorBytes
+            val discriminatorBytes =
+                (shape.singletonDispatchDiscriminator?.wireWidth ?: WireWidth.Zero)
+                    .requireFixed("singletonDiscriminator")
+            val total = shape.fields.sumOfFixedWireBytes().requireFixed("sumOfFixedWireBytes") + discriminatorBytes
             builder.addStatement(
                 "return if (stream.available() - baseOffset >= %L) %T.Complete(%L) else %T.NeedsMoreData",
                 total,
@@ -4237,14 +4248,14 @@ internal class CodecEmitter(
         for (field in shape.fields) {
             when (field) {
                 is FieldSpec.Scalar -> {
-                    appendPeekAvailabilityCheck(body, field.wireBytes)
+                    appendPeekAvailabilityCheck(body, field.wireWidth)
                     if (field.name in needsPeekStash) {
                         appendPeekScalar(body, field, field.name, "__offset")
                     }
-                    body.addStatement("__offset += %L", field.wireBytes)
+                    body.addStatement("__offset += %L", field.wireWidth.requireFixed("appendSequentialPeek"))
                 }
                 is FieldSpec.ValueClassScalar -> {
-                    appendPeekAvailabilityCheck(body, field.wireBytes)
+                    appendPeekAvailabilityCheck(body, field.wireWidth)
                     if (field.name in needsPeekStash) {
                         val rawVar = "${field.name}Raw"
                         // Follow-up: pass the value class's wireOrder
@@ -4265,7 +4276,7 @@ internal class CodecEmitter(
                             rawVar,
                         )
                     }
-                    body.addStatement("__offset += %L", field.wireBytes)
+                    body.addStatement("__offset += %L", field.wireWidth.requireFixed("appendSequentialPeek"))
                 }
                 is FieldSpec.LengthPrefixedString ->
                     appendSequentialPeekLengthPrefixed(
@@ -4396,8 +4407,9 @@ internal class CodecEmitter(
 
     private fun appendPeekAvailabilityCheck(
         body: CodeBlock.Builder,
-        bytes: Int,
+        width: WireWidth,
     ) {
+        val bytes = width.requireFixed("appendPeekAvailabilityCheck")
         body.addStatement(
             "if (stream.available() - baseOffset < __offset + %L) return %T.NeedsMoreData",
             bytes,
@@ -4420,7 +4432,7 @@ internal class CodecEmitter(
         prefixWidth: Int,
         prefixWireOrder: Endianness,
     ) {
-        appendPeekAvailabilityCheck(body, prefixWidth)
+        appendPeekAvailabilityCheck(body, WireWidth.Fixed(prefixWidth))
         appendPeekPrefixAssembly(body, name, prefixWidth, prefixWireOrder, "__offset")
         val prefixVar = "${name}Prefix"
         body.beginControlFlow(
@@ -4494,8 +4506,8 @@ internal class CodecEmitter(
         body.beginControlFlow("if (%L)", condExpr)
         when (val inner = field.inner) {
             is ConditionalInner.Scalar -> {
-                appendPeekAvailabilityCheck(body, inner.kind.width)
-                body.addStatement("__offset += %L", inner.kind.width)
+                appendPeekAvailabilityCheck(body, inner.kind.wireWidth)
+                body.addStatement("__offset += %L", inner.kind.wireWidth.requireFixed("appendSequentialPeekConditional"))
             }
             is ConditionalInner.LengthPrefixedString ->
                 appendSequentialPeekLengthPrefixed(
@@ -4509,8 +4521,8 @@ internal class CodecEmitter(
                 // Peek consumes the inner scalar's
                 // natural width when the predicate is true (the value
                 // class wraps with no extra wire bytes).
-                appendPeekAvailabilityCheck(body, inner.innerKind.width)
-                body.addStatement("__offset += %L", inner.innerKind.width)
+                appendPeekAvailabilityCheck(body, inner.innerKind.wireWidth)
+                body.addStatement("__offset += %L", inner.innerKind.wireWidth.requireFixed("appendSequentialPeekConditional"))
             }
             is ConditionalInner.LengthPrefixedUseCodecList ->
                 // Unreachable: any shape with this inner
@@ -4559,7 +4571,7 @@ internal class CodecEmitter(
         body.endControlFlow()
     }
 
-    private fun scalarHeaderBytes(shape: CodecShape): Int = shape.fields.sumOfFixedWireBytes()
+    private fun scalarHeaderBytes(shape: CodecShape): Int = shape.fields.sumOfFixedWireBytes().requireFixed("scalarHeaderBytes")
 
     private fun appendDecodeScalar(
         body: CodeBlock.Builder,
@@ -5600,7 +5612,7 @@ internal class CodecEmitter(
                     offsetExpr,
                 )
             ScalarKind.UShort, ScalarKind.UInt -> {
-                val width = kind.width
+                val width = kind.wireWidth.requireFixed("appendPeekFixedScalar")
                 val bigEndian =
                     when (wireOrder) {
                         Endianness.Big, Endianness.Default -> true
@@ -6634,7 +6646,7 @@ internal class CodecEmitter(
                 )
             }
             ScalarKind.UShort, ScalarKind.UInt -> {
-                val width = field.wireBytes
+                val width = field.wireWidth.requireFixed("appendPeekScalar")
                 val bigEndian =
                     when (field.resolvedWireOrder) {
                         Endianness.Big, Endianness.Default -> true
@@ -7174,7 +7186,7 @@ internal class CodecEmitter(
             // dispatcher forwards without re-deriving.
             is FieldSpec.RemainingBytesProtocolMessageList -> VariantWireSize.RuntimeExact
             is FieldSpec.Scalar, is FieldSpec.ValueClassScalar, null ->
-                VariantWireSize.LiteralExact(shape.fields.sumOfFixedWireBytes())
+                VariantWireSize.LiteralExact(shape.fields.sumOfFixedWireBytes().requireFixed("sumOfFixedWireBytes"))
             is FieldSpec.LengthPrefixedString, is FieldSpec.Conditional -> VariantWireSize.BackPatch
             // Handled by the upfront BackPatch short-circuit; this
             // branch is unreachable because the early return collapses any
@@ -7489,7 +7501,7 @@ internal class CodecEmitter(
         val framedBy =
             shape.framedBy
                 ?: error("buildFramedByDispatchOnPeekFun called on shape without @FramedBy")
-        val headerWireWidth = shape.discriminatorInnerKind.width
+        val headerWireWidth = shape.discriminatorWireWidth.requireFixed("dispatchOnDiscriminator")
         val builder =
             FunSpec
                 .builder("peekFrameSize")
@@ -8098,7 +8110,7 @@ internal class CodecEmitter(
 
     private fun buildDispatchOnPeekFun(shape: DispatchOnDispatcherShape): FunSpec {
         val body = CodeBlock.builder()
-        val discriminatorBytes = shape.discriminatorInnerKind.width
+        val discriminatorBytes = shape.discriminatorWireWidth.requireFixed("dispatchOnDiscriminator")
         body.addStatement(
             "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
             discriminatorBytes,
@@ -8238,7 +8250,15 @@ internal class CodecEmitter(
          * byte so the stored opcode re-encodes byte-identically.
          */
         val forwardCompatible: ForwardCompatibleConfig? = null,
-    )
+    ) {
+        /**
+         * Phase 1: the discriminator's wire width as a WireWidth, routed
+         * from its inner scalar kind (always Fixed). Consumers read this
+         * instead of `discriminatorInnerKind.width` when they want a wire
+         * width.
+         */
+        val discriminatorWireWidth: WireWidth get() = discriminatorInnerKind.wireWidth
+    }
 
     /**
      * Variant spec for `@DispatchOn` dispatch. Differs from
@@ -8345,7 +8365,14 @@ internal class CodecEmitter(
     private data class SingletonDispatchDiscriminator(
         val innerKind: ScalarKind,
         val literalValue: Int,
-    )
+    ) {
+        /**
+         * Phase 1: the discriminator's wire width as a WireWidth, routed
+         * from its inner scalar kind (always Fixed). Consumers read this
+         * instead of `innerKind.width` when they want a wire width.
+         */
+        val wireWidth: WireWidth get() = innerKind.wireWidth
+    }
 
     /**
      * `@FramedBy` configuration captured during
@@ -8440,6 +8467,15 @@ internal class CodecEmitter(
          */
         sealed interface FixedSize : FieldSpec {
             val wireBytes: Int
+
+            /**
+             * Phase 1: the variable-width axis projected onto this field.
+             * Always `Fixed(wireBytes)` because every concrete member
+             * (Scalar, ValueClassScalar) constructs from an Int `wireBytes`.
+             * Consumers that conceptually want a wire width read this;
+             * `wireBytes` readers are untouched.
+             */
+            val wireWidth: WireWidth get() = WireWidth.Fixed(wireBytes)
         }
 
         data class Scalar(
@@ -9214,10 +9250,85 @@ internal class CodecEmitter(
                 error("Long / ULong / Float / Double are not in DISPATCH_VALUE_RETURN_KINDS — analyze should have rejected this kind")
         }
 
+    /**
+     * Phase 1: makes the variable-width axis representable in the IR.
+     *
+     * Today every wire byte count is a compile-time `Int`. This sum type
+     * names the two cases so each consumer must acknowledge the
+     * `Variable` arm. Phase 1 only STUBS `Variable` (error/TODO); the
+     * `Fixed(n)` arm must produce byte-for-byte identical output to the
+     * pre-refactor `Int` code.
+     *
+     * The eventual `Variable` implementations already exist in spirit on
+     * the `UseCodecScalar` / `LengthPrefixedUseCodecPayload` field shapes:
+     *   - wireSize collapses the containing message to VariantWireSize.BackPatch
+     *   - peek bails to NoFraming (runtime-measured, not prefix-walkable)
+     *   - decode/encode measure the body at runtime rather than from a literal.
+     * The stubs below are intentionally placed at exactly the sites those
+     * three behaviors will eventually attach, so Phase 2 fills them in
+     * without re-threading the type.
+     */
+    private sealed interface WireWidth {
+        /** Compile-time-known byte count. `bytes` is always >= 0. */
+        data class Fixed(
+            val bytes: Int,
+        ) : WireWidth
+
+        /**
+         * Width is not known until encode/decode runs (length-prefixed or
+         * codec-measured body). Phase 1: every consumer stubs this arm.
+         * Phase 2 routes it to BackPatch wireSize + NoFraming peek +
+         * runtime-measured decode/encode, exactly as UseCodecScalar does
+         * today.
+         */
+        data object Variable : WireWidth
+
+        companion object {
+            /** Identity for [plus] folds; equals the empty-field-list sum. */
+            val Zero: Fixed = Fixed(0)
+
+            /**
+             * Lift a legacy `Int` byte count into the sum type. Used only at
+             * the IR-construction boundary while consumers migrate; produces
+             * Fixed, so it can never change output.
+             */
+            fun ofFixed(bytes: Int): Fixed = Fixed(bytes)
+        }
+    }
+
+    /**
+     * Additive fold over WireWidth. Two Fixed values add numerically
+     * (the exact `a + b` the old `Int` arithmetic produced); any Variable
+     * operand makes the whole sum Variable. Used by `sumOfFixedWireBytes`
+     * and the framed-header `n + 1` arithmetic so the Fixed path stays
+     * byte-identical and the Variable path propagates instead of throwing
+     * prematurely.
+     */
+    private operator fun WireWidth.plus(other: WireWidth): WireWidth =
+        when {
+            this is WireWidth.Fixed && other is WireWidth.Fixed -> WireWidth.Fixed(this.bytes + other.bytes)
+            else -> WireWidth.Variable
+        }
+
+    /**
+     * Unwrap a WireWidth that the call site requires to be Fixed, with a
+     * symbol-named error for the stubbed Variable arm. This is THE single
+     * Phase-1 stub helper: every consumer that needs a literal byte count
+     * calls `width.requireFixed("siteName")` and gets `n` for Fixed,
+     * error() for Variable. Centralizing it means the Variable behavior is
+     * a one-liner to find and (in Phase 2) replace per site.
+     */
+    private fun WireWidth.requireFixed(site: String): Int =
+        when (this) {
+            is WireWidth.Fixed -> bytes
+            WireWidth.Variable -> error("$site requires a Fixed wire width; Variable not yet supported (Phase 1 stub)")
+        }
+
     private enum class ScalarKind(
         val width: Int,
         val isSigned: Boolean,
     ) {
+        // (members below; computed `wireWidth` declared after the entries)
         // Boolean is a 1-byte scalar with no byte order and no `@WireBytes` narrowing.
         // Precondition for `@When` ( mandates a
         // `Boolean`-typed source field).
@@ -9238,6 +9349,16 @@ internal class CodecEmitter(
         // out of scope).
         Float(4, true),
         Double(8, true),
+        ;
+
+        /**
+         * Phase 1: the variable-width axis projected onto this kind.
+         * Always `Fixed(width)` — scalar kinds are intrinsically fixed.
+         * Routing point for `.width` reads that conceptually want a wire
+         * width; the natural-read fast-path `when (width) { 2,4,8 }`
+         * switches keep reading `.width` directly.
+         */
+        val wireWidth: WireWidth get() = WireWidth.Fixed(width)
     }
 
     private enum class Endianness {
