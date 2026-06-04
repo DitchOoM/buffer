@@ -5,6 +5,33 @@ parameterized by a `Discriminator` sum type, executed as a byte-identical,
 snapshot-gated staged refactor. This is the gateway to an HTTP/3 QUIC-varint
 discriminator.
 
+## Status (resume point)
+
+Branch `codec/dispatch-wirewidth-track`. All stages byte-identical (305 goldens
+unchanged) and committed:
+
+- **Stages 0–2 done** — unified IR + adapters (`8f764f64`). All optional/variant
+  dimensions are sum types (no nullables).
+- **Stage 3 done** — decode (`d7538f43`)
+- **Stage 4 done** — encode (`928eb015`)
+- **Stage 5 done** — wireSize (`d4147d9b`)
+- **Stage 6 done** — peek (`80db2b74`)
+- **Stage 7 done** — file-shell collapsed to one `buildDispatchFileSpec`; framed
+  encode/peek + aggregator migrated onto `DispatchShape` (`fad87fe0`)
+
+The two dispatch emit paths are now ONE builder set on `DispatchShape`. **Remaining:**
+
+- **Stage 8 (next)** — collapse `analyzeSealedDispatcher` /
+  `analyzeDispatchOnSealedDispatcher` to produce `DispatchShape` directly; delete
+  the legacy `DispatcherShape` / `DispatchOnDispatcherShape` / `DispatchOnVariantSpec`
+  / `VariantSpec` and their `toDispatchShape()` adapters. Byte-identical.
+- **Stage 9** — fold dispatcher analysis into `AnalysisResult` (the `?: return null`
+  dispatcher silent-skips become `Rejected` diagnostics). Existing goldens
+  unchanged; adds new diagnostics + negative tests for the previously-silent
+  dispatcher gaps.
+
+After stage 9: varint/H3 = a new `Discriminator.Varint` case (see §5).
+
 ## The key insight
 
 A simple `@PacketType` dispatcher **is** a `@DispatchOn` dispatcher whose
