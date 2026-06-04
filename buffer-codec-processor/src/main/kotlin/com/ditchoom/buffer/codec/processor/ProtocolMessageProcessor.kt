@@ -210,6 +210,7 @@ class ProtocolMessageProcessor(
             return
         }
         val parentName = parent.qualifiedName?.asString() ?: parent.simpleName.asString()
+        if (validateGenericPayloadVariantShape(parent, parentName)) return
         val seen = mutableMapOf<Int, String>()
         for (sub in parent.getSealedSubclasses()) {
             val subName = sub.qualifiedName?.asString() ?: sub.simpleName.asString()
@@ -397,6 +398,8 @@ class ProtocolMessageProcessor(
             return
         }
         val dispatchValueRange = DISPATCH_VALUE_RETURN_RANGES.getValue(dispatchReturnQname!!)
+
+        if (validateGenericPayloadVariantShape(parent, parentName)) return
 
         val seen = mutableMapOf<Int, String>()
         for (sub in parent.getSealedSubclasses()) {
@@ -1586,6 +1589,52 @@ class ProtocolMessageProcessor(
         val bound = bounds[0].resolve()
         if (bound.isError) return false
         return bound.declaration.qualifiedName?.asString() == PAYLOAD_QNAME
+    }
+
+    /**
+     * Issue #176 — reject the type-unsafe sealed shape where the
+     * sealed PARENT is non-generic but one or more variants declare a
+     * `<P : Payload>` type parameter (and therefore extend the raw
+     * parent instead of `Parent<P>` / `Parent<Nothing>`).
+     *
+     * In that shape the dispatcher has nowhere to bind the variant
+     * codec's `<P>` at dispatch time, so the generated decode/encode
+     * code references an unresolved generic codec and won't compile.
+     * The correct shape declares the parent as
+     * `sealed interface Parent<out P : Payload>`, with non-generic
+     * variants extending `Parent<Nothing>` and generic variants
+     * extending `Parent<P>`.
+     *
+     * Fires on both the simple `@PacketType` dispatch path and the
+     * `@DispatchOn` bit-packed path. Returns `true` (and emits a
+     * `logger.error`) when the unsound shape is detected so callers can
+     * early-return.
+     */
+    private fun validateGenericPayloadVariantShape(
+        parent: KSClassDeclaration,
+        parentName: String,
+    ): Boolean {
+        if (hasPayloadTypeParameter(parent)) return false
+        val genericVariants =
+            parent
+                .getSealedSubclasses()
+                .filterNot { it.hasAnnotation(UNKNOWN_VARIANT_SHORT, UNKNOWN_VARIANT_QNAME) }
+                .filter { hasPayloadTypeParameter(it) }
+                .map { it.qualifiedName?.asString() ?: it.simpleName.asString() }
+                .toList()
+        if (genericVariants.isEmpty()) return false
+        val variantList = genericVariants.joinToString(", ")
+        logger.error(
+            "@ProtocolMessage sealed parent $parentName has generic-payload variant(s) " +
+                "($variantList) that declare a `<P : Payload>` type parameter, but the parent " +
+                "itself is not generic. This shape is type-unsafe — the variant codec's `<P>` has " +
+                "no binding at dispatch time, so the generated decode/encode code won't compile. " +
+                "Declare the parent as `sealed interface $parentName<out P : Payload>` and have " +
+                "generic variants extend `$parentName<P>` and non-generic variants extend " +
+                "`$parentName<Nothing>`.",
+            parent,
+        )
+        return true
     }
 
     /**

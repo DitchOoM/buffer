@@ -153,12 +153,13 @@ class ProtocolMessagePayloadValidatorTest {
                 """
                 package test
 
+                import com.ditchoom.buffer.codec.annotations.LengthPrefixed
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 
                 @ProtocolMessage
                 data class ScalarOnly(
                     val id: UInt,
-                    val name: String,
+                    @LengthPrefixed val name: String,
                     val flag: Boolean,
                 )
                 """.trimIndent(),
