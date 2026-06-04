@@ -7265,6 +7265,12 @@ internal class CodecEmitter(
         }
         val subclasses = symbol.getSealedSubclasses().toList()
         if (subclasses.isEmpty()) return DispatchAnalysisResult.NotApplicable
+        // Generic-payload parity with the @DispatchOn path: a sealed parent
+        // declaring `<out P : Payload>` emits as `class FooCodec<P>(payloadCodec)`
+        // and threads the codec to generic variants. A non-generic parent
+        // stays Monomorphic and every variant uses a static-object codec ref —
+        // byte-identical to the pre-generics simple dispatcher.
+        val payloadTypeParameter = detectPayloadTypeParameter(symbol)
         val variants = mutableListOf<DispatchVariant>()
         val seenValues = mutableSetOf<Int>()
         for (sub in subclasses) {
@@ -7306,9 +7312,23 @@ internal class CodecEmitter(
                 (analyze(sub) as? AnalysisResult.Supported)?.shape
                     ?: return DispatchAnalysisResult.NotApplicable
             val variantWireSize = classifyVariantWireSize(variantShape)
+            // A variant declaring its own `<P : Payload>` needs a
+            // constructor-injected `payloadCodec`, so the dispatcher holds the
+            // variant codec as a generic instance (mirrors the @DispatchOn
+            // path). A generic variant under a NON-generic parent is the #176
+            // type-unsafe shape, reported by validateGenericPayloadVariantShape
+            // (ProtocolMessageProcessor.kt:213) — stay silent here.
+            val variantSimpleName = sub.simpleName.asString()
+            val genericInstanceFieldName =
+                if (detectPayloadTypeParameter(sub) != null) {
+                    if (payloadTypeParameter == null) return DispatchAnalysisResult.NotApplicable
+                    "${variantSimpleName.replaceFirstChar { it.lowercase() }}Codec"
+                } else {
+                    null
+                }
             variants +=
                 DispatchVariant(
-                    simpleName = sub.simpleName.asString(),
+                    simpleName = variantSimpleName,
                     className = classNameOf(sub),
                     codecClassName =
                         ClassName(
@@ -7316,7 +7336,10 @@ internal class CodecEmitter(
                             sub.flattenedCodecName(),
                         ),
                     dispatchValue = rawValue,
-                    codecRef = VariantCodecRef.StaticObject,
+                    codecRef =
+                        genericInstanceFieldName
+                            ?.let { VariantCodecRef.GenericInstance(it) }
+                            ?: VariantCodecRef.StaticObject,
                     wireSize = variantWireSize,
                 )
         }
@@ -7334,7 +7357,10 @@ internal class CodecEmitter(
                 codecSimpleName = symbol.flattenedCodecName(),
                 discriminator = Discriminator.FixedByte,
                 variants = variants,
-                genericity = Genericity.Monomorphic,
+                genericity =
+                    payloadTypeParameter
+                        ?.let { Genericity.Generic(it) }
+                        ?: Genericity.Monomorphic,
                 framing = Framing.Unframed,
                 forwardCompat = ForwardCompat.Disabled,
                 visibility = codecVisibilityModifier(symbol).toCodecVisibility(),
@@ -7936,9 +7962,21 @@ internal class CodecEmitter(
 
         when (shape.discriminator.ownership) {
             DiscriminatorOwnership.ConsumedByDispatcher -> {
+                // Generic variants (a `<P : Payload>` parent under simple
+                // @PacketType) star-project their `is X<*>` branch and cast
+                // `value as X<P>` so the injected variant codec instance
+                // accepts it — identical machinery to the ReReadByVariant
+                // branch below. For monomorphic shapes `branchTypeName` is the
+                // bare class and `codecReceiver` the static object, so the
+                // output is byte-identical to the pre-generics simple path.
+                val anyGeneric =
+                    shape.variants.any { it.codecRef is VariantCodecRef.GenericInstance }
+                if (anyGeneric) {
+                    body.add("@Suppress(%S)\n", "UNCHECKED_CAST")
+                }
                 body.beginControlFlow("when (value)")
                 for (variant in shape.variants) {
-                    body.beginControlFlow("is %T ->", variant.className)
+                    body.beginControlFlow("is %T ->", variant.branchTypeName(shape.genericity))
                     // The discriminator literal is ALWAYS hex (risk #2).
                     body.addStatement(
                         "buffer.writeUByte(0x%L.toUByte())",
@@ -7947,10 +7985,18 @@ internal class CodecEmitter(
                             .padStart(2, '0')
                             .uppercase(),
                     )
-                    body.addStatement(
-                        "%L.encode(buffer, value, context)",
-                        variant.codecReceiver(),
-                    )
+                    if (variant.codecRef is VariantCodecRef.GenericInstance) {
+                        body.addStatement(
+                            "%L.encode(buffer, value as %T, context)",
+                            variant.codecReceiver(),
+                            variant.typedRef(shape.genericity),
+                        )
+                    } else {
+                        body.addStatement(
+                            "%L.encode(buffer, value, context)",
+                            variant.codecReceiver(),
+                        )
+                    }
                     body.endControlFlow()
                 }
                 body.endControlFlow()
@@ -8024,25 +8070,34 @@ internal class CodecEmitter(
             DiscriminatorOwnership.ConsumedByDispatcher -> {
                 body.beginControlFlow("return when (value)")
                 for (variant in shape.variants) {
+                    // Generic variants (a `<P : Payload>` parent under simple
+                    // @PacketType) need the star-projected `is X<*>` branch so
+                    // the runtime match succeeds. For monomorphic shapes
+                    // `branchTypeName` is the bare class, so existing output is
+                    // unchanged. A generic variant always carries
+                    // `@RemainingBytes val: P`, which classifyVariantWireSize
+                    // maps to BackPatch — so the RuntimeExact static-codec call
+                    // below is only ever reached by monomorphic variants.
+                    val branchType = variant.branchTypeName(shape.genericity)
                     when (val ws = variant.wireSize) {
                         is VariantWireSize.LiteralExact ->
                             body.addStatement(
                                 "is %T -> %T.Exact(%L)",
-                                variant.className,
+                                branchType,
                                 WIRE_SIZE_CN,
                                 1 + ws.bytes,
                             )
                         is VariantWireSize.BackPatch ->
                             body.addStatement(
                                 "is %T -> %T.BackPatch",
-                                variant.className,
+                                branchType,
                                 WIRE_SIZE_CN,
                             )
                         is VariantWireSize.RuntimeExact -> {
-                            body.beginControlFlow("is %T ->", variant.className)
+                            body.beginControlFlow("is %T ->", branchType)
                             body.addStatement(
-                                "val inner = (%T.wireSize(value, context) as %T.Exact).bytes",
-                                variant.codecClassName,
+                                "val inner = (%L.wireSize(value, context) as %T.Exact).bytes",
+                                variant.codecReceiver(),
                                 WIRE_SIZE_CN,
                             )
                             body.addStatement("%T.Exact(1 + inner)", WIRE_SIZE_CN)
@@ -8314,7 +8369,16 @@ internal class CodecEmitter(
                         builder.addFunction(buildDispatchWireSizeFun(shape))
                         builder.addFunction(buildDispatchPeekFun(shape))
                     }
-                    builder.addType(buildDispatchOnAggregatorCompanion(shape, binding))
+                    // The `decodeAggregating` companion (per-call payload-codec
+                    // selection) is a ReReadByVariant/@DispatchOn construct — it
+                    // peeks+rewinds the discriminator. A simple @PacketType
+                    // (FixedByte) generic dispatcher consumes the byte and relies
+                    // on the constructor-injected payloadCodec, so it omits the
+                    // aggregator. (buildDispatchOnAggregatorCompanion requires a
+                    // ValueClass discriminator and would otherwise error.)
+                    if (shape.discriminator is Discriminator.ValueClass) {
+                        builder.addType(buildDispatchOnAggregatorCompanion(shape, binding))
+                    }
                     builder.build()
                 }
             }
