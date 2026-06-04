@@ -59,133 +59,6 @@ internal sealed interface FieldAnalysis {
     ) : FieldAnalysis
 }
 
-internal data class DispatcherShape(
-    val packageName: String,
-    val parentClassName: ClassName,
-    val parentSimpleName: String,
-    val codecSimpleName: String,
-    val variants: List<VariantSpec>,
-    /** Issue #175 — source class visibility, applied to the codec object. */
-    val visibility: KModifier? = null,
-)
-
-/**
- * Bit-packed dispatcher shape.
- *
- * The discriminator is a `@JvmInline value class` whose
- * `@DispatchValue`-annotated property produces an `Int` to match
- * against `@PacketType.value`. Variants are data classes whose
- * first constructor parameter is the discriminator type, so the
- * variant codec naturally reads/writes the discriminator byte
- * via the `FieldSpec.ValueClassScalar` path.
- */
-internal data class DispatchOnDispatcherShape(
-    val packageName: String,
-    val parentClassName: ClassName,
-    val parentSimpleName: String,
-    val codecSimpleName: String,
-    val discriminatorClassName: ClassName,
-    val discriminatorCodecClassName: ClassName,
-    val discriminatorInnerKind: ScalarKind,
-    val discriminatorInnerWireOrder: Endianness,
-    val dispatchValuePropertyName: String,
-    /**
-     * Slice — kind of the `@DispatchValue`
-     * property's return type. Drives the per-emit-site Int
-     * coercion at the dispatch site: Int returns flow through
-     * unchanged, Boolean lifts to `if (b) 1 else 0`, the other
-     * primitive numeric kinds use `.toInt()`. Defaults to
-     * `ScalarKind.Int` for backwards compatibility with the
-     * pre-widening Int-only contract.
-     */
-    val dispatchValueKind: ScalarKind = ScalarKind.Int,
-    val variants: List<DispatchOnVariantSpec>,
-    /**
-     * Present when the sealed parent declares
-     * `<out P : Payload>` (or `<P : Payload>`). Causes the
-     * dispatcher to emit as a generic class
-     * `class FooCodec<P : Payload>(payloadCodec: Codec<P>) :
-     * Codec<Foo<P>>` instead of `object FooCodec : Codec<Foo>`.
-     * Generic variants thread through `payloadCodec`;
-     * `Nothing`-typed variants use static codec refs as before.
-     */
-    val payloadTypeParameter: PayloadTypeParameter? = null,
-    /**
-     * Present when the sealed parent itself
-     * carries `@FramedBy`. The dispatcher then drops the `Codec<T>`
-     * superinterface (encode contract differs — returns a
-     * `ReadBuffer` slice), changes the encode signature to
-     * `(value, context, factory): ReadBuffer`, and owns
-     * `peekFrameSize` directly (every variant peeks identically
-     * under inherited framing, so a single header+prefix walker on
-     * the dispatcher subsumes the per-variant dispatch). `wireSize`
-     * is dropped — the slicing-scheme encode returns a sized slice
-     * and no caller needs an upfront size.
-     *
-     * The header wire width comes from the discriminator's inner
-     * kind (`discriminatorInnerKind.width`) — the validator's E3
-     * check ensures every variant's `after`-named field has Exact
-     * wire width, and per the `@DispatchOn` shape contract, the
-     * after-field IS the discriminator value class. So the header
-     * the framing emit needs to skip equals the discriminator's
-     * inner scalar width.
-     */
-    val framedBy: FramedByConfig? = null,
-    /**
-     * Present when the sealed parent carries `@ForwardCompatible`
-     * (only meaningful alongside [framedBy]). When set, the decode
-     * `else` arm skips an unrecognized discriminator's framed
-     * payload and preserves it into the unknown variant rather than
-     * throwing, and the framed encode gains an `is <Unknown> ->` arm
-     * that re-frames the preserved bytes with the inherited framing
-     * codec. The discriminator is validator-constrained to a single
-     * byte so the stored opcode re-encodes byte-identically.
-     */
-    val forwardCompatible: ForwardCompatibleConfig? = null,
-    /** Issue #175 — source class visibility, applied to the dispatcher codec. */
-    val visibility: KModifier? = null,
-) {
-    /**
-     * Phase 1: the discriminator's wire width as a WireWidth, routed
-     * from its inner scalar kind (always Fixed). Consumers read this
-     * instead of `discriminatorInnerKind.width` when they want a wire
-     * width.
-     */
-    val discriminatorWireWidth: WireWidth get() = discriminatorInnerKind.wireWidth
-}
-
-/**
- * Variant spec for `@DispatchOn` dispatch. Differs from
- * `VariantSpec` in carrying only the dispatch value (no
- * `wireSize` — the variant codec's own `wireSize` is the source
- * of truth, since the variant's bytes are exactly its body).
- *
- * Adds `genericInstanceFieldName`: when the
- * variant data class declares `<P: Payload>` ( shape),
- * the variant's codec is a generic class that needs a constructor-
- * injected `payloadCodec`. The dispatcher constructs the variant
- * codec instance once in its primary constructor and stores it as
- * a private property under this field name (e.g., `dataCodec`);
- * emit sites reference the field instead of the static codec
- * class. `null` for `Nothing`-typed variants — those use static
- * codec object references unchanged.
- */
-internal data class DispatchOnVariantSpec(
-    val simpleName: String,
-    val className: ClassName,
-    val codecClassName: ClassName,
-    val dispatchValue: Int,
-    val genericInstanceFieldName: String? = null,
-)
-
-internal data class VariantSpec(
-    val simpleName: String,
-    val className: ClassName,
-    val codecClassName: ClassName,
-    val packetTypeValue: Int,
-    val wireSize: VariantWireSize,
-)
-
 internal sealed interface VariantWireSize {
     data class LiteralExact(
         val bytes: Int,
@@ -208,12 +81,11 @@ internal sealed interface VariantWireSize {
 // ---------------------------------------------------------------------------
 // Unified dispatch IR (dispatch-path unification — see
 // DISPATCH_UNIFICATION_PLAN.md). One DispatchShape subsumes both the simple
-// @PacketType (DispatcherShape) and @DispatchOn (DispatchOnDispatcherShape)
-// paths. Every optional/variant dimension is an explicit sum type — no
-// nullable-as-state — so the emitters branch on named cases rather than on
-// null checks. The legacy shapes' nullable fields are normalized into these
-// states at the adapter boundary below and disappear when the analyzers are
-// collapsed (plan stage 8).
+// @PacketType and @DispatchOn dispatch paths. Both analyzers
+// (analyzeSealedDispatcher / analyzeDispatchOnSealedDispatcher) produce this
+// shape directly. Every optional/variant dimension is an explicit sum type —
+// no nullable-as-state — so the emitters branch on named cases rather than on
+// null checks.
 // ---------------------------------------------------------------------------
 
 internal data class DispatchShape(
@@ -349,75 +221,6 @@ internal sealed interface CodecVisibility {
 /** Map the legacy nullable visibility modifier into the explicit state. */
 internal fun KModifier?.toCodecVisibility(): CodecVisibility =
     if (this == KModifier.INTERNAL) CodecVisibility.Internal else CodecVisibility.Public
-
-// --- Adapters from the legacy shapes (plan stage 2). Unused until the emit
-// --- builders migrate; they normalize the legacy nullable fields into the
-// --- explicit sum-type states above.
-
-internal fun DispatcherShape.toDispatchShape(): DispatchShape =
-    DispatchShape(
-        packageName = packageName,
-        parentClassName = parentClassName,
-        parentSimpleName = parentSimpleName,
-        codecSimpleName = codecSimpleName,
-        discriminator = Discriminator.FixedByte,
-        variants = variants.map { it.toDispatchVariant() },
-        genericity = Genericity.Monomorphic,
-        framing = Framing.Unframed,
-        forwardCompat = ForwardCompat.Disabled,
-        visibility = visibility.toCodecVisibility(),
-    )
-
-internal fun VariantSpec.toDispatchVariant(): DispatchVariant =
-    DispatchVariant(
-        simpleName = simpleName,
-        className = className,
-        codecClassName = codecClassName,
-        dispatchValue = packetTypeValue,
-        codecRef = VariantCodecRef.StaticObject,
-        wireSize = wireSize,
-    )
-
-internal fun DispatchOnDispatcherShape.toDispatchShape(): DispatchShape =
-    DispatchShape(
-        packageName = packageName,
-        parentClassName = parentClassName,
-        parentSimpleName = parentSimpleName,
-        codecSimpleName = codecSimpleName,
-        discriminator =
-            Discriminator.ValueClass(
-                className = discriminatorClassName,
-                codecClassName = discriminatorCodecClassName,
-                innerKind = discriminatorInnerKind,
-                innerWireOrder = discriminatorInnerWireOrder,
-                dispatchValueProperty = dispatchValuePropertyName,
-                dispatchValueKind = dispatchValueKind,
-            ),
-        variants = variants.map { it.toDispatchVariant() },
-        genericity =
-            payloadTypeParameter
-                ?.let { Genericity.Generic(it) }
-                ?: Genericity.Monomorphic,
-        framing = framedBy?.let { Framing.Framed(it) } ?: Framing.Unframed,
-        forwardCompat =
-            forwardCompatible
-                ?.let { ForwardCompat.Enabled(it) }
-                ?: ForwardCompat.Disabled,
-        visibility = visibility.toCodecVisibility(),
-    )
-
-internal fun DispatchOnVariantSpec.toDispatchVariant(): DispatchVariant =
-    DispatchVariant(
-        simpleName = simpleName,
-        className = className,
-        codecClassName = codecClassName,
-        dispatchValue = dispatchValue,
-        codecRef =
-            genericInstanceFieldName
-                ?.let { VariantCodecRef.GenericInstance(it) }
-                ?: VariantCodecRef.StaticObject,
-        wireSize = VariantWireSize.Delegated,
-    )
 
 internal data class CodecShape(
     val packageName: String,

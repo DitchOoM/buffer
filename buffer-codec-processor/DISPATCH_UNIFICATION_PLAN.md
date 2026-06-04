@@ -18,14 +18,16 @@ unchanged) and committed:
 - **Stage 6 done** — peek (`80db2b74`)
 - **Stage 7 done** — file-shell collapsed to one `buildDispatchFileSpec`; framed
   encode/peek + aggregator migrated onto `DispatchShape` (`fad87fe0`)
+- **Stage 8 done** — both analyzers (`analyzeSealedDispatcher` /
+  `analyzeDispatchOnSealedDispatcher`) now return `DispatchShape` directly; the
+  legacy `DispatcherShape` / `DispatchOnDispatcherShape` / `DispatchOnVariantSpec`
+  / `VariantSpec` and their `toDispatchShape()` / `toDispatchVariant()` adapters
+  are deleted. Byte-identical (305 goldens unchanged).
 
-The two dispatch emit paths are now ONE builder set on `DispatchShape`. **Remaining:**
+The two dispatch emit paths are now ONE builder set on `DispatchShape`, fed by
+two analyzers that emit it directly. **Remaining:**
 
-- **Stage 8 (next)** — collapse `analyzeSealedDispatcher` /
-  `analyzeDispatchOnSealedDispatcher` to produce `DispatchShape` directly; delete
-  the legacy `DispatcherShape` / `DispatchOnDispatcherShape` / `DispatchOnVariantSpec`
-  / `VariantSpec` and their `toDispatchShape()` adapters. Byte-identical.
-- **Stage 9** — fold dispatcher analysis into `AnalysisResult` (the `?: return null`
+- **Stage 9 (next)** — fold dispatcher analysis into `AnalysisResult` (the `?: return null`
   dispatcher silent-skips become `Rejected` diagnostics). Existing goldens
   unchanged; adds new diagnostics + negative tests for the previously-silent
   dispatcher gaps.
@@ -109,9 +111,10 @@ internal enum class LabelFormat { Hex, Decimal }
 ```
 
 Adapters `DispatcherShape.toDispatchShape()` / `DispatchOnDispatcherShape.toDispatchShape()`
-normalize the legacy nullable fields into these states; they vanish when the
-analyzers are collapsed (stage 8). `DispatcherShape` → `FixedByte` + Monomorphic +
-Unframed + Disabled; `DispatchOnDispatcherShape` → `ValueClass` with feature
+normalized the legacy nullable fields into these states through stages 2–7; they
+were deleted in stage 8 once both analyzers emitted `DispatchShape` directly. The
+mapping the analyzers now apply inline: simple `@PacketType` → `FixedByte` +
+Monomorphic + Unframed + Disabled; `@DispatchOn` → `ValueClass` with feature
 fields mapped one-for-one.
 
 ## Staged migration (each stage byte-identical; gate = `codec-snapshots/` unchanged)

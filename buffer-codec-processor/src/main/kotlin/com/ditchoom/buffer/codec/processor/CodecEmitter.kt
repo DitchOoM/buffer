@@ -143,10 +143,10 @@ internal class CodecEmitter(
             // Compute the unified dispatch shape once: try the @DispatchOn
             // dispatcher path first; if the parent doesn't carry the
             // annotation, fall back to the simple @PacketType dispatcher.
-            // Both analyzers normalize into one DispatchShape (plan stage 7).
+            // Both analyzers produce one DispatchShape directly (plan stage 8).
             val shape =
-                analyzeDispatchOnSealedDispatcher(symbol)?.toDispatchShape()
-                    ?: analyzeSealedDispatcher(symbol)?.toDispatchShape()
+                analyzeDispatchOnSealedDispatcher(symbol)
+                    ?: analyzeSealedDispatcher(symbol)
                     ?: return
             val file = buildDispatchFileSpec(shape)
             codeGenerator
@@ -7237,11 +7237,11 @@ internal class CodecEmitter(
      * and duplicate-value cases; this method's silence keeps the
      * emitter consistent with /B/C "out of shape, no codec".
      */
-    private fun analyzeSealedDispatcher(symbol: KSClassDeclaration): DispatcherShape? {
+    private fun analyzeSealedDispatcher(symbol: KSClassDeclaration): DispatchShape? {
         if (symbol.annotations.any { it.shortName.asString() == "DispatchOn" }) return null
         val subclasses = symbol.getSealedSubclasses().toList()
         if (subclasses.isEmpty()) return null
-        val variants = mutableListOf<VariantSpec>()
+        val variants = mutableListOf<DispatchVariant>()
         val seenValues = mutableSetOf<Int>()
         for (sub in subclasses) {
             // Issue #150 — accept `data object` / `object` variants
@@ -7267,7 +7267,7 @@ internal class CodecEmitter(
                 (analyze(sub) as? AnalysisResult.Supported)?.shape ?: return null
             val variantWireSize = classifyVariantWireSize(variantShape)
             variants +=
-                VariantSpec(
+                DispatchVariant(
                     simpleName = sub.simpleName.asString(),
                     className = classNameOf(sub),
                     codecClassName =
@@ -7275,29 +7275,34 @@ internal class CodecEmitter(
                             sub.packageName.asString(),
                             sub.flattenedCodecName(),
                         ),
-                    packetTypeValue = rawValue,
+                    dispatchValue = rawValue,
+                    codecRef = VariantCodecRef.StaticObject,
                     wireSize = variantWireSize,
                 )
         }
         // Sort by discriminator value so the generated `expected = "one of {...}"`
         // string and the `when` branches are deterministic, and so the dispatcher
         // table reads in the natural ascending order.
-        variants.sortBy { it.packetTypeValue }
+        variants.sortBy { it.dispatchValue }
         val pkg = symbol.packageName.asString()
         val parentSimpleName = symbol.simpleName.asString()
-        return DispatcherShape(
+        return DispatchShape(
             packageName = pkg,
             parentClassName = ClassName(pkg, parentSimpleName),
             parentSimpleName = parentSimpleName,
             codecSimpleName = symbol.flattenedCodecName(),
+            discriminator = Discriminator.FixedByte,
             variants = variants,
-            visibility = codecVisibilityModifier(symbol),
+            genericity = Genericity.Monomorphic,
+            framing = Framing.Unframed,
+            forwardCompat = ForwardCompat.Disabled,
+            visibility = codecVisibilityModifier(symbol).toCodecVisibility(),
         )
     }
 
     /**
      * Analyze a `@DispatchOn`-annotated sealed
-     * parent into a `DispatchOnDispatcherShape`.
+     * parent into a `DispatchShape` (ValueClass discriminator).
      *
      * Returns null (silent skip) when the parent doesn't carry
      * `@DispatchOn`, when the discriminator type isn't a value class
@@ -7309,7 +7314,7 @@ internal class CodecEmitter(
      * surfaces user-facing diagnostics; the emitter's silence keeps
      * the "out of shape, no codec" pattern intact.
      */
-    private fun analyzeDispatchOnSealedDispatcher(symbol: KSClassDeclaration): DispatchOnDispatcherShape? {
+    private fun analyzeDispatchOnSealedDispatcher(symbol: KSClassDeclaration): DispatchShape? {
         val dispatchOn =
             symbol.annotations.firstOrNull { it.shortName.asString() == "DispatchOn" }
                 ?: return null
@@ -7379,7 +7384,7 @@ internal class CodecEmitter(
                 ?.takeIf { symbol.annotations.any(::isFramedByAnn) }
                 ?.let { resolveForwardCompatibleConfig(subclasses) }
 
-        val variants = mutableListOf<DispatchOnVariantSpec>()
+        val variants = mutableListOf<DispatchVariant>()
         val seenValues = mutableSetOf<Int>()
         for (sub in subclasses) {
             // The `@UnknownVariant` sink is handled by the dispatcher's
@@ -7448,7 +7453,7 @@ internal class CodecEmitter(
                     null
                 }
             variants +=
-                DispatchOnVariantSpec(
+                DispatchVariant(
                     simpleName = variantSimpleName,
                     className = classNameOf(sub),
                     codecClassName =
@@ -7457,7 +7462,11 @@ internal class CodecEmitter(
                             sub.flattenedCodecName(),
                         ),
                     dispatchValue = rawValue,
-                    genericInstanceFieldName = genericInstanceFieldName,
+                    codecRef =
+                        genericInstanceFieldName
+                            ?.let { VariantCodecRef.GenericInstance(it) }
+                            ?: VariantCodecRef.StaticObject,
+                    wireSize = VariantWireSize.Delegated,
                 )
         }
         variants.sortBy { it.dispatchValue }
@@ -7470,26 +7479,35 @@ internal class CodecEmitter(
         // a single header+prefix walker rather than per-variant
         // dispatch, and `wireSize` is omitted.
         val framedBy = symbol.annotations.firstOrNull(::isFramedByAnn)?.let(::parseFramedBy)
-        return DispatchOnDispatcherShape(
+        return DispatchShape(
             packageName = pkg,
             parentClassName = ClassName(pkg, parentSimpleName),
             parentSimpleName = parentSimpleName,
             codecSimpleName = symbol.flattenedCodecName(),
-            discriminatorClassName = classNameOf(discriminatorDecl),
-            discriminatorCodecClassName =
-                ClassName(
-                    discriminatorDecl.packageName.asString(),
-                    discriminatorDecl.flattenedCodecName(),
+            discriminator =
+                Discriminator.ValueClass(
+                    className = classNameOf(discriminatorDecl),
+                    codecClassName =
+                        ClassName(
+                            discriminatorDecl.packageName.asString(),
+                            discriminatorDecl.flattenedCodecName(),
+                        ),
+                    innerKind = innerKind,
+                    innerWireOrder = discriminatorWireOrder,
+                    dispatchValueProperty = dispatchValuePropertyName,
+                    dispatchValueKind = dispatchValueKind,
                 ),
-            discriminatorInnerKind = innerKind,
-            discriminatorInnerWireOrder = discriminatorWireOrder,
-            dispatchValuePropertyName = dispatchValuePropertyName,
-            dispatchValueKind = dispatchValueKind,
             variants = variants,
-            payloadTypeParameter = payloadTypeParameter,
-            framedBy = framedBy,
-            forwardCompatible = forwardCompatible,
-            visibility = codecVisibilityModifier(symbol),
+            genericity =
+                payloadTypeParameter
+                    ?.let { Genericity.Generic(it) }
+                    ?: Genericity.Monomorphic,
+            framing = framedBy?.let { Framing.Framed(it) } ?: Framing.Unframed,
+            forwardCompat =
+                forwardCompatible
+                    ?.let { ForwardCompat.Enabled(it) }
+                    ?: ForwardCompat.Disabled,
+            visibility = codecVisibilityModifier(symbol).toCodecVisibility(),
         )
     }
 
