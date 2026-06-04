@@ -7992,6 +7992,134 @@ internal class CodecEmitter(
             .build()
     }
 
+    /**
+     * THE unified NON-framed dispatch peekFrameSize builder. Reproduces the
+     * (now-removed) simple-@PacketType `buildDispatcherPeekFrameFun` and
+     * non-framed @DispatchOn `buildDispatchOnPeekFun` output byte-for-byte by
+     * forking on [Discriminator] ownership — the discriminator-counted-once
+     * invariant (plan §6 risk #1) and the hex-vs-decimal label radix (risk #2).
+     *
+     * - [DiscriminatorOwnership.ConsumedByDispatcher] (FixedByte): the
+     *   DISPATCHER consumes the byte. Min guard `< 1`; inline
+     *   `stream.peekByte(baseOffset)` discriminator; hex `when` labels; delegate
+     *   to the variant at `baseOffset + 1` and wrap a `Complete` result with
+     *   `Complete(1 + inner.bytes)` (the variant body excludes the byte).
+     * - [DiscriminatorOwnership.ReReadByVariant] (ValueClass): the dispatcher
+     *   PEEKS the discriminator's inner scalar, reconstructs the value class,
+     *   coerces the dispatch value. Min guard `< innerWidth`; decimal `when`
+     *   labels; PURE-DELEGATE at `baseOffset` (NO `1 +`) — the variant peek
+     *   already counts its self-framed re-read discriminator.
+     *
+     * Does NOT cover the framed (`@FramedBy`) single-walker peek — that keeps
+     * [buildFramedByDispatchOnPeekFun]; this builder is only routed at the
+     * non-framed call sites.
+     */
+    private fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
+        val body = CodeBlock.builder()
+        val discriminatorBytes = shape.discriminator.wireWidth.requireFixed("dispatch peek")
+
+        when (val disc = shape.discriminator) {
+            Discriminator.FixedByte -> {
+                body.addStatement(
+                    "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
+                    discriminatorBytes,
+                    PEEK_RESULT_CN,
+                )
+                body.addStatement(
+                    "val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF",
+                )
+                body.beginControlFlow("return when (discriminator)")
+                for (variant in shape.variants) {
+                    body.beginControlFlow(
+                        "%L ->",
+                        variant.dispatchLabel(shape.discriminator.labelFormat),
+                    )
+                    body.beginControlFlow(
+                        "when (val inner = %L.peekFrameSize(stream, baseOffset + 1))",
+                        variant.codecReceiver(),
+                    )
+                    body.addStatement(
+                        "is %T.Complete -> %T.Complete(1 + inner.bytes)",
+                        PEEK_RESULT_CN,
+                        PEEK_RESULT_CN,
+                    )
+                    body.addStatement("else -> inner")
+                    body.endControlFlow()
+                    body.endControlFlow()
+                }
+                body.beginControlFlow("else ->")
+                body.addStatement(
+                    "throw %T(fieldPath = %S, bufferPosition = baseOffset, expected = %S, actual = %P)",
+                    DECODE_EXCEPTION_CN,
+                    "${shape.parentSimpleName}.discriminator",
+                    expectedDispatchSet(shape),
+                    "0x\${discriminator.toString(16).padStart(2, '0').uppercase()}",
+                )
+                body.endControlFlow()
+                body.endControlFlow()
+            }
+            is Discriminator.ValueClass -> {
+                body.addStatement(
+                    "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
+                    discriminatorBytes,
+                    PEEK_RESULT_CN,
+                )
+                // Peek the discriminator's inner-scalar bytes at baseOffset and
+                // reconstruct the value class — the same path the value-class
+                // @When source uses.
+                appendPeekFixedScalar(
+                    body = body,
+                    kind = disc.innerKind,
+                    targetVar = "__discRaw",
+                    offsetExpr = "0",
+                    wireOrder = disc.innerWireOrder,
+                )
+                body.addStatement(
+                    "val __discriminator = %T(__discRaw)",
+                    disc.className,
+                )
+                body.addStatement(
+                    "val __dispatchValue = %L",
+                    dispatchValueIntCoercion(
+                        disc.dispatchValueKind,
+                        "__discriminator.${disc.dispatchValueProperty}",
+                    ),
+                )
+                body.beginControlFlow("return when (__dispatchValue)")
+                for (variant in shape.variants) {
+                    // Variant.peek counts the discriminator bytes in its own
+                    // header field, so we delegate at baseOffset, not + 1.
+                    body.addStatement(
+                        "%L -> %L.peekFrameSize(stream, baseOffset)",
+                        variant.dispatchLabel(shape.discriminator.labelFormat),
+                        variant.codecReceiver(),
+                    )
+                }
+                body.beginControlFlow("else ->")
+                body.addStatement(
+                    "throw %T(fieldPath = %S, bufferPosition = baseOffset, expected = %S, actual = %P)",
+                    DECODE_EXCEPTION_CN,
+                    "${shape.parentSimpleName}.discriminator",
+                    expectedDispatchSet(shape),
+                    "\${__dispatchValue}",
+                )
+                body.endControlFlow()
+                body.endControlFlow()
+            }
+            is Discriminator.Varint ->
+                error("Discriminator.Varint peek is not reachable yet — no shape produces it")
+        }
+
+        return FunSpec
+            .builder("peekFrameSize")
+            .addModifiers(KModifier.OVERRIDE)
+            .addParameter("stream", STREAM_PROCESSOR_CN)
+            .addParameter("baseOffset", INT)
+            .returns(PEEK_RESULT_CN)
+            .addCode(body.build())
+            .build()
+    }
+
     private fun buildSealedDispatcherFileSpec(shape: DispatcherShape): FileSpec {
         val codecType =
             TypeSpec
@@ -8001,67 +8129,11 @@ internal class CodecEmitter(
                 .addFunction(buildDispatchDecodeFun(shape.toDispatchShape()))
                 .addFunction(buildDispatchEncodeFun(shape.toDispatchShape()))
                 .addFunction(buildDispatchWireSizeFun(shape.toDispatchShape()))
-                .addFunction(buildDispatcherPeekFrameFun(shape))
+                .addFunction(buildDispatchPeekFun(shape.toDispatchShape()))
                 .build()
         return FileSpec
             .builder(shape.packageName, shape.codecSimpleName)
             .addType(codecType)
-            .build()
-    }
-
-    private fun expectedDiscriminatorSet(shape: DispatcherShape): String =
-        shape.variants.joinToString(prefix = "one of {", postfix = "}") {
-            "0x${it.packetTypeValue.toString(16).padStart(2, '0').uppercase()}"
-        }
-
-    private fun buildDispatcherPeekFrameFun(shape: DispatcherShape): FunSpec {
-        val body = CodeBlock.builder()
-        body.addStatement(
-            "if (stream.available() - baseOffset < 1) return %T.NeedsMoreData",
-            PEEK_RESULT_CN,
-        )
-        body.addStatement(
-            "val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF",
-        )
-        body.beginControlFlow("return when (discriminator)")
-        for (variant in shape.variants) {
-            body.beginControlFlow(
-                "0x%L ->",
-                variant.packetTypeValue
-                    .toString(16)
-                    .padStart(2, '0')
-                    .uppercase(),
-            )
-            body.beginControlFlow(
-                "when (val inner = %T.peekFrameSize(stream, baseOffset + 1))",
-                variant.codecClassName,
-            )
-            body.addStatement(
-                "is %T.Complete -> %T.Complete(1 + inner.bytes)",
-                PEEK_RESULT_CN,
-                PEEK_RESULT_CN,
-            )
-            body.addStatement("else -> inner")
-            body.endControlFlow()
-            body.endControlFlow()
-        }
-        body.beginControlFlow("else ->")
-        body.addStatement(
-            "throw %T(fieldPath = %S, bufferPosition = baseOffset, expected = %S, actual = %P)",
-            DECODE_EXCEPTION_CN,
-            "${shape.parentSimpleName}.discriminator",
-            expectedDiscriminatorSet(shape),
-            "0x\${discriminator.toString(16).padStart(2, '0').uppercase()}",
-        )
-        body.endControlFlow()
-        body.endControlFlow()
-        return FunSpec
-            .builder("peekFrameSize")
-            .addModifiers(KModifier.OVERRIDE)
-            .addParameter("stream", STREAM_PROCESSOR_CN)
-            .addParameter("baseOffset", INT)
-            .returns(PEEK_RESULT_CN)
-            .addCode(body.build())
             .build()
     }
 
@@ -8106,7 +8178,7 @@ internal class CodecEmitter(
                     .addFunction(buildDispatchDecodeFun(shape.toDispatchShape()))
                     .addFunction(buildDispatchEncodeFun(shape.toDispatchShape()))
                     .addFunction(buildDispatchWireSizeFun(shape.toDispatchShape()))
-                    .addFunction(buildDispatchOnPeekFun(shape))
+                    .addFunction(buildDispatchPeekFun(shape.toDispatchShape()))
                     .build()
             }
         return FileSpec
@@ -8306,7 +8378,7 @@ internal class CodecEmitter(
         } else {
             builder.addFunction(buildDispatchEncodeFun(shape.toDispatchShape()))
             builder.addFunction(buildDispatchWireSizeFun(shape.toDispatchShape()))
-            builder.addFunction(buildDispatchOnPeekFun(shape))
+            builder.addFunction(buildDispatchPeekFun(shape.toDispatchShape()))
         }
         return builder
             .addType(buildDispatchOnAggregatorCompanion(shape, binding))
@@ -8639,67 +8711,6 @@ internal class CodecEmitter(
         body.beginControlFlow(") { __fcBuf ->")
         body.addStatement("__fcBuf.write(value.%L.slice())", fc.rawFieldName)
         body.endControlFlow()
-    }
-
-    private fun buildDispatchOnPeekFun(shape: DispatchOnDispatcherShape): FunSpec {
-        val body = CodeBlock.builder()
-        val discriminatorBytes = shape.discriminatorWireWidth.requireFixed("dispatchOnDiscriminator")
-        body.addStatement(
-            "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
-            discriminatorBytes,
-            PEEK_RESULT_CN,
-        )
-        // Peek the discriminator's inner-scalar bytes at baseOffset and
-        // reconstruct the value class. supports natural-width
-        // single-byte kinds via appendPeekFixedScalar — the same path the
-        // value-class @When source uses. Wider discriminators
-        // would route through appendPeekScalar's order-aware assembly.
-        appendPeekFixedScalar(
-            body = body,
-            kind = shape.discriminatorInnerKind,
-            targetVar = "__discRaw",
-            offsetExpr = "0",
-            wireOrder = shape.discriminatorInnerWireOrder,
-        )
-        body.addStatement(
-            "val __discriminator = %T(__discRaw)",
-            shape.discriminatorClassName,
-        )
-        body.addStatement(
-            "val __dispatchValue = %L",
-            dispatchValueIntCoercion(
-                shape.dispatchValueKind,
-                "__discriminator.${shape.dispatchValuePropertyName}",
-            ),
-        )
-        body.beginControlFlow("return when (__dispatchValue)")
-        for (variant in shape.variants) {
-            // Variant.peek counts the discriminator bytes in its own header
-            // field, so we delegate at baseOffset, not baseOffset + 1.
-            body.addStatement(
-                "%L -> %L.peekFrameSize(stream, baseOffset)",
-                variant.dispatchValue,
-                variant.codecReceiver(),
-            )
-        }
-        body.beginControlFlow("else ->")
-        body.addStatement(
-            "throw %T(fieldPath = %S, bufferPosition = baseOffset, expected = %S, actual = %P)",
-            DECODE_EXCEPTION_CN,
-            "${shape.parentSimpleName}.discriminator",
-            expectedDispatchValueSet(shape),
-            "\${__dispatchValue}",
-        )
-        body.endControlFlow()
-        body.endControlFlow()
-        return FunSpec
-            .builder("peekFrameSize")
-            .addModifiers(KModifier.OVERRIDE)
-            .addParameter("stream", STREAM_PROCESSOR_CN)
-            .addParameter("baseOffset", INT)
-            .returns(PEEK_RESULT_CN)
-            .addCode(body.build())
-            .build()
     }
 
     /**
