@@ -7628,13 +7628,161 @@ internal class CodecEmitter(
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Unified dispatch decode (DISPATCH_UNIFICATION_PLAN.md stage 3). One
+    // builder subsumes BOTH the simple @PacketType decode
+    // (DiscriminatorOwnership.ConsumedByDispatcher) and the @DispatchOn decode
+    // (DiscriminatorOwnership.ReReadByVariant), byte-for-byte. The legacy
+    // builders' divergent behavior is recovered from the discriminator sum
+    // type: ownership (consume vs peek/rewind), label radix (hex vs decimal),
+    // local var names, receiver form (static object vs generic instance), and
+    // the forward-compatible else arm.
+    // -----------------------------------------------------------------------
+
+    /**
+     * The parent type the decode returns: bare for [Genericity.Monomorphic],
+     * parameterized by the type variable for [Genericity.Generic]. Mirror of
+     * [dispatcherParentTypeRef] over the unified shape.
+     */
+    private fun DispatchShape.parentTypeRef(): TypeName =
+        when (val g = genericity) {
+            Genericity.Monomorphic -> parentClassName
+            is Genericity.Generic ->
+                parentClassName.parameterizedBy(
+                    TypeVariableName(g.binding.typeVariableName),
+                )
+        }
+
+    /** The `when` label for one variant, in the discriminator's radix. */
+    private fun DispatchVariant.dispatchLabel(format: LabelFormat): CodeBlock =
+        when (format) {
+            // Pre-formatted hex string passed as %L after the `0x` prefix —
+            // matches the simple path's `"0x%L"`.
+            LabelFormat.Hex ->
+                CodeBlock.of(
+                    "0x%L",
+                    dispatchValue
+                        .toString(16)
+                        .padStart(2, '0')
+                        .uppercase(),
+                )
+            // Int passed as %L so KotlinPoet underscores large decimals
+            // (e.g. `2_048`) — matches the @DispatchOn path.
+            LabelFormat.Decimal -> CodeBlock.of("%L", dispatchValue)
+        }
+
+    /** How the dispatcher references this variant's codec at a call site. */
+    private fun DispatchVariant.codecReceiver(): CodeBlock =
+        when (val ref = codecRef) {
+            VariantCodecRef.StaticObject -> CodeBlock.of("%T", codecClassName)
+            is VariantCodecRef.GenericInstance -> CodeBlock.of("%L", ref.fieldName)
+        }
+
+    /** The expected-set diagnostic string in the discriminator's radix. */
+    private fun expectedDispatchSet(shape: DispatchShape): String =
+        shape.variants.joinToString(prefix = "one of {", postfix = "}") { variant ->
+            when (shape.discriminator.labelFormat) {
+                LabelFormat.Hex ->
+                    "0x${variant.dispatchValue.toString(16).padStart(2, '0').uppercase()}"
+                LabelFormat.Decimal -> variant.dispatchValue.toString()
+            }
+        }
+
+    /**
+     * THE unified dispatch decode builder. Reproduces the (now-removed)
+     * simple-@PacketType and @DispatchOn decode output byte-for-byte by
+     * forking on [Discriminator] ownership/labelFormat.
+     */
+    private fun buildDispatchDecodeFun(shape: DispatchShape): FunSpec {
+        val body = CodeBlock.builder()
+        val parentTypeRef = shape.parentTypeRef()
+        // The `actual = ...` argument to DecodeException — hex-formatted for
+        // FixedByte, the decimal value for ValueClass.
+        val actualFormat: String
+
+        when (val disc = shape.discriminator) {
+            Discriminator.FixedByte -> {
+                // Simple @PacketType: consume the discriminator byte.
+                body.addStatement("val discriminatorPosition = buffer.position()")
+                body.addStatement("val discriminator = buffer.readUByte().toInt()")
+                actualFormat = "0x\${discriminator.toString(16).padStart(2, '0').uppercase()}"
+                body.beginControlFlow("return when (discriminator)")
+            }
+            is Discriminator.ValueClass -> {
+                // @DispatchOn: peek the discriminator via its codec, rewind so
+                // the variant re-reads it as its first value-class field.
+                body.addStatement("val discriminatorPosition = buffer.position()")
+                body.addStatement(
+                    "val __discriminator = %T.decode(buffer, context)",
+                    disc.codecClassName,
+                )
+                body.addStatement("buffer.position(discriminatorPosition)")
+                body.addStatement(
+                    "val __dispatchValue = %L",
+                    dispatchValueIntCoercion(
+                        disc.dispatchValueKind,
+                        "__discriminator.${disc.dispatchValueProperty}",
+                    ),
+                )
+                actualFormat = "\${__dispatchValue}"
+                body.beginControlFlow("return when (__dispatchValue)")
+            }
+            is Discriminator.Varint ->
+                error("Discriminator.Varint decode is not reachable yet — no shape produces it")
+        }
+
+        for (variant in shape.variants) {
+            body.addStatement(
+                "%L -> %L.decode(buffer, context)",
+                variant.dispatchLabel(shape.discriminator.labelFormat),
+                variant.codecReceiver(),
+            )
+        }
+
+        when (val fc = shape.forwardCompat) {
+            is ForwardCompat.Enabled -> {
+                val framedBy =
+                    (shape.framing as? Framing.Framed)?.config
+                        ?: error("@ForwardCompatible requires @FramedBy; analyzer should not have set forwardCompat")
+                appendForwardCompatibleDecodeElse(body, framedBy, fc.config)
+            }
+            ForwardCompat.Disabled -> {
+                body.beginControlFlow("else ->")
+                body.addStatement(
+                    "throw %T(fieldPath = %S, bufferPosition = discriminatorPosition, expected = %S, actual = %P)",
+                    DECODE_EXCEPTION_CN,
+                    "${shape.parentSimpleName}.discriminator",
+                    expectedDispatchSet(shape),
+                    actualFormat,
+                )
+                body.endControlFlow()
+            }
+        }
+        body.endControlFlow()
+
+        val builder =
+            FunSpec
+                .builder("decode")
+                .addParameter("buffer", READ_BUFFER_CN)
+                .addParameter("context", DECODE_CONTEXT_CN)
+                .returns(parentTypeRef)
+                .addCode(body.build())
+        // `@FramedBy` dispatchers don't implement `Codec<T>` (the encode
+        // contract differs), so decode is a plain object/class function rather
+        // than an override. Every non-framed dispatcher overrides Codec.decode.
+        if (shape.framing is Framing.Unframed) {
+            builder.addModifiers(KModifier.OVERRIDE)
+        }
+        return builder.build()
+    }
+
     private fun buildSealedDispatcherFileSpec(shape: DispatcherShape): FileSpec {
         val codecType =
             TypeSpec
                 .objectBuilder(shape.codecSimpleName)
                 .withVisibility(shape.visibility)
                 .addSuperinterface(CODEC_CN.parameterizedBy(shape.parentClassName))
-                .addFunction(buildDispatcherDecodeFun(shape))
+                .addFunction(buildDispatchDecodeFun(shape.toDispatchShape()))
                 .addFunction(buildDispatcherEncodeFun(shape))
                 .addFunction(buildDispatcherWireSizeFun(shape))
                 .addFunction(buildDispatcherPeekFrameFun(shape))
@@ -7649,41 +7797,6 @@ internal class CodecEmitter(
         shape.variants.joinToString(prefix = "one of {", postfix = "}") {
             "0x${it.packetTypeValue.toString(16).padStart(2, '0').uppercase()}"
         }
-
-    private fun buildDispatcherDecodeFun(shape: DispatcherShape): FunSpec {
-        val body = CodeBlock.builder()
-        body.addStatement("val discriminatorPosition = buffer.position()")
-        body.addStatement("val discriminator = buffer.readUByte().toInt()")
-        body.beginControlFlow("return when (discriminator)")
-        for (variant in shape.variants) {
-            body.addStatement(
-                "0x%L -> %T.decode(buffer, context)",
-                variant.packetTypeValue
-                    .toString(16)
-                    .padStart(2, '0')
-                    .uppercase(),
-                variant.codecClassName,
-            )
-        }
-        body.beginControlFlow("else ->")
-        body.addStatement(
-            "throw %T(fieldPath = %S, bufferPosition = discriminatorPosition, expected = %S, actual = %P)",
-            DECODE_EXCEPTION_CN,
-            "${shape.parentSimpleName}.discriminator",
-            expectedDiscriminatorSet(shape),
-            "0x\${discriminator.toString(16).padStart(2, '0').uppercase()}",
-        )
-        body.endControlFlow()
-        body.endControlFlow()
-        return FunSpec
-            .builder("decode")
-            .addModifiers(KModifier.OVERRIDE)
-            .addParameter("buffer", READ_BUFFER_CN)
-            .addParameter("context", DECODE_CONTEXT_CN)
-            .returns(shape.parentClassName)
-            .addCode(body.build())
-            .build()
-    }
 
     private fun buildDispatcherEncodeFun(shape: DispatcherShape): FunSpec {
         val body = CodeBlock.builder()
@@ -7840,7 +7953,7 @@ internal class CodecEmitter(
                 TypeSpec
                     .objectBuilder(shape.codecSimpleName)
                     .withVisibility(shape.visibility)
-                    .addFunction(buildDispatchOnDecodeFun(shape, parentTypeRef))
+                    .addFunction(buildDispatchDecodeFun(shape.toDispatchShape()))
                     .addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
                     .addFunction(buildFramedByDispatchOnPeekFun(shape))
                     .build()
@@ -7849,7 +7962,7 @@ internal class CodecEmitter(
                     .objectBuilder(shape.codecSimpleName)
                     .withVisibility(shape.visibility)
                     .addSuperinterface(CODEC_CN.parameterizedBy(parentTypeRef))
-                    .addFunction(buildDispatchOnDecodeFun(shape, parentTypeRef))
+                    .addFunction(buildDispatchDecodeFun(shape.toDispatchShape()))
                     .addFunction(buildDispatchOnEncodeFun(shape, parentTypeRef))
                     .addFunction(buildDispatchOnWireSizeFun(shape, parentTypeRef))
                     .addFunction(buildDispatchOnPeekFun(shape))
@@ -8044,7 +8157,7 @@ internal class CodecEmitter(
                     .build(),
             )
         }
-        builder.addFunction(buildDispatchOnDecodeFun(shape, parentTypeRef))
+        builder.addFunction(buildDispatchDecodeFun(shape.toDispatchShape()))
         if (shape.framedBy != null) {
             builder.addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
             builder.addFunction(buildFramedByDispatchOnPeekFun(shape))
@@ -8321,12 +8434,9 @@ internal class CodecEmitter(
      */
     private fun appendForwardCompatibleDecodeElse(
         body: CodeBlock.Builder,
-        shape: DispatchOnDispatcherShape,
+        framedBy: FramedByConfig,
         fc: ForwardCompatibleConfig,
     ) {
-        val framedBy =
-            shape.framedBy
-                ?: error("@ForwardCompatible requires @FramedBy; analyzer should not have set forwardCompatible")
         body.beginControlFlow("else ->")
         // Cursor is at discriminatorPosition (rewound by decode); set it
         // explicitly so the read is robust to future reordering.
@@ -8387,65 +8497,6 @@ internal class CodecEmitter(
         body.beginControlFlow(") { __fcBuf ->")
         body.addStatement("__fcBuf.write(value.%L.slice())", fc.rawFieldName)
         body.endControlFlow()
-    }
-
-    private fun buildDispatchOnDecodeFun(
-        shape: DispatchOnDispatcherShape,
-        parentTypeRef: TypeName,
-    ): FunSpec {
-        val body = CodeBlock.builder()
-        body.addStatement("val discriminatorPosition = buffer.position()")
-        body.addStatement(
-            "val __discriminator = %T.decode(buffer, context)",
-            shape.discriminatorCodecClassName,
-        )
-        // Rewind so the variant codec re-reads the discriminator bytes
-        // as its first FieldSpec.ValueClassScalar field.
-        body.addStatement("buffer.position(discriminatorPosition)")
-        body.addStatement(
-            "val __dispatchValue = %L",
-            dispatchValueIntCoercion(
-                shape.dispatchValueKind,
-                "__discriminator.${shape.dispatchValuePropertyName}",
-            ),
-        )
-        body.beginControlFlow("return when (__dispatchValue)")
-        for (variant in shape.variants) {
-            body.addStatement(
-                "%L -> %L.decode(buffer, context)",
-                variant.dispatchValue,
-                variant.codecReceiver(),
-            )
-        }
-        val fc = shape.forwardCompatible
-        if (fc != null) {
-            appendForwardCompatibleDecodeElse(body, shape, fc)
-        } else {
-            body.beginControlFlow("else ->")
-            body.addStatement(
-                "throw %T(fieldPath = %S, bufferPosition = discriminatorPosition, expected = %S, actual = %P)",
-                DECODE_EXCEPTION_CN,
-                "${shape.parentSimpleName}.discriminator",
-                expectedDispatchValueSet(shape),
-                "\${__dispatchValue}",
-            )
-            body.endControlFlow()
-        }
-        body.endControlFlow()
-        // `@FramedBy` dispatchers don't
-        // implement `Codec<T>` (the encode contract differs), so
-        // `decode` is a plain object function rather than an override.
-        val builder =
-            FunSpec
-                .builder("decode")
-                .addParameter("buffer", READ_BUFFER_CN)
-                .addParameter("context", DECODE_CONTEXT_CN)
-                .returns(parentTypeRef)
-                .addCode(body.build())
-        if (shape.framedBy == null) {
-            builder.addModifiers(KModifier.OVERRIDE)
-        }
-        return builder.build()
     }
 
     private fun buildDispatchOnEncodeFun(
