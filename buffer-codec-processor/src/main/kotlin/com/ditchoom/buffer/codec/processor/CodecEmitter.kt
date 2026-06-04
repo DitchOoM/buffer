@@ -8,6 +8,7 @@ import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.symbol.ClassKind
 import com.google.devtools.ksp.symbol.KSAnnotation
 import com.google.devtools.ksp.symbol.KSClassDeclaration
+import com.google.devtools.ksp.symbol.KSDeclaration
 import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.symbol.KSValueParameter
 import com.google.devtools.ksp.symbol.Modifier
@@ -178,6 +179,29 @@ internal class CodecEmitter(
             }
     }
 
+    /**
+     * Issue #175 — the generated codec exposes the message type in its
+     * public `decode(): T` / `encode(value: T)` signatures, so a codec
+     * for an `internal` class must itself be `internal` (otherwise Kotlin
+     * rejects it: "'public' function exposes its 'internal' return
+     * type"). Returns [KModifier.INTERNAL] when the source class or any
+     * enclosing declaration is `internal` (effective visibility), else
+     * `null` (default public — keeps every existing public codec
+     * byte-identical).
+     */
+    private fun codecVisibilityModifier(symbol: KSClassDeclaration): KModifier? {
+        var decl: KSDeclaration? = symbol
+        while (decl != null) {
+            if (Modifier.INTERNAL in decl.modifiers) return KModifier.INTERNAL
+            decl = decl.parentDeclaration
+        }
+        return null
+    }
+
+    /** Apply the source class's visibility (issue #175); no-op when public. */
+    private fun TypeSpec.Builder.withVisibility(modifier: KModifier?): TypeSpec.Builder =
+        if (modifier != null) addModifiers(modifier) else this
+
     private fun analyze(symbol: KSClassDeclaration): CodecShape? {
         // Issue #150 — `@ProtocolMessage data object` / `@ProtocolMessage object`.
         // Singleton variants carry zero wire bytes beyond the dispatcher's
@@ -208,6 +232,7 @@ internal class CodecEmitter(
                 ownerSimpleName = ownerSimpleName,
                 codecSimpleName = symbol.flattenedCodecName(),
                 fields = emptyList(),
+                visibility = codecVisibilityModifier(symbol),
                 isSingletonObject = true,
                 singletonDispatchDiscriminator = detectSealedDispatchOnParentDiscriminator(symbol),
             )
@@ -335,6 +360,7 @@ internal class CodecEmitter(
             ownerSimpleName = ownerSimpleName,
             codecSimpleName = symbol.flattenedCodecName(),
             fields = fields,
+            visibility = codecVisibilityModifier(symbol),
             payloadTypeParameter = payloadTypeParameter,
             framedBy = detectFramedBy(symbol),
         )
@@ -2171,6 +2197,7 @@ internal class CodecEmitter(
         val typeSpec =
             TypeSpec
                 .objectBuilder(shape.codecSimpleName)
+                .withVisibility(shape.visibility)
                 .addFunction(buildFramedByDecodeFun(shape, framedBy))
                 .addFunction(buildFramedByEncodeFun(shape, framedBy))
                 .addFunction(buildFramedByPeekFrameFun(shape, framedBy))
@@ -2421,6 +2448,7 @@ internal class CodecEmitter(
             } else {
                 TypeSpec
                     .objectBuilder(shape.codecSimpleName)
+                    .withVisibility(shape.visibility)
                     .addSuperinterface(CODEC_CN.parameterizedBy(shape.messageClassName))
                     .addFunction(buildDecodeFun(shape))
                     .addFunction(buildEncodeFun(shape))
@@ -2462,6 +2490,7 @@ internal class CodecEmitter(
         val codecOfP = CODEC_CN.parameterizedBy(typeVar)
         return TypeSpec
             .classBuilder(shape.codecSimpleName)
+            .withVisibility(shape.visibility)
             .addTypeVariable(typeVar)
             .primaryConstructor(
                 FunSpec
@@ -2515,6 +2544,7 @@ internal class CodecEmitter(
         val codecOfP = CODEC_CN.parameterizedBy(typeVar)
         return TypeSpec
             .classBuilder(shape.codecSimpleName)
+            .withVisibility(shape.visibility)
             .addTypeVariable(typeVar)
             .primaryConstructor(
                 FunSpec
@@ -6879,6 +6909,7 @@ internal class CodecEmitter(
             parentSimpleName = parentSimpleName,
             codecSimpleName = symbol.flattenedCodecName(),
             variants = variants,
+            visibility = codecVisibilityModifier(symbol),
         )
     }
 
@@ -7074,6 +7105,7 @@ internal class CodecEmitter(
             payloadTypeParameter = payloadTypeParameter,
             framedBy = framedBy,
             forwardCompatible = forwardCompatible,
+            visibility = codecVisibilityModifier(symbol),
         )
     }
 
@@ -7215,6 +7247,7 @@ internal class CodecEmitter(
         val codecType =
             TypeSpec
                 .objectBuilder(shape.codecSimpleName)
+                .withVisibility(shape.visibility)
                 .addSuperinterface(CODEC_CN.parameterizedBy(shape.parentClassName))
                 .addFunction(buildDispatcherDecodeFun(shape))
                 .addFunction(buildDispatcherEncodeFun(shape))
@@ -7416,6 +7449,7 @@ internal class CodecEmitter(
                 // wireSize.
                 TypeSpec
                     .objectBuilder(shape.codecSimpleName)
+                    .withVisibility(shape.visibility)
                     .addFunction(buildDispatchOnDecodeFun(shape, parentTypeRef))
                     .addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
                     .addFunction(buildFramedByDispatchOnPeekFun(shape))
@@ -7423,6 +7457,7 @@ internal class CodecEmitter(
             } else {
                 TypeSpec
                     .objectBuilder(shape.codecSimpleName)
+                    .withVisibility(shape.visibility)
                     .addSuperinterface(CODEC_CN.parameterizedBy(parentTypeRef))
                     .addFunction(buildDispatchOnDecodeFun(shape, parentTypeRef))
                     .addFunction(buildDispatchOnEncodeFun(shape, parentTypeRef))
@@ -7585,6 +7620,7 @@ internal class CodecEmitter(
         val builder =
             TypeSpec
                 .classBuilder(shape.codecSimpleName)
+                .withVisibility(shape.visibility)
                 .addTypeVariable(typeVar)
                 .primaryConstructor(
                     FunSpec
@@ -8175,6 +8211,8 @@ internal class CodecEmitter(
         val parentSimpleName: String,
         val codecSimpleName: String,
         val variants: List<VariantSpec>,
+        /** Issue #175 — source class visibility, applied to the codec object. */
+        val visibility: KModifier? = null,
     )
 
     /**
@@ -8250,6 +8288,8 @@ internal class CodecEmitter(
          * byte so the stored opcode re-encodes byte-identically.
          */
         val forwardCompatible: ForwardCompatibleConfig? = null,
+        /** Issue #175 — source class visibility, applied to the dispatcher codec. */
+        val visibility: KModifier? = null,
     ) {
         /**
          * Phase 1: the discriminator's wire width as a WireWidth, routed
@@ -8308,6 +8348,8 @@ internal class CodecEmitter(
         val ownerSimpleName: String,
         val codecSimpleName: String,
         val fields: List<FieldSpec>,
+        /** Issue #175 — source class visibility, applied to the codec object/class. */
+        val visibility: KModifier? = null,
         /**
          * When the @ProtocolMessage data class
          * carries a `<P : Payload>` type parameter and a
