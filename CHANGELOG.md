@@ -3,6 +3,31 @@
 All notable changes to this project are documented here. This project adheres
 to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Codec processor: two previously-silent malformed sealed-dispatch shapes
+  now fail the build with a diagnostic instead of silently generating no
+  codec** (the "Outcome-3 silent gap" class):
+  - A `@PacketType` variant under a *simple* sealed-dispatch parent that is
+    neither a `data class` nor an `object` / `data object`.
+  - A `@DispatchOn` discriminator whose value-class inner scalar is not a
+    supported dispatch width. Only single-byte (`UByte` / `Byte`) and 2/4-byte
+    unsigned (`UShort` / `UInt`) kinds are supported; `Short`, `Int`, `Long`,
+    and `ULong` discriminators now error rather than emitting nothing.
+
+  Wire format and **all existing generated codecs are byte-for-byte unchanged**
+  — only inputs that previously produced no codec are affected.
+
+### Internal
+
+- Unified the two sealed-dispatch codegen paths (simple `@PacketType` and
+  `@DispatchOn`) into a single `DispatchShape` IR parameterized by a
+  `Discriminator` sum type, with one shared emit builder set. Byte-identical
+  refactor (305 codec-snapshot goldens unchanged); groundwork for a future
+  variable-width (QUIC-varint / HTTP/3) discriminator.
+
 ## [5.0.x] — Silent breaking changes from 4.x not documented in the 5.0.0 notes
 
 The 5.0.0 release went through a strip-and-rebuild of `buffer-codec-processor`.
