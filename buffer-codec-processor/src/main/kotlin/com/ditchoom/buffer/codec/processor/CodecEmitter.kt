@@ -135,7 +135,7 @@ import com.squareup.kotlinpoet.U_SHORT
  */
 internal class CodecEmitter(
     private val codeGenerator: CodeGenerator,
-    @Suppress("unused") private val logger: KSPLogger,
+    private val logger: KSPLogger,
 ) {
     fun tryEmit(symbol: KSClassDeclaration) {
         val sourceFile = symbol.containingFile ?: return
@@ -180,11 +180,14 @@ internal class CodecEmitter(
                         file.writeTo(writer)
                     }
             }
-            // Byte-identical commit: Rejected diagnostics are NOT
-            // emitted yet (that is the follow-on diagnostics pass). Both
-            // Rejected and NotApplicable map to the prior silent-skip,
-            // so behavior is preserved.
-            else -> return
+            // A recognized-but-unsupported shape: emit the diagnostic(s)
+            // so the build fails loudly instead of silently producing no
+            // codec (the Outcome-3 bug class). These cover the §2.5/§2.6
+            // silent gaps the validator does not already catch.
+            is AnalysisResult.Rejected -> r.diagnostics.forEach { logger.error(it.message, it.node) }
+            // Not a codec target (handled elsewhere or already rejected by
+            // the validator) — stay silent to avoid double-reporting.
+            AnalysisResult.NotApplicable -> return
         }
     }
 
@@ -936,6 +939,18 @@ internal class CodecEmitter(
                 ?: return FieldAnalysis.Err(Diagnostic("field type has no qualified name", param))
         val kind = SUPPORTED_SCALARS[qualified]
         if (kind == null) {
+            // A bare String has no inline wire length. This is the most
+            // common mistake, so give it a targeted message rather than the
+            // generic value-class fallthrough below.
+            if (qualified == "kotlin.String") {
+                return FieldAnalysis.Err(
+                    Diagnostic(
+                        "String field requires @LengthPrefixed, @LengthFrom, or @RemainingBytes " +
+                            "to define its wire length",
+                        param,
+                    ),
+                )
+            }
             // Value-class field. Only the natural-width
             // unannotated path is in scope; @WireBytes / @WireOrder on the
             // outer parameter widen this and are deferred to a later slice.
