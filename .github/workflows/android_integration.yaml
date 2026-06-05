@@ -66,7 +66,14 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-${{ matrix.api-level }}-${{ matrix.target }}-${{ matrix.arch }}
+          # The cached AVD userdata retains test APKs installed by the run that
+          # populated it, signed with that run's keystore. If the current
+          # .ci/debug.keystore differs (e.g. the cache predates the keystore pin),
+          # installing the freshly-signed APK over the stale one fails with
+          # INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES before any test runs.
+          # Hashing the keystore into the key ties the cached install set to the
+          # signing key, so any keystore change invalidates the stale AVD cache.
+          key: avd-${{ matrix.api-level }}-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('.ci/debug.keystore') }}
 
       - name: create AVD and generate snapshot for caching
         if: steps.avd-cache.outputs.cache-hit != 'true'
