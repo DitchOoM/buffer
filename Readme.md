@@ -107,6 +107,8 @@ Annotations cover common binary protocol patterns:
 - `@Payload` — generic payload type parameter
 - `@PacketType(value, wire)` on sealed interface variants — auto-dispatched decode; `wire` for spec-compliant encode values
 - `@DispatchOn(Discriminator::class)` + `@DispatchValue` — custom multi-byte or bit-packed discriminator dispatch
+- `@FramedBy(codec, after)` — framework-owned length framing computed from and bounding a sealed message's body
+- `@ForwardCompatible(unknown)` + `@UnknownVariant` — skip and preserve unrecognized sealed variants byte-identically (forward-compatible relay/persistence)
 - Value classes wrapping primitives — zero-overhead typed wrappers (e.g., `value class PacketId(val raw: UShort)`)
 
 Generated codecs also provide `peekFrameSize(stream)` for zero-boilerplate stream framing and `CodecContext` for typed runtime configuration through codec chains.
