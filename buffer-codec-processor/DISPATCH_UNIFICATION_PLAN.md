@@ -170,6 +170,59 @@ runtime-measured branch (this is the documented Phase-2 attach point for the
 `WireWidth.Variable` stub). encode/wireSize/file-shell need no changes because
 Varint is `ReReadByVariant` (the variant counts it, dispatcher pure-delegates).
 
+## Post-unification: safe-to-add follow-ups (roadmap)
+
+Now that both dispatch paths share one `DispatchShape` + one emit builder set,
+several `SUPPORT_MATRIX.md` backlog rows became *safe* to add — meaning
+byte-identical for existing goldens (snapshot-gated), leveraging infra that
+already exists on a parallel path, with a round-trip test as the correctness
+gate. `SUPPORT_MATRIX.md` stays the canonical gap inventory; this is the
+prioritization lens (row numbers reference it).
+
+The template the unification establishes: a feature already working on one path
+becomes a small, byte-identical change on the other because
+`branchTypeName(Monomorphic) == className` and `codecReceiver(StaticObject)`
+equals the old static ref — so generic/feature code emits *only* when the new
+shape is present. (Proven by the generics-under-simple-`@PacketType` win,
+matrix #3/#4.)
+
+**Tier 1 — safe capability wins (infra exists, one path missing a piece):**
+
+- **#1/#2 — multi-byte `@DispatchOn` discriminators** (signed `Short`/`Int`/`Long`,
+  unsigned `ULong`). Decode/encode already work via the value-class-field path;
+  only the `peekFrameSize` byte-reconstruction is missing (these are *Rejected*
+  today by the stage-9 non-peekable diagnostic — a clean seam to flip). **This is
+  the on-ramp to varint/H3** (variable width is the same machinery one step on).
+- **#7/#26 — `@LengthFrom` value-class-wrapped scalar sibling / non-peekable
+  inner.** The validator already accepts these; the emitter rejects (drift gap).
+  Fix = widen one accepted-kinds set.
+- **#28 — bare nested `@RemainingBytes val: SomeMessage`** (not `List`). Mirrors
+  the existing `List<@ProtocolMessage>` path.
+- **#22/#23 — data-object variant under simple `@PacketType` + peek/wireSize
+  asymmetry.** Almost certainly already closed structurally by the one-builder
+  set; near-zero-risk "add a fixture + round-trip test to prove and lock it".
+
+**Tier 2 — loudness, not capability (cheap DX):** convert remaining silent gaps
+to diagnostics (#8–#12, #16, #36–#38). Trivially safe (fire only on
+already-broken shapes). NB: the `AnalysisResult` diagnostics pass + stage 9
+already closed many — audit `EmitterDiagnosticsValidatorTest` first to find the
+genuine stragglers.
+
+**Tier 3 — NOT safe yet (design work / fragile paths):**
+
+- **#6 — generic + `@FramedBy` on the simple path.** Framed-encode infra is
+  still `@DispatchOn`-only; re-introduces path-specific feature code.
+- **#14/#15 — signed scalar with explicit `@WireOrder` (#154).** Touches the
+  fragile manual byte-assembly path (sign handling); flagged risky in-code.
+- **#24 — `@ForwardCompatible` + generic framed round-trip.** Unchecked
+  star-projected casts + `payloadCodec` injection into the Unknown re-frame;
+  compiles but runtime-fragile.
+- **Supporting (vs rejecting) non-terminal length fields** — needs wireSize
+  composition that doesn't exist; a design project, not an add.
+
+Recommended next: **#1/#2** (highest leverage — also the varint on-ramp), then
+**#22/#23** (cheapest — likely just prove-and-lock).
+
 ## Top byte-identity risks
 
 1. **Discriminator-counted-once** (`1 +` only under ConsumedByDispatcher) — the

@@ -367,10 +367,10 @@ Every Outcome-3 row across all axes, deduplicated and tagged with the recommende
 |---|-------|------|----------------|-------|
 | 1 | Signed multi-byte discriminators (Short/Long) in `@DispatchOn` | dispatch | `add-support` (#176) | Extend `peekableDispatcherInnerKinds`; add parallel signed peek paths. |
 | 2 | Unsigned multi-byte (ULong) discriminators in `@DispatchOn` | dispatch | `add-support` (#176) | Same set, ULong peek path. |
-| 3 | Generic `<P: Payload>` under **simple** `@PacketType` dispatcher | dispatch / genericity | `unify-dispatch` (#176) | Simple path has no `payloadTypeParameter`; merge with `@DispatchOn` path. |
-| 4 | Generic sealed parent `<out P>` emitted as `object`, not `class<P>` | genericity | `unify-dispatch` (#176) | `buildSealedDispatcherFileSpec` always `object`. |
-| 5 | Generic variant under non-generic simple sealed parent | genericity | `unify-dispatch` (#176) | Simple path lacks the `:7061` parent-generic check the `@DispatchOn` path has. |
-| 6 | Generic sealed parent w/ `@PacketType` + `@FramedBy`, no `@DispatchOn` | genericity | `unify-dispatch` (#176) | Framed encode infra exists only on the `@DispatchOn` path. |
+| 3 | Generic `<P: Payload>` under **simple** `@PacketType` dispatcher | dispatch / genericity | ✅ **RESOLVED** | `analyzeSealedDispatcher` now detects the parent payload type param and sets `Genericity.Generic`; the unified emit builders handle `Generic × FixedByte`. Fixture `simplegeneric/SimpleGenericFrame`. |
+| 4 | Generic sealed parent `<out P>` emitted as `object`, not `class<P>` | genericity | ✅ **RESOLVED** | `buildDispatchFileSpec` emits `class FooCodec<P>(payloadCodec)` for any `Genericity.Generic`, including `FixedByte`. |
+| 5 | Generic variant under non-generic simple sealed parent | genericity | ✅ rejected (loud) | The type-unsafe shape is reported by `validateGenericPayloadVariantShape` on the simple path (issue #176). Stays a diagnostic, not silent. |
+| 6 | Generic sealed parent w/ `@PacketType` + `@FramedBy`, no `@DispatchOn` | genericity | `add-support` | Generic + **non-framed** simple dispatch now works (#3/#4); generic + `@FramedBy` on the simple path is still unimplemented (framed encode infra remains `@DispatchOn`-only). |
 | 7 | `@LengthFrom` on value-class-wrapped scalar sibling (non-dotted) | length | `reject-with-diagnostic` or `add-support` (#163) | Validator passes value-class sibling; emitter rejects. |
 | 8 | `@LengthPrefixed val: @ProtocolMessage` non-terminal | length | `reject-with-diagnostic` | Add terminal-position validator error. |
 | 9 | `@LengthFrom on @ProtocolMessage` non-terminal | length | `reject-with-diagnostic` | Same terminal check. |
@@ -394,7 +394,7 @@ Every Outcome-3 row across all axes, deduplicated and tagged with the recommende
 | 22 | Data object variant under simple `@PacketType` w/ variable peekFrameSize | dispatch | `unify-dispatch` (unified peek walk) + add test coverage |
 | 23 | Asymmetric wireSize (simple aggregates discriminator, `@DispatchOn` doesn't) | dispatch | `unify-dispatch` (single wireSize builder) |
 | 24 | `@DispatchOn` framed generic variant + `@ForwardCompatible` round-trip | dispatch | `add-support` (thread `payloadCodec` into Unknown re-frame) + test |
-| 25 | `Partial<P>` aggregator: generic variant under non-generic simple parent | genericity | `unify-dispatch` (#176) |
+| 25 | `Partial<P>` aggregator: generic variant under non-generic simple parent | genericity | ✅ rejected (loud) — the non-generic-parent shape is the #176 diagnostic. For a *correctly* generic parent under simple `@PacketType`, the dispatcher omits the `decodeAggregating` companion by design (it's a `@DispatchOn` peek+rewind construct); the variant codec's own `Partial<P>` is still generated. |
 | 26 | `@LengthFrom` value-class property w/ non-peekable inner (ULong/Long) | length | `reject-with-diagnostic` or `add-support` (#163) |
 | 27 | `@When @LengthPrefixed` on inner `@ProtocolMessage` (non-String) | length | `reject-with-diagnostic` or `add-support` |
 | 28 | `@RemainingBytes @ProtocolMessage` (bare nested, not List) | length | `add-support` (#151) |
