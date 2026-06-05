@@ -579,6 +579,75 @@ variant inherits the framing rule — there is no per-variant override.
 See [Length Codecs](#length-codecs-boundinglengthcodec) for the
 `BoundingLengthCodec` contract.
 
+### `@ForwardCompatible` — Skip and Preserve Unknown Variants
+
+When an old decoder meets a discriminator a newer peer added, the usual
+sealed-dispatch `else` arm has nowhere to put the bytes — they're lost, and the
+message can't be relayed or persisted intact. `@ForwardCompatible` makes the
+dispatcher **skip and preserve** an unrecognized variant: the opaque framed
+payload is captured verbatim into a designated sink variant, so unknown ops
+survive a round-trip byte-for-byte.
+
+It builds on framed sealed dispatch — `@DispatchOn` (single-byte discriminator)
+plus `@FramedBy` (the length prefix bounds the payload the decoder skips). Mark
+the sealed parent with `@ForwardCompatible(unknown = …)`, and mark one sink
+variant with `@UnknownVariant`. The sink is the `else` arm of dispatch — it
+carries **no** `@PacketType` — and its primary constructor must be
+`(opcode: Int, raw: PlatformBuffer)` (a `ReadBuffer`-typed `raw` is also
+accepted):
+
+```kotlin
+import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.codec.annotations.ForwardCompatible
+import com.ditchoom.buffer.codec.annotations.UnknownVariant
+
+@ProtocolMessage
+@DispatchOn(OpCode::class)
+@FramedBy(OpLengthCodec::class, after = "header")
+@ForwardCompatible(unknown = Op.Unknown::class)
+sealed interface Op {
+    @ProtocolMessage @PacketType(value = 0x12)
+    data class Scroll(val header: OpCode, val delta: Short) : Op
+
+    @ProtocolMessage @PacketType(value = 0x34)
+    data class SetTitle(val header: OpCode, @LengthPrefixed val title: String) : Op
+
+    // The skip-and-preserve sink — no @PacketType, never matched by value.
+    @UnknownVariant
+    data class Unknown(val opcode: Int, val raw: PlatformBuffer) : Op
+}
+```
+
+Known variants decode exactly as before. For an unrecognized opcode the codec
+yields `Unknown(opcode, raw)`, where `opcode` is the discriminator byte (the
+only place it survives — `raw` is the payload only, excluding the opcode and
+length prefix). Re-encoding an `Unknown` reproduces the original bytes
+identically, so a relay or on-disk frame preserves ops the decoder never
+understood:
+
+```kotlin
+// Wire: opcode 0x99 (unknown) | varint len 3 | payload AA BB CC
+val op = OpCodec.decode(buffer, DecodeContext.Empty)
+val unknown = op as Op.Unknown
+unknown.opcode            // 0x99
+unknown.raw               // a PlatformBuffer holding AA BB CC
+OpCodec.encode(unknown, EncodeContext.Empty, factory)  // → 99 03 AA BB CC, byte-identical
+```
+
+`peekFrameSize` works on unknown ops too — the length prefix gives the frame
+extent without a registered variant — so unknown frames participate in
+streaming exactly like known ones.
+
+Preserved bytes are allocated through `ForwardCompatibleFactoryKey` (default
+`BufferFactory.managed()` — GC lifetime, nothing to free). A caller that wants
+native or pooled memory injects its own factory through that context key and
+owns freeing:
+
+```kotlin
+val ctx = DecodeContext.Empty.with(ForwardCompatibleFactoryKey, myPool)
+val op = OpCodec.decode(buffer, ctx)   // Unknown.raw is pool-backed
+```
+
 ### Value Classes — Zero-Overhead Typed Wrappers
 
 Value classes wrapping a primitive type are supported as fields. The generated codec reads/writes the inner primitive directly with no boxing overhead:

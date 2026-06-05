@@ -5,6 +5,8 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.5.0] — 2026-06-05
+
 ### Added
 
 - **Codec processor: multi-byte `@DispatchOn` discriminators across every
