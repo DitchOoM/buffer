@@ -184,8 +184,20 @@ internal sealed interface Discriminator {
         override val wireWidth: WireWidth get() = innerKind.wireWidth
     }
 
-    /** Reserved — HTTP/3 QUIC varint discriminator (variable wire width). */
+    /**
+     * `@DispatchOn(value class)` whose inner scalar carries
+     * `@UseCodec(VariableLengthCodec)` — an HTTP/3 QUIC-varint-style
+     * self-delimiting discriminator. Wire width is variable, recovered at
+     * runtime from the value class's own generated codec ([codecClassName],
+     * which delegates to the consumer's `VariableLengthCodec`). Like
+     * [ValueClass] this is peek/rewind + re-read-by-variant with decimal
+     * labels; it differs only in that the dispatcher can't pre-compute a
+     * fixed discriminator width, so peek measures it via the codec instead
+     * of reconstructing fixed inner-scalar bytes.
+     */
     data class Varint(
+        val className: ClassName,
+        val codecClassName: ClassName,
         val dispatchValueProperty: String,
         val dispatchValueKind: ScalarKind,
     ) : Discriminator {

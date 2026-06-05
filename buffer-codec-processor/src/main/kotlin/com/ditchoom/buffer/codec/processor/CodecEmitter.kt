@@ -1077,6 +1077,30 @@ internal class CodecEmitter(
             return FieldAnalysis.Err(Diagnostic("value class must have exactly one constructor parameter", param))
         }
         val innerParam = ctor.parameters[0]
+        // Varint discriminator field: the value class's inner scalar carries
+        // `@UseCodec(VariableLengthCodec)`, so its wire form is variable-width
+        // and not an inline fixed scalar. Re-read it through the value class's
+        // own generated codec (which delegates to the consumer's variable-length
+        // codec) — the same UseCodecScalar machinery a bare varint field uses,
+        // so decode/encode/peek all compose. Only varint inners take this path;
+        // every existing value class stays on the inline-scalar path below,
+        // keeping its goldens byte-identical.
+        if (innerParam.hasVariableLengthUseCodec()) {
+            return FieldAnalysis.Ok(
+                FieldSpec.UseCodecScalar(
+                    name = name,
+                    ownerSimpleName = ownerSimpleName,
+                    fieldType = classNameOf(decl),
+                    codecType =
+                        ClassName(
+                            decl.packageName.asString(),
+                            decl.flattenedCodecName(),
+                        ),
+                    isBounding = false,
+                    isVariableLength = true,
+                ),
+            )
+        }
         val innerName =
             innerParam.name?.asString()
                 ?: return FieldAnalysis.Err(Diagnostic("value class inner parameter has no name", param))
@@ -1885,6 +1909,25 @@ internal class CodecEmitter(
         getAllSuperTypes().any { st ->
             st.declaration.qualifiedName?.asString() == VARIABLE_LENGTH_CODEC_QNAME
         }
+
+    /**
+     * Does this parameter carry `@UseCodec(C::class)` where `C` implements
+     * `VariableLengthCodec`? Used in two places to recognize a self-delimiting
+     * variable-width scalar:
+     *  - on a `@DispatchOn` discriminator value class's inner constructor
+     *    parameter → the dispatcher is a [Discriminator.Varint];
+     *  - on the inner of a variant's value-class discriminator field → that
+     *    field re-reads the discriminator through the value class's own codec
+     *    rather than an inline fixed-width scalar read.
+     */
+    private fun KSValueParameter.hasVariableLengthUseCodec(): Boolean {
+        val useCodecAnn =
+            annotations.firstOrNull { it.shortName.asString() == "UseCodec" } ?: return false
+        val codecDecl =
+            (useCodecAnn.arguments.firstOrNull { it.name?.asString() == "codec" }?.value as? KSType)
+                ?.declaration as? KSClassDeclaration ?: return false
+        return codecDecl.implementsVariableLengthCodec()
+    }
 
     /**
      * Per-field-type peek-budget table.
@@ -7514,37 +7557,16 @@ internal class CodecEmitter(
         val discriminatorCtor =
             discriminatorDecl.primaryConstructor ?: return DispatchAnalysisResult.NotApplicable
         if (discriminatorCtor.parameters.size != 1) return DispatchAnalysisResult.NotApplicable
-        val innerType = discriminatorCtor.parameters[0].type.resolve()
+        val innerParam = discriminatorCtor.parameters[0]
+        val innerType = innerParam.type.resolve()
         if (innerType.isError || innerType.isMarkedNullable) return DispatchAnalysisResult.NotApplicable
-        val innerKind =
-            SUPPORTED_SCALARS[innerType.declaration.qualifiedName?.asString()]
-                ?: return DispatchAnalysisResult.NotApplicable
-        // True silent gap: validateDispatchOnSealed accepts any numeric
-        // inner (NUMERIC_SCALAR_QNAMES), but peek-side reconstruction only
-        // supports single-byte kinds plus 2/4-byte unsigned kinds. ULong,
-        // Int, and signed multi-byte (Short/Long) discriminators aren't
-        // required by any in-scope vector and would need parallel peek
-        // paths — so they pass validation and are then silently dropped.
-        if (innerKind !in peekableDispatcherInnerKinds) {
-            val innerName =
-                innerType.declaration.simpleName.asString()
-            val peekable = peekableDispatcherInnerKinds.joinToString(", ") { it.name }
-            return DispatchAnalysisResult.Rejected(
-                listOf(
-                    Diagnostic(
-                        "@DispatchOn discriminator on ${symbol.simpleName.asString()} has inner scalar " +
-                            "`$innerName`, which is not a supported dispatch discriminator width. The peek " +
-                            "path supports only single-byte and 2/4-byte unsigned kinds ($peekable); signed " +
-                            "multi-byte (Short/Long), Int, and ULong discriminators are not yet supported.",
-                        symbol,
-                    ),
-                ),
-            )
-        }
-        // Read the discriminator value class's `@ProtocolMessage(
-        // wireOrder = ...)` so multi-byte byte assembly during peek matches
-        // the encode/decode wire layout. Single-byte kinds ignore this.
-        val discriminatorWireOrder = readMessageWireOrder(discriminatorDecl)
+        // Varint discriminator: the value class's inner scalar carries
+        // `@UseCodec(VariableLengthCodec)`. Width is variable and recovered
+        // at runtime from the value class's own generated codec, so the
+        // fixed-width peekable-inner-kind machinery below does not apply.
+        // The concrete `Discriminator` (Varint vs ValueClass) is built after
+        // the shared dispatch-value resolution.
+        val varintInner = innerParam.hasVariableLengthUseCodec()
 
         val dispatchProp =
             discriminatorDecl
@@ -7697,25 +7719,64 @@ internal class CodecEmitter(
         // a single header+prefix walker rather than per-variant
         // dispatch, and `wireSize` is omitted.
         val framedBy = symbol.annotations.firstOrNull(::isFramedByAnn)?.let(::parseFramedBy)
+        val discriminatorCodecClassName =
+            ClassName(
+                discriminatorDecl.packageName.asString(),
+                discriminatorDecl.flattenedCodecName(),
+            )
+        val discriminator: Discriminator =
+            if (varintInner) {
+                Discriminator.Varint(
+                    className = classNameOf(discriminatorDecl),
+                    codecClassName = discriminatorCodecClassName,
+                    dispatchValueProperty = dispatchValuePropertyName,
+                    dispatchValueKind = dispatchValueKind,
+                )
+            } else {
+                val innerKind =
+                    SUPPORTED_SCALARS[innerType.declaration.qualifiedName?.asString()]
+                        ?: return DispatchAnalysisResult.NotApplicable
+                // True silent gap: validateDispatchOnSealed accepts any numeric
+                // inner (NUMERIC_SCALAR_QNAMES), but peek-side reconstruction only
+                // supports single-byte kinds plus 2/4-byte unsigned kinds. ULong,
+                // Int, and signed multi-byte (Short/Long) discriminators aren't
+                // required by any in-scope vector and would need parallel peek
+                // paths — so they pass validation and are then silently dropped.
+                if (innerKind !in peekableDispatcherInnerKinds) {
+                    val innerName = innerType.declaration.simpleName.asString()
+                    val peekable = peekableDispatcherInnerKinds.joinToString(", ") { it.name }
+                    return DispatchAnalysisResult.Rejected(
+                        listOf(
+                            Diagnostic(
+                                "@DispatchOn discriminator on ${symbol.simpleName.asString()} has inner scalar " +
+                                    "`$innerName`, which is not a supported dispatch discriminator width. The peek " +
+                                    "path supports only single-byte and 2/4-byte unsigned kinds ($peekable); signed " +
+                                    "multi-byte (Short/Long), Int, and ULong discriminators are not yet supported.",
+                                symbol,
+                            ),
+                        ),
+                    )
+                }
+                Discriminator.ValueClass(
+                    className = classNameOf(discriminatorDecl),
+                    codecClassName = discriminatorCodecClassName,
+                    innerKind = innerKind,
+                    // Read the discriminator value class's `@ProtocolMessage(
+                    // wireOrder = ...)` so multi-byte byte assembly during peek
+                    // matches the encode/decode wire layout. Single-byte kinds
+                    // ignore this.
+                    innerWireOrder = readMessageWireOrder(discriminatorDecl),
+                    dispatchValueProperty = dispatchValuePropertyName,
+                    dispatchValueKind = dispatchValueKind,
+                )
+            }
         return DispatchAnalysisResult.Supported(
             DispatchShape(
                 packageName = pkg,
                 parentClassName = ClassName(pkg, parentSimpleName),
                 parentSimpleName = parentSimpleName,
                 codecSimpleName = symbol.flattenedCodecName(),
-                discriminator =
-                    Discriminator.ValueClass(
-                        className = classNameOf(discriminatorDecl),
-                        codecClassName =
-                            ClassName(
-                                discriminatorDecl.packageName.asString(),
-                                discriminatorDecl.flattenedCodecName(),
-                            ),
-                        innerKind = innerKind,
-                        innerWireOrder = discriminatorWireOrder,
-                        dispatchValueProperty = dispatchValuePropertyName,
-                        dispatchValueKind = dispatchValueKind,
-                    ),
+                discriminator = discriminator,
                 variants = variants,
                 genericity =
                     payloadTypeParameter
@@ -7965,8 +8026,27 @@ internal class CodecEmitter(
                 actualFormat = "\${__dispatchValue}"
                 body.beginControlFlow("return when (__dispatchValue)")
             }
-            is Discriminator.Varint ->
-                error("Discriminator.Varint decode is not reachable yet — no shape produces it")
+            is Discriminator.Varint -> {
+                // Varint @DispatchOn: identical decode shape to ValueClass —
+                // peek the variable-width discriminator via the value class's
+                // codec, rewind, and let the variant re-read it. The codec
+                // (not a fixed inner-scalar read) does the self-delimiting read.
+                body.addStatement("val discriminatorPosition = buffer.position()")
+                body.addStatement(
+                    "val __discriminator = %T.decode(buffer, context)",
+                    disc.codecClassName,
+                )
+                body.addStatement("buffer.position(discriminatorPosition)")
+                body.addStatement(
+                    "val __dispatchValue = %L",
+                    dispatchValueIntCoercion(
+                        disc.dispatchValueKind,
+                        "__discriminator.${disc.dispatchValueProperty}",
+                    ),
+                )
+                actualFormat = "\${__dispatchValue}"
+                body.beginControlFlow("return when (__dispatchValue)")
+            }
         }
 
         for (variant in shape.variants) {
@@ -8282,13 +8362,12 @@ internal class CodecEmitter(
      */
     private fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
         val body = CodeBlock.builder()
-        val discriminatorBytes = shape.discriminator.wireWidth.requireFixed("dispatch peek")
 
         when (val disc = shape.discriminator) {
             Discriminator.FixedByte -> {
                 body.addStatement(
                     "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
-                    discriminatorBytes,
+                    disc.wireWidth.requireFixed("dispatch peek"),
                     PEEK_RESULT_CN,
                 )
                 body.addStatement(
@@ -8327,7 +8406,7 @@ internal class CodecEmitter(
             is Discriminator.ValueClass -> {
                 body.addStatement(
                     "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
-                    discriminatorBytes,
+                    disc.wireWidth.requireFixed("dispatch peek"),
                     PEEK_RESULT_CN,
                 )
                 // Peek the discriminator's inner-scalar bytes at baseOffset and
@@ -8372,8 +8451,65 @@ internal class CodecEmitter(
                 body.endControlFlow()
                 body.endControlFlow()
             }
-            is Discriminator.Varint ->
-                error("Discriminator.Varint peek is not reachable yet — no shape produces it")
+            is Discriminator.Varint -> {
+                // Variable-width discriminator: its byte count isn't known
+                // statically, so measure it via the value class codec's own
+                // peekFrameSize (which delegates to the consumer's
+                // VariableLengthCodec). If the prefix is too short to frame the
+                // discriminator, propagate NeedsMoreData / NoFraming unchanged.
+                body.addStatement(
+                    "val __discFrame = %T.peekFrameSize(stream, baseOffset)",
+                    disc.codecClassName,
+                )
+                body.beginControlFlow("if (__discFrame !is %T.Complete)", PEEK_RESULT_CN)
+                body.addStatement("return __discFrame")
+                body.endControlFlow()
+                // Decode the discriminator from a non-consuming view of exactly
+                // its measured width to recover the dispatch value, then PURE-
+                // DELEGATE to the variant at baseOffset (the variant re-reads the
+                // self-delimiting discriminator as its first field, so no `1 +`).
+                body.addStatement(
+                    "val __discView = stream.peekBuffer(baseOffset, __discFrame.bytes) ?: return %T.NeedsMoreData",
+                    PEEK_RESULT_CN,
+                )
+                body.beginControlFlow("val __dispatchValue = try")
+                body.addStatement(
+                    "val __discriminator = %T.decode(__discView, %T.Empty)",
+                    disc.codecClassName,
+                    DECODE_CONTEXT_CN,
+                )
+                body.addStatement(
+                    "%L",
+                    dispatchValueIntCoercion(
+                        disc.dispatchValueKind,
+                        "__discriminator.${disc.dispatchValueProperty}",
+                    ),
+                )
+                body.nextControlFlow("finally")
+                body.addStatement(
+                    "(__discView as? %T)?.freeNativeMemory()",
+                    PLATFORM_BUFFER_CN,
+                )
+                body.endControlFlow()
+                body.beginControlFlow("return when (__dispatchValue)")
+                for (variant in shape.variants) {
+                    body.addStatement(
+                        "%L -> %L.peekFrameSize(stream, baseOffset)",
+                        variant.dispatchLabel(shape.discriminator.labelFormat),
+                        variant.codecReceiver(),
+                    )
+                }
+                body.beginControlFlow("else ->")
+                body.addStatement(
+                    "throw %T(fieldPath = %S, bufferPosition = baseOffset, expected = %S, actual = %P)",
+                    DECODE_EXCEPTION_CN,
+                    "${shape.parentSimpleName}.discriminator",
+                    expectedDispatchSet(shape),
+                    "\${__dispatchValue}",
+                )
+                body.endControlFlow()
+                body.endControlFlow()
+            }
         }
 
         return FunSpec
