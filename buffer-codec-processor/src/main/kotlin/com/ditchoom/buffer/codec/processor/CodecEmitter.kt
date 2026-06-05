@@ -2499,18 +2499,32 @@ internal class CodecEmitter(
 
     /**
      * Peek-side reconstruction kinds for `@DispatchOn` value-class
-     * discriminators. Accepts 1/2/4-byte unsigned kinds for real-spec
-     * multi-byte discriminators (e.g., HTTP/2's first 4 bytes packed as
-     * `length<<8 | type`). `appendPeekFixedScalar` with the discriminator
-     * value class's `wireOrder` handles the byte assembly.
+     * discriminators. Accepts every integer scalar kind — 1/2/4/8-byte,
+     * signed and unsigned — so real-spec multi-byte discriminators
+     * (e.g., HTTP/2's first 4 bytes packed as `length<<8 | type`, or a
+     * QUIC-style 8-byte frame type) reconstruct correctly. The byte
+     * assembly is order-aware: `appendPeekFixedScalar` reads the inner
+     * scalar's bytes honoring the discriminator value class's `wireOrder`
+     * and narrows to the inner kind, matching the discriminator codec's
+     * decode/encode wire layout.
      *
-     * `ULong` and signed multi-byte kinds are still rejected — they
-     * would need parallel peek paths (ULong promotion, signed
-     * sign-extension), and no in-scope discriminator vector
-     * requires them.
+     * Int-width kinds (Short / UShort / Int / UInt) assemble in the `Int`
+     * domain; Long-width kinds (Long / ULong) assemble in the `Long`
+     * domain. Float / Double are not integer discriminators and remain
+     * rejected (the validator already restricts inners to
+     * `NUMERIC_SCALAR_QNAMES`).
      */
     private val peekableDispatcherInnerKinds =
-        setOf(ScalarKind.UByte, ScalarKind.Byte, ScalarKind.UShort, ScalarKind.UInt)
+        setOf(
+            ScalarKind.UByte,
+            ScalarKind.Byte,
+            ScalarKind.UShort,
+            ScalarKind.Short,
+            ScalarKind.UInt,
+            ScalarKind.Int,
+            ScalarKind.ULong,
+            ScalarKind.Long,
+        )
 
     /**
      * Typed shape of the `@When("…")` expression
@@ -6358,7 +6372,13 @@ internal class CodecEmitter(
                     targetVar,
                     offsetExpr,
                 )
-            ScalarKind.UShort, ScalarKind.UInt -> {
+            ScalarKind.UShort, ScalarKind.Short, ScalarKind.UInt, ScalarKind.Int -> {
+                // Int-domain assembly: extract each byte as `Int and 0xFF`,
+                // shift into place (big- or little-endian per wireOrder), then
+                // narrow to the inner kind. Signed kinds (Short / Int) narrow
+                // by `.toShort()` / no-op so the high byte's sign bit is
+                // preserved exactly as the discriminator codec's `readShort()`
+                // / `readInt()` would produce it.
                 val width = kind.wireWidth.requireFixed("appendPeekFixedScalar")
                 val bigEndian =
                     when (wireOrder) {
@@ -6383,16 +6403,50 @@ internal class CodecEmitter(
                     when (kind) {
                         ScalarKind.UShort -> "(%L).toUInt().toUShort()"
                         ScalarKind.UInt -> "(%L).toUInt()"
+                        ScalarKind.Short -> "(%L).toShort()"
+                        ScalarKind.Int -> "(%L)"
                         else -> error("unreachable")
                     }
                 body.addStatement("val %L = $narrow", targetVar, parts.joinToString(" or "))
             }
-            ScalarKind.ULong, ScalarKind.Short, ScalarKind.Int, ScalarKind.Long,
-            ScalarKind.Float, ScalarKind.Double,
-            ->
+            ScalarKind.ULong, ScalarKind.Long -> {
+                // Long-domain assembly: an 8-byte inner overflows `Int`, so each
+                // byte is lifted to `Long and 0xFFL` before shifting (up to 56
+                // bits). `ULong` narrows via `.toULong()`; `Long` keeps the
+                // assembled value — matching `readULong()` / `readLong()`.
+                val width = kind.wireWidth.requireFixed("appendPeekFixedScalar")
+                val bigEndian =
+                    when (wireOrder) {
+                        Endianness.Big, Endianness.Default -> true
+                        Endianness.Little -> false
+                    }
+                for (i in 0 until width) {
+                    val byteOffset = if (i == 0) offsetExpr else "$offsetExpr + $i"
+                    body.addStatement(
+                        "val %L = stream.peekByte(baseOffset + %L).toLong() and 0xFFL",
+                        "${targetVar}B$i",
+                        byteOffset,
+                    )
+                }
+                val parts =
+                    (0 until width).map { i ->
+                        val byteName = "${targetVar}B$i"
+                        val shiftBits = if (bigEndian) (width - 1 - i) * 8 else i * 8
+                        if (shiftBits == 0) byteName else "($byteName shl $shiftBits)"
+                    }
+                val narrow =
+                    when (kind) {
+                        ScalarKind.Long -> "(%L)"
+                        ScalarKind.ULong -> "(%L).toULong()"
+                        else -> error("unreachable")
+                    }
+                body.addStatement("val %L = $narrow", targetVar, parts.joinToString(" or "))
+            }
+            ScalarKind.Float, ScalarKind.Double ->
                 error(
                     "peek-side reconstruction for value-class inner kind $kind not implemented; " +
-                        "the analyzer should have rejected this shape until the wider peek path lands.",
+                        "Float / Double are not integer dispatch discriminators and the analyzer " +
+                        "should have rejected this shape.",
                 )
         }
     }
@@ -7737,7 +7791,10 @@ internal class CodecEmitter(
         // at runtime from the value class's own generated codec, so the
         // fixed-width peekable-inner-kind machinery below does not apply.
         // The concrete `Discriminator` (Varint vs ValueClass) is built after
-        // the shared dispatch-value resolution.
+        // the shared dispatch-value resolution. For the non-varint case the
+        // inner-kind resolution + peekable check (now widened to every integer
+        // scalar kind by the multi-byte-discriminator work) live in the
+        // `ValueClass` branch below.
         val varintInner = innerParam.hasVariableLengthUseCodec()
 
         val dispatchProp =
@@ -7908,12 +7965,12 @@ internal class CodecEmitter(
                 val innerKind =
                     SUPPORTED_SCALARS[innerType.declaration.qualifiedName?.asString()]
                         ?: return DispatchAnalysisResult.NotApplicable
-                // True silent gap: validateDispatchOnSealed accepts any numeric
-                // inner (NUMERIC_SCALAR_QNAMES), but peek-side reconstruction only
-                // supports single-byte kinds plus 2/4-byte unsigned kinds. ULong,
-                // Int, and signed multi-byte (Short/Long) discriminators aren't
-                // required by any in-scope vector and would need parallel peek
-                // paths — so they pass validation and are then silently dropped.
+                // Defensive guard: every integer scalar kind (signed/unsigned,
+                // 1/2/4/8-byte) is peekable, so for any inner `validateDispatchOnSealed`
+                // accepts (`NUMERIC_SCALAR_QNAMES`) this never fires. It remains as the
+                // emitter's own check against a non-integer inner (Float / Double) — the
+                // validator reports the user-facing error first, so this is belt-and-
+                // suspenders rather than a silent-gap closer.
                 if (innerKind !in peekableDispatcherInnerKinds) {
                     val innerName = innerType.declaration.simpleName.asString()
                     val peekable = peekableDispatcherInnerKinds.joinToString(", ") { it.name }
@@ -7921,9 +7978,9 @@ internal class CodecEmitter(
                         listOf(
                             Diagnostic(
                                 "@DispatchOn discriminator on ${symbol.simpleName.asString()} has inner scalar " +
-                                    "`$innerName`, which is not a supported dispatch discriminator width. The peek " +
-                                    "path supports only single-byte and 2/4-byte unsigned kinds ($peekable); signed " +
-                                    "multi-byte (Short/Long), Int, and ULong discriminators are not yet supported.",
+                                    "`$innerName`, which is not a supported dispatch discriminator type. The peek " +
+                                    "path supports the integer scalar kinds ($peekable); non-integer inners " +
+                                    "(Float / Double) cannot be dispatch discriminators.",
                                 symbol,
                             ),
                         ),

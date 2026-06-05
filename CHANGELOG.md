@@ -5,17 +5,26 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Codec processor: multi-byte `@DispatchOn` discriminators across every
+  integer inner kind** — signed `Short` / `Int` / `Long` and unsigned `ULong`,
+  in addition to the existing single-byte (`UByte` / `Byte`) and 2/4-byte
+  unsigned (`UShort` / `UInt`) kinds. Decode and encode already handled these;
+  the missing piece was the dispatcher's `peekFrameSize` byte-reconstruction,
+  which now assembles the discriminator order-aware (honoring the discriminator
+  value class's `@ProtocolMessage(wireOrder = …)`) in the `Int` domain for
+  2/4-byte inners and the `Long` domain for 8-byte inners, narrowing
+  sign-preservingly to the inner kind. **Wire format and all existing generated
+  codecs are byte-for-byte unchanged.**
+
 ### Changed
 
-- **Codec processor: two previously-silent malformed sealed-dispatch shapes
-  now fail the build with a diagnostic instead of silently generating no
-  codec** (the "Outcome-3 silent gap" class):
-  - A `@PacketType` variant under a *simple* sealed-dispatch parent that is
-    neither a `data class` nor an `object` / `data object`.
-  - A `@DispatchOn` discriminator whose value-class inner scalar is not a
-    supported dispatch width. Only single-byte (`UByte` / `Byte`) and 2/4-byte
-    unsigned (`UShort` / `UInt`) kinds are supported; `Short`, `Int`, `Long`,
-    and `ULong` discriminators now error rather than emitting nothing.
+- **Codec processor: a previously-silent malformed sealed-dispatch shape now
+  fails the build with a diagnostic instead of silently generating no codec**
+  (the "Outcome-3 silent gap" class): a `@PacketType` variant under a *simple*
+  sealed-dispatch parent that is neither a `data class` nor an `object` /
+  `data object`.
 
   Wire format and **all existing generated codecs are byte-for-byte unchanged**
   — only inputs that previously produced no codec are affected.
