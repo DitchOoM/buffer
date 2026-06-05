@@ -471,6 +471,7 @@ internal class CodecEmitter(
                 visibility = codecVisibilityModifier(symbol),
                 payloadTypeParameter = payloadTypeParameter,
                 framedBy = detectFramedBy(symbol),
+                customPeek = detectCustomFramePeek(symbol),
             ),
         )
     }
@@ -1077,6 +1078,30 @@ internal class CodecEmitter(
             return FieldAnalysis.Err(Diagnostic("value class must have exactly one constructor parameter", param))
         }
         val innerParam = ctor.parameters[0]
+        // Varint discriminator field: the value class's inner scalar carries
+        // `@UseCodec(VariableLengthCodec)`, so its wire form is variable-width
+        // and not an inline fixed scalar. Re-read it through the value class's
+        // own generated codec (which delegates to the consumer's variable-length
+        // codec) — the same UseCodecScalar machinery a bare varint field uses,
+        // so decode/encode/peek all compose. Only varint inners take this path;
+        // every existing value class stays on the inline-scalar path below,
+        // keeping its goldens byte-identical.
+        if (innerParam.hasVariableLengthUseCodec()) {
+            return FieldAnalysis.Ok(
+                FieldSpec.UseCodecScalar(
+                    name = name,
+                    ownerSimpleName = ownerSimpleName,
+                    fieldType = classNameOf(decl),
+                    codecType =
+                        ClassName(
+                            decl.packageName.asString(),
+                            decl.flattenedCodecName(),
+                        ),
+                    isBounding = false,
+                    isVariableLength = true,
+                ),
+            )
+        }
         val innerName =
             innerParam.name?.asString()
                 ?: return FieldAnalysis.Err(Diagnostic("value class inner parameter has no name", param))
@@ -1638,6 +1663,7 @@ internal class CodecEmitter(
                 fieldType = fieldTypeName,
                 codecType = codecClassName,
                 isBounding = codecDecl.implementsBoundingLengthCodec(),
+                isVariableLength = codecDecl.implementsVariableLengthCodec(),
             ),
         )
     }
@@ -1870,6 +1896,68 @@ internal class CodecEmitter(
         getAllSuperTypes().any { st ->
             st.declaration.qualifiedName?.asString() == BOUNDING_LENGTH_CODEC_QNAME
         }
+
+    /**
+     * Does this codec class implement
+     * `com.ditchoom.buffer.codec.VariableLengthCodec`? Marks a bare-`@UseCodec`
+     * scalar field as self-delimiting / variable-width: decode/encode already
+     * delegate to the codec, and this flag drives the variable-width
+     * `peekFrameSize` branch (`total = prior + observed-width`, no value term —
+     * unlike the bounding case). Walks the full supertype chain so an indirect
+     * implementer (intermediate interface) is still detected.
+     */
+    private fun KSClassDeclaration.implementsVariableLengthCodec(): Boolean =
+        getAllSuperTypes().any { st ->
+            st.declaration.qualifiedName?.asString() == VARIABLE_LENGTH_CODEC_QNAME
+        }
+
+    /**
+     * Consumer-supplied frame-size override: when a `@ProtocolMessage` type
+     * declares a companion object implementing
+     * `com.ditchoom.buffer.codec.FrameDetector`, the generated codec's
+     * `peekFrameSize` delegates to it instead of running the derived walker (or
+     * collapsing to `NoFraming`). The escape hatch for wire shapes the walker
+     * can't express — RFC 6455 WebSocket's escape-coded payload length with a
+     * masking key folded between the length and the body.
+     *
+     * Returns the type whose companion to call (`<Type>.peekFrameSize(...)` —
+     * companion members are referenced through the enclosing class name, so this
+     * is the message/parent [ClassName] itself, raw of any type arguments), or
+     * `null` when there is no such companion. Walks the full supertype chain of
+     * the companion so an indirect `FrameDetector` (e.g. via `Codec`) still
+     * counts.
+     */
+    private fun detectCustomFramePeek(symbol: KSClassDeclaration): ClassName? {
+        val companion =
+            symbol.declarations
+                .filterIsInstance<KSClassDeclaration>()
+                .firstOrNull { it.isCompanionObject }
+                ?: return null
+        val implementsFrameDetector =
+            companion.getAllSuperTypes().any { st ->
+                st.declaration.qualifiedName?.asString() == FRAME_DETECTOR_QNAME
+            }
+        return if (implementsFrameDetector) classNameOf(symbol) else null
+    }
+
+    /**
+     * Does this parameter carry `@UseCodec(C::class)` where `C` implements
+     * `VariableLengthCodec`? Used in two places to recognize a self-delimiting
+     * variable-width scalar:
+     *  - on a `@DispatchOn` discriminator value class's inner constructor
+     *    parameter → the dispatcher is a [Discriminator.Varint];
+     *  - on the inner of a variant's value-class discriminator field → that
+     *    field re-reads the discriminator through the value class's own codec
+     *    rather than an inline fixed-width scalar read.
+     */
+    private fun KSValueParameter.hasVariableLengthUseCodec(): Boolean {
+        val useCodecAnn =
+            annotations.firstOrNull { it.shortName.asString() == "UseCodec" } ?: return false
+        val codecDecl =
+            (useCodecAnn.arguments.firstOrNull { it.name?.asString() == "codec" }?.value as? KSType)
+                ?.declaration as? KSClassDeclaration ?: return false
+        return codecDecl.implementsVariableLengthCodec()
+    }
 
     /**
      * Per-field-type peek-budget table.
@@ -4313,6 +4401,13 @@ internal class CodecEmitter(
                 .addParameter("stream", STREAM_PROCESSOR_CN)
                 .addParameter("baseOffset", INT)
                 .returns(PEEK_RESULT_CN)
+        // Consumer-supplied frame-size override: a companion object implementing
+        // `FrameDetector` takes over framing wholesale (the escape hatch for
+        // wire shapes the walker can't express). Delegate and return.
+        shape.customPeek?.let { customPeek ->
+            builder.addStatement("return %T.peekFrameSize(stream, baseOffset)", customPeek)
+            return builder.build()
+        }
         // Generic `@UseCodec` peek walker. When a
         // bounding `UseCodecScalar` field is present, the framework drives
         // the user codec against a non-consuming `stream.peekBuffer(...)`
@@ -4332,16 +4427,77 @@ internal class CodecEmitter(
         val ucsField =
             shape.fields.firstOrNull { it is FieldSpec.UseCodecScalar } as? FieldSpec.UseCodecScalar
         if (ucsField != null) {
-            val budget = peekBudgetFor(ucsField.fieldType)
+            // A bounding length anchors framing wherever it sits: the decoded
+            // value IS the bounded body's byte count, so
+            // total = priorBytes + lengthWidth + value. The priors before it may
+            // themselves be variable-width as long as each is *self-framing* —
+            // fixed-width, a nested-message/value-class `ProtocolMessageScalar`,
+            // or a self-delimiting variable-length `@UseCodec` (a varint). This
+            // is the real HTTP/3 frame shape: a QUIC-varint `Type` discriminator
+            // precedes the QUIC-varint bounding `Length`.
+            val boundingField =
+                shape.fields
+                    .firstOrNull { it is FieldSpec.UseCodecScalar && it.isBounding }
+                    as? FieldSpec.UseCodecScalar
+            if (boundingField != null) {
+                val budget = peekBudgetFor(boundingField.fieldType)
+                val priors = shape.fields.takeWhile { it !== boundingField }
+                val priorAreFixed = priors.all { it is FieldSpec.FixedSize }
+                val priorAreFramable =
+                    priors.all {
+                        it is FieldSpec.FixedSize ||
+                            it is FieldSpec.ProtocolMessageScalar ||
+                            (it is FieldSpec.UseCodecScalar && it.isVariableLength)
+                    }
+                // No peek budget for the length field (value-class / non-scalar),
+                // or a prior the walker can't size → NoFraming.
+                if (budget == null || !priorAreFramable) {
+                    builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+                    return builder.build()
+                }
+                if (priorAreFixed) {
+                    // All-fixed priors: the static-offset walker (byte-identical
+                    // to every pre-existing bounding fixture).
+                    appendPeekUseCodecScalar(builder, shape, boundingField, budget)
+                } else {
+                    // A self-framing variable-width prior is present (varint
+                    // discriminator): measure prior offsets at runtime.
+                    appendPeekBoundingDynamicPrior(builder, shape, boundingField, budget)
+                }
+                return builder.build()
+            }
+            // No bounding length: the remaining cases key off the first
+            // `@UseCodec` field and require statically-sized priors.
             val priorAreFixed =
                 shape.fields
                     .takeWhile { it !== ucsField }
                     .all { it is FieldSpec.FixedSize }
-            if (!ucsField.isBounding || budget == null || !priorAreFixed) {
+            if (!priorAreFixed) {
                 builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
                 return builder.build()
             }
-            appendPeekUseCodecScalar(builder, shape, ucsField, budget)
+            // Self-delimiting variable-width value (VariableLengthCodec): the
+            // value occupies only its own bytes, so total = prior + width +
+            // fixed-suffix — provided every field after it is FixedSize (a
+            // variable suffix would desync the byte count). Width comes from the
+            // codec's own peekFrameSize (no peek budget needed), so this also
+            // composes through a value-class codec whose inner is a varint.
+            if (ucsField.isVariableLength) {
+                val suffixAreFixed =
+                    shape.fields
+                        .dropWhile { it !== ucsField }
+                        .drop(1)
+                        .all { it is FieldSpec.FixedSize }
+                if (!suffixAreFixed) {
+                    builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+                    return builder.build()
+                }
+                appendPeekVariableLengthUseCodecScalar(builder, shape, ucsField)
+                return builder.build()
+            }
+            // Non-bounding, non-variable-length @UseCodec: no value-to-byte
+            // mapping the walker can use.
+            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
             return builder.build()
         }
         // `@LengthPrefixed @UseCodec val: List<E>`
@@ -4553,6 +4709,172 @@ internal class CodecEmitter(
             PLATFORM_BUFFER_CN,
         )
         body.endControlFlow()
+        builder.addCode(body.build())
+    }
+
+    /**
+     * Bounding `@UseCodec` peek where one or more prior fields are **not**
+     * fixed-width but are self-framing — most importantly a dispatch variant's
+     * re-read varint discriminator (the HTTP/3 frame's QUIC-varint `Type` before
+     * the bounding `Length`). The fixed-prior sibling [appendPeekUseCodecScalar]
+     * sums a compile-time `priorBytes`; here that sum is accumulated at runtime
+     * into `__priorBytes`:
+     *
+     *  - a `FixedSize` prior contributes its constant `wireBytes`;
+     *  - a `ProtocolMessageScalar` or self-delimiting variable-length
+     *    `UseCodecScalar` prior contributes the width its own codec's
+     *    `peekFrameSize` reports — measured at `baseOffset + __priorBytes`,
+     *    exactly the dispatcher's discriminator-framing idiom, so peek and decode
+     *    read the same bytes. A non-`Complete` prior result (the discriminator
+     *    isn't fully buffered, or itself yields `NoFraming`) propagates straight
+     *    out.
+     *
+     * After the priors, the bounded length is materialized and decoded against a
+     * non-consuming `peekBuffer` view (underflow → `NeedsMoreData`, the same
+     * contract as [appendPeekUseCodecScalar]) and the frame total is
+     * `__priorBytes + lengthWidth + value`.
+     */
+    private fun appendPeekBoundingDynamicPrior(
+        builder: FunSpec.Builder,
+        shape: CodecShape,
+        field: FieldSpec.UseCodecScalar,
+        peekBudget: Int,
+    ) {
+        val priors = shape.fields.takeWhile { it !== field }
+        val body = CodeBlock.builder()
+        body.addStatement("var __priorBytes = 0")
+        for (prior in priors) {
+            val priorCodec: ClassName? =
+                when (prior) {
+                    is FieldSpec.ProtocolMessageScalar -> prior.codecType
+                    is FieldSpec.UseCodecScalar -> prior.codecType
+                    else -> null
+                }
+            when {
+                prior is FieldSpec.FixedSize ->
+                    body.addStatement("__priorBytes += %L", prior.wireBytes)
+                priorCodec != null -> {
+                    val frameVar = "__${prior.name}Frame"
+                    body.addStatement(
+                        "val %L = %T.peekFrameSize(stream, baseOffset + __priorBytes)",
+                        frameVar,
+                        priorCodec,
+                    )
+                    body.beginControlFlow("if (%L !is %T.Complete)", frameVar, PEEK_RESULT_CN)
+                    body.addStatement("return %L", frameVar)
+                    body.endControlFlow()
+                    body.addStatement("__priorBytes += %L.bytes", frameVar)
+                }
+                else ->
+                    error("priorAreFramable should have excluded ${prior::class.simpleName}")
+            }
+        }
+        body.addStatement(
+            "if (stream.available() - baseOffset < __priorBytes + 1) return %T.NeedsMoreData",
+            PEEK_RESULT_CN,
+        )
+        val peekViewVar = "__${field.name}PeekView"
+        body.addStatement(
+            "val %L = stream.peekBuffer(baseOffset + __priorBytes, %L) ?: return %T.NeedsMoreData",
+            peekViewVar,
+            peekBudget,
+            PEEK_RESULT_CN,
+        )
+        body.beginControlFlow("try")
+        val priorPosVar = "__${field.name}PriorPos"
+        body.addStatement("val %L = %L.position()", priorPosVar, peekViewVar)
+        body.beginControlFlow("val %L = try", field.name)
+        body.addStatement(
+            "%T.decode(%L, %T.Empty)",
+            field.codecType,
+            peekViewVar,
+            DECODE_CONTEXT_CN,
+        )
+        body.nextControlFlow("catch (__e: %T)", ClassName("kotlin", "Throwable"))
+        body.beginControlFlow("when (__e::class.simpleName)")
+        body.addStatement(
+            "%S, %S, %S -> return %T.NeedsMoreData",
+            "BufferUnderflowException",
+            "IndexOutOfBoundsException",
+            "ArrayIndexOutOfBoundsException",
+            PEEK_RESULT_CN,
+        )
+        body.addStatement("else -> throw __e")
+        body.endControlFlow()
+        body.endControlFlow()
+        val widthVar = "__${field.name}Width"
+        body.addStatement("val %L = %L.position() - %L", widthVar, peekViewVar, priorPosVar)
+        body.addStatement("val __total = __priorBytes + %L + %L.toInt()", widthVar, field.name)
+        body.addStatement(
+            "return if (stream.available() - baseOffset >= __total) %T.Complete(__total) else %T.NeedsMoreData",
+            PEEK_RESULT_CN,
+            PEEK_RESULT_CN,
+        )
+        body.nextControlFlow("finally")
+        body.addStatement(
+            "(%L as? %T)?.freeNativeMemory()",
+            peekViewVar,
+            PLATFORM_BUFFER_CN,
+        )
+        body.endControlFlow()
+        builder.addCode(body.build())
+    }
+
+    /**
+     * Emit peek for a shape carrying a non-bounding, **variable-length**
+     * `@UseCodec val: <scalar>` field (codec implements `VariableLengthCodec`).
+     * The decoded value is *not* a body length, so the frame total is
+     * `priorBytes + codecWidth + fixedSuffixBytes` — no value term.
+     *
+     * Width comes from the codec's own `peekFrameSize` (every
+     * `VariableLengthCodec` derives it from `peekValue`): `Complete(width)` once
+     * the self-delimiting value is fully buffered, `NeedsMoreData` otherwise.
+     * Delegating to the codec means no peek budget is needed and the same path
+     * composes through a generated value-class codec whose inner is a varint.
+     *
+     * Caller guarantees (in [buildPeekFrameFun]): every prior and suffix field
+     * is `FixedSize`.
+     */
+    private fun appendPeekVariableLengthUseCodecScalar(
+        builder: FunSpec.Builder,
+        shape: CodecShape,
+        field: FieldSpec.UseCodecScalar,
+    ) {
+        val priorBytes =
+            shape.fields
+                .takeWhile { it !== field }
+                .filterIsInstance<FieldSpec.FixedSize>()
+                .sumOf { it.wireBytes }
+        val suffixBytes =
+            shape.fields
+                .dropWhile { it !== field }
+                .drop(1)
+                .filterIsInstance<FieldSpec.FixedSize>()
+                .sumOf { it.wireBytes }
+        val body = CodeBlock.builder()
+        val frameVar = "__${field.name}Frame"
+        body.addStatement(
+            "val %L = %T.peekFrameSize(stream, baseOffset + %L)",
+            frameVar,
+            field.codecType,
+            priorBytes,
+        )
+        // Propagate NeedsMoreData / NoFraming unchanged; only a Complete width
+        // lets us size the whole frame.
+        body.beginControlFlow("if (%L !is %T.Complete)", frameVar, PEEK_RESULT_CN)
+        body.addStatement("return %L", frameVar)
+        body.endControlFlow()
+        body.addStatement(
+            "val __total = %L + %L.bytes + %L",
+            priorBytes,
+            frameVar,
+            suffixBytes,
+        )
+        body.addStatement(
+            "return if (stream.available() - baseOffset >= __total) %T.Complete(__total) else %T.NeedsMoreData",
+            PEEK_RESULT_CN,
+            PEEK_RESULT_CN,
+        )
         builder.addCode(body.build())
     }
 
@@ -7364,6 +7686,7 @@ internal class CodecEmitter(
                 framing = Framing.Unframed,
                 forwardCompat = ForwardCompat.Disabled,
                 visibility = codecVisibilityModifier(symbol).toCodecVisibility(),
+                customPeek = detectCustomFramePeek(symbol),
             ),
         )
     }
@@ -7406,37 +7729,16 @@ internal class CodecEmitter(
         val discriminatorCtor =
             discriminatorDecl.primaryConstructor ?: return DispatchAnalysisResult.NotApplicable
         if (discriminatorCtor.parameters.size != 1) return DispatchAnalysisResult.NotApplicable
-        val innerType = discriminatorCtor.parameters[0].type.resolve()
+        val innerParam = discriminatorCtor.parameters[0]
+        val innerType = innerParam.type.resolve()
         if (innerType.isError || innerType.isMarkedNullable) return DispatchAnalysisResult.NotApplicable
-        val innerKind =
-            SUPPORTED_SCALARS[innerType.declaration.qualifiedName?.asString()]
-                ?: return DispatchAnalysisResult.NotApplicable
-        // True silent gap: validateDispatchOnSealed accepts any numeric
-        // inner (NUMERIC_SCALAR_QNAMES), but peek-side reconstruction only
-        // supports single-byte kinds plus 2/4-byte unsigned kinds. ULong,
-        // Int, and signed multi-byte (Short/Long) discriminators aren't
-        // required by any in-scope vector and would need parallel peek
-        // paths — so they pass validation and are then silently dropped.
-        if (innerKind !in peekableDispatcherInnerKinds) {
-            val innerName =
-                innerType.declaration.simpleName.asString()
-            val peekable = peekableDispatcherInnerKinds.joinToString(", ") { it.name }
-            return DispatchAnalysisResult.Rejected(
-                listOf(
-                    Diagnostic(
-                        "@DispatchOn discriminator on ${symbol.simpleName.asString()} has inner scalar " +
-                            "`$innerName`, which is not a supported dispatch discriminator width. The peek " +
-                            "path supports only single-byte and 2/4-byte unsigned kinds ($peekable); signed " +
-                            "multi-byte (Short/Long), Int, and ULong discriminators are not yet supported.",
-                        symbol,
-                    ),
-                ),
-            )
-        }
-        // Read the discriminator value class's `@ProtocolMessage(
-        // wireOrder = ...)` so multi-byte byte assembly during peek matches
-        // the encode/decode wire layout. Single-byte kinds ignore this.
-        val discriminatorWireOrder = readMessageWireOrder(discriminatorDecl)
+        // Varint discriminator: the value class's inner scalar carries
+        // `@UseCodec(VariableLengthCodec)`. Width is variable and recovered
+        // at runtime from the value class's own generated codec, so the
+        // fixed-width peekable-inner-kind machinery below does not apply.
+        // The concrete `Discriminator` (Varint vs ValueClass) is built after
+        // the shared dispatch-value resolution.
+        val varintInner = innerParam.hasVariableLengthUseCodec()
 
         val dispatchProp =
             discriminatorDecl
@@ -7589,25 +7891,64 @@ internal class CodecEmitter(
         // a single header+prefix walker rather than per-variant
         // dispatch, and `wireSize` is omitted.
         val framedBy = symbol.annotations.firstOrNull(::isFramedByAnn)?.let(::parseFramedBy)
+        val discriminatorCodecClassName =
+            ClassName(
+                discriminatorDecl.packageName.asString(),
+                discriminatorDecl.flattenedCodecName(),
+            )
+        val discriminator: Discriminator =
+            if (varintInner) {
+                Discriminator.Varint(
+                    className = classNameOf(discriminatorDecl),
+                    codecClassName = discriminatorCodecClassName,
+                    dispatchValueProperty = dispatchValuePropertyName,
+                    dispatchValueKind = dispatchValueKind,
+                )
+            } else {
+                val innerKind =
+                    SUPPORTED_SCALARS[innerType.declaration.qualifiedName?.asString()]
+                        ?: return DispatchAnalysisResult.NotApplicable
+                // True silent gap: validateDispatchOnSealed accepts any numeric
+                // inner (NUMERIC_SCALAR_QNAMES), but peek-side reconstruction only
+                // supports single-byte kinds plus 2/4-byte unsigned kinds. ULong,
+                // Int, and signed multi-byte (Short/Long) discriminators aren't
+                // required by any in-scope vector and would need parallel peek
+                // paths — so they pass validation and are then silently dropped.
+                if (innerKind !in peekableDispatcherInnerKinds) {
+                    val innerName = innerType.declaration.simpleName.asString()
+                    val peekable = peekableDispatcherInnerKinds.joinToString(", ") { it.name }
+                    return DispatchAnalysisResult.Rejected(
+                        listOf(
+                            Diagnostic(
+                                "@DispatchOn discriminator on ${symbol.simpleName.asString()} has inner scalar " +
+                                    "`$innerName`, which is not a supported dispatch discriminator width. The peek " +
+                                    "path supports only single-byte and 2/4-byte unsigned kinds ($peekable); signed " +
+                                    "multi-byte (Short/Long), Int, and ULong discriminators are not yet supported.",
+                                symbol,
+                            ),
+                        ),
+                    )
+                }
+                Discriminator.ValueClass(
+                    className = classNameOf(discriminatorDecl),
+                    codecClassName = discriminatorCodecClassName,
+                    innerKind = innerKind,
+                    // Read the discriminator value class's `@ProtocolMessage(
+                    // wireOrder = ...)` so multi-byte byte assembly during peek
+                    // matches the encode/decode wire layout. Single-byte kinds
+                    // ignore this.
+                    innerWireOrder = readMessageWireOrder(discriminatorDecl),
+                    dispatchValueProperty = dispatchValuePropertyName,
+                    dispatchValueKind = dispatchValueKind,
+                )
+            }
         return DispatchAnalysisResult.Supported(
             DispatchShape(
                 packageName = pkg,
                 parentClassName = ClassName(pkg, parentSimpleName),
                 parentSimpleName = parentSimpleName,
                 codecSimpleName = symbol.flattenedCodecName(),
-                discriminator =
-                    Discriminator.ValueClass(
-                        className = classNameOf(discriminatorDecl),
-                        codecClassName =
-                            ClassName(
-                                discriminatorDecl.packageName.asString(),
-                                discriminatorDecl.flattenedCodecName(),
-                            ),
-                        innerKind = innerKind,
-                        innerWireOrder = discriminatorWireOrder,
-                        dispatchValueProperty = dispatchValuePropertyName,
-                        dispatchValueKind = dispatchValueKind,
-                    ),
+                discriminator = discriminator,
                 variants = variants,
                 genericity =
                     payloadTypeParameter
@@ -7619,6 +7960,7 @@ internal class CodecEmitter(
                         ?.let { ForwardCompat.Enabled(it) }
                         ?: ForwardCompat.Disabled,
                 visibility = codecVisibilityModifier(symbol).toCodecVisibility(),
+                customPeek = detectCustomFramePeek(symbol),
             ),
         )
     }
@@ -7857,8 +8199,27 @@ internal class CodecEmitter(
                 actualFormat = "\${__dispatchValue}"
                 body.beginControlFlow("return when (__dispatchValue)")
             }
-            is Discriminator.Varint ->
-                error("Discriminator.Varint decode is not reachable yet — no shape produces it")
+            is Discriminator.Varint -> {
+                // Varint @DispatchOn: identical decode shape to ValueClass —
+                // peek the variable-width discriminator via the value class's
+                // codec, rewind, and let the variant re-read it. The codec
+                // (not a fixed inner-scalar read) does the self-delimiting read.
+                body.addStatement("val discriminatorPosition = buffer.position()")
+                body.addStatement(
+                    "val __discriminator = %T.decode(buffer, context)",
+                    disc.codecClassName,
+                )
+                body.addStatement("buffer.position(discriminatorPosition)")
+                body.addStatement(
+                    "val __dispatchValue = %L",
+                    dispatchValueIntCoercion(
+                        disc.dispatchValueKind,
+                        "__discriminator.${disc.dispatchValueProperty}",
+                    ),
+                )
+                actualFormat = "\${__dispatchValue}"
+                body.beginControlFlow("return when (__dispatchValue)")
+            }
         }
 
         for (variant in shape.variants) {
@@ -8174,13 +8535,28 @@ internal class CodecEmitter(
      */
     private fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
         val body = CodeBlock.builder()
-        val discriminatorBytes = shape.discriminator.wireWidth.requireFixed("dispatch peek")
+
+        // Consumer-supplied frame-size override: a companion object on the sealed
+        // parent implementing `FrameDetector` frames the whole dispatch wholesale
+        // (RFC 6455 WebSocket: opcode-independent bit-packed escape length +
+        // folded mask, which the per-variant peek walk can't derive). Delegate
+        // and return, bypassing discriminator routing.
+        shape.customPeek?.let { customPeek ->
+            return FunSpec
+                .builder("peekFrameSize")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("stream", STREAM_PROCESSOR_CN)
+                .addParameter("baseOffset", INT)
+                .returns(PEEK_RESULT_CN)
+                .addStatement("return %T.peekFrameSize(stream, baseOffset)", customPeek)
+                .build()
+        }
 
         when (val disc = shape.discriminator) {
             Discriminator.FixedByte -> {
                 body.addStatement(
                     "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
-                    discriminatorBytes,
+                    disc.wireWidth.requireFixed("dispatch peek"),
                     PEEK_RESULT_CN,
                 )
                 body.addStatement(
@@ -8219,7 +8595,7 @@ internal class CodecEmitter(
             is Discriminator.ValueClass -> {
                 body.addStatement(
                     "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
-                    discriminatorBytes,
+                    disc.wireWidth.requireFixed("dispatch peek"),
                     PEEK_RESULT_CN,
                 )
                 // Peek the discriminator's inner-scalar bytes at baseOffset and
@@ -8264,8 +8640,65 @@ internal class CodecEmitter(
                 body.endControlFlow()
                 body.endControlFlow()
             }
-            is Discriminator.Varint ->
-                error("Discriminator.Varint peek is not reachable yet — no shape produces it")
+            is Discriminator.Varint -> {
+                // Variable-width discriminator: its byte count isn't known
+                // statically, so measure it via the value class codec's own
+                // peekFrameSize (which delegates to the consumer's
+                // VariableLengthCodec). If the prefix is too short to frame the
+                // discriminator, propagate NeedsMoreData / NoFraming unchanged.
+                body.addStatement(
+                    "val __discFrame = %T.peekFrameSize(stream, baseOffset)",
+                    disc.codecClassName,
+                )
+                body.beginControlFlow("if (__discFrame !is %T.Complete)", PEEK_RESULT_CN)
+                body.addStatement("return __discFrame")
+                body.endControlFlow()
+                // Decode the discriminator from a non-consuming view of exactly
+                // its measured width to recover the dispatch value, then PURE-
+                // DELEGATE to the variant at baseOffset (the variant re-reads the
+                // self-delimiting discriminator as its first field, so no `1 +`).
+                body.addStatement(
+                    "val __discView = stream.peekBuffer(baseOffset, __discFrame.bytes) ?: return %T.NeedsMoreData",
+                    PEEK_RESULT_CN,
+                )
+                body.beginControlFlow("val __dispatchValue = try")
+                body.addStatement(
+                    "val __discriminator = %T.decode(__discView, %T.Empty)",
+                    disc.codecClassName,
+                    DECODE_CONTEXT_CN,
+                )
+                body.addStatement(
+                    "%L",
+                    dispatchValueIntCoercion(
+                        disc.dispatchValueKind,
+                        "__discriminator.${disc.dispatchValueProperty}",
+                    ),
+                )
+                body.nextControlFlow("finally")
+                body.addStatement(
+                    "(__discView as? %T)?.freeNativeMemory()",
+                    PLATFORM_BUFFER_CN,
+                )
+                body.endControlFlow()
+                body.beginControlFlow("return when (__dispatchValue)")
+                for (variant in shape.variants) {
+                    body.addStatement(
+                        "%L -> %L.peekFrameSize(stream, baseOffset)",
+                        variant.dispatchLabel(shape.discriminator.labelFormat),
+                        variant.codecReceiver(),
+                    )
+                }
+                body.beginControlFlow("else ->")
+                body.addStatement(
+                    "throw %T(fieldPath = %S, bufferPosition = baseOffset, expected = %S, actual = %P)",
+                    DECODE_EXCEPTION_CN,
+                    "${shape.parentSimpleName}.discriminator",
+                    expectedDispatchSet(shape),
+                    "\${__dispatchValue}",
+                )
+                body.endControlFlow()
+                body.endControlFlow()
+            }
         }
 
         return FunSpec
@@ -8895,7 +9328,9 @@ internal class CodecEmitter(
         private const val PAYLOAD_SIMPLE = "Payload"
         private const val OWNED_BYTES_HANDLE_QNAME = "com.ditchoom.buffer.codec.OwnedBytesHandle"
         private const val BOUNDING_LENGTH_CODEC_QNAME = "com.ditchoom.buffer.codec.BoundingLengthCodec"
+        private const val VARIABLE_LENGTH_CODEC_QNAME = "com.ditchoom.buffer.codec.VariableLengthCodec"
         private const val FRAMED_BY_QNAME = "com.ditchoom.buffer.codec.annotations.FramedBy"
+        private const val FRAME_DETECTOR_QNAME = "com.ditchoom.buffer.codec.FrameDetector"
 
         // Batching gate. A coalesced read targets exactly 2, 4, or 8 bytes —
         // the natural-width reads on `ReadBuffer`. 3/5/6/7 prefixes are

@@ -2128,9 +2128,9 @@ class ProtocolMessageProcessor(
         fieldType: KSType,
     ): Boolean {
         val expectedQname = fieldType.declaration.qualifiedName?.asString() ?: return false
-        // Walk the full supertype chain so a `BoundingLengthCodec<T>` impl
-        // (which transitively implements `Codec<T>`) is also recognized.
-        // Both `Codec<T>` and `BoundingLengthCodec<T>` are accepted: KSP's
+        // Walk the full supertype chain so a `BoundingLengthCodec<T>` or
+        // `VariableLengthCodec<T>` impl (each transitively implements
+        // `Codec<T>`) is also recognized. All three are accepted: KSP's
         // `getAllSuperTypes()` doesn't substitute the type variable from the
         // intermediate interface declaration, so the transitive `Codec<T>`
         // entry still carries the unsubstituted T. The concrete type arg is
@@ -2138,7 +2138,7 @@ class ProtocolMessageProcessor(
         for (st in codecDecl.getAllSuperTypes()) {
             if (st.isError) continue
             val q = st.declaration.qualifiedName?.asString()
-            if (q != CODEC_QNAME && q != BOUNDING_LENGTH_CODEC_QNAME) continue
+            if (q != CODEC_QNAME && q != BOUNDING_LENGTH_CODEC_QNAME && q != VARIABLE_LENGTH_CODEC_QNAME) continue
             val arg =
                 st.arguments
                     .firstOrNull()
@@ -2402,6 +2402,7 @@ class ProtocolMessageProcessor(
         private const val REMAINING_BYTES_SHORT = "RemainingBytes"
         private const val CODEC_QNAME = "com.ditchoom.buffer.codec.Codec"
         private const val BOUNDING_LENGTH_CODEC_QNAME = "com.ditchoom.buffer.codec.BoundingLengthCodec"
+        private const val VARIABLE_LENGTH_CODEC_QNAME = "com.ditchoom.buffer.codec.VariableLengthCodec"
         private const val BOOLEAN_QNAME = "kotlin.Boolean"
         private const val STRING_QNAME = "kotlin.String"
         private const val OWNED_BYTES_HANDLE_QNAME = "com.ditchoom.buffer.codec.OwnedBytesHandle"

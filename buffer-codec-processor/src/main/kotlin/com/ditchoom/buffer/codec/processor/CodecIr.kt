@@ -128,6 +128,17 @@ internal data class DispatchShape(
     val framing: Framing,
     val forwardCompat: ForwardCompat,
     val visibility: CodecVisibility,
+    /**
+     * Consumer-supplied frame-size override for the dispatcher. Non-null when
+     * the sealed parent declares a companion object implementing
+     * `com.ditchoom.buffer.codec.FrameDetector`; holds the parent type whose
+     * companion to call. The dispatcher's `peekFrameSize` delegates to
+     * `<customPeek>.peekFrameSize(stream, baseOffset)` instead of routing through
+     * per-variant peeks — for frames whose size is opcode-independent and not
+     * walker-derivable (RFC 6455 WebSocket: bit-packed escape length + folded
+     * mask). See [CodecShape.customPeek].
+     */
+    val customPeek: ClassName? = null,
 )
 
 internal data class DispatchVariant(
@@ -184,8 +195,20 @@ internal sealed interface Discriminator {
         override val wireWidth: WireWidth get() = innerKind.wireWidth
     }
 
-    /** Reserved — HTTP/3 QUIC varint discriminator (variable wire width). */
+    /**
+     * `@DispatchOn(value class)` whose inner scalar carries
+     * `@UseCodec(VariableLengthCodec)` — an HTTP/3 QUIC-varint-style
+     * self-delimiting discriminator. Wire width is variable, recovered at
+     * runtime from the value class's own generated codec ([codecClassName],
+     * which delegates to the consumer's `VariableLengthCodec`). Like
+     * [ValueClass] this is peek/rewind + re-read-by-variant with decimal
+     * labels; it differs only in that the dispatcher can't pre-compute a
+     * fixed discriminator width, so peek measures it via the codec instead
+     * of reconstructing fixed inner-scalar bytes.
+     */
     data class Varint(
+        val className: ClassName,
+        val codecClassName: ClassName,
         val dispatchValueProperty: String,
         val dispatchValueKind: ScalarKind,
     ) : Discriminator {
@@ -303,6 +326,16 @@ internal data class CodecShape(
      * literal drives the encode-side write.
      */
     val singletonDispatchDiscriminator: SingletonDispatchDiscriminator? = null,
+    /**
+     * Consumer-supplied frame-size override. Non-null when the
+     * `@ProtocolMessage` type declares a companion object implementing
+     * `com.ditchoom.buffer.codec.FrameDetector`; holds the type whose companion
+     * to call. The emitter makes `peekFrameSize` delegate to
+     * `<customPeek>.peekFrameSize(stream, baseOffset)` instead of running the
+     * derived walker — the escape hatch for framings the walker can't express
+     * (e.g. RFC 6455 WebSocket's escape-coded length + folded mask).
+     */
+    val customPeek: ClassName? = null,
 )
 
 /**
@@ -536,6 +569,17 @@ internal sealed interface FieldSpec {
         val fieldType: TypeName,
         val codecType: ClassName,
         val isBounding: Boolean,
+        /**
+         * `true` when `C` implements
+         * `com.ditchoom.buffer.codec.VariableLengthCodec<T>` — a
+         * self-delimiting, variable-width encoding (QUIC varint, LEB128, …).
+         * Decode/encode are unchanged (they already delegate to `C`); this
+         * flag makes `peekFrameSize` framable via the codec's observed width
+         * (`total = prior + width + fixed-suffix`) instead of collapsing to
+         * `NoFraming`. Mutually exclusive with [isBounding] (a bounding length
+         * adds its value to the total; a self-delimiting value does not).
+         */
+        val isVariableLength: Boolean,
     ) : FieldSpec
 
     /**

@@ -72,23 +72,7 @@ public class WsFrameCodec<P : Payload>(
     }
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
-    val __discRaw = stream.peekByte(baseOffset + 0).toUByte()
-    val __discriminator = FrameHeaderByte1(__discRaw)
-    val __dispatchValue = __discriminator.opcode
-    return when (__dispatchValue) {
-      0 -> continuationCodec.peekFrameSize(stream, baseOffset)
-      1 -> textCodec.peekFrameSize(stream, baseOffset)
-      2 -> binaryCodec.peekFrameSize(stream, baseOffset)
-      8 -> WsFrameCloseCodec.peekFrameSize(stream, baseOffset)
-      9 -> pingCodec.peekFrameSize(stream, baseOffset)
-      10 -> pongCodec.peekFrameSize(stream, baseOffset)
-      else -> {
-        throw DecodeException(fieldPath = "WsFrame.discriminator", bufferPosition = baseOffset, expected = "one of {0, 1, 2, 8, 9, 10}", actual = """${__dispatchValue}""")
-      }
-    }
-  }
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = WsFrame.peekFrameSize(stream, baseOffset)
 
   public companion object {
     public fun <P : Payload> decodeAggregating(

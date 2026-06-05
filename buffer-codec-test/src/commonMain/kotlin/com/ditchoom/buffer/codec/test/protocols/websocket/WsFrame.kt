@@ -1,6 +1,8 @@
 package com.ditchoom.buffer.codec.test.protocols.websocket
 
+import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.Payload
+import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.annotations.DispatchOn
 import com.ditchoom.buffer.codec.annotations.DispatchValue
 import com.ditchoom.buffer.codec.annotations.Endianness
@@ -8,6 +10,7 @@ import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import com.ditchoom.buffer.codec.annotations.When
+import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.jvm.JvmInline
 
 /*
@@ -342,4 +345,68 @@ sealed interface WsFrame<out P : Payload> {
         @When("byte2.masked") val maskingKey: WsMaskingKey? = null,
         @RemainingBytes val payload: P,
     ) : WsFrame<P>
+
+    /**
+     * Consumer-supplied frame sizing — the piece RFC 6455 framing needs that the
+     * generated peek walker cannot derive. The payload length is **escape-coded**
+     * across header fields (`byte2.lengthIndicator`, escaping to a 16- or 64-bit
+     * extended length at 126/127), and a masking key folds **between** the length
+     * and the payload — neither a `@LengthPrefixed`/`@LengthFrom` nor a bounding
+     * codec can express that, so `WsFrameCodec.peekFrameSize` would otherwise fall
+     * back to `NoFraming` (and the websocket repo hand-writes this in
+     * `WebSocketCodec.readNextFrame`).
+     *
+     * Because this companion implements [FrameDetector], the processor makes the
+     * generated `WsFrameCodec.peekFrameSize` delegate here instead. The companion
+     * owns ONLY framing (the total byte count); field decode/encode stay
+     * generated. The load-bearing contract — `peek.bytes == decode consumption`
+     * for any fully-buffered frame, `NeedsMoreData` for every shorter prefix — is
+     * locked by `WsFramePeekCodecTest`'s drip-feed across all three length classes
+     * (7-bit / 16-bit / 64-bit), masked and unmasked.
+     *
+     * Wire walked (RFC 6455 §5.2): `byte1 | byte2 | [ext-len 16 if ind==126 |
+     * ext-len 64 if ind==127] | [mask 4 if MASK] | payload[len]`. Extended lengths
+     * are network (big-endian) order; the 64-bit length's MSB is 0 by spec, so it
+     * fits a non-negative `Long`.
+     */
+    companion object : FrameDetector {
+        override fun peekFrameSize(
+            stream: StreamProcessor,
+            baseOffset: Int,
+        ): PeekResult {
+            // byte1 + byte2 are needed before the length shape is known.
+            if (stream.available() - baseOffset < 2) return PeekResult.NeedsMoreData
+            val byte2 = stream.peekByte(baseOffset + 1).toInt() and 0xFF
+            val masked = (byte2 and 0x80) != 0
+            val indicator = byte2 and 0x7F
+            var offset = 2
+            val payloadLength: Long =
+                when (indicator) {
+                    126 -> {
+                        if (stream.available() - baseOffset < offset + 2) return PeekResult.NeedsMoreData
+                        val hi = stream.peekByte(baseOffset + offset).toInt() and 0xFF
+                        val lo = stream.peekByte(baseOffset + offset + 1).toInt() and 0xFF
+                        offset += 2
+                        ((hi shl 8) or lo).toLong()
+                    }
+                    127 -> {
+                        if (stream.available() - baseOffset < offset + 8) return PeekResult.NeedsMoreData
+                        var v = 0L
+                        for (i in 0 until 8) {
+                            v = (v shl 8) or (stream.peekByte(baseOffset + offset + i).toLong() and 0xFF)
+                        }
+                        offset += 8
+                        v
+                    }
+                    else -> indicator.toLong()
+                }
+            if (masked) offset += 4
+            val total = offset + payloadLength.toInt()
+            return if (stream.available() - baseOffset >= total) {
+                PeekResult.Complete(total)
+            } else {
+                PeekResult.NeedsMoreData
+            }
+        }
+    }
 }
