@@ -24,7 +24,6 @@ import com.squareup.kotlinpoet.INT
 import com.squareup.kotlinpoet.KModifier
 import com.squareup.kotlinpoet.LONG
 import com.squareup.kotlinpoet.LambdaTypeName
-import com.squareup.kotlinpoet.MemberName
 import com.squareup.kotlinpoet.ParameterSpec
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 import com.squareup.kotlinpoet.SHORT
@@ -9377,89 +9376,4 @@ internal class CodecEmitter(
             is WireWidth.Fixed -> bytes
             WireWidth.Variable -> error("$site requires a Fixed wire width; Variable not yet supported (Phase 1 stub)")
         }
-
-    private companion object {
-        private const val PROTOCOL_MESSAGE_QNAME = "com.ditchoom.buffer.codec.annotations.ProtocolMessage"
-        private const val PAYLOAD_QNAME = "com.ditchoom.buffer.codec.Payload"
-        private const val PAYLOAD_PKG = "com.ditchoom.buffer.codec"
-        private const val PAYLOAD_SIMPLE = "Payload"
-        private const val OWNED_BYTES_HANDLE_QNAME = "com.ditchoom.buffer.codec.OwnedBytesHandle"
-        private const val BOUNDING_LENGTH_CODEC_QNAME = "com.ditchoom.buffer.codec.BoundingLengthCodec"
-        private const val VARIABLE_LENGTH_CODEC_QNAME = "com.ditchoom.buffer.codec.VariableLengthCodec"
-        private const val FRAMED_BY_QNAME = "com.ditchoom.buffer.codec.annotations.FramedBy"
-        private const val FRAME_DETECTOR_QNAME = "com.ditchoom.buffer.codec.FrameDetector"
-
-        // Batching gate. A coalesced read targets exactly 2, 4, or 8 bytes —
-        // the natural-width reads on `ReadBuffer`. 3/5/6/7 prefixes are
-        // never emitted; the coalescer keeps them as individual reads.
-        private val BATCH_ALIGNMENTS = setOf(2, 4, 8)
-
-        private val BYTE_ORDER_CN = ClassName("com.ditchoom.buffer", "ByteOrder")
-        private val SWAP_BYTES_MN = MemberName("com.ditchoom.buffer", "swapBytes")
-
-        private val SUPPORTED_SCALARS =
-            mapOf(
-                "kotlin.Boolean" to ScalarKind.Boolean,
-                "kotlin.UByte" to ScalarKind.UByte,
-                "kotlin.UShort" to ScalarKind.UShort,
-                "kotlin.UInt" to ScalarKind.UInt,
-                "kotlin.ULong" to ScalarKind.ULong,
-                "kotlin.Byte" to ScalarKind.Byte,
-                "kotlin.Short" to ScalarKind.Short,
-                "kotlin.Int" to ScalarKind.Int,
-                "kotlin.Long" to ScalarKind.Long,
-                "kotlin.Float" to ScalarKind.Float,
-                "kotlin.Double" to ScalarKind.Double,
-            )
-
-        // Slice — qnames accepted as `@DispatchValue`
-        // property return types, mapped to the kind that drives the
-        // dispatch-site Int coercion. Long / ULong are excluded — the
-        // `@PacketType.value` annotation parameter is `Int` and can't
-        // address values beyond `Int.MAX_VALUE`. Mirror of the
-        // ProtocolMessageProcessor `DISPATCH_VALUE_RETURN_RANGES`
-        // validator-side set.
-        private val DISPATCH_VALUE_RETURN_KINDS =
-            mapOf(
-                "kotlin.Boolean" to ScalarKind.Boolean,
-                "kotlin.Byte" to ScalarKind.Byte,
-                "kotlin.UByte" to ScalarKind.UByte,
-                "kotlin.Short" to ScalarKind.Short,
-                "kotlin.UShort" to ScalarKind.UShort,
-                "kotlin.Int" to ScalarKind.Int,
-                "kotlin.UInt" to ScalarKind.UInt,
-            )
-
-        private val READ_BUFFER_CN = ClassName("com.ditchoom.buffer", "ReadBuffer")
-        private val WRITE_BUFFER_CN = ClassName("com.ditchoom.buffer", "WriteBuffer")
-        private val PLATFORM_BUFFER_CN = ClassName("com.ditchoom.buffer", "PlatformBuffer")
-        private val BUFFER_FACTORY_CN = ClassName("com.ditchoom.buffer", "BufferFactory")
-        private val BUFFER_FACTORY_DEFAULT_MN =
-            com.squareup.kotlinpoet.MemberName("com.ditchoom.buffer", "Default")
-        private val BUFFER_USE_MN =
-            com.squareup.kotlinpoet.MemberName("com.ditchoom.buffer", "use")
-        private val CODEC_CN = ClassName("com.ditchoom.buffer.codec", "Codec")
-        private val DECODER_CN = ClassName("com.ditchoom.buffer.codec", "Decoder")
-        private val DECODE_CONTEXT_CN = ClassName("com.ditchoom.buffer.codec", "DecodeContext")
-        private val ENCODE_CONTEXT_CN = ClassName("com.ditchoom.buffer.codec", "EncodeContext")
-        private val WIRE_SIZE_CN = ClassName("com.ditchoom.buffer.codec", "WireSize")
-        private val PEEK_RESULT_CN = ClassName("com.ditchoom.buffer.codec", "PeekResult")
-        private val STREAM_PROCESSOR_CN = ClassName("com.ditchoom.buffer.stream", "StreamProcessor")
-        private val DECODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "DecodeException")
-        private val ENCODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "EncodeException")
-        private val FRAMED_ENCODER_CN = ClassName("com.ditchoom.buffer.codec", "FramedEncoder")
-        private val FORWARD_COMPATIBLE_FACTORY_KEY_CN =
-            ClassName("com.ditchoom.buffer.codec", "ForwardCompatibleFactoryKey")
-        private val BUFFER_FACTORY_MANAGED_MN =
-            com.squareup.kotlinpoet.MemberName("com.ditchoom.buffer", "managed")
-
-        // Accepted types for the `@UnknownVariant` `raw` parameter — the
-        // opaque preserved payload. `factory.allocate(...)` yields a
-        // `PlatformBuffer` (assignable to a `ReadBuffer`-typed field too),
-        // so both are valid declared types.
-        private val FORWARD_COMPATIBLE_RAW_QNAMES =
-            setOf("com.ditchoom.buffer.PlatformBuffer", "com.ditchoom.buffer.ReadBuffer")
-        private val CHARSET_CN = ClassName("com.ditchoom.buffer", "Charset")
-        private val STRING_NULLABLE_TN = ClassName("kotlin", "String").copy(nullable = true)
-    }
 }
