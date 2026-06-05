@@ -536,6 +536,17 @@ internal sealed interface FieldSpec {
         val fieldType: TypeName,
         val codecType: ClassName,
         val isBounding: Boolean,
+        /**
+         * `true` when `C` implements
+         * `com.ditchoom.buffer.codec.VariableLengthCodec<T>` — a
+         * self-delimiting, variable-width encoding (QUIC varint, LEB128, …).
+         * Decode/encode are unchanged (they already delegate to `C`); this
+         * flag makes `peekFrameSize` framable via the codec's observed width
+         * (`total = prior + width + fixed-suffix`) instead of collapsing to
+         * `NoFraming`. Mutually exclusive with [isBounding] (a bounding length
+         * adds its value to the total; a self-delimiting value does not).
+         */
+        val isVariableLength: Boolean,
     ) : FieldSpec
 
     /**

@@ -1638,6 +1638,7 @@ internal class CodecEmitter(
                 fieldType = fieldTypeName,
                 codecType = codecClassName,
                 isBounding = codecDecl.implementsBoundingLengthCodec(),
+                isVariableLength = codecDecl.implementsVariableLengthCodec(),
             ),
         )
     }
@@ -1869,6 +1870,20 @@ internal class CodecEmitter(
     private fun KSClassDeclaration.implementsBoundingLengthCodec(): Boolean =
         getAllSuperTypes().any { st ->
             st.declaration.qualifiedName?.asString() == BOUNDING_LENGTH_CODEC_QNAME
+        }
+
+    /**
+     * Does this codec class implement
+     * `com.ditchoom.buffer.codec.VariableLengthCodec`? Marks a bare-`@UseCodec`
+     * scalar field as self-delimiting / variable-width: decode/encode already
+     * delegate to the codec, and this flag drives the variable-width
+     * `peekFrameSize` branch (`total = prior + observed-width`, no value term —
+     * unlike the bounding case). Walks the full supertype chain so an indirect
+     * implementer (intermediate interface) is still detected.
+     */
+    private fun KSClassDeclaration.implementsVariableLengthCodec(): Boolean =
+        getAllSuperTypes().any { st ->
+            st.declaration.qualifiedName?.asString() == VARIABLE_LENGTH_CODEC_QNAME
         }
 
     /**
@@ -4337,11 +4352,46 @@ internal class CodecEmitter(
                 shape.fields
                     .takeWhile { it !== ucsField }
                     .all { it is FieldSpec.FixedSize }
-            if (!ucsField.isBounding || budget == null || !priorAreFixed) {
+            // A non-statically-sized prior field → out of the walker's reach
+            // (the walker assumes a statically-known prior byte count).
+            if (!priorAreFixed) {
                 builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
                 return builder.build()
             }
-            appendPeekUseCodecScalar(builder, shape, ucsField, budget)
+            // Bounding length: the decoded value IS the body byte count, so
+            // total = prior + width + value (existing walker). Needs a peek
+            // budget to size the materialize-and-decode view; no budget entry
+            // (value-class / non-scalar field) → NoFraming.
+            if (ucsField.isBounding) {
+                if (budget == null) {
+                    builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+                    return builder.build()
+                }
+                appendPeekUseCodecScalar(builder, shape, ucsField, budget)
+                return builder.build()
+            }
+            // Self-delimiting variable-width value (VariableLengthCodec): the
+            // value occupies only its own bytes, so total = prior + width +
+            // fixed-suffix — provided every field after it is FixedSize (a
+            // variable suffix would desync the byte count). Width comes from the
+            // codec's own peekFrameSize (no peek budget needed), so this also
+            // composes through a value-class codec whose inner is a varint.
+            if (ucsField.isVariableLength) {
+                val suffixAreFixed =
+                    shape.fields
+                        .dropWhile { it !== ucsField }
+                        .drop(1)
+                        .all { it is FieldSpec.FixedSize }
+                if (!suffixAreFixed) {
+                    builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+                    return builder.build()
+                }
+                appendPeekVariableLengthUseCodecScalar(builder, shape, ucsField)
+                return builder.build()
+            }
+            // Non-bounding, non-variable-length @UseCodec: no value-to-byte
+            // mapping the walker can use.
+            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
             return builder.build()
         }
         // `@LengthPrefixed @UseCodec val: List<E>`
@@ -4553,6 +4603,64 @@ internal class CodecEmitter(
             PLATFORM_BUFFER_CN,
         )
         body.endControlFlow()
+        builder.addCode(body.build())
+    }
+
+    /**
+     * Emit peek for a shape carrying a non-bounding, **variable-length**
+     * `@UseCodec val: <scalar>` field (codec implements `VariableLengthCodec`).
+     * The decoded value is *not* a body length, so the frame total is
+     * `priorBytes + codecWidth + fixedSuffixBytes` — no value term.
+     *
+     * Width comes from the codec's own `peekFrameSize` (every
+     * `VariableLengthCodec` derives it from `peekValue`): `Complete(width)` once
+     * the self-delimiting value is fully buffered, `NeedsMoreData` otherwise.
+     * Delegating to the codec means no peek budget is needed and the same path
+     * composes through a generated value-class codec whose inner is a varint.
+     *
+     * Caller guarantees (in [buildPeekFrameFun]): every prior and suffix field
+     * is `FixedSize`.
+     */
+    private fun appendPeekVariableLengthUseCodecScalar(
+        builder: FunSpec.Builder,
+        shape: CodecShape,
+        field: FieldSpec.UseCodecScalar,
+    ) {
+        val priorBytes =
+            shape.fields
+                .takeWhile { it !== field }
+                .filterIsInstance<FieldSpec.FixedSize>()
+                .sumOf { it.wireBytes }
+        val suffixBytes =
+            shape.fields
+                .dropWhile { it !== field }
+                .drop(1)
+                .filterIsInstance<FieldSpec.FixedSize>()
+                .sumOf { it.wireBytes }
+        val body = CodeBlock.builder()
+        val frameVar = "__${field.name}Frame"
+        body.addStatement(
+            "val %L = %T.peekFrameSize(stream, baseOffset + %L)",
+            frameVar,
+            field.codecType,
+            priorBytes,
+        )
+        // Propagate NeedsMoreData / NoFraming unchanged; only a Complete width
+        // lets us size the whole frame.
+        body.beginControlFlow("if (%L !is %T.Complete)", frameVar, PEEK_RESULT_CN)
+        body.addStatement("return %L", frameVar)
+        body.endControlFlow()
+        body.addStatement(
+            "val __total = %L + %L.bytes + %L",
+            priorBytes,
+            frameVar,
+            suffixBytes,
+        )
+        body.addStatement(
+            "return if (stream.available() - baseOffset >= __total) %T.Complete(__total) else %T.NeedsMoreData",
+            PEEK_RESULT_CN,
+            PEEK_RESULT_CN,
+        )
         builder.addCode(body.build())
     }
 
@@ -8895,6 +9003,7 @@ internal class CodecEmitter(
         private const val PAYLOAD_SIMPLE = "Payload"
         private const val OWNED_BYTES_HANDLE_QNAME = "com.ditchoom.buffer.codec.OwnedBytesHandle"
         private const val BOUNDING_LENGTH_CODEC_QNAME = "com.ditchoom.buffer.codec.BoundingLengthCodec"
+        private const val VARIABLE_LENGTH_CODEC_QNAME = "com.ditchoom.buffer.codec.VariableLengthCodec"
         private const val FRAMED_BY_QNAME = "com.ditchoom.buffer.codec.annotations.FramedBy"
 
         // Batching gate. A coalesced read targets exactly 2, 4, or 8 bytes —
