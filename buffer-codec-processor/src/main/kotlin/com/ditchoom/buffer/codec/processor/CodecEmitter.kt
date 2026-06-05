@@ -12,12 +12,9 @@ import com.google.devtools.ksp.symbol.KSDeclaration
 import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.symbol.KSValueParameter
 import com.google.devtools.ksp.symbol.Modifier
-import com.squareup.kotlinpoet.BOOLEAN
 import com.squareup.kotlinpoet.BYTE
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
-import com.squareup.kotlinpoet.DOUBLE
-import com.squareup.kotlinpoet.FLOAT
 import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
 import com.squareup.kotlinpoet.INT
@@ -2552,41 +2549,6 @@ internal class CodecEmitter(
         ) : WhenExpression
     }
 
-    private fun scalarTypeName(kind: ScalarKind): TypeName =
-        when (kind) {
-            ScalarKind.Boolean -> BOOLEAN
-            ScalarKind.UByte -> U_BYTE
-            ScalarKind.UShort -> U_SHORT
-            ScalarKind.UInt -> U_INT
-            ScalarKind.ULong -> U_LONG
-            ScalarKind.Byte -> BYTE
-            ScalarKind.Short -> SHORT
-            ScalarKind.Int -> INT
-            ScalarKind.Long -> LONG
-            ScalarKind.Float -> FLOAT
-            ScalarKind.Double -> DOUBLE
-        }
-
-    /**
-     * Read expression for a natural-width scalar. Used by
-     * the conditional emit path (which needs an expression, not a statement)
-     * and by the existing non-conditional decode (refactored to share).
-     */
-    private fun naturalScalarReadExpr(kind: ScalarKind): String =
-        when (kind) {
-            ScalarKind.Boolean -> "buffer.readByte() != 0.toByte()"
-            ScalarKind.UByte -> "buffer.readUByte()"
-            ScalarKind.UShort -> "buffer.readUShort()"
-            ScalarKind.UInt -> "buffer.readUInt()"
-            ScalarKind.ULong -> "buffer.readULong()"
-            ScalarKind.Byte -> "buffer.readByte()"
-            ScalarKind.Short -> "buffer.readShort()"
-            ScalarKind.Int -> "buffer.readInt()"
-            ScalarKind.Long -> "buffer.readLong()"
-            ScalarKind.Float -> "buffer.readFloat()"
-            ScalarKind.Double -> "buffer.readDouble()"
-        }
-
     /**
      * Write statement for a natural-width scalar given an
      * accessor expression. Boolean encodes as `0x00` / `0x01`.
@@ -4401,11 +4363,6 @@ internal class CodecEmitter(
      * `filterIsInstance` step. Callers that require the result to
      * cover every field gate on terminal shape before calling.
      */
-    private fun List<FieldSpec>.sumOfFixedWireBytes(): WireWidth =
-        filterIsInstance<FieldSpec.FixedSize>()
-            .map { it.wireWidth }
-            .fold(WireWidth.Zero as WireWidth) { a, b -> a + b }
-
     private fun buildPeekFrameFun(shape: CodecShape): FunSpec {
         val builder =
             FunSpec
@@ -9301,79 +9258,5 @@ internal class CodecEmitter(
         when (this) {
             is LengthSource.Sibling -> "$siblingName.toInt()"
             is LengthSource.ValueClassProperty -> "$siblingName.$propertyName"
-        }
-
-    /**
-     * Slice — valid `@PacketType.value` range for
-     * a given `@DispatchValue` return kind. Mirror of the validator-
-     * side `DISPATCH_VALUE_RETURN_RANGES` map in
-     * [com.ditchoom.buffer.codec.processor.ProtocolMessageProcessor].
-     * Drives the analyzer's silent-skip on out-of-range values
-     * (validator surfaces the user-facing diagnostic).
-     */
-    private fun dispatchValuePacketTypeRange(kind: ScalarKind): IntRange =
-        when (kind) {
-            ScalarKind.Boolean -> 0..1
-            ScalarKind.Byte -> Byte.MIN_VALUE.toInt()..Byte.MAX_VALUE.toInt()
-            ScalarKind.UByte -> 0..0xFF
-            ScalarKind.Short -> Short.MIN_VALUE.toInt()..Short.MAX_VALUE.toInt()
-            ScalarKind.UShort -> 0..0xFFFF
-            ScalarKind.Int -> Int.MIN_VALUE..Int.MAX_VALUE
-            ScalarKind.UInt -> 0..Int.MAX_VALUE
-            ScalarKind.Long, ScalarKind.ULong, ScalarKind.Float, ScalarKind.Double ->
-                error("Long / ULong / Float / Double are not in DISPATCH_VALUE_RETURN_KINDS — analyze should have rejected this kind")
-        }
-
-    /**
-     * Slice — Int-coercion for an `@DispatchValue`
-     * property's runtime value, lifting it into the `Int` domain that
-     * the dispatcher's `when (__dispatchValue)` branches use. Int
-     * returns flow through unchanged, Boolean lifts to a 0/1 ternary,
-     * the other primitive numeric kinds use `.toInt()` (sign-extending
-     * for Byte / Short, zero-extending for UByte / UShort / UInt).
-     * Long / ULong are unreachable — `DISPATCH_VALUE_RETURN_KINDS`
-     * filters them out at analyze time.
-     */
-    private fun dispatchValueIntCoercion(
-        kind: ScalarKind,
-        propertyAccess: String,
-    ): String =
-        when (kind) {
-            ScalarKind.Int -> propertyAccess
-            ScalarKind.Boolean -> "if ($propertyAccess) 1 else 0"
-            ScalarKind.Byte, ScalarKind.UByte,
-            ScalarKind.Short, ScalarKind.UShort,
-            ScalarKind.UInt,
-            -> "$propertyAccess.toInt()"
-            ScalarKind.Long, ScalarKind.ULong, ScalarKind.Float, ScalarKind.Double ->
-                error("Long / ULong / Float / Double are not in DISPATCH_VALUE_RETURN_KINDS — analyze should have rejected this kind")
-        }
-
-    /**
-     * Additive fold over WireWidth. Two Fixed values add numerically
-     * (the exact `a + b` the old `Int` arithmetic produced); any Variable
-     * operand makes the whole sum Variable. Used by `sumOfFixedWireBytes`
-     * and the framed-header `n + 1` arithmetic so the Fixed path stays
-     * byte-identical and the Variable path propagates instead of throwing
-     * prematurely.
-     */
-    private operator fun WireWidth.plus(other: WireWidth): WireWidth =
-        when {
-            this is WireWidth.Fixed && other is WireWidth.Fixed -> WireWidth.Fixed(this.bytes + other.bytes)
-            else -> WireWidth.Variable
-        }
-
-    /**
-     * Unwrap a WireWidth that the call site requires to be Fixed, with a
-     * symbol-named error for the stubbed Variable arm. This is THE single
-     * Phase-1 stub helper: every consumer that needs a literal byte count
-     * calls `width.requireFixed("siteName")` and gets `n` for Fixed,
-     * error() for Variable. Centralizing it means the Variable behavior is
-     * a one-liner to find and (in Phase 2) replace per site.
-     */
-    private fun WireWidth.requireFixed(site: String): Int =
-        when (this) {
-            is WireWidth.Fixed -> bytes
-            WireWidth.Variable -> error("$site requires a Fixed wire width; Variable not yet supported (Phase 1 stub)")
         }
 }
