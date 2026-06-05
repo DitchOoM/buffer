@@ -8,6 +8,7 @@ import com.tschuchort.compiletesting.useKsp2
 import org.intellij.lang.annotations.Language
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -462,13 +463,17 @@ class EmitterDiagnosticsValidatorTest {
         )
     }
 
-    // 17. @DispatchOn with a non-peekable discriminator inner kind (Short).
-    // validateDispatchOnSealed accepts any numeric inner, so signed
-    // multi-byte / ULong / Int discriminators passed validation and were
-    // then silently dropped until the analyzer started returning Rejected
-    // (plan stage 9).
+    // 17. @DispatchOn with multi-byte discriminator inner kinds (signed
+    // Short / Int / Long, unsigned ULong) now compiles. Decode/encode always
+    // worked; the missing piece was the dispatcher's peekFrameSize byte-
+    // reconstruction, which previously rejected these via the stage-9
+    // "non-peekable @DispatchOn discriminator" diagnostic. Now that
+    // peekableDispatcherInnerKinds covers every integer kind, the peek path
+    // reconstructs Int-domain (2/4-byte) and Long-domain (8-byte) inners
+    // order-aware, so the shape is Supported. (Was: firesOnDispatchOn-
+    // NonPeekableDiscriminator, which asserted COMPILATION_ERROR.)
     @Test
-    fun firesOnDispatchOnNonPeekableDiscriminator() {
+    fun acceptsDispatchOnMultiByteSignedAndULongDiscriminators() {
         val result =
             compile(
                 """
@@ -493,12 +498,57 @@ class EmitterDiagnosticsValidatorTest {
                     @PacketType(1)
                     data class A(val d: ShortDisc, val x: Int) : P
                 }
+
+                @JvmInline
+                @ProtocolMessage
+                value class IntDisc(val raw: Int) {
+                    @DispatchValue
+                    val v: Int get() = raw
+                }
+
+                @DispatchOn(IntDisc::class)
+                @ProtocolMessage
+                sealed interface Q {
+                    @ProtocolMessage
+                    @PacketType(1)
+                    data class A(val d: IntDisc, val x: Int) : Q
+                }
+
+                @JvmInline
+                @ProtocolMessage
+                value class LongDisc(val raw: Long) {
+                    @DispatchValue
+                    val v: Int get() = raw.toInt()
+                }
+
+                @DispatchOn(LongDisc::class)
+                @ProtocolMessage
+                sealed interface R {
+                    @ProtocolMessage
+                    @PacketType(1)
+                    data class A(val d: LongDisc, val x: Int) : R
+                }
+
+                @JvmInline
+                @ProtocolMessage
+                value class ULongDisc(val raw: ULong) {
+                    @DispatchValue
+                    val v: Int get() = raw.toInt()
+                }
+
+                @DispatchOn(ULongDisc::class)
+                @ProtocolMessage
+                sealed interface S {
+                    @ProtocolMessage
+                    @PacketType(1)
+                    data class A(val d: ULongDisc, val x: Int) : S
+                }
                 """.trimIndent(),
             )
-        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
-        assertTrue(
-            result.messages.contains("is not a supported dispatch discriminator width"),
-            "expected @DispatchOn non-peekable-discriminator diagnostic. Messages:\n${result.messages}",
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+        assertFalse(
+            result.messages.contains("not a supported dispatch discriminator"),
+            "multi-byte signed / ULong @DispatchOn discriminators must compile. Messages:\n${result.messages}",
         )
     }
 

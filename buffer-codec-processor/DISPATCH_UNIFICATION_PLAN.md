@@ -189,10 +189,21 @@ matrix #3/#4.)
 **Tier 1 — safe capability wins (infra exists, one path missing a piece):**
 
 - **#1/#2 — multi-byte `@DispatchOn` discriminators** (signed `Short`/`Int`/`Long`,
-  unsigned `ULong`). Decode/encode already work via the value-class-field path;
-  only the `peekFrameSize` byte-reconstruction is missing (these are *Rejected*
-  today by the stage-9 non-peekable diagnostic — a clean seam to flip). **This is
-  the on-ramp to varint/H3** (variable width is the same machinery one step on).
+  unsigned `ULong`). **DONE** (branch `codec/multibyte-dispatchon-discriminator`).
+  Decode/encode already worked via the value-class-field path; the only gap was
+  the dispatcher's `peekFrameSize` byte-reconstruction. Flipped the clean seam:
+  `peekableDispatcherInnerKinds` now covers every integer kind, and
+  `appendPeekFixedScalar` reconstructs Int-domain (2/4-byte: `Int and 0xFF`
+  shifts) and Long-domain (8-byte: `Long and 0xFFL` shifts) inners, order-aware
+  per the discriminator's `wireOrder`, narrowing sign-preservingly to the inner
+  kind. The stage-9 "non-peekable" diagnostic is now a defensive guard for the
+  non-integer (Float/Double) inners the validator already rejects. New fixture
+  `multibytedisc/MultiByteDispatchFrames` (one frame per inner kind, mixing
+  big/little-endian) + cross-platform round-trip/peek test; stage-9 negative test
+  #17 flipped Rejected→Supported. Byte-identical (305 existing goldens unchanged;
+  16 new goldens added). **This was the on-ramp to varint/H3** (variable width is
+  the same machinery one step on — the Long-domain peek assembly is the shape a
+  QUIC 8-byte varint reuses).
 - **#7/#26 — `@LengthFrom` value-class-wrapped scalar sibling / non-peekable
   inner.** The validator already accepts these; the emitter rejects (drift gap).
   Fix = widen one accepted-kinds set.
