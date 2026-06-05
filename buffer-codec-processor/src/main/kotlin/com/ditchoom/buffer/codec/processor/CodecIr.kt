@@ -128,6 +128,17 @@ internal data class DispatchShape(
     val framing: Framing,
     val forwardCompat: ForwardCompat,
     val visibility: CodecVisibility,
+    /**
+     * Consumer-supplied frame-size override for the dispatcher. Non-null when
+     * the sealed parent declares a companion object implementing
+     * `com.ditchoom.buffer.codec.FrameDetector`; holds the parent type whose
+     * companion to call. The dispatcher's `peekFrameSize` delegates to
+     * `<customPeek>.peekFrameSize(stream, baseOffset)` instead of routing through
+     * per-variant peeks — for frames whose size is opcode-independent and not
+     * walker-derivable (RFC 6455 WebSocket: bit-packed escape length + folded
+     * mask). See [CodecShape.customPeek].
+     */
+    val customPeek: ClassName? = null,
 )
 
 internal data class DispatchVariant(
@@ -315,6 +326,16 @@ internal data class CodecShape(
      * literal drives the encode-side write.
      */
     val singletonDispatchDiscriminator: SingletonDispatchDiscriminator? = null,
+    /**
+     * Consumer-supplied frame-size override. Non-null when the
+     * `@ProtocolMessage` type declares a companion object implementing
+     * `com.ditchoom.buffer.codec.FrameDetector`; holds the type whose companion
+     * to call. The emitter makes `peekFrameSize` delegate to
+     * `<customPeek>.peekFrameSize(stream, baseOffset)` instead of running the
+     * derived walker — the escape hatch for framings the walker can't express
+     * (e.g. RFC 6455 WebSocket's escape-coded length + folded mask).
+     */
+    val customPeek: ClassName? = null,
 )
 
 /**

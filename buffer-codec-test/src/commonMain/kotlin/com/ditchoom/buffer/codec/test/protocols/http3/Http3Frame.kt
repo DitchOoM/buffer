@@ -4,31 +4,40 @@ import com.ditchoom.buffer.codec.annotations.DispatchOn
 import com.ditchoom.buffer.codec.annotations.DispatchValue
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import com.ditchoom.buffer.codec.annotations.UseCodec
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
+import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec
 import kotlin.jvm.JvmInline
 
 /**
- * Stage 3/4a — the variable-width **dispatcher** vector: a `@DispatchOn`
- * discriminator whose wire width is itself variable.
+ * The real HTTP/3 frame (RFC 9114 §7.1): `Type (varint)` + `Length (varint)` +
+ * `Frame Payload`. This fixture exercises two variable-width mechanisms at once,
+ * both keyed off the QUIC variable-length integer (RFC 9000 §16):
  *
- * The HTTP/3 frame layout (RFC 9114 §7.1) is `Type (varint)` + `Length
- * (varint)` + `Frame Payload`, where `Type` is a QUIC variable-length integer
- * (RFC 9000 §16). [Http3FrameType] models that discriminator: its inner scalar
- * carries `@UseCodec(QuicVarintCodec)`, so the dispatcher is a
- * `Discriminator.Varint` — it can't pre-compute a fixed discriminator width and
- * instead measures it at runtime via the value class's own codec.
+ *  - **A variable-width dispatcher.** [Http3FrameType] is the `@DispatchOn`
+ *    discriminator; its inner scalar carries `@UseCodec(QuicVarintCodec)`, so
+ *    the dispatcher is a `Discriminator.Varint` — it measures the discriminator
+ *    width at runtime rather than assuming one byte. Frame types `0x00`/`0x01`/
+ *    `0x04` are 1-byte varints; [Extension] (type `0x40` = 64) needs 2 bytes.
  *
- * The buffer library ships no QUIC encoding; [QuicVarintCodec] is test-support
- * (RFC 9000 §16) and the processor stays encoding-agnostic. Frame *bodies* are
- * fixed-size scalars here (not the real HTTP/3 length-prefixed payloads) so the
- * generated `peekFrameSize` is exactly testable: total = varint-type-width +
- * fixed-suffix.
+ *  - **A variable-width bounding length.** Each variant's `length` field is the
+ *    real RFC 9114 §7.1 Length, modeled as [Http3LengthCodec] (a
+ *    `BoundingLengthCodec`). It narrows `buffer.limit()` to the payload extent so
+ *    the trailing `@RemainingBytes payload` reads exactly `length` bytes — and
+ *    the generated `peekFrameSize` sizes the whole frame as
+ *    `typeWidth + lengthWidth + length`.
  *
- * [Extension] uses frame type `0x40` (64), which needs a 2-byte QUIC varint, so
- * the suite exercises a discriminator wider than one byte on both decode and
- * peek — the property that distinguishes this from the fixed-width
- * `Discriminator.ValueClass` path.
+ * The length sits immediately before the payload (no field folds between them),
+ * which is the common bounding shape; the WebSocket frame is the contrasting
+ * case where a masking key folds between the length and the body.
+ *
+ * The buffer library ships no QUIC encoding; [QuicVarintCodec] / [Http3LengthCodec]
+ * are test-support and the processor stays encoding-agnostic. Frame payloads are
+ * opaque [BinaryData] here — RFC 9114 §7.1 defines the generic frame as
+ * Type + Length + opaque Frame Payload; per-type payload structure (QPACK field
+ * sections, SETTINGS id/value pairs) is a nested concern above the framing layer.
  */
 @JvmInline
 @ProtocolMessage
@@ -42,28 +51,31 @@ value class Http3FrameType(
 @DispatchOn(Http3FrameType::class)
 @ProtocolMessage
 sealed interface Http3Frame {
-    /** DATA — RFC 9114 §7.2.1, frame type 0x00. */
+    /** DATA — RFC 9114 §7.2.1, frame type 0x00. Payload is opaque application data. */
     @PacketType(value = 0x00)
     @ProtocolMessage
     data class Data(
         val frameType: Http3FrameType = Http3FrameType(0x00uL),
-        val firstByte: UByte,
+        @UseCodec(Http3LengthCodec::class) val length: ULong,
+        @RemainingBytes @UseCodec(BinaryDataCodec::class) val payload: BinaryData,
     ) : Http3Frame
 
-    /** HEADERS — RFC 9114 §7.2.2, frame type 0x01. */
+    /** HEADERS — RFC 9114 §7.2.2, frame type 0x01. Payload is a QPACK field section. */
     @PacketType(value = 0x01)
     @ProtocolMessage
     data class Headers(
         val frameType: Http3FrameType = Http3FrameType(0x01uL),
-        val fieldSectionTag: UShort,
+        @UseCodec(Http3LengthCodec::class) val length: ULong,
+        @RemainingBytes @UseCodec(BinaryDataCodec::class) val fieldSection: BinaryData,
     ) : Http3Frame
 
-    /** SETTINGS — RFC 9114 §7.2.4, frame type 0x04. */
+    /** SETTINGS — RFC 9114 §7.2.4, frame type 0x04. Payload is a sequence of id/value pairs. */
     @PacketType(value = 0x04)
     @ProtocolMessage
     data class Settings(
         val frameType: Http3FrameType = Http3FrameType(0x04uL),
-        val identifier: UInt,
+        @UseCodec(Http3LengthCodec::class) val length: ULong,
+        @RemainingBytes @UseCodec(BinaryDataCodec::class) val parameters: BinaryData,
     ) : Http3Frame
 
     /** A reserved/greased extension frame whose type needs a 2-byte varint. */
@@ -71,6 +83,7 @@ sealed interface Http3Frame {
     @ProtocolMessage
     data class Extension(
         val frameType: Http3FrameType = Http3FrameType(0x40uL),
-        val payload: UByte,
+        @UseCodec(Http3LengthCodec::class) val length: ULong,
+        @RemainingBytes @UseCodec(BinaryDataCodec::class) val payload: BinaryData,
     ) : Http3Frame
 }
