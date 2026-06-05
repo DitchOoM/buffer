@@ -17,9 +17,9 @@ public object TlsHandshakeSealedBodyCodec : Codec<TlsHandshakeSealedBody> {
     val discriminator = buffer.readUByte().toInt()
     return when (discriminator) {
       0x01 -> TlsHandshakeSealedBodyClientHelloCodec.decode(buffer, context)
-      0x02 -> TlsHandshakeSealedBodyHelloRequestCodec.decode(buffer, context)
+      0x05 -> TlsHandshakeSealedBodyEndOfEarlyDataCodec.decode(buffer, context)
       else -> {
-        throw DecodeException(fieldPath = "TlsHandshakeSealedBody.discriminator", bufferPosition = discriminatorPosition, expected = "one of {0x01, 0x02}", actual = """0x${discriminator.toString(16).padStart(2, '0').uppercase()}""")
+        throw DecodeException(fieldPath = "TlsHandshakeSealedBody.discriminator", bufferPosition = discriminatorPosition, expected = "one of {0x01, 0x05}", actual = """0x${discriminator.toString(16).padStart(2, '0').uppercase()}""")
       }
     }
   }
@@ -34,16 +34,16 @@ public object TlsHandshakeSealedBodyCodec : Codec<TlsHandshakeSealedBody> {
         buffer.writeUByte(0x01.toUByte())
         TlsHandshakeSealedBodyClientHelloCodec.encode(buffer, value, context)
       }
-      is TlsHandshakeSealedBody.HelloRequest -> {
-        buffer.writeUByte(0x02.toUByte())
-        TlsHandshakeSealedBodyHelloRequestCodec.encode(buffer, value, context)
+      is TlsHandshakeSealedBody.EndOfEarlyData -> {
+        buffer.writeUByte(0x05.toUByte())
+        TlsHandshakeSealedBodyEndOfEarlyDataCodec.encode(buffer, value, context)
       }
     }
   }
 
   override fun wireSize(`value`: TlsHandshakeSealedBody, context: EncodeContext): WireSize = when (value) {
     is TlsHandshakeSealedBody.ClientHello -> WireSize.Exact(3)
-    is TlsHandshakeSealedBody.HelloRequest -> WireSize.Exact(1)
+    is TlsHandshakeSealedBody.EndOfEarlyData -> WireSize.Exact(1)
   }
 
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
@@ -56,14 +56,14 @@ public object TlsHandshakeSealedBodyCodec : Codec<TlsHandshakeSealedBody> {
           else -> inner
         }
       }
-      0x02 -> {
-        when (val inner = TlsHandshakeSealedBodyHelloRequestCodec.peekFrameSize(stream, baseOffset + 1)) {
+      0x05 -> {
+        when (val inner = TlsHandshakeSealedBodyEndOfEarlyDataCodec.peekFrameSize(stream, baseOffset + 1)) {
           is PeekResult.Complete -> PeekResult.Complete(1 + inner.bytes)
           else -> inner
         }
       }
       else -> {
-        throw DecodeException(fieldPath = "TlsHandshakeSealedBody.discriminator", bufferPosition = baseOffset, expected = "one of {0x01, 0x02}", actual = """0x${discriminator.toString(16).padStart(2, '0').uppercase()}""")
+        throw DecodeException(fieldPath = "TlsHandshakeSealedBody.discriminator", bufferPosition = baseOffset, expected = "one of {0x01, 0x05}", actual = """0x${discriminator.toString(16).padStart(2, '0').uppercase()}""")
       }
     }
   }

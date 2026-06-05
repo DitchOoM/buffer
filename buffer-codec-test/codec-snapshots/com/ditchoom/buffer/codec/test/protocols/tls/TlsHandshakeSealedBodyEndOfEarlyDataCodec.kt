@@ -10,17 +10,17 @@ import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
 
-public object TlsHandshakeSealedBodyHelloRequestCodec : Codec<TlsHandshakeSealedBody.HelloRequest> {
-  override fun decode(buffer: ReadBuffer, context: DecodeContext): TlsHandshakeSealedBody.HelloRequest = TlsHandshakeSealedBody.HelloRequest
+public object TlsHandshakeSealedBodyEndOfEarlyDataCodec : Codec<TlsHandshakeSealedBody.EndOfEarlyData> {
+  override fun decode(buffer: ReadBuffer, context: DecodeContext): TlsHandshakeSealedBody.EndOfEarlyData = TlsHandshakeSealedBody.EndOfEarlyData
 
   override fun encode(
     buffer: WriteBuffer,
-    `value`: TlsHandshakeSealedBody.HelloRequest,
+    `value`: TlsHandshakeSealedBody.EndOfEarlyData,
     context: EncodeContext,
   ) {
   }
 
-  override fun wireSize(`value`: TlsHandshakeSealedBody.HelloRequest, context: EncodeContext): WireSize = WireSize.Exact(0)
+  override fun wireSize(`value`: TlsHandshakeSealedBody.EndOfEarlyData, context: EncodeContext): WireSize = WireSize.Exact(0)
 
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 0) PeekResult.Complete(0) else PeekResult.NeedsMoreData
 }

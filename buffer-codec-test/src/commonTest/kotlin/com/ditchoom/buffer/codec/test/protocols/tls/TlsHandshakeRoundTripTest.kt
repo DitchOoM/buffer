@@ -95,19 +95,20 @@ class TlsHandshakeRoundTripTest {
     }
 
     @Test
-    fun handshakeWithSealedHelloRequestDataObjectRoundTrips() {
-        val body = TlsHandshakeSealedBody.HelloRequest
+    fun handshakeWithSealedEndOfEarlyDataDataObjectRoundTrips() {
+        val body = TlsHandshakeSealedBody.EndOfEarlyData
         // Sealed-body wire = 1 (PacketType discriminator) + 0 (singleton) = 1
         val bodyBytes = 1
         val original =
             TlsHandshakeWithSealedBody(
-                msgType = 0x00u,
+                msgType = 0x05u,
                 length = bodyBytes.toUInt(),
                 body = body,
             )
-        val expected = byteArrayOf(0x00, 0x00, 0x00, 0x01, 0x02)
+        // msgType 0x05 + uint24 length 0x000001 + body discriminator 0x05 (end_of_early_data).
+        val expected = byteArrayOf(0x05, 0x00, 0x00, 0x01, 0x05)
         val decoded = roundTripHandshakeWithSealed(original, expected)
-        assertSame(TlsHandshakeSealedBody.HelloRequest, decoded.body)
+        assertSame(TlsHandshakeSealedBody.EndOfEarlyData, decoded.body)
     }
 
     private fun bodyWireBytes(body: TlsHandshakeBody): Int = 2 + body.random.bytes.size
