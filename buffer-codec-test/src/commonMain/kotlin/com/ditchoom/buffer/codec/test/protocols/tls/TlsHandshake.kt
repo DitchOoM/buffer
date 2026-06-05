@@ -70,13 +70,19 @@ data class TlsHandshakeWithSealedBody(
 
 @ProtocolMessage(wireOrder = Endianness.Big)
 sealed interface TlsHandshakeSealedBody {
+    /** RFC 8446 §4 HandshakeType `client_hello(1)` — a data-class body. */
     @PacketType(0x01)
     @ProtocolMessage
     data class ClientHello(
         val legacyVersion: UShort,
     ) : TlsHandshakeSealedBody
 
-    @PacketType(0x02)
+    /**
+     * RFC 8446 §4.5 HandshakeType `end_of_early_data(5)` — `struct {} EndOfEarlyData`,
+     * an empty body. Exercises the empty `data object` singleton-dispatch path under a
+     * `@LengthFrom`-bounded sealed parent with a spec-faithful HandshakeType value.
+     */
+    @PacketType(0x05)
     @ProtocolMessage
-    data object HelloRequest : TlsHandshakeSealedBody
+    data object EndOfEarlyData : TlsHandshakeSealedBody
 }
