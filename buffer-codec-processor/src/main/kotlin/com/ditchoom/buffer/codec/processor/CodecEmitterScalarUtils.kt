@@ -127,3 +127,25 @@ internal fun List<FieldSpec>.sumOfFixedWireBytes(): WireWidth =
     filterIsInstance<FieldSpec.FixedSize>()
         .map { it.wireWidth }
         .fold(WireWidth.Zero as WireWidth) { a, b -> a + b }
+
+/**
+ * Write statement for a natural-width scalar given an
+ * accessor expression. Boolean encodes as `0x00` / `0x01`.
+ */
+internal fun naturalScalarWriteStatement(
+    kind: ScalarKind,
+    accessor: String,
+): String =
+    when (kind) {
+        ScalarKind.Boolean -> "buffer.writeByte(if ($accessor) 1.toByte() else 0.toByte())"
+        ScalarKind.UByte -> "buffer.writeUByte($accessor)"
+        ScalarKind.UShort -> "buffer.writeUShort($accessor)"
+        ScalarKind.UInt -> "buffer.writeUInt($accessor)"
+        ScalarKind.ULong -> "buffer.writeULong($accessor)"
+        ScalarKind.Byte -> "buffer.writeByte($accessor)"
+        ScalarKind.Short -> "buffer.writeShort($accessor)"
+        ScalarKind.Int -> "buffer.writeInt($accessor)"
+        ScalarKind.Long -> "buffer.writeLong($accessor)"
+        ScalarKind.Float -> "buffer.writeFloat($accessor)"
+        ScalarKind.Double -> "buffer.writeDouble($accessor)"
+    }
