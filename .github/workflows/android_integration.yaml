@@ -96,7 +96,18 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: ./gradlew connectedAndroidTest -x connectedBenchmarkAndroidTest
+          script: |
+            # The cached AVD's userdata retains test APKs installed by the run
+            # that populated it. If any was signed with a different debug key
+            # than the current build (cache poisoning across a keystore /
+            # emulator / module-signing change — the keystore-hash cache key in
+            # #183 only invalidates on keystore changes, not these), reinstalling
+            # over it fails with INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES
+            # before any test runs. Uninstalling every pre-existing ditchoom
+            # package first makes the install clean and idempotent regardless of
+            # what signature the cached copy carried.
+            adb shell pm list packages -3 | sed 's/^package://' | grep -i '\.ditchoom\.' | xargs -r -n1 adb uninstall || true
+            ./gradlew connectedAndroidTest -x connectedBenchmarkAndroidTest
 
       - name: Kill emulator processes
         if: always()
