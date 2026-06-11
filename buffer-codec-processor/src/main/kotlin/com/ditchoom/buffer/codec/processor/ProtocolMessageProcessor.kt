@@ -172,6 +172,16 @@ class ProtocolMessageProcessor(
             }
             val ctor = symbol.primaryConstructor ?: continue
             for (param in ctor.parameters) {
+                // `@RemainingBytes @UseCodec(C)` where `C : ViewCodec` is the
+                // sanctioned zero-copy escape from the raw-bytes prohibition:
+                // the codec's ViewCodec contract documents the borrowed-view
+                // ownership the prohibition exists to demand. The field's
+                // declared type (including `ReadBuffer`) is the codec's
+                // business — skip the walker for this parameter.
+                val isViewPayload =
+                    param.annotations.any { it.shortName.asString() == "RemainingBytes" } &&
+                        param.hasViewUseCodec()
+                if (isViewPayload) continue
                 walkType(
                     type = param.type.resolve(),
                     owner = symbol,
@@ -1361,14 +1371,16 @@ class ProtocolMessageProcessor(
                 )
                 continue
             }
-            if (hasRemainingBytes && !isPayloadField) {
+            if (hasRemainingBytes && !isPayloadField && !param.hasViewUseCodec()) {
                 val displayed = fieldType.declaration.qualifiedName?.asString() ?: "<unresolved>"
                 logger.error(
                     "@RemainingBytes @UseCodec on $ownerName.$fieldName requires the bound " +
                         "field's type to extend `com.ditchoom.buffer.codec.Payload`, but it " +
-                        "is `$displayed`. The typed-payload path is the only " +
-                        "`@UseCodec` composition wired up — wrap the value in a `Payload`-" +
-                        "tagged type.",
+                        "is `$displayed`. Either wrap the value in a `Payload`-tagged type " +
+                        "(consumer-owned copy), or — for a zero-copy borrowed view whose " +
+                        "lifetime is tied to the source buffer — make the codec implement " +
+                        "`com.ditchoom.buffer.codec.ViewCodec` (the explicit ownership " +
+                        "opt-in for non-Payload types).",
                     param,
                 )
                 continue
@@ -1907,7 +1919,7 @@ class ProtocolMessageProcessor(
             )
         }
 
-        // F2 — requires @DispatchOn with a single-byte discriminator.
+        // F2 — requires @DispatchOn with a single-byte or varint discriminator.
         val dispatchOn =
             owner.annotations.firstOrNull { a ->
                 a.shortName.asString() == DISPATCH_ON_SHORT &&
@@ -1916,12 +1928,19 @@ class ProtocolMessageProcessor(
                         .declaration.qualifiedName
                         ?.asString() == DISPATCH_ON_QNAME
             }
+        // Discriminator shape, threaded into F5: the opcode parameter's
+        // required type depends on whether the discriminator is the
+        // legacy single-byte scalar (opcode: Int carrying the byte) or a
+        // varint value class (opcode: Long / ULong carrying the full
+        // decoded value, re-encoded through the discriminator's codec).
+        var discInnerQname: String? = null
+        var discIsVarint = false
         if (dispatchOn == null) {
             logger.error(
                 "@ForwardCompatible on $ownerName requires @DispatchOn dispatch with a single-byte " +
-                    "discriminator. Framed sealed dispatch routes through @DispatchOn; wrap the " +
-                    "opcode in a `@JvmInline value class` carrying a @DispatchValue and annotate the " +
-                    "parent with @DispatchOn(<OpCode>::class).",
+                    "or varint discriminator. Framed sealed dispatch routes through @DispatchOn; " +
+                    "wrap the opcode in a `@JvmInline value class` carrying a @DispatchValue and " +
+                    "annotate the parent with @DispatchOn(<OpCode>::class).",
                 owner,
             )
         } else {
@@ -1930,27 +1949,39 @@ class ProtocolMessageProcessor(
                     .firstOrNull { it.name?.asString() == "type" }
                     ?.value as? KSType
             val discriminatorDecl = discriminatorType?.declaration as? KSClassDeclaration
-            val innerQname =
+            val innerParam =
                 discriminatorDecl
                     ?.primaryConstructor
                     ?.parameters
                     ?.singleOrNull()
+            val innerQname =
+                innerParam
                     ?.type
                     ?.resolve()
                     ?.declaration
                     ?.qualifiedName
                     ?.asString()
-            // Single-byte inner scalars only (Byte / UByte). Wider
-            // discriminators would need a multi-byte opcode store + a
-            // byte-order-aware re-encode, neither of which the preserve
-            // path emits today.
-            if (innerQname != null && innerQname !in SINGLE_BYTE_SCALAR_QNAMES) {
+            discInnerQname = innerQname
+            discIsVarint = innerParam?.hasVariableLengthUseCodec() == true
+            // Two preservable shapes: a single-byte inner scalar (the
+            // opcode byte re-encodes via writeUByte) or a varint inner
+            // (`@UseCodec(VariableLengthCodec)` on a Long / ULong inner —
+            // the opcode value re-encodes through the discriminator's own
+            // codec, so a multi-byte GREASE-style type round-trips).
+            // Fixed multi-byte inners (UShort / UInt / …) remain
+            // unsupported: their preserve path would need a byte-order-
+            // aware re-encode the emit doesn't produce.
+            val singleByte = innerQname in SINGLE_BYTE_SCALAR_QNAMES
+            val varintWide = discIsVarint && innerQname in VARINT_OPCODE_QNAMES
+            if (innerQname != null && !singleByte && !varintWide) {
                 logger.error(
                     "@ForwardCompatible on $ownerName requires a single-byte @DispatchOn " +
-                        "discriminator (Byte / UByte inner scalar), but the discriminator's inner " +
-                        "type is `$innerQname`. The preserved opcode is stored as one byte and " +
-                        "re-encoded with writeUByte, so a wider discriminator cannot round-trip " +
-                        "byte-identically.",
+                        "discriminator (Byte / UByte inner scalar) or a varint discriminator " +
+                        "(`@UseCodec(<VariableLengthCodec>) raw: Long | ULong` inner), but the " +
+                        "discriminator's inner type is `$innerQname`" +
+                        (if (discIsVarint) " (varint)" else "") +
+                        ". A fixed multi-byte discriminator cannot round-trip byte-identically " +
+                        "through the preserve path.",
                     owner,
                 )
             }
@@ -1994,14 +2025,20 @@ class ProtocolMessageProcessor(
             )
         }
 
-        // F5 — (opcode: Int, raw: PlatformBuffer | ReadBuffer).
+        // F5 — (opcode: Int | Long | ULong, raw: PlatformBuffer | ReadBuffer).
+        // The opcode kind must match the discriminator shape: a single-
+        // byte discriminator preserves the discriminator *byte* as `Int`;
+        // a varint discriminator preserves the full decoded value, so the
+        // opcode parameter must be the discriminator's own inner type
+        // (Long / ULong) for a lossless preserve→re-encode round trip.
         val params = sink.primaryConstructor?.parameters.orEmpty()
-        val hasInt =
+        val expectedOpcodeQname = if (discIsVarint) discInnerQname else INT_QNAME
+        val hasOpcode =
             params.any {
                 it.type
                     .resolve()
                     .declaration.qualifiedName
-                    ?.asString() == INT_QNAME
+                    ?.asString() == expectedOpcodeQname
             }
         val hasRawBuffer =
             params.any {
@@ -2011,12 +2048,21 @@ class ProtocolMessageProcessor(
                     ?.asString() in
                     setOf(PLATFORM_BUFFER_QNAME, READ_BUFFER_QNAME)
             }
-        if (params.size != 2 || !hasInt || !hasRawBuffer) {
+        if (params.size != 2 || !hasOpcode || !hasRawBuffer) {
+            val expectedOpcodeSimple = expectedOpcodeQname?.substringAfterLast('.') ?: "Int"
             logger.error(
                 "@UnknownVariant $sinkName must have a primary constructor shaped " +
-                    "`(opcode: Int, raw: PlatformBuffer)` (a ReadBuffer-typed `raw` is also " +
-                    "accepted): `opcode` carries the discriminator byte and `raw` carries the " +
-                    "opaque preserved payload.",
+                    "`(opcode: $expectedOpcodeSimple, raw: PlatformBuffer)` (a ReadBuffer-typed " +
+                    "`raw` is also accepted): `opcode` carries the " +
+                    (
+                        if (discIsVarint) {
+                            "discriminator's full decoded value (its inner type, so the preserve" +
+                                "→re-encode round trip is lossless)"
+                        } else {
+                            "discriminator byte"
+                        }
+                    ) +
+                    " and `raw` carries the opaque preserved payload.",
                 sink,
             )
         }
@@ -2138,7 +2184,13 @@ class ProtocolMessageProcessor(
         for (st in codecDecl.getAllSuperTypes()) {
             if (st.isError) continue
             val q = st.declaration.qualifiedName?.asString()
-            if (q != CODEC_QNAME && q != BOUNDING_LENGTH_CODEC_QNAME && q != VARIABLE_LENGTH_CODEC_QNAME) continue
+            if (q != CODEC_QNAME &&
+                q != BOUNDING_LENGTH_CODEC_QNAME &&
+                q != VARIABLE_LENGTH_CODEC_QNAME &&
+                q != VIEW_CODEC_QNAME
+            ) {
+                continue
+            }
             val arg =
                 st.arguments
                     .firstOrNull()
@@ -2398,6 +2450,10 @@ class ProtocolMessageProcessor(
         private const val READ_BUFFER_QNAME = "com.ditchoom.buffer.ReadBuffer"
         private const val INT_QNAME = "kotlin.Int"
         private val SINGLE_BYTE_SCALAR_QNAMES = setOf("kotlin.Byte", "kotlin.UByte")
+
+        // Inner scalar kinds accepted for a *varint* @ForwardCompatible
+        // discriminator (QUIC varints decode into a 62-bit domain).
+        private val VARINT_OPCODE_QNAMES = setOf("kotlin.Long", "kotlin.ULong")
         private const val REMAINING_BYTES_QNAME = "com.ditchoom.buffer.codec.annotations.RemainingBytes"
         private const val REMAINING_BYTES_SHORT = "RemainingBytes"
         private const val CODEC_QNAME = "com.ditchoom.buffer.codec.Codec"

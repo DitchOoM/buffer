@@ -19,6 +19,7 @@ internal const val PAYLOAD_SIMPLE = "Payload"
 internal const val OWNED_BYTES_HANDLE_QNAME = "com.ditchoom.buffer.codec.OwnedBytesHandle"
 internal const val BOUNDING_LENGTH_CODEC_QNAME = "com.ditchoom.buffer.codec.BoundingLengthCodec"
 internal const val VARIABLE_LENGTH_CODEC_QNAME = "com.ditchoom.buffer.codec.VariableLengthCodec"
+internal const val VIEW_CODEC_QNAME = "com.ditchoom.buffer.codec.ViewCodec"
 internal const val FRAMED_BY_QNAME = "com.ditchoom.buffer.codec.annotations.FramedBy"
 internal const val FRAME_DETECTOR_QNAME = "com.ditchoom.buffer.codec.FrameDetector"
 
@@ -92,5 +93,13 @@ internal val BUFFER_FACTORY_MANAGED_MN =
 // so both are valid declared types.
 internal val FORWARD_COMPATIBLE_RAW_QNAMES =
     setOf("com.ditchoom.buffer.PlatformBuffer", "com.ditchoom.buffer.ReadBuffer")
+
+// Accepted types for the `@UnknownVariant` `opcode` parameter. `Int`
+// is the legacy single-byte-discriminator shape (carries the
+// discriminator byte); `Long` / `ULong` are the varint-discriminator
+// shapes (carry the discriminator's full decoded value) — F2/F5
+// require them to match the discriminator's inner scalar kind.
+internal val FORWARD_COMPATIBLE_OPCODE_QNAMES =
+    setOf("kotlin.Int", "kotlin.Long", "kotlin.ULong")
 internal val CHARSET_CN = ClassName("com.ditchoom.buffer", "Charset")
 internal val STRING_NULLABLE_TN = ClassName("kotlin", "String").copy(nullable = true)
