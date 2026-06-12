@@ -601,6 +601,30 @@ class BufferStreamTests {
         pool.clear()
     }
 
+    @Test
+    fun readBufferScopedPartialSliceReturnsChunkToPool() {
+        val pool = BufferPool(defaultBufferSize = 64, maxPoolSize = 10)
+        val processor = StreamProcessor.create(pool)
+
+        val chunk = pool.acquire(8)
+        chunk.writeInt(0x11223344)
+        chunk.writeInt(0x55667788)
+        chunk.resetForRead()
+        processor.append(chunk)
+
+        // Partial path: a slice of a chunk that stays in the deque. The slice holds a
+        // refCount on the pooled chunk, so the scope must release it on exit.
+        processor.readBufferScoped(4) { assertEquals(0x11223344, readInt()) }
+        // Exact path: drains the chunk; the processor releases its own reference.
+        processor.readBufferScoped(4) { assertEquals(0x55667788, readInt()) }
+
+        // Both references released -> refCount zero -> the chunk must be back in the pool.
+        assertEquals(1, pool.stats().currentPoolSize)
+
+        processor.release()
+        pool.clear()
+    }
+
     // ============================================================================
     // StreamProcessor Spanning Chunk Boundary Tests
     // ============================================================================

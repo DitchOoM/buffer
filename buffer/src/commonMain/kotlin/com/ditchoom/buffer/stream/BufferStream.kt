@@ -692,14 +692,20 @@ internal class DefaultStreamProcessor(
             }
         }
         if (chunk.remaining() > size) {
-            // Partial: slice without removing chunk (chunk stays in deque)
+            // Partial: slice without removing chunk (chunk stays in deque). The slice still
+            // holds a refCount on a pooled chunk — release it after the block, or the chunk
+            // can never return to the pool even once fully drained.
             val oldLimit = chunk.limit()
             chunk.setLimit(chunk.position() + size)
             val slice = chunk.slice()
             chunk.setLimit(oldLimit)
             chunk.position(chunk.position() + size)
             totalAvailable -= size
-            return block(slice)
+            return try {
+                block(slice)
+            } finally {
+                freeConsumedChunk(slice)
+            }
         }
 
         // Multi-chunk: copy into pooled buffer, pass to block, then free
