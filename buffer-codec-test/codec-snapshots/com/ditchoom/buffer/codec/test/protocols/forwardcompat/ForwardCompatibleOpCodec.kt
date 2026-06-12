@@ -4,6 +4,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
+import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.ForwardCompatibleFactoryKey
 import com.ditchoom.buffer.codec.FramedEncoder
@@ -27,6 +28,14 @@ public object ForwardCompatibleOpCodec {
         buffer.position(discriminatorPosition)
         val __fcOpcode = buffer.readUByte().toInt()
         val __fcLength = MqttRemainingLengthCodec.decode(buffer, context)
+        if (__fcLength.toInt() > buffer.remaining()) {
+          throw DecodeException(
+                fieldPath = "Unknown.@ForwardCompatible",
+                bufferPosition = buffer.position(),
+                expected = "a fully-buffered " + __fcLength + "-byte framed body",
+                actual = buffer.remaining().toString() + " bytes available",
+              )
+        }
         val __fcFrameEnd = buffer.position() + __fcLength.toInt()
         val __fcFactory = context[ForwardCompatibleFactoryKey] ?: BufferFactory.managed()
         val __fcRaw = __fcFactory.allocate(__fcLength.toInt())

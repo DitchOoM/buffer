@@ -238,6 +238,7 @@ internal class CodecEmitter(
             "val __framingLength = %T.decode(buffer, context)",
             framedBy.codecClassName,
         )
+        appendFramedBodyTruncationGuard(body, "__framingLength", "${shape.ownerSimpleName}.@FramedBy")
         body.addStatement("%T.applyBound(buffer, __framingLength)", framedBy.codecClassName)
         body.addStatement("val __framingStart = buffer.position()")
         body.addStatement("val __framingBound = __framingStart + __framingLength.toInt()")
@@ -1693,6 +1694,7 @@ internal class CodecEmitter(
                 "val __framingLength = %T.decode(buffer, context)",
                 framedBy.codecClassName,
             )
+            appendFramedBodyTruncationGuard(body, "__framingLength", "${shape.ownerSimpleName}.@FramedBy")
             body.addStatement(
                 "%T.applyBound(buffer, __framingLength)",
                 framedBy.codecClassName,
@@ -1787,4 +1789,31 @@ internal class CodecEmitter(
             is FieldSpec.Conditional -> field.nullableTypeName
             is FieldSpec.ProtocolMessageScalar -> field.fieldType
         }
+}
+
+/**
+ * Emits the framed-body truncation guard between the framing codec's `decode`
+ * and the body decode: the declared body must be fully buffered. Without it a
+ * truncated frame fails with platform-dependent buffer errors — or worse, on
+ * platforms whose buffers clamp limits past capacity (JS), reads silently
+ * fabricate zero bytes for the missing region (and the @ForwardCompatible
+ * preserve path would even *allocate* the attacker-declared length). Stream
+ * readers that gate on `peekFrameSize` never hit this; it protects direct
+ * `decode` callers.
+ */
+internal fun appendFramedBodyTruncationGuard(
+    body: CodeBlock.Builder,
+    lengthLocal: String,
+    fieldPath: String,
+) {
+    body.beginControlFlow("if (%L.toInt() > buffer.remaining())", lengthLocal)
+    body.addStatement(
+        "throw %T(\n  fieldPath = %S,\n  bufferPosition = buffer.position(),\n" +
+            "  expected = \"a fully-buffered \" + %L + \"-byte framed body\",\n" +
+            "  actual = buffer.remaining().toString() + \" bytes available\",\n)",
+        DECODE_EXCEPTION_CN,
+        fieldPath,
+        lengthLocal,
+    )
+    body.endControlFlow()
 }

@@ -1129,6 +1129,10 @@ internal fun appendForwardCompatibleDecodeElse(
         "val __fcLength = %T.decode(buffer, context)",
         framedBy.codecClassName,
     )
+    // Truncation guard BEFORE the allocate below: __fcRaw is sized by the
+    // *declared* length, so an unguarded truncated frame would allocate an
+    // attacker-controlled amount and (on limit-clamping platforms) zero-fill it.
+    appendFramedBodyTruncationGuard(body, "__fcLength", "${fc.unknownClassName.simpleName}.@ForwardCompatible")
     body.addStatement("val __fcFrameEnd = buffer.position() + __fcLength.toInt()")
     body.addStatement(
         "val __fcFactory = context[%T] ?: %T.%M()",

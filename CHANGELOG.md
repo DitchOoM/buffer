@@ -7,6 +7,17 @@ to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Codec processor: framed-body truncation guard** — generated `@FramedBy`
+  decode (variant arms and the `@ForwardCompatible` preserve arm) now throws a
+  `DecodeException` (`<Owner>.@FramedBy` / `<Unknown>.@ForwardCompatible`)
+  when the declared body length exceeds `buffer.remaining()`, **before**
+  applying the bound or allocating the preserve buffer. Previously a truncated
+  frame failed with platform-dependent buffer errors — or worse, on platforms
+  whose buffers clamp limits past capacity (JS), reads silently fabricated
+  zero bytes for the missing region and the preserve path allocated the
+  attacker-declared length (found by downstream differential fuzzing). Stream
+  readers that gate on `peekFrameSize` never hit the guard; it protects direct
+  `decode` callers and makes truncation behavior identical on every platform.
 - **Codec processor: `@FramedBy` after a varint discriminator** — the `after`
   framing header may now be a varint value class (inner scalar carrying
   `@UseCodec(<VariableLengthCodec>)`, e.g. an HTTP/3 frame type). The framed

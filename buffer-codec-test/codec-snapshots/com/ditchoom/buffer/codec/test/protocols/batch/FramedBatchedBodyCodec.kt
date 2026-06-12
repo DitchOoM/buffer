@@ -19,6 +19,14 @@ public object FramedBatchedBodyCodec {
   public fun decode(buffer: ReadBuffer, context: DecodeContext): FramedBatchedBody {
     val __framingOuterLimit = buffer.limit()
     val __framingLength = Le32LengthCodec.decode(buffer, context)
+    if (__framingLength.toInt() > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "FramedBatchedBody.@FramedBy",
+            bufferPosition = buffer.position(),
+            expected = "a fully-buffered " + __framingLength + "-byte framed body",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     Le32LengthCodec.applyBound(buffer, __framingLength)
     val __framingStart = buffer.position()
     val __framingBound = __framingStart + __framingLength.toInt()

@@ -18,6 +18,14 @@ public object Http3FcFrameDataCodec {
     val frameType = Http3FcFrameTypeCodec.decode(buffer, context)
     val __framingOuterLimit = buffer.limit()
     val __framingLength = Http3FcLengthCodec.decode(buffer, context)
+    if (__framingLength.toInt() > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "Data.@FramedBy",
+            bufferPosition = buffer.position(),
+            expected = "a fully-buffered " + __framingLength + "-byte framed body",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     Http3FcLengthCodec.applyBound(buffer, __framingLength)
     val __framingStart = buffer.position()
     val __framingBound = __framingStart + __framingLength.toInt()
