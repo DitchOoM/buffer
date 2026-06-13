@@ -546,7 +546,11 @@ internal fun analyzeField(
                 ),
             )
         }
-        if (useCodecAnn != null && type.implementsPayload()) {
+        if (useCodecAnn != null && (type.implementsPayload() || param.hasViewUseCodec())) {
+            // Two typed-payload shapes share one emit: a `Payload`-marked
+            // self-contained value, or a non-`Payload` borrowed view whose
+            // codec opts in via `ViewCodec` (the zero-copy escape — see
+            // [implementsViewCodec]).
             return analyzeRemainingBytesPayloadField(param, type, useCodecAnn, ownerSimpleName)
         }
         if (useCodecAnn == null && payloadTypeParameter != null && type.matchesTypeParameter(payloadTypeParameter)) {
@@ -1766,6 +1770,35 @@ internal fun KSValueParameter.hasVariableLengthUseCodec(): Boolean {
 }
 
 /**
+ * Does this codec class implement `com.ditchoom.buffer.codec.ViewCodec`?
+ * The explicit opt-in that lets a `@RemainingBytes @UseCodec(C) val: T`
+ * field carry a non-`Payload` type (including `ReadBuffer`): the codec's
+ * decode returns a borrowed view into the source buffer, and implementing
+ * `ViewCodec` is the documented ownership contract the lockdown's
+ * raw-bytes prohibition otherwise demands. Walks the full supertype chain
+ * so an indirect implementer is still detected.
+ */
+internal fun KSClassDeclaration.implementsViewCodec(): Boolean =
+    getAllSuperTypes().any { st ->
+        st.declaration.qualifiedName?.asString() == VIEW_CODEC_QNAME
+    }
+
+/**
+ * Does this parameter carry `@UseCodec(C::class)` where `C` implements
+ * `ViewCodec`? See [implementsViewCodec]; used to route a
+ * `@RemainingBytes` non-`Payload` field onto the typed-payload emit path
+ * and to exempt its declared type from the raw-bytes prohibition.
+ */
+internal fun KSValueParameter.hasViewUseCodec(): Boolean {
+    val useCodecAnn =
+        annotations.firstOrNull { it.shortName.asString() == "UseCodec" } ?: return false
+    val codecDecl =
+        (useCodecAnn.arguments.firstOrNull { it.name?.asString() == "codec" }?.value as? KSType)
+            ?.declaration as? KSClassDeclaration ?: return false
+    return codecDecl.implementsViewCodec()
+}
+
+/**
  * Does this type refer to the message's
  * declared `<P : Payload>` type parameter? KSP represents type-
  * parameter references as a `KSTypeParameter` declaration with
@@ -2706,11 +2739,25 @@ internal fun analyzeDispatchOnSealedDispatcher(symbol: KSClassDeclaration): Disp
         )
     val discriminator: Discriminator =
         if (varintInner) {
+            // The inner property's name + scalar kind feed the
+            // `@ForwardCompatible` skip+preserve emit (full-width opcode
+            // capture / re-wrap). A varint inner that isn't a supported
+            // scalar (or has no name) can't carry an opcode — fall back
+            // to NotApplicable; the validator reports the user-facing
+            // diagnostic.
+            val varintInnerName =
+                innerParam.name?.asString()
+                    ?: return DispatchAnalysisResult.NotApplicable
+            val varintInnerKind =
+                SUPPORTED_SCALARS[innerType.declaration.qualifiedName?.asString()]
+                    ?: return DispatchAnalysisResult.NotApplicable
             Discriminator.Varint(
                 className = classNameOf(discriminatorDecl),
                 codecClassName = discriminatorCodecClassName,
                 dispatchValueProperty = dispatchValuePropertyName,
                 dispatchValueKind = dispatchValueKind,
+                innerPropertyName = varintInnerName,
+                innerKind = varintInnerKind,
             )
         } else {
             val innerKind =
@@ -2791,12 +2838,16 @@ internal fun resolveForwardCompatibleConfig(subclasses: List<KSClassDeclaration>
     val ctor = sink.primaryConstructor ?: return null
     val params = ctor.parameters
     if (params.size != 2) return null
+    // Legacy single-byte shape stores the opcode as `Int`; the varint
+    // shapes store the discriminator's full decoded value as `Long` /
+    // `ULong`. F2/F5 enforce kind-vs-discriminator compatibility; the
+    // analyzer only needs the declared kind for emit-side typing.
     val opcodeParam =
         params.firstOrNull {
             it.type
                 .resolve()
                 .declaration.qualifiedName
-                ?.asString() == "kotlin.Int"
+                ?.asString() in FORWARD_COMPATIBLE_OPCODE_QNAMES
         } ?: return null
     val rawParam =
         params.firstOrNull {
@@ -2808,10 +2859,18 @@ internal fun resolveForwardCompatibleConfig(subclasses: List<KSClassDeclaration>
     val opcodeName = opcodeParam.name?.asString() ?: return null
     val rawName = rawParam.name?.asString() ?: return null
     if (opcodeName == rawName) return null
+    val opcodeKind =
+        SUPPORTED_SCALARS[
+            opcodeParam.type
+                .resolve()
+                .declaration.qualifiedName
+                ?.asString(),
+        ] ?: return null
     return ForwardCompatibleConfig(
         unknownClassName = classNameOf(sink),
         opcodeFieldName = opcodeName,
         rawFieldName = rawName,
+        opcodeKind = opcodeKind,
     )
 }
 

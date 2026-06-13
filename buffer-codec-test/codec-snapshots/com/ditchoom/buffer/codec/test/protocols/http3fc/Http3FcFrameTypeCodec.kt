@@ -1,4 +1,4 @@
-package com.ditchoom.buffer.codec.test.protocols.http3
+package com.ditchoom.buffer.codec.test.protocols.http3fc
 
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
@@ -11,21 +11,21 @@ import com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
 
-public object Http3FrameTypeCodec : Codec<Http3FrameType> {
-  override fun decode(buffer: ReadBuffer, context: DecodeContext): Http3FrameType {
+public object Http3FcFrameTypeCodec : Codec<Http3FcFrameType> {
+  override fun decode(buffer: ReadBuffer, context: DecodeContext): Http3FcFrameType {
     val raw = QuicVarintCodec.decode(buffer, context)
-    return Http3FrameType(raw = raw)
+    return Http3FcFrameType(raw = raw)
   }
 
   override fun encode(
     buffer: WriteBuffer,
-    `value`: Http3FrameType,
+    `value`: Http3FcFrameType,
     context: EncodeContext,
   ) {
     QuicVarintCodec.encode(buffer, value.raw, context)
   }
 
-  override fun wireSize(`value`: Http3FrameType, context: EncodeContext): WireSize = QuicVarintCodec.wireSize(value.raw, context)
+  override fun wireSize(`value`: Http3FcFrameType, context: EncodeContext): WireSize = QuicVarintCodec.wireSize(value.raw, context)
 
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     val __rawFrame = QuicVarintCodec.peekFrameSize(stream, baseOffset + 0)

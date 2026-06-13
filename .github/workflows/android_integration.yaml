@@ -59,20 +59,25 @@ jobs:
           mkdir -p ~/.android
           cp .ci/debug.keystore ~/.android/debug.keystore
 
-      - name: AVD cache
-        uses: actions/cache@v5
+      # restore/save are deliberately SPLIT (not actions/cache@v5): the unified
+      # action saves at job END, i.e. AFTER `run tests` — capturing AVD userdata
+      # with the test APKs installed, possibly torn from the emulator teardown
+      # mid-write. Every cache-miss run then poisons the cache for the next run:
+      # the stale/corrupt install can neither be uninstalled
+      # (DELETE_FAILED_INTERNAL_ERROR on API 21) nor reinstalled over
+      # (INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES), even with the pinned
+      # keystore. Saving explicitly right after the create-AVD step caches the
+      # PRISTINE snapshot — no package ever installed — and the post-test state
+      # is never cached.
+      - name: AVD cache (restore)
+        uses: actions/cache/restore@v5
         id: avd-cache
         with:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          # The cached AVD userdata retains test APKs installed by the run that
-          # populated it, signed with that run's keystore. If the current
-          # .ci/debug.keystore differs (e.g. the cache predates the keystore pin),
-          # installing the freshly-signed APK over the stale one fails with
-          # INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES before any test runs.
-          # Hashing the keystore into the key ties the cached install set to the
-          # signing key, so any keystore change invalidates the stale AVD cache.
+          # The keystore hash stays in the key so a keystore change still
+          # invalidates any cache created under the old key (see #183).
           key: avd-${{ matrix.api-level }}-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('.ci/debug.keystore') }}
 
       - name: create AVD and generate snapshot for caching
@@ -86,6 +91,15 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: false
           script: echo "Generated AVD snapshot for caching."
+
+      - name: AVD cache (save pristine snapshot)
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-${{ matrix.api-level }}-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('.ci/debug.keystore') }}
 
       - name: run tests
         uses: reactivecircus/android-emulator-runner@v2

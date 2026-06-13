@@ -18,6 +18,14 @@ public object ForwardCompatibleOpScrollCodec {
     val header = OpCode(buffer.readUByte())
     val __framingOuterLimit = buffer.limit()
     val __framingLength = MqttRemainingLengthCodec.decode(buffer, context)
+    if (__framingLength.toInt() > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "Scroll.@FramedBy",
+            bufferPosition = buffer.position(),
+            expected = "a fully-buffered " + __framingLength + "-byte framed body",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     MqttRemainingLengthCodec.applyBound(buffer, __framingLength)
     val __framingStart = buffer.position()
     val __framingBound = __framingStart + __framingLength.toInt()

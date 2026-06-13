@@ -46,6 +46,23 @@ internal fun buildWireSizeFun(
     // BackPatch unconditionally — runtime-Exact-via-cast (mirroring
     // LengthPrefixedMessage) is a follow-on once a vector measurably
     // benefits.
+    //
+    // The one promoted vector: a **varint value class** — a single
+    // variable-length UseCodecScalar field (an HTTP/3 frame type wrapping
+    // a QUIC varint). Its wire size IS the user codec's
+    // (`VariableLengthCodec.wireSize` is `Exact(encodedLength)` by
+    // construction), and the `@FramedBy`-after-varint emit needs that
+    // Exact answer to size the framing header per value. Forward instead
+    // of collapsing.
+    val soleVarintField = shape.fields.singleOrNull() as? FieldSpec.UseCodecScalar
+    if (soleVarintField != null && soleVarintField.isVariableLength) {
+        builder.addStatement(
+            "return %T.wireSize(value.%L, context)",
+            soleVarintField.codecType,
+            soleVarintField.name,
+        )
+        return builder.build()
+    }
     if (shape.fields.any { it is FieldSpec.UseCodecScalar }) {
         builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
         return builder.build()
