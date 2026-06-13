@@ -5,6 +5,19 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`PlatformBuffer.use {}` now releases pooled buffers.** The cleanup was gated
+  on `this is CloseableBuffer`, but pooled buffers (`PooledBuffer` /
+  `TrackedSlice`, returned by `BufferPool.acquire`/`slice`) are not
+  `CloseableBuffer` — their release is a refcount decrement performed by
+  `freeNativeMemory()`. As a result `use {}` silently failed to return pooled
+  buffers to their pool, contradicting its own "works on all buffers" contract
+  and leaking pool capacity. `use {}` now always invokes `freeNativeMemory()`;
+  this is a no-op on GC-managed buffers and non-owning slices, frees native
+  memory on `CloseableBuffer`s, and returns pooled buffers to the pool. No wire
+  format or allocation-path change.
+
 ## [5.5.0] — 2026-06-05
 
 ### Added
