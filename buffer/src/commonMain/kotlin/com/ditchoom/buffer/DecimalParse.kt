@@ -87,7 +87,10 @@ internal inline fun parseSignedLong(
 fun ReadBuffer.readFixedDecimalTenths(
     offset: Int,
     length: Int,
-): Int = parseFixedDecimalTenths(offset, length) { get(it) }
+): Int {
+    requireRange(offset, length)
+    return parseFixedDecimalTenths(offset, length) { getUnchecked(it) }
+}
 
 /**
  * Relative: parse the next [length] bytes from the current [position] into tenths, advancing
@@ -95,7 +98,7 @@ fun ReadBuffer.readFixedDecimalTenths(
  */
 fun ReadBuffer.readFixedDecimalTenths(length: Int): Int {
     val start = position()
-    val value = parseFixedDecimalTenths(start, length) { get(it) }
+    val value = readFixedDecimalTenths(start, length)
     position(start + length)
     return value
 }
@@ -107,14 +110,17 @@ fun ReadBuffer.readFixedDecimalTenths(length: Int): Int {
 fun ReadBuffer.readSignedInt(
     offset: Int,
     length: Int,
-): Int = parseSignedLong(offset, length) { get(it) }.toInt()
+): Int {
+    requireRange(offset, length)
+    return parseSignedLong(offset, length) { getUnchecked(it) }.toInt()
+}
 
 /**
  * Relative: parse a signed base-10 integer over the next [length] bytes, advancing [position].
  */
 fun ReadBuffer.readSignedInt(length: Int): Int {
     val start = position()
-    val value = parseSignedLong(start, length) { get(it) }.toInt()
+    val value = readSignedInt(start, length)
     position(start + length)
     return value
 }
@@ -126,6 +132,9 @@ fun ReadBuffer.readSignedInt(length: Int): Int {
 fun ReadBuffer.readDecimalAsLong(
     offset: Int,
     length: Int,
-): Long = parseSignedLong(offset, length) { get(it) }
+): Long {
+    requireRange(offset, length)
+    return parseSignedLong(offset, length) { getUnchecked(it) }
+}
 
 // endregion

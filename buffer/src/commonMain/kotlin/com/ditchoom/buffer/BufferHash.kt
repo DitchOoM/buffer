@@ -53,7 +53,29 @@ internal inline fun fnv1aHashRange(
 fun ReadBuffer.hashRange(
     offset: Int,
     length: Int,
-): Long = fnv1aHashRange(FNV64_OFFSET_BASIS, offset, length, { getLong(it) }, { get(it) })
+): Long {
+    requireRange(offset, length)
+    return fnv1aHashRange(FNV64_OFFSET_BASIS, offset, length, { getLongUnchecked(it) }, { getUnchecked(it) })
+}
+
+/**
+ * Validates that `[offset, offset + length)` lies within this buffer, throwing the same
+ * [BufferUnderflowException] the per-element accessors would. Bulk primitives call this once up front
+ * so their inner loop can use the unchecked accessors ([getUnchecked]/[getLongUnchecked]).
+ *
+ * Note the bulk word reads (`getLongUnchecked`) only advance while a full 8-byte word fits inside
+ * `length`, so every access stays within `[offset, offset + length)` — one range check covers them all.
+ */
+internal fun ReadBuffer.requireRange(
+    offset: Int,
+    length: Int,
+) {
+    if (offset < 0 || length < 0 || offset + length > limit()) {
+        throw BufferUnderflowException(
+            "range [$offset, ${offset + length}) exceeds limit ${limit()}",
+        )
+    }
+}
 
 /**
  * Fast 64-bit content digest over the remaining bytes (`position()` until `limit()`).
@@ -73,13 +95,16 @@ fun ReadBuffer.regionEquals(
     other: ReadBuffer,
     otherOffset: Int,
     length: Int,
-): Boolean =
-    bulkCompareEquals(
+): Boolean {
+    requireRange(thisOffset, length)
+    other.requireRange(otherOffset, length)
+    return bulkCompareEquals(
         thisPos = thisOffset,
         otherPos = otherOffset,
         length = length,
-        getLong = { getLong(it) },
-        otherGetLong = { other.getLong(it) },
-        getByte = { get(it) },
-        otherGetByte = { other.get(it) },
+        getLong = { getLongUnchecked(it) },
+        otherGetLong = { other.getLongUnchecked(it) },
+        getByte = { getUnchecked(it) },
+        otherGetByte = { other.getUnchecked(it) },
     )
+}

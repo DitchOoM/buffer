@@ -80,6 +80,24 @@ interface ReadBuffer : PositionBuffer {
     operator fun get(index: Int): Byte
 
     /**
+     * Reads the byte at [index] **without bounds or liveness checks**.
+     *
+     * This is a building block for the library's own bulk primitives ([hashRange], [regionEquals],
+     * [readFixedDecimalTenths], …), which validate the whole accessed range **once** and then loop
+     * over these unchecked accessors — the manual equivalent of a JIT hoisting a bounds check out of
+     * a loop. On platforms with a JIT (JVM) the default below already gets that elimination for free,
+     * so it simply delegates to the checked [get]; non-JIT backends (Native) override it to skip the
+     * per-element check. Callers MUST have validated `index` lies within the buffer first.
+     */
+    fun getUnchecked(index: Int): Byte = get(index)
+
+    /**
+     * Reads the 8-byte Long at [index] (per [byteOrder]) **without bounds or liveness checks**.
+     * See [getUnchecked] for the contract — the caller must have validated `[index, index+8)`.
+     */
+    fun getLongUnchecked(index: Int): Long = getLong(index)
+
+    /**
      * **Zero-copy view** of this buffer's remaining content. The slice shares
      * the underlying storage; mutations to either are visible in both.
      *

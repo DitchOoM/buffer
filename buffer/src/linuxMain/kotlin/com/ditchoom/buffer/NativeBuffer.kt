@@ -204,6 +204,16 @@ class NativeBuffer private constructor(
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
+    // Unchecked fast paths (see ReadBuffer.getUnchecked): the caller (a bulk primitive) has already
+    // validated the whole range, so skip the per-element checkOpen()/requireIndex() that K/N can't
+    // hoist out of the loop the way a JIT does. ~27% of native 1BRC time was these per-element checks.
+    override fun getUnchecked(index: Int): Byte = ptr[index]
+
+    override fun getLongUnchecked(index: Int): Long {
+        val raw = UnsafeMemory.getLong(nativeAddress + index)
+        return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
+    }
+
     override fun readByteArray(size: Int): ByteArray {
         checkOpen()
         if (size < 1) return ByteArray(0)
@@ -754,6 +764,14 @@ private class NativeBufferSlice(
     override fun getLong(index: Int): Long {
         checkOpen()
         requireIndex(index, 8)
+        val raw = UnsafeMemory.getLong(baseAddress + index)
+        return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
+    }
+
+    // Unchecked fast paths — see the matching overrides on NativeBuffer and ReadBuffer.getUnchecked.
+    override fun getUnchecked(index: Int): Byte = UnsafeMemory.getByte(baseAddress + index)
+
+    override fun getLongUnchecked(index: Int): Long {
         val raw = UnsafeMemory.getLong(baseAddress + index)
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
