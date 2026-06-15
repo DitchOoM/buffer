@@ -109,12 +109,17 @@ interface HalfCloseable : ByteStream {
 }
 
 /**
- * A [ByteStream] that can be abruptly **reset** with an application error code — RESET_STREAM on
+ * A byte stream half that can be abruptly **reset** with an application error code — RESET_STREAM on
  * the send side and STOP_SENDING on the receive side (RFC 9000 §19.4/§19.5) — rather than the
- * graceful FIN of [close]. Used by layered protocols to abort a single stream and tell the peer
- * *why* (e.g. an HTTP/3 error code, RFC 9114 §8.1).
+ * graceful FIN of [ByteStream.close]. Used by layered protocols to abort a single stream and tell the
+ * peer *why* (e.g. an HTTP/3 error code, RFC 9114 §8.1).
+ *
+ * Deliberately **not** a [ByteStream]: reset is an orthogonal capability that applies to a duplex
+ * [ByteStream], a send-only [ByteSink], or a receive-only [ByteSource] alike (a unidirectional QUIC /
+ * WebTransport stream is resettable without being bidirectional). Mix it onto whichever direction the
+ * stream actually has — `ByteSink, Resettable` for send-only, `ByteSource, Resettable` for receive-only.
  */
-interface Resettable : ByteStream {
-    /** Abort the stream with [errorCode]. Idempotent; subsequent [read]/[write] fail like after [close]. */
+interface Resettable {
+    /** Abort the stream with [errorCode]. Idempotent; subsequent reads/writes fail like after a close. */
     suspend fun reset(errorCode: Long)
 }
