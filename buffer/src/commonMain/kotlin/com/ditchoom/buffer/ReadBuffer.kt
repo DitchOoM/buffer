@@ -1002,8 +1002,42 @@ fun bufferEquals(
  */
 fun bufferHashCode(self: ReadBuffer): Int {
     var h = 1
-    for (i in self.position() until self.limit()) {
-        h = 31 * h + self.get(i).toInt()
+    val end = self.limit()
+    var i = self.position()
+    // Bulk path: read 8 bytes per memory access (one getLong instead of eight get()s — 8x fewer
+    // accesses / pointer materializations on non-JIT backends), then fold each byte in index order.
+    // Bit-identical to the per-byte 31-multiplier loop; the [position, limit) range is in-bounds so
+    // the unchecked accessors are safe (see ReadBuffer.getUnchecked).
+    if (self.byteOrder == ByteOrder.BIG_ENDIAN) {
+        while (i + 8 <= end) {
+            val w = self.getLongUnchecked(i)
+            h = 31 * h + (w shr 56).toByte().toInt()
+            h = 31 * h + (w shr 48).toByte().toInt()
+            h = 31 * h + (w shr 40).toByte().toInt()
+            h = 31 * h + (w shr 32).toByte().toInt()
+            h = 31 * h + (w shr 24).toByte().toInt()
+            h = 31 * h + (w shr 16).toByte().toInt()
+            h = 31 * h + (w shr 8).toByte().toInt()
+            h = 31 * h + w.toByte().toInt()
+            i += 8
+        }
+    } else {
+        while (i + 8 <= end) {
+            val w = self.getLongUnchecked(i)
+            h = 31 * h + w.toByte().toInt()
+            h = 31 * h + (w shr 8).toByte().toInt()
+            h = 31 * h + (w shr 16).toByte().toInt()
+            h = 31 * h + (w shr 24).toByte().toInt()
+            h = 31 * h + (w shr 32).toByte().toInt()
+            h = 31 * h + (w shr 40).toByte().toInt()
+            h = 31 * h + (w shr 48).toByte().toInt()
+            h = 31 * h + (w shr 56).toByte().toInt()
+            i += 8
+        }
+    }
+    while (i < end) {
+        h = 31 * h + self.getUnchecked(i).toInt()
+        i++
     }
     return h
 }

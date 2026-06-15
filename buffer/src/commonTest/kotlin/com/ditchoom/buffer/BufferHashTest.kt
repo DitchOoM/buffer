@@ -98,4 +98,38 @@ class BufferHashTest {
         val b = bufferOf("Saint-Pierre-and-Miquelon")
         assertTrue(a.regionEquals(0, b, 0, 25))
     }
+
+    // region bufferHashCode (bulk 8-byte path) — must stay bit-identical to the naive 31-multiplier loop
+
+    private fun naiveHash(b: PlatformBuffer): Int {
+        var h = 1
+        for (i in b.position() until b.limit()) h = 31 * h + b[i].toInt()
+        return h
+    }
+
+    @Test
+    fun bufferHashCodeBulkMatchesNaiveAcrossWordBoundary() {
+        // 27 bytes: exercises three 8-byte bulk words + a 3-byte tail.
+        val b = bufferOf("Saint-Pierre-and-Miquelon!!")
+        assertEquals(naiveHash(b), bufferHashCode(b))
+    }
+
+    @Test
+    fun bufferHashCodeShortStaysInTail() {
+        val b = bufferOf("Hi") // < 8 bytes: only the tail loop runs
+        assertEquals(naiveHash(b), bufferHashCode(b))
+    }
+
+    @Test
+    fun bufferHashCodeIndependentOfByteOrder() {
+        // get(i) is byte-order-independent, so the content hash must match regardless of byteOrder.
+        val big = BufferFactory.Default.allocate(16, byteOrder = ByteOrder.BIG_ENDIAN)
+        val little = BufferFactory.Default.allocate(16, byteOrder = ByteOrder.LITTLE_ENDIAN)
+        for (buf in listOf(big, little)) {
+            buf.writeString("HamburgBulawayo") // 15 bytes: one bulk word + 7-byte tail
+            buf.resetForRead()
+        }
+        assertEquals(bufferHashCode(big), bufferHashCode(little))
+        assertEquals(naiveHash(big), bufferHashCode(little))
+    }
 }
