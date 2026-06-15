@@ -88,7 +88,11 @@ kotlin {
         commonTest.dependencies {
             implementation(kotlin("test"))
         }
-        // Native parallelism uses coroutines Dispatchers.Default (multi-threaded under K/N's MM).
+        // JVM + Native parallelism both use coroutines Dispatchers.Default (a shared long-lived pool
+        // sized to the core count) so runChunks reuses one pool across every solve() call.
+        jvmMain.dependencies {
+            implementation(libs.kotlinx.coroutines.core)
+        }
         nativeMain.dependencies {
             implementation(libs.kotlinx.coroutines.core)
         }
