@@ -65,6 +65,16 @@ object UnsignedVarIntCodec : VariableLengthCodec<UInt> {
         while (true) {
             val b = buffer.readUByte().toInt()
             bytes++
+            // On the 5th (last possible) byte only the low 4 bits are in UInt range; bits 4..6
+            // (0x70) would carry value bits 32..34 and silently truncate, so reject the overflow.
+            if (bytes == MAX_BYTES && b and 0x70 != 0) {
+                throw DecodeException(
+                    fieldPath = "UnsignedVarInt",
+                    bufferPosition = buffer.position(),
+                    expected = "a 5th byte within UInt range (high bits 0x70 clear)",
+                    actual = "a 5th byte carrying value bits beyond 2^32",
+                )
+            }
             result = result or ((b and 0x7F).toUInt() shl shift)
             if (b and 0x80 == 0) break
             shift += 7
@@ -90,6 +100,15 @@ object UnsignedVarIntCodec : VariableLengthCodec<UInt> {
         while (true) {
             if (stream.available() - baseOffset < i + 1) return VarLenPeek.NeedsMoreData
             val b = stream.peekByte(baseOffset + i).toInt() and 0xFF
+            // 5th byte: reject value bits beyond 2^32 (see decode) rather than truncate.
+            if (i == MAX_BYTES - 1 && b and 0x70 != 0) {
+                throw DecodeException(
+                    fieldPath = "UnsignedVarInt",
+                    bufferPosition = baseOffset + i,
+                    expected = "a 5th byte within UInt range (high bits 0x70 clear)",
+                    actual = "a 5th byte carrying value bits beyond 2^32",
+                )
+            }
             result = result or ((b and 0x7F).toUInt() shl shift)
             i++
             if (b and 0x80 == 0) break

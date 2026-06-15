@@ -79,6 +79,34 @@ class UnsignedVarIntCodecTest {
         assertFailsWith<DecodeException> { UnsignedVarIntCodec.decode(buf, DecodeContext.Empty) }
     }
 
+    @Test
+    fun decodeRejectsOverflowingFifthByte() {
+        // Four continuation bytes then a terminating 5th byte whose value bits exceed 2^32
+        // (0x10 → bit 32). Must throw rather than silently truncate to a 32-bit result.
+        val buf = BufferFactory.Default.allocate(8)
+        repeat(4) { buf.writeByte(0x80.toByte()) }
+        buf.writeByte(0x10.toByte())
+        buf.resetForRead()
+        assertFailsWith<DecodeException> { UnsignedVarIntCodec.decode(buf, DecodeContext.Empty) }
+    }
+
+    @Test
+    fun peekRejectsOverflowingFifthByte() {
+        val src = BufferFactory.Default.allocate(8)
+        repeat(4) { src.writeByte(0x80.toByte()) }
+        src.writeByte(0x10.toByte())
+        src.resetForRead()
+        val pool = BufferPool()
+        val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
+        try {
+            repeat(5) { appendByte(stream, src.readByte()) }
+            assertFailsWith<DecodeException> { UnsignedVarIntCodec.peekValue(stream) }
+        } finally {
+            stream.release()
+            pool.clear()
+        }
+    }
+
     private fun appendByte(
         stream: StreamProcessor,
         byte: Byte,

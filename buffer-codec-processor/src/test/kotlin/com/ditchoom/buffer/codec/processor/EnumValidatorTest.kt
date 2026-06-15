@@ -61,6 +61,67 @@ class EnumValidatorTest {
     }
 
     @Test
+    fun firesOnWireOrderOnEnumField() {
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.annotations.Endianness
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.WireOrder
+
+                enum class Color { Red, Green }
+
+                @ProtocolMessage
+                data class Style(@WireOrder(Endianness.Little) val color: Color)
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("@WireOrder"),
+            "diagnostic should name @WireOrder. Messages:\n${result.messages}",
+        )
+    }
+
+    @Test
+    fun acceptsUseCodecOverrideOnEnumField() {
+        // The @UseCodec escape hatch: an enum field carrying @UseCodec routes through the generic
+        // user-codec path (a fixed byte here) instead of the default LEB128-ordinal encoding — the
+        // analyzer takes the @UseCodec branch before enum auto-detection, so the consumer's codec
+        // owns the wire shape.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.Codec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+
+                enum class Color { Red, Green, Blue }
+
+                object ColorByteCodec : Codec<Color> {
+                    override fun encode(buffer: WriteBuffer, value: Color, context: EncodeContext) {
+                        buffer.writeByte(value.ordinal.toByte())
+                    }
+
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): Color =
+                        Color.entries[buffer.readByte().toInt()]
+                }
+
+                @ProtocolMessage
+                data class Style(@UseCodec(ColorByteCodec::class) val color: Color, val weight: UByte)
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+    }
+
+    @Test
     fun firesOnWireBytesOnEnumField() {
         val result =
             compile(
