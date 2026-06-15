@@ -14,6 +14,7 @@ fun main(args: Array<String>) {
     var workers = defaultParallelism()
     var file: String? = null
     var out: String? = null
+    var repeat = 1
     var i = 0
     while (i < args.size) {
         when (args[i]) {
@@ -21,6 +22,7 @@ fun main(args: Array<String>) {
             "--workers" -> workers = args[++i].toInt()
             "--file" -> file = args[++i]
             "--out" -> out = args[++i] // generate here and keep (don't delete)
+            "--repeat" -> repeat = args[++i].toInt() // re-solve N times in one JVM (warm timing / profiling)
         }
         i++
     }
@@ -36,11 +38,14 @@ fun main(args: Array<String>) {
         }
 
     val sizeMb = File(path).length() / 1_000_000.0
-    val started = System.nanoTime()
-    val result = OneBrc.solveFile(path, workers)
-    val elapsed = (System.nanoTime() - started) / 1e9
-
-    println("Solved ${fmt(sizeMb)} MB with $workers workers in ${fmt(elapsed)}s  (${fmt(sizeMb / elapsed)} MB/s)")
+    var result = ""
+    for (run in 1..repeat) {
+        val started = System.nanoTime()
+        result = OneBrc.solveFile(path, workers)
+        val elapsed = (System.nanoTime() - started) / 1e9
+        val label = if (repeat > 1) "[${run}/$repeat] " else ""
+        println("${label}Solved ${fmt(sizeMb)} MB with $workers workers in ${fmt(elapsed)}s  (${fmt(sizeMb / elapsed)} MB/s)")
+    }
     val preview = if (result.length > 140) result.substring(0, 140) + "…}" else result
     println("Output: $preview")
 }
