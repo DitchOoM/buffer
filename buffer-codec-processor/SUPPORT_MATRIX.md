@@ -140,6 +140,7 @@ Six axes are inventoried. Each has three tables: **Supported**, **Rejected (with
 | `@When @LengthPrefixed @UseCodec val: P : Payload?` | `CodecEmitter.kt:1748-1753`; validator `:1824-1853` |
 | `@When @UseCodec val: T?` (sealed via hand-written codec) | `CodecEmitter.kt:1755-1762`; `Slice11aProbe.kt` |
 | `@UseCodec(Codec<T>) val: T` (non-Payload scalar, natural width) | `CodecEmitter.kt:760-770`; MQTT `MqttRemainingLengthCodec` |
+| `@UseCodec(VariableLengthCodec<T>) val: T` → message wireSize is **runtime-Exact** (not BackPatch) | `CodecEmitterWireSize.kt` runtime-Exact branch; sums fixed bytes + `(codec.wireSize(value) as Exact).bytes`; `VarintLengthFrameCodec` (`Exact(1 + valueLen)`), `Http3FrameTypeCodec` (`Exact(0 + rawLen)`) |
 | `@WireBytes(N)` on Scalar fields (1-8 bytes) | `CodecEmitter.kt:806-823`; validator `:654-695` |
 | value-class scalar field (natural-width inner) | `CodecEmitter.kt:835-881` |
 | `@When val: value-class scalar?` | `CodecEmitter.kt:1788-1793`; MQTT PUBLISH `packetId: PacketId?` |

@@ -7,6 +7,7 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -42,6 +43,29 @@ class VarintLengthFrameCodecTest {
             assertEquals(varintWidth + 1, buf.position(), "encoded size for value $value")
             buf.resetForRead()
             assertEquals(original, VarintLengthFrameCodec.decode(buf, DecodeContext.Empty), "round-trip $value")
+        }
+    }
+
+    @Test
+    fun wireSizeIsRuntimeExactByVarintWidthNotBackPatch() {
+        // The varint field reports Exact(encodedLength) at runtime, so the message wireSize is the
+        // varint width + the fixed tag byte — Exact, NOT BackPatch — keeping an enclosing message on
+        // the pre-allocate (precompute) path. Tracks the value the way the round-trip test does.
+        for ((value, varintWidth) in listOf(
+            0uL to 1,
+            63uL to 1,
+            64uL to 2,
+            16383uL to 2,
+            16384uL to 4,
+            0x3FFF_FFFFuL to 4,
+            0x4000_0000uL to 8,
+            0x3FFF_FFFF_FFFF_FFFFuL to 8,
+        )) {
+            assertEquals(
+                WireSize.Exact(varintWidth + 1),
+                VarintLengthFrameCodec.wireSize(VarintLengthFrame(value = value, tag = 0xABu), EncodeContext.Empty),
+                "wireSize for value $value",
+            )
         }
     }
 

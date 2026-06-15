@@ -27,7 +27,10 @@ public object VarintLengthFrameCodec : Codec<VarintLengthFrame> {
     buffer.writeUByte(value.tag)
   }
 
-  override fun wireSize(`value`: VarintLengthFrame, context: EncodeContext): WireSize = WireSize.BackPatch
+  override fun wireSize(`value`: VarintLengthFrame, context: EncodeContext): WireSize {
+    val __valueSize = (QuicVarintCodec.wireSize(value.value, context) as WireSize.Exact).bytes
+    return WireSize.Exact(1 + __valueSize)
+  }
 
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     val __valueFrame = QuicVarintCodec.peekFrameSize(stream, baseOffset + 0)

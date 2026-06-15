@@ -41,12 +41,12 @@ internal fun buildWireSizeFun(
         builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
         return builder.build()
     }
-    // Any `@UseCodec val: <scalar>` field's wireSize comes from
-    // the user codec, which may be Exact or BackPatch. Collapse to
-    // BackPatch unconditionally — runtime-Exact-via-cast (mirroring
-    // LengthPrefixedMessage) is a follow-on once a vector measurably
-    // benefits.
-    if (shape.fields.any { it is FieldSpec.UseCodecScalar }) {
+    // An OPAQUE `@UseCodec val: <scalar>` field's wireSize is unknown to the framework, so
+    // the message collapses to BackPatch. A `VariableLengthCodec`-backed field
+    // (`isVariableLength`) is the exception: it reports `Exact(encodedLength(value))` at
+    // runtime, so a message whose only variable fields are such codecs stays on the
+    // precompute path via the runtime-Exact branch below (just before the terminal `when`).
+    if (shape.fields.any { it is FieldSpec.UseCodecScalar && !it.isVariableLength }) {
         builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
         return builder.build()
     }
@@ -121,6 +121,30 @@ internal fun buildWireSizeFun(
         }
     ) {
         builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+        return builder.build()
+    }
+    // Runtime-Exact: the message's only variable-width fields are `VariableLengthCodec`-backed
+    // `@UseCodec` scalars (each reports `Exact(encodedLength(value))` at runtime) and every other
+    // field is FixedSize. Sum the compile-time fixed bytes with each variable field's runtime
+    // `Exact` (the same `as Exact` cast LengthPrefixedMessage uses) so enclosing messages keep the
+    // precompute path instead of degrading to BackPatch. Mirrors the peekFrameSize walk's shape.
+    val runtimeExactVarFields =
+        shape.fields.filterIsInstance<FieldSpec.UseCodecScalar>().filter { it.isVariableLength }
+    if (runtimeExactVarFields.isNotEmpty() &&
+        shape.fields.all { it is FieldSpec.FixedSize || (it is FieldSpec.UseCodecScalar && it.isVariableLength) }
+    ) {
+        val fixedBytes = shape.fields.sumOfFixedWireBytes().requireFixed("runtimeExactWireSize")
+        for (f in runtimeExactVarFields) {
+            builder.addStatement(
+                "val %L = (%T.wireSize(value.%L, context) as %T.Exact).bytes",
+                "__${f.name}Size",
+                f.codecType,
+                f.name,
+                WIRE_SIZE_CN,
+            )
+        }
+        val sumExpr = (listOf(fixedBytes.toString()) + runtimeExactVarFields.map { "__${it.name}Size" }).joinToString(" + ")
+        builder.addStatement("return %T.Exact(%L)", WIRE_SIZE_CN, sumExpr)
         return builder.build()
     }
     when (val terminal = shape.fields.lastOrNull()) {
