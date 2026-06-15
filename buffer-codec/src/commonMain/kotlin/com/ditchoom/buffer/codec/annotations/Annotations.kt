@@ -712,3 +712,27 @@ annotation class ForwardCompatible(
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.BINARY)
 annotation class UnknownVariant
+
+/**
+ * Marks the single enum entry a generated enum-field codec falls back to when it decodes an
+ * ordinal it doesn't recognize — a forward-compatibility sink, the enum analogue of
+ * [ForwardCompatible]/[UnknownVariant] for sealed unions.
+ *
+ * An enum `@ProtocolMessage` field rides on the wire as its `ordinal`, encoded with the
+ * self-delimiting unsigned-LEB128 `UnsignedVarIntCodec`. Because the discriminator is a varint, an
+ * **older** decoder always reads the right number of bytes for a **newer** entry's ordinal — the
+ * framing never breaks; it just sees an ordinal past its known range. With this annotation, that
+ * decode resolves to the marked entry (`entries.getOrElse(ord) { <default> }`); without it, an
+ * out-of-range ordinal throws [DecodeException].
+ *
+ * Exactly one entry per enum may carry it (a second is a compile error). Enums are append-only on
+ * the wire (ordinal is wire-significant) — add entries at the end, never reorder.
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * enum class Intensity { @EnumDefault Normal, Bold, Faint }
+ * ```
+ */
+@Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)
+@Retention(AnnotationRetention.BINARY)
+annotation class EnumDefault

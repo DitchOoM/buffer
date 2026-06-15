@@ -140,11 +140,13 @@ Six axes are inventoried. Each has three tables: **Supported**, **Rejected (with
 | `@When @LengthPrefixed @UseCodec val: P : Payload?` | `CodecEmitter.kt:1748-1753`; validator `:1824-1853` |
 | `@When @UseCodec val: T?` (sealed via hand-written codec) | `CodecEmitter.kt:1755-1762`; `Slice11aProbe.kt` |
 | `@UseCodec(Codec<T>) val: T` (non-Payload scalar, natural width) | `CodecEmitter.kt:760-770`; MQTT `MqttRemainingLengthCodec` |
+| `@UseCodec(VariableLengthCodec<T>) val: T` → message wireSize is **runtime-Exact** (not BackPatch) | `CodecEmitterWireSize.kt` runtime-Exact branch; sums fixed bytes + `(codec.wireSize(value) as Exact).bytes`; `VarintLengthFrameCodec` (`Exact(1 + valueLen)`), `Http3FrameTypeCodec` (`Exact(0 + rawLen)`) |
 | `@WireBytes(N)` on Scalar fields (1-8 bytes) | `CodecEmitter.kt:806-823`; validator `:654-695` |
 | value-class scalar field (natural-width inner) | `CodecEmitter.kt:835-881` |
 | `@When val: value-class scalar?` | `CodecEmitter.kt:1788-1793`; MQTT PUBLISH `packetId: PacketId?` |
 | bare `val: @ProtocolMessage` (by-name codec resolution) | `CodecEmitter.kt:1175-1214` |
 | `@When val: @ProtocolMessage?` (by-name, non-payload-generic) | `CodecEmitter.kt:1913-1937` |
+| enum field (`ordinal` as unsigned LEB128 varint via `UnsignedVarIntCodec`; optional `@EnumDefault` unknown-ordinal sink) | `EnumScalar`; `analyzeEnumField`; `appendDecodeEnum`/`appendEncodeEnum`; `enums/StyleCodec.kt`. Evolution-safe: self-delimiting varint, so a newer ordinal never breaks an older decoder's framing. wireSize runtime-Exact; peek NoFraming (see Silent Gaps). |
 
 #### Rejected (with diagnostic)
 
@@ -174,6 +176,8 @@ Six axes are inventoried. Each has three tables: **Supported**, **Rejected (with
 | `@LengthPrefixed @ProtocolMessage @UseCodec` not `BoundingLengthCodec<UInt>` | `codec does not implement BoundingLengthCodec<UInt>` | `ProtocolMessageProcessor.kt:1514-1522` |
 | `@LengthPrefixed @UseCodec` List element not `@ProtocolMessage` | `element must be @ProtocolMessage data class or sealed parent` | `ProtocolMessageProcessor.kt:1545-1553` |
 | `@LengthPrefixed @UseCodec` List element with `<P : Payload>` | `element cannot carry <P : Payload> type parameter` | `ProtocolMessageProcessor.kt:1559-1568` |
+| enum field with >1 `@EnumDefault` entry | `at most one @EnumDefault entry is allowed` | `CodecAnalyzer.kt analyzeEnumField` |
+| `@WireBytes` / `@WireOrder` on an enum field | `not supported on an enum field (its ordinal rides as a varint)` | `CodecAnalyzer.kt analyzeEnumField` |
 
 #### Silent Gaps (Outcome 3)
 
@@ -186,6 +190,7 @@ Six axes are inventoried. Each has three tables: **Supported**, **Rejected (with
 | `@LengthFrom` value-class property w/ non-peekable inner kind (ULong/Long) | silent-skip | medium | #163 | `CodecEmitter.kt:959` set `{UByte,Byte,UShort,UInt}`; validator only checks numeric (`:1149` includes ULong/Long), so passes validator, fails emit. |
 | value-class scalar field whose inner scalar carries `@WireBytes`/`@WireOrder` | silent-skip | low | — | `CodecEmitter.kt:858-862` returns null; validator doesn't check inner annotations. |
 | `@When` conditional with nullable predicate source | silent-skip | low | — | `CodecEmitter.kt:1735` handles bound-field nullability only; predicate source nullability unvalidated by emitter (validator covers via `:834` if not skipped). |
+| message with >1 enum field (or an enum + variable suffix) → `peekFrameSize` is `NoFraming` | documented-limitation | low | — | `CodecEmitterPeek.kt`: a SINGLE enum with all-fixed priors+suffix frames via `appendPeekEnum` (`UnsignedVarIntCodec.peekFrameSize`); multiple self-delimiting fields collapse to NoFraming — the same single-variable-field limitation the `isVariableLength` `@UseCodec` peek has. |
 | `@When @LengthPrefixed` on inner `@ProtocolMessage` (non-String) | silent-skip | medium | — | `CodecEmitter.kt:1764-1769` returns null when not `kotlin.String`; no validator rejection. |
 | `@RemainingBytes @ProtocolMessage` (bare nested, not List) | silent-skip | medium | #151 | `CodecEmitter.kt:632` `typeQname != LIST_QNAME` returns null; `@RemainingBytes` analyzer handles only String / List<@ProtocolMessage>. |
 | `@LengthPrefixedUseCodecList` with non-singleton (generic) element codec | silent-broken-codegen | **high** | — | `CodecEmitter.kt:703-708` calls `<E>Codec.decode` directly; if element carries `<P>` it's a generic class, not singleton. Validator (`:1558-1569`) rejects *resolved* case but pre-slice gap exists. |
