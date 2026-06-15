@@ -648,6 +648,63 @@ val ctx = DecodeContext.Empty.with(ForwardCompatibleFactoryKey, myPool)
 val op = OpCodec.decode(buffer, ctx)   // Unknown.raw is pool-backed
 ```
 
+### Enum Fields — Ordinal as a Self-Delimiting Varint
+
+A field whose type is a Kotlin `enum class` needs **no annotation of its own**.
+The processor encodes the entry's `ordinal` as an unsigned LEB128 varint (the
+shipped `UnsignedVarIntCodec`): one byte for ordinals `0..127`, more beyond. The
+varint is self-delimiting, which makes enums **evolution-safe** — an older
+decoder always reads the right number of bytes for an ordinal a newer peer
+added, so framing never desyncs. Enums are **append-only on the wire**: add
+entries at the end, never reorder (the ordinal is wire-significant).
+
+```kotlin
+import com.ditchoom.buffer.codec.annotations.EnumDefault
+
+enum class Intensity { @EnumDefault Normal, Bold, Faint }
+enum class Priority { Low, Medium, High }
+
+@ProtocolMessage
+data class Style(
+    val intensity: Intensity,   // ordinal as a 1-byte varint
+    val priority: Priority,
+    val weight: UByte,
+)
+```
+
+`@EnumDefault` marks the single entry an unknown (e.g. newer) ordinal decodes to
+— the forward-compatibility sink, the enum analogue of `@ForwardCompatible` /
+`@UnknownVariant` for sealed unions. With it, an out-of-range ordinal resolves
+to that entry and the following fields still decode (framing intact); **without
+it, an out-of-range ordinal throws `DecodeException`**. At most one entry per
+enum may carry `@EnumDefault` (a second is a compile error).
+
+`@WireBytes` and `@WireOrder` are rejected on an enum field — the varint owns
+the wire shape and is byte-order-independent.
+
+`wireSize` stays runtime-`Exact` (the varint reports `Exact(encodedLength)`), so
+a message carrying enum fields keeps the precompute path rather than degrading
+to back-patch. A message whose only variable-width field is a single enum frames
+via `peekFrameSize`; two or more variable-width fields collapse to `NoFraming`
+(the same single-variable-field limitation the `@UseCodec` peek has).
+
+**Overriding the encoding.** The LEB128-of-ordinal is just the zero-annotation
+default. To put an enum on the wire some other way — a fixed byte, a QUIC
+varint, a domain mapping — attach a hand-written codec with `@UseCodec`; it
+takes precedence over the default and fully owns the wire shape:
+
+```kotlin
+object IntensityByteCodec : Codec<Intensity> {
+    override fun encode(buffer: WriteBuffer, value: Intensity, context: EncodeContext) =
+        buffer.writeByte(value.ordinal.toByte())
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): Intensity =
+        Intensity.entries[buffer.readByte().toInt()]
+}
+
+@ProtocolMessage
+data class Style(@UseCodec(IntensityByteCodec::class) val intensity: Intensity)
+```
+
 ### Value Classes — Zero-Overhead Typed Wrappers
 
 Value classes wrapping a primitive type are supported as fields. The generated codec reads/writes the inner primitive directly with no boxing overhead:
@@ -781,11 +838,15 @@ type with a hand-written `Codec` that copies bytes out at the boundary — see
 | `Double` | 8 | — |
 | `Boolean` | 1 | — |
 | `String` | Variable | — |
+| `enum class` | Variable (1 byte for ordinals 0–127) | No |
 
 A `String` field always needs one of `@LengthPrefixed`, `@RemainingBytes`, or
 `@LengthFrom` — a bare `String` has no wire extent. `String` bodies are UTF-8.
 For other charsets, write a `Codec<String>` and attach it with `@UseCodec`; the
 library ships `AsciiStringCodec` as a 7-bit-ASCII reference implementation.
+
+An `enum class` field rides as its `ordinal` in an unsigned LEB128 varint with
+no annotation — see [Enum Fields](#enum-fields--ordinal-as-a-self-delimiting-varint).
 
 ## Stream Framing with `peekFrameSize`
 
@@ -848,12 +909,16 @@ hanging the receive loop.
 - `@DispatchOn` — peeks the value-class or data-class discriminator
 - `@FramedBy` — peeks the framing length prefix
 - Nested `@ProtocolMessage` — delegates to the nested codec's `peekFrameSize`
+- A single enum field (with fixed priors/suffix) — peeks the self-delimiting
+  ordinal varint and adds the fixed bytes
 
 **When generation is skipped** (the codec compiles, `peekFrameSize` returns `NoFraming`):
 
 - `@RemainingBytes` at top level — no length on the wire
 - `@UseCodec` without a length annotation, or delegating to a hand-written codec
   that itself returns `NoFraming`
+- Two or more variable-width fields where more than one is an enum (or an enum
+  plus a variable-length suffix) — only a single variable field can frame
 
 ## The Codec Interface
 
