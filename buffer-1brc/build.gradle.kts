@@ -169,6 +169,7 @@ tasks.register<JavaExec>("onebrcRun") {
     (project.findProperty("onebrc.workers") as String?)?.let { args("--workers", it) }
     (project.findProperty("onebrc.out") as String?)?.let { args("--out", it) }
     (project.findProperty("onebrc.repeat") as String?)?.let { args("--repeat", it) }
+    if ((project.findProperty("onebrc.managed") as String?) == "true") args("--managed")
     // Optional JFR profiling: -Ponebrc.jfr=/tmp/onebrc.jfr (settings=profile, dumped on exit)
     (project.findProperty("onebrc.jfr") as String?)?.let {
         jvmArgs("-XX:StartFlightRecording=filename=$it,settings=profile,dumponexit=true")

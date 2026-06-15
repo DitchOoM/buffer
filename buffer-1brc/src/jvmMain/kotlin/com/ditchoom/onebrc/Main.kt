@@ -1,5 +1,7 @@
 package com.ditchoom.onebrc
 
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.managed
 import java.io.File
 
 /**
@@ -15,6 +17,7 @@ fun main(args: Array<String>) {
     var file: String? = null
     var out: String? = null
     var repeat = 1
+    var managed = false
     var i = 0
     while (i < args.size) {
         when (args[i]) {
@@ -23,9 +26,11 @@ fun main(args: Array<String>) {
             "--file" -> file = args[++i]
             "--out" -> out = args[++i] // generate here and keep (don't delete)
             "--repeat" -> repeat = args[++i].toInt() // re-solve N times in one JVM (warm timing / profiling)
+            "--managed" -> managed = true // scan a HeapJvmBuffer copy instead of the direct mmap
         }
         i++
     }
+    val scanFactory = if (managed) BufferFactory.managed() else null
 
     val path =
         file ?: run {
@@ -39,12 +44,13 @@ fun main(args: Array<String>) {
 
     val sizeMb = File(path).length() / 1_000_000.0
     var result = ""
+    val backend = if (managed) "managed/heap" else "default/mmap"
     for (run in 1..repeat) {
         val started = System.nanoTime()
-        result = OneBrc.solveFile(path, workers)
+        result = OneBrc.solveFile(path, workers, scanFactory = scanFactory)
         val elapsed = (System.nanoTime() - started) / 1e9
-        val label = if (repeat > 1) "[${run}/$repeat] " else ""
-        println("${label}Solved ${fmt(sizeMb)} MB with $workers workers in ${fmt(elapsed)}s  (${fmt(sizeMb / elapsed)} MB/s)")
+        val label = if (repeat > 1) "[$run/$repeat] " else ""
+        println("${label}Solved ${fmt(sizeMb)} MB with $workers workers [$backend] in ${fmt(elapsed)}s  (${fmt(sizeMb / elapsed)} MB/s)")
     }
     val preview = if (result.length > 140) result.substring(0, 140) + "…}" else result
     println("Output: $preview")

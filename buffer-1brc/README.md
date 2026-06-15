@@ -7,12 +7,13 @@ the **min / mean / max** per station, sorted by name.
 
 ## Result
 
-Measured on a 24-core WSL2 Linux box, JVM 21 / Kotlin/Native (release), warm page cache:
+Measured on a 24-core WSL2 Linux box, JVM 21 / Kotlin/Native (release), warm page cache (warm
+steady-state over `--repeat`):
 
 | Platform            | Dataset            | Size      | Workers | Wall clock | Throughput   |
 |---------------------|--------------------|-----------|---------|------------|--------------|
-| JVM                 | 1,000,000,000 rows | 13.25 GB  | 24      | **2.59 s** | 5,110 MB/s   |
-| JVM                 | 100,000,000 rows   | 1.32 GB   | 24      | 0.63 s     | 2,111 MB/s   |
+| JVM                 | 1,000,000,000 rows | 13.25 GB  | 24      | **~2.25 s**| ~5,900 MB/s  |
+| Native linuxX64     | 1,000,000,000 rows | 13.25 GB  | 24      | **~4.4 s** | ~3,030 MB/s  |
 
 ### Cross-platform (kotlinx-benchmark / JMH)
 
@@ -22,18 +23,54 @@ Run with `./gradlew :buffer-1brc:<target>FullBenchmark` (targets: `jvmBenchmark`
 
 | Platform           | Workers | Score (ms/op)   | ≈ Throughput   |
 |--------------------|---------|-----------------|----------------|
-| JVM                | 24      | 5.02 ± 0.18     | ~199 M rows/s  |
-| Native linuxX64    | 24      | 10.81 ± 0.13    | ~92 M rows/s   |
-| WASM (node)        | 1       | 220.3 ± 2.2     | ~4.5 M rows/s  |
-| JS (node)          | 1       | 911.7 ± 4.8     | ~1.1 M rows/s  |
+| JVM                | 24      | 4.46 ± 0.34     | ~224 M rows/s  |
+| Native linuxX64    | 24      | 5.99 ± 0.07     | ~167 M rows/s  |
+| WASM (node)        | 1       | 199.9 ± 3.0     | ~5.0 M rows/s  |
+| JS (node)          | 1       | 556.2 ± 6.8     | ~1.8 M rows/s  |
 
 JVM/Native run 24 worker threads; JS/WASM are single-threaded (no threads in those runtimes), so part
 of the gap is parallelism, not raw speed.
 
+> These numbers reflect the **check-once / unchecked-loop** optimization below. Before it, native was
+> 10.81 ms/op (1M) and ~6.7 s (13 GB); profiling showed ~21% of native time in per-access bounds
+> checks that the JVM's JIT hoists out of hot loops but Kotlin/Native cannot. See *Buffer backends &
+> the JIT gap*.
+
 Reproduce the headline large-scale runs:
-- JVM: `./gradlew :buffer-1brc:onebrcRun -Ponebrc.rows=1000000000`
+- JVM: `./gradlew :buffer-1brc:onebrcRun -Ponebrc.rows=1000000000` (add `-Ponebrc.repeat=6` for warm
+  steady-state, `-Ponebrc.managed=true` to scan a heap copy instead of the mmap)
 - Native: `./gradlew :buffer-1brc:linkReleaseExecutableLinuxX64` then
-  `build/bin/linuxX64/releaseExecutable/buffer-1brc.kexe --file <measurements.txt>`
+  `build/bin/linuxX64/releaseExecutable/buffer-1brc.kexe --file <measurements.txt> --repeat 6`
+
+### Buffer backends & the JIT gap
+
+The same solver, scanning the **mmap region directly** (zero-copy `NativeBuffer` / `DirectJvmBuffer`,
+the default) versus a **heap copy** (`BufferFactory.managed()` → `ByteArrayBuffer` / `HeapJvmBuffer`,
+via `--managed`). 100M rows / 1.32 GB, warm steady-state:
+
+| Backend                          | Native linuxX64 | JVM       |
+|----------------------------------|-----------------|-----------|
+| Default (mmap, zero-copy)        | ~0.43 s         | ~0.25 s   |
+| Managed (heap copy)              | ~1.0 s          | ~0.30 s   |
+| **Managed penalty**              | **~2.3×**       | **~1.2×** |
+
+The backend choice costs far more without a JIT. On the JVM, HotSpot lowers `HeapJvmBuffer.getLong`
+to a single intrinsic and elides the bounds checks, so heap vs direct is ~1.2×. On Kotlin/Native
+there is no JIT: `ByteArrayBuffer.getLong` is assembled from 8 array reads + shifts, `indexOf` can't
+use libc `memchr`, and the up-front copy adds GC pressure — ~2.3×. (It is *not* `ByteArray` pinning:
+reads use array indexing; pinning only happens on bulk array↔native `memcpy`.) At 13 GB the heap copy
+needs the whole file in heap and OOMs a default `-Xmx` — **zero-copy mmap is required at scale.**
+
+### check-once / unchecked-loop
+
+To recover what the JIT does for free, the bulk read primitives (`hashRange`, `regionEquals`,
+`readFixedDecimalTenths`, `contentEquals`, `mismatch`) validate the whole accessed range **once**, then
+loop over internal unchecked accessors (`ReadBuffer.getUnchecked` / `getLongUnchecked`). The default
+implementations delegate to the checked accessors (JVM unchanged — the JIT already eliminates the
+per-element checks); non-JIT backends (`NativeBuffer`, `ByteArrayBuffer`, wasm `LinearBuffer`, JS,
+Apple `MutableDataBuffer`) override them to skip the per-element check. Safety is preserved — every
+public call still validates the full range — it just stops repeating the check the JIT would have
+hoisted. This is a core `:buffer` win for every non-JIT consumer, not 1BRC-specific.
 
 ## How it maps to the library
 

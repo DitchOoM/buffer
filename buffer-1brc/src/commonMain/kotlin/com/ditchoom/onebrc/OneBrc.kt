@@ -18,9 +18,24 @@ internal fun aggregateChunk(
     file: MappedFile,
     chunk: Chunk,
     factory: BufferFactory,
+    scanFactory: BufferFactory? = null,
 ): StationTable {
     val length = chunk.length.toInt() // chunks are < 2GB by construction
-    val buffer = file.region(chunk.start, length)
+    val region = file.region(chunk.start, length)
+    // Backend comparison: by default we scan the mmap region directly (zero-copy NativeBuffer /
+    // DirectJvmBuffer). When [scanFactory] is set, copy the chunk into a buffer from that factory and
+    // scan THAT instead — e.g. BufferFactory.managed() (heap ByteArrayBuffer / HeapJvmBuffer) — to
+    // measure the cost of the backend (array-assembled getLong + generic indexOf vs native loads/memchr).
+    val buffer =
+        if (scanFactory == null) {
+            region
+        } else {
+            val staged = scanFactory.allocate(length)
+            staged.write(region)
+            staged.resetForRead()
+            region.freeNativeMemory()
+            staged
+        }
     val table = StationTable(factory)
     val limit = buffer.limit()
     var pos = 0
@@ -54,10 +69,11 @@ object OneBrc {
         file: MappedFile,
         workers: Int = defaultParallelism(),
         factory: BufferFactory = onebrcDefaultFactory(),
+        scanFactory: BufferFactory? = null,
     ): String {
         if (file.size == 0L) return "{}"
         val chunks = ChunkSplitter.split(file.size, workers) { file.byteAt(it) }
-        val tables = runChunks(chunks) { chunk -> aggregateChunk(file, chunk, factory) }
+        val tables = runChunks(chunks) { chunk -> aggregateChunk(file, chunk, factory, scanFactory) }
 
         val merged = StationTable(factory)
         for (table in tables) {
@@ -72,10 +88,11 @@ object OneBrc {
     fun solveFile(
         path: String,
         workers: Int = defaultParallelism(),
+        scanFactory: BufferFactory? = null,
     ): String {
         val file = openMappedFile(path)
         return try {
-            solve(file, workers)
+            solve(file, workers, scanFactory = scanFactory)
         } finally {
             file.close()
         }

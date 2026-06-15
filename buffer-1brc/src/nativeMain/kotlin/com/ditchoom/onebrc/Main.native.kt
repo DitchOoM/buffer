@@ -1,5 +1,7 @@
 package com.ditchoom.onebrc
 
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.managed
 import kotlin.time.TimeSource
 
 /**
@@ -12,6 +14,7 @@ fun main(args: Array<String>) {
     var workers = defaultParallelism()
     var file: String? = null
     var repeat = 1
+    var managed = false
     var i = 0
     while (i < args.size) {
         when (args[i]) {
@@ -19,9 +22,11 @@ fun main(args: Array<String>) {
             "--workers" -> workers = args[++i].toInt()
             "--file" -> file = args[++i]
             "--repeat" -> repeat = args[++i].toInt() // re-solve N times (warm timing / profiling)
+            "--managed" -> managed = true // scan a heap ByteArrayBuffer copy instead of the mmap
         }
         i++
     }
+    val scanFactory = if (managed) BufferFactory.managed() else null
 
     val path =
         file ?: run {
@@ -34,11 +39,12 @@ fun main(args: Array<String>) {
         }
 
     var result = ""
+    val backend = if (managed) "managed/heap" else "default/mmap"
     for (run in 1..repeat) {
         val mark = TimeSource.Monotonic.markNow()
-        result = OneBrc.solveFile(path, workers)
+        result = OneBrc.solveFile(path, workers, scanFactory = scanFactory)
         val label = if (repeat > 1) "[$run/$repeat] " else ""
-        println("${label}Solved with $workers worker(s) in ${secondsSince(mark)}s")
+        println("${label}Solved with $workers worker(s) [$backend] in ${secondsSince(mark)}s")
     }
     val preview = if (result.length > 140) result.substring(0, 140) + "…}" else result
     println("Output: $preview")
