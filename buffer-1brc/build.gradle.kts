@@ -57,7 +57,18 @@ kotlin {
     linuxArm64()
     // Apple targets reuse the identical nativeMain posix-mmap code; only buildable on macOS.
     if (HostManager.hostIsMac) {
-        macosArm64()
+        // macosArm64 gets the same runnable executable + kotlinx-benchmark wiring as linuxX64 so the
+        // native solver (and the apple MutableDataBuffer fast paths) can be measured on apple silicon.
+        macosArm64 {
+            binaries {
+                executable {
+                    entryPoint = "com.ditchoom.onebrc.main"
+                }
+            }
+            compilations.create("benchmark") {
+                associateWith(this@macosArm64.compilations.getByName("main"))
+            }
+        }
         macosX64()
         iosArm64()
         iosSimulatorArm64()
@@ -123,6 +134,15 @@ kotlin {
                 implementation(libs.kotlinx.benchmark.runtime)
             }
         }
+        // macosArm64 only exists on a mac host (gated above); guard the source set lookup to match.
+        if (HostManager.hostIsMac) {
+            val macosArm64Benchmark by getting {
+                kotlin.srcDir("src/commonBenchmark/kotlin")
+                dependencies {
+                    implementation(libs.kotlinx.benchmark.runtime)
+                }
+            }
+        }
     }
 }
 
@@ -133,6 +153,10 @@ benchmark {
         register("linuxX64Benchmark")
         register("jsBenchmark")
         register("wasmJsBenchmark")
+        // macosArm64 target/source set only exist on a mac host (gated in the kotlin {} block).
+        if (HostManager.hostIsMac) {
+            register("macosArm64Benchmark")
+        }
     }
     configurations {
         // 1BRC is a wall-clock-to-completion benchmark; avgt (ms/op) works on all platforms.

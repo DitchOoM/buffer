@@ -89,8 +89,10 @@ hoisted. This is a core `:buffer` win for every non-JIT consumer, not 1BRC-speci
 
 Two further refinements: `bufferHashCode` and the `contentEquals`/`regionEquals` tail were converted
 to 8-byte bulk loads (one `getLong` per word, an overlapping final word instead of a per-byte tail),
-and on native `hashRange` is implemented as a single cinterop C call (`buf_fnv1a_64`) — the whole FNV
-digest runs in C with raw pointer arithmetic, so the per-element `CPointer` materialization disappears.
+and on native direct buffers (`NativeBuffer` on linux, `MutableDataBuffer` on apple) `hashRange` is
+implemented as a single cinterop C call (`buf_fnv1a_64`, shared via `nativeFnv1aHashRange` in
+`nativeMain`) — the whole FNV digest runs in C with raw pointer arithmetic, so the per-element
+`CPointer` materialization disappears. (The native/wasm heap `ByteArrayBuffer` keeps the Kotlin loop.)
 Profiling guided this precisely: `indexOf` (already libc `memchr`) measured even between C and an
 inline Kotlin SWAR scan, so it was left alone; `hashRange`, which had a Kotlin per-byte tail that
 couldn't be hoisted, is the case where dropping into C actually paid off (~5% on native).

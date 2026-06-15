@@ -2,7 +2,6 @@
 
 package com.ditchoom.buffer
 
-import com.ditchoom.buffer.cinterop.buf_fnv1a_64
 import com.ditchoom.buffer.cinterop.buf_indexof_int
 import com.ditchoom.buffer.cinterop.buf_indexof_int_aligned
 import com.ditchoom.buffer.cinterop.buf_indexof_long
@@ -226,11 +225,12 @@ class NativeBuffer private constructor(
         offset: Int,
         length: Int,
     ): Long {
+        checkOpen()
         requireIndex(offset, length)
-        return buf_fnv1a_64(
-            (baseAddress + offset).toCPointer<UByteVar>(),
-            length.convert(),
-            if (littleEndian) 0 else 1,
+        return nativeFnv1aHashRange(
+            (baseAddress + offset).toCPointer<ByteVar>()!!,
+            length,
+            bigEndian = !littleEndian,
         )
     }
 
@@ -801,11 +801,12 @@ private class NativeBufferSlice(
         offset: Int,
         length: Int,
     ): Long {
+        checkOpen()
         requireIndex(offset, length)
-        return buf_fnv1a_64(
-            (baseAddress + offset).toCPointer<UByteVar>(),
-            length.convert(),
-            if (littleEndian) 0 else 1,
+        return nativeFnv1aHashRange(
+            (baseAddress + offset).toCPointer<ByteVar>()!!,
+            length,
+            bigEndian = !littleEndian,
         )
     }
 

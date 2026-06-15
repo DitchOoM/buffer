@@ -168,6 +168,21 @@ class MutableDataBuffer private constructor(
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
+    // Whole FNV digest in C (raw pointer arithmetic, no per-element CPointer materialization) — via the
+    // shared nativeFnv1aHashRange (buf_fnv1a_64). Mirrors the linux NativeBuffer override so both native
+    // backends get the same fast path from one place (see ReadBuffer.hashRange default).
+    override fun hashRange(
+        offset: Int,
+        length: Int,
+    ): Long {
+        requireIndex(offset, length)
+        return nativeFnv1aHashRange(
+            (bytePointer + offset)!!,
+            length,
+            bigEndian = byteOrder == ByteOrder.BIG_ENDIAN,
+        )
+    }
+
     override fun readShort(): Short {
         requireReadable(2)
         val ptr = (bytePointer + position)!!.reinterpret<ShortVar>()
@@ -731,6 +746,21 @@ class MutableDataBufferSlice(
         val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
+    }
+
+    // Whole FNV digest in C (raw pointer arithmetic, no per-element CPointer materialization) — via the
+    // shared nativeFnv1aHashRange (buf_fnv1a_64). Mirrors the linux NativeBuffer override so both native
+    // backends get the same fast path from one place (see ReadBuffer.hashRange default).
+    override fun hashRange(
+        offset: Int,
+        length: Int,
+    ): Long {
+        requireIndex(offset, length)
+        return nativeFnv1aHashRange(
+            (bytePointer + offset)!!,
+            length,
+            bigEndian = byteOrder == ByteOrder.BIG_ENDIAN,
+        )
     }
 
     override fun readShort(): Short {
