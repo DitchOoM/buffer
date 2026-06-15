@@ -66,7 +66,13 @@ class NativeBuffer private constructor(
     private var limitValue: Int = capacity
     private var closed: Boolean = false
 
-    override val nativeAddress: Long get() = ptr.toLong()
+    // Cache the raw pointer once: ptr is immutable, so ptr.toLong() is constant. Recomputing it per
+    // multi-byte access showed up as ~19% (cinterop <get-rawValue>) in native hot-loop profiles, since
+    // every getShort/getInt/getLong reads through nativeAddress. The byte path keeps using ptr[index]
+    // directly (the UnsafeMemory.getByte alternative measured slower).
+    private val baseAddress: Long = ptr.toLong()
+
+    override val nativeAddress: Long get() = baseAddress
     override val nativeSize: Long get() = capacity.toLong()
 
     private val littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN
