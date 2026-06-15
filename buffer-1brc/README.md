@@ -57,9 +57,24 @@ via `--managed`). 100M rows / 1.32 GB, warm steady-state:
 The backend choice costs far more without a JIT. On the JVM, HotSpot lowers `HeapJvmBuffer.getLong`
 to a single intrinsic and elides the bounds checks, so heap vs direct is ~1.2×. On Kotlin/Native
 there is no JIT: `ByteArrayBuffer.getLong` is assembled from 8 array reads + shifts, `indexOf` can't
-use libc `memchr`, and the up-front copy adds GC pressure — ~2.3×. (It is *not* `ByteArray` pinning:
-reads use array indexing; pinning only happens on bulk array↔native `memcpy`.) At 13 GB the heap copy
-needs the whole file in heap and OOMs a default `-Xmx` — **zero-copy mmap is required at scale.**
+use libc `memchr`, and the scan adds GC pressure — ~2.3×. At 13 GB the heap copy needs the whole file
+in heap and OOMs a default `-Xmx` — **zero-copy mmap is required at scale.**
+
+**Copy vs access path (native control).** `--deterministic` copies each chunk into an *off-heap*
+`NativeBuffer` (same fast access path as the mmap, but paying a one-time copy) — a control that splits
+the managed penalty into "the copy" vs "the buffer type":
+
+| Native, 100M, warm        | Time     | Isolates                                   |
+|---------------------------|----------|--------------------------------------------|
+| Default (no copy)         | ~0.42 s  | —                                          |
+| Deterministic (off-heap copy) | ~0.47 s  | + copy cost only (still `NativeBuffer`)    |
+| Managed (heap copy)       | ~1.0 s   | + copy **and** `ByteArrayBuffer` access    |
+
+So of the ~0.6 s managed overhead, the **copy is only ~0.05 s (~8%)** and the **`ByteArrayBuffer`
+access path is ~0.56 s (~92%)**. It is *not* `ByteArray` pinning (reads use array indexing; pinning
+only happens during the bulk `memcpy`, which the off-heap copy shows is cheap). And `Default` vs
+`deterministic` access is identical — both are `NativeBuffer` — so the allocation *strategy* doesn't
+move the scan; only the buffer *type* does.
 
 ### check-once / unchecked-loop
 
