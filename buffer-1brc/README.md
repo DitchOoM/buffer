@@ -13,7 +13,7 @@ steady-state over `--repeat`):
 | Platform            | Dataset            | Size      | Workers | Wall clock | Throughput   |
 |---------------------|--------------------|-----------|---------|------------|--------------|
 | JVM                 | 1,000,000,000 rows | 13.25 GB  | 24      | **~2.25 s**| ~5,900 MB/s  |
-| Native linuxX64     | 1,000,000,000 rows | 13.25 GB  | 24      | **~4.4 s** | ~3,030 MB/s  |
+| Native linuxX64     | 1,000,000,000 rows | 13.25 GB  | 24      | **~4.0 s** | ~3,300 MB/s  |
 
 ### Cross-platform (kotlinx-benchmark / JMH)
 
@@ -24,7 +24,7 @@ Run with `./gradlew :buffer-1brc:<target>FullBenchmark` (targets: `jvmBenchmark`
 | Platform           | Workers | Score (ms/op)   | ≈ Throughput   |
 |--------------------|---------|-----------------|----------------|
 | JVM                | 24      | 4.46 ± 0.34     | ~224 M rows/s  |
-| Native linuxX64    | 24      | 5.99 ± 0.07     | ~167 M rows/s  |
+| Native linuxX64    | 24      | 5.80 ± 0.07     | ~172 M rows/s  |
 | WASM (node)        | 1       | 199.9 ± 3.0     | ~5.0 M rows/s  |
 | JS (node)          | 1       | 556.2 ± 6.8     | ~1.8 M rows/s  |
 
@@ -86,6 +86,14 @@ per-element checks); non-JIT backends (`NativeBuffer`, `ByteArrayBuffer`, wasm `
 Apple `MutableDataBuffer`) override them to skip the per-element check. Safety is preserved — every
 public call still validates the full range — it just stops repeating the check the JIT would have
 hoisted. This is a core `:buffer` win for every non-JIT consumer, not 1BRC-specific.
+
+Two further refinements: `bufferHashCode` and the `contentEquals`/`regionEquals` tail were converted
+to 8-byte bulk loads (one `getLong` per word, an overlapping final word instead of a per-byte tail),
+and on native `hashRange` is implemented as a single cinterop C call (`buf_fnv1a_64`) — the whole FNV
+digest runs in C with raw pointer arithmetic, so the per-element `CPointer` materialization disappears.
+Profiling guided this precisely: `indexOf` (already libc `memchr`) measured even between C and an
+inline Kotlin SWAR scan, so it was left alone; `hashRange`, which had a Kotlin per-byte tail that
+couldn't be hoisted, is the case where dropping into C actually paid off (~5% on native).
 
 ## How it maps to the library
 
