@@ -3,6 +3,8 @@ package com.ditchoom.onebrc
 import androidx.collection.MutableLongObjectMap
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.hashRange
+import com.ditchoom.buffer.regionEquals
 import kotlin.math.floor
 
 /**

@@ -77,3 +77,55 @@ internal inline fun parseSignedLong(
     }
     return if (negative) -value else value
 }
+
+// region public ReadBuffer parsers
+
+/**
+ * Absolute: parse the fixed 1BRC temperature format in `[offset, offset + length)` into tenths
+ * (value scaled x10). See [parseFixedDecimalTenths]. Does not change [position].
+ */
+fun ReadBuffer.readFixedDecimalTenths(
+    offset: Int,
+    length: Int,
+): Int = parseFixedDecimalTenths(offset, length) { get(it) }
+
+/**
+ * Relative: parse the next [length] bytes from the current [position] into tenths, advancing
+ * position by [length].
+ */
+fun ReadBuffer.readFixedDecimalTenths(length: Int): Int {
+    val start = position()
+    val value = parseFixedDecimalTenths(start, length) { get(it) }
+    position(start + length)
+    return value
+}
+
+/**
+ * Absolute: parse a signed base-10 integer in `[offset, offset + length)`. Does not change
+ * [position]. The range must contain a well-formed integer (optional '-' then digits).
+ */
+fun ReadBuffer.readSignedInt(
+    offset: Int,
+    length: Int,
+): Int = parseSignedLong(offset, length) { get(it) }.toInt()
+
+/**
+ * Relative: parse a signed base-10 integer over the next [length] bytes, advancing [position].
+ */
+fun ReadBuffer.readSignedInt(length: Int): Int {
+    val start = position()
+    val value = parseSignedLong(start, length) { get(it) }.toInt()
+    position(start + length)
+    return value
+}
+
+/**
+ * Absolute: parse a signed base-10 integer in `[offset, offset + length)` as a [Long] (for values
+ * beyond the Int range). Does not change [position].
+ */
+fun ReadBuffer.readDecimalAsLong(
+    offset: Int,
+    length: Int,
+): Long = parseSignedLong(offset, length) { get(it) }
+
+// endregion

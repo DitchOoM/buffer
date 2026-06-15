@@ -1,6 +1,7 @@
 package com.ditchoom.onebrc
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.readFixedDecimalTenths
 
 private const val SEMICOLON = ';'.code.toByte()
 private const val NEWLINE = '\n'.code.toByte()

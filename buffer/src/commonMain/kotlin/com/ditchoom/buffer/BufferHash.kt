@@ -42,3 +42,44 @@ internal inline fun fnv1aHashRange(
     }
     return h
 }
+
+/**
+ * Fast 64-bit content digest over the absolute byte range `[offset, offset + length)`.
+ *
+ * FNV-1a-64, mixing whole 8-byte words then the byte tail (see [fnv1aHashRange]). Intended for
+ * hash-table bucketing where collisions are resolved by an explicit [regionEquals]. The value is
+ * consistent across buffers sharing the same [byteOrder]; it does not change [position].
+ */
+fun ReadBuffer.hashRange(
+    offset: Int,
+    length: Int,
+): Long = fnv1aHashRange(FNV64_OFFSET_BASIS, offset, length, { getLong(it) }, { get(it) })
+
+/**
+ * Fast 64-bit content digest over the remaining bytes (`position()` until `limit()`).
+ * Convenience for [hashRange]; does not change [position].
+ */
+fun ReadBuffer.hash64(): Long = hashRange(position(), remaining())
+
+/**
+ * True if `length` bytes of this buffer starting at [thisOffset] are byte-identical to `length`
+ * bytes of [other] starting at [otherOffset].
+ *
+ * Uses the shared bulk 8-byte comparison ([bulkCompareEquals]). Reads through absolute accessors
+ * only, so it does not change the [position] of either buffer.
+ */
+fun ReadBuffer.regionEquals(
+    thisOffset: Int,
+    other: ReadBuffer,
+    otherOffset: Int,
+    length: Int,
+): Boolean =
+    bulkCompareEquals(
+        thisPos = thisOffset,
+        otherPos = otherOffset,
+        length = length,
+        getLong = { getLong(it) },
+        otherGetLong = { other.getLong(it) },
+        getByte = { get(it) },
+        otherGetByte = { other.get(it) },
+    )
