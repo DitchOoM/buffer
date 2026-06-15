@@ -94,3 +94,6 @@ internal val FORWARD_COMPATIBLE_RAW_QNAMES =
     setOf("com.ditchoom.buffer.PlatformBuffer", "com.ditchoom.buffer.ReadBuffer")
 internal val CHARSET_CN = ClassName("com.ditchoom.buffer", "Charset")
 internal val STRING_NULLABLE_TN = ClassName("kotlin", "String").copy(nullable = true)
+
+// The shipped unsigned-LEB128 codec a generated enum field rides its ordinal on.
+internal val UNSIGNED_VARINT_CODEC_CN = ClassName("com.ditchoom.buffer.codec", "UnsignedVarIntCodec")

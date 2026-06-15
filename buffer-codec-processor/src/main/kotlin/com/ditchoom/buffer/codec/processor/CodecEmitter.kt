@@ -663,6 +663,7 @@ internal class CodecEmitter(
             is FieldSpec.ValueClassScalar -> appendDecodeValueClassScalar(body, field)
             is FieldSpec.Conditional -> appendDecodeConditional(body, field)
             is FieldSpec.ProtocolMessageScalar -> appendDecodeProtocolMessageScalar(body, field)
+            is FieldSpec.EnumScalar -> appendDecodeEnum(body, field)
         }
     }
 
@@ -745,6 +746,7 @@ internal class CodecEmitter(
             is FieldSpec.ValueClassScalar -> appendEncodeValueClassScalar(body, field)
             is FieldSpec.Conditional -> appendEncodeConditional(body, field)
             is FieldSpec.ProtocolMessageScalar -> appendEncodeProtocolMessageScalar(body, field)
+            is FieldSpec.EnumScalar -> appendEncodeEnum(body, field)
         }
     }
 
@@ -1704,5 +1706,6 @@ internal class CodecEmitter(
             is FieldSpec.ValueClassScalar -> field.valueClassType
             is FieldSpec.Conditional -> field.nullableTypeName
             is FieldSpec.ProtocolMessageScalar -> field.fieldType
+            is FieldSpec.EnumScalar -> field.enumType
         }
 }

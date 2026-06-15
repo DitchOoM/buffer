@@ -469,6 +469,26 @@ internal sealed interface FieldSpec {
         override val wireBytes: Int,
     ) : FixedSize
 
+    /**
+     * A Kotlin `enum class` field. The entry's `ordinal` rides the wire as an unsigned LEB128
+     * varint via the shipped `UnsignedVarIntCodec` — self-delimiting, so adding entries never
+     * breaks an older decoder's framing (it reads the right bytes and resolves an unknown ordinal
+     * to [defaultEntryName] when set, else throws). NOT [FixedSize]: the width is value-dependent
+     * (1 byte for ordinals 0..127, more beyond), so the containing message's wireSize is
+     * runtime-Exact (summed via `UnsignedVarIntCodec.wireSize(...) as Exact`), mirroring an
+     * `isVariableLength` `@UseCodec` field.
+     *
+     * [entryCount] is informational (diagnostics / future width bounds); [defaultEntryName] is the
+     * `@EnumDefault` entry's simple name, or null for strict decode.
+     */
+    data class EnumScalar(
+        override val name: String,
+        val ownerSimpleName: String,
+        val enumType: ClassName,
+        val entryCount: Int,
+        val defaultEntryName: String?,
+    ) : FieldSpec
+
     data class LengthPrefixedMessage(
         override val name: String,
         val ownerSimpleName: String,

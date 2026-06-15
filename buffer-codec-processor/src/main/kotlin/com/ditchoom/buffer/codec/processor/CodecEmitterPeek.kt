@@ -242,6 +242,23 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
         builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
         return builder.build()
     }
+    // An enum field's ordinal is a self-delimiting unsigned-LEB128 varint, so a SINGLE enum with
+    // all-fixed priors + suffix frames exactly like the `isVariableLength` `@UseCodec` path:
+    // total = priorBytes + UnsignedVarIntCodec.peekFrameSize().bytes + suffixBytes. Multiple enums
+    // (or a variable suffix) collapse to NoFraming — the same single-variable-field limitation the
+    // varint `@UseCodec` peek has (a second variable width would desync the static offset math).
+    val enumFields = shape.fields.filterIsInstance<FieldSpec.EnumScalar>()
+    if (enumFields.isNotEmpty()) {
+        val enumField = enumFields.first()
+        val priorsFixed = shape.fields.takeWhile { it !== enumField }.all { it is FieldSpec.FixedSize }
+        val suffixFixed = shape.fields.dropWhile { it !== enumField }.drop(1).all { it is FieldSpec.FixedSize }
+        if (enumFields.size == 1 && priorsFixed && suffixFixed) {
+            appendPeekEnum(builder, shape, enumField)
+        } else {
+            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+        }
+        return builder.build()
+    }
     // `@When("remaining <op> <int>")` collapses peek to
     // NoFraming when reached at this point. The grammar-2 predicate
     // tests the decode buffer's `remaining()` after the upstream
@@ -519,6 +536,47 @@ internal fun appendPeekBoundingDynamicPrior(
  * Caller guarantees (in [buildPeekFrameFun]): every prior and suffix field
  * is `FixedSize`.
  */
+/**
+ * Peek a message whose single variable-width field is an enum (ordinal as unsigned-LEB128 varint).
+ * Mirror of [appendPeekVariableLengthUseCodecScalar] with the codec fixed to `UnsignedVarIntCodec`:
+ * total = priorBytes + the varint's observed width + suffixBytes.
+ */
+internal fun appendPeekEnum(
+    builder: FunSpec.Builder,
+    shape: CodecShape,
+    field: FieldSpec.EnumScalar,
+) {
+    val priorBytes =
+        shape.fields
+            .takeWhile { it !== field }
+            .filterIsInstance<FieldSpec.FixedSize>()
+            .sumOf { it.wireBytes }
+    val suffixBytes =
+        shape.fields
+            .dropWhile { it !== field }
+            .drop(1)
+            .filterIsInstance<FieldSpec.FixedSize>()
+            .sumOf { it.wireBytes }
+    val body = CodeBlock.builder()
+    val frameVar = "__${field.name}Frame"
+    body.addStatement(
+        "val %L = %T.peekFrameSize(stream, baseOffset + %L)",
+        frameVar,
+        UNSIGNED_VARINT_CODEC_CN,
+        priorBytes,
+    )
+    body.beginControlFlow("if (%L !is %T.Complete)", frameVar, PEEK_RESULT_CN)
+    body.addStatement("return %L", frameVar)
+    body.endControlFlow()
+    body.addStatement("val __total = %L + %L.bytes + %L", priorBytes, frameVar, suffixBytes)
+    body.addStatement(
+        "return if (stream.available() - baseOffset >= __total) %T.Complete(__total) else %T.NeedsMoreData",
+        PEEK_RESULT_CN,
+        PEEK_RESULT_CN,
+    )
+    builder.addCode(body.build())
+}
+
 internal fun appendPeekVariableLengthUseCodecScalar(
     builder: FunSpec.Builder,
     shape: CodecShape,
@@ -798,6 +856,11 @@ internal fun appendSequentialPeek(
                 )
             is FieldSpec.Conditional ->
                 appendSequentialPeekConditional(body, field)
+            is FieldSpec.EnumScalar ->
+                error(
+                    "EnumScalar should be handled by buildPeekFrameFun's upfront NoFraming " +
+                        "short-circuit before reaching the sequential walk.",
+                )
         }
     }
     body.addStatement(
