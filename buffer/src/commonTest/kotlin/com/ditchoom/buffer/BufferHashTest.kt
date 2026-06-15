@@ -121,6 +121,27 @@ class BufferHashTest {
     }
 
     @Test
+    fun hashRangeMatchesWordBasedFnvReference() {
+        // Guards the native C buf_fnv1a_64 override against the Kotlin word-based FNV: recompute the
+        // digest here from the buffer's own (byte-order-aware) getLong/get and require equality. On
+        // native this proves the C implementation (with its big-endian byte-swap) matches getLong.
+        val text = "Saint-Pierre-and-Miquelon" // 25 bytes: 3 whole words + a 1-byte tail
+        val b = bufferOf(text)
+        val prime = 0x100000001b3L
+        var ref = -3750763034362895579L // FNV64_OFFSET_BASIS (0xcbf29ce484222325)
+        var i = 0
+        while (i + 8 <= text.length) {
+            ref = (ref xor b.getLong(i)) * prime
+            i += 8
+        }
+        while (i < text.length) {
+            ref = (ref xor (b[i].toLong() and 0xFF)) * prime
+            i++
+        }
+        assertEquals(ref, b.hashRange(0, text.length))
+    }
+
+    @Test
     fun bufferHashCodeIndependentOfByteOrder() {
         // get(i) is byte-order-independent, so the content hash must match regardless of byteOrder.
         val big = BufferFactory.Default.allocate(16, byteOrder = ByteOrder.BIG_ENDIAN)

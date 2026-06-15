@@ -2,6 +2,7 @@
 
 package com.ditchoom.buffer
 
+import com.ditchoom.buffer.cinterop.buf_fnv1a_64
 import com.ditchoom.buffer.cinterop.buf_indexof_int
 import com.ditchoom.buffer.cinterop.buf_indexof_int_aligned
 import com.ditchoom.buffer.cinterop.buf_indexof_long
@@ -218,6 +219,19 @@ class NativeBuffer private constructor(
     override fun getLongUnchecked(index: Int): Long {
         val raw = UnsafeMemory.getLong(nativeAddress + index)
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
+    }
+
+    // Whole FNV digest in C (one pointer materialization, raw arithmetic in the loop) — see buf_fnv1a_64.
+    override fun hashRange(
+        offset: Int,
+        length: Int,
+    ): Long {
+        requireIndex(offset, length)
+        return buf_fnv1a_64(
+            (baseAddress + offset).toCPointer<UByteVar>(),
+            length.convert(),
+            if (littleEndian) 0 else 1,
+        )
     }
 
     override fun readByteArray(size: Int): ByteArray {
@@ -780,6 +794,19 @@ private class NativeBufferSlice(
     override fun getLongUnchecked(index: Int): Long {
         val raw = UnsafeMemory.getLong(baseAddress + index)
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
+    }
+
+    // Whole FNV digest in C — see buf_fnv1a_64 and the matching override on NativeBuffer.
+    override fun hashRange(
+        offset: Int,
+        length: Int,
+    ): Long {
+        requireIndex(offset, length)
+        return buf_fnv1a_64(
+            (baseAddress + offset).toCPointer<UByteVar>(),
+            length.convert(),
+            if (littleEndian) 0 else 1,
+        )
     }
 
     override fun readByteArray(size: Int): ByteArray {

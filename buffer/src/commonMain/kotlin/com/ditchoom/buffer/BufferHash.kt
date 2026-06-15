@@ -43,20 +43,9 @@ internal inline fun fnv1aHashRange(
     return h
 }
 
-/**
- * Fast 64-bit content digest over the absolute byte range `[offset, offset + length)`.
- *
- * FNV-1a-64, mixing whole 8-byte words then the byte tail (see [fnv1aHashRange]). Intended for
- * hash-table bucketing where collisions are resolved by an explicit [regionEquals]. The value is
- * consistent across buffers sharing the same [byteOrder]; it does not change [position].
- */
-fun ReadBuffer.hashRange(
-    offset: Int,
-    length: Int,
-): Long {
-    requireRange(offset, length)
-    return fnv1aHashRange(FNV64_OFFSET_BASIS, offset, length, { getLongUnchecked(it) }, { getUnchecked(it) })
-}
+// ReadBuffer.hashRange(offset, length) is a member of ReadBuffer (default impl folds via
+// fnv1aHashRange below); NativeBuffer overrides it with a single cinterop C call (buf_fnv1a_64) so the
+// whole digest loop runs with raw pointer arithmetic instead of per-element CPointer materialization.
 
 /**
  * Validates that `[offset, offset + length)` lies within this buffer, throwing the same

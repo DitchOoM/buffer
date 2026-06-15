@@ -605,6 +605,22 @@ interface ReadBuffer : PositionBuffer {
     }
 
     /**
+     * Fast 64-bit content digest over the absolute byte range `[offset, offset + length)`.
+     *
+     * FNV-1a-64, mixing whole 8-byte words then the byte tail. Intended for hash-table bucketing where
+     * collisions are resolved by an explicit [regionEquals]. The value is consistent across buffers
+     * sharing the same [byteOrder]; it does not change [position]. Native backends override this to run
+     * the whole digest in C with raw pointer arithmetic (no per-element pointer materialization).
+     */
+    fun hashRange(
+        offset: Int,
+        length: Int,
+    ): Long {
+        requireRange(offset, length)
+        return fnv1aHashRange(FNV64_OFFSET_BASIS, offset, length, { getLongUnchecked(it) }, { getUnchecked(it) })
+    }
+
+    /**
      * Finds the first occurrence of a byte sequence within this buffer.
      *
      * Uses optimized bulk search (8 bytes at a time) for the first byte,
