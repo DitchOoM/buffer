@@ -2947,11 +2947,12 @@ internal fun classifyVariantWireSize(shape: CodecShape): VariantWireSize {
     // wireSize is BackPatch (see buildWireSizeFun's RemainingBytesPayload
     // early-return); the dispatcher must skip the runtime-Exact cast.
     if (shape.fields.any { it is FieldSpec.RemainingBytesPayload }) return VariantWireSize.BackPatch
-    // Same shape — buildWireSizeFun collapses any
-    // UseCodecScalar-bearing shape to BackPatch, so the dispatcher must
-    // also skip the runtime-Exact cast. Promote later if a vector
-    // benefits from runtime-Exact via codec.wireSize forwarding.
-    if (shape.fields.any { it is FieldSpec.UseCodecScalar }) return VariantWireSize.BackPatch
+    // A NON-`VariableLengthCodec` `@UseCodec` scalar may report `BackPatch` at runtime, so the
+    // dispatcher can't assume Exact — collapse (mirrors buildWireSizeFun's `!isVariableLength`
+    // BackPatch guard). A `VariableLengthCodec`-backed `@UseCodec` scalar reports
+    // `Exact(encodedLength)` and is promoted to RuntimeExact below — the "promote later if a vector
+    // benefits" note made good (a sealed grid-op union whose payloads are LEB128 `@UseCodec` fields).
+    if (shape.fields.any { it is FieldSpec.UseCodecScalar && !it.isVariableLength }) return VariantWireSize.BackPatch
     // Same — buildWireSizeFun collapses
     // LengthPrefixedUseCodecList-bearing shapes to BackPatch.
     if (shape.fields.any { it is FieldSpec.LengthPrefixedUseCodecList }) return VariantWireSize.BackPatch
@@ -2980,6 +2981,13 @@ internal fun classifyVariantWireSize(shape: CodecShape): VariantWireSize {
     ) {
         return VariantWireSize.BackPatch
     }
+    // A `VariableLengthCodec`-backed `@UseCodec` scalar reports `Exact(encodedLength)` at runtime, so
+    // any variant carrying one is runtime-Exact (the variant codec's own wireSize sums it via the
+    // `as Exact` cast — buildWireSizeFun's `isRuntimeExactVar`); the dispatcher forwards to the
+    // variant codec's wireSize without re-deriving. Early-return (like the enum case below) so a VL
+    // `@UseCodec` field in a NON-terminal slot isn't dropped by the terminal `when`'s FixedSize-only
+    // sum — e.g. a variant of `(varint, varint, enum, Boolean)` whose Boolean is last.
+    if (shape.fields.any { it is FieldSpec.UseCodecScalar && it.isVariableLength }) return VariantWireSize.RuntimeExact
     // An enum field's ordinal is a runtime-width varint, so any variant carrying one is
     // runtime-Exact (the variant codec's own wireSize sums it via `UnsignedVarIntCodec.wireSize
     // as Exact`); the dispatcher forwards without re-deriving. Early-return so an enum in a
@@ -3010,8 +3018,9 @@ internal fun classifyVariantWireSize(shape: CodecShape): VariantWireSize {
         // shape carrying a RemainingBytesPayload field before the
         // terminal-shape `when` runs.
         is FieldSpec.RemainingBytesPayload -> VariantWireSize.BackPatch
-        // Same — handled by the upfront BackPatch short-circuit
-        // above; defensive branch keeps the `when` exhaustive.
+        // Both cases handled upfront — a non-VariableLengthCodec `@UseCodec` scalar by the BackPatch
+        // short-circuit, a VariableLengthCodec one by the RuntimeExact early-return. This defensive
+        // branch is unreachable; it keeps the `when` exhaustive (BackPatch is the conservative arm).
         is FieldSpec.UseCodecScalar -> VariantWireSize.BackPatch
         // Same — handled by the upfront BackPatch
         // short-circuit above.

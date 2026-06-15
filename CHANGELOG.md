@@ -7,6 +7,23 @@ to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Codec processor: runtime-`Exact` `wireSize` for `VariableLengthCodec`
+  `@UseCodec` dispatch variants** — a sealed `@ProtocolMessage` dispatch union
+  whose variants carry `VariableLengthCodec`-backed `@UseCodec` scalar fields
+  now reports `WireSize.Exact(1 + body)` for each such variant (forwarding to
+  the variant codec's own `Exact` `wireSize`) instead of collapsing the variant
+  to `WireSize.BackPatch`. `classifyVariantWireSize` previously classified
+  *every* `@UseCodec` scalar variant as `BackPatch` (the "promote later if a
+  vector benefits" note); it now mirrors `buildWireSizeFun`'s `isVariableLength`
+  split — a non-`VariableLengthCodec` `@UseCodec` (plain `Codec`, possibly
+  `BackPatch` at runtime) still collapses, while a `VariableLengthCodec` one
+  (LEB128 / QUIC-varint, always `Exact(encodedLength)`) is `RuntimeExact`.
+  This lets a dispatch union of varint-payload variants compose inside a
+  measure-first / two-pass encoder that requires `Exact` (e.g. one that embeds
+  the union to length-prefix each message). A mixed variant — a VL `@UseCodec`
+  field in a non-terminal slot followed by a fixed-size trailer — is summed
+  correctly via the runtime-Exact early-return rather than crashing the
+  fixed-size-only sum path.
 - **Codec processor: framed-body truncation guard** — generated `@FramedBy`
   decode (variant arms and the `@ForwardCompatible` preserve arm) now throws a
   `DecodeException` (`<Owner>.@FramedBy` / `<Unknown>.@ForwardCompatible`)
