@@ -251,7 +251,11 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
     if (enumFields.isNotEmpty()) {
         val enumField = enumFields.first()
         val priorsFixed = shape.fields.takeWhile { it !== enumField }.all { it is FieldSpec.FixedSize }
-        val suffixFixed = shape.fields.dropWhile { it !== enumField }.drop(1).all { it is FieldSpec.FixedSize }
+        val suffixFixed =
+            shape.fields
+                .dropWhile { it !== enumField }
+                .drop(1)
+                .all { it is FieldSpec.FixedSize }
         if (enumFields.size == 1 && priorsFixed && suffixFixed) {
             appendPeekEnum(builder, shape, enumField)
         } else {
@@ -522,21 +526,6 @@ internal fun appendPeekBoundingDynamicPrior(
 }
 
 /**
- * Emit peek for a shape carrying a non-bounding, **variable-length**
- * `@UseCodec val: <scalar>` field (codec implements `VariableLengthCodec`).
- * The decoded value is *not* a body length, so the frame total is
- * `priorBytes + codecWidth + fixedSuffixBytes` — no value term.
- *
- * Width comes from the codec's own `peekFrameSize` (every
- * `VariableLengthCodec` derives it from `peekValue`): `Complete(width)` once
- * the self-delimiting value is fully buffered, `NeedsMoreData` otherwise.
- * Delegating to the codec means no peek budget is needed and the same path
- * composes through a generated value-class codec whose inner is a varint.
- *
- * Caller guarantees (in [buildPeekFrameFun]): every prior and suffix field
- * is `FixedSize`.
- */
-/**
  * Peek a message whose single variable-width field is an enum (ordinal as unsigned-LEB128 varint).
  * Mirror of [appendPeekVariableLengthUseCodecScalar] with the codec fixed to `UnsignedVarIntCodec`:
  * total = priorBytes + the varint's observed width + suffixBytes.
@@ -577,6 +566,21 @@ internal fun appendPeekEnum(
     builder.addCode(body.build())
 }
 
+/**
+ * Emit peek for a shape carrying a non-bounding, **variable-length**
+ * `@UseCodec val: <scalar>` field (codec implements `VariableLengthCodec`).
+ * The decoded value is *not* a body length, so the frame total is
+ * `priorBytes + codecWidth + fixedSuffixBytes` — no value term.
+ *
+ * Width comes from the codec's own `peekFrameSize` (every
+ * `VariableLengthCodec` derives it from `peekValue`): `Complete(width)` once
+ * the self-delimiting value is fully buffered, `NeedsMoreData` otherwise.
+ * Delegating to the codec means no peek budget is needed and the same path
+ * composes through a generated value-class codec whose inner is a varint.
+ *
+ * Caller guarantees (in [buildPeekFrameFun]): every prior and suffix field
+ * is `FixedSize`.
+ */
 internal fun appendPeekVariableLengthUseCodecScalar(
     builder: FunSpec.Builder,
     shape: CodecShape,

@@ -23,3 +23,5 @@ docs/build/
 docs/.docusaurus/
 docs/.cache-loader/
 docs/static/api/
+# Android NDK / CMake native build outputs
+.cxx/

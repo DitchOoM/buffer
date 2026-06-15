@@ -211,6 +211,17 @@ internal sealed interface Discriminator {
         val codecClassName: ClassName,
         val dispatchValueProperty: String,
         val dispatchValueKind: ScalarKind,
+        /**
+         * The value class's single constructor property carrying the
+         * varint-decoded value (e.g. `raw`). The `@ForwardCompatible`
+         * skip+preserve arms read `<decoded>.<innerPropertyName>` to
+         * capture the full-width opcode (the dispatch value may be a
+         * narrowing projection) and re-wrap it (`ValueClass(opcode)`)
+         * on the re-encode path.
+         */
+        val innerPropertyName: String,
+        /** The inner property's scalar kind (Long / ULong for QUIC varints). */
+        val innerKind: ScalarKind,
     ) : Discriminator {
         override val labelFormat: LabelFormat get() = LabelFormat.Decimal
         override val ownership: DiscriminatorOwnership get() = DiscriminatorOwnership.ReReadByVariant
@@ -388,6 +399,15 @@ internal data class ForwardCompatibleConfig(
     val unknownClassName: ClassName,
     val opcodeFieldName: String,
     val rawFieldName: String,
+    /**
+     * The opcode parameter's declared scalar kind. [ScalarKind.Int] is
+     * the legacy single-byte-discriminator shape (the opcode carries the
+     * discriminator *byte*); [ScalarKind.Long] / [ScalarKind.ULong] are
+     * the varint-discriminator shapes, carrying the discriminator's full
+     * decoded value (F2/F5 require it to match the discriminator's inner
+     * scalar kind so the preserve→re-encode round trip is lossless).
+     */
+    val opcodeKind: ScalarKind,
 )
 
 /**

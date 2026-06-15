@@ -5,6 +5,75 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Codec processor: framed-body truncation guard** — generated `@FramedBy`
+  decode (variant arms and the `@ForwardCompatible` preserve arm) now throws a
+  `DecodeException` (`<Owner>.@FramedBy` / `<Unknown>.@ForwardCompatible`)
+  when the declared body length exceeds `buffer.remaining()`, **before**
+  applying the bound or allocating the preserve buffer. Previously a truncated
+  frame failed with platform-dependent buffer errors — or worse, on platforms
+  whose buffers clamp limits past capacity (JS), reads silently fabricated
+  zero bytes for the missing region and the preserve path allocated the
+  attacker-declared length (found by downstream differential fuzzing). Stream
+  readers that gate on `peekFrameSize` never hit the guard; it protects direct
+  `decode` callers and makes truncation behavior identical on every platform.
+- **Codec processor: `@FramedBy` after a varint discriminator** — the `after`
+  framing header may now be a varint value class (inner scalar carrying
+  `@UseCodec(<VariableLengthCodec>)`, e.g. an HTTP/3 frame type). The framed
+  encode measures the header's width per value via the codec's `wireSize`
+  (instead of a compile-time constant), the framed `peekFrameSize` measures it
+  via the codec's own peek, and the peek budget for the framing prefix is the
+  framing codec's declared `maxWireSize` (a QUIC varint length is 1–8 bytes;
+  the fixed path's literal budget is unchanged). Together with
+  `@ForwardCompatible` below this enables a fully **length-free** declarative
+  HTTP/3 frame model: `Type (varint)` + computed `Length (varint)` + payload,
+  with strict body consumption (RFC 9114 §7.1 H3_FRAME_ERROR semantics).
+- **Codec processor: `@ForwardCompatible` over varint discriminators** — the
+  skip-and-preserve contract (F2/F5) now accepts a varint `@DispatchOn`
+  discriminator in addition to single-byte ones. The preserved opcode is the
+  discriminator's full decoded value; the `@UnknownVariant` sink's opcode
+  parameter must be the discriminator's inner type (`Long` / `ULong`) so the
+  preserve→re-encode round trip is lossless (re-encoded through the
+  discriminator's own codec in canonical minimal form). Covers RFC 9114 §9
+  ignore-unknown (reserved/GREASE frame types) for HTTP/3-style unions; the
+  same shape fits QUIC frame types, HTTP/3 stream types, and QPACK opcodes.
+- **`ViewCodec<T>` — explicit zero-copy escape from the raw-bytes lockdown.**
+  `@RemainingBytes @UseCodec(C) val: T` may now carry a **non-`Payload`** type
+  (including `ReadBuffer` itself) when `C` implements the new
+  `com.ditchoom.buffer.codec.ViewCodec` marker: decode returns a borrowed view
+  whose lifetime is tied to the source buffer, encode must be non-consuming.
+  Implementing `ViewCodec` *is* the documented ownership answer the lockdown's
+  prohibition exists to demand; `Payload`-marked self-contained values remain
+  the default for anything that outlives the source buffer.
+
+### Changed
+
+- **Generated varint value-class codecs report Exact `wireSize`.** A
+  `@ProtocolMessage` value class whose single field is a variable-length
+  `@UseCodec` scalar (a varint wrapper) now forwards `wireSize` to the user
+  codec (`VariableLengthCodec.wireSize` is `Exact(encodedLength)` by
+  construction) instead of collapsing to `BackPatch`. Wire format unchanged;
+  required so `@FramedBy`-after-varint can size the framing header per value.
+- The new dispatch-value contract note for varint unions: a `@DispatchValue`
+  projection narrowing a `Long`/`ULong` varint to `Int` should clamp
+  out-of-range values to a sentinel (e.g. `-1`) rather than truncate —
+  truncation can alias a huge unknown type onto a known small `@PacketType`
+  value. The `protocols/http3fc` fixture pins the guard.
+
+### Fixed
+
+- **`PlatformBuffer.use {}` now releases pooled buffers.** The cleanup was gated
+  on `this is CloseableBuffer`, but pooled buffers (`PooledBuffer` /
+  `TrackedSlice`, returned by `BufferPool.acquire`/`slice`) are not
+  `CloseableBuffer` — their release is a refcount decrement performed by
+  `freeNativeMemory()`. As a result `use {}` silently failed to return pooled
+  buffers to their pool, contradicting its own "works on all buffers" contract
+  and leaking pool capacity. `use {}` now always invokes `freeNativeMemory()`;
+  this is a no-op on GC-managed buffers and non-owning slices, frees native
+  memory on `CloseableBuffer`s, and returns pooled buffers to the pool. No wire
+  format or allocation-path change.
+
 ## [5.5.0] — 2026-06-05
 
 ### Added

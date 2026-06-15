@@ -238,6 +238,7 @@ internal class CodecEmitter(
             "val __framingLength = %T.decode(buffer, context)",
             framedBy.codecClassName,
         )
+        appendFramedBodyTruncationGuard(body, "__framingLength", "${shape.ownerSimpleName}.@FramedBy")
         body.addStatement("%T.applyBound(buffer, __framingLength)", framedBy.codecClassName)
         body.addStatement("val __framingStart = buffer.position()")
         body.addStatement("val __framingBound = __framingStart + __framingLength.toInt()")
@@ -272,17 +273,44 @@ internal class CodecEmitter(
         messageType: TypeName = shape.messageClassName,
     ): FunSpec {
         val afterField = framedByAfterField(shape, framedBy)
-        val headerWireWidth =
-            (afterField?.let(::framedByHeaderWireWidth) ?: WireWidth.Zero)
-                .requireFixed("framedByHeaderWireWidth")
         val body = CodeBlock.builder()
+        // Variable-width header (varint discriminator): the header's
+        // width isn't a compile-time constant, so measure it per-value
+        // through the header codec's `wireSize` and pass the runtime
+        // value to FramedEncoder (whose slack arithmetic is already
+        // runtime-`Int`-driven).
+        val variableAfter = afterField as? FieldSpec.UseCodecScalar
+        if (variableAfter != null) {
+            body.addStatement(
+                "val __framingHeaderSize = %T.wireSize(value.%L, context)",
+                variableAfter.codecType,
+                variableAfter.name,
+            )
+            body.beginControlFlow("require(__framingHeaderSize is %T.Exact)", WIRE_SIZE_CN)
+            body.addStatement(
+                "%S",
+                "framing header codec returned a non-Exact wire size for ${shape.ownerSimpleName}.${variableAfter.name}",
+            )
+            body.endControlFlow()
+        }
+        val headerWireWidthLiteral: Int? =
+            if (variableAfter == null) {
+                (afterField?.let(::framedByHeaderWireWidth) ?: WireWidth.Zero)
+                    .requireFixed("framedByHeaderWireWidth")
+            } else {
+                null
+            }
         body.add("return %T.encode(\n", FRAMED_ENCODER_CN)
         body.indent()
         body.add("factory = factory,\n")
         body.add("framingCodec = %T,\n", framedBy.codecClassName)
         body.add("context = context,\n")
         if (afterField != null) {
-            body.add("headerWireWidth = %L,\n", headerWireWidth)
+            if (variableAfter != null) {
+                body.add("headerWireWidth = __framingHeaderSize.bytes,\n")
+            } else {
+                body.add("headerWireWidth = %L,\n", headerWireWidthLiteral)
+            }
             body.add("writeHeader = { buffer ->\n")
             body.indent()
             appendEncodeField(body, afterField, shape)
@@ -316,9 +344,7 @@ internal class CodecEmitter(
         framedBy: FramedByConfig,
     ): FunSpec {
         val afterField = framedByAfterField(shape, framedBy)
-        val headerWireWidth =
-            (afterField?.let(::framedByHeaderWireWidth) ?: WireWidth.Zero)
-                .requireFixed("framedByHeaderWireWidth")
+        val variableAfter = afterField as? FieldSpec.UseCodecScalar
         val builder =
             FunSpec
                 .builder("peekFrameSize")
@@ -330,6 +356,35 @@ internal class CodecEmitter(
                         .build(),
                 ).returns(PEEK_RESULT_CN)
         val body = CodeBlock.builder()
+        if (variableAfter != null) {
+            // Variable-width header (varint discriminator): measure the
+            // header's width via its codec's own peek, then walk the
+            // framing prefix at the measured offset. The peek budget is
+            // the framing codec's declared worst case rather than the
+            // fixed-path literal (a QUIC varint length is 1..8 bytes).
+            body.addStatement(
+                "val __headerFrame = %T.peekFrameSize(stream, baseOffset)",
+                variableAfter.codecType,
+            )
+            body.beginControlFlow("if (__headerFrame !is %T.Complete)", PEEK_RESULT_CN)
+            body.addStatement("return __headerFrame")
+            body.endControlFlow()
+            body.addStatement("val __headerWireWidth = __headerFrame.bytes")
+            body.addStatement(
+                "if (stream.available() - baseOffset < __headerWireWidth + 1) return %T.NeedsMoreData",
+                PEEK_RESULT_CN,
+            )
+            body.addStatement(
+                "val __framingPeek = stream.peekBuffer(baseOffset + __headerWireWidth, %T.maxWireSize) " +
+                    "?: return %T.NeedsMoreData",
+                framedBy.codecClassName,
+                PEEK_RESULT_CN,
+            )
+            return buildFramedByPeekFrameTail(builder, body, framedBy, headerWidthExpr = "__headerWireWidth")
+        }
+        val headerWireWidth =
+            (afterField?.let(::framedByHeaderWireWidth) ?: WireWidth.Zero)
+                .requireFixed("framedByHeaderWireWidth")
         // Need at least the header bytes plus one prefix byte before
         // attempting the codec read. Wider VBI continuations are caught
         // by the codec's underflow → NeedsMoreData fallback below.
@@ -348,6 +403,23 @@ internal class CodecEmitter(
             peekBudget,
             PEEK_RESULT_CN,
         )
+        return buildFramedByPeekFrameTail(builder, body, framedBy, headerWidthExpr = headerWireWidth.toString())
+    }
+
+    /**
+     * Shared tail of the `@FramedBy` `peekFrameSize` emit: decode the
+     * framing prefix against the non-consuming `__framingPeek` view
+     * (underflow → NeedsMoreData), then total = header + observed prefix
+     * width + decoded length. [headerWidthExpr] is either the fixed-path
+     * literal (`"1"`) or the variable-path runtime local
+     * (`"__headerWireWidth"`) — both interpolate into the same shape.
+     */
+    private fun buildFramedByPeekFrameTail(
+        builder: FunSpec.Builder,
+        body: CodeBlock.Builder,
+        framedBy: FramedByConfig,
+        headerWidthExpr: String,
+    ): FunSpec {
         body.beginControlFlow("try")
         body.addStatement("val __framingPeekStart = __framingPeek.position()")
         body.beginControlFlow("val __framingLength = try")
@@ -373,7 +445,7 @@ internal class CodecEmitter(
         )
         body.addStatement(
             "val __total = %L + __framingPrefixWidth + __framingLength.toInt()",
-            headerWireWidth,
+            headerWidthExpr,
         )
         body.addStatement(
             "return if (stream.available() - baseOffset >= __total) %T.Complete(__total) else %T.NeedsMoreData",
@@ -393,9 +465,11 @@ internal class CodecEmitter(
     /**
      * Resolve the `@FramedByafter`-named
      * field to its [FieldSpec], or `null` when the name doesn't match
-     * an analyzed field OR the field shape cannot carry an Exact wire
-     * width (only Scalar / ValueClassScalar are accepted; this mirrors
-     * the validator's E3 acceptance set).
+     * an analyzed field OR the field shape cannot serve as the framing
+     * header (Scalar / ValueClassScalar for the fixed-width emit, plus
+     * a variable-length non-bounding UseCodecScalar — the varint
+     * discriminator — for the runtime-width emit; this mirrors the
+     * validator's E3 acceptance set).
      *
      * Returning `null` for a non-Exact match is a graceful fallback: the
      * validator already logged an `E3` error against the same shape, so
@@ -411,6 +485,15 @@ internal class CodecEmitter(
         val field = shape.fields.firstOrNull { it.name == framedBy.afterFieldName } ?: return null
         return when (field) {
             is FieldSpec.Scalar, is FieldSpec.ValueClassScalar -> field
+            // Varint discriminator header (a value class whose inner
+            // scalar carries `@UseCodec(VariableLengthCodec)`, e.g. an
+            // HTTP/3 frame type). Variable wire width: the encode emit
+            // measures it per-value via the codec's `wireSize` and the
+            // peek emit via the codec's `peekFrameSize`, instead of the
+            // compile-time constant the fixed shapes use. A *bounding*
+            // UseCodecScalar can never be the framing header (its value
+            // is a length, not an opcode) — excluded.
+            is FieldSpec.UseCodecScalar -> field.takeIf { it.isVariableLength && !it.isBounding }
             else -> null
         }
     }
@@ -1613,6 +1696,7 @@ internal class CodecEmitter(
                 "val __framingLength = %T.decode(buffer, context)",
                 framedBy.codecClassName,
             )
+            appendFramedBodyTruncationGuard(body, "__framingLength", "${shape.ownerSimpleName}.@FramedBy")
             body.addStatement(
                 "%T.applyBound(buffer, __framingLength)",
                 framedBy.codecClassName,
@@ -1708,4 +1792,31 @@ internal class CodecEmitter(
             is FieldSpec.ProtocolMessageScalar -> field.fieldType
             is FieldSpec.EnumScalar -> field.enumType
         }
+}
+
+/**
+ * Emits the framed-body truncation guard between the framing codec's `decode`
+ * and the body decode: the declared body must be fully buffered. Without it a
+ * truncated frame fails with platform-dependent buffer errors — or worse, on
+ * platforms whose buffers clamp limits past capacity (JS), reads silently
+ * fabricate zero bytes for the missing region (and the @ForwardCompatible
+ * preserve path would even *allocate* the attacker-declared length). Stream
+ * readers that gate on `peekFrameSize` never hit this; it protects direct
+ * `decode` callers.
+ */
+internal fun appendFramedBodyTruncationGuard(
+    body: CodeBlock.Builder,
+    lengthLocal: String,
+    fieldPath: String,
+) {
+    body.beginControlFlow("if (%L.toInt() > buffer.remaining())", lengthLocal)
+    body.addStatement(
+        "throw %T(\n  fieldPath = %S,\n  bufferPosition = buffer.position(),\n" +
+            "  expected = \"a fully-buffered \" + %L + \"-byte framed body\",\n" +
+            "  actual = buffer.remaining().toString() + \" bytes available\",\n)",
+        DECODE_EXCEPTION_CN,
+        fieldPath,
+        lengthLocal,
+    )
+    body.endControlFlow()
 }

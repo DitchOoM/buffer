@@ -160,7 +160,7 @@ internal fun buildDispatchDecodeFun(shape: DispatchShape): FunSpec {
             val framedBy =
                 (shape.framing as? Framing.Framed)?.config
                     ?: error("@ForwardCompatible requires @FramedBy; analyzer should not have set forwardCompat")
-            appendForwardCompatibleDecodeElse(body, framedBy, fc.config)
+            appendForwardCompatibleDecodeElse(body, framedBy, fc.config, shape.discriminator)
         }
         ForwardCompat.Disabled -> {
             body.beginControlFlow("else ->")
@@ -794,7 +794,7 @@ internal fun buildFramedByDispatchOnEncodeFun(
             val framedBy =
                 (shape.framing as? Framing.Framed)?.config
                     ?: error("@ForwardCompatible requires @FramedBy; analyzer should not have set forwardCompat")
-            appendForwardCompatibleEncodeArm(body, framedBy, fc.config)
+            appendForwardCompatibleEncodeArm(body, framedBy, fc.config, shape.discriminator)
         }
         ForwardCompat.Disabled -> Unit
     }
@@ -820,7 +820,6 @@ internal fun buildFramedByDispatchOnPeekFun(shape: DispatchShape): FunSpec {
     val framedBy =
         (shape.framing as? Framing.Framed)?.config
             ?: error("buildFramedByDispatchOnPeekFun called on shape without @FramedBy")
-    val headerWireWidth = shape.discriminator.wireWidth.requireFixed("dispatchOnDiscriminator")
     val builder =
         FunSpec
             .builder("peekFrameSize")
@@ -832,18 +831,49 @@ internal fun buildFramedByDispatchOnPeekFun(shape: DispatchShape): FunSpec {
                     .build(),
             ).returns(PEEK_RESULT_CN)
     val body = CodeBlock.builder()
-    body.addStatement(
-        "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
-        headerWireWidth + 1,
-        PEEK_RESULT_CN,
-    )
-    val peekBudget = 5
-    body.addStatement(
-        "val __framingPeek = stream.peekBuffer(baseOffset + %L, %L) ?: return %T.NeedsMoreData",
-        headerWireWidth,
-        peekBudget,
-        PEEK_RESULT_CN,
-    )
+    val headerWidthExpr: String
+    if (shape.discriminator is Discriminator.Varint) {
+        // Variable-width discriminator: measure its width via the value
+        // class codec's own peek (works for unknown/GREASE types too —
+        // a varint self-delimits regardless of whether the dispatch
+        // value is recognized), then walk the framing prefix at the
+        // measured offset with the framing codec's worst-case budget.
+        val disc = shape.discriminator as Discriminator.Varint
+        body.addStatement(
+            "val __headerFrame = %T.peekFrameSize(stream, baseOffset)",
+            disc.codecClassName,
+        )
+        body.beginControlFlow("if (__headerFrame !is %T.Complete)", PEEK_RESULT_CN)
+        body.addStatement("return __headerFrame")
+        body.endControlFlow()
+        body.addStatement("val __headerWireWidth = __headerFrame.bytes")
+        body.addStatement(
+            "if (stream.available() - baseOffset < __headerWireWidth + 1) return %T.NeedsMoreData",
+            PEEK_RESULT_CN,
+        )
+        body.addStatement(
+            "val __framingPeek = stream.peekBuffer(baseOffset + __headerWireWidth, %T.maxWireSize) " +
+                "?: return %T.NeedsMoreData",
+            framedBy.codecClassName,
+            PEEK_RESULT_CN,
+        )
+        headerWidthExpr = "__headerWireWidth"
+    } else {
+        val headerWireWidth = shape.discriminator.wireWidth.requireFixed("dispatchOnDiscriminator")
+        body.addStatement(
+            "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
+            headerWireWidth + 1,
+            PEEK_RESULT_CN,
+        )
+        val peekBudget = 5
+        body.addStatement(
+            "val __framingPeek = stream.peekBuffer(baseOffset + %L, %L) ?: return %T.NeedsMoreData",
+            headerWireWidth,
+            peekBudget,
+            PEEK_RESULT_CN,
+        )
+        headerWidthExpr = headerWireWidth.toString()
+    }
     body.beginControlFlow("try")
     body.addStatement("val __framingPeekStart = __framingPeek.position()")
     body.beginControlFlow("val __framingLength = try")
@@ -869,7 +899,7 @@ internal fun buildFramedByDispatchOnPeekFun(shape: DispatchShape): FunSpec {
     )
     body.addStatement(
         "val __total = %L + __framingPrefixWidth + __framingLength.toInt()",
-        headerWireWidth,
+        headerWidthExpr,
     )
     body.addStatement(
         "return if (stream.available() - baseOffset >= __total) %T.Complete(__total) else %T.NeedsMoreData",
@@ -1075,16 +1105,34 @@ internal fun appendForwardCompatibleDecodeElse(
     body: CodeBlock.Builder,
     framedBy: FramedByConfig,
     fc: ForwardCompatibleConfig,
+    discriminator: Discriminator,
 ) {
     body.beginControlFlow("else ->")
     // Cursor is at discriminatorPosition (rewound by decode); set it
     // explicitly so the read is robust to future reordering.
     body.addStatement("buffer.position(discriminatorPosition)")
-    body.addStatement("val __fcOpcode = buffer.readUByte().toInt()")
+    when (discriminator) {
+        is Discriminator.Varint ->
+            // Re-read the variable-width discriminator through its own
+            // codec and keep the *inner* decoded value (Long / ULong) —
+            // the dispatch value may be a narrowing projection, but the
+            // inner value is what re-encodes byte-identically.
+            body.addStatement(
+                "val __fcOpcode = %T.decode(buffer, context).%L",
+                discriminator.codecClassName,
+                discriminator.innerPropertyName,
+            )
+        else ->
+            body.addStatement("val __fcOpcode = buffer.readUByte().toInt()")
+    }
     body.addStatement(
         "val __fcLength = %T.decode(buffer, context)",
         framedBy.codecClassName,
     )
+    // Truncation guard BEFORE the allocate below: __fcRaw is sized by the
+    // *declared* length, so an unguarded truncated frame would allocate an
+    // attacker-controlled amount and (on limit-clamping platforms) zero-fill it.
+    appendFramedBodyTruncationGuard(body, "__fcLength", "${fc.unknownClassName.simpleName}.@ForwardCompatible")
     body.addStatement("val __fcFrameEnd = buffer.position() + __fcLength.toInt()")
     body.addStatement(
         "val __fcFactory = context[%T] ?: %T.%M()",
@@ -1121,7 +1169,47 @@ internal fun appendForwardCompatibleEncodeArm(
     body: CodeBlock.Builder,
     framedBy: FramedByConfig,
     fc: ForwardCompatibleConfig,
+    discriminator: Discriminator,
 ) {
+    if (discriminator is Discriminator.Varint) {
+        // Re-wrap the preserved full-width opcode in the discriminator
+        // value class and re-encode it through the discriminator's own
+        // codec — width measured per-value, so a multi-byte GREASE-style
+        // type round-trips byte-identically (for the canonical minimal
+        // encoding; a varint has no fixed width to assume).
+        body.beginControlFlow("is %T ->", fc.unknownClassName)
+        body.addStatement(
+            "val __fcHeader = %T(value.%L)",
+            discriminator.className,
+            fc.opcodeFieldName,
+        )
+        body.addStatement(
+            "val __fcHeaderSize = %T.wireSize(__fcHeader, context)",
+            discriminator.codecClassName,
+        )
+        body.beginControlFlow("require(__fcHeaderSize is %T.Exact)", WIRE_SIZE_CN)
+        body.addStatement(
+            "%S",
+            "discriminator codec returned a non-Exact wire size for the preserved opcode",
+        )
+        body.endControlFlow()
+        body.add("%T.encode(\n", FRAMED_ENCODER_CN)
+        body.indent()
+        body.add("factory = factory,\n")
+        body.add("framingCodec = %T,\n", framedBy.codecClassName)
+        body.add("context = context,\n")
+        body.add("headerWireWidth = __fcHeaderSize.bytes,\n")
+        body.add(
+            "writeHeader = { __fcBuf -> %T.encode(__fcBuf, __fcHeader, context) },\n",
+            discriminator.codecClassName,
+        )
+        body.unindent()
+        body.beginControlFlow(") { __fcBuf ->")
+        body.addStatement("__fcBuf.write(value.%L.slice())", fc.rawFieldName)
+        body.endControlFlow()
+        body.endControlFlow()
+        return
+    }
     body.add("is %T -> %T.encode(\n", fc.unknownClassName, FRAMED_ENCODER_CN)
     body.indent()
     body.add("factory = factory,\n")

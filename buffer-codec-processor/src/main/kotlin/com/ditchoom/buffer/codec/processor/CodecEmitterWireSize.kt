@@ -46,6 +46,10 @@ internal fun buildWireSizeFun(
     // (`isVariableLength`) is the exception: it reports `Exact(encodedLength(value))` at
     // runtime, so a message whose only variable fields are such codecs stays on the
     // precompute path via the runtime-Exact branch below (just before the terminal `when`).
+    // This subsumes the former sole-varint-value-class special case (#186): a single
+    // variable-length `@UseCodec` scalar (an HTTP/3 frame type wrapping a QUIC varint) now
+    // falls through to that branch, which yields the same `Exact(encodedLength)` the
+    // `@FramedBy`-after-varint emit needs to size its framing header per value.
     if (shape.fields.any { it is FieldSpec.UseCodecScalar && !it.isVariableLength }) {
         builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
         return builder.build()

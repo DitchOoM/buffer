@@ -32,7 +32,8 @@ package com.ditchoom.buffer
  *     // Platform requires explicit cleanup
  *     buffer.use { /* ... */ }
  * }
- * // Or always safe — use {} works on all buffers:
+ * // Or always safe — use {} releases any buffer (frees native memory, returns a pooled
+ * // buffer to its pool, or no-ops for GC-managed buffers):
  * BufferFactory.Default.allocate(1024).use { buf ->
  *     buf.writeInt(42)
  * }
@@ -47,14 +48,19 @@ interface CloseableBuffer {
 }
 
 /**
- * Executes [block] with this [PlatformBuffer] and ensures cleanup when the block completes.
+ * Executes [block] with this [PlatformBuffer] and releases it when the block completes by
+ * calling [freeNativeMemory][PlatformBuffer.freeNativeMemory].
  *
- * If the buffer implements [CloseableBuffer], [freeNativeMemory][PlatformBuffer.freeNativeMemory]
- * is called after the block. Otherwise this is a no-op on completion (the buffer is
- * GC-managed).
+ * What "release" means depends on the buffer, and [freeNativeMemory] dispatches correctly for each:
+ * - [CloseableBuffer] (deterministic / native-memory buffers): frees the native memory.
+ * - A buffer acquired from a buffer pool: decrements its refcount and returns it to the pool
+ *   once all of its slices are also freed.
+ * - GC-managed buffers and non-owning slices: [freeNativeMemory] is a no-op, so this is harmless.
  *
- * This is the recommended way to use buffers when you don't know at compile time
- * whether cleanup is required.
+ * Because the release is always invoked — not gated on [CloseableBuffer] — this is safe, and the
+ * recommended way, for any buffer whose ownership ends with the block, **including pooled buffers**
+ * (an earlier version skipped non-[CloseableBuffer] buffers and silently failed to return pooled
+ * buffers to their pool).
  */
 inline fun <R> PlatformBuffer.use(block: (PlatformBuffer) -> R): R {
     var exception: Throwable? = null
@@ -64,15 +70,13 @@ inline fun <R> PlatformBuffer.use(block: (PlatformBuffer) -> R): R {
         exception = e
         throw e
     } finally {
-        if (this is CloseableBuffer) {
-            if (exception == null) {
+        if (exception == null) {
+            freeNativeMemory()
+        } else {
+            try {
                 freeNativeMemory()
-            } else {
-                try {
-                    freeNativeMemory()
-                } catch (closeException: Throwable) {
-                    exception.addSuppressed(closeException)
-                }
+            } catch (closeException: Throwable) {
+                exception.addSuppressed(closeException)
             }
         }
     }

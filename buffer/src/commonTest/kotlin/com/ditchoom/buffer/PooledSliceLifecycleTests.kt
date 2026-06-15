@@ -172,4 +172,54 @@ class PooledSliceLifecycleTests {
         assertNotEquals(0, stats.currentPoolSize, "Pool must hold the recycled buffer between iterations")
         pool.clear()
     }
+
+    /**
+     * [use] must return a pooled buffer to its pool. A pooled chunk is NOT a
+     * [CloseableBuffer], so the earlier `if (this is CloseableBuffer)` gate in
+     * `use` skipped its `freeNativeMemory()` and stranded the chunk forever —
+     * the exact footgun behind the "use {} works on all buffers" doc claim.
+     */
+    @Test
+    fun useReturnsPooledChunkToPool() {
+        val pool = newPool()
+        val chunk = pool.acquire(256) as PlatformBuffer
+
+        chunk.use { it.writeInt(0xCAFEBABE.toInt()) }
+
+        assertEquals(1, pool.stats().currentPoolSize, "use {} must release the pooled chunk back to the pool")
+        pool.clear()
+    }
+
+    /** [use] on a pooled slice must decrement the parent refcount, same as an explicit free. */
+    @Test
+    fun useOnPooledSliceReleasesParentReference() {
+        val pool = newPool()
+        val chunk = pool.acquire(256) as PlatformBuffer
+        val slice = chunk.slice()
+
+        chunk.freeNativeMemory()
+        assertEquals(0, pool.stats().currentPoolSize, "Slice still outstanding — chunk pinned")
+
+        slice.use { /* read/inspect */ }
+        assertEquals(1, pool.stats().currentPoolSize, "use {} on the last slice must recycle the chunk")
+        pool.clear()
+    }
+
+    /** Release must happen even when the block throws (and the original exception propagates). */
+    @Test
+    fun useReleasesPooledChunkOnException() {
+        val pool = newPool()
+        val chunk = pool.acquire(256) as PlatformBuffer
+
+        val marker = RuntimeException("boom")
+        val thrown =
+            try {
+                chunk.use { throw marker }
+            } catch (e: RuntimeException) {
+                e
+            }
+        assertEquals(marker, thrown, "Original exception must propagate")
+        assertEquals(1, pool.stats().currentPoolSize, "use {} must release the chunk even on a thrown block")
+        pool.clear()
+    }
 }

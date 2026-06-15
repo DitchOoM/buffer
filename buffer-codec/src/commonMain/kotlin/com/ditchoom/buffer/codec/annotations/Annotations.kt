@@ -138,7 +138,12 @@ annotation class LengthPrefixed(
  *   - Typed binary payload via `@RemainingBytes @UseCodec(C::class) val: P`
  *     — the user codec consumes the bounded region in one call. Use this
  *     instead of a raw scalar list when the bytes are opaque (an image,
- *     a compressed blob, an encrypted payload). See [UseCodec].
+ *     a compressed blob, an encrypted payload). See [UseCodec]. `P` must
+ *     extend `Payload` (a self-contained, consumer-owned value) — unless
+ *     `C` implements `com.ditchoom.buffer.codec.ViewCodec`, the explicit
+ *     opt-in for **zero-copy borrowed views** (then `P` may be any type,
+ *     including `ReadBuffer`; the view's lifetime is tied to the source
+ *     buffer per the `ViewCodec` contract).
  *
  * For protocols that genuinely need a typed list of single bytes the
  * scalar-list shape (`List<UByte>` / `List<Byte>`) is also accepted, but
@@ -542,8 +547,13 @@ annotation class UseCodec(
  *   emitter can size the slack region for the slicing scheme.
  * @param after Names a sibling constructor field that the prefix sits
  *   immediately *after* on the wire. Empty (default) means the prefix is at
- *   offset 0. The named field must exist, have Exact wire width, and — when
- *   the class carries `@PacketType` — be the discriminator.
+ *   offset 0. The named field must exist and — when the class carries
+ *   `@PacketType` — be the discriminator. It must either have Exact wire
+ *   width (fixed-width scalars / value classes wrapping them) or be a
+ *   **varint value class** (inner scalar carrying
+ *   `@UseCodec(<VariableLengthCodec>)`, e.g. an HTTP/3 frame type): the
+ *   emit then measures the header's width per value via the codec instead
+ *   of a compile-time constant.
  *
  * ```kotlin
  * @ProtocolMessage
@@ -639,16 +649,23 @@ annotation class DispatchValue
  * 1. The annotated type must also carry [FramedBy] — you cannot skip a variant
  *    whose length you cannot measure. The framing prefix bounds the payload the
  *    decoder skips.
- * 2. The annotated type must use [DispatchOn] dispatch with a **single-byte**
- *    discriminator. (Framed sealed dispatch routes exclusively through
- *    `@DispatchOn`; a single-byte discriminator guarantees the preserved
- *    opcode re-encodes byte-identically.)
+ * 2. The annotated type must use [DispatchOn] dispatch with either a
+ *    **single-byte** discriminator (the preserved opcode is one byte,
+ *    re-encoded verbatim) or a **varint** discriminator — a value class whose
+ *    inner scalar is `@UseCodec(<VariableLengthCodec>) raw: Long | ULong`
+ *    (QUIC varint, LEB128, …). A varint opcode is preserved as its full
+ *    decoded value and re-encoded through the discriminator's own codec, so a
+ *    multi-byte GREASE-style type round-trips in its canonical minimal
+ *    encoding. Fixed multi-byte discriminators (UShort/UInt) are not
+ *    supported.
  * 3. [unknown] must name a member of the sealed type marked [UnknownVariant],
  *    whose primary constructor is shaped `(opcode: Int, raw: PlatformBuffer)`
- *    (a `ReadBuffer`-typed `raw` is also accepted). `opcode` carries the
- *    discriminator byte (the only place it can survive — `raw` is the payload
- *    only); `raw` carries the opaque framed payload, excluding the opcode and
- *    length prefix.
+ *    (a `ReadBuffer`-typed `raw` is also accepted). For a single-byte
+ *    discriminator `opcode` is `Int` and carries the discriminator byte; for
+ *    a varint discriminator it must be the discriminator's own inner type
+ *    (`Long` / `ULong`) and carries the full decoded type value. `raw`
+ *    carries the opaque framed payload, excluding the opcode and length
+ *    prefix.
  *
  * ```kotlin
  * @ProtocolMessage
@@ -684,8 +701,11 @@ annotation class ForwardCompatible(
  * Marks the single sealed-variant sink that a [ForwardCompatible] union skips
  * unknown discriminators into. The marked variant must **not** carry
  * [PacketType] — it is the `else` arm of dispatch, never matched by value — and
- * its primary constructor must be `(opcode: Int, raw: PlatformBuffer)` (or
- * `(opcode: Int, raw: ReadBuffer)`).
+ * its primary constructor must be `(opcode: Int, raw: PlatformBuffer)` (a
+ * `ReadBuffer`-typed `raw` is also accepted). For a *varint* discriminator the
+ * opcode parameter is instead the discriminator's own inner type (`Long` /
+ * `ULong`), carrying the full decoded type value — see [ForwardCompatible]
+ * requirement 3.
  *
  * @see ForwardCompatible
  */
