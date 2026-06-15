@@ -158,6 +158,16 @@ class MutableDataBuffer private constructor(
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
+    // Unchecked fast paths (see ReadBuffer.getUnchecked): caller has validated the range, so skip the
+    // per-element requireIndex that K/N can't hoist out of a loop the way a JIT does.
+    override fun getUnchecked(index: Int): Byte = bytePointer[index]
+
+    override fun getLongUnchecked(index: Int): Long {
+        val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
+        val value = ptr[0]
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
+    }
+
     override fun readShort(): Short {
         requireReadable(2)
         val ptr = (bytePointer + position)!!.reinterpret<ShortVar>()
@@ -708,6 +718,16 @@ class MutableDataBufferSlice(
 
     override fun getLong(index: Int): Long {
         requireIndex(index, 8)
+        val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
+        val value = ptr[0]
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
+    }
+
+    // Unchecked fast paths (see ReadBuffer.getUnchecked): caller has validated the range, so skip the
+    // per-element requireIndex that K/N can't hoist out of a loop the way a JIT does.
+    override fun getUnchecked(index: Int): Byte = bytePointer[index]
+
+    override fun getLongUnchecked(index: Int): Long {
         val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value

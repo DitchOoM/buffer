@@ -554,14 +554,17 @@ interface ReadBuffer : PositionBuffer {
         val size = remaining()
         if (size == 0) return true
 
+        // Reads cover [position, position+size) on both buffers (size == remaining), so every access
+        // is provably in-bounds — use the unchecked accessors to skip per-element checks on non-JIT
+        // backends (see getUnchecked).
         return bulkCompareEquals(
             thisPos = position(),
             otherPos = other.position(),
             length = size,
-            getLong = { getLong(it) },
-            otherGetLong = { other.getLong(it) },
-            getByte = { get(it) },
-            otherGetByte = { other.get(it) },
+            getLong = { getLongUnchecked(it) },
+            otherGetLong = { other.getLongUnchecked(it) },
+            getByte = { getUnchecked(it) },
+            otherGetByte = { other.getUnchecked(it) },
         )
     }
 
@@ -586,16 +589,18 @@ interface ReadBuffer : PositionBuffer {
             return if (thisRemaining != otherRemaining) 0 else -1
         }
 
+        // minLength <= remaining on both buffers, so all reads are in-bounds — unchecked accessors
+        // skip per-element checks on non-JIT backends (see getUnchecked).
         return bulkMismatch(
             thisPos = position(),
             otherPos = other.position(),
             minLength = minLength,
             thisRemaining = thisRemaining,
             otherRemaining = otherRemaining,
-            getLong = { getLong(it) },
-            otherGetLong = { other.getLong(it) },
-            getByte = { get(it) },
-            otherGetByte = { other.get(it) },
+            getLong = { getLongUnchecked(it) },
+            otherGetLong = { other.getLongUnchecked(it) },
+            getByte = { getUnchecked(it) },
+            otherGetByte = { other.getUnchecked(it) },
         )
     }
 
