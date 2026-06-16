@@ -641,7 +641,7 @@ interface ReadBuffer : PositionBuffer {
         upperCase: Boolean = false,
     ) {
         requireRange(offset, length)
-        encodeHexFallback(offset, length, upperCase, { getUnchecked(it) }, { dest.writeByte(it) })
+        encodeHexCommon(offset, length, upperCase, dest)
     }
 
     /**
@@ -688,7 +688,7 @@ interface ReadBuffer : PositionBuffer {
         padded: Boolean = true,
     ) {
         requireRange(offset, length)
-        encodeBase64Fallback(offset, length, urlSafe, padded, { getUnchecked(it) }, { dest.writeByte(it) })
+        encodeBase64Common(offset, length, urlSafe, padded, dest)
     }
 
     /**

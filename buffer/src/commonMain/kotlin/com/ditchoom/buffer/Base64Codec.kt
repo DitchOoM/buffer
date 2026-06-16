@@ -56,47 +56,52 @@ fun base64DecodedMaxLength(charCount: Int): Int =
         }
 
 /**
- * Portable encode fallback: reads `length` source bytes via [getByte] and emits Base64 ASCII via
- * [putByte]. The caller has already range-checked the source.
+ * Portable encode path: reads `length` source bytes from [this] (via the unchecked accessor) and emits
+ * Base64 ASCII into [dest]. The caller has already range-checked the source.
+ *
+ * Writes each output char with an individual [WriteBuffer.writeByte]. Packing a full group's 4 chars
+ * into a single `writeInt` was measured neutral on the JVM and regressed hex's `writeShort` variant
+ * (`putInt`/`putShort` on a direct ByteBuffer is no cheaper than the byte puts), so the simple per-byte
+ * path stays. The native buffers bypass this via the C path (see NativeBase64.kt); this is the fallback
+ * they share too.
  */
-internal inline fun encodeBase64Fallback(
+internal fun ReadBuffer.encodeBase64Common(
     srcOffset: Int,
     length: Int,
     urlSafe: Boolean,
     padded: Boolean,
-    getByte: (Int) -> Byte,
-    putByte: (Byte) -> Unit,
+    dest: WriteBuffer,
 ) {
     val alphabet = if (urlSafe) BASE64_URL_ALPHABET else BASE64_STD_ALPHABET
     val fullEnd = srcOffset + length / 3 * 3
     var idx = srcOffset
     while (idx < fullEnd) {
-        val b0 = getByte(idx).toInt() and 0xFF
-        val b1 = getByte(idx + 1).toInt() and 0xFF
-        val b2 = getByte(idx + 2).toInt() and 0xFF
-        putByte(alphabet[b0 ushr 2].code.toByte())
-        putByte(alphabet[((b0 and 0x03) shl 4) or (b1 ushr 4)].code.toByte())
-        putByte(alphabet[((b1 and 0x0F) shl 2) or (b2 ushr 6)].code.toByte())
-        putByte(alphabet[b2 and 0x3F].code.toByte())
+        val b0 = getUnchecked(idx).toInt() and 0xFF
+        val b1 = getUnchecked(idx + 1).toInt() and 0xFF
+        val b2 = getUnchecked(idx + 2).toInt() and 0xFF
+        dest.writeByte(alphabet[b0 ushr 2].code.toByte())
+        dest.writeByte(alphabet[((b0 and 0x03) shl 4) or (b1 ushr 4)].code.toByte())
+        dest.writeByte(alphabet[((b1 and 0x0F) shl 2) or (b2 ushr 6)].code.toByte())
+        dest.writeByte(alphabet[b2 and 0x3F].code.toByte())
         idx += 3
     }
     when ((srcOffset + length) - fullEnd) {
         1 -> {
-            val b0 = getByte(fullEnd).toInt() and 0xFF
-            putByte(alphabet[b0 ushr 2].code.toByte())
-            putByte(alphabet[(b0 and 0x03) shl 4].code.toByte())
+            val b0 = getUnchecked(fullEnd).toInt() and 0xFF
+            dest.writeByte(alphabet[b0 ushr 2].code.toByte())
+            dest.writeByte(alphabet[(b0 and 0x03) shl 4].code.toByte())
             if (padded) {
-                putByte(BASE64_PAD.toByte())
-                putByte(BASE64_PAD.toByte())
+                dest.writeByte(BASE64_PAD.toByte())
+                dest.writeByte(BASE64_PAD.toByte())
             }
         }
         2 -> {
-            val b0 = getByte(fullEnd).toInt() and 0xFF
-            val b1 = getByte(fullEnd + 1).toInt() and 0xFF
-            putByte(alphabet[b0 ushr 2].code.toByte())
-            putByte(alphabet[((b0 and 0x03) shl 4) or (b1 ushr 4)].code.toByte())
-            putByte(alphabet[(b1 and 0x0F) shl 2].code.toByte())
-            if (padded) putByte(BASE64_PAD.toByte())
+            val b0 = getUnchecked(fullEnd).toInt() and 0xFF
+            val b1 = getUnchecked(fullEnd + 1).toInt() and 0xFF
+            dest.writeByte(alphabet[b0 ushr 2].code.toByte())
+            dest.writeByte(alphabet[((b0 and 0x03) shl 4) or (b1 ushr 4)].code.toByte())
+            dest.writeByte(alphabet[(b1 and 0x0F) shl 2].code.toByte())
+            if (padded) dest.writeByte(BASE64_PAD.toByte())
         }
     }
 }

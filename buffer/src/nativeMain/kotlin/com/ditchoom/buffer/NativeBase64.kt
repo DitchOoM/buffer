@@ -14,7 +14,7 @@ import kotlinx.cinterop.toCPointer
 // buf_base64_decode. Shared by every native NativeMemoryAccess buffer (linux NativeBuffer + slice, apple
 // MutableDataBuffer + slice), mirroring NativeHex.kt. The destination is taken when it is also native
 // memory; otherwise (or when it would not fit) we fall back to the portable common-code path
-// (encodeBase64Fallback / decodeBase64Fallback) — bit-identical output, just without the C fast path.
+// (encodeBase64Common / decodeBase64Fallback) — bit-identical output, just without the C fast path.
 
 private fun nativeBase64EncodeAddr(
     srcAddress: Long,
@@ -60,7 +60,7 @@ internal fun ReadBuffer.nativeEncodeBase64Into(
         nativeBase64EncodeAddr(srcAddress + offset, destNative.nativeAddress + destPos, length, urlSafe, padded)
         dest.position(destPos + outBytes)
     } else {
-        encodeBase64Fallback(offset, length, urlSafe, padded, { getUnchecked(it) }, { dest.writeByte(it) })
+        encodeBase64Common(offset, length, urlSafe, padded, dest)
     }
 }
 

@@ -18,7 +18,7 @@ import kotlinx.cinterop.toCPointer
 // Both directions take the source via raw addresses; the destination is taken when it is also native
 // memory (dest.nativeMemoryAccess), so the whole transform stays pointer-to-pointer with no per-element
 // Kotlin dispatch. When the destination is NOT native (e.g. a managed ByteArrayBuffer), or would not
-// fit, we fall back to the portable common-code path (encodeHexFallback / decodeHexFallback) — bit
+// fit, we fall back to the portable common-code path (encodeHexCommon / decodeHexFallback) — bit
 // identical output, just without the C fast path.
 
 private fun nativeHexEncodeAddr(
@@ -62,7 +62,7 @@ internal fun ReadBuffer.nativeEncodeHexInto(
         nativeHexEncodeAddr(srcAddress + offset, destNative.nativeAddress + destPos, length, upperCase)
         dest.position(destPos + outBytes)
     } else {
-        encodeHexFallback(offset, length, upperCase, { getUnchecked(it) }, { dest.writeByte(it) })
+        encodeHexCommon(offset, length, upperCase, dest)
     }
 }
 

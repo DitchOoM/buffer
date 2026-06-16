@@ -186,6 +186,17 @@ class Base64CodecTest {
     }
 
     @Test
+    fun encodesIntoLittleEndianDestination() {
+        // Base64 output is an ASCII byte sequence, so it must be identical regardless of the
+        // destination's byte order (default buffers are big-endian; this pins the little-endian case).
+        val src = textBuffer("foobar!")
+        val dest = BufferFactory.Default.allocate(12, ByteOrder.LITTLE_ENDIAN)
+        src.encodeBase64Into(dest)
+        dest.resetForRead()
+        assertEquals("Zm9vYmFyIQ==", dest.readString(12))
+    }
+
+    @Test
     fun roundTripsThroughPooledBufferWrappers() {
         BufferPool().let { pool ->
             val src = pool.acquire(8)

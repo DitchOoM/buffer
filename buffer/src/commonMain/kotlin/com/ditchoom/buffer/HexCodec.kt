@@ -40,22 +40,27 @@ internal fun hexDecodeNibble(c: Byte): Int {
 }
 
 /**
- * Portable encode fallback: reads `length` source bytes via [getByte] and emits `2 * length` ASCII hex
- * bytes via [putByte] (high nibble first). The caller has already range-checked the source.
+ * Portable encode path: reads `length` source bytes from [this] (via the unchecked accessor) and emits
+ * `2 * length` ASCII hex bytes into [dest] (high nibble first). The caller has already range-checked the
+ * source.
+ *
+ * Writes the two hex chars per source byte with individual [WriteBuffer.writeByte]s. Packing them into
+ * a single `writeShort` was measured ~39% *slower* on the JVM (`putShort` on a direct ByteBuffer costs
+ * more than two `put`s), so the simple per-byte path stays. The native buffers bypass this entirely via
+ * the C path (see NativeHex.kt); this is the fallback they share too.
  */
-internal inline fun encodeHexFallback(
+internal fun ReadBuffer.encodeHexCommon(
     srcOffset: Int,
     length: Int,
     upperCase: Boolean,
-    getByte: (Int) -> Byte,
-    putByte: (Byte) -> Unit,
+    dest: WriteBuffer,
 ) {
     val alphaDelta = if (upperCase) HEX_UPPER_ALPHA_DELTA else HEX_LOWER_ALPHA_DELTA
     var i = 0
     while (i < length) {
-        val b = getByte(srcOffset + i).toInt() and 0xFF
-        putByte(hexEncodeNibble(b ushr 4, alphaDelta))
-        putByte(hexEncodeNibble(b and 0x0F, alphaDelta))
+        val b = getUnchecked(srcOffset + i).toInt() and 0xFF
+        dest.writeByte(hexEncodeNibble(b ushr 4, alphaDelta))
+        dest.writeByte(hexEncodeNibble(b and 0x0F, alphaDelta))
         i++
     }
 }

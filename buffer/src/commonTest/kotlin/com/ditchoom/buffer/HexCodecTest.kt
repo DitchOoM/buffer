@@ -65,6 +65,17 @@ class HexCodecTest {
     }
 
     @Test
+    fun encodesIntoLittleEndianDestination() {
+        // Hex output is an ASCII byte sequence, so it must be identical regardless of the destination's
+        // byte order (default buffers are big-endian; this pins the little-endian case too).
+        val src = bytesBuffer(listOf(0xDE, 0xAD, 0xBE, 0xEF))
+        val dest = BufferFactory.Default.allocate(8, ByteOrder.LITTLE_ENDIAN)
+        src.encodeHexInto(dest)
+        dest.resetForRead()
+        assertEquals("deadbeef", dest.readString(8))
+    }
+
+    @Test
     fun relativeEncodeAdvancesSourceToLimit() {
         val src = bytesBuffer(listOf(0x01, 0x02))
         val dest = BufferFactory.Default.allocate(4)
