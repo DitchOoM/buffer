@@ -34,7 +34,7 @@ actual class Sha256Digest actual constructor() {
         dest.withWritablePointer(SHA256_DIGEST_BYTES) { ptr -> CC_SHA256_Final(ptr.reinterpret(), ctx.ptr) }
         if (!finalized) {
             finalized = true
-            nativeHeap.free(ctx)
+            nativeHeap.free(ctx.rawPtr)
         }
     }
 }

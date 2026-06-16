@@ -9,7 +9,6 @@ import kotlinx.cinterop.alloc
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.nativeHeap
 import kotlinx.cinterop.ptr
-import kotlinx.cinterop.reinterpret
 import platform.CoreCrypto.CCHmacContext
 import platform.CoreCrypto.CCHmacFinal
 import platform.CoreCrypto.CCHmacInit
@@ -38,10 +37,10 @@ actual class HmacSha256Mac actual constructor(
 
     actual fun doFinalInto(dest: WriteBuffer) {
         // CommonCrypto writes the 32-byte tag straight into the destination buffer's memory.
-        dest.withWritablePointer(SHA256_DIGEST_BYTES) { ptr -> CCHmacFinal(ctx.ptr, ptr.reinterpret()) }
+        dest.withWritablePointer(SHA256_DIGEST_BYTES) { ptr -> CCHmacFinal(ctx.ptr, ptr) }
         if (!finalized) {
             finalized = true
-            nativeHeap.free(ctx)
+            nativeHeap.free(ctx.rawPtr)
         }
     }
 }
