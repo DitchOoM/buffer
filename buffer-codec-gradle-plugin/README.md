@@ -30,7 +30,23 @@ meaning for someone who lacks your new code.
 
 ## Setup
 
-You should already be generating codecs with `buffer-codec` + the KSP processor. Add the plugin:
+You should already be generating codecs with `buffer-codec` + the KSP processor.
+
+This plugin is published to **Maven Central**, not the Gradle Plugin Portal. Gradle's `plugins {}`
+DSL only resolves from the Plugin Portal by default, so add Maven Central to your plugin
+repositories in `settings.gradle.kts` (otherwise resolution fails with "Plugin not found"):
+
+```kotlin
+// settings.gradle.kts
+pluginManagement {
+    repositories {
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+```
+
+Then apply the plugin in the module's build script:
 
 ```kotlin
 plugins {

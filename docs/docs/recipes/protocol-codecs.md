@@ -1479,7 +1479,20 @@ Codecs encode **positionally** — fields ride the wire in constructor order, en
 
 **Round-trip tests can't catch any of these** — you encode and decode with the same new code, so the test passes against different-but-self-consistent bytes. The `com.ditchoom.buffer.codec-schema` Gradle plugin closes that gap: it baselines your protocol's wire shape into a committed, diffable file and classifies every later change as safe, advisory (a rename), or breaking.
 
+The plugin is published to Maven Central (not the Gradle Plugin Portal), so add Maven Central to your plugin repositories:
+
 ```kotlin
+// settings.gradle.kts
+pluginManagement {
+    repositories {
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+```
+
+```kotlin
+// build.gradle.kts
 plugins {
     id("com.google.devtools.ksp") version "<ksp-version>"
     id("com.ditchoom.buffer.codec-schema") version "<latest-version>"

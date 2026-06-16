@@ -132,6 +132,17 @@ baselines your protocol's wire shape into a committed, diffable file and fails t
 change is wire-breaking:
 
 ```kotlin
+// settings.gradle.kts — the plugin is on Maven Central, not the Gradle Plugin Portal
+pluginManagement {
+    repositories {
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+```
+
+```kotlin
+// build.gradle.kts
 plugins {
     id("com.ditchoom.buffer.codec-schema") version "<latest-version>"
 }
