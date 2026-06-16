@@ -61,10 +61,6 @@ gradlePlugin {
     }
 }
 
-val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
-    archiveClassifier.set("javadoc")
-}
-
 val publishedGroupId: String by project
 val libraryName: String by project
 val siteUrl: String by project
@@ -94,6 +90,18 @@ if (shouldSignAndPublish) {
 }
 
 mavenPublishing {
+    // Configure the Gradle-plugin platform explicitly so vanniktech augments the `pluginMaven`
+    // publication that `java-gradle-plugin` creates (main jar + sources + empty javadoc + the plugin
+    // marker) instead of also creating a redundant `maven` publication at the same coordinates.
+    configure(
+        com.vanniktech.maven.publish.GradlePlugin(
+            javadocJar =
+                com.vanniktech.maven.publish.JavadocJar
+                    .Empty(),
+            sourcesJar = true,
+        ),
+    )
+
     if (shouldSignAndPublish) {
         publishToMavenCentral()
         signAllPublications()
