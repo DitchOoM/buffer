@@ -129,6 +129,30 @@ void buf_bswap64(uint8_t* buffer, size_t length) {
 }
 
 /**
+ * FNV-1a-64 content digest over a byte range, computed entirely in C so the whole per-element loop
+ * runs with raw pointer arithmetic (no Kotlin/Native CPointer materialization per access).
+ *
+ * Bit-identical to the Kotlin fnv1aHashRange: same offset basis / prime, whole 8-byte words then the
+ * byte tail. `big_endian` selects how each 8-byte word is interpreted so the result matches the
+ * buffer's getLong() byteOrder (the host is little-endian; swap when the buffer is big-endian).
+ */
+int64_t buf_fnv1a_64(const uint8_t* data, size_t length, int big_endian) {
+    uint64_t h = 0xcbf29ce484222325ULL;
+    const uint64_t prime = 0x100000001b3ULL;
+    size_t i = 0;
+    for (; i + 8 <= length; i += 8) {
+        uint64_t w;
+        memcpy(&w, data + i, 8);
+        if (big_endian) w = __builtin_bswap64(w);
+        h = (h ^ w) * prime;
+    }
+    for (; i < length; i++) {
+        h = (h ^ (uint64_t)data[i]) * prime;
+    }
+    return (int64_t)h;
+}
+
+/**
  * Find first mismatch between two buffers.
  * Returns index of first differing byte, or -1 if buffers are equal.
  * Clang auto-vectorizes the comparison loop.

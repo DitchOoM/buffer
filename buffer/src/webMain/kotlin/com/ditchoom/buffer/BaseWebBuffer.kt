@@ -97,6 +97,12 @@ abstract class BaseWebBuffer(
         return loadByte(index)
     }
 
+    // Unchecked fast paths (see ReadBuffer.getUnchecked): the caller (a bulk primitive) has validated
+    // the whole range, so skip the per-element requireIndex that JS/WASM can't hoist out of a loop.
+    override fun getUnchecked(index: Int): Byte = loadByte(index)
+
+    override fun getLongUnchecked(index: Int): Long = loadLong(index)
+
     override fun readShort(): Short {
         requireReadable(Short.SIZE_BYTES)
         val value = loadShort(positionValue)

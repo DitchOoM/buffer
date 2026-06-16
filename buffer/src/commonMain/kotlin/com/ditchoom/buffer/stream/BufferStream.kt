@@ -450,15 +450,18 @@ internal class DefaultStreamProcessor(
         val patternPos = pattern.position()
         val firstChunk = chunks.first()
 
-        // Fast path: pattern fits entirely in first chunk - use primitive comparisons
+        // Fast path: pattern fits entirely in first chunk - use primitive comparisons.
+        // Both reads stay within [pos, pos+patternSize) (guarded by remaining() >= patternSize on the
+        // chunk and pattern), so the hot 8-byte loop uses the unchecked accessors to skip per-element
+        // bounds checks on non-JIT backends (see ReadBuffer.getUnchecked).
         if (firstChunk.remaining() >= patternSize) {
             val chunkPos = firstChunk.position()
             var offset = 0
 
             // Compare 8 bytes at a time using Long
             while (offset + Long.SIZE_BYTES <= patternSize) {
-                val chunkLong = firstChunk.getLong(chunkPos + offset)
-                val patternLong = pattern.getLong(patternPos + offset)
+                val chunkLong = firstChunk.getLongUnchecked(chunkPos + offset)
+                val patternLong = pattern.getLongUnchecked(patternPos + offset)
                 if (chunkLong != patternLong) {
                     // Find exact mismatch byte within this Long
                     return offset + findMismatchInLong(chunkLong, patternLong)
@@ -488,7 +491,7 @@ internal class DefaultStreamProcessor(
 
             // Compare remaining byte
             if (offset < patternSize) {
-                if (firstChunk.get(chunkPos + offset) != pattern.get(patternPos + offset)) {
+                if (firstChunk.getUnchecked(chunkPos + offset) != pattern.getUnchecked(patternPos + offset)) {
                     return offset
                 }
             }
