@@ -1,5 +1,4 @@
 plugins {
-    alias(libs.plugins.kotlin.multiplatform) apply false
     kotlin("jvm")
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
@@ -30,39 +29,21 @@ kotlin {
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_11
-    targetCompatibility = JavaVersion.VERSION_11
+    // Java 8 bytecode: the descriptor model/parser/classifier are pure Kotlin with no Java 11+ APIs,
+    // and a low target keeps the module consumable by JVM-8 targets (e.g. buffer-codec-test's jvm
+    // target, which dogfoods the classifier in a test).
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
     compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
-        freeCompilerArgs.add("-opt-in=org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi")
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8)
     }
 }
 
 dependencies {
-    implementation(libs.ksp.api)
-    implementation(libs.kotlinpoet)
-    implementation(libs.kotlinpoet.ksp)
-    implementation(project(":buffer-codec"))
-    implementation(project(":buffer-codec-schema"))
     testImplementation(kotlin("test"))
-    // sealedSubclasses in the schema-descriptor coverage test needs kotlin-reflect at runtime.
-    testImplementation(kotlin("reflect"))
-    testImplementation(libs.kctfork.ksp)
-
-    // kctfork 0.12.0-alpha01 transitively requests 2.3.0-RC; force the
-    // embedded test compiler to the same 2.3.0 final the rest of the
-    // project is built with.
-    constraints {
-        testImplementation("org.jetbrains.kotlin:kotlin-compiler-embeddable") {
-            version { strictly("2.3.0") }
-        }
-        testImplementation("org.jetbrains.kotlin:kotlin-annotation-processing-embeddable") {
-            version { strictly("2.3.0") }
-        }
-    }
 }
 
 val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
@@ -103,11 +84,14 @@ mavenPublishing {
         signAllPublications()
     }
 
-    coordinates(publishedGroupId, "buffer-codec-processor", project.version.toString())
+    coordinates(publishedGroupId, "buffer-codec-schema", project.version.toString())
 
     pom {
-        name.set("Buffer Codec Processor")
-        description.set("KSP annotation processor for the buffer-codec protocol codec system")
+        name.set("Buffer Codec Schema")
+        description.set(
+            "Wire-format schema descriptor model, parser, and drift classifier shared by the " +
+                "buffer-codec KSP processor and the codec-schema Gradle plugin",
+        )
         url.set(siteUrl)
 
         licenses {

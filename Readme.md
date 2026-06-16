@@ -36,6 +36,8 @@ dependencies {
     // Optional: Protocol codecs (annotation-driven code generation)
     implementation("com.ditchoom:buffer-codec:<latest-version>")
     ksp("com.ditchoom:buffer-codec-processor:<latest-version>")
+    // Optional: codec wire-compat gate — apply the plugin in the plugins {} block:
+    //   id("com.ditchoom.buffer.codec-schema") version "<latest-version>"
 
     // Optional: Compression (gzip, deflate)
     implementation("com.ditchoom:buffer-compression:<latest-version>")
@@ -54,6 +56,8 @@ Find the latest version on [Maven Central](https://central.sonatype.com/artifact
 | `buffer` | Core `ReadBuffer`/`WriteBuffer` interfaces, `BufferPool`, `StreamProcessor` |
 | `buffer-codec` | `Codec<T>` interface (operates directly on `ReadBuffer`/`WriteBuffer`), annotations for code generation |
 | `buffer-codec-processor` | KSP processor — generates `Codec` implementations from `@ProtocolMessage` annotations |
+| `buffer-codec-schema` | Wire-format schema descriptor model, parser, and drift classifier (shared by the processor and the Gradle plugin) |
+| `buffer-codec-gradle-plugin` | Gradle plugin (`com.ditchoom.buffer.codec-schema`) — baselines the wire shape and fails the build on breaking drift |
 | `buffer-compression` | `compress()`/`decompress()` (gzip, deflate) on `ReadBuffer` |
 | `buffer-flow` | Kotlin Flow extensions: `mapBuffer()`, `asStringFlow()`, `lines()` |
 
@@ -118,6 +122,40 @@ Generated codecs implement the same `Codec<T>` interface used for manual codecs,
 > **Note:** Generated code appears after compilation (`./gradlew build`). IDE features like autocomplete and navigation for generated codecs require an initial build.
 
 See the [full protocol codecs guide](docs/docs/recipes/protocol-codecs.md) for details.
+
+### Guard against wire-breaking changes (experimental)
+
+Because codecs encode **positionally**, edits like reordering an enum, inserting a field, or
+changing a wire width silently break peers already on the wire — and round-trip tests can't catch
+them (the same new code encodes and decodes). The `com.ditchoom.buffer.codec-schema` Gradle plugin
+baselines your protocol's wire shape into a committed, diffable file and fails the build when a
+change is wire-breaking:
+
+```kotlin
+// settings.gradle.kts — the plugin is on Maven Central, not the Gradle Plugin Portal
+pluginManagement {
+    repositories {
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+```
+
+```kotlin
+// build.gradle.kts
+plugins {
+    id("com.ditchoom.buffer.codec-schema") version "<latest-version>"
+}
+
+codecSchema {
+    failOnBreaking.set(true) // fail on breaking drift (default: warn only)
+}
+```
+
+The first `check` writes `src/codecSchema/codec-schema.txt` — commit it. After an intentional wire
+change, run `./gradlew updateCodecSchema` and commit the diff. See the
+[plugin README](buffer-codec-gradle-plugin/README.md) for the full drift-classification table and
+workflow.
 
 ## Buffer Pooling
 
