@@ -1467,3 +1467,44 @@ fun encodeRiffImage(metadata: ImageMetadata, pixels: ReadBuffer): PlatformBuffer
 | **Intermediate copies** | **0** | **2** |
 
 The Skia path achieves **zero intermediate copies** of pixel data — the decoded pixels exist in exactly one place, the Skia-wrapped native buffer.
+
+## Guarding Against Wire-Breaking Changes
+
+Codecs encode **positionally** — fields ride the wire in constructor order, enums as their `ordinal`, sealed variants as their `@PacketType` / `@DispatchValue`. That makes a class of edits silently wire-breaking:
+
+- Reorder or insert an enum entry → every `ordinal → meaning` shifts; peers misread every value.
+- Insert or delete a field → every later field shifts; framing breaks for old peers.
+- Change a field's wire width or byte order (`@WireBytes`, `@WireOrder`) → silent corruption.
+- Reassign a `@PacketType` / `@DispatchValue` → variant dispatch breaks.
+
+**Round-trip tests can't catch any of these** — you encode and decode with the same new code, so the test passes against different-but-self-consistent bytes. The `com.ditchoom.buffer.codec-schema` Gradle plugin closes that gap: it baselines your protocol's wire shape into a committed, diffable file and classifies every later change as safe, advisory (a rename), or breaking.
+
+```kotlin
+plugins {
+    id("com.google.devtools.ksp") version "<ksp-version>"
+    id("com.ditchoom.buffer.codec-schema") version "<latest-version>"
+}
+
+codecSchema {
+    baseline.set(file("src/codecSchema/codec-schema.txt")) // default
+    failOnBreaking.set(true)                               // default: false (warn only)
+}
+```
+
+The first `check` writes the baseline descriptor — commit it:
+
+```bash
+./gradlew check                          # creates src/codecSchema/codec-schema.txt
+git add src/codecSchema/codec-schema.txt
+git commit -m "codec schema baseline"
+```
+
+After that, `check` (which runs `checkCodecSchema`) fails on breaking drift. After an **intentional, reviewed** wire change, re-accept the baseline — the diff is your migration note:
+
+```bash
+./gradlew updateCodecSchema
+git add src/codecSchema/codec-schema.txt
+git commit
+```
+
+This is complementary to the runtime forward-compatibility annotations (`@EnumDefault`, `@ForwardCompatible`, `@UnknownVariant`): those let a message *tolerate* unknown values at runtime; the plugin detects, at build time, when you've *broken* the schema for peers that lack those tolerances. See the [plugin README](https://github.com/DitchOoM/buffer/tree/main/buffer-codec-gradle-plugin) for the full drift-classification table.
