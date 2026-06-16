@@ -181,15 +181,15 @@ static inline int buf_hex_val(uint8_t c) {
  * Returns -1 on success, or the index of the first byte that is not a hex digit (decoding stops there;
  * bytes decoded before the bad character have already been written to `dst`).
  */
-long buf_hex_decode(const uint8_t* src, uint8_t* dst, size_t length) {
+int64_t buf_hex_decode(const uint8_t* src, uint8_t* dst, size_t length) {
     for (size_t i = 0; i < length; i += 2) {
         int hi = buf_hex_val(src[i]);
-        if (hi < 0) return (long)i;
+        if (hi < 0) return (int64_t)i;
         int lo = buf_hex_val(src[i + 1]);
-        if (lo < 0) return (long)(i + 1);
+        if (lo < 0) return (int64_t)(i + 1);
         dst[i / 2] = (uint8_t)((hi << 4) | lo);
     }
-    return -1L;
+    return -1;
 }
 
 /**
@@ -240,7 +240,7 @@ static inline int buf_base64_val(uint8_t c) {
  * bytes written to `dst` on success, or `-(index) - 1` if the byte at `index` (before any '=' padding)
  * is not a Base64 digit. Decoding stops at the first '=' padding byte.
  */
-long buf_base64_decode(const uint8_t* src, uint8_t* dst, size_t length) {
+int64_t buf_base64_decode(const uint8_t* src, uint8_t* dst, size_t length) {
     uint32_t acc = 0;
     int bits = 0;
     size_t o = 0;
@@ -248,7 +248,7 @@ long buf_base64_decode(const uint8_t* src, uint8_t* dst, size_t length) {
         uint8_t c = src[i];
         if (c == '=') break;
         int v = buf_base64_val(c);
-        if (v < 0) return -((long)i) - 1;
+        if (v < 0) return -((int64_t)i) - 1;
         acc = (acc << 6) | (uint32_t)v;
         bits += 6;
         if (bits >= 8) {
@@ -256,7 +256,7 @@ long buf_base64_decode(const uint8_t* src, uint8_t* dst, size_t length) {
             dst[o++] = (uint8_t)((acc >> bits) & 0xFF);
         }
     }
-    return (long)o;
+    return (int64_t)o;
 }
 
 /**
