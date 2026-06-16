@@ -234,6 +234,29 @@ class NativeBuffer private constructor(
         )
     }
 
+    // Hex transform in C (raw pointer-to-pointer, shuffle-vectorized) when dest is also native — see
+    // nativeEncodeHexInto / buf_hex_encode; falls back to the portable common path otherwise.
+    override fun encodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        upperCase: Boolean,
+    ) {
+        checkOpen()
+        requireIndex(offset, length)
+        nativeEncodeHexInto(baseAddress, dest, offset, length, upperCase)
+    }
+
+    override fun decodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        checkOpen()
+        requireIndex(offset, length)
+        nativeDecodeHexInto(baseAddress, dest, offset, length)
+    }
+
     override fun readByteArray(size: Int): ByteArray {
         checkOpen()
         if (size < 1) return ByteArray(0)
@@ -808,6 +831,28 @@ private class NativeBufferSlice(
             length,
             bigEndian = !littleEndian,
         )
+    }
+
+    // Hex transform in C — see nativeEncodeHexInto and the matching override on NativeBuffer.
+    override fun encodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        upperCase: Boolean,
+    ) {
+        checkOpen()
+        requireIndex(offset, length)
+        nativeEncodeHexInto(baseAddress, dest, offset, length, upperCase)
+    }
+
+    override fun decodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        checkOpen()
+        requireIndex(offset, length)
+        nativeDecodeHexInto(baseAddress, dest, offset, length)
     }
 
     override fun readByteArray(size: Int): ByteArray {

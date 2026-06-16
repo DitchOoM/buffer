@@ -621,6 +621,52 @@ interface ReadBuffer : PositionBuffer {
     }
 
     /**
+     * Hex-encodes the absolute source range `[offset, offset + length)` into [dest], writing
+     * `2 * length` ASCII hex bytes (high nibble first) at [dest]'s current position and advancing it.
+     * Does not change this buffer's [position].
+     *
+     * "Zero-copy": the bytes flow straight from this buffer into [dest] with no intermediate
+     * `String`/`ByteArray`. Native backends override this to run the whole transform in C over raw
+     * pointers when [dest] is also native memory (see `buf_hex_encode`).
+     *
+     * @param dest destination buffer that receives the ASCII hex bytes
+     * @param offset absolute index of the first source byte
+     * @param length number of source bytes to encode
+     * @param upperCase emit 'A'-'F' instead of 'a'-'f'
+     */
+    fun encodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        upperCase: Boolean = false,
+    ) {
+        requireRange(offset, length)
+        encodeHexFallback(offset, length, upperCase, { getUnchecked(it) }, { dest.writeByte(it) })
+    }
+
+    /**
+     * Hex-decodes the absolute source range `[offset, offset + length)` (an even count of ASCII hex
+     * bytes) into [dest], writing `length / 2` decoded bytes at [dest]'s current position and advancing
+     * it. Does not change this buffer's [position].
+     *
+     * Native backends override this to run the whole transform in C over raw pointers when [dest] is
+     * also native memory (see `buf_hex_decode`).
+     *
+     * @param dest destination buffer that receives the decoded bytes
+     * @param offset absolute index of the first source hex byte
+     * @param length number of source hex bytes (must be even)
+     * @throws IllegalArgumentException if [length] is odd or a source byte is not a hex digit.
+     */
+    fun decodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        requireRange(offset, length)
+        decodeHexFallback(offset, length, { getUnchecked(it) }, { dest.writeByte(it) })
+    }
+
+    /**
      * Finds the first occurrence of a byte sequence within this buffer.
      *
      * Uses optimized bulk search (8 bytes at a time) for the first byte,

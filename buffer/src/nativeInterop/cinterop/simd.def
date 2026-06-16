@@ -153,6 +153,46 @@ int64_t buf_fnv1a_64(const uint8_t* data, size_t length, int big_endian) {
 }
 
 /**
+ * Hex-encode `length` source bytes into `2 * length` ASCII bytes (high nibble first).
+ * `upper` selects 'A'-'F' (non-zero) vs 'a'-'f' (zero). Each nibble indexes a 16-byte digit
+ * table; Clang at -O2 lowers the table lookup to a NEON/SSE shuffle (TBL / PSHUFB).
+ */
+void buf_hex_encode(const uint8_t* src, uint8_t* dst, size_t length, int upper) {
+    static const char lower[16] = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'};
+    static const char upper_tbl[16] = {'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'};
+    const char* digits = upper ? upper_tbl : lower;
+    for (size_t i = 0; i < length; i++) {
+        uint8_t b = src[i];
+        dst[i * 2]     = (uint8_t)digits[b >> 4];
+        dst[i * 2 + 1] = (uint8_t)digits[b & 0x0F];
+    }
+}
+
+/** Map one ASCII hex character to its 0-15 nibble value, or -1 if it is not a hex digit. */
+static inline int buf_hex_val(uint8_t c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/**
+ * Hex-decode `length` ASCII bytes (caller guarantees `length` is even) into `length / 2` bytes.
+ * Returns -1 on success, or the index of the first byte that is not a hex digit (decoding stops there;
+ * bytes decoded before the bad character have already been written to `dst`).
+ */
+long buf_hex_decode(const uint8_t* src, uint8_t* dst, size_t length) {
+    for (size_t i = 0; i < length; i += 2) {
+        int hi = buf_hex_val(src[i]);
+        if (hi < 0) return (long)i;
+        int lo = buf_hex_val(src[i + 1]);
+        if (lo < 0) return (long)(i + 1);
+        dst[i / 2] = (uint8_t)((hi << 4) | lo);
+    }
+    return -1L;
+}
+
+/**
  * Find first mismatch between two buffers.
  * Returns index of first differing byte, or -1 if buffers are equal.
  * Clang auto-vectorizes the comparison loop.
