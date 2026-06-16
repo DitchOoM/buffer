@@ -124,6 +124,41 @@ class CodecSchemaPluginTest {
         assertEquals(TaskOutcome.SUCCESS, result.task(":checkCodecSchema")?.outcome, "check must run checkCodecSchema")
     }
 
+    // ---- multi-source-set descriptor location -----------------------------
+
+    @Test
+    fun `identical descriptors across source sets are deduped and pass`() {
+        // A KMP module whose @ProtocolMessage types are all common emits the same descriptor under
+        // the metadata compilation and (potentially) a platform compilation. Identical copies must
+        // collapse to one and check cleanly against the baseline.
+        writeProject(baseline = baseDescriptor)
+        stageDescriptor("metadata/commonMain/resources", baseDescriptor)
+        stageDescriptor("jvm/jvmMain/resources", baseDescriptor)
+
+        val result = run("checkCodecSchema")
+
+        assertEquals(TaskOutcome.SUCCESS, result.task(":checkCodecSchema")?.outcome)
+        assertTrue(!result.output.contains("codec schema drift"), "identical copies must not report drift")
+    }
+
+    @Test
+    fun `divergent descriptors across source sets fail with an actionable message`() {
+        // If platform source sets emit genuinely different wire shapes, a single aggregate baseline
+        // can't represent them — fail loudly rather than silently picking one. (Pre-classification:
+        // independent of failOnBreaking.)
+        writeProject(baseline = baseDescriptor)
+        stageDescriptor("metadata/commonMain/resources", baseDescriptor)
+        stageDescriptor("jvm/jvmMain/resources", reorderedDescriptor)
+
+        val result = runAndFail("checkCodecSchema")
+
+        assertEquals(TaskOutcome.FAILED, result.task(":checkCodecSchema")?.outcome)
+        assertTrue(
+            result.output.contains("differing codec-schema.txt descriptors"),
+            "should explain that diverging per-source-set schemas are unsupported in v1",
+        )
+    }
+
     // ---- fixtures ---------------------------------------------------------
 
     private fun baselineFile() = File(projectDir, "src/codecSchema/codec-schema.txt")
@@ -146,16 +181,22 @@ class CodecSchemaPluginTest {
             }
             """.trimIndent() + "\n",
         )
-        if (generated != null) {
-            // Mimic the processor's KSP output location for common types.
-            val out = File(projectDir, "build/generated/ksp/metadata/commonMain/resources")
-            out.mkdirs()
-            File(out, "codec-schema.txt").writeText(generated)
-        }
+        // Mimic the processor's KSP output location for common types.
+        if (generated != null) stageDescriptor("metadata/commonMain/resources", generated)
         if (baseline != null) {
             baselineFile().parentFile.mkdirs()
             baselineFile().writeText(baseline)
         }
+    }
+
+    /** Drop a `codec-schema.txt` under a KSP source-set subdir of `build/generated/ksp`. */
+    private fun stageDescriptor(
+        relDir: String,
+        content: String,
+    ) {
+        val out = File(projectDir, "build/generated/ksp/$relDir")
+        out.mkdirs()
+        File(out, "codec-schema.txt").writeText(content)
     }
 
     private fun run(vararg args: String) = gradleRunner(*args).build()
