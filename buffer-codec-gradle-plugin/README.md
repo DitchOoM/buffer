@@ -6,6 +6,11 @@ fails (or warns on) the build when a change would break peers already on the wir
 
 Plugin id: `com.ditchoom.buffer.codec-schema`
 
+> **Status: experimental (v1).** The plugin surface and the descriptor format may change between
+> releases. A descriptor-format change will surface as drift against your committed baseline — re-accept
+> it with `./gradlew updateCodecSchema` after upgrading. Adoption is non-blocking by default
+> (`failOnBreaking = false` → warn only), so a false positive can't fail your build unless you opt in.
+
 ## Why you want this
 
 `@ProtocolMessage` encodes **positionally** — fields ride the wire in constructor order, enums as

@@ -123,7 +123,7 @@ Generated codecs implement the same `Codec<T>` interface used for manual codecs,
 
 See the [full protocol codecs guide](docs/docs/recipes/protocol-codecs.md) for details.
 
-### Guard against wire-breaking changes
+### Guard against wire-breaking changes (experimental)
 
 Because codecs encode **positionally**, edits like reordering an enum, inserting a field, or
 changing a wire width silently break peers already on the wire — and round-trip tests can't catch
