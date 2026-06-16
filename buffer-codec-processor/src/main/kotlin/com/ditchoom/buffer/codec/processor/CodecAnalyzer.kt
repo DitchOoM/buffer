@@ -1440,6 +1440,9 @@ internal fun analyzeEnumField(
             enumType = classNameOf(enumDecl),
             entryCount = entries.size,
             defaultEntryName = defaults.firstOrNull()?.simpleName?.asString(),
+            // Declaration order == ordinal order: `entries` is the source-order
+            // list of ENUM_ENTRY declarations, so index i is ordinal i.
+            entryNames = entries.map { it.simpleName.asString() },
         ),
     )
 }

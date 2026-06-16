@@ -77,6 +77,14 @@ kotlin {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
         }
+        // Dogfood the wire-compat gate (SCHEMA_DRIFT.md, step 4): the JVM test target reuses the
+        // real schema parser + drift classifier to compare the generated descriptor against a
+        // committed baseline. The Gradle plugin itself can't be self-applied in this same build
+        // (Gradle forbids buildscript project dependencies), so the gate runs as a jvmTest instead;
+        // the plugin's task wiring is covered by buffer-codec-gradle-plugin's TestKit tests.
+        jvmTest.dependencies {
+            implementation(project(":buffer-codec-schema"))
+        }
     }
 }
 
@@ -156,5 +164,20 @@ tasks.named<Test>("jvmTest") {
     systemProperty(
         "update.snapshots",
         providers.systemProperty("update.snapshots").getOrElse("false"),
+    )
+    // Wire-compat gate (CodecSchemaDriftGateTest): the freshly-generated aggregate descriptor and
+    // the committed baseline. Shares the `update.snapshots` flag to re-accept the baseline.
+    systemProperty(
+        "codec.schema.generated",
+        layout.buildDirectory
+            .file("generated/ksp/metadata/commonMain/resources/codec-schema.txt")
+            .get()
+            .asFile.absolutePath,
+    )
+    systemProperty(
+        "codec.schema.baseline",
+        layout.projectDirectory
+            .file("src/codecSchema/codec-schema.txt")
+            .asFile.absolutePath,
     )
 }

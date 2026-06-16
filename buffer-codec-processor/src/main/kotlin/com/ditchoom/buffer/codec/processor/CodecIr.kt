@@ -500,6 +500,12 @@ internal sealed interface FieldSpec {
      *
      * [entryCount] is informational (diagnostics / future width bounds); [defaultEntryName] is the
      * `@EnumDefault` entry's simple name, or null for strict decode.
+     *
+     * [entryNames] are the enum's entry simple names in declaration order — i.e. the
+     * `ordinal → name` mapping (index == ordinal). The schema descriptor (SCHEMA_DRIFT.md)
+     * projects this into the `enum` record so a reorder of same-count enums is visible to the
+     * drift differ; without it the descriptor could only see [entryCount] and an ordinal swap
+     * would be invisible.
      */
     data class EnumScalar(
         override val name: String,
@@ -507,6 +513,7 @@ internal sealed interface FieldSpec {
         val enumType: ClassName,
         val entryCount: Int,
         val defaultEntryName: String?,
+        val entryNames: List<String>,
     ) : FieldSpec
 
     data class LengthPrefixedMessage(

@@ -18,7 +18,7 @@ plugins {
 tasks.register("allTests") {
     description = "Run tests for all modules and platforms"
     group = "verification"
-    dependsOn(":buffer:allTests", ":buffer-compression:allTests", ":buffer-flow:allTests", ":buffer-codec:allTests", ":buffer-codec-processor:test", ":buffer-codec-test:allTests")
+    dependsOn(":buffer:allTests", ":buffer-compression:allTests", ":buffer-flow:allTests", ":buffer-codec:allTests", ":buffer-codec-schema:test", ":buffer-codec-processor:test", ":buffer-codec-gradle-plugin:test", ":buffer-codec-test:allTests")
 }
 
 // Pre-publish gate: superset of `allTests` that also covers Android-host JVM unit tests
@@ -73,7 +73,7 @@ subprojects {
 tasks.register("buildAll") {
     description = "Build all modules"
     group = "build"
-    dependsOn(":buffer:build", ":buffer-compression:build", ":buffer-flow:build", ":buffer-codec:build", ":buffer-codec-processor:build", ":buffer-codec-test:build")
+    dependsOn(":buffer:build", ":buffer-compression:build", ":buffer-flow:build", ":buffer-codec:build", ":buffer-codec-schema:build", ":buffer-codec-processor:build", ":buffer-codec-gradle-plugin:build", ":buffer-codec-test:build")
 }
 
 // Copy Dokka output to Docusaurus static directory

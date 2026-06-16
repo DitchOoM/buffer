@@ -1,6 +1,6 @@
 plugins {
-    alias(libs.plugins.kotlin.multiplatform) apply false
     kotlin("jvm")
+    `java-gradle-plugin`
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.dokka)
@@ -37,30 +37,26 @@ java {
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
-        freeCompilerArgs.add("-opt-in=org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi")
     }
 }
 
 dependencies {
-    implementation(libs.ksp.api)
-    implementation(libs.kotlinpoet)
-    implementation(libs.kotlinpoet.ksp)
-    implementation(project(":buffer-codec"))
+    // The descriptor model, parser, and drift classifier are the single format authority,
+    // shared with the KSP processor so the emitter and this differ can never drift apart.
     implementation(project(":buffer-codec-schema"))
     testImplementation(kotlin("test"))
-    // sealedSubclasses in the schema-descriptor coverage test needs kotlin-reflect at runtime.
-    testImplementation(kotlin("reflect"))
-    testImplementation(libs.kctfork.ksp)
+    testImplementation(gradleTestKit())
+}
 
-    // kctfork 0.12.0-alpha01 transitively requests 2.3.0-RC; force the
-    // embedded test compiler to the same 2.3.0 final the rest of the
-    // project is built with.
-    constraints {
-        testImplementation("org.jetbrains.kotlin:kotlin-compiler-embeddable") {
-            version { strictly("2.3.0") }
-        }
-        testImplementation("org.jetbrains.kotlin:kotlin-annotation-processing-embeddable") {
-            version { strictly("2.3.0") }
+gradlePlugin {
+    plugins {
+        create("codecSchema") {
+            id = "com.ditchoom.buffer.codec-schema"
+            implementationClass = "com.ditchoom.buffer.codec.gradle.CodecSchemaPlugin"
+            displayName = "Buffer Codec Schema"
+            description =
+                "Baselines the wire-format descriptor emitted by buffer-codec and classifies " +
+                "schema drift (checkCodecSchema / updateCodecSchema)."
         }
     }
 }
@@ -103,11 +99,14 @@ mavenPublishing {
         signAllPublications()
     }
 
-    coordinates(publishedGroupId, "buffer-codec-processor", project.version.toString())
+    coordinates(publishedGroupId, "buffer-codec-gradle-plugin", project.version.toString())
 
     pom {
-        name.set("Buffer Codec Processor")
-        description.set("KSP annotation processor for the buffer-codec protocol codec system")
+        name.set("Buffer Codec Schema Gradle Plugin")
+        description.set(
+            "Gradle plugin that baselines the buffer-codec wire-format descriptor and fails the " +
+                "build on breaking schema drift (checkCodecSchema / updateCodecSchema).",
+        )
         url.set(siteUrl)
 
         licenses {
