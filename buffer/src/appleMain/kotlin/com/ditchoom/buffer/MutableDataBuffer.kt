@@ -183,6 +183,50 @@ class MutableDataBuffer private constructor(
         )
     }
 
+    // Hex transform in C (raw pointer-to-pointer, shuffle-vectorized) when dest is also native — see
+    // nativeEncodeHexInto / buf_hex_encode; falls back to the portable common path otherwise. Mirrors
+    // the linux NativeBuffer override so both native backends share one fast path.
+    override fun encodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        upperCase: Boolean,
+    ) {
+        requireIndex(offset, length)
+        nativeEncodeHexInto(nativeAddress, dest, offset, length, upperCase)
+    }
+
+    override fun decodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        requireIndex(offset, length)
+        nativeDecodeHexInto(nativeAddress, dest, offset, length)
+    }
+
+    // Base64 transform in C when dest is also native — see nativeEncodeBase64Into / buf_base64_encode;
+    // falls back to the portable common path otherwise. Mirrors the linux NativeBuffer override.
+    override fun encodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        urlSafe: Boolean,
+        padded: Boolean,
+    ) {
+        requireIndex(offset, length)
+        nativeEncodeBase64Into(nativeAddress, dest, offset, length, urlSafe, padded)
+    }
+
+    override fun decodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        requireIndex(offset, length)
+        nativeDecodeBase64Into(nativeAddress, dest, offset, length)
+    }
+
     override fun readShort(): Short {
         requireReadable(2)
         val ptr = (bytePointer + position)!!.reinterpret<ShortVar>()
@@ -761,6 +805,50 @@ class MutableDataBufferSlice(
             length,
             bigEndian = byteOrder == ByteOrder.BIG_ENDIAN,
         )
+    }
+
+    // Hex transform in C (raw pointer-to-pointer, shuffle-vectorized) when dest is also native — see
+    // nativeEncodeHexInto / buf_hex_encode; falls back to the portable common path otherwise. Mirrors
+    // the linux NativeBuffer override so both native backends share one fast path.
+    override fun encodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        upperCase: Boolean,
+    ) {
+        requireIndex(offset, length)
+        nativeEncodeHexInto(nativeAddress, dest, offset, length, upperCase)
+    }
+
+    override fun decodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        requireIndex(offset, length)
+        nativeDecodeHexInto(nativeAddress, dest, offset, length)
+    }
+
+    // Base64 transform in C when dest is also native — see nativeEncodeBase64Into / buf_base64_encode;
+    // falls back to the portable common path otherwise. Mirrors the linux NativeBuffer override.
+    override fun encodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        urlSafe: Boolean,
+        padded: Boolean,
+    ) {
+        requireIndex(offset, length)
+        nativeEncodeBase64Into(nativeAddress, dest, offset, length, urlSafe, padded)
+    }
+
+    override fun decodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        requireIndex(offset, length)
+        nativeDecodeBase64Into(nativeAddress, dest, offset, length)
     }
 
     override fun readShort(): Short {
