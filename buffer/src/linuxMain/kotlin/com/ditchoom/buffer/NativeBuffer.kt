@@ -257,6 +257,30 @@ class NativeBuffer private constructor(
         nativeDecodeHexInto(baseAddress, dest, offset, length)
     }
 
+    // Base64 transform in C when dest is also native — see nativeEncodeBase64Into / buf_base64_encode;
+    // falls back to the portable common path otherwise.
+    override fun encodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        urlSafe: Boolean,
+        padded: Boolean,
+    ) {
+        checkOpen()
+        requireIndex(offset, length)
+        nativeEncodeBase64Into(baseAddress, dest, offset, length, urlSafe, padded)
+    }
+
+    override fun decodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        checkOpen()
+        requireIndex(offset, length)
+        nativeDecodeBase64Into(baseAddress, dest, offset, length)
+    }
+
     override fun readByteArray(size: Int): ByteArray {
         checkOpen()
         if (size < 1) return ByteArray(0)
@@ -853,6 +877,30 @@ private class NativeBufferSlice(
         checkOpen()
         requireIndex(offset, length)
         nativeDecodeHexInto(baseAddress, dest, offset, length)
+    }
+
+    // Base64 transform in C when dest is also native — see nativeEncodeBase64Into / buf_base64_encode;
+    // falls back to the portable common path otherwise.
+    override fun encodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        urlSafe: Boolean,
+        padded: Boolean,
+    ) {
+        checkOpen()
+        requireIndex(offset, length)
+        nativeEncodeBase64Into(baseAddress, dest, offset, length, urlSafe, padded)
+    }
+
+    override fun decodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        checkOpen()
+        requireIndex(offset, length)
+        nativeDecodeBase64Into(baseAddress, dest, offset, length)
     }
 
     override fun readByteArray(size: Int): ByteArray {

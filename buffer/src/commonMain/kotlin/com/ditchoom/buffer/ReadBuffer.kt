@@ -667,6 +667,53 @@ interface ReadBuffer : PositionBuffer {
     }
 
     /**
+     * Base64-encodes the absolute source range `[offset, offset + length)` (RFC 4648) into [dest] at
+     * [dest]'s current position, advancing it by the encoded length. Does not change this buffer's
+     * [position].
+     *
+     * Native backends override this to run the whole transform in C over raw pointers when [dest] is
+     * also native memory (see `buf_base64_encode`).
+     *
+     * @param dest destination buffer that receives the ASCII Base64 bytes
+     * @param offset absolute index of the first source byte
+     * @param length number of source bytes to encode
+     * @param urlSafe use the URL-safe alphabet ('-' '_') instead of the standard one ('+' '/')
+     * @param padded append '=' padding so the output length is a multiple of 4
+     */
+    fun encodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        urlSafe: Boolean = false,
+        padded: Boolean = true,
+    ) {
+        requireRange(offset, length)
+        encodeBase64Fallback(offset, length, urlSafe, padded, { getUnchecked(it) }, { dest.writeByte(it) })
+    }
+
+    /**
+     * Base64-decodes the absolute source range `[offset, offset + length)` into [dest] at [dest]'s
+     * current position, advancing it by the decoded length. Accepts both the standard and URL-safe
+     * alphabets and tolerates missing padding. Does not change this buffer's [position].
+     *
+     * Native backends override this to run the whole transform in C over raw pointers when [dest] is
+     * also native memory (see `buf_base64_decode`).
+     *
+     * @param dest destination buffer that receives the decoded bytes
+     * @param offset absolute index of the first source Base64 byte
+     * @param length number of source Base64 bytes
+     * @throws IllegalArgumentException if a source byte (before padding) is not a Base64 digit.
+     */
+    fun decodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        requireRange(offset, length)
+        decodeBase64Fallback(offset, length, { getUnchecked(it) }, { dest.writeByte(it) })
+    }
+
+    /**
      * Finds the first occurrence of a byte sequence within this buffer.
      *
      * Uses optimized bulk search (8 bytes at a time) for the first byte,
