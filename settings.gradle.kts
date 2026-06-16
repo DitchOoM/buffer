@@ -23,6 +23,7 @@ develocity {
 // Monorepo modules
 include(":buffer")
 include(":buffer-compression")
+include(":buffer-crypto")
 include(":buffer-flow")
 include(":buffer-codec")
 include(":buffer-codec-schema")
