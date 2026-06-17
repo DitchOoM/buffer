@@ -73,7 +73,11 @@ kotlin {
             iosArm64()
             iosSimulatorArm64()
             iosX64()
-            watchosArm64()
+            // watchosArm64 (arm64_32) is intentionally omitted: it is the only 32-bit
+            // Apple target, and appleMain calls CommonCrypto/Security size_t functions.
+            // With no cinterop of its own this module doesn't engage size_t commonization,
+            // so the shared Apple metadata compile rejects the 32-bit vs 64-bit width
+            // mismatch. watchOS is still covered by the simulator + x64 targets below.
             watchosSimulatorArm64()
             watchosX64()
             tvosArm64()
