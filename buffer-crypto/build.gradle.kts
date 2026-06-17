@@ -103,6 +103,9 @@ kotlin {
             implementation(kotlin("test"))
             // Parses vendored Wycheproof known-answer vectors (test-only; not shipped).
             implementation(libs.kotlinx.serialization.json)
+            // Drives the suspending sign/verify API (WebCrypto is async on JS/WASM) in tests.
+            // Test-only: the production module deliberately keeps no coroutines dependency.
+            implementation(libs.kotlinx.coroutines.test)
         }
 
         val androidInstrumentedTest by getting {
