@@ -6,11 +6,17 @@ import com.ditchoom.buffer.WriteBuffer
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.convert
 import platform.Security.SecRandomCopyBytes
+import platform.Security.errSecSuccess
 import platform.Security.kSecRandomDefault
 
 /** Apple CSPRNG backed by Security.framework `SecRandomCopyBytes`, written straight into the buffer. */
 actual fun cryptoRandomInto(dest: WriteBuffer) {
     val n = dest.remaining()
     if (n == 0) return
-    dest.withWritablePointer(n) { ptr -> SecRandomCopyBytes(kSecRandomDefault, n.convert(), ptr) }
+    dest.withWritablePointer(n) { ptr ->
+        // SecRandomCopyBytes returns errSecSuccess (0) on success; on failure the destination
+        // bytes are undefined, so surface it rather than hand back non-random data.
+        val status = SecRandomCopyBytes(kSecRandomDefault, n.convert(), ptr)
+        check(status == errSecSuccess) { "SecRandomCopyBytes failed (OSStatus=$status)" }
+    }
 }
