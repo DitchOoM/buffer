@@ -8,6 +8,8 @@ import org.jetbrains.kotlin.konan.target.HostManager
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.library)
+    // Test-only: parse vendored Wycheproof KAT vectors in commonTest.
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.dokka)
@@ -99,6 +101,8 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
+            // Parses vendored Wycheproof known-answer vectors (test-only; not shipped).
+            implementation(libs.kotlinx.serialization.json)
         }
 
         val androidInstrumentedTest by getting {
