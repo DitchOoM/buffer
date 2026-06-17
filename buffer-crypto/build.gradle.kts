@@ -98,11 +98,16 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":buffer"))
+            // Async key-agreement wrappers (deriveSharedSecretAsync) await WebCrypto Promises on
+            // js/wasmJs; coroutines-core supplies `kotlinx.coroutines.await` there.
+            implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
             // Parses vendored Wycheproof known-answer vectors (test-only; not shipped).
             implementation(libs.kotlinx.serialization.json)
+            // runTest for the suspend async key-agreement tests.
+            implementation(libs.kotlinx.coroutines.test)
         }
 
         val androidInstrumentedTest by getting {
