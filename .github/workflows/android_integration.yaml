@@ -138,7 +138,16 @@ jobs:
             # package first makes the install clean and idempotent regardless of
             # what signature the cached copy carried.
             adb shell pm list packages -3 | sed 's/^package://' | grep -i '\.ditchoom\.' | xargs -r -n1 adb uninstall || true
-            ./gradlew connectedAndroidTest -x connectedBenchmarkAndroidTest
+            # buffer-crypto declares minSdk 28 (its secure/deterministic key buffers
+            # allocate via Unsafe.allocateMemory, absent from the runtime before API 26).
+            # AGP installs and runs instrumented tests regardless of the device API, so
+            # exclude that module's connected tests on emulators below 28. The other
+            # modules keep their genuine minSdk-21 floor check on this emulator.
+            EXCLUDE_ARGS="-x connectedBenchmarkAndroidTest"
+            if [ "${{ matrix.api-level }}" -lt 28 ]; then
+              EXCLUDE_ARGS="$EXCLUDE_ARGS -x :buffer-crypto:connectedDebugAndroidTest"
+            fi
+            ./gradlew connectedAndroidTest $EXCLUDE_ARGS
 
       - name: Kill emulator processes
         if: always()
