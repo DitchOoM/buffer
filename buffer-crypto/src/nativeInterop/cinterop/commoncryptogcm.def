@@ -1,0 +1,35 @@
+package = com.ditchoom.buffer.crypto.cinterop
+language = C
+---
+#include <CommonCrypto/CommonCryptor.h>
+#include <stdint.h>
+#include <stddef.h>
+
+/*
+ * AES-GCM via CommonCrypto's streaming GCM API.
+ *
+ * The GCM entry points (and the kCCModeGCM mode constant) are declared in CommonCrypto's
+ * private header CommonCryptorSPI.h, which is NOT part of the public SDK module map. As a
+ * result Kotlin/Native's generated platform.CoreCrypto binding omits them (it exposes only
+ * CBC/CFB/CTR/ECB/OFB). The symbols themselves ARE exported by libcommonCrypto (they are
+ * present in the SDK's libcommonCrypto.tbd and resolve via the shared cache at runtime), so
+ * we forward-declare exactly the entry points we use and let the linker bind them normally.
+ *
+ * CCCryptorCreateWithMode / CCCryptorRelease / CCCryptorRef and the CCAlgorithm / CCCryptorStatus
+ * / kCCEncrypt / kCCDecrypt / kCCAlgorithmAES / kCCSuccess symbols come from the public
+ * CommonCryptor.h above, so the whole AES-GCM call chain shares one consistent CCCryptorRef type.
+ *
+ * CCCryptorGCMFinal computes and OUTPUTS the authentication tag for both encrypt and decrypt;
+ * the decrypt path compares the recomputed tag against the supplied tag in constant time and
+ * scrubs the plaintext on mismatch (no unverified-plaintext release). This matches the reviewed
+ * cross-platform AEAD contract.
+ */
+
+// kCCModeGCM is SPI-only (== 11 in the CCMode enum); the public header stops at kCCModeCFB8 (7).
+#define kCCModeGCM 11
+
+extern CCCryptorStatus CCCryptorGCMAddIV(CCCryptorRef cryptorRef, const void *iv, size_t ivLen);
+extern CCCryptorStatus CCCryptorGCMaddAAD(CCCryptorRef cryptorRef, const void *aData, size_t aDataLen);
+extern CCCryptorStatus CCCryptorGCMEncrypt(CCCryptorRef cryptorRef, const void *dataIn, size_t dataInLength, void *dataOut);
+extern CCCryptorStatus CCCryptorGCMDecrypt(CCCryptorRef cryptorRef, const void *dataIn, size_t dataInLength, void *dataOut);
+extern CCCryptorStatus CCCryptorGCMFinal(CCCryptorRef cryptorRef, void *tagOut, size_t *tagLength);

@@ -10,14 +10,15 @@ import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.get
 import kotlinx.cinterop.usePinned
 
-/**
- * Apple AEAD glue shared by [Aead.apple.kt][aesGcmSeal] and the ChaCha20-Poly1305 bridge.
+/*
+ * Apple AEAD glue shared by Aead.apple.kt (aesGcmSeal) and the ChaCha20-Poly1305 bridge.
  *
- * These helpers expose buffer memory to the CommonCrypto one-shot calls without allocating
- * arrays, mirroring [withRemainingBytes] / [withWritablePointer] but adding the small extras
- * the AEAD paths need (optional AAD pointer, absolute sub-views, a native-tag comparison view).
+ * These helpers expose buffer memory to the CommonCrypto calls without allocating arrays,
+ * mirroring withRemainingBytes / withWritablePointer but adding the small extras the AEAD paths
+ * need (optional AAD pointer, absolute sub-views, a native-tag comparison view).
  */
 
 /**

@@ -76,10 +76,10 @@ kotlin {
             iosSimulatorArm64()
             iosX64()
             // watchosArm64 (arm64_32) is intentionally omitted: it is the only 32-bit
-            // Apple target, and appleMain calls CommonCrypto/Security size_t functions.
-            // With no cinterop of its own this module doesn't engage size_t commonization,
-            // so the shared Apple metadata compile rejects the 32-bit vs 64-bit width
-            // mismatch. watchOS is still covered by the simulator + x64 targets below.
+            // Apple target, and appleMain calls CommonCrypto/Security size_t functions plus
+            // the commoncryptogcm cinterop below. Its 32-bit size_t width cannot be verified
+            // on the 64-bit hosts/CI we build on, so we keep it out rather than ship unverified
+            // crypto. watchOS is still covered by the simulator + x64 (64-bit) targets below.
             watchosSimulatorArm64()
             watchosX64()
             tvosArm64()
@@ -91,6 +91,16 @@ kotlin {
             macosArm64()
         } else {
             macosX64()
+        }
+    }
+
+    // AES-GCM on Apple needs CommonCrypto's streaming GCM entry points, which live in the
+    // SPI header and are absent from Kotlin/Native's platform.CoreCrypto binding. Bind them
+    // via a small cinterop (forward declarations only; symbols resolve from libcommonCrypto).
+    // Registered uniformly on every Apple target so the commonizer exposes it to appleMain.
+    targets.withType<org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget>().configureEach {
+        compilations.getByName("main").cinterops.create("commoncryptogcm") {
+            defFile(project.file("src/nativeInterop/cinterop/commoncryptogcm.def"))
         }
     }
 

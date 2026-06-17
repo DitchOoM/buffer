@@ -1,15 +1,12 @@
-@file:OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
+@file:OptIn(ExperimentalForeignApi::class)
 
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.toNSData
-import kotlinx.cinterop.BetaInteropApi
-import kotlinx.cinterop.CFBridgingRelease
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.alloc
@@ -18,13 +15,18 @@ import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.usePinned
 import platform.CoreFoundation.CFDataRef
-import platform.CoreFoundation.CFDictionaryRef
+import platform.CoreFoundation.CFDictionaryCreateMutable
+import platform.CoreFoundation.CFDictionarySetValue
 import platform.CoreFoundation.CFErrorRefVar
+import platform.CoreFoundation.CFMutableDictionaryRef
 import platform.CoreFoundation.CFRelease
-import platform.CoreFoundation.CFTypeRef
+import platform.CoreFoundation.kCFAllocatorDefault
+import platform.CoreFoundation.kCFTypeDictionaryKeyCallBacks
+import platform.CoreFoundation.kCFTypeDictionaryValueCallBacks
+import platform.Foundation.CFBridgingRelease
 import platform.Foundation.CFBridgingRetain
 import platform.Foundation.NSData
-import platform.Foundation.NSMutableDictionary
+import platform.Security.SecKeyAlgorithm
 import platform.Security.SecKeyCreateSignature
 import platform.Security.SecKeyCreateWithData
 import platform.Security.SecKeyRef
@@ -70,7 +72,7 @@ private fun unsupportedEd25519(): Nothing =
         "Ed25519 is unavailable on Apple via Security.framework (CryptoKit bridge not wired)",
     )
 
-private fun ecdsaAlgorithm(scheme: SignatureScheme): CFTypeRef? =
+private fun ecdsaAlgorithm(scheme: SignatureScheme): SecKeyAlgorithm? =
     when (scheme) {
         SignatureScheme.EcdsaP256 -> kSecKeyAlgorithmECDSASignatureMessageX962SHA256
         SignatureScheme.EcdsaP384 -> kSecKeyAlgorithmECDSASignatureMessageX962SHA384
@@ -87,16 +89,27 @@ private fun ReadBuffer.toNsData(): NSData {
     return bytes.toNSData()
 }
 
-/** Builds the SecKey attribute dictionary {keyType: EC, keyClass: <class>}; caller [CFRelease]s. */
-private fun keyAttributes(isPrivate: Boolean): CFDictionaryRef {
-    val dict = NSMutableDictionary()
-    dict.setObject(kSecAttrKeyTypeECSECPrimeRandom, kSecAttrKeyType as Any)
-    dict.setObject(
+/**
+ * Builds the SecKey attribute dictionary {keyType: EC, keyClass: <class>}; caller [CFRelease]s.
+ * Uses the CoreFoundation dictionary primitives directly (the known-good idiom in
+ * [KeyAgreement.apple.kt]) rather than NSMutableDictionary + ObjC-ARC bridging, which does not
+ * resolve cleanly through Kotlin/Native CF interop.
+ */
+private fun keyAttributes(isPrivate: Boolean): CFMutableDictionaryRef {
+    val dict =
+        CFDictionaryCreateMutable(
+            kCFAllocatorDefault,
+            0,
+            kCFTypeDictionaryKeyCallBacks.ptr,
+            kCFTypeDictionaryValueCallBacks.ptr,
+        )!!
+    CFDictionarySetValue(dict, kSecAttrKeyType, kSecAttrKeyTypeECSECPrimeRandom)
+    CFDictionarySetValue(
+        dict,
+        kSecAttrKeyClass,
         if (isPrivate) kSecAttrKeyClassPrivate else kSecAttrKeyClassPublic,
-        kSecAttrKeyClass as Any,
     )
-    @Suppress("UNCHECKED_CAST")
-    return CFBridgingRetain(dict) as CFDictionaryRef
+    return dict
 }
 
 private fun createKey(
@@ -104,6 +117,7 @@ private fun createKey(
     isPrivate: Boolean,
 ): SecKeyRef? {
     val attrs = keyAttributes(isPrivate)
+
     @Suppress("UNCHECKED_CAST")
     val cfData = CFBridgingRetain(data) as CFDataRef
     return try {
@@ -125,6 +139,7 @@ private fun appleEcdsaSign(
     val priv =
         createKey(key.requireOpen().toNsData(), isPrivate = true)
             ?: throw IllegalArgumentException("invalid ${key.scheme.schemeName} private key")
+
     @Suppress("UNCHECKED_CAST")
     val msgData = CFBridgingRetain(message.toNsData()) as CFDataRef
     return try {
@@ -141,15 +156,82 @@ private fun appleEcdsaSign(
     }
 }
 
+/**
+ * Returns (decoded length, index just past the length octets) for a minimal-form DER length at
+ * [i], or `null` if the length is non-canonical (indefinite form, leading-zero octet, or long
+ * form used where short form would suffice).
+ */
+private fun readDerLen(
+    b: ByteArray,
+    i: Int,
+): Pair<Int, Int>? {
+    if (i >= b.size) return null
+    val first = b[i].toInt() and 0xFF
+    if (first < 0x80) return first to (i + 1) // short form
+    val numBytes = first and 0x7f
+    if (numBytes == 0 || numBytes > 4) return null // indefinite form / unreasonably large
+    if (i + 1 + numBytes > b.size) return null
+    if ((b[i + 1].toInt() and 0xFF) == 0x00) return null // leading-zero length octet (non-minimal)
+    var len = 0
+    for (k in 0 until numBytes) len = (len shl 8) or (b[i + 1 + k].toInt() and 0xFF)
+    if (len < 0x80) return null // long form used where short form fits (non-minimal)
+    return len to (i + 1 + numBytes)
+}
+
+/**
+ * Validates a canonical positive DER `INTEGER` starting at [i] inside `[i, end)` and returns the
+ * index just past it, or `-1` if it is missing, negative, or carries a superfluous leading zero.
+ */
+private fun readDerPositiveInt(
+    b: ByteArray,
+    i: Int,
+    end: Int,
+): Int {
+    if (i >= end || (b[i].toInt() and 0xFF) != 0x02) return -1
+    val (len, contentStart) = readDerLen(b, i + 1) ?: return -1
+    if (len < 1 || contentStart + len > end) return -1
+    val c0 = b[contentStart].toInt() and 0xFF
+    if (c0 and 0x80 != 0) return -1 // negative (r/s must be positive)
+    if (c0 == 0x00 && len > 1 && (b[contentStart + 1].toInt() and 0x80) == 0) return -1 // superfluous 0x00
+    return contentStart + len
+}
+
+/**
+ * Strict canonical-DER well-formedness check for an ECDSA `SEQUENCE { INTEGER r, INTEGER s }`.
+ *
+ * Apple's `SecKeyVerifySignature` is lenient — it accepts BER encodings (long-form or leading-zero
+ * length octets, superfluous integer padding, trailing bytes) that strict DER, and therefore the
+ * cross-platform contract and the Wycheproof `invalid` vectors, require be rejected. JCA on the JVM
+ * rejects these for free; on Apple we enforce canonical DER ourselves before delegating to the
+ * platform verify. Returns `false` for any non-canonical or malformed encoding.
+ */
+private fun isCanonicalEcdsaDer(signature: ReadBuffer): Boolean {
+    val start = signature.position()
+    val n = signature.remaining()
+    if (n < 2) return false
+    val b = ByteArray(n) { signature.get(start + it) }
+    if ((b[0].toInt() and 0xFF) != 0x30) return false
+    val (seqLen, contentStart) = readDerLen(b, 1) ?: return false
+    if (contentStart + seqLen != n) return false // exact consumption, no trailing bytes
+    val afterR = readDerPositiveInt(b, contentStart, n)
+    if (afterR < 0) return false
+    val afterS = readDerPositiveInt(b, afterR, n)
+    return afterS == n // r and s fill the sequence exactly
+}
+
 private fun appleEcdsaVerify(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
 ): Boolean {
     if (key.scheme == SignatureScheme.Ed25519) unsupportedEd25519()
+    // SecKeyVerifySignature accepts non-canonical BER; reject anything that is not strict DER first.
+    if (!isCanonicalEcdsaDer(signature)) return false
     val pub = createKey(key.material.toNsData(), isPrivate = false) ?: return false
+
     @Suppress("UNCHECKED_CAST")
     val msgData = CFBridgingRetain(message.toNsData()) as CFDataRef
+
     @Suppress("UNCHECKED_CAST")
     val sigData = CFBridgingRetain(signature.toNsData()) as CFDataRef
     return try {
