@@ -1,0 +1,1188 @@
+sealed com.ditchoom.buffer.codec.test.protocols.CommandPayload dispatch=fixed-byte/1B
+  0x22 SetRgbState
+  0x23 GetRgbState
+  0x24 ResetDevice
+message com.ditchoom.buffer.codec.test.protocols.CommandPayload.GetRgbState
+message com.ditchoom.buffer.codec.test.protocols.CommandPayload.ResetDevice
+message com.ditchoom.buffer.codec.test.protocols.CommandPayload.SetRgbState
+  0 r scalar:UByte wire=1B order=Default
+  1 g scalar:UByte wire=1B order=Default
+  2 b scalar:UByte wire=1B order=Default
+sealed com.ditchoom.buffer.codec.test.protocols.ConnectionStatus dispatch=fixed-byte/1B
+  0x00 Disconnected
+  0x01 Connecting
+  0x02 Connected
+  0x03 Failed
+message com.ditchoom.buffer.codec.test.protocols.ConnectionStatus.Connected
+message com.ditchoom.buffer.codec.test.protocols.ConnectionStatus.Connecting
+  0 attempt scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.ConnectionStatus.Disconnected
+message com.ditchoom.buffer.codec.test.protocols.ConnectionStatus.Failed
+message com.ditchoom.buffer.codec.test.protocols.DeviceState
+  0 deviceId scalar:UByte wire=1B order=Little
+  1 connection msg:com.ditchoom.buffer.codec.test.protocols.ConnectionStatus
+sealed com.ditchoom.buffer.codec.test.protocols.Issue156Command dispatch=fixed-byte/1B
+  0x20 LedStateSet
+message com.ditchoom.buffer.codec.test.protocols.Issue156Command.LedStateSet
+  0 ledId scalar:UByte wire=1B order=Default
+  1 duty scalar:UShort wire=2B order=Default
+sealed com.ditchoom.buffer.codec.test.protocols.Issue156Response dispatch=fixed-byte/1B
+  0x20 LedStateSet
+message com.ditchoom.buffer.codec.test.protocols.Issue156Response.LedStateSet
+  0 ledId scalar:UByte wire=1B order=Default
+  1 duty scalar:UShort wire=2B order=Default
+message com.ditchoom.buffer.codec.test.protocols.asciistring.AsciiGreeting
+  0 command payload:kotlin.String len-prefix=2B/Default codec=com.ditchoom.buffer.codec.AsciiStringCodec
+sealed com.ditchoom.buffer.codec.test.protocols.batch.BigDispatchFrame dispatch=fixed-byte/1B
+  0x01 TypeA
+  0x02 TypeB
+message com.ditchoom.buffer.codec.test.protocols.batch.BigDispatchFrame.TypeA
+  0 a scalar:UByte wire=1B order=Big
+  1 b scalar:UByte wire=1B order=Big
+  2 c scalar:UShort wire=2B order=Big
+  3 d scalar:UInt wire=4B order=Big
+message com.ditchoom.buffer.codec.test.protocols.batch.BigDispatchFrame.TypeB
+  0 x scalar:UByte wire=1B order=Big
+  1 y scalar:UByte wire=1B order=Big
+  2 z scalar:UShort wire=2B order=Big
+  3 w scalar:UInt wire=4B order=Big
+message com.ditchoom.buffer.codec.test.protocols.batch.BigHeader
+  0 type scalar:UByte wire=1B order=Big
+  1 version scalar:UByte wire=1B order=Big
+  2 flags scalar:UShort wire=2B order=Big
+  3 length scalar:UInt wire=4B order=Big
+message com.ditchoom.buffer.codec.test.protocols.batch.ConditionalBreaksBatch
+  0 header scalar:UByte wire=1B order=Default
+  1 hasExtra scalar:Boolean wire=1B order=Default
+  2 extra? when(sibling:hasExtra) scalar:UByte order=Default
+  3 trailer scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.batch.EightUBytes
+  0 a scalar:UByte wire=1B order=Default
+  1 b scalar:UByte wire=1B order=Default
+  2 c scalar:UByte wire=1B order=Default
+  3 d scalar:UByte wire=1B order=Default
+  4 e scalar:UByte wire=1B order=Default
+  5 f scalar:UByte wire=1B order=Default
+  6 g scalar:UByte wire=1B order=Default
+  7 h scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.batch.FourUBytes
+  0 a scalar:UByte wire=1B order=Default
+  1 b scalar:UByte wire=1B order=Default
+  2 c scalar:UByte wire=1B order=Default
+  3 d scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.batch.FramedBatchedBody
+  0 a scalar:UShort wire=2B order=Big
+  1 b scalar:UShort wire=2B order=Big
+  2 c scalar:UInt wire=4B order=Big
+message com.ditchoom.buffer.codec.test.protocols.batch.HeaderByte
+  0 raw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.batch.LittleHeader
+  0 type scalar:UByte wire=1B order=Little
+  1 version scalar:UByte wire=1B order=Little
+  2 flags scalar:UShort wire=2B order=Little
+  3 length scalar:UInt wire=4B order=Little
+message com.ditchoom.buffer.codec.test.protocols.batch.LittleTag
+  0 raw scalar:UShort wire=2B order=Little
+message com.ditchoom.buffer.codec.test.protocols.batch.MixedNaturalScalars
+  0 flags scalar:UByte wire=1B order=Default
+  1 tag scalar:UByte wire=1B order=Default
+  2 length scalar:UShort wire=2B order=Default
+  3 checksum scalar:UInt wire=4B order=Default
+message com.ditchoom.buffer.codec.test.protocols.batch.MixedOrderFlush
+  0 leadingBig scalar:UShort wire=2B order=Big
+  1 middleLittle scalar:UShort wire=2B order=Little
+  2 trailingBig scalar:UInt wire=4B order=Big
+message com.ditchoom.buffer.codec.test.protocols.batch.MixedOrderPartialBatch
+  0 bigA scalar:UShort wire=2B order=Big
+  1 bigB scalar:UShort wire=2B order=Big
+  2 trailingLittle scalar:UInt wire=4B order=Little
+message com.ditchoom.buffer.codec.test.protocols.batch.MixedOrderValueClass
+  0 leadingBig scalar:UShort wire=2B order=Big
+  1 littleTag valueclass:com.ditchoom.buffer.codec.test.protocols.batch.LittleTag scalar:UShort wire=2B order=Little
+  2 trailingBig scalar:UInt wire=4B order=Big
+message com.ditchoom.buffer.codec.test.protocols.batch.SandwichBatch
+  0 a scalar:UShort wire=2B order=Big
+  1 b scalar:UShort wire=2B order=Big
+  2 gate scalar:Boolean wire=1B order=Default
+  3 middle? when(sibling:gate) scalar:UInt order=Big
+  4 c scalar:UShort wire=2B order=Big
+  5 d scalar:UShort wire=2B order=Big
+message com.ditchoom.buffer.codec.test.protocols.batch.SignedAndUnsignedMix
+  0 signed scalar:Byte wire=1B order=Default
+  1 unsigned scalar:UByte wire=1B order=Default
+  2 signedShort scalar:Short wire=2B order=Default
+message com.ditchoom.buffer.codec.test.protocols.batch.ValueClassBatch
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.batch.HeaderByte scalar:UByte wire=1B order=Default
+  1 tail valueclass:com.ditchoom.buffer.codec.test.protocols.batch.HeaderByte scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.dns.DnsHeader
+  0 id scalar:UShort wire=2B order=Big
+  1 flags scalar:UShort wire=2B order=Big
+  2 qdCount scalar:UShort wire=2B order=Big
+  3 anCount scalar:UShort wire=2B order=Big
+  4 nsCount scalar:UShort wire=2B order=Big
+  5 arCount scalar:UShort wire=2B order=Big
+enum com.ditchoom.buffer.codec.test.protocols.enums.Color default=Unknown
+  0 Unknown
+  1 Red
+  2 Green
+  3 Blue
+enum com.ditchoom.buffer.codec.test.protocols.enums.Priority
+  0 Low
+  1 Medium
+  2 High
+message com.ditchoom.buffer.codec.test.protocols.enums.Style
+  0 color enum:com.ditchoom.buffer.codec.test.protocols.enums.Color
+  1 priority enum:com.ditchoom.buffer.codec.test.protocols.enums.Priority
+  2 weight scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.enums.Tagged
+  0 level enum:com.ditchoom.buffer.codec.test.protocols.enums.Priority
+  1 id scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.ethernet.EtherType
+  0 raw scalar:UShort wire=2B order=Default
+sealed com.ditchoom.buffer.codec.test.protocols.ethernet.EthernetFrameByEtherType dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.ethernet.EtherType/2B,inner=UShort/Default,dispatchValue=type:UShort
+  2048 Ipv4
+  2054 Arp
+  33024 VlanTag
+  34525 Ipv6
+message com.ditchoom.buffer.codec.test.protocols.ethernet.EthernetFrameByEtherType.Arp
+  0 etherType valueclass:com.ditchoom.buffer.codec.test.protocols.ethernet.EtherType scalar:UShort wire=2B order=Default
+message com.ditchoom.buffer.codec.test.protocols.ethernet.EthernetFrameByEtherType.Ipv4
+  0 etherType valueclass:com.ditchoom.buffer.codec.test.protocols.ethernet.EtherType scalar:UShort wire=2B order=Default
+message com.ditchoom.buffer.codec.test.protocols.ethernet.EthernetFrameByEtherType.Ipv6
+  0 etherType valueclass:com.ditchoom.buffer.codec.test.protocols.ethernet.EtherType scalar:UShort wire=2B order=Default
+message com.ditchoom.buffer.codec.test.protocols.ethernet.EthernetFrameByEtherType.VlanTag
+  0 etherType valueclass:com.ditchoom.buffer.codec.test.protocols.ethernet.EtherType scalar:UShort wire=2B order=Default
+message com.ditchoom.buffer.codec.test.protocols.flv.FlvTagHeader
+  0 tagType scalar:UByte wire=1B order=Big
+  1 dataSize scalar:UInt wire=3B order=Big
+  2 timestamp scalar:UInt wire=3B order=Big
+  3 timestampExtended scalar:UByte wire=1B order=Big
+  4 streamId scalar:UInt wire=3B order=Big
+sealed com.ditchoom.buffer.codec.test.protocols.forwardcompat.ForwardCompatibleOp dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.forwardcompat.OpCode/1B,inner=UByte/Default,dispatchValue=code:Int framedBy=com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec forwardCompatible=com.ditchoom.buffer.codec.test.protocols.forwardcompat.ForwardCompatibleOp.Unknown
+  18 Scroll
+  52 SetTitle
+message com.ditchoom.buffer.codec.test.protocols.forwardcompat.ForwardCompatibleOp.Scroll
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.forwardcompat.OpCode scalar:UByte wire=1B order=Default
+  1 delta scalar:Short wire=2B order=Default
+message com.ditchoom.buffer.codec.test.protocols.forwardcompat.ForwardCompatibleOp.SetTitle
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.forwardcompat.OpCode scalar:UByte wire=1B order=Default
+  1 title string len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.forwardcompat.OpCode
+  0 raw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.grpc.GrpcLengthPrefixedMessage
+  0 compressedFlag scalar:UByte wire=1B order=Big
+  1 message payload:com.ditchoom.buffer.codec.test.protocols.payload.BinaryData len-prefix=4B/Big codec=com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
+sealed com.ditchoom.buffer.codec.test.protocols.http2.Http2Frame dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.http2.Http2LengthAndType/4B,inner=UInt/Big,dispatchValue=type:Int
+  0 Data
+  4 Settings
+  6 Ping
+  8 WindowUpdate
+message com.ditchoom.buffer.codec.test.protocols.http2.Http2Frame.Data
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.http2.Http2LengthAndType scalar:UInt wire=4B order=Big
+  1 flags scalar:UByte wire=1B order=Big
+  2 streamId valueclass:com.ditchoom.buffer.codec.test.protocols.http2.Http2StreamId scalar:UInt wire=4B order=Default
+  3 payload payload:P remaining codec=injected:payloadCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.http2.Http2Frame.Ping
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.http2.Http2LengthAndType scalar:UInt wire=4B order=Big
+  1 flags scalar:UByte wire=1B order=Big
+  2 streamId valueclass:com.ditchoom.buffer.codec.test.protocols.http2.Http2StreamId scalar:UInt wire=4B order=Default
+  3 opaqueData scalar:ULong wire=8B order=Big
+message com.ditchoom.buffer.codec.test.protocols.http2.Http2Frame.Settings
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.http2.Http2LengthAndType scalar:UInt wire=4B order=Big
+  1 flags scalar:UByte wire=1B order=Big
+  2 streamId valueclass:com.ditchoom.buffer.codec.test.protocols.http2.Http2StreamId scalar:UInt wire=4B order=Default
+  3 entries list:com.ditchoom.buffer.codec.test.protocols.http2.Http2Setting len-from=sibling:header.length
+message com.ditchoom.buffer.codec.test.protocols.http2.Http2Frame.WindowUpdate
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.http2.Http2LengthAndType scalar:UInt wire=4B order=Big
+  1 flags scalar:UByte wire=1B order=Big
+  2 streamId valueclass:com.ditchoom.buffer.codec.test.protocols.http2.Http2StreamId scalar:UInt wire=4B order=Default
+  3 windowSizeIncrement scalar:UInt wire=4B order=Big
+message com.ditchoom.buffer.codec.test.protocols.http2.Http2LengthAndType
+  0 raw scalar:UInt wire=4B order=Big
+message com.ditchoom.buffer.codec.test.protocols.http2.Http2Setting
+  0 identifier scalar:UShort wire=2B order=Big
+  1 value scalar:UInt wire=4B order=Big
+message com.ditchoom.buffer.codec.test.protocols.http2.Http2SettingsFrame
+  0 length scalar:UInt wire=3B order=Big
+  1 type scalar:UByte wire=1B order=Big
+  2 flags scalar:UByte wire=1B order=Big
+  3 streamId valueclass:com.ditchoom.buffer.codec.test.protocols.http2.Http2StreamId scalar:UInt wire=4B order=Default
+  4 entries list:com.ditchoom.buffer.codec.test.protocols.http2.Http2Setting len-from=sibling:length
+sealed com.ditchoom.buffer.codec.test.protocols.http3.Http3Frame dispatch=varint:com.ditchoom.buffer.codec.test.protocols.http3.Http3FrameType/var,inner=ULong,dispatchValue=type:Int
+  0 Data
+  1 Headers
+  4 Settings
+  64 Extension
+message com.ditchoom.buffer.codec.test.protocols.http3.Http3Frame.Data
+  0 frameType codec:com.ditchoom.buffer.codec.test.protocols.http3.Http3FrameTypeCodec bounding=false variable=true
+  1 length codec:com.ditchoom.buffer.codec.test.protocols.http3.Http3LengthCodec bounding=true variable=false
+  2 payload payload:com.ditchoom.buffer.codec.test.protocols.payload.BinaryData remaining codec=com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.http3.Http3Frame.Extension
+  0 frameType codec:com.ditchoom.buffer.codec.test.protocols.http3.Http3FrameTypeCodec bounding=false variable=true
+  1 length codec:com.ditchoom.buffer.codec.test.protocols.http3.Http3LengthCodec bounding=true variable=false
+  2 payload payload:com.ditchoom.buffer.codec.test.protocols.payload.BinaryData remaining codec=com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.http3.Http3Frame.Headers
+  0 frameType codec:com.ditchoom.buffer.codec.test.protocols.http3.Http3FrameTypeCodec bounding=false variable=true
+  1 length codec:com.ditchoom.buffer.codec.test.protocols.http3.Http3LengthCodec bounding=true variable=false
+  2 fieldSection payload:com.ditchoom.buffer.codec.test.protocols.payload.BinaryData remaining codec=com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.http3.Http3Frame.Settings
+  0 frameType codec:com.ditchoom.buffer.codec.test.protocols.http3.Http3FrameTypeCodec bounding=false variable=true
+  1 length codec:com.ditchoom.buffer.codec.test.protocols.http3.Http3LengthCodec bounding=true variable=false
+  2 parameters payload:com.ditchoom.buffer.codec.test.protocols.payload.BinaryData remaining codec=com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.http3.Http3FrameType
+  0 raw codec:com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec bounding=false variable=true
+sealed com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcFrame dispatch=varint:com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcFrameType/var,inner=ULong,dispatchValue=type:Int framedBy=com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcLengthCodec forwardCompatible=com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcFrame.Unknown
+  0 Data
+  4 Settings
+  5 PushPromise
+  7 GoAway
+  64 Extension
+message com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcFrame.Data
+  0 frameType codec:com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcFrameTypeCodec bounding=false variable=true
+  1 payload payload:com.ditchoom.buffer.ReadBuffer remaining codec=com.ditchoom.buffer.codec.test.protocols.http3fc.RawBytesCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcFrame.Extension
+  0 frameType codec:com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcFrameTypeCodec bounding=false variable=true
+  1 payload payload:com.ditchoom.buffer.ReadBuffer remaining codec=com.ditchoom.buffer.codec.test.protocols.http3fc.RawBytesCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcFrame.GoAway
+  0 frameType codec:com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcFrameTypeCodec bounding=false variable=true
+  1 id codec:com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec bounding=false variable=true
+message com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcFrame.PushPromise
+  0 frameType codec:com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcFrameTypeCodec bounding=false variable=true
+  1 pushId codec:com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec bounding=false variable=true
+  2 encodedFieldSection payload:com.ditchoom.buffer.ReadBuffer remaining codec=com.ditchoom.buffer.codec.test.protocols.http3fc.RawBytesCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcFrame.Settings
+  0 frameType codec:com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcFrameTypeCodec bounding=false variable=true
+  1 entries list:com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcSetting remaining reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcFrameType
+  0 raw codec:com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec bounding=false variable=true
+message com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcSetting
+  0 identifier codec:com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec bounding=false variable=true
+  1 value codec:com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec bounding=false variable=true
+message com.ditchoom.buffer.codec.test.protocols.lengthprefixedusecodec.PropertyBagFrame
+  0 properties list:com.ditchoom.buffer.codec.test.protocols.lengthprefixedusecodec.PropertyEntry len-prefix-codec=com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
+message com.ditchoom.buffer.codec.test.protocols.lengthprefixedusecodec.PropertyEntry
+  0 id scalar:UByte wire=1B order=Default
+  1 value scalar:UInt wire=4B order=Default
+message com.ditchoom.buffer.codec.test.protocols.lengthprefixedusecodec.StringTaggedProperty
+  0 tag string len-prefix=2B/Default
+  1 value scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.lengthprefixedusecodec.StringTaggedPropertyBag
+  0 properties list:com.ditchoom.buffer.codec.test.protocols.lengthprefixedusecodec.StringTaggedProperty len-prefix-codec=com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
+message com.ditchoom.buffer.codec.test.protocols.lengthprefixedusecodec.TaggedPropertyBag
+  0 tag scalar:UByte wire=1B order=Default
+  1 properties list:com.ditchoom.buffer.codec.test.protocols.lengthprefixedusecodec.PropertyEntry len-prefix-codec=com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttConnectFlags
+  0 raw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttConnectProtocolName
+  0 name string len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
+  0 raw scalar:UByte wire=1B order=Default
+sealed com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader/1B,inner=UByte/Default,dispatchValue=packetType:Int framedBy=com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
+  1 Connect
+  2 ConnAck
+  3 Publish
+  4 PubAck
+  5 PubRec
+  6 PubRel
+  7 PubComp
+  8 Subscribe
+  9 SubAck
+  10 Unsubscribe
+  11 UnsubAck
+  12 PingReq
+  13 PingResp
+  14 Disconnect
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket.ConnAck
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 connectAckFlags scalar:UByte wire=1B order=Big
+  2 returnCode scalar:UByte wire=1B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket.Connect
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 protocolName string len-prefix=2B/Default
+  2 protocolLevel scalar:UByte wire=1B order=Default
+  3 connectFlags valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttConnectFlags scalar:UByte wire=1B order=Default
+  4 keepAliveSeconds scalar:UShort wire=2B order=Default
+  5 clientId string len-prefix=2B/Default
+  6 willTopic? when(sibling:connectFlags.willPresent) string len-prefix=2B/Default
+  7 willPayload? when(sibling:connectFlags.willPresent) payload:com.ditchoom.buffer.codec.test.protocols.payload.BinaryData len-prefix=2B/Default codec=com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
+  8 username? when(sibling:connectFlags.usernamePresent) string len-prefix=2B/Default
+  9 password? when(sibling:connectFlags.passwordPresent) payload:com.ditchoom.buffer.codec.test.protocols.payload.BinaryData len-prefix=2B/Default codec=com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket.Disconnect
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket.PingReq
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket.PingResp
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket.PubAck
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 packetIdentifier scalar:UShort wire=2B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket.PubComp
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 packetIdentifier scalar:UShort wire=2B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket.PubRec
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 packetIdentifier scalar:UShort wire=2B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket.PubRel
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 packetIdentifier scalar:UShort wire=2B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket.Publish
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 topic string len-prefix=2B/Default
+  2 packetId? when(sibling:header.qosGreaterThanZero) valueclass:com.ditchoom.buffer.codec.test.protocols.payload.PacketId scalar:UShort order=Default
+  3 payload payload:P remaining codec=injected:payloadCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket.SubAck
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 packetIdentifier scalar:UShort wire=2B order=Big
+  2 returnCodes list:com.ditchoom.buffer.codec.test.protocols.mqtt.suback.MqttV3SubAckReturnCode remaining reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket.Subscribe
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 packetIdentifier scalar:UShort wire=2B order=Big
+  2 topicFilters list:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttTopicFilter remaining reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket.UnsubAck
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 packetIdentifier scalar:UShort wire=2B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacket.Unsubscribe
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 packetIdentifier scalar:UShort wire=2B order=Big
+  2 topics list:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttUnsubscribeTopic remaining reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttTopicFilter
+  0 filter string len-prefix=2B/Big
+  1 qos scalar:UByte wire=1B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqtt.MqttUnsubscribeTopic
+  0 name string len-prefix=2B/Big
+sealed com.ditchoom.buffer.codec.test.protocols.mqtt.suback.MqttV3SubAckReturnCode dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.suback.MqttV3SubAckReturnCodeRaw/1B,inner=UByte/Default,dispatchValue=id:Int
+  0 SuccessMaximumQoS0
+  1 SuccessMaximumQoS1
+  2 SuccessMaximumQoS2
+  128 Failure
+message com.ditchoom.buffer.codec.test.protocols.mqtt.suback.MqttV3SubAckReturnCode.Failure
+message com.ditchoom.buffer.codec.test.protocols.mqtt.suback.MqttV3SubAckReturnCode.SuccessMaximumQoS0
+message com.ditchoom.buffer.codec.test.protocols.mqtt.suback.MqttV3SubAckReturnCode.SuccessMaximumQoS1
+message com.ditchoom.buffer.codec.test.protocols.mqtt.suback.MqttV3SubAckReturnCode.SuccessMaximumQoS2
+message com.ditchoom.buffer.codec.test.protocols.mqtt.suback.MqttV3SubAckReturnCodeRaw
+  0 raw scalar:UByte wire=1B order=Default
+sealed com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader/1B,inner=UByte/Default,dispatchValue=packetType:Int framedBy=com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
+  1 Connect
+  2 ConnAck
+  3 Publish
+  4 PubAck
+  5 PubRec
+  6 PubRel
+  7 PubComp
+  8 Subscribe
+  9 SubAck
+  10 Unsubscribe
+  11 UnsubAck
+  12 PingReq
+  13 PingResp
+  14 Disconnect
+  15 Auth
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet.Auth
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 reasonCode? when(remaining>=1) msg:com.ditchoom.buffer.codec.test.protocols.mqttv5.authrc.V5AuthReasonCode
+  2 properties? when(remaining>=1) codec:com.ditchoom.buffer.codec.test.protocols.mqttv5.V5PropertyBagCodec
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet.ConnAck
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 connectAckFlags scalar:UByte wire=1B order=Big
+  2 reasonCode msg:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode
+  3 properties codec:com.ditchoom.buffer.codec.test.protocols.mqttv5.V5PropertyBagCodec bounding=false variable=false
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet.Connect
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 protocolName string len-prefix=2B/Big
+  2 protocolLevel scalar:UByte wire=1B order=Big
+  3 connectFlags valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttConnectFlags scalar:UByte wire=1B order=Default
+  4 keepAliveSeconds scalar:UShort wire=2B order=Big
+  5 properties codec:com.ditchoom.buffer.codec.test.protocols.mqttv5.V5PropertyBagCodec bounding=false variable=false
+  6 clientId string len-prefix=2B/Big
+  7 willProperties? when(sibling:connectFlags.willPresent) codec:com.ditchoom.buffer.codec.test.protocols.mqttv5.V5PropertyBagCodec
+  8 willTopic? when(sibling:connectFlags.willPresent) string len-prefix=2B/Big
+  9 willPayload? when(sibling:connectFlags.willPresent) payload:com.ditchoom.buffer.codec.test.protocols.payload.BinaryData len-prefix=2B/Big codec=com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
+  10 username? when(sibling:connectFlags.usernamePresent) string len-prefix=2B/Big
+  11 password? when(sibling:connectFlags.passwordPresent) payload:com.ditchoom.buffer.codec.test.protocols.payload.BinaryData len-prefix=2B/Big codec=com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet.Disconnect
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 reasonCode? when(remaining>=1) msg:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode
+  2 properties? when(remaining>=1) codec:com.ditchoom.buffer.codec.test.protocols.mqttv5.V5PropertyBagCodec
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet.PingReq
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet.PingResp
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet.PubAck
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 packetIdentifier scalar:UShort wire=2B order=Big
+  2 reasonCode? when(remaining>=1) msg:com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode
+  3 properties? when(remaining>=1) codec:com.ditchoom.buffer.codec.test.protocols.mqttv5.V5PropertyBagCodec
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet.PubComp
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 packetIdentifier scalar:UShort wire=2B order=Big
+  2 reasonCode? when(remaining>=1) msg:com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode
+  3 properties? when(remaining>=1) codec:com.ditchoom.buffer.codec.test.protocols.mqttv5.V5PropertyBagCodec
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet.PubRec
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 packetIdentifier scalar:UShort wire=2B order=Big
+  2 reasonCode? when(remaining>=1) msg:com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode
+  3 properties? when(remaining>=1) codec:com.ditchoom.buffer.codec.test.protocols.mqttv5.V5PropertyBagCodec
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet.PubRel
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 packetIdentifier scalar:UShort wire=2B order=Big
+  2 reasonCode? when(remaining>=1) msg:com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode
+  3 properties? when(remaining>=1) codec:com.ditchoom.buffer.codec.test.protocols.mqttv5.V5PropertyBagCodec
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet.Publish
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 topic string len-prefix=2B/Default
+  2 packetId? when(sibling:header.qosGreaterThanZero) valueclass:com.ditchoom.buffer.codec.test.protocols.payload.PacketId scalar:UShort order=Default
+  3 properties codec:com.ditchoom.buffer.codec.test.protocols.mqttv5.V5PropertyBagCodec bounding=false variable=false
+  4 payload payload:P remaining codec=injected:payloadCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet.SubAck
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 packetIdentifier scalar:UShort wire=2B order=Big
+  2 properties codec:com.ditchoom.buffer.codec.test.protocols.mqttv5.V5PropertyBagCodec bounding=false variable=false
+  3 reasonCodes list:com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode remaining reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet.Subscribe
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 packetIdentifier scalar:UShort wire=2B order=Big
+  2 properties codec:com.ditchoom.buffer.codec.test.protocols.mqttv5.V5PropertyBagCodec bounding=false variable=false
+  3 topicFilters list:com.ditchoom.buffer.codec.test.protocols.mqttv5.V5Subscription remaining reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet.UnsubAck
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 packetIdentifier scalar:UShort wire=2B order=Big
+  2 reasonCode? when(remaining>=1) msg:com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCode
+  3 properties? when(remaining>=1) codec:com.ditchoom.buffer.codec.test.protocols.mqttv5.V5PropertyBagCodec
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Packet.Unsubscribe
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 packetIdentifier scalar:UShort wire=2B order=Big
+  2 properties codec:com.ditchoom.buffer.codec.test.protocols.mqttv5.V5PropertyBagCodec bounding=false variable=false
+  3 topics list:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttUnsubscribeTopic remaining reserved=0B
+sealed com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId/1B,inner=UByte/Default,dispatchValue=id:Int
+  1 PayloadFormatIndicator
+  2 MessageExpiryInterval
+  3 ContentType
+  8 ResponseTopic
+  9 CorrelationData
+  11 SubscriptionIdentifier
+  17 SessionExpiryInterval
+  18 AssignedClientIdentifier
+  19 ServerKeepAlive
+  21 AuthenticationMethod
+  22 AuthenticationData
+  23 RequestProblemInformation
+  24 WillDelayInterval
+  25 RequestResponseInformation
+  26 ResponseInformation
+  28 ServerReference
+  31 ReasonString
+  33 ReceiveMaximum
+  34 TopicAliasMaximum
+  35 TopicAlias
+  36 MaximumQoS
+  37 RetainAvailable
+  38 UserProperty
+  39 MaximumPacketSize
+  40 WildcardSubscriptionAvailable
+  41 SubscriptionIdentifiersAvailable
+  42 SharedSubscriptionAvailable
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.AssignedClientIdentifier
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value string len-prefix=2B/Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.AuthenticationData
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 data payload:com.ditchoom.buffer.codec.test.protocols.payload.BinaryData len-prefix=2B/Big codec=com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.AuthenticationMethod
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value string len-prefix=2B/Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.ContentType
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value string len-prefix=2B/Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.CorrelationData
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 data payload:com.ditchoom.buffer.codec.test.protocols.payload.BinaryData len-prefix=2B/Big codec=com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.MaximumPacketSize
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value scalar:UInt wire=4B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.MaximumQoS
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value scalar:UByte wire=1B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.MessageExpiryInterval
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 seconds scalar:UInt wire=4B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.PayloadFormatIndicator
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value scalar:UByte wire=1B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.ReasonString
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value string len-prefix=2B/Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.ReceiveMaximum
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value scalar:UShort wire=2B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.RequestProblemInformation
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value scalar:UByte wire=1B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.RequestResponseInformation
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value scalar:UByte wire=1B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.ResponseInformation
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value string len-prefix=2B/Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.ResponseTopic
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value string len-prefix=2B/Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.RetainAvailable
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value scalar:UByte wire=1B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.ServerKeepAlive
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 seconds scalar:UShort wire=2B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.ServerReference
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value string len-prefix=2B/Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.SessionExpiryInterval
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 seconds scalar:UInt wire=4B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.SharedSubscriptionAvailable
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value scalar:UByte wire=1B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.SubscriptionIdentifier
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value codec:com.ditchoom.buffer.codec.test.protocols.mqttv5.VariableByteIntegerCodec bounding=false variable=false
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.SubscriptionIdentifiersAvailable
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value scalar:UByte wire=1B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.TopicAlias
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value scalar:UShort wire=2B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.TopicAliasMaximum
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value scalar:UShort wire=2B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.UserProperty
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 key string len-prefix=2B/Big
+  2 value string len-prefix=2B/Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.WildcardSubscriptionAvailable
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 value scalar:UByte wire=1B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5Property.WillDelayInterval
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId scalar:UByte wire=1B order=Default
+  1 seconds scalar:UInt wire=4B order=Big
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.MqttV5PropertyId
+  0 raw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.V5Subscription
+  0 topicFilter string len-prefix=2B/Big
+  1 subscriptionOptions valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.V5SubscriptionOptions scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.V5SubscriptionOptions
+  0 raw scalar:UByte wire=1B order=Default
+sealed com.ditchoom.buffer.codec.test.protocols.mqttv5.authrc.V5AuthReasonCode dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.authrc.V5AuthReasonCodeRaw/1B,inner=UByte/Default,dispatchValue=id:Int
+  0 Success
+  24 ContinueAuthentication
+  25 ReAuthenticate
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.authrc.V5AuthReasonCode.ContinueAuthentication
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.authrc.V5AuthReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.authrc.V5AuthReasonCode.ReAuthenticate
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.authrc.V5AuthReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.authrc.V5AuthReasonCode.Success
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.authrc.V5AuthReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.authrc.V5AuthReasonCodeRaw
+  0 raw scalar:UByte wire=1B order=Default
+sealed com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw/1B,inner=UByte/Default,dispatchValue=id:Int
+  0 Success
+  128 UnspecifiedError
+  129 MalformedPacket
+  130 ProtocolError
+  131 ImplementationSpecificError
+  132 UnsupportedProtocolVersion
+  133 ClientIdentifierNotValid
+  134 BadUserNameOrPassword
+  135 NotAuthorized
+  136 ServerUnavailable
+  137 ServerBusy
+  138 Banned
+  140 BadAuthenticationMethod
+  144 TopicNameInvalid
+  149 PacketTooLarge
+  151 QuotaExceeded
+  153 PayloadFormatInvalid
+  154 RetainNotSupported
+  155 QoSNotSupported
+  156 UseAnotherServer
+  157 ServerMoved
+  159 ConnectionRateExceeded
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.BadAuthenticationMethod
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.BadUserNameOrPassword
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.Banned
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.ClientIdentifierNotValid
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.ConnectionRateExceeded
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.ImplementationSpecificError
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.MalformedPacket
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.NotAuthorized
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.PacketTooLarge
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.PayloadFormatInvalid
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.ProtocolError
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.QoSNotSupported
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.QuotaExceeded
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.RetainNotSupported
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.ServerBusy
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.ServerMoved
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.ServerUnavailable
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.Success
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.TopicNameInvalid
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.UnspecifiedError
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.UnsupportedProtocolVersion
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCode.UseAnotherServer
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeRaw
+  0 raw scalar:UByte wire=1B order=Default
+sealed com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw/1B,inner=UByte/Default,dispatchValue=id:Int
+  0 NormalDisconnection
+  4 DisconnectWithWillMessage
+  128 UnspecifiedError
+  129 MalformedPacket
+  130 ProtocolError
+  131 ImplementationSpecificError
+  135 NotAuthorized
+  137 ServerBusy
+  139 ServerShuttingDown
+  141 KeepAliveTimeout
+  142 SessionTakenOver
+  143 TopicFilterInvalid
+  144 TopicNameInvalid
+  147 ReceiveMaximumExceeded
+  148 TopicAliasInvalid
+  149 PacketTooLarge
+  151 QuotaExceeded
+  152 AdministrativeAction
+  153 PayloadFormatInvalid
+  154 RetainNotSupported
+  155 QoSNotSupported
+  156 UseAnotherServer
+  157 ServerMoved
+  158 SharedSubscriptionsNotSupported
+  159 ConnectionRateExceeded
+  160 MaximumConnectTime
+  161 SubscriptionIdentifiersNotSupported
+  162 WildcardSubscriptionsNotSupported
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.AdministrativeAction
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.ConnectionRateExceeded
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.DisconnectWithWillMessage
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.ImplementationSpecificError
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.KeepAliveTimeout
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.MalformedPacket
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.MaximumConnectTime
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.NormalDisconnection
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.NotAuthorized
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.PacketTooLarge
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.PayloadFormatInvalid
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.ProtocolError
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.QoSNotSupported
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.QuotaExceeded
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.ReceiveMaximumExceeded
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.RetainNotSupported
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.ServerBusy
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.ServerMoved
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.ServerShuttingDown
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.SessionTakenOver
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.SharedSubscriptionsNotSupported
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.SubscriptionIdentifiersNotSupported
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.TopicAliasInvalid
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.TopicFilterInvalid
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.TopicNameInvalid
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.UnspecifiedError
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.UseAnotherServer
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode.WildcardSubscriptionsNotSupported
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCodeRaw
+  0 raw scalar:UByte wire=1B order=Default
+sealed com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCodeRaw/1B,inner=UByte/Default,dispatchValue=id:Int
+  0 Success
+  16 NoMatchingSubscribers
+  128 UnspecifiedError
+  131 ImplementationSpecificError
+  135 NotAuthorized
+  144 TopicNameInvalid
+  145 PacketIdentifierInUse
+  146 PacketIdentifierNotFound
+  151 QuotaExceeded
+  153 PayloadFormatInvalid
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode.ImplementationSpecificError
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode.NoMatchingSubscribers
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode.NotAuthorized
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode.PacketIdentifierInUse
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode.PacketIdentifierNotFound
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode.PayloadFormatInvalid
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode.QuotaExceeded
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode.Success
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode.TopicNameInvalid
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode.UnspecifiedError
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCodeRaw
+  0 raw scalar:UByte wire=1B order=Default
+sealed com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCodeRaw/1B,inner=UByte/Default,dispatchValue=id:Int
+  0 GrantedQoS0
+  1 GrantedQoS1
+  2 GrantedQoS2
+  128 UnspecifiedError
+  131 ImplementationSpecificError
+  135 NotAuthorized
+  143 TopicFilterInvalid
+  145 PacketIdentifierInUse
+  151 QuotaExceeded
+  158 SharedSubscriptionsNotSupported
+  161 SubscriptionIdentifiersNotSupported
+  162 WildcardSubscriptionsNotSupported
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode.GrantedQoS0
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode.GrantedQoS1
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode.GrantedQoS2
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode.ImplementationSpecificError
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode.NotAuthorized
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode.PacketIdentifierInUse
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode.QuotaExceeded
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode.SharedSubscriptionsNotSupported
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode.SubscriptionIdentifiersNotSupported
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode.TopicFilterInvalid
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode.UnspecifiedError
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode.WildcardSubscriptionsNotSupported
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCodeRaw
+  0 raw scalar:UByte wire=1B order=Default
+sealed com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCode dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCodeRaw/1B,inner=UByte/Default,dispatchValue=id:Int
+  0 Success
+  17 NoSubscriptionExisted
+  128 UnspecifiedError
+  131 ImplementationSpecificError
+  135 NotAuthorized
+  143 TopicFilterInvalid
+  145 PacketIdentifierInUse
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCode.ImplementationSpecificError
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCode.NoSubscriptionExisted
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCode.NotAuthorized
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCode.PacketIdentifierInUse
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCode.Success
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCode.TopicFilterInvalid
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCode.UnspecifiedError
+  0 id valueclass:com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCodeRaw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mqttv5.unsuback.V5UnsubAckReasonCodeRaw
+  0 raw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedOpcode
+  0 raw scalar:Short wire=2B order=Big
+sealed com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedOpcodeFrame dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedOpcode/2B,inner=Short/Big,dispatchValue=code:Int
+  -2 Negative
+  1 Positive
+message com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedOpcodeFrame.Negative
+  0 opcode valueclass:com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedOpcode scalar:Short wire=2B order=Big
+  1 payload scalar:Int wire=4B order=Default
+message com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedOpcodeFrame.Positive
+  0 opcode valueclass:com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedOpcode scalar:Short wire=2B order=Big
+  1 payload scalar:Int wire=4B order=Default
+message com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedSelector
+  0 raw scalar:Long wire=8B order=Big
+sealed com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedSelectorFrame dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedSelector/8B,inner=Long/Big,dispatchValue=kind:Int
+  2 Two
+  9 Nine
+message com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedSelectorFrame.Nine
+  0 selector valueclass:com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedSelector scalar:Long wire=8B order=Big
+  1 payload scalar:Int wire=4B order=Default
+message com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedSelectorFrame.Two
+  0 selector valueclass:com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedSelector scalar:Long wire=8B order=Big
+  1 payload scalar:Int wire=4B order=Default
+message com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedTag
+  0 raw scalar:Int wire=4B order=Little
+sealed com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedTagFrame dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedTag/4B,inner=Int/Little,dispatchValue=tag:Int
+  -1 Alpha
+  7 Beta
+message com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedTagFrame.Alpha
+  0 tag valueclass:com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedTag scalar:Int wire=4B order=Little
+  1 value scalar:Short wire=2B order=Default
+message com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedTagFrame.Beta
+  0 tag valueclass:com.ditchoom.buffer.codec.test.protocols.multibytedisc.SignedTag scalar:Int wire=4B order=Little
+  1 value scalar:Short wire=2B order=Default
+message com.ditchoom.buffer.codec.test.protocols.multibytedisc.UnsignedMagic
+  0 raw scalar:ULong wire=8B order=Little
+sealed com.ditchoom.buffer.codec.test.protocols.multibytedisc.UnsignedMagicFrame dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.multibytedisc.UnsignedMagic/8B,inner=ULong/Little,dispatchValue=tag:Int
+  17 First
+  34 Second
+message com.ditchoom.buffer.codec.test.protocols.multibytedisc.UnsignedMagicFrame.First
+  0 magic valueclass:com.ditchoom.buffer.codec.test.protocols.multibytedisc.UnsignedMagic scalar:ULong wire=8B order=Little
+  1 payload scalar:Int wire=4B order=Default
+message com.ditchoom.buffer.codec.test.protocols.multibytedisc.UnsignedMagicFrame.Second
+  0 magic valueclass:com.ditchoom.buffer.codec.test.protocols.multibytedisc.UnsignedMagic scalar:ULong wire=8B order=Little
+  1 payload scalar:Int wire=4B order=Default
+message com.ditchoom.buffer.codec.test.protocols.mysql.MySqlPacketHeader
+  0 raw scalar:UInt wire=4B order=Little
+message com.ditchoom.buffer.codec.test.protocols.partialnonterminal.CommandFrame
+  0 counter scalar:UShort wire=2B order=Big
+  1 length scalar:UShort wire=2B order=Big
+  2 payload payload:P remaining codec=injected:payloadCodec reserved=2B
+  3 checksum scalar:UShort wire=2B order=Big
+message com.ditchoom.buffer.codec.test.protocols.payload.MqttPublishV3
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 topic string len-prefix=2B/Big
+  2 packetId valueclass:com.ditchoom.buffer.codec.test.protocols.payload.PacketId scalar:UShort wire=2B order=Default
+  3 payload payload:P remaining codec=injected:payloadCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.payload.MqttPublishV3Concrete
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader scalar:UByte wire=1B order=Default
+  1 topic string len-prefix=2B/Big
+  2 packetId valueclass:com.ditchoom.buffer.codec.test.protocols.payload.PacketId scalar:UShort wire=2B order=Default
+  3 payload payload:com.ditchoom.buffer.codec.test.protocols.payload.JpegImage remaining codec=com.ditchoom.buffer.codec.test.protocols.payload.JpegImageCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.payload.PacketId
+  0 raw scalar:UShort wire=2B order=Default
+message com.ditchoom.buffer.codec.test.protocols.png.PngChunk
+  0 length scalar:UInt wire=4B order=Big
+  1 type scalar:UInt wire=4B order=Big
+  2 data payload:com.ditchoom.buffer.codec.test.protocols.payload.BinaryData remaining codec=com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec reserved=4B
+  3 crc scalar:UInt wire=4B order=Big
+message com.ditchoom.buffer.codec.test.protocols.quic.QuicHeaderByte
+  0 raw scalar:UByte wire=1B order=Default
+sealed com.ditchoom.buffer.codec.test.protocols.quic.QuicPacketHeader dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.quic.QuicHeaderByte/1B,inner=UByte/Default,dispatchValue=isLongHeader:Boolean
+  0 ShortHeader
+  1 LongHeader
+message com.ditchoom.buffer.codec.test.protocols.quic.QuicPacketHeader.LongHeader
+  0 firstByte valueclass:com.ditchoom.buffer.codec.test.protocols.quic.QuicHeaderByte scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.quic.QuicPacketHeader.ShortHeader
+  0 firstByte valueclass:com.ditchoom.buffer.codec.test.protocols.quic.QuicHeaderByte scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.riff.RiffChunkHeader
+  0 fourCC scalar:UInt wire=4B order=Big
+  1 chunkSize scalar:UInt wire=4B order=Little
+message com.ditchoom.buffer.codec.test.protocols.riff.WavFmtBody
+  0 audioFormat scalar:UShort wire=2B order=Little
+  1 numChannels scalar:UShort wire=2B order=Little
+  2 sampleRate scalar:UInt wire=4B order=Little
+  3 byteRate scalar:UInt wire=4B order=Little
+  4 blockAlign scalar:UShort wire=2B order=Little
+  5 bitsPerSample scalar:UShort wire=2B order=Little
+message com.ditchoom.buffer.codec.test.protocols.riff.WavFmtChunk
+  0 fourCC scalar:UInt wire=4B order=Big
+  1 body msg:com.ditchoom.buffer.codec.test.protocols.riff.WavFmtBody len-prefix=4B/Little
+message com.ditchoom.buffer.codec.test.protocols.simple.BytePrefixedString
+  0 name string len-prefix=1B/Default
+sealed com.ditchoom.buffer.codec.test.protocols.simple.Command dispatch=fixed-byte/1B
+  0x01 Ping
+  0x02 Echo
+message com.ditchoom.buffer.codec.test.protocols.simple.Command.Echo
+  0 msg string len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.simple.Command.Ping
+  0 ts scalar:Long wire=8B order=Default
+message com.ditchoom.buffer.codec.test.protocols.simple.IntPrefixedString
+  0 name string len-prefix=4B/Default
+message com.ditchoom.buffer.codec.test.protocols.simple.LeHeader
+  0 raw scalar:UShort wire=2B order=Little
+message com.ditchoom.buffer.codec.test.protocols.simple.LePacket
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.simple.LeHeader scalar:UShort wire=2B order=Little
+  1 payload string len-from=sibling:header.length
+message com.ditchoom.buffer.codec.test.protocols.simple.RemoteHeader
+  0 payloadLength scalar:UShort wire=2B order=Default
+  1 flags scalar:UByte wire=1B order=Default
+  2 correlationId scalar:UInt wire=4B order=Default
+  3 payload string len-from=sibling:payloadLength
+message com.ditchoom.buffer.codec.test.protocols.simple.SimpleHeader
+  0 id scalar:Int wire=4B order=Default
+  1 name string len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.simple.SmallFlags
+  0 raw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.simple.TwoStrings
+  0 first string len-prefix=2B/Default
+  1 second string len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.simple.WithFlagPayload
+  0 flags valueclass:com.ditchoom.buffer.codec.test.protocols.simple.SmallFlags scalar:UByte wire=1B order=Default
+  1 payload? when(sibling:flags.want) string len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.simple.WithOptional
+  0 hasExtra scalar:Boolean wire=1B order=Default
+  1 extra? when(sibling:hasExtra) scalar:Int order=Default
+sealed com.ditchoom.buffer.codec.test.protocols.simplegeneric.SimpleGenericFrame dispatch=fixed-byte/1B
+  0x0A Command
+  0xA0 Status
+message com.ditchoom.buffer.codec.test.protocols.simplegeneric.SimpleGenericFrame.Command
+  0 counter scalar:UByte wire=1B order=Default
+  1 payload payload:P remaining codec=injected:payloadCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.simplegeneric.SimpleGenericFrame.Status
+  0 code scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.slice10e.RemoteCommand
+  0 id string len-prefix=2B/Big
+  1 payload payload:com.ditchoom.buffer.codec.test.protocols.slice10e.RemoteCommandPayload remaining codec=com.ditchoom.buffer.codec.test.protocols.slice10e.RemoteCommandPayloadCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.slice11a.ProbeConditional
+  0 present scalar:Boolean wire=1B order=Default
+  1 seal? when(sibling:present) codec:com.ditchoom.buffer.codec.test.protocols.slice11a.ProbeSealedDelegateCodec
+message com.ditchoom.buffer.codec.test.protocols.slice11a.ProbeRemainingBytesList
+  0 xs list:com.ditchoom.buffer.codec.test.protocols.slice11a.ProbeSealed remaining reserved=0B
+sealed com.ditchoom.buffer.codec.test.protocols.slice11a.ProbeSealed dispatch=fixed-byte/1B
+  0x01 Tag1
+  0x02 Tag2
+message com.ditchoom.buffer.codec.test.protocols.slice11a.ProbeSealed.Tag1
+  0 n scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.slice11a.ProbeSealed.Tag2
+  0 msg string len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.slice14b.Slice14bFramedFrameFixed
+  0 payload scalar:UByte wire=1B order=Default
+  1 tail scalar:UShort wire=2B order=Default
+message com.ditchoom.buffer.codec.test.protocols.slice14b.Slice14bFramedFrameVariable
+  0 message string len-prefix=2B/Default
+sealed com.ditchoom.buffer.codec.test.protocols.slice14c.Slice14cFramedDispatch dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.slice14c.Slice14cTinyHeader/1B,inner=UByte/Default,dispatchValue=packetType:Int framedBy=com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
+  1 A
+  2 B
+message com.ditchoom.buffer.codec.test.protocols.slice14c.Slice14cFramedDispatch.A
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.slice14c.Slice14cTinyHeader scalar:UByte wire=1B order=Default
+  1 a scalar:UByte wire=1B order=Default
+  2 b scalar:UShort wire=2B order=Default
+message com.ditchoom.buffer.codec.test.protocols.slice14c.Slice14cFramedDispatch.B
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.slice14c.Slice14cTinyHeader scalar:UByte wire=1B order=Default
+  1 message string len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.slice14c.Slice14cTinyHeader
+  0 raw scalar:UByte wire=1B order=Default
+sealed com.ditchoom.buffer.codec.test.protocols.slice14cgeneric.Slice14cGenericFramedDispatch dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.slice14c.Slice14cTinyHeader/1B,inner=UByte/Default,dispatchValue=packetType:Int framedBy=com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
+  1 Headered
+  2 WithPayload
+message com.ditchoom.buffer.codec.test.protocols.slice14cgeneric.Slice14cGenericFramedDispatch.Headered
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.slice14c.Slice14cTinyHeader scalar:UByte wire=1B order=Default
+  1 a scalar:UByte wire=1B order=Default
+  2 b scalar:UShort wire=2B order=Default
+message com.ditchoom.buffer.codec.test.protocols.slice14cgeneric.Slice14cGenericFramedDispatch.WithPayload
+  0 header valueclass:com.ditchoom.buffer.codec.test.protocols.slice14c.Slice14cTinyHeader scalar:UByte wire=1B order=Default
+  1 topic string len-prefix=2B/Default
+  2 payload payload:P remaining codec=injected:payloadCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.slice15a.Slice15aLengthPrefixedPayload
+  0 data payload:com.ditchoom.buffer.codec.test.protocols.payload.BinaryData len-prefix=2B/Default codec=com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
+message com.ditchoom.buffer.codec.test.protocols.slice7c.RepeatedBlock
+  0 blockId scalar:UShort wire=2B order=Big
+  1 blockKind scalar:UByte wire=1B order=Big
+message com.ditchoom.buffer.codec.test.protocols.slice7c.RepeatedBlocks
+  0 streamId scalar:UShort wire=2B order=Big
+  1 blocks list:com.ditchoom.buffer.codec.test.protocols.slice7c.RepeatedBlock remaining reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.tcp.TcpFlagsByte
+  0 raw scalar:UByte wire=1B order=Default
+sealed com.ditchoom.buffer.codec.test.protocols.tcp.TcpSegmentByFlags dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.tcp.TcpFlagsByte/1B,inner=UByte/Default,dispatchValue=flags:UByte
+  2 Syn
+  4 Rst
+  16 Ack
+  17 FinAck
+  18 SynAck
+message com.ditchoom.buffer.codec.test.protocols.tcp.TcpSegmentByFlags.Ack
+  0 flags valueclass:com.ditchoom.buffer.codec.test.protocols.tcp.TcpFlagsByte scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.tcp.TcpSegmentByFlags.FinAck
+  0 flags valueclass:com.ditchoom.buffer.codec.test.protocols.tcp.TcpFlagsByte scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.tcp.TcpSegmentByFlags.Rst
+  0 flags valueclass:com.ditchoom.buffer.codec.test.protocols.tcp.TcpFlagsByte scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.tcp.TcpSegmentByFlags.Syn
+  0 flags valueclass:com.ditchoom.buffer.codec.test.protocols.tcp.TcpFlagsByte scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.tcp.TcpSegmentByFlags.SynAck
+  0 flags valueclass:com.ditchoom.buffer.codec.test.protocols.tcp.TcpFlagsByte scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.tls.TlsHandshake
+  0 msgType scalar:UByte wire=1B order=Big
+  1 length scalar:UInt wire=3B order=Big
+  2 body msg:com.ditchoom.buffer.codec.test.protocols.tls.TlsHandshakeBody len-from=sibling:length
+message com.ditchoom.buffer.codec.test.protocols.tls.TlsHandshakeBody
+  0 legacyVersion scalar:UShort wire=2B order=Big
+  1 random payload:com.ditchoom.buffer.codec.test.protocols.payload.BinaryData remaining codec=com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec reserved=0B
+sealed com.ditchoom.buffer.codec.test.protocols.tls.TlsHandshakeSealedBody dispatch=fixed-byte/1B
+  0x01 ClientHello
+  0x05 EndOfEarlyData
+message com.ditchoom.buffer.codec.test.protocols.tls.TlsHandshakeSealedBody.ClientHello
+  0 legacyVersion scalar:UShort wire=2B order=Default
+message com.ditchoom.buffer.codec.test.protocols.tls.TlsHandshakeSealedBody.EndOfEarlyData
+message com.ditchoom.buffer.codec.test.protocols.tls.TlsHandshakeWithSealedBody
+  0 msgType scalar:UByte wire=1B order=Big
+  1 length scalar:UInt wire=3B order=Big
+  2 body msg:com.ditchoom.buffer.codec.test.protocols.tls.TlsHandshakeSealedBody len-from=sibling:length
+message com.ditchoom.buffer.codec.test.protocols.usecodecscalar.BoundedFrame
+  0 tag scalar:Short wire=2B order=Default
+  1 length codec:com.ditchoom.buffer.codec.test.protocols.usecodecscalar.Le32LengthCodec bounding=true variable=false
+  2 payload payload:com.ditchoom.buffer.codec.test.protocols.payload.BinaryData remaining codec=com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec reserved=0B
+sealed com.ditchoom.buffer.codec.test.protocols.usecodecscalar.DispatchVarintUnion dispatch=fixed-byte/1B
+  0x01 Single
+  0x02 Mixed
+  0x03 Marker
+  0x04 Plain
+message com.ditchoom.buffer.codec.test.protocols.usecodecscalar.DispatchVarintUnion.Marker
+message com.ditchoom.buffer.codec.test.protocols.usecodecscalar.DispatchVarintUnion.Mixed
+  0 v codec:com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec bounding=false variable=true
+  1 flag scalar:Boolean wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.usecodecscalar.DispatchVarintUnion.Plain
+  0 value codec:com.ditchoom.buffer.codec.test.protocols.usecodecscalar.ZigZagUIntCodec bounding=false variable=false
+message com.ditchoom.buffer.codec.test.protocols.usecodecscalar.DispatchVarintUnion.Single
+  0 v codec:com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec bounding=false variable=true
+message com.ditchoom.buffer.codec.test.protocols.usecodecscalar.ZigZagFrame
+  0 id scalar:Int wire=4B order=Default
+  1 value codec:com.ditchoom.buffer.codec.test.protocols.usecodecscalar.ZigZagUIntCodec bounding=false variable=false
+message com.ditchoom.buffer.codec.test.protocols.varintfield.VarintLengthFrame
+  0 value codec:com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec bounding=false variable=true
+  1 tag scalar:UByte wire=1B order=Default
+sealed com.ditchoom.buffer.codec.test.protocols.visibility.InternalCommand dispatch=fixed-byte/1B
+  0x01 Ping
+  0x02 Echo
+message com.ditchoom.buffer.codec.test.protocols.visibility.InternalCommand.Echo
+  0 msg string len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.visibility.InternalCommand.Ping
+  0 ts scalar:Long wire=8B order=Default
+message com.ditchoom.buffer.codec.test.protocols.visibility.InternalPacket
+  0 id scalar:Int wire=4B order=Default
+  1 name string len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.websocket.FrameHeaderByte1
+  0 raw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.websocket.WsCloseBody
+  0 statusCode scalar:UShort wire=2B order=Big
+  1 reason string remaining reserved=0B
+sealed com.ditchoom.buffer.codec.test.protocols.websocket.WsFrame dispatch=valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.FrameHeaderByte1/1B,inner=UByte/Default,dispatchValue=opcode:Int
+  0 Continuation
+  1 Text
+  2 Binary
+  8 Close
+  9 Ping
+  10 Pong
+message com.ditchoom.buffer.codec.test.protocols.websocket.WsFrame.Binary
+  0 byte1 valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.FrameHeaderByte1 scalar:UByte wire=1B order=Default
+  1 byte2 valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.WsHeaderByte2 scalar:UByte wire=1B order=Default
+  2 extendedLength16? when(sibling:byte2.extended16) scalar:UShort order=Big
+  3 extendedLength64? when(sibling:byte2.extended64) scalar:Long order=Big
+  4 maskingKey? when(sibling:byte2.masked) valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.WsMaskingKey scalar:UInt order=Default
+  5 payload payload:P remaining codec=injected:payloadCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.websocket.WsFrame.Close
+  0 byte1 valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.FrameHeaderByte1 scalar:UByte wire=1B order=Default
+  1 byte2 valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.WsHeaderByte2 scalar:UByte wire=1B order=Default
+  2 extendedLength16? when(sibling:byte2.extended16) scalar:UShort order=Big
+  3 extendedLength64? when(sibling:byte2.extended64) scalar:Long order=Big
+  4 maskingKey? when(sibling:byte2.masked) valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.WsMaskingKey scalar:UInt order=Default
+  5 body? when(remaining>=2) msg:com.ditchoom.buffer.codec.test.protocols.websocket.WsCloseBody
+message com.ditchoom.buffer.codec.test.protocols.websocket.WsFrame.Continuation
+  0 byte1 valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.FrameHeaderByte1 scalar:UByte wire=1B order=Default
+  1 byte2 valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.WsHeaderByte2 scalar:UByte wire=1B order=Default
+  2 extendedLength16? when(sibling:byte2.extended16) scalar:UShort order=Big
+  3 extendedLength64? when(sibling:byte2.extended64) scalar:Long order=Big
+  4 maskingKey? when(sibling:byte2.masked) valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.WsMaskingKey scalar:UInt order=Default
+  5 payload payload:P remaining codec=injected:payloadCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.websocket.WsFrame.Ping
+  0 byte1 valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.FrameHeaderByte1 scalar:UByte wire=1B order=Default
+  1 byte2 valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.WsHeaderByte2 scalar:UByte wire=1B order=Default
+  2 extendedLength16? when(sibling:byte2.extended16) scalar:UShort order=Big
+  3 extendedLength64? when(sibling:byte2.extended64) scalar:Long order=Big
+  4 maskingKey? when(sibling:byte2.masked) valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.WsMaskingKey scalar:UInt order=Default
+  5 payload payload:P remaining codec=injected:payloadCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.websocket.WsFrame.Pong
+  0 byte1 valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.FrameHeaderByte1 scalar:UByte wire=1B order=Default
+  1 byte2 valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.WsHeaderByte2 scalar:UByte wire=1B order=Default
+  2 extendedLength16? when(sibling:byte2.extended16) scalar:UShort order=Big
+  3 extendedLength64? when(sibling:byte2.extended64) scalar:Long order=Big
+  4 maskingKey? when(sibling:byte2.masked) valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.WsMaskingKey scalar:UInt order=Default
+  5 payload payload:P remaining codec=injected:payloadCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.websocket.WsFrame.Text
+  0 byte1 valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.FrameHeaderByte1 scalar:UByte wire=1B order=Default
+  1 byte2 valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.WsHeaderByte2 scalar:UByte wire=1B order=Default
+  2 extendedLength16? when(sibling:byte2.extended16) scalar:UShort order=Big
+  3 extendedLength64? when(sibling:byte2.extended64) scalar:Long order=Big
+  4 maskingKey? when(sibling:byte2.masked) valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.WsMaskingKey scalar:UInt order=Default
+  5 payload payload:P remaining codec=injected:payloadCodec reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.websocket.WsFrameHeader
+  0 byte1 valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.FrameHeaderByte1 scalar:UByte wire=1B order=Default
+  1 byte2 valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.WsHeaderByte2 scalar:UByte wire=1B order=Default
+  2 extendedLength16? when(sibling:byte2.extended16) scalar:UShort order=Big
+  3 extendedLength64? when(sibling:byte2.extended64) scalar:Long order=Big
+  4 maskingKey? when(sibling:byte2.masked) valueclass:com.ditchoom.buffer.codec.test.protocols.websocket.WsMaskingKey scalar:UInt order=Default
+message com.ditchoom.buffer.codec.test.protocols.websocket.WsHeaderByte2
+  0 raw scalar:UByte wire=1B order=Default
+message com.ditchoom.buffer.codec.test.protocols.websocket.WsMaskingKey
+  0 raw scalar:UInt wire=4B order=Default
+sealed com.ditchoom.buffer.codec.test.protocols.wireorderMismatch.BigWireFrame dispatch=fixed-byte/1B
+  0x01 Sample
+  0x02 Status
+message com.ditchoom.buffer.codec.test.protocols.wireorderMismatch.BigWireFrame.Sample
+  0 short scalar:Short wire=2B order=Big
+  1 int scalar:Int wire=4B order=Big
+  2 long scalar:Long wire=8B order=Big
+  3 float scalar:Float wire=4B order=Big
+  4 double scalar:Double wire=8B order=Big
+message com.ditchoom.buffer.codec.test.protocols.wireorderMismatch.BigWireFrame.Status
+  0 flags scalar:UInt wire=4B order=Big
+  1 ratio scalar:Double wire=8B order=Big
+message com.ditchoom.buffer.codec.test.protocols.wireorderMismatch.BigWirePacket
+  0 bool scalar:Boolean wire=1B order=Default
+  1 byte scalar:Byte wire=1B order=Big
+  2 ubyte scalar:UByte wire=1B order=Big
+  3 short scalar:Short wire=2B order=Big
+  4 ushort scalar:UShort wire=2B order=Big
+  5 int scalar:Int wire=4B order=Big
+  6 uint scalar:UInt wire=4B order=Big
+  7 long scalar:Long wire=8B order=Big
+  8 ulong scalar:ULong wire=8B order=Big
+  9 float scalar:Float wire=4B order=Big
+  10 double scalar:Double wire=8B order=Big
+message com.ditchoom.buffer.codec.test.protocols.wireorderMismatch.LittleWirePacket
+  0 bool scalar:Boolean wire=1B order=Default
+  1 byte scalar:Byte wire=1B order=Little
+  2 ubyte scalar:UByte wire=1B order=Little
+  3 short scalar:Short wire=2B order=Little
+  4 ushort scalar:UShort wire=2B order=Little
+  5 int scalar:Int wire=4B order=Little
+  6 uint scalar:UInt wire=4B order=Little
+  7 long scalar:Long wire=8B order=Little
+  8 ulong scalar:ULong wire=8B order=Little
+  9 float scalar:Float wire=4B order=Little
+  10 double scalar:Double wire=8B order=Little

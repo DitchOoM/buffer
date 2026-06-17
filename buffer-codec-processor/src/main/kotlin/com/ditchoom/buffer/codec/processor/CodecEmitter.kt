@@ -5,6 +5,7 @@ import com.google.devtools.ksp.processing.Dependencies
 import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.symbol.ClassKind
 import com.google.devtools.ksp.symbol.KSClassDeclaration
+import com.google.devtools.ksp.symbol.KSFile
 import com.google.devtools.ksp.symbol.Modifier
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
@@ -119,6 +120,14 @@ internal class CodecEmitter(
     private val codeGenerator: CodeGenerator,
     private val logger: KSPLogger,
 ) {
+    // Accumulated analyzed shapes for the aggregate schema descriptor
+    // (SCHEMA_DRIFT.md). Collected across every tryEmit / KSP round; projected
+    // into codec-schema.txt by writeSchemaDescriptor() in the processor's
+    // finish(). Order does not matter — the descriptor sorts by type name.
+    private val collectedCodecShapes = mutableListOf<CodecShape>()
+    private val collectedDispatchShapes = mutableListOf<DispatchShape>()
+    private val schemaSourceFiles = linkedSetOf<KSFile>()
+
     fun tryEmit(symbol: KSClassDeclaration) {
         val sourceFile = symbol.containingFile ?: return
         if (Modifier.SEALED in symbol.modifiers && symbol.classKind == ClassKind.INTERFACE) {
@@ -137,6 +146,8 @@ internal class CodecEmitter(
             when (result) {
                 is DispatchAnalysisResult.Supported -> {
                     val shape = result.shape
+                    collectedDispatchShapes += shape
+                    schemaSourceFiles += sourceFile
                     val file = buildDispatchFileSpec(shape)
                     codeGenerator
                         .createNewFile(
@@ -160,6 +171,8 @@ internal class CodecEmitter(
         when (val r = analyze(symbol)) {
             is AnalysisResult.Supported -> {
                 val shape = r.shape
+                collectedCodecShapes += shape
+                schemaSourceFiles += sourceFile
                 val file = buildFileSpec(shape)
                 codeGenerator
                     .createNewFile(
@@ -180,6 +193,26 @@ internal class CodecEmitter(
             // the validator) — stay silent to avoid double-reporting.
             AnalysisResult.NotApplicable -> return
         }
+    }
+
+    /**
+     * Emit the aggregate schema descriptor (SCHEMA_DRIFT.md) for every shape analyzed across all
+     * KSP rounds. Called once from the processor's `finish()`. Projects the collected IR into the
+     * line-oriented `codec-schema.txt` format ([CodecSchemaDescriptor]) and writes it alongside the
+     * generated codecs. No-op when nothing was analyzed (an empty descriptor would only churn the
+     * baseline). The output aggregates every source file, so it is declared `aggregating = true`.
+     */
+    fun writeSchemaDescriptor() {
+        val text = CodecSchemaDescriptor.render(collectedCodecShapes, collectedDispatchShapes)
+        if (text.isEmpty()) return
+        codeGenerator
+            .createNewFile(
+                Dependencies(aggregating = true, *schemaSourceFiles.toTypedArray()),
+                packageName = "",
+                fileName = "codec-schema",
+                extensionName = "txt",
+            ).bufferedWriter()
+            .use { writer -> writer.write(text) }
     }
 
     /**
@@ -746,6 +779,7 @@ internal class CodecEmitter(
             is FieldSpec.ValueClassScalar -> appendDecodeValueClassScalar(body, field)
             is FieldSpec.Conditional -> appendDecodeConditional(body, field)
             is FieldSpec.ProtocolMessageScalar -> appendDecodeProtocolMessageScalar(body, field)
+            is FieldSpec.EnumScalar -> appendDecodeEnum(body, field)
         }
     }
 
@@ -828,6 +862,7 @@ internal class CodecEmitter(
             is FieldSpec.ValueClassScalar -> appendEncodeValueClassScalar(body, field)
             is FieldSpec.Conditional -> appendEncodeConditional(body, field)
             is FieldSpec.ProtocolMessageScalar -> appendEncodeProtocolMessageScalar(body, field)
+            is FieldSpec.EnumScalar -> appendEncodeEnum(body, field)
         }
     }
 
@@ -1788,6 +1823,7 @@ internal class CodecEmitter(
             is FieldSpec.ValueClassScalar -> field.valueClassType
             is FieldSpec.Conditional -> field.nullableTypeName
             is FieldSpec.ProtocolMessageScalar -> field.fieldType
+            is FieldSpec.EnumScalar -> field.enumType
         }
 }
 

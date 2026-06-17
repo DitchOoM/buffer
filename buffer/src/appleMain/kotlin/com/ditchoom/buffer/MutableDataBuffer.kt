@@ -158,6 +158,75 @@ class MutableDataBuffer private constructor(
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
+    // Unchecked fast paths (see ReadBuffer.getUnchecked): caller has validated the range, so skip the
+    // per-element requireIndex that K/N can't hoist out of a loop the way a JIT does.
+    override fun getUnchecked(index: Int): Byte = bytePointer[index]
+
+    override fun getLongUnchecked(index: Int): Long {
+        val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
+        val value = ptr[0]
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
+    }
+
+    // Whole FNV digest in C (raw pointer arithmetic, no per-element CPointer materialization) — via the
+    // shared nativeFnv1aHashRange (buf_fnv1a_64). Mirrors the linux NativeBuffer override so both native
+    // backends get the same fast path from one place (see ReadBuffer.hashRange default).
+    override fun hashRange(
+        offset: Int,
+        length: Int,
+    ): Long {
+        requireIndex(offset, length)
+        return nativeFnv1aHashRange(
+            (bytePointer + offset)!!,
+            length,
+            bigEndian = byteOrder == ByteOrder.BIG_ENDIAN,
+        )
+    }
+
+    // Hex transform in C (raw pointer-to-pointer, shuffle-vectorized) when dest is also native — see
+    // nativeEncodeHexInto / buf_hex_encode; falls back to the portable common path otherwise. Mirrors
+    // the linux NativeBuffer override so both native backends share one fast path.
+    override fun encodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        upperCase: Boolean,
+    ) {
+        requireIndex(offset, length)
+        nativeEncodeHexInto(nativeAddress, dest, offset, length, upperCase)
+    }
+
+    override fun decodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        requireIndex(offset, length)
+        nativeDecodeHexInto(nativeAddress, dest, offset, length)
+    }
+
+    // Base64 transform in C when dest is also native — see nativeEncodeBase64Into / buf_base64_encode;
+    // falls back to the portable common path otherwise. Mirrors the linux NativeBuffer override.
+    override fun encodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        urlSafe: Boolean,
+        padded: Boolean,
+    ) {
+        requireIndex(offset, length)
+        nativeEncodeBase64Into(nativeAddress, dest, offset, length, urlSafe, padded)
+    }
+
+    override fun decodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        requireIndex(offset, length)
+        nativeDecodeBase64Into(nativeAddress, dest, offset, length)
+    }
+
     override fun readShort(): Short {
         requireReadable(2)
         val ptr = (bytePointer + position)!!.reinterpret<ShortVar>()
@@ -711,6 +780,75 @@ class MutableDataBufferSlice(
         val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
+    }
+
+    // Unchecked fast paths (see ReadBuffer.getUnchecked): caller has validated the range, so skip the
+    // per-element requireIndex that K/N can't hoist out of a loop the way a JIT does.
+    override fun getUnchecked(index: Int): Byte = bytePointer[index]
+
+    override fun getLongUnchecked(index: Int): Long {
+        val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
+        val value = ptr[0]
+        return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
+    }
+
+    // Whole FNV digest in C (raw pointer arithmetic, no per-element CPointer materialization) — via the
+    // shared nativeFnv1aHashRange (buf_fnv1a_64). Mirrors the linux NativeBuffer override so both native
+    // backends get the same fast path from one place (see ReadBuffer.hashRange default).
+    override fun hashRange(
+        offset: Int,
+        length: Int,
+    ): Long {
+        requireIndex(offset, length)
+        return nativeFnv1aHashRange(
+            (bytePointer + offset)!!,
+            length,
+            bigEndian = byteOrder == ByteOrder.BIG_ENDIAN,
+        )
+    }
+
+    // Hex transform in C (raw pointer-to-pointer, shuffle-vectorized) when dest is also native — see
+    // nativeEncodeHexInto / buf_hex_encode; falls back to the portable common path otherwise. Mirrors
+    // the linux NativeBuffer override so both native backends share one fast path.
+    override fun encodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        upperCase: Boolean,
+    ) {
+        requireIndex(offset, length)
+        nativeEncodeHexInto(nativeAddress, dest, offset, length, upperCase)
+    }
+
+    override fun decodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        requireIndex(offset, length)
+        nativeDecodeHexInto(nativeAddress, dest, offset, length)
+    }
+
+    // Base64 transform in C when dest is also native — see nativeEncodeBase64Into / buf_base64_encode;
+    // falls back to the portable common path otherwise. Mirrors the linux NativeBuffer override.
+    override fun encodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        urlSafe: Boolean,
+        padded: Boolean,
+    ) {
+        requireIndex(offset, length)
+        nativeEncodeBase64Into(nativeAddress, dest, offset, length, urlSafe, padded)
+    }
+
+    override fun decodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        requireIndex(offset, length)
+        nativeDecodeBase64Into(nativeAddress, dest, offset, length)
     }
 
     override fun readShort(): Short {

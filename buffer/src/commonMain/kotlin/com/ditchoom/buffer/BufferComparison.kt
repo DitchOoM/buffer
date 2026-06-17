@@ -25,15 +25,28 @@ internal inline fun bulkCompareEquals(
     getByte: (Int) -> Byte,
     otherGetByte: (Int) -> Byte,
 ): Boolean {
-    var i = 0
-    // Compare 8 bytes at a time
-    while (i + 8 <= length) {
-        if (getLong(thisPos + i) != otherGetLong(otherPos + i)) {
-            return false
+    // For length >= 8, compare whole 8-byte words, then handle any remainder with ONE final
+    // overlapping word ([length-8, length)) instead of a per-byte tail. For equality the overlap
+    // (re-comparing a few bytes) is harmless, and it keeps the whole path on 8-byte loads — fewer
+    // memory accesses, and on non-JIT backends no per-byte pointer materialization.
+    if (length >= 8) {
+        var i = 0
+        while (i + 8 <= length) {
+            if (getLong(thisPos + i) != otherGetLong(otherPos + i)) {
+                return false
+            }
+            i += 8
         }
-        i += 8
+        if (i < length) {
+            val tail = length - 8
+            if (getLong(thisPos + tail) != otherGetLong(otherPos + tail)) {
+                return false
+            }
+        }
+        return true
     }
-    // Compare remaining bytes
+    // length < 8: byte-by-byte (too short for a word load)
+    var i = 0
     while (i < length) {
         if (getByte(thisPos + i) != otherGetByte(otherPos + i)) {
             return false

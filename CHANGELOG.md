@@ -7,6 +7,23 @@ to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Codec processor: runtime-`Exact` `wireSize` for `VariableLengthCodec`
+  `@UseCodec` dispatch variants** — a sealed `@ProtocolMessage` dispatch union
+  whose variants carry `VariableLengthCodec`-backed `@UseCodec` scalar fields
+  now reports `WireSize.Exact(1 + body)` for each such variant (forwarding to
+  the variant codec's own `Exact` `wireSize`) instead of collapsing the variant
+  to `WireSize.BackPatch`. `classifyVariantWireSize` previously classified
+  *every* `@UseCodec` scalar variant as `BackPatch` (the "promote later if a
+  vector benefits" note); it now mirrors `buildWireSizeFun`'s `isVariableLength`
+  split — a non-`VariableLengthCodec` `@UseCodec` (plain `Codec`, possibly
+  `BackPatch` at runtime) still collapses, while a `VariableLengthCodec` one
+  (LEB128 / QUIC-varint, always `Exact(encodedLength)`) is `RuntimeExact`.
+  This lets a dispatch union of varint-payload variants compose inside a
+  measure-first / two-pass encoder that requires `Exact` (e.g. one that embeds
+  the union to length-prefix each message). A mixed variant — a VL `@UseCodec`
+  field in a non-terminal slot followed by a fixed-size trailer — is summed
+  correctly via the runtime-Exact early-return rather than crashing the
+  fixed-size-only sum path.
 - **Codec processor: framed-body truncation guard** — generated `@FramedBy`
   decode (variant arms and the `@ForwardCompatible` preserve arm) now throws a
   `DecodeException` (`<Owner>.@FramedBy` / `<Unknown>.@ForwardCompatible`)
@@ -46,15 +63,27 @@ to [Semantic Versioning](https://semver.org/).
   Implementing `ViewCodec` *is* the documented ownership answer the lockdown's
   prohibition exists to demand; `Payload`-marked self-contained values remain
   the default for anything that outlives the source buffer.
+- **Codec processor: enum fields.** A `@ProtocolMessage` field whose type is a
+  Kotlin `enum class` now encodes its `ordinal` as an unsigned LEB128 varint
+  (`UnsignedVarIntCodec`) — evolution-safe (no fixed width), and the field needs
+  no annotation of its own. Marking one entry `@EnumDefault` makes an unknown
+  (newer) ordinal decode to that entry — the forward-compatibility sink; without
+  it, an out-of-range ordinal throws `DecodeException`. A single-enum message
+  frames via `peekFrameSize` (the self-delimiting varint), and a message whose
+  only variable-width fields are enums stays on the precompute path with a
+  runtime-`Exact` `wireSize` (see Changed).
 
 ### Changed
 
-- **Generated varint value-class codecs report Exact `wireSize`.** A
-  `@ProtocolMessage` value class whose single field is a variable-length
-  `@UseCodec` scalar (a varint wrapper) now forwards `wireSize` to the user
-  codec (`VariableLengthCodec.wireSize` is `Exact(encodedLength)` by
-  construction) instead of collapsing to `BackPatch`. Wire format unchanged;
-  required so `@FramedBy`-after-varint can size the framing header per value.
+- **Generated codecs report Exact `wireSize` for runtime-exact variable fields.**
+  A `@ProtocolMessage` whose only variable-width fields are variable-length
+  `@UseCodec` scalars (varint wrappers — `VariableLengthCodec.wireSize` is
+  `Exact(encodedLength)` by construction) and/or enum fields (ordinal as an
+  `UnsignedVarIntCodec` varint) now sums each field's runtime `Exact` instead of
+  collapsing to `BackPatch`, so enclosing messages keep the precompute path. This
+  generalizes the earlier sole-varint-value-class case (it subsumes it: a single
+  varint field routes through the same branch). Wire format unchanged; lets
+  `@FramedBy`-after-varint size the framing header per value.
 - The new dispatch-value contract note for varint unions: a `@DispatchValue`
   projection narrowing a `Long`/`ULong` varint to `Int` should clamp
   out-of-range values to a sentinel (e.g. `-1`) rather than truncate —

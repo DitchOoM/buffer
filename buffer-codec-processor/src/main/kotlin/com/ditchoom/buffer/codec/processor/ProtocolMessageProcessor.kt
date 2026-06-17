@@ -205,6 +205,16 @@ class ProtocolMessageProcessor(
         return deferred
     }
 
+    /**
+     * After the last round, project every analyzed shape into the aggregate schema descriptor
+     * (SCHEMA_DRIFT.md). Emitting here — rather than per-round in [process] — guarantees a single
+     * `codec-schema.txt` covering all `@ProtocolMessage` types, even when KSP defers symbols across
+     * rounds.
+     */
+    override fun finish() {
+        emitter.writeSchemaDescriptor()
+    }
+
     private fun validateSealedDispatcher(parent: KSClassDeclaration) {
         // @DispatchOn parents go through 's value-class discriminator
         // path; 's @PacketType-uniqueness rules don't model the bit

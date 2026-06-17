@@ -66,7 +66,13 @@ class NativeBuffer private constructor(
     private var limitValue: Int = capacity
     private var closed: Boolean = false
 
-    override val nativeAddress: Long get() = ptr.toLong()
+    // Cache the raw pointer once: ptr is immutable, so ptr.toLong() is constant. Recomputing it per
+    // multi-byte access showed up as ~19% (cinterop <get-rawValue>) in native hot-loop profiles, since
+    // every getShort/getInt/getLong reads through nativeAddress. The byte path keeps using ptr[index]
+    // directly (the UnsafeMemory.getByte alternative measured slower).
+    private val baseAddress: Long = ptr.toLong()
+
+    override val nativeAddress: Long get() = baseAddress
     override val nativeSize: Long get() = capacity.toLong()
 
     private val littleEndian = byteOrder == ByteOrder.LITTLE_ENDIAN
@@ -202,6 +208,77 @@ class NativeBuffer private constructor(
         requireIndex(index, 8)
         val raw = UnsafeMemory.getLong(nativeAddress + index)
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
+    }
+
+    // Unchecked fast paths (see ReadBuffer.getUnchecked): the caller (a bulk primitive) has already
+    // validated the whole range, so skip the per-element checkOpen()/requireIndex() that K/N can't
+    // hoist out of the loop the way a JIT does. ~27% of native 1BRC time was these per-element checks.
+    override fun getUnchecked(index: Int): Byte = ptr[index]
+
+    override fun getLongUnchecked(index: Int): Long {
+        val raw = UnsafeMemory.getLong(nativeAddress + index)
+        return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
+    }
+
+    // Whole FNV digest in C (one pointer materialization, raw arithmetic in the loop) — see buf_fnv1a_64.
+    override fun hashRange(
+        offset: Int,
+        length: Int,
+    ): Long {
+        checkOpen()
+        requireIndex(offset, length)
+        return nativeFnv1aHashRange(
+            (baseAddress + offset).toCPointer<ByteVar>()!!,
+            length,
+            bigEndian = !littleEndian,
+        )
+    }
+
+    // Hex transform in C (raw pointer-to-pointer, shuffle-vectorized) when dest is also native — see
+    // nativeEncodeHexInto / buf_hex_encode; falls back to the portable common path otherwise.
+    override fun encodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        upperCase: Boolean,
+    ) {
+        checkOpen()
+        requireIndex(offset, length)
+        nativeEncodeHexInto(baseAddress, dest, offset, length, upperCase)
+    }
+
+    override fun decodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        checkOpen()
+        requireIndex(offset, length)
+        nativeDecodeHexInto(baseAddress, dest, offset, length)
+    }
+
+    // Base64 transform in C when dest is also native — see nativeEncodeBase64Into / buf_base64_encode;
+    // falls back to the portable common path otherwise.
+    override fun encodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        urlSafe: Boolean,
+        padded: Boolean,
+    ) {
+        checkOpen()
+        requireIndex(offset, length)
+        nativeEncodeBase64Into(baseAddress, dest, offset, length, urlSafe, padded)
+    }
+
+    override fun decodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        checkOpen()
+        requireIndex(offset, length)
+        nativeDecodeBase64Into(baseAddress, dest, offset, length)
     }
 
     override fun readByteArray(size: Int): ByteArray {
@@ -756,6 +833,74 @@ private class NativeBufferSlice(
         requireIndex(index, 8)
         val raw = UnsafeMemory.getLong(baseAddress + index)
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
+    }
+
+    // Unchecked fast paths — see the matching overrides on NativeBuffer and ReadBuffer.getUnchecked.
+    override fun getUnchecked(index: Int): Byte = UnsafeMemory.getByte(baseAddress + index)
+
+    override fun getLongUnchecked(index: Int): Long {
+        val raw = UnsafeMemory.getLong(baseAddress + index)
+        return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
+    }
+
+    // Whole FNV digest in C — see buf_fnv1a_64 and the matching override on NativeBuffer.
+    override fun hashRange(
+        offset: Int,
+        length: Int,
+    ): Long {
+        checkOpen()
+        requireIndex(offset, length)
+        return nativeFnv1aHashRange(
+            (baseAddress + offset).toCPointer<ByteVar>()!!,
+            length,
+            bigEndian = !littleEndian,
+        )
+    }
+
+    // Hex transform in C — see nativeEncodeHexInto and the matching override on NativeBuffer.
+    override fun encodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        upperCase: Boolean,
+    ) {
+        checkOpen()
+        requireIndex(offset, length)
+        nativeEncodeHexInto(baseAddress, dest, offset, length, upperCase)
+    }
+
+    override fun decodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        checkOpen()
+        requireIndex(offset, length)
+        nativeDecodeHexInto(baseAddress, dest, offset, length)
+    }
+
+    // Base64 transform in C when dest is also native — see nativeEncodeBase64Into / buf_base64_encode;
+    // falls back to the portable common path otherwise.
+    override fun encodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        urlSafe: Boolean,
+        padded: Boolean,
+    ) {
+        checkOpen()
+        requireIndex(offset, length)
+        nativeEncodeBase64Into(baseAddress, dest, offset, length, urlSafe, padded)
+    }
+
+    override fun decodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        checkOpen()
+        requireIndex(offset, length)
+        nativeDecodeBase64Into(baseAddress, dest, offset, length)
     }
 
     override fun readByteArray(size: Int): ByteArray {

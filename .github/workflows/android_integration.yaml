@@ -67,8 +67,19 @@ jobs:
       # (DELETE_FAILED_INTERNAL_ERROR on API 21) nor reinstalled over
       # (INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES), even with the pinned
       # keystore. Saving explicitly right after the create-AVD step caches the
-      # PRISTINE snapshot — no package ever installed — and the post-test state
+      # PRISTINE AVD disk — no package ever installed — and the post-test state
       # is never cached.
+      #
+      # The cached AVD is deliberately SNAPSHOT-FREE: the create step runs with
+      # `-no-snapshot` so no quickboot snapshot is ever written, and `run tests`
+      # COLD-BOOTS (also `-no-snapshot`). Restoring a cached quickboot snapshot
+      # is hang-prone — a snapshot saved on one GitHub runner host and reloaded
+      # on another intermittently deadlocks the emulator ("A snapshot operation
+      # for 'test' is pending and timeout has expired"), which never recovers and
+      # trips the boot timeout. A cold boot from the cached AVD disk takes
+      # ~30-60s, far under the runner-action boot timeout, and is reproducible
+      # across hosts. We still cache ~/.android/avd/* so the AVD disk itself is
+      # reused (skips re-creation); only the fragile snapshot is dropped.
       - name: AVD cache (restore)
         uses: actions/cache/restore@v5
         id: avd-cache
@@ -80,7 +91,7 @@ jobs:
           # invalidates any cache created under the old key (see #183).
           key: avd-${{ matrix.api-level }}-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('.ci/debug.keystore') }}
 
-      - name: create AVD and generate snapshot for caching
+      - name: create AVD for caching (no snapshot)
         if: steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -88,11 +99,13 @@ jobs:
           target: ${{ matrix.target }}
           arch: ${{ matrix.arch }}
           force-avd-creation: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          # -no-snapshot: create + cold-boot the AVD without writing any
+          # quickboot snapshot, so the cached AVD disk is snapshot-free.
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: false
-          script: echo "Generated AVD snapshot for caching."
+          script: echo "Primed pristine AVD disk for caching."
 
-      - name: AVD cache (save pristine snapshot)
+      - name: AVD cache (save pristine AVD)
         if: steps.avd-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
@@ -108,7 +121,11 @@ jobs:
           target: ${{ matrix.target }}
           arch: ${{ matrix.arch }}
           force-avd-creation: false
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          # -no-snapshot (== -no-snapshot-load + -no-snapshot-save): COLD-BOOT
+          # from the cached AVD disk. Never restores a quickboot snapshot, which
+          # is hang-prone when saved on one runner host and reloaded on another
+          # (see the rationale on the AVD cache steps above).
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: |
             # The cached AVD's userdata retains test APKs installed by the run
@@ -121,7 +138,14 @@ jobs:
             # package first makes the install clean and idempotent regardless of
             # what signature the cached copy carried.
             adb shell pm list packages -3 | sed 's/^package://' | grep -i '\.ditchoom\.' | xargs -r -n1 adb uninstall || true
-            ./gradlew connectedAndroidTest -x connectedBenchmarkAndroidTest
+            # NOTE: android-emulator-runner runs each script line as a separate `sh -c`,
+            # so this must stay a single line (no multi-line if/var that spans lines).
+            # buffer-crypto declares minSdk 28 (its secure/deterministic key buffers
+            # allocate via Unsafe.allocateMemory, absent from the runtime before API 26);
+            # AGP installs and runs instrumented tests regardless of the device API, so
+            # exclude that module's connected tests on emulators below 28. The other
+            # modules keep their genuine minSdk-21 floor check on this emulator.
+            ./gradlew connectedAndroidTest -x connectedBenchmarkAndroidTest $([ "${{ matrix.api-level }}" -lt 28 ] && echo "-x :buffer-crypto:connectedDebugAndroidTest")
 
       - name: Kill emulator processes
         if: always()

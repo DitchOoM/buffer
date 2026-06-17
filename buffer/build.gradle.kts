@@ -522,6 +522,13 @@ benchmark {
             iterationTimeUnit = "ms"
             include("StreamingStringDecoder")
         }
+        register("codec") {
+            warmups = 3
+            iterations = 5
+            iterationTime = 500
+            iterationTimeUnit = "ms"
+            include("(Hex|Base64).*")
+        }
         // Fast configuration for WASM - runs only key benchmarks to avoid long run times
         register("wasmFast") {
             warmups = 2

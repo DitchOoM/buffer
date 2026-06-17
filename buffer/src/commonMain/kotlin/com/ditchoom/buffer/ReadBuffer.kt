@@ -80,6 +80,24 @@ interface ReadBuffer : PositionBuffer {
     operator fun get(index: Int): Byte
 
     /**
+     * Reads the byte at [index] **without bounds or liveness checks**.
+     *
+     * This is a building block for the library's own bulk primitives ([hashRange], [regionEquals],
+     * [readFixedDecimalTenths], …), which validate the whole accessed range **once** and then loop
+     * over these unchecked accessors — the manual equivalent of a JIT hoisting a bounds check out of
+     * a loop. On platforms with a JIT (JVM) the default below already gets that elimination for free,
+     * so it simply delegates to the checked [get]; non-JIT backends (Native) override it to skip the
+     * per-element check. Callers MUST have validated `index` lies within the buffer first.
+     */
+    fun getUnchecked(index: Int): Byte = get(index)
+
+    /**
+     * Reads the 8-byte Long at [index] (per [byteOrder]) **without bounds or liveness checks**.
+     * See [getUnchecked] for the contract — the caller must have validated `[index, index+8)`.
+     */
+    fun getLongUnchecked(index: Int): Long = getLong(index)
+
+    /**
      * **Zero-copy view** of this buffer's remaining content. The slice shares
      * the underlying storage; mutations to either are visible in both.
      *
@@ -536,14 +554,17 @@ interface ReadBuffer : PositionBuffer {
         val size = remaining()
         if (size == 0) return true
 
+        // Reads cover [position, position+size) on both buffers (size == remaining), so every access
+        // is provably in-bounds — use the unchecked accessors to skip per-element checks on non-JIT
+        // backends (see getUnchecked).
         return bulkCompareEquals(
             thisPos = position(),
             otherPos = other.position(),
             length = size,
-            getLong = { getLong(it) },
-            otherGetLong = { other.getLong(it) },
-            getByte = { get(it) },
-            otherGetByte = { other.get(it) },
+            getLong = { getLongUnchecked(it) },
+            otherGetLong = { other.getLongUnchecked(it) },
+            getByte = { getUnchecked(it) },
+            otherGetByte = { other.getUnchecked(it) },
         )
     }
 
@@ -568,17 +589,128 @@ interface ReadBuffer : PositionBuffer {
             return if (thisRemaining != otherRemaining) 0 else -1
         }
 
+        // minLength <= remaining on both buffers, so all reads are in-bounds — unchecked accessors
+        // skip per-element checks on non-JIT backends (see getUnchecked).
         return bulkMismatch(
             thisPos = position(),
             otherPos = other.position(),
             minLength = minLength,
             thisRemaining = thisRemaining,
             otherRemaining = otherRemaining,
-            getLong = { getLong(it) },
-            otherGetLong = { other.getLong(it) },
-            getByte = { get(it) },
-            otherGetByte = { other.get(it) },
+            getLong = { getLongUnchecked(it) },
+            otherGetLong = { other.getLongUnchecked(it) },
+            getByte = { getUnchecked(it) },
+            otherGetByte = { other.getUnchecked(it) },
         )
+    }
+
+    /**
+     * Fast 64-bit content digest over the absolute byte range `[offset, offset + length)`.
+     *
+     * FNV-1a-64, mixing whole 8-byte words then the byte tail. Intended for hash-table bucketing where
+     * collisions are resolved by an explicit [regionEquals]. The value is consistent across buffers
+     * sharing the same [byteOrder]; it does not change [position]. Native backends override this to run
+     * the whole digest in C with raw pointer arithmetic (no per-element pointer materialization).
+     */
+    fun hashRange(
+        offset: Int,
+        length: Int,
+    ): Long {
+        requireRange(offset, length)
+        return fnv1aHashRange(FNV64_OFFSET_BASIS, offset, length, { getLongUnchecked(it) }, { getUnchecked(it) })
+    }
+
+    /**
+     * Hex-encodes the absolute source range `[offset, offset + length)` into [dest], writing
+     * `2 * length` ASCII hex bytes (high nibble first) at [dest]'s current position and advancing it.
+     * Does not change this buffer's [position].
+     *
+     * "Zero-copy": the bytes flow straight from this buffer into [dest] with no intermediate
+     * `String`/`ByteArray`. Native backends override this to run the whole transform in C over raw
+     * pointers when [dest] is also native memory (see `buf_hex_encode`).
+     *
+     * @param dest destination buffer that receives the ASCII hex bytes
+     * @param offset absolute index of the first source byte
+     * @param length number of source bytes to encode
+     * @param upperCase emit 'A'-'F' instead of 'a'-'f'
+     */
+    fun encodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        upperCase: Boolean = false,
+    ) {
+        requireRange(offset, length)
+        encodeHexCommon(offset, length, upperCase, dest)
+    }
+
+    /**
+     * Hex-decodes the absolute source range `[offset, offset + length)` (an even count of ASCII hex
+     * bytes) into [dest], writing `length / 2` decoded bytes at [dest]'s current position and advancing
+     * it. Does not change this buffer's [position].
+     *
+     * Native backends override this to run the whole transform in C over raw pointers when [dest] is
+     * also native memory (see `buf_hex_decode`).
+     *
+     * @param dest destination buffer that receives the decoded bytes
+     * @param offset absolute index of the first source hex byte
+     * @param length number of source hex bytes (must be even)
+     * @throws IllegalArgumentException if [length] is odd or a source byte is not a hex digit.
+     */
+    fun decodeHexInto(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        requireRange(offset, length)
+        decodeHexFallback(offset, length, { getUnchecked(it) }, { dest.writeByte(it) })
+    }
+
+    /**
+     * Base64-encodes the absolute source range `[offset, offset + length)` (RFC 4648) into [dest] at
+     * [dest]'s current position, advancing it by the encoded length. Does not change this buffer's
+     * [position].
+     *
+     * Native backends override this to run the whole transform in C over raw pointers when [dest] is
+     * also native memory (see `buf_base64_encode`).
+     *
+     * @param dest destination buffer that receives the ASCII Base64 bytes
+     * @param offset absolute index of the first source byte
+     * @param length number of source bytes to encode
+     * @param urlSafe use the URL-safe alphabet ('-' '_') instead of the standard one ('+' '/')
+     * @param padded append '=' padding so the output length is a multiple of 4
+     */
+    fun encodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+        urlSafe: Boolean = false,
+        padded: Boolean = true,
+    ) {
+        requireRange(offset, length)
+        encodeBase64Common(offset, length, urlSafe, padded, dest)
+    }
+
+    /**
+     * Base64-decodes the absolute source range `[offset, offset + length)` into [dest] at [dest]'s
+     * current position, advancing it by the decoded length. Accepts both the standard and URL-safe
+     * alphabets and tolerates missing padding. Does not change this buffer's [position].
+     *
+     * Native backends override this to run the whole transform in C over raw pointers when [dest] is
+     * also native memory (see `buf_base64_decode`).
+     *
+     * @param dest destination buffer that receives the decoded bytes
+     * @param offset absolute index of the first source Base64 byte
+     * @param length number of source Base64 bytes
+     * @throws IllegalArgumentException if a source byte (before padding) is not a Base64 digit.
+     */
+    fun decodeBase64Into(
+        dest: WriteBuffer,
+        offset: Int,
+        length: Int,
+    ) {
+        requireRange(offset, length)
+        decodeBase64Fallback(offset, length, { getUnchecked(it) }, { dest.writeByte(it) })
     }
 
     /**
@@ -979,8 +1111,42 @@ fun bufferEquals(
  */
 fun bufferHashCode(self: ReadBuffer): Int {
     var h = 1
-    for (i in self.position() until self.limit()) {
-        h = 31 * h + self.get(i).toInt()
+    val end = self.limit()
+    var i = self.position()
+    // Bulk path: read 8 bytes per memory access (one getLong instead of eight get()s — 8x fewer
+    // accesses / pointer materializations on non-JIT backends), then fold each byte in index order.
+    // Bit-identical to the per-byte 31-multiplier loop; the [position, limit) range is in-bounds so
+    // the unchecked accessors are safe (see ReadBuffer.getUnchecked).
+    if (self.byteOrder == ByteOrder.BIG_ENDIAN) {
+        while (i + 8 <= end) {
+            val w = self.getLongUnchecked(i)
+            h = 31 * h + (w shr 56).toByte().toInt()
+            h = 31 * h + (w shr 48).toByte().toInt()
+            h = 31 * h + (w shr 40).toByte().toInt()
+            h = 31 * h + (w shr 32).toByte().toInt()
+            h = 31 * h + (w shr 24).toByte().toInt()
+            h = 31 * h + (w shr 16).toByte().toInt()
+            h = 31 * h + (w shr 8).toByte().toInt()
+            h = 31 * h + w.toByte().toInt()
+            i += 8
+        }
+    } else {
+        while (i + 8 <= end) {
+            val w = self.getLongUnchecked(i)
+            h = 31 * h + w.toByte().toInt()
+            h = 31 * h + (w shr 8).toByte().toInt()
+            h = 31 * h + (w shr 16).toByte().toInt()
+            h = 31 * h + (w shr 24).toByte().toInt()
+            h = 31 * h + (w shr 32).toByte().toInt()
+            h = 31 * h + (w shr 40).toByte().toInt()
+            h = 31 * h + (w shr 48).toByte().toInt()
+            h = 31 * h + (w shr 56).toByte().toInt()
+            i += 8
+        }
+    }
+    while (i < end) {
+        h = 31 * h + self.getUnchecked(i).toInt()
+        i++
     }
     return h
 }

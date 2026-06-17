@@ -778,6 +778,12 @@ internal fun analyzeField(
                 ),
             )
         }
+        // Enum field: the entry's `ordinal` rides the wire as an unsigned LEB128 varint
+        // (UnsignedVarIntCodec), self-delimiting so it stays evolution-safe (see EnumScalar).
+        val enumDecl = type.declaration as? KSClassDeclaration
+        if (enumDecl?.classKind == ClassKind.ENUM_CLASS) {
+            return analyzeEnumField(param, enumDecl, ownerSimpleName, wireBytesAnn)
+        }
         // Value-class field. Only the natural-width
         // unannotated path is in scope; @WireBytes / @WireOrder on the
         // outer parameter widen this and are deferred to a later slice.
@@ -1336,6 +1342,7 @@ internal fun analyzeRemainingBytesProtocolMessageListField(
  * fields uniformly across framing annotations — see
  * [FieldSpec.ProtocolMessageScalar] kdoc for the principle in full.
  */
+
 internal fun analyzeBareProtocolMessageField(
     param: KSValueParameter,
     type: KSType,
@@ -1384,6 +1391,58 @@ internal fun analyzeBareProtocolMessageField(
                     decl.packageName.asString(),
                     decl.flattenedCodecName(),
                 ),
+        ),
+    )
+}
+
+/**
+ * Analyze a Kotlin `enum class` field into a [FieldSpec.EnumScalar]. The entry's `ordinal` rides
+ * the wire as an unsigned LEB128 varint. At most one `@EnumDefault` entry is allowed (the
+ * unknown-ordinal decode sink); `@WireBytes` / `@WireOrder` are meaningless on the varint and are
+ * rejected.
+ */
+internal fun analyzeEnumField(
+    param: KSValueParameter,
+    enumDecl: KSClassDeclaration,
+    ownerSimpleName: String,
+    wireBytesAnn: KSAnnotation?,
+): FieldAnalysis {
+    val name =
+        param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
+    if (wireBytesAnn != null) {
+        return FieldAnalysis.Err(
+            Diagnostic("@WireBytes is not supported on an enum field (its ordinal rides as a varint)", param),
+        )
+    }
+    if (param.annotations.any { it.shortName.asString() == "WireOrder" }) {
+        return FieldAnalysis.Err(
+            Diagnostic("@WireOrder is not supported on an enum field (the varint is byte-order-independent)", param),
+        )
+    }
+    val entries =
+        enumDecl.declarations
+            .filterIsInstance<KSClassDeclaration>()
+            .filter { it.classKind == ClassKind.ENUM_ENTRY }
+            .toList()
+    val defaults = entries.filter { e -> e.annotations.any { it.shortName.asString() == "EnumDefault" } }
+    if (defaults.size > 1) {
+        return FieldAnalysis.Err(
+            Diagnostic(
+                "enum ${enumDecl.simpleName.asString()} declares ${defaults.size} @EnumDefault entries; at most one is allowed",
+                param,
+            ),
+        )
+    }
+    return FieldAnalysis.Ok(
+        FieldSpec.EnumScalar(
+            name = name,
+            ownerSimpleName = ownerSimpleName,
+            enumType = classNameOf(enumDecl),
+            entryCount = entries.size,
+            defaultEntryName = defaults.firstOrNull()?.simpleName?.asString(),
+            // Declaration order == ordinal order: `entries` is the source-order
+            // list of ENUM_ENTRY declarations, so index i is ordinal i.
+            entryNames = entries.map { it.simpleName.asString() },
         ),
     )
 }
@@ -2891,11 +2950,12 @@ internal fun classifyVariantWireSize(shape: CodecShape): VariantWireSize {
     // wireSize is BackPatch (see buildWireSizeFun's RemainingBytesPayload
     // early-return); the dispatcher must skip the runtime-Exact cast.
     if (shape.fields.any { it is FieldSpec.RemainingBytesPayload }) return VariantWireSize.BackPatch
-    // Same shape — buildWireSizeFun collapses any
-    // UseCodecScalar-bearing shape to BackPatch, so the dispatcher must
-    // also skip the runtime-Exact cast. Promote later if a vector
-    // benefits from runtime-Exact via codec.wireSize forwarding.
-    if (shape.fields.any { it is FieldSpec.UseCodecScalar }) return VariantWireSize.BackPatch
+    // A NON-`VariableLengthCodec` `@UseCodec` scalar may report `BackPatch` at runtime, so the
+    // dispatcher can't assume Exact — collapse (mirrors buildWireSizeFun's `!isVariableLength`
+    // BackPatch guard). A `VariableLengthCodec`-backed `@UseCodec` scalar reports
+    // `Exact(encodedLength)` and is promoted to RuntimeExact below — the "promote later if a vector
+    // benefits" note made good (a sealed grid-op union whose payloads are LEB128 `@UseCodec` fields).
+    if (shape.fields.any { it is FieldSpec.UseCodecScalar && !it.isVariableLength }) return VariantWireSize.BackPatch
     // Same — buildWireSizeFun collapses
     // LengthPrefixedUseCodecList-bearing shapes to BackPatch.
     if (shape.fields.any { it is FieldSpec.LengthPrefixedUseCodecList }) return VariantWireSize.BackPatch
@@ -2924,6 +2984,19 @@ internal fun classifyVariantWireSize(shape: CodecShape): VariantWireSize {
     ) {
         return VariantWireSize.BackPatch
     }
+    // A `VariableLengthCodec`-backed `@UseCodec` scalar reports `Exact(encodedLength)` at runtime, so
+    // any variant carrying one is runtime-Exact (the variant codec's own wireSize sums it via the
+    // `as Exact` cast — buildWireSizeFun's `isRuntimeExactVar`); the dispatcher forwards to the
+    // variant codec's wireSize without re-deriving. Early-return (like the enum case below) so a VL
+    // `@UseCodec` field in a NON-terminal slot isn't dropped by the terminal `when`'s FixedSize-only
+    // sum — e.g. a variant of `(varint, varint, enum, Boolean)` whose Boolean is last.
+    if (shape.fields.any { it is FieldSpec.UseCodecScalar && it.isVariableLength }) return VariantWireSize.RuntimeExact
+    // An enum field's ordinal is a runtime-width varint, so any variant carrying one is
+    // runtime-Exact (the variant codec's own wireSize sums it via `UnsignedVarIntCodec.wireSize
+    // as Exact`); the dispatcher forwards without re-deriving. Early-return so an enum in a
+    // non-terminal slot isn't mis-classified by the terminal `when` below (which only sums
+    // FixedSize fields and would drop the varint).
+    if (shape.fields.any { it is FieldSpec.EnumScalar }) return VariantWireSize.RuntimeExact
     return when (shape.fields.lastOrNull()) {
         is FieldSpec.LengthPrefixedMessage -> VariantWireSize.RuntimeExact
         // A LengthFromString variant's body byte count is the
@@ -2948,8 +3021,9 @@ internal fun classifyVariantWireSize(shape: CodecShape): VariantWireSize {
         // shape carrying a RemainingBytesPayload field before the
         // terminal-shape `when` runs.
         is FieldSpec.RemainingBytesPayload -> VariantWireSize.BackPatch
-        // Same — handled by the upfront BackPatch short-circuit
-        // above; defensive branch keeps the `when` exhaustive.
+        // Both cases handled upfront — a non-VariableLengthCodec `@UseCodec` scalar by the BackPatch
+        // short-circuit, a VariableLengthCodec one by the RuntimeExact early-return. This defensive
+        // branch is unreachable; it keeps the `when` exhaustive (BackPatch is the conservative arm).
         is FieldSpec.UseCodecScalar -> VariantWireSize.BackPatch
         // Same — handled by the upfront BackPatch
         // short-circuit above.
@@ -2963,6 +3037,9 @@ internal fun classifyVariantWireSize(shape: CodecShape): VariantWireSize {
         // `@RemainingBytes val: String` — handled by the upfront BackPatch
         // short-circuit above.
         is FieldSpec.RemainingBytesString -> VariantWireSize.BackPatch
+        // Handled by the upfront `any EnumScalar -> RuntimeExact` early-return above; defensive
+        // branch keeps the `when` exhaustive.
+        is FieldSpec.EnumScalar -> VariantWireSize.RuntimeExact
     }
 }
 

@@ -103,3 +103,6 @@ internal val FORWARD_COMPATIBLE_OPCODE_QNAMES =
     setOf("kotlin.Int", "kotlin.Long", "kotlin.ULong")
 internal val CHARSET_CN = ClassName("com.ditchoom.buffer", "Charset")
 internal val STRING_NULLABLE_TN = ClassName("kotlin", "String").copy(nullable = true)
+
+// The shipped unsigned-LEB128 codec a generated enum field rides its ordinal on.
+internal val UNSIGNED_VARINT_CODEC_CN = ClassName("com.ditchoom.buffer.codec", "UnsignedVarIntCodec")

@@ -46,7 +46,10 @@ dependencies {
     implementation(libs.kotlinpoet)
     implementation(libs.kotlinpoet.ksp)
     implementation(project(":buffer-codec"))
+    implementation(project(":buffer-codec-schema"))
     testImplementation(kotlin("test"))
+    // sealedSubclasses in the schema-descriptor coverage test needs kotlin-reflect at runtime.
+    testImplementation(kotlin("reflect"))
     testImplementation(libs.kctfork.ksp)
 
     // kctfork 0.12.0-alpha01 transitively requests 2.3.0-RC; force the

@@ -82,6 +82,10 @@ class ByteArrayBuffer(
         return data[offset + index]
     }
 
+    // Unchecked fast path (see ReadBuffer.getUnchecked): caller has validated the range, so read the
+    // backing array directly. Lets bulk primitives skip the per-element requireIndex on non-JIT targets.
+    override fun getUnchecked(index: Int): Byte = data[offset + index]
+
     override fun slice(byteOrder: ByteOrder): ByteArrayBuffer =
         ByteArrayBuffer(
             data,
@@ -171,7 +175,7 @@ class ByteArrayBuffer(
         return getLongUnchecked(index)
     }
 
-    private fun getLongUnchecked(index: Int): Long {
+    override fun getLongUnchecked(index: Int): Long {
         val first = getIntUnchecked(index).toLong() and 0xFFFFFFFFL
         val second = getIntUnchecked(index + 4).toLong() and 0xFFFFFFFFL
         return if (littleEndian) {

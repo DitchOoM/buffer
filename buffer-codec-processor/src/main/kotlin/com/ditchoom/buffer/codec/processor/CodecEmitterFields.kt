@@ -1605,6 +1605,47 @@ internal fun appendEncodeUseCodecScalar(
 }
 
 /**
+ * Emit decode for an enum field: read the ordinal as an unsigned LEB128 varint, then map it back
+ * to an entry. With an `@EnumDefault` an unknown (e.g. newer) ordinal resolves to that entry
+ * (forward-compatible); without one it throws [DecodeException].
+ */
+internal fun appendDecodeEnum(
+    body: CodeBlock.Builder,
+    field: FieldSpec.EnumScalar,
+) {
+    body.addStatement("val __%LOrdinal = %T.decode(buffer, context).toInt()", field.name, UNSIGNED_VARINT_CODEC_CN)
+    if (field.defaultEntryName != null) {
+        body.addStatement(
+            "val %L = %T.entries.getOrElse(__%LOrdinal) { %T.%L }",
+            field.name,
+            field.enumType,
+            field.name,
+            field.enumType,
+            field.defaultEntryName,
+        )
+    } else {
+        body.addStatement(
+            "val %L = %T.entries.getOrElse(__%LOrdinal) { throw %T(fieldPath = %S, bufferPosition = buffer.position(), expected = %S, actual = __%LOrdinal.toString()) }",
+            field.name,
+            field.enumType,
+            field.name,
+            DECODE_EXCEPTION_CN,
+            "${field.ownerSimpleName}.${field.name}",
+            "an ordinal in 0 until ${field.entryCount}",
+            field.name,
+        )
+    }
+}
+
+/** Emit encode for an enum field: write the entry's `ordinal` as an unsigned LEB128 varint. */
+internal fun appendEncodeEnum(
+    body: CodeBlock.Builder,
+    field: FieldSpec.EnumScalar,
+) {
+    body.addStatement("%T.encode(buffer, value.%L.ordinal.toUInt(), context)", UNSIGNED_VARINT_CODEC_CN, field.name)
+}
+
+/**
  * Emit decode/encode for bare `val: T:
  * @ProtocolMessage`. Mirrors [appendEncodeUseCodecScalar] /
  * [appendDecodeUseCodecScalar] minus the bounding-codec branch:

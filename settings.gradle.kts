@@ -23,7 +23,11 @@ develocity {
 // Monorepo modules
 include(":buffer")
 include(":buffer-compression")
+include(":buffer-crypto")
 include(":buffer-flow")
 include(":buffer-codec")
+include(":buffer-codec-schema")
 include(":buffer-codec-processor")
+include(":buffer-codec-gradle-plugin")
 include(":buffer-codec-test")
+include(":buffer-1brc")
