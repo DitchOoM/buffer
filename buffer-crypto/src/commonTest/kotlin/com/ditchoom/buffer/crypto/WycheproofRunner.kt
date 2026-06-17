@@ -38,6 +38,9 @@ class WycheproofCase internal constructor(
     /** Per-test hex field, or `null` if absent (for optional fields like `"aad"`). */
     fun testHexOrNull(name: String): ReadBuffer? = test[name]?.jsonPrimitive?.content?.let(::hexBuffer)
 
+    /** Per-test integer field (e.g. HKDF `"size"`). */
+    fun testInt(name: String): Int = test[name]?.jsonPrimitive?.int ?: error("tcId $tcId: missing int '$name'")
+
     /** Group-level integer field (e.g. `"keySize"`, `"tagSize"`). */
     fun groupInt(name: String): Int = group[name]?.jsonPrimitive?.int ?: error("tcId $tcId: missing int '$name'")
 }

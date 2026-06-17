@@ -44,8 +44,8 @@ internal fun MessageDigest.digestInto(dest: WriteBuffer) {
     val managed = dest.managedMemoryAccess
     if (managed != null) {
         val pos = dest.position()
-        digest(managed.backingArray, managed.arrayOffset + pos, SHA256_DIGEST_BYTES)
-        dest.position(pos + SHA256_DIGEST_BYTES)
+        digest(managed.backingArray, managed.arrayOffset + pos, digestLength)
+        dest.position(pos + digestLength)
     } else {
         dest.writeBytes(digest())
     }
@@ -57,7 +57,7 @@ internal fun Mac.doFinalInto(dest: WriteBuffer) {
     if (managed != null) {
         val pos = dest.position()
         doFinal(managed.backingArray, managed.arrayOffset + pos)
-        dest.position(pos + HMAC_SHA256_BYTES)
+        dest.position(pos + macLength)
     } else {
         dest.writeBytes(doFinal())
     }
