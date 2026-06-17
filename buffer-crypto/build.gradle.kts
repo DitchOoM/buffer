@@ -122,13 +122,28 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
 
+        // Shared TEST source set for JVM and Android: both run the common suite over the JCA
+        // actuals, so platform test-support actuals (e.g. KeyAgreementTestSupport) live here
+        // rather than in jvmTest alone — otherwise the Android instrumented-test compile sees
+        // the commonTest `expect`s with no `actual`.
+        val jvmCommonTest by creating {
+            dependsOn(commonTest.get())
+        }
+
         val androidInstrumentedTest by getting {
+            dependsOn(jvmCommonTest)
             dependencies {
                 implementation(libs.androidx.test.runner)
                 implementation(libs.androidx.test.rules)
                 implementation(libs.androidx.test.core.ktx)
                 implementation(libs.androidx.test.ext.junit)
             }
+        }
+
+        // Android host unit-test compile (compileDebugUnitTestKotlinAndroid) also needs the
+        // shared JVM/Android test actuals.
+        val androidUnitTest by getting {
+            dependsOn(jvmCommonTest)
         }
 
         // Shared source set for JVM and Android: both use the JCA (java.security /
@@ -141,6 +156,9 @@ kotlin {
         }
         androidMain {
             dependsOn(jvmCommonMain)
+        }
+        jvmTest {
+            dependsOn(jvmCommonTest)
         }
 
         // Shared source set for JS and wasmJs: pure-Kotlin SHA-256/HMAC (WebCrypto's
