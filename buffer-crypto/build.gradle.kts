@@ -144,7 +144,12 @@ kotlin {
 android {
     compileSdk = 36
     defaultConfig {
-        minSdk = 21
+        // API 28+: the secure/deterministic key-material buffers route through
+        // sun.misc.Unsafe.allocateMemory, which is absent from the Android runtime
+        // before API 26 (NoSuchMethodError on API 21). 28 is a conservative modern
+        // floor for a crypto module. AGP skips this module's instrumented tests on
+        // older emulators rather than failing to install.
+        minSdk = 28
     }
     namespace = "$group.buffer.crypto"
 
