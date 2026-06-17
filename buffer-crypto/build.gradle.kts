@@ -98,11 +98,16 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":buffer"))
+            // AEAD exposes suspend `*Async` wrappers; on js/wasmJs they await the WebCrypto
+            // Promise via kotlinx.coroutines.await, so coroutines-core is part of the API.
+            api(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
             // Parses vendored Wycheproof known-answer vectors (test-only; not shipped).
             implementation(libs.kotlinx.serialization.json)
+            // Drives the suspend `*Async` AEAD entry points from tests via runTest.
+            implementation(libs.kotlinx.coroutines.test)
         }
 
         val androidInstrumentedTest by getting {

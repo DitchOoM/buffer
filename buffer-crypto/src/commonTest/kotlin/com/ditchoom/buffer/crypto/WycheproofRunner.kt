@@ -70,6 +70,24 @@ object Wycheproof {
     fun run(
         vectorJson: String,
         accepts: (WycheproofCase) -> Boolean,
+    ): Summary =
+        runInternal(vectorJson) { case ->
+            try {
+                accepts(case)
+            } catch (_: CryptoException) {
+                false
+            } catch (_: IllegalArgumentException) {
+                false
+            }
+        }
+
+    /**
+     * Suspending counterpart of [run], for primitives whose only cross-platform surface is a
+     * suspend function (e.g. AES-GCM via WebCrypto on the web). Same verdict contract.
+     */
+    suspend fun runSuspending(
+        vectorJson: String,
+        accepts: suspend (WycheproofCase) -> Boolean,
     ): Summary {
         val file = json.parseToJsonElement(vectorJson).jsonObject
         val groups = file["testGroups"]?.jsonArray ?: error("no testGroups in vector file")
@@ -81,15 +99,7 @@ object Wycheproof {
             val tests = group["tests"]?.jsonArray ?: continue
             for (testEl in tests) {
                 val test = testEl.jsonObject
-                val case =
-                    WycheproofCase(
-                        tcId = test["tcId"]?.jsonPrimitive?.int ?: error("test without tcId"),
-                        comment = test["comment"]?.jsonPrimitive?.content ?: "",
-                        flags = test["flags"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
-                        result = test["result"]?.jsonPrimitive?.content ?: error("test without result"),
-                        group = group,
-                        test = test,
-                    )
+                val case = parseCase(group, test)
                 total++
                 val accepted =
                     try {
@@ -99,20 +109,68 @@ object Wycheproof {
                     } catch (_: IllegalArgumentException) {
                         false
                     }
-                when (case.result) {
-                    "valid" ->
-                        if (!accepted) {
-                            fail("tcId ${case.tcId} (${case.comment}): valid vector was REJECTED")
-                        }
-                    "invalid" ->
-                        if (accepted) {
-                            fail("tcId ${case.tcId} (${case.comment}) flags=${case.flags}: invalid vector was ACCEPTED")
-                        }
-                    "acceptable" -> if (accepted) acceptableAccepted++ else acceptableRejected++
-                    else -> fail("tcId ${case.tcId}: unknown result '${case.result}'")
+                assertVerdict(case, accepted)
+                if (case.result == "acceptable") {
+                    if (accepted) acceptableAccepted++ else acceptableRejected++
                 }
             }
         }
         return Summary(total, acceptableAccepted, acceptableRejected)
+    }
+
+    private inline fun runInternal(
+        vectorJson: String,
+        accepts: (WycheproofCase) -> Boolean,
+    ): Summary {
+        val file = json.parseToJsonElement(vectorJson).jsonObject
+        val groups = file["testGroups"]?.jsonArray ?: error("no testGroups in vector file")
+        var total = 0
+        var acceptableAccepted = 0
+        var acceptableRejected = 0
+        for (groupEl in groups) {
+            val group = groupEl.jsonObject
+            val tests = group["tests"]?.jsonArray ?: continue
+            for (testEl in tests) {
+                val case = parseCase(group, testEl.jsonObject)
+                total++
+                val accepted = accepts(case)
+                assertVerdict(case, accepted)
+                if (case.result == "acceptable") {
+                    if (accepted) acceptableAccepted++ else acceptableRejected++
+                }
+            }
+        }
+        return Summary(total, acceptableAccepted, acceptableRejected)
+    }
+
+    private fun parseCase(
+        group: JsonObject,
+        test: JsonObject,
+    ): WycheproofCase =
+        WycheproofCase(
+            tcId = test["tcId"]?.jsonPrimitive?.int ?: error("test without tcId"),
+            comment = test["comment"]?.jsonPrimitive?.content ?: "",
+            flags = test["flags"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
+            result = test["result"]?.jsonPrimitive?.content ?: error("test without result"),
+            group = group,
+            test = test,
+        )
+
+    private fun assertVerdict(
+        case: WycheproofCase,
+        accepted: Boolean,
+    ) {
+        when (case.result) {
+            "valid" ->
+                if (!accepted) {
+                    fail("tcId ${case.tcId} (${case.comment}): valid vector was REJECTED")
+                }
+            "invalid" ->
+                if (accepted) {
+                    fail("tcId ${case.tcId} (${case.comment}) flags=${case.flags}: invalid vector was ACCEPTED")
+                }
+            "acceptable" -> Unit
+            else -> fail("tcId ${case.tcId}: unknown result '${case.result}'")
+        }
     }
 }
