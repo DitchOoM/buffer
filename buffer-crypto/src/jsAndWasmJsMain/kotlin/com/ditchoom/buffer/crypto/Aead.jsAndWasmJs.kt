@@ -30,7 +30,7 @@ actual val supportsChaChaPoly: Boolean = false
 
 actual val supportsSyncChaChaPoly: Boolean = false
 
-actual fun aesGcmSeal(
+internal actual fun aesGcmSeal(
     key: AesGcmKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
@@ -38,7 +38,7 @@ actual fun aesGcmSeal(
     dest: WriteBuffer,
 ): Unit = throw UnsupportedOperationException("synchronous AES-GCM is unavailable on the web; use aesGcmSealAsync")
 
-actual fun aesGcmOpen(
+internal actual fun aesGcmOpen(
     key: AesGcmKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
@@ -46,7 +46,7 @@ actual fun aesGcmOpen(
     dest: WriteBuffer,
 ): Unit = throw UnsupportedOperationException("synchronous AES-GCM is unavailable on the web; use aesGcmOpenAsync")
 
-actual fun chaChaPolySeal(
+internal actual fun chaChaPolySeal(
     key: ChaChaPolyKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
@@ -54,7 +54,7 @@ actual fun chaChaPolySeal(
     dest: WriteBuffer,
 ): Unit = throw UnsupportedOperationException("ChaCha20-Poly1305 is not part of WebCrypto and is not polyfilled")
 
-actual fun chaChaPolyOpen(
+internal actual fun chaChaPolyOpen(
     key: ChaChaPolyKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,

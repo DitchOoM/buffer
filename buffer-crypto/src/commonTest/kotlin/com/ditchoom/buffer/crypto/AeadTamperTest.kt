@@ -116,6 +116,66 @@ class AeadTamperTest {
         assertFailsWith<VerificationFailed> { chaChaPolyOpen(sealed, wrongKey, ascii(aad), BufferFactory.Default) }
     }
 
+    // --- nonce-length / tag-length defenses (the Wycheproof subset never exercises these) ---
+
+    @Test
+    fun aesGcmNon96BitNonceRejectedOnSeal() =
+        runTest {
+            val key = AesGcmKey.of(hexBuffer(keyHex))
+            // 8-byte (64-bit) nonce — too short.
+            assertFailsWith<IllegalArgumentException>("8-byte nonce must reject on seal") {
+                aesGcmSealWithNonceAsync(key, hexBuffer("0001020304050607"), ascii(aad), ascii(plaintext), BufferFactory.Default)
+            }
+            // 16-byte (128-bit) nonce — too long.
+            assertFailsWith<IllegalArgumentException>("16-byte nonce must reject on seal") {
+                aesGcmSealWithNonceAsync(
+                    key,
+                    hexBuffer("000102030405060708090a0b0c0d0e0f"),
+                    ascii(aad),
+                    ascii(plaintext),
+                    BufferFactory.Default,
+                )
+            }
+        }
+
+    @Test
+    fun aesGcmNon96BitNonceRejectedOnOpen() =
+        runTest {
+            val key = AesGcmKey.of(hexBuffer(keyHex))
+            // A valid sealed frame, opened with a wrong-length explicit nonce — must reject before any verify.
+            val sealed = sealOnce()
+            val (_, ctAndTag, _) = splitFramed(sealed)
+            assertFailsWith<IllegalArgumentException>("8-byte nonce must reject on open") {
+                aesGcmOpenWithNonceAsync(key, hexBuffer("0001020304050607"), ascii(aad), ctAndTag, BufferFactory.Default)
+            }
+            assertFailsWith<IllegalArgumentException>("16-byte nonce must reject on open") {
+                aesGcmOpenWithNonceAsync(key, hexBuffer("000102030405060708090a0b0c0d0e0f"), ascii(aad), ctAndTag, BufferFactory.Default)
+            }
+        }
+
+    @Test
+    fun aesGcmShortFramedBlobRejectedOnOpen() =
+        runTest {
+            val key = AesGcmKey.of(hexBuffer(keyHex))
+            // A frame shorter than nonce(12)+tag(16) can't carry a tag — splitFramed must reject.
+            assertFailsWith<IllegalArgumentException>("15-byte frame must reject") {
+                aesGcmOpenAsync(hexBuffer("000102030405060708090a0b0c0d0e"), key, ascii(aad), BufferFactory.Default)
+            }
+        }
+
+    @Test
+    fun aesGcmShortCiphertextAndTagRejectedOnSyncOpen() {
+        if (!supportsSyncAesGcm) return
+        val key = AesGcmKey.of(hexBuffer(keyHex))
+        val nonce = hexBuffer("000102030405060708090a0b")
+        // ciphertext+tag with only 15 bytes — fewer than AEAD_TAG_BYTES — must reject on the sync open primitive.
+        val shortCtAndTag = hexBuffer("000102030405060708090a0b0c0d0e")
+        val dest = BufferFactory.Default.allocate(0)
+        assertFailsWith<IllegalArgumentException>("ciphertext+tag shorter than tag must reject") {
+            aesGcmOpen(key, nonce, ascii(aad), shortCtAndTag, dest)
+        }
+    }
+
     // --- helpers: copy-and-mutate without ByteArray ---
 
     /** Returns a fresh read-ready copy of [source] with the byte at absolute index [i] flipped. */

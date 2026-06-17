@@ -169,7 +169,7 @@ expect val supportsSyncChaChaPoly: Boolean
  *
  * @throws UnsupportedOperationException if [supportsSyncAesGcm] is `false`.
  */
-expect fun aesGcmSeal(
+internal expect fun aesGcmSeal(
     key: AesGcmKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
@@ -185,7 +185,7 @@ expect fun aesGcmSeal(
  * @throws VerificationFailed if authentication fails (bad tag/ciphertext/AAD/key) — opaque.
  * @throws UnsupportedOperationException if [supportsSyncAesGcm] is `false`.
  */
-expect fun aesGcmOpen(
+internal expect fun aesGcmOpen(
     key: AesGcmKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
@@ -198,7 +198,7 @@ expect fun aesGcmOpen(
  *
  * @throws UnsupportedOperationException if [supportsSyncChaChaPoly] is `false` (e.g. web).
  */
-expect fun chaChaPolySeal(
+internal expect fun chaChaPolySeal(
     key: ChaChaPolyKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
@@ -212,7 +212,7 @@ expect fun chaChaPolySeal(
  * @throws VerificationFailed if authentication fails — opaque.
  * @throws UnsupportedOperationException if [supportsSyncChaChaPoly] is `false` (e.g. web).
  */
-expect fun chaChaPolyOpen(
+internal expect fun chaChaPolyOpen(
     key: ChaChaPolyKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,

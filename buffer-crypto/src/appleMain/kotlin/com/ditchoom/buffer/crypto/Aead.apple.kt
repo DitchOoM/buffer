@@ -39,7 +39,7 @@ actual val supportsChaChaPoly: Boolean = appleChaChaPolyAvailable
 
 actual val supportsSyncChaChaPoly: Boolean = appleChaChaPolyAvailable
 
-actual fun aesGcmSeal(
+internal actual fun aesGcmSeal(
     key: AesGcmKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
@@ -80,7 +80,7 @@ actual fun aesGcmSeal(
     }
 }
 
-actual fun aesGcmOpen(
+internal actual fun aesGcmOpen(
     key: AesGcmKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
@@ -135,7 +135,7 @@ actual fun aesGcmOpen(
     }
 }
 
-actual fun chaChaPolySeal(
+internal actual fun chaChaPolySeal(
     key: ChaChaPolyKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
@@ -149,7 +149,7 @@ actual fun chaChaPolySeal(
     appleChaChaPolySeal(key, nonce, aad, plaintext, dest)
 }
 
-actual fun chaChaPolyOpen(
+internal actual fun chaChaPolyOpen(
     key: ChaChaPolyKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
