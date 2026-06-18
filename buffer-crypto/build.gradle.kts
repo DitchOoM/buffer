@@ -130,9 +130,10 @@ fun appleSwiftShim(
 // multi-minute BoringSSL build entirely.
 // ---------------------------------------------------------------------------
 
-// Pinned BoringSSL commit. Bump deliberately; it gates the rebuild marker file. This commit
-// predates BoringSSL's CMake "no top-level make target" reshuffle, so `make crypto` still works.
-val boringSslCommit = "dd5219451c3ce26c5ffa73caebdf09f44b753f60"
+// Pinned BoringSSL commit, fetched from the GitHub mirror (which — unlike googlesource — reliably
+// serves `git fetch --depth 1 <sha>`). Bump deliberately; the SHA gates the rebuild marker file.
+val boringSslCommit = "63893acb3684fc756ddfa1ca4c6bab9e7b924e53"
+val boringSslRepo = "https://github.com/google/boringssl.git"
 val boringSslBuildScratch = layout.buildDirectory.dir("boringssl")
 
 fun createBuildBoringSslTask(arch: String): TaskProvider<Task> {
@@ -169,7 +170,7 @@ fun createBuildBoringSslTask(arch: String): TaskProvider<Task> {
                     if (rc != 0) throw GradleException("command failed (${cmd.joinToString(" ")}): exit $rc")
                 }
                 run("git", "init", "boringssl", dir = scratch)
-                run("git", "remote", "add", "origin", "https://boringssl.googlesource.com/boringssl", dir = srcDir)
+                run("git", "remote", "add", "origin", boringSslRepo, dir = srcDir)
                 run("git", "fetch", "--depth", "1", "origin", boringSslCommit, dir = srcDir)
                 run("git", "checkout", "FETCH_HEAD", dir = srcDir)
             }
@@ -178,14 +179,22 @@ fun createBuildBoringSslTask(arch: String): TaskProvider<Task> {
             if (cmakeBuildDir.exists()) cmakeBuildDir.deleteRecursively()
             cmakeBuildDir.mkdirs()
 
+            // Compatibility flags so the produced libcrypto.a only references symbols present in
+            // Kotlin/Native's bundled (older) glibc. Modern Ubuntu gcc + glibc 2.38+ otherwise emit:
+            //   * __*_chk (fortify) — from the distro's default _FORTIFY_SOURCE; disabled here.
+            //   * __stack_chk_fail — from -fstack-protector; disabled here.
+            //   * __isoc23_strtoull — glibc redirects strtoull under gcc 13+/C23; a tiny compat
+            //     translation unit (below, appended to the archive) provides it.
+            // K/N's ld.lld links against its own glibc, where these newer symbols are absent.
+            val compatCFlags = "-fPIC -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector"
             val cmakeArgs =
                 mutableListOf(
                     "cmake",
                     "-DCMAKE_BUILD_TYPE=Release",
                     "-DBUILD_SHARED_LIBS=OFF",
                     "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
-                    "-DCMAKE_C_FLAGS=-fPIC",
-                    "-DCMAKE_CXX_FLAGS=-fPIC",
+                    "-DCMAKE_C_FLAGS=$compatCFlags",
+                    "-DCMAKE_CXX_FLAGS=$compatCFlags",
                     "-G",
                     "Unix Makefiles",
                 )
@@ -196,8 +205,8 @@ fun createBuildBoringSslTask(arch: String): TaskProvider<Task> {
                         "-DCMAKE_SYSTEM_PROCESSOR=aarch64",
                         "-DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc",
                         "-DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++",
-                        "-DCMAKE_C_FLAGS=-fPIC -mno-outline-atomics",
-                        "-DCMAKE_CXX_FLAGS=-fPIC -mno-outline-atomics",
+                        "-DCMAKE_C_FLAGS=$compatCFlags -mno-outline-atomics",
+                        "-DCMAKE_CXX_FLAGS=$compatCFlags -mno-outline-atomics",
                     ),
                 )
             }
@@ -223,11 +232,29 @@ fun createBuildBoringSslTask(arch: String): TaskProvider<Task> {
             val cpu = Runtime.getRuntime().availableProcessors()
             runIn(cmakeBuildDir, "make", "-j$cpu", "crypto")
 
-            outputDir.resolve("lib").mkdirs()
-            val cryptoLib =
+            val builtCrypto =
                 cmakeBuildDir.walk().firstOrNull { it.name == "libcrypto.a" }
                     ?: throw GradleException("libcrypto.a not found under ${cmakeBuildDir.absolutePath}")
-            cryptoLib.copyTo(outputDir.resolve("lib/libcrypto.a"), overwrite = true)
+
+            // Append a tiny compat translation unit providing __isoc23_strtoull (glibc 2.38+/gcc-13
+            // redirects strtoull to it; K/N's bundled glibc lacks the symbol). It just forwards to
+            // the classic strtoull, which is present everywhere.
+            val compatC = File(cmakeBuildDir, "kn_glibc_compat.c")
+            compatC.writeText(
+                """
+                #include <stdlib.h>
+                unsigned long long __isoc23_strtoull(const char *nptr, char **endptr, int base) {
+                    return strtoull(nptr, endptr, base);
+                }
+                """.trimIndent(),
+            )
+            val compatO = File(cmakeBuildDir, "kn_glibc_compat.o")
+            val cc = if (arch == "arm64" && System.getProperty("os.arch") != "aarch64") "aarch64-linux-gnu-gcc" else "cc"
+            runIn(cmakeBuildDir, cc, "-fPIC", "-c", compatC.absolutePath, "-o", compatO.absolutePath)
+            runIn(cmakeBuildDir, "ar", "r", builtCrypto.absolutePath, compatO.absolutePath)
+
+            outputDir.resolve("lib").mkdirs()
+            builtCrypto.copyTo(outputDir.resolve("lib/libcrypto.a"), overwrite = true)
 
             val includeOutput = outputDir.resolve("include")
             val srcInclude = srcDir.resolve("src/include")

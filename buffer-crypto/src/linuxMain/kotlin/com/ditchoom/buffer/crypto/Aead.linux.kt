@@ -37,28 +37,112 @@ actual val supportsSyncAesGcm: Boolean = true
 actual val supportsChaChaPoly: Boolean = true
 actual val supportsSyncChaChaPoly: Boolean = true
 
+/** Which BoringSSL AEAD wrapper a seal/open call dispatches to. */
+private enum class AeadAlg { AES_GCM, CHACHA }
+
 private fun requireNonce(nonce: ReadBuffer) {
     require(nonce.remaining() == AEAD_NONCE_BYTES) {
         "nonce must be $AEAD_NONCE_BYTES bytes, was ${nonce.remaining()}"
     }
 }
 
-/** A seal/open BoringSSL wrapper, distilled to the common pointer signature. */
-private typealias AeadFn = (
-    key: CPointer<ByteVar>, keyLen: Int,
-    nonce: CPointer<ByteVar>, nonceLen: Int,
-    aad: CPointer<ByteVar>, aadLen: Int,
-    data: CPointer<ByteVar>, dataLen: Int,
-    out: CPointer<ByteVar>, outCap: Int, outLen: CPointer<size_tVar>,
-) -> Int
+private fun sealCall(
+    alg: AeadAlg,
+    key: CPointer<ByteVar>,
+    keyLen: Int,
+    nonce: CPointer<ByteVar>,
+    nonceLen: Int,
+    aad: CPointer<ByteVar>,
+    aadLen: Int,
+    data: CPointer<ByteVar>,
+    dataLen: Int,
+    out: CPointer<ByteVar>,
+    outCap: Int,
+    outLen: CPointer<size_tVar>,
+): Int =
+    when (alg) {
+        AeadAlg.AES_GCM ->
+            bcl_aes_gcm_seal(
+                key.reinterpret(),
+                keyLen.convert(),
+                nonce.reinterpret(),
+                nonceLen.convert(),
+                aad.reinterpret(),
+                aadLen.convert(),
+                data.reinterpret(),
+                dataLen.convert(),
+                out.reinterpret(),
+                outCap.convert(),
+                outLen,
+            )
+        AeadAlg.CHACHA ->
+            bcl_chacha_seal(
+                key.reinterpret(),
+                keyLen.convert(),
+                nonce.reinterpret(),
+                nonceLen.convert(),
+                aad.reinterpret(),
+                aadLen.convert(),
+                data.reinterpret(),
+                dataLen.convert(),
+                out.reinterpret(),
+                outCap.convert(),
+                outLen,
+            )
+    }
+
+private fun openCall(
+    alg: AeadAlg,
+    key: CPointer<ByteVar>,
+    keyLen: Int,
+    nonce: CPointer<ByteVar>,
+    nonceLen: Int,
+    aad: CPointer<ByteVar>,
+    aadLen: Int,
+    data: CPointer<ByteVar>,
+    dataLen: Int,
+    out: CPointer<ByteVar>,
+    outCap: Int,
+    outLen: CPointer<size_tVar>,
+): Int =
+    when (alg) {
+        AeadAlg.AES_GCM ->
+            bcl_aes_gcm_open(
+                key.reinterpret(),
+                keyLen.convert(),
+                nonce.reinterpret(),
+                nonceLen.convert(),
+                aad.reinterpret(),
+                aadLen.convert(),
+                data.reinterpret(),
+                dataLen.convert(),
+                out.reinterpret(),
+                outCap.convert(),
+                outLen,
+            )
+        AeadAlg.CHACHA ->
+            bcl_chacha_open(
+                key.reinterpret(),
+                keyLen.convert(),
+                nonce.reinterpret(),
+                nonceLen.convert(),
+                aad.reinterpret(),
+                aadLen.convert(),
+                data.reinterpret(),
+                dataLen.convert(),
+                out.reinterpret(),
+                outCap.convert(),
+                outLen,
+            )
+    }
 
 private fun aeadSeal(
+    alg: AeadAlg,
     keyMaterial: ReadBuffer,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
     plaintext: ReadBuffer,
     dest: WriteBuffer,
-    seal: AeadFn,
 ) {
     requireNonce(nonce)
     val ptLen = plaintext.remaining()
@@ -76,12 +160,19 @@ private fun aeadSeal(
                         // EVP_AEAD_CTX_seal writes ciphertext||tag contiguously straight into dest.
                         dest.withWritablePointer(sealedLen) { outPtr ->
                             status =
-                                seal(
-                                    keyPtr, keyLen,
-                                    ivPtr, ivLen,
-                                    aadPtr, aadLen,
-                                    ptPtr, ptLen,
-                                    outPtr, sealedLen, outLen.ptr,
+                                sealCall(
+                                    alg,
+                                    keyPtr,
+                                    keyLen,
+                                    ivPtr,
+                                    ivLen,
+                                    aadPtr,
+                                    aadLen,
+                                    ptPtr,
+                                    ptLen,
+                                    outPtr,
+                                    sealedLen,
+                                    outLen.ptr,
                                 )
                         }
                     }
@@ -89,17 +180,19 @@ private fun aeadSeal(
             }
         }
         check(status == BCL_OK) { "AEAD seal failed (status=$status)" }
-        check(outLen.value.toInt() == sealedLen) { "AEAD seal produced ${outLen.value} bytes, expected $sealedLen" }
+        check(outLen.value.toInt() == sealedLen) {
+            "AEAD seal produced ${outLen.value} bytes, expected $sealedLen"
+        }
     }
 }
 
 private fun aeadOpen(
+    alg: AeadAlg,
     keyMaterial: ReadBuffer,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
     ciphertextAndTag: ReadBuffer,
     dest: WriteBuffer,
-    open: AeadFn,
 ) {
     requireNonce(nonce)
     require(ciphertextAndTag.remaining() >= AEAD_TAG_BYTES) {
@@ -119,12 +212,19 @@ private fun aeadOpen(
                         // mismatch it returns 0 (mapped to BCL_AUTH_FAIL) and never writes dest.
                         dest.withWritablePointer(ptLen) { outPtr ->
                             status =
-                                open(
-                                    keyPtr, keyLen,
-                                    ivPtr, ivLen,
-                                    aadPtr, aadLen,
-                                    ctPtr, ctLen,
-                                    outPtr, ptLen, outLen.ptr,
+                                openCall(
+                                    alg,
+                                    keyPtr,
+                                    keyLen,
+                                    ivPtr,
+                                    ivLen,
+                                    aadPtr,
+                                    aadLen,
+                                    ctPtr,
+                                    ctLen,
+                                    outPtr,
+                                    ptLen,
+                                    outLen.ptr,
                                 )
                         }
                     }
@@ -133,7 +233,9 @@ private fun aeadOpen(
         }
         if (status == BCL_AUTH_FAIL) throw VerificationFailed()
         check(status == BCL_OK) { "AEAD open failed (status=$status)" }
-        check(outLen.value.toInt() == ptLen) { "AEAD open produced ${outLen.value} bytes, expected $ptLen" }
+        check(outLen.value.toInt() == ptLen) {
+            "AEAD open produced ${outLen.value} bytes, expected $ptLen"
+        }
     }
 }
 
@@ -143,16 +245,7 @@ internal actual fun aesGcmSeal(
     aad: ReadBuffer?,
     plaintext: ReadBuffer,
     dest: WriteBuffer,
-) = aeadSeal(key.material, nonce, aad, plaintext, dest) {
-        keyPtr, keyLen, ivPtr, ivLen, aadPtr, aadLen, ptPtr, ptLen, outPtr, outCap, outLen ->
-    bcl_aes_gcm_seal(
-        keyPtr.reinterpret(), keyLen.convert(),
-        ivPtr.reinterpret(), ivLen.convert(),
-        aadPtr.reinterpret(), aadLen.convert(),
-        ptPtr.reinterpret(), ptLen.convert(),
-        outPtr.reinterpret(), outCap.convert(), outLen,
-    )
-}
+) = aeadSeal(AeadAlg.AES_GCM, key.material, nonce, aad, plaintext, dest)
 
 internal actual fun aesGcmOpen(
     key: AesGcmKey,
@@ -160,16 +253,7 @@ internal actual fun aesGcmOpen(
     aad: ReadBuffer?,
     ciphertextAndTag: ReadBuffer,
     dest: WriteBuffer,
-) = aeadOpen(key.material, nonce, aad, ciphertextAndTag, dest) {
-        keyPtr, keyLen, ivPtr, ivLen, aadPtr, aadLen, ctPtr, ctLen, outPtr, outCap, outLen ->
-    bcl_aes_gcm_open(
-        keyPtr.reinterpret(), keyLen.convert(),
-        ivPtr.reinterpret(), ivLen.convert(),
-        aadPtr.reinterpret(), aadLen.convert(),
-        ctPtr.reinterpret(), ctLen.convert(),
-        outPtr.reinterpret(), outCap.convert(), outLen,
-    )
-}
+) = aeadOpen(AeadAlg.AES_GCM, key.material, nonce, aad, ciphertextAndTag, dest)
 
 internal actual fun chaChaPolySeal(
     key: ChaChaPolyKey,
@@ -177,16 +261,7 @@ internal actual fun chaChaPolySeal(
     aad: ReadBuffer?,
     plaintext: ReadBuffer,
     dest: WriteBuffer,
-) = aeadSeal(key.material, nonce, aad, plaintext, dest) {
-        keyPtr, keyLen, ivPtr, ivLen, aadPtr, aadLen, ptPtr, ptLen, outPtr, outCap, outLen ->
-    bcl_chacha_seal(
-        keyPtr.reinterpret(), keyLen.convert(),
-        ivPtr.reinterpret(), ivLen.convert(),
-        aadPtr.reinterpret(), aadLen.convert(),
-        ptPtr.reinterpret(), ptLen.convert(),
-        outPtr.reinterpret(), outCap.convert(), outLen,
-    )
-}
+) = aeadSeal(AeadAlg.CHACHA, key.material, nonce, aad, plaintext, dest)
 
 internal actual fun chaChaPolyOpen(
     key: ChaChaPolyKey,
@@ -194,16 +269,7 @@ internal actual fun chaChaPolyOpen(
     aad: ReadBuffer?,
     ciphertextAndTag: ReadBuffer,
     dest: WriteBuffer,
-) = aeadOpen(key.material, nonce, aad, ciphertextAndTag, dest) {
-        keyPtr, keyLen, ivPtr, ivLen, aadPtr, aadLen, ctPtr, ctLen, outPtr, outCap, outLen ->
-    bcl_chacha_open(
-        keyPtr.reinterpret(), keyLen.convert(),
-        ivPtr.reinterpret(), ivLen.convert(),
-        aadPtr.reinterpret(), aadLen.convert(),
-        ctPtr.reinterpret(), ctLen.convert(),
-        outPtr.reinterpret(), outCap.convert(), outLen,
-    )
-}
+) = aeadOpen(AeadAlg.CHACHA, key.material, nonce, aad, ciphertextAndTag, dest)
 
 // Async wrappers — Linux has a synchronous native AEAD, so delegate to the framed one-shots.
 

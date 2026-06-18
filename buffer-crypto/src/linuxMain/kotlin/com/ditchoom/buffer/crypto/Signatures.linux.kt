@@ -104,13 +104,15 @@ private fun isCanonicalEcdsaDer(
     val n = signature.remaining()
     if (n < 8) return false
     val b = ByteArray(n) { signature.get(start + it) }
+
     fun u(i: Int) = b[i].toInt() and 0xFF
     if (u(0) != 0x30) return false
     var p: Int
     val seqLen: Int
     when {
         u(1) < 0x80 -> {
-            seqLen = u(1); p = 2
+            seqLen = u(1)
+            p = 2
         }
         u(1) == 0x81 -> {
             if (n < 3) return false

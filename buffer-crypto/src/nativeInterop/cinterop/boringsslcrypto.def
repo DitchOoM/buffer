@@ -419,9 +419,16 @@ static inline int bcl_ecdsa_sign(
     mdctx = EVP_MD_CTX_new();
     if (!mdctx) goto done;
     if (!EVP_DigestSignInit(mdctx, NULL, md, NULL, pkey)) goto done;
+    if (!EVP_DigestSignUpdate(mdctx, msg, msg_len)) goto done;
     {
-        size_t out_len = sig_cap;
-        if (!EVP_DigestSign(mdctx, out_sig, &out_len, msg, msg_len)) goto done;
+        /* DER ECDSA signatures top out at ~139 bytes (P-521); sign into a generous local scratch so
+         * BoringSSL's worst-case length estimate never collides with the caller's cap, then copy out
+         * only the bytes actually produced. */
+        uint8_t scratch[160];
+        size_t out_len = sizeof(scratch);
+        if (!EVP_DigestSignFinal(mdctx, scratch, &out_len)) goto done;
+        if (out_len > sig_cap) goto done;
+        memcpy(out_sig, scratch, out_len);
         *out_sig_len = out_len;
         rc = BCL_OK;
     }
@@ -476,7 +483,8 @@ static inline int bcl_ecdsa_verify(
     mdctx = EVP_MD_CTX_new();
     if (!mdctx) goto done;
     if (!EVP_DigestVerifyInit(mdctx, NULL, md, NULL, pkey)) goto done;
-    if (EVP_DigestVerify(mdctx, sig, sig_len, msg, msg_len) == 1) {
+    if (!EVP_DigestVerifyUpdate(mdctx, msg, msg_len)) goto done;
+    if (EVP_DigestVerifyFinal(mdctx, sig, sig_len) == 1) {
         rc = BCL_OK;
     }
 done:

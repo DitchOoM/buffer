@@ -89,6 +89,12 @@ class NativeBuffer private constructor(
             val ptr =
                 malloc(size.convert())?.reinterpret<ByteVar>()
                     ?: throw OutOfMemoryError("Failed to allocate $size bytes")
+            // Zero-initialize so freshly allocated native memory matches every other platform
+            // backing (JVM direct ByteBuffer, Apple NSMutableData, Kotlin ByteArray, WASM linear
+            // memory all hand out zeroed bytes). Code that relies on a fresh buffer being zero —
+            // e.g. HKDF's empty-salt zero block in buffer-crypto — would otherwise read malloc
+            // garbage only on Linux.
+            if (size > 0) memset(ptr, 0, size.convert())
             return NativeBuffer(ptr, size, byteOrder)
         }
 

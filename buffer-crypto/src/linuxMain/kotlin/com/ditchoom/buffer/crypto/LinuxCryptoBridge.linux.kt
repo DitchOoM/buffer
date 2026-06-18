@@ -13,11 +13,11 @@ import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.usePinned
 
-/**
+/*
  * Shared Kotlin/Native buffer-pointer helpers for the Linux BoringSSL backend. These mirror the
- * Apple backend's [AppleCryptoBridge] helpers exactly — they are platform-agnostic K/Native
+ * Apple backend's AppleCryptoBridge helpers exactly — they are platform-agnostic K/Native
  * primitives (pin a heap array, or hand over a native pointer) and depend only on cinterop, not on
- * any Apple type. Kept in `linuxMain` so they do not collide with the Apple copies.
+ * any Apple type. Kept in linuxMain so they do not collide with the Apple copies.
  */
 
 /**
@@ -83,6 +83,12 @@ internal inline fun WriteBuffer.withWritablePointer(
     block: (CPointer<ByteVar>) -> Unit,
 ) {
     require(remaining() >= count) { "dest needs $count bytes remaining, has ${remaining()}" }
+    if (count == 0) {
+        // Nothing to write; hand BoringSSL a valid non-null 1-byte scratch pointer (it accepts a
+        // length-0 output). Calling addressOf on a possibly-empty backing array would AIOOBE.
+        ByteArray(1).usePinned { block(it.addressOf(0)) }
+        return
+    }
     val pos = position()
     val managed = managedMemoryAccess
     if (managed != null) {
