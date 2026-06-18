@@ -336,6 +336,39 @@ private fun rawAgree(
     }
 }
 
+/**
+ * Raw DH secret seam for HPKE/DHKEM. Performs the native agreement (with the same provider
+ * public-key validation as [deriveSharedSecret]) and hands back the raw secret in a wiped
+ * SecureBuffer — without the KDF step the public path applies.
+ */
+internal actual suspend fun dhRawSecret(
+    privateKey: KeyAgreementPrivateKey,
+    peerPublicKey: KeyAgreementPublicKey,
+): PlatformBuffer {
+    val curve = privateKey.curve
+    require(curve == peerPublicKey.curve) { "private/public key curve mismatch" }
+    requireSupported(curve)
+
+    val rawSecretBytes =
+        try {
+            rawAgree(curve, privateKey, peerPublicKey)
+        } catch (e: InvalidPublicKey) {
+            throw e
+        } catch (e: GeneralSecurityException) {
+            throw InvalidPublicKey(curve.curveName)
+        } catch (e: RuntimeException) {
+            // Unchecked provider rejections (ProviderException / IllegalState / IllegalArgument from
+            // the provider) map to the same uniform InvalidPublicKey — no exception-type oracle.
+            throw InvalidPublicKey(curve.curveName)
+        }
+
+    val raw = secureScratch.allocate(curve.sharedSecretBytes)
+    raw.writeBytes(rawSecretBytes)
+    rawSecretBytes.fill(0)
+    raw.resetForRead()
+    return validateRawSecret(curve, raw)
+}
+
 // Async wrappers: JVM/Android have a synchronous native KA, so just delegate.
 
 actual suspend fun generateKeyPairAsync(curve: KeyAgreementCurve): KeyAgreementKeyPair = generateKeyPair(curve)

@@ -164,6 +164,25 @@ actual fun deriveSharedSecret(
     factory: BufferFactory,
 ): ReadBuffer {
     val curve = privateKey.curve
+    val raw = rawAgreeApple(privateKey, peerPublicKey)
+    return deriveFromRawSecret(curve, raw, info, length, salt, factory)
+}
+
+/**
+ * Raw DH secret seam for HPKE/DHKEM (no KDF). Delegates to the same Security-framework exchange
+ * as [deriveSharedSecret] and applies the audited [validateRawSecret] post-check.
+ */
+internal actual suspend fun dhRawSecret(
+    privateKey: KeyAgreementPrivateKey,
+    peerPublicKey: KeyAgreementPublicKey,
+): PlatformBuffer = validateRawSecret(privateKey.curve, rawAgreeApple(privateKey, peerPublicKey))
+
+/** Computes the raw ECDH secret into a wiped SecureBuffer; throws [InvalidPublicKey] on a bad point. */
+private fun rawAgreeApple(
+    privateKey: KeyAgreementPrivateKey,
+    peerPublicKey: KeyAgreementPublicKey,
+): PlatformBuffer {
+    val curve = privateKey.curve
     require(curve == peerPublicKey.curve) { "private/public key curve mismatch" }
     requireEc(curve)
 
@@ -202,8 +221,7 @@ actual fun deriveSharedSecret(
                 }
             CFRelease(params)
             try {
-                val raw = cfDataToBuffer(sharedData, secureScratch)
-                return deriveFromRawSecret(curve, raw, info, length, salt, factory)
+                return cfDataToBuffer(sharedData, secureScratch)
             } finally {
                 CFRelease(sharedData)
             }

@@ -116,6 +116,31 @@ actual suspend fun deriveSharedSecretAsync(
     return deriveFromRawSecret(curve, raw, info, length, salt, factory)
 }
 
+/**
+ * Raw DH secret seam for HPKE/DHKEM on the web. Awaits WebCrypto `deriveBits` and returns the raw
+ * secret in a wiped SecureBuffer (no KDF). Same validation contract as [deriveSharedSecretAsync].
+ */
+internal actual suspend fun dhRawSecret(
+    privateKey: KeyAgreementPrivateKey,
+    peerPublicKey: KeyAgreementPublicKey,
+): PlatformBuffer {
+    val curve = privateKey.curve
+    require(curve == peerPublicKey.curve) { "private/public key curve mismatch" }
+    ensureSupported(curve)
+
+    val sharedHex =
+        try {
+            webCryptoDeriveSharedSecret(curve.curveName, privateKey.encoded.toHex(), peerPublicKey.encoded.toHex())
+        } catch (e: Throwable) {
+            throw InvalidPublicKey(curve.curveName)
+        }
+    if (sharedHex == UNSUPPORTED_SENTINEL) {
+        throw UnsupportedOperationException("${curve.curveName} is not available in this WebCrypto engine")
+    }
+    val raw = hexToBuffer(sharedHex, secureScratch)
+    return validateRawSecret(curve, raw)
+}
+
 /** Sentinel the JS/wasm glue returns when WebCrypto lacks the requested algorithm (e.g. X25519). */
 internal const val UNSUPPORTED_SENTINEL: String = "UNSUPPORTED"
 
