@@ -80,6 +80,8 @@ Run the full suite:
 - Signatures: `SignatureKatTest`, `SignatureWycheproofTest`, `SignatureTamperTest`,
   `SignatureCapabilityTest`, `SignatureBackingTest`
 - Key agreement: `KeyAgreementKatTest`, `KeyAgreementWycheproofTest`, `KeyAgreementTest`
+- HPKE / DHKEM (RFC 9180): `HpkeKatTest` (RFC 9180 Appendix A vectors, all four modes),
+  `HpkeRoundTripTest`, `HpkeTamperTest`, `HpkeBackingTests`, `HpkeCapabilityTest`
 - Foundation: `ConstantTimeTest`, `CryptoRandomTest`, `SecureBufferTest`,
   `WycheproofRunnerSelfTest`
 - Vendored Wycheproof vector sets (curated, in `WycheproofVectors*.kt`): AES-GCM,
@@ -135,6 +137,18 @@ prevented by API/type design · **(e)** out of scope / documented trust assumpti
 | Non-constant-time tag compare in glue | **(b)** `constantTimeEquals`; **(e)** native verify |
 | Hash-length confusion (256/384/512) | **(d)** typed |
 
+### HPKE / DHKEM (RFC 9180): Base/PSK/Auth/AuthPSK over X25519, P-256/384/521; AES-128/256-GCM, ChaCha20-Poly1305
+| Vector | Defense |
+|---|---|
+| AEAD nonce reuse across messages | **(d)** per-context monotonic seq → nonce = base_nonce XOR seq; seq advances only on success; `MessageLimitReached` before wrap + **(a)** |
+| Plaintext released before tag verified | **(b)/(d)** `open` returns plaintext only after the native AEAD verify (no unverified-plaintext path) + tamper test |
+| Tag / ciphertext / AAD / `enc` tamper | **(a)** RFC 9180 KAT + **(c)** decrypt throws `VerificationFailed`; corrupted `enc` rejected as `InvalidPublicKey` or `VerificationFailed` (every-byte-flip test) |
+| `suite_id` / label domain-separation error | **(a)** RFC 9180 Appendix A KAT pins `enc`, ciphertext, and exports byte-exact (any label/suite_id byte change diverges) |
+| KEM low-order / off-curve / identity point | **(b)/(c)** delegated to the key-agreement family's validation; X25519 all-zero raw secret rejected (constant-time) → `InvalidPublicKey` |
+| Raw DH / KEM shared secret leakage | **(d)** the internal `dhRawSecret` seam is `internal`; shared secrets / `secret` / `exporter_secret` / AEAD keys stay in wiped `SecureBuffer`s, never returned or logged |
+| Sender-auth (Auth/AuthPSK) forgery | **(a)** KAT + negative test: a receiver authenticating the wrong sender key fails to verify |
+| Suite primitive unavailable (ChaCha on web, X25519 where absent) | **(b)/(d)** gated `false` → `UnsupportedOperationException`, never a silent fallback + capability test |
+
 ## 4. Platform support & capability gating
 
 These are tested error paths, not assumptions — the capability flag drives a `true`→works /
@@ -150,9 +164,15 @@ These are tested error paths, not assumptions — the capability flag drives a `
 | Ed25519 | ✓ (JDK 15+) | ✓ **API 34+** (runtime gate, throws 28–33) | ⚠ pending (see §5) | ✓ newer engines (feature-detected) |
 | X25519 | ✓ (JDK 11+) | ✓ **API 34+** (runtime gate) | ⚠ pending (see §5) | ✓ newer engines (feature-detected) |
 | ECDH P-256/384/521 | ✓ | ✓ | ✓ | ✓ |
+| HPKE/DHKEM(P-256/384/521) | ✓ | ✓ | ✓ (ECDH KEMs) | ✓ (WebCrypto async) |
+| HPKE/DHKEM(X25519) | ✓ (JDK 11+) | ✓ **API 34+** | ✗ throws (X25519 pending, see §5) | ✓ newer engines (feature-detected) |
+| HPKE AEAD = ChaCha20-Poly1305 | ✓ (JDK 11+) | ✓ | ⚠ pending (see §5) | ✗ throws — not in WebCrypto |
 
 Encoding differs by platform and is pinned + tested both ways: JCA uses DER/ASN.1 (ECDSA) and
-SPKI/X.509 (ECDH); WebCrypto uses raw P1363 `r‖s` and raw points.
+SPKI/X.509 (ECDH); WebCrypto uses raw P1363 `r‖s` and raw points. HPKE keys use the RFC 9180 raw
+KEM encodings (raw X25519 u-coordinate, uncompressed SEC1 EC points); the RFC 9180 Appendix A
+known-answer vectors (raw private scalars) run on JVM/Android, and Apple/web get HPKE round-trip
+coverage with platform-generated keys.
 
 ## 5. Known limitations & tracked follow-ups
 
