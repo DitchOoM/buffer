@@ -116,7 +116,9 @@ jobs:
         run: |
           TOKEN=$(echo -n "${MAVEN_CENTRAL_USERNAME}:${MAVEN_CENTRAL_PASSWORD}" | base64)
           DEPLOYMENT_ID="${{ steps.upload.outputs.deployment-id }}"
-          MAX_ATTEMPTS=50
+          # Window only needs to cover PENDING -> VALIDATING -> (VALIDATED|PUBLISHING); we do NOT
+          # wait for the terminal PUBLISHED state (see below). 120 * 30s = 60min is ample headroom.
+          MAX_ATTEMPTS=120
           ATTEMPT=0
 
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
@@ -139,8 +141,15 @@ jobs:
             echo "Attempt ${ATTEMPT}/${MAX_ATTEMPTS}: ${STATE}"
 
             case "$STATE" in
-              VALIDATED|PUBLISHED)
-                echo "Deployment ${STATE} successfully!"
+              VALIDATED|PUBLISHING|PUBLISHED)
+                # VALIDATED  = signatures/POM/checksums all passed.
+                # PUBLISHING = Sonatype accepted it and is releasing to Central (AUTOMATIC); it
+                #              cannot fail from here, and the actual Central propagation is async.
+                # PUBLISHED  = terminal.
+                # Any of these means "accepted, will publish" — succeed now so the tag/release is
+                # cut, instead of blocking a runner until the slow terminal state (the cause of the
+                # 5.12.0 publish timeouts).
+                echo "Deployment ${STATE} — accepted, succeeding."
                 exit 0
                 ;;
               FAILED)
@@ -149,7 +158,7 @@ jobs:
                 exit 1
                 ;;
               *)
-                # PENDING, VALIDATING, PUBLISHING - keep polling
+                # PENDING, VALIDATING - keep polling
                 ;;
             esac
           done
