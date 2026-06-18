@@ -6,12 +6,23 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_chachapoly_open
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_chachapoly_seal
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.alloc
+import kotlinx.cinterop.allocArray
+import kotlinx.cinterop.convert
 import kotlinx.cinterop.get
+import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.ptr
+import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.usePinned
+import kotlinx.cinterop.value
+import platform.posix.size_tVar
 
 /*
  * Apple AEAD glue shared by Aead.apple.kt (aesGcmSeal) and the ChaCha20-Poly1305 bridge.
@@ -82,18 +93,13 @@ internal fun nativeTagBuffer(tag: CPointer<ByteVar>): ReadBuffer {
  * ChaCha20-Poly1305 on Apple via CryptoKit (`ChaChaPoly.seal` / `.open`).
  *
  * CommonCrypto exposes no Kotlin/Native-bindable ChaCha20-Poly1305 one-shot, so the algorithm
- * routes through a CryptoKit Swift shim wired up in the **macOS CI** toolchain (a Swift source
- * file + cinterop bridging header registered only when building on a Mac). On a host without
- * that shim (e.g. this Linux-hosted build) the symbol is absent: [appleChaChaPolyAvailable] is
- * `false`, so the AEAD entry points throw [UnsupportedOperationException] — never a polyfill —
- * exactly as the web target does for ChaCha.
- *
- * Mac CI replaces [appleChaChaPolyAvailable] with `true` and supplies the [appleChaChaPolySeal]
- * / [appleChaChaPolyOpen] bodies that call into the CryptoKit shim, at which point the shared
- * KAT/Wycheproof/tamper suite gates the algorithm on Apple. This default keeps the Linux build
- * honest: it compiles, reports the capability as unsupported, and never fabricates a tag.
+ * routes through the CryptoKit Swift shim ([bcks_chachapoly_seal] / [bcks_chachapoly_open], from
+ * `CryptoKitShim.swift` via the `cryptokitshim` cinterop). CryptoKit is available on every Apple
+ * target this module builds for (macOS 10.15+, iOS 13+, tvOS 13+, watchOS 6+), all of which exceed
+ * the module's deployment floors, so [appleChaChaPolyAvailable] is `true` unconditionally — no
+ * runtime feature-detection is needed.
  */
-internal val appleChaChaPolyAvailable: Boolean = false
+internal val appleChaChaPolyAvailable: Boolean = true
 
 internal fun appleChaChaPolySeal(
     key: ChaChaPolyKey,
@@ -101,7 +107,44 @@ internal fun appleChaChaPolySeal(
     aad: ReadBuffer?,
     plaintext: ReadBuffer,
     dest: WriteBuffer,
-): Unit = throw UnsupportedOperationException("ChaCha20-Poly1305 requires the CryptoKit shim (macOS CI)")
+) {
+    val ptLen = plaintext.remaining()
+    require(dest.remaining() >= ptLen + AEAD_TAG_BYTES) {
+        "dest needs ${ptLen + AEAD_TAG_BYTES} bytes remaining, has ${dest.remaining()}"
+    }
+    memScoped {
+        val tag = allocArray<ByteVar>(AEAD_TAG_BYTES)
+        var status = -1
+        key.material.withRemainingBytes { keyPtr, keyLen ->
+            nonce.withRemainingBytes { ivPtr, ivLen ->
+                withOptionalBytes(aad) { aadPtr, aadLen ->
+                    plaintext.withRemainingBytes2(ptLen) { ptPtr ->
+                        // Ciphertext (== plaintext length) goes straight into dest; tag to scratch.
+                        dest.withWritablePointer(ptLen) { ctPtr ->
+                            status =
+                                bcks_chachapoly_seal(
+                                    keyPtr.reinterpret(),
+                                    keyLen.convert(),
+                                    ivPtr.reinterpret(),
+                                    ivLen.convert(),
+                                    aadPtr.reinterpret(),
+                                    aadLen.convert(),
+                                    ptPtr.reinterpret(),
+                                    ptLen.convert(),
+                                    ctPtr.reinterpret(),
+                                    ptLen.convert(),
+                                    tag.reinterpret(),
+                                    AEAD_TAG_BYTES.convert(),
+                                )
+                        }
+                    }
+                }
+            }
+        }
+        check(status == BCKS_OK) { "ChaCha20-Poly1305 seal failed (status=$status)" }
+        for (i in 0 until AEAD_TAG_BYTES) dest.writeByte(tag[i])
+    }
+}
 
 internal fun appleChaChaPolyOpen(
     key: ChaChaPolyKey,
@@ -109,4 +152,60 @@ internal fun appleChaChaPolyOpen(
     aad: ReadBuffer?,
     ciphertextAndTag: ReadBuffer,
     dest: WriteBuffer,
-): Unit = throw UnsupportedOperationException("ChaCha20-Poly1305 requires the CryptoKit shim (macOS CI)")
+) {
+    require(ciphertextAndTag.remaining() >= AEAD_TAG_BYTES) {
+        "ciphertext+tag must be at least $AEAD_TAG_BYTES bytes"
+    }
+    val ctLen = ciphertextAndTag.remaining() - AEAD_TAG_BYTES
+    require(dest.remaining() >= ctLen) { "dest needs $ctLen bytes remaining, has ${dest.remaining()}" }
+
+    val ctView = absoluteView(ciphertextAndTag, ciphertextAndTag.position(), ctLen)
+    val tagView = absoluteView(ciphertextAndTag, ciphertextAndTag.position() + ctLen, AEAD_TAG_BYTES)
+
+    memScoped {
+        val destStart = dest.position()
+        var status = -1
+        var written = 0
+        val writtenVar = alloc<size_tVar>()
+        key.material.withRemainingBytes { keyPtr, keyLen ->
+            nonce.withRemainingBytes { ivPtr, ivLen ->
+                withOptionalBytes(aad) { aadPtr, aadLen ->
+                    ctView.withRemainingBytes2(ctLen) { ctPtr ->
+                        tagView.withRemainingBytes2(AEAD_TAG_BYTES) { tagPtr ->
+                            // CryptoKit authenticates first; on tag mismatch it returns BCKS_ERR_AUTH
+                            // and never writes plaintext into dest.
+                            dest.withWritablePointer(ctLen) { ptPtr ->
+                                status =
+                                    bcks_chachapoly_open(
+                                        keyPtr.reinterpret(),
+                                        keyLen.convert(),
+                                        ivPtr.reinterpret(),
+                                        ivLen.convert(),
+                                        aadPtr.reinterpret(),
+                                        aadLen.convert(),
+                                        ctPtr.reinterpret(),
+                                        ctLen.convert(),
+                                        tagPtr.reinterpret(),
+                                        AEAD_TAG_BYTES.convert(),
+                                        ptPtr.reinterpret(),
+                                        ctLen.convert(),
+                                        writtenVar.ptr,
+                                    )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        written = writtenVar.value.toInt()
+        if (status != BCKS_OK || written != ctLen) {
+            // Scrub any bytes that may have been written and reject. CryptoKit does not release
+            // unverified plaintext, but we zero dest defensively to honor the no-leak contract.
+            val end = dest.position()
+            dest.position(destStart)
+            while (dest.position() < end) dest.writeByte(0)
+            dest.position(destStart)
+            throw VerificationFailed()
+        }
+    }
+}

@@ -35,6 +35,89 @@ repositories {
     maven { setUrl("https://maven.pkg.jetbrains.space/kotlin/p/kotlin/kotlin-js-wrappers/") }
 }
 
+/**
+ * Per-target wiring for the CryptoKit Swift shim. Returns null for non-Apple konan targets (they
+ * have no CryptoKit). For an Apple target it registers a task that compiles
+ * src/nativeInterop/swift/CryptoKitShim.swift into a per-target static archive
+ * `lib<konan>cryptokitshim.a`, and exposes the archive name, output dir, and the toolchain's
+ * per-SDK Swift runtime lib dir for the cinterop + final-binary linker.
+ */
+class AppleSwiftShim(
+    val task: TaskProvider<Exec>,
+    val archiveName: String,
+    val outDir: File,
+    val swiftLibDir: String,
+)
+
+fun appleSwiftShim(
+    project: org.gradle.api.Project,
+    konanTarget: org.jetbrains.kotlin.konan.target.KonanTarget,
+): AppleSwiftShim? {
+    // (swift -target triple, xcrun --sdk name, swift runtime lib subdir under .../lib/swift/)
+    val spec: Triple<String, String, String> =
+        when (konanTarget.name) {
+            "macos_arm64" -> Triple("arm64-apple-macos11", "macosx", "macosx")
+            "macos_x64" -> Triple("x86_64-apple-macos11", "macosx", "macosx")
+            "ios_arm64" -> Triple("arm64-apple-ios14", "iphoneos", "iphoneos")
+            "ios_simulator_arm64" -> Triple("arm64-apple-ios14-simulator", "iphonesimulator", "iphonesimulator")
+            "ios_x64" -> Triple("x86_64-apple-ios14-simulator", "iphonesimulator", "iphonesimulator")
+            "tvos_arm64" -> Triple("arm64-apple-tvos14", "appletvos", "appletvos")
+            "tvos_simulator_arm64" -> Triple("arm64-apple-tvos14-simulator", "appletvsimulator", "appletvsimulator")
+            "tvos_x64" -> Triple("x86_64-apple-tvos14-simulator", "appletvsimulator", "appletvsimulator")
+            "watchos_simulator_arm64" -> Triple("arm64-apple-watchos7-simulator", "watchsimulator", "watchsimulator")
+            "watchos_x64" -> Triple("x86_64-apple-watchos7-simulator", "watchsimulator", "watchsimulator")
+            else -> return null
+        }
+    val (triple, sdkName, swiftSubdir) = spec
+    val swiftLibDir =
+        File(
+            project.providers
+                .exec { commandLine("xcrun", "--find", "swiftc") }
+                .standardOutput.asText
+                .get()
+                .trim(),
+        ).parentFile.parentFile // .../usr/bin/swiftc -> .../usr
+            .resolve("lib/swift/$swiftSubdir")
+            .absolutePath
+    val sdkPath =
+        project.providers
+            .exec { commandLine("xcrun", "--sdk", sdkName, "--show-sdk-path") }
+            .standardOutput.asText
+            .get()
+            .trim()
+    val outDir =
+        project.layout.buildDirectory
+            .dir("cryptokitshim/${konanTarget.name}")
+            .get()
+            .asFile
+    val archiveName = "${konanTarget.name}cryptokitshim"
+    val src = project.file("src/nativeInterop/swift/CryptoKitShim.swift")
+    val archive = File(outDir, "lib$archiveName.a")
+    val task =
+        project.tasks.register("compileCryptoKitShim${konanTarget.name.replaceFirstChar { it.uppercase() }}", Exec::class.java) {
+            inputs.file(src)
+            inputs.property("triple", triple)
+            inputs.property("sdkPath", sdkPath)
+            outputs.file(archive)
+            doFirst { outDir.mkdirs() }
+            commandLine(
+                "xcrun",
+                "swiftc",
+                "-emit-library",
+                "-static",
+                "-target",
+                triple,
+                "-sdk",
+                sdkPath,
+                "-O",
+                "-o",
+                archive.absolutePath,
+                src.absolutePath,
+            )
+        }
+    return AppleSwiftShim(task, archiveName, outDir, swiftLibDir)
+}
+
 kotlin {
     jvmToolchain(21)
 
@@ -101,6 +184,44 @@ kotlin {
     targets.withType<org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget>().configureEach {
         compilations.getByName("main").cinterops.create("commoncryptogcm") {
             defFile(project.file("src/nativeInterop/cinterop/commoncryptogcm.def"))
+        }
+
+        // CryptoKit shim: ChaCha20-Poly1305, Ed25519, X25519, and ECDSA-sign-from-scalar live in
+        // CryptoKit, which is Swift-only with no Objective-C/C interface — Kotlin/Native cinterop
+        // cannot bind it directly the way it binds CommonCrypto/Security. We compile a tiny Swift
+        // shim (src/nativeInterop/swift/CryptoKitShim.swift) that re-exposes those primitives through
+        // an `@_cdecl` plain-C surface into a per-target static archive, then cinterop against the
+        // hand-written header and link the archive + the Swift runtime. Registered on every Apple
+        // target so the commonizer exposes it to appleMain.
+        val konan = konanTarget
+        appleSwiftShim(project, konan)?.let { shim ->
+            compilations.getByName("main").cinterops.create("cryptokitshim") {
+                defFile(project.file("src/nativeInterop/cinterop/cryptokitshim.def"))
+                includeDirs(project.file("src/nativeInterop/swift"))
+                extraOpts(
+                    "-staticLibrary",
+                    "lib${shim.archiveName}.a",
+                    "-libraryPath",
+                    shim.outDir.absolutePath,
+                )
+            }
+            // The cinterop task is registered by the KMP plugin under a derived name; wire the
+            // Swift-archive build ahead of it.
+            val capName = konan.name.split("_").joinToString("") { it.replaceFirstChar { c -> c.uppercase() } }
+            project.tasks.named("cinteropCryptokitshim$capName").configure { dependsOn(shim.task) }
+            // The Swift static archive references the Swift runtime; point the final-binary linker
+            // at the toolchain's per-SDK Swift libs and the CryptoKit/Foundation frameworks.
+            binaries.all {
+                linkerOpts(
+                    "-L${shim.swiftLibDir}",
+                    "-lswiftCore",
+                    "-lswiftFoundation",
+                    "-framework",
+                    "CryptoKit",
+                    "-framework",
+                    "Foundation",
+                )
+            }
         }
     }
 

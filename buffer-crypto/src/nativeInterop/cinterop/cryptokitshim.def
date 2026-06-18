@@ -1,0 +1,4 @@
+package = com.ditchoom.buffer.crypto.cinterop.cryptokit
+language = C
+headers = CryptoKitShim.h
+---
