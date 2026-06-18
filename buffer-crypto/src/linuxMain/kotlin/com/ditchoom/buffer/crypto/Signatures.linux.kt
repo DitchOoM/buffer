@@ -12,11 +12,15 @@ import com.ditchoom.buffer.crypto.cinterop.boringssl.bcl_ed25519_sign
 import com.ditchoom.buffer.crypto.cinterop.boringssl.bcl_ed25519_verify
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.alloc
 import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.ptr
 import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.value
+import platform.posix.size_tVar
 
 /**
  * Linux signature bridge over **BoringSSL** (libcrypto).
@@ -178,7 +182,7 @@ private fun ecdsaSign(
     val msgLen = message.remaining()
     return memScoped {
         val sigOut = allocArray<ByteVar>(cap)
-        val sigLen = kotlinx.cinterop.alloc<platform.posix.size_tVar>()
+        val sigLen = alloc<size_tVar>()
         var status = -1
         scalar.withRemainingBytes { keyPtr, keyLen ->
             message.withRemainingBytes2(msgLen) { msgPtr ->

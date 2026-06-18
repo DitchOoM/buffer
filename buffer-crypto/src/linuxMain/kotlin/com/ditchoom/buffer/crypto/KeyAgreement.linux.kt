@@ -3,6 +3,7 @@
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.crypto.cinterop.boringssl.BCL_OK
@@ -12,6 +13,7 @@ import com.ditchoom.buffer.crypto.cinterop.boringssl.bcl_x25519
 import com.ditchoom.buffer.crypto.cinterop.boringssl.bcl_x25519_keypair
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.alloc
 import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.get
@@ -80,8 +82,8 @@ private fun generateEc(curve: KeyAgreementCurve): KeyAgreementKeyPair {
     memScoped {
         val privOut = allocArray<ByteVar>(curve.privateKeyBytes)
         val pubOut = allocArray<ByteVar>(curve.publicKeyBytes)
-        val privLen = kotlinx.cinterop.alloc<size_tVar>()
-        val pubLen = kotlinx.cinterop.alloc<size_tVar>()
+        val privLen = alloc<size_tVar>()
+        val pubLen = alloc<size_tVar>()
         val status =
             bcl_ec_generate(
                 curveCode(curve),
@@ -171,7 +173,7 @@ private fun rawAgreeEc(
     val out = secureScratch.allocate(curve.sharedSecretBytes)
     memScoped {
         val secretOut = allocArray<ByteVar>(curve.sharedSecretBytes)
-        val secretLen = kotlinx.cinterop.alloc<size_tVar>()
+        val secretLen = alloc<size_tVar>()
         var status = -1
         privateKey.encoded.withRemainingBytes { privPtr, privLen ->
             peerPublicKey.encoded.withRemainingBytes { peerPtr, peerLen ->
