@@ -1,0 +1,3 @@
+# BoringSSL static libs + headers, provisioned by the buildBoringssl<Arch> Gradle task (or
+# symlinked from a prebuilt tree on a dev box). Never commit the .a binaries or vendored headers.
+/libs/boringssl/
