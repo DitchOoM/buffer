@@ -58,7 +58,8 @@ jobs:
       - name: Install ARM64 dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-user-static gcc-aarch64-linux-gnu
+          # g++-aarch64-linux-gnu is needed to cross-compile buffer-crypto's BoringSSL (C++) for arm64.
+          sudo apt-get install -y qemu-user-static gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
           # ARM64 runtime libraries for QEMU
           mkdir -p /tmp/arm64-libs
           cd /tmp/arm64-libs
@@ -102,15 +103,21 @@ jobs:
           --no-build-cache ${{ inputs.gradle-args }}
 
       - name: Run Linux x64 tests
+        # :buffer-crypto:linuxX64Test runs the full common crypto suite (KAT + Wycheproof +
+        # tamper/negative + capability) over the BoringSSL backend. Its first run provisions
+        # BoringSSL via the self-contained buildBoringsslX64 task (clone + cmake + make crypto),
+        # which needs the go/cmake toolchains present on the runner.
         run: >-
           ./gradlew :buffer:linuxX64Test :buffer-compression:linuxX64Test :buffer-flow:linuxX64Test
-          :buffer-codec:linuxX64Test :buffer-codec-test:linuxX64Test
+          :buffer-codec:linuxX64Test :buffer-codec-test:linuxX64Test :buffer-crypto:linuxX64Test
           --no-build-cache ${{ inputs.gradle-args }}
 
       - name: Build ARM64 test binaries
+        # buffer-crypto cross-builds its arm64 BoringSSL via buildBoringsslArm64 (uses the
+        # aarch64-linux-gnu cross toolchain installed above).
         run: >-
           ./gradlew :buffer:linkDebugTestLinuxArm64 :buffer-compression:linkDebugTestLinuxArm64 :buffer-flow:linkDebugTestLinuxArm64
-          :buffer-codec-test:linkDebugTestLinuxArm64
+          :buffer-codec-test:linkDebugTestLinuxArm64 :buffer-crypto:linkDebugTestLinuxArm64
           --no-build-cache ${{ inputs.gradle-args }}
 
       - name: Run buffer ARM64 tests via QEMU
