@@ -508,14 +508,20 @@ internal fun i2osp2(
     dest.writeByte((value and 0xFF).toByte())
 }
 
-/** Copies [source]'s remaining bytes into [dest] non-destructively (absolute reads). */
+/**
+ * Copies [source]'s remaining bytes into [dest] without consuming [source]: the bulk
+ * [WriteBuffer.write] advances the source to its limit, so its position is saved and restored.
+ * Callers reuse the same source across calls (e.g. `suite_id` and the key-schedule `secret`),
+ * so the non-destructive contract is load-bearing.
+ */
 internal fun copyInto(
     source: ReadBuffer,
     dest: WriteBuffer,
 ) {
-    val start = source.position()
-    val n = source.remaining()
-    for (i in 0 until n) dest.writeByte(source.get(start + i))
+    if (source.remaining() == 0) return
+    val mark = source.position()
+    dest.write(source)
+    source.position(mark)
 }
 
 /** A fresh read-ready copy of [source]'s remaining bytes from [factory]. */
