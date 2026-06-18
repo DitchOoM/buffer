@@ -12,11 +12,15 @@ import kotlin.test.assertTrue
 /**
  * Known-answer vectors (RFC 8032 Ed25519 + NIST/FIPS-186 ECDSA) and sign→verify round-trips.
  *
- * Ed25519 is deterministic (RFC 8032), so its KAT asserts the exact signature bytes **and** that
- * verify accepts them. ECDSA signing is randomized (the per-signature nonce `k`), so its KAT is a
- * verify-of-known-good check, and correctness of our signing is proven by a sign→verify round-trip
- * (sign here, verify the produced signature). All ops use the async API so the suite runs on every
- * platform (WebCrypto async on JS/WASM, native otherwise).
+ * Ed25519 per RFC 8032 is deterministic, so where the platform produces deterministic signatures
+ * (JCA on the JVM, WebCrypto) the KAT asserts the exact signature bytes. Apple's CryptoKit instead
+ * produces *hedged* (randomized) Ed25519 signatures — still valid and RFC-conformant on the verify
+ * side, but not bit-identical to the RFC test vector — so on such platforms the KAT proves
+ * correctness by verifying the known-good signature and round-tripping our own. Which mode applies
+ * is probed at runtime (sign the same message twice; identical ⇒ deterministic). ECDSA signing is
+ * always randomized (the per-signature nonce `k`), so its KAT is a verify-of-known-good check plus a
+ * sign→verify round-trip. All ops use the async API so the suite runs on every platform (WebCrypto
+ * async on JS/WASM, native otherwise).
  */
 class SignatureKatTest {
     // RFC 8032 §7.1 — Ed25519 (seed, publicKey, message, signature).
@@ -43,14 +47,37 @@ class SignatureKatTest {
         val sig: String,
     )
 
+    /**
+     * Probes whether this platform's Ed25519 signing is deterministic by signing the same message
+     * twice and comparing. RFC 8032 mandates deterministic signatures, but CryptoKit (Apple) hedges
+     * them with randomness, so the exact-bytes assertion only applies where signing is deterministic.
+     */
+    private suspend fun ed25519IsDeterministic(): Boolean {
+        val seed = ed25519Vectors.first().seed
+        val msg = hexBuffer("ab")
+        signingKey(SignatureScheme.Ed25519, seed).use { sk ->
+            val a = signAsync(sk, msg).toHex()
+            val b = signingKey(SignatureScheme.Ed25519, seed).use { sk2 -> signAsync(sk2, hexBuffer("ab")).toHex() }
+            return a == b
+        }
+    }
+
     @Test
     fun ed25519DeterministicSignAndVerify() =
         runTest {
             if (!ed25519AsyncAvailable()) return@runTest
+            val deterministic = ed25519IsDeterministic()
             for (v in ed25519Vectors) {
                 signingKey(SignatureScheme.Ed25519, v.seed).use { sk ->
                     val produced = signAsync(sk, hexBuffer(v.msg))
-                    assertEquals(v.sig, produced.toHex(), "Ed25519 sign(seed=${v.seed.take(8)}…)")
+                    if (deterministic) {
+                        // RFC 8032 deterministic signing must reproduce the published vector exactly.
+                        assertEquals(v.sig, produced.toHex(), "Ed25519 sign(seed=${v.seed.take(8)}…)")
+                    } else {
+                        // Hedged signing (CryptoKit): the produced signature must still verify.
+                        val selfOk = verifyAsync(verifyKey(SignatureScheme.Ed25519, v.pub), hexBuffer(v.msg), produced)
+                        assertTrue(selfOk, "Ed25519 hedged sign→verify(seed=${v.seed.take(8)}…)")
+                    }
                 }
                 val ok =
                     verifyAsync(

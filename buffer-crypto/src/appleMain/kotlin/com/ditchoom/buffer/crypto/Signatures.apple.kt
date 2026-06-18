@@ -3,17 +3,23 @@
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_ecdsa_sign_from_scalar
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_ed25519_sign
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_ed25519_verify
 import com.ditchoom.buffer.toNSData
+import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.ExperimentalForeignApi
-import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.alloc
+import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.convert
+import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
-import kotlinx.cinterop.usePinned
+import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.value
 import platform.CoreFoundation.CFDataRef
 import platform.CoreFoundation.CFDictionaryCreateMutable
 import platform.CoreFoundation.CFDictionarySetValue
@@ -23,11 +29,9 @@ import platform.CoreFoundation.CFRelease
 import platform.CoreFoundation.kCFAllocatorDefault
 import platform.CoreFoundation.kCFTypeDictionaryKeyCallBacks
 import platform.CoreFoundation.kCFTypeDictionaryValueCallBacks
-import platform.Foundation.CFBridgingRelease
 import platform.Foundation.CFBridgingRetain
 import platform.Foundation.NSData
 import platform.Security.SecKeyAlgorithm
-import platform.Security.SecKeyCreateSignature
 import platform.Security.SecKeyCreateWithData
 import platform.Security.SecKeyRef
 import platform.Security.SecKeyVerifySignature
@@ -39,7 +43,7 @@ import platform.Security.kSecAttrKeyTypeECSECPrimeRandom
 import platform.Security.kSecKeyAlgorithmECDSASignatureMessageX962SHA256
 import platform.Security.kSecKeyAlgorithmECDSASignatureMessageX962SHA384
 import platform.Security.kSecKeyAlgorithmECDSASignatureMessageX962SHA512
-import platform.posix.memcpy
+import platform.posix.size_tVar
 
 /**
  * Apple signature bridge over **Security.framework** (`SecKey*`).
@@ -48,36 +52,40 @@ import platform.posix.memcpy
  * `kSecKeyAlgorithmECDSASignatureMessageX962SHA{256,384,512}` algorithms, which hash-then-sign and
  * produce/consume **DER/X9.62** signatures — so [ecdsaSignatureEncoding] is `Der`, matching JVM.
  *
- * **Ed25519** is **not** exposed by the Security.framework C API (it lives in CryptoKit, which is
- * Swift-only and not reachable from this module's Kotlin/Native cinterop). Rather than ship a
- * Swift bridge that can't be built/verified here, Ed25519 is reported **unsupported** on Apple:
- * [supportsSyncEd25519] is `false` and every Ed25519 entry point throws
- * [UnsupportedOperationException] — the honest "native-or-throw" contract. (Documented deviation
- * from the original plan, which assumed a CryptoKit bridge.)
+ * **Ed25519** is not exposed by the Security.framework C API — it lives in CryptoKit. It is wired
+ * through the `cryptokitshim` cinterop ([bcks_ed25519_sign] / [bcks_ed25519_verify]), which calls
+ * CryptoKit `Curve25519.Signing`. [supportsSyncEd25519] is therefore `true` on Apple.
  *
- * **Key import note (Apple-specific):** `SecKeyCreateWithData` for an EC *private* key requires the
- * full ANSI X9.63 representation `04 ‖ X ‖ Y ‖ K` (public point concatenated with the private
- * scalar), not the bare scalar. So on Apple a [SigningKey] for ECDSA must be built from that full
- * representation. *Verify* keys are the ordinary uncompressed point `04 ‖ X ‖ Y`.
+ * **ECDSA signing-from-scalar (Apple-specific):** `SecKeyCreateWithData` for an EC *private* key
+ * requires the full ANSI X9.63 representation `04 ‖ X ‖ Y ‖ K`, not the bare scalar — it cannot
+ * derive the public point. CryptoKit's `P###.Signing.PrivateKey(rawRepresentation:)` *can* build a
+ * signing key from the bare scalar, so ECDSA signing routes through the CryptoKit shim
+ * ([bcks_ecdsa_sign_from_scalar]) and [supportsEcdsaSigningFromScalar] is `true`. ECDSA *verify*
+ * stays on Security.framework (`SecKeyVerifySignature`), which consumes the uncompressed point
+ * `04 ‖ X ‖ Y` and DER signatures directly.
  */
 
-actual val supportsSyncEd25519: Boolean get() = false
+actual val supportsSyncEd25519: Boolean get() = true
 
 actual val supportsSyncEcdsa: Boolean get() = true
 
 actual val ecdsaSignatureEncoding: EcdsaSignatureEncoding get() = EcdsaSignatureEncoding.Der
 
-private fun unsupportedEd25519(): Nothing =
-    throw UnsupportedOperationException(
-        "Ed25519 is unavailable on Apple via Security.framework (CryptoKit bridge not wired)",
-    )
+/** Curve order in bits for the CryptoKit ECDSA-from-scalar shim (256 / 384 / 521). */
+private fun ecdsaCurveCode(scheme: SignatureScheme): Int =
+    when (scheme) {
+        SignatureScheme.EcdsaP256 -> 256
+        SignatureScheme.EcdsaP384 -> 384
+        SignatureScheme.EcdsaP521 -> 521
+        SignatureScheme.Ed25519 -> error("not an ECDSA scheme")
+    }
 
 private fun ecdsaAlgorithm(scheme: SignatureScheme): SecKeyAlgorithm? =
     when (scheme) {
         SignatureScheme.EcdsaP256 -> kSecKeyAlgorithmECDSASignatureMessageX962SHA256
         SignatureScheme.EcdsaP384 -> kSecKeyAlgorithmECDSASignatureMessageX962SHA384
         SignatureScheme.EcdsaP521 -> kSecKeyAlgorithmECDSASignatureMessageX962SHA512
-        SignatureScheme.Ed25519 -> unsupportedEd25519()
+        SignatureScheme.Ed25519 -> error("Ed25519 does not use a Security.framework ECDSA algorithm")
     }
 
 /** Snapshot the remaining bytes of [buffer] into an NSData (independent copy). */
@@ -131,29 +139,85 @@ private fun createKey(
     }
 }
 
-private fun appleEcdsaSign(
+/**
+ * Signs [message] under [key] through the CryptoKit shim and returns the signature bytes.
+ *
+ * Both schemes go through CryptoKit: Ed25519 via `Curve25519.Signing`, and ECDSA via
+ * `P###.Signing.PrivateKey(rawRepresentation:)`, which (unlike Security.framework) accepts the bare
+ * private scalar the [SigningKey] holds. ECDSA emits DER; Ed25519 the canonical 64-byte form.
+ */
+private fun cryptoKitSign(
     key: SigningKey,
     message: ReadBuffer,
-): NSData {
-    if (key.scheme == SignatureScheme.Ed25519) unsupportedEd25519()
-    val priv =
-        createKey(key.requireOpen().toNsData(), isPrivate = true)
-            ?: throw IllegalArgumentException("invalid ${key.scheme.schemeName} private key")
-
-    @Suppress("UNCHECKED_CAST")
-    val msgData = CFBridgingRetain(message.toNsData()) as CFDataRef
-    return try {
-        memScoped {
-            val err = alloc<CFErrorRefVar>()
-            val sig =
-                SecKeyCreateSignature(priv, ecdsaAlgorithm(key.scheme), msgData, err.ptr)
-                    ?: throw IllegalArgumentException("ECDSA signing failed")
-            CFBridgingRelease(sig) as NSData
+): ByteArray {
+    val cap = maxSignatureBytes(key.scheme)
+    val scalar = key.requireOpen()
+    return memScoped {
+        val sigOut = allocArray<ByteVar>(cap)
+        val sigLen = alloc<size_tVar>()
+        var status = -1
+        val msgLen = message.remaining()
+        scalar.withRemainingBytes { keyPtr, keyLen ->
+            // withRemainingBytes2 tolerates an empty message (Ed25519 KAT signs ""); it pins a
+            // 1-byte placeholder and we still pass length 0 to the shim.
+            message.withRemainingBytes2(msgLen) { msgPtr ->
+                status =
+                    if (key.scheme == SignatureScheme.Ed25519) {
+                        bcks_ed25519_sign(
+                            keyPtr.reinterpret(),
+                            keyLen.convert(),
+                            msgPtr.reinterpret(),
+                            msgLen.convert(),
+                            sigOut.reinterpret(),
+                            cap.convert(),
+                            sigLen.ptr,
+                        )
+                    } else {
+                        bcks_ecdsa_sign_from_scalar(
+                            ecdsaCurveCode(key.scheme),
+                            keyPtr.reinterpret(),
+                            keyLen.convert(),
+                            msgPtr.reinterpret(),
+                            msgLen.convert(),
+                            sigOut.reinterpret(),
+                            cap.convert(),
+                            sigLen.ptr,
+                        )
+                    }
+            }
         }
-    } finally {
-        CFRelease(msgData)
-        CFRelease(priv)
+        require(status == BCKS_OK) { "invalid ${key.scheme.schemeName} private key" }
+        val n = sigLen.value.toInt()
+        ByteArray(n) { sigOut[it] }
     }
+}
+
+/** Verifies an Ed25519 signature through the CryptoKit shim. */
+private fun appleEd25519Verify(
+    key: VerifyKey,
+    message: ReadBuffer,
+    signature: ReadBuffer,
+): Boolean {
+    // Ed25519 signatures are a fixed 64 bytes; reject anything else without calling into CryptoKit.
+    if (signature.remaining() != 64) return false
+    var status = -1
+    val msgLen = message.remaining()
+    key.material.withRemainingBytes { pubPtr, pubLen ->
+        message.withRemainingBytes2(msgLen) { msgPtr ->
+            signature.withRemainingBytes { sigPtr, sigLen ->
+                status =
+                    bcks_ed25519_verify(
+                        pubPtr.reinterpret(),
+                        pubLen.convert(),
+                        msgPtr.reinterpret(),
+                        msgLen.convert(),
+                        sigPtr.reinterpret(),
+                        sigLen.convert(),
+                    )
+            }
+        }
+    }
+    return status == BCKS_OK
 }
 
 /**
@@ -224,7 +288,6 @@ private fun appleEcdsaVerify(
     message: ReadBuffer,
     signature: ReadBuffer,
 ): Boolean {
-    if (key.scheme == SignatureScheme.Ed25519) unsupportedEd25519()
     // SecKeyVerifySignature accepts non-canonical BER; reject anything that is not strict DER first.
     if (!isCanonicalEcdsaDer(signature)) return false
     val pub = createKey(key.material.toNsData(), isPrivate = false) ?: return false
@@ -246,38 +309,15 @@ private fun appleEcdsaVerify(
     }
 }
 
-/** Copies [n] bytes from [data] into [dest] at its current position, advancing it. */
-private fun copyNsDataInto(
-    data: NSData,
-    dest: WriteBuffer,
-    n: Int,
-) {
-    if (n == 0) return
-    val bytes = ByteArray(n)
-    bytes.usePinned { pinned ->
-        memcpy(pinned.addressOf(0), data.bytes, n.convert())
-    }
-    dest.writeBytes(bytes)
-}
-
-private fun NSData.toReadBuffer(factory: BufferFactory): PlatformBuffer {
-    val n = length.toInt()
-    val out = factory.allocate(n)
-    copyNsDataInto(this, out, n)
-    out.resetForRead()
-    return out
-}
-
 actual fun signInto(
     key: SigningKey,
     message: ReadBuffer,
     dest: WriteBuffer,
 ): Int {
-    if (key.scheme == SignatureScheme.Ed25519) unsupportedEd25519()
-    val sig = appleEcdsaSign(key, message)
-    val n = sig.length.toInt()
+    val sig = cryptoKitSign(key, message)
+    val n = sig.size
     require(dest.remaining() >= n) { "dest needs $n bytes remaining, has ${dest.remaining()}" }
-    copyNsDataInto(sig, dest, n)
+    dest.writeBytes(sig)
     return n
 }
 
@@ -285,23 +325,31 @@ actual fun verify(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
-): Boolean = appleEcdsaVerify(key, message, signature)
+): Boolean =
+    if (key.scheme == SignatureScheme.Ed25519) {
+        appleEd25519Verify(key, message, signature)
+    } else {
+        appleEcdsaVerify(key, message, signature)
+    }
 
 actual suspend fun signAsync(
     key: SigningKey,
     message: ReadBuffer,
     factory: BufferFactory,
 ): ReadBuffer {
-    if (key.scheme == SignatureScheme.Ed25519) unsupportedEd25519()
-    return appleEcdsaSign(key, message).toReadBuffer(factory)
+    val sig = cryptoKitSign(key, message)
+    val out = factory.allocate(sig.size)
+    out.writeBytes(sig)
+    out.resetForRead()
+    return out
 }
 
 actual suspend fun verifyAsync(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
-): Boolean = appleEcdsaVerify(key, message, signature)
+): Boolean = verify(key, message, signature)
 
-actual suspend fun ed25519AsyncAvailable(): Boolean = false
+actual suspend fun ed25519AsyncAvailable(): Boolean = true
 
-actual val supportsEcdsaSigningFromScalar: Boolean get() = false
+actual val supportsEcdsaSigningFromScalar: Boolean get() = true

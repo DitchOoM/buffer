@@ -6,13 +6,20 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_x25519_agree
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_x25519_generate
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_x25519_public_key
+import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.alloc
+import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
+import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.value
 import platform.CoreFoundation.CFDataGetBytePtr
 import platform.CoreFoundation.CFDataGetLength
@@ -42,6 +49,7 @@ import platform.Security.kSecAttrKeySizeInBits
 import platform.Security.kSecAttrKeyType
 import platform.Security.kSecAttrKeyTypeECSECPrimeRandom
 import platform.Security.kSecKeyAlgorithmECDHKeyExchangeStandard
+import platform.posix.size_tVar
 
 /**
  * Apple key agreement.
@@ -52,16 +60,18 @@ import platform.Security.kSecKeyAlgorithmECDHKeyExchangeStandard
  * small-subgroup peer points are rejected by `SecKeyCreateWithData` / the exchange, surfaced as
  * [InvalidPublicKey]. This file is verified on Mac CI — the Linux dev box does not compile Apple.
  *
- * **X25519** has no Security-framework key type — Curve25519 key agreement lives only in CryptoKit,
- * which is Swift-only and unreachable through Kotlin/Native cinterop without a Swift shim. It is
- * therefore reported unsupported here ([supportsSyncX25519] = `false`) and throws; adding it needs a
- * CryptoKit bridge (tracked as a follow-up — see the PR notes).
+ * **X25519** has no Security-framework key type — Curve25519 key agreement lives only in CryptoKit.
+ * It is wired through the `cryptokitshim` cinterop ([bcks_x25519_generate] / [bcks_x25519_public_key]
+ * / [bcks_x25519_agree]), which calls CryptoKit `Curve25519.KeyAgreement`. Keys use the RFC 7748 raw
+ * encoding (32-byte little-endian scalar / u-coordinate) directly, matching the cross-platform
+ * contract. [supportsSyncX25519] is therefore `true`. The RFC 7748 §6.1 all-zero rejection is applied
+ * by the shared [validateRawSecret] post-check (the `deriveSharedSecret` path runs it via the KDF).
  *
- * Private keys are stored as the Security framework external representation (`0x04‖X‖Y‖scalar`) in a
- * wiped [SecureBuffer]; that encoding round-trips through `SecKeyCreateWithData` for the agreement.
+ * EC private keys are stored as the Security framework external representation (`0x04‖X‖Y‖scalar`) in
+ * a wiped [SecureBuffer]; that encoding round-trips through `SecKeyCreateWithData` for the agreement.
  */
 
-actual val supportsSyncX25519: Boolean = false
+actual val supportsSyncX25519: Boolean = true
 actual val supportsSyncEcdhP256: Boolean = true
 actual val supportsSyncEcdhP384: Boolean = true
 actual val supportsSyncEcdhP521: Boolean = true
@@ -74,9 +84,15 @@ private fun keySizeBits(curve: KeyAgreementCurve): Int =
         KeyAgreementCurve.X25519 -> error("X25519 unsupported on Apple")
     }
 
+private fun requireSupported(curve: KeyAgreementCurve) {
+    if (!supportsSync(curve)) {
+        throw UnsupportedOperationException("${curve.curveName} key agreement is not available on this platform")
+    }
+}
+
 private fun requireEc(curve: KeyAgreementCurve) {
     if (curve == KeyAgreementCurve.X25519 || !supportsSync(curve)) {
-        throw UnsupportedOperationException("${curve.curveName} key agreement is not available on this platform")
+        throw UnsupportedOperationException("${curve.curveName} EC key agreement is not available on this platform")
     }
 }
 
@@ -125,7 +141,8 @@ private fun attributes(
 }
 
 actual fun generateKeyPair(curve: KeyAgreementCurve): KeyAgreementKeyPair {
-    requireEc(curve)
+    requireSupported(curve)
+    if (curve == KeyAgreementCurve.X25519) return generateX25519KeyPair()
     val attrs = attributes(curve, kSecAttrKeyClassPrivate)
     val privKey =
         SecKeyCreateRandomKey(attrs, null) ?: run {
@@ -184,6 +201,7 @@ private fun rawAgreeApple(
 ): PlatformBuffer {
     val curve = privateKey.curve
     require(curve == peerPublicKey.curve) { "private/public key curve mismatch" }
+    if (curve == KeyAgreementCurve.X25519) return rawAgreeX25519(privateKey, peerPublicKey)
     requireEc(curve)
 
     val privData = privateKey.encoded.toNsData()
@@ -233,6 +251,82 @@ private fun rawAgreeApple(
         CFRelease(privAttrs)
         CFRelease(pubAttrs)
     }
+}
+
+// =============================================================================
+// X25519 via the CryptoKit shim (Curve25519.KeyAgreement)
+// =============================================================================
+
+private const val X25519_BYTES = 32
+
+/** Generates an X25519 key pair through CryptoKit; private scalar lands in a wiped SecureBuffer. */
+private fun generateX25519KeyPair(): KeyAgreementKeyPair {
+    memScoped {
+        val privOut = allocArray<ByteVar>(X25519_BYTES)
+        val pubOut = allocArray<ByteVar>(X25519_BYTES)
+        val privLen = alloc<size_tVar>()
+        val pubLen = alloc<size_tVar>()
+        val status =
+            bcks_x25519_generate(
+                privOut.reinterpret(),
+                X25519_BYTES.convert(),
+                privLen.ptr,
+                pubOut.reinterpret(),
+                X25519_BYTES.convert(),
+                pubLen.ptr,
+            )
+        check(status == BCKS_OK) { "X25519 key generation failed (status=$status)" }
+        val privBuf = secureScratch.allocate(X25519_BYTES)
+        for (i in 0 until X25519_BYTES) privBuf.writeByte(privOut[i])
+        privBuf.resetForRead()
+        val pubBuf = BufferFactory.Default.allocate(X25519_BYTES)
+        for (i in 0 until X25519_BYTES) pubBuf.writeByte(pubOut[i])
+        pubBuf.resetForRead()
+        return KeyAgreementKeyPair(
+            KeyAgreementCurve.X25519,
+            KeyAgreementPrivateKey(KeyAgreementCurve.X25519, privBuf),
+            KeyAgreementPublicKey(KeyAgreementCurve.X25519, pubBuf),
+        )
+    }
+}
+
+/**
+ * Raw X25519 agreement through CryptoKit into a wiped SecureBuffer. CryptoKit validates the peer
+ * point and rejects malformed keys (surfaced as [InvalidPublicKey]); the shared
+ * [validateRawSecret] / [deriveFromRawSecret] post-check enforces the RFC 7748 §6.1 all-zero
+ * rejection for low-order points.
+ */
+private fun rawAgreeX25519(
+    privateKey: KeyAgreementPrivateKey,
+    peerPublicKey: KeyAgreementPublicKey,
+): PlatformBuffer {
+    val out = secureScratch.allocate(X25519_BYTES)
+    memScoped {
+        val secretOut = allocArray<ByteVar>(X25519_BYTES)
+        val secretLen = alloc<size_tVar>()
+        var status = -1
+        privateKey.encoded.withRemainingBytes { privPtr, privLen ->
+            peerPublicKey.encoded.withRemainingBytes { peerPtr, peerLen ->
+                status =
+                    bcks_x25519_agree(
+                        privPtr.reinterpret(),
+                        privLen.convert(),
+                        peerPtr.reinterpret(),
+                        peerLen.convert(),
+                        secretOut.reinterpret(),
+                        X25519_BYTES.convert(),
+                        secretLen.ptr,
+                    )
+            }
+        }
+        if (status != BCKS_OK) {
+            out.freeNativeMemory()
+            throw InvalidPublicKey(KeyAgreementCurve.X25519.curveName)
+        }
+        for (i in 0 until X25519_BYTES) out.writeByte(secretOut[i])
+    }
+    out.resetForRead()
+    return out
 }
 
 actual suspend fun generateKeyPairAsync(curve: KeyAgreementCurve): KeyAgreementKeyPair = generateKeyPair(curve)
