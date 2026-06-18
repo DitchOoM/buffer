@@ -43,7 +43,9 @@ class SecureBuffer internal constructor(
                 // position..limit, so widen the window to cover every byte first.
                 inner.position(0)
                 inner.setLimit(inner.capacity)
-                inner.fill(0)
+                // Byte fill (not the Int-pattern overload, which rejects non-multiple-of-4
+                // lengths) so buffers of any capacity — e.g. P-521's 66 bytes — are fully wiped.
+                inner.fill(0.toByte())
             } catch (_: Throwable) {
                 // A best-effort wipe must never mask the real free below; swallow and free.
             }
@@ -87,7 +89,9 @@ internal class SecureBufferFactory(
         val savedLimit = buffer.limit()
         buffer.position(0)
         buffer.setLimit(buffer.capacity)
-        buffer.fill(0)
+        // Byte fill, not the Int-pattern overload: the latter requires the length to be a
+        // multiple of 4 and throws otherwise (e.g. P-521's 66-byte scratch, odd sizes).
+        buffer.fill(0.toByte())
         buffer.position(savedPosition)
         buffer.setLimit(savedLimit)
         return buffer
