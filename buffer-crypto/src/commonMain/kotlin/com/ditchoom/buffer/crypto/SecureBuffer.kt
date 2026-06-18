@@ -43,7 +43,9 @@ class SecureBuffer internal constructor(
                 // position..limit, so widen the window to cover every byte first.
                 inner.position(0)
                 inner.setLimit(inner.capacity)
-                inner.fill(0)
+                // Byte fill (not the Int-pattern overload, which rejects non-multiple-of-4
+                // lengths) so buffers of any capacity — e.g. P-521's 66 bytes — are fully wiped.
+                inner.fill(0.toByte())
             } catch (_: Throwable) {
                 // A best-effort wipe must never mask the real free below; swallow and free.
             }
@@ -66,12 +68,34 @@ internal class SecureBufferFactory(
     override fun allocate(
         size: Int,
         byteOrder: ByteOrder,
-    ): PlatformBuffer = SecureBuffer(delegate.allocate(size, byteOrder))
+    ): PlatformBuffer = SecureBuffer(zeroInit(delegate.allocate(size, byteOrder)))
 
     override fun wrap(
         array: ByteArray,
         byteOrder: ByteOrder,
     ): PlatformBuffer = SecureBuffer(delegate.wrap(array, byteOrder))
+
+    /**
+     * Zero-initializes the full backing of a freshly allocated buffer — the allocate-time mirror
+     * of [SecureBuffer]'s wipe-on-free. Secure scratch must be deterministically zero on every
+     * platform: crypto code (e.g. HKDF's empty-salt zero block) relies on a fresh secure buffer
+     * reading as zero, and the native Linux backing ([com.ditchoom.buffer.NativeBuffer], raw
+     * `malloc`) does not zero on its own. Zeros the whole capacity (not just `remaining()`) so no
+     * slack bytes carry prior contents, then restores the position/limit the delegate handed back
+     * so the `allocate` contract is unchanged (including pooled delegates where capacity > size).
+     */
+    private fun zeroInit(buffer: PlatformBuffer): PlatformBuffer {
+        val savedPosition = buffer.position()
+        val savedLimit = buffer.limit()
+        buffer.position(0)
+        buffer.setLimit(buffer.capacity)
+        // Byte fill, not the Int-pattern overload: the latter requires the length to be a
+        // multiple of 4 and throws otherwise (e.g. P-521's 66-byte scratch, odd sizes).
+        buffer.fill(0.toByte())
+        buffer.position(savedPosition)
+        buffer.setLimit(savedLimit)
+        return buffer
+    }
 }
 
 /**
