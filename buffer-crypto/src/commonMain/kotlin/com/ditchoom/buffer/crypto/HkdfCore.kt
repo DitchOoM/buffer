@@ -49,7 +49,9 @@ internal class HkdfEngine(
         if (salt != null && salt.remaining() > 0) {
             newMac(salt).also { it.update(ikm) }.doFinalInto(dest)
         } else {
-            // Empty salt → a block of zero bytes. The scratch buffer is zero-initialized.
+            // Empty salt → a block of zero bytes (RFC 5869). The secure [scratch] factory
+            // zero-initializes on allocate (see SecureBufferFactory), so this is guaranteed
+            // zero on every platform — not a reliance on the underlying allocator.
             scratch.allocate(hashLen).use { zeroSalt ->
                 newMac(zeroSalt).also { it.update(ikm) }.doFinalInto(dest)
             }
