@@ -76,6 +76,59 @@ tasks.register("buildAll") {
     dependsOn(":buffer:build", ":buffer-compression:build", ":buffer-flow:build", ":buffer-codec:build", ":buffer-codec-schema:build", ":buffer-codec-processor:build", ":buffer-codec-gradle-plugin:build", ":buffer-codec-test:build")
 }
 
+// minSdk-aware aggregate for Android instrumented tests on a SPECIFIC emulator API level.
+//
+// Why this exists: AGP's `connectedAndroidTest` does NOT skip a module whose
+// `minSdk` exceeds the connected device's API level — it logs
+//   "Skipping device '<emu>' for ':module:': minSdkVersion [N] > deviceApiLevel [M]"
+//   "> : No compatible devices connected.[TestRunner] FAILED"
+// and FAILS the task (there is no AGP flag to turn that into a skip). On the CI
+// emulator matrix that means any module with a minSdk above the matrix's lowest
+// API level (e.g. an API-21 leg) red-fails the whole leg even though the emulator
+// booted fine and every compatible module passed. See PR discussion / the
+// `android_integration.yaml` API-21 leg failures.
+//
+// Fix: schedule only the connected-test tasks for modules whose `minSdk` is <= the
+// emulator API level. The level is passed by CI as `-PdeviceApiLevel=<api-level>`
+// (the same value as the emulator matrix entry). When the property is absent every
+// Android module is included (local `connectedCheck`-style runs against whatever
+// device is attached keep their existing all-modules behaviour).
+tasks.register("connectedAndroidTestCompatible") {
+    description = "Run connectedDebugAndroidTest only for Android modules whose minSdk <= -PdeviceApiLevel (defaults to all modules when unset)."
+    group = "verification"
+
+    val deviceApiLevel = (findProperty("deviceApiLevel") as String?)?.toIntOrNull()
+
+    // Android library modules instrumented in CI, paired with the module's declared
+    // minSdk (see each module's build.gradle.kts `android { defaultConfig { minSdk } }`).
+    // This mirrors exactly the set the previous CI command
+    // (`connectedAndroidTest -x connectedBenchmarkAndroidTest`) scheduled: the
+    // debug-variant connected tests. `:buffer` is intentionally absent — it pins
+    // testBuildType = "benchmark", so its only connected variant is
+    // connectedBenchmarkAndroidTest, which the previous command excluded with `-x`
+    // (emulator timings are not representative) and which therefore stays excluded here.
+    // When a new module is added (e.g. buffer-crypto, minSdk 28), add it here with its
+    // minSdk so the API-21 leg cleanly skips it instead of failing.
+    val androidConnectedTests =
+        listOf(
+            Triple(":buffer-compression", ":buffer-compression:connectedDebugAndroidTest", 21),
+            Triple(":buffer-flow", ":buffer-flow:connectedDebugAndroidTest", 21),
+            Triple(":buffer-codec", ":buffer-codec:connectedDebugAndroidTest", 21),
+        )
+
+    androidConnectedTests.forEach { (_, testTaskPath, minSdk) ->
+        val compatible = deviceApiLevel == null || minSdk <= deviceApiLevel
+        if (compatible) {
+            dependsOn(testTaskPath)
+        } else {
+            logger.lifecycle(
+                "connectedAndroidTestCompatible: skipping $testTaskPath " +
+                    "(minSdk=$minSdk > deviceApiLevel=$deviceApiLevel)",
+            )
+        }
+    }
+}
+
 // Copy Dokka output to Docusaurus static directory
 tasks.register<Copy>("copyDokkaToDocusaurus") {
     description = "Generate and copy API documentation to Docusaurus"

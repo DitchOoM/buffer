@@ -138,7 +138,14 @@ jobs:
             # package first makes the install clean and idempotent regardless of
             # what signature the cached copy carried.
             adb shell pm list packages -3 | sed 's/^package://' | grep -i '\.ditchoom\.' | xargs -r -n1 adb uninstall || true
-            ./gradlew connectedAndroidTest -x connectedBenchmarkAndroidTest
+            # connectedAndroidTestCompatible (root build.gradle.kts) schedules only the
+            # connected tests for modules whose minSdk <= this emulator's API level.
+            # AGP fails connectedAndroidTest for a module whose minSdk exceeds the device
+            # API ("No compatible devices connected.[TestRunner] FAILED") instead of
+            # skipping it, which red-failed the API-21 leg the moment a higher-minSdk
+            # module (e.g. buffer-crypto, minSdk 28) was present. Passing the matrix
+            # api-level lets the build drop those modules cleanly on the low-API leg.
+            ./gradlew connectedAndroidTestCompatible -PdeviceApiLevel=${{ matrix.api-level }}
 
       - name: Kill emulator processes
         if: always()
