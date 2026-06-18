@@ -50,14 +50,14 @@ sealed class HpkeContext protected constructor(
         // bytes (96 bits) so seq can never reach the true limit before Long overflow; still, guard
         // explicitly against the documented overflow boundary.
         if (seq == Long.MAX_VALUE) throw MessageLimitReached()
+        // nonce = base_nonce XOR I2OSP(seq, Nn). Default allocation is big-endian, so copy the base
+        // nonce in bulk and XOR the sequence number straight into the trailing 8 bytes as one Long:
+        // I2OSP(seq, Nn) is right-aligned and Nn (12) >= 8, so the leading Nn-8 bytes XOR with zero.
         val nonce = BufferFactory.Default.allocate(nn)
-        // XOR the big-endian seq into the low bytes of base_nonce.
-        val baseStart = baseNonce.position()
-        for (i in 0 until nn) {
-            val shift = (nn - 1 - i) * 8
-            val seqByte = if (shift < 64) ((seq ushr shift) and 0xFF).toInt() else 0
-            nonce.writeByte((baseNonce.get(baseStart + i).toInt() xor seqByte).toByte())
-        }
+        copyInto(baseNonce, nonce)
+        val tailOffset = nn - 8
+        nonce.position(tailOffset)
+        nonce.writeLong(nonce.getLong(tailOffset) xor seq)
         nonce.resetForRead()
         return nonce
     }
@@ -472,13 +472,12 @@ internal fun labeledExtract(
     ikm: ReadBuffer,
     dest: WriteBuffer,
 ) {
-    val suiteIdStart = suiteId.position()
     val suiteIdLen = suiteId.remaining()
     val len = HPKE_V1.size + suiteIdLen + label.size + ikm.remaining()
     val labeled = secureScratch.allocate(len)
     try {
         labeled.writeBytes(HPKE_V1)
-        for (i in 0 until suiteIdLen) labeled.writeByte(suiteId.get(suiteIdStart + i))
+        copyInto(suiteId, labeled)
         labeled.writeBytes(label)
         copyInto(ikm, labeled)
         labeled.resetForRead()
@@ -502,7 +501,6 @@ internal fun labeledExpand(
     length: Int,
     dest: WriteBuffer,
 ) {
-    val suiteIdStart = suiteId.position()
     val suiteIdLen = suiteId.remaining()
     val infoLen = info?.remaining() ?: 0
     val len = 2 + HPKE_V1.size + suiteIdLen + label.size + infoLen
@@ -510,7 +508,7 @@ internal fun labeledExpand(
     try {
         i2osp2(length, labeled)
         labeled.writeBytes(HPKE_V1)
-        for (i in 0 until suiteIdLen) labeled.writeByte(suiteId.get(suiteIdStart + i))
+        copyInto(suiteId, labeled)
         labeled.writeBytes(label)
         if (info != null) copyInto(info, labeled)
         labeled.resetForRead()
