@@ -140,7 +140,7 @@ jobs:
           retention-days: 3
 
       - name: Checkout validation project
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: |
             .ci/validate-resolution

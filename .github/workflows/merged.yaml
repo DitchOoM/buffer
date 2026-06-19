@@ -39,7 +39,7 @@ jobs:
       flow: ${{ steps.check.outputs.flow }}
       gradle-args: ${{ steps.check.outputs.gradle-args }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Determine release flow
@@ -144,7 +144,7 @@ jobs:
     if: always() && needs.check-release.outputs.flow != 'skip' && needs.check-release.outputs.flow != 'dry-run'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Create draft GitHub release
         if: needs.check-release.outputs.flow == 'draft' && needs.publish.result == 'success'
