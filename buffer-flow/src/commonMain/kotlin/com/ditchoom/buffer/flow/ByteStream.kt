@@ -71,6 +71,16 @@ interface ByteSink {
 
     /** Gather-writes [buffers] using the injected [writePolicy]. */
     suspend fun writeGathered(buffers: List<ReadBuffer>): BytesWritten = writeGathered(buffers, writePolicy.toDeadline())
+
+    /**
+     * Finish/close the **send** side (a stream-level FIN), so the peer sees end-of-send. Idempotent.
+     *
+     * This is the byte-layer mirror of [Sender.close]: a send-only [ByteSink] must announce its end,
+     * while a receive-only [ByteSource] only discovers it (via [ReadResult.End]). Defaults to a no-op
+     * so a simple sink (e.g. a test recorder) needs nothing; real send streams (QUIC / WebTransport uni
+     * streams) override it to FIN. A duplex [ByteStream] re-abstracts this as its full-stream [close].
+     */
+    suspend fun close() {}
 }
 
 /**
@@ -93,7 +103,8 @@ interface ByteSink {
 interface ByteStream :
     ByteSource,
     ByteSink {
-    suspend fun close()
+    /** Close the whole stream (re-abstracts [ByteSink.close], which is send-side-only). */
+    override suspend fun close()
 }
 
 /**
