@@ -374,8 +374,7 @@ internal class NSDataBufferSlice(
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
-    override fun slice(byteOrder: ByteOrder): ReadBuffer =
-        NSDataBufferSlice(parent, sliceOffset + position, limit - position, byteOrder)
+    override fun slice(byteOrder: ByteOrder): ReadBuffer = NSDataBufferSlice(parent, sliceOffset + position, limit - position, byteOrder)
 
     override fun readByteArray(size: Int): ByteArray {
         if (size < 1) {
