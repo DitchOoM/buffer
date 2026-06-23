@@ -284,6 +284,44 @@ BufferFactory.deterministic().secure().allocate(32).use { buffer ->
 }
 ```
 
+## Feature detection — `CryptoCapabilities`
+
+The individual `supports…` flags used throughout this guide (`supportsSyncAesGcm`,
+`supportsChaChaPoly`, `supportsSyncEd25519`, …) are gathered behind one discoverable surface,
+`CryptoCapabilities`, so you can branch on availability — and pick the synchronous vs `suspend`
+path — from a single place. Every member is a thin alias over the same `supports…` source of
+truth; the facade just makes them easy to find.
+
+Availability has **two axes**: `anyPath` ("works via *some* path — sync or `suspend` async") and
+`sync` ("a non-`suspend` entry point exists"). WebCrypto primitives on JS/WASM are async-only, so
+they report `anyPath = true` but `sync = false`.
+
+```kotlin
+import com.ditchoom.buffer.crypto.CryptoCapabilities
+
+// AEAD: prefer the sync one-shot, fall back to the async path where only that exists (web).
+val sealed =
+    if (CryptoCapabilities.aesGcm.sync) aesGcmSeal(key, nonce, plaintext, dest)
+    else aesGcmSealAsync(key, nonce, plaintext, dest)
+
+// ChaCha20-Poly1305 is unavailable by *either* path on JS/WASM.
+if (CryptoCapabilities.chaChaPoly.anyPath) { /* … */ }
+
+// Signatures and key agreement expose their synchronous availability directly.
+if (CryptoCapabilities.ed25519Sync) sign(privateScalar, message, dest)
+if (CryptoCapabilities.keyAgreementSync(KeyAgreementCurve.X25519)) { /* … */ }
+
+// ECDSA verify is universal; signing from a bare scalar is gated off on Apple.
+if (CryptoCapabilities.ecdsaSigningFromScalar) { /* sign from a raw private scalar */ }
+
+// HPKE: check the whole suite (its KEM curve *and* AEAD must both be available).
+if (CryptoCapabilities.hpke(suite)) { /* set up sender/receiver */ }
+```
+
+`CryptoCapabilities.aead(HpkeAead.Aes256Gcm)` maps an HPKE AEAD id to its `AeadAvailability`. The
+per-platform results of these checks are the [capability matrix](#per-platform-capability-matrix)
+below.
+
 ## Security model
 
 The full threat model lives in [`buffer-crypto/SECURITY.md`](https://github.com/DitchOoM/buffer/blob/main/buffer-crypto/SECURITY.md). In brief:
