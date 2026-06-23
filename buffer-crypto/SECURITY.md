@@ -149,6 +149,13 @@ prevented by API/type design · **(e)** out of scope / documented trust assumpti
 | Sender-auth (Auth/AuthPSK) forgery | **(a)** KAT + negative test: a receiver authenticating the wrong sender key fails to verify |
 | Suite primitive unavailable (ChaCha on web, X25519 where absent) | **(b)/(d)** gated `false` → `UnsupportedOperationException`, never a silent fallback + capability test |
 
+### Resource exhaustion / denial-of-service (cross-cutting)
+| Vector | Defense |
+|---|---|
+| Attacker-controlled length reaches a secure allocation (unbounded native-memory request) | **(b)/(d)** `BufferFactory.secure(maxAllocationBytes = …)` caps every secure `allocate`/`wrap`; an over-limit request throws `IllegalArgumentException` in common code **before** any platform allocation, so the bound is byte-identical on every target. Callers parsing untrusted, length-prefixed input set the cap to the largest secret their protocol can legitimately hold. |
+| Message-sequence overflow forcing nonce reuse | **(d)** HPKE per-context monotonic seq throws `MessageLimitReached` before wrap (see §3 HPKE) |
+| `L > 255·HashLen` HKDF expansion | **(a)/(b)** length cap (see §3 KDF/MAC) |
+
 ## 4. Platform support & capability gating
 
 These are tested error paths, not assumptions — the capability flag drives a `true`→works /
@@ -215,3 +222,28 @@ Runtime: `kotlinx-coroutines-core` (the `*Async` wrappers await WebCrypto promis
 `kotlinx-serialization-json` (parses vendored Wycheproof vectors; never shipped) and
 `kotlinx-coroutines-test`. No third-party cryptographic dependency is bundled — every primitive
 is the platform's own. No known-vulnerable dependency versions are in use.
+
+## 8. Supply-chain & build integrity
+
+The threat model extends past the source: a consumer must be able to trust that the published
+artifact was built from this repository by this CI, untampered. The controls, mapped to STRIDE
+**Tampering** and **Denial-of-Service** at the build layer:
+
+- **SLSA build provenance.** Every release attaches a signed provenance attestation
+  (`actions/attest-build-provenance`, GitHub OIDC) binding the published jars/klibs/aars to the
+  workflow, commit, and runner that produced them. Verify with
+  `gh attestation verify <artifact> --repo ditchoom/buffer`.
+- **SBOM.** A CycloneDX SBOM is generated from the exact published artifact set, attached to the
+  GitHub release, and itself attested.
+- **Pinned, immutable actions.** Every third-party GitHub Action is pinned to a full commit SHA
+  (with the human-readable tag in a trailing comment); Dependabot updates the pin + comment
+  together. A retagged/compromised action cannot silently enter the build.
+- **Least-privilege tokens.** Workflows default to a read-only `GITHUB_TOKEN`; write scopes
+  (`contents`, `attestations`, `id-token`) are granted per-job only where required. The
+  `pull_request_target` release workflow in particular runs read-only except for the single
+  tag/release/attestation job.
+- **Static analysis & posture scoring.** CodeQL (`security-extended`) runs on every PR and weekly;
+  OpenSSF Scorecard runs weekly and on push to `main`, surfacing branch-protection, token, and
+  pinning regressions.
+- **Signed publication.** Maven Central artifacts are PGP-signed (detached `.asc`) with checksums,
+  produced only on `main`.

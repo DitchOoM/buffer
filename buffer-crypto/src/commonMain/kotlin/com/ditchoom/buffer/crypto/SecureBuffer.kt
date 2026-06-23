@@ -61,19 +61,43 @@ class SecureBuffer internal constructor(
  * over any delegate factory — `BufferFactory.deterministic().secure()`,
  * `someFactory.withPooling(pool).secure()`, etc. — so the secure-erase behavior layers
  * on top of whatever allocation strategy the delegate provides.
+ *
+ * [maxAllocationBytes] is an explicit upper bound on any single secure allocation. Secure
+ * buffers hold key material and scratch, which is small; a request larger than the bound is
+ * almost always a bug or an attacker-supplied length reaching `allocate`. Enforcing the cap
+ * turns an unbounded native-memory request (a denial-of-service vector) into a deterministic
+ * [IllegalArgumentException], thrown in common code before any platform allocation, so the
+ * behavior is byte-identical on every target.
  */
 internal class SecureBufferFactory(
     private val delegate: BufferFactory,
+    private val maxAllocationBytes: Int,
 ) : BufferFactory {
+    init {
+        require(maxAllocationBytes >= 1) {
+            "maxAllocationBytes must be >= 1, was $maxAllocationBytes"
+        }
+    }
+
     override fun allocate(
         size: Int,
         byteOrder: ByteOrder,
-    ): PlatformBuffer = SecureBuffer(zeroInit(delegate.allocate(size, byteOrder)))
+    ): PlatformBuffer {
+        require(size in 0..maxAllocationBytes) {
+            "secure allocation of $size bytes exceeds the configured maximum of $maxAllocationBytes"
+        }
+        return SecureBuffer(zeroInit(delegate.allocate(size, byteOrder)))
+    }
 
     override fun wrap(
         array: ByteArray,
         byteOrder: ByteOrder,
-    ): PlatformBuffer = SecureBuffer(delegate.wrap(array, byteOrder))
+    ): PlatformBuffer {
+        require(array.size <= maxAllocationBytes) {
+            "secure wrap of ${array.size} bytes exceeds the configured maximum of $maxAllocationBytes"
+        }
+        return SecureBuffer(delegate.wrap(array, byteOrder))
+    }
 
     /**
      * Zero-initializes the full backing of a freshly allocated buffer — the allocate-time mirror
@@ -107,5 +131,17 @@ internal class SecureBufferFactory(
  * val secure = BufferFactory.deterministic().secure()
  * secure.allocate(32).use { key -> /* ... */ } // zeroed at end of block
  * ```
+ *
+ * Pass [maxAllocationBytes] to bound every secure allocation/wrap — a defense against
+ * resource-exhaustion (DoS) when an untrusted, length-prefixed input can reach `allocate`.
+ * Requests above the bound throw [IllegalArgumentException] before any memory is reserved.
+ * The default is unbounded ([Int.MAX_VALUE]); set it to the largest secret your protocol can
+ * legitimately hold (key material is normally well under a kilobyte):
+ * ```kotlin
+ * val secure = BufferFactory.deterministic().secure(maxAllocationBytes = 4 * 1024)
+ * secure.allocate(attackerControlledLength) // throws if length > 4096
+ * ```
+ *
+ * @param maxAllocationBytes upper bound, in bytes, on a single secure buffer. Must be >= 1.
  */
-fun BufferFactory.secure(): BufferFactory = SecureBufferFactory(this)
+fun BufferFactory.secure(maxAllocationBytes: Int = Int.MAX_VALUE): BufferFactory = SecureBufferFactory(this, maxAllocationBytes)

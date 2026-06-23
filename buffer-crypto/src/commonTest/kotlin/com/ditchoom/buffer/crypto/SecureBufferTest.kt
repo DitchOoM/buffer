@@ -4,6 +4,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.managed
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class SecureBufferTest {
@@ -42,5 +43,40 @@ class SecureBufferTest {
         buf.freeNativeMemory()
         buf.freeNativeMemory()
         for (i in 0 until 8) assertEquals(0, buf.get(i).toInt())
+    }
+
+    // --- DoS cap: maxAllocationBytes ---
+
+    @Test
+    fun allocateWithinCapSucceeds() {
+        val secure = BufferFactory.managed().secure(maxAllocationBytes = 64)
+        assertTrue(secure.allocate(64) is SecureBuffer)
+        assertTrue(secure.allocate(0) is SecureBuffer)
+    }
+
+    @Test
+    fun allocateAboveCapThrows() {
+        val secure = BufferFactory.managed().secure(maxAllocationBytes = 64)
+        assertFailsWith<IllegalArgumentException> { secure.allocate(65) }
+    }
+
+    @Test
+    fun wrapAboveCapThrows() {
+        val secure = BufferFactory.managed().secure(maxAllocationBytes = 4)
+        assertFailsWith<IllegalArgumentException> { secure.wrap(ByteArray(5)) }
+        // At the boundary it still succeeds.
+        assertTrue(secure.wrap(ByteArray(4)) is SecureBuffer)
+    }
+
+    @Test
+    fun nonPositiveCapIsRejected() {
+        assertFailsWith<IllegalArgumentException> { BufferFactory.managed().secure(maxAllocationBytes = 0) }
+        assertFailsWith<IllegalArgumentException> { BufferFactory.managed().secure(maxAllocationBytes = -1) }
+    }
+
+    @Test
+    fun defaultCapIsUnbounded() {
+        // No cap argument == backward-compatible unbounded behavior.
+        assertTrue(BufferFactory.managed().secure().allocate(1 shl 20) is SecureBuffer)
     }
 }
