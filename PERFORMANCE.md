@@ -118,6 +118,27 @@ BufferFactory.deterministic().allocate(1024).use { buffer ->
 | WASM | LinearBuffer (already deterministic) |
 | JS | JsBuffer (GC-managed, no alternative) |
 
+## Secure Buffers (`buffer-crypto`)
+
+For repeatedly held, fixed-size key material, **`secureFixedPool(size)` is the hot-path choice** — it
+reuses pooled buffers (no native alloc/free per operation) while keeping the zero-init/wipe at
+O(size). `SecurePoolBenchmark` (alloc → write a 32-byte key → free), ops/sec, higher is better:
+
+| Strategy | JVM | macOS arm64 |
+|----------|-----|-------------|
+| `BufferFactory.deterministic()` (no secure layer, baseline) | 7,270,877 | 6,710,915 |
+| **`secureFixedPool(32)`** | **7,235,088** | **6,906,352** |
+| `deterministic().secure()` (non-pooled) | 4,216,004 | 5,453,803 |
+| secure over a 64 KiB shared pool (O(capacity) wipe) | 34,227 | 945,480 |
+
+Takeaways:
+- `secureFixedPool` matches the plain-allocation baseline — the secure layer is essentially free —
+  and is **1.7× (JVM) / 1.3× (Native)** faster than non-pooled `deterministic().secure()`. The two
+  per-op wrappers (pooled + secure) do not dominate, even on Kotlin/Native.
+- **Never pool key material in a large shared pool.** The wipe is O(capacity), so wiping a 64 KiB
+  buffer to protect a 32-byte key is 211× (JVM) / 7× (Native) slower. `BufferPool.withSecureBuffer`
+  is for convenience/correctness on an existing pool, not a hot path; reach for `secureFixedPool`.
+
 ## Running Benchmarks
 
 ### kotlinx-benchmark (JVM, JS, WasmJS, Native)
