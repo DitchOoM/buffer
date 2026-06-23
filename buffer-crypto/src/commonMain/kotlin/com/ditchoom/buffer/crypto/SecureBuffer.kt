@@ -132,11 +132,13 @@ internal class SecureBufferFactory(
  * secure.allocate(32).use { key -> /* ... */ } // zeroed at end of block
  * ```
  *
- * Pass [maxAllocationBytes] to bound every secure allocation/wrap — a defense against
+ * [maxAllocationBytes] bounds every secure allocation/wrap — a defense against
  * resource-exhaustion (DoS) when an untrusted, length-prefixed input can reach `allocate`.
  * Requests above the bound throw [IllegalArgumentException] before any memory is reserved.
- * The default is unbounded ([Int.MAX_VALUE]); set it to the largest secret your protocol can
- * legitimately hold (key material is normally well under a kilobyte):
+ * It defaults to a generous 16 MiB backstop ([DEFAULT_MAX_SECURE_ALLOCATION_BYTES]) so the
+ * safe behavior is the default — no realistic key material or crypto scratch approaches it.
+ * Pass a tighter, protocol-specific bound when an attacker controls the length (key material
+ * is normally well under a kilobyte):
  * ```kotlin
  * val secure = BufferFactory.deterministic().secure(maxAllocationBytes = 4 * 1024)
  * secure.allocate(attackerControlledLength) // throws if length > 4096
@@ -144,4 +146,12 @@ internal class SecureBufferFactory(
  *
  * @param maxAllocationBytes upper bound, in bytes, on a single secure buffer. Must be >= 1.
  */
-fun BufferFactory.secure(maxAllocationBytes: Int = Int.MAX_VALUE): BufferFactory = SecureBufferFactory(this, maxAllocationBytes)
+fun BufferFactory.secure(maxAllocationBytes: Int = DEFAULT_MAX_SECURE_ALLOCATION_BYTES): BufferFactory =
+    SecureBufferFactory(this, maxAllocationBytes)
+
+/**
+ * Default upper bound for [secure]: a 16 MiB backstop. Generous enough that no legitimate key
+ * material or crypto scratch reaches it, small enough to bound a runaway or attacker-driven
+ * allocation. Override with a tighter, protocol-specific cap when parsing untrusted input.
+ */
+const val DEFAULT_MAX_SECURE_ALLOCATION_BYTES: Int = 16 * 1024 * 1024

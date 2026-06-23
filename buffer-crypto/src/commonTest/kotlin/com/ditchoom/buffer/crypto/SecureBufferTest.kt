@@ -75,8 +75,13 @@ class SecureBufferTest {
     }
 
     @Test
-    fun defaultCapIsUnbounded() {
-        // No cap argument == backward-compatible unbounded behavior.
-        assertTrue(BufferFactory.managed().secure().allocate(1 shl 20) is SecureBuffer)
+    fun defaultCapIsFiniteBackstop() {
+        val secure = BufferFactory.managed().secure() // default == DEFAULT_MAX_SECURE_ALLOCATION_BYTES
+        // A request above the default backstop is rejected before any allocation (no 16 MiB alloc).
+        assertFailsWith<IllegalArgumentException> {
+            secure.allocate(DEFAULT_MAX_SECURE_ALLOCATION_BYTES + 1)
+        }
+        // A normal key-material-sized allocation still succeeds.
+        assertTrue(secure.allocate(64) is SecureBuffer)
     }
 }

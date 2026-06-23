@@ -152,7 +152,7 @@ prevented by API/type design · **(e)** out of scope / documented trust assumpti
 ### Resource exhaustion / denial-of-service (cross-cutting)
 | Vector | Defense |
 |---|---|
-| Attacker-controlled length reaches a secure allocation (unbounded native-memory request) | **(b)/(d)** `BufferFactory.secure(maxAllocationBytes = …)` caps every secure `allocate`/`wrap`; an over-limit request throws `IllegalArgumentException` in common code **before** any platform allocation, so the bound is byte-identical on every target. Callers parsing untrusted, length-prefixed input set the cap to the largest secret their protocol can legitimately hold. |
+| Attacker-controlled length reaches a secure allocation (unbounded native-memory request) | **(b)/(d)** `BufferFactory.secure(maxAllocationBytes = …)` caps every secure `allocate`/`wrap`; an over-limit request throws `IllegalArgumentException` in common code **before** any platform allocation, so the bound is byte-identical on every target. The cap defaults to a 16 MiB backstop (`DEFAULT_MAX_SECURE_ALLOCATION_BYTES`) — secure-by-default — and callers parsing untrusted, length-prefixed input set a tighter, protocol-specific bound. |
 | Message-sequence overflow forcing nonce reuse | **(d)** HPKE per-context monotonic seq throws `MessageLimitReached` before wrap (see §3 HPKE) |
 | `L > 255·HashLen` HKDF expansion | **(a)/(b)** length cap (see §3 KDF/MAC) |
 
