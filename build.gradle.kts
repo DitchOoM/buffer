@@ -181,7 +181,7 @@ tasks.register("connectedAndroidTestCompatible") {
 tasks.register<Copy>("copyDokkaToDocusaurus") {
     description = "Generate and copy API documentation to Docusaurus"
     group = "documentation"
-    dependsOn(":buffer:dokkaGenerateHtml", ":buffer-compression:dokkaGenerateHtml", ":buffer-flow:dokkaGenerateHtml", ":buffer-codec:dokkaGenerateHtml")
+    dependsOn(":buffer:dokkaGenerateHtml", ":buffer-compression:dokkaGenerateHtml", ":buffer-flow:dokkaGenerateHtml", ":buffer-codec:dokkaGenerateHtml", ":buffer-crypto:dokkaGenerateHtml")
 
     from(layout.projectDirectory.dir("buffer/build/dokka/html")) {
         into("buffer")
@@ -194,6 +194,9 @@ tasks.register<Copy>("copyDokkaToDocusaurus") {
     }
     from(layout.projectDirectory.dir("buffer-codec/build/dokka/html")) {
         into("buffer-codec")
+    }
+    from(layout.projectDirectory.dir("buffer-crypto/build/dokka/html")) {
+        into("buffer-crypto")
     }
     into(layout.projectDirectory.dir("docs/static/api"))
 }
