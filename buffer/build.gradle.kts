@@ -535,6 +535,13 @@ benchmark {
             iterations = 2
             include("BufferBaseline")
         }
+        register("securePool") {
+            warmups = 3
+            iterations = 5
+            iterationTime = 500
+            iterationTimeUnit = "ms"
+            include("SecurePool")
+        }
     }
 }
 

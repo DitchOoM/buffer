@@ -94,6 +94,30 @@ interface BufferFactory {
         byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN,
     ): PlatformBuffer
 
+    /**
+     * Wraps an **already-allocated** [buffer] in this factory's per-buffer decoration, if any.
+     *
+     * The default is the identity function: most factories add their behavior at allocation
+     * time and have nothing to layer onto a pre-existing buffer. Only *wrapping* decorators —
+     * factories whose contribution is a [PlatformBuffer] wrapper rather than an allocation
+     * strategy — override this. The canonical example is the secure-erase factory, whose
+     * `decorate` returns a wrapper that zeroes the backing on free.
+     *
+     * This exists so a wrapping decorator's behavior is preserved even when the buffer does
+     * not come from its own `allocate`. In particular [withPooling] borrows a buffer from a
+     * pool and then calls `delegate.decorate(borrowed)`, so `secure().withPooling(pool)` and
+     * `withPooling(pool).secure()` both yield a secure-wrapped pooled buffer (wipe-on-free,
+     * then return-to-pool) — the composition order stops mattering.
+     *
+     * Contract: `decorate` must **wrap an existing buffer, never allocate**. Transparent
+     * decorators that add no per-buffer wrapper should forward to their delegate's `decorate`
+     * so an inner wrapping decorator still gets a chance to wrap.
+     *
+     * @param buffer an existing buffer to decorate
+     * @return [buffer] wrapped in this factory's decoration, or [buffer] unchanged
+     */
+    fun decorate(buffer: PlatformBuffer): PlatformBuffer = buffer
+
     companion object
 }
 
@@ -289,6 +313,9 @@ internal class RequiringFactory(
         }
         return buffer
     }
+
+    // Transparent decorator: forward so an inner wrapping decorator (e.g. secure()) can wrap.
+    override fun decorate(buffer: PlatformBuffer): PlatformBuffer = delegate.decorate(buffer)
 }
 
 @PublishedApi
@@ -326,6 +353,9 @@ internal class PreferringFactory(
         array: ByteArray,
         byteOrder: ByteOrder,
     ): PlatformBuffer = delegate.wrap(array, byteOrder)
+
+    // Transparent decorator: forward so an inner wrapping decorator (e.g. secure()) can wrap.
+    override fun decorate(buffer: PlatformBuffer): PlatformBuffer = delegate.decorate(buffer)
 }
 
 internal class SizeLimitedFactory(
@@ -351,6 +381,10 @@ internal class SizeLimitedFactory(
         }
         return delegate.wrap(array, byteOrder)
     }
+
+    // Transparent decorator: the size guard is allocation-time only; forward so an inner
+    // wrapping decorator (e.g. secure()) can wrap a borrowed buffer.
+    override fun decorate(buffer: PlatformBuffer): PlatformBuffer = delegate.decorate(buffer)
 }
 
 internal class PoolingFactory(
@@ -362,8 +396,15 @@ internal class PoolingFactory(
         byteOrder: ByteOrder,
     ): PlatformBuffer {
         val buffer = pool.acquire(size)
-        if (buffer is PlatformBuffer && buffer.byteOrder == byteOrder) return buffer
-        // Byte order mismatch or not a PlatformBuffer — release back and allocate fresh
+        // Apply the delegate's per-buffer decoration to the pool-borrowed buffer. For a plain
+        // delegate this is identity; for a wrapping delegate like secure() it returns e.g.
+        // SecureBuffer(zeroInit(pooled)) so freeNativeMemory() wipes the buffer *then* returns
+        // it to the pool. This makes secure().withPooling(pool) wipe correctly — the secure
+        // layer no longer has to be the outermost factory.
+        if (buffer is PlatformBuffer && buffer.byteOrder == byteOrder) return delegate.decorate(buffer)
+        // Byte order mismatch or not a PlatformBuffer — release back and allocate fresh.
+        // delegate.allocate already applies the delegate's decoration (e.g. secure-wraps),
+        // so this fallback path is decorated too; just not pooled.
         pool.release(buffer)
         return delegate.allocate(size, byteOrder)
     }
@@ -372,4 +413,8 @@ internal class PoolingFactory(
         array: ByteArray,
         byteOrder: ByteOrder,
     ): PlatformBuffer = delegate.wrap(array, byteOrder)
+
+    // A pool cannot pool an externally-owned buffer, so decoration is the delegate's only
+    // contribution here — forward it. (PoolingFactory itself adds no per-buffer wrapper.)
+    override fun decorate(buffer: PlatformBuffer): PlatformBuffer = delegate.decorate(buffer)
 }
