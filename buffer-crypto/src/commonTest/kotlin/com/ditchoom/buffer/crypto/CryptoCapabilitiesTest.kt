@@ -36,7 +36,13 @@ class CryptoCapabilitiesTest {
 
     @Test
     fun keyAgreementMirrorsUnderlyingForEveryCurve() {
-        val curves = listOf(KeyAgreementCurve.X25519, KeyAgreementCurve.P256, KeyAgreementCurve.P384, KeyAgreementCurve.P521)
+        val curves =
+            listOf(
+                KeyAgreementCurve.X25519,
+                KeyAgreementCurve.P256,
+                KeyAgreementCurve.P384,
+                KeyAgreementCurve.P521,
+            )
         for (curve in curves) {
             assertEquals(supportsSync(curve), CryptoCapabilities.keyAgreementSync(curve), "curve $curve")
         }
