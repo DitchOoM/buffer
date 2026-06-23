@@ -50,6 +50,12 @@ open class SecurePoolBenchmark {
     private val keySize = 32
     private val sharedSize = 64 * 1024
 
+    // Four distinct 8-byte lanes that fill the 32-byte test "key" — arbitrary non-zero patterns.
+    private val keyLane0 = 0x0102030405060708L
+    private val keyLane1 = 0x1112131415161718L
+    private val keyLane2 = 0x2122232425262728L
+    private val keyLane3 = 0x3132333435363738L
+
     private lateinit var secureDeterministic: BufferFactory
     private lateinit var secureFixedPool: BufferFactory
     private lateinit var secureSharedPool: BufferFactory
@@ -70,10 +76,10 @@ open class SecurePoolBenchmark {
     /** Writes a 32-byte "key", reads one long back (defeats DCE), frees. */
     private inline fun cycle(factory: BufferFactory): Long {
         val buf = factory.allocate(keySize)
-        buf.writeLong(0x0102030405060708L)
-        buf.writeLong(0x1112131415161718L)
-        buf.writeLong(0x2122232425262728L)
-        buf.writeLong(0x3132333435363738L)
+        buf.writeLong(keyLane0)
+        buf.writeLong(keyLane1)
+        buf.writeLong(keyLane2)
+        buf.writeLong(keyLane3)
         buf.position(0)
         val first = buf.readLong()
         buf.freeNativeMemory()

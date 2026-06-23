@@ -159,7 +159,9 @@ internal fun zeroInitBuffer(buffer: PlatformBuffer): PlatformBuffer {
  *   or pooled buffer whose prior contents must not leak in). Defaults to false — wrapping a buffer
  *   whose existing bytes are the secret you want protected, which must not be destroyed.
  */
-fun PlatformBuffer.toSecureBuffer(zeroFirst: Boolean = false): PlatformBuffer = SecureBuffer(if (zeroFirst) zeroInitBuffer(this) else this)
+fun PlatformBuffer.toSecureBuffer(zeroFirst: Boolean = false): PlatformBuffer = SecureBuffer(zeroInitIf(zeroFirst))
+
+private fun PlatformBuffer.zeroInitIf(zero: Boolean): PlatformBuffer = if (zero) zeroInitBuffer(this) else this
 
 /**
  * Returns a factory whose buffers zero their backing storage when freed (see [SecureBuffer]).
