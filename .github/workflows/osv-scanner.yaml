@@ -16,10 +16,11 @@ name: "OSV-Scanner (SBOM CVE scan)"
 # un-actionable advisory doesn't wedge every merge.
 
 on:
+  # No paths-ignore: as a required status check this must run on EVERY PR, otherwise a
+  # docs-only PR (where the workflow would be skipped) leaves the required `scan` context
+  # pending forever and can never merge.
   pull_request:
     branches: [main]
-    paths-ignore:
-      - "**/*.md"
   push:
     branches: [main]
   schedule:
