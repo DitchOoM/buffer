@@ -49,6 +49,16 @@ jobs:
           java-version: "21"
           cache: gradle
 
+      # publishToMavenLocal builds buffer-crypto's linuxArm64 publication, which cross-compiles
+      # BoringSSL (buildBoringsslArm64) with the aarch64 toolchain. Without these the cmake step
+      # fails (exit 1) and the SBOM build dies before OSV-Scanner ever runs — see build-linux.yaml,
+      # which installs the same compilers. Only the compilers are needed here (no qemu/runtime
+      # libs): this job compiles the arm64 artifacts but never executes them.
+      - name: Install ARM64 cross-compiler (for buffer-crypto BoringSSL arm64)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
       # Materialize the artifacts so Syft resolves the full dependency set (the same input
       # the release SBOM is built from). publishToMavenLocal runs the prePublishCheck gate;
       # use a plain build of the published modules instead to keep this scan fast.
