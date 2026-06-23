@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>MaxLineLength:AbstractCodecSchemaTask.kt:AbstractCodecSchemaTask$@DisableCachingByDefault(because = "Schema diffing is fast and reads a source-controlled baseline; caching adds no value")</ID>
+    <ID>ReturnCount:CheckCodecSchemaTask.kt:CheckCodecSchemaTask$@TaskAction fun check</ID>
+  </CurrentIssues>
+</SmellBaseline>

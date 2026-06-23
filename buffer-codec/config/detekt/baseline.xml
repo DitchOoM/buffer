@@ -1,0 +1,28 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>MagicNumber:AsciiStringCodec.kt:AsciiStringCodec$0x7F</ID>
+    <ID>MagicNumber:AsciiStringCodec.kt:AsciiStringCodec$16</ID>
+    <ID>MagicNumber:AsciiStringCodec.kt:AsciiStringCodec$4</ID>
+    <ID>MagicNumber:GrowableWriteBuffer.kt:GrowableWriteBuffer$4</ID>
+    <ID>MagicNumber:GrowableWriteBuffer.kt:GrowableWriteBuffer$8</ID>
+    <ID>MagicNumber:UnsignedVarIntCodec.kt:UnsignedVarIntCodec$0x70</ID>
+    <ID>MagicNumber:UnsignedVarIntCodec.kt:UnsignedVarIntCodec$0x7F</ID>
+    <ID>MagicNumber:UnsignedVarIntCodec.kt:UnsignedVarIntCodec$0x7Fu</ID>
+    <ID>MagicNumber:UnsignedVarIntCodec.kt:UnsignedVarIntCodec$0x80</ID>
+    <ID>MagicNumber:UnsignedVarIntCodec.kt:UnsignedVarIntCodec$0x80u</ID>
+    <ID>MagicNumber:UnsignedVarIntCodec.kt:UnsignedVarIntCodec$7</ID>
+    <ID>MatchingDeclarationName:OwnedBytesHandle.jvmCommon.kt:OwnedBytesHandle</ID>
+    <ID>MatchingDeclarationName:OwnedBytesHandle.wasmJs.kt:OwnedBytesHandle</ID>
+    <ID>MaxLineLength:CodecContext.kt:DecodeMapContext$override fun toString: String</ID>
+    <ID>MaxLineLength:CodecContext.kt:EncodeMapContext$override fun toString: String</ID>
+    <ID>MaxLineLength:FramedEncoderPoolLifecycleTests.kt:FramedEncoderPoolLifecycleTests$assertEquals(1, pool.stats().currentPoolSize, "freeNativeMemory on the encoded slice must return the chunk to the pool")</ID>
+    <ID>MaxLineLength:FramedEncoderPoolLifecycleTests.kt:FramedEncoderPoolLifecycleTests$assertEquals(expected.size, actual.size, "$label: size mismatch (expected ${expected.size}, got ${actual.size})")</ID>
+    <ID>MaxLineLength:FramedEncoderPoolLifecycleTests.kt:FramedEncoderPoolLifecycleTests$assertEquals(iterations.toLong(), stats.totalAllocations, "Each iteration must hit the pool factory exactly once")</ID>
+    <ID>MaxLineLength:GrowableWriteBuffer.kt:GrowableWriteBuffer$private fun requireInner: PlatformBuffer</ID>
+    <ID>MaxLineLength:UnsignedVarIntCodecTest.kt:UnsignedVarIntCodecTest$assertEquals(VarLenPeek.Decoded(value, width), UnsignedVarIntCodec.peekValue(stream), "value $value complete")</ID>
+    <ID>MaxLineLength:UnsignedVarIntCodecTest.kt:UnsignedVarIntCodecTest$assertEquals(VarLenPeek.NeedsMoreData, UnsignedVarIntCodec.peekValue(stream), "value $value after ${i + 1} bytes")</ID>
+    <ID>TooManyFunctions:GrowableWriteBuffer.kt:GrowableWriteBuffer : WriteBuffer</ID>
+  </CurrentIssues>
+</SmellBaseline>

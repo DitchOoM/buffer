@@ -1,0 +1,85 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:JvmCommonStreamingCompression.kt:JvmGzipStreamingDecompressor$private fun parseOptionalGzipFields: Boolean</ID>
+    <ID>LargeClass:CompressionStressTests.kt:CompressionStressTests</ID>
+    <ID>LargeClass:StreamingCompressionTests.kt:StreamingCompressionTests</ID>
+    <ID>LongMethod:StreamProcessorIntegrationTests.kt:StreamProcessorIntegrationTests$@Test fun interleavedReadAndAppendWithSuspendingProcessor</ID>
+    <ID>LoopWithTooManyJumpStatements:AppleCompression.kt:while</ID>
+    <ID>LoopWithTooManyJumpStatements:JsInteropActual.kt:while</ID>
+    <ID>LoopWithTooManyJumpStatements:LinuxCompression.kt:while</ID>
+    <ID>MagicNumber:AppleCompression.kt:5</ID>
+    <ID>MagicNumber:Compression.kt:4</ID>
+    <ID>MagicNumber:Compression.kt:CompressionLevel.Custom$9</ID>
+    <ID>MagicNumber:JvmCommonStreamingCompression.kt:JvmGzipStreamingCompressor$0xFFFFFFFFL</ID>
+    <ID>MagicNumber:JvmCommonStreamingCompression.kt:JvmGzipStreamingDecompressor$0xFF</ID>
+    <ID>MagicNumber:JvmCommonStreamingCompression.kt:JvmGzipStreamingDecompressor$10</ID>
+    <ID>MagicNumber:JvmCommonStreamingCompression.kt:JvmGzipStreamingDecompressor$12</ID>
+    <ID>MagicNumber:JvmCommonStreamingCompression.kt:JvmGzipStreamingDecompressor$3</ID>
+    <ID>MagicNumber:StreamingCompression.kt:0x00000000000000FFL</ID>
+    <ID>MagicNumber:StreamingCompression.kt:0x000000000000FF00L</ID>
+    <ID>MagicNumber:StreamingCompression.kt:0x0000000000FF0000L</ID>
+    <ID>MagicNumber:StreamingCompression.kt:0x00000000FF000000L</ID>
+    <ID>MagicNumber:StreamingCompression.kt:0x000000FF00000000L</ID>
+    <ID>MagicNumber:StreamingCompression.kt:0x0000FF0000000000L</ID>
+    <ID>MagicNumber:StreamingCompression.kt:0x00FF000000000000L</ID>
+    <ID>MagicNumber:StreamingCompression.kt:24</ID>
+    <ID>MagicNumber:StreamingCompression.kt:40</ID>
+    <ID>MagicNumber:StreamingCompression.kt:56</ID>
+    <ID>MagicNumber:StreamingCompression.kt:8</ID>
+    <ID>MagicNumber:WindowBits.kt:15</ID>
+    <ID>MagicNumber:WindowBits.kt:16</ID>
+    <ID>MagicNumber:WindowBits.kt:31</ID>
+    <ID>MagicNumber:WindowBits.kt:WindowBits.Companion$15</ID>
+    <ID>MagicNumber:WindowBits.kt:WindowBits.Companion$9</ID>
+    <ID>MaxLineLength:BufferAllocatorAssumptionTests.kt:BufferAllocatorAssumptionTests$assertTrue(hasAccess, "BufferFactory.Default should produce buffers with nativeMemoryAccess or managedMemoryAccess")</ID>
+    <ID>MaxLineLength:BufferAllocatorAssumptionTests.kt:BufferAllocatorAssumptionTests$assertTrue(hasAccess, "Pool-backed BufferFactory should produce buffers with nativeMemoryAccess or managedMemoryAccess")</ID>
+    <ID>MaxLineLength:CompressionTests.kt:CompressionTests$"BestCompression (${bestCompression.buffer.remaining()}) should be &lt;= BestSpeed (${bestSpeed.buffer.remaining()})"</ID>
+    <ID>MaxLineLength:CompressionTests.kt:CompressionTests$assertEquals(expectedAdler32, storedAdler32, "Adler32 in trailer should match computed Adler32 of original data")</ID>
+    <ID>MaxLineLength:JsInteropActual.kt:)</ID>
+    <ID>MaxLineLength:JsInteropActual.kt:private fun createUint8ArrayFromBuffer: Uint8Array</ID>
+    <ID>MaxLineLength:JsInteropActual.kt:val result = jsBrowserCompress(input.ref, algorithm.toBrowserFormat().toJsString()).unsafeCast&lt;Promise&lt;JsAny?>>().await() as JsAny</ID>
+    <ID>MaxLineLength:JsInteropActual.kt:val result = jsBrowserDecompress(input.ref, algorithm.toBrowserFormat().toJsString()).unsafeCast&lt;Promise&lt;JsAny?>>().await() as JsAny</ID>
+    <ID>MaxLineLength:JsInteropActual.kt:val result = jsTransformCompressOneShot(jsInputs, algorithm.toOrdinal(), level.value).unsafeCast&lt;Promise&lt;JsAny?>>().await() as JsAny</ID>
+    <ID>MaxLineLength:JsInteropActual.kt:val result = jsTransformDecompressOneShot(jsInputs, algorithm.toOrdinal()).unsafeCast&lt;Promise&lt;JsAny?>>().await() as JsAny</ID>
+    <ID>MaxLineLength:JvmCommonStreamingCompression.kt:CompressionAlgorithm.Deflate -> JvmDeflateStreamingCompressor(level, nowrap = false, bufferFactory, outputBufferSize)</ID>
+    <ID>MaxLineLength:JvmCommonStreamingCompression.kt:CompressionAlgorithm.Deflate -> JvmInflateStreamingDecompressor(nowrap = false, bufferFactory, outputBufferSize, expectedSize)</ID>
+    <ID>MaxLineLength:JvmCommonStreamingCompression.kt:CompressionAlgorithm.Raw -> JvmInflateStreamingDecompressor(nowrap = true, bufferFactory, outputBufferSize, expectedSize)</ID>
+    <ID>MaxLineLength:JvmCommonStreamingCompression.kt:private</ID>
+    <ID>MaxLineLength:JvmCommonStreamingCompression.kt:val count = deflateArray(buffer.array(), buffer.arrayOffset() + buffer.position(), buffer.remaining(), flushMode)</ID>
+    <ID>MaxLineLength:StreamProcessorExtensions.kt:DecompressionSpec$override fun wrapSync: StreamProcessor</ID>
+    <ID>MaxLineLength:StreamingCompression.kt:suspend inline</ID>
+    <ID>MaxLineLength:StreamingCompressionBenchmark.kt:StreamingCompressionBenchmark$compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, BufferFactory.Default)</ID>
+    <ID>MaxLineLength:StreamingCompressorApiMatrix.kt:StreamingCompressorApiMatrix$fail("$message — sizes expected=${expected.size} actual=${actual.size}, head expected=[$expHex] actual=[$actHex]")</ID>
+    <ID>MaxLineLength:StreamingCompressorApiMatrix.kt:StreamingCompressorApiMatrix$runMatrix(lifecycleFlushResetCycle(iterations = 12), payloadFilter = { it.first != "empty" &amp;&amp; it.first != "random_64k" })</ID>
+    <ID>ReturnCount:CompressionStressTests.kt:CompressionStressTests$private fun findMismatchOptimized: Int</ID>
+    <ID>ReturnCount:ContextTakeoverTests.kt:ContextTakeoverTests$fun decompressWithFreshMarker: String</ID>
+    <ID>ReturnCount:ContextTakeoverTests.kt:ContextTakeoverTests$private fun decompressWithFlush: String</ID>
+    <ID>ReturnCount:ContextTakeoverTests.kt:ContextTakeoverTests$private fun decompressWithSharedMarker: String</ID>
+    <ID>ReturnCount:JsInteropActual.kt:internal actual fun ReadBuffer.toJsByteArray: JsByteArray</ID>
+    <ID>ReturnCount:JsInteropActual.kt:internal actual fun ReadBuffer.toJsByteArrayView: JsByteArray</ID>
+    <ID>ReturnCount:JvmCommonStreamingCompression.kt:JvmGzipStreamingDecompressor$private fun parseOptionalGzipFields: Boolean</ID>
+    <ID>ReturnCount:JvmCommonStreamingCompression.kt:private fun CRC32.updateFrom: Int</ID>
+    <ID>ReturnCount:JvmCommonStreamingCompression.kt:private fun Deflater.deflateInto: Int</ID>
+    <ID>ReturnCount:JvmCommonStreamingCompression.kt:private fun Inflater.inflateInto: Int</ID>
+    <ID>ReturnCount:JvmCommonStreamingCompression.kt:private fun Inflater.setInputFrom</ID>
+    <ID>ReturnCount:JvmCommonStreamingCompression.kt:private inline fun emitPartialBuffer: Boolean</ID>
+    <ID>ReturnCount:StreamingCompressionResetTest.kt:StreamingCompressionResetTest$private fun decompressToString: String</ID>
+    <ID>TooGenericExceptionCaught:AppleCompression.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:JsWasmCompression.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:JvmCommonCompression.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:LinuxCompression.kt:e: Exception</ID>
+    <ID>TooManyFunctions:Compression.kt:com.ditchoom.buffer.compression.Compression.kt</ID>
+    <ID>TooManyFunctions:JsInterop.kt:com.ditchoom.buffer.compression.JsInterop.kt</ID>
+    <ID>TooManyFunctions:JsInteropActual.kt:com.ditchoom.buffer.compression.JsInteropActual.kt</ID>
+    <ID>TooManyFunctions:JvmCommonStreamingCompression.kt:com.ditchoom.buffer.compression.JvmCommonStreamingCompression.kt</ID>
+    <ID>TooManyFunctions:StreamProcessorExtensions.kt:SuspendingDecompressingStreamProcessor : SuspendingStreamProcessor</ID>
+    <ID>TooManyFunctions:StreamingCompression.kt:com.ditchoom.buffer.compression.StreamingCompression.kt</ID>
+    <ID>TooManyFunctions:StreamingCompressionBenchmark.kt:StreamingCompressionBenchmark</ID>
+    <ID>UnusedParameter:JsInteropActual.kt:buffer: dynamic</ID>
+    <ID>UnusedParameter:JsInteropActual.kt:data: Uint8Array</ID>
+    <ID>UnusedParameter:JsInteropActual.kt:format: String</ID>
+    <ID>UnusedParameter:JsInteropActual.kt:stream: dynamic</ID>
+  </CurrentIssues>
+</SmellBaseline>

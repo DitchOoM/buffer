@@ -1,0 +1,121 @@
+name: "OSV-Scanner (SBOM CVE scan)"
+
+# Scans the project's dependency graph for known vulnerabilities (CVEs) via the OSV
+# database. The release flow (merged.yaml `finalize` job) already generates a CycloneDX
+# SBOM with anchore/sbom-action over the published Maven artifacts and attaches it to the
+# release; this workflow reproduces that SBOM on PRs/main and feeds it to OSV-Scanner so
+# CVEs in bundled dependencies (including the vendored native crypto, e.g. BoringSSL) are
+# caught BEFORE release rather than only being recorded in the SBOM.
+#
+# ROLLOUT STATUS: BLOCKING. A CVE finding fails the `scan` job, and `scan` is a required
+# status check on `main` (alongside build-linux + build-apple), so a vulnerable dependency
+# blocks the merge rather than only being reported.
+#
+# Pre-triage acceptable/un-actionable advisories (e.g. an unfixable transitive CVE) in an
+# osv-scanner.toml ([[IgnoredVulns]]) with a documented reason + expiry, so a single
+# un-actionable advisory doesn't wedge every merge.
+
+on:
+  # No paths-ignore: as a required status check this must run on EVERY PR, otherwise a
+  # docs-only PR (where the workflow would be skipped) leaves the required `scan` context
+  # pending forever and can never merge.
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "13 4 * * 1" # weekly, Monday 04:13 UTC — catch newly-published CVEs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: "scan"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5
+        with:
+          distribution: "zulu"
+          java-version: "21"
+          cache: gradle
+
+      # publishToMavenLocal builds buffer-crypto's linuxArm64 publication, which cross-compiles
+      # BoringSSL (buildBoringsslArm64) with the aarch64 toolchain. Without these the cmake step
+      # fails (exit 1) and the SBOM build dies before OSV-Scanner ever runs — see build-linux.yaml,
+      # which installs the same compilers. Only the compilers are needed here (no qemu/runtime
+      # libs): this job compiles the arm64 artifacts but never executes them.
+      - name: Install ARM64 cross-compiler (for buffer-crypto BoringSSL arm64)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      # Materialize the artifacts so Syft resolves the full dependency set (the same input
+      # the release SBOM is built from). publishToMavenLocal runs the prePublishCheck gate;
+      # use a plain build of the published modules instead to keep this scan fast.
+      - name: Build artifacts for SBOM
+        run: ./gradlew publishToMavenLocal -x test --no-daemon
+
+      - name: Generate SBOM (CycloneDX)
+        # Mirrors the release flow's SBOM generation (merged.yaml finalize job): Syft over the
+        # Maven-local repo, emitting CycloneDX JSON. Keeping the tool/format identical means
+        # this scan covers exactly the dependency set the released SBOM describes.
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: ~/.m2/repository/com/ditchoom
+          format: cyclonedx-json
+          output-file: /tmp/buffer-sbom.cdx.json
+          # Do not upload an SBOM release artifact from this CI workflow.
+          artifact-name: ""
+
+      # Install the OSV-Scanner CLI directly from its signed release rather than via the
+      # google/osv-scanner/actions/scanner Docker action — that action's Dockerfile fails to
+      # build at the pinned ref ("dockerfile parse error: unknown instruction: bash"), so the
+      # scan never ran. The release binary is version-pinned (v2.4.0) and verified against the
+      # published SHA256 from osv-scanner_SHA256SUMS, keeping the supply-chain guarantee.
+      - name: Install OSV-Scanner
+        run: |
+          set -euo pipefail
+          VERSION=v2.4.0
+          SHA256=15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0
+          curl -sSfL "https://github.com/google/osv-scanner/releases/download/${VERSION}/osv-scanner_linux_amd64" -o /usr/local/bin/osv-scanner
+          echo "${SHA256}  /usr/local/bin/osv-scanner" | sha256sum -c -
+          chmod +x /usr/local/bin/osv-scanner
+          osv-scanner --version
+
+      - name: Run OSV-Scanner against the SBOM
+        id: osv
+        # Blocking: a CVE finding fails this step and, since `scan` is a required check, the merge.
+        # v2 CLI: `scan source --lockfile=<file>` ingests the CycloneDX SBOM (the *.cdx.json
+        # extension is recognized as CycloneDX). `--sbom` was deprecated in favor of -L/--lockfile.
+        run: |
+          osv-scanner scan source \
+            --lockfile=/tmp/buffer-sbom.cdx.json \
+            --format=table
+
+      - name: Report scan result
+        if: always()
+        run: |
+          if [ "${{ steps.osv.outcome }}" = "failure" ]; then
+            echo "::error::OSV-Scanner reported vulnerabilities in the SBOM. Review the OSV-Scanner step log. This check is blocking; fix the dependency or triage the advisory in osv-scanner.toml ([[IgnoredVulns]])."
+          else
+            echo "OSV-Scanner found no known vulnerabilities in the SBOM."
+          fi
+
+      - name: Upload SBOM artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: osv-scanner-sbom
+          path: /tmp/buffer-sbom.cdx.json
+          retention-days: 5
+          if-no-files-found: ignore

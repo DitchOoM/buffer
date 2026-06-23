@@ -20,7 +20,14 @@ jobs:
   build:
     name: "Apple Targets"
     runs-on: macos-latest
-    timeout-minutes: 60
+    # The test step (macosArm64 + iosSimulatorArm64) finishes in ~20 min, but the subsequent
+    # `publishToMavenLocal` rebuilds the per-target CryptoKit Swift shims, CommonCrypto cinterops,
+    # and Kotlin/Native klibs for the full ~10-target Apple matrix (macos/ios/tvos/watchos ×
+    # arm64/x64/sim) with `--no-build-cache`. Only Konan is cached, so this is ~50+ min of cold
+    # native compilation. Since buffer-crypto landed those per-target shims, 60 min is no longer
+    # enough and the job was being killed mid-publish (timeout, not a code failure). Raised to 120
+    # to fit the cold run with headroom; cache the native shim archives to bring this back down.
+    timeout-minutes: 120
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:

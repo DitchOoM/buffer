@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>MagicNumber:FlowExtensionsBenchmark.kt:FlowExtensionsBenchmark$10</ID>
+    <ID>MagicNumber:FlowExtensionsBenchmark.kt:FlowExtensionsBenchmark$1024</ID>
+    <ID>MagicNumber:FlowExtensionsBenchmark.kt:FlowExtensionsBenchmark$20</ID>
+    <ID>MagicNumber:FlowExtensionsBenchmark.kt:FlowExtensionsBenchmark$4</ID>
+    <ID>MagicNumber:FlowExtensionsBenchmark.kt:FlowExtensionsBenchmark$64</ID>
+    <ID>MaxLineLength:FlowExtensions.kt:fun</ID>
+    <ID>TooManyFunctions:FlowExtensionsBenchmark.kt:FlowExtensionsBenchmark</ID>
+  </CurrentIssues>
+</SmellBaseline>
