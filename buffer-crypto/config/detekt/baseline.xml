@@ -1,0 +1,208 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:HpkeKatTest.kt:HpkeKatTest$private suspend fun runVector: Int</ID>
+    <ID>CyclomaticComplexMethod:SignatureWycheproof.kt:SignatureWycheproof$suspend fun run: Summary</ID>
+    <ID>CyclomaticComplexMethod:Signatures.jvmCommon.kt:private fun parseCanonicalEcdsaDer: Pair&lt;BigInteger, BigInteger>?</ID>
+    <ID>CyclomaticComplexMethod:Signatures.linux.kt:private fun isCanonicalEcdsaDer: Boolean</ID>
+    <ID>LongMethod:HpkeKatTest.kt:HpkeKatTest$private suspend fun runVector: Int</ID>
+    <ID>LoopWithTooManyJumpStatements:HpkeBackingTests.kt:HpkeBackingTests$for</ID>
+    <ID>LoopWithTooManyJumpStatements:KeyAgreementTest.kt:KeyAgreementTest$for</ID>
+    <ID>MagicNumber:Aead.jsAndWasmJs.kt:4</ID>
+    <ID>MagicNumber:Aead.kt:AesGcmKey.Companion$8</ID>
+    <ID>MagicNumber:CryptoRandom.jvmCommon.kt:8</ID>
+    <ID>MagicNumber:HmacSha256Mac.jsAndWasmJs.kt:HmacSha256Mac$0x36</ID>
+    <ID>MagicNumber:HmacSha256Mac.jsAndWasmJs.kt:HmacSha256Mac$0x5c</ID>
+    <ID>MagicNumber:Hpke.kt:0xFF</ID>
+    <ID>MagicNumber:Hpke.kt:8</ID>
+    <ID>MagicNumber:KeyAgreement.apple.kt:256</ID>
+    <ID>MagicNumber:KeyAgreement.apple.kt:384</ID>
+    <ID>MagicNumber:KeyAgreement.apple.kt:521</ID>
+    <ID>MagicNumber:KeyAgreement.jsAndWasmJs.kt:16</ID>
+    <ID>MagicNumber:KeyAgreement.jsAndWasmJs.kt:4</ID>
+    <ID>MagicNumber:KeyAgreement.jvmCommon.kt:0x04</ID>
+    <ID>MagicNumber:KeyAgreement.jvmCommon.kt:32</ID>
+    <ID>MagicNumber:KeyAgreement.linux.kt:256</ID>
+    <ID>MagicNumber:KeyAgreement.linux.kt:384</ID>
+    <ID>MagicNumber:KeyAgreement.linux.kt:521</ID>
+    <ID>MagicNumber:KeyAgreementKdf.kt:0xFF</ID>
+    <ID>MagicNumber:KeyAgreementRaw.kt:0xFF</ID>
+    <ID>MagicNumber:Sha256Core.kt:Sha256Core$16</ID>
+    <ID>MagicNumber:Sha256Core.kt:Sha256Core$24</ID>
+    <ID>MagicNumber:Sha256Core.kt:Sha256Core$3</ID>
+    <ID>MagicNumber:Sha256Core.kt:Sha256Core$4</ID>
+    <ID>MagicNumber:Sha256Core.kt:Sha256Core$64</ID>
+    <ID>MagicNumber:Sha256Core.kt:Sha256Core$8</ID>
+    <ID>MagicNumber:Sha512Core.kt:Sha512Core$16</ID>
+    <ID>MagicNumber:Sha512Core.kt:Sha512Core$24</ID>
+    <ID>MagicNumber:Sha512Core.kt:Sha512Core$32</ID>
+    <ID>MagicNumber:Sha512Core.kt:Sha512Core$40</ID>
+    <ID>MagicNumber:Sha512Core.kt:Sha512Core$48</ID>
+    <ID>MagicNumber:Sha512Core.kt:Sha512Core$56</ID>
+    <ID>MagicNumber:Sha512Core.kt:Sha512Core$7</ID>
+    <ID>MagicNumber:Sha512Core.kt:Sha512Core$8</ID>
+    <ID>MagicNumber:Sha512Core.kt:Sha512Core$80</ID>
+    <ID>MagicNumber:Sha512Core.kt:Sha512Core.Companion$16</ID>
+    <ID>MagicNumber:Sha512FamilyHmac.kt:Sha512FamilyHmac$0x36</ID>
+    <ID>MagicNumber:Sha512FamilyHmac.kt:Sha512FamilyHmac$0x5c</ID>
+    <ID>MagicNumber:Signatures.apple.kt:0x30</ID>
+    <ID>MagicNumber:Signatures.apple.kt:0x80</ID>
+    <ID>MagicNumber:Signatures.apple.kt:0xFF</ID>
+    <ID>MagicNumber:Signatures.apple.kt:256</ID>
+    <ID>MagicNumber:Signatures.apple.kt:384</ID>
+    <ID>MagicNumber:Signatures.apple.kt:4</ID>
+    <ID>MagicNumber:Signatures.apple.kt:521</ID>
+    <ID>MagicNumber:Signatures.apple.kt:64</ID>
+    <ID>MagicNumber:Signatures.apple.kt:8</ID>
+    <ID>MagicNumber:Signatures.jsAndWasmJs.kt:0x100</ID>
+    <ID>MagicNumber:Signatures.jsAndWasmJs.kt:0x80</ID>
+    <ID>MagicNumber:Signatures.jsAndWasmJs.kt:0xFF</ID>
+    <ID>MagicNumber:Signatures.jsAndWasmJs.kt:32</ID>
+    <ID>MagicNumber:Signatures.jsAndWasmJs.kt:4</ID>
+    <ID>MagicNumber:Signatures.jsAndWasmJs.kt:48</ID>
+    <ID>MagicNumber:Signatures.jsAndWasmJs.kt:66</ID>
+    <ID>MagicNumber:Signatures.jsAndWasmJs.kt:8</ID>
+    <ID>MagicNumber:Signatures.jvmCommon.kt:0x04</ID>
+    <ID>MagicNumber:Signatures.jvmCommon.kt:0x30</ID>
+    <ID>MagicNumber:Signatures.jvmCommon.kt:0x80</ID>
+    <ID>MagicNumber:Signatures.jvmCommon.kt:0x81</ID>
+    <ID>MagicNumber:Signatures.jvmCommon.kt:0xFF</ID>
+    <ID>MagicNumber:Signatures.jvmCommon.kt:16</ID>
+    <ID>MagicNumber:Signatures.jvmCommon.kt:3</ID>
+    <ID>MagicNumber:Signatures.jvmCommon.kt:32</ID>
+    <ID>MagicNumber:Signatures.jvmCommon.kt:48</ID>
+    <ID>MagicNumber:Signatures.jvmCommon.kt:66</ID>
+    <ID>MagicNumber:Signatures.jvmCommon.kt:8</ID>
+    <ID>MagicNumber:Signatures.kt:104</ID>
+    <ID>MagicNumber:Signatures.kt:139</ID>
+    <ID>MagicNumber:Signatures.kt:64</ID>
+    <ID>MagicNumber:Signatures.kt:72</ID>
+    <ID>MagicNumber:Signatures.linux.kt:0x30</ID>
+    <ID>MagicNumber:Signatures.linux.kt:0x80</ID>
+    <ID>MagicNumber:Signatures.linux.kt:0x81</ID>
+    <ID>MagicNumber:Signatures.linux.kt:0xFF</ID>
+    <ID>MagicNumber:Signatures.linux.kt:256</ID>
+    <ID>MagicNumber:Signatures.linux.kt:3</ID>
+    <ID>MagicNumber:Signatures.linux.kt:32</ID>
+    <ID>MagicNumber:Signatures.linux.kt:384</ID>
+    <ID>MagicNumber:Signatures.linux.kt:521</ID>
+    <ID>MagicNumber:Signatures.linux.kt:64</ID>
+    <ID>MagicNumber:Signatures.linux.kt:8</ID>
+    <ID>MatchingDeclarationName:Dhkem.kt:DhkemEncapResult</ID>
+    <ID>MatchingDeclarationName:HmacSha256Mac.apple.kt:HmacSha256Mac</ID>
+    <ID>MatchingDeclarationName:HmacSha256Mac.jsAndWasmJs.kt:HmacSha256Mac</ID>
+    <ID>MatchingDeclarationName:HmacSha256Mac.jvmCommon.kt:HmacSha256Mac</ID>
+    <ID>MatchingDeclarationName:HmacSha256Mac.linux.kt:HmacSha256Mac</ID>
+    <ID>MatchingDeclarationName:HmacSha384Mac.apple.kt:HmacSha384Mac</ID>
+    <ID>MatchingDeclarationName:HmacSha384Mac.jsAndWasmJs.kt:HmacSha384Mac</ID>
+    <ID>MatchingDeclarationName:HmacSha384Mac.jvmCommon.kt:HmacSha384Mac</ID>
+    <ID>MatchingDeclarationName:HmacSha384Mac.linux.kt:HmacSha384Mac</ID>
+    <ID>MatchingDeclarationName:HmacSha512Mac.apple.kt:HmacSha512Mac</ID>
+    <ID>MatchingDeclarationName:HmacSha512Mac.jsAndWasmJs.kt:HmacSha512Mac</ID>
+    <ID>MatchingDeclarationName:HmacSha512Mac.jvmCommon.kt:HmacSha512Mac</ID>
+    <ID>MatchingDeclarationName:HmacSha512Mac.linux.kt:HmacSha512Mac</ID>
+    <ID>MatchingDeclarationName:Sha256Digest.apple.kt:Sha256Digest</ID>
+    <ID>MatchingDeclarationName:Sha256Digest.jsAndWasmJs.kt:Sha256Digest</ID>
+    <ID>MatchingDeclarationName:Sha256Digest.jvmCommon.kt:Sha256Digest</ID>
+    <ID>MatchingDeclarationName:Sha256Digest.linux.kt:Sha256Digest</ID>
+    <ID>MatchingDeclarationName:Sha384Digest.apple.kt:Sha384Digest</ID>
+    <ID>MatchingDeclarationName:Sha384Digest.jsAndWasmJs.kt:Sha384Digest</ID>
+    <ID>MatchingDeclarationName:Sha384Digest.jvmCommon.kt:Sha384Digest</ID>
+    <ID>MatchingDeclarationName:Sha384Digest.linux.kt:Sha384Digest</ID>
+    <ID>MatchingDeclarationName:Sha512Digest.apple.kt:Sha512Digest</ID>
+    <ID>MatchingDeclarationName:Sha512Digest.jsAndWasmJs.kt:Sha512Digest</ID>
+    <ID>MatchingDeclarationName:Sha512Digest.jvmCommon.kt:Sha512Digest</ID>
+    <ID>MatchingDeclarationName:Sha512Digest.linux.kt:Sha512Digest</ID>
+    <ID>MaxLineLength:Aead.jsAndWasmJs.kt:)</ID>
+    <ID>MaxLineLength:Aead.kt:if (!supportsSyncAesGcm) throw UnsupportedOperationException("synchronous AES-GCM is not supported on this platform")</ID>
+    <ID>MaxLineLength:AeadBackingTests.kt:AeadBackingTests$"42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091"</ID>
+    <ID>MaxLineLength:AeadTamperTest.kt:AeadTamperTest$aesGcmOpenWithNonceAsync(key, hexBuffer("0001020304050607"), ascii(aad), ctAndTag, BufferFactory.Default)</ID>
+    <ID>MaxLineLength:AeadTamperTest.kt:AeadTamperTest$aesGcmOpenWithNonceAsync(key, hexBuffer("000102030405060708090a0b0c0d0e0f"), ascii(aad), ctAndTag, BufferFactory.Default)</ID>
+    <ID>MaxLineLength:AeadTamperTest.kt:AeadTamperTest$aesGcmSealWithNonceAsync(key, hexBuffer("0001020304050607"), ascii(aad), ascii(plaintext), BufferFactory.Default)</ID>
+    <ID>MaxLineLength:AeadTamperTest.kt:AeadTamperTest$val sealed = aesGcmSealAsync(key, BufferFactory.Default.allocate(0).also { it.resetForRead() }, null, BufferFactory.Default)</ID>
+    <ID>MaxLineLength:AeadTamperTest.kt:AeadTamperTest$val wrongKey = AesGcmKey.of(hexBuffer("00000000000000000000000000000000" + "00000000000000000000000000000000"))</ID>
+    <ID>MaxLineLength:AeadTest.kt:AeadTest$ct = "42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091"</ID>
+    <ID>MaxLineLength:AeadTest.kt:AeadTest$ct = "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662"</ID>
+    <ID>MaxLineLength:AeadTest.kt:AeadTest$pt = "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39"</ID>
+    <ID>MaxLineLength:AeadTest.kt:AeadTest$val opened = aesGcmOpenWithNonceAsync(key, hexBuffer(v.iv), aad, hexBuffer(v.ct + v.tag), BufferFactory.Default)</ID>
+    <ID>MaxLineLength:CryptoEdgeCaseTests.kt:CryptoEdgeCaseTests$val out = Hkdf.derive(salt = null, ikm = repeatedByte(0x0b, 22), info = null, length = 0, factory = BufferFactory.Default)</ID>
+    <ID>MaxLineLength:HkdfCore.kt:HkdfEngine$/** Scratch factory for key-derived intermediates: deterministic so it can be `use {}`-freed, secure so it is wiped. */</ID>
+    <ID>MaxLineLength:HmacSha256Mac.jvmCommon.kt:HmacSha256Mac$SecretKeySpec(managed.backingArray, managed.arrayOffset + key.position(), key.remaining(), "HmacSHA256")</ID>
+    <ID>MaxLineLength:HmacSha384Mac.jvmCommon.kt:HmacSha384Mac$SecretKeySpec(managed.backingArray, managed.arrayOffset + key.position(), key.remaining(), "HmacSHA384")</ID>
+    <ID>MaxLineLength:HmacSha384Sha512Test.kt:HmacSha384Sha512Test$private val jefe384 = "af45d2e376484031617f78d2b58a6b1b9c7ef464f5a01b47e42ec3736322445e8e2240ca5e69e2c78b3239ecfab21649"</ID>
+    <ID>MaxLineLength:HmacSha384Sha512Test.kt:HmacSha384Sha512Test$private val klong384 = "46804650ed802b963703b909887d57afcb0d97f6e56f1c108c55b6cc6e9f107c92f872d89b2cce41d391a7bbe01437d3"</ID>
+    <ID>MaxLineLength:HmacSha512Mac.jvmCommon.kt:HmacSha512Mac$SecretKeySpec(managed.backingArray, managed.arrayOffset + key.position(), key.remaining(), "HmacSHA512")</ID>
+    <ID>MaxLineLength:Hpke.kt:MessageLimitReached$class</ID>
+    <ID>MaxLineLength:HpkeBackingTests.kt:HpkeBackingTests$val enc0 = (v["encryptions"]!! as kotlinx.serialization.json.JsonArray)[0] as kotlinx.serialization.json.JsonObject</ID>
+    <ID>MaxLineLength:HpkeCapabilityTest.kt:HpkeCapabilityTest$assertTrue(sender.enc.remaining() == suite.kem.nEnc, "${suite.kem.kemName}/${suite.aead.aeadName} enc length")</ID>
+    <ID>MaxLineLength:HpkeContext.kt:)</ID>
+    <ID>MaxLineLength:HpkeContext.kt:if (needsSender) "mode ${mode.value} requires a sender key" else "a sender key must not be supplied in mode ${mode.value}"</ID>
+    <ID>MaxLineLength:HpkeKatTest.kt:HpkeKatTest$private fun JsonObject.str: String</ID>
+    <ID>MaxLineLength:HpkeRoundTripTest.kt:HpkeRoundTripTest$assertEquals(pt.toHex(), recovered.toHex(), "${suite.kem.kemName}/${suite.aead.aeadName} base round-trip")</ID>
+    <ID>MaxLineLength:KeyAgreement.js.kt:"(function(){ try { var s=(globalThis.crypto&amp;&amp;globalThis.crypto.subtle); return !!(s&amp;&amp;typeof s.generateKey==='function'); } catch(e){ return false; } })()"</ID>
+    <ID>MaxLineLength:KeyAgreementBackingTests.kt:KeyAgreementBackingTests$for</ID>
+    <ID>MaxLineLength:KeyAgreementTest.kt:KeyAgreementTest$assertFailsWith</ID>
+    <ID>MaxLineLength:Sha384Sha512Test.kt:Sha384Sha512Test$private val abc384 = "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7"</ID>
+    <ID>MaxLineLength:Sha384Sha512Test.kt:Sha384Sha512Test$private val e112v384 = "2f4396d8a08aa20908f102b110f5895325c27e87b7f2cc60fb80e191762f4557aa6edc8ce5877bb67541c6628c664892"</ID>
+    <ID>MaxLineLength:SignatureKatTest.kt:SignatureKatTest$"92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"</ID>
+    <ID>MaxLineLength:SignatureKatTest.kt:SignatureKatTest$"b4f80989858693c75ab32b65b85ca3af703dde0fa635313f7304fdcdaca6c7f3dfe93ecb6af52bd7101b5b65b53ea8bee7d4991655ad824a7a3c5834f2953100"</ID>
+    <ID>MaxLineLength:Signatures.js.kt:val key = subtle.importKey("pkcs8", pkcs8, importAlgo, false, js("['sign']")).unsafeCast&lt;Promise&lt;dynamic>>().awaitResult()</ID>
+    <ID>MaxLineLength:WycheproofVectorsEcdhP256.kt:WycheproofVectorsEcdhP256$/** Curated real Wycheproof vectors (C2SP testvectors_v1), public keys rendered as raw points / scalars. Generated; do not edit by hand. */</ID>
+    <ID>MaxLineLength:WycheproofVectorsEcdhP256WebCrypto.kt:WycheproofVectorsEcdhP256WebCrypto$/** Curated real Wycheproof vectors (C2SP testvectors_v1), public keys rendered as raw points / scalars. Generated; do not edit by hand. */</ID>
+    <ID>MaxLineLength:WycheproofVectorsEcdhP384.kt:WycheproofVectorsEcdhP384$/** Curated real Wycheproof vectors (C2SP testvectors_v1), public keys rendered as raw points / scalars. Generated; do not edit by hand. */</ID>
+    <ID>MaxLineLength:WycheproofVectorsEcdhP521.kt:WycheproofVectorsEcdhP521$/** Curated real Wycheproof vectors (C2SP testvectors_v1), public keys rendered as raw points / scalars. Generated; do not edit by hand. */</ID>
+    <ID>MaxLineLength:WycheproofVectorsEcdsaP256.kt:WycheproofVectorsEcdsaP256$/** Curated real Wycheproof signature vectors (C2SP testvectors_v1, ecdsa_secp256r1_sha256_test.json). Generated; do not edit by hand. */</ID>
+    <ID>MaxLineLength:WycheproofVectorsEcdsaP256P1363.kt:WycheproofVectorsEcdsaP256P1363$/** Curated real Wycheproof signature vectors (C2SP testvectors_v1, ecdsa_secp256r1_sha256_p1363_test.json). Generated; do not edit by hand. */</ID>
+    <ID>MaxLineLength:WycheproofVectorsEcdsaP384.kt:WycheproofVectorsEcdsaP384$/** Curated real Wycheproof signature vectors (C2SP testvectors_v1, ecdsa_secp384r1_sha384_test.json). Generated; do not edit by hand. */</ID>
+    <ID>MaxLineLength:WycheproofVectorsEcdsaP384P1363.kt:WycheproofVectorsEcdsaP384P1363$/** Curated real Wycheproof signature vectors (C2SP testvectors_v1, ecdsa_secp384r1_sha384_p1363_test.json). Generated; do not edit by hand. */</ID>
+    <ID>MaxLineLength:WycheproofVectorsEcdsaP521.kt:WycheproofVectorsEcdsaP521$/** Curated real Wycheproof signature vectors (C2SP testvectors_v1, ecdsa_secp521r1_sha512_test.json). Generated; do not edit by hand. */</ID>
+    <ID>MaxLineLength:WycheproofVectorsEcdsaP521P1363.kt:WycheproofVectorsEcdsaP521P1363$/** Curated real Wycheproof signature vectors (C2SP testvectors_v1, ecdsa_secp521r1_sha512_p1363_test.json). Generated; do not edit by hand. */</ID>
+    <ID>MaxLineLength:WycheproofVectorsEd25519.kt:WycheproofVectorsEd25519$/** Curated real Wycheproof signature vectors (C2SP testvectors_v1, ed25519_test.json). Generated; do not edit by hand. */</ID>
+    <ID>MaxLineLength:WycheproofVectorsX25519.kt:WycheproofVectorsX25519$/** Curated real Wycheproof vectors (C2SP testvectors_v1), public keys rendered as raw points / scalars. Generated; do not edit by hand. */</ID>
+    <ID>MayBeConstant:AeadBridge.apple.kt:/** * ChaCha20-Poly1305 on Apple via CryptoKit (`ChaChaPoly.seal` / `.open`). * * CommonCrypto exposes no Kotlin/Native-bindable ChaCha20-Poly1305 one-shot, so the algorithm * routes through the CryptoKit Swift shim ([bcks_chachapoly_seal] / [bcks_chachapoly_open], from * `CryptoKitShim.swift` via the `cryptokitshim` cinterop). CryptoKit is available on every Apple * target this module builds for (macOS 10.15+, iOS 13+, tvOS 13+, watchOS 6+), all of which exceed * the module's deployment floors, so [appleChaChaPolyAvailable] is `true` unconditionally — no * runtime feature-detection is needed. */ internal val appleChaChaPolyAvailable: Boolean = true</ID>
+    <ID>NestedBlockDepth:HkdfCore.kt:HkdfEngine$fun expandInto</ID>
+    <ID>ReturnCount:HpkeKatTest.kt:HpkeKatTest$private suspend fun runVector: Int</ID>
+    <ID>ReturnCount:Signatures.apple.kt:private fun appleEcdsaVerify: Boolean</ID>
+    <ID>ReturnCount:Signatures.apple.kt:private fun isCanonicalEcdsaDer: Boolean</ID>
+    <ID>ReturnCount:Signatures.apple.kt:private fun readDerLen: Pair&lt;Int, Int>?</ID>
+    <ID>ReturnCount:Signatures.apple.kt:private fun readDerPositiveInt: Int</ID>
+    <ID>ReturnCount:Signatures.jvmCommon.kt:fun readInt: BigInteger?</ID>
+    <ID>ReturnCount:Signatures.jvmCommon.kt:private fun parseCanonicalEcdsaDer: Pair&lt;BigInteger, BigInteger>?</ID>
+    <ID>ReturnCount:Signatures.linux.kt:fun readInt: ByteArray?</ID>
+    <ID>ReturnCount:Signatures.linux.kt:private fun ed25519Verify: Boolean</ID>
+    <ID>ReturnCount:Signatures.linux.kt:private fun inRangeOneToOrder: Boolean</ID>
+    <ID>ReturnCount:Signatures.linux.kt:private fun isCanonicalEcdsaDer: Boolean</ID>
+    <ID>SwallowedException:KeyAgreement.jsAndWasmJs.kt:e: Throwable</ID>
+    <ID>SwallowedException:KeyAgreement.jvmCommon.kt:e: GeneralSecurityException</ID>
+    <ID>SwallowedException:KeyAgreement.jvmCommon.kt:e: RuntimeException</ID>
+    <ID>ThrowsCount:KeyAgreement.apple.kt:actual fun generateKeyPair: KeyAgreementKeyPair</ID>
+    <ID>ThrowsCount:KeyAgreement.apple.kt:private fun rawAgreeApple: PlatformBuffer</ID>
+    <ID>ThrowsCount:KeyAgreement.jvmCommon.kt:actual fun deriveSharedSecret: ReadBuffer</ID>
+    <ID>ThrowsCount:KeyAgreement.jvmCommon.kt:internal actual suspend fun dhRawSecret: PlatformBuffer</ID>
+    <ID>TooGenericExceptionCaught:KeyAgreement.jsAndWasmJs.kt:e: Throwable</ID>
+    <ID>TooGenericExceptionCaught:KeyAgreement.jvmCommon.kt:e: RuntimeException</ID>
+    <ID>TooManyFunctions:Aead.apple.kt:com.ditchoom.buffer.crypto.Aead.apple.kt</ID>
+    <ID>TooManyFunctions:Aead.jsAndWasmJs.kt:com.ditchoom.buffer.crypto.Aead.jsAndWasmJs.kt</ID>
+    <ID>TooManyFunctions:Aead.jvmCommon.kt:com.ditchoom.buffer.crypto.Aead.jvmCommon.kt</ID>
+    <ID>TooManyFunctions:Aead.kt:com.ditchoom.buffer.crypto.Aead.kt</ID>
+    <ID>TooManyFunctions:Aead.linux.kt:com.ditchoom.buffer.crypto.Aead.linux.kt</ID>
+    <ID>TooManyFunctions:HpkeContext.kt:com.ditchoom.buffer.crypto.HpkeContext.kt</ID>
+    <ID>TooManyFunctions:KeyAgreement.apple.kt:com.ditchoom.buffer.crypto.KeyAgreement.apple.kt</ID>
+    <ID>TooManyFunctions:KeyAgreement.jvmCommon.kt:com.ditchoom.buffer.crypto.KeyAgreement.jvmCommon.kt</ID>
+    <ID>TooManyFunctions:Signatures.apple.kt:com.ditchoom.buffer.crypto.Signatures.apple.kt</ID>
+    <ID>TooManyFunctions:Signatures.jsAndWasmJs.kt:com.ditchoom.buffer.crypto.Signatures.jsAndWasmJs.kt</ID>
+    <ID>TooManyFunctions:Signatures.jvmCommon.kt:com.ditchoom.buffer.crypto.Signatures.jvmCommon.kt</ID>
+    <ID>TooManyFunctions:Signatures.linux.kt:com.ditchoom.buffer.crypto.Signatures.linux.kt</ID>
+    <ID>UnusedParameter:Aead.js.kt:aadHex: String</ID>
+    <ID>UnusedParameter:Aead.js.kt:ctHex: String</ID>
+    <ID>UnusedParameter:Aead.js.kt:ivHex: String</ID>
+    <ID>UnusedParameter:Aead.js.kt:keyHex: String</ID>
+    <ID>UnusedParameter:Aead.js.kt:ptHex: String</ID>
+    <ID>UnusedParameter:KeyAgreement.js.kt:curveName: String</ID>
+    <ID>UnusedParameter:KeyAgreement.js.kt:peerPublicHex: String</ID>
+    <ID>UnusedParameter:KeyAgreement.js.kt:privateHex: String</ID>
+    <ID>UnusedParameter:Signatures.js.kt:buf: dynamic</ID>
+    <ID>UnusedParameter:Signatures.js.kt:hex: String</ID>
+  </CurrentIssues>
+</SmellBaseline>

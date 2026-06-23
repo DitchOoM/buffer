@@ -3,6 +3,9 @@
 kotlin = "2.3.21"
 androidGradlePlugin = "9.2.1"
 ktlint = "14.2.0"
+# detekt 2.0.0-alpha.3 is built against Kotlin 2.3.21 (exact match for `kotlin` above).
+# Plugin id moved to `dev.detekt` in 2.0. Run non-blocking with a committed baseline.
+detekt = "2.0.0-alpha.3"
 # simdutf - SIMD-accelerated Unicode validation and transcoding (Linux only)
 simdutf = "8.0.0"
 simdutfSha256 = "3d9eef727f088abaeaae4d40962a1ca09871c6bbe6d23de7930488c43ab77643"
@@ -51,6 +54,7 @@ kotlin-allopen = { id = "org.jetbrains.kotlin.plugin.allopen", version.ref = "ko
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 android-library = { id = "com.android.library", version.ref = "androidGradlePlugin" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
+detekt = { id = "dev.detekt", version.ref = "detekt" }
 maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublish" }
 atomicfu = { id = "org.jetbrains.kotlinx.atomicfu", version.ref = "atomicfu" }
 dokka = { id = "org.jetbrains.dokka", version.ref = "dokka" }

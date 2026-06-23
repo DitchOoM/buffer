@@ -1,0 +1,103 @@
+name: "detekt (multiplatform static analysis)"
+
+# Non-blocking static analysis across EVERY Kotlin source set.
+#
+# Why this exists alongside CodeQL: CodeQL's `java-kotlin` extractor only traces
+# JVM bytecode, so it sees commonMain + the jvm/android actuals and nothing else.
+# detekt parses Kotlin source directly, so it is the only analyzer in this repo that
+# covers the Kotlin/Native (appleMain, linuxMain) and JS/WASM (jsMain, wasmJsMain)
+# actuals. This job fills that multiplatform coverage gap.
+#
+# ROLLOUT STATUS: NON-BLOCKING. This is a standalone workflow that is NOT part of the
+# required-checks gate (the required checks on main are build-linux + build-apple via
+# review.yaml). It never blocks a merge. Existing findings are suppressed by committed
+# per-module baselines (<module>/config/detekt/baseline.xml); only NEW findings surface
+# in the job log / SARIF. `./gradlew detektAll` also runs with ignoreFailures=true.
+#
+# To make it blocking later: add `detekt` to the required status checks in branch
+# protection and remove `continue-on-error` below.
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  detekt:
+    name: "detekt (all source sets)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Non-blocking: surface findings without failing the overall CI gate.
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write # upload detekt SARIF to the code-scanning dashboard
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5
+        with:
+          distribution: "zulu"
+          java-version: "21"
+          cache: gradle
+
+      - name: Run detekt across all modules and source sets
+        # detektAll fans out to every module's `detekt` task; each scans its KMP
+        # src/<sourceSet>/kotlin dirs (configured in the root build.gradle.kts).
+        run: ./gradlew detektAll --no-daemon --continue
+
+      - name: Merge SARIF reports
+        if: always()
+        # Each module writes build/reports/detekt/detekt.sarif. Concatenate the `results`
+        # arrays into one SARIF run so a single upload covers every module. jq merges all
+        # files; if none exist (NO-SOURCE) we emit an empty-but-valid SARIF.
+        run: |
+          mkdir -p build/reports
+          # Read SARIF paths into an array so paths-with-spaces and word-splitting are safe.
+          mapfile -t sarifs < <(find . -path '*/build/reports/detekt/detekt.sarif' -type f)
+          if [ "${#sarifs[@]}" -eq 0 ]; then
+            # The literal "$schema" is a SARIF field name, not a shell variable.
+            # shellcheck disable=SC2016
+            printf '%s\n' '{"$schema":"https://json.schemastore.org/sarif-2.1.0.json","version":"2.1.0","runs":[]}' \
+              > build/reports/detekt-merged.sarif
+          else
+            # Collect every run's results from all module SARIF files into one run,
+            # reusing the first file's tool descriptor.
+            jq -s '{
+              "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+              "version": "2.1.0",
+              "runs": [
+                {
+                  "tool": (.[0].runs[0].tool),
+                  "results": ([ .[].runs[].results ] | add // [])
+                }
+              ]
+            }' "${sarifs[@]}" > build/reports/detekt-merged.sarif
+          fi
+
+      - name: Upload detekt SARIF to code scanning
+        if: always()
+        continue-on-error: true # never block on the upload itself
+        uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
+        with:
+          sarif_file: build/reports/detekt-merged.sarif
+          category: detekt
+
+      - name: Upload detekt reports artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: detekt-reports
+          path: "**/build/reports/detekt/"
+          retention-days: 5
+          if-no-files-found: ignore

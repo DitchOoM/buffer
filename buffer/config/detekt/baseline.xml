@@ -1,0 +1,448 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:JsBuffer.kt:JsBuffer$override fun xorMaskCopy</ID>
+    <ID>CyclomaticComplexMethod:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$private fun decodeUtf8CodePointToAppendable: Int</ID>
+    <ID>CyclomaticComplexMethod:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$private fun decodeUtf8CodePointToAppendable: Int</ID>
+    <ID>EmptyFunctionBlock:DeterministicSliceBuffer.kt:DeterministicSliceBuffer${}</ID>
+    <ID>EmptyFunctionBlock:FfmAutoBuffer.kt:FfmAutoBuffer${}</ID>
+    <ID>EmptyFunctionBlock:FfmSliceBuffer.kt:FfmSliceBuffer${}</ID>
+    <ID>ForbiddenComment:BufferBaselineBenchmark.kt:BufferBaselineBenchmark$// TODO: restore to Direct</ID>
+    <ID>InvalidPackageDeclaration:Parcelable.kt:package com.ditchoom.buffer</ID>
+    <ID>LargeClass:BaseJvmBuffer.kt:BaseJvmBuffer : PlatformBuffer</ID>
+    <ID>LargeClass:BufferComparisonTest.kt:BufferComparisonTest</ID>
+    <ID>LargeClass:BufferPoolTests.kt:BufferPoolTests</ID>
+    <ID>LargeClass:BufferStreamTests.kt:BufferStreamTests</ID>
+    <ID>LargeClass:BufferTests.kt:BufferTests</ID>
+    <ID>LargeClass:WrapperTransparencyTests.kt:WrapperTransparencyTests</ID>
+    <ID>LongMethod:BaseJvmBuffer.kt:BaseJvmBuffer$override fun xorMaskCopy</ID>
+    <ID>LongMethod:FastDirectByteBufferTest.kt:FastDirectByteBufferTest$@Test fun `byte order conversion performance`</ID>
+    <ID>LongMethod:JsBuffer.kt:JsBuffer$override fun xorMaskCopy</ID>
+    <ID>LongMethod:SimdByteSwapTest.kt:SimdByteSwapTest$@Test fun `bulk byte swap operations performance`</ID>
+    <ID>LongMethod:WriteStringBenchmarkTest.kt:WriteStringBenchmarkTest$@Test fun benchmarkWriteStringApproaches</ID>
+    <ID>LoopWithTooManyJumpStatements:StreamingStringDecoder.jvmCommon.kt:JvmStreamingStringDecoder$while</ID>
+    <ID>LoopWithTooManyJumpStatements:StringCharsetParityTest.kt:StringCharsetParityTest$for</ID>
+    <ID>MagicNumber:ApplePlatformInteropDocTests.kt:ApplePlatformInteropDocTests$100</ID>
+    <ID>MagicNumber:ApplePlatformInteropDocTests.kt:ApplePlatformInteropDocTests$3</ID>
+    <ID>MagicNumber:ApplePlatformInteropDocTests.kt:ApplePlatformInteropDocTests$4</ID>
+    <ID>MagicNumber:ApplePlatformInteropDocTests.kt:ApplePlatformInteropDocTests$42</ID>
+    <ID>MagicNumber:ApplePlatformInteropDocTests.kt:ApplePlatformInteropDocTests$5</ID>
+    <ID>MagicNumber:ApplePlatformInteropDocTests.kt:ApplePlatformInteropDocTests$6</ID>
+    <ID>MagicNumber:ApplePlatformInteropDocTests.kt:ApplePlatformInteropDocTests$7</ID>
+    <ID>MagicNumber:ApplePlatformInteropDocTests.kt:ApplePlatformInteropDocTests$8</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$0x2B</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$0x30</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$0x39</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$0x3F</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$0x41</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$0x5A</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$0x61</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$0x7A</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$0xFF</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$12</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$18</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$26</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$3</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$52</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$6</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$62</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$63</ID>
+    <ID>MagicNumber:Base64Benchmark.kt:Base64Benchmark$8</ID>
+    <ID>MagicNumber:Base64Codec.kt:0x03</ID>
+    <ID>MagicNumber:Base64Codec.kt:0x3F</ID>
+    <ID>MagicNumber:Base64Codec.kt:0xFF</ID>
+    <ID>MagicNumber:Base64Codec.kt:26</ID>
+    <ID>MagicNumber:Base64Codec.kt:3</ID>
+    <ID>MagicNumber:Base64Codec.kt:4</ID>
+    <ID>MagicNumber:Base64Codec.kt:52</ID>
+    <ID>MagicNumber:Base64Codec.kt:6</ID>
+    <ID>MagicNumber:Base64Codec.kt:62</ID>
+    <ID>MagicNumber:Base64Codec.kt:63</ID>
+    <ID>MagicNumber:Base64Codec.kt:8</ID>
+    <ID>MagicNumber:Base64PlatformComparisonBenchmark.kt:Base64PlatformComparisonBenchmark$3</ID>
+    <ID>MagicNumber:Base64PlatformComparisonBenchmark.kt:Base64PlatformComparisonBenchmark$4</ID>
+    <ID>MagicNumber:BaseJvmBuffer.kt:BaseJvmBuffer$4</ID>
+    <ID>MagicNumber:BaseJvmBuffer.kt:BaseJvmBuffer$8</ID>
+    <ID>MagicNumber:BufferBaselineBenchmark.kt:BufferBaselineBenchmark$3</ID>
+    <ID>MagicNumber:BufferBaselineBenchmark.kt:BufferBaselineBenchmark$4</ID>
+    <ID>MagicNumber:BufferBaselineBenchmark.kt:BufferBaselineBenchmark$64</ID>
+    <ID>MagicNumber:BufferBaselineBenchmark.kt:BufferBaselineBenchmark$8</ID>
+    <ID>MagicNumber:BufferComparison.kt:0xFFFFFFFFL</ID>
+    <ID>MagicNumber:BufferComparison.kt:32</ID>
+    <ID>MagicNumber:BufferComparison.kt:4</ID>
+    <ID>MagicNumber:BufferComparison.kt:8</ID>
+    <ID>MagicNumber:BufferFactory.kt:0x7F</ID>
+    <ID>MagicNumber:BufferFactory.kt:0x7FF</ID>
+    <ID>MagicNumber:BufferFactory.kt:3</ID>
+    <ID>MagicNumber:BufferFactory.kt:4</ID>
+    <ID>MagicNumber:BufferHash.kt:0xFF</ID>
+    <ID>MagicNumber:BufferHash.kt:8</ID>
+    <ID>MagicNumber:BufferStream.kt:DefaultStreamProcessor$0xFF</ID>
+    <ID>MagicNumber:BufferStream.kt:DefaultStreamProcessor$16</ID>
+    <ID>MagicNumber:BufferStream.kt:DefaultStreamProcessor$24</ID>
+    <ID>MagicNumber:BufferStream.kt:DefaultStreamProcessor$3</ID>
+    <ID>MagicNumber:BufferStream.kt:DefaultStreamProcessor$32</ID>
+    <ID>MagicNumber:BufferStream.kt:DefaultStreamProcessor$4</ID>
+    <ID>MagicNumber:BufferStream.kt:DefaultStreamProcessor$40</ID>
+    <ID>MagicNumber:BufferStream.kt:DefaultStreamProcessor$48</ID>
+    <ID>MagicNumber:BufferStream.kt:DefaultStreamProcessor$5</ID>
+    <ID>MagicNumber:BufferStream.kt:DefaultStreamProcessor$56</ID>
+    <ID>MagicNumber:BufferStream.kt:DefaultStreamProcessor$6</ID>
+    <ID>MagicNumber:BufferStream.kt:DefaultStreamProcessor$7</ID>
+    <ID>MagicNumber:BufferStream.kt:DefaultStreamProcessor$8</ID>
+    <ID>MagicNumber:BulkOperationsBenchmark.kt:BulkOperationsBenchmark$0x0101010101010101L</ID>
+    <ID>MagicNumber:BulkOperationsBenchmark.kt:BulkOperationsBenchmark$0x12345678</ID>
+    <ID>MagicNumber:BulkOperationsBenchmark.kt:BulkOperationsBenchmark$0x78797A7B7C7D7E7FL</ID>
+    <ID>MagicNumber:BulkOperationsBenchmark.kt:BulkOperationsBenchmark$0x7C7D7E7F</ID>
+    <ID>MagicNumber:BulkOperationsBenchmark.kt:BulkOperationsBenchmark$4</ID>
+    <ID>MagicNumber:BulkOperationsBenchmark.kt:BulkOperationsBenchmark$8</ID>
+    <ID>MagicNumber:ByteArrayBuffer.kt:ByteArrayBuffer$16</ID>
+    <ID>MagicNumber:ByteArrayBuffer.kt:ByteArrayBuffer$24</ID>
+    <ID>MagicNumber:ByteArrayBuffer.kt:ByteArrayBuffer$3</ID>
+    <ID>MagicNumber:ByteArrayBuffer.kt:ByteArrayBuffer$32</ID>
+    <ID>MagicNumber:ByteArrayBuffer.kt:ByteArrayBuffer$4</ID>
+    <ID>MagicNumber:ByteArrayBuffer.kt:ByteArrayBuffer$8</ID>
+    <ID>MagicNumber:ByteSwap.kt:0x0000FFFF0000FFFFL</ID>
+    <ID>MagicNumber:ByteSwap.kt:0x00FF00FF00FF00FFL</ID>
+    <ID>MagicNumber:ByteSwap.kt:0xFF</ID>
+    <ID>MagicNumber:ByteSwap.kt:0xFF00</ID>
+    <ID>MagicNumber:ByteSwap.kt:16</ID>
+    <ID>MagicNumber:ByteSwap.kt:24</ID>
+    <ID>MagicNumber:ByteSwap.kt:32</ID>
+    <ID>MagicNumber:ByteSwap.kt:8</ID>
+    <ID>MagicNumber:Charset.kt:Charset.UTF16$4f</ID>
+    <ID>MagicNumber:Charset.kt:Charset.UTF16BigEndian$4f</ID>
+    <ID>MagicNumber:Charset.kt:Charset.UTF16LittleEndian$4f</ID>
+    <ID>MagicNumber:Charset.kt:Charset.UTF32$4f</ID>
+    <ID>MagicNumber:Charset.kt:Charset.UTF32BigEndian$4f</ID>
+    <ID>MagicNumber:Charset.kt:Charset.UTF32LittleEndian$4f</ID>
+    <ID>MagicNumber:Charset.kt:Charset.UTF8$1.1f</ID>
+    <ID>MagicNumber:Charset.kt:Charset.UTF8$4f</ID>
+    <ID>MagicNumber:DecimalParse.kt:10</ID>
+    <ID>MagicNumber:HexBenchmark.kt:HexBenchmark$0x30</ID>
+    <ID>MagicNumber:HexBenchmark.kt:HexBenchmark$0x39</ID>
+    <ID>MagicNumber:HexBenchmark.kt:HexBenchmark$0x41</ID>
+    <ID>MagicNumber:HexBenchmark.kt:HexBenchmark$0x46</ID>
+    <ID>MagicNumber:HexBenchmark.kt:HexBenchmark$0x61</ID>
+    <ID>MagicNumber:HexBenchmark.kt:HexBenchmark$0x66</ID>
+    <ID>MagicNumber:HexBenchmark.kt:HexBenchmark$10</ID>
+    <ID>MagicNumber:HexBenchmark.kt:HexBenchmark$4</ID>
+    <ID>MagicNumber:HexCodec.kt:0x30</ID>
+    <ID>MagicNumber:HexCodec.kt:10</ID>
+    <ID>MagicNumber:HexCodec.kt:4</ID>
+    <ID>MagicNumber:JsBuffer.kt:JsBuffer$0xFF</ID>
+    <ID>MagicNumber:JsBuffer.kt:JsBuffer$0xFF00</ID>
+    <ID>MagicNumber:JsBuffer.kt:JsBuffer$24</ID>
+    <ID>MagicNumber:JsBuffer.kt:JsBuffer$3</ID>
+    <ID>MagicNumber:JsBuffer.kt:JsBuffer$32</ID>
+    <ID>MagicNumber:JsBuffer.kt:JsBuffer$4</ID>
+    <ID>MagicNumber:JsBuffer.kt:JsBuffer$8</ID>
+    <ID>MagicNumber:LinearBuffer.kt:LinearBuffer$0xFF</ID>
+    <ID>MagicNumber:LinearBuffer.kt:LinearBuffer$16</ID>
+    <ID>MagicNumber:LinearBuffer.kt:LinearBuffer$24</ID>
+    <ID>MagicNumber:LinearBuffer.kt:LinearBuffer$3</ID>
+    <ID>MagicNumber:LinearBuffer.kt:LinearBuffer$32</ID>
+    <ID>MagicNumber:LinearBuffer.kt:LinearBuffer$4</ID>
+    <ID>MagicNumber:LinearBuffer.kt:LinearBuffer$40</ID>
+    <ID>MagicNumber:LinearBuffer.kt:LinearBuffer$48</ID>
+    <ID>MagicNumber:LinearBuffer.kt:LinearBuffer$5</ID>
+    <ID>MagicNumber:LinearBuffer.kt:LinearBuffer$56</ID>
+    <ID>MagicNumber:LinearBuffer.kt:LinearBuffer$6</ID>
+    <ID>MagicNumber:LinearBuffer.kt:LinearBuffer$7</ID>
+    <ID>MagicNumber:LinearBuffer.kt:LinearBuffer$8</ID>
+    <ID>MagicNumber:LinearBufferIsolationBenchmark.kt:LinearBufferIsolationBenchmark$1024</ID>
+    <ID>MagicNumber:LinearBufferIsolationBenchmark.kt:LinearBufferIsolationBenchmark$42</ID>
+    <ID>MagicNumber:LinuxNativeDataContentTests.kt:LinuxNativeDataContentTests$0x01020304</ID>
+    <ID>MagicNumber:LinuxNativeDataContentTests.kt:LinuxNativeDataContentTests$0x0102030405060708L</ID>
+    <ID>MagicNumber:LinuxNativeDataContentTests.kt:LinuxNativeDataContentTests$0x05060708</ID>
+    <ID>MagicNumber:LinuxNativeDataContentTests.kt:LinuxNativeDataContentTests$0x123456789ABCDEF0L</ID>
+    <ID>MagicNumber:LinuxNativeDataContentTests.kt:LinuxNativeDataContentTests$0x42</ID>
+    <ID>MagicNumber:LinuxNativeDataContentTests.kt:LinuxNativeDataContentTests$4</ID>
+    <ID>MagicNumber:LinuxNativeDataContentTests.kt:LinuxNativeDataContentTests$42</ID>
+    <ID>MagicNumber:MemoryManager.kt:LinearMemoryAllocator$7</ID>
+    <ID>MagicNumber:MutableDataBuffer.kt:MutableDataBuffer$4</ID>
+    <ID>MagicNumber:MutableDataBuffer.kt:MutableDataBuffer$8</ID>
+    <ID>MagicNumber:MutableDataBuffer.kt:MutableDataBufferSlice$4</ID>
+    <ID>MagicNumber:MutableDataBuffer.kt:MutableDataBufferSlice$8</ID>
+    <ID>MagicNumber:NSDataBuffer.kt:NSDataBuffer$4</ID>
+    <ID>MagicNumber:NSDataBuffer.kt:NSDataBuffer$8</ID>
+    <ID>MagicNumber:NSDataBuffer.kt:NSDataBufferSlice$4</ID>
+    <ID>MagicNumber:NSDataBuffer.kt:NSDataBufferSlice$8</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$0x0203</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$0x04050607</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$0x08090A0B0C0D0E0FL</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$0x11223344</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$0x12345678</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$0x55667788</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$100</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$12</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$16</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$3</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$32</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$4</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$42</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$5</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$6</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$7</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$8</ID>
+    <ID>MagicNumber:NSDataBufferTest.kt:NSDataBufferTest$999</ID>
+    <ID>MagicNumber:NativeBuffer.kt:NativeBuffer$4</ID>
+    <ID>MagicNumber:NativeBuffer.kt:NativeBuffer$8</ID>
+    <ID>MagicNumber:NativeBuffer.kt:NativeBufferSlice$4</ID>
+    <ID>MagicNumber:NativeBuffer.kt:NativeBufferSlice$8</ID>
+    <ID>MagicNumber:NativeDataConversionJvmTest.kt:NativeDataConversionJvmTest$10</ID>
+    <ID>MagicNumber:NativeDataConversionJvmTest.kt:NativeDataConversionJvmTest$20</ID>
+    <ID>MagicNumber:NativeDataConversionJvmTest.kt:NativeDataConversionJvmTest$3</ID>
+    <ID>MagicNumber:NativeDataConversionJvmTest.kt:NativeDataConversionJvmTest$30</ID>
+    <ID>MagicNumber:NativeDataConversionJvmTest.kt:NativeDataConversionJvmTest$4</ID>
+    <ID>MagicNumber:NativeDataConversionJvmTest.kt:NativeDataConversionJvmTest$40</ID>
+    <ID>MagicNumber:NativeDataConversionJvmTest.kt:NativeDataConversionJvmTest$5</ID>
+    <ID>MagicNumber:NativeDataConversionJvmTest.kt:NativeDataConversionJvmTest$50</ID>
+    <ID>MagicNumber:NativeDataConversionJvmTest.kt:NativeDataConversionJvmTest$6</ID>
+    <ID>MagicNumber:NativeDataConversionJvmTest.kt:NativeDataConversionJvmTest$60</ID>
+    <ID>MagicNumber:NativeDataConversionJvmTest.kt:NativeDataConversionJvmTest$7</ID>
+    <ID>MagicNumber:NativeDataConversionJvmTest.kt:NativeDataConversionJvmTest$70</ID>
+    <ID>MagicNumber:NativeDataConversionJvmTest.kt:NativeDataConversionJvmTest$8</ID>
+    <ID>MagicNumber:NativeDataConversionJvmTest.kt:NativeDataConversionJvmTest$80</ID>
+    <ID>MagicNumber:OptimizerBugTest.kt:OptimizerBugTest$1000</ID>
+    <ID>MagicNumber:OptimizerBugTest.kt:OptimizerBugTest$10000</ID>
+    <ID>MagicNumber:OptimizerBugTest.kt:OptimizerBugTest$100000</ID>
+    <ID>MagicNumber:OptimizerBugTest.kt:OptimizerBugTest$1024</ID>
+    <ID>MagicNumber:OptimizerBugTest.kt:OptimizerBugTest$16</ID>
+    <ID>MagicNumber:OptimizerBugTest.kt:OptimizerBugTest$42</ID>
+    <ID>MagicNumber:OptimizerBugTest.kt:OptimizerBugTest$8192</ID>
+    <ID>MagicNumber:ReadBuffer.kt:16</ID>
+    <ID>MagicNumber:ReadBuffer.kt:24</ID>
+    <ID>MagicNumber:ReadBuffer.kt:31</ID>
+    <ID>MagicNumber:ReadBuffer.kt:32</ID>
+    <ID>MagicNumber:ReadBuffer.kt:40</ID>
+    <ID>MagicNumber:ReadBuffer.kt:48</ID>
+    <ID>MagicNumber:ReadBuffer.kt:56</ID>
+    <ID>MagicNumber:ReadBuffer.kt:8</ID>
+    <ID>MagicNumber:ReadBuffer.kt:ReadBuffer$0xFF</ID>
+    <ID>MagicNumber:ReadBuffer.kt:ReadBuffer$0xFFFF</ID>
+    <ID>MagicNumber:ReadBuffer.kt:ReadBuffer$0xFFFFFFFFL</ID>
+    <ID>MagicNumber:ReadBuffer.kt:ReadBuffer$16</ID>
+    <ID>MagicNumber:ReadBuffer.kt:ReadBuffer$32</ID>
+    <ID>MagicNumber:ReadBuffer.kt:ReadBuffer$4</ID>
+    <ID>MagicNumber:ReadBuffer.kt:ReadBuffer$8</ID>
+    <ID>MagicNumber:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$0x3FF</ID>
+    <ID>MagicNumber:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$0x80</ID>
+    <ID>MagicNumber:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$0xC0</ID>
+    <ID>MagicNumber:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$0xD800</ID>
+    <ID>MagicNumber:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$0xDC00</ID>
+    <ID>MagicNumber:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$0xFF</ID>
+    <ID>MagicNumber:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$0xFFFF</ID>
+    <ID>MagicNumber:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$10</ID>
+    <ID>MagicNumber:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$3</ID>
+    <ID>MagicNumber:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$8</ID>
+    <ID>MagicNumber:StreamingStringDecoder.jvmCommon.kt:JvmStreamingStringDecoder$0xFF</ID>
+    <ID>MagicNumber:StreamingStringDecoder.jvmCommon.kt:JvmStreamingStringDecoder$8</ID>
+    <ID>MagicNumber:StreamingStringDecoder.jvmCommon.kt:JvmStreamingStringDecoder$8192</ID>
+    <ID>MagicNumber:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$0x3FF</ID>
+    <ID>MagicNumber:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$0x80</ID>
+    <ID>MagicNumber:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$0xC0</ID>
+    <ID>MagicNumber:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$0xD800</ID>
+    <ID>MagicNumber:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$0xDC00</ID>
+    <ID>MagicNumber:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$0xFF</ID>
+    <ID>MagicNumber:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$0xFFFF</ID>
+    <ID>MagicNumber:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$10</ID>
+    <ID>MagicNumber:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$3</ID>
+    <ID>MagicNumber:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$8</ID>
+    <ID>MagicNumber:StreamingStringDecoderBenchmark.kt:StreamingStringDecoderBenchmark$16384</ID>
+    <ID>MagicNumber:StreamingStringDecoderBenchmark.kt:StreamingStringDecoderBenchmark$256</ID>
+    <ID>MagicNumber:StreamingStringDecoderBenchmark.kt:StreamingStringDecoderBenchmark$32</ID>
+    <ID>MagicNumber:StreamingStringDecoderBenchmark.kt:StreamingStringDecoderBenchmark$4096</ID>
+    <ID>MagicNumber:StreamingStringDecoderBenchmark.kt:StreamingStringDecoderBenchmark$95</ID>
+    <ID>MagicNumber:StreamingStringDecoderBenchmark.kt:StreamingStringDecoderBenchmark.Companion$0x20</ID>
+    <ID>MagicNumber:StringDecoding.wasmJs.kt:0xFF</ID>
+    <ID>MagicNumber:StringDecoding.wasmJs.kt:16</ID>
+    <ID>MagicNumber:StringDecoding.wasmJs.kt:24</ID>
+    <ID>MagicNumber:StringDecoding.wasmJs.kt:3</ID>
+    <ID>MagicNumber:StringDecoding.wasmJs.kt:4</ID>
+    <ID>MagicNumber:StringDecoding.wasmJs.kt:8</ID>
+    <ID>MagicNumber:UnsafeMemory.wasmJs.kt:UnsafeMemory$16</ID>
+    <ID>MagicNumber:UnsafeMemory.wasmJs.kt:UnsafeMemory$24</ID>
+    <ID>MagicNumber:UnsafeMemory.wasmJs.kt:UnsafeMemory$3</ID>
+    <ID>MagicNumber:UnsafeMemory.wasmJs.kt:UnsafeMemory$4</ID>
+    <ID>MagicNumber:UnsafeMemory.wasmJs.kt:UnsafeMemory$8</ID>
+    <ID>MagicNumber:VariableByteInteger.kt:0x7F</ID>
+    <ID>MagicNumber:VariableByteInteger.kt:128</ID>
+    <ID>MagicNumber:VariableByteInteger.kt:4</ID>
+    <ID>MagicNumber:WasmLinearBufferBenchmark.kt:WasmLinearBufferBenchmark$4</ID>
+    <ID>MagicNumber:WasmLinearBufferBenchmark.kt:WasmLinearBufferBenchmark$42</ID>
+    <ID>MagicNumber:WasmNativeDataContentTests.kt:WasmNativeDataContentTests$0x01020304</ID>
+    <ID>MagicNumber:WasmNativeDataContentTests.kt:WasmNativeDataContentTests$0x0102030405060708L</ID>
+    <ID>MagicNumber:WasmNativeDataContentTests.kt:WasmNativeDataContentTests$0x05060708</ID>
+    <ID>MagicNumber:WasmNativeDataContentTests.kt:WasmNativeDataContentTests$0x090A0B0C</ID>
+    <ID>MagicNumber:WasmNativeDataContentTests.kt:WasmNativeDataContentTests$0x123456789ABCDEF0L</ID>
+    <ID>MagicNumber:WasmNativeDataContentTests.kt:WasmNativeDataContentTests$0x42</ID>
+    <ID>MagicNumber:WasmNativeDataContentTests.kt:WasmNativeDataContentTests$4</ID>
+    <ID>MagicNumber:WasmNativeDataContentTests.kt:WasmNativeDataContentTests$42</ID>
+    <ID>MagicNumber:WasmNativeDataContentTests.kt:WasmNativeDataContentTests$8</ID>
+    <ID>MagicNumber:WasmNativeDataContentTests.kt:WasmNativeDataContentTests$99</ID>
+    <ID>MagicNumber:WasmPlatformInteropDocTests.kt:WasmPlatformInteropDocTests$3</ID>
+    <ID>MagicNumber:WasmPlatformInteropDocTests.kt:WasmPlatformInteropDocTests$4</ID>
+    <ID>MagicNumber:WasmPlatformInteropDocTests.kt:WasmPlatformInteropDocTests$42</ID>
+    <ID>MagicNumber:WasmPlatformInteropDocTests.kt:WasmPlatformInteropDocTests$5</ID>
+    <ID>MagicNumber:WasmPlatformInteropDocTests.kt:WasmPlatformInteropDocTests$6</ID>
+    <ID>MagicNumber:WasmPlatformInteropDocTests.kt:WasmPlatformInteropDocTests$7</ID>
+    <ID>MagicNumber:WasmPlatformInteropDocTests.kt:WasmPlatformInteropDocTests$8</ID>
+    <ID>MagicNumber:WriteBuffer.kt:WriteBuffer$0xff</ID>
+    <ID>MagicNumber:WriteBuffer.kt:WriteBuffer$16</ID>
+    <ID>MagicNumber:WriteBuffer.kt:WriteBuffer$32</ID>
+    <ID>MagicNumber:WriteBuffer.kt:WriteBuffer$4</ID>
+    <ID>MagicNumber:WriteBuffer.kt:WriteBuffer$8</ID>
+    <ID>MagicNumber:WriteStringBenchmarkTest.kt:WriteStringBenchmarkTest$30</ID>
+    <ID>MatchingDeclarationName:BufferOverflowException.jvmCommon.kt:BufferOverflowException : BufferOverflowException</ID>
+    <ID>MatchingDeclarationName:BufferOverflowException.nonJvm.kt:BufferOverflowException : RuntimeException</ID>
+    <ID>MatchingDeclarationName:BufferUnderflowException.jvmCommon.kt:BufferUnderflowException : BufferUnderflowException</ID>
+    <ID>MatchingDeclarationName:BufferUnderflowException.nonJvm.kt:BufferUnderflowException : RuntimeException</ID>
+    <ID>MatchingDeclarationName:UnsafeMemory.apple.kt:UnsafeMemory</ID>
+    <ID>MatchingDeclarationName:UnsafeMemory.jvmCommon.kt:UnsafeMemory</ID>
+    <ID>MatchingDeclarationName:UnsafeMemory.linux.kt:UnsafeMemory</ID>
+    <ID>MaxLineLength:AndroidBufferBenchmark.kt:AndroidBufferBenchmark$*</ID>
+    <ID>MaxLineLength:BufferFactoryInterface.kt:fun</ID>
+    <ID>MaxLineLength:BufferPoolTests.kt:BufferPoolTests$assertTrue(original.contentEquals(recovered), "Round-trip XOR mask should recover original data")</ID>
+    <ID>MaxLineLength:BufferTests.kt:BufferTests$assertBufferEquals(buf, byteArrayOf(-87, 96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56))</ID>
+    <ID>MaxLineLength:BufferTests.kt:BufferTests$assertBufferEquals(buf, byteArrayOf(96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56))</ID>
+    <ID>MaxLineLength:BufferTests.kt:BufferTests$assertBufferEquals(newBuffer, byteArrayOf(96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56))</ID>
+    <ID>MaxLineLength:BufferTests.kt:BufferTests$assertContentEquals(data, byteArrayOf(96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56))</ID>
+    <ID>MaxLineLength:BufferTests.kt:BufferTests$byteArrayOf(0, 1, -87, 96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56)</ID>
+    <ID>MaxLineLength:DirectBufferAddressHelper.kt:internal actual fun getDirectBufferAddress: Long</ID>
+    <ID>MaxLineLength:DirectJvmBuffer.kt:DirectJvmBuffer$override fun slice: DirectJvmBuffer</ID>
+    <ID>MaxLineLength:FastDirectByteBufferTest.kt:FastDirectByteBufferTest.Companion$constructor = clazz.getDeclaredConstructor(Long::class.javaPrimitiveType, Long::class.javaPrimitiveType)</ID>
+    <ID>MaxLineLength:HeapJvmBuffer.kt:HeapJvmBuffer$override fun slice: HeapJvmBuffer</ID>
+    <ID>MaxLineLength:IPCTest.kt:IPCTest.&lt;no name provided>$override fun onServiceDisconnected: Unit</ID>
+    <ID>MaxLineLength:MemoryManager.kt:@JsFun("() => { if (typeof wasmExports !== 'undefined' &amp;&amp; wasmExports.memory) { return wasmExports.memory.buffer.byteLength; } return 0; }")</ID>
+    <ID>MaxLineLength:MemoryManager.kt:@JsFun("(pages) => { if (typeof wasmExports !== 'undefined' &amp;&amp; wasmExports.memory) { return wasmExports.memory.grow(pages); } return -1; }")</ID>
+    <ID>MaxLineLength:MutableDataBuffer.kt:MutableDataBuffer$memcpy(bytePointer + position, pinned.addressOf(srcManaged.arrayOffset + buffer.position()), bytesToCopy.convert())</ID>
+    <ID>MaxLineLength:PooledSliceLifecycleTests.kt:PooledSliceLifecycleTests$assertEquals(0, pool.stats().currentPoolSize, "Chunk freed but slice still alive — pool must NOT have it back yet")</ID>
+    <ID>MaxLineLength:PooledSliceLifecycleTests.kt:PooledSliceLifecycleTests$assertEquals(1, pool.stats().currentPoolSize, "After both chunk and slice released, buffer must be back in pool")</ID>
+    <ID>MaxLineLength:StreamProcessorBuilder.kt:StreamProcessorBuilder$fun</ID>
+    <ID>MaxLineLength:StreamingStringDecoder.apple.kt:actual fun StreamingStringDecoder: StreamingStringDecoder</ID>
+    <ID>MaxLineLength:StreamingStringDecoder.js.kt:actual fun StreamingStringDecoder: StreamingStringDecoder</ID>
+    <ID>MaxLineLength:StreamingStringDecoder.jvmCommon.kt:actual fun StreamingStringDecoder: StreamingStringDecoder</ID>
+    <ID>MaxLineLength:StreamingStringDecoder.kt:expect</ID>
+    <ID>MaxLineLength:StreamingStringDecoder.linux.kt:actual fun StreamingStringDecoder: StreamingStringDecoder</ID>
+    <ID>MaxLineLength:StreamingStringDecoder.wasmJs.kt:actual fun StreamingStringDecoder: StreamingStringDecoder</ID>
+    <ID>MaxLineLength:StringCharsetParityTest.kt:StringCharsetParityTest$assertEquals(sample, buffer.readString(bytesWritten, Charset.UTF8), "UTF-8 round-trip failed ($factoryName)")</ID>
+    <ID>MaxLineLength:WriteStringBenchmarkTest.kt:WriteStringBenchmarkTest$"speedup_encode=${if (time2.inWholeMicroseconds > 0) time1.inWholeMicroseconds / time2.inWholeMicroseconds else 0}x "</ID>
+    <ID>MaxLineLength:WriteStringBenchmarkTest.kt:WriteStringBenchmarkTest$"speedup_simdutf=${if (time3.inWholeMicroseconds > 0) time1.inWholeMicroseconds / time3.inWholeMicroseconds else 0}x"</ID>
+    <ID>NestedBlockDepth:JvmBuffer.kt:JvmBuffer.Companion.&lt;no name provided>$override fun createFromParcel: JvmBuffer</ID>
+    <ID>ReturnCount:BaseJvmBuffer.kt:BaseJvmBuffer$override fun indexOf: Int</ID>
+    <ID>ReturnCount:BufferComparison.kt:internal inline fun bulkCompareEquals: Boolean</ID>
+    <ID>ReturnCount:BufferComparison.kt:internal inline fun bulkCompareEqualsInt: Boolean</ID>
+    <ID>ReturnCount:BufferComparison.kt:internal inline fun bulkIndexOf: Int</ID>
+    <ID>ReturnCount:BufferComparison.kt:internal inline fun bulkIndexOfInt: Int</ID>
+    <ID>ReturnCount:BufferComparison.kt:internal inline fun bulkMismatch: Int</ID>
+    <ID>ReturnCount:BufferComparison.kt:internal inline fun bulkMismatchInt: Int</ID>
+    <ID>ReturnCount:BufferStream.kt:DefaultStreamProcessor$override fun &lt;T> readBufferScoped: T</ID>
+    <ID>ReturnCount:BufferStream.kt:DefaultStreamProcessor$override fun peekBuffer: ReadBuffer?</ID>
+    <ID>ReturnCount:BufferStream.kt:DefaultStreamProcessor$override fun peekMismatch: Int</ID>
+    <ID>ReturnCount:BufferStream.kt:DefaultStreamProcessor$override fun readBuffer: ReadBuffer</ID>
+    <ID>ReturnCount:BulkOperationsBenchmark.kt:BulkOperationsBenchmark$@Benchmark fun contentEquals64kBaseline: Boolean</ID>
+    <ID>ReturnCount:BulkOperationsBenchmark.kt:BulkOperationsBenchmark$@Benchmark fun indexOfByte64kBaseline: Int</ID>
+    <ID>ReturnCount:BulkOperationsBenchmark.kt:BulkOperationsBenchmark$@Benchmark fun mismatch64kBaseline: Int</ID>
+    <ID>ReturnCount:JsBuffer.kt:JsBuffer$override fun contentEquals: Boolean</ID>
+    <ID>ReturnCount:JsBuffer.kt:JsBuffer$override fun xorMaskCopy</ID>
+    <ID>ReturnCount:LinearBuffer.kt:LinearBuffer$override fun contentEquals: Boolean</ID>
+    <ID>ReturnCount:MutableDataBuffer.kt:MutableDataBuffer$override fun contentEquals: Boolean</ID>
+    <ID>ReturnCount:MutableDataBuffer.kt:MutableDataBuffer$override fun mismatch: Int</ID>
+    <ID>ReturnCount:MutableDataBuffer.kt:MutableDataBuffer$override fun readString: String</ID>
+    <ID>ReturnCount:MutableDataBuffer.kt:MutableDataBuffer$override fun xorMaskCopy</ID>
+    <ID>ReturnCount:MutableDataBuffer.kt:MutableDataBufferSlice$override fun readString: String</ID>
+    <ID>ReturnCount:NSDataBuffer.kt:NSDataBuffer$override fun contentEquals: Boolean</ID>
+    <ID>ReturnCount:NativeBuffer.kt:NativeBuffer$override fun contentEquals: Boolean</ID>
+    <ID>ReturnCount:NativeBuffer.kt:NativeBuffer$override fun mismatch: Int</ID>
+    <ID>ReturnCount:NativeBuffer.kt:NativeBuffer$override fun write</ID>
+    <ID>ReturnCount:NativeBuffer.kt:NativeBuffer$override fun xorMaskCopy</ID>
+    <ID>ReturnCount:NativeBuffer.kt:NativeBufferSlice$override fun write</ID>
+    <ID>ReturnCount:NativeBuffer.kt:private fun simdutfDecodeUtf8: String</ID>
+    <ID>ReturnCount:NativeDataConversions.jvmCommon.kt:actual fun ReadBuffer.toNativeData: NativeData</ID>
+    <ID>ReturnCount:NativeDataConversions.nonJvm.kt:actual fun ReadBuffer.toByteArray: ByteArray</ID>
+    <ID>ReturnCount:ReadBuffer.kt:@Suppress("DEPRECATION") fun ReadBuffer.unwrapFully: ReadBuffer</ID>
+    <ID>ReturnCount:ReadBuffer.kt:ReadBuffer$fun contentEquals: Boolean</ID>
+    <ID>ReturnCount:ReadBuffer.kt:ReadBuffer$fun indexOf: Int</ID>
+    <ID>ReturnCount:ReadBuffer.kt:ReadBuffer$fun readNumberWithByteSize: Long</ID>
+    <ID>ReturnCount:ReadBuffer.kt:fun bufferEquals: Boolean</ID>
+    <ID>ReturnCount:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$override fun decode: Int</ID>
+    <ID>ReturnCount:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$private fun completePendingSequence: DecodeResult</ID>
+    <ID>ReturnCount:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$private fun convertUtf8PtrToAppendable: Int</ID>
+    <ID>ReturnCount:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$private fun decodeUtf8CodePointToAppendable: Int</ID>
+    <ID>ReturnCount:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$private fun findUtf8Boundary: Int</ID>
+    <ID>ReturnCount:StreamingStringDecoder.jvmCommon.kt:JvmStreamingStringDecoder$private fun getByteBuffer: ByteBuffer</ID>
+    <ID>ReturnCount:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$override fun decode: Int</ID>
+    <ID>ReturnCount:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$private fun completePendingSequence: DecodeResult</ID>
+    <ID>ReturnCount:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$private fun convertUtf8PtrToAppendable: Int</ID>
+    <ID>ReturnCount:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$private fun decodeUtf8CodePointToAppendable: Int</ID>
+    <ID>ReturnCount:StreamingStringDecoder.wasmJs.kt:WasmJsStreamingStringDecoder$private fun decodeChunk: String</ID>
+    <ID>ReturnCount:UnsafeMemoryTest.kt:UnsafeMemoryTest$@Test fun testCopyMemory</ID>
+    <ID>ReturnCount:UnsafeMemoryTest.kt:UnsafeMemoryTest$@Test fun testLargeBufferOperations</ID>
+    <ID>SwallowedException:AndroidBufferHelper.kt:AndroidBufferHelper$e: Exception</ID>
+    <ID>SwallowedException:BaseJvmBuffer.kt:BaseJvmBuffer$e: IndexOutOfBoundsException</ID>
+    <ID>SwallowedException:BaseJvmBuffer.kt:BaseJvmBuffer$e: java.nio.BufferOverflowException</ID>
+    <ID>SwallowedException:BaseJvmBuffer.kt:BaseJvmBuffer$e: java.nio.BufferUnderflowException</ID>
+    <ID>SwallowedException:BufferPoolTests.kt:BufferPoolTests$e: RuntimeException</ID>
+    <ID>SwallowedException:BufferTests.kt:BufferTests$e: UnsupportedOperationException</ID>
+    <ID>SwallowedException:DirectBufferAddressHelper.kt:e: Exception</ID>
+    <ID>SwallowedException:FastDirectByteBufferTest.kt:FastDirectByteBufferTest.Companion$e2: NoSuchMethodException</ID>
+    <ID>SwallowedException:FastDirectByteBufferTest.kt:FastDirectByteBufferTest.Companion$e: NoSuchMethodException</ID>
+    <ID>SwallowedException:UnsafeMemory.jvmCommon.kt:UnsafeMemory$e: Exception</ID>
+    <ID>ThrowsCount:JsBuffer.kt:JsBuffer$override fun readString: String</ID>
+    <ID>TooGenericExceptionCaught:AndroidBufferHelper.kt:AndroidBufferHelper$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:AndroidDeterministicUnsafeJvmBuffer.kt:AndroidDeterministicUnsafeJvmBuffer.Companion$e: Throwable</ID>
+    <ID>TooGenericExceptionCaught:BaseJvmBuffer.kt:BaseJvmBuffer$e: IndexOutOfBoundsException</ID>
+    <ID>TooGenericExceptionCaught:CloseableBuffer.kt:closeException: Throwable</ID>
+    <ID>TooGenericExceptionCaught:CloseableBuffer.kt:e: Throwable</ID>
+    <ID>TooGenericExceptionCaught:DirectBufferAddressHelper.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:JvmDeterministicUnsafeJvmBuffer.kt:JvmDeterministicUnsafeJvmBuffer.Companion$e: Throwable</ID>
+    <ID>TooGenericExceptionCaught:StreamingStringDecoder.js.kt:JsStreamingStringDecoder$e: Throwable</ID>
+    <ID>TooGenericExceptionCaught:StreamingStringDecoder.wasmJs.kt:WasmJsStreamingStringDecoder$e: Throwable</ID>
+    <ID>TooGenericExceptionCaught:UnsafeMemory.jvmCommon.kt:UnsafeMemory$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:UnsafeMemory.jvmCommon.kt:UnsafeMemory$e: Throwable</ID>
+    <ID>TooGenericExceptionThrown:BufferFactoryTests.kt:BufferFactoryTests$throw RuntimeException("test exception")</ID>
+    <ID>TooGenericExceptionThrown:BufferFactoryTests.kt:BufferFactoryTests$throw RuntimeException("test")</ID>
+    <ID>TooGenericExceptionThrown:BufferPoolSafetyTests.kt:BufferPoolSafetyTests$throw RuntimeException("test")</ID>
+    <ID>TooGenericExceptionThrown:BufferPoolTests.kt:BufferPoolTests$throw RuntimeException("Test exception")</ID>
+    <ID>TooGenericExceptionThrown:BufferPoolTests.kt:BufferPoolTests$throw RuntimeException("test")</ID>
+    <ID>TooGenericExceptionThrown:CloseableBufferTests.kt:CloseableBufferTests$throw RuntimeException("test")</ID>
+    <ID>TooGenericExceptionThrown:DeterministicBufferTest.kt:DeterministicBufferTest$throw RuntimeException("test")</ID>
+    <ID>TooGenericExceptionThrown:FfmBufferTest.kt:FfmBufferTest$throw RuntimeException("test error")</ID>
+    <ID>TooManyFunctions:AutoFillingSuspendingStreamProcessor.kt:AutoFillingSuspendingStreamProcessor : SuspendingStreamProcessor</ID>
+    <ID>TooManyFunctions:BaseJvmBuffer.kt:BaseJvmBuffer : PlatformBuffer</ID>
+    <ID>TooManyFunctions:BaseWebBuffer.kt:BaseWebBuffer : PlatformBuffer</ID>
+    <ID>TooManyFunctions:BufferBaselineBenchmark.kt:BufferBaselineBenchmark</ID>
+    <ID>TooManyFunctions:BufferComparison.kt:com.ditchoom.buffer.BufferComparison.kt</ID>
+    <ID>TooManyFunctions:BufferStream.kt:DefaultStreamProcessor : StreamProcessor</ID>
+    <ID>TooManyFunctions:BufferStream.kt:StreamProcessor</ID>
+    <ID>TooManyFunctions:BulkOperationsBenchmark.kt:BulkOperationsBenchmark</ID>
+    <ID>TooManyFunctions:ByteArrayBuffer.kt:ByteArrayBuffer : PlatformBufferManagedMemoryAccess</ID>
+    <ID>TooManyFunctions:JsBuffer.kt:JsBuffer : BaseWebBufferNativeMemoryAccessManagedMemoryAccessSharedMemoryAccess</ID>
+    <ID>TooManyFunctions:LinearBuffer.kt:LinearBuffer : BaseWebBufferNativeMemoryAccess</ID>
+    <ID>TooManyFunctions:MemoryManager.kt:LinearMemoryAllocator</ID>
+    <ID>TooManyFunctions:MutableDataBuffer.kt:MutableDataBuffer : PlatformBufferParcelableNativeMemoryAccess</ID>
+    <ID>TooManyFunctions:MutableDataBuffer.kt:MutableDataBufferSlice : PlatformBufferNativeMemoryAccess</ID>
+    <ID>TooManyFunctions:NSDataBuffer.kt:NSDataBuffer : ReadBufferNativeMemoryAccess</ID>
+    <ID>TooManyFunctions:NSDataBuffer.kt:NSDataBufferSlice : ReadBufferNativeMemoryAccess</ID>
+    <ID>TooManyFunctions:NSDataBufferTest.kt:NSDataBufferTest</ID>
+    <ID>TooManyFunctions:NativeBuffer.kt:NativeBuffer : PlatformBufferNativeMemoryAccessCloseableBuffer</ID>
+    <ID>TooManyFunctions:NativeBuffer.kt:NativeBufferSlice : PlatformBufferNativeMemoryAccess</ID>
+    <ID>TooManyFunctions:NativeDataConversionJvmTest.kt:NativeDataConversionJvmTest</ID>
+    <ID>TooManyFunctions:PooledBuffer.kt:PooledBuffer : PlatformBuffer</ID>
+    <ID>TooManyFunctions:ReadBuffer.kt:ReadBuffer : PositionBuffer</ID>
+    <ID>TooManyFunctions:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder : StreamingStringDecoder</ID>
+    <ID>TooManyFunctions:SuspendingStreamProcessor.kt:SuspendingStreamProcessor</ID>
+    <ID>TooManyFunctions:SuspendingStreamProcessor.kt:SyncToSuspendingProcessor : SuspendingStreamProcessor</ID>
+    <ID>TooManyFunctions:UnsafeMemory.apple.kt:UnsafeMemory</ID>
+    <ID>TooManyFunctions:UnsafeMemory.js.kt:UnsafeMemory</ID>
+    <ID>TooManyFunctions:UnsafeMemory.jvmCommon.kt:UnsafeMemory</ID>
+    <ID>TooManyFunctions:UnsafeMemory.kt:UnsafeMemory</ID>
+    <ID>TooManyFunctions:UnsafeMemory.linux.kt:UnsafeMemory</ID>
+    <ID>TooManyFunctions:UnsafeMemory.wasmJs.kt:UnsafeMemory</ID>
+    <ID>TooManyFunctions:WriteBuffer.kt:WriteBuffer : PositionBuffer</ID>
+    <ID>UnusedParameter:StreamingStringDecoder.js.kt:JsStreamingStringDecoder$encoding: String</ID>
+    <ID>UnusedParameter:StreamingStringDecoder.js.kt:JsStreamingStringDecoder$fatal: Boolean</ID>
+  </CurrentIssues>
+</SmellBaseline>

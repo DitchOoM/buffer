@@ -1,0 +1,31 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:Main.kt:fun main</ID>
+    <ID>CyclomaticComplexMethod:Main.native.kt:fun main</ID>
+    <ID>EmptyFunctionBlock:Platform.web.kt:WebMappedFile${}</ID>
+    <ID>MagicNumber:DatasetGenerator.native.kt:10</ID>
+    <ID>MagicNumber:DatasetGenerator.native.kt:1e-12</ID>
+    <ID>MagicNumber:DatasetGenerator.native.kt:2.0</ID>
+    <ID>MagicNumber:DatasetGenerator.native.kt:999</ID>
+    <ID>MagicNumber:DatasetGenerator.web.kt:10</ID>
+    <ID>MagicNumber:DatasetGenerator.web.kt:1e-12</ID>
+    <ID>MagicNumber:DatasetGenerator.web.kt:2.0</ID>
+    <ID>MagicNumber:DatasetGenerator.web.kt:999</ID>
+    <ID>MagicNumber:JvmDatasetGenerator.kt:10</ID>
+    <ID>MagicNumber:JvmDatasetGenerator.kt:20</ID>
+    <ID>MagicNumber:JvmDatasetGenerator.kt:999</ID>
+    <ID>MagicNumber:KeyArena.kt:KeyArena$1024</ID>
+    <ID>MagicNumber:KeyArena.kt:KeyArena$64</ID>
+    <ID>MagicNumber:Main.native.kt:1000.0</ID>
+    <ID>MagicNumber:StationTable.kt:StationTable$0.5</ID>
+    <ID>MagicNumber:StationTable.kt:StationTable$10</ID>
+    <ID>MatchingDeclarationName:Platform.kt:MappedFile</ID>
+    <ID>MaxLineLength:Main.kt:println("${label}Solved ${fmt(sizeMb)} MB with $workers workers [$backend] in ${fmt(elapsed)}s (${fmt(sizeMb / elapsed)} MB/s)")</ID>
+    <ID>MaxLineLength:Main.kt:val generated = out?.let { File(it) } ?: File.createTempFile("onebrc-run-", ".txt").also { it.deleteOnExit() }</ID>
+    <ID>ReturnCount:Chunk.kt:ChunkSplitter$fun split: List&lt;Chunk></ID>
+    <ID>UnusedParameter:FileSupport.web.kt:data: String</ID>
+    <ID>UnusedParameter:FileSupport.web.kt:path: String</ID>
+  </CurrentIssues>
+</SmellBaseline>

@@ -1,0 +1,211 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ComplexCondition:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$q != CODEC_QNAME &amp;&amp; q != BOUNDING_LENGTH_CODEC_QNAME &amp;&amp; q != VARIABLE_LENGTH_CODEC_QNAME &amp;&amp; q != VIEW_CODEC_QNAME</ID>
+    <ID>CyclomaticComplexMethod:CodecAnalyzer.kt:internal fun analyze: AnalysisResult</ID>
+    <ID>CyclomaticComplexMethod:CodecAnalyzer.kt:internal fun analyzeDispatchOnSealedDispatcher: DispatchAnalysisResult</ID>
+    <ID>CyclomaticComplexMethod:CodecAnalyzer.kt:internal fun analyzeField: FieldAnalysis</ID>
+    <ID>CyclomaticComplexMethod:CodecAnalyzer.kt:internal fun analyzeLengthPrefixedListSpec: LengthPrefixedListSpec?</ID>
+    <ID>CyclomaticComplexMethod:CodecAnalyzer.kt:internal fun analyzeLengthSource: LengthSource?</ID>
+    <ID>CyclomaticComplexMethod:CodecAnalyzer.kt:internal fun analyzeSealedDispatcher: DispatchAnalysisResult</ID>
+    <ID>CyclomaticComplexMethod:CodecAnalyzer.kt:internal fun analyzeValueClassScalarField: FieldAnalysis</ID>
+    <ID>CyclomaticComplexMethod:CodecAnalyzer.kt:internal fun classifyVariantWireSize: VariantWireSize</ID>
+    <ID>CyclomaticComplexMethod:CodecAnalyzer.kt:internal fun detectSealedDispatchOnParentDiscriminator: SingletonDispatchDiscriminator?</ID>
+    <ID>CyclomaticComplexMethod:CodecAnalyzer.kt:internal fun parseWhenExpression: WhenExpression?</ID>
+    <ID>CyclomaticComplexMethod:CodecAnalyzer.kt:internal fun resolveDottedCondition: ConditionRef?</ID>
+    <ID>CyclomaticComplexMethod:CodecEmitter.kt:CodecEmitter$fun tryEmit</ID>
+    <ID>CyclomaticComplexMethod:CodecEmitter.kt:CodecEmitter$private fun appendDecodeField</ID>
+    <ID>CyclomaticComplexMethod:CodecEmitter.kt:CodecEmitter$private fun appendEncodeField</ID>
+    <ID>CyclomaticComplexMethod:CodecEmitter.kt:CodecEmitter$private fun coalesceBatches: List&lt;BatchItem></ID>
+    <ID>CyclomaticComplexMethod:CodecEmitter.kt:CodecEmitter$private fun encodeToBatchAccumulator: String</ID>
+    <ID>CyclomaticComplexMethod:CodecEmitter.kt:CodecEmitter$private fun partialFieldTypeName: TypeName</ID>
+    <ID>CyclomaticComplexMethod:CodecEmitterDispatch.kt:internal fun appendPeekFixedScalar</ID>
+    <ID>CyclomaticComplexMethod:CodecEmitterFields.kt:internal fun appendConditionalScalarSwapDecode</ID>
+    <ID>CyclomaticComplexMethod:CodecEmitterFields.kt:internal fun appendManualScalarDecode</ID>
+    <ID>CyclomaticComplexMethod:CodecEmitterFields.kt:internal fun appendManualScalarEncode</ID>
+    <ID>CyclomaticComplexMethod:CodecEmitterFields.kt:internal fun appendNaturalReadWithSwap</ID>
+    <ID>CyclomaticComplexMethod:CodecEmitterPeek.kt:internal fun appendPeekScalar</ID>
+    <ID>CyclomaticComplexMethod:CodecEmitterPeek.kt:internal fun appendSequentialPeek</ID>
+    <ID>CyclomaticComplexMethod:CodecEmitterPeek.kt:internal fun buildPeekFrameFun: FunSpec</ID>
+    <ID>CyclomaticComplexMethod:CodecEmitterWireSize.kt:internal fun buildWireSizeFun: FunSpec</ID>
+    <ID>CyclomaticComplexMethod:CodecSchemaDescriptor.kt:CodecSchemaDescriptor$fun describeField: String</ID>
+    <ID>CyclomaticComplexMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$override fun process: List&lt;KSAnnotated></ID>
+    <ID>CyclomaticComplexMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun implementsCodecOf: Boolean</ID>
+    <ID>CyclomaticComplexMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateAdjacentLengthFrom</ID>
+    <ID>CyclomaticComplexMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateDispatchOnSealed</ID>
+    <ID>CyclomaticComplexMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateForwardCompatible</ID>
+    <ID>CyclomaticComplexMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateFramedBy</ID>
+    <ID>CyclomaticComplexMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateLengthFrom</ID>
+    <ID>CyclomaticComplexMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateLengthPrefixedUseCodec</ID>
+    <ID>CyclomaticComplexMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateRemainingBytesElementType</ID>
+    <ID>CyclomaticComplexMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateRemainingBytesTrailers</ID>
+    <ID>CyclomaticComplexMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateSealedDispatcher</ID>
+    <ID>CyclomaticComplexMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateUseCodec</ID>
+    <ID>CyclomaticComplexMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateWhen</ID>
+    <ID>CyclomaticComplexMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun walkType</ID>
+    <ID>LargeClass:CodecEmitter.kt:CodecEmitter</ID>
+    <ID>LargeClass:ProtocolMessageProcessor.kt:ProtocolMessageProcessor : SymbolProcessor</ID>
+    <ID>LargeClass:UseCodecScalarValidatorTest.kt:UseCodecScalarValidatorTest</ID>
+    <ID>LongMethod:CodecAnalyzer.kt:internal fun analyze: AnalysisResult</ID>
+    <ID>LongMethod:CodecAnalyzer.kt:internal fun analyzeDispatchOnSealedDispatcher: DispatchAnalysisResult</ID>
+    <ID>LongMethod:CodecAnalyzer.kt:internal fun analyzeField: FieldAnalysis</ID>
+    <ID>LongMethod:CodecAnalyzer.kt:internal fun analyzeSealedDispatcher: DispatchAnalysisResult</ID>
+    <ID>LongMethod:CodecAnalyzer.kt:internal fun analyzeValueClassScalarField: FieldAnalysis</ID>
+    <ID>LongMethod:CodecEmitter.kt:CodecEmitter$private fun appendBatchedDecode</ID>
+    <ID>LongMethod:CodecEmitter.kt:CodecEmitter$private fun buildPartialClassTypeSpec: TypeSpec</ID>
+    <ID>LongMethod:CodecEmitter.kt:CodecEmitter$private fun buildPartialEntryFun: FunSpec</ID>
+    <ID>LongMethod:CodecEmitterDispatch.kt:internal fun appendPeekFixedScalar</ID>
+    <ID>LongMethod:CodecEmitterDispatch.kt:internal fun buildDispatchDecodeFun: FunSpec</ID>
+    <ID>LongMethod:CodecEmitterDispatch.kt:internal fun buildDispatchEncodeFun: FunSpec</ID>
+    <ID>LongMethod:CodecEmitterDispatch.kt:internal fun buildDispatchFileSpec: FileSpec</ID>
+    <ID>LongMethod:CodecEmitterDispatch.kt:internal fun buildDispatchOnDecodeAggregatingFun: FunSpec</ID>
+    <ID>LongMethod:CodecEmitterDispatch.kt:internal fun buildDispatchPeekFun: FunSpec</ID>
+    <ID>LongMethod:CodecEmitterDispatch.kt:internal fun buildDispatchWireSizeFun: FunSpec</ID>
+    <ID>LongMethod:CodecEmitterDispatch.kt:internal fun buildFramedByDispatchOnPeekFun: FunSpec</ID>
+    <ID>LongMethod:CodecEmitterFields.kt:internal fun appendConditionalScalarSwapDecode</ID>
+    <ID>LongMethod:CodecEmitterFields.kt:internal fun appendDecodeConditional</ID>
+    <ID>LongMethod:CodecEmitterFields.kt:internal fun appendEncodeConditional</ID>
+    <ID>LongMethod:CodecEmitterFields.kt:internal fun appendNaturalReadWithSwap</ID>
+    <ID>LongMethod:CodecEmitterPeek.kt:internal fun appendPeekBoundingDynamicPrior</ID>
+    <ID>LongMethod:CodecEmitterPeek.kt:internal fun appendPeekLengthPrefixedUseCodecList</ID>
+    <ID>LongMethod:CodecEmitterPeek.kt:internal fun appendPeekScalar</ID>
+    <ID>LongMethod:CodecEmitterPeek.kt:internal fun appendPeekUseCodecScalar</ID>
+    <ID>LongMethod:CodecEmitterPeek.kt:internal fun appendSequentialPeek</ID>
+    <ID>LongMethod:CodecEmitterPeek.kt:internal fun buildPeekFrameFun: FunSpec</ID>
+    <ID>LongMethod:CodecEmitterWireSize.kt:internal fun buildWireSizeFun: FunSpec</ID>
+    <ID>LongMethod:EmitterDiagnosticsValidatorTest.kt:EmitterDiagnosticsValidatorTest$@Test fun acceptsDispatchOnMultiByteSignedAndULongDiscriminators</ID>
+    <ID>LongMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$override fun process: List&lt;KSAnnotated></ID>
+    <ID>LongMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateDispatchOnSealed</ID>
+    <ID>LongMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateForwardCompatible</ID>
+    <ID>LongMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateFramedBy</ID>
+    <ID>LongMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateLengthFrom</ID>
+    <ID>LongMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateLengthPrefixedUseCodec</ID>
+    <ID>LongMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validatePayloadTypeParameter</ID>
+    <ID>LongMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateRemainingBytesElementType</ID>
+    <ID>LongMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateSealedDispatcher</ID>
+    <ID>LongMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateUseCodec</ID>
+    <ID>LongMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateWhen</ID>
+    <ID>LongMethod:UseCodecScalarValidatorTest.kt:UseCodecScalarValidatorTest$@Test fun acceptsLengthPrefixedUseCodecOnSealedParentList</ID>
+    <ID>LongMethod:UseCodecScalarValidatorTest.kt:UseCodecScalarValidatorTest$@Test fun rejectsLengthPrefixedUseCodecOnPayloadGenericSealedParentElement</ID>
+    <ID>LoopWithTooManyJumpStatements:CodecAnalyzer.kt:for</ID>
+    <ID>LoopWithTooManyJumpStatements:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$for</ID>
+    <ID>MagicNumber:CodecAnalyzer.kt:255</ID>
+    <ID>MagicNumber:CodecAnalyzer.kt:3</ID>
+    <ID>MagicNumber:CodecAnalyzer.kt:4</ID>
+    <ID>MagicNumber:CodecAnalyzer.kt:8</ID>
+    <ID>MagicNumber:CodecEmitter.kt:CodecEmitter$16</ID>
+    <ID>MagicNumber:CodecEmitter.kt:CodecEmitter$32</ID>
+    <ID>MagicNumber:CodecEmitter.kt:CodecEmitter$4</ID>
+    <ID>MagicNumber:CodecEmitter.kt:CodecEmitter$64</ID>
+    <ID>MagicNumber:CodecEmitter.kt:CodecEmitter$8</ID>
+    <ID>MagicNumber:CodecEmitterDispatch.kt:16</ID>
+    <ID>MagicNumber:CodecEmitterFields.kt:4</ID>
+    <ID>MagicNumber:CodecEmitterFields.kt:8</ID>
+    <ID>MagicNumber:CodecEmitterPeek.kt:10</ID>
+    <ID>MagicNumber:CodecEmitterPeek.kt:3</ID>
+    <ID>MagicNumber:CodecEmitterPeek.kt:5</ID>
+    <ID>MagicNumber:CodecEmitterScalarUtils.kt:0xFF</ID>
+    <ID>MagicNumber:CodecEmitterScalarUtils.kt:0xFFFF</ID>
+    <ID>MagicNumber:CodecIr.kt:ScalarKind.Double$8</ID>
+    <ID>MagicNumber:CodecIr.kt:ScalarKind.Float$4</ID>
+    <ID>MagicNumber:CodecIr.kt:ScalarKind.Int$4</ID>
+    <ID>MagicNumber:CodecIr.kt:ScalarKind.Long$8</ID>
+    <ID>MagicNumber:CodecIr.kt:ScalarKind.UInt$4</ID>
+    <ID>MagicNumber:CodecIr.kt:ScalarKind.ULong$8</ID>
+    <ID>MagicNumber:CodecSchemaDescriptor.kt:CodecSchemaDescriptor$16</ID>
+    <ID>MagicNumber:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$255</ID>
+    <ID>MagicNumber:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$8</ID>
+    <ID>MaxLineLength:CodecAnalyzer.kt:"enum ${enumDecl.simpleName.asString()} declares ${defaults.size} @EnumDefault entries; at most one is allowed"</ID>
+    <ID>MaxLineLength:CodecAnalyzer.kt:?:</ID>
+    <ID>MaxLineLength:CodecAnalyzer.kt:Diagnostic("@LengthFrom requires the field to be String, List&lt;@ProtocolMessage>, or @ProtocolMessage", param)</ID>
+    <ID>MaxLineLength:CodecAnalyzer.kt:return FieldAnalysis.Err(Diagnostic("bare @ProtocolMessage field must be a resolvable non-nullable type", param))</ID>
+    <ID>MaxLineLength:CodecEmitter.kt:CodecEmitter$"framing header codec returned a non-Exact wire size for ${shape.ownerSimpleName}.${variableAfter.name}"</ID>
+    <ID>MaxLineLength:CodecEmitter.kt:CodecEmitter$ScalarKind.Float -> if (accumulatorType == "Long") "Float.fromBits($rawExpr.toInt())" else "Float.fromBits($rawExpr)"</ID>
+    <ID>MaxLineLength:CodecEmitter.kt:CodecEmitter$private</ID>
+    <ID>MaxLineLength:CodecEmitter.kt:CodecEmitter$return if (pkg.isEmpty()) part.valueClass.simpleName else "$pkg.${part.valueClass.simpleNames.joinToString(".")}"</ID>
+    <ID>MaxLineLength:CodecEmitterFields.kt:"val %L = %T.entries.getOrElse(__%LOrdinal) { throw %T(fieldPath = %S, bufferPosition = buffer.position(), expected = %S, actual = __%LOrdinal.toString()) }"</ID>
+    <ID>MaxLineLength:CodecEmitterFields.kt:internal fun scalarHeaderBytes: Int</ID>
+    <ID>MaxLineLength:CodecEmitterPeek.kt:body.addStatement("__offset += %L", inner.innerKind.wireWidth.requireFixed("appendSequentialPeekConditional"))</ID>
+    <ID>MaxLineLength:CodecEmitterScalarUtils.kt:error("Long / ULong / Float / Double are not in DISPATCH_VALUE_RETURN_KINDS — analyze should have rejected this kind")</ID>
+    <ID>MaxLineLength:CodecEmitterWireSize.kt:fun</ID>
+    <ID>MaxLineLength:CodecEmitterWireSize.kt:val sumExpr = (listOf(fixedBytes.toString()) + runtimeExactVarFields.map { "__${it.name}Size" }).joinToString(" + ")</ID>
+    <ID>MaxLineLength:CodecSchemaClassifierTest.kt:CodecSchemaClassifierTest$listOf(msgRec("p.M", field(0, "a", "scalar:Int wire=4B order=Big"), field(1, "b", "scalar:UShort wire=2B order=Big")))</ID>
+    <ID>MaxLineLength:CodecSchemaClassifierTest.kt:CodecSchemaClassifierTest$msgRec("p.M", field(0, "a", "scalar:Int wire=4B order=Big"), field(1, "b", "scalar:UByte wire=1B order=Big"))</ID>
+    <ID>MaxLineLength:CodecSchemaClassifierTest.kt:CodecSchemaClassifierTest$sealedRec("p.S", "valueclass:p.Tag/2B,inner=UShort/Big,dispatchValue=type:Int", variants = arrayOf("0x01" to "A"))</ID>
+    <ID>MaxLineLength:CodecSchemaClassifierTest.kt:CodecSchemaClassifierTest$val with = sealedRec("p.S", "fixed-byte/1B", forwardCompatible = "p.S.Unknown", variants = arrayOf("0x01" to "A"))</ID>
+    <ID>MaxLineLength:CodecSchemaDescriptorCodegenTest.kt:CodecSchemaDescriptorCodegenTest$CodecSchemaParser.parse(schema).filterIsInstance&lt;SchemaRecord.SealedRecord>().single { it.typeName == "test.Frame" }</ID>
+    <ID>MaxLineLength:CodecSchemaDescriptorCodegenTest.kt:CodecSchemaDescriptorCodegenTest$assertTrue(frame.dispatch.startsWith("valueclass:test.EtherType/2B,"), "unexpected dispatch token: ${frame.dispatch}")</ID>
+    <ID>MaxLineLength:CodecSchemaDescriptorTest.kt:CodecSchemaDescriptorTest$private</ID>
+    <ID>MaxLineLength:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$"$variantName's primary constructor. Available: ${available.joinToString().ifEmpty { "&lt;none>" }}."</ID>
+    <ID>MaxLineLength:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$"declare exactly one property annotated with `@DispatchValue`. Found ${dispatchValueProperties.size}."</ID>
+    <ID>MaxLineLength:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$"naming a Kotlin `object` that implements `Codec&lt;${fieldType.declaration.simpleName.asString()}>`."</ID>
+    <ID>MaxLineLength:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$owner.getSealedSubclasses().filter { it.hasAnnotation(UNKNOWN_VARIANT_SHORT, UNKNOWN_VARIANT_QNAME) }.toList()</ID>
+    <ID>MaxLineLength:Slice11aValidatorTest.kt:Slice11aValidatorTest$"no deferred-shape diagnostic should fire on @When @UseCodec sealed-parent inner. Messages:\n${result.messages}"</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun KSType.implementsPayload: Boolean</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun KSValueParameter.hasVariableLengthUseCodec: Boolean</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun KSValueParameter.hasViewUseCodec: Boolean</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyze: AnalysisResult</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeBareProtocolMessageField: FieldAnalysis</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeConditionalField: FieldAnalysis</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeConditionalInner: ConditionalInner?</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeConditionalLengthPrefixedUseCodecPayloadInner: ConditionalInner.LengthPrefixedUseCodecPayload?</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeConditionalProtocolMessageInner: ConditionalInner.ProtocolMessageScalar?</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeConditionalUseCodecInner: ConditionalInner.UseCodecScalar?</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeConditionalValueClassInner: ConditionalInner.ValueClassScalar?</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeDispatchOnSealedDispatcher: DispatchAnalysisResult</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeEnumField: FieldAnalysis</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeField: FieldAnalysis</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeLengthFromListField: FieldAnalysis</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeLengthFromMessageField: FieldAnalysis</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeLengthFromStringField: FieldAnalysis</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeLengthPrefixedListSpec: LengthPrefixedListSpec?</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeLengthPrefixedUseCodecListField: FieldAnalysis</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeLengthPrefixedUseCodecPayloadField: FieldAnalysis</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeLengthSource: LengthSource?</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeRemainingBytesPayloadField: FieldAnalysis</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeRemainingBytesProtocolMessageListField: FieldAnalysis</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeSealedDispatcher: DispatchAnalysisResult</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeUseCodecScalarField: FieldAnalysis</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeValueClassScalarField: FieldAnalysis</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun boundParameterIsConditionalShape: Boolean</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun classifyVariantWireSize: VariantWireSize</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun detectElementBackPatch: Boolean</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun detectFramedBy: FramedByConfig?</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun detectPayloadTypeParameter: PayloadTypeParameter?</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun detectSealedDispatchOnParentDiscriminator: SingletonDispatchDiscriminator?</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun parseFramedBy: FramedByConfig?</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun parseWhenExpression: WhenExpression?</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun resolveDottedCondition: ConditionRef?</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun resolveForwardCompatibleConfig: ForwardCompatibleConfig?</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun resolveSimpleCondition: ConditionRef?</ID>
+    <ID>ReturnCount:CodecEmitter.kt:CodecEmitter$fun tryEmit</ID>
+    <ID>ReturnCount:CodecEmitter.kt:CodecEmitter$private fun buildFileSpec: FileSpec</ID>
+    <ID>ReturnCount:CodecEmitter.kt:CodecEmitter$private fun framedByAfterField: FieldSpec?</ID>
+    <ID>ReturnCount:CodecEmitter.kt:CodecEmitter$private fun shouldEmitPartial: Boolean</ID>
+    <ID>ReturnCount:CodecEmitterFields.kt:internal fun appendEncodeGuard</ID>
+    <ID>ReturnCount:CodecEmitterPeek.kt:internal fun buildPeekFrameFun: FunSpec</ID>
+    <ID>ReturnCount:CodecEmitterWireSize.kt:internal fun buildWireSizeFun: FunSpec</ID>
+    <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun hasPayloadTypeParameter: Boolean</ID>
+    <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun implementsCodecOf: Boolean</ID>
+    <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun isBooleanReturningValProperty: Boolean</ID>
+    <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun isIntReturningValProperty: Boolean</ID>
+    <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun isListOfProtocolMessageDataClass: Boolean</ID>
+    <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun isNestedProtocolMessageType: Boolean</ID>
+    <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateDispatchOnSealed</ID>
+    <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateGenericPayloadVariantShape: Boolean</ID>
+    <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateLengthPrefixedUseCodec</ID>
+    <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validatePayloadProperty</ID>
+    <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validatePayloadShape</ID>
+    <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validatePayloadTypeParameter</ID>
+    <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun walkType</ID>
+    <ID>ReturnCount:ValueClassDetection.kt:internal fun KSClassDeclaration.isValueClassDecl: Boolean</ID>
+    <ID>TooManyFunctions:CodecAnalyzer.kt:com.ditchoom.buffer.codec.processor.CodecAnalyzer.kt</ID>
+    <ID>TooManyFunctions:CodecEmitter.kt:CodecEmitter</ID>
+    <ID>TooManyFunctions:CodecEmitterDispatch.kt:com.ditchoom.buffer.codec.processor.CodecEmitterDispatch.kt</ID>
+    <ID>TooManyFunctions:CodecEmitterFields.kt:com.ditchoom.buffer.codec.processor.CodecEmitterFields.kt</ID>
+    <ID>TooManyFunctions:CodecEmitterPeek.kt:com.ditchoom.buffer.codec.processor.CodecEmitterPeek.kt</ID>
+    <ID>TooManyFunctions:CodecSchemaDescriptor.kt:CodecSchemaDescriptor</ID>
+    <ID>TooManyFunctions:ProtocolMessageProcessor.kt:ProtocolMessageProcessor : SymbolProcessor</ID>
+  </CurrentIssues>
+</SmellBaseline>
