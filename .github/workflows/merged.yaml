@@ -23,8 +23,10 @@ on:
           - dry-run
         default: release
 
+# Least privilege: this workflow runs on pull_request_target (merged PRs), so the default
+# token is read-only and write is granted per-job only where actually needed (tag/release).
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: deploy
@@ -35,11 +37,14 @@ jobs:
     name: Check if release is needed
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read  # lists the merged PR's changed files via the REST API
     outputs:
       flow: ${{ steps.check.outputs.flow }}
       gradle-args: ${{ steps.check.outputs.gradle-args }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
       - name: Determine release flow
@@ -143,8 +148,12 @@ jobs:
     needs: [check-release, build-linux, publish]
     if: always() && needs.check-release.outputs.flow != 'skip' && needs.check-release.outputs.flow != 'dry-run'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # pushes the version tag and creates the GitHub release
+      id-token: write # OIDC for SLSA build-provenance attestation
+      attestations: write # write provenance + SBOM attestations to the GitHub attestation store
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Create draft GitHub release
         if: needs.check-release.outputs.flow == 'draft' && needs.publish.result == 'success'
@@ -208,3 +217,52 @@ jobs:
           **Maven Central:** [com.ditchoom:buffer:${version}](${maven_url})
           EOF
           )"
+
+      # ---- Supply-chain: SBOM + SLSA build provenance for the published artifacts ----
+      # Runs whenever publish succeeded (draft or release). Uses the exact same artifact
+      # bundle the publish job uploaded to Maven Central, so the attested digests match
+      # what consumers download.
+      - name: Download published artifacts
+        if: needs.publish.result == 'success'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: maven-local-merged
+          path: /tmp/maven-repo
+
+      - name: Generate SBOM (CycloneDX)
+        if: needs.publish.result == 'success'
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: /tmp/maven-repo
+          format: cyclonedx-json
+          output-file: /tmp/buffer-sbom.cdx.json
+          artifact-name: buffer-sbom.cdx.json
+
+      - name: Attest build provenance
+        if: needs.publish.result == 'success'
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          # The shipped binaries: JVM/Android jars+aars and Kotlin/Native klibs.
+          subject-path: |
+            /tmp/maven-repo/**/*.jar
+            /tmp/maven-repo/**/*.klib
+            /tmp/maven-repo/**/*.aar
+
+      - name: Attest SBOM
+        if: needs.publish.result == 'success'
+        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
+        with:
+          subject-path: |
+            /tmp/maven-repo/**/*.jar
+            /tmp/maven-repo/**/*.klib
+            /tmp/maven-repo/**/*.aar
+          sbom-path: /tmp/buffer-sbom.cdx.json
+
+      - name: Attach SBOM to release
+        if: needs.check-release.outputs.flow == 'release' && needs.publish.result == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${{ needs.build-linux.outputs.version }}"
+          gh release upload "v${version}" /tmp/buffer-sbom.cdx.json \
+            --repo="$GITHUB_REPOSITORY" --clobber

@@ -25,6 +25,10 @@ on:
         description: "Sonatype Central Portal deployment ID"
         value: ${{ jobs.publish.outputs.deployment-id }}
 
+# Downloads same-run artifacts and uploads to Sonatype (external); no repo write needed.
+permissions:
+  contents: read
+
 jobs:
   publish:
     name: "Sign, Bundle & Upload"
@@ -34,7 +38,7 @@ jobs:
       deployment-id: ${{ steps.upload.outputs.deployment-id }}
     steps:
       - name: Download merged artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: maven-local-merged
           path: /tmp/maven-repo
