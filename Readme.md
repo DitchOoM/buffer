@@ -8,6 +8,7 @@ See the [project website][docs] for documentation and APIs.
 Buffer gives you one `ReadBuffer`/`WriteBuffer` API that delegates to platform-native types — `ByteBuffer` on JVM, `NSData` on Apple, `malloc` on Linux, `Uint8Array` on JS — so data never copies between your code and the OS.
 
 [![Maven Central](https://img.shields.io/maven-central/v/com.ditchoom/buffer.svg)](https://central.sonatype.com/artifact/com.ditchoom/buffer)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/DitchOoM/buffer/badge)](https://scorecard.dev/viewer/?uri=github.com/DitchOoM/buffer)
 
 ## Why Buffer?
 

@@ -16,6 +16,7 @@ const sidebars: SidebarsConfig = {
         'recipes/protocol-parsing',
         'recipes/basic-operations',
         'recipes/platform-interop',
+        'recipes/cryptography',
       ],
     },
     {
