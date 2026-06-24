@@ -144,11 +144,15 @@ public final class com/ditchoom/buffer/crypto/CryptoRandom_jvmCommonKt {
 }
 
 public final class com/ditchoom/buffer/crypto/EcEncodingError : java/lang/Enum {
+	public static final field CurveMismatch Lcom/ditchoom/buffer/crypto/EcEncodingError;
 	public static final field IntegerTooWide Lcom/ditchoom/buffer/crypto/EcEncodingError;
 	public static final field MalformedDer Lcom/ditchoom/buffer/crypto/EcEncodingError;
 	public static final field NegativeInteger Lcom/ditchoom/buffer/crypto/EcEncodingError;
 	public static final field NonMinimalInteger Lcom/ditchoom/buffer/crypto/EcEncodingError;
+	public static final field PointNotOnCurve Lcom/ditchoom/buffer/crypto/EcEncodingError;
+	public static final field UnsupportedCurve Lcom/ditchoom/buffer/crypto/EcEncodingError;
 	public static final field UnsupportedScheme Lcom/ditchoom/buffer/crypto/EcEncodingError;
+	public static final field WrongKeyLength Lcom/ditchoom/buffer/crypto/EcEncodingError;
 	public static final field WrongSignatureLength Lcom/ditchoom/buffer/crypto/EcEncodingError;
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lcom/ditchoom/buffer/crypto/EcEncodingError;
@@ -160,10 +164,25 @@ public final class com/ditchoom/buffer/crypto/EcEncodingException : com/ditchoom
 }
 
 public final class com/ditchoom/buffer/crypto/EcInteropKt {
+	public static final fun ecPrivateKeyToPkcs8 (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun ecPrivateKeyToPkcs8$default (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static final fun ecPublicKeyCompress (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun ecPublicKeyCompress$default (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static final fun ecPublicKeyToSpki (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun ecPublicKeyToSpki$default (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 	public static final fun ecdsaSignatureToDer (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
 	public static synthetic fun ecdsaSignatureToDer$default (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 	public static final fun ecdsaSignatureToP1363 (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
 	public static synthetic fun ecdsaSignatureToP1363$default (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static final fun pkcs8ToEcPrivateKey (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun pkcs8ToEcPrivateKey$default (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static final fun spkiToEcPublicKey (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun spkiToEcPublicKey$default (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+}
+
+public final class com/ditchoom/buffer/crypto/EcInterop_jvmCommonKt {
+	public static final fun ecPublicKeyDecompress (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun ecPublicKeyDecompress$default (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 }
 
 public final class com/ditchoom/buffer/crypto/EcdsaSignatureEncoding : java/lang/Enum {

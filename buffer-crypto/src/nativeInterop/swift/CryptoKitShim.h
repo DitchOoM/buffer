@@ -81,6 +81,16 @@ int32_t bcks_ecdh_x963_from_scalar(
     uint8_t *x963Out, size_t x963Cap,
     size_t *x963LenOut);
 
+// EC point decompression (curve: 256, 384, or 521): SEC1 compressed (0x02/0x03 || X) -> uncompressed
+// (0x04 || X || Y) via CryptoKit. Returns BCKS_ERR_INPUT for an off-curve point and BCKS_ERR_INTERNAL
+// when the running OS predates CryptoKit's compressed-point support (macOS 13 / iOS 16 / watchOS 9 /
+// tvOS 16); the Kotlin actual maps the latter to UnsupportedOperationException.
+int32_t bcks_ec_decompress(
+    int32_t curve,
+    const uint8_t *pointPtr, size_t pointLen,
+    uint8_t *out, size_t outCap,
+    size_t *outLenOut);
+
 // ECDSA signing from a bare scalar (curve: 256, 384, or 521).
 int32_t bcks_ecdsa_sign_from_scalar(
     int32_t curve,

@@ -50,6 +50,25 @@ enum class EcEncodingError {
 
     /** The scheme has no DER/P1363 transcoding (Ed25519 has a single canonical 64-byte encoding). */
     UnsupportedScheme,
+
+    /** The curve has no encoding for this operation (e.g. X25519 has no SEC1 point form / SPKI point). */
+    UnsupportedCurve,
+
+    /** A raw scalar or SEC1 point was not the curve's expected width, or a point had a wrong prefix byte. */
+    WrongKeyLength,
+
+    /**
+     * A wrapped encoding named a different curve/algorithm than requested: the embedded `namedCurve`
+     * OID, or the `id-ecPublicKey` / `id-X25519` algorithm OID, did not match the [KeyAgreementCurve]
+     * passed in.
+     */
+    CurveMismatch,
+
+    /**
+     * A compressed point's `x` has no square root on the curve — `x³ + a·x + b` is not a quadratic
+     * residue mod `p` — so it is not a valid point. (A genuine on-curve check, not a parse error.)
+     */
+    PointNotOnCurve,
 }
 
 /**
@@ -68,6 +87,9 @@ private fun fail(error: EcEncodingError): Nothing = throw EcEncodingException(er
 
 private const val DER_SEQUENCE = 0x30
 private const val DER_INTEGER = 0x02
+private const val DER_BIT_STRING = 0x03
+private const val DER_OCTET_STRING = 0x04
+private const val DER_OID = 0x06
 private const val DER_LONG_FORM = 0x80
 private const val BYTE_MASK = 0xFF
 private const val HIGH_BIT = 0x80
@@ -119,6 +141,33 @@ private class DerCursor(
 
     fun ensureFullyConsumed() {
         if (remaining != 0) fail(EcEncodingError.MalformedDer)
+    }
+
+    /** The next TLV tag without consuming it, or `-1` if the window is exhausted (for optional fields). */
+    fun peekTag(): Int = if (pos >= end) -1 else buf.get(pos).toInt() and BYTE_MASK
+
+    /** Reads an INTEGER element and asserts it is the single-byte [expected] value (DER versions). */
+    fun expectIntegerValue(expected: Int) {
+        val w = element(DER_INTEGER)
+        if (w.len != 1 || (buf.get(w.start).toInt() and BYTE_MASK) != expected) fail(EcEncodingError.MalformedDer)
+    }
+
+    /** True if the next element is an OID whose value bytes equal [oidValue]; consumes it either way it matches. */
+    fun matchOid(oidValue: ByteArray): Boolean {
+        val w = element(DER_OID)
+        if (w.len != oidValue.size) return false
+        for (i in oidValue.indices) if (buf.get(w.start + i) != oidValue[i]) return false
+        return true
+    }
+
+    /** Copies a [tag]'d element's value window verbatim into [dest] (e.g. an OCTET STRING's contents). */
+    fun copyElementValue(
+        tag: Int,
+        dest: WriteBuffer,
+    ): Int {
+        val w = element(tag)
+        copyWindow(buf, w.start, w.len, dest)
+        return w.len
     }
 }
 
@@ -280,3 +329,347 @@ fun ecdsaSignatureToDer(
     dest.resetForRead()
     return dest
 }
+
+// =============================================================================
+// EC key transcoders: curve metadata + generic DER writer helpers
+// =============================================================================
+
+// OID *value* bytes (the content of an OID TLV, without the 0x06 tag / length). Fixed non-secret
+// templates used both to emit and to match — never as a data structure.
+private val OID_ID_EC_PUBLIC_KEY = byteArrayOf(0x2a, 0x86.toByte(), 0x48, 0xce.toByte(), 0x3d, 0x02, 0x01)
+private val OID_X25519 = byteArrayOf(0x2b, 0x65, 0x6e)
+private val OID_P256 = byteArrayOf(0x2a, 0x86.toByte(), 0x48, 0xce.toByte(), 0x3d, 0x03, 0x01, 0x07)
+private val OID_P384 = byteArrayOf(0x2b, 0x81.toByte(), 0x04, 0x00, 0x22)
+private val OID_P521 = byteArrayOf(0x2b, 0x81.toByte(), 0x04, 0x00, 0x23)
+
+private const val SEC1_UNCOMPRESSED = 0x04
+private const val SEC1_COMPRESSED_EVEN = 0x02
+private const val SEC1_COMPRESSED_ODD = 0x03
+
+/** DER INTEGER version element size (`02 01 vv`), used for the fixed `0`/`1` versions in PKCS#8. */
+private const val INT_VERSION_TLV = 3
+
+/** Rejects [KeyAgreementCurve.X25519], which has no SEC1 point / NIST-named-curve encoding. */
+internal fun requireEcCurve(curve: KeyAgreementCurve) {
+    if (curve == KeyAgreementCurve.X25519) fail(EcEncodingError.UnsupportedCurve)
+}
+
+/** Coordinate / scalar width in bytes (P-256 32, P-384 48, P-521 66, X25519 32). */
+internal fun fieldBytes(curve: KeyAgreementCurve): Int = curve.privateKeyBytes
+
+/** The named-curve OID value bytes for a NIST prime curve. */
+private fun namedCurveOid(curve: KeyAgreementCurve): ByteArray =
+    when (curve) {
+        KeyAgreementCurve.P256 -> OID_P256
+        KeyAgreementCurve.P384 -> OID_P384
+        KeyAgreementCurve.P521 -> OID_P521
+        KeyAgreementCurve.X25519 -> fail(EcEncodingError.UnsupportedCurve)
+    }
+
+/** Total bytes a TLV with [contentLen]-byte content occupies (tag + DER length + content). */
+private fun tlvSize(contentLen: Int): Int = 1 + derLengthSize(contentLen) + contentLen
+
+private fun writeTlvHeader(
+    dest: WriteBuffer,
+    tag: Int,
+    contentLen: Int,
+) {
+    dest.writeByte(tag.toByte())
+    writeDerLength(dest, contentLen)
+}
+
+private fun writeOidElement(
+    dest: WriteBuffer,
+    oidValue: ByteArray,
+) {
+    writeTlvHeader(dest, DER_OID, oidValue.size)
+    for (b in oidValue) dest.writeByte(b)
+}
+
+private fun writeIntVersion(
+    dest: WriteBuffer,
+    version: Int,
+) {
+    dest.writeByte(DER_INTEGER.toByte())
+    dest.writeByte(1)
+    dest.writeByte(version.toByte())
+}
+
+// =============================================================================
+// EC private key: raw big-endian scalar <-> PKCS#8 (RFC 5208 / RFC 5915 / RFC 8410)
+// =============================================================================
+
+/**
+ * Wraps a raw big-endian private [rawScalar] (the module's canonical EC private encoding) in a PKCS#8
+ * `PrivateKeyInfo` — RFC 5208 around an RFC 5915 `ECPrivateKey` for the NIST curves, or the RFC 8410
+ * form for X25519. The byte layout is identical to what each platform's native stack accepts, so the
+ * result round-trips with WebCrypto `importKey('pkcs8')` / JCA `PKCS8EncodedKeySpec`. The scalar must
+ * be exactly the curve's width ([WrongKeyLength] otherwise). Allocated from [factory], read-ready.
+ */
+fun ecPrivateKeyToPkcs8(
+    curve: KeyAgreementCurve,
+    rawScalar: ReadBuffer,
+    factory: BufferFactory = BufferFactory.Default,
+): ReadBuffer {
+    val field = fieldBytes(curve)
+    if (rawScalar.remaining() != field) fail(EcEncodingError.WrongKeyLength)
+    val scalarStart = rawScalar.position()
+
+    if (curve == KeyAgreementCurve.X25519) {
+        val innerOctet = tlvSize(field) // CurvePrivateKey ::= OCTET STRING (scalar)
+        val pkOctet = tlvSize(innerOctet) // privateKey OCTET STRING wraps the CurvePrivateKey
+        val algIdContent = tlvSize(OID_X25519.size)
+        val pkInfoContent = INT_VERSION_TLV + tlvSize(algIdContent) + pkOctet
+        val dest = factory.allocate(tlvSize(pkInfoContent))
+        writeTlvHeader(dest, DER_SEQUENCE, pkInfoContent)
+        writeIntVersion(dest, 0)
+        writeTlvHeader(dest, DER_SEQUENCE, algIdContent)
+        writeOidElement(dest, OID_X25519)
+        writeTlvHeader(dest, DER_OCTET_STRING, innerOctet)
+        writeTlvHeader(dest, DER_OCTET_STRING, field)
+        copyWindow(rawScalar, scalarStart, field, dest)
+        dest.resetForRead()
+        return dest
+    }
+
+    val named = namedCurveOid(curve)
+    val ecPrivContent = INT_VERSION_TLV + tlvSize(field) // version(1) + privateKey OCTET STRING(scalar)
+    val ecPriv = tlvSize(ecPrivContent)
+    val algIdContent = tlvSize(OID_ID_EC_PUBLIC_KEY.size) + tlvSize(named.size)
+    val pkInfoContent = INT_VERSION_TLV + tlvSize(algIdContent) + tlvSize(ecPriv)
+    val dest = factory.allocate(tlvSize(pkInfoContent))
+    writeTlvHeader(dest, DER_SEQUENCE, pkInfoContent)
+    writeIntVersion(dest, 0)
+    writeTlvHeader(dest, DER_SEQUENCE, algIdContent)
+    writeOidElement(dest, OID_ID_EC_PUBLIC_KEY)
+    writeOidElement(dest, named)
+    writeTlvHeader(dest, DER_OCTET_STRING, ecPriv) // privateKey OCTET STRING wraps ECPrivateKey
+    writeTlvHeader(dest, DER_SEQUENCE, ecPrivContent)
+    writeIntVersion(dest, 1)
+    writeTlvHeader(dest, DER_OCTET_STRING, field)
+    copyWindow(rawScalar, scalarStart, field, dest)
+    dest.resetForRead()
+    return dest
+}
+
+/**
+ * Extracts the raw big-endian private scalar from a PKCS#8 `PrivateKeyInfo` for [curve] (the inverse of
+ * [ecPrivateKeyToPkcs8]). Parsed strictly: the embedded algorithm and `namedCurve` OIDs must match
+ * [curve] ([CurveMismatch] otherwise); optional RFC 5915 `[0]`/`[1]` fields and PKCS#8 attributes are
+ * tolerated and ignored. The scalar is left-padded to the curve width. Allocated from [factory].
+ */
+fun pkcs8ToEcPrivateKey(
+    curve: KeyAgreementCurve,
+    pkcs8: ReadBuffer,
+    factory: BufferFactory = BufferFactory.Default,
+): ReadBuffer {
+    val field = fieldBytes(curve)
+    val outer = DerCursor(pkcs8, pkcs8.position(), pkcs8.position() + pkcs8.remaining())
+    val info = outer.scoped(outer.element(DER_SEQUENCE))
+    outer.ensureFullyConsumed()
+    info.expectIntegerValue(0) // PrivateKeyInfo version 0
+    val algId = info.scoped(info.element(DER_SEQUENCE))
+    if (curve == KeyAgreementCurve.X25519) {
+        if (!algId.matchOid(OID_X25519)) fail(EcEncodingError.CurveMismatch)
+        val pkOctet = info.scoped(info.element(DER_OCTET_STRING))
+        val scalar = pkOctet.element(DER_OCTET_STRING) // CurvePrivateKey OCTET STRING(scalar)
+        if (scalar.len != field) fail(EcEncodingError.WrongKeyLength)
+        val dest = factory.allocate(field)
+        copyWindow(pkcs8, scalar.start, field, dest)
+        dest.resetForRead()
+        return dest
+    }
+
+    if (!algId.matchOid(OID_ID_EC_PUBLIC_KEY)) fail(EcEncodingError.CurveMismatch)
+    if (!algId.matchOid(namedCurveOid(curve))) fail(EcEncodingError.CurveMismatch)
+    val ecPriv = info.scoped(info.element(DER_OCTET_STRING)) // privateKey OCTET STRING -> ECPrivateKey
+    val ec = ecPriv.scoped(ecPriv.element(DER_SEQUENCE))
+    ec.expectIntegerValue(1) // ECPrivateKey version 1
+    val scalar = ec.element(DER_OCTET_STRING)
+    if (scalar.len > field) fail(EcEncodingError.WrongKeyLength)
+    val dest = factory.allocate(field)
+    repeat(field - scalar.len) { dest.writeByte(0) } // left-pad a short (non-canonical) scalar
+    copyWindow(pkcs8, scalar.start, scalar.len, dest)
+    dest.resetForRead()
+    return dest
+}
+
+// =============================================================================
+// EC public key: uncompressed SEC1 point <-> X.509 SubjectPublicKeyInfo (SPKI)
+// =============================================================================
+
+/**
+ * Wraps an uncompressed SEC1 point (`0x04 ‖ X ‖ Y`) in an X.509 `SubjectPublicKeyInfo`
+ * (`id-ecPublicKey` + the [curve] `namedCurve` OID + a BIT STRING of the point) — the form X.509
+ * certificates, JWK-to-DER, and `openssl` consume. NIST prime curves only ([UnsupportedCurve] for
+ * X25519, whose SPKI carries a raw key, not a point). The point must be the curve's uncompressed
+ * width and start with `0x04` ([WrongKeyLength] otherwise). Allocated from [factory], read-ready.
+ */
+fun ecPublicKeyToSpki(
+    curve: KeyAgreementCurve,
+    uncompressedPoint: ReadBuffer,
+    factory: BufferFactory = BufferFactory.Default,
+): ReadBuffer {
+    requireEcCurve(curve)
+    val field = fieldBytes(curve)
+    val pointLen = 1 + 2 * field
+    val base = uncompressedPoint.position()
+    if (uncompressedPoint.remaining() != pointLen) fail(EcEncodingError.WrongKeyLength)
+    if ((uncompressedPoint.get(base).toInt() and BYTE_MASK) != SEC1_UNCOMPRESSED) fail(EcEncodingError.WrongKeyLength)
+
+    val named = namedCurveOid(curve)
+    val algIdContent = tlvSize(OID_ID_EC_PUBLIC_KEY.size) + tlvSize(named.size)
+    val bitStrContent = 1 + pointLen // leading "unused bits" byte (0x00) + the point
+    val spkiContent = tlvSize(algIdContent) + tlvSize(bitStrContent)
+    val dest = factory.allocate(tlvSize(spkiContent))
+    writeTlvHeader(dest, DER_SEQUENCE, spkiContent)
+    writeTlvHeader(dest, DER_SEQUENCE, algIdContent)
+    writeOidElement(dest, OID_ID_EC_PUBLIC_KEY)
+    writeOidElement(dest, named)
+    writeTlvHeader(dest, DER_BIT_STRING, bitStrContent)
+    dest.writeByte(0) // 0 unused bits
+    copyWindow(uncompressedPoint, base, pointLen, dest)
+    dest.resetForRead()
+    return dest
+}
+
+/**
+ * Extracts the uncompressed SEC1 point (`0x04 ‖ X ‖ Y`) from an X.509 `SubjectPublicKeyInfo` for
+ * [curve] (the inverse of [ecPublicKeyToSpki]). Strict: the algorithm and `namedCurve` OIDs must match
+ * [curve] ([CurveMismatch]); the BIT STRING must have 0 unused bits and carry a full-width uncompressed
+ * point ([WrongKeyLength] / [MalformedDer] otherwise). A compressed point inside the SPKI is rejected
+ * (decompress it first). Allocated from [factory], read-ready.
+ */
+fun spkiToEcPublicKey(
+    curve: KeyAgreementCurve,
+    spki: ReadBuffer,
+    factory: BufferFactory = BufferFactory.Default,
+): ReadBuffer {
+    requireEcCurve(curve)
+    val field = fieldBytes(curve)
+    val pointLen = 1 + 2 * field
+    val outer = DerCursor(spki, spki.position(), spki.position() + spki.remaining())
+    val info = outer.scoped(outer.element(DER_SEQUENCE))
+    outer.ensureFullyConsumed()
+    val algId = info.scoped(info.element(DER_SEQUENCE))
+    if (!algId.matchOid(OID_ID_EC_PUBLIC_KEY)) fail(EcEncodingError.CurveMismatch)
+    if (!algId.matchOid(namedCurveOid(curve))) fail(EcEncodingError.CurveMismatch)
+    val bits = info.element(DER_BIT_STRING)
+    info.ensureFullyConsumed()
+    if (bits.len != 1 + pointLen) fail(EcEncodingError.WrongKeyLength)
+    if ((spki.get(bits.start).toInt() and BYTE_MASK) != 0) fail(EcEncodingError.MalformedDer) // unused bits
+    if ((spki.get(bits.start + 1).toInt() and BYTE_MASK) != SEC1_UNCOMPRESSED) fail(EcEncodingError.WrongKeyLength)
+    val dest = factory.allocate(pointLen)
+    copyWindow(spki, bits.start + 1, pointLen, dest)
+    dest.resetForRead()
+    return dest
+}
+
+// =============================================================================
+// EC public key: point compression (pure) and decompression (per-platform bignum / native stack)
+// =============================================================================
+
+/**
+ * Compresses an uncompressed SEC1 point (`0x04 ‖ X ‖ Y`) to the compressed form (`0x02/0x03 ‖ X`),
+ * where the prefix encodes the parity of Y (`0x02` even, `0x03` odd). Pure — drops Y, no field math.
+ * NIST prime curves only ([UnsupportedCurve] for X25519). The point must be the curve's uncompressed
+ * width and start with `0x04` ([WrongKeyLength] otherwise). Allocated from [factory], read-ready.
+ */
+fun ecPublicKeyCompress(
+    curve: KeyAgreementCurve,
+    uncompressedPoint: ReadBuffer,
+    factory: BufferFactory = BufferFactory.Default,
+): ReadBuffer {
+    requireEcCurve(curve)
+    val field = fieldBytes(curve)
+    val pointLen = 1 + 2 * field
+    val base = uncompressedPoint.position()
+    if (uncompressedPoint.remaining() != pointLen) fail(EcEncodingError.WrongKeyLength)
+    if ((uncompressedPoint.get(base).toInt() and BYTE_MASK) != SEC1_UNCOMPRESSED) fail(EcEncodingError.WrongKeyLength)
+    val yOdd = (uncompressedPoint.get(base + pointLen - 1).toInt() and 1) == 1
+    val dest = factory.allocate(1 + field)
+    dest.writeByte((if (yOdd) SEC1_COMPRESSED_ODD else SEC1_COMPRESSED_EVEN).toByte())
+    copyWindow(uncompressedPoint, base + 1, field, dest) // X
+    dest.resetForRead()
+    return dest
+}
+
+/** A validated compressed SEC1 point: its X coordinate window and the required parity of Y. */
+internal class CompressedPoint(
+    val field: Int,
+    /** Absolute index of the X coordinate's first byte within the source buffer. */
+    val xStart: Int,
+    /** Whether the recovered Y must be odd (prefix `0x03`) rather than even (`0x02`). */
+    val wantOdd: Boolean,
+)
+
+/** Validates a compressed SEC1 point for [curve] (prefix `0x02/0x03`, exact `1 + field` length). */
+internal fun requireCompressedPoint(
+    curve: KeyAgreementCurve,
+    compressedPoint: ReadBuffer,
+): CompressedPoint {
+    requireEcCurve(curve)
+    val field = fieldBytes(curve)
+    val base = compressedPoint.position()
+    if (compressedPoint.remaining() != 1 + field) fail(EcEncodingError.WrongKeyLength)
+    val wantOdd =
+        when (compressedPoint.get(base).toInt() and BYTE_MASK) {
+            SEC1_COMPRESSED_EVEN -> false
+            SEC1_COMPRESSED_ODD -> true
+            else -> fail(EcEncodingError.WrongKeyLength)
+        }
+    return CompressedPoint(field, base + 1, wantOdd)
+}
+
+/** Throws the typed "point has no square root on the curve" error from a platform decompressor. */
+internal fun failPointNotOnCurve(): Nothing = fail(EcEncodingError.PointNotOnCurve)
+
+// Domain parameters for the bignum decompressors (JVM/Android via BigInteger, JS/WASM via BigInt).
+// The NIST prime curves all have a = p - 3; the recovered Y solves y^2 = x^3 - 3x + b (mod p). All
+// three primes are p ≡ 3 (mod 4), so sqrt(v) = v^((p+1)/4) mod p — a single modular exponentiation.
+// Big-endian hex, no 0x prefix. Apple/Linux do not use these (they delegate to the native stack).
+
+/** Big-endian hex of the field prime `p` for a NIST prime [curve]. */
+internal fun ecPrimeHex(curve: KeyAgreementCurve): String =
+    when (curve) {
+        KeyAgreementCurve.P256 ->
+            "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff"
+        KeyAgreementCurve.P384 ->
+            "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe" +
+                "ffffffff0000000000000000ffffffff"
+        KeyAgreementCurve.P521 ->
+            "01" + "ff".repeat(65)
+        KeyAgreementCurve.X25519 -> fail(EcEncodingError.UnsupportedCurve)
+    }
+
+/** Big-endian hex of the curve constant `b` for a NIST prime [curve]. */
+internal fun ecBHex(curve: KeyAgreementCurve): String =
+    when (curve) {
+        KeyAgreementCurve.P256 ->
+            "5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b"
+        KeyAgreementCurve.P384 ->
+            "b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875a" +
+                "c656398d8a2ed19d2a85c8edd3ec2aef"
+        KeyAgreementCurve.P521 ->
+            "0051953eb9618e1c9a1f929a21a0b68540eea2da725b99b315f3b8b489918ef1" +
+                "09e156193951ec7e937b1652c0bd3bb1bf073573df883d2c34f1ef451fd46b503f00"
+        KeyAgreementCurve.X25519 -> fail(EcEncodingError.UnsupportedCurve)
+    }
+
+/**
+ * Recovers the uncompressed SEC1 point (`0x04 ‖ X ‖ Y`) from a compressed point (`0x02/0x03 ‖ X`) for a
+ * NIST prime [curve] — the inverse of [ecPublicKeyCompress]. Decompression solves `y² = x³ - 3x + b`
+ * over the curve field and selects Y by the prefix parity; an X with no square root is rejected with
+ * [PointNotOnCurve], so the result is always a genuine on-curve point.
+ *
+ * Uniformly available on every platform (no capability gap): JVM/Android compute it with
+ * `java.math.BigInteger`, JS/WASM with the host `BigInt`, Apple/Linux through the native CryptoKit /
+ * BoringSSL stack. The math runs only on the *public* X coordinate (no secret), so a variable-time
+ * implementation leaks nothing. X25519 has no compressed form ([UnsupportedCurve]); a wrong length or
+ * prefix is [WrongKeyLength]. Allocated from [factory], read-ready.
+ */
+expect fun ecPublicKeyDecompress(
+    curve: KeyAgreementCurve,
+    compressedPoint: ReadBuffer,
+    factory: BufferFactory = BufferFactory.Default,
+): ReadBuffer

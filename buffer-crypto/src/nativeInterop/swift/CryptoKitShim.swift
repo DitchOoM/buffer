@@ -231,6 +231,44 @@ public func bcks_ecdh_x963_from_scalar(
 }
 
 // =============================================================================
+// EC point decompression — CryptoKit P256/P384/P521.KeyAgreement
+// =============================================================================
+//
+// Recovers the uncompressed point (04 ‖ X ‖ Y) from a SEC1 compressed point (02/03 ‖ X). CryptoKit's
+// compressed-point initializers require macOS 13 / iOS 16 / watchOS 9 / tvOS 16; on older systems the
+// caller is told (BCKS_ERR_INTERNAL) so it can surface a capability error rather than a wrong answer.
+
+@available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, *)
+private func ecDecompress(_ curve: Int32, _ point: Data) -> Data? {
+    switch curve {
+    case 256:
+        return (try? P256.KeyAgreement.PublicKey(compressedRepresentation: point))?.x963Representation
+    case 384:
+        return (try? P384.KeyAgreement.PublicKey(compressedRepresentation: point))?.x963Representation
+    case 521:
+        return (try? P521.KeyAgreement.PublicKey(compressedRepresentation: point))?.x963Representation
+    default:
+        return nil
+    }
+}
+
+@_cdecl("bcks_ec_decompress")
+public func bcks_ec_decompress(
+    _ curve: Int32,
+    _ pointPtr: UnsafePointer<UInt8>?, _ pointLen: Int,
+    _ out: UnsafeMutablePointer<UInt8>?, _ outCap: Int,
+    _ outLenOut: UnsafeMutablePointer<Int>?
+) -> Int32 {
+    guard #available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, *) else {
+        return BCKS_ERR_INTERNAL // CryptoKit lacks compressed-point support on this OS
+    }
+    guard let uncompressed = ecDecompress(curve, bytes(pointPtr, pointLen)) else {
+        return BCKS_ERR_INPUT // off-curve / malformed compressed point
+    }
+    return emit(uncompressed, out, outCap, outLenOut)
+}
+
+// =============================================================================
 // ECDSA signing from a bare scalar — CryptoKit P256/P384/P521.Signing
 // =============================================================================
 //
