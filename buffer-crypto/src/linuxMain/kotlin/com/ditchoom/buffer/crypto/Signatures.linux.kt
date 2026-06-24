@@ -46,7 +46,8 @@ actual val ecdsaSignatureEncoding: EcdsaSignatureEncoding = EcdsaSignatureEncodi
 actual val supportsEcdsaSigningFromScalar: Boolean = true
 
 /** BoringSSL provides a synchronous path for every scheme (ECDSA + Ed25519). */
-actual fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupport = SignatureSupport.Blocking(SignatureBlockingOpsImpl(scheme))
+actual fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupport =
+    SignatureSupport.Blocking(SignatureBlockingOpsImpl(scheme))
 
 private const val P256_CURVE_BITS = 256
 private const val P384_CURVE_BITS = 384
@@ -360,7 +361,11 @@ private fun generateEd25519(factory: BufferFactory): SyncCapableSigningKey {
         }
     }
     val verifyKey = VerifyKey.ed25519(bufferOf(pub))
-    val seedBuf = secureScratch.allocate(ED25519_KEY_BYTES).also { it.writeBytes(seed); it.resetForRead() }
+    val seedBuf =
+        secureScratch.allocate(ED25519_KEY_BYTES).also {
+            it.writeBytes(seed)
+            it.resetForRead()
+        }
     return try {
         signingKeyOf(SignatureScheme.Ed25519, seedBuf, verifyKey, factory)
     } finally {
