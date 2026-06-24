@@ -50,10 +50,10 @@ import javax.crypto.spec.GCMParameterSpec
  * **Robustness shape (all driven by real device behaviour):**
  *  - **StrongBox fallback is exception-broad.** A device that lacks (or under-provisions) a secure
  *    element does not reliably throw [StrongBoxUnavailableException]: Pixel 4 surfaces a plain
- *    `ProviderException` (`UNSUPPORTED_KEY_SIZE`) and Samsung S24/Android 14 a `KeyStoreException`
- *    (code 4) even for a spec-guaranteed AES-256-GCM key. So the StrongBox attempt catches the whole
+ *    `ProviderException` and Samsung S24/Android 14 a `KeyStoreException` (code 4) even for a
+ *    spec-guaranteed AES-256-GCM key. So the StrongBox attempt catches the whole
  *    `GeneralSecurityException` / `ProviderException` family and retries in the TEE rather than
- *    crashing. A terminal TEE failure is normalized to a [HardwareKeyException] state.
+ *    crashing; a terminal TEE failure is normalized to a [HardwareKeyException] state.
  *  - **The keystore generates the GCM IV.** AES keys are *randomized-encryption-required* (the JCA
  *    default), so `Cipher.init(ENCRYPT_MODE, key)` makes the keystore mint a fresh IV; the seal reads
  *    it back via [Cipher.getIV] and frames `nonce ‖ ciphertext ‖ tag`. The library never supplies a
@@ -193,17 +193,6 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
             }
         }
 
-    private inline fun <T> mappingKeystoreFailures(block: () -> T): T =
-        try {
-            block()
-        } catch (e: CryptoException) {
-            throw e // VerificationFailed / AuthorizationFailed / already-mapped HardwareKeyException
-        } catch (e: GeneralSecurityException) {
-            throw mapKeystoreFailure(e)
-        } catch (e: ProviderException) {
-            throw mapKeystoreFailure(e)
-        }
-
     // --- keystore generation ---------------------------------------------------------------------
 
     private fun generateAesKey(
@@ -281,31 +270,6 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         }
     }
 
-    /**
-     * Normalizes a keystore-originated failure to a sealed [HardwareKeyException] state. Walks the
-     * cause chain because the JCA frequently wraps the real `android.security.KeyStoreException`
-     * inside a [ProviderException]. Unrecognized failures collapse to [HardwareKeyException
-     * .UnsupportedHardwareKey] (a public, non-secret outcome — never an oracle).
-     */
-    private fun mapKeystoreFailure(failure: Throwable): HardwareKeyException {
-        var cur: Throwable? = failure
-        while (cur != null) {
-            when (cur) {
-                is UserNotAuthenticatedException -> return HardwareKeyException.UserAuthenticationRequired()
-                is KeyPermanentlyInvalidatedException -> return HardwareKeyException.KeyInvalidated()
-                is StrongBoxUnavailableException -> return HardwareKeyException.SecureElementUnavailable()
-                is KeyStoreException ->
-                    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && cur.isTransientFailure) {
-                        HardwareKeyException.TransientHardwareFailure(retryable = true)
-                    } else {
-                        HardwareKeyException.UnsupportedHardwareKey()
-                    }
-            }
-            cur = cur.cause
-        }
-        return HardwareKeyException.UnsupportedHardwareKey()
-    }
-
     private fun probeStrongBox(): Boolean =
         synchronized(keystoreMonitor) {
             val alias = newAlias("probe")
@@ -331,50 +295,95 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
             }
         }
 
-    /** API 31+ only: `true` iff [privateKey]'s keystore-reported security level is StrongBox. */
-    private fun securityLevelIsStrongBox(privateKey: PrivateKey): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
-        val info =
-            KeyFactory
-                .getInstance(privateKey.algorithm, ANDROID_KEY_STORE)
-                .getKeySpec(privateKey, KeyInfo::class.java)
-        return info.securityLevel == KeyProperties.SECURITY_LEVEL_STRONGBOX
-    }
-
     private fun newAlias(kind: String): String = "$ALIAS_PREFIX$kind-${UUID.randomUUID()}"
+}
 
-    /** Encodes an EC public key as an uncompressed SEC1 point (`04 ‖ X ‖ Y`) for [VerifyKey]. */
-    private fun uncompressedPoint(pub: ECPublicKey): ReadBuffer {
-        val field = P256_FIELD_BYTES
-        val out = ByteArray(1 + 2 * field)
-        out[0] = SEC1_UNCOMPRESSED.toByte()
-        fixedBigEndian(pub.w.affineX, field).copyInto(out, 1)
-        fixedBigEndian(pub.w.affineY, field).copyInto(out, 1 + field)
-        return BufferFactory.Default.wrap(out)
+private const val ANDROID_KEY_STORE = "AndroidKeyStore"
+private const val AES_GCM_TRANSFORM = "AES/GCM/NoPadding"
+private const val ECDSA_SHA256 = "SHA256withECDSA"
+private const val SECP256R1 = "secp256r1"
+private const val ALIAS_PREFIX = "com.ditchoom.buffer.crypto.hw."
+private const val P256_FIELD_BYTES = 32
+private const val SEC1_UNCOMPRESSED = 0x04
+
+// --- stateless keystore helpers (file-level: no provider state, kept off the class) --------------
+
+/**
+ * Runs [block], normalizing any keystore-originated failure to a [HardwareKeyException]. A
+ * [CryptoException] thrown inside (the opaque [VerificationFailed] from [openInto], or
+ * [AuthorizationFailed]) passes through untouched so a bad-tag open never leaks an oracle and is
+ * never relabeled a hardware failure.
+ */
+private inline fun <T> mappingKeystoreFailures(block: () -> T): T =
+    try {
+        block()
+    } catch (e: CryptoException) {
+        throw e // VerificationFailed / AuthorizationFailed / already-mapped HardwareKeyException
+    } catch (e: GeneralSecurityException) {
+        throw mapKeystoreFailure(e)
+    } catch (e: ProviderException) {
+        throw mapKeystoreFailure(e)
     }
 
-    /** A nonnegative [BigInteger] as exactly [n] big-endian bytes (left-padded / sign-byte stripped). */
-    private fun fixedBigEndian(
-        value: BigInteger,
-        n: Int,
-    ): ByteArray {
-        val be = value.toByteArray()
-        return when {
-            be.size == n -> be
-            be.size == n + 1 && be[0].toInt() == 0 -> be.copyOfRange(1, be.size)
-            be.size < n -> ByteArray(n - be.size) + be
-            else -> be.copyOfRange(be.size - n, be.size)
-        }
+/**
+ * Normalizes a keystore-originated failure to a sealed [HardwareKeyException] state. Walks the cause
+ * chain because the JCA frequently wraps the real `android.security.KeyStoreException` inside a
+ * [ProviderException]. Unrecognized failures collapse to [HardwareKeyException.UnsupportedHardwareKey]
+ * (a public, non-secret outcome — never an oracle).
+ */
+private fun mapKeystoreFailure(failure: Throwable): HardwareKeyException {
+    var cur: Throwable? = failure
+    while (cur != null) {
+        val mapped =
+            when (cur) {
+                is UserNotAuthenticatedException -> HardwareKeyException.UserAuthenticationRequired()
+                is KeyPermanentlyInvalidatedException -> HardwareKeyException.KeyInvalidated()
+                is StrongBoxUnavailableException -> HardwareKeyException.SecureElementUnavailable()
+                is KeyStoreException ->
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && cur.isTransientFailure) {
+                        HardwareKeyException.TransientHardwareFailure(retryable = true)
+                    } else {
+                        HardwareKeyException.UnsupportedHardwareKey()
+                    }
+                else -> null
+            }
+        if (mapped != null) return mapped
+        cur = cur.cause
     }
+    return HardwareKeyException.UnsupportedHardwareKey()
+}
 
-    private companion object {
-        const val ANDROID_KEY_STORE = "AndroidKeyStore"
-        const val AES_GCM_TRANSFORM = "AES/GCM/NoPadding"
-        const val ECDSA_SHA256 = "SHA256withECDSA"
-        const val SECP256R1 = "secp256r1"
-        const val ALIAS_PREFIX = "com.ditchoom.buffer.crypto.hw."
-        const val P256_FIELD_BYTES = 32
-        const val SEC1_UNCOMPRESSED = 0x04
+/** API 31+ only: `true` iff [privateKey]'s keystore-reported security level is StrongBox. */
+private fun securityLevelIsStrongBox(privateKey: PrivateKey): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
+    val info =
+        KeyFactory
+            .getInstance(privateKey.algorithm, ANDROID_KEY_STORE)
+            .getKeySpec(privateKey, KeyInfo::class.java)
+    return info.securityLevel == KeyProperties.SECURITY_LEVEL_STRONGBOX
+}
+
+/** Encodes an EC public key as an uncompressed SEC1 point (`04 ‖ X ‖ Y`) for [VerifyKey]. */
+private fun uncompressedPoint(pub: ECPublicKey): ReadBuffer {
+    val field = P256_FIELD_BYTES
+    val out = ByteArray(1 + 2 * field)
+    out[0] = SEC1_UNCOMPRESSED.toByte()
+    fixedBigEndian(pub.w.affineX, field).copyInto(out, 1)
+    fixedBigEndian(pub.w.affineY, field).copyInto(out, 1 + field)
+    return BufferFactory.Default.wrap(out)
+}
+
+/** A nonnegative [BigInteger] as exactly [n] big-endian bytes (left-padded / sign-byte stripped). */
+private fun fixedBigEndian(
+    value: BigInteger,
+    n: Int,
+): ByteArray {
+    val be = value.toByteArray()
+    return when {
+        be.size == n -> be
+        be.size == n + 1 && be[0].toInt() == 0 -> be.copyOfRange(1, be.size)
+        be.size < n -> ByteArray(n - be.size) + be
+        else -> be.copyOfRange(be.size - n, be.size)
     }
 }
 
