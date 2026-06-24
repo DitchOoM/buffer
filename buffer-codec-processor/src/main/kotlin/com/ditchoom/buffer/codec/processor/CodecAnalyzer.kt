@@ -1365,7 +1365,12 @@ internal fun analyzeRemainingBytesProtocolMessageListField(
  * non-payload-generic) and the same by-name `${T.simpleName}Codec`
  * resolution; only the framing differs (a varint element count vs. a
  * caller-set byte limit). Produces [FieldSpec.CountPrefixedProtocolMessageList].
+ *
+ * Uses early returns as guard clauses to reject unsupported element shapes one validation
+ * step at a time (mirroring [analyzeRemainingBytesProtocolMessageListField]); collapsing them
+ * into a single exit would obscure which specific constraint failed.
  */
+@Suppress("ReturnCount")
 internal fun analyzeCountListField(
     param: KSValueParameter,
     listType: KSType,
