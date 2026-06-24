@@ -28,6 +28,7 @@ actual fun ecPublicKeyDecompress(
 @JsFun(
     """(pHex, bHex, xHex, wantOdd) => {
       var p=BigInt('0x'+pHex), b=BigInt('0x'+bHex), x=BigInt('0x'+xHex);
+      if(x>=p) return ''; // X must be a reduced field element (matches the native stacks)
       var ONE=BigInt(1), ZERO=BigInt(0), THREE=BigInt(3);
       function mod(a,m){ var r=a%m; return r<ZERO ? r+m : r; }
       function mpow(base,exp,m){ base=mod(base,m); var r=ONE; while(exp>ZERO){ if(exp&ONE)r=mod(r*base,m); base=mod(base*base,m); exp>>=ONE; } return r; }

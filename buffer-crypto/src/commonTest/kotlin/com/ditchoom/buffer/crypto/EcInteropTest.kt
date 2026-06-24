@@ -293,6 +293,64 @@ class EcInteropTest {
         )
     }
 
+    @Test
+    fun decompressRejectsOutOfRangeX() {
+        // X == p is not a reduced field element; the bignum paths must reject it like the native stacks
+        // do (without this guard, X' = x + p that fits in `field` bytes would emit a malformed point).
+        val pHex = "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff"
+        val e = assertFailsWith<EcEncodingException> { ecPublicKeyDecompress(KeyAgreementCurve.P256, hexBuffer("02$pHex")) }
+        assertEquals(EcEncodingError.PointNotOnCurve, e.error)
+    }
+
+    // --- strict PKCS#8 parsing edges (left-pad, over-wide, wrong inner length, algId trailing) -------
+
+    @Test
+    fun pkcs8ParseLeftPadsShortScalar() {
+        // A 31-byte ECPrivateKey scalar must be left-padded with a leading 0x00 to the 32-byte field.
+        val short = "aa".repeat(31)
+        val pkcs8 =
+            "3040020100301306072a8648ce3d020106082a8648ce3d030107" +
+                "04263024020101041f$short"
+        assertEquals("00$short", pkcs8ToEcPrivateKey(KeyAgreementCurve.P256, hexBuffer(pkcs8)).toHex())
+    }
+
+    @Test
+    fun pkcs8ParseRejectsOverWideScalar() {
+        // A 33-byte scalar exceeds the field width and must be rejected (not truncated/overrun).
+        val wide = "bb".repeat(33)
+        val pkcs8 =
+            "3042020100301306072a8648ce3d020106082a8648ce3d030107" +
+                "042830260201010421$wide"
+        val e = assertFailsWith<EcEncodingException> { pkcs8ToEcPrivateKey(KeyAgreementCurve.P256, hexBuffer(pkcs8)) }
+        assertEquals(EcEncodingError.WrongKeyLength, e.error)
+    }
+
+    @Test
+    fun x25519Pkcs8RejectsWrongInnerLength() {
+        // RFC 8410 CurvePrivateKey OCTET STRING must be exactly 32 bytes.
+        val pkcs8 = "302d020100300506032b656e0421041f${"cc".repeat(31)}"
+        val e = assertFailsWith<EcEncodingException> { pkcs8ToEcPrivateKey(KeyAgreementCurve.X25519, hexBuffer(pkcs8)) }
+        assertEquals(EcEncodingError.WrongKeyLength, e.error)
+    }
+
+    @Test
+    fun pkcs8RejectsTrailingBytesInAlgId() {
+        // A NULL appended inside the AlgorithmIdentifier (after the two OIDs) is non-canonical → reject.
+        val pkcs8 =
+            "3043020100301506072a8648ce3d020106082a8648ce3d0301070500" +
+                "042730250201010420$p256Scalar"
+        val e = assertFailsWith<EcEncodingException> { pkcs8ToEcPrivateKey(KeyAgreementCurve.P256, hexBuffer(pkcs8)) }
+        assertEquals(EcEncodingError.MalformedDer, e.error)
+    }
+
+    @Test
+    fun rejectsNonMinimalDerLength() {
+        // SEQUENCE length 6 encoded non-minimally as 82 00 06 (canonical is a single 0x06 octet).
+        val der = "30820006020101020101"
+        val e = assertFailsWith<EcEncodingException> { ecdsaSignatureToP1363(SignatureScheme.EcdsaP256, hexBuffer(der)) }
+        assertEquals(EcEncodingError.MalformedDer, e.error)
+    }
+
     // --- round-trips against the platform's own freshly-generated EC points ------
 
     @Test

@@ -121,8 +121,12 @@ private class DerCursor(
         val numBytes = first and HIGH_BIT.inv()
         if (numBytes !in 1..MAX_LEN_BYTES) fail(EcEncodingError.MalformedDer)
         var len = 0
-        repeat(numBytes) { len = (len shl BITS_PER_BYTE) or u8() }
-        if (len < DER_LONG_FORM || len < 0) fail(EcEncodingError.MalformedDer) // non-minimal / overflow
+        for (i in 0 until numBytes) {
+            val b = u8()
+            if (i == 0 && numBytes > 1 && b == 0) fail(EcEncodingError.MalformedDer) // leading-zero length octet
+            len = (len shl BITS_PER_BYTE) or b
+        }
+        if (len < DER_LONG_FORM || len < 0) fail(EcEncodingError.MalformedDer) // long form for < 128 / overflow
         return len
     }
 
@@ -143,9 +147,6 @@ private class DerCursor(
         if (remaining != 0) fail(EcEncodingError.MalformedDer)
     }
 
-    /** The next TLV tag without consuming it, or `-1` if the window is exhausted (for optional fields). */
-    fun peekTag(): Int = if (pos >= end) -1 else buf.get(pos).toInt() and BYTE_MASK
-
     /** Reads an INTEGER element and asserts it is the single-byte [expected] value (DER versions). */
     fun expectIntegerValue(expected: Int) {
         val w = element(DER_INTEGER)
@@ -158,16 +159,6 @@ private class DerCursor(
         if (w.len != oidValue.size) return false
         for (i in oidValue.indices) if (buf.get(w.start + i) != oidValue[i]) return false
         return true
-    }
-
-    /** Copies a [tag]'d element's value window verbatim into [dest] (e.g. an OCTET STRING's contents). */
-    fun copyElementValue(
-        tag: Int,
-        dest: WriteBuffer,
-    ): Int {
-        val w = element(tag)
-        copyWindow(buf, w.start, w.len, dest)
-        return w.len
     }
 }
 
@@ -471,6 +462,7 @@ fun pkcs8ToEcPrivateKey(
     val algId = info.scoped(info.element(DER_SEQUENCE))
     if (curve == KeyAgreementCurve.X25519) {
         if (!algId.matchOid(OID_X25519)) fail(EcEncodingError.CurveMismatch)
+        algId.ensureFullyConsumed() // RFC 8410: id-X25519 AlgorithmIdentifier has no parameters
         val pkOctet = info.scoped(info.element(DER_OCTET_STRING))
         val scalar = pkOctet.element(DER_OCTET_STRING) // CurvePrivateKey OCTET STRING(scalar)
         if (scalar.len != field) fail(EcEncodingError.WrongKeyLength)
@@ -482,6 +474,7 @@ fun pkcs8ToEcPrivateKey(
 
     if (!algId.matchOid(OID_ID_EC_PUBLIC_KEY)) fail(EcEncodingError.CurveMismatch)
     if (!algId.matchOid(namedCurveOid(curve))) fail(EcEncodingError.CurveMismatch)
+    algId.ensureFullyConsumed() // no trailing bytes after id-ecPublicKey + namedCurve
     val ecPriv = info.scoped(info.element(DER_OCTET_STRING)) // privateKey OCTET STRING -> ECPrivateKey
     val ec = ecPriv.scoped(ecPriv.element(DER_SEQUENCE))
     ec.expectIntegerValue(1) // ECPrivateKey version 1
@@ -554,6 +547,7 @@ fun spkiToEcPublicKey(
     val algId = info.scoped(info.element(DER_SEQUENCE))
     if (!algId.matchOid(OID_ID_EC_PUBLIC_KEY)) fail(EcEncodingError.CurveMismatch)
     if (!algId.matchOid(namedCurveOid(curve))) fail(EcEncodingError.CurveMismatch)
+    algId.ensureFullyConsumed() // no trailing bytes after id-ecPublicKey + namedCurve
     val bits = info.element(DER_BIT_STRING)
     info.ensureFullyConsumed()
     if (bits.len != 1 + pointLen) fail(EcEncodingError.WrongKeyLength)

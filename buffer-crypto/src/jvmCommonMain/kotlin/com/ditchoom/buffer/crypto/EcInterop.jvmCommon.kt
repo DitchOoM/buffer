@@ -28,6 +28,7 @@ actual fun ecPublicKeyDecompress(
     val p = BigInteger(ecPrimeHex(curve), 16)
     val b = BigInteger(ecBHex(curve), 16)
     val x = readBigEndian(compressedPoint, cp.xStart, field)
+    if (x >= p) failPointNotOnCurve() // X must be a reduced field element (matches the native stacks)
     // y^2 = x^3 - 3x + b (mod p); a = -3 on every NIST prime curve.
     val rhs =
         x
