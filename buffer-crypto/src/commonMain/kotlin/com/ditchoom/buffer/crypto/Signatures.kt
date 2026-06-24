@@ -133,14 +133,7 @@ class SigningKey private constructor(
             scheme: SignatureScheme,
             raw: ReadBuffer,
             factory: BufferFactory,
-        ): SigningKey {
-            val n = raw.remaining()
-            val start = raw.position()
-            val secure = factory.allocate(n)
-            for (i in 0 until n) secure.writeByte(raw.get(start + i))
-            secure.resetForRead()
-            return SigningKey(scheme, secure)
-        }
+        ): SigningKey = SigningKey(scheme, copyBuffer(raw, factory))
     }
 }
 
@@ -171,14 +164,7 @@ class VerifyKey private constructor(
         private fun of(
             scheme: SignatureScheme,
             raw: ReadBuffer,
-        ): VerifyKey {
-            val n = raw.remaining()
-            val start = raw.position()
-            val copy = BufferFactory.Default.allocate(n)
-            for (i in 0 until n) copy.writeByte(raw.get(start + i))
-            copy.resetForRead()
-            return VerifyKey(scheme, copy)
-        }
+        ): VerifyKey = VerifyKey(scheme, copyBuffer(raw, BufferFactory.Default))
     }
 }
 
