@@ -143,13 +143,9 @@ internal fun buildWireSizeFun(
     // Sum the compile-time fixed bytes with each variable field's runtime `Exact` (the same
     // `as Exact` cast LengthPrefixedMessage uses) so enclosing messages keep the precompute path
     // instead of degrading to BackPatch. Mirrors the peekFrameSize walk's shape.
-    fun isRuntimeExactVar(f: FieldSpec): Boolean =
-        (f is FieldSpec.UseCodecScalar && f.isVariableLength) ||
-            f is FieldSpec.EnumScalar ||
-            f is FieldSpec.CountPrefixedProtocolMessageList
-    val runtimeExactVarFields = shape.fields.filter { isRuntimeExactVar(it) }
+    val runtimeExactVarFields = shape.fields.filter { it.isRuntimeExactVar() }
     if (runtimeExactVarFields.isNotEmpty() &&
-        shape.fields.all { it is FieldSpec.FixedSize || isRuntimeExactVar(it) }
+        shape.fields.all { it is FieldSpec.FixedSize || it.isRuntimeExactVar() }
     ) {
         val fixedBytes = shape.fields.sumOfFixedWireBytes().requireFixed("runtimeExactWireSize")
         for (f in runtimeExactVarFields) {
@@ -175,13 +171,14 @@ internal fun buildWireSizeFun(
                 else -> {}
             }
         }
-        val sumExpr = (listOf(fixedBytes.toString()) + runtimeExactVarFields.map { "__${it.name}Size" }).joinToString(" + ")
+        val sizeTerms = listOf(fixedBytes.toString()) + runtimeExactVarFields.map { "__${it.name}Size" }
+        val sumExpr = sizeTerms.joinToString(" + ")
         builder.addStatement("return %T.Exact(%L)", WIRE_SIZE_CN, sumExpr)
         return builder.build()
     }
     when (val terminal = shape.fields.lastOrNull()) {
         is FieldSpec.LengthPrefixedMessage -> {
-            val headerBytes = scalarHeaderBytes(shape) + terminal.prefixWidth
+            val headerBytes = shape.scalarHeaderBytes() + terminal.prefixWidth
             builder.addStatement(
                 "val %L = (%T.wireSize(value.%L, context) as %T.Exact).bytes",
                 "${terminal.name}Size",
@@ -200,7 +197,7 @@ internal fun buildWireSizeFun(
             // Body byte count comes from the resolved LengthSource
             // (sibling.toInt() for simple, sibling.property for
             // dotted). User-trusted.
-            val prefixBytes = scalarHeaderBytes(shape)
+            val prefixBytes = shape.scalarHeaderBytes()
             builder.addStatement(
                 "return %T.Exact(%L + %L)",
                 WIRE_SIZE_CN,
@@ -210,7 +207,7 @@ internal fun buildWireSizeFun(
         }
         is FieldSpec.LengthFromList -> {
             // Same Exact shape via LengthSource.
-            val prefixBytes = scalarHeaderBytes(shape)
+            val prefixBytes = shape.scalarHeaderBytes()
             builder.addStatement(
                 "return %T.Exact(%L + %L)",
                 WIRE_SIZE_CN,
@@ -225,7 +222,7 @@ internal fun buildWireSizeFun(
             // RuntimeExact at runtime, but we don't query it here:
             // the user supplies the sibling and is responsible for
             // keeping it consistent with the body's encoded size.
-            val prefixBytes = scalarHeaderBytes(shape)
+            val prefixBytes = shape.scalarHeaderBytes()
             builder.addStatement(
                 "return %T.Exact(%L + %L)",
                 WIRE_SIZE_CN,
@@ -239,7 +236,7 @@ internal fun buildWireSizeFun(
             // same convention as LengthPrefixedMessage's `as Exact` cast
             // above; BackPatch element codecs throw ClassCastException
             // (fixture-design contract for this slice).
-            val prefixBytes = scalarHeaderBytes(shape)
+            val prefixBytes = shape.scalarHeaderBytes()
             builder.addStatement(
                 "return %T.Exact(%L + value.%L.sumOf { (%T.wireSize(it, context) as %T.Exact).bytes })",
                 WIRE_SIZE_CN,
@@ -302,3 +299,14 @@ internal fun appendCountListWireSizeLocal(
         WIRE_SIZE_CN,
     )
 }
+
+/**
+ * A field whose wireSize is known only at runtime but always `Exact`: a
+ * `VariableLengthCodec`-backed `@UseCodec` scalar, an enum riding its ordinal
+ * as an `UnsignedVarIntCodec` varint, or a `@Count` element-count list (varint
+ * element count plus the summed element wireSizes).
+ */
+private fun FieldSpec.isRuntimeExactVar(): Boolean =
+    this is FieldSpec.EnumScalar ||
+        this is FieldSpec.CountPrefixedProtocolMessageList ||
+        (this is FieldSpec.UseCodecScalar && isVariableLength)

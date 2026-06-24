@@ -259,7 +259,7 @@ internal object CodecSchemaDescriptor {
         format: LabelFormat,
     ): String =
         when (format) {
-            LabelFormat.Hex -> "0x" + value.toString(16).uppercase().padStart(2, '0')
+            LabelFormat.Hex -> "0x" + value.toString(HEX_RADIX).uppercase().padStart(HEX_BYTE_PAD, '0')
             LabelFormat.Decimal -> value.toString()
         }
 }

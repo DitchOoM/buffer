@@ -28,6 +28,24 @@ internal const val FRAME_DETECTOR_QNAME = "com.ditchoom.buffer.codec.FrameDetect
 // never emitted; the coalescer keeps them as individual reads.
 internal val BATCH_ALIGNMENTS = setOf(2, 4, 8)
 
+// A coalesced batch reads at most a single `Long` (8 bytes) at once.
+internal const val MAX_BATCH_BYTES = Long.SIZE_BYTES
+
+// Wire widths of the batch accumulator reads, in bytes.
+internal const val SHORT_BATCH_BYTES = Short.SIZE_BYTES
+internal const val INT_BATCH_BYTES = Int.SIZE_BYTES
+internal const val LONG_BATCH_BYTES = Long.SIZE_BYTES
+
+// Corresponding bit widths (`bytes * 8`) used for the shift/or assembly.
+internal const val SHORT_BATCH_BITS = Short.SIZE_BITS
+internal const val INT_BATCH_BITS = Int.SIZE_BITS
+internal const val LONG_BATCH_BITS = Long.SIZE_BITS
+
+// Hex formatting of discriminator/label literals: base-16, zero-padded to two
+// digits so a single byte always renders as `0xNN`.
+internal const val HEX_RADIX = 16
+internal const val HEX_BYTE_PAD = 2
+
 internal val BYTE_ORDER_CN = ClassName("com.ditchoom.buffer", "ByteOrder")
 internal val SWAP_BYTES_MN = MemberName("com.ditchoom.buffer", "swapBytes")
 

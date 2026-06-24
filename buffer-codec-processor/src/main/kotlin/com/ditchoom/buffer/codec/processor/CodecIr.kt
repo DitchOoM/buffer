@@ -1301,20 +1301,20 @@ internal enum class ScalarKind(
     Boolean(1, false),
     UByte(1, false),
     UShort(2, false),
-    UInt(4, false),
-    ULong(8, false),
+    UInt(kotlin.Int.SIZE_BYTES, false),
+    ULong(kotlin.Long.SIZE_BYTES, false),
     Byte(1, true),
     Short(2, true),
-    Int(4, true),
-    Long(8, true),
+    Int(kotlin.Int.SIZE_BYTES, true),
+    Long(kotlin.Long.SIZE_BYTES, true),
 
     // IEEE 754 floating point — wire form is the raw bit pattern of
     // toRawBits() / fromBits() at fixed natural width. Treated as
     // signed only insofar as @WireBytes narrowing is rejected (same
     // rule as integer signed types — partial-read sign extension is
     // out of scope).
-    Float(4, true),
-    Double(8, true),
+    Float(kotlin.Int.SIZE_BYTES, true),
+    Double(kotlin.Long.SIZE_BYTES, true),
     ;
 
     /**

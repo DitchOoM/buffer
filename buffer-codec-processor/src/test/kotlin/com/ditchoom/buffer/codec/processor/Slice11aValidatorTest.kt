@@ -123,7 +123,8 @@ class Slice11aValidatorTest {
         assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
         assertFalse(
             result.messages.contains("not yet supported"),
-            "no deferred-shape diagnostic should fire on @When @UseCodec sealed-parent inner. Messages:\n${result.messages}",
+            "no deferred-shape diagnostic should fire on @When @UseCodec sealed-parent inner. " +
+                "Messages:\n${result.messages}",
         )
     }
 

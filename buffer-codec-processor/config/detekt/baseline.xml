@@ -50,6 +50,7 @@
     <ID>LongMethod:CodecAnalyzer.kt:internal fun analyze: AnalysisResult</ID>
     <ID>LongMethod:CodecAnalyzer.kt:internal fun analyzeDispatchOnSealedDispatcher: DispatchAnalysisResult</ID>
     <ID>LongMethod:CodecAnalyzer.kt:internal fun analyzeField: FieldAnalysis</ID>
+    <ID>LongMethod:CodecAnalyzer.kt:internal fun analyzeLengthFromMessageField: FieldAnalysis</ID>
     <ID>LongMethod:CodecAnalyzer.kt:internal fun analyzeSealedDispatcher: DispatchAnalysisResult</ID>
     <ID>LongMethod:CodecAnalyzer.kt:internal fun analyzeValueClassScalarField: FieldAnalysis</ID>
     <ID>LongMethod:CodecEmitter.kt:CodecEmitter$private fun appendBatchedDecode</ID>
@@ -90,58 +91,6 @@
     <ID>LongMethod:UseCodecScalarValidatorTest.kt:UseCodecScalarValidatorTest$@Test fun rejectsLengthPrefixedUseCodecOnPayloadGenericSealedParentElement</ID>
     <ID>LoopWithTooManyJumpStatements:CodecAnalyzer.kt:for</ID>
     <ID>LoopWithTooManyJumpStatements:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$for</ID>
-    <ID>MagicNumber:CodecAnalyzer.kt:255</ID>
-    <ID>MagicNumber:CodecAnalyzer.kt:3</ID>
-    <ID>MagicNumber:CodecAnalyzer.kt:4</ID>
-    <ID>MagicNumber:CodecAnalyzer.kt:8</ID>
-    <ID>MagicNumber:CodecEmitter.kt:CodecEmitter$16</ID>
-    <ID>MagicNumber:CodecEmitter.kt:CodecEmitter$32</ID>
-    <ID>MagicNumber:CodecEmitter.kt:CodecEmitter$4</ID>
-    <ID>MagicNumber:CodecEmitter.kt:CodecEmitter$64</ID>
-    <ID>MagicNumber:CodecEmitter.kt:CodecEmitter$8</ID>
-    <ID>MagicNumber:CodecEmitterDispatch.kt:16</ID>
-    <ID>MagicNumber:CodecEmitterFields.kt:4</ID>
-    <ID>MagicNumber:CodecEmitterFields.kt:8</ID>
-    <ID>MagicNumber:CodecEmitterPeek.kt:10</ID>
-    <ID>MagicNumber:CodecEmitterPeek.kt:3</ID>
-    <ID>MagicNumber:CodecEmitterPeek.kt:5</ID>
-    <ID>MagicNumber:CodecEmitterScalarUtils.kt:0xFF</ID>
-    <ID>MagicNumber:CodecEmitterScalarUtils.kt:0xFFFF</ID>
-    <ID>MagicNumber:CodecIr.kt:ScalarKind.Double$8</ID>
-    <ID>MagicNumber:CodecIr.kt:ScalarKind.Float$4</ID>
-    <ID>MagicNumber:CodecIr.kt:ScalarKind.Int$4</ID>
-    <ID>MagicNumber:CodecIr.kt:ScalarKind.Long$8</ID>
-    <ID>MagicNumber:CodecIr.kt:ScalarKind.UInt$4</ID>
-    <ID>MagicNumber:CodecIr.kt:ScalarKind.ULong$8</ID>
-    <ID>MagicNumber:CodecSchemaDescriptor.kt:CodecSchemaDescriptor$16</ID>
-    <ID>MagicNumber:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$255</ID>
-    <ID>MagicNumber:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$8</ID>
-    <ID>MaxLineLength:CodecAnalyzer.kt:"enum ${enumDecl.simpleName.asString()} declares ${defaults.size} @EnumDefault entries; at most one is allowed"</ID>
-    <ID>MaxLineLength:CodecAnalyzer.kt:?:</ID>
-    <ID>MaxLineLength:CodecAnalyzer.kt:Diagnostic("@LengthFrom requires the field to be String, List&lt;@ProtocolMessage>, or @ProtocolMessage", param)</ID>
-    <ID>MaxLineLength:CodecAnalyzer.kt:return FieldAnalysis.Err(Diagnostic("bare @ProtocolMessage field must be a resolvable non-nullable type", param))</ID>
-    <ID>MaxLineLength:CodecEmitter.kt:CodecEmitter$"framing header codec returned a non-Exact wire size for ${shape.ownerSimpleName}.${variableAfter.name}"</ID>
-    <ID>MaxLineLength:CodecEmitter.kt:CodecEmitter$ScalarKind.Float -> if (accumulatorType == "Long") "Float.fromBits($rawExpr.toInt())" else "Float.fromBits($rawExpr)"</ID>
-    <ID>MaxLineLength:CodecEmitter.kt:CodecEmitter$private</ID>
-    <ID>MaxLineLength:CodecEmitter.kt:CodecEmitter$return if (pkg.isEmpty()) part.valueClass.simpleName else "$pkg.${part.valueClass.simpleNames.joinToString(".")}"</ID>
-    <ID>MaxLineLength:CodecEmitterFields.kt:"val %L = %T.entries.getOrElse(__%LOrdinal) { throw %T(fieldPath = %S, bufferPosition = buffer.position(), expected = %S, actual = __%LOrdinal.toString()) }"</ID>
-    <ID>MaxLineLength:CodecEmitterFields.kt:internal fun scalarHeaderBytes: Int</ID>
-    <ID>MaxLineLength:CodecEmitterPeek.kt:body.addStatement("__offset += %L", inner.innerKind.wireWidth.requireFixed("appendSequentialPeekConditional"))</ID>
-    <ID>MaxLineLength:CodecEmitterScalarUtils.kt:error("Long / ULong / Float / Double are not in DISPATCH_VALUE_RETURN_KINDS — analyze should have rejected this kind")</ID>
-    <ID>MaxLineLength:CodecEmitterWireSize.kt:fun</ID>
-    <ID>MaxLineLength:CodecEmitterWireSize.kt:val sumExpr = (listOf(fixedBytes.toString()) + runtimeExactVarFields.map { "__${it.name}Size" }).joinToString(" + ")</ID>
-    <ID>MaxLineLength:CodecSchemaClassifierTest.kt:CodecSchemaClassifierTest$listOf(msgRec("p.M", field(0, "a", "scalar:Int wire=4B order=Big"), field(1, "b", "scalar:UShort wire=2B order=Big")))</ID>
-    <ID>MaxLineLength:CodecSchemaClassifierTest.kt:CodecSchemaClassifierTest$msgRec("p.M", field(0, "a", "scalar:Int wire=4B order=Big"), field(1, "b", "scalar:UByte wire=1B order=Big"))</ID>
-    <ID>MaxLineLength:CodecSchemaClassifierTest.kt:CodecSchemaClassifierTest$sealedRec("p.S", "valueclass:p.Tag/2B,inner=UShort/Big,dispatchValue=type:Int", variants = arrayOf("0x01" to "A"))</ID>
-    <ID>MaxLineLength:CodecSchemaClassifierTest.kt:CodecSchemaClassifierTest$val with = sealedRec("p.S", "fixed-byte/1B", forwardCompatible = "p.S.Unknown", variants = arrayOf("0x01" to "A"))</ID>
-    <ID>MaxLineLength:CodecSchemaDescriptorCodegenTest.kt:CodecSchemaDescriptorCodegenTest$CodecSchemaParser.parse(schema).filterIsInstance&lt;SchemaRecord.SealedRecord>().single { it.typeName == "test.Frame" }</ID>
-    <ID>MaxLineLength:CodecSchemaDescriptorCodegenTest.kt:CodecSchemaDescriptorCodegenTest$assertTrue(frame.dispatch.startsWith("valueclass:test.EtherType/2B,"), "unexpected dispatch token: ${frame.dispatch}")</ID>
-    <ID>MaxLineLength:CodecSchemaDescriptorTest.kt:CodecSchemaDescriptorTest$private</ID>
-    <ID>MaxLineLength:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$"$variantName's primary constructor. Available: ${available.joinToString().ifEmpty { "&lt;none>" }}."</ID>
-    <ID>MaxLineLength:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$"declare exactly one property annotated with `@DispatchValue`. Found ${dispatchValueProperties.size}."</ID>
-    <ID>MaxLineLength:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$"naming a Kotlin `object` that implements `Codec&lt;${fieldType.declaration.simpleName.asString()}>`."</ID>
-    <ID>MaxLineLength:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$owner.getSealedSubclasses().filter { it.hasAnnotation(UNKNOWN_VARIANT_SHORT, UNKNOWN_VARIANT_QNAME) }.toList()</ID>
-    <ID>MaxLineLength:Slice11aValidatorTest.kt:Slice11aValidatorTest$"no deferred-shape diagnostic should fire on @When @UseCodec sealed-parent inner. Messages:\n${result.messages}"</ID>
     <ID>ReturnCount:CodecAnalyzer.kt:internal fun KSType.implementsPayload: Boolean</ID>
     <ID>ReturnCount:CodecAnalyzer.kt:internal fun KSValueParameter.hasVariableLengthUseCodec: Boolean</ID>
     <ID>ReturnCount:CodecAnalyzer.kt:internal fun KSValueParameter.hasViewUseCodec: Boolean</ID>

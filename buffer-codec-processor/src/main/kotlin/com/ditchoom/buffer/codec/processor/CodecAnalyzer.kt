@@ -24,6 +24,16 @@ import com.squareup.kotlinpoet.TypeVariableName
  * verified by the snapshot suite.
  */
 
+/** Minimum / maximum byte width accepted by `@WireBytes` (a Long is 8 bytes wide). */
+private const val MIN_WIRE_BYTES = 1
+private const val MAX_WIRE_BYTES = Long.SIZE_BYTES
+
+/** A `remaining` comparison shape is exactly three tokens: `remaining <op> <int>`. */
+private const val REMAINING_COMPARISON_TOKEN_COUNT = 3
+
+/** Inclusive upper bound of an unsigned byte; `@PacketType` wire values live in `0..255`. */
+private const val UBYTE_MAX_VALUE = 0xFF
+
 /**
  * Issue #175 — the generated codec exposes the message type in its
  * public `decode(): T` / `encode(value: T)` signatures, so a codec
@@ -867,7 +877,7 @@ internal fun analyzeField(
     // R4 narrows what the emitter accepts; the validator emits the actual
     // diagnostic. Skip emission for unsupported widths so generated code
     // never references an out-of-bounds bit shift.
-    if (wireBytes < 1 || wireBytes > 8) {
+    if (wireBytes < MIN_WIRE_BYTES || wireBytes > MAX_WIRE_BYTES) {
         return FieldAnalysis.Err(Diagnostic("@WireBytes width must be in 1..8", param))
     }
     if (wireBytes > kind.width) {
@@ -1223,7 +1233,10 @@ internal fun analyzeLengthFromMessageField(
         }
     if (!isProtocolMessage) {
         return FieldAnalysis.Err(
-            Diagnostic("@LengthFrom requires the field to be String, List<@ProtocolMessage>, or @ProtocolMessage", param),
+            Diagnostic(
+                "@LengthFrom requires the field to be String, List<@ProtocolMessage>, or @ProtocolMessage",
+                param,
+            ),
         )
     }
     // Accept both data-class and sealed-parent shapes — the by-name
@@ -1457,7 +1470,9 @@ internal fun analyzeBareProtocolMessageField(
     ownerSimpleName: String,
 ): FieldAnalysis {
     if (type.isError || type.isMarkedNullable) {
-        return FieldAnalysis.Err(Diagnostic("bare @ProtocolMessage field must be a resolvable non-nullable type", param))
+        return FieldAnalysis.Err(
+            Diagnostic("bare @ProtocolMessage field must be a resolvable non-nullable type", param),
+        )
     }
     val name =
         param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
@@ -1536,7 +1551,8 @@ internal fun analyzeEnumField(
     if (defaults.size > 1) {
         return FieldAnalysis.Err(
             Diagnostic(
-                "enum ${enumDecl.simpleName.asString()} declares ${defaults.size} @EnumDefault entries; at most one is allowed",
+                "enum ${enumDecl.simpleName.asString()} declares ${defaults.size} @EnumDefault entries; " +
+                    "at most one is allowed",
                 param,
             ),
         )
@@ -1573,7 +1589,9 @@ internal fun analyzeRemainingBytesPayloadField(
         param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
     val payloadDecl =
         type.declaration as? KSClassDeclaration
-            ?: return FieldAnalysis.Err(Diagnostic("@RemainingBytes @UseCodec field type is not a class declaration", param))
+            ?: return FieldAnalysis.Err(
+                Diagnostic("@RemainingBytes @UseCodec field type is not a class declaration", param),
+            )
     val codecKsType =
         useCodecAnn.arguments
             .firstOrNull { it.name?.asString() == "codec" }
@@ -1720,7 +1738,9 @@ internal fun analyzeLengthPrefixedUseCodecPayloadField(
     }
     val payloadDecl =
         type.declaration as? KSClassDeclaration
-            ?: return FieldAnalysis.Err(Diagnostic("@LengthPrefixed @UseCodec field type is not a class declaration", param))
+            ?: return FieldAnalysis.Err(
+                Diagnostic("@LengthPrefixed @UseCodec field type is not a class declaration", param),
+            )
     val codecKsType =
         useCodecAnn.arguments
             .firstOrNull { it.name?.asString() == "codec" }
@@ -2081,7 +2101,7 @@ internal fun parseWhenExpression(whenAnn: KSAnnotation): WhenExpression? {
     // threshold, extra tokens).
     if (trimmed.startsWith("remaining ") || trimmed == "remaining") {
         val tokens = trimmed.split(Regex("\\s+"))
-        if (tokens.size != 3) return null
+        if (tokens.size != REMAINING_COMPARISON_TOKEN_COUNT) return null
         if (tokens[0] != "remaining") return null
         val op =
             when (tokens[1]) {
@@ -2539,11 +2559,11 @@ internal fun readLengthPrefix(ann: KSAnnotation): Int {
             else -> arg?.toString()?.substringAfterLast('.')
         }
     return when (name) {
-        "Byte" -> 1
-        "Short" -> 2
-        "Int" -> 4
+        "Byte" -> Byte.SIZE_BYTES
+        "Short" -> Short.SIZE_BYTES
+        "Int" -> Int.SIZE_BYTES
         // Default per Annotations.kt: LengthPrefix.Short.
-        else -> 2
+        else -> Short.SIZE_BYTES
     }
 }
 
@@ -2630,7 +2650,7 @@ internal fun analyzeSealedDispatcher(symbol: KSClassDeclaration): DispatchAnalys
             packetType.arguments
                 .firstOrNull { it.name?.asString() == "value" }
                 ?.value as? Int ?: return DispatchAnalysisResult.NotApplicable
-        if (rawValue !in 0..255) return DispatchAnalysisResult.NotApplicable
+        if (rawValue !in 0..UBYTE_MAX_VALUE) return DispatchAnalysisResult.NotApplicable
         if (!seenValues.add(rawValue)) return DispatchAnalysisResult.NotApplicable
         // The variant carries `@ProtocolMessage` and is analyzed
         // separately by `tryEmit(sub)`; if its own field shape is not

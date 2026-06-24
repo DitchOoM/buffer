@@ -179,7 +179,10 @@ class CodecSchemaDescriptorTest {
     }
 
     /** Concrete (non-sealed) leaf classes reachable through a sealed hierarchy. */
-    private fun leaves(k: KClass<*>): List<KClass<*>> = if (k.isSealed) k.sealedSubclasses.flatMap { leaves(it) } else listOf(k)
+    private fun leaves(k: KClass<*>): List<KClass<*>> {
+        if (!k.isSealed) return listOf(k)
+        return k.sealedSubclasses.flatMap { leaves(it) }
+    }
 
     // ---- IR samples -------------------------------------------------------
 
