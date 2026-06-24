@@ -8,7 +8,6 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
-import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -50,7 +49,7 @@ class StrongBoxInstrumentedTest {
                     "dedicatedSecureElement must equal device StrongBox feature ($hasStrongBox)",
                 )
                 // The provider-minted key publishes its public key and produces a verifiable signature.
-                val vk = assertNotNull(signing.verifyKey, "hardware signing key exposes its verify key")
+                val vk = signing.verifyKey
                 val ops = signatureAsyncOrNull(SignatureScheme.EcdsaP256)
                 if (ops != null) {
                     val message = ascii("strongbox device signature")

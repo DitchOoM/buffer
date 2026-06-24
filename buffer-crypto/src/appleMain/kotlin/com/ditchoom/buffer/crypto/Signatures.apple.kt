@@ -3,10 +3,13 @@
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_ecdsa_sign_from_scalar
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_ed25519_public_key
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_ed25519_sign
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_ed25519_verify
 import com.ditchoom.buffer.toNSData
@@ -71,12 +74,14 @@ actual val ecdsaSignatureEncoding: EcdsaSignatureEncoding get() = EcdsaSignature
  * Every scheme has a synchronous path on Apple: ECDSA via Security.framework + the CryptoKit
  * sign-from-scalar shim, Ed25519 via the CryptoKit `Curve25519.Signing` shim.
  */
-actual fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupport = SignatureSupport.Blocking(SignatureBlockingOpsImpl)
+actual fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupport =
+    SignatureSupport.Blocking(SignatureBlockingOpsImpl(scheme))
 
 private const val P256_CURVE_BITS = 256
 private const val P384_CURVE_BITS = 384
 private const val P521_CURVE_BITS = 521
 private const val ED25519_SIGNATURE_BYTES = 64
+private const val ED25519_KEY_BYTES = 32
 
 /** Curve order in bits for the CryptoKit ECDSA-from-scalar shim (256 / 384 / 521). */
 private fun ecdsaCurveCode(scheme: SignatureScheme): Int =
@@ -369,3 +374,100 @@ internal actual suspend fun verifyAsyncPlatform(
 actual suspend fun ed25519AsyncAvailable(): Boolean = true
 
 actual val supportsEcdsaSigningFromScalar: Boolean get() = true
+
+// ---------------------------------------------------------------------------
+// Ed25519 key generation (ECDSA generation is common, reusing key agreement).
+// A fresh 32-byte seed from the platform CSPRNG; the matching public key is derived from it via the
+// CryptoKit shim ([bcks_ed25519_public_key]).
+// ---------------------------------------------------------------------------
+
+/** Read-ready buffer wrapping [bytes] (a fresh copy). */
+private fun bufferOf(bytes: ByteArray): PlatformBuffer {
+    val b = BufferFactory.Default.allocate(bytes.size)
+    b.writeBytes(bytes)
+    b.resetForRead()
+    return b
+}
+
+private fun generateEd25519(factory: BufferFactory): SyncCapableSigningKey {
+    val seedBuf = secureScratch.allocate(ED25519_KEY_BYTES)
+    cryptoRandomInto(seedBuf)
+    seedBuf.resetForRead()
+    val pubBytes = ByteArray(ED25519_KEY_BYTES)
+    return try {
+        memScoped {
+            val pubOut = allocArray<ByteVar>(ED25519_KEY_BYTES)
+            val pubLen = alloc<size_tVar>()
+            var status = -1
+            seedBuf.withRemainingBytes { seedPtr, seedLen ->
+                status =
+                    bcks_ed25519_public_key(
+                        seedPtr.reinterpret(),
+                        seedLen.convert(),
+                        pubOut.reinterpret(),
+                        ED25519_KEY_BYTES.convert(),
+                        pubLen.ptr,
+                    )
+            }
+            require(status == BCKS_OK) { "Ed25519 public-key derivation failed (status=$status)" }
+            for (i in 0 until ED25519_KEY_BYTES) pubBytes[i] = pubOut[i]
+        }
+        val verifyKey = VerifyKey.ed25519(bufferOf(pubBytes))
+        signingKeyOf(SignatureScheme.Ed25519, seedBuf, verifyKey, factory)
+    } finally {
+        seedBuf.freeNativeMemory()
+    }
+}
+
+/** Field width (coordinate / scalar bytes) for an ECDSA [scheme]. */
+private fun ecFieldBytes(scheme: SignatureScheme): Int =
+    when (scheme) {
+        SignatureScheme.EcdsaP256 -> 32
+        SignatureScheme.EcdsaP384 -> 48
+        SignatureScheme.EcdsaP521 -> 66
+        SignatureScheme.Ed25519 -> error("not ECDSA")
+    }
+
+private fun generateEcdsa(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey {
+    // Reuse the key-agreement generator over the same NIST curve. On Apple the KA public key is the
+    // uncompressed point (exactly the signature verify-key encoding), and the KA private key is the
+    // ANSI X9.63 representation 04‖X‖Y‖K, whose trailing field-width bytes are the raw scalar the
+    // CryptoKit signing shim expects.
+    val pair = generateKeyPairPlatform(scheme.toKeyAgreementCurve())
+    try {
+        val verifyKey = verifyKeyOf(scheme, pair.publicKey.encoded)
+        val x963 = pair.privateKey.exportEncoded(secureScratch)
+        val field = ecFieldBytes(scheme)
+        val scalar = secureScratch.allocate(field)
+        val start = x963.position()
+        val total = x963.remaining()
+        for (i in 0 until field) scalar.writeByte(x963.get(start + total - field + i))
+        scalar.resetForRead()
+        return try {
+            signingKeyOf(scheme, scalar, verifyKey, factory)
+        } finally {
+            scalar.freeNativeMemory()
+            (x963 as? PlatformBuffer)?.freeNativeMemory()
+        }
+    } finally {
+        pair.close()
+    }
+}
+
+internal actual fun generateSigningKeyPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey =
+    if (scheme == SignatureScheme.Ed25519) {
+        generateEd25519(factory)
+    } else {
+        generateEcdsa(scheme, factory)
+    }
+
+internal actual suspend fun generateSigningKeyAsyncPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey = generateSigningKeyPlatform(scheme, factory)

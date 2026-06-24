@@ -124,6 +124,41 @@ internal actual suspend fun webCryptoSign(
     return u8ToHex(sig)
 }
 
+private fun schemeTag(scheme: SignatureScheme): String =
+    when (scheme) {
+        SignatureScheme.Ed25519 -> "Ed25519"
+        SignatureScheme.EcdsaP256 -> "P256"
+        SignatureScheme.EcdsaP384 -> "P384"
+        SignatureScheme.EcdsaP521 -> "P521"
+    }
+
+// Generates a keypair and returns "<rawPrivHex>:<rawPubHex>". Ed25519: the 32-byte seed is the PKCS#8
+// suffix after the fixed 16-byte RFC 8410 prefix; the public key exports as raw. ECDSA: the raw scalar
+// is the JWK `d` (fixed-width base64url) and the public key the uncompressed SEC1 point (raw export).
+@Suppress("UnusedParameter") // referenced inside the js(...) template
+private fun jsGenerateKeyPair(scheme: String): dynamic =
+    js(
+        """
+        (function(sc){
+            var subtle = (globalThis.crypto).subtle;
+            var toHex = function(b){ var a=new Uint8Array(b); var s=''; for(var i=0;i<a.length;i++){ s+=a[i].toString(16).padStart(2,'0'); } return s; };
+            var b64uToHex = function(s){ s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4){ s+='='; } var bin=atob(s); var h=''; for(var i=0;i<bin.length;i++){ h+=bin.charCodeAt(i).toString(16).padStart(2,'0'); } return h; };
+            if (sc === 'Ed25519') {
+                return subtle.generateKey({ name:'Ed25519' }, true, ['sign','verify'])
+                    .then(function(kp){ return Promise.all([subtle.exportKey('raw',kp.publicKey), subtle.exportKey('pkcs8',kp.privateKey)]); })
+                    .then(function(a){ return toHex(a[1]).substring(32,96) + ':' + toHex(a[0]); });
+            }
+            var curve = sc === 'P256' ? 'P-256' : (sc === 'P384' ? 'P-384' : 'P-521');
+            return subtle.generateKey({ name:'ECDSA', namedCurve:curve }, true, ['sign','verify'])
+                .then(function(kp){ return Promise.all([subtle.exportKey('raw',kp.publicKey), subtle.exportKey('jwk',kp.privateKey)]); })
+                .then(function(a){ return b64uToHex(a[1].d) + ':' + toHex(a[0]); });
+        })(scheme)
+        """,
+    )
+
+internal actual suspend fun webCryptoGenerateKeyPair(scheme: SignatureScheme): String =
+    jsGenerateKeyPair(schemeTag(scheme)).unsafeCast<Promise<String>>().awaitResult()
+
 internal actual suspend fun webCryptoVerify(
     scheme: SignatureScheme,
     publicMaterialHex: String,

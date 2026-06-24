@@ -15,10 +15,11 @@ import com.ditchoom.buffer.ReadBuffer
  * branching the caller writes:
  *
  *  - [KeyProvenance.Hardware] on the key says the material is not exportable.
- *  - The key's secret-material seam (`requireInMemoryMaterial`) has no hardware branch that returns
- *    bytes — it throws — so the *blocking* op paths (which read material directly) are statically
- *    unreachable for a hardware key. Hardware keys only operate through the **async** witness ops,
- *    which dispatch to provider-supplied gated closures.
+ *  - A hardware key is **not** a `SyncCapable*` key ([SyncCapableSigningKey] / [SyncCapableAesGcmKey]),
+ *    and the *blocking* witness ops only accept the sync-capable type — so routing a hardware key into
+ *    a synchronous op is a compile error, not a runtime throw. Hardware keys only operate through the
+ *    **async** witness ops, which dispatch to provider-supplied gated closures. The internal
+ *    `requireInMemoryMaterial` seam keeps a defensive throw for the now-unreachable hardware branch.
  *  - An op the secure element declines surfaces as [AuthorizationFailed] (a structured, non-secret
  *    [CryptoMisuseException]), never as the opaque [VerificationFailed].
  *
@@ -230,7 +231,7 @@ internal class HardwareSigningKey(
     override val scheme: SignatureScheme,
     val gatedSign: HardwareSign,
     /** The public key matching this signing key, captured by the provider at generation. */
-    val verifyKey: VerifyKey,
+    override val verifyKey: VerifyKey,
     private val onClose: () -> Unit = {},
 ) : SigningKey {
     override val provenance: KeyProvenance get() = KeyProvenance.Hardware
@@ -241,12 +242,3 @@ internal class HardwareSigningKey(
      */
     override fun close() = onClose()
 }
-
-/**
- * The public [VerifyKey] matching this signing key, when known. A provider-minted hardware signing
- * key always carries the public key the secure element produced at generation (signatures from a
- * non-exportable hardware key are useless without a way to publish the verifier). In-memory signing
- * keys return `null` — their public key is not tracked today (a non-breaking enhancement could add
- * it later).
- */
-val SigningKey.verifyKey: VerifyKey? get() = (this as? HardwareSigningKey)?.verifyKey

@@ -42,7 +42,7 @@ class CryptoFacadeTest {
             val pub = hexBuffer("dacdbc0f4e3606de5619c8a565a6864275feddf264b11b130abc1167e4f5d034")
             val ops = signatureAsyncOrNull(SignatureScheme.Ed25519) ?: return@runTest
             val msg = ascii("witness signing")
-            SigningKey.ed25519(seed).use { signing ->
+            SigningKey.ed25519(seed, VerifyKey.ed25519(pub)).use { signing ->
                 val sig = ops.sign(signing, msg, BufferFactory.Default)
                 assertTrue(
                     ops.verify(VerifyKey.ed25519(pub), msg, sig),

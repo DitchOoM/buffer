@@ -32,7 +32,7 @@ class SignatureCapabilityTest {
         val message = ascii("cap")
         val support = CryptoCapabilities.signatures(SignatureScheme.Ed25519)
         if (support is SignatureSupport.Blocking) {
-            signingKey(SignatureScheme.Ed25519, edSeed).use { sk ->
+            signingKey(SignatureScheme.Ed25519, edSeed, edPub).use { sk ->
                 val sig = support.ops.signBlocking(sk, message)
                 assertTrue(support.ops.verifyBlocking(verifyKey(SignatureScheme.Ed25519, edPub), message, sig))
             }
@@ -47,7 +47,7 @@ class SignatureCapabilityTest {
         // Signing-from-scalar is a separate key-construction capability; only drive the sync sign
         // path where both the blocking witness and that capability hold.
         if (support is SignatureSupport.Blocking && supportsEcdsaSigningFromScalar) {
-            signingKey(SignatureScheme.EcdsaP256, p256Scalar).use { sk ->
+            signingKey(SignatureScheme.EcdsaP256, p256Scalar, p256Point).use { sk ->
                 val sig = support.ops.signBlocking(sk, message)
                 assertTrue(support.ops.verifyBlocking(verifyKey(SignatureScheme.EcdsaP256, p256Point), message, sig))
             }
@@ -70,7 +70,7 @@ class SignatureCapabilityTest {
         runTest {
             val message = ascii("cap-async")
             if (ed25519AsyncAvailable()) {
-                signingKey(SignatureScheme.Ed25519, edSeed).use { sk ->
+                signingKey(SignatureScheme.Ed25519, edSeed, edPub).use { sk ->
                     val sig = signAsync(sk, message)
                     assertTrue(verifyAsync(verifyKey(SignatureScheme.Ed25519, edPub), message, sig))
                 }
@@ -81,11 +81,11 @@ class SignatureCapabilityTest {
                     SignatureSupport.Unavailable -> Unit
                     is SignatureSupport.AsyncOnly ->
                         assertFailsWith<UnsupportedOperationException> {
-                            signingKey(SignatureScheme.Ed25519, edSeed).use { sk -> w.ops.sign(sk, message) }
+                            signingKey(SignatureScheme.Ed25519, edSeed, edPub).use { sk -> w.ops.sign(sk, message) }
                         }
                     is SignatureSupport.Blocking ->
                         assertFailsWith<UnsupportedOperationException> {
-                            signingKey(SignatureScheme.Ed25519, edSeed).use { sk -> w.ops.sign(sk, message) }
+                            signingKey(SignatureScheme.Ed25519, edSeed, edPub).use { sk -> w.ops.sign(sk, message) }
                         }
                 }
             }

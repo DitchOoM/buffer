@@ -27,7 +27,7 @@ import com.ditchoom.buffer.WriteBuffer
 private const val NO_CHACHA_POLY = "ChaCha20-Poly1305 is not part of WebCrypto and is not polyfilled"
 
 /** AES-GCM on the web is async-only (WebCrypto `SubtleCrypto` is Promise-based). */
-actual val CryptoCapabilities.aesGcm: Aead<AesGcmKey> get() = Aead.AsyncOnly(AesGcmAsyncOps)
+actual val CryptoCapabilities.aesGcm: Aead<AesGcmKey, SyncCapableAesGcmKey> get() = Aead.AsyncOnly(AesGcmAsyncOps)
 
 /** ChaCha20-Poly1305 is not part of WebCrypto and is never polyfilled. */
 actual val CryptoCapabilities.chaChaPoly: OptionalAead<ChaChaPolyKey> get() = OptionalAead.Unavailable

@@ -36,7 +36,7 @@ private val chaChaPolyAvailable: Boolean =
     }
 
 /** AES-GCM is synchronous via JCA. */
-actual val CryptoCapabilities.aesGcm: Aead<AesGcmKey> get() = Aead.Blocking(AesGcmBlockingOps)
+actual val CryptoCapabilities.aesGcm: Aead<AesGcmKey, SyncCapableAesGcmKey> get() = Aead.Blocking(AesGcmBlockingOps)
 
 /** ChaCha20-Poly1305 is synchronous via JCA when the transform is present (JDK 11+ / Conscrypt). */
 actual val CryptoCapabilities.chaChaPoly: OptionalAead<ChaChaPolyKey>

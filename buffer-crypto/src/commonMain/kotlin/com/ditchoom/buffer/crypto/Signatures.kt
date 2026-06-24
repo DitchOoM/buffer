@@ -105,7 +105,7 @@ enum class EcdsaSignatureEncoding {
  *
  * ```kotlin
  * val signatures = CryptoCapabilities.signatures(SignatureScheme.Ed25519)
- * SigningKey.ed25519(seed).use { sk ->
+ * SigningKey.ed25519(seed, verifyKey).use { sk ->
  *     when (signatures) {
  *         is SignatureSupport.Blocking -> signatures.ops.signInto(sk, message, dest)
  *         is SignatureSupport.AsyncOnly -> signatures.ops.sign(sk, message)
@@ -125,47 +125,85 @@ sealed interface SigningKey : AutoCloseable {
     /** Whether the key material is in software memory or hardware-backed. */
     val provenance: KeyProvenance
 
+    /**
+     * The public [VerifyKey] matching this signing key. Every signing key knows its verifier:
+     * an imported in-memory key carries the [VerifyKey] supplied at construction, and a
+     * provider-minted hardware key carries the public key the secure element produced at generation.
+     */
+    val verifyKey: VerifyKey
+
     companion object {
         /**
-         * An Ed25519 signing key from its 32-byte raw private seed (RFC 8032 §5.1.5).
-         * The seed is copied into a wiped [SecureBuffer]; the caller may free [seed] afterward.
+         * An Ed25519 signing key from its 32-byte raw private seed (RFC 8032 §5.1.5) plus its matching
+         * [verifyKey]. The seed is copied into a wiped [SecureBuffer]; the caller may free [seed]
+         * afterward. [verifyKey] must be an Ed25519 key (its [VerifyKey.scheme] must match).
          */
         fun ed25519(
             seed: ReadBuffer,
+            verifyKey: VerifyKey,
             factory: BufferFactory = BufferFactory.deterministicSecure(),
-        ): SigningKey = of(SignatureScheme.Ed25519, seed, factory)
+        ): SyncCapableSigningKey = of(SignatureScheme.Ed25519, seed, verifyKey, factory)
 
-        /** An ECDSA P-256 signing key from its raw private scalar `d` (32 bytes, big-endian). */
+        /**
+         * An ECDSA P-256 signing key from its raw private scalar `d` (32 bytes, big-endian) plus its
+         * matching [verifyKey] (which must be an ECDSA P-256 key).
+         */
         fun ecdsaP256(
             privateScalar: ReadBuffer,
+            verifyKey: VerifyKey,
             factory: BufferFactory = BufferFactory.deterministicSecure(),
-        ): SigningKey = of(SignatureScheme.EcdsaP256, privateScalar, factory)
+        ): SyncCapableSigningKey = of(SignatureScheme.EcdsaP256, privateScalar, verifyKey, factory)
 
-        /** An ECDSA P-384 signing key from its raw private scalar `d` (48 bytes, big-endian). */
+        /**
+         * An ECDSA P-384 signing key from its raw private scalar `d` (48 bytes, big-endian) plus its
+         * matching [verifyKey] (which must be an ECDSA P-384 key).
+         */
         fun ecdsaP384(
             privateScalar: ReadBuffer,
+            verifyKey: VerifyKey,
             factory: BufferFactory = BufferFactory.deterministicSecure(),
-        ): SigningKey = of(SignatureScheme.EcdsaP384, privateScalar, factory)
+        ): SyncCapableSigningKey = of(SignatureScheme.EcdsaP384, privateScalar, verifyKey, factory)
 
-        /** An ECDSA P-521 signing key from its raw private scalar `d` (66 bytes, big-endian). */
+        /**
+         * An ECDSA P-521 signing key from its raw private scalar `d` (66 bytes, big-endian) plus its
+         * matching [verifyKey] (which must be an ECDSA P-521 key).
+         */
         fun ecdsaP521(
             privateScalar: ReadBuffer,
+            verifyKey: VerifyKey,
             factory: BufferFactory = BufferFactory.deterministicSecure(),
-        ): SigningKey = of(SignatureScheme.EcdsaP521, privateScalar, factory)
+        ): SyncCapableSigningKey = of(SignatureScheme.EcdsaP521, privateScalar, verifyKey, factory)
 
         private fun of(
             scheme: SignatureScheme,
             raw: ReadBuffer,
+            verifyKey: VerifyKey,
             factory: BufferFactory,
-        ): SigningKey = InMemorySigningKey(scheme, copyBuffer(raw, factory))
+        ): SyncCapableSigningKey {
+            require(verifyKey.scheme == scheme) {
+                "verify key is for ${verifyKey.scheme.schemeName}, not the signing key's ${scheme.schemeName}"
+            }
+            return InMemorySigningKey(scheme, copyBuffer(raw, factory), verifyKey)
+        }
     }
 }
+
+/**
+ * A [SigningKey] whose private material lives in process memory, so the **synchronous** signature ops
+ * can read it directly. Only the in-memory key produced by the [SigningKey] factories is a
+ * [SyncCapableSigningKey]; a hardware-backed key is a [SigningKey] but not this, so the blocking
+ * witness ops ([SignatureBlockingOps.signInto] / [SignatureBlockingOps.signBlocking], which take the
+ * sync-capable type) are statically unreachable for it — routing a hardware key into the synchronous
+ * path is a compile error rather than a runtime throw. The async witness ops still serve both kinds.
+ */
+sealed interface SyncCapableSigningKey : SigningKey
 
 /** In-memory [SigningKey]: holds the raw key material in a [SecureBuffer], wiped on [close]. */
 internal class InMemorySigningKey(
     override val scheme: SignatureScheme,
     private val material: PlatformBuffer,
-) : SigningKey {
+    override val verifyKey: VerifyKey,
+) : SyncCapableSigningKey {
     override val provenance: KeyProvenance get() = KeyProvenance.Software
     private var closed = false
 
@@ -313,6 +351,17 @@ fun maxSignatureBytes(scheme: SignatureScheme): Int =
  * which adds the non-suspend entry points.
  */
 interface SignatureAsyncOps {
+    /** The scheme these ops sign/verify under (the scheme the witness was resolved for). */
+    val scheme: SignatureScheme
+
+    /**
+     * Generates a fresh signing key for [scheme] using the platform CSPRNG, returning an in-memory
+     * [SyncCapableSigningKey] that already carries its matching [SigningKey.verifyKey]. Close it
+     * (`use {}`) to wipe the private material. This is the ergonomic path for a brand-new key, where
+     * the import factories (which require the caller to supply the verify key) do not fit.
+     */
+    suspend fun generateSigningKey(factory: BufferFactory = BufferFactory.deterministicSecure()): SyncCapableSigningKey
+
     /** Signs [message] under [key], returning a read-ready signature buffer. */
     suspend fun sign(
         key: SigningKey,
@@ -333,20 +382,24 @@ interface SignatureAsyncOps {
 
 /** Signatures with a synchronous (non-`suspend`) path, in addition to the inherited async one. */
 interface SignatureBlockingOps : SignatureAsyncOps {
+    /** Synchronous [SignatureAsyncOps.generateSigningKey]. */
+    fun generateSigningKeyBlocking(factory: BufferFactory = BufferFactory.deterministicSecure()): SyncCapableSigningKey
+
     /**
      * Signs the remaining bytes of [message] under [key], writing the signature into [dest] at its
      * current position and advancing it. Returns the number of signature bytes written. [dest] must
-     * have at least [maxSignatureBytes] of [key]'s scheme remaining.
+     * have at least [maxSignatureBytes] of [key]'s scheme remaining. Only a sync-capable
+     * [SyncCapableSigningKey] can reach this path; a hardware key is async-only.
      */
     fun signInto(
-        key: SigningKey,
+        key: SyncCapableSigningKey,
         message: ReadBuffer,
         dest: WriteBuffer,
     ): Int
 
     /** Synchronous [SignatureAsyncOps.sign]: a freshly allocated, read-ready signature buffer. */
     fun signBlocking(
-        key: SigningKey,
+        key: SyncCapableSigningKey,
         message: ReadBuffer,
         factory: BufferFactory = BufferFactory.Default,
     ): ReadBuffer
@@ -399,16 +452,23 @@ expect fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupp
 // Witness op implementations (common — call the per-platform expect primitives)
 // =============================================================================
 
-/** Signature ops over the synchronous native primitives. Native async == sync. */
-internal object SignatureBlockingOpsImpl : SignatureBlockingOps {
+/**
+ * Signature ops over the synchronous native primitives, bound to the [scheme] the witness resolved
+ * for (so [generateSigningKey] knows what to generate). Native async == sync.
+ */
+internal class SignatureBlockingOpsImpl(
+    override val scheme: SignatureScheme,
+) : SignatureBlockingOps {
+    override fun generateSigningKeyBlocking(factory: BufferFactory): SyncCapableSigningKey = generateSigningKeyPlatform(scheme, factory)
+
     override fun signInto(
-        key: SigningKey,
+        key: SyncCapableSigningKey,
         message: ReadBuffer,
         dest: WriteBuffer,
     ): Int = signIntoPlatform(key, message, dest)
 
     override fun signBlocking(
-        key: SigningKey,
+        key: SyncCapableSigningKey,
         message: ReadBuffer,
         factory: BufferFactory,
     ): ReadBuffer {
@@ -424,6 +484,8 @@ internal object SignatureBlockingOpsImpl : SignatureBlockingOps {
         message: ReadBuffer,
         signature: ReadBuffer,
     ): Boolean = verifyPlatform(key, message, signature)
+
+    override suspend fun generateSigningKey(factory: BufferFactory): SyncCapableSigningKey = generateSigningKeyBlocking(factory)
 
     // A hardware key is async-only (no in-process material for signBlocking), so even on a Blocking
     // platform its async sign routes through the gated closure.
@@ -444,8 +506,16 @@ internal object SignatureBlockingOpsImpl : SignatureBlockingOps {
     ): Boolean = verifyBlocking(key, message, signature)
 }
 
-/** Signature ops over the async-only primitives (WebCrypto on JS/WASM). */
-internal object SignatureAsyncOpsImpl : SignatureAsyncOps {
+/**
+ * Signature ops over the async-only primitives (WebCrypto on JS/WASM), bound to the [scheme] the
+ * witness resolved for.
+ */
+internal class SignatureAsyncOpsImpl(
+    override val scheme: SignatureScheme,
+) : SignatureAsyncOps {
+    override suspend fun generateSigningKey(factory: BufferFactory): SyncCapableSigningKey =
+        generateSigningKeyAsyncPlatform(scheme, factory)
+
     override suspend fun sign(
         key: SigningKey,
         message: ReadBuffer,
@@ -464,6 +534,94 @@ internal object SignatureAsyncOpsImpl : SignatureAsyncOps {
         signature: ReadBuffer,
     ): Boolean = verifyAsyncPlatform(key, message, signature)
 }
+
+// =============================================================================
+// Key generation (common — ECDSA reuses key agreement; Ed25519 is a per-platform primitive)
+// =============================================================================
+//
+// An ECDSA signing keypair over a NIST P-curve is bit-for-bit a key-agreement keypair over that same
+// curve (the raw private scalar and the uncompressed SEC1 public point use the identical encodings),
+// so ECDSA generation reuses the already-platform-implemented key-agreement generator rather than
+// adding a parallel signing-key generator on every target. Ed25519 has no key-agreement analogue
+// (X25519 ≠ Ed25519), so it gets a small per-platform primitive.
+
+/** The key-agreement curve an ECDSA [scheme] generates over (identical scalar / point encoding). */
+internal fun SignatureScheme.toKeyAgreementCurve(): KeyAgreementCurve =
+    when (this) {
+        SignatureScheme.EcdsaP256 -> KeyAgreementCurve.P256
+        SignatureScheme.EcdsaP384 -> KeyAgreementCurve.P384
+        SignatureScheme.EcdsaP521 -> KeyAgreementCurve.P521
+        SignatureScheme.Ed25519 -> error("Ed25519 generates without a key-agreement curve")
+    }
+
+/** Builds a [VerifyKey] for [scheme] from its standard public encoding (raw / uncompressed point). */
+internal fun verifyKeyOf(
+    scheme: SignatureScheme,
+    encoded: ReadBuffer,
+): VerifyKey =
+    when (scheme) {
+        SignatureScheme.Ed25519 -> VerifyKey.ed25519(encoded)
+        SignatureScheme.EcdsaP256 -> VerifyKey.ecdsaP256(encoded)
+        SignatureScheme.EcdsaP384 -> VerifyKey.ecdsaP384(encoded)
+        SignatureScheme.EcdsaP521 -> VerifyKey.ecdsaP521(encoded)
+    }
+
+/** Builds an in-memory signing key for [scheme] from its raw private material + matching [verifyKey]. */
+internal fun signingKeyOf(
+    scheme: SignatureScheme,
+    rawPrivate: ReadBuffer,
+    verifyKey: VerifyKey,
+    factory: BufferFactory,
+): SyncCapableSigningKey =
+    when (scheme) {
+        SignatureScheme.Ed25519 -> SigningKey.ed25519(rawPrivate, verifyKey, factory)
+        SignatureScheme.EcdsaP256 -> SigningKey.ecdsaP256(rawPrivate, verifyKey, factory)
+        SignatureScheme.EcdsaP384 -> SigningKey.ecdsaP384(rawPrivate, verifyKey, factory)
+        SignatureScheme.EcdsaP521 -> SigningKey.ecdsaP521(rawPrivate, verifyKey, factory)
+    }
+
+/**
+ * Wraps a freshly generated key-agreement [pair] as an ECDSA signing key for [scheme]: the public
+ * point becomes the [VerifyKey], the private scalar the signing material (copied into [factory]). The
+ * staged scalar export and the source pair are wiped before returning.
+ *
+ * Valid only where the key-agreement private key exports the **raw scalar** (the native platforms);
+ * on JS/WASM the key-agreement private material is PKCS#8, so the web actuals generate ECDSA signing
+ * keys directly through WebCrypto rather than calling this.
+ */
+internal fun ecdsaSigningKeyFromKeyAgreement(
+    scheme: SignatureScheme,
+    pair: KeyAgreementKeyPair,
+    factory: BufferFactory,
+): SyncCapableSigningKey {
+    try {
+        val verifyKey = verifyKeyOf(scheme, pair.publicKey.encoded)
+        val scalar = pair.privateKey.exportEncoded(BufferFactory.deterministicSecure())
+        return try {
+            signingKeyOf(scheme, scalar, verifyKey, factory)
+        } finally {
+            (scalar as? PlatformBuffer)?.freeNativeMemory()
+        }
+    } finally {
+        pair.close()
+    }
+}
+
+/**
+ * Per-platform key generation (blocking; native platforms). Native actuals reuse the key-agreement
+ * generator for ECDSA (the raw scalar / point encodings coincide) and a CSPRNG-seeded primitive for
+ * Ed25519. Throws on JS/WASM (the witness there is AsyncOnly).
+ */
+internal expect fun generateSigningKeyPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey
+
+/** Async key generation: WebCrypto on JS/WASM (raw-scalar export); native platforms fulfil synchronously. */
+internal expect suspend fun generateSigningKeyAsyncPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey
 
 // =============================================================================
 // Per-platform primitives — internal seam driven by the witness ops above

@@ -108,6 +108,26 @@ private external fun jsVerify(
     sigHex: String,
 ): Promise<JsBoolean>
 
+@JsFun(
+    """
+(scheme) => {
+    const subtle = (globalThis.crypto).subtle;
+    const toHex = (b) => { const a = new Uint8Array(b); let s=''; for (let i=0;i<a.length;i++) s += a[i].toString(16).padStart(2,'0'); return s; };
+    const b64uToHex = (s) => { s = s.replace(/-/g,'+').replace(/_/g,'/'); while (s.length % 4) s += '='; const bin = atob(s); let h=''; for (let i=0;i<bin.length;i++) h += bin.charCodeAt(i).toString(16).padStart(2,'0'); return h; };
+    if (scheme === 'Ed25519') {
+        return subtle.generateKey({ name: 'Ed25519' }, true, ['sign','verify'])
+            .then((kp) => Promise.all([subtle.exportKey('raw', kp.publicKey), subtle.exportKey('pkcs8', kp.privateKey)]))
+            .then((arr) => toHex(arr[1]).substring(32, 96) + ':' + toHex(arr[0]));
+    }
+    const curve = scheme === 'P256' ? 'P-256' : (scheme === 'P384' ? 'P-384' : 'P-521');
+    return subtle.generateKey({ name: 'ECDSA', namedCurve: curve }, true, ['sign','verify'])
+        .then((kp) => Promise.all([subtle.exportKey('raw', kp.publicKey), subtle.exportKey('jwk', kp.privateKey)]))
+        .then((arr) => b64uToHex(arr[1].d) + ':' + toHex(arr[0]));
+}
+""",
+)
+private external fun jsGenerateKeyPair(scheme: String): Promise<JsString>
+
 private fun schemeTag(scheme: SignatureScheme): String =
     when (scheme) {
         SignatureScheme.Ed25519 -> "Ed25519"
@@ -128,6 +148,9 @@ internal actual suspend fun webCryptoSign(
     privateMaterialHex: String,
     messageHex: String,
 ): String = jsSign(schemeTag(scheme), privateMaterialHex, messageHex).awaitResult().toString()
+
+internal actual suspend fun webCryptoGenerateKeyPair(scheme: SignatureScheme): String =
+    jsGenerateKeyPair(schemeTag(scheme)).awaitResult().toString()
 
 internal actual suspend fun webCryptoVerify(
     scheme: SignatureScheme,

@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
@@ -28,13 +29,19 @@ actual val ecdsaSignatureEncoding: EcdsaSignatureEncoding get() = EcdsaSignature
  * synchronous ops are not reachable. Ed25519's actual engine support is feature-detected at call
  * time (see [ed25519AsyncAvailable]); the async ops throw [UnsupportedOperationException] if absent.
  */
-actual fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupport = SignatureSupport.AsyncOnly(SignatureAsyncOpsImpl)
+actual fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupport =
+    SignatureSupport.AsyncOnly(SignatureAsyncOpsImpl(scheme))
 
 internal actual fun signIntoPlatform(
     key: SigningKey,
     message: ReadBuffer,
     dest: WriteBuffer,
 ): Int = throw UnsupportedOperationException("synchronous signing is unavailable on JS/WASM; use the async ops")
+
+internal actual fun generateSigningKeyPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey = throw UnsupportedOperationException("synchronous key generation is unavailable on JS/WASM; use the async ops")
 
 internal actual fun verifyPlatform(
     key: VerifyKey,
@@ -65,6 +72,14 @@ internal expect suspend fun webCryptoVerify(
     messageHex: String,
     signatureHex: String,
 ): Boolean
+
+/**
+ * WebCrypto key generation for [scheme]. Returns `"<privHex>:<pubHex>"` — the raw private material
+ * (Ed25519 32-byte seed / ECDSA big-endian scalar) and the raw public key (Ed25519 32-byte point /
+ * ECDSA uncompressed SEC1 point), both lowercase hex. Throws (engine rejection) for an unsupported
+ * scheme (e.g. Ed25519 where the engine lacks it).
+ */
+internal expect suspend fun webCryptoGenerateKeyPair(scheme: SignatureScheme): String
 
 // ---------------------------------------------------------------------------
 // Hex <-> buffer helpers (no ByteArray staging beyond the WebCrypto string boundary).
@@ -228,3 +243,21 @@ internal actual suspend fun verifyAsyncPlatform(
 actual suspend fun ed25519AsyncAvailable(): Boolean = webCryptoEd25519Available()
 
 actual val supportsEcdsaSigningFromScalar: Boolean get() = true
+
+internal actual suspend fun generateSigningKeyAsyncPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey {
+    if (scheme == SignatureScheme.Ed25519 && !webCryptoEd25519Available()) {
+        throw UnsupportedOperationException("Ed25519 is not available on this WebCrypto engine")
+    }
+    val parts = webCryptoGenerateKeyPair(scheme).split(":")
+    val verifyKey = verifyKeyOf(scheme, hexToBuffer(parts[1], BufferFactory.Default))
+    // Stage the secret private material in a wiped buffer; the import factory copies it into `factory`.
+    val privBuf = hexToBuffer(parts[0], secureScratch)
+    return try {
+        signingKeyOf(scheme, privBuf, verifyKey, factory)
+    } finally {
+        privBuf.freeNativeMemory()
+    }
+}

@@ -89,8 +89,8 @@ internal class FakeHardware(
 
     /** Richer result for the conformance test: the hardware signing key and its public verify key. */
     fun signingPair(spec: HardwareKeySpec): SigningPair {
-        val inner = SigningKey.ecdsaP256(hexBuffer(P256_SCALAR_HEX))
         val verifyKey = VerifyKey.ecdsaP256(hexBuffer(P256_POINT_HEX))
+        val inner = SigningKey.ecdsaP256(hexBuffer(P256_SCALAR_HEX), verifyKey)
         val auth = spec.authorization
         val hardware =
             HardwareSigningKey(

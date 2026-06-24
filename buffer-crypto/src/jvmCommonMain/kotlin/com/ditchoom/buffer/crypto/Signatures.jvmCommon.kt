@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
@@ -10,6 +11,7 @@ import java.math.BigInteger
 import java.security.AlgorithmParameters
 import java.security.GeneralSecurityException
 import java.security.KeyFactory
+import java.security.KeyPairGenerator
 import java.security.Signature
 import java.security.spec.ECGenParameterSpec
 import java.security.spec.ECParameterSpec
@@ -49,11 +51,11 @@ actual fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupp
     when (scheme) {
         SignatureScheme.Ed25519 ->
             if (ed25519RuntimeSupported) {
-                SignatureSupport.Blocking(SignatureBlockingOpsImpl)
+                SignatureSupport.Blocking(SignatureBlockingOpsImpl(scheme))
             } else {
                 SignatureSupport.Unavailable
             }
-        else -> SignatureSupport.Blocking(SignatureBlockingOpsImpl)
+        else -> SignatureSupport.Blocking(SignatureBlockingOpsImpl(scheme))
     }
 
 // ---------------------------------------------------------------------------
@@ -412,3 +414,67 @@ actual suspend fun ed25519AsyncAvailable(): Boolean = ed25519RuntimeSupported
 
 actual val supportsEcdsaSigningFromScalar: Boolean
     get() = true
+
+// ---------------------------------------------------------------------------
+// Ed25519 key generation (ECDSA generation is common, reusing key agreement).
+// ---------------------------------------------------------------------------
+
+/** Read-ready buffer wrapping [bytes] (a fresh copy). */
+private fun bufferOf(bytes: ByteArray): PlatformBuffer {
+    val b = BufferFactory.Default.allocate(bytes.size)
+    b.writeBytes(bytes)
+    b.resetForRead()
+    return b
+}
+
+/** The 32-byte seed from a generated Ed25519 PKCS#8 (the inverse of [ed25519PrivateKey]'s prefix wrap). */
+private fun ed25519SeedFromPkcs8(pkcs8: ByteArray): ByteArray {
+    require(pkcs8.size >= ED25519_PKCS8_PREFIX.size + ED25519_KEY_BYTES) {
+        "unexpected Ed25519 PKCS#8 length ${pkcs8.size}"
+    }
+    return pkcs8.copyOfRange(ED25519_PKCS8_PREFIX.size, ED25519_PKCS8_PREFIX.size + ED25519_KEY_BYTES)
+}
+
+/** The 32-byte public key from a generated Ed25519 SPKI (the inverse of [ed25519PublicKey]'s prefix wrap). */
+private fun ed25519PublicFromSpki(spki: ByteArray): ByteArray {
+    require(spki.size == ED25519_SPKI_PREFIX.size + ED25519_KEY_BYTES) {
+        "unexpected Ed25519 SPKI length ${spki.size}"
+    }
+    return spki.copyOfRange(ED25519_SPKI_PREFIX.size, spki.size)
+}
+
+private fun generateEd25519(factory: BufferFactory): SyncCapableSigningKey {
+    requireEd25519Supported()
+    val kp = KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
+    val seedBytes = ed25519SeedFromPkcs8(kp.private.encoded)
+    val verifyKey = VerifyKey.ed25519(bufferOf(ed25519PublicFromSpki(kp.public.encoded)))
+    // Stage the secret seed in a wiped buffer; the import factory copies it into `factory`.
+    val seedBuf =
+        secureScratch.allocate(seedBytes.size).also {
+            it.writeBytes(seedBytes)
+            it.resetForRead()
+        }
+    return try {
+        signingKeyOf(SignatureScheme.Ed25519, seedBuf, verifyKey, factory)
+    } finally {
+        seedBuf.freeNativeMemory()
+        seedBytes.fill(0)
+    }
+}
+
+internal actual fun generateSigningKeyPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey =
+    if (scheme == SignatureScheme.Ed25519) {
+        generateEd25519(factory)
+    } else {
+        // ECDSA: the key-agreement generator over the same NIST curve yields the identical raw scalar
+        // (private) and uncompressed point (public) the signing key needs.
+        ecdsaSigningKeyFromKeyAgreement(scheme, generateKeyPairPlatform(scheme.toKeyAgreementCurve()), factory)
+    }
+
+internal actual suspend fun generateSigningKeyAsyncPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey = generateSigningKeyPlatform(scheme, factory)

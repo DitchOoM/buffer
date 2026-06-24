@@ -18,17 +18,22 @@ object SignatureTestSupport {
         }
     }
 
-    /** Builds a [SigningKey] for [scheme] from a hex-encoded private scalar / seed. */
+    /**
+     * Builds a [SigningKey] for [scheme] from a hex-encoded private scalar / seed plus its matching
+     * hex-encoded public key (the [verifyKey] the factory now requires).
+     */
     fun signingKey(
         scheme: SignatureScheme,
         privateHex: String,
-    ): SigningKey {
+        publicKeyHex: String,
+    ): SyncCapableSigningKey {
         val priv = hexBuffer(privateHex)
+        val vk = verifyKey(scheme, publicKeyHex)
         return when (scheme) {
-            SignatureScheme.Ed25519 -> SigningKey.ed25519(priv)
-            SignatureScheme.EcdsaP256 -> SigningKey.ecdsaP256(priv)
-            SignatureScheme.EcdsaP384 -> SigningKey.ecdsaP384(priv)
-            SignatureScheme.EcdsaP521 -> SigningKey.ecdsaP521(priv)
+            SignatureScheme.Ed25519 -> SigningKey.ed25519(priv, vk)
+            SignatureScheme.EcdsaP256 -> SigningKey.ecdsaP256(priv, vk)
+            SignatureScheme.EcdsaP384 -> SigningKey.ecdsaP384(priv, vk)
+            SignatureScheme.EcdsaP521 -> SigningKey.ecdsaP521(priv, vk)
         }
     }
 

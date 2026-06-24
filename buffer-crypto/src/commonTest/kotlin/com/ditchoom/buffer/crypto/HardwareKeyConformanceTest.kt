@@ -1,14 +1,12 @@
 package com.ditchoom.buffer.crypto
 
-import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.crypto.CryptoTestVectors.ascii
 import com.ditchoom.buffer.crypto.CryptoTestVectors.toHex
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertNotNull
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -24,8 +22,9 @@ import kotlin.test.assertTrue
  *  - a hardware seal/sign round-trips through real crypto (hw-seal opens with an independent software
  *    key; hw-sign verifies under the matching public key) — the gated closure is wired through;
  *  - tampering is rejected opaquely ([VerificationFailed]) on the hardware open path;
- *  - the **blocking** op path is unreachable for a hardware key (the material seam throws), so a
- *    hardware key can only ever be driven through the async witness ops;
+ *  - the **blocking** op path is unreachable for a hardware key (it is not a `SyncCapable*` key, so the
+ *    blocking witness ops do not accept it — a compile error, not a runtime throw), leaving the async
+ *    witness ops as the only path a hardware key can be driven through;
  *  - a denied authorization gate surfaces as [AuthorizationFailed].
  */
 class HardwareKeyConformanceTest {
@@ -54,7 +53,7 @@ class HardwareKeyConformanceTest {
         val signing = provider.generateSigning(SignatureScheme.EcdsaP256, grant)
         try {
             assertEquals(KeyProvenance.Hardware, signing.provenance)
-            val vk = assertNotNull(signing.verifyKey, "a provider-minted signing key exposes its public verify key")
+            val vk = signing.verifyKey
             val ops = signatureAsyncOrNull(SignatureScheme.EcdsaP256)
             if (ops != null) {
                 val message = ascii("real hardware-backed signature")
@@ -140,18 +139,13 @@ class HardwareKeyConformanceTest {
         }
 
     @Test
-    fun hardwareAesGcmHasNoBlockingPath() {
-        // Where AES-GCM is Blocking (native/JVM), a hardware key routed into the synchronous path
-        // must throw at the material seam — hardware keys are async-only.
-        when (val w = CryptoCapabilities.aesGcm) {
-            is Aead.Blocking -> {
-                val keys = provider.aesGcmPair(grant)
-                assertFailsWith<UnsupportedOperationException> {
-                    w.ops.sealBlocking(keys.hardware, ascii("x"))
-                }
-            }
-            is Aead.AsyncOnly -> Unit // no blocking path exists at all on this platform
-        }
+    fun hardwareAesGcmIsNotSyncCapable() {
+        // A hardware AES-GCM key is an AesGcmKey but not a SyncCapableAesGcmKey, so it cannot be passed
+        // to the blocking witness ops at all — the impossible state (hardware key → synchronous path)
+        // is a compile error, not a runtime throw. Its in-memory software twin IS sync-capable.
+        val keys = provider.aesGcmPair(grant)
+        assertFalse(keys.hardware is SyncCapableAesGcmKey, "a hardware AES-GCM key must not be sync-capable")
+        assertTrue(keys.softwareTwin is SyncCapableAesGcmKey, "an in-memory AES-GCM key is sync-capable")
     }
 
     @Test
@@ -191,24 +185,19 @@ class HardwareKeyConformanceTest {
             val pair = provider.signingPair(grant)
             val ops = signatureAsyncOrNull(SignatureScheme.EcdsaP256) ?: return@runTest
             // The public SigningKey.verifyKey accessor surfaces the provider-captured public key.
-            val vk = assertNotNull(pair.hardware.verifyKey, "hardware signing key exposes its verify key")
+            val vk = pair.hardware.verifyKey
             val message = ascii("verifyKey accessor")
             val signature = ops.sign(pair.hardware, message)
             assertTrue(ops.verify(vk, message, signature), "the accessor's verify key verifies the signature")
         }
 
     @Test
-    fun hardwareSigningHasNoBlockingPath() {
-        if (!supportsEcdsaSigningFromScalar) return
-        val blocking = signatureBlockingOrNull(SignatureScheme.EcdsaP256) ?: return
+    fun hardwareSigningIsNotSyncCapable() {
+        // A hardware signing key is a SigningKey but not a SyncCapableSigningKey, so signBlocking /
+        // signInto (which take the sync-capable type) are statically unreachable for it — a compile
+        // error, not a runtime throw. Key construction is platform-independent, so no scalar-signing gate.
         val pair = provider.signingPair(grant)
-        assertFailsWith<UnsupportedOperationException> {
-            blocking.signBlocking(pair.hardware, ascii("x"))
-        }
-        val dest = BufferFactory.Default.allocate(maxSignatureBytes(SignatureScheme.EcdsaP256))
-        assertFailsWith<UnsupportedOperationException> {
-            blocking.signInto(pair.hardware, ascii("x"), dest)
-        }
+        assertFalse(pair.hardware is SyncCapableSigningKey, "a hardware signing key must not be sync-capable")
     }
 
     @Test

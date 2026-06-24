@@ -95,8 +95,8 @@ public abstract interface class com/ditchoom/buffer/crypto/AesGcmKey : com/ditch
 }
 
 public final class com/ditchoom/buffer/crypto/AesGcmKey$Companion {
-	public final fun of (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/crypto/AesGcmKey;
-	public static synthetic fun of$default (Lcom/ditchoom/buffer/crypto/AesGcmKey$Companion;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/AesGcmKey;
+	public final fun of (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/crypto/SyncCapableAesGcmKey;
+	public static synthetic fun of$default (Lcom/ditchoom/buffer/crypto/AesGcmKey$Companion;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/SyncCapableAesGcmKey;
 }
 
 public final class com/ditchoom/buffer/crypto/AesGcmKey$DefaultImpls {
@@ -203,7 +203,6 @@ public final class com/ditchoom/buffer/crypto/HardwareKeySpec {
 
 public final class com/ditchoom/buffer/crypto/HardwareKeysKt {
 	public static final fun getHardware (Lcom/ditchoom/buffer/crypto/CryptoCapabilities;)Lcom/ditchoom/buffer/crypto/HardwareSupport;
-	public static final fun getVerifyKey (Lcom/ditchoom/buffer/crypto/SigningKey;)Lcom/ditchoom/buffer/crypto/VerifyKey;
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/HardwareSupport {
@@ -1070,24 +1069,31 @@ public final class com/ditchoom/buffer/crypto/Sha512Kt {
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/SignatureAsyncOps {
+	public abstract fun generateSigningKey (Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun generateSigningKey$default (Lcom/ditchoom/buffer/crypto/SignatureAsyncOps;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getScheme ()Lcom/ditchoom/buffer/crypto/SignatureScheme;
 	public abstract fun sign (Lcom/ditchoom/buffer/crypto/SigningKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public static synthetic fun sign$default (Lcom/ditchoom/buffer/crypto/SignatureAsyncOps;Lcom/ditchoom/buffer/crypto/SigningKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
 	public abstract fun verify (Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
 public final class com/ditchoom/buffer/crypto/SignatureAsyncOps$DefaultImpls {
+	public static synthetic fun generateSigningKey$default (Lcom/ditchoom/buffer/crypto/SignatureAsyncOps;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
 	public static synthetic fun sign$default (Lcom/ditchoom/buffer/crypto/SignatureAsyncOps;Lcom/ditchoom/buffer/crypto/SigningKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/SignatureBlockingOps : com/ditchoom/buffer/crypto/SignatureAsyncOps {
-	public abstract fun signBlocking (Lcom/ditchoom/buffer/crypto/SigningKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
-	public static synthetic fun signBlocking$default (Lcom/ditchoom/buffer/crypto/SignatureBlockingOps;Lcom/ditchoom/buffer/crypto/SigningKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
-	public abstract fun signInto (Lcom/ditchoom/buffer/crypto/SigningKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/WriteBuffer;)I
+	public abstract fun generateSigningKeyBlocking (Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/crypto/SyncCapableSigningKey;
+	public static synthetic fun generateSigningKeyBlocking$default (Lcom/ditchoom/buffer/crypto/SignatureBlockingOps;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/SyncCapableSigningKey;
+	public abstract fun signBlocking (Lcom/ditchoom/buffer/crypto/SyncCapableSigningKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun signBlocking$default (Lcom/ditchoom/buffer/crypto/SignatureBlockingOps;Lcom/ditchoom/buffer/crypto/SyncCapableSigningKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public abstract fun signInto (Lcom/ditchoom/buffer/crypto/SyncCapableSigningKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/WriteBuffer;)I
 	public abstract fun verifyBlocking (Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;)Z
 }
 
 public final class com/ditchoom/buffer/crypto/SignatureBlockingOps$DefaultImpls {
-	public static synthetic fun signBlocking$default (Lcom/ditchoom/buffer/crypto/SignatureBlockingOps;Lcom/ditchoom/buffer/crypto/SigningKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun generateSigningKeyBlocking$default (Lcom/ditchoom/buffer/crypto/SignatureBlockingOps;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/SyncCapableSigningKey;
+	public static synthetic fun signBlocking$default (Lcom/ditchoom/buffer/crypto/SignatureBlockingOps;Lcom/ditchoom/buffer/crypto/SyncCapableSigningKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/SignatureScheme {
@@ -1173,17 +1179,28 @@ public abstract interface class com/ditchoom/buffer/crypto/SigningKey : java/lan
 	public static final field Companion Lcom/ditchoom/buffer/crypto/SigningKey$Companion;
 	public abstract fun getProvenance ()Lcom/ditchoom/buffer/crypto/KeyProvenance;
 	public abstract fun getScheme ()Lcom/ditchoom/buffer/crypto/SignatureScheme;
+	public abstract fun getVerifyKey ()Lcom/ditchoom/buffer/crypto/VerifyKey;
 }
 
 public final class com/ditchoom/buffer/crypto/SigningKey$Companion {
-	public final fun ecdsaP256 (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/crypto/SigningKey;
-	public static synthetic fun ecdsaP256$default (Lcom/ditchoom/buffer/crypto/SigningKey$Companion;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/SigningKey;
-	public final fun ecdsaP384 (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/crypto/SigningKey;
-	public static synthetic fun ecdsaP384$default (Lcom/ditchoom/buffer/crypto/SigningKey$Companion;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/SigningKey;
-	public final fun ecdsaP521 (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/crypto/SigningKey;
-	public static synthetic fun ecdsaP521$default (Lcom/ditchoom/buffer/crypto/SigningKey$Companion;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/SigningKey;
-	public final fun ed25519 (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/crypto/SigningKey;
-	public static synthetic fun ed25519$default (Lcom/ditchoom/buffer/crypto/SigningKey$Companion;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/SigningKey;
+	public final fun ecdsaP256 (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/crypto/SyncCapableSigningKey;
+	public static synthetic fun ecdsaP256$default (Lcom/ditchoom/buffer/crypto/SigningKey$Companion;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/SyncCapableSigningKey;
+	public final fun ecdsaP384 (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/crypto/SyncCapableSigningKey;
+	public static synthetic fun ecdsaP384$default (Lcom/ditchoom/buffer/crypto/SigningKey$Companion;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/SyncCapableSigningKey;
+	public final fun ecdsaP521 (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/crypto/SyncCapableSigningKey;
+	public static synthetic fun ecdsaP521$default (Lcom/ditchoom/buffer/crypto/SigningKey$Companion;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/SyncCapableSigningKey;
+	public final fun ed25519 (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/crypto/SyncCapableSigningKey;
+	public static synthetic fun ed25519$default (Lcom/ditchoom/buffer/crypto/SigningKey$Companion;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/SyncCapableSigningKey;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/SyncCapableAesGcmKey : com/ditchoom/buffer/crypto/AesGcmKey {
+}
+
+public final class com/ditchoom/buffer/crypto/SyncCapableAesGcmKey$DefaultImpls {
+	public static fun getSizeBytes (Lcom/ditchoom/buffer/crypto/SyncCapableAesGcmKey;)I
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/SyncCapableSigningKey : com/ditchoom/buffer/crypto/SigningKey {
 }
 
 public final class com/ditchoom/buffer/crypto/VerificationFailed : com/ditchoom/buffer/crypto/CryptoException {

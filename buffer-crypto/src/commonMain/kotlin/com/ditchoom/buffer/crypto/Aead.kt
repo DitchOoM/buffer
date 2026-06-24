@@ -98,7 +98,7 @@ sealed interface AesGcmKey :
         fun of(
             key: ReadBuffer,
             factory: BufferFactory = BufferFactory.Default,
-        ): AesGcmKey {
+        ): SyncCapableAesGcmKey {
             val n = key.remaining()
             require(n == AES_128_KEY_BYTES || n == AES_256_KEY_BYTES) {
                 "AES-GCM key must be $AES_128_KEY_BYTES or $AES_256_KEY_BYTES bytes, was $n"
@@ -108,11 +108,21 @@ sealed interface AesGcmKey :
     }
 }
 
+/**
+ * An [AesGcmKey] whose key material lives in process memory, so the **synchronous** AEAD ops can read
+ * it directly. Only the in-memory key produced by [AesGcmKey.of] is a [SyncCapableAesGcmKey]; a
+ * hardware-backed key is an [AesGcmKey] but not this, so the blocking witness ops
+ * ([AeadBlockingOps.sealBlocking] / [AeadBlockingOps.openBlocking], which take the sync-capable type)
+ * are statically unreachable for it — routing a hardware key into the synchronous path is a compile
+ * error rather than a runtime throw. The async witness ops still serve both kinds.
+ */
+sealed interface SyncCapableAesGcmKey : AesGcmKey
+
 /** In-memory [AesGcmKey]: holds the raw key bytes, freed (and wiped, on a secure buffer) on [close]. */
 internal class InMemoryAesGcmKey(
     override val sizeBits: Int,
     val material: PlatformBuffer,
-) : AesGcmKey {
+) : SyncCapableAesGcmKey {
     override val provenance: KeyProvenance get() = KeyProvenance.Software
     private var closed = false
 
@@ -248,20 +258,27 @@ interface AeadAsyncOps<K : AeadKey> {
     ): PlatformBuffer
 }
 
-/** AEAD with a synchronous (non-`suspend`) path, in addition to the inherited async one. */
-interface AeadBlockingOps<K : AeadKey> : AeadAsyncOps<K> {
-    /** Synchronous [AeadAsyncOps.seal]. */
+/**
+ * AEAD with a synchronous (non-`suspend`) path, in addition to the inherited async one.
+ *
+ * The synchronous ops are bound to [KSync] — the *sync-capable* subtype of the key family ([K]) whose
+ * material is in process memory. For AES-GCM that is [SyncCapableAesGcmKey] (a hardware key is [K] but
+ * not [KSync], so it cannot reach the blocking ops); for families with no hardware variant (ChaCha)
+ * [KSync] is just [K]. The inherited async [seal] / [open] still serve the full [K] family.
+ */
+interface AeadBlockingOps<K : AeadKey, KSync : K> : AeadAsyncOps<K> {
+    /** Synchronous [AeadAsyncOps.seal]; only a sync-capable [KSync] key can reach it. */
     fun sealBlocking(
-        key: K,
+        key: KSync,
         plaintext: ReadBuffer,
         aad: Aad = Aad.None,
         factory: BufferFactory = BufferFactory.Default,
     ): PlatformBuffer
 
-    /** Synchronous [AeadAsyncOps.open]. */
+    /** Synchronous [AeadAsyncOps.open]; only a sync-capable [KSync] key can reach it. */
     fun openBlocking(
         sealed: ReadBuffer,
-        key: K,
+        key: KSync,
         aad: Aad = Aad.None,
         factory: BufferFactory = BufferFactory.Default,
     ): PlatformBuffer
@@ -271,17 +288,21 @@ interface AeadBlockingOps<K : AeadKey> : AeadAsyncOps<K> {
  * Capability witness for an AEAD that is available on **every** platform (AES-GCM): it is either
  * synchronous ([Blocking], native) or async-only ([AsyncOnly], web). There is no `Unavailable`
  * variant because the algorithm is always present in some form.
+ *
+ * Carries the sync-capable key type [KSync] as a second parameter so that, after matching [Blocking],
+ * a consumer can call [AeadBlockingOps.sealBlocking] with a concrete [KSync] key — a hardware key is
+ * [K] but not [KSync], so it is rejected at compile time rather than throwing at the material seam.
  */
-sealed interface Aead<out K : AeadKey> {
+sealed interface Aead<K : AeadKey, KSync : K> {
     /** Async-only (e.g. WebCrypto). Only [AeadAsyncOps] is reachable. */
-    data class AsyncOnly<K : AeadKey>(
+    data class AsyncOnly<K : AeadKey, KSync : K>(
         val ops: AeadAsyncOps<K>,
-    ) : Aead<K>
+    ) : Aead<K, KSync>
 
     /** A synchronous native path is available; [ops] also satisfies [AeadAsyncOps]. */
-    data class Blocking<K : AeadKey>(
-        val ops: AeadBlockingOps<K>,
-    ) : Aead<K>
+    data class Blocking<K : AeadKey, KSync : K>(
+        val ops: AeadBlockingOps<K, KSync>,
+    ) : Aead<K, KSync>
 }
 
 /**
@@ -298,17 +319,22 @@ sealed interface OptionalAead<out K : AeadKey> {
         val ops: AeadAsyncOps<K>,
     ) : OptionalAead<K>
 
-    /** Synchronous native path available. */
+    /**
+     * Synchronous native path available. The optional AEADs have no hardware-backed variant, so every
+     * key is sync-capable and the blocking ops are bound to the full key family ([AeadBlockingOps]'s
+     * second parameter is just [K]).
+     */
     data class Blocking<K : AeadKey>(
-        val ops: AeadBlockingOps<K>,
+        val ops: AeadBlockingOps<K, K>,
     ) : OptionalAead<K>
 }
 
 /**
  * The AES-GCM capability on this platform: [Aead.Blocking] on JVM/Android/Apple/Linux,
- * [Aead.AsyncOnly] on js/wasmJs (WebCrypto's `SubtleCrypto` is `suspend`-only). Always present.
+ * [Aead.AsyncOnly] on js/wasmJs (WebCrypto's `SubtleCrypto` is `suspend`-only). Always present. The
+ * sync-capable key type is [SyncCapableAesGcmKey], so a hardware key cannot reach the blocking ops.
  */
-expect val CryptoCapabilities.aesGcm: Aead<AesGcmKey>
+expect val CryptoCapabilities.aesGcm: Aead<AesGcmKey, SyncCapableAesGcmKey>
 
 /**
  * The ChaCha20-Poly1305 capability on this platform: [OptionalAead.Blocking] on
@@ -321,9 +347,9 @@ expect val CryptoCapabilities.chaChaPoly: OptionalAead<ChaChaPolyKey>
 // =============================================================================
 
 /** AES-GCM ops over the synchronous native primitives. Native async == sync. */
-internal object AesGcmBlockingOps : AeadBlockingOps<AesGcmKey> {
+internal object AesGcmBlockingOps : AeadBlockingOps<AesGcmKey, SyncCapableAesGcmKey> {
     override fun sealBlocking(
-        key: AesGcmKey,
+        key: SyncCapableAesGcmKey,
         plaintext: ReadBuffer,
         aad: Aad,
         factory: BufferFactory,
@@ -337,7 +363,7 @@ internal object AesGcmBlockingOps : AeadBlockingOps<AesGcmKey> {
 
     override fun openBlocking(
         sealed: ReadBuffer,
-        key: AesGcmKey,
+        key: SyncCapableAesGcmKey,
         aad: Aad,
         factory: BufferFactory,
     ): PlatformBuffer {
@@ -414,7 +440,7 @@ internal object AesGcmAsyncOps : AeadAsyncOps<AesGcmKey> {
 }
 
 /** ChaCha20-Poly1305 ops over the synchronous native primitives (never web). */
-internal object ChaChaPolyBlockingOps : AeadBlockingOps<ChaChaPolyKey> {
+internal object ChaChaPolyBlockingOps : AeadBlockingOps<ChaChaPolyKey, ChaChaPolyKey> {
     override fun sealBlocking(
         key: ChaChaPolyKey,
         plaintext: ReadBuffer,
