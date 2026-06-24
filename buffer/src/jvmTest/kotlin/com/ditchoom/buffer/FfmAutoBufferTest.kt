@@ -31,7 +31,10 @@ class FfmAutoBufferTest {
     @Test
     fun `FfmAutoBuffer is NOT CloseableBuffer`() {
         val buffer = createAutoBuffer(64)
-        assertFalse(buffer is CloseableBuffer)
+        // Kotlin statically proves FfmAutoBuffer !is CloseableBuffer, so a direct `is`
+        // check won't compile. Query at runtime so this stays a real regression guard:
+        // it fails if FfmAutoBuffer ever starts implementing CloseableBuffer.
+        assertFalse(CloseableBuffer::class.java.isInstance(buffer))
     }
 
     @Test
