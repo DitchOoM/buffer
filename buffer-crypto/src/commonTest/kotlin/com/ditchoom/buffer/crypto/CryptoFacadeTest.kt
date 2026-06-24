@@ -66,7 +66,8 @@ class CryptoFacadeTest {
             val b = generateKeyPairAsync(curve)
             val info = ascii("kex-facade")
             // Both sides derive the same shared secret; facade and top-level must agree.
-            val viaFacade = Kex.deriveSharedSecretAsync(a.privateKey, b.publicKey, info, 32, null, BufferFactory.Default)
+            val viaFacade =
+                Kex.deriveSharedSecretAsync(a.privateKey, b.publicKey, info, 32, null, BufferFactory.Default)
             val viaTopLevel =
                 deriveSharedSecretAsync(b.privateKey, a.publicKey, info, 32, null, BufferFactory.Default)
             assertEquals(viaTopLevel.toHex(), viaFacade.toHex())

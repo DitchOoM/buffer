@@ -214,7 +214,11 @@ object Kex {
 /**
  * HPKE (RFC 9180) namespaced entry points: key handling, single-shot seal/open, and the
  * Base/PSK/Auth/AuthPSK setup variants. Delegates to the top-level `hpke*` functions.
+ *
+ * The four HPKE setup modes (Base/PSK/Auth/AuthPSK) each need key handling plus seal/open, so this
+ * cohesive namespace object necessarily exposes more than the default per-object function cap.
  */
+@Suppress("TooManyFunctions")
 object Hpke {
     /** @see hpkeSupported */
     fun supported(suite: HpkeSuite): Boolean = freeHpkeSupported(suite)
