@@ -40,7 +40,11 @@ class EthernetFrameByEtherTypePeekTest {
                 appendByte(stream, source.readByte())
                 assertEquals(PeekResult.NeedsMoreData, EthernetFrameByEtherTypeCodec.peekFrameSize(stream), "1/2 bytes")
                 appendByte(stream, source.readByte())
-                assertEquals(PeekResult.Complete(2), EthernetFrameByEtherTypeCodec.peekFrameSize(stream), "fully buffered")
+                assertEquals(
+                    PeekResult.Complete(2),
+                    EthernetFrameByEtherTypeCodec.peekFrameSize(stream),
+                    "fully buffered",
+                )
 
                 val decodeBuffer = BufferFactory.Default.allocate(8, ByteOrder.BIG_ENDIAN)
                 EthernetFrameByEtherTypeCodec.encode(decodeBuffer, frame, EncodeContext.Empty)

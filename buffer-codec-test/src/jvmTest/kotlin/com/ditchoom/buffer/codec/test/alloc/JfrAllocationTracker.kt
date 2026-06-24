@@ -2,6 +2,8 @@ package com.ditchoom.buffer.codec.test.alloc
 
 import jdk.jfr.Recording
 import jdk.jfr.consumer.RecordedClass
+import jdk.jfr.consumer.RecordedEvent
+import jdk.jfr.consumer.RecordedFrame
 import jdk.jfr.consumer.RecordingFile
 import java.nio.file.Files
 import java.time.Duration
@@ -68,27 +70,10 @@ internal object JfrAllocationTracker {
             RecordingFile(tmp).use { rf ->
                 while (rf.hasMoreEvents()) {
                     val event = rf.readEvent()
-                    val cls = event.getValue<RecordedClass?>("objectClass") ?: continue
                     // JFR uses the JVM internal descriptor — `[B` for byte[].
-                    if (cls.name != "[B") continue
+                    val byteArrayClassName = byteArrayClassNameOf(event) ?: continue
                     totalByteArrayEvents++
-                    val stack = event.stackTrace ?: continue
-                    val frames = stack.frames
-                    if (frames.isEmpty()) continue
-                    val trigger = frames[0]
-                    val triggerClass = trigger.method.type.name
-                    if (OWNED_PACKAGES.none { triggerClass.startsWith(it) }) continue
-                    val size =
-                        runCatching { event.getLong("allocationSize") }
-                            .recoverCatching { event.getLong("tlabSize") }
-                            .getOrDefault(0L)
-                    attributed +=
-                        AttributedAllocation(
-                            objectClass = cls.name,
-                            size = size,
-                            triggerClass = triggerClass,
-                            triggerMethod = trigger.method.name,
-                        )
+                    attributeOwnedAllocation(event, byteArrayClassName)?.let { attributed += it }
                 }
             }
             return result to AllocationReport(attributed, totalByteArrayEvents)
@@ -96,5 +81,43 @@ internal object JfrAllocationTracker {
             recording.close()
             Files.deleteIfExists(tmp)
         }
+    }
+
+    /** Returns the object class name when [event] is a `[B` (byte[]) allocation, else null. */
+    private fun byteArrayClassNameOf(event: RecordedEvent): String? {
+        val cls = event.getValue<RecordedClass?>("objectClass") ?: return null
+        return cls.name.takeIf { it == "[B" }
+    }
+
+    /** True when [frame]'s declaring class is in one of our owned packages. */
+    private fun isOwnedTrigger(frame: RecordedFrame): Boolean {
+        val triggerClass = frame.method.type.name
+        return OWNED_PACKAGES.any { triggerClass.startsWith(it) }
+    }
+
+    /**
+     * Attributes a byte-array allocation to our code when its immediate trigger frame is in an
+     * owned package, else returns null (so the caller skips it without a loop jump).
+     */
+    private fun attributeOwnedAllocation(
+        event: RecordedEvent,
+        objectClass: String,
+    ): AttributedAllocation? {
+        val trigger =
+            event.stackTrace
+                ?.frames
+                ?.firstOrNull()
+                ?.takeIf(::isOwnedTrigger) ?: return null
+        val triggerClass = trigger.method.type.name
+        val size =
+            runCatching { event.getLong("allocationSize") }
+                .recoverCatching { event.getLong("tlabSize") }
+                .getOrDefault(0L)
+        return AttributedAllocation(
+            objectClass = objectClass,
+            size = size,
+            triggerClass = triggerClass,
+            triggerMethod = trigger.method.name,
+        )
     }
 }

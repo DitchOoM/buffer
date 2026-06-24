@@ -13,22 +13,6 @@
     <ID>LongMethod:V5PropertyBag.kt:V5PropertyBagCodec$override fun decode: V5PropertyBag</ID>
     <ID>LongMethod:V5PropertyBag.kt:fun List&lt;MqttV5Property>.toV5PropertyBag: V5PropertyBag</ID>
     <ID>LongMethod:V5PropertyBagCodecTest.kt:V5PropertyBagCodecTest$@Test fun roundTripsBagWithEveryUniqueVariantPopulated</ID>
-    <ID>LoopWithTooManyJumpStatements:JfrAllocationTracker.kt:JfrAllocationTracker$while</ID>
-    <ID>MatchingDeclarationName:PlatformBitmap.wasmJs.kt:PlatformBitmap</ID>
-    <ID>MaxLineLength:EthernetFrameByEtherTypeCodecTest.kt:EthernetFrameByEtherTypeCodecTest$fun</ID>
-    <ID>MaxLineLength:EthernetFrameByEtherTypePeekTest.kt:EthernetFrameByEtherTypePeekTest$assertEquals(PeekResult.Complete(2), EthernetFrameByEtherTypeCodec.peekFrameSize(stream), "fully buffered")</ID>
-    <ID>MaxLineLength:MqttSubAckCodecTest.kt:MqttSubAckCodecTest$MqttV3SubAckReturnCodeSuccessMaximumQoS0Codec as com.ditchoom.buffer.codec.Codec&lt;MqttV3SubAckReturnCode></ID>
-    <ID>MaxLineLength:MqttSubAckCodecTest.kt:MqttSubAckCodecTest$MqttV3SubAckReturnCodeSuccessMaximumQoS1Codec as com.ditchoom.buffer.codec.Codec&lt;MqttV3SubAckReturnCode></ID>
-    <ID>MaxLineLength:MqttSubAckCodecTest.kt:MqttSubAckCodecTest$MqttV3SubAckReturnCodeSuccessMaximumQoS2Codec as com.ditchoom.buffer.codec.Codec&lt;MqttV3SubAckReturnCode></ID>
-    <ID>MaxLineLength:MqttV5CascadingAcksCodecTest.kt:MqttV5CascadingAcksCodecTest$reasonCode = V5DisconnectReasonCode.NormalDisconnection()</ID>
-    <ID>MaxLineLength:QuicPacketHeaderCodecTest.kt:QuicPacketHeaderCodecTest$assertEquals(WireSize.Exact(1), QuicPacketHeaderCodec.wireSize(QuicPacketHeader.LongHeader(), EncodeContext.Empty))</ID>
-    <ID>MaxLineLength:QuicPacketHeaderCodecTest.kt:QuicPacketHeaderCodecTest$assertEquals(WireSize.Exact(1), QuicPacketHeaderCodec.wireSize(QuicPacketHeader.ShortHeader(), EncodeContext.Empty))</ID>
-    <ID>MaxLineLength:V5PropertyBag.kt:V5PropertyBagCodec$expected = "single occurrence (spec §2.2.2 — $name 0x${id.toString(16).padStart(2, '0')} appears at most once)"</ID>
-    <ID>MaxLineLength:V5PropertyBag.kt:V5PropertyBagCodec$if (requestResponseInformation != null) duplicate(entryStart, "RequestResponseInformation", 0x19)</ID>
-    <ID>MaxLineLength:V5PropertyBag.kt:V5PropertyBagCodec$if (sharedSubscriptionAvailable != null) duplicate(entryStart, "SharedSubscriptionAvailable", 0x2A)</ID>
-    <ID>MaxLineLength:V5PropertyBag.kt:V5PropertyBagCodec$if (subscriptionIdentifiersAvailable != null) duplicate(entryStart, "SubscriptionIdentifiersAvailable", 0x29)</ID>
-    <ID>MaxLineLength:V5PropertyBag.kt:V5PropertyBagCodec$if (wildcardSubscriptionAvailable != null) duplicate(entryStart, "WildcardSubscriptionAvailable", 0x28)</ID>
-    <ID>ReturnCount:CodecSchemaDriftGateTest.kt:CodecSchemaDriftGateTest$@Test fun `generated codec schema is wire-compatible with the committed baseline`</ID>
     <ID>ReturnCount:QuicVarintCodec.kt:QuicVarintCodec$override fun peekValue: VarLenPeek&lt;ULong></ID>
     <ID>ReturnCount:WsFrame.kt:WsFrame.Companion$override fun peekFrameSize: PeekResult</ID>
   </CurrentIssues>
