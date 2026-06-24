@@ -1,3 +1,5 @@
+@file:Suppress("MatchingDeclarationName") // MPP platform-suffixed actual file
+
 package com.ditchoom.buffer.crypto
 
 import android.security.keystore.KeyGenParameterSpec
@@ -50,11 +52,16 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
      */
     override val dedicatedSecureElement: Boolean by lazy { probeStrongBox() }
 
-    override fun eligible(alg: HardwareAlgorithm): Boolean = alg == HardwareAlgorithm.AesGcm || alg == HardwareAlgorithm.EcdsaP256
+    override fun eligible(alg: HardwareAlgorithm): Boolean =
+        when (alg) {
+            HardwareAlgorithm.AesGcm, HardwareAlgorithm.EcdsaP256 -> true
+            else -> false
+        }
 
     override suspend fun generateAesGcm(spec: HardwareKeySpec): AesGcmKey {
-        require(spec.aesKeySizeBits == AES_128_KEY_BYTES * Byte.SIZE_BITS || spec.aesKeySizeBits == AES_256_KEY_BYTES * Byte.SIZE_BITS) {
-            "AES key size must be 128 or 256 bits, was ${spec.aesKeySizeBits}"
+        val keyBits = spec.aesKeySizeBits
+        require(keyBits == AES_128_KEY_BYTES * Byte.SIZE_BITS || keyBits == AES_256_KEY_BYTES * Byte.SIZE_BITS) {
+            "AES key size must be 128 or 256 bits, was $keyBits"
         }
         val alias = newAlias("aes")
         val key = generateAesKey(alias, spec.aesKeySizeBits)

@@ -191,7 +191,7 @@ class HardwareKeyConformanceTest {
             val pair = provider.signingPair(grant)
             val ops = signatureAsyncOrNull(SignatureScheme.EcdsaP256) ?: return@runTest
             // The public SigningKey.verifyKey accessor surfaces the provider-captured public key.
-            val vk = assertNotNull(pair.hardware.verifyKey, "a hardware signing key exposes its verify key via SigningKey.verifyKey")
+            val vk = assertNotNull(pair.hardware.verifyKey, "hardware signing key exposes its verify key")
             val message = ascii("verifyKey accessor")
             val signature = ops.sign(pair.hardware, message)
             assertTrue(ops.verify(vk, message, signature), "the accessor's verify key verifies the signature")

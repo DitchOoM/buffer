@@ -1,4 +1,5 @@
 @file:OptIn(ExperimentalForeignApi::class)
+@file:Suppress("MatchingDeclarationName") // MPP platform-suffixed actual file
 
 package com.ditchoom.buffer.crypto
 
@@ -86,7 +87,10 @@ private class EnclaveP256Key(
     val point: ByteArray,
 )
 
-private const val ENCLAVE_BLOB_CAP = 256
+// A Secure Enclave P-256 signing key's `dataRepresentation` is ~284 bytes (observed); 1024 gives
+// comfortable margin against OS-version variation. Too-small a buffer makes generate return
+// BCKS_ERR_BUFFER, which would make the provider silently fail to resolve — so keep this generous.
+private const val ENCLAVE_BLOB_CAP = 1024
 private const val P256_POINT_BYTES = 65
 
 private fun enclaveGenerateP256(): EnclaveP256Key =
