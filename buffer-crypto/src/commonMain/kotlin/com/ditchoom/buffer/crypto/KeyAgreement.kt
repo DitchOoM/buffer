@@ -163,11 +163,7 @@ fun importPrivateKey(
     require(encoded.remaining() == curve.privateKeyBytes) {
         "${curve.curveName} private key must be ${curve.privateKeyBytes} bytes, was ${encoded.remaining()}"
     }
-    val secure = secureScratch.allocate(curve.privateKeyBytes)
-    val start = encoded.position()
-    for (i in 0 until curve.privateKeyBytes) secure.writeByte(encoded.get(start + i))
-    secure.resetForRead()
-    return KeyAgreementPrivateKey(curve, secure)
+    return KeyAgreementPrivateKey(curve, copyBuffer(encoded, secureScratch))
 }
 
 /**

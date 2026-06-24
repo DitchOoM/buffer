@@ -65,9 +65,22 @@ class AesGcmKey private constructor(
     /** 128 or 256 — the AES key size in bits. */
     val sizeBits: Int,
     internal val material: PlatformBuffer,
-) {
+) : AutoCloseable {
+    private var closed = false
+
     /** Key size in bytes (16 for AES-128, 32 for AES-256). */
     val sizeBytes: Int get() = sizeBits / 8
+
+    /**
+     * Zeroes and frees the key material (wipes when [material] is a secure buffer). Idempotent.
+     * Parity with the signing/key-agreement key types, which are already [AutoCloseable].
+     */
+    override fun close() {
+        if (!closed) {
+            closed = true
+            material.freeNativeMemory()
+        }
+    }
 
     companion object {
         /**
@@ -94,7 +107,20 @@ class AesGcmKey private constructor(
  */
 class ChaChaPolyKey private constructor(
     internal val material: PlatformBuffer,
-) {
+) : AutoCloseable {
+    private var closed = false
+
+    /**
+     * Zeroes and frees the key material (wipes when [material] is a secure buffer). Idempotent.
+     * Parity with the signing/key-agreement key types, which are already [AutoCloseable].
+     */
+    override fun close() {
+        if (!closed) {
+            closed = true
+            material.freeNativeMemory()
+        }
+    }
+
     companion object {
         /**
          * Wraps [key]'s remaining bytes as a ChaCha20-Poly1305 key. The length must be
@@ -118,14 +144,7 @@ class ChaChaPolyKey private constructor(
 private fun copyMaterial(
     source: ReadBuffer,
     factory: BufferFactory,
-): PlatformBuffer {
-    val n = source.remaining()
-    val start = source.position()
-    val out = factory.allocate(n)
-    for (i in 0 until n) out.writeByte(source.get(start + i))
-    out.resetForRead()
-    return out
-}
+): PlatformBuffer = copyBuffer(source, factory)
 
 // =============================================================================
 // Low-level one-shot primitives (synchronous, native-or-throw)
@@ -423,9 +442,9 @@ internal fun allocateFramed(
  */
 internal fun writeFreshNonce(dest: WriteBuffer): ReadBuffer {
     val nonce = cryptoRandom(AEAD_NONCE_BYTES)
-    // Copy the nonce bytes into dest's framing slot, then hand back the standalone nonce buffer.
-    val start = nonce.position()
-    for (i in 0 until AEAD_NONCE_BYTES) dest.writeByte(nonce.get(start + i))
+    // Bulk-copy the nonce into dest's framing slot, then hand back the standalone nonce buffer.
+    // copyInto is non-destructive, so the returned nonce stays read-ready at position 0.
+    copyInto(nonce, dest)
     return nonce
 }
 
